@@ -1,6 +1,7 @@
 import { createHash, createHmac } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
@@ -94,9 +95,11 @@ export type R2OnlineObjectClass =
 export interface R2BundlesOnlineCopyOptions {
   apply: boolean;
   confirmDestination: string | null;
+  copierExclusive: boolean;
   copierStopped: boolean;
   destination: string;
   finalConvergence: boolean;
+  holdForSourcePutDrain: boolean;
   immutableKeysAudited: boolean;
   phase: R2OnlineCopyPhase;
   source: string;
@@ -125,7 +128,7 @@ interface OnlineCopyClient {
     destination: string;
     entry: R2ObjectInventoryEntry;
     source: string;
-  }): Promise<"copied" | "destination_exists">;
+  }): Promise<"copied" | "destination_exists" | "source_missing">;
   headObject(bucket: string, key: string): Promise<R2HeadResult | null>;
   putMarker(bucket: string, key: string): Promise<"created" | "exists">;
 }
@@ -145,6 +148,10 @@ interface OnlineCopyDependencies {
   log?: (message: string) => void;
   readInventory?: (bucket: string) => Promise<R2ObjectInventoryEntry[]>;
   runner?: R2BundlesMigrationCommandRunner;
+  waitForSourcePutDrain?: (input: {
+    destination: string;
+    source: string;
+  }) => Promise<void>;
 }
 
 export const R2_BUNDLES_ONLINE_COPY_USAGE = `Usage:
@@ -159,8 +166,14 @@ media, and meal photo objects are intentionally excluded. Mutable, unknown,
 and legacy-global keys block the operation.
 
 Options:
-  --apply                       Copy currently missing eligible objects.
+  --apply                       Copy currently missing eligible objects while
+                                --phase is source_active.
   --confirm-destination <name>  Repeat the destination for --apply.
+  --copier-exclusive            Assert this is the only apply invocation for
+                                this source/destination pair.
+  --hold-for-source-put-drain   At temporary convergence, retain in-process
+                                provenance until the operator confirms the OC
+                                write and direct-PUT drain.
   --immutable-keys-audited      Assert browser-vault data versions and every
                                 eligible key class are create-only identities.
   --final-convergence           Read-only final directional proof.
@@ -187,10 +200,12 @@ export function parseR2BundlesOnlineCopyArgs(
     options: {
       apply: { type: "boolean" },
       "confirm-destination": { type: "string" },
+      "copier-exclusive": { type: "boolean" },
       "copier-stopped": { type: "boolean" },
       destination: { type: "string" },
       "final-convergence": { type: "boolean" },
       help: { short: "h", type: "boolean" },
+      "hold-for-source-put-drain": { type: "boolean" },
       "immutable-keys-audited": { type: "boolean" },
       phase: { type: "string" },
       source: { type: "string" },
@@ -212,12 +227,14 @@ export function parseR2BundlesOnlineCopyArgs(
     confirmDestination: values["confirm-destination"] === undefined
       ? null
       : normalizeBucketName(values["confirm-destination"], "confirmed destination"),
+    copierExclusive: values["copier-exclusive"] ?? false,
     copierStopped: values["copier-stopped"] ?? false,
     destination: normalizeBucketName(
       requireFlag(values.destination, "--destination"),
       "destination",
     ),
     finalConvergence: values["final-convergence"] ?? false,
+    holdForSourcePutDrain: values["hold-for-source-put-drain"] ?? false,
     immutableKeysAudited: values["immutable-keys-audited"] ?? false,
     phase,
     source: normalizeBucketName(requireFlag(values.source, "--source"), "source"),
@@ -308,15 +325,16 @@ export async function runR2BundlesOnlineCopy(
       runner,
     }));
   const client = dependencies.client ?? createOnlineCopyClient(environment);
+  const waitForSourcePutDrain = dependencies.waitForSourcePutDrain
+    ?? waitForOperatorSourcePutDrain;
 
   await inspectInfrastructure({
     destination: options.destination,
     source: options.source,
   });
 
-  const activeOwners = await inspectActiveOwners();
-
   if (options.finalConvergence) {
+    const activeOwners = await inspectActiveOwners();
     await proveFinalDirectionalConvergence({
       activeOwners,
       log,
@@ -326,8 +344,17 @@ export async function runR2BundlesOnlineCopy(
     return;
   }
 
-  let sourceInventory = await readInventory(options.source);
-  let destinationInventory = await readInventory(options.destination);
+  let {
+    activeOwners,
+    destinationInventory,
+    sourceInventory,
+  } = await readCoherentOnlineCopyState({
+    destination: options.destination,
+    inspectActiveOwners,
+    log,
+    readInventory,
+    source: options.source,
+  });
   assertInventoryEligibleForOnlineCopy(sourceInventory, "source", activeOwners);
   assertInventoryEligibleForOnlineCopy(destinationInventory, "destination", activeOwners);
   assertCanonicalSnapshotsReachable(
@@ -351,72 +378,225 @@ export async function runR2BundlesOnlineCopy(
   }
   assertExpectedMarker(destinationInventory, markerKey);
 
-  const before = compareR2OnlineEligibleObjects(sourceInventory, destinationInventory);
-  assertNoMismatches(before);
-  if (options.phase === "source_active" && before.destinationOnlyEligibleCount > 0) {
+  const initialComparison = compareR2OnlineEligibleObjects(
+    sourceInventory,
+    destinationInventory,
+  );
+  const observedSourceEligibleKeys = new Set(
+    sourceInventory
+      .filter((entry) => classifyR2OnlineCopyKey(entry.key) === "eligible_immutable")
+      .map((entry) => entry.key),
+  );
+  assertNoMismatches(initialComparison);
+  if (
+    options.phase === "source_active"
+    && initialComparison.destinationOnlyEligibleCount > 0
+  ) {
     throw new Error(
-      `The source-active destination contains ${before.destinationOnlyEligibleCount.toLocaleString("en-US")} `
+      `The source-active destination contains ${initialComparison.destinationOnlyEligibleCount.toLocaleString("en-US")} `
       + "eligible object(s) absent from OC; this command never prunes them.",
     );
   }
 
-  log(
-    `Online copy plan: ${before.sourceOnlyEligibleKeys.length.toLocaleString("en-US")} `
-    + "missing immutable object(s); lifecycle-managed objects remain in OC.",
-  );
-  if (!options.apply) {
-    if (before.sourceOnlyEligibleKeys.length > 0) {
-      throw new Error(
-        `${before.sourceOnlyEligibleKeys.length.toLocaleString("en-US")} eligible source object(s) `
-        + "are not present in ENAM.",
-      );
+  let copyCycle = 0;
+  let destinationConfirmedCount = 0;
+  let sourcePutDrainConfirmed = false;
+  const sourceMissingKeys = new Set<string>();
+  while (true) {
+    copyCycle += 1;
+    const before = compareR2OnlineEligibleObjects(sourceInventory, destinationInventory);
+    assertNoMismatches(before);
+    log(
+      `Online copy plan: ${before.sourceOnlyEligibleKeys.length.toLocaleString("en-US")} `
+      + "missing immutable object(s); lifecycle-managed objects remain in OC.",
+    );
+    if (!options.apply) {
+      if (before.sourceOnlyEligibleKeys.length > 0) {
+        throw new Error(
+          `${before.sourceOnlyEligibleKeys.length.toLocaleString("en-US")} eligible source object(s) `
+          + "are not present in ENAM.",
+        );
+      }
+      log("Verified directional eligible-object convergence without changing either bucket.");
+      return;
     }
-    log("Verified directional eligible-object convergence without changing either bucket.");
+
+    const sourceByKey = new Map(sourceInventory.map((entry) => [entry.key, entry] as const));
+    const copyEntries = before.sourceOnlyEligibleKeys.map((key) => {
+      const entry = sourceByKey.get(key);
+      if (!entry) throw new Error("Online copy plan lost a source inventory entry.");
+      return entry;
+    });
+    const copyResult = await copyEntriesConcurrently({
+      client,
+      destination: options.destination,
+      entries: copyEntries,
+      source: options.source,
+    });
+    destinationConfirmedCount += copyResult.destinationConfirmedCount;
+    for (const key of copyResult.sourceMissingKeys) {
+      sourceMissingKeys.add(key);
+    }
+
+    ({
+      activeOwners,
+      destinationInventory,
+      sourceInventory,
+    } = await readCoherentOnlineCopyState({
+      destination: options.destination,
+      inspectActiveOwners,
+      log,
+      readInventory,
+      source: options.source,
+    }));
+    assertInventoryEligibleForOnlineCopy(sourceInventory, "source", activeOwners);
+    assertInventoryEligibleForOnlineCopy(destinationInventory, "destination", activeOwners);
+    assertCanonicalSnapshotsReachable(
+      sourceInventory,
+      destinationInventory,
+      activeOwners,
+      options.phase,
+    );
+    assertExpectedMarker(destinationInventory, markerKey);
+    for (const entry of sourceInventory) {
+      if (classifyR2OnlineCopyKey(entry.key) === "eligible_immutable") {
+        observedSourceEligibleKeys.add(entry.key);
+      }
+    }
+    const after = compareR2OnlineEligibleObjects(sourceInventory, destinationInventory);
+    assertNoMismatches(after);
+    const skippedKeysNowPresent = destinationInventory.filter((entry) =>
+      sourceMissingKeys.has(entry.key)
+    );
+    if (skippedKeysNowPresent.length > 0) {
+      throw new Error(formatFingerprintFailure(
+        `${skippedKeysNowPresent.length.toLocaleString("en-US")} immutable object(s) skipped `
+        + "after confirmed source deletion later appeared in the destination",
+        skippedKeysNowPresent.map((entry) => entry.key),
+      ));
+    }
+    const finalSourceEligibleKeys = new Set(
+      sourceInventory
+        .filter((entry) => classifyR2OnlineCopyKey(entry.key) === "eligible_immutable")
+        .map((entry) => entry.key),
+    );
+    const unexpectedDestinationOnly = destinationInventory.filter((entry) =>
+      classifyR2OnlineCopyKey(entry.key) === "eligible_immutable"
+      && !finalSourceEligibleKeys.has(entry.key)
+      && !observedSourceEligibleKeys.has(entry.key)
+    );
+    if (unexpectedDestinationOnly.length > 0) {
+      throw new Error(formatFingerprintFailure(
+        `The source-active destination contains ${unexpectedDestinationOnly.length.toLocaleString("en-US")} `
+        + "eligible object(s) never observed in OC by this invocation",
+        unexpectedDestinationOnly.map((entry) => entry.key),
+      ));
+    }
+    if (after.sourceOnlyEligibleKeys.length > 0) {
+      log(
+        `Online copy cycle ${copyCycle.toLocaleString("en-US")} observed `
+        + `${after.sourceOnlyEligibleKeys.length.toLocaleString("en-US")} new immutable source `
+        + "object(s); continuing in the same acknowledged invocation.",
+      );
+      continue;
+    }
+    if (options.holdForSourcePutDrain && !sourcePutDrainConfirmed) {
+      log(
+        "Online copy reached temporary convergence; retaining source provenance "
+        + "until the operator confirms the OC PUT drain.",
+      );
+      await waitForSourcePutDrain({
+        destination: options.destination,
+        source: options.source,
+      });
+      sourcePutDrainConfirmed = true;
+      log("OC PUT drain confirmed; revalidating source and destination before exit.");
+      continue;
+    }
+    log(
+      `Copied or confirmed ${destinationConfirmedCount.toLocaleString("en-US")} `
+      + "destination immutable object(s); "
+      + `observed ${sourceMissingKeys.size.toLocaleString("en-US")} planned source object(s) `
+      + "missing during per-object checks and "
+      + `${after.destinationOnlyEligibleCount.toLocaleString("en-US")} observed source object(s) `
+      + "absent from the final source inventory; "
+      + "no destination object was overwritten or deleted.",
+    );
     return;
   }
+}
 
-  const sourceByKey = new Map(sourceInventory.map((entry) => [entry.key, entry] as const));
-  const copyEntries = before.sourceOnlyEligibleKeys.map((key) => {
-    const entry = sourceByKey.get(key);
-    if (!entry) throw new Error("Online copy plan lost a source inventory entry.");
-    return entry;
-  });
-  await copyEntriesConcurrently({
-    client,
-    destination: options.destination,
-    entries: copyEntries,
-    source: options.source,
-  });
-
-  sourceInventory = await readInventory(options.source);
-  destinationInventory = await readInventory(options.destination);
-  assertInventoryEligibleForOnlineCopy(sourceInventory, "source", activeOwners);
-  assertInventoryEligibleForOnlineCopy(destinationInventory, "destination", activeOwners);
-  assertCanonicalSnapshotsReachable(
-    sourceInventory,
-    destinationInventory,
-    activeOwners,
-    options.phase,
-  );
-  assertExpectedMarker(destinationInventory, markerKey);
-  const after = compareR2OnlineEligibleObjects(sourceInventory, destinationInventory);
-  assertNoMismatches(after);
-  if (after.sourceOnlyEligibleKeys.length > 0) {
-    throw new Error(
-      `${after.sourceOnlyEligibleKeys.length.toLocaleString("en-US")} eligible source object(s) `
-      + "remain after the online pass; rerun the create-only pass.",
+async function readCoherentOnlineCopyState(input: {
+  destination: string;
+  inspectActiveOwners: () => Promise<R2OnlineCopyActiveOwners>;
+  log: (message: string) => void;
+  readInventory: (bucket: string) => Promise<R2ObjectInventoryEntry[]>;
+  source: string;
+}): Promise<{
+  activeOwners: R2OnlineCopyActiveOwners;
+  destinationInventory: R2ObjectInventoryEntry[];
+  sourceInventory: R2ObjectInventoryEntry[];
+}> {
+  let attempt = 0;
+  while (true) {
+    attempt += 1;
+    const ownersBefore = await input.inspectActiveOwners();
+    const sourceInventory = await input.readInventory(input.source);
+    const destinationInventory = await input.readInventory(input.destination);
+    const ownersAfter = await input.inspectActiveOwners();
+    if (sameActiveOwners(ownersBefore, ownersAfter)) {
+      return {
+        activeOwners: ownersAfter,
+        destinationInventory,
+        sourceInventory,
+      };
+    }
+    input.log(
+      `Hosted ownership changed during online-copy inventory read ${attempt.toLocaleString("en-US")}; `
+      + "retrying the coherent read in the same invocation.",
     );
   }
-  if (options.phase === "source_active" && after.destinationOnlyEligibleCount > 0) {
-    throw new Error(
-      `The source-active destination contains ${after.destinationOnlyEligibleCount.toLocaleString("en-US")} `
-      + "eligible object(s) absent from OC after copying; abandon or separately review the destination.",
+}
+
+function sameActiveOwners(
+  left: R2OnlineCopyActiveOwners,
+  right: R2OnlineCopyActiveOwners,
+): boolean {
+  return sameStringSet(left.namespaces, right.namespaces)
+    && sameStringSet(
+      left.canonicalSnapshotObjectKeys,
+      right.canonicalSnapshotObjectKeys,
     );
+}
+
+function sameStringSet(left: ReadonlySet<string>, right: ReadonlySet<string>): boolean {
+  if (left.size !== right.size) return false;
+  for (const value of left) {
+    if (!right.has(value)) return false;
   }
-  log(
-    `Copied or confirmed ${copyEntries.length.toLocaleString("en-US")} immutable object(s); `
-    + "no destination object was overwritten or deleted.",
-  );
+  return true;
+}
+
+async function waitForOperatorSourcePutDrain(input: {
+  destination: string;
+  source: string;
+}): Promise<void> {
+  const expected = `SOURCE_PUT_DRAINED ${input.source} ${input.destination}`;
+  const readline = createInterface({
+    input: process.stdin,
+    output: process.stderr,
+  });
+  try {
+    const answer = await readline.question(
+      `After the source write fence and OC direct-PUT drain are proven, type exactly:\n`
+      + `${expected}\n> `,
+    );
+    if (answer !== expected) {
+      throw new TypeError("The OC PUT drain confirmation did not exactly match this bucket pair.");
+    }
+  } finally {
+    readline.close();
+  }
 }
 
 export function createSignedR2Request(input: {
@@ -482,8 +662,20 @@ function assertOnlineCopyAcknowledgements(options: R2BundlesOnlineCopyOptions): 
   if (options.apply && options.confirmDestination !== options.destination) {
     throw new TypeError("--apply requires --confirm-destination to exactly match the destination.");
   }
+  if (options.apply && !options.copierExclusive) {
+    throw new TypeError("--apply requires --copier-exclusive.");
+  }
+  if (options.apply && options.phase !== "source_active") {
+    throw new TypeError("--apply requires --phase source_active.");
+  }
+  if (options.holdForSourcePutDrain && !options.apply) {
+    throw new TypeError("--hold-for-source-put-drain requires --apply.");
+  }
   if (!options.apply && options.confirmDestination !== null) {
     throw new TypeError("Read-only online-copy checks do not accept --confirm-destination.");
+  }
+  if (!options.apply && options.copierExclusive) {
+    throw new TypeError("Read-only online-copy checks do not accept --copier-exclusive.");
   }
   if ((options.apply || options.finalConvergence) && !options.immutableKeysAudited) {
     throw new TypeError("--immutable-keys-audited is required for copying or final convergence.");
@@ -681,9 +873,14 @@ async function copyEntriesConcurrently(input: {
   destination: string;
   entries: readonly R2ObjectInventoryEntry[];
   source: string;
-}): Promise<void> {
+}): Promise<{
+  destinationConfirmedCount: number;
+  sourceMissingKeys: ReadonlySet<string>;
+}> {
   let nextIndex = 0;
   let firstFailure: unknown = null;
+  let destinationConfirmedCount = 0;
+  const sourceMissingKeys = new Set<string>();
   const worker = async (): Promise<void> => {
     while (firstFailure === null) {
       const index = nextIndex;
@@ -696,18 +893,38 @@ async function copyEntriesConcurrently(input: {
           entry,
           source: input.source,
         });
+        if (result === "source_missing") {
+          const sourceHead = await input.client.headObject(input.source, entry.key);
+          if (sourceHead !== null) {
+            throw new Error(
+              "R2 create-only CopyObject returned 404 while the planned source object still exists.",
+            );
+          }
+          sourceMissingKeys.add(entry.key);
+          continue;
+        }
         const destinationHead = await input.client.headObject(input.destination, entry.key);
         if (!destinationHead || !sameHeadIdentity(entry, destinationHead)) {
           throw new Error("The create-only destination object does not match the source identity.");
         }
         const sourceHead = await input.client.headObject(input.source, entry.key);
-        if (!sourceHead || !sameHeadIdentity(entry, sourceHead)) {
+        if (!sourceHead) {
+          throw new Error(
+            result === "copied"
+              ? "The source disappeared after a create-only copy committed; "
+                + "copy/delete ordering is ambiguous and the destination was not deleted."
+              : "The source disappeared while resolving a destination precondition failure; "
+                + "copy/delete ordering is ambiguous.",
+          );
+        }
+        if (!sameHeadIdentity(entry, sourceHead)) {
           throw new Error(
             result === "copied"
               ? "The source changed after a create-only copy committed; the destination was not deleted."
               : "The source changed while resolving a destination precondition failure.",
           );
         }
+        destinationConfirmedCount += 1;
       } catch (error) {
         firstFailure = error;
       }
@@ -717,6 +934,7 @@ async function copyEntriesConcurrently(input: {
     Array.from({ length: Math.min(COPY_CONCURRENCY, input.entries.length) }, worker),
   );
   if (firstFailure !== null) throw firstFailure;
+  return { destinationConfirmedCount, sourceMissingKeys };
 }
 
 async function readR2OnlineCopyActiveOwners(input: {
@@ -802,7 +1020,7 @@ function pickEnvironment(
 function createOnlineCopyClient(environment: MigrationEnvironment): OnlineCopyClient {
   return {
     async copyObject(input) {
-      const response = await fetchR2WithOneRetry(environment, {
+      const response = await fetchR2Once(environment, {
         bucket: input.destination,
         headers: {
           "cf-copy-destination-if-none-match": "*",
@@ -815,6 +1033,10 @@ function createOnlineCopyClient(environment: MigrationEnvironment): OnlineCopyCl
         method: "PUT",
       });
       if (response.status === 412) return "destination_exists";
+      if (response.status === 404) {
+        await response.body?.cancel();
+        return "source_missing";
+      }
       if (!response.ok) {
         throw new Error(`R2 create-only CopyObject failed with HTTP ${response.status}.`);
       }
@@ -869,19 +1091,7 @@ async function fetchR2WithOneRetry(
   let lastError: unknown = null;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      const signed = createSignedR2Request({
-        accessKeyId: environment.accessKeyId,
-        bucket: input.bucket,
-        endpoint: environment.endpoint,
-        headers: input.headers,
-        key: input.key,
-        method: input.method,
-        secretAccessKey: environment.secretAccessKey,
-      });
-      const response = await fetch(signed.url, {
-        headers: signed.headers,
-        method: input.method,
-      });
+      const response = await fetchR2Once(environment, input);
       if (attempt === 0 && (response.status === 429 || response.status >= 500)) {
         await response.body?.cancel();
         continue;
@@ -893,6 +1103,30 @@ async function fetchR2WithOneRetry(
     }
   }
   throw lastError instanceof Error ? lastError : new Error("R2 online-copy request failed.");
+}
+
+async function fetchR2Once(
+  environment: MigrationEnvironment,
+  input: {
+    bucket: string;
+    headers?: Readonly<Record<string, string>>;
+    key: string;
+    method: "HEAD" | "PUT";
+  },
+): Promise<Response> {
+  const signed = createSignedR2Request({
+    accessKeyId: environment.accessKeyId,
+    bucket: input.bucket,
+    endpoint: environment.endpoint,
+    headers: input.headers,
+    key: input.key,
+    method: input.method,
+    secretAccessKey: environment.secretAccessKey,
+  });
+  return await fetch(signed.url, {
+    headers: signed.headers,
+    method: input.method,
+  });
 }
 
 async function inspectR2OnlineCopyInfrastructure(input: {

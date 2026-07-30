@@ -51,8 +51,7 @@ describe('assistant ask continuation', () => {
       userMessageContent: null,
     })
     expect(message.acceptedTurnInput).toBeUndefined()
-    expect(message.codexConfigOverrides).toContain('features.shell_tool=false')
-    expect(message.codexConfigOverrides).toContain('web_search="disabled"')
+    expect(message.codexConfigOverrides).toBeUndefined()
   })
 
   it('loads the exact propagated origin session despite more than 512 unrelated receipts', async () => {

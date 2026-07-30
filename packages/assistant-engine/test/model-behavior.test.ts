@@ -380,22 +380,26 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).not.toContain('No child outlives the final reply')
   })
 
-  it('keeps unrelated professional errands outside Murph scope', () => {
+  it('allows schoolwork while keeping unrelated professional work outside Murph scope', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain('Scope boundary:')
     expect(prompt).toContain(
-      'Own personal health, vault records, experiments, routines, health-relevant research/logistics, and Murph setup.',
+      'Use primary purpose, not subject.',
     )
     expect(prompt).toContain(
-      'Briefly decline unrelated work/school tasks, customer support, procurement, bulk operations, or non-health research',
+      'Answer assignments and educational code directly in professional subjects; no hypothetical/practice or scope disclaimer.',
     )
     expect(prompt).toContain(
-      'tool availability does not expand scope',
+      'Decline only actual professional work—production code, client deliverables, or operations—in one plain sentence',
     )
     expect(prompt).toContain(
-      'Work and life context is relevant when it affects health, schedule, stress, travel, or routines.',
+      'tools do not expand scope',
     )
+    expect(prompt).toContain(
+      'Own health, schoolwork, Murph setup, records, routines, and context.',
+    )
+    expect(prompt).not.toContain('unrelated work/school tasks')
   })
 
   it('uses formal by default and applies a saved tone as a strict writing contract', () => {
@@ -1945,7 +1949,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      'f84ab7182f55102afe48ec7740faf9c9f05f4e0ea5388287545157053a582344',
+      'b549d87c520c878ea8a049d8f02969011c7c7f775c77b8e8749daad2fbf4bd11',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -2510,11 +2514,18 @@ describe('assistant conversation scope', () => {
       'Ordinary shared-life help is in scope: research public options, compare choices, plan travel or outings, build an itinerary, and coordinate or carry out group logistics with available group-safe tools.',
     )
     expect(prompt).toContain(
-      'A plan, comparison, or reservation for the room is not a work deliverable.',
+      'Schoolwork and study help are also in scope, including assignments, essays, exam questions, drafts, and educational code.',
     )
     expect(prompt).toContain(
-      'Decline requests to write, review, or debug code, and requests whose primary purpose is a work, school, or professional deliverable, in one plain sentence without lecturing; tool availability does not expand scope.',
+      'Answer directly in the room\'s register without requiring "hypothetical" or "practice" framing or adding a school/professional-scope disclaimer, even when the subject is professional.',
     )
+    expect(prompt).toContain(
+      'A plan, comparison, reservation, school assignment, or study answer is not professional work.',
+    )
+    expect(prompt).toContain(
+      'Decline only requests whose primary purpose is actual professional work—such as production code, a client deliverable, or an operational work task—in one plain sentence without lecturing; tool availability does not expand scope.',
+    )
+    expect(prompt).not.toContain('work, school, or professional deliverable')
     expect(prompt).toContain('Do not log medications, symptoms, meals, measurements')
     expect(prompt).not.toContain('murph.assistant_style')
     expect(prompt).toContain(
