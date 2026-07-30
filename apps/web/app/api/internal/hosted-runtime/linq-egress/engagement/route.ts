@@ -6,6 +6,7 @@ import {
 } from "@/src/lib/hosted-groups/group-assistant-ask";
 import {
   assertHostedLinqRecentInboundEngagementForRuntime,
+  resolveHostedLinqEgressPolicyForRuntime,
 } from "@/src/lib/hosted-onboarding/linq-egress-engagement";
 import {
   recordHostedLinqRuntimeProviderDispatchFenceTx,
@@ -87,6 +88,7 @@ export const POST = withJsonError(async (request: Request) => {
     });
     const providerTarget = asserted.targetOverride?.target ?? target;
     const providerTargetKind = asserted.targetOverride?.targetKind ?? targetKind;
+    let finalAuthority = asserted;
     if (
       providerTargetKind !== "participant"
       && providerTarget
@@ -96,7 +98,8 @@ export const POST = withJsonError(async (request: Request) => {
         chatId: providerTarget,
         tx,
       });
-      await assertHostedLinqRecentInboundEngagementForRuntime({
+      finalAuthority =
+        await assertHostedLinqRecentInboundEngagementForRuntime({
         answeredMailboxItemIds,
         authorityCheckOnly,
         directRecipientPhoneNumber,
@@ -109,6 +112,24 @@ export const POST = withJsonError(async (request: Request) => {
         target: providerTarget,
         targetKind: providerTargetKind,
       });
+    }
+
+    const health = await resolveHostedLinqEgressPolicyForRuntime({
+      fromPhoneNumber,
+      linePhoneNumberLookupKey:
+        finalAuthority.linePhoneNumberLookupKey,
+      prisma: tx,
+      target: providerTarget,
+      targetKind: providerTargetKind,
+    });
+    if (health.policy.kind === "block") {
+      return {
+        assistantAskFallbackRequired: false,
+        asserted,
+        deliveryBlockCode: health.policy.code,
+        deliveryPosture: null,
+        providerDispatchClaimed: null,
+      };
     }
 
     const assistantAskAuthority =
@@ -156,6 +177,10 @@ export const POST = withJsonError(async (request: Request) => {
       assistantAskFallbackRequired:
         assistantAskAuthority?.assistantAskFallbackRequired === true,
       asserted,
+      deliveryBlockCode: null,
+      deliveryPosture: health.policy.posture === "normal"
+        ? null
+        : health.policy.posture,
       providerDispatchClaimed,
     };
   });
@@ -168,6 +193,12 @@ export const POST = withJsonError(async (request: Request) => {
     threadIsDirect: assertion.asserted.threadIsDirect,
     ...(assertion.asserted.targetOverride
       ? { targetOverride: assertion.asserted.targetOverride }
+      : {}),
+    ...(assertion.deliveryBlockCode
+      ? { deliveryBlockCode: assertion.deliveryBlockCode }
+      : {}),
+    ...(assertion.deliveryPosture
+      ? { deliveryPosture: assertion.deliveryPosture }
       : {}),
     ...(assertion.providerDispatchClaimed === null
       ? {}

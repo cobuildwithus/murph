@@ -4237,8 +4237,6 @@ describe("Linq group chat auto-provision", () => {
       select: { phoneNumberLookupKey: true },
       where: {
         configuredAt: { not: null },
-        egressPolicy: "enabled",
-        healthStatus: { in: ["healthy", "unknown"] },
         phoneNumberEncrypted: { not: null },
         phoneNumberLookupKey: {
           in: createHostedPhoneLookupKeyReadCandidates(phoneNumber),

@@ -1023,6 +1023,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260729010000_hosted_account_cleanup_runtime_logs",
       "20260729043000_hosted_member_assistant_provider_preference",
       "20260729170000_hosted_thread_route_account_lookup_key",
+      "20260729180000_linq_provider_health_projection",
       "20260729190000_composable_usage_referral_missions",
       "migration_lock.toml",
     ]);
@@ -2256,6 +2257,59 @@ describe("hosted Prisma baseline migration", () => {
     expect(schema).not.toContain("model LinqWebhookEvent");
   });
 
+
+  it("keeps legacy Linq delivery health blocking until the post-drain lane", () => {
+    const schema = readFileSync(
+      new URL("../prisma/schema.prisma", import.meta.url),
+      "utf8",
+    );
+    const predeploySql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260729180000_linq_provider_health_projection/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const postDrainSql = readFileSync(
+      new URL(
+        "../prisma/contract-migrations/20260729183000_rebuild_linq_delivery_health_after_drain/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+
+    expect(predeploySql).toContain(
+      'ADD COLUMN "provider_service_updated_at" TIMESTAMP(3)',
+    );
+    expect(predeploySql).toContain(
+      'ADD COLUMN "provider_reputation_updated_at" TIMESTAMP(3)',
+    );
+    expect(predeploySql).not.toMatch(
+      /UPDATE "hosted_linq_line"\s+SET "health_status"/u,
+    );
+    expect(postDrainSql).toMatch(
+      /UPDATE "hosted_linq_line"\s+SET "health_status" = CASE/u,
+    );
+    expect(postDrainSql).toContain(
+      'WHEN "consecutive_failures" > 0',
+    );
+    expect(postDrainSql.indexOf(
+      '"provider_service_status" = UPPER("provider_status")',
+    )).toBeLessThan(postDrainSql.indexOf(
+      'SET "health_status" = CASE',
+    ));
+    expect(postDrainSql.indexOf(
+      '"provider_reputation_status" = UPPER("provider_status")',
+    )).toBeLessThan(postDrainSql.indexOf(
+      'SET "health_status" = CASE',
+    ));
+    expect(schema).toContain(
+      'providerServiceUpdatedAt   DateTime? @map("provider_service_updated_at")',
+    );
+    expect(schema).toContain(
+      'providerReputationUpdatedAt DateTime? @map("provider_reputation_updated_at")',
+    );
+  });
 
   it("keeps hosted-member data on the reviewed scalar schema contract", () => {
     const schema = readFileSync(

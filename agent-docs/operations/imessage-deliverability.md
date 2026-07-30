@@ -145,12 +145,13 @@ A complete review should inspect:
 
 If a path lacks line-level pacing, recipient reply tracking, or delivery-health suppression, treat that as a deliverability risk even if the copy itself looks fine.
 
-#### Reciprocity Is Everything
+#### Reciprocity Is Continuous
 
-Design your messaging flows to get a reply within the first 3 messages. Apple's TrustKit skips all spam checks once a chat has 3 or more replies from the recipient. This is the single most important thing you can do.
+Design messaging flows to earn genuine replies early, then keep letting current replies set the pace. Historical engagement is useful context, not permanent permission to continue proactive outbound after someone has gone quiet.
 
-- Ask questions. "Hey, is this still a good number for you?" beats "Here's your update." Questions get replies. Replies build trust.
-- Avoid one-way broadcast patterns. If you are sending 50 messages and getting 0 replies, Apple's ML is scoring every one of those as spam-like. Even 1 reply per 10 outbound messages changes the math.
+- Ask natural, relevant questions when an answer would genuinely help the conversation.
+- Avoid one-way broadcast patterns. When replies stop, combine related reminders, slow down, and eventually pause nonessential proactive messages.
+- Do not require ritualized replies such as "YES", "done", or "skip" merely to manufacture engagement.
 
 #### Volume and Pacing
 
@@ -180,16 +181,35 @@ Design your messaging flows to get a reply within the first 3 messages. Apple's 
 - Do not re-engage cold contacts who have not replied in 30 or more days with bulk messages. Apple tracks recipient engagement per chat: a thread with 50 sent and 0 replies is a red flag.
 #### Monitoring Your Line Health
 
+- Keep three provider/local facts independent: Linq line service
+  (`ACTIVE`/`FLAGGED`), Linq line reputation
+  (`HEALTHY`/`AT_RISK`/`CRITICAL`), and Murph-observed delivery health from
+  receipts and failures. A successful receipt must not erase provider
+  reputation, and a provider warning must not masquerade as a local failure.
+  Service and reputation also keep independent provider ordering metadata:
+  missing, null, or unrecognized values never clear the other dimension.
+  Current Web code does not advance the legacy generic provider
+  status/timestamp/event triplet; it remains a coherent prior-build
+  compatibility snapshot until the post-drain contract migration consumes it.
+- Keep Linq chat health as a content-free latest-state projection keyed by the
+  blinded chat identifier. Webhooks are the fast path; bounded inventory
+  reconciliation repairs missed or silence-driven changes without calling Linq
+  from a routing transaction.
+- Existing routes remain sticky on `AT_RISK`; new assignments avoid those
+  lines. Scheduled turns may receive only a closed cautious/recovery posture,
+  while the existing Web egress authority rechecks hard blocks immediately
+  before the existing provider-dispatch fence.
+- During rollout, predeploy adds and backfills the independent provider fields
+  but leaves legacy delivery health conservatively blocking old Web builds.
+  The existing post-drain contract-migration lane reconstructs local delivery
+  health from receipt evidence only after the replacement build is live. That
+  cutover makes the replacement Web revision the rollback floor; recover by
+  redeploying it or a later compatible revision, never a pre-cutover build.
 - Watch delivery receipts on receipt-capable protocols. If iMessage messages show as "sent" but never "delivered," Apple may be silently dropping them. SMS/MMS do not produce delivered/read receipts, so `message.sent` is their highest positive provider signal and must not be presented as handset delivery.
 - If you see delivery failures spike on a line, reduce volume immediately. Do not keep sending; you are making it worse.
 - If a line gets flagged, stop all automated sending on it immediately. Continued sending on a flagged line can escalate from temporary throttle to permanent block.
 - Contact the provider if you suspect a line is flagged. They can check the line health status and help with recovery before it becomes permanent.
 
-#### The 3-Reply Rule
+#### Engagement Can Change
 
-Apple's internal spam engine, TrustKit, has a hardcoded check: if a conversation has 3 or more replies from the recipient, spam evaluation is skipped entirely.
-
-- A conversation with 100 outbound and 3 inbound replies is trusted.
-- A conversation with 5 outbound and 0 replies is evaluated for spam.
-
-Design every conversation flow to earn those 3 replies as early as possible.
+A chat that was once active can become one-way later. Treat Linq's current chat-health status and Murph's current inbound/outbound pattern as live evidence, and never assume that an old reply count permanently clears future automated sends.

@@ -1778,6 +1778,12 @@ model HostedLinqLine {
   egressPolicy               String    @default("enabled") @map("egress_policy")
   providerStatus             String?   @map("provider_status")
   providerReason             String?   @map("provider_reason")
+  providerServiceStatus      String?   @map("provider_service_status")
+  providerServiceUpdatedAt   DateTime? @map("provider_service_updated_at")
+  lastServiceStatusEventId   String?   @map("last_service_status_event_id")
+  providerReputationStatus   String?   @map("provider_reputation_status")
+  providerReputationUpdatedAt DateTime? @map("provider_reputation_updated_at")
+  lastReputationStatusEventId String?   @map("last_reputation_status_event_id")
   providerUpdatedAt          DateTime? @map("provider_updated_at")
   lastStatusEventId          String?   @map("last_status_event_id")
   lastOutboundAt             DateTime? @map("last_outbound_at")
@@ -1809,13 +1815,33 @@ model HostedLinqLine {
   providerEvents             HostedLinqProviderEvent[]
   deliveries                 HostedLinqDelivery[]
   alerts                     HostedLinqAlert[]
+  chatHealth                 HostedLinqChatHealth[]
 
   @@index([healthStatus, egressPolicy])
   @@index([configuredAt, egressPolicy, healthStatus])
   @@index([providerStatus])
+  @@index([providerServiceStatus])
+  @@index([providerReputationStatus])
   @@index([providerLastSeenAt])
   @@index([lastFailedAt])
   @@map("hosted_linq_line")
+}
+
+model HostedLinqChatHealth {
+  linqChatLookupKey     String   @id @map("linq_chat_lookup_key")
+  phoneNumberLookupKey String?  @map("phone_number_lookup_key")
+  providerStatus       String   @map("provider_status")
+  providerUpdatedAt    DateTime @map("provider_updated_at")
+  providerObservedAt   DateTime @map("provider_observed_at")
+  isGroup              Boolean? @map("is_group")
+  service              String?
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+  line                 HostedLinqLine? @relation(fields: [phoneNumberLookupKey], references: [phoneNumberLookupKey], onDelete: SetNull)
+
+  @@index([phoneNumberLookupKey, providerStatus], map: "hosted_linq_chat_health_phone_status_idx")
+  @@index([providerStatus, providerUpdatedAt], map: "hosted_linq_chat_health_status_updated_idx")
+  @@map("hosted_linq_chat_health")
 }
 
 model HostedLinqProviderEvent {
@@ -1839,6 +1865,10 @@ model HostedLinqProviderEvent {
   failureReason        String?  @map("failure_reason")
   providerStatus       String?  @map("provider_status")
   providerReason       String?  @map("provider_reason")
+  providerServiceStatus String? @map("provider_service_status")
+  providerReputationStatus String? @map("provider_reputation_status")
+  chatHealthStatus     String?  @map("chat_health_status")
+  chatHealthUpdatedAt  DateTime? @map("chat_health_updated_at")
   groupJoinOfferHandledAt DateTime? @map("group_join_offer_handled_at")
   extractionVersion    Int      @default(1) @map("extraction_version")
   extractionJson       Json?    @map("extraction_json")
@@ -1852,6 +1882,7 @@ model HostedLinqProviderEvent {
   @@index([eventType, providerCreatedAt])
   @@index([phoneNumberLookupKey, providerCreatedAt])
   @@index([phoneNumberLookupKey, eventType, providerCreatedAt])
+  @@index([linqChatLookupKey, providerCreatedAt], map: "hosted_linq_provider_event_chat_created_idx")
   @@index([messageLookupKey, providerCreatedAt])
   @@index([receivedAt, eventId])
   @@index([deliveryStatus, providerCreatedAt])
