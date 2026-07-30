@@ -156,6 +156,12 @@ const DESIGN_AI_USAGE_WAITING_ACTIVITY: HostedAiUsageActivitySnapshot = {
   missionsEnabled: true,
 };
 
+const DESIGN_AI_USAGE_EMPTY_ACTIVITY: HostedAiUsageActivitySnapshot = {
+  credits: [],
+  missions: [],
+  missionsEnabled: true,
+};
+
 const DESIGN_AI_USAGE_DISABLED_HISTORY: HostedAiUsageActivitySnapshot = {
   credits: [
     {
@@ -502,6 +508,7 @@ function PersonalUsageCreditState(props: {
 export {
   DESIGN_AI_USAGE_ACTIVITY,
   DESIGN_AI_USAGE_DISABLED_HISTORY,
+  DESIGN_AI_USAGE_EMPTY_ACTIVITY,
   DESIGN_AI_USAGE_WAITING_ACTIVITY,
   DESIGN_GROUP_SPONSORSHIP_OFFERS,
   DESIGN_USAGE_OFFERS,

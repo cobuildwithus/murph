@@ -109,6 +109,7 @@ import { MurphPersonalitySettingsDialog } from "@/src/components/settings/murph-
 import {
   DESIGN_AI_USAGE_ACTIVITY,
   DESIGN_AI_USAGE_DISABLED_HISTORY,
+  DESIGN_AI_USAGE_EMPTY_ACTIVITY,
   DESIGN_AI_USAGE_WAITING_ACTIVITY,
   DESIGN_GROUP_SPONSORSHIP_OFFERS,
   DESIGN_USAGE_OFFERS,
@@ -1349,19 +1350,32 @@ export function ComponentsContent() {
                 activity: DESIGN_AI_USAGE_ACTIVITY,
                 contactOption: DESIGN_USAGE_MISSION_CONTACT_OPTION,
                 label: "Active and completed missions",
+                state: "active-and-completed",
               },
               {
                 activity: DESIGN_AI_USAGE_WAITING_ACTIVITY,
                 contactOption: DESIGN_USAGE_MISSION_CONTACT_OPTION,
                 label: "Mission selected, waiting for a new group",
+                state: "waiting-for-group",
+              },
+              {
+                activity: DESIGN_AI_USAGE_EMPTY_ACTIVITY,
+                contactOption: DESIGN_USAGE_MISSION_CONTACT_OPTION,
+                label: "Missions available, none selected",
+                state: "empty",
               },
               {
                 activity: DESIGN_AI_USAGE_DISABLED_HISTORY,
                 contactOption: null,
                 label: "New missions disabled, existing history retained",
+                state: "disabled-history",
               },
             ].map((preview) => (
-              <div className="flex flex-col gap-3" key={preview.label}>
+              <div
+                className="flex flex-col gap-3"
+                data-design-state={preview.state}
+                key={preview.label}
+              >
                 <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
                   {preview.label}
                 </p>

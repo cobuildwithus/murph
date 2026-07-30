@@ -474,6 +474,30 @@ describe("HostedAiUsageActivity", () => {
     assert.doesNotMatch(markup, /Ask Murph/);
   });
 
+  it("keeps the enabled empty state compact and actionable", async () => {
+    const { HostedAiUsageActivity } = await import(
+      "@/src/components/settings/hosted-ai-usage-activity"
+    );
+    const markup = renderToStaticMarkup(createElement(HostedAiUsageActivity, {
+      activity: {
+        credits: [],
+        missions: [],
+        missionsEnabled: true,
+      },
+      missionContactOption: {
+        href: "sms:+15550100001?body=mission",
+        kind: "text",
+        label: "Messages",
+      },
+    }));
+
+    assert.match(markup, /<h3[^>]*>Missions<\/h3>/);
+    assert.match(markup, /No missions selected/);
+    assert.match(markup, /Ask Murph/);
+    assert.match(markup, /No usage credits yet/);
+    assert.doesNotMatch(markup, /<details/);
+  });
+
   it("renders email-only mission history without action-oriented copy", async () => {
     const { HostedAiUsageActivity } = await import(
       "@/src/components/settings/hosted-ai-usage-activity"
