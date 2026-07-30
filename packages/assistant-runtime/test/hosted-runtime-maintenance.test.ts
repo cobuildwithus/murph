@@ -1807,6 +1807,7 @@ describe("runHostedDeviceSyncPass", () => {
     });
     expect(mocks.createHostedRuntimeDeviceSyncService).toHaveBeenCalledWith(
       expect.objectContaining({
+        deviceSyncPort: expect.anything(),
         registry: expect.anything(),
       }),
     );

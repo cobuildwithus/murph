@@ -116,7 +116,11 @@ export async function POST(
       throw error;
     }
 
-    return deviceConnectIntentStartResponse(request, started.authorizationUrl);
+    return deviceConnectIntentStartResponse(
+      request,
+      started.authorizationUrl,
+      started.callbackProofCookie,
+    );
   } catch (error) {
     return handleHostedDeviceConnectIntentError(error, request);
   }
@@ -195,14 +199,22 @@ function handleHostedDeviceConnectIntentError(error: unknown, request?: Request)
   );
 }
 
-function deviceConnectIntentStartResponse(request: Request, authorizationUrl: string): Response {
+function deviceConnectIntentStartResponse(
+  request: Request,
+  authorizationUrl: string,
+  callbackProofCookie: string,
+): Response {
   if (wantsJsonDeviceConnectIntentResponse(request)) {
-    return jsonOk({
+    const response = jsonOk({
       authorizationUrl,
     });
+    response.headers.append("Set-Cookie", callbackProofCookie);
+    return response;
   }
 
-  return redirectNoReferrer(authorizationUrl);
+  const response = redirectNoReferrer(authorizationUrl);
+  response.headers.append("Set-Cookie", callbackProofCookie);
+  return response;
 }
 
 function deviceConnectIntentMessageResponse(

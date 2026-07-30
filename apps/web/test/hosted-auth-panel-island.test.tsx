@@ -20,12 +20,37 @@ vi.mock("@vercel/analytics", () => ({
 }));
 
 vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel", () => ({
-  HostedAuthPanel(props: unknown) {
+  HostedAuthPanel(props: {
+    onPrivyWaitChange?: (waiting: boolean) => void;
+  }) {
     mocks.panelRender(props);
+    const ready = mocks.ready;
+    const { onPrivyWaitChange } = props;
+    useEffect(() => {
+      if (ready) {
+        onPrivyWaitChange?.(false);
+      }
+    }, [onPrivyWaitChange, ready]);
     return createElement(
       "div",
-      { "data-hosted-auth-panel": "ready" },
-      "Ready auth",
+      { "data-hosted-auth-panel": "visible" },
+      "Sign in form",
+      createElement(
+        "button",
+        {
+          onClick: () => props.onPrivyWaitChange?.(true),
+          type: "button",
+        },
+        "Queue phone",
+      ),
+      createElement(
+        "button",
+        {
+          onClick: () => props.onPrivyWaitChange?.(false),
+          type: "button",
+        },
+        "Cancel queue",
+      ),
     );
   },
 }));
@@ -60,34 +85,25 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-test("keeps every auth method hidden until Privy is ready", async () => {
+test("keeps the ordinary auth form visible while Privy initializes", async () => {
   const rendered = await renderClientComponent(renderAuthIsland(), {
     requireButton: false,
   });
 
   try {
-    expect(rendered.container.textContent).toContain("Preparing secure sign in");
+    expect(rendered.container.textContent).toContain("Sign in form");
     expect(
-      rendered.container.querySelector("[data-hosted-auth-panel='ready']"),
-    ).toBeNull();
-    expect(mocks.panelRender).not.toHaveBeenCalled();
+      rendered.container.querySelector("[data-hosted-auth-panel='visible']"),
+    ).toBeTruthy();
+    expect(rendered.container.querySelector("[role='status']")).toBeNull();
+    expect(mocks.panelRender).toHaveBeenCalledTimes(1);
     expect(mocks.providerMount).toHaveBeenCalledTimes(1);
-    expect(
-      rendered.container
-        .querySelector("[role='status']")
-        ?.getAttribute("aria-live"),
-    ).toBe("polite");
-    expect(
-      rendered.container
-        .querySelector("[data-slot='spinner']")
-        ?.getAttribute("aria-hidden"),
-    ).toBe("true");
 
     mocks.ready = true;
     await rendered.rerender(renderAuthIsland());
 
-    expect(rendered.container.textContent).toContain("Ready auth");
-    expect(mocks.panelRender).toHaveBeenCalledTimes(1);
+    expect(rendered.container.textContent).toContain("Sign in form");
+    expect(mocks.panelRender).toHaveBeenCalledTimes(2);
     expect(mocks.providerMount).toHaveBeenCalledTimes(1);
     expect(mocks.providerUnmount).not.toHaveBeenCalled();
   } finally {
@@ -95,7 +111,7 @@ test("keeps every auth method hidden until Privy is ready", async () => {
   }
 });
 
-test("keeps a slow provider mounted and accepts late readiness", async () => {
+test("shows compact delayed feedback only after an auth action is queued", async () => {
   vi.useFakeTimers();
   const rendered = await renderClientComponent(renderAuthIsland(), {
     location: bareHomepageLocation(),
@@ -103,45 +119,55 @@ test("keeps a slow provider mounted and accepts late readiness", async () => {
   });
 
   try {
+    expect(rendered.container.querySelector("[role='status']")).toBeNull();
+    await clickButton(rendered, "Queue phone");
+
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(10_000);
+      await vi.advanceTimersByTimeAsync(1_499);
+    });
+    expect(rendered.container.querySelector("[role='status']")).toBeNull();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
     });
 
     expect(rendered.container.textContent).toContain(
-      "Sign in is taking longer",
+      "Your selection is saved",
     );
-    expect(rendered.container.textContent).toContain("Nothing was submitted");
-    expect(mocks.panelRender).not.toHaveBeenCalled();
+    expect(
+      rendered.container.querySelector("[role='status']")?.getAttribute(
+        "aria-live",
+      ),
+    ).toBe("polite");
+    expect(
+      rendered.container.querySelector("[role='status']")?.getAttribute(
+        "aria-atomic",
+      ),
+    ).toBe("true");
+    expect(
+      rendered.container
+        .querySelector("[data-slot='spinner']")
+        ?.getAttribute("aria-hidden"),
+    ).toBe("true");
+    expect(rendered.container.textContent).toContain("Sign in form");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8_500);
+    });
+
     expect(mocks.track).toHaveBeenCalledWith(
       "hosted_auth_privy_ready_timeout",
       expect.objectContaining({ attempt: 1, timeoutCount: 1 }),
     );
-
-    const keepWaitingButton = Array.from(
-      rendered.container.querySelectorAll("button"),
-    ).find((button) => button.textContent === "Keep waiting");
-    expect(keepWaitingButton).toBeTruthy();
     expect(rendered.container.textContent).not.toContain("Restart sign in");
-
-    await act(async () => {
-      keepWaitingButton?.dispatchEvent(
-        new rendered.window.Event("click", { bubbles: true }),
-      );
-    });
-
-    expect(rendered.container.textContent).toContain("Preparing secure sign in");
     expect(mocks.providerMount).toHaveBeenCalledTimes(1);
     expect(mocks.providerUnmount).not.toHaveBeenCalled();
-    expect(mocks.track).toHaveBeenCalledWith(
-      "hosted_auth_privy_ready_continue_waiting",
-      expect.objectContaining({ attempt: 1, timeoutCount: 1 }),
-    );
 
     mocks.ready = true;
     await rendered.rerender(renderAuthIsland());
 
-    expect(rendered.container.textContent).toContain("Ready auth");
-    expect(mocks.panelRender).toHaveBeenCalledTimes(1);
+    expect(rendered.container.textContent).toContain("Sign in form");
+    expect(rendered.container.querySelector("[role='status']")).toBeNull();
     expect(mocks.providerMount).toHaveBeenCalledTimes(1);
     expect(mocks.providerUnmount).not.toHaveBeenCalled();
   } finally {
@@ -157,12 +183,13 @@ test("offers an explicit provider restart only after a second timeout", async ()
   });
 
   try {
+    await clickButton(rendered, "Queue phone");
+
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10_000);
     });
 
     expect(rendered.container.textContent).not.toContain("Restart sign in");
-    await clickButton(rendered, "Keep waiting");
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10_000);
@@ -172,9 +199,16 @@ test("offers an explicit provider restart only after a second timeout", async ()
     expect(mocks.providerMount).toHaveBeenCalledTimes(1);
     expect(mocks.providerUnmount).not.toHaveBeenCalled();
 
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(40_000);
+    });
+
+    expect(mocks.track).toHaveBeenCalledTimes(2);
+
     await clickButton(rendered, "Restart sign in");
 
-    expect(rendered.container.textContent).toContain("Preparing secure sign in");
+    expect(rendered.container.textContent).toContain("Sign in form");
+    expect(rendered.container.querySelector("[role='status']")).toBeNull();
     expect(mocks.providerMount).toHaveBeenCalledTimes(2);
     expect(mocks.providerUnmount).toHaveBeenCalledTimes(1);
     expect(mocks.track).toHaveBeenCalledWith(
@@ -225,13 +259,35 @@ test.each([
   });
 
   try {
+    await clickButton(rendered, "Queue phone");
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10_000);
     });
 
     expect(rendered.container.textContent).toContain(
-      "Sign in is taking longer",
+      "Your selection is saved",
     );
+    expect(mocks.track).not.toHaveBeenCalled();
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("cancels delayed feedback when the queued action is cleared", async () => {
+  vi.useFakeTimers();
+  const rendered = await renderClientComponent(renderAuthIsland(), {
+    requireButton: false,
+  });
+
+  try {
+    await clickButton(rendered, "Queue phone");
+    await clickButton(rendered, "Cancel queue");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20_000);
+    });
+
+    expect(rendered.container.querySelector("[role='status']")).toBeNull();
     expect(mocks.track).not.toHaveBeenCalled();
   } finally {
     await rendered.cleanup();

@@ -372,6 +372,16 @@ full card remains one predictable radio target. Stack on narrow screens and use
 a compact grid only when the options are true peers. Do not use choice cards as
 navigation or as a substitute for ordinary buttons.
 
+### Device Connection Callback
+
+Provider return is a quiet, full-height confirmation page built from the shared
+Card primitives. Use one mono kicker, one serif decision heading, one short
+safety instruction, and explicit primary/secondary actions. The callback GET
+never mutates: the primary button is the member's visible completion act. The
+failure state removes that action, says that nothing was connected, and offers
+one route back to Connect. Keep both states readable at narrow mobile widths,
+with 44px-or-larger controls and no provider-supplied copy.
+
 ### Group Usage Funding
 Use `GroupUsageFundingCard` as the public entry surface for one-time group usage
 credit. Lead with the group name, one concise sentence explaining that the

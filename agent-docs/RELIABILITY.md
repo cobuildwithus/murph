@@ -276,6 +276,28 @@ Last verified: 2026-07-29
   for the private message.
 - Foreground inbox/parser-backed daemon runs should favor restartable connectors with bounded backoff over permanently dead watch loops, while still keeping low-level restart behavior opt-in and always bounded by the owning abort signal.
 - Networked assistant/provider/channel calls should set explicit timeouts, propagate caller abort signals, and only auto-retry request shapes that are replay-safe or rate-limit directed.
+- Junction Link setup remains retryable but inert before browser confirmation.
+  Webhooks for an active `pending_link` or `link_returned` account release their
+  trace claim and return a retryable not-ready response; they do not persist
+  dirty state or wake work. Manual reconcile, due scheduling, ordinary queued
+  jobs, and sync-success promotion apply the same account phase gate. After a
+  shared account is `source_confirmed`, a new target source does not move the
+  account back into a pending phase. Its `DeviceConnectionSource` remains
+  `disconnected`, and source-attributed webhooks, dirty-state commit races, and
+  provider pulls fail or exit without admitting target data until callback
+  confirmation reaches the sole runtime connection-established admission
+  boundary. Shared ingress marks every account persistence request with the
+  closed `replace` or `preserve_established` policy; hosted Prisma and local
+  SQLite apply the same shared predicate inside their persistence transactions,
+  so neither adapter may reinterpret a source addition as an account reconnect.
+  Hosted admission commits the source, signal, and mailbox work in one
+  transaction; local admission commits the source and initial jobs in one SQLite
+  transaction. Shared ingress never performs a second source write. A missing,
+  disconnected, or newer account makes the callback fail and leaves the source
+  disconnected. Established siblings continue normally.
+  Starting or retrying the source first attempts target-only provider cleanup;
+  a cleanup warning blocks the new link instead of adopting an ambiguous
+  linkage or revoking sibling sources.
 - The hosted reply-latency operator alert remains one singleton incident owner.
   Outbound paging requires the shared Resend operational-email sender and
   recipients plus a valid IANA operator timezone; it never falls back to

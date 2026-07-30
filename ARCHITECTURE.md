@@ -655,7 +655,7 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
 - `packages/contracts`: canonical Zod contracts, shared event-envelope/lifecycle parse and revision-collapse helpers, TypeScript types, generated JSON Schema artifacts, the canonical static lookup-ID family catalog/classifiers consumed by query and vault-usecases, and the shared vault-family registry/layout/query-source metadata consumed by core, query, and inboxd
 - `packages/clinical-records`: workspace-private pure Clinical Records Intake contract owner for raw FHIR retrieval manifests, explicit completed-resource-family declarations, canonical FHIR base/patient/page hashing helpers, facet-free resource-level FHIR external references, and one-decision-per-resource `upsert | retract | review` import plans; it does not own OAuth, provider credentials, raw-file writes, assistant behavior, or canonical vault mutation
 - `packages/hosted-execution`: shared hosted control-plane contracts, HMAC signing/verification helpers, vendor-neutral env readers, route builders, computer-use request schemas, phone-call start contracts, and side-effect codecs; it no longer owns Cloudflare worker-host topology or proxy-client inference, and app-local adapters now own deployment-specific transport, hostname, and token policy
-- `packages/hosted-orchestrator-temporal`: workspace-private Temporal worker package for hosted runtime orchestration. It owns the per-user workflow, the global device-sync scheduled-wake reconciler workflow, pointer-only signals, Activity retry boundaries, Temporal Schedule/client helpers, and the worker process entrypoint used by the root Render Background Worker Blueprint. Its production build pre-bundles Workflow code for `workflowBundle` startup, while local/dev startup keeps `workflowsPath`; the production worker also sets an explicit shutdown grace policy bounded by Render's shutdown-delay window. It must not store raw webhook payloads, mailbox bodies, prompts, transcripts, provider responses, provider tokens, dirty resource bodies, or workspace snapshot contents in Temporal workflow state.
+- `packages/hosted-orchestrator-temporal`: temporary public rollback implementation for hosted Temporal orchestration while private `cobuildwithus/murph-cloud` owns the production worker and Render deployment. The package contains the per-user workflow, the global device-sync scheduled-wake reconciler workflow, pointer-only signals, Activity retry boundaries, Temporal Schedule/client helpers, and worker process entrypoint. Its production build pre-bundles Workflow code for `workflowBundle` startup, while local/dev startup keeps `workflowsPath`; the production worker also sets an explicit shutdown grace policy bounded by Render's shutdown-delay window. It must not store raw webhook payloads, mailbox bodies, prompts, transcripts, provider responses, provider tokens, dirty resource bodies, or workspace snapshot contents in Temporal workflow state.
 - `packages/runtime-state`: workspace-private shared hosted email/env/loopback/id helpers plus pure hosted bundle identity types/equality on the root package, a worker-safe `@murphai/runtime-state/assistant-generated-deliveries` exact-ref contract, an explicit `@murphai/runtime-state/node` subpath for hosted bundle codec/materialization, an explicit `@murphai/runtime-state/node/assistant-state-fs` subpath for assistant runtime-state write/audit/repair permission policy, explicit `.runtime` taxonomy/path resolution (`operations` vs `projections` vs `cache/tmp`), assistant runtime path/security helpers, process scoping, versioned JSON helpers, and SQLite-backed Node-only migration seams
 - `packages/core`: workspace-private canonical mutation owner for live local-vault evolution, with current-format canonical reads/writes failing closed on non-current `formatVersion` values; it also owns the shared raw-attachment staging/manifests and canonical event attachment metadata used by document, meal, workout, and measurement writes, the dedicated `addActivitySession` and `addBodyMeasurement` seams for workout-session and body-measurement persistence, provider-agnostic wearable storage repair primitives for proven legacy/debug telemetry bloat, the verified raw-to-gzip transition and streaming gzip read/amendment path for closed monthly integration-ingest shards, and the shared event-spine envelope assembly used by generic events and health-event writes over the single `ledger/events` seam. Public bulk event import accepts legacy payload batches plus explicit upsert/retract decision batches and reconciles strict ISO `externalRef.version` values monotonically at that owner: it orders same-identity decisions by source revision within a batch, ignores retrieval-local provenance for source-semantically equal replay, rejects equal-version conflicts, supersedes newer same-kind values, tombstones and replaces newer kind changes, and tombstones newer retractions. An unseen retraction is persisted as an invisible deleted source marker in the same event ledger, preventing stale resurrection without a parallel watermark store. Blood tests stay canonical `kind: "test"` records behind a projected user-facing view.
 - `packages/importers`: workspace-private ingestion adapters that parse external files or provider API snapshots, normalize them behind registry-based adapters, and delegate all writes to core; the clinical FHIR adapter validates each raw page exactly once for file integrity, declared resource family, manifest patient plus FHIR-base binding, same-base root-reachable pagination, and FHIR modifier semantics before emitting one upsert, retract, or review decision per resource
@@ -1189,6 +1189,54 @@ Beneficiary deletion still removes its credit and purchase history in ownership
 order.
 
 Hosted app-session cookies use a strict v2 session-id plus bearer format. The existing token-hash field stores a dedicated web-key HMAC over the session id, bearer, member id, Privy identity, and expiry, so Postgres write access alone cannot mint or retarget browser authority; legacy unsigned cookies are rejected.
+
+Hosted browser wearable OAuth is a same-browser, same-member, same-host
+boundary. Start issues one short-lived, host-only callback proof bound to the
+provider, OAuth state, member, and app-session generation. The provider callback
+GET requires that proof and active session, but only renders a confirmation; it
+does not consume state, exchange a code, or persist credentials. One explicit
+same-origin POST passes the session member as `expectedOwnerId` and is the only
+browser callback path that may reach shared ingress. A callback delivered
+without its initiating-browser proof consumes only the OAuth state, so its
+transferable provider URL cannot be relayed later. This proof adds no durable
+state owner and never crosses hosts.
+
+Before constructing shared ingress or starting provider authorization, Web
+rejects a callback hostname that differs from the authenticated start request.
+Hosted Web build validation applies the runtime precedence to both explicit
+`DEVICE_SYNC_PUBLIC_BASE_URL` and its derived hosted-public-origin fallback.
+Cloudflare preview and production preflight verify explicit callback overrides;
+they do not claim to derive an unset Web-owned callback base. The `__Host-`
+app-session and callback-proof cookies remain host-only; do not add a Domain
+cookie or cross-host handoff.
+
+Junction's existing setup phase is the account data-admission boundary. A new
+account in `pending_link` or `link_returned` cannot accept webhook side effects,
+persist dirty work, wake or schedule the runtime, execute queued provider jobs,
+or promote itself through sync success. After an account reaches
+`source_confirmed`, adding or retrying another Junction-backed source preserves
+that account and its established siblings. The target `DeviceConnectionSource`
+stays `disconnected` and its webhook and pull work remain inert until callback
+confirmation reaches the runtime connection-established hook. Shared ingress
+chooses one closed account write policy for every persistence request:
+`replace` for an account reconnect or `preserve_established` for a
+source-scoped addition. Hosted Prisma and local SQLite apply the same shared
+established-account predicate inside their persistence transactions; neither
+adapter may drop or reinterpret that decision. The runtime hook is the sole
+source-admission owner: hosted mode commits the source, signal, and mailbox work
+in one transaction, while local mode commits the source and initial jobs in one
+SQLite transaction. Shared ingress never writes source admission after the
+hook. Junction polling lists every upstream source only to resolve provenance:
+before projection and every durable summary or timeseries import it rereads the
+live source rows, skips projection mutation for a disconnected source, and
+removes that source's records from the import. While any source admission is
+pending, a record whose source reference cannot be resolved fails closed;
+absence of a row for an explicit source remains the legacy admission rule.
+Explicit disconnect or a newer connection epoch wins the locked recheck,
+fails the stale callback, and leaves the target disconnected. Retry cleanup
+deregisters only the target source; whole-account revoke remains the explicit
+connection-wide disconnect path. Ambiguous target cleanup blocks the new link
+and remains retryable.
 
 The companion Privy bearer rule above is the default, with one authenticated
 extension bridge: `POST /api/device-sync/companion/imessage-mini-app/enrollment`

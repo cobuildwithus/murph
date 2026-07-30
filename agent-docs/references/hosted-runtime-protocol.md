@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-07-29
+Last verified: 2026-07-30
 
 ## Decision
 
@@ -767,14 +767,15 @@ workflow `patched()`/version gating for any new signal that changes wait or
 reconciliation behavior, deploy the Temporal worker before web emits that signal, and
 keep old histories replaying the old invalid/no-op signal behavior.
 
-The PR65+PR66 runtime reconciliation change is an explicit hard-cut exception to
-the tolerant deploy sequence above. It deletes the old demand Activity and
-legacy direct demand signals, so operators must stop old Temporal workers,
-terminate old `hosted-user-runtime:*` workflows, deploy matching web,
-Temporal, and Cloudflare builds together, then reseed new histories. Existing
-Cloudflare Durable Object state is not canonical product truth for this
-cutover; the new runner schema drops the retired `runner_bundle_slots` table
-during schema migration instead of requiring a manual Durable Object wipe.
+The completed PR65+PR66 runtime reconciliation change was an explicit hard-cut
+exception to the tolerant deploy sequence above. It deleted the old demand
+Activity and legacy direct demand signals; operators stopped the old workers,
+terminated the incompatible histories, deployed the matching web, Temporal,
+and Cloudflare builds, and reseeded the current lineage. Do not repeat that
+history reset for repository relocation. Existing Cloudflare Durable Object
+state was not canonical product truth for that historical cutover; the runner
+schema dropped the retired `runner_bundle_slots` table during schema migration
+instead of requiring a manual Durable Object wipe.
 
 Hosted producers for exact user-visible events append one `HostedMailboxItem` in
 the same transaction as the product/control-plane mutation that made work
