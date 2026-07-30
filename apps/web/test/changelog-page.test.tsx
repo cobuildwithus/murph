@@ -57,13 +57,14 @@ describe("ChangelogPage", () => {
       await ChangelogPage({ searchParams: Promise.resolve({}) }),
     );
 
+    expect(markup).toContain("More ways through, less waiting around");
     expect(markup).toContain("Corrections that carry forward");
     expect(markup).toContain("A first text that goes somewhere");
     expect(markup).toContain("Reminders on your time, not ours");
     expect(markup).toContain("Group memory, clearer recovery");
     expect(markup).toContain("A Murph that knows when to speak");
     expect(markup).toContain("Group chats that read the room");
-    expect(markup).toContain(
+    expect(markup).not.toContain(
       "Updated documents, honest reactions, usage you can see",
     );
     expect(markup).not.toContain("Onboarding that sounds like a person");
@@ -82,9 +83,9 @@ describe("ChangelogPage", () => {
     expect(markup).not.toContain("Better answers, better instincts");
     expect(markup).not.toContain("Murph referees your group challenge");
     expect(markup).toContain('aria-label="Changelog pages"');
-    expect(markup).toContain('href="/changelog?edition=2026-07-22"');
+    expect(markup).toContain('href="/changelog?edition=2026-07-23"');
     expect(markup).toContain(
-      'href="/changelog?edition=2026-07-29#post-onboarding-choice-point"',
+      'href="/changelog?edition=2026-07-30#usage-options-together"',
     );
     expect(markup).toContain("Older");
     expect(markup).not.toContain(">Newer<");
@@ -139,9 +140,7 @@ describe("ChangelogPage", () => {
     );
 
     expect(markup).toContain("Add usage");
-    expect(markup).toContain("Group texts per day");
     expect(markup).toContain("Add to Contacts");
-    expect(markup).toContain("Try again");
     expect(markup).toContain("Scheduled reminders");
     expect(markup).toContain("Keep Murph going");
     expect(markup).toContain("Verified line after setup");
