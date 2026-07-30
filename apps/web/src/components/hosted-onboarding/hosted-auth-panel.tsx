@@ -46,6 +46,7 @@ export function HostedAuthPanel({
   inviteCode,
   methods,
   onCompleted,
+  onPrivyWaitChange,
   onSignOut,
   onViewChange,
   requireLaunchConsentOnCompletion,
@@ -55,6 +56,7 @@ export function HostedAuthPanel({
   inviteCode?: string | null;
   methods: readonly HostedAuthMethod[];
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
+  onPrivyWaitChange?: (waiting: boolean) => void;
   onSignOut?: () => Promise<void> | void;
   onViewChange?: (view: HostedAuthPanelView) => void;
   requireLaunchConsentOnCompletion?: boolean;
@@ -63,12 +65,15 @@ export function HostedAuthPanel({
 }) {
   const [primaryMethod, setPrimaryMethod] = useState<HostedPrimaryMethod>("phone");
   const [codeSent, setCodeSent] = useState(false);
+  const [queuedAuthMethod, setQueuedAuthMethod] =
+    useState<HostedAuthMethod | null>(null);
   const [telegramActive, setTelegramActive] = useState(false);
   const [telegramNotice, setTelegramNotice] = useState<TelegramAuthNotice | null>(null);
   const [pendingAuthCompletion, setPendingAuthCompletion] =
     useState<HostedAuthCompletionResult | null>(null);
   const [consentDeclinePending, setConsentDeclinePending] = useState(false);
   const pendingAuthCompletionRef = useRef<HostedAuthCompletionResult | null>(null);
+  const queuedAuthMethodRef = useRef<HostedAuthMethod | null>(null);
   // Decline is terminal. A status read or acceptance that resolves after it must
   // not advance the journey the member just refused.
   const consentDeclinedRef = useRef(false);
@@ -90,10 +95,15 @@ export function HostedAuthPanel({
   const canSwap = includesPhone && includesEmail;
   const showAlternateMethods = !codeSent && (includesTelegram || canSwap);
   const showResumableAuthState =
-    !codeSent && primaryMethod === "phone" && !telegramActive && resumableAuth !== null;
+    !codeSent
+    && queuedAuthMethod !== "phone"
+    && primaryMethod === "phone"
+    && !telegramActive
+    && resumableAuth !== null;
   const shouldRequireLaunchConsent = requireLaunchConsentOnCompletion ?? false;
   const shouldShowPassiveLegalNotice = showPassiveLegalNotice ?? false;
   const authJourneyActive = completion.activeMethod !== null;
+  const selectedAuthMethod = completion.activeMethod ?? queuedAuthMethod;
 
   const view: HostedAuthPanelView = pendingAuthCompletion
     ? "consent"
@@ -103,6 +113,59 @@ export function HostedAuthPanel({
   useLayoutEffect(() => {
     onViewChange?.(view);
   }, [onViewChange, view]);
+  useLayoutEffect(() => {
+    onPrivyWaitChange?.(queuedAuthMethod !== null);
+  }, [onPrivyWaitChange, queuedAuthMethod]);
+
+  function queueAuthMethod(method: HostedAuthMethod): boolean {
+    const activeMethod = completion.activeMethod;
+    const currentQueuedMethod = queuedAuthMethodRef.current;
+
+    if (
+      authenticated
+      ||
+      (activeMethod !== null && activeMethod !== method)
+      || (currentQueuedMethod !== null && currentQueuedMethod !== method)
+    ) {
+      return false;
+    }
+
+    queuedAuthMethodRef.current = method;
+    setQueuedAuthMethod(method);
+    clearTelegramStateForAcceptedPhone(method);
+    return true;
+  }
+
+  function clearQueuedAuthMethod(method: HostedAuthMethod) {
+    if (queuedAuthMethodRef.current !== method) return;
+    queuedAuthMethodRef.current = null;
+    setQueuedAuthMethod(null);
+    if (authenticated) {
+      if (includesPhone) {
+        setPrimaryMethod("phone");
+      }
+      setTelegramActive(false);
+      setTelegramNotice(null);
+    }
+  }
+
+  function beginAuthMethod(method: HostedAuthMethod): boolean {
+    if (!completion.beginAuth(method)) return false;
+    clearQueuedAuthMethod(method);
+    clearTelegramStateForAcceptedPhone(method);
+    return true;
+  }
+
+  function clearTelegramStateForAcceptedPhone(method: HostedAuthMethod) {
+    if (method !== "phone") return;
+    setTelegramActive(false);
+    setTelegramNotice(null);
+  }
+
+  function cancelAuthMethod(method: HostedAuthMethod) {
+    clearQueuedAuthMethod(method);
+    completion.cancelAuth(method);
+  }
 
   async function handleAuthCompleted(result: HostedAuthCompletionResult) {
     if (shouldGateHostedAuthCompletionWithLaunchConsent({
@@ -227,11 +290,13 @@ export function HostedAuthPanel({
         <HostedPhoneAuth
           inviteCode={inviteCode}
           interactionGated={
-            completion.activeMethod !== null
-            && completion.activeMethod !== "phone"
+            selectedAuthMethod !== null
+            && selectedAuthMethod !== "phone"
           }
-          onAuthCancel={() => completion.cancelAuth("phone")}
-          onAuthStart={() => completion.beginAuth("phone")}
+          onAuthCancel={() => cancelAuthMethod("phone")}
+          onAuthQueue={() => queueAuthMethod("phone")}
+          onAuthQueueCancel={() => clearQueuedAuthMethod("phone")}
+          onAuthStart={() => beginAuthMethod("phone")}
           onAuthenticated={handlePhoneAuthenticated}
           onCodeSent={() => setCodeSent(true)}
           onSignOut={onSignOut}
@@ -247,11 +312,13 @@ export function HostedAuthPanel({
           active
           completionPending={completion.completingMethod === "email"}
           disabled={
-            completion.activeMethod !== null
-            && completion.activeMethod !== "email"
+            selectedAuthMethod !== null
+            && selectedAuthMethod !== "email"
           }
-          onAuthCancel={() => completion.cancelAuth("email")}
-          onAuthStart={() => completion.beginAuth("email")}
+          onAuthCancel={() => cancelAuthMethod("email")}
+          onAuthQueue={() => queueAuthMethod("email")}
+          onAuthQueueCancel={() => clearQueuedAuthMethod("email")}
+          onAuthStart={() => beginAuthMethod("email")}
           onAuthenticated={completion.completeAuth}
           onActivate={() => {}}
           onCodeEntryChange={setCodeSent}
@@ -272,11 +339,13 @@ export function HostedAuthPanel({
                 active={telegramActive}
                 completionPending={completion.completingMethod === "telegram"}
                 disabled={
-                  completion.activeMethod !== null
-                  && completion.activeMethod !== "telegram"
+                  selectedAuthMethod !== null
+                  && selectedAuthMethod !== "telegram"
                 }
-                onAuthCancel={() => completion.cancelAuth("telegram")}
-                onAuthStart={() => completion.beginAuth("telegram")}
+                onAuthCancel={() => cancelAuthMethod("telegram")}
+                onAuthQueue={() => queueAuthMethod("telegram")}
+                onAuthQueueCancel={() => clearQueuedAuthMethod("telegram")}
+                onAuthStart={() => beginAuthMethod("telegram")}
                 onAuthenticated={completion.completeAuth}
                 onActivate={() => {
                   setPrimaryMethod("phone");
@@ -290,11 +359,13 @@ export function HostedAuthPanel({
                 <HostedEmailAuthButton
                   active={false}
                   disabled={
-                    completion.activeMethod !== null
-                    && completion.activeMethod !== "email"
+                    selectedAuthMethod !== null
+                    && selectedAuthMethod !== "email"
                   }
-                  onAuthCancel={() => completion.cancelAuth("email")}
-                  onAuthStart={() => completion.beginAuth("email")}
+                  onAuthCancel={() => cancelAuthMethod("email")}
+                  onAuthQueue={() => queueAuthMethod("email")}
+                  onAuthQueueCancel={() => clearQueuedAuthMethod("email")}
+                  onAuthStart={() => beginAuthMethod("email")}
                   onAuthenticated={completion.completeAuth}
                   onActivate={() => {
                     setPrimaryMethod("email");
@@ -306,7 +377,7 @@ export function HostedAuthPanel({
               ) : (
                 <HostedInlineAuthButton
                   active={false}
-                  disabled={authJourneyActive}
+                  disabled={selectedAuthMethod !== null}
                   icon={<PhoneIcon className="h-5 w-5" />}
                   onClick={() => {
                     setPrimaryMethod("phone");
