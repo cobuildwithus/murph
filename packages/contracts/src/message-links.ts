@@ -8,6 +8,7 @@ export type TrailingHttpsLinkSplit = {
 const TRAILING_TOKEN_PATTERN = /\S+$/u;
 const TRAILING_SENTENCE_PUNCTUATION_PATTERN = /[.,;!]+$/u;
 const HTTP_URL_START_PATTERN = /https?:\/\//iu;
+const HTTPS_URL_START_PATTERN = /^https:\/\//iu;
 const TRAILING_LINK_WRAPPERS = [
   ["<", ">"],
   ["(", ")"],
@@ -71,7 +72,7 @@ function normalizeTrailingHttpsLinkToken(token: string): string | null {
   }
 
   if (
-    !candidate.startsWith("https://")
+    !HTTPS_URL_START_PATTERN.test(candidate)
     || parsed.protocol !== "https:"
     || !parsed.hostname
     || parsed.username

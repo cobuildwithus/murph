@@ -10,6 +10,7 @@ import {
 import {
   claimHostedLinqDeliveryProviderDispatchTx,
   markHostedLinqDeliverySendFailedTx,
+  recordHostedLinqRuntimeDeliveryOutcomeTx,
   resolveHostedLinqInviteSignupDispatchEffectIdTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import {
@@ -59,6 +60,70 @@ const partialCases = (
 describe.skipIf(!runPostgresProof)(
   "Hosted Linq rich-link partial ordering with PostgreSQL",
   () => {
+    it("consumes the exact answered mailbox row after the primary message is accepted", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 4 });
+      const suffix = randomUUID();
+      const memberId = `hbm_rich_link_mailbox_${suffix}`;
+      const mailboxItemId = `hmi_rich_link_mailbox_${suffix}`;
+      const idempotencyKey = `assistant-outbox:rich-link-mailbox-${suffix}`;
+      const deliveryLookupKey =
+        createHostedLinqDeliveryIdempotencyLookupKey(idempotencyKey);
+      const failedAt = new Date("2026-07-29T18:00:02.000Z");
+
+      if (!deliveryLookupKey) {
+        await prisma.$disconnect();
+        throw new Error("Expected a deterministic delivery lookup key.");
+      }
+
+      try {
+        await prisma.hostedMember.create({ data: { id: memberId } });
+        await prisma.hostedMailboxItem.create({
+          data: {
+            dedupeKey: `rich-link-mailbox:${suffix}`,
+            id: mailboxItemId,
+            kind: "conversation.message",
+            lane: "conversation",
+            laneSeq: 1n,
+            occurredAt: new Date("2026-07-29T18:00:00.000Z"),
+            payloadSchema: "murph.hosted-execution.conversation-message.v1",
+            userId: memberId,
+          },
+        });
+
+        await recordHostedLinqRuntimeDeliveryOutcomeTx({
+          answeredMailboxItemIds: [mailboxItemId],
+          attemptedAt: new Date("2026-07-29T18:00:01.000Z"),
+          failedAt,
+          failureCode: PARTIAL_FAILURE_CODE,
+          idempotencyKey,
+          linqChatId: `chat-rich-link-mailbox-${suffix}`,
+          messageIds: [`msg-rich-link-mailbox-${suffix}`],
+          prisma,
+          sourceRef: `intent-rich-link-mailbox-${suffix}`,
+          targetKind: "thread",
+          userId: memberId,
+        });
+
+        await expect(prisma.hostedMailboxItem.findUnique({
+          select: { consumedAt: true },
+          where: { id: mailboxItemId },
+        })).resolves.toEqual({ consumedAt: failedAt });
+        await expect(prisma.hostedLinqDelivery.findUnique({
+          select: { failureCode: true, status: true },
+          where: { idempotencyKey: deliveryLookupKey },
+        })).resolves.toEqual({
+          failureCode: PARTIAL_FAILURE_CODE,
+          status: "failed",
+        });
+      } finally {
+        await prisma.hostedLinqDelivery.deleteMany({
+          where: { idempotencyKey: deliveryLookupKey },
+        });
+        await prisma.hostedMember.deleteMany({ where: { id: memberId } });
+        await prisma.$disconnect();
+      }
+    });
+
     it.each(partialCases)(
       "keeps a parent-only $template $identity partial absorbing after a $receiptStatus receipt",
       async ({ identity, receiptStatus, template }) => {

@@ -38,6 +38,16 @@ test("supports a link-only message", () => {
   );
 });
 
+test("splits an uppercase HTTPS scheme without rewriting the URL", () => {
+  assert.deepEqual(
+    splitTrailingHttpsLink("Open it:\nHTTPS://www.withmurph.ai/connect/device"),
+    {
+      linkUrl: "HTTPS://www.withmurph.ai/connect/device",
+      message: "Open it:",
+    },
+  );
+});
+
 test("detects remaining HTTP URL text without treating malformed schemes as URLs", () => {
   assert.equal(
     containsHttpUrlText("https://first.example.test https://second.example.test"),

@@ -997,6 +997,8 @@ function hostedAssistantReplyTargetsSignupWelcomeRecipient(
 }
 
 const HOSTED_SIGNUP_WELCOME_DELIVERY_IDEMPOTENCY_PREFIX = "signup-welcome:";
+const HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE =
+  "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY";
 
 function isHostedSignupWelcomeDeliveryPayload(
   payload: HostedAssistantDeliveryPayload,
@@ -3687,7 +3689,7 @@ function createHostedAssistantLinqSendDependency(input: {
       const partialRichLinkResult =
         readHostedAssistantLinqRichLinkPartialDeliveryResult(error);
       if (partialRichLinkResult) {
-        queueHostedAssistantLinqDeliveryOutcomeWrite({
+        await recordHostedAssistantLinqDeliveryOutcomeOrQueueBestEffort({
           effectsPort: input.effectsPort ?? null,
           outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
             attemptedAt,
@@ -4212,7 +4214,13 @@ async function recordHostedAssistantLinqDeliveryOutcomeOrQueueBestEffort(input: 
 function shouldRequireHostedAssistantLinqDeliveryOutcomeWrite(
   outcome: HostedRuntimeLinqDeliveryOutcomeRequest,
 ): boolean {
-  if (!outcome.acceptedAt) {
+  const providerAccepted = Boolean(outcome.acceptedAt)
+    || (
+      Boolean(outcome.failedAt)
+      && outcome.failureCode
+        === HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE
+    );
+  if (!providerAccepted) {
     return false;
   }
   if (outcome.answeredMailboxItemIds?.length) {
@@ -4396,7 +4404,7 @@ function readHostedAssistantLinqRichLinkPartialDeliveryResult(
     typeof error !== "object"
     || error === null
     || !("code" in error)
-    || error.code !== "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY"
+    || error.code !== HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE
   ) {
     return null;
   }

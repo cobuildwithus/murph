@@ -3003,8 +3003,10 @@ describe("hosted Linq observability stores", () => {
   it("records a failed runtime rich-link outcome with its accepted primary identity", async () => {
     const fixture = createObservabilityPrismaFixture();
     const failedAt = new Date("2026-03-26T12:00:02.000Z");
+    const answeredMailboxItemIds = ["mailbox_item_primary_answered"];
 
     await expect(recordHostedLinqRuntimeDeliveryOutcomeTx({
+      answeredMailboxItemIds,
       attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
       failedAt,
       failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
@@ -3043,6 +3045,20 @@ describe("hosted Linq observability stores", () => {
         ],
       }),
     );
+    expect(fixture.hostedMailboxItemUpdateMany).toHaveBeenCalledWith({
+      data: {
+        consumedAt: failedAt,
+      },
+      where: {
+        consumedAt: null,
+        id: {
+          in: answeredMailboxItemIds,
+        },
+        kind: "conversation.message",
+        lane: "conversation",
+        userId: "member_123",
+      },
+    });
   });
 
   it("does not double-count outbound totals when the provider echo lands before runtime acceptance", async () => {

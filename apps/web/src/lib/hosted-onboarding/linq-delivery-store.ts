@@ -45,7 +45,7 @@ import {
 type HostedLinqDeliveryClient = PrismaClient | Prisma.TransactionClient;
 const HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS =
   "provider_dispatch_started";
-const HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE =
+export const HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE =
   "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY";
 type HostedLinqDeliveryProviderDispatchData = {
   attemptedAt: Date;
@@ -979,6 +979,13 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
       recorded: false,
     };
   }
+  const answeredMailboxConsumedAt = acceptedAt ?? (
+    failedAt
+    && normalizeNullable(input.failureCode)
+      === HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE
+      ? failedAt
+      : null
+  );
   const line = await readHostedLinqDeliveryLineIdentityTx({
     phoneNumber: input.phoneNumber ?? null,
     phoneNumberLookupKey: input.phoneNumberLookupKey ?? null,
@@ -1173,10 +1180,10 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
         });
       }
     }
-    if (acceptedAt && input.answeredMailboxItemIds?.length) {
+    if (answeredMailboxConsumedAt && input.answeredMailboxItemIds?.length) {
       await prisma.hostedMailboxItem.updateMany({
         data: {
-          consumedAt: acceptedAt,
+          consumedAt: answeredMailboxConsumedAt,
         },
         where: {
           consumedAt: null,
