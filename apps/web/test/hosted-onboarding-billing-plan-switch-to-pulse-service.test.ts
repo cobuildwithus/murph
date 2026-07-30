@@ -601,7 +601,6 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
     await expect(scheduleHostedBillingPlanSwitch({
       memberId: "member_123",
       now: new Date("2026-05-06T00:00:00.000Z"),
-      requiredSourceBillingPhase: "trial",
       targetPlanCode: "launch_group_monthly",
     })).resolves.toEqual({
       billingPlanCode: "launch_group_monthly",
@@ -633,7 +632,6 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
     await expect(scheduleHostedBillingPlanSwitch({
       memberId: "member_123",
       now: new Date("2026-05-06T00:00:00.000Z"),
-      requiredSourceBillingPhase: "trial",
       targetPlanCode: "launch_group_monthly",
     })).rejects.toMatchObject({
       code: "HOSTED_BILLING_PLAN_SWITCH_SOURCE_CHANGED",

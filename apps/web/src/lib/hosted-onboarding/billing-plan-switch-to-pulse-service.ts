@@ -142,11 +142,13 @@ async function scheduleHostedBillingPlanSwitchWithLockedOwner(input: {
     memberId: input.memberId,
     prisma: input.tx,
   });
+  const sourceBillingPhase = parseHostedBillingPhase(
+    billingRef?.currentBillingPhase,
+  );
 
   if (
     input.requiredSourceBillingPhase
-    && parseHostedBillingPhase(billingRef?.currentBillingPhase)
-      !== input.requiredSourceBillingPhase
+    && sourceBillingPhase !== input.requiredSourceBillingPhase
   ) {
     throw buildHostedBillingPlanSwitchSourceChangedError();
   }
@@ -197,14 +199,13 @@ async function scheduleHostedBillingPlanSwitchWithLockedOwner(input: {
     subscription,
   });
   if (
-    input.requiredSourceBillingPhase === "trial"
+    sourceBillingPhase === "trial"
     && subscription.status !== "trialing"
   ) {
     throw buildHostedBillingPlanSwitchSourceChangedError();
   }
   assertHostedStripeSubscriptionScheduleableState({
-    allowTrialing:
-      parseHostedBillingPhase(billingRef?.currentBillingPhase) === "trial",
+    allowTrialing: sourceBillingPhase === "trial",
     now: input.now,
     subscription,
   });
@@ -214,7 +215,7 @@ async function scheduleHostedBillingPlanSwitchWithLockedOwner(input: {
   });
 
   if (
-    input.requiredSourceBillingPhase === "trial"
+    sourceBillingPhase === "trial"
     && input.targetPlanCode === "launch_group_monthly"
     && !hasHostedStripeSubscriptionPaymentMethod(subscription)
   ) {
