@@ -4,21 +4,19 @@ import { afterEach, expect, test, vi } from "vitest";
 import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
-  standalonePanelModuleLoad: vi.fn(),
+  standalonePanelRender: vi.fn(),
   sharedPanelRender: vi.fn(),
 }));
 
-vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel-island", () => {
-  mocks.standalonePanelModuleLoad();
-  return {
-    HostedAuthPanelIsland() {
-      return createElement("div", null, "Standalone auth panel");
-    },
-    HostedAuthPanelWithinPrivy() {
-      return createElement("div", null, "Module shared auth panel");
-    },
-  };
-});
+vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel-island", () => ({
+  HostedAuthPanelIsland() {
+    mocks.standalonePanelRender();
+    return createElement("div", null, "Standalone auth panel");
+  },
+  HostedAuthPanelWithinPrivy() {
+    return createElement("div", null, "Module shared auth panel");
+  },
+}));
 
 const DialogOpenContext = createContext(false);
 
@@ -57,7 +55,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-test("renders the panel supplied by the warm runtime without loading a standalone provider island", async () => {
+test("renders the panel supplied by the warm runtime without rendering a standalone provider island", async () => {
   const rendered = await renderClientComponent(
     createElement(AuthDialog, {
       onOpenChange: () => {},
@@ -78,7 +76,7 @@ test("renders the panel supplied by the warm runtime without loading a standalon
     expect(mocks.sharedPanelRender).toHaveBeenCalledWith(
       expect.objectContaining({ privyAttempt: 3 }),
     );
-    expect(mocks.standalonePanelModuleLoad).not.toHaveBeenCalled();
+    expect(mocks.standalonePanelRender).not.toHaveBeenCalled();
   } finally {
     await rendered.cleanup();
   }
