@@ -51,8 +51,17 @@ sender, route, review, expiry, and final-egress authority.
 - Before deletion, the production Web matcher accepted the conforming
   contrastive refusal and the focused test failed on `true` versus `false`.
 - After deletion, the focused current-sender Web file passes 7/7, the
-  hosted-execution current-sender parser file passes 4/4, and the two
-  assistant tool-description contract files pass 86/86.
+  hosted-execution current-sender parser file passes 4/4, and the assistant
+  prompt, tool, and skill contract files pass 116/116.
+- The affected assistant-engine files pass 174/174 and the affected
+  assistant-runtime files pass 307/307 after merging the latest base.
+- Both changed-package typechecks pass. The root typecheck was stopped while
+  queued behind another checkout's exclusive verification run; exact-head CI
+  owns the full repository gate.
+- Base-aware docs drift, diff whitespace, and diff-scoped privacy checks pass.
+- The branch includes the latest base without conflicts, and no live
+  acknowledgement column, parser, status, migration, or prompt flow remains.
 
-Status: active
-Updated: 2026-07-30
+Status: completed
+Updated: 2026-07-29
+Completed: 2026-07-29
