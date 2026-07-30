@@ -70,8 +70,8 @@ const HOSTED_CODEX_AUTOCOMPACTION_E2E_TOKEN_LIMIT = 12_000;
 const HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL =
   "HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL";
 const EXPECTED_MULTI_AGENT_USAGE_HINT = [
-  "Proactively spawn a hosted child for bounded background parsing or import work and optional enrichment, research, deterministic transformation, or verification whose result is not needed in the current reply, and reply without waiting.",
-  `When the root model is gpt-5.6-sol, and gpt-5.6-terra is listed as an available child model, pass model="gpt-5.6-terra", reasoning_effort="low", and fork_turns="none" for well-specified, low-consequence leaf work such as extracting structured values from lab files, gathering sources, or running checks.`,
+  "Proactively spawn a hosted child for bounded background read-only parsing, optional enrichment, research, deterministic transformation, or verification whose result is not needed in the current reply, and reply without waiting.",
+  `When the root model is gpt-5.6-sol, and gpt-5.6-terra is listed as an available child model, pass model="gpt-5.6-terra", reasoning_effort="low", and fork_turns="none" for well-specified, low-consequence leaf work such as gathering sources, normalizing a read-only fixture, or running checks.`,
   `Put every required input, file path, constraint, and completion criterion in the child message because fork_turns="none" gives it no parent conversation history.`,
   "Do not spawn an inherited Sol child solely for this class of work, and keep interpretation, clinical judgment, ambiguous planning, permission-sensitive actions, and final synthesis in the root.",
   "Follow the active route or skill contract for child design and completion proof.",

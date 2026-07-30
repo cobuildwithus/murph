@@ -62,30 +62,32 @@ const SCRIPTED_MODEL_PROVIDER = 'local-stub'
 const TURN_TIMEOUT_MS = 90_000
 const execFileAsync = promisify(execFile)
 
-type ScriptedResponse =
-  | { delayMs?: number; text: string }
+type ScriptedResponse = {
+  delayMs?: number
+  requestExcludes?: string
+  requestIncludes?: string
+} & (
+  | { text: string }
   | {
     customToolCall: {
       input: string
       name: string
     }
-    delayMs?: number
   }
   | {
-    delayMs?: number
     toolSearchCall: {
       limit?: number
       query: string
     }
   }
   | {
-    delayMs?: number
     functionCall: {
       arguments: Record<string, unknown>
+      callId?: string
       name: string
       namespace?: string
     }
-  }
+  })
 
 interface ScriptedStub {
   baseUrl: string
@@ -179,6 +181,100 @@ describe('real codex app-server with scripted provider', () => {
     expect(result.turnId).toEqual(expect.any(String))
     expect(result.sessionId).toEqual(expect.any(String))
     expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
+  })
+
+  it('attributes a real V2 Sol-to-Terra spawn to the explicit child model', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const parentPrompt = 'PARENT_SOL_TERRA_USAGE_PROBE'
+    const childPrompt = 'CHILD_TERRA_USAGE_PROBE'
+    const spawnCallId = 'spawn_sol_to_terra_usage_probe'
+    const firstWaitCallId = 'wait_sol_to_terra_usage_probe_1'
+    const secondWaitCallId = 'wait_sol_to_terra_usage_probe_2'
+    const scenario = await prepareScriptedTurnScenario({
+      model: 'gpt-5.6-sol',
+      multiAgentV2: true,
+    })
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: {
+            message: childPrompt,
+            task_name: 'terra_usage_probe',
+            model: 'gpt-5.6-terra',
+            reasoning_effort: 'low',
+            fork_turns: 'none',
+          },
+          callId: spawnCallId,
+          name: 'spawn_agent',
+          namespace: 'collaboration',
+        },
+        requestIncludes: parentPrompt,
+        requestExcludes: spawnCallId,
+      },
+      {
+        functionCall: {
+          arguments: {
+            timeout_ms: 10_000,
+          },
+          callId: firstWaitCallId,
+          name: 'wait_agent',
+          namespace: 'collaboration',
+        },
+        requestIncludes: spawnCallId,
+        requestExcludes: firstWaitCallId,
+      },
+      {
+        functionCall: {
+          arguments: {
+            timeout_ms: 10_000,
+          },
+          callId: secondWaitCallId,
+          name: 'wait_agent',
+          namespace: 'collaboration',
+        },
+        requestIncludes: firstWaitCallId,
+        requestExcludes: secondWaitCallId,
+      },
+      {
+        requestIncludes: childPrompt,
+        requestExcludes: spawnCallId,
+        text: 'CHILD_TERRA_USAGE_OK',
+      },
+      {
+        requestIncludes: secondWaitCallId,
+        text: 'PARENT_SOL_TERRA_USAGE_OK',
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      prompt: parentPrompt,
+    })
+
+    expect(result.finalMessage).toBe('PARENT_SOL_TERRA_USAGE_OK')
+    const activityItem = result.jsonEvents
+      .map(readRecord)
+      .map((event) => readRecord(readRecord(event?.params)?.item))
+      .find((item) =>
+        item?.type === 'subAgentActivity' &&
+        item?.kind === 'started' &&
+        item?.id === spawnCallId)
+    const childThreadId = readString(activityItem?.agentThreadId)
+    expect(childThreadId).not.toBeNull()
+    if (!childThreadId) {
+      throw new Error('Expected the V2 activity to name the Terra child thread.')
+    }
+
+    expect(result.additionalUsages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        usage: expect.objectContaining({
+          requestedModel: 'gpt-5.6-terra',
+          servedModel: 'gpt-5.6-terra',
+        }),
+      }),
+    ]))
+    expect(JSON.stringify(result.additionalUsages)).not.toContain(childPrompt)
   })
 
   it('composes a reviewed group continuation through the real provider and queues one reply', {
@@ -1736,7 +1832,12 @@ function createScriptedSongRuntime(
   }
 }
 
-async function prepareScriptedTurnScenario(): Promise<{
+async function prepareScriptedTurnScenario(
+  input: {
+    model?: string
+    multiAgentV2?: boolean
+  } = {},
+): Promise<{
   stub: ScriptedStub
   turnInput: {
     codexCommand: string
@@ -1759,7 +1860,7 @@ async function prepareScriptedTurnScenario(): Promise<{
   temporaryPaths.push(workingDirectory)
   await writeFile(
     path.join(codexHome, 'config.toml'),
-    buildScriptedCodexConfigToml(scriptedStub.baseUrl),
+    buildScriptedCodexConfigToml(scriptedStub.baseUrl, input),
     {
       encoding: 'utf8',
       mode: 0o600,
@@ -1777,7 +1878,7 @@ async function prepareScriptedTurnScenario(): Promise<{
         PATH: process.env.PATH,
         TMPDIR: process.env.TMPDIR,
       },
-      model: SCRIPTED_MODEL,
+      model: input.model ?? SCRIPTED_MODEL,
       modelProvider: SCRIPTED_MODEL_PROVIDER,
       reasoningEffort: 'low',
       sandbox: 'workspace-write',
@@ -1835,14 +1936,28 @@ async function writeOpenAiFlexModelCatalogJson(input: {
   return modelCatalogJson
 }
 
-function buildScriptedCodexConfigToml(baseUrl: string): string {
+function buildScriptedCodexConfigToml(
+  baseUrl: string,
+  input: {
+    model?: string
+    multiAgentV2?: boolean
+  } = {},
+): string {
   return [
-    `model = "${SCRIPTED_MODEL}"`,
+    `model = "${input.model ?? SCRIPTED_MODEL}"`,
     `model_provider = "${SCRIPTED_MODEL_PROVIDER}"`,
     'model_reasoning_effort = "low"',
     'approval_policy = "never"',
     'sandbox_mode = "workspace-write"',
     'check_for_update_on_startup = false',
+    ...(input.multiAgentV2
+      ? [
+          '',
+          '[features.multi_agent_v2]',
+          'enabled = true',
+          'expose_spawn_agent_model_overrides = true',
+        ]
+      : []),
     '',
     '[history]',
     'persistence = "none"',
@@ -1886,7 +2001,19 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
       requestBody,
       providerRequestDiagnosticsEnabled,
     ))
-    const scripted = queuedResponses.shift()
+    const scriptedIndex = queuedResponses.findIndex((candidate) =>
+      (
+        candidate.requestIncludes === undefined ||
+        requestBody.includes(candidate.requestIncludes)
+      ) &&
+      (
+        candidate.requestExcludes === undefined ||
+        !requestBody.includes(candidate.requestExcludes)
+      ))
+    const scripted =
+      scriptedIndex >= 0
+        ? queuedResponses.splice(scriptedIndex, 1)[0]
+        : undefined
     if (!scripted) {
       response.statusCode = 500
       response.end(JSON.stringify({
@@ -1929,7 +2056,7 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
       : 'functionCall' in scripted
       ? {
           arguments: JSON.stringify(scripted.functionCall.arguments),
-          call_id: `call_${responseId}`,
+          call_id: scripted.functionCall.callId ?? `call_${responseId}`,
           id: `fcall_${responseId}`,
           name: scripted.functionCall.name,
           ...(scripted.functionCall.namespace

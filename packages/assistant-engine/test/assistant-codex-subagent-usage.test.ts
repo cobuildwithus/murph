@@ -736,4 +736,87 @@ describe('extractCodexSubagentUsageDrafts', () => {
       ),
     ).toBe(1_200)
   })
+
+  it('joins a V2 raw spawn call to its activity so an explicit Terra child does not inherit Sol usage', () => {
+    const drafts = extractCodexSubagentUsageDrafts({
+      modelProvider: 'openai',
+      ordinalStart: 2,
+      parentModel: 'gpt-5.6-sol',
+      parentRawEvents: [
+        {
+          method: 'rawResponseItem/completed',
+          params: {
+            threadId: 'thread-parent-v2-override',
+            turnId: 'turn-parent-v2-override',
+            item: {
+              type: 'function_call',
+              name: 'spawn_agent',
+              namespace: 'collaboration',
+              arguments: JSON.stringify({
+                message: 'synthetic read-only check',
+                task_name: 'terra_check',
+                model: 'gpt-5.6-terra',
+                reasoning_effort: 'low',
+                fork_turns: 'none',
+              }),
+              call_id: 'spawn-v2-terra',
+            },
+          },
+        },
+        {
+          method: 'item/completed',
+          params: {
+            threadId: 'thread-parent-v2-override',
+            turnId: 'turn-parent-v2-override',
+            item: {
+              id: 'spawn-v2-terra',
+              type: 'subAgentActivity',
+              kind: 'started',
+              agentThreadId: 'thread-child-v2-terra',
+              agentPath: 'root/terra_check',
+            },
+          },
+        },
+      ],
+      subagentTokenUsageByThread: new Map([
+        [
+          'thread-child-v2-terra',
+          sampleFromEvents([
+            tokenUsageEvent({
+              threadId: 'thread-child-v2-terra',
+              turnId: 'turn-child-v2-terra',
+              total: {
+                totalTokens: 300,
+                inputTokens: 250,
+                cachedInputTokens: 0,
+                outputTokens: 50,
+                reasoningOutputTokens: 0,
+              },
+              last: {
+                totalTokens: 300,
+                inputTokens: 250,
+                cachedInputTokens: 0,
+                outputTokens: 50,
+                reasoningOutputTokens: 0,
+              },
+            }),
+          ]),
+        ],
+      ]),
+    })
+
+    expect(drafts).toHaveLength(1)
+    expect(drafts[0]).toMatchObject({
+      providerRequestOrdinal: 2,
+      usage: {
+        inputTokens: 250,
+        outputTokens: 50,
+        requestedModel: 'gpt-5.6-terra',
+        servedModel: 'gpt-5.6-terra',
+        totalTokens: 300,
+      },
+    })
+    expect(JSON.stringify(drafts)).not.toContain('synthetic read-only check')
+    expect(JSON.stringify(drafts)).not.toContain('thread-child-v2-terra')
+  })
 })
