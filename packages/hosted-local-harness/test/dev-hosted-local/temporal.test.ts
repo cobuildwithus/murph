@@ -269,8 +269,9 @@ describe("hosted-local Temporal lifecycle", () => {
     expect(terminateChildProcessAndWaitMock).toHaveBeenCalledTimes(1);
   });
 
-  it("ensures the schedule before starting an opted-in external-mode worker with the worker env", async () => {
+  it("uses one configured package directory for opted-in schedule setup and worker startup", async () => {
     const { startHostedLocalTemporalRuntime } = await import("../../src/dev-hosted-local/temporal.ts");
+    const externalPackageDir = "../murph-cloud/packages/hosted-orchestrator-temporal";
 
     const runtime = await startHostedLocalTemporalRuntime({
       cloudflareHostedControlBaseUrl: "http://0.0.0.0:8787",
@@ -289,6 +290,7 @@ describe("hosted-local Temporal lifecycle", () => {
         HOSTED_TEMPORAL_API_KEY: "remote-secret",
         HOSTED_TEMPORAL_TLS_ENABLED: "true",
         MURPH_DEV_TEMPORAL_ALLOW_EXTERNAL_SCHEDULE_ENSURE: "1",
+        MURPH_DEV_TEMPORAL_WORKER_PACKAGE_DIR: `  ${externalPackageDir}  `,
       },
       hostedWebBaseUrl: "http://localhost:3000",
     });
@@ -298,7 +300,7 @@ describe("hosted-local Temporal lifecycle", () => {
       "pnpm",
       [
         "--dir",
-        "packages/hosted-orchestrator-temporal",
+        externalPackageDir,
         "temporal:ensure-device-sync-reconciler-schedule",
       ],
       expect.objectContaining({
@@ -321,7 +323,7 @@ describe("hosted-local Temporal lifecycle", () => {
     expect(spawnChildProcessMock).toHaveBeenCalledWith(
       "temporal-worker",
       "pnpm",
-      ["--dir", "packages/hosted-orchestrator-temporal", "temporal:worker"],
+      ["--dir", externalPackageDir, "temporal:worker"],
       expect.objectContaining({
         CLOUDFLARE_HOSTED_CONTROL_BASE_URL: "http://127.0.0.1:8787",
         HOSTED_TEMPORAL_ADDRESS: "temporal.example.test:7233",
