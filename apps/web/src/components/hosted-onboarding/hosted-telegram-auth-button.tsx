@@ -3,6 +3,7 @@
 import { useLoginWithTelegram, usePrivy } from "@privy-io/react-auth";
 
 import { TelegramIcon } from "@/src/components/homepage/telegram-icon";
+import { Spinner } from "@/src/components/ui/spinner";
 
 import {
   describeTelegramAuthError,
@@ -13,13 +14,21 @@ import type { HostedPrivyAuthenticatedInput } from "./use-hosted-auth-completion
 
 export function HostedTelegramAuthButton({
   active = false,
+  completionPending = false,
   disableSignup = false,
+  disabled = false,
+  onAuthCancel,
+  onAuthStart,
   onActivate,
   onAuthenticated,
   onNoticeChange,
 }: {
   active?: boolean;
+  completionPending?: boolean;
   disableSignup?: boolean;
+  disabled?: boolean;
+  onAuthCancel?: () => void;
+  onAuthStart?: () => boolean;
   onActivate: () => void;
   onAuthenticated: (input: HostedPrivyAuthenticatedInput) => Promise<void> | void;
   onNoticeChange?: (notice: TelegramAuthNotice | null) => void;
@@ -30,12 +39,17 @@ export function HostedTelegramAuthButton({
   const loading = state.status === "loading";
 
   async function handleClick() {
+    if (onAuthStart && !onAuthStart()) {
+      return;
+    }
+
     onActivate();
     onNoticeChange?.(null);
 
     try {
       await login(disableSignup ? { disableSignup: true } : undefined);
     } catch (error) {
+      onAuthCancel?.();
       onNoticeChange?.(describeTelegramAuthError(error));
       return;
     }
@@ -46,13 +60,42 @@ export function HostedTelegramAuthButton({
   }
 
   return (
+    <HostedTelegramAuthButtonPresentation
+      active={active}
+      completionPending={completionPending}
+      disabled={disabled || !ready || loading || completionPending}
+      loading={loading}
+      onClick={handleClick}
+    />
+  );
+}
+
+export function HostedTelegramAuthButtonPresentation({
+  active = false,
+  completionPending = false,
+  disabled = false,
+  loading = false,
+  onClick,
+}: {
+  active?: boolean;
+  completionPending?: boolean;
+  disabled?: boolean;
+  loading?: boolean;
+  onClick: () => void;
+}) {
+  return (
     <HostedInlineAuthButton
       active={active}
-      disabled={!ready || loading}
-      icon={<TelegramIcon className="h-5 w-5" />}
-      onClick={handleClick}
+      busy={completionPending}
+      disabled={disabled}
+      icon={
+        completionPending
+          ? <Spinner aria-hidden="true" />
+          : <TelegramIcon className="h-5 w-5" />
+      }
+      onClick={onClick}
     >
-      {loading ? "Connecting..." : "Telegram"}
+      {completionPending ? "Finishing..." : loading ? "Connecting..." : "Telegram"}
     </HostedInlineAuthButton>
   );
 }

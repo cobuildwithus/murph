@@ -30,7 +30,15 @@ import { HealthDomainCard } from "@/src/components/overview/health-domain-card";
 import { ActiveExperimentBanner } from "@/src/components/overview/active-experiment-banner";
 import { TrialBillingBanner } from "@/src/components/home/trial-billing-banner";
 import { ProfileStats } from "@/src/components/overview/profile-stats";
-import { HostedAuthFinishingNotice } from "@/src/components/hosted-onboarding/hosted-auth-shared";
+import { HostedResumableAuthState } from "@/src/components/hosted-onboarding/hosted-auth-panel";
+import { HostedPrivyReadinessState } from "@/src/components/hosted-onboarding/hosted-auth-panel-island";
+import {
+  resolveAuthDialogHeaderPresentation,
+} from "@/src/components/hosted-onboarding/auth-dialog";
+import { HostedInlineAuthButton } from "@/src/components/hosted-onboarding/hosted-inline-auth-button";
+import { HostedCodeEntryStep } from "@/src/components/hosted-onboarding/hosted-phone-auth-step-views";
+import { HostedAuthenticatedPhoneAuthState } from "@/src/components/hosted-onboarding/hosted-phone-auth-views";
+import { HostedTelegramAuthButtonPresentation } from "@/src/components/hosted-onboarding/hosted-telegram-auth-button";
 import {
   HostedLegalConsentCard,
   type HostedLegalConsentAcceptanceInput,
@@ -133,15 +141,27 @@ function DialogPreviewFrame({ label, children }: { label: string; children: Reac
   return (
     <div className="flex flex-col gap-3">
       <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">{label}</p>
-      <div className="rounded-2xl bg-[#FAF8F4] p-6 shadow-[0_1px_2px_rgba(26,31,22,0.04)] ring-1 ring-[#1A1F16]/[0.06]">
-        <p className="font-serif text-xl font-semibold tracking-tight text-[#1A1F16]">
-          Log in or sign up
-        </p>
-        <p className="mt-1 text-sm text-[#5C5A52]">
-          Discover what actually makes you healthier.
-        </p>
+      <div className="max-w-md rounded-2xl bg-[#FAF8F4] p-6 shadow-[0_1px_2px_rgba(26,31,22,0.04)] ring-1 ring-[#1A1F16]/[0.06] md:p-7">
+        <DialogPreviewHeader />
         <div className="mt-5">{children}</div>
       </div>
+    </div>
+  );
+}
+
+function DialogPreviewHeader() {
+  const header = resolveAuthDialogHeaderPresentation({
+    panelView: "auth-active",
+  });
+
+  return (
+    <div className={header.headerClassName}>
+      <h3 className="text-xl font-bold tracking-tight text-foreground">
+        {header.title}
+      </h3>
+      <p className="text-sm text-pretty text-muted-foreground">
+        {header.description}
+      </p>
     </div>
   );
 }
@@ -265,47 +285,72 @@ const DESIGN_AVAILABLE_CONNECT_SOURCES: ConnectSource[] = [
     name: "Garmin",
   },
 ];
-const DESIGN_DASHBOARD_CONSENT_STATUS: HostedConsentStatus = {
-  documents: DESIGN_LEGAL_DOCUMENTS,
-  generatedAt: "2026-07-23T12:00:00.000Z",
-  launchGranted: false,
-  launchScopes: [
-    {
-      granted: false,
-      missingDocuments: DESIGN_LEGAL_SCOPE_DOCUMENTS,
-      scope: "launch.legal",
-    },
-    {
-      granted: false,
-      missingDocuments: DESIGN_HEALTH_DATA_SCOPE_DOCUMENTS,
-      scope: "launch.health-data",
-    },
-  ],
-  ok: true,
-  schema: "murph.hosted-consent-status.v1",
-  scopes: [
-    {
-      current: false,
-      documents: DESIGN_LEGAL_SCOPE_DOCUMENTS,
-      grant: null,
-      granted: false,
-      label: "Terms, privacy, and AI disclosure",
-      missingDocuments: DESIGN_LEGAL_SCOPE_DOCUMENTS,
-      revocable: false,
-      scope: "launch.legal",
-    },
-    {
-      current: false,
-      documents: DESIGN_HEALTH_DATA_SCOPE_DOCUMENTS,
-      grant: null,
-      granted: false,
-      label: "Health data notice and processing authorization",
-      missingDocuments: DESIGN_HEALTH_DATA_SCOPE_DOCUMENTS,
-      revocable: false,
-      scope: "launch.health-data",
-    },
-  ],
-};
+function createDesignLaunchConsentStatus({
+  healthDataGranted,
+  legalGranted,
+}: {
+  healthDataGranted: boolean;
+  legalGranted: boolean;
+}): HostedConsentStatus {
+  return {
+    documents: DESIGN_LEGAL_DOCUMENTS,
+    generatedAt: "2026-07-23T12:00:00.000Z",
+    launchGranted: legalGranted && healthDataGranted,
+    launchScopes: [
+      {
+        granted: legalGranted,
+        missingDocuments: legalGranted ? [] : DESIGN_LEGAL_SCOPE_DOCUMENTS,
+        scope: "launch.legal",
+      },
+      {
+        granted: healthDataGranted,
+        missingDocuments: healthDataGranted
+          ? []
+          : DESIGN_HEALTH_DATA_SCOPE_DOCUMENTS,
+        scope: "launch.health-data",
+      },
+    ],
+    ok: true,
+    schema: "murph.hosted-consent-status.v1",
+    scopes: [
+      {
+        current: legalGranted,
+        documents: DESIGN_LEGAL_SCOPE_DOCUMENTS,
+        grant: null,
+        granted: legalGranted,
+        label: "Terms, privacy, and AI disclosure",
+        missingDocuments: legalGranted ? [] : DESIGN_LEGAL_SCOPE_DOCUMENTS,
+        revocable: false,
+        scope: "launch.legal",
+      },
+      {
+        current: healthDataGranted,
+        documents: DESIGN_HEALTH_DATA_SCOPE_DOCUMENTS,
+        grant: null,
+        granted: healthDataGranted,
+        label: "Health data notice and processing authorization",
+        missingDocuments: healthDataGranted
+          ? []
+          : DESIGN_HEALTH_DATA_SCOPE_DOCUMENTS,
+        revocable: false,
+        scope: "launch.health-data",
+      },
+    ],
+  };
+}
+
+const DESIGN_DASHBOARD_CONSENT_STATUS = createDesignLaunchConsentStatus({
+  healthDataGranted: false,
+  legalGranted: false,
+});
+const DESIGN_LEGAL_ONLY_CONSENT_STATUS = createDesignLaunchConsentStatus({
+  healthDataGranted: true,
+  legalGranted: false,
+});
+const DESIGN_HEALTH_DATA_ONLY_CONSENT_STATUS = createDesignLaunchConsentStatus({
+  healthDataGranted: false,
+  legalGranted: true,
+});
 
 const SEGMENTED_CONTROL_OPTIONS: ReadonlyArray<
   SegmentedControlOption<SegmentedControlDemoValue>
@@ -495,6 +540,147 @@ export function ComponentsContent() {
               onDismiss={() => {}}
               status="confirming"
             />
+          </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Homepage auth transitions">
+          <div
+            className="flex flex-col gap-6"
+            data-design-homepage-auth-transitions
+          >
+            <p className="text-sm text-muted-foreground">
+              Secure sign in exposes its methods only after the provider is
+              ready. Account completion then stays on the active production
+              action, carrying consent status directly into the next view.
+            </p>
+            <div
+              className="grid items-start gap-5 lg:grid-cols-2"
+              data-design-homepage-auth-readiness
+              inert
+            >
+              <DialogPreviewFrame label="Provider initialization">
+                <HostedPrivyReadinessState
+                  onKeepWaiting={() => {}}
+                  onRestart={() => {}}
+                  restartAvailable={false}
+                  timedOut={false}
+                />
+              </DialogPreviewFrame>
+              <DialogPreviewFrame label="First provider delay">
+                <HostedPrivyReadinessState
+                  onKeepWaiting={() => {}}
+                  onRestart={() => {}}
+                  restartAvailable={false}
+                  timedOut
+                />
+              </DialogPreviewFrame>
+              <DialogPreviewFrame label="Repeated provider delay">
+                <HostedPrivyReadinessState
+                  onKeepWaiting={() => {}}
+                  onRestart={() => {}}
+                  restartAvailable
+                  timedOut
+                />
+              </DialogPreviewFrame>
+            </div>
+            <div className="grid items-start gap-5 lg:grid-cols-2" inert>
+              <DialogPreviewFrame label="Telegram completion">
+                <div className="grid grid-cols-2 gap-3">
+                  <HostedTelegramAuthButtonPresentation
+                    active
+                    completionPending
+                    disabled
+                    onClick={() => {}}
+                  />
+                  <HostedInlineAuthButton
+                    disabled
+                    icon={<CheckCircle2 aria-hidden="true" className="size-5" />}
+                    onClick={() => {}}
+                  >
+                    Email
+                  </HostedInlineAuthButton>
+                </div>
+              </DialogPreviewFrame>
+              <DialogPreviewFrame label="Phone verification completion">
+                <HostedCodeEntryStep
+                  autoFocus={false}
+                  code="123456"
+                  disableSignup={false}
+                  disabled
+                  intent="auth"
+                  onCodeChange={() => {}}
+                  onResendCode={() => {}}
+                  onUseDifferentNumber={() => {}}
+                  onVerifyCode={() => {}}
+                  pendingAction="verify-code"
+                  secondaryActionSize="lg"
+                  size="compact"
+                  verificationPhoneNumberHint="*** 2671"
+                />
+              </DialogPreviewFrame>
+              <DialogPreviewFrame label="Phone resume completion">
+                <HostedAuthenticatedPhoneAuthState
+                  body=""
+                  description=""
+                  disabled
+                  onContinue={() => {}}
+                  onUseDifferentNumber={() => {}}
+                  pendingAction="continue"
+                  secondaryActionSize="lg"
+                  title=""
+                  view="manual-resume"
+                />
+              </DialogPreviewFrame>
+              <DialogPreviewFrame label="Resumable completion">
+                <HostedResumableAuthState
+                  auth={{ identityLabel: null, method: "telegram" }}
+                  disabled
+                  onContinue={() => {}}
+                  onSignOut={() => {}}
+                  pending
+                />
+              </DialogPreviewFrame>
+            </div>
+            <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              Consent appears directly from completion status
+            </p>
+            <div className="grid items-start gap-5 lg:grid-cols-2" inert>
+              <div
+                className="max-w-md rounded-2xl bg-[#FAF8F4] p-6 ring-1 ring-[#1A1F16]/[0.06] sm:p-7"
+                data-design-homepage-consent="combined"
+              >
+                <HostedLegalConsentCard
+                  initialStatus={DESIGN_DASHBOARD_CONSENT_STATUS}
+                  mode="compact"
+                  onDecline={() => {}}
+                  source="design-homepage-consent-combined"
+                />
+              </div>
+              <div
+                className="max-w-md rounded-2xl bg-[#FAF8F4] p-6 ring-1 ring-[#1A1F16]/[0.06] sm:p-7"
+                data-design-homepage-consent="health-data"
+              >
+                <HostedLegalConsentCard
+                  initialStatus={DESIGN_HEALTH_DATA_ONLY_CONSENT_STATUS}
+                  mode="compact"
+                  onDecline={() => {}}
+                  source="design-homepage-consent-health-data"
+                />
+              </div>
+              <div
+                className="max-w-md rounded-2xl bg-[#FAF8F4] p-6 ring-1 ring-[#1A1F16]/[0.06] sm:p-7"
+                data-design-homepage-consent="legal"
+              >
+                <HostedLegalConsentCard
+                  initialStatus={DESIGN_LEGAL_ONLY_CONSENT_STATUS}
+                  mode="compact"
+                  onDecline={() => {}}
+                  source="design-homepage-consent-legal"
+                />
+              </div>
+            </div>
           </div>
         </Section>
 
@@ -807,21 +993,6 @@ export function ComponentsContent() {
                 itemClassName="text-[#736a58] hover:bg-[#fffcf6]/70 hover:text-[#2d3436] aria-pressed:bg-[#fffcf6] aria-pressed:text-[#2d3436] aria-pressed:shadow-none"
               />
             </div>
-          </div>
-        </Section>
-
-        <Separator />
-
-        <Section title="Auth Finishing Notice">
-          <p className="text-sm text-muted-foreground">
-            Shown inside the sign-in dialog while the account is being provisioned.
-            The animated Murph mark ripples outward from its warm center — core dots
-            breathe first, mid amber ring trails by 200ms, sage outer ring by 400ms.
-          </p>
-          <div className="max-w-md">
-            <DialogPreviewFrame label="In dialog context">
-              <HostedAuthFinishingNotice />
-            </DialogPreviewFrame>
           </div>
         </Section>
 

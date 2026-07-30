@@ -93,11 +93,16 @@ export function OnboardingSteps({
   // cannot prompt for on its own.
   const primaryStepId = messageMurphAction ? "message" : "devices";
 
-  const gridColsClass =
-    visibleSteps.length >= 3 ? "sm:grid-cols-2 xl:grid-cols-3" : "sm:grid-cols-2";
+  const desktopCardWidthClass =
+    visibleSteps.length >= 3
+      ? "lg:basis-[calc((100%-2.5rem)/3)]"
+      : "lg:basis-[calc((100%-1.25rem)/2)]";
 
   return (
-    <div className={`grid gap-5 ${gridColsClass}`}>
+    <div
+      className="grid gap-5 sm:grid-cols-2 lg:flex lg:overflow-x-auto lg:pb-2"
+      data-onboarding-steps
+    >
       {visibleSteps.map((step, i) => {
         const Icon = step.icon;
         const isPrimary = step.id === primaryStepId;
@@ -133,7 +138,8 @@ export function OnboardingSteps({
         return (
           <div
             key={step.id}
-            className={`group flex flex-col justify-between rounded-2xl border p-7 transition-colors duration-300 ${isPrimary ? "border-primary/35 bg-primary/12 hover:border-primary/45" : "border-border/50 bg-[rgba(255,252,246,0.9)] hover:border-[#7a8c6e]/25"}`}
+            className={`group flex flex-col justify-between rounded-2xl border p-7 transition-colors duration-300 lg:min-w-0 lg:flex-none ${desktopCardWidthClass} ${isPrimary ? "border-primary/35 bg-primary/12 hover:border-primary/45" : "border-border/50 bg-[rgba(255,252,246,0.9)] hover:border-[#7a8c6e]/25"}`}
+            data-onboarding-step={step.id}
           >
             <div>
               <div className="mb-6 flex items-start justify-between">
