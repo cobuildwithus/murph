@@ -607,8 +607,9 @@ describe('assistant Codex turn planning', () => {
       expect(plan.systemPrompt).not.toContain('PRIVATE_CONTEXT_SNAPSHOT')
       expect(plan.systemPrompt).not.toContain('PRIVATE_HOSTED_CONTEXT')
       expect(plan.systemPrompt).toContain(
-        'Set `durationSeconds` to 5–15',
+        'Set `durationSeconds` to exactly 15',
       )
+      expect(plan.systemPrompt).not.toContain('durationSeconds` to 5–15')
       expect(plan.systemPrompt).toContain('at most four short lyric lines')
       expect(plan.systemPrompt).toContain(
         'Never infer the contributor or payer identity',
@@ -2533,6 +2534,11 @@ describe('assistant Codex turn planning', () => {
       'use `murph.send_progress_update` much more sparingly than in a direct conversation',
     )
     expect(attendedPlan.systemPrompt).toContain(
+      '`murph.select_reply_target` annotates the one eventual group response',
+    )
+    expect(attendedPlan.systemPrompt).toContain('run shell `sleep 4`')
+    expect(attendedPlan.systemPrompt).toContain('one final `sleep 6`')
+    expect(attendedPlan.systemPrompt).not.toContain(
       'including every `---` bubble',
     )
 

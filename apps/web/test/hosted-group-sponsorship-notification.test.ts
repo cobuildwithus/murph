@@ -145,6 +145,22 @@ describe("group sponsorship notification", () => {
       "calling murph.generate_song exactly once",
     );
     expect(envelope.notification.instructions).toContain(
+      "current group conversation",
+    );
+    expect(envelope.notification.instructions).toContain(
+      "a surprising hook that could only belong to this group",
+    );
+    expect(envelope.notification.instructions).toContain(
+      "prefer it as the creative seed and blend it with the current conversation",
+    );
+    expect(envelope.notification.instructions).toContain(
+      "without inventing personal facts or referring to sensitive history",
+    );
+    expect(envelope.notification.instructions).toContain(
+      "fill the song naturally instead of treating it as a short sting",
+    );
+    expect(envelope.notification.instructions).not.toContain("5–15 seconds");
+    expect(envelope.notification.instructions).toContain(
       "gentle, respectful, and non-comedic",
     );
     expect(JSON.stringify(envelope)).not.toContain("purchase_private_123");

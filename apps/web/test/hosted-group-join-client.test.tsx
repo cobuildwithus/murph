@@ -8,6 +8,7 @@ import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
   authDialogProps: null as {
+    autoSendPastedPhoneNumber?: boolean;
     description: string;
     inviteCode?: string | null;
     methods?: readonly ("phone" | "telegram" | "email")[];
@@ -34,6 +35,7 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
   AuthDialog(props: {
+    autoSendPastedPhoneNumber?: boolean;
     description: string;
     inviteCode?: string | null;
     methods?: readonly ("phone" | "telegram" | "email")[];
@@ -396,6 +398,7 @@ test("automatically opens the intent-first auth prompt on a valid group join pag
   expect(container.textContent).toContain("Continue to join");
   expect(mocks.authDialogProps?.inviteCode).toBe("invite_opaque");
   expect(mocks.authDialogProps?.methods).toEqual(["phone"]);
+  expect(mocks.authDialogProps?.autoSendPastedPhoneNumber).toBeUndefined();
   expect(container.querySelector(
     '[data-auth-title="Continue to join this Murph group"]',
   )).toBeTruthy();

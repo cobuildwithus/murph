@@ -1757,6 +1757,35 @@ describe('assistant skill assets', () => {
     expect(referenceText).not.toContain('exercise-image skill')
   })
 
+  it('keeps pain-driven restrictions evidence-gated and durable-rehab answers durable', async () => {
+    const physicalTherapy = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'physical-therapy',
+    )
+    expect(physicalTherapy).toBeTruthy()
+    if (!physicalTherapy) {
+      return
+    }
+
+    expect(physicalTherapy.triggerHint).toContain(
+      'Read before recommending exercises, rest, activity restriction, or load changes',
+    )
+
+    const raw = await readSkillFile(physicalTherapy)
+
+    expect(raw).toContain(
+      "Do not anchor on the user's label or let it choose an acute-injury branch.",
+    )
+    expect(raw).toContain(
+      'do not answer mainly with short-term flare management or a bare referral',
+    )
+    expect(raw).toContain(
+      'Rest, activity restriction, and fixed recovery windows are interventions, not neutral defaults while clarifying.',
+    )
+    expect(raw).toContain(
+      'ask that question before restricting activity; preserve tolerated movement in the meantime.',
+    )
+  })
+
   it('keeps exercise lookup and presentation in one shared domain reference', async () => {
     const skillBySlug = new Map(
       ASSISTANT_SKILLS.map((skill) => [skill.slug, skill] as const),
