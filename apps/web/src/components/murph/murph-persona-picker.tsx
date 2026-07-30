@@ -501,7 +501,7 @@ export function MurphPersonaPicker({
               ? "min(44rem, calc(100dvh - 2rem))"
               : undefined,
           maxWidth: "calc(100vw - 2rem)",
-          width: "52rem",
+          width: step === "tone" ? "42rem" : "52rem",
         }}
         className="flex min-w-0 max-h-[calc(100dvh-2rem)] flex-col gap-5 overflow-hidden p-6"
       >

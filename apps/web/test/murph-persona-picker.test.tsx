@@ -381,6 +381,10 @@ test("MurphPersonaPicker constrains its desktop dialog and left-aligns the subti
     assert.match(step.className, /min-w-0/u);
     assert.match(step.className, /overflow-x-hidden/u);
     assert.match(description.className, /text-left/u);
+    await clickControlContaining(rendered, "Continue");
+    await clickControlContaining(rendered, "Continue");
+    await clickControlContaining(rendered, "Continue");
+    assert.equal(dialog.style.width, "42rem");
   } finally {
     await rendered.cleanup();
   }
