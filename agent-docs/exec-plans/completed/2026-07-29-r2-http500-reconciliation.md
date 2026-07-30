@@ -49,3 +49,6 @@ destination writes.
 This code change is backward compatible and does not itself deploy anything.
 After merge, the rehearsal uses a new isolated ENAM destination bucket. A
 production cutover remains a separate, explicitly authorized operation.
+Status: completed
+Updated: 2026-07-30
+Completed: 2026-07-30
