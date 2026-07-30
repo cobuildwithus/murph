@@ -6,7 +6,6 @@ import {
   Prisma,
   type HostedMember,
   type HostedMemberIdentity,
-  type PrismaClient,
 } from "@prisma/client";
 import {
   findHostedDomainRootWrap,
@@ -1008,59 +1007,186 @@ test("domain root unwraps are memoized inside the scoped cache and wiped at scop
   assert.ok(outside.readCount() > outsideFirst);
 });
 
-test("Stripe activation preflight performs KMS unwraps before the member transaction cache is reused", async () => {
+test("Stripe activation preflight keeps activation proof false and reuses KMS roots for private projection", async () => {
   const { decryptMetrics, tx } =
     await createHostedWebCryptoTransactionFixture();
   const {
+    hasActiveHostedCryptoDomainRootsForUserTx,
     provisionActiveHostedDomainRootEnvelopeForUserOnly,
-    unwrapHostedDomainRootForWeb,
   } = await import("../src/lib/hosted-crypto/domain-root-store");
   const { runWithHostedDomainRootUnwrapCache } = await import(
     "../src/lib/hosted-crypto/domain-root-unwrap-cache"
+  );
+  const { hasHostedMemberActivationProof } = await import(
+    "../src/lib/hosted-onboarding/member-activation"
+  );
+  const { activateHostedMemberForPositiveSourceTx } = await import(
+    "../src/lib/hosted-onboarding/member-activation"
+  );
+  const mailboxStore = await import(
+    "../src/lib/hosted-mailbox/store"
   );
   const { prepareHostedStripeDirectMemberActivationCrypto } = await import(
     "../src/lib/hosted-onboarding/stripe-billing-events"
   );
   const memberId = "member-test-stripe-activation";
 
-  for (const domain of ["control", "device", "ingress", "runtime"] as const) {
-    await provisionActiveHostedDomainRootEnvelopeForUserOnly({
-      domain,
-      prisma: tx.prisma,
-      reason: "test.stripe-activation",
-      userId: memberId,
-    });
-  }
+  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+    domain: "control",
+    prisma: tx.prisma,
+    reason: "test.stripe-activation",
+    userId: memberId,
+  });
+  const privateColumns = await buildHostedMemberIdentityPrivateColumns({
+    memberId,
+    phoneNumber: null,
+    prisma: tx.prisma,
+    privyUserId: "did:privy:stripe-activation",
+    signupPhoneCodeSendAttemptId: null,
+    signupPhoneCodeSendAttemptStartedAt: null,
+    signupPhoneCodeSentAt: null,
+    signupPhoneNumber: null,
+  });
+  const identity = buildHostedMemberIdentityRecord({
+    memberId,
+    ...privateColumns,
+  });
+  const now = new Date("2026-07-29T12:00:00.000Z");
+  vi.spyOn(
+    mailboxStore,
+    "readHostedMailboxItemByDedupeKey",
+  ).mockResolvedValue(null);
+  vi.spyOn(
+    mailboxStore,
+    "appendHostedMailboxEnvelopeTx",
+  ).mockImplementation(async ({ envelope }) => ({
+    item: {
+      dedupeKey: envelope.eventId,
+      id: `mailbox-${envelope.eventId}`,
+    },
+  }) as never);
 
   const prisma = Object.assign(tx.prisma, {
     $transaction: async <Result>(
       run: (transaction: Prisma.TransactionClient) => Promise<Result>,
     ) => run(tx.prisma),
+    hostedMember: {
+      findUnique: async () => ({
+        billingStatus: HostedBillingStatus.active,
+        createdAt: now,
+        id: memberId,
+        pendingActivationTimeZone: null,
+        suspendedAt: null,
+        updatedAt: now,
+      }),
+    },
+    hostedMemberEmailAuthorization: {
+      findUnique: async () => null,
+    },
+    hostedMemberIdentity: {
+      findUnique: async () => identity,
+    },
+    hostedMailboxItem: {
+      findFirst: async () => null,
+    },
+    hostedMemberRouting: {
+      findUnique: async () => null,
+    },
   });
   resetLocalKmsDecryptMetrics(decryptMetrics);
 
   await runWithHostedDomainRootUnwrapCache(async () => {
-    await expect(
-      prepareHostedStripeDirectMemberActivationCrypto({
-        memberId,
-        prisma: prisma as PrismaClient,
-      }),
-    ).resolves.toEqual(new Map());
+    const prepared = await prepareHostedStripeDirectMemberActivationCrypto({
+      memberId,
+      prisma,
+    });
+    expect([...prepared.keys()].sort()).toEqual(["device", "runtime"]);
     expect(decryptMetrics.calls).toHaveLength(2);
+    await expect(hasActiveHostedCryptoDomainRootsForUserTx({
+      tx: prisma,
+      userId: memberId,
+    })).resolves.toBe(false);
+    await expect(hasHostedMemberActivationProof({
+      memberId,
+      prisma,
+    })).resolves.toBe(false);
 
     const callsBeforeMemberTransaction = decryptMetrics.calls.length;
-    await runWithHostedDomainRootUnwrapCache(async () => {
-      for (const domain of ["control", "ingress"] as const) {
-        const root = await unwrapHostedDomainRootForWeb({
-          domain,
-          prisma: tx.prisma,
-          userId: memberId,
-        });
-        root.rootKey.fill(0);
-      }
+    await expect(activateHostedMemberForPositiveSourceTx({
+      dispatchContext: {
+        eventCreatedAt: now,
+        occurredAt: now.toISOString(),
+        sourceEventId: "checkout.session:stripe-activation",
+        sourceType: "stripe.checkout.session.completed",
+      },
+      memberId,
+      preparedCryptoDomainRoots: prepared,
+      prisma,
+      skipIfBillingAlreadyActive: false,
+      suppressSignupWelcome: true,
+    })).resolves.toMatchObject({
+      activated: true,
+      memberId,
     });
     expect(decryptMetrics.calls).toHaveLength(callsBeforeMemberTransaction);
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenCalledOnce();
+    await expect(hasHostedMemberActivationProof({
+      memberId,
+      prisma,
+    })).resolves.toBe(true);
   });
+});
+
+test("Stripe activation preflight failure cannot create complete-root activation proof", async () => {
+  const { decryptMetrics, tx } =
+    await createHostedWebCryptoTransactionFixture();
+  const {
+    provisionActiveHostedDomainRootEnvelopeForUserOnly,
+  } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const { runWithHostedDomainRootUnwrapCache } = await import(
+    "../src/lib/hosted-crypto/domain-root-unwrap-cache"
+  );
+  const { hasHostedMemberActivationProof } = await import(
+    "../src/lib/hosted-onboarding/member-activation"
+  );
+  const { prepareHostedStripeDirectMemberActivationCrypto } = await import(
+    "../src/lib/hosted-onboarding/stripe-billing-events"
+  );
+  const memberId = "member-test-stripe-activation-failure";
+
+  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+    domain: "control",
+    prisma: tx.prisma,
+    reason: "test.stripe-activation-failure",
+    userId: memberId,
+  });
+  const prisma = Object.assign(tx.prisma, {
+    $transaction: async <Result>(
+      run: (transaction: Prisma.TransactionClient) => Promise<Result>,
+    ) => run(tx.prisma),
+    hostedMailboxItem: {
+      findFirst: async () => null,
+    },
+  });
+  resetLocalKmsDecryptMetrics(decryptMetrics, { failAtCall: 1 });
+
+  await expect(runWithHostedDomainRootUnwrapCache(() =>
+    prepareHostedStripeDirectMemberActivationCrypto({
+      memberId,
+      prisma,
+    })
+  )).rejects.toThrow("Test KMS decrypt failure.");
+
+  expect(
+    tx.persistedEnvelopes
+      .filter((envelope) => envelope.userId === memberId)
+      .map((envelope) => envelope.domain)
+      .sort(),
+  ).toEqual(["control", "ingress"]);
+  await expect(hasHostedMemberActivationProof({
+    memberId,
+    prisma,
+  })).resolves.toBe(false);
 });
 
 test("nested domain root cache scopes reuse the transaction-owned cache", async () => {

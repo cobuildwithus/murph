@@ -159,13 +159,17 @@ Last verified: 2026-07-29
   fields and therefore cannot call KMS. A loser preserves the current identity
   and is canceled after commit; an unexpected policy rejection after acceptance
   aborts the transaction. Before browser or webhook completion takes the member
-  lock, it durably provisions the existing activation domain roots in a separate
-  short transaction and unwraps control and ingress into the request-scoped
-  cache. The locked winner path selects only attempt, lookup-key, freshness, and
-  entitlement scalars, writes the accepted scalar trial facts, and lets
-  activation reuse those cached roots; it does not project a rich billing
-  snapshot or make a KMS request. Stripe event reconciliation likewise prepares
-  its canonical provider snapshot before the lock and revalidates the database
+  lock, it durably provisions only control and ingress through their existing
+  short transactions, unwraps both into the request-scoped cache, and prepares
+  ephemeral device and runtime candidates. Complete root presence is also
+  activation proof for group participant projection, phone-call authority, and
+  activation recovery, so those final candidates become durable only inside the
+  accepted winner transaction. The locked winner path selects only attempt,
+  lookup-key, freshness, and entitlement scalars, writes the accepted scalar
+  trial facts, and lets private-field batch projection reuse the concrete root
+  keys already in the scoped cache; it does not project a rich billing snapshot
+  or make a KMS request. Stripe event reconciliation likewise prepares its
+  canonical provider snapshot before the lock and revalidates the database
   owner inside it. After Stripe creates a session, Checkout creation
   re-locks the owner and returns the URL only after binding that reference; if
   suspension or deletion won, it expires the session instead. Account deletion

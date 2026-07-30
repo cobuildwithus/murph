@@ -6,7 +6,8 @@ import {
 import type Stripe from "stripe";
 
 import {
-  provisionHostedCryptoDomainRootsForUser,
+  prepareHostedCryptoDomainRootCandidates,
+  provisionActiveHostedDomainRootEnvelopeForUserOnly,
   unwrapHostedDomainRootForWeb,
   type PreparedHostedCryptoDomainRootCandidates,
 } from "../hosted-crypto/domain-root-store";
@@ -125,13 +126,16 @@ export type HostedStripeSubscriptionUpdateOutcome = HostedStripeActivationOutcom
 
 export async function prepareHostedStripeDirectMemberActivationCrypto(input: {
   memberId: string;
-  prisma: PrismaClient;
+  prisma: Prisma.TransactionClient & Pick<PrismaClient, "$transaction">;
 }): Promise<PreparedHostedCryptoDomainRootCandidates> {
-  await provisionHostedCryptoDomainRootsForUser({
-    prisma: input.prisma,
-    reason: "hosted-member.activation",
-    userId: input.memberId,
-  });
+  for (const domain of ["control", "ingress"] as const) {
+    await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+      domain,
+      prisma: input.prisma,
+      reason: "hosted-member.activation-preflight",
+      userId: input.memberId,
+    });
+  }
   await Promise.all(
     (["control", "ingress"] as const).map(async (domain) => {
       const root = await unwrapHostedDomainRootForWeb({
@@ -142,7 +146,11 @@ export async function prepareHostedStripeDirectMemberActivationCrypto(input: {
       root.rootKey.fill(0);
     }),
   );
-  return new Map();
+  return prepareHostedCryptoDomainRootCandidates({
+    domains: ["device", "runtime"],
+    prisma: input.prisma,
+    userId: input.memberId,
+  });
 }
 
 export type HostedSubscriptionCancellationEmailCandidate = {
