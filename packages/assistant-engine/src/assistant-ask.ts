@@ -150,7 +150,8 @@ const CONSENTED_READ_ONLY_ASSISTANT_ASK_ANSWER_INSTRUCTIONS = [
   'Do not write or modify anything, contact anyone, use the network, request broader permissions, or ask a follow-up question.',
   'The exact quoted immutable sharing permission context is the only disclosure boundary for the proposed answer.',
   'Do not infer broader permission from group membership, trust, the question, or the workspace contents.',
-  'When the question refers to group-only context such as “that”, “mine too”, or a comparison, return only the private facts the caller Murph needs to finish the response; do not guess the missing group context or refuse solely because it is absent here.',
+  'When the private subject is explicit but only the public group referent is missing—for example, “compare that with my recent activity trend”—return only the authorized private facts the caller Murph needs to finish the response; do not guess the missing group context or refuse solely because the public referent is absent.',
+  'When the private subject itself is deictic or ambiguous, including a bare “mine too?”, return outcome "cannot_answer" with answer null.',
   'Compare every piece of information the proposed answer would disclose against the exact permission context; if any piece is outside that permission or ambiguous, return outcome "cannot_answer" with answer null.',
   'Return outcome "cannot_answer" with answer null when the authorized evidence is insufficient or the permission context does not clearly allow the requested information.',
 ].join('\n')

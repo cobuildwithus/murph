@@ -259,13 +259,28 @@ describe("hosted current-sender Assistant Ask authority", () => {
   });
 
   it("requires one explicit, self-contained privacy confirmation", async () => {
-    expect(isHostedGroupCurrentSenderDisclosureConfirmation(
-      "Yes — ask my private Murph about my recent activity and share your summary here.",
-    )).toBe(true);
-    expect(isHostedGroupCurrentSenderDisclosureConfirmation(
-      "Yes, do not share anything from my private Murph.",
-    )).toBe(false);
+    for (const [confirmation, expected] of [
+      [
+        "Yes — ask my private Murph about my recent activity and share your summary here.",
+        true,
+      ],
+      [
+        "Yes — ask my private Murph why my sleep is not improving and share the answer here.",
+        true,
+      ],
+      ["Yes, private Murph, share.", false],
+      ["Yes, private Murph, share it here.", false],
+      ["Yes, private Murph, share that with everyone.", false],
+      ["Yes, do not share anything from my private Murph.", false],
+    ] as const) {
+      expect(isHostedGroupCurrentSenderDisclosureConfirmation(
+        confirmation,
+      )).toBe(expected);
+    }
 
+    mocks.readHostedMailboxConversationWakeByAssistantInputId.mockResolvedValue(
+      createSourceWake({ text: "Yes, private Murph, share." }),
+    );
     mocks.hostedMemberFindUnique.mockResolvedValueOnce({
       groupPrivateDisclosureIntroAcknowledgedAt: null,
     });
@@ -284,7 +299,7 @@ describe("hosted current-sender Assistant Ask authority", () => {
     mocks.readHostedMailboxConversationWakeByAssistantInputId.mockResolvedValue(
       createSourceWake({
         text:
-          "Yes — ask my private Murph about my recent activity and share your summary here.",
+          "Yes — ask my private Murph why my sleep is not improving and share the answer here.",
       }),
     );
     mocks.hostedMemberFindUnique.mockResolvedValueOnce({
