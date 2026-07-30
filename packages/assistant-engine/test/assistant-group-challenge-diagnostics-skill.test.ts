@@ -386,10 +386,10 @@ describe('assistant group challenge diagnostics guidance', () => {
       'Treat `status="ok"` as an opaque handled result.',
     )
     expect(challenge).toContain(
-      'do not infer, announce, or append a companion message claiming a card is visible.',
+      'This scheduled surface returns `presentation="link"`; include the exact returned `joinUrl` once',
     )
     expect(challenge).toContain(
-      'For `presentation="link"`, include the exact returned `joinUrl` once',
+      'Do not infer, announce, or append a companion message claiming native consent UI is visible.',
     )
     expect(challenge).not.toContain(
       'Say only that a separate permission card is available',
@@ -398,8 +398,8 @@ describe('assistant group challenge diagnostics guidance', () => {
     expect(challenge).toContain(
       'record that the offer action was handled for that exact participant and scope',
     )
-    expect(challenge).toContain(
-      'When native consent is the only user-facing outcome, call',
+    expect(challenge).not.toContain(
+      'When native consent is the only user-facing outcome',
     )
     expect(challenge).not.toContain('If the returned group proves')
     expect(challenge).toContain('active-offer/all-granted dedupe')
