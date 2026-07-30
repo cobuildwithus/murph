@@ -115,6 +115,11 @@ describe('assistant dynamic context prompt blocks', () => {
       conversationScope: 'direct',
       hostedRuntime: true,
     })
+    const groupLayers = buildAssistantSystemPromptLayers({
+      ...baseConversationInput,
+      conversationScope: 'group',
+      hostedRuntime: true,
+    })
     const skillsRoot = resolveAssistantSkillsRoot()
     const [lowUsageSkill, familySkill] = await Promise.all([
       readFile(path.join(skillsRoot, 'hosted-low-usage', 'SKILL.md'), 'utf8'),
@@ -124,6 +129,11 @@ describe('assistant dynamic context prompt blocks', () => {
       layers.stableRouteCapabilityPrompt,
       lowUsageSkill,
       familySkill,
+    ].join('\n')
+    const assembledGroupFundingPrompt = [
+      groupLayers.staticCacheableCorePrompt,
+      groupLayers.stableRouteCapabilityPrompt,
+      lowUsageSkill,
     ].join('\n')
     const genericSettingsRoute = `${MURPH_PRODUCT_ORIGIN}/settings#subscription`
     const personalAddUsageRoute =
@@ -149,6 +159,15 @@ describe('assistant dynamic context prompt blocks', () => {
     expect(lowUsageSkill).not.toContain(genericSettingsRoute)
     expect(familySkill).not.toContain(genericSettingsRoute)
     expect(assembledBillingPrompt.split(genericSettingsRoute)).toHaveLength(2)
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'only after someone asks for or accepts an explanation of the group\'s usage options',
+    )
+    expect(assembledGroupFundingPrompt).not.toContain(
+      'on a trusted low-usage turn or after the group asks',
+    )
+    expect(lowUsageSkill.replace(/\s+/gu, ' ')).toContain(
+      'Never send it in the first assistant-initiated heads-up',
+    )
   })
 
   it('injects runtime dynamic context before the context snapshot on conversation turns', () => {

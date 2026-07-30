@@ -380,16 +380,17 @@ inventing a billing menu:
   private Settings handoff; a sponsored non-owner is told that the Family
   owner must make the change, while Family Edge has no higher current tier; and
 - a hosted group gets a proactive first heads-up: on the first trusted
-  low-usage turn the assistant calls `murph.group action="read_usage"` once and,
-  when available, reads the current sender's referral options once. The segment
-  stays conversational and link-free: it calls the shared capacity "Murph
-  time," says Murph may pause for the room, and asks whether they want the
-  available ways to keep going. It never frames each text as a unit being
-  purchased or spent. A `healthy` read suppresses the heads-up entirely. After
-  someone asks for the options, asks for more Murph time, asks how to keep the
-  room going, or accepts the quick path, the assistant refreshes current state
-  as needed, presents every returned earned and sponsored path, and places the
-  funding URL after the sponsored path instead of leading with it. Playful payer
+  low-usage turn the assistant calls `murph.group action="read_usage"` once.
+  The segment stays conversational, link-free, and route-neutral: it calls the
+  shared capacity "Murph time," says Murph may pause for the room, and asks
+  whether they want Murph to check the options without naming or counting any
+  path. It never frames each text as a unit being purchased or spent. A
+  `healthy` read suppresses the heads-up entirely. After someone asks for the
+  options, asks for more Murph time, asks how to keep the room going, or accepts
+  the quick path, the assistant reads the options for that responding sender,
+  refreshes current usage as needed, presents every returned earned and
+  sponsored path, and places the funding URL after the sponsored path instead
+  of leading with it. Playful payer
   nomination is allowed, but who actually paid, purchase status, and amounts
   stay private, and the assistant never promises a URL the read did not return.
   For a group without an owner-created join code, the funding URL carries a

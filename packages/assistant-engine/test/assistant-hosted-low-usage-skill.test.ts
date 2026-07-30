@@ -103,6 +103,7 @@ describe('assistant hosted low-usage skill', () => {
     expect(firstHeadsUpSection).toContain(
       "we're getting low on Murph time in here",
     )
+    expect(firstHeadsUpSection).toContain('Want me to check the options?')
     expect(firstHeadsUpSection).not.toContain(
       "we're getting low on messages in here",
     )
@@ -157,15 +158,22 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain('call `murph.group action="read_usage"` once before writing the')
     expect(skill).toContain('`murph.group action="read_usage_referral"` once')
     expect(normalizedSkill).toContain(
-      "Also call it on a hosted group's first trusted low-usage turn",
+      'In a hosted group, wait until someone engages with the link-free heads-up',
     )
-    expect(skill).toContain('Mentioning an earned route only offers')
-    expect(skill).toContain('does not arm one')
+    expect(normalizedSkill).toContain(
+      "read the options for that responding sender",
+    )
+    expect(normalizedSkill).toContain(
+      'Keep this first mention link-free and route-neutral',
+    )
+    expect(normalizedSkill).toContain(
+      'do not name or count earned, sponsored, paid, funding, or referral paths',
+    )
     expect(normalizedSkill).toContain(
       'A returned funding URL is authority for a later requested follow-up, not copy for the first heads-up',
     )
     expect(normalizedSkill).toContain(
-      'present all available paths before any link',
+      'present all of them before any link',
     )
     expect(normalizedSkill).toContain(
       'place any funding URL after the sponsored path rather than opening with it',
@@ -186,7 +194,7 @@ describe('assistant hosted low-usage skill', () => {
       'sponsor action in approximate messages',
     )
     expect(skill).toContain("Match the room's energy")
-    expect(skill).toContain('without naming or singling out a nonpayer')
+    expect(normalizedSkill).toContain('without naming or singling out a nonpayer')
     expect(skill).toContain('guilt-trip, call out nonpayers')
     expect(skill).toContain('skip the heads-up entirely')
     expect(skill).toContain('standing no-re-offer rule wins')
