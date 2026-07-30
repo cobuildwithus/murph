@@ -390,6 +390,11 @@ describe("Linq provider health projections", () => {
         ]),
       },
     }));
+    expect(updateMany.mock.calls.every(([query]) =>
+      !Object.hasOwn(query.data, "providerStatus")
+      && !Object.hasOwn(query.data, "providerUpdatedAt")
+      && !Object.hasOwn(query.data, "lastStatusEventId"),
+    )).toBe(true);
   });
 
   it("does not clear an independent provider dimension for an unknown value", async () => {

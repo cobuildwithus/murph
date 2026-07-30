@@ -188,6 +188,9 @@ Design messaging flows to earn genuine replies early, then keep letting current 
   reputation, and a provider warning must not masquerade as a local failure.
   Service and reputation also keep independent provider ordering metadata:
   missing, null, or unrecognized values never clear the other dimension.
+  Current Web code does not advance the legacy generic provider
+  status/timestamp/event triplet; it remains a coherent prior-build
+  compatibility snapshot until the post-drain contract migration consumes it.
 - Keep Linq chat health as a content-free latest-state projection keyed by the
   blinded chat identifier. Webhooks are the fast path; bounded inventory
   reconciliation repairs missed or silence-driven changes without calling Linq
@@ -199,7 +202,9 @@ Design messaging flows to earn genuine replies early, then keep letting current 
 - During rollout, predeploy adds and backfills the independent provider fields
   but leaves legacy delivery health conservatively blocking old Web builds.
   The existing post-drain contract-migration lane reconstructs local delivery
-  health from receipt evidence only after the replacement build is live.
+  health from receipt evidence only after the replacement build is live. That
+  cutover makes the replacement Web revision the rollback floor; recover by
+  redeploying it or a later compatible revision, never a pre-cutover build.
 - Watch delivery receipts on receipt-capable protocols. If iMessage messages show as "sent" but never "delivered," Apple may be silently dropping them. SMS/MMS do not produce delivered/read receipts, so `message.sent` is their highest positive provider signal and must not be presented as handset delivery.
 - If you see delivery failures spike on a line, reduce volume immediately. Do not keep sending; you are making it worse.
 - If a line gets flagged, stop all automated sending on it immediately. Continued sending on a flagged line can escalate from temporary throttle to permanent block.

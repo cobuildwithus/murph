@@ -73,19 +73,6 @@ export async function projectHostedLinqLineProviderStateTx(input: {
           },
         ]
       : [];
-  const overallSameTimestampWhere: Prisma.HostedLinqLineWhereInput[] =
-    lastStatusEventId
-      ? [
-          {
-            providerUpdatedAt,
-            OR: [
-              { lastStatusEventId: null },
-              { lastStatusEventId: { lt: lastStatusEventId } },
-            ],
-          },
-        ]
-      : [];
-
   const serviceUpdated = serviceStatus
     ? await input.prisma.hostedLinqLine.updateMany({
         data: {
@@ -123,17 +110,14 @@ export async function projectHostedLinqLineProviderStateTx(input: {
 
   await input.prisma.hostedLinqLine.updateMany({
     data: {
-      lastStatusEventId,
       providerLastSeenAt: providerObservedAt,
       providerSeenAt: providerObservedAt,
-      providerUpdatedAt,
     },
     where: {
       phoneNumberLookupKey,
       OR: [
-        { providerUpdatedAt: null },
-        { providerUpdatedAt: { lt: providerUpdatedAt } },
-        ...overallSameTimestampWhere,
+        { providerLastSeenAt: null },
+        { providerLastSeenAt: { lt: providerObservedAt } },
       ],
     },
   });

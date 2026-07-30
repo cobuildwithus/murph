@@ -1,7 +1,9 @@
 -- Predeploy must leave this legacy column untouched while the prior Web build
 -- can still interpret provider status through it. After the replacement build
 -- is live and prior functions drain, first retain any final provider status
--- written by an old function during the rollout window.
+-- written by an old function during the rollout window. Current Web code never
+-- advances this legacy status/timestamp/event triplet, so each copied clock
+-- still belongs to the copied status rather than the other provider dimension.
 UPDATE "hosted_linq_line"
 SET
   "provider_service_status" = UPPER("provider_status"),
@@ -36,6 +38,8 @@ WHERE UPPER("provider_status") IN ('HEALTHY', 'AT_RISK', 'CRITICAL')
 
 -- Once legacy writes cannot resume, reconstruct only Murph-observed delivery
 -- health. Independent provider hard blocks remain in their dedicated columns.
+-- Applying this semantic cutover establishes the documented Web rollback floor:
+-- pre-cutover Web revisions must not run against the resulting rows.
 UPDATE "hosted_linq_line"
 SET "health_status" = CASE
   WHEN "consecutive_failures" > 0

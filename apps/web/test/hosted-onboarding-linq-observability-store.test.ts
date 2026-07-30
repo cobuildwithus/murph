@@ -1119,6 +1119,7 @@ describe("hosted Linq observability stores", () => {
     await ingestHostedLinqProviderEventTx({
       event,
       prisma: fixture.prisma as never,
+      receivedAt: new Date("2026-03-26T12:00:01.000Z"),
     });
 
     expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith({
@@ -1141,8 +1142,8 @@ describe("hosted Linq observability stores", () => {
     });
     expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        lastStatusEventId: createHostedLinqProviderEventLookupKey("evt_status_123"),
-        providerUpdatedAt: new Date("2026-03-26T12:00:00.000Z"),
+        providerLastSeenAt: new Date("2026-03-26T12:00:01.000Z"),
+        providerSeenAt: new Date("2026-03-26T12:00:01.000Z"),
       }),
       where: expect.objectContaining({
         phoneNumberLookupKey: expect.any(String),
