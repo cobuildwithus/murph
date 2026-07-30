@@ -2,6 +2,11 @@ import { spawn, type SpawnOptions } from "node:child_process";
 
 import { readHostedAppSessionHmacKey } from "../src/lib/hosted-onboarding/app-session-config";
 
+export const hostedRuntimeLogProductionMigrationCommand = {
+  command: resolvePnpmCommand(),
+  args: ["--dir", "apps/web", "runtime-logs:migrate:deploy"],
+} as const;
+
 export const hostedWebProductionMigrationCommand = {
   command: resolvePnpmCommand(),
   args: ["--dir", "apps/web", "prisma:migrate:deploy"],
@@ -45,6 +50,11 @@ export async function runHostedWebProductionMigrationsIfNeeded(
 
   readHostedAppSessionHmacKey(environment);
 
+  console.log("Applying pending hosted runtime log database migrations.");
+  await runCommand(
+    hostedRuntimeLogProductionMigrationCommand.command,
+    hostedRuntimeLogProductionMigrationCommand.args,
+  );
   console.log("Applying pending hosted web Prisma migrations.");
   await runCommand(
     hostedWebProductionMigrationCommand.command,

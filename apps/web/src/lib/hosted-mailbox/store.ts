@@ -37,7 +37,6 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
-import { recordHostedRuntimeLogTx } from "../hosted-workspace/store";
 import { advanceHostedMailboxLaneConsumedSeq } from "./lane-counter-store";
 import {
   createHostedAssistantInputLookupKey,
@@ -290,7 +289,7 @@ async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
       payloadHash,
       payloadSchema,
     });
-    await recordHostedMailboxDedupeConflictLogTx({
+    recordHostedMailboxDedupeConflictLog({
       dedupeConflict,
       existing,
       kind,
@@ -298,15 +297,6 @@ async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
       payloadBytes,
       payloadHash,
       payloadSchema,
-      tx: input.tx,
-      userId,
-    });
-    await recordHostedMailboxAppendLogTx({
-      outcome: "duplicate",
-      item: existing,
-      payloadStorage: existing.payloadRef ? "ref" : "inline",
-      tx: input.tx,
-      userId,
     });
 
     return {
@@ -432,7 +422,7 @@ async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
       payloadHash,
       payloadSchema,
     });
-    await recordHostedMailboxDedupeConflictLogTx({
+    recordHostedMailboxDedupeConflictLog({
       dedupeConflict,
       existing: concurrentExisting,
       kind,
@@ -440,15 +430,6 @@ async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
       payloadBytes,
       payloadHash,
       payloadSchema,
-      tx: input.tx,
-      userId,
-    });
-    await recordHostedMailboxAppendLogTx({
-      outcome: "duplicate",
-      item: concurrentExisting,
-      payloadStorage: concurrentExisting.payloadRef ? "ref" : "inline",
-      tx: input.tx,
-      userId,
     });
 
     return {
@@ -471,14 +452,6 @@ async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
       },
     });
   }
-
-  await recordHostedMailboxAppendLogTx({
-    outcome: "inserted",
-    item,
-    payloadStorage: payloadStorage.storage,
-    tx: input.tx,
-    userId,
-  });
 
   return {
     duplicate: false,
@@ -2044,37 +2017,7 @@ function normalizeHostedMailboxSourceMessageLookupKeys(
   ))].sort();
 }
 
-async function recordHostedMailboxAppendLogTx(input: {
-  outcome: "duplicate" | "inserted";
-  item: HostedMailboxItemRow;
-  payloadStorage: "inline" | "ref";
-  tx: HostedMailboxMutationTx;
-  userId: string;
-}): Promise<void> {
-  const inserted = input.outcome === "inserted";
-  await recordHostedRuntimeLogTx({
-    component: "mailbox",
-    eventCode: "mailbox.appended",
-    level: "info",
-    mailboxLane: input.item.lane,
-    mailboxSeqEnd: input.item.laneSeq,
-    mailboxSeqStart: input.item.laneSeq,
-    phase: "import",
-    redacted: {
-      bytes: input.item.payloadBytes ?? null,
-      dedupeKeyPresent: true,
-      duplicate: !inserted,
-      inserted,
-      kind: input.item.kind,
-      schema: input.item.payloadSchema,
-      storage: input.payloadStorage,
-    },
-    tx: input.tx,
-    userId: input.userId,
-  });
-}
-
-async function recordHostedMailboxDedupeConflictLogTx(input: {
+function recordHostedMailboxDedupeConflictLog(input: {
   dedupeConflict: boolean;
   existing: HostedMailboxItemRow;
   kind: HostedMailboxKind;
@@ -2082,36 +2025,42 @@ async function recordHostedMailboxDedupeConflictLogTx(input: {
   payloadBytes: number;
   payloadHash: string | null;
   payloadSchema: string;
-  tx: HostedMailboxMutationTx;
-  userId: string;
-}): Promise<void> {
+}): void {
   if (!input.dedupeConflict) {
     return;
   }
 
-  await recordHostedRuntimeLogTx({
+  // The mailbox row is already the durable append authority. Keep only this
+  // rare mismatch in platform logs, with content-free metadata, so optional
+  // diagnostics cannot add work to or abort the canonical transaction.
+  console.warn(
+    "Hosted mailbox dedupe conflict.",
+    summarizeHostedMailboxDedupeConflictForLog(input),
+  );
+}
+
+function summarizeHostedMailboxDedupeConflictForLog(input: {
+  existing: HostedMailboxItemRow;
+  kind: HostedMailboxKind;
+  lane: HostedMailboxLane;
+  payloadBytes: number;
+  payloadHash: string | null;
+  payloadSchema: string;
+}) {
+  return {
     component: "mailbox",
     eventCode: "mailbox.dedupe_conflict",
-    level: "warn",
-    mailboxLane: input.existing.lane,
-    mailboxSeqEnd: input.existing.laneSeq,
-    mailboxSeqStart: input.existing.laneSeq,
-    phase: "import",
-    redacted: {
-      existingBytes: input.existing.payloadBytes ?? null,
-      existingHasHash: input.existing.payloadHash != null,
-      existingKind: input.existing.kind,
-      existingLane: input.existing.lane,
-      existingSchema: input.existing.payloadSchema,
-      requestedBytes: input.payloadBytes,
-      requestedHasHash: input.payloadHash != null,
-      requestedKind: input.kind,
-      requestedLane: input.lane,
-      requestedSchema: input.payloadSchema,
-    },
-    tx: input.tx,
-    userId: input.userId,
-  });
+    existingBytes: input.existing.payloadBytes ?? null,
+    existingHasHash: input.existing.payloadHash != null,
+    existingKind: input.existing.kind,
+    existingLane: input.existing.lane,
+    existingSchema: input.existing.payloadSchema,
+    requestedBytes: input.payloadBytes,
+    requestedHasHash: input.payloadHash != null,
+    requestedKind: input.kind,
+    requestedLane: input.lane,
+    requestedSchema: input.payloadSchema,
+  };
 }
 
 export async function hydrateHostedMailboxItemTx(input: {

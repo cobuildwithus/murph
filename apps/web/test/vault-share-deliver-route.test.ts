@@ -202,11 +202,11 @@ describe("vault-share deliver route", () => {
       new RegExp(`at most ${HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY}`, "u"),
     );
     expect(JSON.stringify(MAXIMUM_WIDTH_WORKOUT_MINUTES)).toHaveLength(24);
-    expect(bodyBytes).toBe(16_090);
+    expect(bodyBytes).toBe(18_375);
     expect(bodyBytes).toBeLessThanOrEqual(
       HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
     );
-    expect(nextBoundBodyBytes).toBe(17_147);
+    expect(nextBoundBodyBytes).toBe(19_583);
     expect(nextBoundBodyBytes).toBeGreaterThan(
       HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
     );

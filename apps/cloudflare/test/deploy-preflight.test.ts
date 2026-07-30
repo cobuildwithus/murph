@@ -37,6 +37,7 @@ function createRequiredWorkerDeployEnv(overrides: Record<string, string | undefi
     HOSTED_CRYPTO_ENV: "production",
     HOSTED_DATABASE_ALERT_ENABLED: "1",
     HOSTED_DATABASE_ALERT_LINQ_CHAT_ID: "chat-test",
+    HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID: "chat-secondary-test",
     HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_ID: "branch-test",
     HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_NAME: "main",
     HOSTED_DATABASE_ALERT_PLANETSCALE_DATABASE_NAME: "database-test",
@@ -194,6 +195,7 @@ describe("deploy preflight helpers", () => {
       createRequiredWorkerDeployEnv({
         HOSTED_DATABASE_ALERT_ENABLED: undefined,
         HOSTED_DATABASE_ALERT_LINQ_CHAT_ID: undefined,
+        HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID: undefined,
         HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_ID: undefined,
         HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_NAME: undefined,
         HOSTED_DATABASE_ALERT_PLANETSCALE_DATABASE_NAME: undefined,
@@ -212,6 +214,7 @@ describe("deploy preflight helpers", () => {
       "HOSTED_DATABASE_ALERT_PLANETSCALE_DATABASE_NAME",
       "HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION",
       "HOSTED_DATABASE_ALERT_LINQ_CHAT_ID",
+      "HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID",
       "HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN",
       "HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID",
       "LINQ_API_TOKEN",
@@ -235,6 +238,15 @@ describe("deploy preflight helpers", () => {
     )).toContain(
       "HOSTED_DATABASE_ALERT_ENABLED must be unset outside production.",
     );
+  });
+
+  it("requires two distinct direct chats for database paging", () => {
+    expect(listHostedDeployEnvironmentInvariantErrors(
+      createRequiredWorkerDeployEnv({
+        HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID: "chat-test",
+      }),
+      { deployWorker: true },
+    )).toContain("Database health alert chat IDs must be distinct.");
   });
 
   it("rejects a weak private-media capability secret", () => {
@@ -609,6 +621,39 @@ describe("deploy preflight helpers", () => {
     ).not.toContain(
       "Junction runtime env must set JUNCTION_API_KEY, JUNCTION_CLIENT_USER_ID_SECRET, JUNCTION_ENV, JUNCTION_REGION together.",
     );
+  });
+
+  it("requires Venice runtime env to be configured all-or-none", () => {
+    const error =
+      "Venice runtime env must set VENICE_API_KEY, HOSTED_VENICE_LUNA_MODEL, HOSTED_VENICE_TERRA_MODEL, HOSTED_VENICE_SOL_MODEL together.";
+
+    expect(
+      listHostedDeployEnvironmentInvariantErrors(
+        createRequiredWorkerDeployEnv({
+          HOSTED_VENICE_TERRA_MODEL: "zai-org-glm-4.7",
+        }),
+        { deployWorker: true },
+      ),
+    ).toContain(error);
+
+    expect(
+      listHostedDeployEnvironmentInvariantErrors(
+        createRequiredWorkerDeployEnv({
+          HOSTED_VENICE_LUNA_MODEL: "qwen3-4b",
+          HOSTED_VENICE_SOL_MODEL: "qwen3-vl-235b-a22b",
+          HOSTED_VENICE_TERRA_MODEL: "zai-org-glm-4.7",
+          VENICE_API_KEY: "venice-key",
+        }),
+        { deployWorker: true },
+      ),
+    ).not.toContain(error);
+
+    expect(
+      listHostedDeployEnvironmentInvariantErrors(
+        createRequiredWorkerDeployEnv(),
+        { deployWorker: true },
+      ),
+    ).not.toContain(error);
   });
 
   it("requires an explicitly priced hosted assistant model for worker deploys", () => {

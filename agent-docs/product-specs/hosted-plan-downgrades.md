@@ -36,6 +36,10 @@ merging with foreign schedules stay out of scope.
 Active personal members can inspect and explicitly choose the assistant target
 that Murph should use on the next hosted turn:
 
+- OpenAI is the default core assistant provider. When the operator-controlled
+  Venice rollout flag is enabled, an active personal member may choose Venice
+  instead. The choice changes core assistant inference only; specialized tools
+  can continue to use their own managed providers.
 - Luna and Terra are available to every active personal member. Terra remains
   the default when no personal model override is stored.
 - Synthetic thread-container runtimes use Sol by default from the existing
@@ -51,21 +55,22 @@ that Murph should use on the next hosted turn:
   receive their derived Sol target but cannot mutate or persist a preference.
 - The common reasoning choices are `low`, `medium`, `high`, and `xhigh`. `low`
   is the default when no reasoning override is stored.
-- Postgres stores nullable non-default model and reasoning intent only for the
-  personal member. It is the only durable owner; the vault, hosted workspace
-  snapshot, and assistant runtime do not keep a second preference. The
-  thread-container Sol target remains derived rather than stored.
+- Postgres stores nullable non-default provider, model, and reasoning intent
+  only for the personal member. It is the only durable owner; the vault, hosted
+  workspace snapshot, and assistant runtime do not keep a second preference.
+  The thread-container Sol target remains derived rather than stored.
 - A scheduled switch to Pulse keeps Sol available until Stripe applies the
   Pulse phase and reconciliation changes the current billing state. After that
   boundary, Terra is effective while the stored Sol intent remains available
   for a later Edge reactivation.
 - The signed workspace read projects either an eligible personal member's
-  non-default model and reasoning effort or the relation-derived thread-container
-  Sol model to the runner at the next hosted invocation boundary. This is also
-  the activation boundary for changes made through Settings. An already-active
-  invocation can retain that snapshot through its bounded 180-second idle
-  window, so Settings states that an idle run can take up to three minutes to
-  close.
+  available provider, non-default model, and reasoning effort or the
+  relation-derived thread-container Sol model to the runner at the next hosted
+  invocation boundary. If Venice is disabled, a stored Venice preference
+  resolves to OpenAI without deleting member intent. This is also the activation
+  boundary for changes made through Settings. An already-active invocation can
+  retain that snapshot through its bounded 180-second idle window, so Settings
+  states that an idle run can take up to three minutes to close.
 - A confirmed `murph.assistant_configuration` update is different: its
   authoritative full web response becomes an ephemeral target for the next
   separately accepted provider turn, including a follow-up serviced by the
@@ -137,6 +142,26 @@ resulting orchestration state.
 
 ### Deployment And Compatibility
 
+Venice activation is an operator-gated addition to the established
+configuration rollout below:
+
+1. Apply the nullable `assistantProviderPreference` Postgres migration.
+2. Deploy Web with `HOSTED_VENICE_ENABLED` unset or disabled. This version can
+   store and parse the preference while continuing to project OpenAI.
+3. Configure the selected GitHub environment with `VENICE_API_KEY` and all
+   three fixed `HOSTED_VENICE_{LUNA,TERRA,SOL}_MODEL` variables, then deploy
+   Cloudflare and the runner with `container_rollout=immediate`. Deploy
+   preflight rejects a partial Venice group.
+4. Verify the exact runner fingerprint and a controlled Venice turn, then
+   enable `HOSTED_VENICE_ENABLED` in Web and redeploy Web to expose the choice.
+
+Rollback hides the choice first by disabling `HOSTED_VENICE_ENABLED` and
+redeploying Web. New invocations then project OpenAI even when a nullable
+Venice preference remains stored. Only after that Web state is serving may the
+Venice Worker secret or model mappings be removed or the Cloudflare bundle be
+rolled back. No backfill, second preference owner, or compatibility queue is
+required.
+
 Deploy this additive path in the following order:
 
 1. Apply the nullable Postgres migration.
@@ -186,15 +211,18 @@ longer projects the saved values returns execution to the platform-configured
 model and reasoning defaults without deleting member intent. This feature has
 no model-specific fallback or rollback path.
 
-Focused contract coverage proves old/no-field compatibility, personal-member
-Luna/Terra/Sol eligibility, the common reasoning values, same-invocation
-next-turn projection and default reset, the relation-derived thread-container
-Sol default, and private-member tone/voice reads and writes. The normal deploy
-keeps its managed-container fingerprint and live Terra smoke. An optional
-post-deploy canary may save one non-default target for an eligible personal
-member through the approved configuration flow, confirm a same-invocation
-follow-up reports it, update style through personalization, and verify usage
-retains both requested-model and served-model attribution.
+Focused contract coverage proves old/no-field compatibility, gated
+OpenAI/Venice resolution, personal-member Luna/Terra/Sol eligibility, the
+common reasoning values, same-invocation next-turn projection and default
+reset, the relation-derived thread-container Sol default, fixed Venice model
+translation at the Worker boundary, and private-member tone/voice reads and
+writes. The normal deploy keeps its managed-container fingerprint and live
+OpenAI Terra smoke. Before the Web flag is enabled, a post-deploy canary must
+exercise one controlled Venice turn through the exact Worker/runner path. A
+later configuration canary may save one non-default target for an eligible
+personal member, confirm a same-invocation follow-up reports it, update style
+through personalization, and verify usage retains both requested-model and
+served-model attribution.
 
 ## Current Scope
 

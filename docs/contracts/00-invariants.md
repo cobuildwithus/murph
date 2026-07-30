@@ -282,16 +282,25 @@ it has been explicitly elevated to a cross-cutting invariant.
   handling progress.
 - Explicit owner or provider causal identifiers take precedence over
   positional, "latest," grouping, watermark, and time-window heuristics. Work
-  with distinct causal anchors must not be merged into one turn.
+  with distinct ordering anchors must not be merged into one turn. A
+  provider-native reply target is per-message semantic context, not an ordering
+  anchor for an authenticated non-direct group room.
 - When one wake exposes a bounded sequence of already-durable, replyable
-  messages that share one conversation and native reply anchor and have
-  exact-successor positive causal identifiers, process that sequence as one
-  assistant turn. An initially empty pre-provider selection may acquire that
-  whole sequence during its required refresh; selection freezes when it first
-  becomes nonempty and always before provider start. A gap, legacy or missing
-  causal identifier, changed anchor or conversation, overflow, or post-freeze
-  arrival starts a later turn; terminal evidence covers every admitted input
-  so restart repair cannot resend the reply.
+  messages with exact-successor positive causal identifiers, process as one
+  assistant turn either one direct conversation with one actor and native reply
+  anchor or one authenticated non-direct provider room with stable route,
+  account, audience, projection-readiness, and reaction boundaries. Preserve
+  every admitted group message's sender, opaque message reference, content,
+  attachments, and native reply context separately. Initial selection freezes
+  before provider start. Exact successors may then join through the existing
+  live-steering path only until the first completed assistant response; initial
+  plus live input is capped at 50 messages, and overflow or later input remains
+  pending for the next ordinary turn. Every completed assistant text or media
+  segment remains part of the turn and is delivered; no audience-specific
+  last-response-wins rule may discard it. A gap, legacy or missing causal
+  identifier, changed direct anchor or actor, or changed room boundary starts a
+  later turn; terminal evidence covers every admitted input so restart repair
+  cannot resend the reply.
 - Accepted-turn membership remains authoritative during restart recovery. If
   terminal evidence proves only an oldest contiguous handled prefix while a
   post-freeze successor is also pending, repair and retire exactly that prefix,
@@ -375,9 +384,9 @@ it has been explicitly elevated to a cross-cutting invariant.
   conversation history, private context, resume mutation, tools, network, or
   delegated work. Provider, webhook, and other external values remain
   untrusted data, and the platform alone owns final delivery.
-  Its restrictive provider launch configuration uses the existing one-shot
-  process path and must not replace the resident ordinary-turn App Server or
-  terminate valid detached background work.
+  Its restrictive configuration belongs to a fresh ephemeral thread on the
+  resident App Server. It must not change provider process launch identity,
+  replace the resident process, or persist a resumable notification thread.
 - Provider shapes come from a pinned canonical SDK or published typed contract.
   A bespoke boundary needs a documented reason and exact-shape tests. On the
   foreground path, an external call may fail or delay a reply only when the

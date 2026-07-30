@@ -2,6 +2,8 @@ import type {
   EventSource,
   ExperimentFrontmatter,
   ExperimentOutcome,
+  ExperimentOutcomeStatistic,
+  ExperimentPrimaryOutcome,
   ExperimentProgressCardData,
   ExperimentRunScheduleIntent,
   ExperimentStatus,
@@ -943,6 +945,13 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
       confounderField?: readonly string[]
       stopCondition?: readonly string[]
       primaryBiomarkerKey?: string
+      primaryOutcomeKey?: string
+      primaryOutcomeKind?: ExperimentPrimaryOutcome["kind"]
+      primaryOutcomeLabel?: string
+      primaryOutcomeSessionField?: string
+      primaryOutcomeSourceMetricKey?: string
+      primaryOutcomeUnit?: string
+      comparisonStatistic?: ExperimentOutcomeStatistic
       secondaryBiomarkerKey?: readonly string[]
       desiredDirection?: "increase" | "decrease" | "stabilize"
       expectedDirection?: readonly string[]

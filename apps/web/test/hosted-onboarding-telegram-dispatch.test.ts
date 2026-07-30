@@ -536,6 +536,8 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       .toHaveBeenCalledExactlyOnceWith({
         occurredAt: new Date("2026-03-26T10:56:40.000Z"),
         ownerMemberId: "member_telegram_owner",
+        targetChannel: "telegram",
+        targetLinqService: null,
         targetContainerMemberId: "member_telegram_group_container",
         tx: prisma,
       });
@@ -570,6 +572,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
               // username keeps the case the room sees; only the separate
               // lookup key is lowercased for identity matching.
               from: "456",
+              senderDisplayName: "Alice",
               senderUsername: "Alice_Example",
               text: "set up our weekly health newsletter",
               threadId: "-100123",

@@ -1,11 +1,16 @@
 "use client";
 
 import {
+  HOSTED_ASSISTANT_DEFAULT_PROVIDER,
   HOSTED_ASSISTANT_LUNA_MODEL,
+  HOSTED_ASSISTANT_OPENAI_PROVIDER,
   HOSTED_ASSISTANT_SOL_MODEL,
   HOSTED_ASSISTANT_TERRA_MODEL,
+  HOSTED_ASSISTANT_VENICE_PROVIDER,
   isHostedAssistantProductModel,
+  isHostedAssistantProvider,
   type HostedAssistantProductModel,
+  type HostedAssistantProvider,
 } from "@murphai/hosted-execution/assistant-model";
 import { useState } from "react";
 
@@ -34,6 +39,7 @@ import { UpgradeToEdgeButton } from "./hosted-plan-upgrade-button";
 
 const ASSISTANT_MODEL_SETTINGS_URL = "/api/settings/assistant-model";
 const SOL_REQUIRES_EDGE_ERROR_CODE = "ASSISTANT_MODEL_SOL_REQUIRES_EDGE";
+const VENICE_UNAVAILABLE_ERROR_CODE = "ASSISTANT_PROVIDER_VENICE_UNAVAILABLE";
 
 const MODEL_OPTIONS = [
   {
@@ -65,10 +71,28 @@ const MODEL_OPTIONS = [
   usage: string;
 }>;
 
+const PROVIDER_OPTIONS = [
+  {
+    description: "Direct managed inference",
+    name: "OpenAI",
+    provider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
+  },
+  {
+    description: "Managed inference through Venice",
+    name: "Venice",
+    provider: HOSTED_ASSISTANT_VENICE_PROVIDER,
+  },
+] as const satisfies ReadonlyArray<{
+  description: string;
+  name: string;
+  provider: HostedAssistantProvider;
+}>;
+
 interface AssistantModelSettingsResponse {
   dormantSolPreference: boolean;
   model: HostedAssistantProductModel;
   ok: true;
+  provider?: HostedAssistantProvider;
   solAvailable: boolean;
   updated: boolean;
 }
@@ -79,77 +103,126 @@ interface HostedAssistantModelSettingsProps {
   expectedCurrentPlanCode?: "launch_group_monthly" | "launch_monthly";
   initialDormantSolPreference: boolean;
   initialModel: HostedAssistantProductModel;
+  initialProvider?: HostedAssistantProvider;
   solAvailable: boolean;
+  veniceAvailable?: boolean;
 }
 
 export function HostedAssistantModelSettings(
   props: HostedAssistantModelSettingsProps,
 ) {
+  const initialProvider = props.initialProvider ?? HOSTED_ASSISTANT_DEFAULT_PROVIDER;
   return (
     <HostedAssistantModelSettingsForm
-      key={`${props.initialModel}:${String(props.initialDormantSolPreference)}:${String(props.solAvailable)}:${String(props.configurationAvailable)}:${String(props.canUpgradeToEdge)}`}
+      key={`${props.initialModel}:${initialProvider}:${String(props.initialDormantSolPreference)}:${String(props.solAvailable)}:${String(props.configurationAvailable)}:${String(props.canUpgradeToEdge)}:${String(props.veniceAvailable === true)}`}
       {...props}
+      initialProvider={initialProvider}
     />
   );
 }
 
 function HostedAssistantModelSettingsForm(
-  props: HostedAssistantModelSettingsProps,
+  props: HostedAssistantModelSettingsProps & {
+    initialProvider: HostedAssistantProvider;
+  },
 ) {
   const [currentModel, setCurrentModel] = useState(props.initialModel);
   const [draftModel, setDraftModel] = useState(props.initialModel);
+  const [currentProvider, setCurrentProvider] = useState(props.initialProvider);
+  const [draftProvider, setDraftProvider] = useState(props.initialProvider);
   const [dormantSolPreference, setDormantSolPreference] = useState(
     props.initialDormantSolPreference,
   );
   const [solAvailable, setSolAvailable] = useState(props.solAvailable);
+  const [veniceAvailable, setVeniceAvailable] = useState(
+    props.veniceAvailable === true,
+  );
   const [isSaving, setIsSaving] = useState(false);
   const [status, setStatus] = useState<{
     message: string;
     tone: "destructive" | "neutral" | "success";
   } | null>(null);
   const controlsDisabled = isSaving || !props.configurationAvailable;
-  const hasChanges = draftModel !== currentModel || dormantSolPreference;
+  const hasChanges =
+    draftModel !== currentModel
+    || draftProvider !== currentProvider
+    || dormantSolPreference;
 
   async function saveModel() {
     setIsSaving(true);
     setStatus(null);
 
     try {
+      const modelChanged = draftModel !== currentModel;
+      const providerChanged = draftProvider !== currentProvider;
+      const replaceDormantSol = dormantSolPreference && !providerChanged;
       const response = await requestHostedOnboardingJson<AssistantModelSettingsResponse>({
         method: "POST",
-        payload: { model: draftModel },
+        payload: {
+          ...(modelChanged || replaceDormantSol
+            ? { model: draftModel }
+            : {}),
+          ...(veniceAvailable && providerChanged
+            ? { provider: draftProvider }
+            : {}),
+        },
         url: ASSISTANT_MODEL_SETTINGS_URL,
       });
 
       if (
         !isHostedAssistantProductModel(response.model)
+        || (
+          veniceAvailable
+            ? !isHostedAssistantProvider(response.provider)
+            : response.provider !== undefined
+              && !isHostedAssistantProvider(response.provider)
+        )
         || typeof response.dormantSolPreference !== "boolean"
         || typeof response.solAvailable !== "boolean"
       ) {
         throw new Error("Assistant model response was invalid.");
       }
 
+      const provider = isHostedAssistantProvider(response.provider)
+        ? response.provider
+        : draftProvider;
       setCurrentModel(response.model);
       setDraftModel(response.model);
+      setCurrentProvider(provider);
+      setDraftProvider(provider);
       setDormantSolPreference(response.dormantSolPreference);
       setSolAvailable(response.solAvailable);
       setStatus({
-        message: `${readModelName(response.model)} is now Murph’s default.`,
+        message: veniceAvailable
+          ? `Saved. New core replies will use ${readProductModelName(response.model)} through ${readProviderName(provider)}. A reply already in progress may finish with your previous choice.`
+          : `Saved. Future core replies will use ${readModelName(response.model)}. An active conversation may take up to three minutes to switch.`,
         tone: "success",
       });
     } catch (error) {
       const solNoLongerAvailable =
         error instanceof HostedOnboardingApiError &&
         error.code === SOL_REQUIRES_EDGE_ERROR_CODE;
+      const veniceNoLongerAvailable =
+        error instanceof HostedOnboardingApiError &&
+        error.code === VENICE_UNAVAILABLE_ERROR_CODE;
       if (solNoLongerAvailable) {
         setDraftModel(currentModel);
         setSolAvailable(false);
       }
+      if (veniceNoLongerAvailable) {
+        setCurrentProvider(HOSTED_ASSISTANT_OPENAI_PROVIDER);
+        setDraftProvider(HOSTED_ASSISTANT_OPENAI_PROVIDER);
+        setVeniceAvailable(false);
+      }
       setStatus({
         message: solNoLongerAvailable
           ? `Your Edge access changed. Murph will keep using ${readModelName(currentModel)}.`
+          : veniceNoLongerAvailable
+            ? "Venice is no longer available. Murph will keep using OpenAI."
           : "We couldn’t save this change. Try again.",
-        tone: solNoLongerAvailable ? "neutral" : "destructive",
+        tone: solNoLongerAvailable || veniceNoLongerAvailable
+          ? "neutral"
+          : "destructive",
       });
     } finally {
       setIsSaving(false);
@@ -169,9 +242,57 @@ function HostedAssistantModelSettingsForm(
         Choose the intelligence behind your personal health assistant.
       </p>
 
+      {veniceAvailable ? (
+        <>
+          <FieldSet
+            className="w-full gap-3"
+            disabled={controlsDisabled}
+          >
+            <FieldLegend className="sr-only">Inference provider</FieldLegend>
+            <FieldDescription className="sr-only">
+              Choose where Murph runs its core assistant inference.
+            </FieldDescription>
+            <RadioGroup
+              className="grid gap-3 md:grid-cols-2"
+              disabled={controlsDisabled}
+              value={draftProvider}
+              onValueChange={(value) => {
+                if (!isHostedAssistantProvider(value)) {
+                  return;
+                }
+                setDraftProvider(value);
+                setStatus(null);
+              }}
+            >
+              {PROVIDER_OPTIONS.map((option) => (
+                <ChoiceCard
+                  badge={readProviderOptionBadge({
+                    current: option.provider === currentProvider,
+                    selected: option.provider === draftProvider,
+                  })}
+                  description={option.description}
+                  disabled={controlsDisabled}
+                  id={`assistant-provider-${option.provider}`}
+                  key={option.provider}
+                  meta="Luna, Terra, and Sol"
+                  title={option.name}
+                  value={option.provider}
+                />
+              ))}
+            </RadioGroup>
+          </FieldSet>
+          <p className="max-w-2xl text-sm text-pretty text-muted-foreground">
+            Provider changes apply to core assistant inference. Specialized tools
+            can continue using their own managed providers.
+          </p>
+        </>
+      ) : null}
+
       {!props.configurationAvailable ? (
         <p className="w-full rounded-xl border border-border bg-muted/30 p-4 text-sm text-pretty text-muted-foreground">
-          Model choices are read-only until personal Murph access is active.
+          {veniceAvailable
+            ? "Provider and model choices are read-only until personal Murph access is active."
+            : "Model choices are read-only until personal Murph access is active."}
         </p>
       ) : null}
 
@@ -268,11 +389,20 @@ function HostedAssistantModelSettingsForm(
         <SettingsStatusLine
           message={status?.message ?? null}
           tone={status?.tone ?? "neutral"}
-          className="sm:whitespace-nowrap"
         />
       </div>
     </form>
   );
+}
+
+function readProviderOptionBadge(input: {
+  current: boolean;
+  selected: boolean;
+}): React.ReactNode {
+  if (input.current) {
+    return <ModelOptionBadge>Current</ModelOptionBadge>;
+  }
+  return input.selected ? <ModelOptionBadge>Selected</ModelOptionBadge> : null;
 }
 
 function readModelOptionBadge(input: {
@@ -312,11 +442,16 @@ function ModelOptionBadge({ children }: { children: React.ReactNode }) {
 }
 
 function readModelName(model: HostedAssistantProductModel): string {
-  if (model === HOSTED_ASSISTANT_LUNA_MODEL) {
-    return "GPT-5.6 Luna";
-  }
+  return `GPT-5.6 ${readProductModelName(model)}`;
+}
 
-  return model === HOSTED_ASSISTANT_SOL_MODEL
-    ? "GPT-5.6 Sol"
-    : "GPT-5.6 Terra";
+function readProductModelName(model: HostedAssistantProductModel): string {
+  if (model === HOSTED_ASSISTANT_LUNA_MODEL) {
+    return "Luna";
+  }
+  return model === HOSTED_ASSISTANT_SOL_MODEL ? "Sol" : "Terra";
+}
+
+function readProviderName(provider: HostedAssistantProvider): string {
+  return provider === HOSTED_ASSISTANT_VENICE_PROVIDER ? "Venice" : "OpenAI";
 }

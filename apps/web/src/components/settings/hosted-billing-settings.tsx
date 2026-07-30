@@ -94,6 +94,7 @@ export function HostedBillingSettings(props: {
   scheduledBillingPlanCode?: unknown;
   showGroupPlan?: boolean;
   pulseTrialBillingContinuationPending?: boolean;
+  usageActivityDetail?: ReactNode;
   usageStatus?: HostedPlanUsageStatus | null;
   usageTopUpActivePurchase?: HostedUsageTopUpActivePurchase | null;
   usageTopUpContactOptions?: readonly MurphContactOption[];
@@ -350,6 +351,7 @@ export function HostedBillingSettings(props: {
         payerMemberId={props.payerMemberId}
         usageTopUpPurchaseReturn={props.usageTopUpPurchaseReturn}
       />
+      {props.usageActivityDetail}
       <div
         className={cn(
           "grid items-stretch gap-3",

@@ -1,4 +1,7 @@
 import { z } from "zod";
+import type {
+  HostedExecutionAcceptedGroupMessageParticipant,
+} from "./contracts.ts";
 
 // Starting a call can perform one bounded control-root unwrap before the
 // provider's own 15-second deadline. The web service owns the complete
@@ -56,6 +59,17 @@ export const hostedPhoneCallBriefSchema = z
 export const hostedPhoneCallStartRequestSchema = z
   .object({
     brief: hostedPhoneCallBriefSchema,
+    groupRequester: z
+      .object({
+        assistantInputId: z.string().regex(/^ain_[0-9a-f]{32}$/u),
+        senderHandle: z.string().trim().min(1).max(512),
+        source: z.enum(["linq", "telegram"]),
+      })
+      .strict()
+      .optional(),
+    // Legacy runner compatibility during the group-requester rollout. The Web
+    // control plane accepts this only as a fallback when groupRequester is
+    // absent, and still reloads every signed mailbox wake before authorizing.
     inboundMailboxItemIds: z
       .array(z.string().trim().min(1).max(200))
       .min(1)
@@ -91,6 +105,8 @@ export const hostedPhoneCallResultSchema = z
 export const HOSTED_PHONE_CALLS_PATH = "/api/internal/phone-calls" as const;
 
 export type HostedPhoneCallBrief = z.infer<typeof hostedPhoneCallBriefSchema>;
+export type HostedPhoneCallGroupRequester =
+  HostedExecutionAcceptedGroupMessageParticipant;
 export type HostedPhoneCallStartRequest = z.infer<
   typeof hostedPhoneCallStartRequestSchema
 >;
