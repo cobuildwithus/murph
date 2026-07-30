@@ -1,6 +1,6 @@
 # Make sponsorship songs specific to the current group conversation
 
-Status: active
+Status: completed
 Created: 2026-07-30
 Updated: 2026-07-30
 
@@ -72,12 +72,20 @@ Updated: 2026-07-30
 
 ## Verification
 
-- Commands to run:
+- Completed checks:
   - `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-group-sponsorship-notification.test.ts`
   - `pnpm --dir apps/web typecheck:prepared`
   - `pnpm --dir apps/web exec eslint src/lib/hosted-groups/group-sponsorship-notification.ts test/hosted-group-sponsorship-notification.test.ts`
-  - focused assistant-engine planning test and package typecheck
+  - `pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts --no-coverage test/assistant-codex-turn-planning.test.ts`
+  - `pnpm --dir packages/assistant-engine typecheck`
   - `pnpm docs:drift`
   - `git diff --check`
-- Expected outcomes: focused prompt assertions pass, app types remain valid,
-  and the final diff contains no formatting or identifier leakage.
+- Results: all completed successfully. The web prompt suite passed 6 tests and
+  the assistant planning suite passed 71 tests. Product-experience review
+  returned `NO FINDINGS`. Preliminary ReviewGPT found one conflicting
+  higher-priority duration range; the system prompt now fixes
+  `durationSeconds` at 15 and the focused planning test guards that contract.
+- Evidence gap: no live provider song was generated or auditioned, so the
+  review proves the authored prompt, tool argument contract, and regression
+  coverage rather than subjective audio quality or observed provider duration.
+Completed: 2026-07-30
