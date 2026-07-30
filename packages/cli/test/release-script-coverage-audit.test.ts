@@ -1497,7 +1497,9 @@ describe('monorepo release flow coverage audit', () => {
       'For prompt-primary changes, apply the prompt lens inside the preliminary specialist ReviewGPT pass',
     )
     expect(agentsGuide).toContain('isolated regression test or explanatory doc')
-    expect(agentsGuide).toContain('later rounds verify only remediation deltas')
+    expect(agentsGuide).toContain(
+      'later rounds verify remediation deltas and directly affected paths',
+    )
     expect(agentWorkflowRouting).toContain('final-ReviewGPT-eligible PR-lane work')
     expect(agentWorkflowRouting).toContain('scope-anomaly signal')
     expect(prReviewGptLoop).toContain('final cross-cutting gate for eligible work')
@@ -1553,7 +1555,7 @@ describe('monorepo release flow coverage audit', () => {
       'pass replaces the four former local `product-experience-review`,',
     )
     expect(completionWorkflow).toContain(
-      'never combine this final gate with local `deep-review`',
+      'do not also run local\n`deep-review`',
     )
     expect(completionWorkflow).not.toContain(
       'Run local `deep-review` too only when the user explicitly asks',
