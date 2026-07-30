@@ -112,7 +112,9 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain(
     "Sponsor more messages: group funding, recovery, and fulfilled receipt",
   );
-  expect(sectionsMarkup).toContain("Overall AI usage, credits, and missions");
+  expect(sectionsMarkup).toContain(
+    "Overall AI usage, purchase reset, Family owner action, credits, and missions",
+  );
   expect(sectionsMarkup).toContain("Biomarker result detail");
   expect(sectionsMarkup).toContain("Biomarker reference context");
   expect(sectionsMarkup).toContain("Boundary result detail");
