@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const codexAppServerMocks = vi.hoisted(() => ({
   executeCodexAppServerTurn: vi.fn(),
+  preinitializeCodexAppServer: vi.fn(),
   readCodexAppServerTurnFailureContext: vi.fn(),
 }))
 const diagnosticsMocks = vi.hoisted(() => ({
@@ -14,6 +15,8 @@ const turnsMocks = vi.hoisted(() => ({
 vi.mock('../src/assistant-codex.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/assistant-codex.ts')>()),
   executeCodexAppServerTurn: codexAppServerMocks.executeCodexAppServerTurn,
+  preinitializeCodexAppServer:
+    codexAppServerMocks.preinitializeCodexAppServer,
   readCodexAppServerTurnFailureContext:
     codexAppServerMocks.readCodexAppServerTurnFailureContext,
 }))
@@ -33,6 +36,9 @@ import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assis
 import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
+import {
+  assistantModelTargetToProviderConfigInput,
+} from '@murphai/operator-config/assistant-backend'
 import {
   createAssistantBinding,
   getAssistantBindingContextLines,
@@ -58,6 +64,7 @@ import {
   executeCodexAssistantTurnFromInput,
   executeCodexAssistantTurnAttempt as executeCodexAssistantTurnAttemptUnchecked,
   executeCodexAssistantTurnAttemptFromInput,
+  prepareHostedCodexAssistantProcess,
   resolveCodexAssistantCapabilities,
   resolveCodexAssistantLabel,
   resolveCodexStaticModels,
@@ -122,6 +129,7 @@ function executeCodexAssistantTurnAttempt(
 
 afterEach(() => {
   codexAppServerMocks.executeCodexAppServerTurn.mockReset()
+  codexAppServerMocks.preinitializeCodexAppServer.mockReset()
   codexAppServerMocks.readCodexAppServerTurnFailureContext.mockReset()
   diagnosticsMocks.recordAssistantDiagnosticEvent.mockReset()
   turnsMocks.appendAssistantTurnReceiptEvent.mockReset()
@@ -185,6 +193,78 @@ function findProviderPromptSizeTraceRawEvent(
 }
 
 describe('Codex assistant registry helpers', () => {
+  it('derives hosted process preparation from the same launch input as a real turn', async () => {
+    const target = {
+      adapter: 'codex-cli',
+      approvalPolicy: 'never',
+      codexCommand: '/runtime/bin/codex',
+      codexHome: '/runtime/codex-home',
+      model: 'gpt-5.6-terra',
+      modelProvider: 'hosted-openai',
+      oss: false,
+      profile: 'hosted',
+      reasoningEffort: 'low',
+      sandbox: 'danger-full-access',
+    } as const
+    const env = {
+      [HOSTED_RUNTIME_PROCESS_ENV_MARKER]: '1',
+      CODEX_HOME: '/runtime/codex-home',
+      HOME: '/runtime/home',
+      PATH: '/usr/bin',
+    }
+    const signal = new AbortController().signal
+    codexAppServerMocks.preinitializeCodexAppServer.mockResolvedValue(null)
+    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValue({
+      finalMessage: 'ok',
+      precedingAgentMessageSegments: [],
+      responseDeliveryContextOrdinal: 0,
+      transcriptMessage: 'ok',
+      jsonEvents: [],
+      providerActionCount: 0,
+      sessionId: 'codex-thread-preinitialized',
+      stderr: '',
+      stdout: '',
+      threadId: 'codex-thread-preinitialized',
+      turnId: 'turn-preinitialized',
+    })
+
+    await prepareHostedCodexAssistantProcess({
+      env,
+      signal,
+      target,
+      workingDirectory: '/runtime/vault',
+    })
+    await executeCodexAssistantTurnAttemptFromInput({
+      providerConfig: assistantModelTargetToProviderConfigInput(target),
+      turn: {
+        dynamicTools: [],
+        env,
+        prompt: 'Answer the current message.',
+        workingDirectory: '/runtime/vault',
+      },
+    })
+
+    const preparationInput =
+      codexAppServerMocks.preinitializeCodexAppServer.mock.calls[0]?.[0]
+    const turnInput =
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]
+    for (const key of [
+      'codexCommand',
+      'codexHome',
+      'configOverrides',
+      'env',
+      'oss',
+      'profile',
+      'workingDirectory',
+    ] as const) {
+      expect(preparationInput?.[key]).toEqual(turnInput?.[key])
+    }
+    expect(preparationInput?.signal).toBe(signal)
+    expect(preparationInput).not.toHaveProperty('prompt')
+    expect(preparationInput).not.toHaveProperty('resumeSessionId')
+    expect(preparationInput).not.toHaveProperty('dynamicTools')
+  })
+
   it('finish_without_reply description does not claim to withdraw completed replies', () => {
     const finishWithoutReply = MURPH_DYNAMIC_TOOLS.find(
       (tool) => tool.name === 'finish_without_reply',

@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-07-29
+Last verified: 2026-07-30
 
 ## Non-Negotiable Rules
 
@@ -584,7 +584,12 @@ Last verified: 2026-07-29
   from the declared production origin. These checks must run before render,
   secret sync, lifecycle mutation, or deploy. Production credentials remain
   accessible only through the production environment.
-- The Render Temporal worker deploy hook must stay in the protected GitHub production environment as the `RENDER_TEMPORAL_WORKER_DEPLOY_HOOK` secret, never at repository scope or in repo files/logs. The post-CI deploy job must attach that environment and may call the hook only for the current `main` commit after required push CI workflows pass; it must append the exact commit `ref` instead of relying on ambient latest-branch state.
+- The Render Temporal worker deploy hook belongs only in the private
+  `cobuildwithus/murph-cloud` protected GitHub production environment as the
+  `RENDER_TEMPORAL_WORKER_DEPLOY_HOOK` secret, never at repository scope, in
+  this public repository, or in repo files/logs. The private post-CI deploy job
+  must attach that environment and may call the hook only for the exact current
+  protected `main` commit after required push CI passes.
 - Resend-backed hosted signup welcome email must keep `RESEND_API_KEY` and sender identity in environment variables only, send a plain-text-only body, claim the durable per-member welcome-attempt marker before the provider call, keep the stable per-member Resend idempotency key as provider replay defense only, and log only sanitized provider metadata such as status/code. The optional internal signup notification must also keep recipients in environment variables only, use a plain-text-only body, claim its own durable per-member attempt marker before the provider call, keep a separate stable per-member Resend idempotency key as provider replay defense only, and log only sanitized provider metadata. Resend-backed subscription cancellation feedback email must use the same env-only API key/sender configuration, send plain text only, rely on the existing Stripe event receipt for retry ownership until completion, store a receipt-local sent marker only after provider success so later receipt retries do not resend, use a subscription-scoped Resend idempotency key as provider replay defense, and log only sanitized provider metadata. A Stripe-collected checkout email may be stored only as an encrypted unverified email hint plus transactional welcome and cancellation-feedback recipient; do not use it for hosted account lookup, direct-public sender authorization, direct-public start instructions, or email-linked channel state until Privy verifies it. Later successful Stripe payments must not re-run activation welcome side effects.
 - Assistant runtime state is high-sensitivity local runtime data: directories under `vault/.runtime/operations/assistant/**` must be `0700`, files under that tree must be `0600`, secret-bearing provider headers must never remain inline in persisted session JSON, and operator-facing repair flows should use `assistant doctor --repair` to tighten assistant runtime permissions in place. Inline secret findings indicate stale local session data that should be rebuilt or repaired manually rather than a supported migration lane.
 - Vault-file refs remain normalized and non-hidden except for one flat assistant-owned shape: `.runtime/operations/assistant/generated-deliveries/<filename>`. Initial preparation may accept that exact ref only after the reader-compatible runner has converged, and both initial and retry paths must adopt/revalidate its regular bounded file before revalidating filename, media type, byte size, and SHA-256. Adoption tightens assistant-runtime parents to `0700` and the exact file to `0600`; ordinary vault refs are not chmodded. Prefix siblings, nested paths, hidden filenames, control characters, snapshot-excluded temp/lock names, symlinks, special files, and every other hidden ref fail closed. Never infer ownership or deletion authority from `exports/assistant-deliveries/**` or another generic vault path.
@@ -595,6 +600,35 @@ Last verified: 2026-07-29
 - Persisted runtime logs, CI logs, uploaded artifacts, and user/provider-facing output must never print raw PHI, health data, vault contents, model prompts, model messages, transcripts, request/response bodies, final provider requests, file text, lab reports, or similarly sensitive payloads. Local one-off diagnostics may inspect concrete payload shape or values when needed to prove root cause, but must stay out of commits, uploaded artifacts, and external surfaces, and must never expose secrets or raw credentials. The static `pnpm logs:guard` check blocks direct logging of variables named `prompt`, `messages`, `input`, `output`, `response`, `body`, `transcript`, `vault`, `finalRequest`, `fileText`, and `labReport` unless the value is passed through an explicit redaction, sanitization, or summarization helper, or reduced to counts/status for persisted or uploaded logs.
 - Device-sync account metadata is internal diagnostic state only. Hosted and local storage writes must sanitize it down to a compact shallow scalar record instead of persisting provider profile payloads, nested JSON blobs, or oversized string fields.
 - The resident Codex App Server is a privileged local adapter, not a sandbox boundary. Normal assistant turns should rely on the bound Murph runtime/tool surface and canonical write ownership in `packages/core`, not a second provider-workspace or canonical-write-guard safety model. The narrow exception is `executeReadOnlyAssistantAsk`: model-invoked commands in that one-shot child are confined by the native `murph-group-read` permission profile. The child reuses the trusted hosted Codex home for minimum auth/config lifecycle, but its thread request passes the named `permissions` override and never a legacy `sandbox` field; the pinned App Server must attest the effective profile, exact runtime roots, empty working directory, empty instruction sources, and approval policy in its thread-start response, and any mismatch fails closed. The profile grants read only to Codex's minimal runtime and exact group workspace roots, denies `.runtime/**`, `.codex/**`, retired vault-share projection roots, and environment files, disables tool network plus project config/instruction discovery, uses approval policy `never`, and gives shell commands an inherit-none environment with no provider credential or hosted secret. The supervising App Server may receive minimum provider auth, but the child's only dynamic tool is the consent-aware lazy `murph.group/read_shared` read. It receives no mutation or delivery tool, route grant, signing material, MCP, web search, memory, plugin, app, or multi-agent authority. A production-like Linux sandbox smoke must prove the effective profile or the feature remains disabled.
+- Hosted process-only App Server initialization may begin only after workspace
+  restore, final managed Codex config/auth preparation, and staging of the first
+  fresh auto-reply-enabled pre-pass Linq or Telegram input candidate. Email,
+  self-authored Linq, bootstrap, system, maintenance, replay, and active-turn
+  imports cannot admit it. It uses the final ordinary-process launch identity
+  but issues no thread start or resume, turn start, provider request, account
+  operation, dynamic-tool assembly, compaction, or child launch.
+  Initialization is not accepted-input, provider-egress, canonical-write, or
+  delivery authority; those remain bound to the later admitted foreground turn
+  and active runtime write fence.
+- Speculative preparation must not replace a healthy claimable resident with
+  another launch identity; only authoritative foreground acquisition may do that.
+  Cancellation, auth/config mutation, and checkpoint cancellation of
+  still-pending unreserved initialization must stop the exact owned process and
+  reject its pending RPCs before the boundary proceeds. The runtime closes and
+  joins asynchronous preparation admission before snapshot construction or
+  invocation release.
+  Invocation release uses the exact-process handle returned by preparation, so
+  a stale invocation cannot cancel a later replacement. The existing
+  engine-owned slot-transition lock spans exact teardown through replacement
+  publication and the checkpoint decision. The same owner marks the full
+  workspace-boundary call active, so resident preparation declines and warm
+  foreground or account acquisition begun while it is active fails busy rather
+  than publishing behind that boundary. A caller that already obtained a
+  slot-transition ticket retains FIFO priority, so the boundary observes that
+  process or fails busy rather than overtaking it. Initialization readiness and
+  background-work waiting remain outside the lock. No launch key, container
+  identity, late initialization response, or merely resident process may
+  substitute for current turn or signed provider authority.
 - Model-backed detached system-mailbox notifications without a valid scheduled occurrence must remain isolated output-only provider work. They receive no conversation history, private context, native resume, dynamic or hosted tool context, shell, browser, apps, plugins, web search, provider fetch, public fetch, artifact materializer, image-generation launcher, progress delivery, or delegated-agent surface. Treat embedded provider, callee, webhook, and Family text only as untrusted data; only the final delivery adapter may send the formatted result. Run them as fresh ephemeral threads whose restrictive thread config leaves the resident App Server launch identity unchanged and cannot persist a resumable notification thread.
 - `assistant.ask.requested` and `assistant.ask.completed` may carry bounded question and answer content only in the existing encrypted mailbox and transient process state. Web derives the target runtime, exact membership generation, origin, expiry, and private return route from the signed caller; the model cannot supply them. Only the trusted target adapter may pass an authorized workspace root and committed conversation evidence to `executeReadOnlyAssistantAsk`. Web rechecks membership before target context is read and before completion is appended, and the private runtime treats the answer as untrusted data. Leaving, rejoining, expiry, an unsafe route, or a stale runtime fence suppresses completion rather than widening access. Failed Ask diagnostics may expose only a validated opaque request id, an allowlisted Prisma `P####` code when present, and HTTP status; they must never expose raw exceptions, response bodies, mailbox content, questions, answers, membership ids, runtime ids, or return routes. Diagnostic values are correlation metadata only and are never caller-supplied authority.
 - Except for that explicitly confined Assistant Ask child, Codex running inside the local Murph runtime or hosted execution container is assumed to have full access to that local/container filesystem. Passing repo-relative, vault-relative, or container-local paths to Codex so it can inspect or modify files is not a privacy leak by itself. Those paths still must not escape into user-facing messaging copy, public API responses, persisted logs/diagnostics, fixtures, generated docs, screenshots, provider requests, external review bundles, or other third-party outputs unless the surface has an explicit safe path policy.
