@@ -46,9 +46,9 @@ const DESIGN_GROUP_SPONSORSHIP_OFFERS = [
 ] as const;
 
 const DESIGN_GROUP_MONTHLY_CAPS = [
-  { amountLabel: "$5", monthlyCapMinor: 500, runningBitDurationLabel: null },
-  { amountLabel: "$10", monthlyCapMinor: 1_000, runningBitDurationLabel: "1 day" },
-  { amountLabel: "$20", monthlyCapMinor: 2_000, runningBitDurationLabel: "3 days" },
+  { amountLabel: "$5", monthlyCapMinor: 500 },
+  { amountLabel: "$10", monthlyCapMinor: 1_000 },
+  { amountLabel: "$20", monthlyCapMinor: 2_000 },
 ] as const;
 
 const DESIGN_TOP_UP_CONTACT_OPTIONS: MurphContactOption[] = [

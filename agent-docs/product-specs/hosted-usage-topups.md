@@ -203,12 +203,15 @@ Verified Stripe reconciliation remains the only activation authority. After a
 fulfilled group purchase, Web idempotently:
 
 1. activates a requested bit for 24 hours on a `$10` one-time contribution or
-   monthly maximum, or 72 hours on a `$20` one-time contribution or monthly
-   maximum;
+   72 hours on a `$20` one-time contribution;
 2. resolves the exact current non-direct group destination, with no personal
    fallback; and
 3. appends one purchase-deduplicated creative notification to the existing
    mailbox.
+
+A monthly activation is the actual `$5` purchase socially acknowledged in the
+room. Its private monthly maximum never changes the public acknowledgment or
+creates a running bit.
 
 The creative turn is isolated, projects only `generate_song`, applies the
 output-only native-capability deny set, and runs as a fresh ephemeral thread on

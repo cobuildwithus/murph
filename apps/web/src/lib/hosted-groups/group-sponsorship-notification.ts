@@ -36,9 +36,7 @@ import {
   buildHostedGroupUsageFundingUrl,
 } from "./group-usage-funding";
 import {
-  getHostedGroupSponsorshipExperienceOfferCode,
   isHostedGroupSponsorshipNearCapNotificationCurrentTx,
-  parseHostedGroupSponsorshipMonthlyCapMinor,
   readHostedGroupSponsorshipAuthorizationByPurchase,
 } from "./group-sponsorship-authorization";
 import {
@@ -97,9 +95,6 @@ export async function materializeHostedGroupSponsorshipIfApplicable(input: {
     run: async (tx) => {
       const current = await tx.hostedUsageCreditPurchase.findUnique({
         include: {
-          groupSponsorshipAuthorization: {
-            select: { monthlyCapMinor: true },
-          },
           groupSponsorshipMoment: {
             select: { creatorMemberId: true },
           },
@@ -148,33 +143,16 @@ export async function materializeHostedGroupSponsorshipIfApplicable(input: {
             current.groupSponsorshipMoment.creatorMemberId,
           prisma: tx,
         });
-      const sponsorshipMonthlyCapMinor =
-        parseHostedGroupSponsorshipMonthlyCapMinor(
-          current.groupSponsorshipAuthorization?.monthlyCapMinor,
-        );
-      if (
-        current.groupSponsorshipAuthorization &&
-        sponsorshipMonthlyCapMinor === null
-      ) {
-        throw new TypeError(
-          "Group sponsorship authorization has an invalid monthly maximum.",
-        );
-      }
-      const experienceOfferCode = sponsorshipMonthlyCapMinor === null
-        ? current.offerCode
-        : getHostedGroupSponsorshipExperienceOfferCode(
-            sponsorshipMonthlyCapMinor,
-          );
       await activateHostedGroupSponsorshipMomentTx({
         activatedAt: current.paidAt,
         customContentAuthorized,
-        offerCode: experienceOfferCode,
+        offerCode: current.offerCode,
         purchaseId: current.id,
         tx,
       });
       const moment = await readHostedGroupSponsorshipMomentForNotification({
         customContentAuthorized,
-        offerCode: experienceOfferCode,
+        offerCode: current.offerCode,
         prisma: tx,
         purchaseId: current.id,
       });

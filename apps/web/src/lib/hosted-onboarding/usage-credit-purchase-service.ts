@@ -89,7 +89,6 @@ import {
 } from "../hosted-groups/group-usage-funding";
 import {
   createHostedGroupSponsorshipAuthorizationTx,
-  getHostedGroupSponsorshipExperienceOfferCode,
   parseHostedGroupSponsorshipMonthlyCapMinor,
   prepareHostedGroupSponsorshipRecoveryTx,
   type HostedGroupSponsorshipMonthlyCapMinor,
@@ -884,27 +883,13 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
           participantMemberId: target.payerMemberId,
           prisma: tx,
         });
-      const sponsorshipExperienceOfferCode = sponsorshipAuthorization
-        ? parseHostedGroupSponsorshipMonthlyCapMinor(
-            input.groupSponsorshipMonthlyCapMinor,
-          )
-        : null;
-      if (sponsorshipAuthorization && sponsorshipExperienceOfferCode === null) {
-        throw buildHostedUsageCreditInvariantError(
-          "group_sponsorship_cap_missing_after_authorization",
-        );
-      }
       await createHostedGroupSponsorshipMomentTx({
         authorizedDraft: customContentAuthorized
           ? input.groupSponsorship ?? null
           : null,
         beneficiaryMemberId: target.beneficiaryMemberId,
         creatorMemberId: target.payerMemberId,
-        offerCode: sponsorshipExperienceOfferCode === null
-          ? offer.code
-          : getHostedGroupSponsorshipExperienceOfferCode(
-              sponsorshipExperienceOfferCode,
-            ),
+        offerCode: offer.code,
         purchaseId,
         tx,
       });

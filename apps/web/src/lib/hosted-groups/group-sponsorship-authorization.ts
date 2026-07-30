@@ -1337,19 +1337,6 @@ export async function isHostedGroupSponsorshipNearCapNotificationCurrentTx(
   })) === authorization.monthlyCapMinor - 500;
 }
 
-export function getHostedGroupSponsorshipExperienceOfferCode(
-  monthlyCapMinor: HostedGroupSponsorshipMonthlyCapMinor,
-): "usage_5_usd" | "usage_10_usd" | "usage_20_usd" {
-  switch (monthlyCapMinor) {
-    case 500:
-      return "usage_5_usd";
-    case 1_000:
-      return "usage_10_usd";
-    case 2_000:
-      return "usage_20_usd";
-  }
-}
-
 export function addHostedGroupSponsorshipCalendarMonth(input: {
   anchorDay: number;
   anchorEndOfMonth: boolean;

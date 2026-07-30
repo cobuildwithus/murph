@@ -30,6 +30,9 @@ describe("hosted usage-credit durable product contract", () => {
     expect(normalizedProductSpec).toContain(
       "unused credit",
     );
+    expect(normalizedProductSpec).toMatch(
+      /private monthly maximum never changes the public acknowledgment or creates a running bit/iu,
+    );
   });
 
   it("rejects obsolete message-pack and reply-path refill promises", () => {

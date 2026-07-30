@@ -52,7 +52,6 @@ type GroupSponsorshipOffer = HostedUsageTopUpOffer & {
 type GroupSponsorshipMonthlyCapOption = {
   amountLabel: string;
   monthlyCapMinor: 500 | 1_000 | 2_000;
-  runningBitDurationLabel: string | null;
 };
 
 function GroupSponsorshipDialog({
@@ -116,11 +115,9 @@ function GroupSponsorshipDialog({
                 publicAlias,
                 sponsorMessage,
                 ...(readRunningBitDurationLabel({
-                  monthlyCapOptions,
                   mode,
                   offerCode,
                   offers,
-                  selectedMonthlyCapMinor,
                 })
                   ? { runningBitRequest }
                   : {}),
@@ -135,11 +132,9 @@ function GroupSponsorshipDialog({
       }
       renderSelectionDetails={({ disabled, selectedOffer }) => {
         const runningBitDurationLabel = readRunningBitDurationLabel({
-          monthlyCapOptions,
           mode,
           offerCode: selectedOffer?.offerCode ?? null,
           offers,
-          selectedMonthlyCapMinor,
         });
         return (
           <div className="space-y-4">
@@ -257,16 +252,12 @@ function GroupSponsorshipDialog({
 }
 
 function readRunningBitDurationLabel(input: {
-  monthlyCapOptions: readonly GroupSponsorshipMonthlyCapOption[];
   mode: "monthly" | "one_time";
   offerCode: string | null;
   offers: readonly GroupSponsorshipOffer[];
-  selectedMonthlyCapMinor: number;
 }): string | null {
   if (input.mode === "monthly") {
-    return input.monthlyCapOptions.find(
-      (option) => option.monthlyCapMinor === input.selectedMonthlyCapMinor,
-    )?.runningBitDurationLabel ?? null;
+    return null;
   }
   return input.offers.find(
     (offer) => offer.offerCode === input.offerCode,

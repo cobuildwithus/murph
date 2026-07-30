@@ -286,20 +286,10 @@ export default async function GroupFundingPage({
 }
 
 function projectHostedMonthlyCapOptions(): GroupSponsorshipMonthlyCapOption[] {
-  return ([500, 1_000, 2_000] as const).map((monthlyCapMinor) => {
-    const offerCode = monthlyCapMinor === 500
-      ? "usage_5_usd"
-      : monthlyCapMinor === 1_000
-        ? "usage_10_usd"
-        : "usage_20_usd";
-    return {
-      amountLabel: formatUsageTopUpAmount(monthlyCapMinor),
-      monthlyCapMinor,
-      runningBitDurationLabel:
-        getHostedGroupSponsorshipExperiencePolicy(offerCode)
-          .runningBitDurationLabel,
-    };
-  });
+  return ([500, 1_000, 2_000] as const).map((monthlyCapMinor) => ({
+    amountLabel: formatUsageTopUpAmount(monthlyCapMinor),
+    monthlyCapMinor,
+  }));
 }
 
 function GroupFundingUnavailable() {

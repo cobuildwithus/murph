@@ -605,6 +605,79 @@ test("freezes optional sponsorship copy with the selected group offer", async ()
   }
 });
 
+test("keeps the private monthly maximum out of the public sponsorship moment", async () => {
+  const checkout = deferred<unknown>();
+  mocks.requestHostedOnboardingJson.mockReturnValueOnce(checkout.promise);
+  const { GroupSponsorshipDialog } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(GroupSponsorshipDialog, {
+      checkoutUrl:
+        "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
+      customizationAllowed: true,
+      initialOpen: true,
+      mode: "monthly",
+      monthlyCapOptions: groupSponsorshipMonthlyCaps(),
+      offers: [groupSponsorshipOffers()[0]],
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    await clickRadio(rendered.container, rendered.window, "2000");
+    assert.equal(
+      rendered.container.querySelector("#group-sponsor-bit"),
+      null,
+    );
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Lasts for/u);
+    await setTextInput(
+      rendered.container.querySelector("#group-sponsor-alias"),
+      rendered.window,
+      "Chat sponsor",
+    );
+    await setTextInput(
+      rendered.container.querySelector("#group-sponsor-message"),
+      rendered.window,
+      "Glad to keep this going.",
+    );
+    const sponsorButtons = Array.from(
+      rendered.container.querySelectorAll<HTMLButtonElement>("button"),
+    ).filter((button) => button.textContent?.includes("Sponsor this chat"));
+    const submitButton = sponsorButtons.at(-1);
+    assert.ok(submitButton);
+    await act(async () => {
+      submitButton.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+      await Promise.resolve();
+    });
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+      method: "POST",
+      payload: {
+        clientRequestKey: "00000000-0000-4000-8000-000000000001",
+        monthlyCapMinor: 2_000,
+        offerCode: "usage_5_usd",
+        sponsorship: {
+          publicAlias: "Chat sponsor",
+          sponsorMessage: "Glad to keep this going.",
+        },
+        sponsorshipKind: "monthly",
+      },
+      signal: expect.any(AbortSignal),
+      url: "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
+    });
+  } finally {
+    checkout.resolve({
+      purchaseId: "hucp_group_monthly_sponsorship",
+      status: "payment_pending",
+    });
+    await rendered.cleanup();
+  }
+});
+
 test("clears a lost group request after terminal recovery with a remounted sponsor draft", async () => {
   const checkoutUrl =
     "/api/groups/fund/group_join_code_1234/usage-credit/checkout";
@@ -4481,6 +4554,14 @@ function groupSponsorshipOffers() {
       offerCode: "usage_20_usd",
       runningBitDurationLabel: "3 days",
     },
+  ] as const;
+}
+
+function groupSponsorshipMonthlyCaps() {
+  return [
+    { amountLabel: "$5", monthlyCapMinor: 500 },
+    { amountLabel: "$10", monthlyCapMinor: 1_000 },
+    { amountLabel: "$20", monthlyCapMinor: 2_000 },
   ] as const;
 }
 

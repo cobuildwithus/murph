@@ -226,6 +226,26 @@ describe("group sponsorship notification", () => {
     });
   });
 
+  it("uses the actual $5 activation for the public moment, not the private monthly maximum", async () => {
+    const prisma = createPrismaHarness({
+      chargeOrdinal: 0,
+      monthlyCapMinor: 2_000,
+      offerCode: "usage_5_usd",
+    });
+
+    await expect(materializeHostedGroupSponsorshipIfApplicable({
+      prisma: prisma as never,
+      purchaseId: "purchase_private_123",
+    })).resolves.toBe(true);
+
+    expect(mocks.activateMoment).toHaveBeenCalledWith(expect.objectContaining({
+      offerCode: "usage_5_usd",
+    }));
+    expect(mocks.readMoment).toHaveBeenCalledWith(expect.objectContaining({
+      offerCode: "usage_5_usd",
+    }));
+  });
+
   it("re-signals an existing item without rebuilding participant content", async () => {
     const prisma = createPrismaHarness();
     mocks.readMailboxItem.mockResolvedValueOnce({
@@ -310,7 +330,12 @@ describe("group sponsorship notification", () => {
   });
 
   it("keeps automatic refill fulfillment silent in the group", async () => {
-    const prisma = createPrismaHarness({ hasMoment: false });
+    const prisma = createPrismaHarness({
+      chargeOrdinal: 1,
+      hasMoment: false,
+      monthlyCapMinor: 1_000,
+      offerCode: "usage_5_usd",
+    });
 
     await expect(materializeHostedGroupSponsorshipIfApplicable({
       prisma: prisma as never,
@@ -490,32 +515,45 @@ describe("group sponsorship notification", () => {
 
 function createPrismaHarness(input: {
   authorizationStatus?: HostedGroupSponsorshipAuthorizationStatus;
+  chargeOrdinal?: number;
   hasMoment?: boolean;
+  monthlyCapMinor?: 500 | 1_000 | 2_000;
+  offerCode?: "usage_5_usd" | "usage_10_usd";
   status?: HostedUsageCreditPurchaseStatus;
   targetKind?: "group" | "personal";
 } = {}) {
   const status = input.status ?? HostedUsageCreditPurchaseStatus.fulfilled;
   const periodStartedAt = new Date("2026-07-27T12:00:00.000Z");
+  const monthlyCapMinor = input.monthlyCapMinor
+    ?? (input.authorizationStatus === undefined ? null : 1_000);
+  const authorization = monthlyCapMinor === null
+    ? null
+    : {
+        beneficiaryMemberId: "member_group_runtime",
+        monthlyCapMinor,
+        payerMemberId: "member_sponsor",
+        status: input.authorizationStatus
+          ?? HostedGroupSponsorshipAuthorizationStatus.active,
+      };
   const purchase = {
     beneficiaryMemberId: "member_group_runtime",
-    groupSponsorshipAuthorizationId: "hgsa_abcdefghijklmnop",
-    groupSponsorshipChargeOrdinal: 1,
+    groupSponsorshipAuthorization: authorization,
+    groupSponsorshipAuthorizationId: authorization
+      ? "hgsa_abcdefghijklmnop"
+      : null,
+    groupSponsorshipChargeOrdinal: authorization
+      ? input.chargeOrdinal ?? 0
+      : null,
     groupSponsorshipMoment: input.hasMoment === false
       ? null
       : { creatorMemberId: "member_sponsor" },
-    groupSponsorshipPeriodStartedAt: periodStartedAt,
+    groupSponsorshipPeriodStartedAt: authorization ? periodStartedAt : null,
     id: "purchase_private_123",
-    offerCode: "usage_10_usd",
+    offerCode: input.offerCode ?? "usage_10_usd",
     paidAt: PAID_AT,
     payerMemberId: "member_sponsor",
     status,
     targetKind: input.targetKind ?? "group",
-  };
-  const authorization = {
-    beneficiaryMemberId: "member_group_runtime",
-    payerMemberId: "member_sponsor",
-    status: input.authorizationStatus
-      ?? HostedGroupSponsorshipAuthorizationStatus.active,
   };
   type PrismaHarness = {
     $transaction: ReturnType<typeof vi.fn>;
