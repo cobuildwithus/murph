@@ -82,6 +82,24 @@ test("HomepageTelegramAuthButton keeps the CTA disabled until Privy is ready", a
   expect(button.disabled).toBe(true);
 });
 
+test("HomepageTelegramAuthButton keeps account completion on the active CTA", async () => {
+  const { button, cleanup } = await renderClientComponent(
+    createElement(HostedTelegramAuthButton, {
+      active: true,
+      completionPending: true,
+      onActivate: () => {},
+      onAuthenticated: mocks.onAuthenticated,
+    }),
+  );
+  cleanupRender = cleanup;
+
+  expect(button.disabled).toBe(true);
+  expect(button.getAttribute("aria-busy")).toBe("true");
+  expect(button.textContent).toContain("Finishing...");
+  expect(button.querySelector('[data-slot="spinner"]')).toBeTruthy();
+  expect(mocks.login).not.toHaveBeenCalled();
+});
+
 test("HomepageTelegramAuthButton softens cancellation messages without alarming the user", async () => {
   mocks.login.mockRejectedValueOnce(new Error("Telegram auth failed or was canceled by the client"));
 

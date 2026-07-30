@@ -30,6 +30,63 @@ let hostedAuthPanelIslandComponent: HostedAuthPanelIslandComponent | null = null
 let hostedAuthPanelIslandLoadPromise: Promise<HostedAuthPanelIslandComponent> | null =
   null;
 
+export const DEFAULT_AUTH_DIALOG_TITLE = "Log in or sign up";
+export const DEFAULT_AUTH_DIALOG_DESCRIPTION =
+  "Murph helps you build healthier habits that fit your life.";
+
+export function resolveAuthDialogHeaderPresentation({
+  description = DEFAULT_AUTH_DIALOG_DESCRIPTION,
+  panelView,
+  title = DEFAULT_AUTH_DIALOG_TITLE,
+}: {
+  description?: string;
+  panelView: HostedAuthPanelView;
+  title?: string;
+}) {
+  const consentPresentation = panelView === "consent";
+  const resolvedCopy = consentPresentation
+    ? {
+        description: "Review how Murph uses health data before continuing.",
+        title: "Use your health data with Murph",
+      }
+    : { description, title };
+
+  return {
+    consentPresentation,
+    description: resolvedCopy.description,
+    headerClassName: cn({
+      "pr-10": !consentPresentation,
+      "sr-only": consentPresentation,
+    }),
+    title: resolvedCopy.title,
+  };
+}
+
+export function AuthDialogHeaderPresentation({
+  description = DEFAULT_AUTH_DIALOG_DESCRIPTION,
+  panelView,
+  title = DEFAULT_AUTH_DIALOG_TITLE,
+}: {
+  description?: string;
+  panelView: HostedAuthPanelView;
+  title?: string;
+}) {
+  const header = resolveAuthDialogHeaderPresentation({
+    description,
+    panelView,
+    title,
+  });
+
+  return (
+    <DialogHeader className={header.headerClassName}>
+      <DialogTitle className="text-xl font-bold tracking-tight text-foreground">
+        {header.title}
+      </DialogTitle>
+      <DialogDescription>{header.description}</DialogDescription>
+    </DialogHeader>
+  );
+}
+
 function loadHostedAuthPanelIsland(): Promise<HostedAuthPanelIslandComponent> {
   if (hostedAuthPanelIslandComponent) {
     return Promise.resolve(hostedAuthPanelIslandComponent);
@@ -101,8 +158,8 @@ export function AuthDialog({
   methods = ["phone", "telegram", "email"],
   open,
   onOpenChange,
-  title = "Log in or sign up",
-  description = "Murph helps you build healthier habits that fit your life.",
+  title = DEFAULT_AUTH_DIALOG_TITLE,
+  description = DEFAULT_AUTH_DIALOG_DESCRIPTION,
   onCompleted,
   requireLaunchConsentOnCompletion = false,
   showPassiveLegalNotice = false,
@@ -153,19 +210,11 @@ export function AuthDialog({
     };
   }, [open, AuthPanelIsland]);
 
-  const resolvedTitle = panelView === "consent"
-    ? "Use your health data with Murph"
-    : panelView === "finishing"
-      ? "Setting things up"
-      : title;
-  const resolvedDescription = panelView === "consent"
-    ? "Review how Murph uses health data before continuing."
-    : panelView === "finishing"
-      ? "Murph is preparing your account."
-      : description;
+  const dismissLocked = panelView !== "auth";
+  const consentPresentation = panelView === "consent";
 
   function handleOpenChange(nextOpen: boolean) {
-    if (!nextOpen && panelView === "consent") {
+    if (!nextOpen && dismissLocked) {
       return;
     }
 
@@ -180,21 +229,15 @@ export function AuthDialog({
       <DialogContent
         className={cn(
           "max-w-md gap-6 p-6 md:p-7",
-          panelView === "consent" ? "rounded-2xl" : null,
+          consentPresentation ? "rounded-2xl" : null,
         )}
-        showCloseButton={panelView !== "consent"}
+        showCloseButton={!dismissLocked}
       >
-        <DialogHeader
-          className={cn({
-            "pr-10": panelView === "auth",
-            "sr-only": panelView !== "auth",
-          })}
-        >
-          <DialogTitle className="text-xl font-bold tracking-tight text-foreground">
-            {resolvedTitle}
-          </DialogTitle>
-          <DialogDescription>{resolvedDescription}</DialogDescription>
-        </DialogHeader>
+        <AuthDialogHeaderPresentation
+          description={description}
+          panelView={panelView}
+          title={title}
+        />
         {AuthPanelIsland ? (
           <AuthPanelIsland
             inviteCode={inviteCode}

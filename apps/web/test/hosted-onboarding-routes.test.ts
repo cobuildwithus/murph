@@ -272,6 +272,9 @@ describe("hosted onboarding routes", () => {
       inviteCode: "invite-code",
       joinUrl: "/join/invite-code",
       launchConsentGranted: false,
+      launchConsentStatus: {
+        launchGranted: false,
+      },
       messagingSetupRequired: false,
       ok: true,
       stage: "checkout",

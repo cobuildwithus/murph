@@ -290,6 +290,36 @@ describe('assistant execution prompt contract', () => {
     )
   })
 
+  it('grounds niche group-chat references with brief public research before joking', () => {
+    const groupLayers = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput({
+        conversationScope: 'group',
+      }),
+    )
+    const directLayers = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput(),
+    )
+
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'When a floor-authorized playful turn hinges on a niche public cultural reference',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'If you cannot confidently name the concrete premise, characters, vocabulary, or recurring bit needed to make the reply specific',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'do a narrow public web lookup before replying',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'one short, original, reference-native joke or callback',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'stay plain rather than inventing lore',
+    )
+    expect(directLayers.staticCacheableCorePrompt).not.toContain(
+      'When a floor-authorized playful turn hinges on a niche public cultural reference',
+    )
+  })
+
   it('keeps a comic register from downgrading a described unsafe act in a group', () => {
     const groupLayers = buildAssistantSystemPromptLayers(
       createCommonCodexPromptInput({

@@ -7,6 +7,7 @@ import { cn } from "@/src/lib/utils";
 
 export function HostedInlineAuthButton({
   active = false,
+  busy = false,
   children,
   className,
   disabled = false,
@@ -14,6 +15,7 @@ export function HostedInlineAuthButton({
   onClick,
 }: {
   active?: boolean;
+  busy?: boolean;
   children: ReactNode;
   className?: string;
   disabled?: boolean;
@@ -22,6 +24,7 @@ export function HostedInlineAuthButton({
 }) {
   return (
     <Button
+      aria-busy={busy}
       type="button"
       size="lg"
       variant="outline"
