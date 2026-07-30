@@ -13,10 +13,11 @@ import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/t
 import { cn } from "@/src/lib/utils";
 
 import type { HostedAuthPanelView } from "./hosted-auth-panel";
+import type { HostedAuthRuntimeState } from "./hosted-auth-runtime";
 
-type HostedAuthPanelIslandComponent = typeof import(
+type HostedAuthPanelModule = typeof import(
   "@/src/components/hosted-onboarding/hosted-auth-panel-island"
-)["HostedAuthPanelIsland"];
+);
 
 type WindowWithIdleCallback = typeof window & {
   cancelIdleCallback?: (handle: number) => void;
@@ -26,9 +27,13 @@ type WindowWithIdleCallback = typeof window & {
   ) => number;
 };
 
-let hostedAuthPanelIslandComponent: HostedAuthPanelIslandComponent | null = null;
-let hostedAuthPanelIslandLoadPromise: Promise<HostedAuthPanelIslandComponent> | null =
-  null;
+let hostedAuthPanelModule: HostedAuthPanelModule | null = null;
+let hostedAuthPanelLoadPromise: Promise<HostedAuthPanelModule> | null = null;
+
+export type AuthDialogPrivyRuntimeState =
+  | HostedAuthRuntimeState
+  | { kind: "loading" }
+  | { kind: "error"; message: string };
 
 export const DEFAULT_AUTH_DIALOG_TITLE = "Log in or sign up";
 export const DEFAULT_AUTH_DIALOG_DESCRIPTION =
@@ -87,43 +92,45 @@ export function AuthDialogHeaderPresentation({
   );
 }
 
-function loadHostedAuthPanelIsland(): Promise<HostedAuthPanelIslandComponent> {
-  if (hostedAuthPanelIslandComponent) {
-    return Promise.resolve(hostedAuthPanelIslandComponent);
+function loadHostedAuthPanelModule(): Promise<HostedAuthPanelModule> {
+  if (hostedAuthPanelModule) {
+    return Promise.resolve(hostedAuthPanelModule);
   }
 
-  if (!hostedAuthPanelIslandLoadPromise) {
-    hostedAuthPanelIslandLoadPromise = import(
+  if (!hostedAuthPanelLoadPromise) {
+    hostedAuthPanelLoadPromise = import(
       "@/src/components/hosted-onboarding/hosted-auth-panel-island"
     )
       .then((mod) => {
-        hostedAuthPanelIslandComponent = mod.HostedAuthPanelIsland;
-        return mod.HostedAuthPanelIsland;
+        hostedAuthPanelModule = mod;
+        return mod;
       })
       .catch((error: unknown) => {
-        hostedAuthPanelIslandLoadPromise = null;
+        hostedAuthPanelLoadPromise = null;
         throw error;
       });
   }
 
-  return hostedAuthPanelIslandLoadPromise;
+  return hostedAuthPanelLoadPromise;
 }
 
-export function readLoadedHostedAuthPanelIsland(): HostedAuthPanelIslandComponent | null {
-  return hostedAuthPanelIslandComponent;
+export function readLoadedHostedAuthPanelIsland():
+  | HostedAuthPanelModule["HostedAuthPanelIsland"]
+  | null {
+  return hostedAuthPanelModule?.HostedAuthPanelIsland ?? null;
 }
 
 export function preloadHostedAuthPanelIsland() {
-  if (hostedAuthPanelIslandComponent) {
+  if (hostedAuthPanelModule) {
     return;
   }
 
-  void loadHostedAuthPanelIsland().catch(() => {});
+  void loadHostedAuthPanelModule().catch(() => {});
 }
 
 export function useHostedAuthPanelIslandIdlePreload(enabled: boolean) {
   useEffect(() => {
-    if (!enabled || typeof window === "undefined" || hostedAuthPanelIslandComponent) {
+    if (!enabled || typeof window === "undefined" || hostedAuthPanelModule) {
       return;
     }
 
@@ -161,6 +168,7 @@ export function AuthDialog({
   title = DEFAULT_AUTH_DIALOG_TITLE,
   description = DEFAULT_AUTH_DIALOG_DESCRIPTION,
   onCompleted,
+  privyRuntime,
   requireLaunchConsentOnCompletion = false,
   showPassiveLegalNotice = false,
 }: {
@@ -171,32 +179,30 @@ export function AuthDialog({
   title?: string;
   description?: string;
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
+  privyRuntime?: AuthDialogPrivyRuntimeState;
   requireLaunchConsentOnCompletion?: boolean;
   showPassiveLegalNotice?: boolean;
 }) {
-  const [AuthPanelIsland, setAuthPanelIsland] =
-    useState<HostedAuthPanelIslandComponent | null>(() =>
-      readLoadedHostedAuthPanelIsland(),
-    );
+  const [AuthPanelModule, setAuthPanelModule] =
+    useState<HostedAuthPanelModule | null>(() => hostedAuthPanelModule);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [panelView, setPanelView] = useState<HostedAuthPanelView>("auth");
 
   useEffect(() => {
-    if (!open || AuthPanelIsland) {
+    if (!open || privyRuntime !== undefined || AuthPanelModule) {
       return;
     }
 
-    const loaded = readLoadedHostedAuthPanelIsland();
     let cancelled = false;
-    const loadPanel = loaded
-      ? Promise.resolve(loaded)
-      : loadHostedAuthPanelIsland();
+    const loadPanel = hostedAuthPanelModule
+      ? Promise.resolve(hostedAuthPanelModule)
+      : loadHostedAuthPanelModule();
 
     loadPanel
-      .then((Component) => {
+      .then((module) => {
         if (!cancelled) {
           setLoadError(null);
-          setAuthPanelIsland(() => Component);
+          setAuthPanelModule(module);
         }
       })
       .catch(() => {
@@ -208,10 +214,16 @@ export function AuthDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, AuthPanelIsland]);
+  }, [open, privyRuntime, AuthPanelModule]);
 
   const dismissLocked = panelView !== "auth";
   const consentPresentation = panelView === "consent";
+  const runtimeLoading = privyRuntime?.kind === "loading";
+  const runtimeError = privyRuntime?.kind === "error"
+    ? privyRuntime.message
+    : privyRuntime?.kind === "unconfigured"
+      ? "Sign in is not configured yet."
+      : null;
 
   function handleOpenChange(nextOpen: boolean) {
     if (!nextOpen && dismissLocked) {
@@ -223,6 +235,16 @@ export function AuthDialog({
     }
     onOpenChange(nextOpen);
   }
+
+  const authPanelProps = {
+    methods,
+    onViewChange: setPanelView,
+    requireLaunchConsentOnCompletion,
+    showPassiveLegalNotice,
+    size: "compact" as const,
+    ...(inviteCode !== undefined ? { inviteCode } : {}),
+    ...(onCompleted ? { onCompleted } : {}),
+  };
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -238,20 +260,20 @@ export function AuthDialog({
           panelView={panelView}
           title={title}
         />
-        {AuthPanelIsland ? (
-          <AuthPanelIsland
-            inviteCode={inviteCode}
-            methods={methods}
-            onCompleted={onCompleted}
-            onViewChange={setPanelView}
-            requireLaunchConsentOnCompletion={requireLaunchConsentOnCompletion}
-            showPassiveLegalNotice={showPassiveLegalNotice}
-            size="compact"
-          />
-        ) : loadError ? (
+        {runtimeLoading ? (
+          <AuthPanelSkeleton />
+        ) : runtimeError || loadError ? (
           <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
-            {loadError}
+            {runtimeError ?? loadError}
           </div>
+        ) : privyRuntime?.kind === "configured" ? (
+          <privyRuntime.AuthPanel
+            {...authPanelProps}
+            onRestartPrivy={privyRuntime.restart}
+            privyAttempt={privyRuntime.attempt}
+          />
+        ) : AuthPanelModule ? (
+          <AuthPanelModule.HostedAuthPanelIsland {...authPanelProps} />
         ) : open ? (
           <AuthPanelSkeleton />
         ) : null}
