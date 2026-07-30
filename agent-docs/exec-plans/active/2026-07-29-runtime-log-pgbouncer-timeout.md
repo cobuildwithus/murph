@@ -57,7 +57,12 @@ without moving application traffic to direct Postgres.
   the required ten-second role setting.
 - The production runtime role has been configured with the ten-second
   server-side timeout while application storage remains in primary mode.
-- Preliminary specialist review, final review, exact-head CI, final ReviewGPT,
-  merge, deploy, drain, cutover, and post-cutover verification remain pending.
+- Preliminary ReviewGPT returned one accepted coverage finding: the existing
+  real-PostgreSQL lane depended on ambient timeout configuration and did not
+  exercise the rejected timeout boundaries through production SQL.
+- The reviewed test-only coverage patch was inspected, dry-run, applied, and
+  proved with all eight real-PostgreSQL runtime-log concurrency tests passing.
+- Parent final review, exact-head CI, final ReviewGPT, merge, deploy, drain,
+  cutover, and post-cutover verification remain pending.
 
 Updated: 2026-07-29
