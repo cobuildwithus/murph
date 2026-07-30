@@ -8,6 +8,7 @@ import {
   COMPANION_HRV_RMSSD_SCHEMA,
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
+import { prepareDeviceProviderSnapshotImport } from "@murphai/importers";
 import { openSqliteRuntimeDatabase, writeSqliteRuntimeUserVersion } from "@murphai/runtime-state/node";
 import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@murphai/runtime-state/node/runtime-paths";
 
@@ -18,7 +19,10 @@ import {
   createDeviceSyncService,
   resolveDeviceSyncStoreNextWakeAt,
 } from "../src/service.ts";
-import { createJunctionDeviceSyncProvider } from "../src/providers/junction.ts";
+import {
+  createJunctionDeviceSyncProvider,
+  JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
+} from "../src/providers/junction.ts";
 import { scopeWebhookTraceId } from "../src/shared.ts";
 import { SqliteDeviceSyncStore } from "../src/store.ts";
 import { DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION } from "../src/store/schema.ts";
@@ -513,6 +517,454 @@ test("device sync service connects, imports, and deduplicates webhook traces", a
   assert.equal(reconcile.jobs.length, 1);
 
   close();
+});
+
+test("local shared-Junction target starts preserve established siblings through SQLite", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-07-28T10:00:00.000Z"));
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-local-junction-siblings");
+  const executedJobKinds: string[] = [];
+  let webhookSequence = 0;
+  const provider: DeviceSyncProvider = {
+    provider: "junction",
+    descriptor: JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
+    credentialPolicy: {
+      kind: "provider_config",
+      providerConfigKey: "junction",
+    },
+    connectionHandler: {
+      async beginConnection(input) {
+        return {
+          authorizationUrl: `https://junction.example.test/link?state=${input.state}`,
+          connectionSeed: {
+            externalAccountId: "shared-junction-account",
+            displayName: "Junction",
+            status: "active",
+            setupPhase: "pending_link",
+            setupExpiresAt: "2026-07-28T10:30:00.000Z",
+            scopes: [],
+            credential: {
+              kind: "provider_config",
+              providerConfigKey: "junction",
+            },
+            nextReconcileAt: null,
+          },
+        };
+      },
+      async completeConnection(input) {
+        if (input.query.get("result") === "failure") {
+          throw deviceSyncError({
+            code: "JUNCTION_LINK_REJECTED",
+            message: "Junction Link did not confirm the requested source.",
+            retryable: false,
+            httpStatus: 409,
+          });
+        }
+
+        return {
+          externalAccountId: "shared-junction-account",
+          displayName: "Junction",
+          scopes: [],
+          credential: {
+            kind: "provider_config",
+            providerConfigKey: "junction",
+          },
+          setupPhase: "link_returned",
+          initialJobs: [
+            {
+              kind: "backfill",
+            },
+          ],
+          nextReconcileAt: "2026-07-28T10:05:00.000Z",
+        };
+      },
+      async revokeAccess() {},
+    },
+    webhookHandler: {
+      async verifyAndParseWebhook(context) {
+        const sourceProviderSlug = context.rawBody.toString("utf8");
+        webhookSequence += 1;
+        return {
+          acceptanceMode: "durable_webhook_work",
+          externalAccountId: "shared-junction-account",
+          eventType: "junction.updated",
+          traceId: `local-junction-${webhookSequence}`,
+          sourceProviderSlug,
+          jobs: [
+            {
+              kind: "reconcile",
+            },
+          ],
+        };
+      },
+    },
+    jobExecutor: {
+      createScheduledJobs(_account, now) {
+        return {
+          jobs: [
+            {
+              kind: "reconcile",
+            },
+          ],
+          nextReconcileAt: new Date(Date.parse(now) + 60 * 60_000).toISOString(),
+        };
+      },
+      async executeJob(_context, job) {
+        executedJobKinds.push(job.kind);
+        return {};
+      },
+    },
+  };
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: {
+      now: () => new Date(),
+    },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [provider],
+  });
+
+  try {
+    const garmin = await service.startConnection({
+      ownerId: "<REDACTED_OWNER_ID>",
+      provider: "junction",
+      sourceProviderSlug: "garmin",
+    });
+    vi.setSystemTime(new Date("2026-07-28T10:01:00.000Z"));
+    const established = await service.handleConnectionCallback({
+      expectedOwnerId: "<REDACTED_OWNER_ID>",
+      provider: "junction",
+      query: new URLSearchParams({
+        murph_state: garmin.state,
+        result: "success",
+      }),
+    });
+    await service.drainWorker(10);
+
+    const baseline = store.getAccountById(established.account.id);
+    assert.ok(baseline);
+    assert.equal(baseline.setupPhase, "source_confirmed");
+    assert.equal(
+      store.listConnectionSources({
+        connectionId: baseline.id,
+        sourceProviderSlug: "garmin",
+      })[0]?.status,
+      "connected",
+    );
+
+    vi.setSystemTime(new Date("2026-07-28T10:02:00.000Z"));
+    const fitbit = await service.startConnection({
+      ownerId: "<REDACTED_OWNER_ID>",
+      provider: "junction",
+      sourceProviderSlug: "fitbit",
+    });
+
+    const afterAbandonedFitbit = store.getAccountById(baseline.id);
+    assert.ok(afterAbandonedFitbit);
+    assert.equal(afterAbandonedFitbit.setupPhase, "source_confirmed");
+    assert.equal(afterAbandonedFitbit.connectedAt, baseline.connectedAt);
+    assert.equal(afterAbandonedFitbit.localConnectionRevision, baseline.localConnectionRevision);
+    assert.equal(afterAbandonedFitbit.localTokenRevision, baseline.localTokenRevision);
+    assert.equal(
+      store.listConnectionSources({
+        connectionId: baseline.id,
+        sourceProviderSlug: "fitbit",
+      })[0]?.status,
+      "disconnected",
+    );
+
+    await assert.doesNotReject(
+      service.handleWebhook("junction", new Headers(), Buffer.from("garmin")),
+    );
+    await assert.rejects(
+      service.handleWebhook("junction", new Headers(), Buffer.from("fitbit")),
+      (error: unknown) =>
+        error instanceof DeviceSyncError
+        && error.code === "WEBHOOK_SOURCE_NOT_READY"
+        && error.httpStatus === 503,
+    );
+    assert.doesNotThrow(() => service.queueManualReconcile(baseline.id));
+    store.markSyncSucceeded(baseline.id, "2026-07-28T10:02:00.000Z", null, {
+      nextReconcileAt: "2026-07-28T10:01:59.000Z",
+    });
+    const jobsBeforeScheduler = countJobsForAccountForTesting(store, baseline.id);
+    await service.runSchedulerOnce();
+    assert.ok(countJobsForAccountForTesting(store, baseline.id) > jobsBeforeScheduler);
+    await service.drainWorker(20);
+    assert.ok(executedJobKinds.includes("reconcile"));
+
+    vi.setSystemTime(new Date("2026-07-28T10:03:00.000Z"));
+    await assert.rejects(
+      service.handleConnectionCallback({
+        expectedOwnerId: "<REDACTED_OWNER_ID>",
+        provider: "junction",
+        query: new URLSearchParams({
+          murph_state: fitbit.state,
+          result: "failure",
+        }),
+      }),
+      (error: unknown) =>
+        error instanceof DeviceSyncError
+        && error.code === "JUNCTION_LINK_REJECTED",
+    );
+    const afterFitbitFailure = store.getAccountById(baseline.id);
+    assert.ok(afterFitbitFailure);
+    assert.equal(afterFitbitFailure.setupPhase, "source_confirmed");
+    assert.equal(afterFitbitFailure.connectedAt, baseline.connectedAt);
+    assert.equal(
+      store.listConnectionSources({
+        connectionId: baseline.id,
+        sourceProviderSlug: "fitbit",
+      })[0]?.status,
+      "disconnected",
+    );
+
+    vi.setSystemTime(new Date("2026-07-28T10:04:00.000Z"));
+    const fitbitRetry = await service.startConnection({
+      ownerId: "<REDACTED_OWNER_ID>",
+      provider: "junction",
+      sourceProviderSlug: "fitbit",
+    });
+    const afterFitbitRetry = store.getAccountById(baseline.id);
+    assert.ok(afterFitbitRetry);
+    assert.equal(afterFitbitRetry.setupPhase, "source_confirmed");
+    assert.equal(afterFitbitRetry.connectedAt, baseline.connectedAt);
+
+    vi.setSystemTime(new Date("2026-07-28T10:05:00.000Z"));
+    await service.handleConnectionCallback({
+      expectedOwnerId: "<REDACTED_OWNER_ID>",
+      provider: "junction",
+      query: new URLSearchParams({
+        murph_state: fitbitRetry.state,
+        result: "success",
+      }),
+    });
+    const afterFitbitCompletion = store.getAccountById(baseline.id);
+    assert.ok(afterFitbitCompletion);
+    assert.equal(afterFitbitCompletion.setupPhase, "source_confirmed");
+    assert.equal(afterFitbitCompletion.connectedAt, baseline.connectedAt);
+    assert.equal(
+      afterFitbitCompletion.localConnectionRevision,
+      afterFitbitRetry.localConnectionRevision,
+    );
+    assert.equal(afterFitbitCompletion.localTokenRevision, afterFitbitRetry.localTokenRevision);
+    assert.equal(
+      store.listConnectionSources({
+        connectionId: baseline.id,
+        sourceProviderSlug: "garmin",
+      })[0]?.status,
+      "connected",
+    );
+    assert.equal(
+      store.listConnectionSources({
+        connectionId: baseline.id,
+        sourceProviderSlug: "fitbit",
+      })[0]?.status,
+      "connected",
+    );
+    await assert.doesNotReject(
+      service.handleWebhook("junction", new Headers(), Buffer.from("fitbit")),
+    );
+  } finally {
+    close();
+    vi.useRealTimers();
+  }
+});
+
+test("local Junction workers exclude a disconnected source from production-normalized evidence", async () => {
+  const now = new Date("2026-07-28T10:00:00.000Z");
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-source-admission");
+  const importerInputs: unknown[] = [];
+  const importerResults: unknown[] = [];
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: {
+      now: () => now,
+    },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer: {
+      async importDeviceProviderSnapshot(input) {
+        importerInputs.push(input);
+        const result = await prepareDeviceProviderSnapshotImport(input);
+        importerResults.push(result);
+        return { events: result.events ?? [] };
+      },
+    },
+    providers: [
+      createJunctionDeviceSyncProvider({
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        region: "us",
+        summaryResources: ["activity"],
+        timeseriesResources: ["blood_oxygen"],
+        fetchImpl: async (input) => {
+          const url = readUrl(input);
+
+          if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+            return createJsonResponse({
+              providers: [
+                {
+                  id: "provider-garmin-1",
+                  slug: "garmin",
+                  name: "Garmin",
+                  status: "connected",
+                  resource_availability: {
+                    activity: true,
+                    blood_oxygen: true,
+                  },
+                },
+                {
+                  id: "provider-fitbit-1",
+                  slug: "fitbit",
+                  name: "Fitbit",
+                  status: "connected",
+                  resource_availability: {
+                    activity: true,
+                    blood_oxygen: true,
+                  },
+                },
+              ],
+            });
+          }
+
+          if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+            return createJsonResponse({
+              data: [
+                {
+                  id: "garmin-activity-1",
+                  connectionId: "provider-garmin-1",
+                  observedAt: "2026-07-27T12:00:00.000Z",
+                  steps: 4321,
+                },
+                {
+                  id: "fitbit-activity-1",
+                  connectionId: "provider-fitbit-1",
+                  observedAt: "2026-07-27T12:00:00.000Z",
+                  steps: 1234,
+                },
+              ],
+            });
+          }
+
+          if (url.includes("/v2/timeseries/junction-user-1/blood_oxygen/grouped")) {
+            return createJsonResponse({
+              groups: {
+                garmin: [{
+                  data: [{
+                    id: "garmin-blood-oxygen-1",
+                    timestamp: "2026-07-27T14:00:00.000Z",
+                    unit: "%",
+                    value: 97,
+                  }],
+                  source: { provider: "garmin", type: "watch" },
+                }],
+                fitbit: [{
+                  data: [{
+                    id: "fitbit-blood-oxygen-1",
+                    timestamp: "2026-07-27T14:00:00.000Z",
+                    unit: "%",
+                    value: 91,
+                  }],
+                  source: { provider: "fitbit", type: "watch" },
+                }],
+              },
+            });
+          }
+
+          throw new Error(`Unexpected Junction request during source admission test: ${url}`);
+        },
+      }),
+    ],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-user-1",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: "2026-07-27T00:00:00.000Z",
+      nextReconcileAt: null,
+    });
+    store.upsertConnectionSource({
+      connectionId: account.id,
+      sourceInstanceKey: "garmin",
+      sourceProviderSlug: "garmin",
+      status: "connected",
+      lastSeenAt: "2026-07-28T10:00:00.000Z",
+    });
+    store.upsertConnectionSource({
+      connectionId: account.id,
+      sourceInstanceKey: "fitbit",
+      sourceProviderSlug: "fitbit",
+      status: "disconnected",
+      lastSeenAt: "2026-07-28T10:00:00.000Z",
+    });
+    const job = store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "reconcile",
+      payload: {
+        windowStart: "2026-07-27T00:00:00.000Z",
+        windowEnd: "2026-07-28T00:00:00.000Z",
+      },
+      availableAt: "2026-07-28T10:00:00.000Z",
+    });
+
+    const processed = await service.runWorkerOnce();
+
+    assert.equal(processed?.id, job.id);
+    assert.equal(store.getJobById(job.id)?.status, "succeeded");
+    assert.equal(
+      store.listConnectionSources({
+        connectionId: account.id,
+        sourceProviderSlug: "fitbit",
+      })[0]?.status,
+      "disconnected",
+    );
+    assert.equal(importerInputs.length, 2);
+    const durableInput = JSON.stringify(importerInputs);
+    assert.match(durableInput, /garmin-activity-1|garmin-blood-oxygen-1/u);
+    assert.doesNotMatch(durableInput, /fitbit|provider-fitbit-1|1234|"value":91/u);
+
+    const durableResults = importerResults as Array<{
+      evidenceParts?: Array<{ content?: unknown }>;
+      events?: Array<{
+        dataOrigin?: { sourceProviderSlug?: string };
+      }>;
+      ingestReceipt?: Record<string, unknown>;
+    }>;
+    assert.equal(
+      durableResults.every((result) => (result.evidenceParts?.length ?? 0) > 0),
+      true,
+    );
+    assert.equal(
+      durableResults.every((result) => typeof result.ingestReceipt?.payloadHash === "string"),
+      true,
+    );
+    assert.equal(
+      durableResults.flatMap((result) => result.events ?? [])
+        .every((event) => event.dataOrigin?.sourceProviderSlug === "garmin"),
+      true,
+    );
+  } finally {
+    close();
+  }
 });
 
 test("device sync service reports canonical counts separately from durable delivery acceptance", async () => {
@@ -1143,6 +1595,86 @@ test("device sync service scheduler queues due active jobs and skips unsupported
   assert.equal(store.getAccountById(dueActive.id)?.nextReconcileAt, "2026-03-17T12:30:00.000Z");
   assert.equal(countJobsForAccountForTesting(store, unsupportedAccount.id), 0);
   assert.equal(countJobsForAccountForTesting(store, disconnected.id), 0);
+
+  close();
+});
+
+test("device sync service keeps pending external-link setup out of manual, scheduled, and worker execution", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-pending-setup");
+  const executeJob = vi.fn(async () => ({}));
+  const createScheduledJobs = vi.fn(() => ({
+    jobs: [
+      {
+        kind: "scheduled-refresh",
+        payload: {
+          slice: "summary",
+        },
+      },
+    ],
+    nextReconcileAt: "2026-03-17T12:30:00.000Z",
+  }));
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        createScheduledJobs,
+        executeJob,
+      }),
+    ],
+  });
+  const pending = store.upsertAccount({
+    provider: "demo",
+    externalAccountId: "pending-external-link",
+    displayName: "Pending",
+    setupPhase: "pending_link",
+    setupExpiresAt: "2026-03-17T12:15:00.000Z",
+    scopes: ["offline"],
+    tokens: {
+      accessToken: "pending-access",
+      accessTokenEncrypted: "enc:pending-access",
+    },
+    connectedAt: "2026-03-17T10:00:00.000Z",
+    nextReconcileAt: "2026-03-17T11:00:00.000Z",
+  });
+
+  assert.equal(service.getNextWakeAt("2026-03-17T10:00:00.000Z"), null);
+
+  assert.throws(
+    () => service.queueManualReconcile(pending.id),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "CONNECTION_SETUP_PENDING"
+      && error.httpStatus === 409,
+  );
+
+  await service.runSchedulerOnce();
+  assert.equal(createScheduledJobs.mock.calls.length, 0);
+  assert.equal(countJobsForAccountForTesting(store, pending.id), 0);
+
+  const queued = store.enqueueJob({
+    accountId: pending.id,
+    provider: "demo",
+    kind: "reconcile",
+    payload: {},
+    availableAt: "2026-03-17T11:30:00.000Z",
+  });
+  assert.equal(
+    service.getNextWakeAt("2026-03-17T10:00:00.000Z"),
+    "2026-03-17T11:30:00.000Z",
+  );
+  const processed = await service.runWorkerOnce();
+  const terminal = store.getJobById(queued.id);
+
+  assert.equal(processed?.id, queued.id);
+  assert.equal(terminal?.status, "dead");
+  assert.equal(terminal?.lastErrorCode, "CONNECTION_SETUP_PENDING");
+  assert.equal(executeJob.mock.calls.length, 0);
+  assert.equal(store.getAccountById(pending.id)?.setupPhase, "pending_link");
 
   close();
 });

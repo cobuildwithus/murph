@@ -134,6 +134,12 @@ describe('cloudflare hosted e2e workflow guards', () => {
     ])
     expect(workflow).not.toContain('for scenario in ${{ matrix.scenarios }}; do')
     expect(workflow).toContain('pnpm hosted-local e2e "${scenarios[@]}" --no-bundle')
+    expect(workflow).toContain("runs-on: ${{ matrix.runner || 'ubuntu-24.04' }}")
+    expect(workflow).toContain([
+      '          - name: Codex media + provider egress E2E',
+      '            runner: blacksmith-4vcpu-ubuntu-2404',
+      '            slug: codex-media-provider-egress',
+    ].join('\n'))
     expect(workflow).toContain(
       'apps/web/test/hosted-production-500-regressions-postgres.test.ts',
     )

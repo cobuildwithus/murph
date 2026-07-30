@@ -13,6 +13,7 @@ import {
   DeviceSyncSetupGuideDialog,
 } from "@/app/(dashboard)/home/device-sync-completion-dialog";
 import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
+import { HostedDeviceSyncCallbackConfirmation } from "@/src/components/device-sync/hosted-device-sync-callback-confirmation";
 import { HomeExperimentCard } from "@/src/components/home/home-experiment-card";
 import { GroupUsageFundingCard } from "@/src/components/hosted-groups/group-usage-funding-card";
 import { GroupSponsorshipDialog } from "@/src/components/hosted-groups/group-sponsorship-dialog";
@@ -929,9 +930,10 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Radio Group, Choice Cards & Provider Dialog">
+        <Section title="Radio Group, Choice Cards & Provider Picker">
           <p className="max-w-2xl text-sm text-muted-foreground">
-            Choose the intelligence behind your personal health assistant.
+            Compare model choice cards and the compact, save-gated provider
+            picker used by assistant settings.
           </p>
           <RadioGroup
             className="grid gap-3 sm:grid-cols-3"
@@ -1059,6 +1061,17 @@ export function ComponentsContent() {
           <div className="flex flex-col gap-4">
             <Alert><AlertTitle>Experiment in progress</AlertTitle><AlertDescription>Day 15 of 28. Next session scheduled for this evening.</AlertDescription></Alert>
             <Alert variant="destructive"><AlertTitle>Oura disconnected</AlertTitle><AlertDescription>Reconnect your ring to continue tracking metrics.</AlertDescription></Alert>
+          </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Device Sync Callback Confirmation">
+          <div className="overflow-hidden rounded-2xl border border-border" inert>
+            <HostedDeviceSyncCallbackConfirmation
+              action="/"
+              state="confirmation"
+            />
           </div>
         </Section>
 

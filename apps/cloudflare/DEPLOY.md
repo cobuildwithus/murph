@@ -415,7 +415,15 @@ For production deploys, `HOSTED_WEB_BASE_URL` must exactly match the normalized
 origin in `HOSTED_WEB_PRODUCTION_BASE_URL`; production preflight also rejects
 HTTP, localhost, `host.docker.internal`, loopback, preview/development, and
 private-network Worker and hosted web origins, including DNS names
-that resolve to private-network addresses.
+that resolve to private-network addresses. When
+`DEVICE_SYNC_PUBLIC_BASE_URL` is set, it may include a callback path but its
+hostname must match `HOSTED_WEB_BASE_URL`; a separate callback host cannot
+receive the host-only hosted app-session and callback-proof cookies. Cloudflare
+preflight owns this explicit-override comparison only. When the override is
+unset, hosted Web build validation derives the effective callback from
+`HOSTED_ONBOARDING_PUBLIC_BASE_URL`, `HOSTED_WEB_BASE_URL`, then the Vercel
+production fallback and rejects a split host; Cloudflare does not claim to
+derive that Web-owned value.
 The single member-scoped computer-use profile change is a greenfield hard cut,
 not an old-Web/old-Worker compatibility rollout. Keep hosted computer-use
 traffic paused during the Web/Worker skew window and finish the Worker deploy
@@ -615,6 +623,18 @@ Opt-in runtime integrations:
 - `JUNCTION_RECONCILE_DAYS`
 - `JUNCTION_RECONCILE_INTERVAL_MS`
 - `JUNCTION_REQUEST_TIMEOUT_MS`
+
+`DEVICE_SYNC_PUBLIC_BASE_URL` is optional. When set, it may select a stable
+provider callback/webhook path on the hosted Web hostname, but it must not use a
+separate device-sync hostname. Both production and preview preflight reject the
+explicit split-host shape before render, secret sync, lifecycle mutation, or
+deploy. When it is unset, hosted Web build validation—not Cloudflare
+preflight—proves the derived callback hostname against every configured browser
+surface.
+Correct the callback hostname before either Web or Worker deployment, and ship
+the Web start/build guard with the Cloudflare preflight change. During a skewed
+rollout the Web start guard still fails closed before OAuth state or provider
+authorization; do not bypass it to recover an invalid split-host environment.
 
 Native parser binaries are owned by the runner image and passed to the hosted runtime through explicit parser toolchain config, not deploy-time env overrides. Hosted audio transcription has no in-image model: the parser toolchain points at the Worker-mediated `murph-transcribe.worker` host and the Worker calls the Workers AI `AI` binding (`@cf/openai/whisper-large-v3-turbo`).
 
@@ -858,7 +878,8 @@ Before the first preview Worker deploy:
    `HOSTED_WEB_PRODUCTION_BASE_URL` must be the production origin used only for
    the inequality guard. The Worker and Web origins must be distinct. If device
    sync is enabled, `DEVICE_SYNC_PUBLIC_BASE_URL` must be a public staging HTTPS
-   URL; its callback path is allowed, but its origin must not be production Web.
+   URL on the same hostname as preview `HOSTED_WEB_BASE_URL`; its callback path
+   is allowed, but a separate callback hostname is not.
 3. Create only the staging R2 bucket or buckets, with the required location,
    and issue the direct-R2 key against those buckets only. Apply the checked-in
    lifecycle rules before stateful use.
@@ -880,7 +901,8 @@ Preflight runs before artifact rendering, secret sync, lifecycle changes, or
 Worker deployment and rejects a mismatched crypto/OIDC context, unscoped
 Worker or R2 name, non-staging Worker/Web origin, production Web alias, local
 or private-network origin, private-network DNS resolution, Worker/Web
-self-routing, or a non-staging device-sync callback. Preview deploys never run
+self-routing, or a device-sync callback whose hostname differs from hosted Web.
+Preview deploys never run
 the paid live-model deploy smoke; endpoint, managed-container, runner-bundle,
 assistant CLI, and immediate direct-R2 smoke still run.
 

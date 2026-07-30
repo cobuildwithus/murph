@@ -486,102 +486,68 @@ export function upsertConnectionSource(
   database: DatabaseSync,
   input: UpsertDeviceConnectionSourceInput,
 ): StoredDeviceConnectionSource {
-  return withImmediateTransaction(database, () => {
-    const normalized = normalizeSourceInput(input);
-    const existing = getConnectionSourceByInstanceKey(
-      database,
-      normalized.connectionId,
-      normalized.sourceInstanceKey,
+  return withImmediateTransaction(database, () =>
+    upsertConnectionSourceInTransaction(database, input)
+  );
+}
+
+export function upsertConnectionSourceInTransaction(
+  database: DatabaseSync,
+  input: UpsertDeviceConnectionSourceInput,
+): StoredDeviceConnectionSource {
+  const normalized = normalizeSourceInput(input);
+  const existing = getConnectionSourceByInstanceKey(
+    database,
+    normalized.connectionId,
+    normalized.sourceInstanceKey,
+  );
+  const displayName = normalized.displayName !== undefined
+    ? normalized.displayName
+    : existing?.displayName ?? null;
+  const resourceAvailabilitySummaryJson = normalized.resourceAvailabilitySummaryJson
+    ?? stringifyJson(existing?.resourceAvailabilitySummary ?? {});
+  const lastErrorCode = hasOwnInputProperty(input, "lastErrorCode")
+    ? normalized.lastErrorCode
+    : normalized.status === "error"
+      ? existing?.lastErrorCode ?? null
+      : null;
+  const lastErrorMessage = hasOwnInputProperty(input, "lastErrorMessage")
+    ? normalized.lastErrorMessage
+    : normalized.status === "error"
+      ? existing?.lastErrorMessage ?? null
+      : null;
+
+  if (existing) {
+    const firstSeenAt = earliestIsoTimestamp(
+      existing.firstSeenAt,
+      normalized.firstSeenAt,
     );
-    const displayName = normalized.displayName !== undefined
-      ? normalized.displayName
-      : existing?.displayName ?? null;
-    const resourceAvailabilitySummaryJson = normalized.resourceAvailabilitySummaryJson
-      ?? stringifyJson(existing?.resourceAvailabilitySummary ?? {});
-    const lastErrorCode = hasOwnInputProperty(input, "lastErrorCode")
-      ? normalized.lastErrorCode
-      : normalized.status === "error"
-        ? existing?.lastErrorCode ?? null
-        : null;
-    const lastErrorMessage = hasOwnInputProperty(input, "lastErrorMessage")
-      ? normalized.lastErrorMessage
-      : normalized.status === "error"
-        ? existing?.lastErrorMessage ?? null
-        : null;
 
-    if (existing) {
-      const firstSeenAt = earliestIsoTimestamp(
-        existing.firstSeenAt,
-        normalized.firstSeenAt,
-      );
-
-      database.prepare(`
-        update device_connection_source
-        set source_provider_slug = ?,
-            display_name = ?,
-            status = ?,
-            resource_availability_summary_json = ?,
-            last_error_code = ?,
-            last_error_message = ?,
-            first_seen_at = ?,
-            last_seen_at = ?,
-            last_data_at = ?,
-            updated_at = ?
-        where id = ?
-      `).run(
-        normalized.sourceProviderSlug,
-        displayName,
-        normalized.status,
-        resourceAvailabilitySummaryJson,
-        lastErrorCode,
-        lastErrorMessage,
-        firstSeenAt,
-        normalized.lastSeenAt,
-        normalized.lastDataAt === undefined ? existing.lastDataAt : normalized.lastDataAt,
-        normalized.lastSeenAt,
-        existing.id,
-      );
-
-      return getConnectionSourceByInstanceKey(
-        database,
-        normalized.connectionId,
-        normalized.sourceInstanceKey,
-      )!;
-    }
-
-    const id = generatePrefixedId("dcs");
     database.prepare(`
-      insert into device_connection_source (
-        id,
-        connection_id,
-        source_instance_key,
-        source_provider_slug,
-        display_name,
-        status,
-        resource_availability_summary_json,
-        last_error_code,
-        last_error_message,
-        first_seen_at,
-        last_seen_at,
-        last_data_at,
-        created_at,
-        updated_at
-      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      update device_connection_source
+      set source_provider_slug = ?,
+          display_name = ?,
+          status = ?,
+          resource_availability_summary_json = ?,
+          last_error_code = ?,
+          last_error_message = ?,
+          first_seen_at = ?,
+          last_seen_at = ?,
+          last_data_at = ?,
+          updated_at = ?
+      where id = ?
     `).run(
-      id,
-      normalized.connectionId,
-      normalized.sourceInstanceKey,
       normalized.sourceProviderSlug,
       displayName,
       normalized.status,
       resourceAvailabilitySummaryJson,
       lastErrorCode,
       lastErrorMessage,
-      normalized.firstSeenAt,
+      firstSeenAt,
       normalized.lastSeenAt,
-      normalized.lastDataAt ?? null,
-      normalized.firstSeenAt,
+      normalized.lastDataAt === undefined ? existing.lastDataAt : normalized.lastDataAt,
       normalized.lastSeenAt,
+      existing.id,
     );
 
     return getConnectionSourceByInstanceKey(
@@ -589,7 +555,48 @@ export function upsertConnectionSource(
       normalized.connectionId,
       normalized.sourceInstanceKey,
     )!;
-  });
+  }
+
+  const id = generatePrefixedId("dcs");
+  database.prepare(`
+    insert into device_connection_source (
+      id,
+      connection_id,
+      source_instance_key,
+      source_provider_slug,
+      display_name,
+      status,
+      resource_availability_summary_json,
+      last_error_code,
+      last_error_message,
+      first_seen_at,
+      last_seen_at,
+      last_data_at,
+      created_at,
+      updated_at
+    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    normalized.connectionId,
+    normalized.sourceInstanceKey,
+    normalized.sourceProviderSlug,
+    displayName,
+    normalized.status,
+    resourceAvailabilitySummaryJson,
+    lastErrorCode,
+    lastErrorMessage,
+    normalized.firstSeenAt,
+    normalized.lastSeenAt,
+    normalized.lastDataAt ?? null,
+    normalized.firstSeenAt,
+    normalized.lastSeenAt,
+  );
+
+  return getConnectionSourceByInstanceKey(
+    database,
+    normalized.connectionId,
+    normalized.sourceInstanceKey,
+  )!;
 }
 
 /**

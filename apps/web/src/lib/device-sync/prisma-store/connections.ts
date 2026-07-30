@@ -5,7 +5,7 @@ import {
 } from "@murphai/device-syncd/hosted-runtime";
 import {
   isDeviceSyncDisconnectInProgress,
-  isEstablishedDeviceSyncConnection,
+  shouldPreserveEstablishedDeviceSyncConnection,
   toRedactedPublicDeviceSyncAccount,
 } from "@murphai/device-syncd/public-account";
 import {
@@ -200,10 +200,12 @@ export class PrismaHostedConnectionStore {
         }
 
         if (
-          input.reuseEstablishedConnection === true
+          shouldPreserveEstablishedDeviceSyncConnection(
+            existing,
+            input.existingAccountPolicy,
+          )
           && ownerId
           && existing.userId === ownerId
-          && isEstablishedDeviceSyncConnection(existing)
         ) {
           return {
             record: existing,
@@ -366,7 +368,12 @@ export class PrismaHostedConnectionStore {
       });
     }
 
-    if (input.reuseEstablishedConnection === true && isEstablishedDeviceSyncConnection(existing)) {
+    if (
+      shouldPreserveEstablishedDeviceSyncConnection(
+        existing,
+        input.existingAccountPolicy,
+      )
+    ) {
       return {
         account: existing,
         previousAccount: existing,

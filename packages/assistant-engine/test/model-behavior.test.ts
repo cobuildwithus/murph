@@ -1284,8 +1284,15 @@ describe('assistant local PDF evidence guidance', () => {
     expect(prompt).toContain(
       'Use `murph.device` to list accounts, create a real connection link, or queue reconciliation',
     )
+    expect(prompt).toContain('Murph iOS app:')
     expect(prompt).toContain(
-      'Apple Watch/iPhone/Apple Health: send https://apps.apple.com/us/app/murph-ai/id6786145859; download/open Murph',
+      'Canonical public App Store listing: https://apps.apple.com/us/app/murph-ai/id6786145859',
+    )
+    expect(prompt).toContain(
+      'It is not a TestFlight invitation; do not search for another listing or claim the public app cannot be verified.',
+    )
+    expect(prompt).toContain(
+      'Apple Watch/iPhone/Apple Health and WHOOP relay handoffs: apply the app-link rule above, then after opening Murph, sign in and connect Apple Health.',
     )
     expect(prompt).toContain('Apple Health relay:')
     expect(prompt).toContain('WHOOP limits third-party access')
@@ -1368,9 +1375,10 @@ describe('assistant local PDF evidence guidance', () => {
 
     expect(readHostedWearableProviderList(prompt)).toBeNull()
     expect(prompt).not.toContain('Hosted wearable connection links are available')
+    expect(prompt).toContain('Murph iOS app:')
     expect(prompt).toContain('Apple Health relay:')
     expect(prompt).toContain(
-      'Apple Watch/iPhone/Apple Health: send https://apps.apple.com/us/app/murph-ai/id6786145859; download/open Murph',
+      'Apple Watch/iPhone/Apple Health and WHOOP relay handoffs: apply the app-link rule above, then after opening Murph, sign in and connect Apple Health.',
     )
     expect(prompt).toContain('No documented WHOOP settings deeplink; never invent one')
     expect(prompt).toContain('WHOOP limits third-party access')
@@ -2502,7 +2510,7 @@ describe('assistant Murph onboarding guidance', () => {
 })
 
 describe('assistant conversation scope', () => {
-  it('keeps personal settings and authorization surfaces out of group prompts', () => {
+  it('allows the public iOS download while keeping personal setup out of group prompts', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       assistantCliContract: [
         'vault-cli device connect <provider> --format json',
@@ -2533,7 +2541,29 @@ describe('assistant conversation scope', () => {
     expect(prompt).not.toContain('vault-cli assistant style set')
     expect(prompt).not.toContain('vault-cli device connect <provider>')
     expect(prompt).not.toContain('Never invent invite/share/auth/wearable URLs')
-    expect(prompt).not.toContain('apps.apple.com/us/app/murph-ai')
+    expect(prompt).toContain('Murph iOS app:')
+    expect(prompt).toContain(
+      'https://apps.apple.com/us/app/murph-ai/id6786145859',
+    )
+    expect(prompt).toContain(
+      'App-link rule: when someone asks how to get, download, or install the Murph iPhone/iOS app, answer directly with this listing.',
+    )
+    expect(prompt).toContain(
+      'In a group, this is ordinary public product information, not a personal account, settings, authorization, or wearable-connect link.',
+    )
+    expect(prompt).toContain(
+      'Do not send personal settings, wearable-connect, OAuth, billing, account, or browser-handoff links from this room.',
+    )
+    expect(prompt).toContain(
+      'Separately, the canonical public Murph iOS App Store listing named in this prompt may be shared when the app-link rule above applies',
+    )
+    expect(prompt).not.toContain(
+      'when someone asks how to get or install the app',
+    )
+    expect(prompt).toContain(
+      'is the requested canonical public Murph iOS App Store listing',
+    )
+    expect(prompt).not.toContain('Apple Health relay:')
     expect(prompt).not.toContain('WHOOP limits third-party access')
     expect(prompt).not.toContain('Computer-use tools:')
     expect(prompt).not.toContain('Phone calls:')

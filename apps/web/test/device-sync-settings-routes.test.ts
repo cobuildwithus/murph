@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   listConnections: vi.fn(),
   listConnectionsForUser: vi.fn(),
   probeRest: vi.fn(),
+  prepareConnectionStart: vi.fn(),
   prismaClient: {} as {
     deviceConnection: { findMany: ReturnType<typeof vi.fn> };
     deviceConnectionSource: { findMany: ReturnType<typeof vi.fn> };
@@ -272,6 +273,10 @@ describe("device sync settings routes", () => {
     vi.stubEnv("JUNCTION_PROVIDER_FILTER", "");
     vi.stubEnv("JUNCTION_REGION", "");
     vi.stubEnv("DEVICE_SYNC_BACKFILL_DIAGNOSTIC_ENABLED", "true");
+    vi.stubEnv(
+      "DEVICE_SYNC_PUBLIC_BASE_URL",
+      "https://join.example.test/api/device-sync",
+    );
     mocks.prismaClient.deviceConnection = {
       findMany: mocks.findManyDeviceConnections,
     };
@@ -286,6 +291,7 @@ describe("device sync settings routes", () => {
       member: {
         id: "member_123",
       },
+      sessionId: "session_123",
     });
     mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
       createBrowserConnectionId: mocks.createBrowserConnectionId,
@@ -303,6 +309,7 @@ describe("device sync settings routes", () => {
     });
     mocks.createHostedDeviceSyncPublicIngressService.mockReturnValue({
       disconnectConnection: mocks.disconnectConnection,
+      prepareConnectionStart: mocks.prepareConnectionStart,
       startConnection: mocks.startConnection,
     });
     mocks.createBrowserConnectionId.mockImplementation((connectionId: string) =>
@@ -452,6 +459,7 @@ describe("device sync settings routes", () => {
     });
     mocks.startConnection.mockResolvedValue({
       authorizationUrl: "https://provider.example.test/oauth/start",
+      state: "callback_state_1234567890",
     });
     mocks.disconnectConnection.mockResolvedValue({
       warning: {
@@ -1261,6 +1269,15 @@ describe("device sync settings routes", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("set-cookie")).toContain("murph-device-sync-oura=");
+    expect(mocks.prepareConnectionStart).toHaveBeenCalledWith(
+      "member_123",
+      expect.objectContaining({
+        connectSourceId: "oura",
+        connectTarget: "oura",
+        provider: "oura",
+      }),
+    );
     expect(mocks.startConnection).toHaveBeenCalledWith(
       "member_123",
       "oura",
