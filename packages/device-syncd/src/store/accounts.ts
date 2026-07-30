@@ -5,6 +5,7 @@ import { withImmediateTransaction } from "@murphai/runtime-state/node";
 import { deviceSyncError } from "../errors.ts";
 import { mergeGuardedJunctionHistoricalBackfillMetadata } from "../junction-historical-backfill-progress.ts";
 import { resolveDeviceProviderMatchKeys } from "../provider-match.ts";
+import { shouldPreserveEstablishedDeviceSyncConnection } from "../public-account.ts";
 import {
   generatePrefixedId,
   isBlockedStoredDeviceSyncMetadataKey,
@@ -23,6 +24,7 @@ import type {
   StoredDeviceSyncAccount,
   ListDeviceSyncAccountsInput,
   UpsertPublicDeviceSyncExistingAccountGuard,
+  UpsertPublicDeviceSyncExistingAccountPolicy,
 } from "../types.ts";
 
 type SqliteRow = Record<string, unknown>;
@@ -48,6 +50,7 @@ export interface AccountUpsertInput {
   credential?: StorageDeviceAccountCredential;
   metadata?: Record<string, unknown>;
   existingAccountGuard?: UpsertPublicDeviceSyncExistingAccountGuard | null;
+  existingAccountPolicy?: UpsertPublicDeviceSyncExistingAccountPolicy;
   connectedAt: string;
   nextReconcileAt?: string | null;
 }
@@ -892,6 +895,14 @@ export function upsertAccount(
 
     if (existing) {
       assertAccountUpsertExistingGuard(existing, input.existingAccountGuard ?? null);
+      if (
+        shouldPreserveEstablishedDeviceSyncConnection(
+          existing,
+          input.existingAccountPolicy ?? "replace",
+        )
+      ) {
+        return existing;
+      }
       const credential = resolveAccountCredentialInput(input);
       const metadata = input.provider === "junction" && input.existingAccountGuard
         ? mergeGuardedJunctionHistoricalBackfillMetadata({

@@ -1,21 +1,27 @@
 import path from "node:path";
 
 import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@murphai/runtime-state/node/runtime-paths";
+import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
 
 import {
   createDeviceSyncService,
   SqliteDeviceSyncStore,
 } from "@murphai/device-syncd/service";
+import { deviceSyncError } from "@murphai/device-syncd/errors";
 
 import type {
   CreateDeviceSyncServiceInput,
   DeviceSyncService,
 } from "@murphai/device-syncd/service";
+import type { ProviderJobConnectionSource } from "@murphai/device-syncd/types";
+import type { HostedRuntimeDeviceSyncPort } from "./hosted-runtime/platform.ts";
 
 const storeByService = new WeakMap<DeviceSyncService, SqliteDeviceSyncStore>();
 
 export function createHostedRuntimeDeviceSyncService(
-  input: Omit<CreateDeviceSyncServiceInput, "store">,
+  input: Omit<CreateDeviceSyncServiceInput, "listConnectionSourcesForJob" | "store"> & {
+    deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
+  },
 ): DeviceSyncService {
   const store = new SqliteDeviceSyncStore(
     input.config.stateDatabasePath
@@ -23,8 +29,19 @@ export function createHostedRuntimeDeviceSyncService(
   );
 
   try {
+    const { deviceSyncPort, ...serviceInput } = input;
     const service = createDeviceSyncService({
-      ...input,
+      ...serviceInput,
+      ...(deviceSyncPort
+        ? {
+            listConnectionSourcesForJob: async (sourceInput) =>
+              listHostedJobConnectionSources({
+                ...sourceInput,
+                deviceSyncPort,
+                store,
+              }),
+          }
+        : {}),
       store,
     });
     storeByService.set(service, store);
@@ -33,6 +50,81 @@ export function createHostedRuntimeDeviceSyncService(
     store.close();
     throw error;
   }
+}
+
+async function listHostedJobConnectionSources(input: {
+  accountId: string;
+  deviceSyncPort: HostedRuntimeDeviceSyncPort;
+  provider: string;
+  signal?: AbortSignal;
+  sourceProviderSlug?: string | null;
+  status?: ProviderJobConnectionSource["status"] | null;
+  store: SqliteDeviceSyncStore;
+}): Promise<ProviderJobConnectionSource[]> {
+  const hostedConnectionId = input.store.getHostedConnectionIdForAccountId(input.accountId);
+  if (!hostedConnectionId) {
+    throw hostedSourceStateUnavailable();
+  }
+
+  let snapshot: Awaited<ReturnType<HostedRuntimeDeviceSyncPort["fetchSnapshot"]>>;
+  try {
+    snapshot = await input.deviceSyncPort.fetchSnapshot({
+      connectionId: hostedConnectionId,
+      includeCredentialMaterial: false,
+      signal: input.signal ?? null,
+    });
+  } catch (error) {
+    if (input.signal?.aborted) {
+      throw input.signal.reason ?? error;
+    }
+    throw hostedSourceStateUnavailable(error);
+  }
+
+  const connection = snapshot.connections.find(
+    (entry) => entry.connection.id === hostedConnectionId,
+  );
+  if (!connection || connection.sources === undefined) {
+    throw hostedSourceStateUnavailable();
+  }
+
+  const localSources = input.store.listConnectionSources({
+    connectionId: input.accountId,
+  });
+  return connection.sources
+    .filter((source) =>
+      (!input.sourceProviderSlug || source.sourceProviderSlug === input.sourceProviderSlug)
+      && (!input.status || source.status === input.status)
+    )
+    .map((source) => {
+      const localSource = localSources.find(
+        (candidate) => candidate.sourceProviderSlug === source.sourceProviderSlug,
+      );
+      const sourceInstanceKey = localSource?.sourceInstanceKey
+        ?? (
+          input.provider === "junction"
+            ? buildJunctionProviderSourceInstanceKey({
+                connectionId: input.accountId,
+                sourceProviderSlug: source.sourceProviderSlug,
+              })
+            : null
+        )
+        ?? source.sourceInstanceKey;
+
+      return {
+        ...source,
+        ...(sourceInstanceKey ? { sourceInstanceKey } : {}),
+      };
+    });
+}
+
+function hostedSourceStateUnavailable(cause?: unknown) {
+  return deviceSyncError({
+    code: "HOSTED_DEVICE_SYNC_SOURCE_STATE_UNAVAILABLE",
+    message: "Current hosted device source state is unavailable. Retry shortly.",
+    retryable: true,
+    httpStatus: 503,
+    ...(cause === undefined ? {} : { cause }),
+  });
 }
 
 export function requireHostedRuntimeDeviceSyncStore(service: DeviceSyncService): SqliteDeviceSyncStore {

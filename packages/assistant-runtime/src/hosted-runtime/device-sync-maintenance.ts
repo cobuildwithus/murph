@@ -98,6 +98,7 @@ export async function runHostedDeviceSyncPass(
   const startedAtMs = Date.now();
   const service = createHostedDeviceSyncRuntime({
     deviceSyncConfig,
+    deviceSyncPort,
     platformEnv,
     shouldYield,
     vaultRoot,
@@ -1120,6 +1121,7 @@ function isHostedDeviceSyncSafeRuntimeLogSummary(value: string): boolean {
 
 function createHostedDeviceSyncRuntime(input: {
   deviceSyncConfig: HostedAssistantRuntimeDeviceSyncConfig | null;
+  deviceSyncPort: HostedRuntimeDeviceSyncPort | null | undefined;
   platformEnv: Readonly<Record<string, string>>;
   shouldYield?: (() => boolean) | null;
   vaultRoot: string;
@@ -1142,6 +1144,7 @@ function createHostedDeviceSyncRuntime(input: {
   }
 
   return createHostedRuntimeDeviceSyncService({
+    deviceSyncPort: input.deviceSyncPort,
     secret: input.deviceSyncConfig.secret,
     config: {
       publicBaseUrl: input.deviceSyncConfig.publicBaseUrl,

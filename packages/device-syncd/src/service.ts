@@ -10,12 +10,16 @@ import {
   isJunctionCompanionHrvRmssdJob,
   JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE,
 } from "./junction-resources.ts";
+import { buildJunctionProviderSourceInstanceKey } from "./config/junction-connect-sources.ts";
 import {
   sanitizeHostedRuntimeDiagnosticText,
   sanitizeHostedRuntimeErrorText,
 } from "./hosted-runtime.ts";
 import { createDeviceSyncPublicIngress, DeviceSyncPublicIngress } from "./public-ingress.ts";
-import { toRedactedPublicDeviceSyncAccount } from "./public-account.ts";
+import {
+  isDeviceSyncConnectionSetupPending,
+  toRedactedPublicDeviceSyncAccount,
+} from "./public-account.ts";
 import { createDeviceSyncRegistry } from "./registry.ts";
 import {
   addMilliseconds,
@@ -59,6 +63,7 @@ import type {
   HandleWebhookResult,
   ListDeviceSyncAccountsInput,
   ProviderAuthTokens,
+  ProviderJobConnectionSource,
   ProviderJobContext,
   ProviderJobBatchDescriptor,
   ProviderSnapshotImportReceipt,
@@ -134,6 +139,15 @@ export interface CreateDeviceSyncServiceInput {
   providers?: readonly DeviceSyncProvider[];
   registry?: DeviceSyncRegistry;
   importer?: DeviceSyncImporterPort;
+  // Hosted runtimes override job-time reads so Web remains the source of truth;
+  // local runtimes continue reading the service's SQLite store.
+  listConnectionSourcesForJob?(input: {
+    accountId: string;
+    provider: string;
+    signal?: AbortSignal;
+    sourceProviderSlug?: string | null;
+    status?: ProviderJobConnectionSource["status"] | null;
+  }): ProviderJobConnectionSource[] | Promise<ProviderJobConnectionSource[]>;
   store?: SqliteDeviceSyncStore;
   clock?: DeviceSyncClock;
   schedulerMutex?: DeviceSyncTickMutex;
@@ -213,6 +227,7 @@ class DeviceSyncServiceController {
 
   private readonly logger: DeviceSyncLogger;
   private readonly importer: DeviceSyncImporterPort;
+  private readonly listConnectionSourcesForJob: CreateDeviceSyncServiceInput["listConnectionSourcesForJob"];
   private readonly store: SqliteDeviceSyncStore;
   private readonly publicIngress: DeviceSyncPublicIngress;
   private readonly codec: ReturnType<typeof createSecretCodec>;
@@ -241,6 +256,7 @@ class DeviceSyncServiceController {
     this.allowedReturnOrigins = normalizeOriginList(input.config.allowedReturnOrigins);
     this.registry = input.registry ?? createDeviceSyncRegistry(input.providers ?? []);
     this.importer = input.importer ?? createDefaultImporterPort();
+    this.listConnectionSourcesForJob = input.listConnectionSourcesForJob;
     this.logger = input.config.log ?? console;
     this.clock = input.clock ?? defaultDeviceSyncClock;
     this.schedulerMutex = input.schedulerMutex ?? createDeviceSyncTickMutex();
@@ -288,6 +304,7 @@ class DeviceSyncServiceController {
               ),
               metadata: record.metadata,
               existingAccountGuard: record.existingAccountGuard ?? null,
+              existingAccountPolicy: record.existingAccountPolicy,
               connectedAt: record.connectedAt,
               nextReconcileAt: record.nextReconcileAt ?? null,
             }),
@@ -313,6 +330,8 @@ class DeviceSyncServiceController {
           const account = this.store.getAccountByExternalAccount(provider, externalAccountId);
           return account ? this.toPublicAccount(account) : null;
         },
+        upsertConnectionSource: (input) => this.store.upsertConnectionSource(input),
+        listConnectionSources: (input) => this.store.listConnectionSources(input),
         claimWebhookTrace: (record) => this.store.claimWebhookTrace(record),
         completeWebhookTrace: (provider, traceId, claimToken) =>
           this.store.completeWebhookTrace(provider, traceId, claimToken),
@@ -325,9 +344,38 @@ class DeviceSyncServiceController {
       hooks: {
         runConnectionMutation: ({ provider }, operation) =>
           this.runProviderConnectionMutation(provider, operation),
-        onConnectionEstablished: async ({ account, connection, provider }) => {
-          this.enqueueJobs(account, connection.initialJobs ?? []);
+        onConnectionEstablished: async ({
+          account,
+          connection,
+          now,
+          provider,
+          sourceProviderSlug,
+        }) => {
+          const sourceInstanceKey = provider.provider === "junction" && sourceProviderSlug
+            ? buildJunctionProviderSourceInstanceKey({
+                connectionId: account.id,
+                sourceProviderSlug,
+              })
+            : null;
+          this.store.commitConnectionEstablished({
+            accountId: account.id,
+            jobs: this.normalizeJobsForEnqueue(account, connection.initialJobs ?? []),
+            provider: account.provider,
+            source: sourceInstanceKey && sourceProviderSlug
+              ? {
+                  connectionId: account.id,
+                  sourceInstanceKey,
+                  sourceProviderSlug,
+                  status: "connected",
+                  firstSeenAt: now,
+                  lastSeenAt: now,
+                }
+              : null,
+          });
           await this.ensureWebhookAdminUpkeepAfterConnectionEstablished(provider);
+          return {
+            sourceAdmissionCommitted: true,
+          };
         },
         onWebhookAccepted: async ({ account, claimToken, traceId, webhook }) => {
           this.store.enqueueJobsAndCompleteWebhookTrace({
@@ -487,6 +535,18 @@ class DeviceSyncServiceController {
   queueManualReconcile(accountId: string): QueueManualReconcileResult {
     const account = this.requireStoredAccount(accountId);
 
+    if (
+      account.status === "active"
+      && isDeviceSyncConnectionSetupPending(account)
+    ) {
+      throw deviceSyncError({
+        code: "CONNECTION_SETUP_PENDING",
+        message: "Finish device sync setup before reconciling this account.",
+        retryable: false,
+        httpStatus: 409,
+      });
+    }
+
     if (account.status === "disconnected") {
       throw deviceSyncError({
         code: "ACCOUNT_DISCONNECTED",
@@ -614,7 +674,12 @@ class DeviceSyncServiceController {
 
       try {
         for (const account of this.store.listAccounts()) {
-          if (account.status !== "active" || !account.nextReconcileAt || Date.parse(account.nextReconcileAt) > Date.parse(now)) {
+          if (
+            account.status !== "active"
+            || isDeviceSyncConnectionSetupPending(account)
+            || !account.nextReconcileAt
+            || Date.parse(account.nextReconcileAt) > Date.parse(now)
+          ) {
             continue;
           }
 
@@ -738,6 +803,20 @@ class DeviceSyncServiceController {
     }
 
     const preservesAcceptedCompanionHrv = isJunctionCompanionHrvRmssdJob(job);
+
+    if (
+      storedAccount.status === "active"
+      && isDeviceSyncConnectionSetupPending(storedAccount)
+      && !preservesAcceptedCompanionHrv
+    ) {
+      failClaimedJob(
+        "CONNECTION_SETUP_PENDING",
+        "Device sync setup must finish before queued jobs can run.",
+        null,
+        false,
+      );
+      return finishPass();
+    }
 
     if (storedAccount.status === "disconnected" && !preservesAcceptedCompanionHrv) {
       const completed = this.store.completeJobIfOwned(job.id, this.workerId, currentNow());
@@ -916,12 +995,21 @@ class DeviceSyncServiceController {
             connectionId: currentAccount.id,
           });
         },
-        listConnectionSources: (input = {}) => {
+        listConnectionSources: async (input = {}) => {
           ensureExecutionActive();
-          return this.store.listConnectionSources({
-            ...input,
-            connectionId: currentAccount.id,
-          });
+          const sources = this.listConnectionSourcesForJob
+            ? await this.listConnectionSourcesForJob({
+                accountId: currentAccount.id,
+                provider: currentAccount.provider,
+                signal: jobAbortController.signal,
+                ...input,
+              })
+            : this.store.listConnectionSources({
+                ...input,
+                connectionId: currentAccount.id,
+              });
+          ensureExecutionActive();
+          return sources;
         },
         refreshAccountTokens: async () => {
           ensureExecutionActive();

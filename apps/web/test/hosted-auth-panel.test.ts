@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   hostedPhoneAuthProps: null as {
     interactionGated?: boolean;
     onAuthCancel?: () => void;
+    onAuthQueue?: () => boolean;
+    onAuthQueueCancel?: () => void;
     onAuthStart?: () => boolean;
     onAuthenticated?: (input: { authMethod: "phone" }) => Promise<void> | void;
     onCodeSent?: () => void;
@@ -55,6 +57,13 @@ vi.mock("@privy-io/react-auth", () => ({
     };
   },
   useLoginWithTelegram() {
+    if (typeof window !== "undefined") {
+      Reflect.set(window, "Telegram", {
+        Login: {
+          auth: () => {},
+        },
+      });
+    }
     return {
       login: mocks.loginWithTelegram,
       state: { status: "initial" },
@@ -113,6 +122,8 @@ vi.mock("@/src/components/hosted-onboarding/hosted-phone-auth", () => ({
     disableSignup?: boolean;
     interactionGated?: boolean;
     onAuthCancel?: () => void;
+    onAuthQueue?: () => boolean;
+    onAuthQueueCancel?: () => void;
     onAuthStart?: () => boolean;
     onAuthenticated?: unknown;
     onCodeSent?: () => void;
@@ -198,6 +209,299 @@ afterEach(async () => {
     await cleanupRender();
     cleanupRender = null;
   }
+});
+
+test("HostedAuthPanel keeps a pre-ready method queued and dismissible until its provider call starts", async () => {
+  const onPrivyWaitChange = vi.fn();
+  const onViewChange = vi.fn();
+  mocks.usePrivy.mockReturnValue({
+    authenticated: false,
+    logout: vi.fn(),
+    ready: false,
+  });
+
+  const { cleanup, container } = await renderClientComponent(
+    createElement(HostedAuthPanel, {
+      methods: ["phone", "telegram", "email"],
+      onPrivyWaitChange,
+      onViewChange,
+    }),
+  );
+  cleanupRender = cleanup;
+
+  const readAlternateButton = (label: string) =>
+    Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.trim() === label,
+    ) as HTMLButtonElement | undefined;
+
+  expect(readAlternateButton("Telegram")?.disabled).toBe(false);
+  expect(readAlternateButton("Email")?.disabled).toBe(false);
+  expect(mocks.hostedPhoneAuthProps?.interactionGated).toBe(false);
+  expect(onViewChange).toHaveBeenLastCalledWith("auth");
+
+  let queued = false;
+  await act(async () => {
+    queued = mocks.hostedPhoneAuthProps?.onAuthQueue?.() ?? false;
+  });
+
+  expect(queued).toBe(true);
+  expect(onPrivyWaitChange).toHaveBeenLastCalledWith(true);
+  expect(onViewChange).toHaveBeenLastCalledWith("auth");
+  expect(readAlternateButton("Telegram")?.disabled).toBe(true);
+  expect(readAlternateButton("Email")?.disabled).toBe(true);
+  expect(mocks.hostedPhoneAuthProps?.interactionGated).toBe(false);
+
+  let started = false;
+  await act(async () => {
+    started = mocks.hostedPhoneAuthProps?.onAuthStart?.() ?? false;
+  });
+
+  expect(started).toBe(true);
+  expect(onPrivyWaitChange).toHaveBeenLastCalledWith(false);
+  expect(onViewChange).toHaveBeenLastCalledWith("auth-active");
+
+  await act(async () => {
+    mocks.hostedPhoneAuthProps?.onAuthCancel?.();
+  });
+
+  expect(onViewChange).toHaveBeenLastCalledWith("auth");
+  expect(readAlternateButton("Telegram")?.disabled).toBe(false);
+  expect(readAlternateButton("Email")?.disabled).toBe(false);
+});
+
+test("HostedAuthPanel retires Telegram continuation when phone takes over", async () => {
+  let privyReady = false;
+  mocks.usePrivy.mockImplementation(() => ({
+    authenticated: false,
+    logout: vi.fn(),
+    ready: privyReady,
+  }));
+  const renderPanel = () => createElement(HostedAuthPanel, {
+    methods: ["phone", "telegram", "email"],
+  });
+  const rendered = await renderClientComponent(renderPanel(), {
+    requireButton: false,
+  });
+  cleanupRender = rendered.cleanup;
+
+  const readTelegramButton = () =>
+    Array.from(rendered.container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Telegram"),
+    ) as HTMLButtonElement | undefined;
+  const telegramButton = readTelegramButton();
+  expect(telegramButton).toBeTruthy();
+
+  await act(async () => {
+    telegramButton?.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  expect(telegramButton?.textContent).toContain("Connecting...");
+  expect(mocks.loginWithTelegram).not.toHaveBeenCalled();
+
+  privyReady = true;
+  await rendered.rerender(renderPanel());
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
+  expect(telegramButton?.textContent).toContain(
+    "Continue with Telegram",
+  );
+  expect(rendered.container.textContent).toContain(
+    "Telegram is ready. Continue to open sign in.",
+  );
+
+  let phoneStarted = false;
+  await act(async () => {
+    phoneStarted = mocks.hostedPhoneAuthProps?.onAuthStart?.() ?? false;
+  });
+  expect(phoneStarted).toBe(true);
+
+  await act(async () => {
+    mocks.hostedPhoneAuthProps?.onAuthCancel?.();
+    await Promise.resolve();
+  });
+
+  expect(readTelegramButton()?.disabled).toBe(false);
+  expect(readTelegramButton()?.textContent).toBe("Telegram");
+  expect(rendered.container.textContent).not.toContain(
+    "Telegram is ready. Continue to open sign in.",
+  );
+  expect(mocks.loginWithTelegram).not.toHaveBeenCalled();
+});
+
+test("HostedAuthPanel discards queued email when Privy hydrates an existing session", async () => {
+  let authenticated = false;
+  let ready = false;
+  let user: { linkedAccounts?: unknown } | null = null;
+  mocks.usePrivy.mockImplementation(() => ({
+    authenticated,
+    logout: vi.fn(),
+    ready,
+  }));
+  mocks.useUser.mockImplementation(() => ({ user }));
+  const renderPanel = () => createElement(HostedAuthPanel, {
+    methods: ["phone", "telegram", "email"],
+  });
+  const rendered = await renderClientComponent(renderPanel(), {
+    requireButton: false,
+  });
+  cleanupRender = rendered.cleanup;
+
+  const emailButton = Array.from(
+    rendered.container.querySelectorAll("button"),
+  ).find((candidate) => candidate.textContent?.trim() === "Email");
+  await act(async () => {
+    emailButton?.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  const emailInput = rendered.container.querySelector(
+    'input[id="homepage-email-address"]',
+  ) as HTMLInputElement | null;
+  const emailForm = rendered.container.querySelector("form");
+  await act(async () => {
+    if (emailInput) {
+      setInputValue(rendered.window, emailInput, "login@example.com");
+    }
+    emailForm?.dispatchEvent(
+      new rendered.window.Event("submit", {
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
+
+  expect(mocks.sendCode).not.toHaveBeenCalled();
+  expect(rendered.container.textContent).toContain("Sending...");
+
+  authenticated = true;
+  ready = true;
+  user = {
+    linkedAccounts: [
+      {
+        address: "login@example.com",
+        latest_verified_at: 1741194420,
+        type: "email",
+      },
+    ],
+  };
+  await rendered.rerender(renderPanel());
+
+  expect(mocks.sendCode).not.toHaveBeenCalled();
+  expect(rendered.container.textContent).toContain("Continue with email");
+  expect(rendered.container.textContent).toContain(
+    "You're signed in as login@example.com.",
+  );
+  expect(rendered.container.textContent).not.toContain("Sending...");
+});
+
+test("HostedAuthPanel discards queued Telegram when Privy hydrates an existing session", async () => {
+  let authenticated = false;
+  let ready = false;
+  let user: { linkedAccounts?: unknown } | null = null;
+  mocks.usePrivy.mockImplementation(() => ({
+    authenticated,
+    logout: vi.fn(),
+    ready,
+  }));
+  mocks.useUser.mockImplementation(() => ({ user }));
+  const renderPanel = () => createElement(HostedAuthPanel, {
+    methods: ["phone", "telegram", "email"],
+  });
+  const rendered = await renderClientComponent(renderPanel(), {
+    requireButton: false,
+  });
+  cleanupRender = rendered.cleanup;
+
+  const telegramButton = Array.from(
+    rendered.container.querySelectorAll("button"),
+  ).find((candidate) => candidate.textContent?.trim() === "Telegram");
+  await act(async () => {
+    telegramButton?.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  expect(mocks.loginWithTelegram).not.toHaveBeenCalled();
+  expect(rendered.container.textContent).toContain("Connecting...");
+
+  authenticated = true;
+  ready = true;
+  user = {
+    linkedAccounts: [
+      {
+        id: "telegram-user-123",
+        type: "telegram",
+        username: "telegram_user",
+      },
+    ],
+  };
+  await rendered.rerender(renderPanel());
+
+  expect(mocks.loginWithTelegram).not.toHaveBeenCalled();
+  expect(rendered.container.textContent).toContain("Continue with Telegram");
+  expect(rendered.container.textContent).toContain(
+    "You're signed in as @telegram_user.",
+  );
+  expect(rendered.container.textContent).not.toContain("Telegram is ready.");
+});
+
+test("HostedAuthPanel restores phone session recovery after a queued alternate hydrates", async () => {
+  let authenticated = false;
+  let ready = false;
+  let user: { linkedAccounts?: unknown } | null = null;
+  mocks.usePrivy.mockImplementation(() => ({
+    authenticated,
+    logout: vi.fn(),
+    ready,
+  }));
+  mocks.useUser.mockImplementation(() => ({ user }));
+  const renderPanel = () => createElement(HostedAuthPanel, {
+    methods: ["phone", "telegram", "email"],
+  });
+  const rendered = await renderClientComponent(renderPanel(), {
+    requireButton: false,
+  });
+  cleanupRender = rendered.cleanup;
+
+  const telegramButton = Array.from(
+    rendered.container.querySelectorAll("button"),
+  ).find((candidate) => candidate.textContent?.trim() === "Telegram");
+  await act(async () => {
+    telegramButton?.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  expect(
+    rendered.container
+      .querySelector('[data-hosted-phone-auth="mounted"]')
+      ?.getAttribute("data-hosted-phone-auth-suppressed"),
+  ).toBe("yes");
+
+  authenticated = true;
+  ready = true;
+  user = {
+    linkedAccounts: [
+      {
+        number: "+14155552671",
+        type: "phone",
+      },
+    ],
+  };
+  await rendered.rerender(renderPanel());
+
+  expect(mocks.loginWithTelegram).not.toHaveBeenCalled();
+  expect(
+    rendered.container
+      .querySelector('[data-hosted-phone-auth="mounted"]')
+      ?.getAttribute("data-hosted-phone-auth-suppressed"),
+  ).toBe("no");
+  expect(rendered.container.textContent).not.toContain("Connecting...");
 });
 
 test("HostedAuthPanel keeps phone auth mounted after SMS code entry starts", async () => {

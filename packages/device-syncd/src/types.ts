@@ -1,5 +1,7 @@
 import type {
+  DeviceConnectionSourceResourceAvailabilitySummary,
   DeviceConnectionSourceRecord,
+  DeviceConnectionSourceStatus,
   DeviceSyncAccountSetupPhase,
   DeviceSyncAccountStatus,
   DeviceSyncAccountRecord,
@@ -268,6 +270,10 @@ export interface UpsertPublicDeviceSyncExistingAccountGuard {
   rejectIfDisconnected?: boolean;
 }
 
+export type UpsertPublicDeviceSyncExistingAccountPolicy =
+  | "replace"
+  | "preserve_established";
+
 export interface UpsertPublicDeviceSyncConnectionInput {
   ownerId?: string | null;
   provider: string;
@@ -281,7 +287,7 @@ export interface UpsertPublicDeviceSyncConnectionInput {
   tokens?: ProviderAuthTokens;
   metadata?: Record<string, unknown>;
   existingAccountGuard?: UpsertPublicDeviceSyncExistingAccountGuard | null;
-  reuseEstablishedConnection?: boolean;
+  existingAccountPolicy: UpsertPublicDeviceSyncExistingAccountPolicy;
   connectedAt: string;
   nextReconcileAt?: string | null;
 }
@@ -372,6 +378,14 @@ export interface DeviceSyncPublicIngressStore {
     provider: string,
     externalAccountId: string,
   ): PublicDeviceSyncAccount | null | Promise<PublicDeviceSyncAccount | null>;
+  upsertConnectionSource(
+    input: UpsertDeviceConnectionSourceInput,
+  ): Pick<PublicDeviceConnectionSource, "connectionId" | "sourceProviderSlug" | "status">
+    | Promise<Pick<PublicDeviceConnectionSource, "connectionId" | "sourceProviderSlug" | "status">>;
+  listConnectionSources(
+    input: ListDeviceConnectionSourcesInput,
+  ): Array<Pick<PublicDeviceConnectionSource, "connectionId" | "sourceProviderSlug" | "status">>
+    | Promise<Array<Pick<PublicDeviceConnectionSource, "connectionId" | "sourceProviderSlug" | "status">>>;
   getConnectionOwnerId?(accountId: string): string | null | Promise<string | null>;
   claimWebhookTrace(input: ClaimDeviceSyncWebhookTraceInput): DeviceSyncWebhookTraceClaimResult | Promise<DeviceSyncWebhookTraceClaimResult>;
   completeWebhookTrace(provider: string, traceId: string, claimToken: string): boolean | Promise<boolean>;
@@ -427,6 +441,7 @@ export interface ProviderCompleteConnectionContext {
   state: string;
   stateMetadata?: Record<string, unknown>;
   seededExternalAccountId?: string | null;
+  sourceProviderSlug?: string | null;
   query: URLSearchParams;
   now: string;
   grantedScopes: string[];
@@ -460,6 +475,8 @@ export interface ProviderWebhookResult {
   occurredAt?: string;
   // Keep top-level parser data narrow; provider-owned jobs may carry sanitized payload hints.
   resourceCategory?: string | null;
+  /** Source this provider event is attributable to, including lifecycle events. */
+  sourceProviderSlug?: string | null;
   /**
    * The connected source whose data this payload carried, when the provider can
    * name it. Ingress uses it to record per-source data arrival, which is the
@@ -491,6 +508,8 @@ export interface DeviceSyncIngressWebhook {
   occurredAt?: string;
   // Accepted and unknown ingress hooks receive stripped summary plus provider-owned job hints.
   resourceCategory?: string | null;
+  /** See `ProviderWebhookResult.sourceProviderSlug`. */
+  sourceProviderSlug?: string | null;
   /** See `ProviderWebhookResult.dataSourceProviderSlug`. */
   dataSourceProviderSlug?: string | null;
 }
@@ -585,6 +604,10 @@ export interface DeviceSyncPublicIngressConnectionEstablishedInput {
   now: string;
 }
 
+export interface DeviceSyncPublicIngressConnectionEstablishedResult {
+  sourceAdmissionCommitted: true;
+}
+
 export interface DeviceSyncPublicIngressWebhookAcceptedInput {
   account: PublicDeviceSyncAccount;
   claimToken: string;
@@ -627,7 +650,14 @@ export interface DeviceSyncPublicIngressHooks {
     input: DeviceSyncPublicIngressConnectionMutationInput,
     operation: () => Promise<Result>,
   ): Promise<Result>;
-  onConnectionEstablished?(input: DeviceSyncPublicIngressConnectionEstablishedInput): void | Promise<void>;
+  // This is the sole runtime-specific admission boundary. A Junction callback
+  // that names a source succeeds only when this hook atomically commits that
+  // source with its durable initial work and returns sourceAdmissionCommitted.
+  onConnectionEstablished?(
+    input: DeviceSyncPublicIngressConnectionEstablishedInput,
+  ): void
+    | DeviceSyncPublicIngressConnectionEstablishedResult
+    | Promise<void | DeviceSyncPublicIngressConnectionEstablishedResult>;
   onLevelDirtyWebhookAlreadySatisfied?(
     input: DeviceSyncPublicIngressWebhookAlreadySatisfiedInput,
   ): DeviceSyncPublicIngressWebhookAlreadySatisfiedResult
@@ -652,6 +682,16 @@ export interface ProviderSnapshotImportReceipt {
   durableDeliveryAccepted: boolean;
 }
 
+export interface ProviderJobConnectionSource {
+  displayName: string | null;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  resourceAvailabilitySummary?: DeviceConnectionSourceResourceAvailabilitySummary;
+  sourceInstanceKey?: string;
+  sourceProviderSlug: string;
+  status: DeviceConnectionSourceStatus;
+}
+
 export interface ProviderJobContext {
   account: DeviceSyncAccount;
   now: string;
@@ -666,7 +706,7 @@ export interface ProviderJobContext {
   ): DeviceConnectionSourceRecord | Promise<DeviceConnectionSourceRecord>;
   listConnectionSources?(
     input?: Omit<ListDeviceConnectionSourcesInput, "connectionId">,
-  ): DeviceConnectionSourceRecord[] | Promise<DeviceConnectionSourceRecord[]>;
+  ): ProviderJobConnectionSource[] | Promise<ProviderJobConnectionSource[]>;
   refreshAccountTokens(): Promise<DeviceSyncAccount>;
   disconnectAccount?(): Promise<void>;
   logger: DeviceSyncLogger;
@@ -742,6 +782,7 @@ export interface DeviceConnectionHandler {
   completeConnection(input: ProviderCompleteConnectionContext): Promise<ProviderConnectionResult>;
   refreshTokens?(account: DeviceSyncAccount, options?: { signal?: AbortSignal | null }): Promise<ProviderAuthTokens>;
   revokeAccess?(account: DeviceSyncAccount): Promise<void>;
+  revokeSourceAccess?(account: DeviceSyncAccount, sourceProviderSlug: string): Promise<void>;
 }
 
 export interface DeviceSdkSignInToken {
