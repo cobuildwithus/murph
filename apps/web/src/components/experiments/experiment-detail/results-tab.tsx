@@ -68,7 +68,18 @@ export function ResultsTab({
   const isStopped = experiment.status === "stopped";
   const isRunnable = isActive || isPaused;
   const hasPrivateRun = Boolean(experiment.privateRun);
-  const hasPersonalOutcomeData = experiment.signals.length > 0 || experiment.trends.length > 0;
+  const isStructuredReview =
+    experiment.privateRun?.outcomeKind === "structured_review" &&
+    experiment.privateRun.outcomeStatus === "available";
+  const isStructuredReviewReady =
+    isStructuredReview &&
+    experiment.privateRun?.structuredReviewStatus === "ready_for_review";
+  const hasIncompleteStructuredReview =
+    isStructuredReview && !isStructuredReviewReady;
+  const hasRenderableOutcome =
+    experiment.signals.length > 0 ||
+    experiment.trends.length > 0 ||
+    isStructuredReviewReady;
   const savedOutcomeStatus = experiment.privateRun?.outcomeStatus;
 
   return (
@@ -143,7 +154,18 @@ export function ResultsTab({
         />
       )}
 
-      {hasPrivateRun && !hasPersonalOutcomeData && !isStopped && (
+      {hasPrivateRun && hasIncompleteStructuredReview && !isStopped && (
+        <ResultsEmptyState
+          title={experiment.summary ?? "Your review evidence is incomplete"}
+          body={experiment.summaryDetail ??
+            "Add the missing baseline or follow-up evidence to make this review ready."}
+        />
+      )}
+
+      {hasPrivateRun &&
+        !hasRenderableOutcome &&
+        !hasIncompleteStructuredReview &&
+        !isStopped && (
         <ResultsEmptyState
           title={isFinished
             ? savedOutcomeStatus === "pending"
@@ -171,19 +193,25 @@ export function ResultsTab({
       {hasPrivateRun && isStopped && (
         <ResultsEmptyState
           title="Your experiment was stopped"
-          body={hasPersonalOutcomeData
+          body={hasRenderableOutcome
             ? "This run ended before the full protocol window. Measurements below are partial context, not a completed before-and-after result."
             : "This run stopped before there was enough data to compare."}
         />
       )}
 
-      {showFinishedOutcomeSummary && isFinished && experiment.summary && (
-        <FinishedOutcomeSummary
-          confidence={experiment.outcomeConfidence}
-          detail={experiment.summaryDetail}
-          summary={experiment.summary}
-        />
-      )}
+      {showFinishedOutcomeSummary &&
+        isFinished &&
+        experiment.summary &&
+        !hasIncompleteStructuredReview && (
+          <FinishedOutcomeSummary
+            confidence={experiment.outcomeConfidence}
+            detail={experiment.summaryDetail}
+            eyebrow={isStructuredReviewReady
+              ? "Evidence ready for review"
+              : "Saved result"}
+            summary={experiment.summary}
+          />
+        )}
 
       {hasPrivateRun && isRunnable ? (
         <ExperimentSummaryTiles experiment={experiment} />
@@ -245,17 +273,19 @@ export function ResultsTab({
 function FinishedOutcomeSummary({
   confidence,
   detail,
+  eyebrow,
   summary,
 }: {
   confidence: ExperimentRunProjection["outcomeConfidence"];
   detail?: string;
+  eyebrow: string;
   summary: string;
 }) {
   return (
     <section className="grid gap-5 border-y border-border py-7 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start sm:gap-8">
       <div className="flex max-w-3xl flex-col gap-3">
         <span className="font-mono text-[10px] uppercase tracking-widest text-primary">
-          Saved result
+          {eyebrow}
         </span>
         <h3 className="font-serif text-2xl/8 font-semibold tracking-tight text-foreground sm:text-3xl/9">
           {summary}
