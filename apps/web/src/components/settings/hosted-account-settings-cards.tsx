@@ -26,12 +26,16 @@ const HostedSettingsIdentityLinkDialog = dynamic(
 
 export function HostedAccountSettingsCards({
   account,
+  expectedPrivyUserId,
   murphPhoneNumber,
   openEmailLink = false,
+  privySessionMatchesAppSession,
 }: {
   account: HostedAccountSettingsSnapshot;
+  expectedPrivyUserId?: string | null;
   murphPhoneNumber?: string | null;
   openEmailLink?: boolean;
+  privySessionMatchesAppSession?: boolean;
 }) {
   const [linkMode, setLinkMode] = useState<HostedSettingsIdentityLinkMode | null>(
     openEmailLink ? "email" : null,
@@ -122,12 +126,14 @@ export function HostedAccountSettingsCards({
       {linkMode ? (
         <HostedSettingsIdentityLinkDialog
           account={account}
+          expectedPrivyUserId={expectedPrivyUserId ?? null}
           initialMode={linkMode}
           onOpenChange={(open) => {
             if (!open) {
               setLinkMode(null);
             }
           }}
+          privySessionMatchesAppSession={privySessionMatchesAppSession === true}
         />
       ) : null}
     </>

@@ -1022,6 +1022,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260728190000_hosted_mailbox_source_message",
       "20260729010000_hosted_account_cleanup_runtime_logs",
       "20260729043000_hosted_member_assistant_provider_preference",
+      "20260729154500_hosted_linq_recent_message_load",
       "20260729170000_hosted_thread_route_account_lookup_key",
       "20260729180000_linq_provider_health_projection",
       "20260729190000_composable_usage_referral_missions",

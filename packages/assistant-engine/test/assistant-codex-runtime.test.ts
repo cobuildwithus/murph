@@ -19505,6 +19505,7 @@ describe('steered final segments', () => {
   async function runScriptedSteeredFinalSegmentsTurn(
     steps: Array<Record<string, unknown> | ScriptedSteeredFinalStep>,
     input: {
+      abortSignal?: CodexAppServerTurnInput['abortSignal']
       authorizeAcceptedMessageTarget?:
         CodexAppServerTurnInput['authorizeAcceptedMessageTarget']
       hostedToolContext?: CodexAppServerTurnInput['hostedToolContext']
@@ -19738,6 +19739,7 @@ describe('steered final segments', () => {
 
     return await executeCodexAppServerTurn({
       approvalPolicy: 'never',
+      ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
       authorizeAcceptedMessageTarget:
         input.authorizeAcceptedMessageTarget ?? null,
       codexCommand: 'codex',
@@ -19788,8 +19790,12 @@ describe('steered final segments', () => {
       },
     }
     const groupTool = {
-      request: vi.fn(async () => response),
+      request: vi.fn(async (
+        _request: unknown,
+        _context?: { signal?: AbortSignal | null },
+      ) => response),
     }
+    const abortController = new AbortController()
 
     const result = await runScriptedSteeredFinalSegmentsTurn([
       {
@@ -19803,10 +19809,21 @@ describe('steered final segments', () => {
         message: 'You belong to Sunday runners.',
       }),
     ], {
+      abortSignal: abortController.signal,
       hostedToolContext: createHostedToolContext({ groupTool }),
     })
 
-    expect(groupTool.request).toHaveBeenCalledWith({ action: 'list_memberships' })
+    expect(groupTool.request).toHaveBeenCalledWith(
+      { action: 'list_memberships' },
+      { signal: expect.any(AbortSignal) },
+    )
+    const forwardedSignal = groupTool.request.mock.calls[0]?.[1]?.signal
+    if (!forwardedSignal) {
+      throw new Error('Expected current-turn abort signal at group-tool boundary.')
+    }
+    expect(forwardedSignal.aborted).toBe(false)
+    abortController.abort(new DOMException('turn cancelled', 'AbortError'))
+    expect(forwardedSignal.aborted).toBe(true)
     expect(result.finalMessage).toBe('You belong to Sunday runners.')
   })
 

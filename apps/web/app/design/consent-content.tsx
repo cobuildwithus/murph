@@ -63,9 +63,15 @@ export function ConsentContent() {
       <Separator />
 
       <section className="flex scroll-mt-24 flex-col gap-6" id="launch-consent">
-        <h2 className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">
-          Launch consent
-        </h2>
+        <div className="flex flex-col gap-2">
+          <h2 className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">
+            Launch consent
+          </h2>
+          <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+            Decline records the current unaccepted launch scopes, then signs the
+            person out without advancing onboarding.
+          </p>
+        </div>
         <div className="grid items-start gap-8 lg:grid-cols-2">
           <PreviewFrame label="Onboarding dialog">
             <HostedLaunchConsentPrompt
@@ -85,6 +91,16 @@ export function ConsentContent() {
                 onContinue={() => {}}
                 onDecline={() => {}}
                 variant="legal"
+              />
+            </div>
+            <div className="flex flex-col gap-3" inert>
+              <PreviewLabel>Accepted · opening destination</PreviewLabel>
+              <HostedLaunchConsentPrompt
+                documents={DESIGN_LAUNCH_DOCUMENTS}
+                handoffPending
+                mode="panel"
+                onContinue={() => {}}
+                onDecline={() => {}}
               />
             </div>
             <div className="flex flex-col gap-3">

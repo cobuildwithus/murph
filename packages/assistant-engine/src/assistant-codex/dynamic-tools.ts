@@ -44,6 +44,10 @@ import {
   HOSTED_ASSISTANT_REASONING_EFFORTS,
 } from '@murphai/hosted-execution/assistant-model'
 import {
+  HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES,
+  type HostedPlanUsageToolRequest,
+} from '@murphai/hosted-execution/plan-usage'
+import {
   hostedRuntimeSubscriptionToolRequestSchema,
   type HostedRuntimeSubscriptionToolRequest,
 } from '@murphai/hosted-execution/subscription'
@@ -119,6 +123,9 @@ import type {
 import {
   ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
 } from '../assistant/generated-delivery-files.js'
+import {
+  resolveAssistantVaultImageResponseMedia,
+} from '../assistant/vault-file-send.js'
 import type {
   AssistantAcceptedMessageTargetAuthorizer,
 } from '../assistant/message-target-selection.js'
@@ -513,11 +520,18 @@ export const MURPH_PLAN_USAGE_TOOL = {
   namespace: 'murph',
   name: 'plan_usage',
   description:
-    'Read the current private hosted plan, overall AI-usage projection, recommendation, and quote. Call only for an explicit plan, usage, billing request, or trusted low-usage context. This is read-only: percentages and forecasts cover all available usage and expose no allowance/credit-source split; a recommendation or quote is not consent or a billing action.',
+    'Read current private hosted plan, AI-usage, recommendation, signed quote for explicit plan, usage, billing or trusted low-usage context. Omit target for recommendation. For exact user-named plan, pass target; use only matching quote. availablePlans is only the trial list. Read-only; percentages and forecasts cover all available usage without credit-source splits.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
-    properties: {},
+    properties: {
+      targetPlanCode: {
+        type: 'string',
+        enum: [...HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES],
+        description:
+          'Optional exact user-named plan to quote instead of the server recommendation.',
+      },
+    },
   },
 } as const
 
@@ -537,17 +551,26 @@ export const MURPH_SUBSCRIPTION_TOOL = {
   namespace: 'murph',
   name: 'subscription',
   description:
-    'Apply exactly one private hosted subscription action explicitly confirmed by the current user in this turn. start_pulse_now and upgrade_edge require a current matching plan_usage quote; continue_pulse requires a current eligible active-trial result. Exact replay of the same input and action is idempotent; a different action requires new eligible user input. Only payment_required includes paymentUrl; completed, pending, and no_action_required do not prove a payment method or future charge.',
+    'Apply one signed private plan change explicitly confirmed by the current user in this turn. Use only action=change_plan with exact targetPlanCode and quoteId from a current matching plan_usage quote. Exact replay of the same input and action is idempotent; a different target requires new eligible user input. A scheduled result includes authoritative effectiveAt; keep current and future plans distinct. Only payment_required includes paymentUrl; other results do not prove a payment method.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
     properties: {
       action: {
         type: 'string',
-        enum: ['continue_pulse', 'start_pulse_now', 'upgrade_edge'],
+        enum: ['change_plan'],
+      },
+      targetPlanCode: {
+        type: 'string',
+        enum: [...HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES],
+      },
+      quoteId: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 1024,
       },
     },
-    required: ['action'],
+    required: ['action', 'targetPlanCode', 'quoteId'],
   },
 } as const
 
@@ -1747,7 +1770,11 @@ const sendVaultFileArgumentsSchema = z
   .strict()
 
 const finishWithoutReplyArgumentsSchema = z.object({}).strict()
-const planUsageArgumentsSchema = z.object({}).strict()
+const planUsageArgumentsSchema = z
+  .object({
+    targetPlanCode: z.enum(HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES).optional(),
+  })
+  .strict()
 const imessageContactArgumentsSchema = z.object({}).strict()
 
 const submitProductFeedbackArgumentsSchema = z
@@ -2239,6 +2266,7 @@ export type MurphDynamicToolRequest =
     }
   | {
       kind: 'plan-usage'
+      request: HostedPlanUsageToolRequest
     }
   | {
       kind: 'imessage-contact'
@@ -2507,6 +2535,7 @@ export function readMurphDynamicToolRequest(
       }
       return {
         kind: 'plan-usage',
+        request: parsed.request,
       }
     }
     case MURPH_IMESSAGE_CONTACT_TOOL.name: {
@@ -2866,15 +2895,31 @@ export async function executeMurphDynamicToolRequest(input: {
     case 'unsupported-dynamic-tool':
       return toolTextResult(false, 'unsupported dynamic tool')
     case 'attach-response-media': {
+      const media = await resolveAttachedResponseMedia({
+        media: input.request.media,
+        vaultRoot: input.vaultRoot ?? null,
+      })
+      if (!media) {
+        return {
+          ...toolTextResult(
+            false,
+            'private response image could not be prepared',
+          ),
+          responseMediaPatch: {
+            media: [],
+            op: 'replace',
+          },
+        }
+      }
       return {
         ...toolTextResult(
           true,
-          input.request.media.length === 0
+          media.length === 0
             ? 'response media cleared'
-            : `${input.request.media.length} response image${input.request.media.length === 1 ? '' : 's'} attached`,
+            : `${media.length} response image${media.length === 1 ? '' : 's'} attached`,
         ),
         responseMediaPatch: {
-          media: input.request.media,
+          media,
           op: 'replace',
         },
       }
@@ -3169,6 +3214,7 @@ export async function executeMurphDynamicToolRequest(input: {
     case 'plan-usage':
       return await executePlanUsageTool({
         hostedToolContext: input.hostedToolContext ?? null,
+        request: input.request.request,
       })
     case 'imessage-contact':
       return await executeIMessageContactTool({
@@ -3480,6 +3526,37 @@ export async function executeMurphDynamicToolRequest(input: {
   }
 }
 
+async function resolveAttachedResponseMedia(input: {
+  media: readonly AssistantResponseMedia[]
+  vaultRoot: string | null
+}): Promise<AssistantResponseMedia[] | null> {
+  if (!input.media.some((item) => item.kind === 'vault_image')) {
+    return [...input.media]
+  }
+  const vaultRoot = input.vaultRoot
+  if (!vaultRoot) {
+    return null
+  }
+  try {
+    const media: AssistantResponseMedia[] = []
+    for (const item of input.media) {
+      media.push(
+        item.kind === 'vault_image'
+          ? await resolveAssistantVaultImageResponseMedia({
+              alt: item.alt,
+              ref: item.ref,
+              source: item.source,
+              vaultRoot,
+            })
+          : item,
+      )
+    }
+    return media
+  } catch {
+    return null
+  }
+}
+
 function renderHostedImageGenerationLaunchResult(input: {
   launch: 'already-pending' | 'already-started' | 'started'
   status: 'pending' | 'queued' | null
@@ -3544,6 +3621,7 @@ async function executeFamilyPlanTool(input: {
 
 async function executePlanUsageTool(input: {
   hostedToolContext: AssistantHostedToolContext | null
+  request: HostedPlanUsageToolRequest
 }): Promise<MurphDynamicToolExecutionResult> {
   const planUsageTool = input.hostedToolContext?.planUsageTool ?? null
   if (!planUsageTool) {
@@ -3551,7 +3629,10 @@ async function executePlanUsageTool(input: {
   }
 
   try {
-    return toolTextResult(true, safeToolPayloadText(await planUsageTool.read()))
+    return toolTextResult(
+      true,
+      safeToolPayloadText(await planUsageTool.read(input.request)),
+    )
   } catch {
     return toolTextResult(false, 'plan usage could not be read')
   }
@@ -3613,14 +3694,35 @@ async function executeSubscriptionTool(input: {
   }
 
   try {
-    const result = await subscriptionTool.request({
-      action: input.request.action,
-      assistantInputId,
-    })
+    const result = await subscriptionTool.request(
+      input.request.action === 'change_plan'
+        ? {
+            action: input.request.action,
+            assistantInputId,
+            quoteId: input.request.quoteId,
+            targetPlanCode: input.request.targetPlanCode,
+          }
+        : {
+            action: input.request.action,
+            assistantInputId,
+          },
+    )
     return toolTextResult(true, safeToolPayloadText(result))
-  } catch {
+  } catch (error) {
+    if (isHostedBillingPlanQuoteStaleError(error)) {
+      return toolTextResult(
+        false,
+        'subscription quote is no longer current; call plan_usage again, show the refreshed exact plan and monthly price, and ask for fresh confirmation before retrying',
+      )
+    }
     return toolTextResult(false, 'subscription action could not be completed')
   }
+}
+
+function isHostedBillingPlanQuoteStaleError(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && Reflect.get(error, 'code') === 'HOSTED_BILLING_PLAN_QUOTE_STALE'
 }
 
 async function executePersonalizationTool(input: {
@@ -4080,9 +4182,10 @@ async function executeGroupTool(input: {
       { action: 'preflight_set_chat_avatar' }
     >
     try {
-      const preflightResult = await groupTool.request({
-        action: 'preflight_set_chat_avatar',
-      })
+      const preflightRequest = { action: 'preflight_set_chat_avatar' } as const
+      const preflightResult = input.abortSignal
+        ? await groupTool.request(preflightRequest, { signal: input.abortSignal })
+        : await groupTool.request(preflightRequest)
       if (preflightResult.action !== 'preflight_set_chat_avatar') {
         return groupAvatarUnavailableToolResult(
           'group_avatar_preflight_unavailable',
@@ -4305,7 +4408,9 @@ async function executeGroupTool(input: {
   }
 
   try {
-    const result = await groupTool.request(request)
+    const result = input.abortSignal
+      ? await groupTool.request(request, { signal: input.abortSignal })
+      : await groupTool.request(request)
     const modelResult = groupToolModelResult(result)
     const payload = generatedAvatarCapture
       ? { ...modelResult, generatedImage: generatedAvatarCapture }
@@ -5573,7 +5678,7 @@ function parseFamilyPlanArguments(
 function parsePlanUsageArguments(
   value: unknown,
 ):
-  | { ok: true }
+  | { ok: true; request: HostedPlanUsageToolRequest }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
   const parsed = planUsageArgumentsSchema.safeParse(value)
   if (!parsed.success) {
@@ -5583,12 +5688,23 @@ function parsePlanUsageArguments(
         error: parsed.error,
         rawInput: value,
         schemaName: 'murph.plan_usage.input',
-        schemaRootKeys: [],
+        schemaRootKeys: ['targetPlanCode'],
         toolName: 'murph.plan_usage',
       }),
     }
   }
-  return { ok: true }
+  return {
+    ok: true,
+    request: {
+      includeSubscriptionActionQuote: true,
+      ...(parsed.data.targetPlanCode
+        ? {
+            subscriptionActionTargetPlanCode:
+              parsed.data.targetPlanCode,
+          }
+        : {}),
+    },
+  }
 }
 
 function parseIMessageContactArguments(

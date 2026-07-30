@@ -9,8 +9,10 @@ const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   grantHostedOptionalFeatureConsent: vi.fn(),
   readHostedConsentStatus: vi.fn(),
+  recordHostedLaunchConsentDecline: vi.fn(),
   recordHostedLaunchRequiredConsent: vi.fn(),
   requirePrivyMemberAuth: vi.fn(),
+  revokeHostedAppSessionFromRequest: vi.fn(),
   revokeHostedOptionalFeatureConsent: vi.fn(),
   prismaClient: {
     label: "test-prisma",
@@ -23,6 +25,7 @@ vi.mock("@/src/lib/prisma", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
   requireHostedAppSessionFromRequest: mocks.requirePrivyMemberAuth,
+  revokeHostedAppSessionFromRequest: mocks.revokeHostedAppSessionFromRequest,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
@@ -38,6 +41,7 @@ vi.mock("@/src/lib/legal/consent", async () => {
     ...actual,
     grantHostedOptionalFeatureConsent: mocks.grantHostedOptionalFeatureConsent,
     readHostedConsentStatus: mocks.readHostedConsentStatus,
+    recordHostedLaunchConsentDecline: mocks.recordHostedLaunchConsentDecline,
     recordHostedLaunchRequiredConsent: mocks.recordHostedLaunchRequiredConsent,
     revokeHostedOptionalFeatureConsent: mocks.revokeHostedOptionalFeatureConsent,
   };
@@ -45,16 +49,19 @@ vi.mock("@/src/lib/legal/consent", async () => {
 
 type HostedConsentStatusRouteModule = typeof import("../app/api/legal/consent/status/route");
 type HostedConsentAcceptRouteModule = typeof import("../app/api/legal/consent/accept/route");
+type HostedConsentDeclineRouteModule = typeof import("../app/api/legal/consent/decline/route");
 type HostedConsentRevokeRouteModule = typeof import("../app/api/legal/consent/revoke/route");
 
 let consentStatusRoute: HostedConsentStatusRouteModule;
 let consentAcceptRoute: HostedConsentAcceptRouteModule;
+let consentDeclineRoute: HostedConsentDeclineRouteModule;
 let consentRevokeRoute: HostedConsentRevokeRouteModule;
 
 const memberAuth = {
   member: {
     id: "member_123",
   },
+  sessionId: "session_123",
 };
 
 const currentStatus = {
@@ -72,9 +79,10 @@ const currentStatus = {
 
 describe("legal consent routes", () => {
   beforeAll(async () => {
-    [consentStatusRoute, consentAcceptRoute, consentRevokeRoute] = await Promise.all([
+    [consentStatusRoute, consentAcceptRoute, consentDeclineRoute, consentRevokeRoute] = await Promise.all([
       import("../app/api/legal/consent/status/route"),
       import("../app/api/legal/consent/accept/route"),
+      import("../app/api/legal/consent/decline/route"),
       import("../app/api/legal/consent/revoke/route"),
     ]);
   });
@@ -85,7 +93,14 @@ describe("legal consent routes", () => {
     mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
     mocks.requirePrivyMemberAuth.mockResolvedValue(memberAuth);
     mocks.readHostedConsentStatus.mockResolvedValue(currentStatus);
+    mocks.recordHostedLaunchConsentDecline.mockResolvedValue([
+      "launch.legal",
+      "launch.health-data",
+    ]);
     mocks.recordHostedLaunchRequiredConsent.mockResolvedValue(currentStatus);
+    mocks.revokeHostedAppSessionFromRequest.mockResolvedValue(
+      "murph-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+    );
     mocks.grantHostedOptionalFeatureConsent.mockResolvedValue(currentStatus);
     mocks.revokeHostedOptionalFeatureConsent.mockResolvedValue(currentStatus);
   });
@@ -172,6 +187,111 @@ describe("legal consent routes", () => {
       source: "hosted onboarding",
     });
     expect(mocks.grantHostedOptionalFeatureConsent).not.toHaveBeenCalled();
+  });
+
+  it("records server-derived launch declines and revokes the authenticated session", async () => {
+    const request = new Request("https://join.example.test/api/legal/consent/decline", {
+      headers: {
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    });
+
+    const response = await consentDeclineRoute.POST(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Set-Cookie")).toBe(
+      "murph-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+    );
+    expect(mocks.recordHostedLaunchConsentDecline).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+      sessionId: "session_123",
+      source: "homepage-auth-dialog",
+    });
+    expect(mocks.revokeHostedAppSessionFromRequest).toHaveBeenCalledWith({
+      reason: "consent_declined",
+      request,
+    });
+    await expect(response.json()).resolves.toEqual({ ok: true });
+  });
+
+  it("still revokes the app session when the scoped decline audit is unavailable", async () => {
+    mocks.recordHostedLaunchConsentDecline.mockRejectedValueOnce(
+      new Error("audit unavailable"),
+    );
+    const request = new Request("https://join.example.test/api/legal/consent/decline", {
+      headers: {
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    });
+
+    const response = await consentDeclineRoute.POST(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Set-Cookie")).toBe(
+      "murph-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+    );
+    expect(mocks.revokeHostedAppSessionFromRequest).toHaveBeenCalledWith({
+      reason: "consent_declined",
+      request,
+    });
+    await expect(response.json()).resolves.toEqual({ ok: true });
+  });
+
+  it("fails the decline request when authoritative session revocation is unavailable", async () => {
+    mocks.revokeHostedAppSessionFromRequest.mockRejectedValueOnce(
+      new Error("session store unavailable"),
+    );
+    const request = new Request("https://join.example.test/api/legal/consent/decline", {
+      headers: {
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    });
+
+    const response = await consentDeclineRoute.POST(request);
+
+    expect(response.status).toBe(500);
+    expect(response.headers.get("Set-Cookie")).toBeNull();
+    expect(mocks.recordHostedLaunchConsentDecline).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+      sessionId: "session_123",
+      source: "homepage-auth-dialog",
+    });
+    expect(mocks.revokeHostedAppSessionFromRequest).toHaveBeenCalledWith({
+      reason: "consent_declined",
+      request,
+    });
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INTERNAL_ERROR",
+        message: "Internal error.",
+      },
+    });
+  });
+
+  it("rejects launch decline before auth when the hosted origin guard fails", async () => {
+    mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {
+      throw hostedOnboardingError({
+        code: "HOSTED_ONBOARDING_ORIGIN_REQUIRED",
+        httpStatus: 403,
+        message: "Hosted browser mutation routes require an Origin header.",
+      });
+    });
+
+    const response = await consentDeclineRoute.POST(
+      new Request("https://join.example.test/api/legal/consent/decline", {
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(mocks.requirePrivyMemberAuth).not.toHaveBeenCalled();
+    expect(mocks.recordHostedLaunchConsentDecline).not.toHaveBeenCalled();
+    expect(mocks.revokeHostedAppSessionFromRequest).not.toHaveBeenCalled();
   });
 
   it("rejects consent mutations before auth when the hosted origin guard fails", async () => {

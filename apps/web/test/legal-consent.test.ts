@@ -10,6 +10,7 @@ import {
   hasHostedHistoricalLaunchConsent,
   parseHostedConsentAcceptRequest,
   parseHostedConsentRevokeRequest,
+  recordHostedLaunchConsentDecline,
   type HostedConsentGrantSnapshot,
 } from "@/src/lib/legal/consent";
 
@@ -114,6 +115,133 @@ describe("hosted legal consent registry", () => {
     })).toEqual({
       scope: "feature.connected-health-source",
       source: "settings",
+    });
+  });
+
+  it("records pending launch scopes as idempotent privacy-safe decline events", async () => {
+    const createdBatches: unknown[] = [];
+    const createMany = vi.fn().mockImplementation(async (input: unknown) => {
+      createdBatches.push(input);
+      return { count: 2 };
+    });
+    const tx = {
+      hostedConsentEvent: { createMany },
+      hostedConsentGrant: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+    } as unknown as Parameters<typeof recordHostedLaunchConsentDecline>[0]["prisma"];
+    const input = {
+      memberId: "member_1",
+      prisma,
+      sessionId: "session_1",
+      source: "homepage-auth-dialog",
+    };
+
+    await expect(recordHostedLaunchConsentDecline({
+      ...input,
+      now: new Date("2026-07-30T17:00:00.000Z"),
+    })).resolves.toEqual([
+      "launch.legal",
+      "launch.health-data",
+    ]);
+    await expect(recordHostedLaunchConsentDecline({
+      ...input,
+      now: new Date("2026-07-30T17:05:00.000Z"),
+    })).resolves.toEqual([
+      "launch.legal",
+      "launch.health-data",
+    ]);
+
+    expect(createdBatches).toHaveLength(2);
+    const firstBatch = createdBatches[0] as {
+      data: Array<Record<string, unknown>>;
+      skipDuplicates: boolean;
+    };
+    const secondBatch = createdBatches[1] as typeof firstBatch;
+    expect(firstBatch.skipDuplicates).toBe(true);
+    expect(firstBatch.data).toEqual([
+      {
+        action: "declined",
+        createdAt: new Date("2026-07-30T17:00:00.000Z"),
+        documentVersionsJson: {
+          "health-ai-safety-disclosure": "2026-07-23",
+          "privacy-policy": "2026-07-23",
+          "terms-of-service": "2026-07-23",
+        },
+        id: expect.stringMatching(/^hbce_[A-Za-z0-9_-]{24}$/u),
+        memberId: "member_1",
+        scope: "launch.legal",
+        source: "homepage-auth-dialog",
+      },
+      {
+        action: "declined",
+        createdAt: new Date("2026-07-30T17:00:00.000Z"),
+        documentVersionsJson: {
+          "consumer-health-data-notice": "2026-07-23",
+        },
+        id: expect.stringMatching(/^hbce_[A-Za-z0-9_-]{24}$/u),
+        memberId: "member_1",
+        scope: "launch.health-data",
+        source: "homepage-auth-dialog",
+      },
+    ]);
+    expect(secondBatch.data.map((event) => event.id)).toEqual(
+      firstBatch.data.map((event) => event.id),
+    );
+    expect(secondBatch.data.map((event) => event.createdAt)).toEqual([
+      new Date("2026-07-30T17:05:00.000Z"),
+      new Date("2026-07-30T17:05:00.000Z"),
+    ]);
+    expect(firstBatch.data.every((event) => !("metadataJson" in event))).toBe(true);
+  });
+
+  it("does not record a decline for a launch scope that is already granted", async () => {
+    const createMany = vi.fn().mockResolvedValue({ count: 1 });
+    const tx = {
+      hostedConsentEvent: { createMany },
+      hostedConsentGrant: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            createdAt: new Date("2026-07-30T16:00:00.000Z"),
+            documentVersionsJson: buildCurrentHostedConsentDocumentVersions("launch.legal"),
+            grantedAt: new Date("2026-07-30T16:00:00.000Z"),
+            lastEventId: "hbce_accepted",
+            memberId: "member_1",
+            revokedAt: null,
+            scope: "launch.legal",
+            source: "homepage-auth-dialog",
+            status: "granted",
+            updatedAt: new Date("2026-07-30T16:00:00.000Z"),
+          },
+        ]),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+    } as unknown as Parameters<typeof recordHostedLaunchConsentDecline>[0]["prisma"];
+
+    await expect(recordHostedLaunchConsentDecline({
+      memberId: "member_1",
+      now: new Date("2026-07-30T17:00:00.000Z"),
+      prisma,
+      sessionId: "session_1",
+      source: "homepage-auth-dialog",
+    })).resolves.toEqual(["launch.health-data"]);
+
+    expect(createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          action: "declined",
+          documentVersionsJson: {
+            "consumer-health-data-notice": "2026-07-23",
+          },
+          scope: "launch.health-data",
+        }),
+      ],
+      skipDuplicates: true,
     });
   });
 

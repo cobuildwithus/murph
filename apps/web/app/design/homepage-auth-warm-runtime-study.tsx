@@ -54,7 +54,6 @@ export function HomepageAuthWarmRuntimeStudy() {
           autoFocus={false}
           code=""
           disabled={false}
-          intent="auth"
           pendingAction={null}
           secondaryActionSize="lg"
           verificationPhoneNumberHint="*** 2671"
@@ -107,7 +106,6 @@ function HomepageAuthFormStudy({
   return (
     <div className="space-y-4">
       <HostedPhoneEntryStep
-        intent="auth"
         pendingAction={phoneQueued ? "send-code" : null}
         phoneInputDisabled={telegramQueued}
         phoneCountryOptions={HOSTED_PHONE_COUNTRY_OPTIONS}

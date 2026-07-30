@@ -27,6 +27,7 @@ import {
   HostedEmailMurphContactDialog,
   WebmailIcon,
 } from "@/src/components/settings/hosted-email-murph-contact-dialog";
+import { HostedPhoneLinkAction } from "@/src/components/settings/hosted-phone-settings";
 import {
   ASSISTANT_MODEL_CHOICE_CARD_CLASSES,
   AssistantModelArtwork,
@@ -117,6 +118,7 @@ import { buildWhoopAppleHealthSetupGuide } from "@/src/lib/device-sync/whoop-app
 import { MurphAssistantStylePicker } from "@/src/components/murph/murph-assistant-style-picker";
 import { HostedAiUsageActivity } from "@/src/components/settings/hosted-ai-usage-activity";
 import { HostedFamilyManager } from "@/src/components/settings/hosted-family-settings-actions";
+import { HostedPlanChangeConfirmationContent } from "@/src/components/settings/hosted-plan-change-button";
 import { PulseTrialBillingContinuationView } from "@/src/components/settings/hosted-start-paid-pulse-button";
 import { MurphPersonalitySettingsDialog } from "@/src/components/settings/murph-personality-settings-dialog";
 import {
@@ -693,7 +695,6 @@ export function ComponentsContent() {
                   code="123456"
                   disableSignup={false}
                   disabled
-                  intent="auth"
                   onCodeChange={() => {}}
                   onResendCode={() => {}}
                   onUseDifferentNumber={() => {}}
@@ -995,8 +996,8 @@ export function ComponentsContent() {
 
         <Section title="Radio Group, Choice Cards & Provider Picker">
           <p className="max-w-2xl text-sm text-muted-foreground">
-            Compare model choice cards and the compact, save-gated provider
-            picker used by assistant settings.
+            Compare model choice cards and review the compact provider-storage
+            disclosures used by assistant settings.
           </p>
           <RadioGroup
             className="grid gap-3 sm:grid-cols-3"
@@ -1199,6 +1200,58 @@ export function ComponentsContent() {
 
         <Section title="Private experiment results share">
           <ExperimentResultsShareStudy />
+        </Section>
+
+        <Separator />
+
+        <Section title="Hosted plan change">
+          <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+            The real open confirmation content for an immediate upgrade and a
+            plan change at the end of the current billing period.
+          </p>
+          <div className="grid items-start gap-6 lg:grid-cols-2">
+            <div className="space-y-3">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Period-end switch
+              </p>
+              <Dialog>
+                <div
+                  className="space-y-6 rounded-2xl border border-[#c4a882]/25 bg-[#fffcf6] p-6 text-[#2d3436] ring-[#c4a882]/25 md:p-7"
+                  inert
+                >
+                  <HostedPlanChangeConfirmationContent
+                    currentPeriodEnd="2026-08-27T04:00:00.000Z"
+                    errorMessage={null}
+                    onClose={() => undefined}
+                    onConfirm={() => undefined}
+                    pending={false}
+                    mode="schedule"
+                    targetPlanCode="launch_group_monthly"
+                  />
+                </div>
+              </Dialog>
+            </div>
+            <div className="space-y-3">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Immediate upgrade
+              </p>
+              <Dialog>
+                <div
+                  className="space-y-6 rounded-2xl border border-[#c4a882]/25 bg-[#fffcf6] p-6 text-[#2d3436] ring-[#c4a882]/25 md:p-7"
+                  inert
+                >
+                  <HostedPlanChangeConfirmationContent
+                    errorMessage={null}
+                    mode="upgrade"
+                    onClose={() => undefined}
+                    onConfirm={() => undefined}
+                    pending={false}
+                    targetPlanCode="launch_monthly"
+                  />
+                </div>
+              </Dialog>
+            </div>
+          </div>
         </Section>
 
         <Separator />
@@ -1441,10 +1494,72 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Hosted AI usage credits and missions">
+        <Section id="phone-account-linking" title="Phone Account Linking">
+          <p className="text-sm leading-6 text-muted-foreground">
+            The account-management action hands phone verification to the
+            authenticated identity provider, then saves the verified result to
+            Murph. Existing phone accounts use the same surface for replacement.
+          </p>
+          <div className="grid gap-4 sm:grid-cols-2" inert>
+            <div className="space-y-3 rounded-xl border border-border bg-card p-5">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Add phone
+              </p>
+              <HostedPhoneLinkAction
+                isChangeFlow={false}
+                isLinking={false}
+                isSyncing={false}
+                onClick={() => {}}
+              />
+            </div>
+            <div className="space-y-3 rounded-xl border border-border bg-card p-5">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Replace phone
+              </p>
+              <HostedPhoneLinkAction
+                isChangeFlow
+                isLinking={false}
+                isSyncing={false}
+                onClick={() => {}}
+              />
+            </div>
+            <div className="space-y-3 rounded-xl border border-border bg-card p-5">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Provider opening
+              </p>
+              <HostedPhoneLinkAction
+                disabled
+                isChangeFlow={false}
+                isLinking
+                isSyncing={false}
+                onClick={() => {}}
+              />
+            </div>
+            <div className="space-y-3 rounded-xl border border-border bg-card p-5">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Session mismatch
+              </p>
+              <HostedPhoneLinkAction
+                disabled
+                isChangeFlow={false}
+                isLinking={false}
+                isSyncing={false}
+                onClick={() => {}}
+              />
+              <p className="text-sm leading-6 text-muted-foreground">
+                Your sign-in changed. Sign in again using a login method already
+                linked to this Murph account before changing a linked account.
+              </p>
+            </div>
+          </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Hosted AI usage credits and referrals">
           <p className="text-sm text-muted-foreground">
-            Read-only Settings detail with missions first, optional mission
-            details on demand, and a compact purchased-credit ledger.
+            Read-only Settings detail keeps current referrals visible and
+            moves completed referrals and purchased credits into quiet history.
           </p>
           <div
             aria-label="Read-only hosted AI usage activity previews"
@@ -1456,31 +1571,36 @@ export function ComponentsContent() {
               {
                 activity: DESIGN_AI_USAGE_ACTIVITY,
                 contactOption: DESIGN_USAGE_MISSION_CONTACT_OPTION,
-                label: "Active and completed missions",
+                label: "Active referrals with completed history",
                 state: "active-and-completed",
               },
               {
                 activity: DESIGN_AI_USAGE_WAITING_ACTIVITY,
                 contactOption: DESIGN_USAGE_MISSION_CONTACT_OPTION,
-                label: "Mission selected, waiting for a new group",
+                label: "Referral selected, waiting for a new group",
                 state: "waiting-for-group",
               },
               {
                 activity: DESIGN_AI_USAGE_EMPTY_ACTIVITY,
                 contactOption: DESIGN_USAGE_MISSION_CONTACT_OPTION,
-                label: "Missions available, none selected",
+                label: "Referrals available, none selected",
                 state: "empty",
               },
               {
                 activity: DESIGN_AI_USAGE_DISABLED_HISTORY,
                 contactOption: null,
-                label: "New missions disabled, existing history retained",
+                label: "New referrals disabled, existing history retained",
                 state: "disabled-history",
               },
             ].map((preview) => (
               <div
                 className="flex flex-col gap-3"
                 data-design-state={preview.state}
+                id={
+                  preview.state === "empty"
+                    ? "hosted-ai-usage-empty"
+                    : undefined
+                }
                 key={preview.label}
               >
                 <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">

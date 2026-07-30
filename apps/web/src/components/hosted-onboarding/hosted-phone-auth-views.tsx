@@ -14,7 +14,6 @@ import {
 import { HostedUseDifferentNumberButton } from "./hosted-phone-auth-use-different-number-button";
 import type {
   HostedAuthenticatedPhoneAuthView,
-  HostedPhoneAuthIntent,
   HostedPhoneAuthPendingAction,
   HostedPhoneCountryOption,
   HostedPhoneVerificationAttempt,
@@ -25,7 +24,6 @@ interface SharedFlowProps {
   code: string;
   disableSignup?: boolean;
   disabled: boolean;
-  intent: HostedPhoneAuthIntent;
   pendingAction: HostedPhoneAuthPendingAction;
   phoneFieldDescription?: string | null;
   phoneFieldLabel?: string | null;
@@ -115,7 +113,6 @@ export function HostedPhoneAuthFlow(props: SharedFlowProps) {
         code={props.code}
         disableSignup={props.disableSignup}
         disabled={props.disabled}
-        intent={props.intent}
         pendingAction={props.pendingAction}
         secondaryActionSize={props.secondaryActionSize}
         size={props.size}
@@ -129,7 +126,6 @@ export function HostedPhoneAuthFlow(props: SharedFlowProps) {
 
   return (
     <HostedPhoneEntryStep
-      intent={props.intent}
       phoneFieldDescription={props.phoneFieldDescription}
       phoneFieldLabel={props.phoneFieldLabel}
       phoneInputAutoFocus={props.phoneInputAutoFocus}

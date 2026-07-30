@@ -43,10 +43,12 @@ export type JoinInviteLaunchConsentState =
 
 export interface JoinInvitePageModel {
   awaitingInviteSessionResolution: boolean;
+  expectedPrivyUserId: string | null;
   familyBillingRecovery: HostedFamilyBillingRecoveryState | null;
   inviteCode: string;
   launchConsent: JoinInviteLaunchConsentState;
   preview: boolean;
+  privySessionMatchesAppSession: boolean;
   status: HostedInviteStatusPayload;
   telegramAccountForMessagingSetup: JoinInviteTelegramAccountSeed | null;
 }
@@ -69,6 +71,7 @@ export async function buildJoinInvitePageModel(input: {
     const status = buildJoinInvitePreviewStatus(previewStage, input.inviteCode);
     return {
       awaitingInviteSessionResolution: false,
+      expectedPrivyUserId: null,
       familyBillingRecovery: null,
       inviteCode: input.inviteCode,
       launchConsent: {
@@ -77,6 +80,7 @@ export async function buildJoinInvitePageModel(input: {
         status: "preview",
       },
       preview: true,
+      privySessionMatchesAppSession: false,
       status,
       telegramAccountForMessagingSetup: null,
     };
@@ -129,10 +133,16 @@ export async function buildJoinInvitePageModel(input: {
           prisma: getPrisma(),
         })
       : null;
+  const expectedPrivyUserId = authSnapshot.session?.privyUserId ?? null;
+  const privySessionMatchesAppSession =
+    freshPrivySession !== null
+    && expectedPrivyUserId !== null
+    && freshPrivySession.identity.userId === expectedPrivyUserId;
   const telegramAccountForMessagingSetup =
     !launchConsent.gateActive
     && status.stage === "checkout"
     && status.messagingSetupRequired
+    && privySessionMatchesAppSession
       ? sanitizeJoinInviteTelegramAccountSeed(extractHostedPrivyTelegramAccount({
           linkedAccounts: freshPrivySession?.linkedAccounts ?? [],
         }))
@@ -140,10 +150,12 @@ export async function buildJoinInvitePageModel(input: {
 
   return {
     awaitingInviteSessionResolution: !hasResolvedHostedInviteVerification(status),
+    expectedPrivyUserId,
     familyBillingRecovery,
     inviteCode: input.inviteCode,
     launchConsent,
     preview: false,
+    privySessionMatchesAppSession,
     status,
     telegramAccountForMessagingSetup,
   };

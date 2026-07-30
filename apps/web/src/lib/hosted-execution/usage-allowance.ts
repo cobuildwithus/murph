@@ -72,6 +72,7 @@ type HostedAiUsageAccessDeniedReason = Exclude<
 export type HostedAiUsageGateNoticeCode =
   | "edge_usage_limit_reached"
   | "family_usage_limit_reached"
+  | "group_upgrade_pulse"
   | "pulse_upgrade_edge"
   | "thread_usage_limit_reached"
   | "trial_usage_limit_reached"
@@ -407,9 +408,9 @@ async function hasHostedAiUsageThreadContainerAccess(input: {
 
 const HOSTED_AI_USAGE_ALLOWANCE_PRICING_VERSION = "openai-api-pricing-2026-05-05-standard";
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_PRICING_VERSION =
-  "openai-api-pricing-2026-07-09-gpt-5.6-standard";
+  "openai-api-pricing-2026-07-30-gpt-5.6-standard";
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_OPENAI_FLEX_PRICING_VERSION =
-  "openai-api-pricing-2026-07-09-gpt-5.6-openai-flex";
+  "openai-api-pricing-2026-07-30-gpt-5.6-openai-flex";
 const HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE =
   "https://openai.com/api/pricing/";
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_PRICING_SOURCE =
@@ -506,17 +507,17 @@ const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_SOL_MODEL_PRICE = {
 } as const;
 
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TERRA_MODEL_PRICE = {
-  cachedInputUsdMicrosPerMillionTokens: 250_000n,
-  cacheWriteUsdMicrosPerMillionTokens: 3_125_000n,
-  inputUsdMicrosPerMillionTokens: 2_500_000n,
-  outputUsdMicrosPerMillionTokens: 15_000_000n,
+  cachedInputUsdMicrosPerMillionTokens: 200_000n,
+  cacheWriteUsdMicrosPerMillionTokens: 2_500_000n,
+  inputUsdMicrosPerMillionTokens: 2_000_000n,
+  outputUsdMicrosPerMillionTokens: 12_000_000n,
 } as const;
 
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_LUNA_MODEL_PRICE = {
-  cachedInputUsdMicrosPerMillionTokens: 100_000n,
-  cacheWriteUsdMicrosPerMillionTokens: 1_250_000n,
-  inputUsdMicrosPerMillionTokens: 1_000_000n,
-  outputUsdMicrosPerMillionTokens: 6_000_000n,
+  cachedInputUsdMicrosPerMillionTokens: 20_000n,
+  cacheWriteUsdMicrosPerMillionTokens: 250_000n,
+  inputUsdMicrosPerMillionTokens: 200_000n,
+  outputUsdMicrosPerMillionTokens: 1_200_000n,
 } as const;
 
 const HOSTED_AI_USAGE_ALLOWANCE_MODEL_PRICES: Record<
@@ -3119,6 +3120,18 @@ function buildHostedAiUsageGateLimitNotice(input: {
     };
   }
 
+  if (input.billingPlanCode === "launch_group_monthly") {
+    return {
+      code: "group_upgrade_pulse",
+      message: renderHostedAiUsageGateLimitNoticeMessage({
+        key: "linq.ai_usage.group_upgrade_pulse",
+        memberId: input.memberId,
+        noticeCode: "group_upgrade_pulse",
+        periodStart: input.periodStart,
+      }),
+    };
+  }
+
   if (input.billingPlanCode === "launch_edge_monthly") {
     return {
       code: "edge_usage_limit_reached",
@@ -3146,6 +3159,7 @@ function renderHostedAiUsageGateLimitNoticeMessage(input: {
   key:
     | "linq.ai_usage.edge_limit_reached"
     | "linq.ai_usage.family_limit_reached"
+    | "linq.ai_usage.group_upgrade_pulse"
     | "linq.ai_usage.pulse_upgrade_edge"
     | "linq.ai_usage.trial_limit_reached";
   memberId: string;

@@ -84,7 +84,7 @@ const MODEL_OPTIONS = [
 
 const PROVIDER_OPTIONS = [
   {
-    description: "Direct inference through OpenAI",
+    description: "No chat history saved.",
     logo: {
       height: 180,
       src: "/brand-logos/assistant-providers/openai-light.svg",
@@ -94,7 +94,7 @@ const PROVIDER_OPTIONS = [
     provider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
   },
   {
-    description: "Privacy-first. Venice stores no prompts or replies.",
+    description: "Privacy-first inference.",
     logo: {
       height: 356,
       src: "/brand-logos/assistant-providers/venice-light.svg",
@@ -126,6 +126,7 @@ interface AssistantModelSettingsResponse {
 interface HostedAssistantModelSettingsProps {
   canUpgradeToEdge: boolean;
   configurationAvailable: boolean;
+  expectedCurrentPlanCode?: "launch_group_monthly" | "launch_monthly";
   initialDormantSolPreference: boolean;
   initialModel: HostedAssistantProductModel;
   initialProvider?: HostedAssistantProvider;
@@ -211,7 +212,7 @@ export function AssistantProviderDialog({
             Choose provider
           </DialogTitle>
           <DialogDescription className="max-w-[38ch] text-sm/6">
-            Core replies use this provider after you save.
+            Murph uses this provider after you save.
           </DialogDescription>
         </DialogHeader>
         <RadioGroup
@@ -516,7 +517,13 @@ function HostedAssistantModelSettingsForm(
             Sol requires an active Edge plan.
           </p>
           {props.canUpgradeToEdge ? (
-            <UpgradeToEdgeButton>Upgrade to Edge</UpgradeToEdgeButton>
+            <UpgradeToEdgeButton
+              expectedCurrentPlanCode={
+                props.expectedCurrentPlanCode ?? "launch_monthly"
+              }
+            >
+              Upgrade to Edge
+            </UpgradeToEdgeButton>
           ) : null}
         </div>
       ) : null}

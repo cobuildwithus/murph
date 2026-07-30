@@ -43,10 +43,10 @@ const LOCAL_TEMPORAL_CLI_ENV_CLEARANCE_NAMES = [
 ] as const;
 const EXTERNAL_SCHEDULE_ENSURE_OPT_IN_ENV =
   "MURPH_DEV_TEMPORAL_ALLOW_EXTERNAL_SCHEDULE_ENSURE";
-const DEFAULT_HOSTED_LOCAL_TEMPORAL_WORKER_PACKAGE_DIR =
-  "packages/hosted-orchestrator-temporal";
 const HOSTED_LOCAL_TEMPORAL_WORKER_PACKAGE_DIR_ENV =
   "MURPH_DEV_TEMPORAL_WORKER_PACKAGE_DIR";
+const MISSING_HOSTED_LOCAL_TEMPORAL_WORKER_PACKAGE_MESSAGE =
+  "Hosted-local Temporal requires an external worker package. Set MURPH_DEV_TEMPORAL_WORKER_PACKAGE_DIR or set MURPH_DEV_TEMPORAL=disabled.";
 
 export interface HostedLocalTemporalRuntime {
   address: string;
@@ -87,9 +87,18 @@ export function buildHostedLocalTemporalRuntimeEnv(input: {
 
 export function resolveHostedLocalTemporalWorkerPackageDir(
   source: Readonly<Record<string, string | undefined>> = process.env,
+): string | null {
+  return source[HOSTED_LOCAL_TEMPORAL_WORKER_PACKAGE_DIR_ENV]?.trim() || null;
+}
+
+export function requireHostedLocalTemporalWorkerPackageDir(
+  source: Readonly<Record<string, string | undefined>> = process.env,
 ): string {
-  return source[HOSTED_LOCAL_TEMPORAL_WORKER_PACKAGE_DIR_ENV]?.trim()
-    || DEFAULT_HOSTED_LOCAL_TEMPORAL_WORKER_PACKAGE_DIR;
+  const packageDir = resolveHostedLocalTemporalWorkerPackageDir(source);
+  if (!packageDir) {
+    throw new Error(MISSING_HOSTED_LOCAL_TEMPORAL_WORKER_PACKAGE_MESSAGE);
+  }
+  return packageDir;
 }
 
 export async function startHostedLocalTemporalRuntime(input: {
@@ -116,7 +125,7 @@ export async function startHostedLocalTemporalRuntime(input: {
   }
 
   const address = resolveHostedLocalTemporalAddress(input);
-  const temporalWorkerPackageDir = resolveHostedLocalTemporalWorkerPackageDir(
+  const temporalWorkerPackageDir = requireHostedLocalTemporalWorkerPackageDir(
     input.env,
   );
   const cloudflareHostedControlBaseUrl = normalizeHostedLocalClientBaseUrl(

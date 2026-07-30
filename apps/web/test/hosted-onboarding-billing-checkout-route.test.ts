@@ -168,6 +168,38 @@ describe("hosted onboarding billing checkout route", () => {
     expect(mocks.createHostedBillingCheckout).not.toHaveBeenCalled();
   });
 
+  it("keeps the private Group plan out of public checkout", async () => {
+    mocks.requireHostedInviteCodeFromRequest.mockResolvedValueOnce({
+      body: {
+        billingPlanCode: "launch_group_monthly",
+        inviteCode: "invite_123",
+      },
+      inviteCode: "invite_123",
+    });
+
+    const response = await billingCheckoutRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/billing/checkout", {
+        body: JSON.stringify({
+          billingPlanCode: "launch_group_monthly",
+          inviteCode: "invite_123",
+        }),
+        headers: {
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "HOSTED_BILLING_PLAN_INVALID",
+      },
+    });
+    expect(mocks.assertHostedLaunchRequiredConsentGranted).not.toHaveBeenCalled();
+    expect(mocks.createHostedBillingCheckout).not.toHaveBeenCalled();
+  });
+
   it("rejects checkout before launch legal consent is current", async () => {
     mocks.assertHostedLaunchRequiredConsentGranted.mockRejectedValueOnce(
       hostedOnboardingError({

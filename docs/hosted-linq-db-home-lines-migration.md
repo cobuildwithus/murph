@@ -10,6 +10,7 @@ This cutover moves new hosted-member Linq home-line assignment from the env phon
 - Planning load is derived on demand as `10 * active direct members + 25 * provisioned Linq group threads`.
 - Direct-member counts come from canonical member home-line bindings. Group counts come from `hosted_thread_route.account_lookup_key`, which is projected atomically from the canonical encrypted delivery route rather than inferred from the container owner.
 - Lines below 5,000 planned messages are preferred. If every otherwise eligible line is at or above 5,000, assignment selects the least-loaded line instead of rejecting the member.
+- Within the below-target pool, genuinely new non-preferred placement ranks exact trailing-168-hour accepted-outbound plus inbound-message effects before weighted planning load and today's new-conversation count. If every line is at or above target, weighted planning load remains the first fallback signal and recent traffic breaks planning ties.
 - Daily new-conversation caps remain a separate proactive/deliverability guard enforced at assignment time with the existing home-line advisory lock.
 - Contact-card reconciliation syncs Linq provider phone inventory before reconciling DB-backed lines.
 

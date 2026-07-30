@@ -1775,6 +1775,7 @@ export type HostedMailboxSubscriptionActionClaimResult =
 
 export async function claimHostedMailboxConversationSubscriptionAction(input: {
   action: HostedRuntimeSubscriptionAction;
+  actionClaim?: string;
   assistantInputId: string;
   memberId: string;
   prisma?: HostedMailboxStoreClient;
@@ -1798,17 +1799,26 @@ export async function claimHostedMailboxConversationSubscriptionAction(input: {
 
 async function claimHostedMailboxConversationSubscriptionActionTx(input: {
   action: HostedRuntimeSubscriptionAction;
+  actionClaim?: string;
   assistantInputId: string;
   memberId: string;
   tx: HostedMailboxMutationTx;
 }): Promise<HostedMailboxSubscriptionActionClaimResult | null> {
   const assistantInputId = normalizeNullableString(input.assistantInputId);
   const memberId = normalizeNullableString(input.memberId);
+  const actionClaim = normalizeNullableString(
+    input.actionClaim ?? input.action,
+  );
   const assistantInputLookupKeys = assistantInputId
     ? createHostedAssistantInputLookupKeyReadCandidates(assistantInputId)
     : [];
 
-  if (assistantInputLookupKeys.length === 0 || !memberId) {
+  if (
+    assistantInputLookupKeys.length === 0
+    || !memberId
+    || !actionClaim
+    || actionClaim.length > 512
+  ) {
     return null;
   }
 
@@ -1838,7 +1848,7 @@ async function claimHostedMailboxConversationSubscriptionActionTx(input: {
   if (!row || rows.length !== 1) {
     return null;
   }
-  if (row.subscriptionActionClaim === input.action) {
+  if (row.subscriptionActionClaim === actionClaim) {
     return "replayed";
   }
   if (row.subscriptionActionClaim !== null) {
@@ -1847,7 +1857,7 @@ async function claimHostedMailboxConversationSubscriptionActionTx(input: {
 
   const claimed = await input.tx.hostedMailboxItem.updateMany({
     data: {
-      subscriptionActionClaim: input.action,
+      subscriptionActionClaim: actionClaim,
     },
     where: {
       ...authorityWhere,
@@ -1868,7 +1878,7 @@ async function claimHostedMailboxConversationSubscriptionActionTx(input: {
       id: row.id,
     },
   });
-  if (raced?.subscriptionActionClaim === input.action) {
+  if (raced?.subscriptionActionClaim === actionClaim) {
     return "replayed";
   }
   return raced?.subscriptionActionClaim ? "conflict" : null;

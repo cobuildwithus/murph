@@ -2,8 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   handleHostedRuntimeAssistantAskControl: vi.fn(),
+  handoffHostedMailboxWake: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
-  scheduleHostedMailboxWakeAfterResponse: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
@@ -15,8 +15,7 @@ vi.mock("@/src/lib/hosted-groups/group-assistant-ask", () => ({
     mocks.handleHostedRuntimeAssistantAskControl,
 }));
 vi.mock("@/src/lib/hosted-orchestration/mailbox-wake", () => ({
-  scheduleHostedMailboxWakeAfterResponse:
-    mocks.scheduleHostedMailboxWakeAfterResponse,
+  handoffHostedMailboxWake: mocks.handoffHostedMailboxWake,
 }));
 
 import { POST } from "@/app/api/internal/hosted-execution/assistant-asks/runtime/route";
@@ -41,6 +40,7 @@ function runtimeRequest(body: unknown, input: { includeFence?: boolean } = {}) {
 describe("Hosted Assistant Ask runtime route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.handoffHostedMailboxWake.mockResolvedValue(undefined);
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue(
       "member-group-runtime",
     );
@@ -97,7 +97,39 @@ describe("Hosted Assistant Ask runtime route", () => {
     });
   });
 
-  it("wakes only the committed private completion after responding", async () => {
+  it("wakes only the committed private completion before responding", async () => {
+    mocks.handleHostedRuntimeAssistantAskControl.mockResolvedValue({
+      mailboxWake: {
+        expectedUserId: "member-personal",
+        mailboxItemId: "aask_done_one",
+      },
+      response: { action: "complete", status: "completed" },
+    });
+
+    const request = runtimeRequest({
+      action: "complete",
+      requestId: "aask_req_one",
+      result: { answer: "Three sets of squats.", outcome: "answered" },
+    });
+    const response = await POST(request);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      action: "complete",
+      status: "completed",
+    });
+    expect(mocks.handoffHostedMailboxWake).toHaveBeenCalledWith({
+      directWakeSource: "assistant-ask-completion",
+      expectedUserId: "member-personal",
+      mailboxItemId: "aask_done_one",
+      signal: request.signal,
+    });
+  });
+
+  it("does not acknowledge a committed completion when its durable handoff rejects", async () => {
+    mocks.handoffHostedMailboxWake.mockRejectedValueOnce(
+      new Error("Temporal unavailable"),
+    );
     mocks.handleHostedRuntimeAssistantAskControl.mockResolvedValue({
       mailboxWake: {
         expectedUserId: "member-personal",
@@ -112,15 +144,12 @@ describe("Hosted Assistant Ask runtime route", () => {
       result: { answer: "Three sets of squats.", outcome: "answered" },
     }));
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(500);
     await expect(response.json()).resolves.toEqual({
-      action: "complete",
-      status: "completed",
-    });
-    expect(mocks.scheduleHostedMailboxWakeAfterResponse).toHaveBeenCalledWith({
-      directWakeSource: "assistant-ask-completion",
-      expectedUserId: "member-personal",
-      mailboxItemId: "aask_done_one",
+      error: {
+        code: "INTERNAL_ERROR",
+        message: "Internal error.",
+      },
     });
   });
 
