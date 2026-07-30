@@ -70,15 +70,20 @@ The live ownership split is:
 
 Authenticated Settings provider changes reuse that ownership split without
 adding mailbox work. Web commits the provider preference to Postgres, then sends
-the existing payloadless `runtime_recheck_requested` Temporal signal only when
-the effective provider changed. If a warm invocation receives that wake and
-finds no foreground mailbox work, it compares its invocation provider with the
-live Web-owned preference. A mismatch makes the current dirty workspace
-checkpoint immediately and returns the existing `immediateRecheckRequested`
-edge so Cloudflare releases the provider-specific invocation and starts a fresh
-one. A failed best-effort signal leaves the durable preference intact; the next
-invocation and the mandatory provider-entry revalidation remain the recovery
-path. The signal carries no provider value or credential.
+the payloadless `runtime_wake_requested` Temporal signal only when the effective
+provider changed. The per-user workflow coalesces duplicate wakes as one
+boolean and invokes its existing Cloudflare processing adapter even when Web
+reconciliation facts are idle. Blocked facts discard the wake; accepted
+processing clears it only when no newer wake arrived during that call. A warm
+invocation compares its invocation provider with the live Web-owned preference.
+A mismatch stops that invocation from servicing further wakes, makes its dirty
+workspace checkpoint, and returns the existing `immediateRecheckRequested` edge
+so Cloudflare releases the provider-specific invocation and starts a fresh one.
+A failed best-effort signal
+leaves the durable preference intact; the next invocation and the mandatory
+provider-entry revalidation remain the recovery path. The signal carries no
+provider value or credential, and `runtime_recheck_requested` remains a
+facts-read-only signal for its existing callers.
 
 Assistant Ask reuses that same ownership split. Web resolves the target and
 return authority, then appends paired encrypted `assistant.ask.requested` and

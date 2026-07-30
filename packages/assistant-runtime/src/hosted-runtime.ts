@@ -2975,6 +2975,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         signal?: AbortSignal;
         systemMailboxAdmission: "all" | "pre_checkpoint_safe";
       }): Promise<boolean> => {
+        if (assistantProviderHandoffRequested) {
+          return false;
+        }
         const shouldContinue = input.shouldContinue ?? (() => true);
         const runtimeStateDirtyBeforeMailboxImport = runtimeStateDirty;
         let invocationLocalAssistantInputBatch:
@@ -3201,6 +3204,23 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         } = {},
       ): Promise<boolean> => {
         await flushImageGenerationWork();
+        if (
+          latencySeed !== null
+          && !assistantProviderHandoffRequested
+          && !runtimeAbortController.signal.aborted
+          && options.shutdownSignal?.aborted !== true
+        ) {
+          try {
+            if (await resolveInvocationAssistantProviderAuthority() === "handoff") {
+              markIdleCheckpointTimerAfterDirtyWork();
+              return false;
+            }
+          } catch {
+            // A runtime wake is only a handoff hint. The provider-entry gate
+            // remains the fail-closed authority when the live read is
+            // temporarily unavailable.
+          }
+        }
         const ran = await runForegroundMailboxWakeIfWork({
           latencySeed,
           requestIdKind: "checkpoint-interrupt",
@@ -3223,21 +3243,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         });
         if (ran) {
           imageAssistantWakePending = false;
-        } else if (
-          latencySeed !== null
-          && !assistantProviderHandoffRequested
-          && !runtimeAbortController.signal.aborted
-          && options.shutdownSignal?.aborted !== true
-        ) {
-          try {
-            if (await resolveInvocationAssistantProviderAuthority() === "handoff") {
-              markIdleCheckpointTimerAfterDirtyWork();
-            }
-          } catch {
-            // A runtime wake is only a handoff hint. The provider-entry gate
-            // remains the fail-closed authority when the live read is
-            // temporarily unavailable.
-          }
         }
         return ran;
       };

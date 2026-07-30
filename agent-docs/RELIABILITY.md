@@ -17,13 +17,22 @@ Last verified: 2026-07-30
   does not add a queue, repair pass, provider fallback, or second preference
   owner.
 - An authenticated Settings provider change commits Postgres first and then
-  sends the existing bounded Temporal runtime-recheck signal. A warm invocation
-  uses an otherwise-unserviced wake to compare its provider snapshot with the
-  live preference, checkpoints immediately on mismatch, and returns the
-  existing immediate-recheck edge. Signal failure preserves the durable save;
-  the next invocation and the provider-entry gate remain the fail-closed
-  backstop. This adds no mailbox item, direct wake, provider fallback, queue, or
-  second preference owner.
+  sends the payload-free `runtime_wake_requested` Temporal signal. The per-user
+  workflow coalesces duplicate wakes as one boolean and calls the existing
+  Cloudflare processing adapter even when Web facts are otherwise idle. A warm
+  invocation compares its provider snapshot with the live preference,
+  stops servicing further wakes on mismatch, checkpoints, and returns the
+  existing immediate-recheck edge. This prevents repeated orchestration wakes
+  from starving the handoff checkpoint. Blocked facts discard the wake;
+  accepted processing clears it only when no newer wake arrived. Signal failure
+  preserves the durable save, and the next invocation plus provider-entry gate
+  remain the fail-closed backstop. The existing `runtime_recheck_requested`
+  signal remains facts-only. This adds no mailbox item, direct wake, provider
+  fallback, queue, or second preference owner.
+- Direct hosted Codex process projection includes the selected core provider
+  and only that provider's signed egress credential. Changing providers
+  therefore changes the warm-process launch identity; the replacement process
+  cannot inherit the prior provider's endpoint or credential.
 - Explicit remote verification is fail-closed. The dispatcher never retries on
   another executor or runs local and remote copies together; an operator may
   retry the same head only after recording a concrete infrastructure failure.

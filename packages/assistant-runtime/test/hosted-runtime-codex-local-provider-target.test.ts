@@ -89,6 +89,27 @@ test("hosted assistant injected env overrides a stale saved platform profile", a
   });
 });
 
+test("hosted assistant target follows a provider switch in the same operator home", async () => {
+  await withTemporaryHostedAssistantEnv(async () => {
+    const openAiTarget = await readHostedAssistantExecutionDefaultTarget({
+      runtimeEnv: {
+        ...HOSTED_ASSISTANT_RUNTIME_ENV,
+        [HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]: "openai-local-test",
+      },
+    });
+    assert.equal(openAiTarget?.modelProvider, "openai-local-test");
+
+    const veniceTarget = await readHostedAssistantExecutionDefaultTarget({
+      runtimeEnv: {
+        ...HOSTED_ASSISTANT_RUNTIME_ENV,
+        HOSTED_ASSISTANT_PROVIDER: "venice",
+        [HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]: "venice-local-test",
+      },
+    });
+    assert.equal(veniceTarget?.modelProvider, "venice-local-test");
+  });
+});
+
 test("hosted assistant target uses the prepared test Codex command override", async () => {
   await withTemporaryHostedAssistantEnv(async () => {
     const defaultTarget = await readHostedAssistantExecutionDefaultTarget({

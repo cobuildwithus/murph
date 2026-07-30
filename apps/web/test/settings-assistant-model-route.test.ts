@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
   getPrisma: vi.fn(),
   requireActiveHostedAppSessionFromRequest: vi.fn(),
-  signalHostedRuntimeRecheckRuntime: vi.fn(),
+  signalHostedRuntimeWakeRuntime: vi.fn(),
   transaction: vi.fn(),
   updateHostedMemberAssistantConfigurationTx: vi.fn(),
 }));
@@ -36,8 +36,8 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
-  signalHostedRuntimeRecheckRuntime:
-    mocks.signalHostedRuntimeRecheckRuntime,
+  signalHostedRuntimeWakeRuntime:
+    mocks.signalHostedRuntimeWakeRuntime,
 }));
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -67,7 +67,7 @@ describe("assistant model settings route", () => {
     mocks.getPrisma.mockReturnValue({
       $transaction: mocks.transaction,
     });
-    mocks.signalHostedRuntimeRecheckRuntime.mockResolvedValue({
+    mocks.signalHostedRuntimeWakeRuntime.mockResolvedValue({
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_edge",
     });
@@ -119,7 +119,7 @@ describe("assistant model settings route", () => {
       model: "gpt-5.6-sol",
       prisma: { tx: true },
     });
-    expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeWakeRuntime).not.toHaveBeenCalled();
   });
 
   it("persists Venice alongside the same Terra product model", async () => {
@@ -156,7 +156,7 @@ describe("assistant model settings route", () => {
     expect(mocks.after).toHaveBeenCalledWith(expect.any(Function));
     const task = mocks.after.mock.calls[0]?.[0];
     await task?.();
-    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
+    expect(mocks.signalHostedRuntimeWakeRuntime).toHaveBeenCalledWith({
       abortSignal: expect.any(AbortSignal),
       userId: "member_edge",
     });
@@ -194,12 +194,12 @@ describe("assistant model settings route", () => {
     });
     const task = mocks.after.mock.calls[0]?.[0];
     await task?.();
-    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledOnce();
+    expect(mocks.signalHostedRuntimeWakeRuntime).toHaveBeenCalledOnce();
   });
 
-  it("keeps a committed provider change successful when the recheck signal fails", async () => {
+  it("keeps a committed provider change successful when the runtime wake fails", async () => {
     process.env.HOSTED_VENICE_ENABLED = "1";
-    mocks.signalHostedRuntimeRecheckRuntime.mockRejectedValueOnce(
+    mocks.signalHostedRuntimeWakeRuntime.mockRejectedValueOnce(
       new Error("orchestration unavailable"),
     );
     mocks.updateHostedMemberAssistantConfigurationTx.mockResolvedValueOnce({
@@ -224,7 +224,7 @@ describe("assistant model settings route", () => {
     });
     const task = mocks.after.mock.calls[0]?.[0];
     await expect(task?.()).resolves.toBeUndefined();
-    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledOnce();
+    expect(mocks.signalHostedRuntimeWakeRuntime).toHaveBeenCalledOnce();
   });
 
   it("rejects Venice before the rollout gate opens", async () => {
@@ -274,7 +274,7 @@ describe("assistant model settings route", () => {
       updated: false,
     });
     expect(mocks.after).not.toHaveBeenCalled();
-    expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeWakeRuntime).not.toHaveBeenCalled();
   });
 
   it("returns the stable Edge entitlement error", async () => {

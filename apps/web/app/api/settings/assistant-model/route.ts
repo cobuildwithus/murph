@@ -16,7 +16,7 @@ import {
   waitForHostedPostCommitOperation,
 } from "@/src/lib/hosted-onboarding/bounded-post-commit";
 import {
-  signalHostedRuntimeRecheckRuntime,
+  signalHostedRuntimeWakeRuntime,
 } from "@/src/lib/hosted-orchestration/signal-runtime";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -115,7 +115,7 @@ function scheduleHostedProviderChange(userId: string): void {
       await waitForHostedPostCommitOperation({
         deadlineMs,
         operation: (abortSignal) =>
-          signalHostedRuntimeRecheckRuntime({
+          signalHostedRuntimeWakeRuntime({
             abortSignal,
             userId,
           }),

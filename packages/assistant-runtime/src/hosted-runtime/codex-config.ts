@@ -31,6 +31,8 @@ import {
 import {
   type AssistantCodexModelProviderConfig,
   HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
   OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
   VENICE_CODEX_MODEL_PROVIDER_ID,
   resolveAssistantCodexModelProviderConfig,
@@ -480,6 +482,9 @@ function resolveHostedCodexModelProviderConfig(input: {
   return {
     ...providerConfig,
     baseUrl: url.toString(),
+    id: providerConfig.id === VENICE_CODEX_MODEL_PROVIDER_ID
+      ? HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID
+      : HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
     supportsWebSockets: false,
   };
 }
