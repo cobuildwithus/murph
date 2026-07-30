@@ -62,7 +62,6 @@ export function HostedInvitePhoneAuth({
   const invitePhoneCodeSendInFlightRef = useRef(false);
   const controller = useHostedPhoneAuthController({
     inviteCode,
-    intent: "auth",
     onCompleted,
     onSignOut: async () => {
       setQueuedInvitePhoneCodeSend(null);

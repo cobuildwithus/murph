@@ -33,6 +33,8 @@ const mocks = vi.hoisted(() => ({
   requestHostedOnboardingJson: vi.fn(),
   hostedEmailAuthProps: null as Record<string, unknown> | null,
   hostedPhoneAuthProps: null as Record<string, unknown> | null,
+  hostedPhoneSettingsProps: null as Record<string, unknown> | null,
+  connectTelegramProps: null as Record<string, unknown> | null,
   useHostedInviteStatusRefresh: vi.fn(),
 }));
 
@@ -51,6 +53,19 @@ vi.mock("@privy-io/react-auth", () => ({
     refreshUser: vi.fn(),
     user: null,
   }),
+}));
+
+vi.mock("@/src/components/settings/hosted-phone-settings", () => ({
+  HostedPhoneSettings(props: Record<string, unknown>) {
+    mocks.hostedPhoneSettingsProps = props;
+    return createElement(
+      "div",
+      {
+        "data-hosted-phone-settings": "true",
+      },
+      "Hosted phone settings",
+    );
+  },
 }));
 
 vi.mock("@/src/components/hosted-onboarding/hosted-phone-auth", () => ({
@@ -80,7 +95,11 @@ vi.mock("@/src/components/hosted-onboarding/hosted-email-auth-button", () => ({
 }));
 
 vi.mock("@/src/components/settings/hosted-telegram-settings", () => ({
-  ConnectTelegram(props: { initialTelegramAccount: { username: string | null } | null }) {
+  ConnectTelegram(props: {
+    authenticated: boolean;
+    initialTelegramAccount: { username: string | null } | null;
+  }) {
+    mocks.connectTelegramProps = props;
     return createElement(
       "div",
       {
@@ -137,8 +156,10 @@ vi.mock("@/src/components/hosted-onboarding/invite-status-client", () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.connectTelegramProps = null;
   mocks.hostedEmailAuthProps = null;
   mocks.hostedPhoneAuthProps = null;
+  mocks.hostedPhoneSettingsProps = null;
 });
 
 test("JoinInviteSignOutButtonIsland preserves the invite URL while switching accounts", async () => {
@@ -608,19 +629,26 @@ test("JoinInviteStatusRefreshIsland surfaces refresh failures with a retry actio
   await cleanup();
 });
 
-test("JoinInviteMessagingSetupIsland shows phone link form and Telegram connect together", async () => {
+test("JoinInviteMessagingSetupIsland shows Privy phone linking and Telegram connect together", async () => {
   const { cleanup, container } = await renderClientComponent(
     createElement(JoinInviteMessagingSetupIsland, {
       authenticated: true,
+      expectedPrivyUserId: "privy-user-a",
       initialTelegramAccount: null,
+      privySessionMatchesAppSession: true,
     }),
     { requireButton: false },
   );
 
-  expect(container.querySelector('[data-hosted-phone-auth="true"]')).toBeTruthy();
+  expect(container.querySelector('[data-hosted-phone-settings="true"]')).toBeTruthy();
   expect(container.querySelector('[data-connect-telegram="true"]')).toBeTruthy();
   expect(container.textContent).toContain("OR");
-  expect(mocks.hostedPhoneAuthProps).toMatchObject({ intent: "link" });
+  expect(mocks.hostedPhoneSettingsProps).toMatchObject({
+    authenticated: true,
+    autoOpen: true,
+    expectedPrivyUserId: "privy-user-a",
+    privySessionMatchesAppSession: true,
+  });
   await cleanup();
 });
 
@@ -628,16 +656,38 @@ test("JoinInviteMessagingSetupIsland surfaces an existing Telegram seed", async 
   const { cleanup, container } = await renderClientComponent(
     createElement(JoinInviteMessagingSetupIsland, {
       authenticated: true,
+      expectedPrivyUserId: "privy-user-a",
       initialTelegramAccount: {
         telegramUserId: "telegram-test-user",
         username: "murph_test",
       },
+      privySessionMatchesAppSession: true,
     }),
     { requireButton: false },
   );
 
   expect(container.querySelector('[data-connect-telegram="true"]')).toBeTruthy();
   expect(container.textContent).toContain("murph_test");
+  await cleanup();
+});
+
+test("JoinInviteMessagingSetupIsland blocks both provider link surfaces on a stale Privy session", async () => {
+  const { cleanup } = await renderClientComponent(
+    createElement(JoinInviteMessagingSetupIsland, {
+      authenticated: true,
+      expectedPrivyUserId: "privy-user-a",
+      initialTelegramAccount: null,
+      privySessionMatchesAppSession: false,
+    }),
+    { requireButton: false },
+  );
+
+  expect(mocks.hostedPhoneSettingsProps).toMatchObject({
+    privySessionMatchesAppSession: false,
+  });
+  expect(mocks.connectTelegramProps).toMatchObject({
+    authenticated: false,
+  });
   await cleanup();
 });
 

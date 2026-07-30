@@ -14,6 +14,8 @@ import {
   seedHostedWorkspaceCheckpointForTest,
   seedHostedWorkspaceInboxMediaRetentionWakeForTest,
   setLatestHostedLinqReplyLatencyForTest,
+  signalHostedMailboxAppendRuntimeForTest,
+  signalHostedRuntimeRecheckRuntimeForTest,
 } from "#hosted-web-testing";
 import {
   buildHostedExecutionAssistantAskCompletedWake,
@@ -45,12 +47,6 @@ import {
 import {
   createCloudflareHostedControlClient,
 } from "@murphai/cloudflare-hosted-control/client";
-import {
-  createHostedRuntimeTemporalClientFromEnv,
-} from "@murphai/hosted-orchestrator-temporal/client/temporal-client";
-import {
-  signalHostedUserRuntimeWorkflow,
-} from "@murphai/hosted-orchestrator-temporal/client";
 import {
   sha256HostedBundleHex,
   snapshotHostedExecutionContext,
@@ -903,18 +899,19 @@ async function signalTemporalRuntime(
       }
     | { kind: "runtime_recheck_requested" },
 ): Promise<void> {
-  const client = await createHostedRuntimeTemporalClientFromEnv(
-    requireScenario().runtimeEnv,
-  );
-  try {
-    await signalHostedUserRuntimeWorkflow({
-      client,
-      signal,
-      userId,
+  if (signal.kind === "mailbox_appended") {
+    await signalHostedMailboxAppendRuntimeForTest({
+      environment: requireScenario().runtimeEnv,
+      expectedUserId: userId,
+      mailboxItemId: signal.mailboxItemId,
     });
-  } finally {
-    await client.connection.close();
+    return;
   }
+
+  await signalHostedRuntimeRecheckRuntimeForTest({
+    environment: requireScenario().runtimeEnv,
+    userId,
+  });
 }
 
 async function waitForAssistantProviderInput(
