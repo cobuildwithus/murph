@@ -497,6 +497,7 @@ export interface HostedRuntimeAssistantPersonalizationToolPort {
 export interface HostedRuntimeGroupToolPort {
   request(
     request: HostedRuntimeGroupToolRequest,
+    context?: { signal?: AbortSignal | null },
   ): Promise<HostedRuntimeGroupToolResponse>;
 }
 

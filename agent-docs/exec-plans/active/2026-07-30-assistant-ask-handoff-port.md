@@ -52,6 +52,32 @@ Created: 2026-07-30
 - Exact pushed-head CI, preliminary completion-specialists ReviewGPT, parent
   final review, and final ReviewGPT rounds.
 
+Completed local proof:
+
+- Focused Web: 4 files, 137 tests passed; Web prepared typecheck and targeted
+  lint passed.
+- Focused Cloudflare plus shared transport: 5 files, 159 tests passed;
+  Cloudflare typecheck passed.
+- Assistant Engine current-turn boundary: full 240-test runtime file passed;
+  Assistant Engine typecheck passed.
+- Assistant Runtime group-context boundary: 20 tests passed; Assistant Runtime
+  typecheck passed.
+- Hosted-local `temporal-orchestration` full-stack E2E: 2 tests passed against
+  the real local Web, Cloudflare runner, database, and managed Temporal stack.
+- Signed loopback direct scenarios proved one exact replay after HTTP `503` and
+  no second POST after foreground cancellation.
+
+Preliminary specialist disposition:
+
+- Accepted the cancellation finding and propagated the existing foreground
+  signal through Assistant Engine, the current-turn runtime wrapper, and the
+  Cloudflare group-tool port. Regression and direct proof now cover the
+  canceled retry boundary.
+- Addressed the requested cross-runtime evidence with the existing hosted-local
+  Temporal scenario plus the existing Web ordering, signed control transport,
+  and Assistant Ask completion integration boundaries. No test-only Temporal
+  controls or parallel orchestration harness were added.
+
 ## Deployment
 
 - Web and Cloudflare control-flow change only; no schema, wire-shape, or

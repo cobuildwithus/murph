@@ -4080,9 +4080,10 @@ async function executeGroupTool(input: {
       { action: 'preflight_set_chat_avatar' }
     >
     try {
-      const preflightResult = await groupTool.request({
-        action: 'preflight_set_chat_avatar',
-      })
+      const preflightResult = await groupTool.request(
+        { action: 'preflight_set_chat_avatar' },
+        { signal: input.abortSignal },
+      )
       if (preflightResult.action !== 'preflight_set_chat_avatar') {
         return groupAvatarUnavailableToolResult(
           'group_avatar_preflight_unavailable',
@@ -4305,7 +4306,9 @@ async function executeGroupTool(input: {
   }
 
   try {
-    const result = await groupTool.request(request)
+    const result = await groupTool.request(request, {
+      signal: input.abortSignal,
+    })
     const modelResult = groupToolModelResult(result)
     const payload = generatedAvatarCapture
       ? { ...modelResult, generatedImage: generatedAvatarCapture }

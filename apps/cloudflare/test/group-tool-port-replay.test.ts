@@ -182,6 +182,26 @@ describe("hosted group tool exact replay", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
+  it("does not replay an Ask after the initiating turn is canceled", async () => {
+    const abortController = new AbortController();
+    const fetchImpl = vi.fn<typeof fetch>(async () => {
+      abortController.abort(new DOMException("turn cancelled", "AbortError"));
+      return createJsonResponse({ error: "temporarily unavailable" }, 503);
+    });
+    const port = createHostedRuntimeGroupToolPort({
+      boundUserId: "member-bound",
+      fetchImpl,
+      timeoutMs: 5_000,
+      transport: { mode: "proxy" },
+    });
+
+    await expect(port.request(
+      replaySafeRequests[0].request,
+      { signal: abortController.signal },
+    )).rejects.toMatchObject({ name: "AbortError" });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it("does not replay an unrelated group action after a lost body", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => createLostBodyResponse(200));
     const port = createHostedRuntimeGroupToolPort({

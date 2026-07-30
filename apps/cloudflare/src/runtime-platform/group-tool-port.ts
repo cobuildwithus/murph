@@ -27,7 +27,7 @@ export function createHostedRuntimeGroupToolPort(input: {
   transport: HostedWebControlTransport;
 }): NonNullable<HostedRuntimePlatform["groupToolPort"]> {
   return {
-    async request(request) {
+    async request(request, context) {
       const isParticipantDisplayNameRead =
         request.action === "read_participant_display_names";
       const timeoutMs = isParticipantDisplayNameRead
@@ -36,6 +36,13 @@ export function createHostedRuntimeGroupToolPort(input: {
           HOSTED_RUNTIME_GROUP_PARTICIPANT_DISPLAY_NAME_SOFT_TIMEOUT_MS,
         )
         : input.timeoutMs;
+      let signal = context?.signal;
+      if (isParticipantDisplayNameRead) {
+        const timeoutSignal = AbortSignal.timeout(timeoutMs);
+        signal = signal
+          ? AbortSignal.any([signal, timeoutSignal])
+          : timeoutSignal;
+      }
       const payload = await fetchHostedWebControlPlaneJson({
         body: request,
         boundUserId: input.boundUserId,
@@ -49,9 +56,9 @@ export function createHostedRuntimeGroupToolPort(input: {
                 maxBytes:
                   HOSTED_RUNTIME_GROUP_PARTICIPANT_DISPLAY_NAME_RESPONSE_MAX_BYTES,
               },
-              signal: AbortSignal.timeout(timeoutMs),
             }
           : {}),
+        signal,
         timeoutMs,
         transport: input.transport,
       });
