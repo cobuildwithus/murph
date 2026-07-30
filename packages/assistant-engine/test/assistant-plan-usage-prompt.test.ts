@@ -19,10 +19,10 @@ describe("assistant plan usage call contracts", () => {
     expect(contract).toContain("trusted low-usage context");
     expect(contract).toContain("This is read-only");
     expect(contract).toContain(
-      "percentages and forecasts cover all available usage",
+      "includeTopUpHistory",
     );
-    expect(contract).toContain("expose no allowance/credit-source split");
-    expect(contract).not.toContain("included/purchased");
+    expect(contract).toContain("beneficiary-scoped");
+    expect(contract).toContain("added, used, adjusted, and remaining");
     expect(contract).toContain("a recommendation or quote is not consent");
     expect(contract).not.toContain("included-usage projection");
   });

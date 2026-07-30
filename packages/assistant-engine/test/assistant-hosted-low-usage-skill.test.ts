@@ -113,13 +113,37 @@ describe('assistant hosted low-usage skill', () => {
       'returned percentages and forecast as overall available AI usage',
     )
     expect(normalizedSkill).toContain(
-      'does not expose how much comes from included allowance or any usage-credit source, including purchase or referral',
+      'does not expose how much of that aggregate percentage comes from included allowance, purchase credit, referral credit, or another source',
     )
     expect(normalizedSkill).toContain(
-      'If asked for a source split, say it is unavailable',
+      'If asked for that percentage source split, say it is unavailable',
     )
     expect(normalizedSkill).toContain(
-      'never assign a returned percentage to included allowance, purchased credit, referral credit, or another source',
+      'never assign the returned percentage to one source',
+    )
+    expect(normalizedSkill).toContain(
+      'call `murph.plan_usage` once with `includeTopUpHistory: true`',
+    )
+    expect(normalizedSkill).toContain(
+      'Use only its beneficiary-scoped `topUpHistory`',
+    )
+    expect(normalizedSkill).toContain(
+      '`purchased_by_you` means the current member funded that grant',
+    )
+    expect(normalizedSkill).toContain(
+      '`added_for_you` means someone else funded it for the current member',
+    )
+    expect(normalizedSkill).toContain(
+      'Report `usedUsd` as usage debited from that grant',
+    )
+    expect(normalizedSkill).toContain(
+      'rounded to cents; they describe cost-weighted Murph usage credit, not cash or token counts',
+    )
+    expect(normalizedSkill).toContain(
+      'If `hasMore` is true, say the returned rows are only the newest portion',
+    )
+    expect(normalizedSkill).toContain(
+      'If the expansion is missing or the read fails, say the history could not be verified',
     )
     expect(skill).not.toContain('included-versus-purchased')
     expect(skill).not.toContain('Share only its')

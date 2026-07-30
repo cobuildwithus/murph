@@ -43,7 +43,7 @@ describe("hosted plan usage tool port", () => {
       transport: { mode: "proxy" },
     });
 
-    await expect(port.read()).resolves.toMatchObject({
+    await expect(port.read({})).resolves.toMatchObject({
       planName: "Pulse",
       usedPercent: 50,
     });
@@ -70,8 +70,48 @@ describe("hosted plan usage tool port", () => {
       transport: { mode: "proxy" },
     });
 
-    await expect(port.read()).rejects.toThrow(
+    await expect(port.read({})).rejects.toThrow(
       "Hosted plan usage tool returned invalid JSON.",
+    );
+  });
+
+  it("forwards the explicit top-up history expansion", async () => {
+    mocks.fetchHostedWebControlPlaneJson.mockResolvedValue({
+      accessKind: "paid",
+      forecast: null,
+      generatedAt: "2026-07-03T12:00:00.000Z",
+      periodEnd: "2026-08-01T00:00:00.000Z",
+      periodKind: "monthly",
+      periodStart: "2026-07-01T00:00:00.000Z",
+      planCode: "launch_monthly",
+      planName: "Pulse",
+      recommendedAction: null,
+      remainingPercent: 50,
+      status: "active",
+      topUpHistory: {
+        hasMore: false,
+        topUps: [],
+        totalCount: 0,
+      },
+      usedPercent: 50,
+    });
+    const port = createHostedRuntimePlanUsageToolPort({
+      boundUserId: "member_bound",
+      fetchImpl: fetch,
+      timeoutMs: 2_000,
+      transport: { mode: "proxy" },
+    });
+
+    await expect(port.read({ includeTopUpHistory: true })).resolves.toMatchObject({
+      topUpHistory: { totalCount: 0 },
+    });
+    expect(mocks.fetchHostedWebControlPlaneJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: {
+          includeSubscriptionActionQuote: true,
+          includeTopUpHistory: true,
+        },
+      }),
     );
   });
 });

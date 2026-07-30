@@ -22,6 +22,9 @@ export const POST = withJsonError(async (request: Request) => {
     ...(toolRequest.includeSubscriptionActionQuote
       ? { includeSubscriptionActionQuote: true }
       : {}),
+    ...(toolRequest.includeTopUpHistory
+      ? { includeTopUpHistory: true }
+      : {}),
     memberId,
   }));
 });

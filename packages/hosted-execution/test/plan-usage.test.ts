@@ -38,6 +38,51 @@ describe("hosted plan usage contract", () => {
     });
   });
 
+  it("parses bounded beneficiary-scoped top-up history", () => {
+    const status = {
+      accessKind: "paid",
+      forecast: null,
+      generatedAt: "2026-07-03T12:00:00.000Z",
+      periodEnd: "2026-08-01T00:00:00.000Z",
+      periodKind: "monthly",
+      periodStart: "2026-07-01T00:00:00.000Z",
+      planCode: "launch_monthly",
+      planName: "Pulse",
+      recommendedAction: null,
+      remainingPercent: 50,
+      status: "active",
+      topUpHistory: {
+        hasMore: false,
+        topUps: [
+          {
+            addedUsd: "5.000000",
+            adjustedUsd: "0.000000",
+            creditedAt: "2026-07-02T12:00:00.000Z",
+            remainingUsd: "3.750000",
+            source: "purchased_by_you",
+            usedUsd: "1.250000",
+          },
+        ],
+        totalCount: 1,
+      },
+      usedPercent: 50,
+    } as const;
+
+    expect(parseHostedPlanUsageStatus(status)).toMatchObject({
+      topUpHistory: {
+        hasMore: false,
+        totalCount: 1,
+      },
+    });
+    expect(() => parseHostedPlanUsageStatus({
+      ...status,
+      topUpHistory: {
+        ...status.topUpHistory,
+        hasMore: true,
+      },
+    })).toThrow();
+  });
+
   it("parses the trial display name", () => {
     expect(parseHostedPlanUsageStatus({
       accessKind: "trial",
@@ -121,8 +166,14 @@ describe("hosted plan usage contract", () => {
     expect(parseHostedPlanUsageToolRequest({
       includeSubscriptionActionQuote: true,
     })).toEqual({ includeSubscriptionActionQuote: true });
+    expect(parseHostedPlanUsageToolRequest({
+      includeTopUpHistory: true,
+    })).toEqual({ includeTopUpHistory: true });
     expect(() => parseHostedPlanUsageToolRequest({
       includeSubscriptionActionQuote: false,
+    })).toThrow();
+    expect(() => parseHostedPlanUsageToolRequest({
+      includeTopUpHistory: false,
     })).toThrow();
     expect(() => parseHostedPlanUsageToolRequest({ memberId: "not-allowed" }))
       .toThrow();

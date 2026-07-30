@@ -1,10 +1,12 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import {
   HOSTED_ADD_USAGE_SETTINGS_URL,
+  HOSTED_PLAN_USAGE_TOP_UP_HISTORY_MAX_ROWS,
   type HostedPlanUsageAvailableStatus,
   type HostedPlanUsageRecommendedAction,
   type HostedPlanUsageStatus,
   type HostedPlanUsageSubscriptionActionQuote,
+  type HostedPlanUsageTopUpHistory,
 } from "@murphai/hosted-execution/plan-usage";
 
 import { getPrisma } from "../prisma";
@@ -28,11 +30,13 @@ import {
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
 const USAGE_ACTION_THRESHOLD_PERCENT = 80;
+const USD_MICROS_PER_USD = 1_000_000n;
 
 type HostedPlanUsageClient = PrismaClient | Prisma.TransactionClient;
 
 export async function readHostedPersonalAiUsageStatus(input: {
   includeSubscriptionActionQuote?: boolean;
+  includeTopUpHistory?: boolean;
   memberId: string;
   now?: Date | string;
   prisma?: HostedPlanUsageClient;
@@ -46,7 +50,7 @@ export async function readHostedPersonalAiUsageStatus(input: {
     prisma,
   });
 
-  return projectHostedPersonalAiUsageStatus({
+  const status = await projectHostedPersonalAiUsageStatus({
     decision,
     includeSubscriptionActionQuote:
       input.includeSubscriptionActionQuote === true,
@@ -55,6 +59,23 @@ export async function readHostedPersonalAiUsageStatus(input: {
     prisma,
     publicBaseUrl: input.publicBaseUrl,
   });
+  if (
+    input.includeTopUpHistory !== true
+    || (
+      status.status === "unavailable"
+      && status.reason === "group_not_supported"
+    )
+  ) {
+    return status;
+  }
+
+  return {
+    ...status,
+    topUpHistory: await readHostedPlanUsageTopUpHistory({
+      memberId: input.memberId,
+      prisma,
+    }),
+  };
 }
 
 export async function projectHostedPersonalAiUsageStatus(input: {
@@ -250,6 +271,114 @@ function calculateUsedPercent(input: {
 
   const floored = Number((input.spent * 100n) / input.capacity);
   return Math.min(99, Math.max(1, floored));
+}
+
+async function readHostedPlanUsageTopUpHistory(input: {
+  memberId: string;
+  prisma: HostedPlanUsageClient;
+}): Promise<HostedPlanUsageTopUpHistory> {
+  const where = {
+    beneficiaryMemberId: input.memberId,
+    kind: "purchase_grant" as const,
+  };
+  const entries = await input.prisma.hostedUsageCreditEntry.findMany({
+    orderBy: [
+      { beneficiarySequence: "desc" },
+      { id: "desc" },
+    ],
+    select: {
+      amountUsdMicros: true,
+      effectiveAt: true,
+      grant: {
+        select: {
+          remainingUsdMicros: true,
+        },
+      },
+      id: true,
+      purchase: {
+        select: {
+          payerMemberId: true,
+        },
+      },
+    },
+    take: HOSTED_PLAN_USAGE_TOP_UP_HISTORY_MAX_ROWS,
+    where,
+  });
+  const totalCount = await input.prisma.hostedUsageCreditEntry.count({ where });
+  const entryIds = entries.map((entry) => entry.id);
+  const debitRows = entryIds.length > 0
+    ? await input.prisma.hostedUsageCreditEntry.groupBy({
+        _sum: {
+          amountUsdMicros: true,
+        },
+        by: ["parentGrantEntryId"],
+        where: {
+          kind: "usage_debit",
+          parentGrantEntryId: {
+            in: entryIds,
+          },
+        },
+      })
+    : [];
+  const usedByGrantEntryId = new Map<string, bigint>();
+  for (const debitRow of debitRows) {
+    if (debitRow.parentGrantEntryId === null) {
+      throw new TypeError("Hosted top-up usage debit is missing its grant.");
+    }
+    const signedAmountUsdMicros = debitRow._sum.amountUsdMicros ?? 0n;
+    if (signedAmountUsdMicros > 0n) {
+      throw new TypeError("Hosted top-up usage debit has an invalid amount.");
+    }
+    usedByGrantEntryId.set(
+      debitRow.parentGrantEntryId,
+      -signedAmountUsdMicros,
+    );
+  }
+
+  return {
+    hasMore: totalCount > entries.length,
+    topUps: entries.map((entry) => {
+      if (!entry.grant || !entry.purchase) {
+        throw new TypeError("Hosted purchase grant projection is incomplete.");
+      }
+      const usedUsdMicros = usedByGrantEntryId.get(entry.id) ?? 0n;
+      const adjustedUsdMicros =
+        entry.amountUsdMicros
+        - entry.grant.remainingUsdMicros
+        - usedUsdMicros;
+      if (
+        entry.amountUsdMicros <= 0n
+        || entry.grant.remainingUsdMicros < 0n
+        || usedUsdMicros < 0n
+        || adjustedUsdMicros < 0n
+      ) {
+        throw new TypeError("Hosted purchase grant amounts are inconsistent.");
+      }
+
+      return {
+        addedUsd: formatHostedPlanUsageUsdMicros(entry.amountUsdMicros),
+        adjustedUsd: formatHostedPlanUsageUsdMicros(adjustedUsdMicros),
+        creditedAt: entry.effectiveAt.toISOString(),
+        remainingUsd: formatHostedPlanUsageUsdMicros(
+          entry.grant.remainingUsdMicros,
+        ),
+        source: entry.purchase.payerMemberId === input.memberId
+          ? "purchased_by_you" as const
+          : "added_for_you" as const,
+        usedUsd: formatHostedPlanUsageUsdMicros(usedUsdMicros),
+      };
+    }),
+    totalCount,
+  };
+}
+
+function formatHostedPlanUsageUsdMicros(value: bigint): string {
+  if (value < 0n) {
+    throw new TypeError("Hosted plan usage USD amount cannot be negative.");
+  }
+  const dollars = value / USD_MICROS_PER_USD;
+  const micros = value % USD_MICROS_PER_USD;
+  return `${dollars}.${micros.toString().padStart(6, "0")}`;
 }
 
 async function buildUsageForecast(input: {

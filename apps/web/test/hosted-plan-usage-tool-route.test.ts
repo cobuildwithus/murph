@@ -137,6 +137,24 @@ describe("hosted plan usage tool route", () => {
     });
   });
 
+  it("binds the explicit top-up history expansion to the signed member", async () => {
+    const { POST } = await import(
+      "../app/api/internal/hosted-execution/plan-usage/tool/route"
+    );
+    const body = JSON.stringify({ includeTopUpHistory: true });
+    const response = await POST(await createSignedRequest({
+      body,
+      memberId: "member_bound",
+      nonce: "1234567890abcdef1234567890abcdef",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.readHostedPersonalAiUsageStatus).toHaveBeenCalledWith({
+      includeTopUpHistory: true,
+      memberId: "member_bound",
+    });
+  });
+
   it("rejects model-supplied fields instead of accepting a member id", async () => {
     const { POST } = await import(
       "../app/api/internal/hosted-execution/plan-usage/tool/route"

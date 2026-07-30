@@ -239,6 +239,15 @@ with the original added amount, source, and date. That history does not read or
 display aggregate or per-grant remaining capacity; the combined AI usage bar
 remains the only current-capacity view.
 
+In a private assistant conversation, an explicit top-up-history question may
+instead request the bounded `murph.plan_usage` expansion. Web selects purchase
+grants by the callback-bound beneficiary, never by payer, so a Family purchase
+for someone else is not presented as the payer's own capacity. The expansion
+may report per-grant usage debits, remaining credit, and non-usage adjustments
+because the member asked for that accounting detail. Ordinary usage reads,
+proactive low-usage warnings, group contexts, Home, and Settings keep the
+aggregate current-capacity presentation above.
+
 Purchased capacity must not be called cash, wallet funds, an account balance,
 or refundable dollars. Accounting stays in integer USD micros behind the
 web-owned projection.

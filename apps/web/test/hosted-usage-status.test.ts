@@ -227,11 +227,12 @@ describe("readHostedPersonalAiUsageStatus", () => {
       remainingUsdMicros: 9_000_000n,
       spentUsdMicros: 1_000_000n,
     }));
+    const prisma = buildPrisma(null);
 
     const result = await readHostedPersonalAiUsageStatus({
       memberId: "member_usage_legacy_shape",
       now: NOW,
-      prisma: buildPrisma(null) as never,
+      prisma: prisma as never,
       publicBaseUrl: null,
     });
 
@@ -242,6 +243,9 @@ describe("readHostedPersonalAiUsageStatus", () => {
     });
     expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
     expect(mocks.readHostedMemberBillingEligibilityState).not.toHaveBeenCalled();
+    expect(prisma.hostedUsageCreditEntry.findMany).not.toHaveBeenCalled();
+    expect(prisma.hostedUsageCreditEntry.count).not.toHaveBeenCalled();
+    expect(prisma.hostedUsageCreditEntry.groupBy).not.toHaveBeenCalled();
   });
 
   it("keeps paid add-usage actions available without a public base URL", async () => {
@@ -534,6 +538,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
 
     await expect(readHostedPersonalAiUsageStatus({
       includeSubscriptionActionQuote: true,
+      includeTopUpHistory: true,
       memberId: "thread_runtime",
       now: NOW,
       prisma: prisma as never,
@@ -545,6 +550,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
       status: "unavailable",
     });
     expect(prisma.hostedAiUsage.findFirst).not.toHaveBeenCalled();
+    expect(prisma.hostedUsageCreditEntry.count).not.toHaveBeenCalled();
   });
 
   it("returns no subscription quote for inactive hosted access", async () => {
@@ -765,6 +771,102 @@ describe("readHostedPersonalAiUsageStatus", () => {
     });
   });
 
+  it("projects bounded beneficiary top-ups with usage and adjustments", async () => {
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+      limitUsdMicros: 10_000_000n,
+      remainingUsdMicros: 6_700_000n,
+      spentUsdMicros: 8_300_000n,
+      usageCreditBalanceUsdMicros: 5_000_000n,
+      usageCreditLedgerVersion: 4n,
+    }));
+    const prisma = buildPrisma(null);
+    prisma.hostedUsageCreditEntry.count.mockResolvedValue(3);
+    prisma.hostedUsageCreditEntry.findMany.mockResolvedValue([
+      {
+        amountUsdMicros: 5_000_000n,
+        effectiveAt: new Date("2026-07-29T14:23:42.000Z"),
+        grant: { remainingUsdMicros: 3_500_000n },
+        id: "grant_self",
+        purchase: { payerMemberId: "member_top_up_history" },
+      },
+      {
+        amountUsdMicros: 10_000_000n,
+        effectiveAt: new Date("2026-07-27T20:38:45.000Z"),
+        grant: { remainingUsdMicros: 0n },
+        id: "grant_family",
+        purchase: { payerMemberId: "member_family_owner" },
+      },
+    ]);
+    prisma.hostedUsageCreditEntry.groupBy.mockResolvedValue([
+      {
+        _sum: { amountUsdMicros: -1_200_000n },
+        parentGrantEntryId: "grant_self",
+      },
+      {
+        _sum: { amountUsdMicros: -10_000_000n },
+        parentGrantEntryId: "grant_family",
+      },
+    ]);
+
+    const result = await readHostedPersonalAiUsageStatus({
+      includeTopUpHistory: true,
+      memberId: "member_top_up_history",
+      now: NOW,
+      prisma: prisma as never,
+      publicBaseUrl: null,
+    });
+
+    expect(result).toMatchObject({
+      topUpHistory: {
+        hasMore: true,
+        topUps: [
+          {
+            addedUsd: "5.000000",
+            adjustedUsd: "0.300000",
+            creditedAt: "2026-07-29T14:23:42.000Z",
+            remainingUsd: "3.500000",
+            source: "purchased_by_you",
+            usedUsd: "1.200000",
+          },
+          {
+            addedUsd: "10.000000",
+            adjustedUsd: "0.000000",
+            creditedAt: "2026-07-27T20:38:45.000Z",
+            remainingUsd: "0.000000",
+            source: "added_for_you",
+            usedUsd: "10.000000",
+          },
+        ],
+        totalCount: 3,
+      },
+    });
+    expect(prisma.hostedUsageCreditEntry.count).toHaveBeenCalledWith({
+      where: {
+        beneficiaryMemberId: "member_top_up_history",
+        kind: "purchase_grant",
+      },
+    });
+    expect(prisma.hostedUsageCreditEntry.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        take: 50,
+        where: {
+          beneficiaryMemberId: "member_top_up_history",
+          kind: "purchase_grant",
+        },
+      }),
+    );
+    expect(prisma.hostedUsageCreditEntry.groupBy).toHaveBeenCalledWith({
+      _sum: { amountUsdMicros: true },
+      by: ["parentGrantEntryId"],
+      where: {
+        kind: "usage_debit",
+        parentGrantEntryId: {
+          in: ["grant_self", "grant_family"],
+        },
+      },
+    });
+  });
+
   it("forecasts exhaustion against overall available capacity", async () => {
     mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
       limitUsdMicros: 10_000_000n,
@@ -798,6 +900,11 @@ function buildPrisma(firstUsageAt: Date | null) {
       findFirst: vi.fn(async () => firstUsageAt
         ? { occurredAt: firstUsageAt }
         : null),
+    },
+    hostedUsageCreditEntry: {
+      count: vi.fn(async () => 0),
+      findMany: vi.fn(async (): Promise<unknown[]> => []),
+      groupBy: vi.fn(async (): Promise<unknown[]> => []),
     },
   };
 }
