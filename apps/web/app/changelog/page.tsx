@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import { SiteFooter } from "@/src/components/homepage/site-footer";
 import { resolveHostedMurphContactOptions } from "@/src/components/murph/hosted-murph-contact-action";
+import { VercelTelemetry } from "@/src/components/observability/vercel-telemetry";
 import {
   buildAbsoluteChangelogUrl,
   buildChangelogCardPath,
@@ -2604,6 +2605,7 @@ export default async function ChangelogPage({
 
   return (
     <>
+      <VercelTelemetry />
       <main className="min-h-dvh bg-[#f5f0e8] text-[#2d3436] antialiased">
         <StickyNav
           authenticated={authenticated}

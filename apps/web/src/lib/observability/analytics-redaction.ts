@@ -1,6 +1,15 @@
 import type { BeforeSendEvent as VercelAnalyticsBeforeSendEvent } from "@vercel/analytics/next";
 
-const MURPH_SAFE_PATHNAME = "/search";
+export const VERCEL_TELEMETRY_PATHNAMES = [
+  "/",
+  "/changelog",
+  "/clubs",
+  "/home",
+  "/pitch",
+] as const;
+const VERCEL_TELEMETRY_PATHNAME_SET = new Set<string>(
+  VERCEL_TELEMETRY_PATHNAMES,
+);
 const PRIVATE_COMPUTER_HANDOFF_PATH_PREFIXES = [
   {
     prefix: "/computer/handoff/",
@@ -51,6 +60,13 @@ export function redactVercelSpeedInsightsEvent(
     ? redactPrivateAnalyticsUrl(event.route)
     : event.route;
 
+  if (
+    typeof redactedRoute === "string"
+    && readUrlPathname(redactedRoute) !== readUrlPathname(redactedUrl)
+  ) {
+    return null;
+  }
+
   if (redactedUrl === event.url && redactedRoute === event.route) {
     return event;
   }
@@ -65,8 +81,10 @@ export function redactVercelSpeedInsightsEvent(
 export function shouldSuppressVercelTelemetryForPathname(
   pathname: string | null | undefined,
 ): boolean {
-  return pathname === MURPH_SAFE_PATHNAME
-    || pathname?.startsWith(`${MURPH_SAFE_PATHNAME}/`) === true;
+  const normalizedPathname = normalizeVercelTelemetryPathname(pathname);
+
+  return !normalizedPathname
+    || !VERCEL_TELEMETRY_PATHNAME_SET.has(normalizedPathname);
 }
 
 export function shouldSuppressVercelTelemetryUrl(value: string): boolean {
@@ -81,6 +99,21 @@ export function shouldSuppressVercelTelemetryUrl(value: string): boolean {
 export function redactPrivateAnalyticsUrl(value: string): string {
   try {
     const parsed = new URL(value, URL_PARSE_BASE);
+    const telemetryPathname = normalizeVercelTelemetryPathname(parsed.pathname);
+
+    if (
+      telemetryPathname
+      && VERCEL_TELEMETRY_PATHNAME_SET.has(telemetryPathname)
+    ) {
+      parsed.pathname = telemetryPathname;
+      parsed.search = "";
+      parsed.hash = "";
+
+      return hasExplicitOrigin(value)
+        ? `${parsed.origin}${parsed.pathname}`
+        : parsed.pathname;
+    }
+
     const redactedPathname = redactPrivateComputerHandoffPathname(parsed.pathname);
 
     if (redactedPathname) {
@@ -141,6 +174,28 @@ function redactClinicalRecordsUrl(url: URL): boolean {
   }
 
   return changed;
+}
+
+function normalizeVercelTelemetryPathname(
+  value: string | null | undefined,
+): string | null {
+  if (!value?.startsWith("/")) {
+    return null;
+  }
+
+  return value.length > 1 && value.endsWith("/")
+    ? value.slice(0, -1)
+    : value;
+}
+
+function readUrlPathname(value: string): string | null {
+  try {
+    return normalizeVercelTelemetryPathname(
+      new URL(value, URL_PARSE_BASE).pathname,
+    );
+  } catch {
+    return null;
+  }
 }
 
 function redactPrivateComputerHandoffPathname(pathname: string): string | null {
