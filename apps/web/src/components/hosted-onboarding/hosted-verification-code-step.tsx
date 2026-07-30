@@ -4,6 +4,7 @@ import { useEffect, useId, useRef } from "react";
 import { Button } from "@/src/components/ui/button";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/src/components/ui/input-otp";
 import { Label } from "@/src/components/ui/label";
+import { Spinner } from "@/src/components/ui/spinner";
 
 const CODE_LENGTH = 6;
 
@@ -105,15 +106,19 @@ export function HostedVerificationCodeStep({
       </div>
       <div className="flex flex-wrap gap-3">
         <Button
+          aria-busy={pendingAction === "verify-code"}
           type="button"
           onClick={onSubmit}
           disabled={disabled}
           size="xl"
           className="w-full"
         >
-          {pendingAction === "verify-code"
-            ? primaryActionPendingLabel
-            : primaryActionLabel}
+          {pendingAction === "verify-code" ? (
+            <>
+              <Spinner aria-hidden="true" />
+              {primaryActionPendingLabel}
+            </>
+          ) : primaryActionLabel}
         </Button>
         {secondaryAction}
       </div>
