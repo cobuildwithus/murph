@@ -1,6 +1,6 @@
 # Completion Workflow
 
-Last verified: 2026-07-29
+Last verified: 2026-07-30
 
 This workflow applies to repo code/docs/test/config changes after implementation is materially complete.
 Use `agent-docs/operations/agent-workflow-routing.md` to classify the task, choose the commit path, and decide whether plan mechanics apply.
@@ -60,7 +60,9 @@ work also requires the production component or section on the appropriate
 `/design` catalog tab and hosted desktop and mobile screenshots from that tab
 in the PR;
 PR-lane work additionally requires green CI and, when the change is eligible,
-the separate final pushed-head ReviewGPT gate.
+the separate final pushed-head ReviewGPT gate. A final handoff that calls the
+PR green or ready to merge also requires a clean task worktree at that exact
+pushed head after all task activity is complete.
 
 Keep the current layer explicit: implementation, local completion, or PR/external
 gate. Do not let a later layer repeat policy owned by an earlier one, and do not
@@ -155,7 +157,16 @@ become fallback product-decision owners.
 14. When the final ReviewGPT gate is selected, start its immutable round-one baseline only now, after preliminary remediation, parent final review, final verification, plan closure, and the resulting push. Follow `agent-docs/operations/pr-reviewgpt-loop.md` until the exact patch returns `ROUND_OUTCOME: PASS` with zero accepted findings. Run each final-gate round concurrently with CI. Use `Final ReviewGPT Eligibility` above for proportional exemptions; never combine this final gate with local `deep-review`.
 15. For PR-lane work, the task is not complete until the PR branch has no merge conflicts with `main` or its configured base branch. Before final handoff, fetch the latest `main`/base branch and prove the PR head can merge cleanly, or update the branch by a normal merge/rebase, resolve any conflicts, rerun the required checks for the touched surfaces, and push the resolved head. Follow the ReviewGPT loop's base-update and patch-change rerun rules.
 16. An open PR remains active, so preserve its task worktree. If the current turn includes confirmed PR merge or closure, run `scripts/retire-worktree <path>` from another checkout before final handoff. The command is the mandatory task-worktree retirement gate defined in `agent-docs/operations/agent-workflow-routing.md`; preserve and report the checkout when it fails closed.
-17. Final handoff must report required-check results, direct scenario evidence,
+17. Immediately before a final handoff that calls the PR green, merge-ready, or
+    ready to merge, run
+    `scripts/review-gpt-pr-head-preflight.sh <pr-url-or-number>` from the task
+    worktree. Run it after all task edits, cleanup, commits, pushes, review
+    activity, and required checks. It must pass with no staged, unstaged, or
+    untracked files and with local `HEAD` equal to the pushed PR head. Any later
+    repository write invalidates the proof and requires another preflight. If
+    it fails, resolve only task-owned residue or report the blocker without a
+    merge-ready claim; never remove unrelated work to satisfy the gate.
+18. Final handoff must report required-check results, direct scenario evidence,
     the preliminary specialist lens verdicts and patch-artifact disposition, the
     `product-experience-review` purpose verdict when that pass applies, and all
     audit findings accepted, fixed, or rejected with reasons. For user-facing

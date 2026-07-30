@@ -1,6 +1,6 @@
 # PR ReviewGPT Completion Loops
 
-Last verified: 2026-07-29
+Last verified: 2026-07-30
 
 This document owns two distinct managed-browser ReviewGPT stages for PR-lane
 completion:
@@ -25,7 +25,10 @@ asks for a final bug hunt.
 
 For final-ReviewGPT-eligible PR-lane work, do not call the PR good to merge until the
 latest substantive round returns `ROUND_OUTCOME: PASS`, local triage has zero
-accepted findings, and PR CI is green on the final head. A completed anomaly
+accepted findings, PR CI is green on the final head, and the final
+`scripts/review-gpt-pr-head-preflight.sh <pr-url-or-number>` passes from a clean
+task worktree at that exact pushed head. Run that preflight after all task
+activity and immediately before the merge-ready handoff. A completed anomaly
 retrospective may justify continuing the same PR, but it never substitutes for
 a later `PASS` on the resulting patch.
 
@@ -36,7 +39,8 @@ invariants using the guarded repository snapshot. Round 1 is the only full-patch
 audit. Later substantive rounds verify the remediation delta and its directly
 affected paths; they do not reopen unchanged code for novelty. The gate
 completes when the exact patch receives `ROUND_OUTCOME: PASS`, local triage has
-zero accepted findings, and CI is green on the final head. Missing or stale
+zero accepted findings, CI is green on the final head, and the final exact-head
+preflight proves the task worktree is clean. Missing or stale
 evidence, an invalid model/response, unresolved accepted findings, a required
 retrospective, or a merge conflict is a stop condition rather than permission
 to infer the answer.
@@ -469,7 +473,10 @@ the touched surface, push it, and use the ordinary review-loop rules.
 ## Stop Condition
 
 - Stop when the exact current patch returns `ROUND_OUTCOME: PASS` and local
-  triage produces zero accepted findings.
+  triage produces zero accepted findings, CI is green on that head, and
+  `scripts/review-gpt-pr-head-preflight.sh <pr-url-or-number>` passes after all
+  task activity. Any later repository write invalidates that clean exact-head
+  proof and requires another preflight before a merge-ready handoff.
 - `ROUND_OUTCOME: INVALID` is an evidence/invocation failure. It does not advance
   the round counter; correct the gap and retry the same substantive round.
 - `ROUND_OUTCOME: RETROSPECTIVE_REQUIRED` pauses tactical remediation until the
