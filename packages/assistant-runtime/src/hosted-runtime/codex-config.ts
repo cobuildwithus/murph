@@ -191,7 +191,11 @@ export async function prepareHostedCodexRuntimeEnvironment(
   const codexConfigPath = path.join(codexHome, HOSTED_CODEX_CONFIG_FILE_NAME);
   const codexAuthPath = path.join(codexHome, HOSTED_CODEX_AUTH_FILE_NAME);
   const openAiProvider = providerConfig.id === HOSTED_CODEX_OPENAI_MODEL_PROVIDER_ID;
-  const seededChatGptAuthJson = openAiProvider
+  const externalChatGptAuth =
+    openAiProvider && input.externalChatGptAuth === true;
+  const fileBackedChatGptAuthDisabled =
+    externalChatGptAuth || input.clearFileBackedChatGptAuth === true;
+  const seededChatGptAuthJson = openAiProvider && !fileBackedChatGptAuthDisabled
     ? readHostedCodexChatGptAuthJson(input.runtimeEnv)
     : null;
 
@@ -200,10 +204,14 @@ export async function prepareHostedCodexRuntimeEnvironment(
     recursive: true,
   });
   await chmod(codexHome, 0o700);
-  if (!openAiProvider) {
+  // Seed-managed ChatGPT credentials belong only to the app-server's in-memory
+  // auth bridge. Active and explicitly cleared seed states both remove any
+  // legacy or development auth file without reading it, so disconnect cannot
+  // revive file-backed credentials.
+  if (!openAiProvider || fileBackedChatGptAuthDisabled) {
     await rm(codexAuthPath, { force: true });
   }
-  let chatGptAuthKind = openAiProvider
+  let chatGptAuthKind = openAiProvider && !fileBackedChatGptAuthDisabled
     ? await readHostedCodexAuthKind(codexAuthPath)
     : null;
   if (
@@ -225,7 +233,8 @@ export async function prepareHostedCodexRuntimeEnvironment(
     await rm(codexAuthPath, { force: true });
     chatGptAuthKind = null;
   }
-  const chatGptAuth = openAiProvider && chatGptAuthKind !== null;
+  const chatGptAuth =
+    openAiProvider && (externalChatGptAuth || chatGptAuthKind !== null);
   const apiKeyValue = normalizeHostedCodexEnvString(input.runtimeEnv[providerConfig.envKey]);
   if (!chatGptAuth && !apiKeyValue) {
     throw new HostedAssistantConfigurationError(

@@ -27,6 +27,7 @@ import type {
   AssistantHostedToolContext,
 } from '../hosted-tool-context.js'
 import type {
+  AssistantCodexChatGptAuthResolver,
   AssistantWorkspaceArtifactMaterializer,
 } from '../execution-context.js'
 import type {
@@ -127,6 +128,8 @@ export interface AssistantProviderTurn {
   dynamicTools: readonly AssistantProviderDynamicTool[]
   environments?: readonly Readonly<Record<string, unknown>>[] | null
   env?: NodeJS.ProcessEnv
+  codexChatGptAuthResolver?: AssistantCodexChatGptAuthResolver | null
+  codexChatGptAuthSubject?: string | null
   groupConversation?: boolean | null
   groupRoomModelMaintenanceAuthorized?: boolean | null
   onFinishWithoutReplyAccepted?: ((

@@ -536,6 +536,12 @@ async function executeAssistantCodexAttempt(input: {
         codexThreadConfig: nativeCapabilitiesRestrictedTurn
           ? ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG
           : null,
+        codexChatGptAuthResolver:
+          executionPlan.executionContext?.hosted?.codexChatGptAuthResolver ?? null,
+        codexChatGptAuthSubject:
+          executionPlan.executionContext?.hosted?.codexChatGptAuthResolver
+            ? executionPlan.executionContext.hosted.memberId
+            : null,
         conversationHistoryMessages:
           attemptPlan.routePlan.conversationHistoryMessages,
         developerInstructions: attemptPlan.routePlan.developerInstructions,

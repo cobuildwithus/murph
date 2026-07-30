@@ -126,6 +126,8 @@ import {
   type CodexAppServerImageInput,
 } from './assistant-codex/images.js'
 import type {
+  AssistantCodexChatGptAuthResolution,
+  AssistantCodexChatGptAuthResolver,
   AssistantWorkspaceArtifactMaterializer,
 } from './assistant/execution-context.js'
 import type {
@@ -839,6 +841,7 @@ class CodexAppServerProcess {
   readonly startedAt = Date.now()
 
   private activeTurn: CodexAppServerActiveTurnBinding | null = null
+  private appliedChatGptAuthBinding: CodexAppliedChatGptAuthBinding | null = null
   private boundThreadGroupConversation = false
   private boundThreadId: string | null = null
   private boundThreadModel: string | null = null

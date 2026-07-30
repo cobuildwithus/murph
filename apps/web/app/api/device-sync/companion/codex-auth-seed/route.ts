@@ -33,10 +33,14 @@ export const GET = withJsonError(async (request: Request) => {
     prisma,
   });
 
-  return jsonOk(await readHostedCodexAuthCompanionView({
-    memberId: auth.member.id,
-    prisma,
-  }));
+  return jsonOk(
+    withHostedCodexAuthAccessSeedAvailability(
+      await readHostedCodexAuthCompanionView({
+        memberId: auth.member.id,
+        prisma,
+      }),
+    ),
+  );
 });
 
 export const POST = withJsonError(async (request: Request) => {
@@ -91,7 +95,7 @@ export const POST = withJsonError(async (request: Request) => {
       retryable: true,
     });
   }
-  return jsonOk(view, 202);
+  return jsonOk(withHostedCodexAuthAccessSeedAvailability(view), 202);
 });
 
 export const DELETE = withJsonError(async (request: Request) => {
@@ -132,17 +136,30 @@ export const DELETE = withJsonError(async (request: Request) => {
       retryable: true,
     });
   }
-  return jsonOk(view, 202);
+  return jsonOk(withHostedCodexAuthAccessSeedAvailability(view), 202);
 });
 
 function assertHostedCodexAuthAccessSeedFeatureEnabled(): void {
-  if (process.env[HOSTED_CODEX_AUTH_ACCESS_SEED_FEATURE_FLAG] !== "1") {
+  if (!hostedCodexAuthAccessSeedFeatureEnabled()) {
     throw hostedOnboardingError({
       code: "HOSTED_CODEX_AUTH_ACCESS_SEED_DISABLED",
       httpStatus: 404,
       message: "ChatGPT connection is not available.",
     });
   }
+}
+
+function hostedCodexAuthAccessSeedFeatureEnabled(): boolean {
+  return process.env[HOSTED_CODEX_AUTH_ACCESS_SEED_FEATURE_FLAG] === "1";
+}
+
+function withHostedCodexAuthAccessSeedAvailability(
+  view: Awaited<ReturnType<typeof readHostedCodexAuthCompanionView>>,
+) {
+  return {
+    ...view,
+    available: hostedCodexAuthAccessSeedFeatureEnabled(),
+  };
 }
 
 async function readHostedCodexAuthAccessSeedBody(

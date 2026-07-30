@@ -452,6 +452,7 @@ export interface AssistantHostedExecutionContext {
   privateImageUrlPublisher?: AssistantHostedPrivateImageUrlPublisher | null
   subscriptionTool?: AssistantHostedSubscriptionTool | null
   dynamicContextPrompts?: readonly string[] | null
+  codexChatGptAuthResolver?: AssistantCodexChatGptAuthResolver | null
   imageGenerationLauncher?: AssistantHostedImageGenerationLauncher | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   memberId: string
@@ -513,6 +514,9 @@ export function normalizeAssistantExecutionContext(
   const dynamicContextPrompts = normalizeAssistantDynamicContextPrompts(
     hosted?.dynamicContextPrompts,
   )
+  const codexChatGptAuthResolver = normalizeAssistantCodexChatGptAuthResolver(
+    hosted?.codexChatGptAuthResolver,
+  )
   const familyPlanTool = normalizeAssistantFamilyPlanTool(hosted?.familyPlanTool)
   const imessageContactTool = normalizeAssistantIMessageContactTool(
     hosted?.imessageContactTool,
@@ -566,6 +570,7 @@ export function normalizeAssistantExecutionContext(
       ...(assistantConfigurationTool ? { assistantConfigurationTool } : {}),
       ...(connectedApps ? { connectedApps } : {}),
       ...(clinicalRecordsConnectLinkTool ? { clinicalRecordsConnectLinkTool } : {}),
+      ...(codexChatGptAuthResolver ? { codexChatGptAuthResolver } : {}),
       ...(hosted?.imageGenerationLauncher
         ? { imageGenerationLauncher: hosted.imageGenerationLauncher }
         : {}),

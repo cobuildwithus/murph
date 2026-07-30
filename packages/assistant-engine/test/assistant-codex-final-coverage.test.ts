@@ -598,6 +598,9 @@ describe('Codex model catalog', () => {
         source: 'system' as const,
       })),
     }
+    const codexChatGptAuthResolver = {
+      resolve: vi.fn(),
+    }
     providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
       supportedUserMessageContentTypes: ['text'],
       supportsReasoningEffort: true,
@@ -609,6 +612,7 @@ describe('Codex model catalog', () => {
       activeTurnSteering: null,
       executionContext: {
         hosted: {
+          codexChatGptAuthResolver,
           materializeWorkspaceArtifacts: vi.fn(),
           memberId: 'member-system-notification',
           providerFetch: fetch,
@@ -687,6 +691,8 @@ describe('Codex model catalog', () => {
       EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG,
     )
     expect(providerInput).toMatchObject({
+      codexChatGptAuthResolver,
+      codexChatGptAuthSubject: 'member-system-notification',
       dynamicTools: [],
       groupConversation: false,
       environments: [],
@@ -1064,8 +1070,6 @@ describe('Codex model catalog', () => {
       'features.shell_tool=false',
     )
     expect(providerInput).toMatchObject({
-      codexChatGptAuthResolver,
-      codexChatGptAuthSubject: 'member-system-notification',
       dynamicTools: [],
       environments: [],
       hostedToolContext: null,

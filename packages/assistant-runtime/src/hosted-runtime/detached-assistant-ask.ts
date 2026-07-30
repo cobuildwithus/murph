@@ -44,7 +44,7 @@ const HOSTED_DETACHED_ASSISTANT_ASK_ROUTE_ACTIONS = [
   "run-assistant-ask",
 ] as const;
 
-type HostedDetachedAssistantAskRunResult = "handoff" | "idle" | "settled";
+type HostedDetachedAssistantAskRunResult = "handoff" | "idle" | "paused" | "settled";
 
 export interface HostedDetachedAssistantAskController {
   closeAndRequeue(): Promise<void>;

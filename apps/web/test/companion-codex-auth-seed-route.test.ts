@@ -99,7 +99,10 @@ describe("companion Codex auth seed route", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    await expect(response.json()).resolves.toEqual(companionView("connected"));
+    await expect(response.json()).resolves.toEqual({
+      ...companionView("connected"),
+      available: true,
+    });
     expect(mocks.requireActivePrivyMemberAuthFromBearerToken).toHaveBeenCalledWith(
       expect.any(Request),
       PRISMA,
@@ -117,7 +120,10 @@ describe("companion Codex auth seed route", () => {
     expect(response.status).toBe(202);
     expect(response.headers.get("cache-control")).toBe("no-store");
     const responseText = await response.text();
-    expect(JSON.parse(responseText)).toEqual(companionView("connected"));
+    expect(JSON.parse(responseText)).toEqual({
+      ...companionView("connected"),
+      available: true,
+    });
     expect(responseText).not.toContain(body.accessToken);
     expect(responseText).not.toContain(body.chatgptAccountId);
     expect(mocks.beginHostedCodexAuthAccessSeedAttempt).toHaveBeenCalledWith({
@@ -156,6 +162,9 @@ describe("companion Codex auth seed route", () => {
 
     await expect(route.GET(request("GET"))).resolves.toMatchObject({ status: 200 });
     await expect(route.DELETE(request("DELETE"))).resolves.toMatchObject({ status: 202 });
+    await expect((await route.GET(request("GET"))).json()).resolves.toMatchObject({
+      available: false,
+    });
   });
 
   it("rejects forbidden token fields and oversized bodies before persistence", async () => {
@@ -243,7 +252,10 @@ describe("companion Codex auth seed route", () => {
     const response = await route.DELETE(request("DELETE"));
 
     expect(response.status).toBe(202);
-    await expect(response.json()).resolves.toEqual(companionView("off", null));
+    await expect(response.json()).resolves.toEqual({
+      ...companionView("off", null),
+      available: true,
+    });
     expect(order).toEqual(["clear", "signal", "ready"]);
     expect(mocks.requirePrivyMemberAuthFromBearerToken).toHaveBeenCalledWith(
       expect.any(Request),

@@ -451,6 +451,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
 
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
+      externalChatGptAuth: false,
       memberId: "member_1",
       model: "gpt-5.6-terra",
       providerName: "hosted-openai",
@@ -490,6 +491,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
 
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
+      externalChatGptAuth: false,
       memberId: "member_1",
       model: "gpt-5.6-terra",
       providerName: "hosted-openai",
@@ -526,6 +528,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
 
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
+      externalChatGptAuth: false,
       memberId: "member_1",
       model: "gpt-5.6-terra",
       providerName: "hosted-openai",
@@ -556,6 +559,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
 
     await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
+      externalChatGptAuth: false,
       memberId: "member_1",
       model: "gpt-5.6-terra",
       providerName: "hosted-openai",
@@ -724,6 +728,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     try {
       const interrupted = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
+        externalChatGptAuth: false,
         memberId: "member_1",
         model: "gpt-5.6-terra",
         providerName: "hosted-openai",
@@ -752,6 +757,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       });
       const resumed = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
+        externalChatGptAuth: false,
         memberId: "member_1",
         model: "gpt-5.6-terra",
         providerName: "hosted-openai",
@@ -1021,6 +1027,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
 
     await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
+      externalChatGptAuth: false,
       memberId: "member_1",
       model: "gpt-5.6-terra",
       pendingWork: false,
@@ -1051,6 +1058,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
 
     await expect(runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
+      externalChatGptAuth: false,
       memberId: "member_1",
       model: "gpt-5.6-terra",
       pendingWork: false,
@@ -1082,6 +1090,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
 
     await expect(runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
+      externalChatGptAuth: false,
       memberId: "member_1",
       model: "gpt-5.6-terra",
       pendingWork: false,

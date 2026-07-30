@@ -269,6 +269,16 @@ export async function runHostedIdleCheckpointMaintenance(input: {
         wakeInterrupted,
       });
     }
+    if (input.externalChatGptAuth) {
+      return attachInboxMediaRetentionWake(
+        {
+          kind: "skipped",
+          reason: "external_chatgpt_auth",
+          threadContextTokensBefore: null,
+        },
+        retentionWake,
+      );
+    }
     // Without a priced hosted model id the compact call's usage cannot be
     // accounted against the member's allowance, so do not spend unattributable
     // tokens. The two reasons are distinct on purpose: missing_model means a

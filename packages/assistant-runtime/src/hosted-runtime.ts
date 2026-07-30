@@ -47,6 +47,7 @@ import {
   getAssistantCronStatus,
   recordAssistantRuntimeIssueInputsBestEffort,
   resolveAssistantDiagnosticsPolicy,
+  stopWarmCodexAppServer,
 } from "@murphai/assistant-engine";
 import {
   AssistantActiveTurnInputUnavailableError,
@@ -1411,11 +1412,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       ...guardedRuntime,
       platform: runnerPlatform,
     };
-    let beforeForegroundRuntimeWakeImport:
-      HostedWorkspaceRunnerInput["beforeForegroundRuntimeWakeImport"] = null;
+    let beforeForegroundRuntimeWakeImport: NonNullable<
+      HostedWorkspaceRunnerInput["beforeForegroundRuntimeWakeImport"]
+    > = async () => false;
     const baseRunnerInput: HostedWorkspaceRunnerInput = {
       beforeForegroundRuntimeWakeImport: async (wakeInput) =>
-        await beforeForegroundRuntimeWakeImport?.(wakeInput) ?? false,
+        await beforeForegroundRuntimeWakeImport(wakeInput),
       checkpointRuntimeRedactedStatus,
       checkpointRequestBuilder,
       expectedUserId: input.request.userId,
@@ -1944,6 +1946,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 foregroundCausalOnly:
                   passInput.foregroundCausalOnly === true,
                 currentAssistantInputId: () => currentAssistantInputId,
+                codexChatGptAuthResolver: codexChatGptAuth.resolver,
                 imageGenerationLauncher:
                   imageGenerationController?.launcher ?? null,
                 deviceSyncMessagingReturnTarget,
@@ -2123,6 +2126,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       ) !== null;
     const pendingDurableCheckpointEffects: HostedWorkspaceDurableCheckpointEffect[] = [];
     let idleCheckpointStartByMs: number | null = null;
+    let codexChatGptAuthModeRestartRequested = false;
+    let codexChatGptAuthModeRestartRequiresProcessStop = false;
+    let codexChatGptAuthModeRestartMailboxContinuationStaged = false;
+    let codexChatGptAuthModeRestartWorkspaceProgressReconciled = false;
     let idleWakeOrdinal = 0;
     const publishCheckpointPublicationExpectation = (
       checkpointStartByMs: number,
@@ -2148,9 +2155,66 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     };
     const markIdleCheckpointTimerAfterDirtyWork = () => {
       setIdleCheckpointStartBy(
-        Date.now() + (assistantProviderHandoffRequested ? 0 : idleCheckpointDelayMs),
+        Date.now() + (
+          codexChatGptAuthModeRestartRequested || assistantProviderHandoffRequested
+            ? 0
+            : idleCheckpointDelayMs
+        ),
       );
     };
+    const requestCodexChatGptAuthModeRestartIfChanged = async (
+      signal: AbortSignal,
+      options: { pauseDetached?: boolean } = {},
+    ): Promise<boolean> => {
+      if (codexChatGptAuthModeRestartRequested) {
+        return true;
+      }
+
+      let modeChange: Awaited<
+        ReturnType<typeof readHostedCodexChatGptAuthModeChange>
+      >;
+      try {
+        modeChange = await readHostedCodexChatGptAuthModeChange({
+          port: guardedRuntime.platform.codexAuthPort,
+          prepared: codexChatGptAuth,
+          signal,
+        });
+      } catch (error) {
+        if (signal.aborted) {
+          throw error;
+        }
+        // Unknown authority cannot safely admit another turn under a frozen
+        // process-level mode. Preserve the mailbox and retry from a fresh
+        // invocation.
+        codexChatGptAuthModeRestartRequested = true;
+        codexChatGptAuthModeRestartRequiresProcessStop = true;
+        setIdleCheckpointStartBy(Date.now());
+        runtimeStateDirty = true;
+        if (options.pauseDetached !== false) {
+          await pauseDetachedAssistantAskBeforeWorkspaceBoundary();
+        }
+        return true;
+      }
+      // Detached and foreground probes can overlap. A later stale-unchanged
+      // result must never reopen admission after either probe froze the mode.
+      if (codexChatGptAuthModeRestartRequested) {
+        return true;
+      }
+      if (!modeChange.changed) {
+        return false;
+      }
+
+      codexChatGptAuthModeRestartRequested = true;
+      codexChatGptAuthModeRestartRequiresProcessStop = true;
+      setIdleCheckpointStartBy(Date.now());
+      runtimeStateDirty = true;
+      if (options.pauseDetached !== false) {
+        await pauseDetachedAssistantAskBeforeWorkspaceBoundary();
+      }
+      return true;
+    };
+    beforeForegroundRuntimeWakeImport = async ({ signal }) =>
+      await requestCodexChatGptAuthModeRestartIfChanged(signal);
     if (runtimeStateDirty) {
       markIdleCheckpointTimerAfterDirtyWork();
     }
@@ -2968,6 +3032,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           !assistantProviderHandoffRequested
           && shouldContinueForegroundCausalPass(passResult);
         while (rerunAssistantInputBatch || continueForegroundCausalPass) {
+          // The previous pass can stage late input after its caller's auth-mode
+          // probe. Recheck the frozen process mode before admitting that batch
+          // to another provider phase.
+          if (
+            await requestCodexChatGptAuthModeRestartIfChanged(
+              wakeInput.signal ?? runtimeAbortController.signal,
+            )
+          ) {
+            break;
+          }
           passResult = await runSingleForegroundPass({
             foregroundCausalOnly:
               rerunAssistantInputBatch === null
@@ -3000,6 +3074,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             requestIdKind: "checkpoint-interrupt",
             signal: wakeInput.signal,
           });
+          if (shouldStopBeforeAnotherForegroundPass()) {
+            break;
+          }
           rerunAssistantInputBatch =
             assistantProviderHandoffRequested
               ? null
@@ -3260,6 +3337,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           signal?: AbortSignal;
         } = {},
       ): Promise<boolean> => {
+        const wakeSignal = options.signal ?? runtimeAbortController.signal;
+        if (await requestCodexChatGptAuthModeRestartIfChanged(wakeSignal)) {
+          return false;
+        }
         await flushImageGenerationWork();
         const ran = await runForegroundMailboxWakeIfWork({
           latencySeed,
@@ -3278,7 +3359,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               )
             ),
           shouldContinue: options.shouldContinue,
-          signal: options.signal,
+          signal: wakeSignal,
           systemMailboxAdmission: "pre_checkpoint_safe",
         });
         if (ran) {
@@ -3381,7 +3462,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         nowMs: Date.now(),
         workspace: committedWorkspace,
       });
-      const runtimeDirtyAfterForeground = result.runtimeStateDirty
+      const runtimeDirtyAfterForeground = initialForegroundResult?.runtimeStateDirty === true
         || hostedVaultStartupPreparation.mutated;
       runtimeStateDirty ||= runtimeDirtyAfterForeground || committedInboxMediaRetentionWakeDue;
       if (runtimeDirtyAfterForeground) {
