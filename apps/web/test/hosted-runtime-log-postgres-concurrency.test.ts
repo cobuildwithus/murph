@@ -56,6 +56,7 @@ describe.skipIf(!runPostgresProof)("isolated runtime-log deletion fence", () => 
     });
     await admin.connect();
     await admin.query(`CREATE DATABASE "${testDatabaseName}"`);
+    await setTestDatabaseStatementTimeout(admin, testDatabaseName, "10s");
 
     pool = new PgPool({
       connectionString: postgresDatabaseUrl(primaryDatabaseUrl, testDatabaseName),
@@ -100,6 +101,37 @@ describe.skipIf(!runPostgresProof)("isolated runtime-log deletion fence", () => 
     })).rejects.toThrow(
       /same PostgreSQL cluster as DIRECT_DATABASE_URL/u,
     );
+  });
+
+  it("rejects disabled and over-budget statement timeouts with PostgreSQL", async () => {
+    const postgresAdmin = requireClient(admin);
+    const runtimeDatabaseUrl = postgresDatabaseUrl(
+      primaryDatabaseUrl,
+      testDatabaseName,
+    );
+
+    try {
+      for (const timeout of ["0", "10001ms"] as const) {
+        await setTestDatabaseStatementTimeout(
+          postgresAdmin,
+          testDatabaseName,
+          timeout,
+        );
+        await expect(verifyHostedRuntimeLogDatabaseEndpoints({
+          directDatabaseUrl: runtimeDatabaseUrl,
+          primaryDirectDatabaseUrl: primaryDatabaseUrl,
+          runtimeDatabaseUrl,
+        })).rejects.toThrow(
+          /statement_timeout set to a positive value no greater than 10 seconds/u,
+        );
+      }
+    } finally {
+      await setTestDatabaseStatementTimeout(
+        postgresAdmin,
+        testDatabaseName,
+        "10s",
+      );
+    }
   });
 
   it("keeps pre-change cleanup receipts until isolated deletion is complete", async () => {
@@ -490,6 +522,13 @@ function randomToken(): string {
   return randomUUID().replaceAll("-", "");
 }
 
+function requireClient(value: Client | null): Client {
+  if (!value) {
+    throw new Error("Runtime-log test client is unavailable.");
+  }
+  return value;
+}
+
 function requireDatabase(
   value: HostedRuntimeLogSqlDatabase | null,
 ): HostedRuntimeLogSqlDatabase {
@@ -504,6 +543,19 @@ function requirePool(value: Pool | null): Pool {
     throw new Error("Runtime-log test pool is unavailable.");
   }
   return value;
+}
+
+async function setTestDatabaseStatementTimeout(
+  client: Client,
+  databaseName: string,
+  timeout: "0" | "10s" | "10001ms",
+): Promise<void> {
+  if (!/^[a-z0-9_]+$/u.test(databaseName)) {
+    throw new TypeError("Runtime-log test database name is invalid.");
+  }
+  await client.query(
+    `ALTER DATABASE "${databaseName}" SET statement_timeout = '${timeout}'`,
+  );
 }
 
 function postgresDatabaseUrl(baseUrl: string, databaseName: string): string {
