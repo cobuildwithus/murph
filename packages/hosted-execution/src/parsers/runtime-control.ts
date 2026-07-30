@@ -2676,51 +2676,102 @@ export function parseHostedRuntimeGroupToolResponse(
         result.usage,
         "Hosted runtime group tool read_usage usage",
       );
+      // Temporary rolling-deploy seam. Remove only after no deployed or
+      // rollback-eligible Web build emits the immediately preceding shape and
+      // every pre-reader warm runner has drained; see apps/cloudflare/DEPLOY.md.
+      const isLegacyUsageProjection = [
+        "capacityState",
+        "periodEnd",
+        "remainingPercent",
+      ].some((key) => Object.prototype.hasOwnProperty.call(usage, key));
+      if (isLegacyUsageProjection) {
+        assertAllowedObjectKeys(
+          usage,
+          new Set([
+            "capacityState",
+            "fundingUrl",
+            "periodEnd",
+            "remainingPercent",
+          ]),
+          "Hosted runtime group tool read_usage legacy usage",
+        );
+        const capacityState = requireString(
+          usage.capacityState,
+          "Hosted runtime group tool read_usage legacy capacityState",
+        );
+        if (
+          capacityState !== "healthy"
+          && capacityState !== "low"
+          && capacityState !== "exhausted"
+        ) {
+          throw new TypeError(
+            "Hosted runtime group tool read_usage legacy capacityState is invalid.",
+          );
+        }
+        const periodEnd = requireString(
+          usage.periodEnd,
+          "Hosted runtime group tool read_usage legacy periodEnd",
+        );
+        const periodEndDate = new Date(periodEnd);
+        if (
+          !Number.isFinite(periodEndDate.getTime())
+          || periodEndDate.toISOString() !== periodEnd
+        ) {
+          throw new TypeError(
+            "Hosted runtime group tool read_usage legacy periodEnd must be canonical.",
+          );
+        }
+        const remainingPercent = usage.remainingPercent === undefined
+          ? undefined
+          : requireNonNegativeInteger(
+              usage.remainingPercent,
+              "Hosted runtime group tool read_usage legacy remainingPercent",
+            );
+        if (remainingPercent !== undefined && remainingPercent > 100) {
+          throw new TypeError(
+            "Hosted runtime group tool read_usage legacy remainingPercent must be at most 100.",
+          );
+        }
+        const fundingUrl = readNullableString(
+          usage.fundingUrl,
+          "Hosted runtime group tool read_usage legacy fundingUrl",
+        );
+        return {
+          action,
+          result: {
+            status,
+            usage: {
+              fundingNeeded: capacityState !== "healthy",
+              fundingUrl: capacityState === "healthy" ? null : fundingUrl,
+              sponsorshipStatus: "not_sponsored",
+            },
+          },
+        };
+      }
       assertAllowedObjectKeys(
         usage,
         new Set([
-          "capacityState",
+          "fundingNeeded",
           "fundingUrl",
-          "periodEnd",
-          "remainingPercent",
+          "sponsorshipStatus",
         ]),
         "Hosted runtime group tool read_usage usage",
       );
-      const capacityState = requireString(
-        usage.capacityState,
-        "Hosted runtime group tool read_usage capacityState",
+      const sponsorshipStatus = requireString(
+        usage.sponsorshipStatus,
+        "Hosted runtime group tool read_usage sponsorshipStatus",
       );
       if (
-        capacityState !== "healthy"
-        && capacityState !== "low"
-        && capacityState !== "exhausted"
+        sponsorshipStatus !== "not_sponsored"
+        && sponsorshipStatus !== "sponsored"
       ) {
         throw new TypeError(
-          "Hosted runtime group tool read_usage capacityState is invalid.",
+          "Hosted runtime group tool read_usage sponsorshipStatus is invalid.",
         );
       }
-      const periodEnd = requireString(
-        usage.periodEnd,
-        "Hosted runtime group tool read_usage periodEnd",
-      );
-      const periodEndDate = new Date(periodEnd);
-      if (
-        !Number.isFinite(periodEndDate.getTime())
-        || periodEndDate.toISOString() !== periodEnd
-      ) {
+      if (typeof usage.fundingNeeded !== "boolean") {
         throw new TypeError(
-          "Hosted runtime group tool read_usage periodEnd must be a canonical timestamp.",
-        );
-      }
-      const remainingPercent = usage.remainingPercent === undefined
-        ? undefined
-        : requireNonNegativeInteger(
-            usage.remainingPercent,
-            "Hosted runtime group tool read_usage remainingPercent",
-          );
-      if (remainingPercent !== undefined && remainingPercent > 100) {
-        throw new TypeError(
-          "Hosted runtime group tool read_usage remainingPercent must be at most 100.",
+          "Hosted runtime group tool read_usage fundingNeeded must be boolean.",
         );
       }
       return {
@@ -2728,13 +2779,12 @@ export function parseHostedRuntimeGroupToolResponse(
         result: {
           status,
           usage: {
-            capacityState,
+            fundingNeeded: usage.fundingNeeded,
             fundingUrl: readNullableString(
               usage.fundingUrl,
               "Hosted runtime group tool read_usage fundingUrl",
             ),
-            periodEnd,
-            ...(remainingPercent === undefined ? {} : { remainingPercent }),
+            sponsorshipStatus,
           },
         },
       };

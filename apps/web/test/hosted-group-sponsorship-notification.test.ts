@@ -1,12 +1,19 @@
-import { HostedUsageCreditPurchaseStatus } from "@prisma/client";
+import {
+  HostedGroupSponsorshipAuthorizationStatus,
+  HostedUsageCreditPurchaseStatus,
+} from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   activateMoment: vi.fn(),
   appendMailbox: vi.fn(),
   hasCustomizationAuthority: vi.fn(),
+  isNearCapCurrent: vi.fn(),
+  lockHostedMemberRow: vi.fn(),
   projectTarget: vi.fn(),
   readMailboxItem: vi.fn(),
+  readAuthorizationByPurchase: vi.fn(),
+  readCommittedMinor: vi.fn(),
   readMoment: vi.fn(),
   resolveDestination: vi.fn(),
   signalRuntime: vi.fn(),
@@ -26,6 +33,16 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
   withHostedMemberStripeMutationLock: mocks.withMemberLock,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/shared", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/hosted-onboarding/shared")
+  >();
+  return {
+    ...actual,
+    lockHostedMemberRow: mocks.lockHostedMemberRow,
+  };
+});
+
 vi.mock("@/src/lib/hosted-onboarding/usage-credit-purchase-status-service", () => ({
   projectHostedUsageCreditPurchaseTarget: mocks.projectTarget,
 }));
@@ -44,11 +61,43 @@ vi.mock("@/src/lib/hosted-groups/group-sponsorship-store", () => ({
   readHostedGroupSponsorshipMomentForNotification: mocks.readMoment,
 }));
 
+vi.mock(
+  "@/src/lib/hosted-groups/group-sponsorship-authorization",
+  async (importOriginal) => {
+    const actual = await importOriginal<
+      typeof import("@/src/lib/hosted-groups/group-sponsorship-authorization")
+    >();
+    return {
+      ...actual,
+      isHostedGroupSponsorshipNearCapNotificationCurrentTx:
+        mocks.isNearCapCurrent,
+      readHostedGroupSponsorshipAuthorizationByPurchase:
+        mocks.readAuthorizationByPurchase,
+      readHostedGroupSponsorshipCommittedMinor: mocks.readCommittedMinor,
+    };
+  },
+);
+
 import {
   materializeHostedGroupSponsorshipIfApplicable,
+  materializeHostedGroupSponsorshipNearCapNotification,
+  materializeHostedGroupSponsorshipRecoveryNotification,
 } from "@/src/lib/hosted-groups/group-sponsorship-notification";
 
 const PAID_AT = new Date("2026-07-27T12:00:00.000Z");
+const DIRECT_DESTINATION = {
+  conversationShape: "direct-member" as const,
+  externalThreadRouteAuthority: null,
+  route: {
+    actorId: "member_sponsor",
+    channel: "telegram" as const,
+    delivery: { kind: "thread" as const, target: "telegram_direct" },
+    identityId: "identity_sponsor",
+    threadId: "thread_direct",
+    threadIsDirect: true,
+  },
+};
+
 const DESTINATION = {
   conversationShape: "thread-container" as const,
   externalThreadRouteAuthority: {
@@ -76,14 +125,18 @@ beforeEach(() => {
     item: { id: "mailbox_item" },
   });
   mocks.hasCustomizationAuthority.mockResolvedValue(true);
+  mocks.isNearCapCurrent.mockResolvedValue(true);
+  mocks.lockHostedMemberRow.mockResolvedValue(undefined);
   mocks.projectTarget.mockReturnValue({ kind: "group" });
+  mocks.readAuthorizationByPurchase.mockResolvedValue(null);
+  mocks.readCommittedMinor.mockResolvedValue(0);
   mocks.readMailboxItem.mockResolvedValue(null);
   mocks.readMoment.mockResolvedValue({
     celebrationScale: "medium",
     expiresAt: new Date("2026-07-28T12:00:00.000Z"),
-    publicAlias: "Jake’s Lower Back",
+    publicAlias: "The Group Historian",
     runningBitRequest: "Treat me like the exhausted CFO.",
-    sponsorMessage: "Please stop inviting Jake to basketball.",
+    sponsorMessage: "For whatever adventure comes next.",
   });
   mocks.resolveDestination.mockResolvedValue(DESTINATION);
   mocks.signalRuntime.mockResolvedValue(undefined);
@@ -133,7 +186,7 @@ describe("group sponsorship notification", () => {
       userId: "member_group_runtime",
     });
     expect(envelope.notification.instructions).toContain(
-      '"publicAlias":"Jake’s Lower Back"',
+      '"publicAlias":"The Group Historian"',
     );
     expect(envelope.notification.instructions).toContain(
       "untrusted participant-authored creative material",
@@ -171,6 +224,26 @@ describe("group sponsorship notification", () => {
       mailboxItemId: "mailbox_item",
       prisma,
     });
+  });
+
+  it("uses the actual $5 activation for the public moment, not the private monthly maximum", async () => {
+    const prisma = createPrismaHarness({
+      chargeOrdinal: 0,
+      monthlyCapMinor: 2_000,
+      offerCode: "usage_5_usd",
+    });
+
+    await expect(materializeHostedGroupSponsorshipIfApplicable({
+      prisma: prisma as never,
+      purchaseId: "purchase_private_123",
+    })).resolves.toBe(true);
+
+    expect(mocks.activateMoment).toHaveBeenCalledWith(expect.objectContaining({
+      offerCode: "usage_5_usd",
+    }));
+    expect(mocks.readMoment).toHaveBeenCalledWith(expect.objectContaining({
+      offerCode: "usage_5_usd",
+    }));
   });
 
   it("re-signals an existing item without rebuilding participant content", async () => {
@@ -218,7 +291,7 @@ describe("group sponsorship notification", () => {
       customContentAuthorized: false,
     }));
     expect(mocks.appendMailbox.mock.calls[0]?.[0]?.envelope.notification.instructions)
-      .not.toContain("Jake’s Lower Back");
+      .not.toContain("The Group Historian");
   });
 
   it.each([
@@ -256,6 +329,241 @@ describe("group sponsorship notification", () => {
     expect(mocks.appendMailbox).not.toHaveBeenCalled();
   });
 
+  it("keeps automatic refill fulfillment silent in the group", async () => {
+    const prisma = createPrismaHarness({
+      chargeOrdinal: 1,
+      hasMoment: false,
+      monthlyCapMinor: 1_000,
+      offerCode: "usage_5_usd",
+    });
+
+    await expect(materializeHostedGroupSponsorshipIfApplicable({
+      prisma: prisma as never,
+      purchaseId: "purchase_private_123",
+    })).resolves.toBe(false);
+
+    expect(mocks.activateMoment).not.toHaveBeenCalled();
+    expect(mocks.appendMailbox).not.toHaveBeenCalled();
+  });
+
+  it("sends one period-scoped near-cap notice only to the payer", async () => {
+    const prisma = createPrismaHarness({
+      authorizationStatus: HostedGroupSponsorshipAuthorizationStatus.active,
+    });
+    mocks.readAuthorizationByPurchase.mockResolvedValue({
+      authorizationId: "hgsa_abcdefghijklmnop",
+      chargeOrdinal: 1,
+      monthlyCapMinor: 1_000,
+      payerMemberId: "member_sponsor",
+      periodStartedAt: new Date("2026-07-27T12:00:00.000Z"),
+    });
+    mocks.readCommittedMinor.mockResolvedValue(500);
+    mocks.resolveDestination.mockResolvedValueOnce(DIRECT_DESTINATION);
+
+    await expect(materializeHostedGroupSponsorshipNearCapNotification({
+      now: new Date("2026-07-27T12:05:00.000Z"),
+      prisma: prisma as never,
+      purchaseId: "purchase_private_123",
+    })).resolves.toBe(true);
+
+    const envelope = mocks.appendMailbox.mock.calls[0]?.[0]?.envelope;
+    expect(envelope).toMatchObject({
+      kind: "assistant.notification.requested",
+      userId: "member_sponsor",
+      notification: {
+        deliveryDedupeToken: expect.stringMatching(
+          /^group-sponsorship-private:v1:[a-f0-9]{40}$/u,
+        ),
+        externalThreadRouteAuthority: null,
+        route: DIRECT_DESTINATION.route,
+      },
+    });
+    expect(envelope.notification.instructions).toContain(
+      "One more $5 usage-credit refill",
+    );
+    expect(envelope.notification.instructions).toContain("$10 monthly maximum");
+    expect(envelope.notification.instructions).toContain("sponsor only");
+    expect(JSON.stringify(envelope)).not.toContain("member_group_runtime");
+  });
+
+  it("uses a fresh near-cap notice identity after the payer raises the cap", async () => {
+    const prisma = createPrismaHarness({
+      authorizationStatus: HostedGroupSponsorshipAuthorizationStatus.active,
+    });
+    mocks.resolveDestination.mockResolvedValue(DIRECT_DESTINATION);
+    mocks.readAuthorizationByPurchase
+      .mockResolvedValueOnce({
+        authorizationId: "hgsa_abcdefghijklmnop",
+        chargeOrdinal: 1,
+        monthlyCapMinor: 1_000,
+        payerMemberId: "member_sponsor",
+        periodStartedAt: new Date("2026-07-27T12:00:00.000Z"),
+      })
+      .mockResolvedValueOnce({
+        authorizationId: "hgsa_abcdefghijklmnop",
+        chargeOrdinal: 3,
+        monthlyCapMinor: 2_000,
+        payerMemberId: "member_sponsor",
+        periodStartedAt: new Date("2026-07-27T12:00:00.000Z"),
+      });
+
+    await materializeHostedGroupSponsorshipNearCapNotification({
+      prisma: prisma as never,
+      purchaseId: "purchase_cap_10",
+    });
+    await materializeHostedGroupSponsorshipNearCapNotification({
+      prisma: prisma as never,
+      purchaseId: "purchase_cap_20",
+    });
+
+    const keys = new Set(mocks.readMailboxItem.mock.calls.map(
+      ([input]) => input.dedupeKey,
+    ));
+    expect(keys.size).toBe(2);
+    for (const key of keys) {
+      expect(key).toMatch(/^assistant\.notification\.requested:/u);
+    }
+  });
+
+  it.each([
+    "a canceled authorization",
+    "a delayed prior-period fulfillment",
+  ])("drops a near-cap notice after locked revalidation finds %s", async () => {
+    const prisma = createPrismaHarness({
+      authorizationStatus: HostedGroupSponsorshipAuthorizationStatus.active,
+    });
+    mocks.readAuthorizationByPurchase.mockResolvedValue({
+      authorizationId: "hgsa_abcdefghijklmnop",
+      chargeOrdinal: 1,
+      monthlyCapMinor: 1_000,
+      payerMemberId: "member_sponsor",
+      periodStartedAt: new Date("2026-07-27T12:00:00.000Z"),
+    });
+    mocks.resolveDestination.mockResolvedValueOnce(DIRECT_DESTINATION);
+    mocks.isNearCapCurrent.mockResolvedValueOnce(false);
+
+    await expect(materializeHostedGroupSponsorshipNearCapNotification({
+      now: new Date("2026-08-27T12:05:00.000Z"),
+      prisma: prisma as never,
+      purchaseId: "purchase_private_123",
+    })).resolves.toBe(false);
+
+    expect(mocks.isNearCapCurrent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authorizationId: "hgsa_abcdefghijklmnop",
+        beneficiaryMemberId: "member_group_runtime",
+        payerMemberId: "member_sponsor",
+        purchaseId: "purchase_private_123",
+        tx: prisma,
+      }),
+    );
+    expect(mocks.appendMailbox).not.toHaveBeenCalled();
+  });
+
+  it("sends payment recovery privately and never to a thread container", async () => {
+    const prisma = createPrismaHarness({
+      authorizationStatus:
+        HostedGroupSponsorshipAuthorizationStatus.recovery_required,
+      status: HostedUsageCreditPurchaseStatus.payment_failed,
+    });
+    mocks.readAuthorizationByPurchase.mockResolvedValue({
+      authorizationId: "hgsa_abcdefghijklmnop",
+      chargeOrdinal: 1,
+      monthlyCapMinor: 1_000,
+      payerMemberId: "member_sponsor",
+      periodStartedAt: new Date("2026-07-27T12:00:00.000Z"),
+    });
+    mocks.resolveDestination.mockResolvedValueOnce(DESTINATION);
+    await expect(materializeHostedGroupSponsorshipRecoveryNotification({
+      prisma: prisma as never,
+      purchaseId: "purchase_private_123",
+    })).resolves.toBe(false);
+    expect(mocks.appendMailbox).not.toHaveBeenCalled();
+
+    mocks.resolveDestination.mockResolvedValueOnce(DIRECT_DESTINATION);
+    await expect(materializeHostedGroupSponsorshipRecoveryNotification({
+      prisma: prisma as never,
+      purchaseId: "purchase_private_123",
+    })).resolves.toBe(true);
+    expect(mocks.appendMailbox.mock.calls[0]?.[0]?.envelope.userId).toBe(
+      "member_sponsor",
+    );
+  });
+
+  it("materializes exactly one recovery notice after a transient first append failure", async () => {
+    const prisma = createPrismaHarness({
+      authorizationStatus:
+        HostedGroupSponsorshipAuthorizationStatus.recovery_required,
+      status: HostedUsageCreditPurchaseStatus.payment_failed,
+    });
+    mocks.readAuthorizationByPurchase.mockResolvedValue({
+      authorizationId: "hgsa_abcdefghijklmnop",
+      chargeOrdinal: 1,
+      monthlyCapMinor: 1_000,
+      payerMemberId: "member_sponsor",
+      periodStartedAt: new Date("2026-07-27T12:00:00.000Z"),
+    });
+    mocks.resolveDestination.mockResolvedValue(DIRECT_DESTINATION);
+    mocks.appendMailbox
+      .mockRejectedValueOnce(new Error("mailbox unavailable"))
+      .mockResolvedValueOnce({
+        dedupeConflict: false,
+        duplicate: false,
+        inserted: true,
+        item: { id: "mailbox_recovered" },
+      });
+
+    await expect(materializeHostedGroupSponsorshipRecoveryNotification({
+      prisma: prisma as never,
+      purchaseId: "purchase_private_123",
+    })).rejects.toThrow("mailbox unavailable");
+    await expect(materializeHostedGroupSponsorshipRecoveryNotification({
+      prisma: prisma as never,
+      purchaseId: "purchase_private_123",
+    })).resolves.toBe(true);
+
+    expect(mocks.appendMailbox).toHaveBeenCalledTimes(2);
+    expect(mocks.signalRuntime).toHaveBeenCalledTimes(1);
+    expect(mocks.signalRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_sponsor",
+      mailboxItemId: "mailbox_recovered",
+      prisma,
+    });
+  });
+
+  it("uses a fresh recovery notice identity for a later failed refill", async () => {
+    const prisma = createPrismaHarness({
+      authorizationStatus:
+        HostedGroupSponsorshipAuthorizationStatus.recovery_required,
+      status: HostedUsageCreditPurchaseStatus.payment_failed,
+    });
+    mocks.readAuthorizationByPurchase.mockResolvedValue({
+      authorizationId: "hgsa_abcdefghijklmnop",
+      chargeOrdinal: 1,
+      monthlyCapMinor: 2_000,
+      payerMemberId: "member_sponsor",
+      periodStartedAt: new Date("2026-07-27T12:00:00.000Z"),
+    });
+    mocks.resolveDestination.mockResolvedValue(DIRECT_DESTINATION);
+
+    await materializeHostedGroupSponsorshipRecoveryNotification({
+      prisma: prisma as never,
+      purchaseId: "purchase_failed_1",
+    });
+    await materializeHostedGroupSponsorshipRecoveryNotification({
+      prisma: prisma as never,
+      purchaseId: "purchase_failed_2",
+    });
+
+    const keys = new Set(mocks.readMailboxItem.mock.calls.map(
+      ([input]) => input.dedupeKey,
+    ));
+    expect(keys.size).toBe(2);
+    for (const key of keys) {
+      expect(key).toMatch(/^assistant\.notification\.requested:/u);
+    }
+  });
+
   it("does nothing before fulfillment and rejects a conflicting mailbox identity", async () => {
     const pending = createPrismaHarness({
       status: HostedUsageCreditPurchaseStatus.payment_pending,
@@ -278,30 +586,67 @@ describe("group sponsorship notification", () => {
 });
 
 function createPrismaHarness(input: {
+  authorizationStatus?: HostedGroupSponsorshipAuthorizationStatus;
+  chargeOrdinal?: number;
+  hasMoment?: boolean;
+  monthlyCapMinor?: 500 | 1_000 | 2_000;
+  offerCode?: "usage_5_usd" | "usage_10_usd";
   status?: HostedUsageCreditPurchaseStatus;
   targetKind?: "group" | "personal";
 } = {}) {
   const status = input.status ?? HostedUsageCreditPurchaseStatus.fulfilled;
+  const periodStartedAt = new Date("2026-07-27T12:00:00.000Z");
+  const monthlyCapMinor = input.monthlyCapMinor
+    ?? (input.authorizationStatus === undefined ? null : 1_000);
+  const authorization = monthlyCapMinor === null
+    ? null
+    : {
+        beneficiaryMemberId: "member_group_runtime",
+        monthlyCapMinor,
+        payerMemberId: "member_sponsor",
+        status: input.authorizationStatus
+          ?? HostedGroupSponsorshipAuthorizationStatus.active,
+      };
   const purchase = {
     beneficiaryMemberId: "member_group_runtime",
-    groupSponsorshipMoment: { creatorMemberId: "member_sponsor" },
+    groupSponsorshipAuthorization: authorization,
+    groupSponsorshipAuthorizationId: authorization
+      ? "hgsa_abcdefghijklmnop"
+      : null,
+    groupSponsorshipChargeOrdinal: authorization
+      ? input.chargeOrdinal ?? 0
+      : null,
+    groupSponsorshipMoment: input.hasMoment === false
+      ? null
+      : { creatorMemberId: "member_sponsor" },
+    groupSponsorshipPeriodStartedAt: authorization ? periodStartedAt : null,
     id: "purchase_private_123",
-    offerCode: "usage_10_usd",
+    offerCode: input.offerCode ?? "usage_10_usd",
     paidAt: PAID_AT,
+    payerMemberId: "member_sponsor",
     status,
     targetKind: input.targetKind ?? "group",
   };
-  return {
+  type PrismaHarness = {
+    $transaction: ReturnType<typeof vi.fn>;
+    hostedGroupSponsorshipAuthorization: {
+      findUnique: ReturnType<typeof vi.fn>;
+    };
     hostedUsageCreditPurchase: {
-      findUnique: vi.fn(async (query: { include?: unknown }) =>
-        query.include
-          ? purchase
-          : {
-              beneficiaryMemberId: purchase.beneficiaryMemberId,
-              id: purchase.id,
-              status: purchase.status,
-            }
-      ),
+      findUnique: ReturnType<typeof vi.fn>;
+    };
+  };
+  const prisma: PrismaHarness = {
+    $transaction: vi.fn(),
+    hostedGroupSponsorshipAuthorization: {
+      findUnique: vi.fn(async () => authorization),
+    },
+    hostedUsageCreditPurchase: {
+      findUnique: vi.fn(async () => purchase),
     },
   };
+  prisma.$transaction.mockImplementation(async (
+    run: (tx: PrismaHarness) => Promise<unknown>,
+  ) => run(prisma));
+  return prisma;
 }

@@ -153,9 +153,9 @@ describe("usage-credit checkout route", () => {
       offerCode: "usage_20_usd",
       recoveryOnly: true,
       sponsorship: {
-        publicAlias: "Jake’s Lower Back",
+        publicAlias: "The Group Historian",
         runningBitRequest: "Treat me like Murph’s exhausted CFO.",
-        sponsorMessage: "Please stop inviting Jake to basketball.",
+        sponsorMessage: "For whatever adventure comes next.",
       },
     }, "https://join.example.test/api/groups/fund/group_join_code_1234/usage-credit/checkout");
     const response = await groupCheckoutRoute.POST(
@@ -173,14 +173,16 @@ describe("usage-credit checkout route", () => {
     expect(mocks.createHostedGroupUsageCreditCheckout).toHaveBeenCalledWith({
       clientRequestKey: "request_key_123456",
       joinCode: "group_join_code_1234",
+      monthlyCapMinor: undefined,
       offerCode: "usage_20_usd",
       payerMemberId: "hbm_member123",
       prisma: { label: "test-prisma" },
       recoveryOnly: true,
+      sponsorshipKind: "one_time",
       sponsorship: {
-        publicAlias: "Jake’s Lower Back",
+        publicAlias: "The Group Historian",
         runningBitRequest: "Treat me like Murph’s exhausted CFO.",
-        sponsorMessage: "Please stop inviting Jake to basketball.",
+        sponsorMessage: "For whatever adventure comes next.",
       },
     });
   });

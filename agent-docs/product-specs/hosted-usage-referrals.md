@@ -25,8 +25,8 @@ policies are independent and may be active at the same time.
 
 | Policy | Qualification | Reward |
 | --- | --- | --- |
-| `new_person_activation_v1` | The referrer starts a fresh Murph group with a genuinely new person. That person activates their own Murph after the mission was armed and then speaks in the bound target group. | $2 credit; presented as about 50 current Sol messages or 100 current Terra messages |
-| `active_group_v1` | The referrer starts a fresh Murph group that reaches 15 qualifying human messages, including at least 8 messages from at least 2 non-referrer speakers, across at least 10 minutes. | $3.50 credit; presented as about 70 current Sol messages or 140 current Terra messages |
+| `new_person_activation_v1` | The referrer starts a fresh Murph group with a genuinely new person. That person activates their own Murph after the mission was armed and then speaks in the bound target group. | $2 of cost-weighted usage credit |
+| `active_group_v1` | The referrer starts a fresh Murph group that reaches 15 qualifying human messages, including at least 8 messages from at least 2 non-referrer speakers, across at least 10 minutes. | $3.50 of cost-weighted usage credit |
 
 The source conversation determines the reward destination and where completion
 is celebrated:
@@ -35,10 +35,10 @@ is celebrated:
 - a mission armed in a group rewards that source group;
 - each group participant may independently arm and earn a mission for the same
   room;
-- the fixed ledger reward remains usage value, while the tool recomputes an
-  approximate message-capacity label from the destination's current effective
-  model both when read and when completion is celebrated;
-- a model without a catalog estimate receives a generic bonus-usage label;
+- the fixed ledger reward remains usage value, and the tool presents that
+  exact dollar-denominated cost-weighted usage-credit label both when read and
+  when completion is celebrated;
+- the tool never translates the reward into a message count or owned bundle;
 - trial rewards add usage capacity but never extend the trial end date.
 
 Completion is celebrated in that same source conversation. A personal mission

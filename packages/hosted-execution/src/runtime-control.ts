@@ -972,17 +972,10 @@ export interface HostedRuntimeGroupSummary {
   status: string;
 }
 
-export type HostedRuntimeGroupUsageCapacityState =
-  | "healthy"
-  | "low"
-  | "exhausted";
-
 export interface HostedRuntimeGroupUsageStatus {
-  capacityState: HostedRuntimeGroupUsageCapacityState;
+  fundingNeeded: boolean;
   fundingUrl: string | null;
-  periodEnd: string;
-  // Optional until the Cloudflare-first rollout and old-Web rollback window close.
-  remainingPercent?: number;
+  sponsorshipStatus: "not_sponsored" | "sponsored";
 }
 
 export const HOSTED_USAGE_REFERRAL_POLICY_CODES = [

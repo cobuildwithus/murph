@@ -114,11 +114,11 @@ const VISUALS: Record<string, ReactNode> = {
   "group-sponsorship-moments": (
     <PreferenceCard
       label="Sponsor this group"
-      meta="One-time"
+      meta="Monthly maximum"
       entries={[
-        { label: "About 100 messages", value: "$5" },
-        { label: "About 200 messages", value: "$10" },
-        { label: "About 400 messages", value: "$20" },
+        { label: "Cost-weighted usage credit", value: "$5" },
+        { label: "Cost-weighted usage credit", value: "$10" },
+        { label: "Cost-weighted usage credit", value: "$20" },
       ]}
     />
   ),
@@ -190,11 +190,11 @@ const VISUALS: Record<string, ReactNode> = {
   "group-funding-speaks-in-messages": (
     <PreferenceCard
       label="Keep Murph going"
-      meta="One-time"
+      meta="Usage credit"
       entries={[
-        { label: "About 100 messages", value: "$5" },
-        { label: "About 200 messages", value: "$10" },
-        { label: "About 500 messages", value: "$25" },
+        { label: "Cost-weighted credit", value: "$5" },
+        { label: "Cost-weighted credit", value: "$10" },
+        { label: "Cost-weighted credit", value: "$25" },
       ]}
     />
   ),
