@@ -1,6 +1,6 @@
 # Route bounded hosted subagent work from Sol to Terra
 
-Status: active
+Status: completed
 Created: 2026-07-30
 Updated: 2026-07-30
 
@@ -105,6 +105,8 @@ Updated: 2026-07-30
   from a Sol parent and emitted a Terra-attributed additional-usage draft
   without retaining the child prompt.
 - Passed: `@murphai/assistant-engine` typecheck and focused subagent usage tests.
+- Passed: hosted usage-allowance regression suite (104 tests), confirming the
+  existing Sol and Terra pricing owners consume the attributed model.
 - Measured complete initial Responses request bodies under pinned Codex 0.145.0,
   `gpt-5.6-sol`, low reasoning, code mode, and representative real tool
   surfaces. After the preliminary prompt narrowing, direct input changes from
@@ -118,6 +120,8 @@ Updated: 2026-07-30
 - Preliminary `completion-specialists` completed with two accepted findings:
   narrow the health-data example and correct V2 child-model pricing. Both are
   addressed in the current candidate.
-- Pending: refreshed provider-input measurement, final focused verification,
-  exact-head required CI, final `pr-review`, mergeability proof, merge
-  confirmation, and worktree retirement.
+- Parent final review and post-rebase focused verification completed with no
+  remaining local findings.
+- Pending after this plan-closing commit: exact-head required CI, final
+  `pr-review`, mergeability proof, merge confirmation, and worktree retirement.
+Completed: 2026-07-30
