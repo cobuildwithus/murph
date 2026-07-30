@@ -4,12 +4,10 @@ import {
   HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
   type HostedRuntimeWorkflowState,
 } from "@murphai/hosted-execution/orchestration-control";
-import {
-  createHostedRuntimeTemporalClientFromEnv,
-} from "@murphai/hosted-orchestrator-temporal/client/temporal-client";
 
 import {
   listHostedRuntimeLogsForTest,
+  queryHostedRuntimeWorkflowForTest,
   signalHostedRuntimeWakeRuntimeForTest,
   updateHostedMemberAssistantProviderForTest,
 } from "#hosted-web-testing";
@@ -23,6 +21,11 @@ const runtimeLogLimit = 500;
 // The hosted-local recorder observes Murph's canonical product model. The
 // production Venice egress boundary owns provider-specific model translation.
 const terraProductModel = "gpt-5.6-terra";
+
+type RuntimeWakeObservation = Pick<
+  HostedRuntimeWorkflowState,
+  "lastExecutionAt" | "signalVersion"
+>;
 
 let egress: HostedLocalEgressScenario | null = null;
 
@@ -157,22 +160,34 @@ function readProviderRequestModel(body: string): unknown {
 async function readRuntimeWorkflowState(input: {
   environment: NodeJS.ProcessEnv;
   userId: string;
-}): Promise<HostedRuntimeWorkflowState> {
-  const client = await createHostedRuntimeTemporalClientFromEnv(
-    input.environment,
-  );
-  try {
-    return await client.workflow
-      .getHandle(`hosted-user-runtime:${input.userId}`)
-      .query<HostedRuntimeWorkflowState>(HOSTED_USER_RUNTIME_STATUS_QUERY_NAME);
-  } finally {
-    await client.connection.close();
+}): Promise<RuntimeWakeObservation> {
+  const value = await queryHostedRuntimeWorkflowForTest({
+    environment: input.environment,
+    queryName: HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
+    workflowId: `hosted-user-runtime:${input.userId}`,
+  });
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Hosted runtime workflow query returned an invalid state.");
   }
+  const lastExecutionAt: unknown = Reflect.get(value, "lastExecutionAt");
+  const signalVersion: unknown = Reflect.get(value, "signalVersion");
+  if (
+    (lastExecutionAt !== null && typeof lastExecutionAt !== "string")
+    || !Number.isSafeInteger(signalVersion)
+    || typeof signalVersion !== "number"
+    || signalVersion < 0
+  ) {
+    throw new TypeError("Hosted runtime workflow query returned an invalid state.");
+  }
+  return {
+    lastExecutionAt,
+    signalVersion,
+  };
 }
 
 async function waitForRuntimeWakeExecution(input: {
   environment: NodeJS.ProcessEnv;
-  previousState: HostedRuntimeWorkflowState;
+  previousState: RuntimeWakeObservation;
   userId: string;
 }): Promise<void> {
   const deadlineMs = Date.now() + 30_000;
