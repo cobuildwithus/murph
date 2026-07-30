@@ -312,6 +312,8 @@ not enter evidence; and attachment-only input fails closed before provider work.
   excludes chronologically valid AI usage-denied traces before grouping while
   keeping mixed unblocked rows and impossible denial chronology alertable, and
   applies the bounded-read truncation signal only to that alertable population,
+  restarts latency at post-denial execution evidence while retaining the
+  original ingress origin when execution predates denial,
   excludes explicit committed terminal non-replies during bounded checkpoint
   grace, reopens them when durable consumption does not arrive, keeps normal
   checkpointed suppression healthy and impossible marker chronology alertable,
@@ -359,7 +361,9 @@ not enter evidence; and attachment-only input fails closed before provider work.
 - `apps/web/test/hosted-mailbox-usage-denial-postgres.test.ts` is an opt-in
   local-PostgreSQL proof that the usage-denial write marks only the observed
   conversation sequence window with database-owned chronology and leaves a
-  post-snapshot append available for a later denial.
+  post-snapshot append available for a later denial. The same proof keeps the
+  trace suppressed while blocked, then proves resumed staging, timely progress,
+  and a slow completed reply against the real bounded monitor query.
 - `apps/cloudflare/test/database-health-{metrics,monitor,worker}.test.ts`
   covers the independent PlanetScale/Linq database-health plane. The tests
   prove strict metric normalization and required-series failure, positive

@@ -2281,10 +2281,13 @@ inside the observed import/consume replay-floor and conversation-high-water
 window, and precedes fallible usage-notice delivery. It does not alter gate,
 mailbox-consumption, or reply behavior. A chronologically valid denial
 timestamp excludes that trace row before the bounded read and
-completed-delivery or unresolved-provider grouping, so a reply after usage
-resumes cannot alert for the intentionally blocked interval while an unblocked
-row sharing the same delivery remains independently alertable. Missing or
-impossible denial chronology provides no suppression.
+completed-delivery or unresolved-provider grouping only while no later
+execution evidence exists. Assistant-input staging, provider start, progress,
+delivery, consumption, or terminal evidence makes the trace alertable again;
+when all such evidence follows the denial, latency starts at the earliest
+milestone instead of ingress. An unblocked row sharing the same delivery
+remains independently alertable. Missing or impossible denial chronology
+provides no suppression.
 Durable consumption remains the long-term terminal proof and the rolling-deploy
 or best-effort-link fallback after handling is otherwise known.
 Accepted grouped Linq replies keep the complete answered mailbox-item set on the

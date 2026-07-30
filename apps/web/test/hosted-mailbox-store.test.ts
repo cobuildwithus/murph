@@ -697,7 +697,10 @@ describe("readHostedMailboxConversationWakeByAssistantInputId", () => {
 
 describe("tryMarkHostedMailboxConversationAiUsageDenied", () => {
   it("marks only the observed fresh conversation sequence window once", async () => {
-    const executeRaw = vi.fn(async () => 2);
+    const executeRaw = vi.fn(async (query: unknown) => {
+      void query;
+      return 2;
+    });
 
     await expect(tryMarkHostedMailboxConversationAiUsageDenied({
       afterConversationLaneSeq: 11n,

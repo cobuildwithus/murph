@@ -105,7 +105,7 @@ describe("hosted runtime latency health", () => {
     });
   });
 
-  it("excludes usage-denied traces before unresolved and completed grouping", () => {
+  it("excludes blocked traces and rebases later completed execution", () => {
     const health = summarizeHostedRuntimeLatencyRows({
       now,
       rows: [
@@ -125,9 +125,82 @@ describe("hosted runtime latency health", () => {
     expect(health).toMatchObject({
       anomalous: false,
       invalidChronologyCount: 0,
-      recentCompletedReplyCount: 0,
+      recentCompletedReplyCount: 1,
       recentSlowInitialResponseCount: 0,
       unresolvedReplyCount: 0,
+    });
+  });
+
+  it("restarts latency from execution staged after a usage denial", () => {
+    const health = summarizeHostedRuntimeLatencyRows({
+      now,
+      rows: [
+        latencyRow({
+          acceptedAt: "2026-07-26T15:50:00.000Z",
+          aiUsageDeniedAt: "2026-07-26T15:55:00.000Z",
+          assistantInputStagedAt: "2026-07-26T15:59:00.000Z",
+        }),
+        latencyRow({
+          acceptedAt: "2026-07-26T15:50:10.000Z",
+          aiUsageDeniedAt: "2026-07-26T15:55:10.000Z",
+          assistantInputStagedAt: "2026-07-26T15:59:10.000Z",
+          deliveryAcceptedAt: "2026-07-26T15:59:50.000Z",
+          linqDeliveryId: "delivery_resumed_slow_1",
+        }),
+      ],
+    });
+
+    expect(health).toMatchObject({
+      anomalous: true,
+      maxFirstVisibleResponseLatencyMs: 40_000,
+      oldestUnresolvedAgeMs: 60_000,
+      recentCompletedReplyCount: 1,
+      recentSlowInitialResponseCount: 1,
+      unresolvedReplyCount: 1,
+    });
+  });
+
+  it("keeps a resumed turn healthy when progress follows staging within 30 seconds", () => {
+    const health = summarizeHostedRuntimeLatencyRows({
+      now,
+      rows: [
+        latencyRow({
+          acceptedAt: "2026-07-26T15:50:00.000Z",
+          aiUsageDeniedAt: "2026-07-26T15:55:00.000Z",
+          assistantInputStagedAt: "2026-07-26T15:59:00.000Z",
+          deliveryAcceptedAt: "2026-07-26T16:00:00.000Z",
+          linqDeliveryId: "delivery_resumed_progress_1",
+          progressUpdateAcceptedAt: "2026-07-26T15:59:29.999Z",
+        }),
+      ],
+    });
+
+    expect(health).toMatchObject({
+      anomalous: false,
+      maxFirstVisibleResponseLatencyMs: null,
+      recentCompletedReplyCount: 1,
+      recentSlowInitialResponseCount: 0,
+      unresolvedReplyCount: 0,
+    });
+  });
+
+  it("keeps execution staged before the denial alertable from ingress", () => {
+    const health = summarizeHostedRuntimeLatencyRows({
+      now,
+      rows: [
+        latencyRow({
+          acceptedAt: "2026-07-26T15:58:00.000Z",
+          aiUsageDeniedAt: "2026-07-26T15:58:02.000Z",
+          assistantInputStagedAt: "2026-07-26T15:58:01.000Z",
+        }),
+      ],
+    });
+
+    expect(health).toMatchObject({
+      anomalous: true,
+      invalidChronologyCount: 0,
+      oldestUnresolvedAgeMs: 2 * 60_000,
+      unresolvedReplyCount: 1,
     });
   });
 
@@ -422,6 +495,30 @@ describe("hosted runtime latency alert monitor", () => {
           aiUsageDeniedAt: index % 2 === 0
             ? undefined
             : "2026-07-26T15:57:59.000Z",
+        }),
+      ),
+    );
+
+    const result = await runHostedRuntimeLatencyAlertMonitor({
+      env: {},
+      now,
+      prisma: fixture.prisma,
+    });
+
+    expect(result.health).toMatchObject({
+      anomalous: true,
+      scanTruncated: true,
+    });
+  });
+
+  it("keeps more than the bounded limit of resumed marked rows alertable", async () => {
+    const fixture = createMonitorPrismaFixture(
+      Array.from(
+        { length: HOSTED_RUNTIME_LATENCY_TEST_READ_LIMIT + 1 },
+        () => latencyRow({
+          acceptedAt: "2026-07-26T15:50:00.000Z",
+          aiUsageDeniedAt: "2026-07-26T15:55:00.000Z",
+          assistantInputStagedAt: "2026-07-26T15:59:00.000Z",
         }),
       ),
     );
@@ -1402,6 +1499,7 @@ describe("hosted runtime latency alert monitor", () => {
 function latencyRow(input: {
   acceptedAt: string;
   aiUsageDeniedAt?: string | null;
+  assistantInputStagedAt?: string | null;
   checkpointPublicationExpectedBy?: string | null;
   consumedAt?: string | null;
   deliveryAcceptedAt?: string | null;
@@ -1416,6 +1514,9 @@ function latencyRow(input: {
     acceptedAt: instant(input.acceptedAt),
     aiUsageDeniedAt: input.aiUsageDeniedAt
       ? instant(input.aiUsageDeniedAt)
+      : null,
+    assistantInputStagedAt: input.assistantInputStagedAt
+      ? instant(input.assistantInputStagedAt)
       : null,
     checkpointPublicationExpectedBy: input.checkpointPublicationExpectedBy
       ? instant(input.checkpointPublicationExpectedBy)
@@ -1458,7 +1559,13 @@ function createMonitorPrismaFixture(
         const deniedAt = row.aiUsageDeniedAt;
         return deniedAt === null
           || deniedAt < row.acceptedAt
-          || deniedAt > queryNow;
+          || deniedAt > queryNow
+          || row.assistantInputStagedAt !== null
+          || row.providerStartAt !== null
+          || row.deliveryAcceptedAt !== null
+          || row.consumedAt !== null
+          || row.progressUpdateAcceptedAt !== null
+          || row.terminalNonReplyCommittedAt !== null;
       })
       .sort(
         (left, right) =>
@@ -1468,6 +1575,7 @@ function createMonitorPrismaFixture(
       .map((row) => ({
         acceptedAt: row.acceptedAt,
         aiUsageDeniedAt: row.aiUsageDeniedAt,
+        assistantInputStagedAt: row.assistantInputStagedAt,
         consumedAt: row.consumedAt,
         deliveryAcceptedAt: row.deliveryAcceptedAt,
         linqDeliveryId: row.linqDeliveryId,

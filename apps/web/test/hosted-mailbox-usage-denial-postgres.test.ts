@@ -5,6 +5,9 @@ import { describe, expect, it } from "vitest";
 import {
   tryMarkHostedMailboxConversationAiUsageDenied,
 } from "@/src/lib/hosted-mailbox/store";
+import {
+  readHostedRuntimeLatencyHealth,
+} from "@/src/lib/hosted-runtime-latency/alert-monitor";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -40,6 +43,26 @@ describe.skipIf(!runPostgresProof)(
             ) ON COMMIT DROP
           `);
           await tx.$executeRaw(Prisma.sql`
+            CREATE TEMP TABLE hosted_linq_delivery (
+              id TEXT PRIMARY KEY,
+              accepted_at TIMESTAMP(3) NOT NULL
+            ) ON COMMIT DROP
+          `);
+          await tx.$executeRaw(Prisma.sql`
+            CREATE TEMP TABLE hosted_ingress_latency_trace (
+              user_id TEXT NOT NULL,
+              mailbox_item_id TEXT NOT NULL,
+              source TEXT NOT NULL,
+              accepted_at TIMESTAMP(3) NOT NULL,
+              assistant_input_staged_at TIMESTAMP(3),
+              provider_start_at TIMESTAMP(3),
+              phase_breakdown_json JSONB,
+              provider_request_ordinal INTEGER,
+              runtime_attempt_id TEXT,
+              linq_delivery_id TEXT
+            ) ON COMMIT DROP
+          `);
+          await tx.$executeRaw(Prisma.sql`
             INSERT INTO hosted_mailbox_item (
               id,
               user_id,
@@ -53,6 +76,20 @@ describe.skipIf(!runPostgresProof)(
               'conversation',
               1,
               statement_timestamp() AT TIME ZONE 'UTC'
+            )
+          `);
+          await tx.$executeRaw(Prisma.sql`
+            INSERT INTO hosted_ingress_latency_trace (
+              user_id,
+              mailbox_item_id,
+              source,
+              accepted_at
+            )
+            VALUES (
+              'member-mailbox-window',
+              'mailbox-observed',
+              'linq',
+              statement_timestamp() AT TIME ZONE 'UTC' - INTERVAL '10 minutes'
             )
           `);
           const snapshot = await tx.$queryRaw<Array<{ maxSeq: bigint }>>(
@@ -94,6 +131,77 @@ describe.skipIf(!runPostgresProof)(
             firstPass[0]?.createdAt.getTime() ?? Number.POSITIVE_INFINITY,
           );
           expect(firstPass[1]?.aiUsageDeniedAt).toBeNull();
+          const deniedAt = requireDate(firstPass[0]?.aiUsageDeniedAt);
+          const resumedAt = new Date(deniedAt.getTime() + 1_000);
+
+          await expect(readHostedRuntimeLatencyHealth({
+            now: new Date(resumedAt.getTime() + 30_000),
+            prisma: tx,
+          })).resolves.toMatchObject({
+            anomalous: false,
+            unresolvedReplyCount: 0,
+          });
+
+          await tx.$executeRaw(Prisma.sql`
+            UPDATE hosted_ingress_latency_trace
+            SET assistant_input_staged_at = ${resumedAt}
+            WHERE mailbox_item_id = 'mailbox-observed'
+          `);
+          await expect(readHostedRuntimeLatencyHealth({
+            now: new Date(resumedAt.getTime() + 30_000),
+            prisma: tx,
+          })).resolves.toMatchObject({
+            anomalous: true,
+            oldestUnresolvedAgeMs: 30_000,
+            unresolvedReplyCount: 1,
+          });
+
+          const progressAt = new Date(resumedAt.getTime() + 29_999);
+          await tx.$executeRaw(Prisma.sql`
+            UPDATE hosted_ingress_latency_trace
+            SET phase_breakdown_json = ${JSON.stringify({
+              assistant: {
+                progressUpdateAcceptedAtEpochMs: progressAt.getTime(),
+              },
+              schemaVersion: 1,
+            })}::jsonb
+            WHERE mailbox_item_id = 'mailbox-observed'
+          `);
+          await expect(readHostedRuntimeLatencyHealth({
+            now: new Date(resumedAt.getTime() + 60_000),
+            prisma: tx,
+          })).resolves.toMatchObject({
+            anomalous: false,
+            recentSlowInitialResponseCount: 0,
+            unresolvedReplyCount: 0,
+          });
+
+          const deliveryAt = new Date(resumedAt.getTime() + 40_000);
+          await tx.$executeRaw(Prisma.sql`
+            INSERT INTO hosted_linq_delivery (id, accepted_at)
+            VALUES ('delivery-after-resume', ${deliveryAt})
+          `);
+          await tx.$executeRaw(Prisma.sql`
+            UPDATE hosted_ingress_latency_trace
+            SET
+              linq_delivery_id = 'delivery-after-resume',
+              phase_breakdown_json = NULL
+            WHERE mailbox_item_id = 'mailbox-observed'
+          `);
+          await tx.$executeRaw(Prisma.sql`
+            UPDATE hosted_mailbox_item
+            SET consumed_at = ${deliveryAt}
+            WHERE id = 'mailbox-observed'
+          `);
+          await expect(readHostedRuntimeLatencyHealth({
+            now: new Date(deliveryAt.getTime() + 1_000),
+            prisma: tx,
+          })).resolves.toMatchObject({
+            anomalous: true,
+            maxFirstVisibleResponseLatencyMs: 40_000,
+            recentCompletedReplyCount: 1,
+            recentSlowInitialResponseCount: 1,
+          });
 
           await expect(tryMarkHostedMailboxConversationAiUsageDenied({
             afterConversationLaneSeq: 1n,
@@ -125,6 +233,13 @@ function readRows(prisma: PrismaClient | Prisma.TransactionClient) {
     FROM hosted_mailbox_item
     ORDER BY lane_seq ASC
   `);
+}
+
+function requireDate(value: Date | null | undefined): Date {
+  if (!(value instanceof Date)) {
+    throw new TypeError("Expected a PostgreSQL timestamp.");
+  }
+  return value;
 }
 
 function isClearlyLocalPostgresUrl(value: string): boolean {

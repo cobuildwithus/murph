@@ -55,6 +55,7 @@ type HostedRuntimeLatencySend = typeof sendHostedResendPlainTextEmail;
 export interface HostedRuntimeLatencyHealthRow {
   acceptedAt: Date;
   aiUsageDeniedAt: Date | null;
+  assistantInputStagedAt: Date | null;
   checkpointPublicationExpectedBy: Date | null;
   consumedAt: Date | null;
   deliveryAcceptedAt: Date | null;
@@ -82,6 +83,7 @@ export interface HostedRuntimeLatencyHealth {
 interface HostedRuntimeLatencyQueryRow {
   acceptedAt: Date;
   aiUsageDeniedAt: Date | null;
+  assistantInputStagedAt: Date | null;
   consumedAt: Date | null;
   deliveryAcceptedAt: Date | null;
   linqDeliveryId: string | null;
@@ -219,6 +221,7 @@ export async function readHostedRuntimeLatencyHealth(input: {
     SELECT
       trace.accepted_at AS "acceptedAt",
       mailbox_item.ai_usage_denied_at AS "aiUsageDeniedAt",
+      trace.assistant_input_staged_at AS "assistantInputStagedAt",
       mailbox_item.consumed_at AS "consumedAt",
       delivery.accepted_at AS "deliveryAcceptedAt",
       trace.linq_delivery_id AS "linqDeliveryId",
@@ -239,6 +242,14 @@ export async function readHostedRuntimeLatencyHealth(input: {
         mailbox_item.ai_usage_denied_at IS NULL
         OR mailbox_item.ai_usage_denied_at < trace.accepted_at
         OR mailbox_item.ai_usage_denied_at > ${now}
+        OR trace.assistant_input_staged_at IS NOT NULL
+        OR trace.provider_start_at IS NOT NULL
+        OR delivery.accepted_at IS NOT NULL
+        OR mailbox_item.consumed_at IS NOT NULL
+        OR trace.phase_breakdown_json
+          #>> '{assistant,progressUpdateAcceptedAtEpochMs}' IS NOT NULL
+        OR trace.phase_breakdown_json
+          #>> '{assistant,terminalNonReplyCommittedAtEpochMs}' IS NOT NULL
       )
     ORDER BY trace.accepted_at DESC
     LIMIT ${HOSTED_RUNTIME_LATENCY_READ_LIMIT + 1}
@@ -253,6 +264,7 @@ export async function readHostedRuntimeLatencyHealth(input: {
     rows: visibleRows.map((row) => ({
       acceptedAt: row.acceptedAt,
       aiUsageDeniedAt: row.aiUsageDeniedAt,
+      assistantInputStagedAt: row.assistantInputStagedAt,
       checkpointPublicationExpectedBy:
         readHostedRuntimeCheckpointPublicationExpectedBy(row.phaseBreakdownJson),
       consumedAt: row.consumedAt,
@@ -284,20 +296,55 @@ export function summarizeHostedRuntimeLatencyRows(input: {
   let recentSlowInitialResponseCount = 0;
   let unresolvedReplyCount = 0;
 
-  const alertableRows = input.rows.filter((row) => {
+  const alertableRows: HostedRuntimeLatencyHealthRow[] = [];
+  for (const row of input.rows) {
     const aiUsageDeniedAtMs = row.aiUsageDeniedAt?.getTime() ?? null;
     if (aiUsageDeniedAtMs === null) {
-      return true;
+      alertableRows.push(row);
+      continue;
     }
     if (
       aiUsageDeniedAtMs < row.acceptedAt.getTime()
       || aiUsageDeniedAtMs > nowMs
     ) {
       invalidChronologyCount += 1;
-      return true;
+      alertableRows.push(row);
+      continue;
     }
-    return false;
-  });
+    const executionEvidenceMs = [
+      row.assistantInputStagedAt,
+      row.providerStartAt,
+      row.progressUpdateAcceptedAt,
+      row.deliveryAcceptedAt,
+      row.consumedAt,
+      row.terminalNonReplyCommittedAt,
+    ]
+      .filter((value): value is Date => value !== null)
+      .map((value) => value.getTime());
+    if (executionEvidenceMs.length === 0) {
+      continue;
+    }
+    if (executionEvidenceMs.some((value) => value > nowMs)) {
+      invalidChronologyCount += 1;
+      alertableRows.push({
+        ...row,
+        aiUsageDeniedAt: null,
+      });
+      continue;
+    }
+    if (executionEvidenceMs.some((value) => value <= aiUsageDeniedAtMs)) {
+      alertableRows.push({
+        ...row,
+        aiUsageDeniedAt: null,
+      });
+      continue;
+    }
+    alertableRows.push({
+      ...row,
+      acceptedAt: new Date(Math.min(...executionEvidenceMs)),
+      aiUsageDeniedAt: null,
+    });
+  }
 
   const groupedRows = new Map<string, HostedRuntimeLatencyHealthRow[]>();
   alertableRows.forEach((row, index) => {
