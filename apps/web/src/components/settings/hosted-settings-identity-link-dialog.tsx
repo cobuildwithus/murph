@@ -168,15 +168,23 @@ function HostedSettingsIdentityMutationContent({
     );
   }
 
+  if (initialMode === "phone") {
+    return (
+      <HostedPhoneSettings
+        autoOpen
+        onAborted={() => onOpenChange(false)}
+        onLinked={onSynced}
+        syncExistingPhone={!account.phone.number && Boolean(user?.phone?.number)}
+      />
+    );
+  }
+
   return (
     <HostedSettingsIdentityDialogFrame
       account={account}
       initialMode={initialMode}
       onOpenChange={onOpenChange}
     >
-      {initialMode === "phone" ? (
-        <HostedPhoneSettings onLinked={onSynced} />
-      ) : null}
       {initialMode === "telegram" ? (
         <HostedTelegramCardSettings
           authenticated

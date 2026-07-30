@@ -157,6 +157,66 @@ describe("HostedPhoneSettings", () => {
     expect(mocks.refreshUser).toHaveBeenCalledTimes(1);
   });
 
+  it("auto-opens Privy's phone flow once without rendering a second action", async () => {
+    const onAborted = vi.fn();
+    const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedPhoneSettings, {
+        autoOpen: true,
+        onAborted,
+      }),
+      { requireButton: false },
+    );
+    cleanupRender = cleanup;
+
+    await vi.waitFor(() => {
+      expect(mocks.linkPhone).toHaveBeenCalledTimes(1);
+    });
+    expect(mocks.updatePhone).not.toHaveBeenCalled();
+    expect(container.querySelector("button")).toBeNull();
+
+    await act(async () => {
+      mocks.linkAccountCallbacks?.onError?.("exited_link_flow", {
+        linkMethod: "sms",
+      });
+    });
+
+    expect(onAborted).toHaveBeenCalledTimes(1);
+    expect(mocks.linkPhone).toHaveBeenCalledTimes(1);
+  });
+
+  it("syncs an existing verified Privy phone without opening another provider mutation", async () => {
+    mocks.useUser.mockReturnValue({
+      refreshUser: mocks.refreshUser,
+      user: {
+        id: "privy-user-a",
+        linkedAccounts: [],
+        phone: {
+          number: "+15550100002",
+        },
+      },
+    });
+    const onLinked = vi.fn();
+    const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
+    const { cleanup } = await renderClientComponent(
+      createElement(HostedPhoneSettings, {
+        autoOpen: true,
+        onLinked,
+        syncExistingPhone: true,
+      }),
+      { requireButton: false },
+    );
+    cleanupRender = cleanup;
+
+    await vi.waitFor(() => {
+      expect(mocks.refreshUser).toHaveBeenCalledTimes(1);
+      expect(mocks.finalizeHostedPhoneLink).toHaveBeenCalledTimes(1);
+      expect(onLinked).toHaveBeenCalledTimes(1);
+    });
+    expect(mocks.linkPhone).not.toHaveBeenCalled();
+    expect(mocks.updatePhone).not.toHaveBeenCalled();
+  });
+
   it("uses Privy's update-phone flow when the matched account already has a phone", async () => {
     mocks.useUser.mockReturnValue({
       refreshUser: mocks.refreshUser,
@@ -202,10 +262,152 @@ describe("HostedPhoneSettings", () => {
     });
   });
 
-  it.each([
-    "linked_to_another_user",
-    "account_transfer_required",
-  ])("explains provider phone ownership conflicts for %s", async (errorCode) => {
+  it("reconciles a completed account transfer after Privy closes the link flow", async () => {
+    const onLinked = vi.fn();
+    mocks.refreshUser.mockResolvedValue({
+      id: "privy-user-a",
+      linkedAccounts: [],
+      phone: {
+        number: "+15550100002",
+      },
+    });
+    const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedPhoneSettings, {
+        onLinked,
+      }),
+    );
+    cleanupRender = cleanup;
+
+    await act(async () => {
+      findButton(container, "Verify phone")?.dispatchEvent(new Event("click", { bubbles: true }));
+      mocks.linkAccountCallbacks?.onError?.("account_transfer_required", {
+        linkMethod: "sms",
+      });
+    });
+
+    expect(container.textContent).not.toContain("belongs to another account");
+    expect(mocks.finalizeHostedPhoneLink).not.toHaveBeenCalled();
+
+    await act(async () => {
+      mocks.linkAccountCallbacks?.onError?.("exited_link_flow", {
+        linkMethod: "sms",
+      });
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => {
+      expect(mocks.refreshUser).toHaveBeenCalledTimes(1);
+      expect(mocks.finalizeHostedPhoneLink).toHaveBeenCalledTimes(1);
+      expect(onLinked).toHaveBeenCalledTimes(1);
+    });
+
+    await act(async () => {
+      mocks.linkAccountCallbacks?.onError?.("exited_link_flow", {
+        linkMethod: "sms",
+      });
+      await Promise.resolve();
+    });
+    expect(mocks.finalizeHostedPhoneLink).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes without syncing when an offered account transfer is declined", async () => {
+    const onAborted = vi.fn();
+    const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedPhoneSettings, {
+        onAborted,
+      }),
+    );
+    cleanupRender = cleanup;
+
+    await act(async () => {
+      findButton(container, "Verify phone")?.dispatchEvent(new Event("click", { bubbles: true }));
+      mocks.linkAccountCallbacks?.onError?.("account_transfer_required", {
+        linkMethod: "sms",
+      });
+      mocks.linkAccountCallbacks?.onError?.("exited_link_flow", {
+        linkMethod: "sms",
+      });
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => {
+      expect(mocks.refreshUser).toHaveBeenCalledTimes(1);
+      expect(onAborted).toHaveBeenCalledTimes(1);
+    });
+    expect(mocks.finalizeHostedPhoneLink).not.toHaveBeenCalled();
+  });
+
+  it("uses the server as transfer authority when the client user refresh fails", async () => {
+    mocks.refreshUser.mockRejectedValueOnce(new Error("refresh unavailable"));
+    const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedPhoneSettings, {}),
+    );
+    cleanupRender = cleanup;
+
+    await act(async () => {
+      findButton(container, "Verify phone")?.dispatchEvent(new Event("click", { bubbles: true }));
+      mocks.linkAccountCallbacks?.onError?.("account_transfer_required", {
+        linkMethod: "sms",
+      });
+      mocks.linkAccountCallbacks?.onError?.("exited_link_flow", {
+        linkMethod: "sms",
+      });
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => {
+      expect(mocks.refreshUser).toHaveBeenCalledTimes(1);
+      expect(mocks.finalizeHostedPhoneLink).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("reconciles a completed account transfer from Privy's update-phone flow", async () => {
+    mocks.useUser.mockReturnValue({
+      refreshUser: mocks.refreshUser,
+      user: {
+        id: "privy-user-a",
+        linkedAccounts: [],
+        phone: {
+          number: "+15550100001",
+        },
+      },
+    });
+    mocks.refreshUser.mockResolvedValue({
+      id: "privy-user-a",
+      linkedAccounts: [],
+      phone: {
+        number: "+15550100002",
+      },
+    });
+    const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedPhoneSettings, {}),
+    );
+    cleanupRender = cleanup;
+
+    await act(async () => {
+      findButton(container, "Verify a new phone")?.dispatchEvent(
+        new Event("click", { bubbles: true }),
+      );
+      mocks.updateAccountCallbacks?.onError?.("account_transfer_required", {
+        linkMethod: "sms",
+      });
+      mocks.updateAccountCallbacks?.onError?.("exited_update_flow", {
+        linkMethod: "sms",
+      });
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => {
+      expect(mocks.refreshUser).toHaveBeenCalledTimes(1);
+      expect(mocks.finalizeHostedPhoneLink).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("explains a terminal provider phone ownership conflict", async () => {
     const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
 
     const { cleanup, container } = await renderClientComponent(
@@ -215,7 +417,7 @@ describe("HostedPhoneSettings", () => {
 
     await act(async () => {
       findButton(container, "Verify phone")?.dispatchEvent(new Event("click", { bubbles: true }));
-      mocks.linkAccountCallbacks?.onError?.(errorCode, {
+      mocks.linkAccountCallbacks?.onError?.("linked_to_another_user", {
         linkMethod: "sms",
       });
     });

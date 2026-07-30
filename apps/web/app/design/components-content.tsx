@@ -1447,9 +1447,12 @@ export function ComponentsContent() {
 
         <Section id="phone-account-linking" title="Phone Account Linking">
           <p className="text-sm leading-6 text-muted-foreground">
-            The account-management action hands phone verification to the
-            authenticated identity provider, then saves the verified result to
-            Murph. Existing phone accounts use the same surface for replacement.
+            Settings opens the authenticated identity provider directly, with
+            no second Murph confirmation. After verification or an approved
+            account transfer, Murph saves the provider-owned result. If Privy
+            already has a verified phone that Murph has not recorded, Settings
+            repairs that projection directly. Existing phone accounts use the
+            same surface for replacement.
           </p>
           <div className="grid gap-4 sm:grid-cols-2" inert>
             <div className="space-y-3 rounded-xl border border-border bg-card p-5">
