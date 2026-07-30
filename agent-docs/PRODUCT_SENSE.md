@@ -160,6 +160,9 @@ Assistant runtime state is never the source of truth for these objects.
   or deletion easy.
 - Prefer the lowest-burden useful response. Silence and “leave it alone” are
   valid outcomes.
+- On secondary web control surfaces, show the actionable state first and keep
+  explanatory history or requirements on demand. Do not repeat the same truth
+  in a heading, introduction, and row labels.
 - Rank learning, confidence, and life fit before engagement or protocol volume.
 - Any experiment result that can be shared or aggregated must stay tied to the
   exact protocol revision, test plan, and confidence language that produced it.
