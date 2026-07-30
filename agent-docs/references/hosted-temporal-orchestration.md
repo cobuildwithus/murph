@@ -124,8 +124,13 @@ Allowed Temporal state is tiny and pointer-only:
 - Latest opaque mailbox pointer fields: mailbox item pointer, lane, and lane
   sequence.
 - Source-less mailbox and recheck wake hints. Manual runs, browser-vault
-  refreshes, and device-sync requests are durable system-mailbox rows; Temporal
-  signals only wake the reconciliation loop.
+  refreshes, and device-sync requests are durable system-mailbox rows; their
+  Temporal signals only wake the reconciliation loop. A payload-free
+  `runtime_wake_requested` signal may additionally set one coalesced boolean
+  that calls the existing Cloudflare processing adapter when facts are idle. It
+  carries no provider value or credential, is discarded while facts are
+  blocked, and is cleared after accepted processing only when no newer wake
+  arrived.
 - Global device-sync scheduled-wake Schedule id, interval, Workflow start options, and
   count-only due-reconcile sweep results. The reconciler may remember that a
   sweep ran and how many due-reconcile rows/wakes it touched; it must not
@@ -187,6 +192,12 @@ of clearing state derived from a stale read. Workflow timers that should be
 preempted by fresh signals, including owner-recheck waits after accepted
 processing, must use a signal-aware `condition()` timeout instead of a bare
 timer sleep.
+
+`runtime_wake_requested` adds a command path only after that new signal event;
+older histories cannot contain it, and carry-forward state defaults its
+coalesced bit to false. This preserves replay determinism without a history
+reset. Roll out Cloudflare runtime support first, then the Temporal worker, and
+deploy Web last so no producer can send the signal to an older workflow bundle.
 
 The workflow type constant must match the exported workflow function name
 exactly. Temporal TypeScript workflow type names are function names, so renaming

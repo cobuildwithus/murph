@@ -6515,14 +6515,71 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("waits for the idle window when an external runtime wake has no foreground work", async () => {
+  test.each([
+    {
+      expectImmediateRecheck: false,
+      expectedElapsedBoundaryMs: 850,
+      foregroundWork: false,
+      futureMailboxWake: false,
+      label: "keeps the idle window when the provider still matches",
+      providerReadOutcome: "openai" as const,
+      slug: "matching_provider",
+    },
+    {
+      expectImmediateRecheck: true,
+      expectedElapsedBoundaryMs: 650,
+      foregroundWork: false,
+      futureMailboxWake: false,
+      label: "hands off immediately when the provider changed",
+      providerReadOutcome: "venice" as const,
+      slug: "changed_provider",
+    },
+    {
+      expectImmediateRecheck: true,
+      expectedElapsedBoundaryMs: 650,
+      foregroundWork: false,
+      futureMailboxWake: true,
+      label: "hands off immediately with a future mailbox continuation",
+      providerReadOutcome: "venice" as const,
+      slug: "changed_provider_future_mailbox",
+    },
+    {
+      expectImmediateRecheck: true,
+      expectedElapsedBoundaryMs: 650,
+      foregroundWork: true,
+      futureMailboxWake: false,
+      label: "hands foreground work to the saved provider before importing it",
+      providerReadOutcome: "venice" as const,
+      slug: "changed_provider_foreground_work",
+    },
+    {
+      expectImmediateRecheck: false,
+      expectedElapsedBoundaryMs: 850,
+      foregroundWork: false,
+      futureMailboxWake: false,
+      label: "keeps the idle window when provider authority is unavailable",
+      providerReadOutcome: "unavailable" as const,
+      slug: "provider_unavailable",
+    },
+  ])("$label after an external runtime wake", async ({
+    expectImmediateRecheck,
+    expectedElapsedBoundaryMs,
+    foregroundWork,
+    futureMailboxWake,
+    providerReadOutcome,
+    slug,
+  }) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const previousStdIoLogSetting = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
     const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const dirtyWaitStarted = createDeferred<void>();
+    const mailboxItems: HostedMailboxItem[] = [];
     let assistantPhaseFinished = false;
+    let assistantPhaseCount = 0;
     let activeDirtyWake: ((notification: { notifiedAtEpochMs: number }) => void) | null = null;
+    let importedItemCount = 0;
+    let providerReadCount = 0;
     let snapshotCount = 0;
     const runtimeWakeSignal: RuntimeWakeSignal = {
       consumePending() {
@@ -6573,8 +6630,8 @@ describe("hosted workspace runtime entrypoint", () => {
 
       const resultPromise = runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
         request: {
-          attemptId: "attempt_synthetic_phase_checkpoint_external_wake_idle_window",
-          idleCheckpointDelayMs: 500,
+          attemptId: `attempt_synthetic_external_wake_${slug}`,
+          idleCheckpointDelayMs: 1_000,
           leaseGeneration: "7",
           userId: TEST_USER_ID,
           workspaceVersion: "0",
@@ -6587,27 +6644,59 @@ describe("hosted workspace runtime entrypoint", () => {
           return {
             snapshotRef: createBundleRef({
               hash: "f".repeat(64),
-              key: "users/bundles/member-synthetic/phase-checkpoint-external-wake.bundle.json",
+              key: `users/bundles/member-synthetic/external-wake-${slug}.bundle.json`,
               size: 512,
             }),
           };
         },
         async importItem() {
-          throw new Error("External wake without foreground work should not import mailbox items.");
+          importedItemCount += 1;
+          return { status: "imported" };
         },
         platform: createPlatform({
+          assistantConfigurationToolPort: {
+            async request() {
+              providerReadCount += 1;
+              if (providerReadOutcome === "unavailable") {
+                throw new Error("control plane unavailable");
+              }
+              return {
+                action: "read",
+                result: {
+                  availableModels: ["gpt-5.6-luna", "gpt-5.6-terra"],
+                  availableProviders: ["openai", "venice"],
+                  availableReasoningEfforts: ["low", "medium", "high", "xhigh"],
+                  configurationAvailable: true,
+                  dormantSolPreference: false,
+                  model: "gpt-5.6-terra",
+                  provider: providerReadOutcome,
+                  reasoningEffort: "low",
+                  solAvailable: false,
+                },
+              };
+            },
+          },
           mailboxPort: createMailboxPort({
             events: [],
-            items: [],
+            items: mailboxItems,
           }),
           workspacePort: createWorkspacePort({
             checkpointRequests,
             events: [],
-            workspace: createWorkspaceState({ version: "0" }),
+            workspace: createWorkspaceState({
+              ...(futureMailboxWake
+                ? {
+                    nextWakeAt: new Date(Date.now() + 60_000).toISOString(),
+                    nextWakeReason: "mailbox",
+                  }
+                : {}),
+              version: "0",
+            }),
           }),
         }),
         runtimeWakeSignal,
         async runAssistantPhase() {
+          assistantPhaseCount += 1;
           assistantPhaseFinished = true;
           return {
             checkpointReason: "assistant_runtime_commit",
@@ -6622,13 +6711,20 @@ describe("hosted workspace runtime entrypoint", () => {
         1_000,
         () => "Dirty checkpoint wait did not arm.",
       );
+      if (foregroundWork) {
+        mailboxItems.push(createMailboxItem({
+          id: "mailbox_item_provider_handoff_foreground",
+          laneSeq: "1",
+        }));
+      }
       const wakeNotifiedAt = Date.now();
       runtimeWakeSignal.notify();
 
       const result = await resultPromise;
+      const elapsedAfterWakeMs = Date.now() - wakeNotifiedAt;
 
       const phaseLogs = readCapturedRuntimePhaseLogs({
-        attemptId: "attempt_synthetic_phase_checkpoint_external_wake_idle_window",
+        attemptId: `attempt_synthetic_external_wake_${slug}`,
         spy: consoleInfo,
       });
       expect(
@@ -6641,10 +6737,21 @@ describe("hosted workspace runtime entrypoint", () => {
         runtimeWakePendingAtCheckpoint: true,
       }));
       assert.equal(snapshotCount, 1);
-      assert.ok(Date.now() - wakeNotifiedAt >= 450);
+      assert.equal(providerReadCount, 1);
+      assert.equal(importedItemCount, 0);
+      assert.equal(assistantPhaseCount, 1);
+      if (expectImmediateRecheck) {
+        assert.ok(elapsedAfterWakeMs < expectedElapsedBoundaryMs);
+      } else {
+        assert.ok(elapsedAfterWakeMs >= expectedElapsedBoundaryMs);
+      }
       assert.equal(checkpointRequests[0]?.idleCheckpointTrigger, "idle_window");
       assert.equal(checkpointRequests[0]?.runtimeWakePendingAtCheckpoint, true);
-      assert.equal(result.status, "idle");
+      assert.equal(
+        result.immediateRecheckRequested === true,
+        expectImmediateRecheck,
+      );
+      assert.equal(result.status, futureMailboxWake ? "scheduled" : "idle");
     } finally {
       if (previousStdIoLogSetting === undefined) {
         delete process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
@@ -9930,20 +10037,6 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       },
       {
-        action: "read",
-        result: {
-          availableModels: ["gpt-5.6-terra", "gpt-5.6-sol"],
-          availableProviders: ["openai", "venice"],
-          availableReasoningEfforts: ["low", "high"],
-          configurationAvailable: true,
-          dormantSolPreference: false,
-          model: "gpt-5.6-terra",
-          provider: "openai",
-          reasoningEffort: "low",
-          solAvailable: true,
-        },
-      },
-      {
         action: "update",
         result: {
           appliesAt: "next_turn",
@@ -10060,6 +10153,22 @@ describe("hosted workspace runtime entrypoint", () => {
               assistantConfigurationToolPort: {
                 async request(request) {
                   configurationRequests.push(request);
+                  if (request.action === "read") {
+                    return {
+                      action: "read",
+                      result: {
+                        availableModels: ["gpt-5.6-terra", "gpt-5.6-sol"],
+                        availableProviders: ["openai", "venice"],
+                        availableReasoningEfforts: ["low", "high"],
+                        configurationAvailable: true,
+                        dormantSolPreference: false,
+                        model: "gpt-5.6-terra",
+                        provider: "openai",
+                        reasoningEffort: "low",
+                        solAvailable: true,
+                      },
+                    };
+                  }
                   const response = configurationResponses.shift();
                   assert.ok(response, "Unexpected assistant configuration request.");
                   return response;
@@ -10215,9 +10324,13 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual(configurationRequests.map((request) => request.action), [
         "update",
         "read",
+        "read",
         "update",
+        "read",
         "update",
+        "read",
         "update",
+        "read",
         "update",
       ]);
       assert.equal(configurationResponses.length, 0);
@@ -26688,11 +26801,14 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("hands a pending turn to a fresh invocation when the live provider changes", async () => {
+  test("hands a pending turn to a fresh invocation before servicing a later wake", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(TEST_NOW));
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-provider-handoff-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const mailboxItems: HostedMailboxItem[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    let assistantPhaseCount = 0;
     let providerEgressCount = 0;
 
     try {
@@ -26716,8 +26832,14 @@ describe("hosted workspace runtime entrypoint", () => {
               }),
             };
           },
-          async importItem() {
-            return { status: "imported" };
+          async importItem(item) {
+            return {
+              assistantInputId: await stageAssistantInputEventForMailboxItem({
+                item: item.item,
+                vaultRoot,
+              }),
+              status: "imported",
+            };
           },
           platform: createPlatform({
             assistantConfigurationToolPort: {
@@ -26738,14 +26860,35 @@ describe("hosted workspace runtime entrypoint", () => {
                 };
               },
             },
-            mailboxPort: createMailboxPort({ events: [], items: [] }),
+            mailboxPort: createMailboxPort({ events: [], items: mailboxItems }),
             workspacePort: createWorkspacePort({
               checkpointRequests,
+              checkpointWorkspace: (request) => {
+                mailboxItems.push(createMailboxItem({
+                  id: "mailbox_item_provider_handoff_retry",
+                  laneSeq: "1",
+                }));
+                runtimeWakeSignal.notify();
+                return createWorkspaceState({
+                  nextWakeAt: request.nextWakeAt ?? null,
+                  nextWakeReason: request.nextWakeReason ?? null,
+                  redactedStatus: request.redactedStatus ?? null,
+                  snapshotRef: request.snapshotRef,
+                  version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+                });
+              },
               events: [],
               workspace: createWorkspaceState({ version: "0" }),
             }),
           }),
+          runtimeWakeSignal,
           async runAssistantPhase(input) {
+            assistantPhaseCount += 1;
+            if (assistantPhaseCount > 1) {
+              throw new Error(
+                "A stale-provider invocation must checkpoint before servicing another wake.",
+              );
+            }
             try {
               await input.beforeProviderAcceptedInputs?.({
                 acceptedInputs: [{ id: "system_provider_handoff", source: "system" }],
@@ -26769,6 +26912,7 @@ describe("hosted workspace runtime entrypoint", () => {
       );
 
       assert.equal(providerEgressCount, 0);
+      assert.equal(assistantPhaseCount, 1);
       assert.equal(result.immediateRecheckRequested, true);
       assert.equal(checkpointRequests.length, 1);
     } finally {

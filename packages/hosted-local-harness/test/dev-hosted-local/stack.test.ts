@@ -2513,7 +2513,7 @@ describe("hosted local dev stack", () => {
     );
   });
 
-  it("passes hosted OpenAI config to the worker but strips host-only Codex env", async () => {
+  it("passes hosted provider credentials to the worker but strips host-only Codex env", async () => {
     spawnChildProcess
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 125 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 126 }));
@@ -2570,6 +2570,7 @@ describe("hosted local dev stack", () => {
         HOSTED_ASSISTANT_PROVIDER: "openai",
         MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON: "/tmp/spoofed-catalog.json",
         OPENAI_API_KEY: "local-openai-key",
+        VENICE_API_KEY: "local-venice-key",
       },
     });
     await stack.ready;
@@ -2580,6 +2581,7 @@ describe("hosted local dev stack", () => {
     const cloudflareEnv = cloudflareCall?.[3] as NodeJS.ProcessEnv;
     expect(cloudflareEnv.CODEX_HOME).toBeUndefined();
     expect(cloudflareEnv.OPENAI_API_KEY).toBe("local-openai-key");
+    expect(cloudflareEnv.VENICE_API_KEY).toBe("local-venice-key");
     expect(cloudflareEnv.HOSTED_ASSISTANT_PROVIDER).toBe("openai");
     expect(cloudflareEnv.MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON).toBe(
       "/tmp/murph-dev-env-test/codex-model-catalog.openai-flex.json",
@@ -2603,6 +2605,7 @@ describe("hosted local dev stack", () => {
       .mock.calls.at(-1)?.[0] as NodeJS.ProcessEnv;
     expect(envFileSource.CODEX_HOME).toBeUndefined();
     expect(envFileSource.OPENAI_API_KEY).toBe("local-openai-key");
+    expect(envFileSource.VENICE_API_KEY).toBe("local-venice-key");
     expect(envFileSource.HOSTED_ASSISTANT_PROVIDER).toBe("openai");
     expect(envFileSource.MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON).toBe(
       "/tmp/murph-dev-env-test/codex-model-catalog.openai-flex.json",

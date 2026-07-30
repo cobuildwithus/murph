@@ -1015,15 +1015,25 @@ application code.
   or when the Venice rollout flag is disabled; Venice is projected only through
   the signed workspace read for eligible personal members. Settings and the
   input-bound assistant-configuration tool write through the same Web
-  transaction. Immediately before core provider entry, the runtime re-reads
-  that owner; an unavailable read defers the accepted turn without provider
-  egress, while a changed provider checkpoints and hands the pending turn to a
-  fresh invocation. The vault, workspace snapshot, assistant runtime, and
+  transaction. After an effective Settings change commits, Web sends one
+  payload-free `runtime_wake_requested` signal. Temporal coalesces duplicate
+  wakes as a boolean and uses the existing Cloudflare processing adapter even
+  when reconciliation facts are idle; it stores no provider value. Immediately
+  before core provider entry, the runtime re-reads the Web owner; an unavailable
+  read defers the accepted turn without provider egress, while a changed
+  provider stops servicing further wakes, checkpoints, and hands the pending
+  turn to a fresh invocation. The
+  vault, workspace snapshot, assistant runtime, Temporal workflow, and
   Cloudflare Durable Object do not keep another provider preference.
 - Cloudflare remains the credential and translation boundary for both core
   providers. The runner holds a signed provider/user/runner credential rather
-  than either real API key. OpenAI uses its existing Responses intercept;
-  Venice accepts only the two Responses POST paths and rewrites a canonical
+  than either real API key, and the direct Codex child receives only the
+  credential selected by `HOSTED_ASSISTANT_PROVIDER`. Provider selection is
+  part of the child launch identity so a warm OpenAI process cannot survive a
+  Venice handoff. The hosted runtime keeps Murph's Luna/Terra/Sol ids canonical;
+  Venice model translation happens only at Worker egress.
+  OpenAI uses its existing Responses intercept; Venice accepts only the two
+  Responses POST paths and rewrites a canonical
   Luna/Terra/Sol model to one fixed operator model id at egress. Specialized
   tools retain their existing provider owners independently of the core choice.
 - Assistant input follows one spine for local and hosted execution: source adapter -> `AssistantInputEvent` -> `AssistantInputSource` -> scanner/active turn -> accepted-input journal -> Codex. Source adapters may project accepted input into inbox for search, attachments, UI, and diagnostics, but inbox projection success is not the gate that decides whether Codex can see a decoded conversation message. `AssistantInputEvent` may carry bounded prompt-readiness facts such as attachment descriptors and minimized channel source metadata; prompt construction must read those first and use inbox capture/envelope data only as projection enrichment.
