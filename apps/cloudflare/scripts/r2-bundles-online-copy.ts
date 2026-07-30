@@ -32,6 +32,7 @@ const lifecycleConfigPath = path.join(appDir, "r2-bundles-lifecycle.json");
 
 const COPY_CONCURRENCY = 16;
 const COPY_OBJECT_MAX_BYTES_EXCLUSIVE = 5_000_000_000;
+const R2_SAME_KEY_WRITE_INTERVAL_MS = 1_000;
 const MIGRATION_ACCESS_KEY_ENV = "R2_MIGRATION_ACCESS_KEY_ID";
 const MIGRATION_SECRET_KEY_ENV = "R2_MIGRATION_SECRET_ACCESS_KEY";
 const MIGRATION_MARKER_PREFIX = "_murph/r2-bundles-migration/";
@@ -1042,10 +1043,12 @@ function createOnlineCopyClient(environment: MigrationEnvironment): OnlineCopyCl
       const response = await fetchR2CopyObjectWithPreconnectRetry(environment, request);
       await response.arrayBuffer();
       if (response.status === 500) {
+        const recoveryNotBefore = performance.now() + R2_SAME_KEY_WRITE_INTERVAL_MS;
         return await reconcileR2CopyObjectHttp500({
           destination: input.destination,
           entry: input.entry,
           environment,
+          recoveryNotBefore,
           request,
           source: input.source,
         });
@@ -1085,6 +1088,7 @@ async function reconcileR2CopyObjectHttp500(input: {
   destination: string;
   entry: R2ObjectInventoryEntry;
   environment: MigrationEnvironment;
+  recoveryNotBefore: number;
   request: R2CopyRequestInput;
   source: string;
 }): Promise<"copied" | "destination_exists"> {
@@ -1112,6 +1116,7 @@ async function reconcileR2CopyObjectHttp500(input: {
   }
   if (destinationHead) return "destination_exists";
 
+  await waitForR2SameKeyWriteInterval(input.recoveryNotBefore);
   const recoveryResponse = await fetchR2Once(input.environment, input.request);
   await recoveryResponse.arrayBuffer();
   if (recoveryResponse.status === 412) return "destination_exists";
@@ -1121,6 +1126,14 @@ async function reconcileR2CopyObjectHttp500(input: {
     );
   }
   return "copied";
+}
+
+async function waitForR2SameKeyWriteInterval(notBefore: number): Promise<void> {
+  while (true) {
+    const remaining = notBefore - performance.now();
+    if (remaining <= 0) return;
+    await new Promise<void>((resolve) => setTimeout(resolve, remaining));
+  }
 }
 
 async function headR2Object(

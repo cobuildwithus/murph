@@ -743,6 +743,80 @@ describe("R2 online immutable copy", () => {
     expect(recoveryResponse.bodyUsed).toBe(true);
   });
 
+  it("paces the single HTTP 500 recovery to R2's same-key write floor", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-30T00:00:00.000Z"));
+    try {
+      const boundaryNamespace = createHostedStorageNamespaceId("member_1");
+      const eligible = entry(
+        `users/${boundaryNamespace}/workspace-snapshots/http500-paced-recovery.snapshot.enc`,
+        { etag: '"13131313131313131313131313131313"', size: 12 },
+      );
+      const copyHeaders: Record<string, string | null>[] = [];
+      const copyPaths: string[] = [];
+      const putTimes: number[] = [];
+      let putAttempts = 0;
+      let markSourceHeadObserved!: () => void;
+      const sourceHeadObserved = new Promise<void>((resolve) => {
+        markSourceHeadObserved = resolve;
+      });
+      const fixture = createProductionCopyFixture(
+        eligible,
+        async (request, init) => {
+          const url = new URL(String(request));
+          if (init?.method === "PUT") {
+            putAttempts += 1;
+            putTimes.push(Date.now());
+            copyHeaders.push(criticalCopyHeaders(init));
+            copyPaths.push(url.pathname);
+            return putAttempts === 1
+              ? new Response("<Error />", { status: 500 })
+              : new Response("<Error />", { status: 429 });
+          }
+          if (init?.method === "HEAD") {
+            if (url.pathname === `/${destinationBucket}/${eligible.key}`) {
+              return new Response(null, { status: 404 });
+            }
+            markSourceHeadObserved();
+            return exactHeadResponse(eligible);
+          }
+          throw new Error(`Unexpected online-copy fetch method: ${init?.method ?? "GET"}`);
+        },
+      );
+
+      const runPromise = fixture.run();
+      const outcome = runPromise.then(
+        () => new Error("expected the paced recovery 429 to fail"),
+        (error: unknown) => error,
+      );
+      await sourceHeadObserved;
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(putAttempts).toBe(1);
+      await vi.advanceTimersByTimeAsync(999);
+      expect(putAttempts).toBe(1);
+      await vi.advanceTimersByTimeAsync(1);
+
+      const error = await outcome;
+      if (!(error instanceof Error)) {
+        throw new TypeError("expected the paced recovery to reject with an Error");
+      }
+      expect(error.message).toContain("recovery failed with HTTP 429");
+      expect(putAttempts).toBe(2);
+      expect(putTimes).toEqual([
+        new Date("2026-07-30T00:00:00.000Z").getTime(),
+        new Date("2026-07-30T00:00:01.000Z").getTime(),
+      ]);
+      expect(copyPaths).toEqual([
+        `/${destinationBucket}/${eligible.key}`,
+        `/${destinationBucket}/${eligible.key}`,
+      ]);
+      expect(copyHeaders[1]).toEqual(copyHeaders[0]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("validates a 412 from the single HTTP 500 recovery attempt", async () => {
     const boundaryNamespace = createHostedStorageNamespaceId("member_1");
     const eligible = entry(

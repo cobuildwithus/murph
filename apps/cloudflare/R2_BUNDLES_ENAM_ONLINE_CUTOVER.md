@@ -247,7 +247,11 @@ CopyObject has two narrow recovery cases:
    source proves the first request committed and returns without another PUT.
    An absent destination plus exact source permits exactly one further raw
    create-only CopyObject with the same source and destination conditions. That
-   recovery attempt does not use or reset the pre-connect retry wrapper.
+   recovery attempt does not use or reset the pre-connect retry wrapper. R2
+   permits only [one write per second to the same object key](https://developers.cloudflare.com/r2/platform/limits/),
+   so the copier establishes a one-second recovery-not-before deadline after
+   the first `500` body drains, performs the reconciliation HEADs during that
+   interval, and waits any remaining time before the recovery PUT.
 
 The single HTTP `500` recovery accepts only a successful response or `412`,
 then the ordinary destination and source HEAD validation runs again. A second
