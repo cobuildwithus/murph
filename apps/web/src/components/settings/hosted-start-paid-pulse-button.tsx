@@ -8,6 +8,8 @@ import {
   HostedOnboardingApiError,
   requestHostedPulseTrialContinuation,
   requestHostedPulseTrialStartPaid,
+  requestHostedTrialPlanStartPaid,
+  type HostedTrialPaidPlanCode,
 } from "@/src/components/hosted-onboarding/client-api";
 import { BillingPortalButton } from "@/src/components/settings/billing-portal-button";
 import { Button } from "@/src/components/ui/button";
@@ -19,14 +21,21 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/src/components/ui/dialog";
-import { getHostedBillingPlanDefinition } from "@/src/lib/hosted-onboarding/billing-plans";
+import {
+  formatHostedBillingPrice,
+  getHostedBillingPlanDefinition,
+} from "@/src/lib/hosted-onboarding/billing-plans";
 import type { HostedPulseTrialContinuationAction } from "@/src/lib/hosted-onboarding/billing-pulse-trial-continuation-contract";
 import { cn } from "@/src/lib/utils";
 
 import { PlanFeatureCard } from "./plan-feature-card";
 import { toErrorMessage } from "./hosted-settings-sync-helpers";
 
-type StartPaidPulseStatus = "billing_pending" | "idle" | "submitting";
+type StartPaidPulseStatus =
+  | "billing_pending"
+  | "idle"
+  | "scheduled"
+  | "submitting";
 type PulseTrialBillingContinuationStatus =
   | "active"
   | "billing_pending"
@@ -40,7 +49,9 @@ type PulseTrialBillingContinuationStatus =
   | "starting";
 
 const pulsePlan = getHostedBillingPlanDefinition("launch_monthly");
-const pulsePriceLabel = `$${pulsePlan.recurringAmountUsdCents / 100}`;
+const pulsePriceLabel = formatHostedBillingPrice(
+  pulsePlan.recurringAmountUsdCents,
+);
 
 const PULSE_FEATURES = [
   "Run experiments, see what changed",
@@ -50,6 +61,12 @@ const PULSE_FEATURES = [
   "Guided experiment setup",
   "Access to the most capable AI models",
 ];
+const GROUP_FEATURES = [
+  "Keep your wearable syncing",
+  "Keep group activity current",
+  "Private Murph conversations",
+  "Lighter included AI usage",
+];
 
 export function StartPaidPulseButton(props: {
   block?: boolean;
@@ -57,13 +74,21 @@ export function StartPaidPulseButton(props: {
   disabled?: boolean;
   onPendingChange?: (pending: boolean) => void;
   presentation?: "banner" | "settings";
+  successHref?: string;
+  targetPlanCode?: HostedTrialPaidPlanCode;
+  timing?: "at_trial_end" | "now";
 }) {
+  const targetPlanCode = props.targetPlanCode ?? "launch_monthly";
+  const timing = props.timing ?? "now";
+  const targetPlan = getHostedBillingPlanDefinition(targetPlanCode);
   const router = useRouter();
   const [confirmationOpen, setConfirmationOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [status, setStatus] = useState<StartPaidPulseStatus>("idle");
   const isSubmitting = status === "submitting";
-  const label = isSubmitting ? "Starting..." : props.children ?? "Start Pulse plan";
+  const label = isSubmitting
+    ? "Starting..."
+    : props.children ?? `Start ${targetPlan.displayName} plan`;
   const disabled = props.disabled === true || isSubmitting;
 
   function setConfirmationOpenState(open: boolean) {
@@ -84,7 +109,13 @@ export function StartPaidPulseButton(props: {
     props.onPendingChange?.(true);
 
     try {
-      const result = await requestHostedPulseTrialStartPaid();
+      const result =
+        targetPlanCode === "launch_monthly" && timing === "now"
+          ? await requestHostedPulseTrialStartPaid()
+          : await requestHostedTrialPlanStartPaid({
+              targetPlanCode,
+              timing,
+            });
       if (result.status === "redirecting") {
         setStatus("idle");
         return;
@@ -92,6 +123,16 @@ export function StartPaidPulseButton(props: {
 
       if (result.status === "billing_pending") {
         setStatus("billing_pending");
+        router.refresh();
+        return;
+      }
+
+      if (
+        result.status === "already_scheduled"
+        || result.status === "continuing"
+        || result.status === "scheduled"
+      ) {
+        setStatus("scheduled");
         router.refresh();
         return;
       }
@@ -104,10 +145,17 @@ export function StartPaidPulseButton(props: {
 
       setStatus("idle");
       setConfirmationOpen(false);
-      router.refresh();
+      if (props.successHref) {
+        router.replace(props.successHref);
+      } else {
+        router.refresh();
+      }
     } catch (error) {
       setStatus("idle");
-      setErrorMessage(toErrorMessage(error, "Could not start Pulse right now."));
+      setErrorMessage(toErrorMessage(
+        error,
+        `Could not start ${targetPlan.displayName} right now.`,
+      ));
     } finally {
       props.onPendingChange?.(false);
     }
@@ -145,6 +193,8 @@ export function StartPaidPulseButton(props: {
         onConfirm={() => void handleStartPaidPulse()}
         onOpenChange={setConfirmationOpenState}
         open={confirmationOpen}
+        targetPlanCode={targetPlanCode}
+        timing={timing}
       />
     </div>
   );
@@ -483,22 +533,69 @@ function StartPaidPulseConfirmationDialog(props: {
   onConfirm: () => void;
   onOpenChange: (open: boolean) => void;
   open: boolean;
+  targetPlanCode: HostedTrialPaidPlanCode;
+  timing: "at_trial_end" | "now";
 }) {
-  const isSubmitting = props.status === "submitting";
-
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogContent className="max-w-md gap-6 rounded-2xl border border-[#c4a882]/25 bg-[#fffcf6] p-6 text-[#2d3436] ring-[#c4a882]/25 md:p-7">
+        <StartPaidPlanConfirmationContent
+          errorMessage={props.errorMessage}
+          onClose={() => props.onOpenChange(false)}
+          onConfirm={props.onConfirm}
+          status={props.status}
+          targetPlanCode={props.targetPlanCode}
+          timing={props.timing}
+        />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function StartPaidPlanConfirmationContent(props: {
+  errorMessage: string | null;
+  onClose: () => void;
+  onConfirm: () => void;
+  status: StartPaidPulseStatus;
+  targetPlanCode: HostedTrialPaidPlanCode;
+  timing: "at_trial_end" | "now";
+}) {
+  const isSubmitting = props.status === "submitting";
+  const targetPlan = getHostedBillingPlanDefinition(
+    props.targetPlanCode,
+  );
+  const targetPlanName = targetPlan.displayName;
+  const targetPriceLabel = formatHostedBillingPrice(
+    targetPlan.recurringAmountUsdCents,
+  );
+  const targetFeatures =
+    props.targetPlanCode === "launch_group_monthly"
+      ? GROUP_FEATURES
+      : PULSE_FEATURES;
+
+  return (
+    <>
         <DialogHeader className="pr-10">
           <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
-            Start Pulse
+            {props.status === "scheduled"
+              ? `${targetPlanName} is set`
+              : props.timing === "at_trial_end"
+                ? `Continue with ${targetPlanName}`
+                : `Start ${targetPlanName}`}
           </DialogTitle>
           <DialogDescription className="text-sm leading-6 text-[#736a58]">
-            Your trial ends and Pulse begins at {pulsePriceLabel}/mo.
+            {props.status === "scheduled"
+              ? `Your trial continues. ${targetPlanName} begins at ${targetPriceLabel}/month when it ends.`
+              : props.timing === "at_trial_end"
+                ? `Your current trial continues. ${targetPlanName} begins at ${targetPriceLabel}/month when it ends.`
+                : `Your trial ends now and ${targetPlanName} begins at ${targetPriceLabel}/month. You will be charged immediately.`}
           </DialogDescription>
         </DialogHeader>
 
-        <PlanFeatureCard price={pulsePriceLabel} features={PULSE_FEATURES} />
+        <PlanFeatureCard
+          price={targetPriceLabel}
+          features={targetFeatures}
+        />
 
         {props.errorMessage ? (
           <p
@@ -529,7 +626,7 @@ function StartPaidPulseConfirmationDialog(props: {
         ) : null}
         {isSubmitting ? (
           <p role="status" aria-live="polite" className="sr-only">
-            Starting Pulse billing.
+            Starting {targetPlanName} billing.
           </p>
         ) : null}
 
@@ -537,28 +634,39 @@ function StartPaidPulseConfirmationDialog(props: {
           <Button
             type="button"
             size="xl"
-            onClick={props.onConfirm}
+            onClick={
+              props.status === "scheduled"
+                ? props.onClose
+                : props.onConfirm
+            }
             disabled={isSubmitting}
             className="w-full"
           >
             {isSubmitting
               ? "Starting..."
+              : props.status === "scheduled"
+                ? "Done"
               : props.status === "billing_pending"
                 ? "Check status"
-                : "Start Pulse"}
+                : props.timing === "at_trial_end"
+                  ? props.targetPlanCode === "launch_group_monthly"
+                    ? "Choose Group"
+                    : "Keep Pulse"
+                  : `Start ${targetPlanName}`}
           </Button>
-          <Button
-            type="button"
-            size="xl"
-            variant="ghost"
-            onClick={() => props.onOpenChange(false)}
-            disabled={isSubmitting}
-            className="w-full"
-          >
-            Cancel
-          </Button>
+          {props.status !== "scheduled" ? (
+            <Button
+              type="button"
+              size="xl"
+              variant="ghost"
+              onClick={props.onClose}
+              disabled={isSubmitting}
+              className="w-full"
+            >
+              Cancel
+            </Button>
+          ) : null}
         </div>
-      </DialogContent>
-    </Dialog>
+    </>
   );
 }

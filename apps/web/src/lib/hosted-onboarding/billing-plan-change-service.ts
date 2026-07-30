@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import type Stripe from "stripe";
 
 import { resolveHostedAiUsageGate } from "../hosted-execution/usage-allowance";
@@ -7,8 +7,9 @@ import { sha256Hex } from "../primitives";
 import { getPrisma } from "../prisma";
 import { coerceStripeObjectId } from "./billing";
 import {
-  canUpgradeHostedBillingPlanToEdge,
+  canUpgradeHostedBillingPlan,
   HOSTED_STANDARD_CHECKOUT_OFFER,
+  isHostedBillingPlanImmediateUpgrade,
   isHostedPulseTrialBillingState,
   parseHostedBillingPlanCode,
   type HostedBillingPlanCode,
@@ -17,6 +18,7 @@ import { assertHostedMemberOwnActiveBillingAllowed } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
 import {
   readHostedMemberStripeBillingRef,
+  withHostedMemberStripeMutationLock,
   type HostedMemberStripeBillingRefSnapshot,
 } from "./hosted-member-billing-store";
 import { readHostedMemberCoreState } from "./hosted-member-store";
@@ -24,8 +26,8 @@ import { isHostedStripeLegacyAiUsageMeteredItem } from "./legacy-usage-price";
 import {
   requireHostedOnboardingPublicBaseUrl,
   requireHostedStripeBillingPlanConfig,
+  requireValidatedHostedStripeBillingPlanConfig,
 } from "./runtime";
-import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
 import { applyStripeSubscriptionUpdated } from "./stripe-billing-events";
 import type { HostedStripeDispatchContext } from "./stripe-dispatch";
 import {
@@ -35,20 +37,21 @@ import {
 
 export type HostedBillingPlanUpgradeResult =
   | {
-    billingPlanCode: "launch_edge_monthly";
+    billingPlanCode: HostedBillingPlanCode;
     status: "already_on_plan";
   }
   | {
-    billingPlanCode: "launch_edge_monthly";
+    billingPlanCode: HostedBillingPlanCode;
     status: "upgraded";
   }
   | {
-    billingPlanCode: "launch_monthly";
+    billingPlanCode: HostedBillingPlanCode;
     paymentUrl: string;
     status: "pending_payment";
   };
 
 export async function upgradeHostedBillingPlan(input: {
+  expectedCurrentPlanCode?: HostedBillingPlanCode;
   memberId: string;
   now?: Date;
   prisma?: PrismaClient;
@@ -56,6 +59,36 @@ export async function upgradeHostedBillingPlan(input: {
 }): Promise<HostedBillingPlanUpgradeResult> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
+  const result = await withHostedMemberStripeMutationLock({
+    memberId: input.memberId,
+    prisma,
+    run: (tx) =>
+      upgradeHostedBillingPlanWithLockedOwner({
+        expectedCurrentPlanCode: input.expectedCurrentPlanCode,
+        memberId: input.memberId,
+        now,
+        targetPlanCode: input.targetPlanCode,
+        tx,
+      }),
+  });
+
+  if (result.status === "upgraded") {
+    await signalHostedRuntimeManualWakeBestEffort({
+      userId: input.memberId,
+    });
+  }
+
+  return result;
+}
+
+async function upgradeHostedBillingPlanWithLockedOwner(input: {
+  expectedCurrentPlanCode?: HostedBillingPlanCode;
+  memberId: string;
+  now: Date;
+  targetPlanCode: HostedBillingPlanCode;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedBillingPlanUpgradeResult> {
+  const prisma = input.tx;
   const member = await readHostedMemberCoreState({
     memberId: input.memberId,
     prisma,
@@ -72,14 +105,6 @@ export async function upgradeHostedBillingPlan(input: {
   assertHostedMemberOwnActiveBillingAllowed(member);
 
   const targetPlanCode = input.targetPlanCode;
-  if (targetPlanCode !== "launch_edge_monthly") {
-    throw hostedOnboardingError({
-      code: "HOSTED_BILLING_PLAN_UPGRADE_UNSUPPORTED",
-      httpStatus: 400,
-      message: "This plan change is not supported.",
-    });
-  }
-
   const billingRef = await readHostedMemberStripeBillingRef({
     memberId: input.memberId,
     prisma,
@@ -92,6 +117,15 @@ export async function upgradeHostedBillingPlan(input: {
       status: "already_on_plan",
     };
   }
+  if (
+    input.expectedCurrentPlanCode
+    && currentPlanCode !== input.expectedCurrentPlanCode
+  ) {
+    throw buildHostedBillingPlanUpgradeSourceChangedError();
+  }
+  if (parseHostedBillingPlanCode(billingRef?.scheduledBillingPlanCode)) {
+    throw buildHostedBillingPlanChangeAlreadyScheduledError();
+  }
 
   const transition = {
     currentPlanCode,
@@ -100,6 +134,7 @@ export async function upgradeHostedBillingPlan(input: {
   assertHostedBillingPlanUpgradeAllowed(transition);
   assertHostedBillingPlanUpgradeSourceState({
     billingRef,
+    targetPlanCode,
   });
 
   const stripeCustomerId = billingRef?.stripeCustomerId ?? null;
@@ -116,7 +151,7 @@ export async function upgradeHostedBillingPlan(input: {
   const currentConfig = requireHostedStripeBillingPlanConfig({
     billingPlanCode: transition.currentPlanCode,
   });
-  const targetConfig = requireHostedStripeBillingPlanConfig({
+  const targetConfig = await requireValidatedHostedStripeBillingPlanConfig({
     billingPlanCode: targetPlanCode,
   });
   const stripe = targetConfig.stripe;
@@ -137,7 +172,7 @@ export async function upgradeHostedBillingPlan(input: {
   })) {
     return await finalizeAppliedHostedBillingPlanUpgrade({
       memberId: input.memberId,
-      now,
+      now: input.now,
       prisma,
       stripe,
       stripeSubscriptionId,
@@ -145,6 +180,9 @@ export async function upgradeHostedBillingPlan(input: {
       targetPlanCode,
       targetPriceId: targetConfig.priceId,
     });
+  }
+  if (coerceStripeObjectId(subscription.schedule)) {
+    throw buildHostedBillingPlanChangeAlreadyScheduledError();
   }
 
   const updateItems = buildHostedBillingPlanUpgradeSubscriptionItems({
@@ -223,7 +261,7 @@ export async function upgradeHostedBillingPlan(input: {
 
   return await finalizeAppliedHostedBillingPlanUpgrade({
     memberId: input.memberId,
-    now,
+    now: input.now,
     prisma,
     stripe,
     stripeSubscriptionId,
@@ -233,17 +271,26 @@ export async function upgradeHostedBillingPlan(input: {
   });
 }
 
+function buildHostedBillingPlanChangeAlreadyScheduledError() {
+  return hostedOnboardingError({
+    code: "HOSTED_BILLING_PLAN_CHANGE_ALREADY_SCHEDULED",
+    httpStatus: 409,
+    message:
+      "A plan change is already scheduled. Review the current billing state before changing plans again.",
+  });
+}
+
 async function finalizeAppliedHostedBillingPlanUpgrade(input: {
   memberId: string;
   now: Date;
-  prisma: PrismaClient;
+  prisma: Prisma.TransactionClient;
   stripe: Stripe;
   stripeSubscriptionId: string;
   subscription: Stripe.Subscription;
-  targetPlanCode: "launch_edge_monthly";
+  targetPlanCode: HostedBillingPlanCode;
   targetPriceId: string;
 }): Promise<{
-  billingPlanCode: "launch_edge_monthly";
+  billingPlanCode: HostedBillingPlanCode;
   status: "upgraded";
 }> {
   const cleanedSubscription = await cleanupAppliedHostedBillingPlanUpgradeSubscriptionItems({
@@ -271,26 +318,34 @@ async function finalizeAppliedHostedBillingPlanUpgrade(input: {
     subscription: appliedSubscription,
     targetPlanCode: input.targetPlanCode,
   });
-  await signalHostedRuntimeManualWakeBestEffort({
-    userId: input.memberId,
-  });
-
   return {
     billingPlanCode: input.targetPlanCode,
     status: "upgraded",
   };
 }
 
+function buildHostedBillingPlanUpgradeSourceChangedError(): Error {
+  return hostedOnboardingError({
+    code: "HOSTED_BILLING_PLAN_UPGRADE_SOURCE_CHANGED",
+    httpStatus: 409,
+    message:
+      "Your current plan changed before this upgrade started. Review the latest billing state and try again.",
+  });
+}
+
 function assertHostedBillingPlanUpgradeAllowed(input: {
   currentPlanCode: HostedBillingPlanCode | null;
   targetPlanCode: HostedBillingPlanCode;
 }): asserts input is {
-  currentPlanCode: "launch_monthly";
-  targetPlanCode: "launch_edge_monthly";
+  currentPlanCode: HostedBillingPlanCode;
+  targetPlanCode: HostedBillingPlanCode;
 } {
   if (
-    input.targetPlanCode === "launch_edge_monthly" &&
-    input.currentPlanCode === "launch_monthly"
+    input.currentPlanCode !== null &&
+    isHostedBillingPlanImmediateUpgrade({
+      currentPlanCode: input.currentPlanCode,
+      targetPlanCode: input.targetPlanCode,
+    })
   ) {
     return;
   }
@@ -304,11 +359,13 @@ function assertHostedBillingPlanUpgradeAllowed(input: {
 
 function assertHostedBillingPlanUpgradeSourceState(input: {
   billingRef: HostedMemberStripeBillingRefSnapshot | null;
+  targetPlanCode: HostedBillingPlanCode;
 }): void {
-  if (canUpgradeHostedBillingPlanToEdge({
+  if (canUpgradeHostedBillingPlan({
     currentBillingPhase: input.billingRef?.currentBillingPhase,
     currentBillingPlanCode: input.billingRef?.currentBillingPlanCode,
     currentCheckoutOffer: input.billingRef?.currentCheckoutOffer,
+    targetPlanCode: input.targetPlanCode,
   })) {
     return;
   }
@@ -320,7 +377,7 @@ function assertHostedBillingPlanUpgradeSourceState(input: {
     throw hostedOnboardingError({
       code: "HOSTED_BILLING_PLAN_UPGRADE_TRIAL_UNSUPPORTED",
       httpStatus: 409,
-      message: "Finish trial billing before upgrading to Edge.",
+      message: "Finish trial billing before changing plans.",
     });
   }
 
@@ -381,7 +438,7 @@ async function cleanupAppliedHostedBillingPlanUpgradeSubscriptionItems(input: {
   stripe: Stripe;
   stripeSubscriptionId: string;
   subscription: Stripe.Subscription;
-  targetPlanCode: "launch_edge_monthly";
+  targetPlanCode: HostedBillingPlanCode;
   targetPriceId: string;
 }): Promise<Stripe.Subscription> {
   const cleanupItems = buildHostedBillingPlanUpgradeAppliedSubscriptionCleanupItems({
@@ -463,7 +520,7 @@ function buildHostedBillingSubscriptionItemsUnsupportedError(): Error {
 
 function buildHostedBillingPlanUpgradeSubscriptionMetadata(input: {
   memberId: string;
-  targetPlanCode: "launch_edge_monthly";
+  targetPlanCode: HostedBillingPlanCode;
 }): Stripe.MetadataParam {
   return {
     billingPlanCode: input.targetPlanCode,
@@ -487,7 +544,7 @@ async function normalizeAppliedHostedBillingPlanUpgradeSubscription(input: {
   stripe: Stripe;
   stripeSubscriptionId: string;
   subscription: Stripe.Subscription;
-  targetPlanCode: "launch_edge_monthly";
+  targetPlanCode: HostedBillingPlanCode;
   targetPriceId: string;
 }): Promise<Stripe.Subscription> {
   if (isHostedBillingPlanUpgradeSubscriptionMetadataNormalized(input)) {
@@ -525,7 +582,7 @@ async function normalizeAppliedHostedBillingPlanUpgradeSubscription(input: {
 function isHostedBillingPlanUpgradeSubscriptionMetadataNormalized(input: {
   memberId: string;
   subscription: Stripe.Subscription;
-  targetPlanCode: "launch_edge_monthly";
+  targetPlanCode: HostedBillingPlanCode;
 }): boolean {
   const metadata = input.subscription.metadata ?? {};
 
@@ -667,21 +724,19 @@ function assertHostedBillingPlanUpgradeAppliedSubscriptionItemsClean(input: {
 async function reconcileAppliedHostedBillingPlanUpgrade(input: {
   memberId: string;
   now: Date;
-  prisma: PrismaClient;
+  prisma: Prisma.TransactionClient;
   stripeSubscriptionId: string;
   subscription: Stripe.Subscription;
-  targetPlanCode: "launch_edge_monthly";
+  targetPlanCode: HostedBillingPlanCode;
 }): Promise<void> {
-  await input.prisma.$transaction(async (tx) => {
-    await applyStripeSubscriptionUpdated(
-      input.subscription,
-      buildHostedBillingPlanUpgradeDispatchContext({
-        now: input.now,
-        stripeSubscriptionId: input.stripeSubscriptionId,
-      }),
-      tx,
-    );
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  await applyStripeSubscriptionUpdated(
+    input.subscription,
+    buildHostedBillingPlanUpgradeDispatchContext({
+      now: input.now,
+      stripeSubscriptionId: input.stripeSubscriptionId,
+    }),
+    input.prisma,
+  );
 
   const gate = await resolveHostedAiUsageGate({
     memberId: input.memberId,

@@ -1475,6 +1475,8 @@ test("HostedAuthPanel phone signup completion pauses on launch consent before re
   });
   expect(onCompleted).toHaveBeenCalledTimes(1);
   expect(assign).not.toHaveBeenCalled();
+  expect(container.textContent).toContain("Hosted legal consent card");
+  expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeNull();
 
   await act(async () => {
     mocks.legalConsentCardProps?.onRequirementChange?.(false);
@@ -1484,7 +1486,7 @@ test("HostedAuthPanel phone signup completion pauses on launch consent before re
   expect(assign).not.toHaveBeenCalled();
 });
 
-test("HostedAuthPanel keeps consent mounted until downstream completion succeeds", async () => {
+test("HostedAuthPanel keeps consent mounted through downstream completion retry", async () => {
   const onCompleted = vi.fn()
     .mockRejectedValueOnce(new Error("Could not finish sign in."))
     .mockResolvedValueOnce(undefined);
@@ -1528,8 +1530,8 @@ test("HostedAuthPanel keeps consent mounted until downstream completion succeeds
   });
 
   expect(onCompleted).toHaveBeenCalledTimes(2);
-  expect(container.textContent).not.toContain("Hosted legal consent card");
-  expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeTruthy();
+  expect(container.textContent).toContain("Hosted legal consent card");
+  expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeNull();
 });
 
 function setInputValue(
@@ -1641,5 +1643,6 @@ test("HostedAuthPanel keeps Decline terminal when a late status result says cons
     joinUrl: "/join/second-invite-code",
     stage: "active",
   });
-  expect(container.textContent).not.toContain("Hosted legal consent card");
+  expect(container.textContent).toContain("Hosted legal consent card");
+  expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeNull();
 });

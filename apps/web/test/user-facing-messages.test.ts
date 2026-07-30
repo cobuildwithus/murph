@@ -29,6 +29,7 @@ const TEST_TEMPLATE_KEYS = [
   "linq.ai_usage.trial_limit_reached",
   "linq.ai_usage.edge_limit_reached",
   "linq.ai_usage.family_limit_reached",
+  "linq.ai_usage.group_upgrade_pulse",
   "linq.ai_usage.pulse_upgrade_edge",
   "linq.ai_usage.thread_limit_reached",
   "linq.ai_usage.thread_limit_funding",
@@ -56,6 +57,9 @@ const TEST_CONTEXT_BY_KEY = {
     homeUrl: "https://withmurph.ai/home",
   },
   "linq.ai_usage.family_limit_reached": {
+    homeUrl: "https://withmurph.ai/home",
+  },
+  "linq.ai_usage.group_upgrade_pulse": {
     homeUrl: "https://withmurph.ai/home",
   },
   "linq.ai_usage.billing_inactive": {
@@ -184,6 +188,15 @@ describe("user-facing message variants", () => {
     }
   });
 
+  it("keeps Group sync continuity explicit when personal AI usage pauses", () => {
+    for (const text of collectRenderedTexts("linq.ai_usage.group_upgrade_pulse")) {
+      expect(text).toMatch(/sync|syncing|wearable|health data/iu);
+      expect(text).toMatch(/group/iu);
+      expect(text).toMatch(/pause|paused|wait|reset/iu);
+      expect(text).not.toMatch(/top[ -]?up|checkout|\$|paid/iu);
+    }
+  });
+
   it("explains how each blocked non-top-up allowance can resume", () => {
     for (const text of collectRenderedTexts("linq.ai_usage.trial_limit_reached")) {
       expect(text).toMatch(/Murph is paused until .+ plan/iu);
@@ -208,6 +221,7 @@ describe("user-facing message variants", () => {
       "linq.ai_usage.trial_limit_reached",
       "linq.ai_usage.edge_limit_reached",
       "linq.ai_usage.family_limit_reached",
+      "linq.ai_usage.group_upgrade_pulse",
       "linq.ai_usage.pulse_upgrade_edge",
       "linq.ai_usage.thread_limit_reached",
     ] as const) {
@@ -235,6 +249,7 @@ describe("user-facing message variants", () => {
       "linq.ai_usage.trial_limit_reached",
       "linq.ai_usage.edge_limit_reached",
       "linq.ai_usage.family_limit_reached",
+      "linq.ai_usage.group_upgrade_pulse",
       "linq.ai_usage.pulse_upgrade_edge",
     ] as const) {
       for (const text of collectRenderedTexts(key)) {
