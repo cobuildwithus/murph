@@ -1,6 +1,6 @@
 # Group Health Newsletter
 
-Last verified: 2026-07-27
+Last verified: 2026-07-29
 Status: Implemented
 
 ## Current State
@@ -43,7 +43,7 @@ The newsletter is not a new scheduler, not a second email system, and not a new 
 | Permission offers | In iMessage/Linq, lead with **Like this message**, state the exact `{{share_scope}}`, and include the customize link. In Telegram, return the existing Web-owned join URL in the ordinary chat reply because Telegram has no provider reaction-offer path. |
 | Consent invariant | The offer message and stored grant snapshot must match: `HostedGroupJoinOffer.projectionKindsJson` is the frozen server-side snapshot, and `{{share_scope}}` must render from that same projection list. |
 | Health data toggles | The newsletter default scope includes the named health fields above. Members can narrow or widen it with the customize link. |
-| Projection retention | Each Web-owned encrypted health snapshot can carry **the 7 most recent records per projection kind** and replaces the prior snapshot on that exact active grant row. |
+| Projection retention | Each Web-owned encrypted health snapshot can carry **the 8 most recent records per projection kind** and replaces the prior snapshot on that exact active grant row. This retains the open local date plus the seven prior completed dates without exposing older history. The signed callback body ceiling is 19 KiB: above the maximum legal eight-record workout payload and below the equivalent nine-record payload. |
 
 ## Canonical Objects
 
@@ -86,7 +86,7 @@ Derived at send time, not persisted:
 ```
 authorized = group roster ∩ members who granted group-email.v0
 recipients = authorized ∩ members with a resolvable verified email
-featured   = recipients ∩ members with a consented current weekly health stat
+featured   = recipients ∩ members with a consented completed-day health stat
 ```
 
 The single shared email is sent to all **recipients** (`To`: all recipient
@@ -103,7 +103,8 @@ email-eligible health scopes through the direct Web shared-data reader. Each
 read captures the current roster and exact active grants, decrypts the bounded
 Web-owned snapshots on those grant rows, and derives device connection status
 live only when `device-sync-status.v0` is currently granted. The runtime uses
-the group vault timezone to turn the returned records into current-week facts
+the group vault timezone to turn the returned records into facts from the seven
+completed local calendar days before the occurrence
 and exposes only email-eligible results to the model. No roster, grant,
 snapshot, device, filesystem, projection, or Web/network read occurs before the
 model turn starts, and no shared-data copy lands in the destination workspace.
@@ -139,33 +140,34 @@ existing hosted group fanout planner revalidates the proof, persists one child
 intent per authorized recipient before provider entry, and then sends each child
 with one envelope recipient while preserving the full authorized `To` audience
 in the shared MIME. The parent carries the automation id plus expected
-configuration revision, and every fanout or safe-retry child copies that same
+configuration revision, and every fanout child copies that same
 authority. Editing, switching delivery, pausing, or archiving the automation
 therefore invalidates already-queued work before provider entry. Legacy parent
 intents without revision authority remain readable for compatible retry
 handling. No new queue, table, route, scheduler, or state owner exists.
 
-The parent and children share the occurrence-scoped delivery key. A later fresh
-cron turn reads their durable states: active work returns `accepted` and retains
-the occurrence; all-sent or durably classified partial work is terminal. Once a
-parent intent has been sent, that parent's subject, text, HTML, proof, and
-occurrence identity are the immutable manifest for the occurrence. Safe
-pre-provider recipient failures may create new child intents, but those children
-copy the sent parent manifest instead of re-planning from a fresh model body.
-The sent parent manifest and terminal recipient evidence for the occurrence are
-protected from normal terminal outbox pruning only while the canonical cron
-occurrence remains unresolved. Once it resolves, ordinary bounded retention
-applies. Sent and ambiguous children are never replayed, and a
-parent or child that reaches `ASSISTANT_DELIVERY_RETRY_EXHAUSTED` is terminal
-for the occurrence rather than gaining a fresh retry budget under a new token.
-A changed proof after a sent parent is terminal for that occurrence instead of
-authorizing a second payload under the same message identity. Missing
-prepare/send results and unavailable preparation are explicit retryable
-failures. The first-run opt-out window remains separate and supplies no
-scheduled send authority, so it can still consume its intentional no-send
-occurrence. Immediately before MIME construction and each recipient provider
-entry, the web callback resolves the complete canonical snapshot again and
-returns addresses only when its proof matches.
+The parent and children share the occurrence-scoped delivery key. Once the
+outbox accepts the parent, it reports that id to cron immediately. Cron stores
+the id in its existing `delivery_pending` state and stops model work for the
+occurrence even if provider completion, decision validation, or turn
+persistence later fails; the run record retains that post-acceptance error. If
+the process stops between durable parent creation and that cron write, the next
+run derives the same parent from the occurrence-scoped outbox key before model
+admission and reconnects it to `delivery_pending`; no repair queue or second
+owner is involved.
+Web marks the parent sent only after it has revalidated the proof and durably
+persisted the recipient fanout intents. The existing deterministic cron
+reconciler then settles the occurrence from that parent state; it never starts
+another model turn to inspect or recreate recipient work. Each child stays with
+the generic outbox's bounded retry lifecycle, and terminal child failure does
+not gain a fresh budget or body through newsletter-specific replay. Missing
+prepare/send results and unavailable preparation before parent acceptance are
+explicit retryable model-turn failures.
+The first-run opt-out window remains separate and supplies no scheduled send
+authority, so it can still consume its intentional no-send occurrence.
+Immediately before MIME construction and each recipient provider entry, the web
+callback resolves the complete canonical snapshot again and returns addresses
+only when its proof matches.
 
 ## Content and Tone
 
@@ -178,16 +180,18 @@ grants, decrypts their bounded encrypted snapshots, and returns the complete
 member/scope result; an explicitly consented device status is derived live
 rather than stored in a snapshot. `buildSharedGroupWeeklyMembers`
 (`packages/query/src/group-weekly.ts`) turns available records into per-member
-current-week summaries with the canonical overview weekly-stat calculation.
-The scheduled occurrence and group vault timezone keep retries on the same
-calendar week. Each encrypted health snapshot carries up to seven records per
-projection kind. Seven records cannot also prove a complete prior calendar
-week, so the result deliberately omits prior-week averages and deltas. One
-shared body; everyone on the thread sees the same digest.
+summaries over the seven completed local calendar days before the scheduled
+occurrence. Each encrypted health snapshot carries up to eight records per
+projection kind: the open local date plus the seven prior completed dates.
+Projection reads use a calendar-date cutoff rather than a rolling-hour cutoff,
+so timezone offset and time of day cannot discard the oldest required date.
+That bounded projection cannot also prove a complete prior calendar week, so
+the result deliberately omits prior-week averages and deltas.
+One shared body; everyone on the thread sees the same digest.
 
 Default content is a selective weekly story, not one repeated metric block per
 featured member. Lead with the strongest close race, leader, surprising
-combination, or current-week group pattern; use the returned stats that develop
+combination, or recent group pattern; use the returned stats that develop
 that story. Cross-person comparisons may include exercise, movement, steps,
 sleep duration, sleep timing, consistency, and other consented group
 metrics. Do not rank "healthiest person" or default to raw biomarker
@@ -212,16 +216,17 @@ through the existing maintenance wake, and prove the legacy population has
 drained. Exact-marker rejection belongs to the subsequent consumer release,
 not this compatibility phase.
 
-Newsletter `prepare` excludes the open local calendar day from every weekly
-average. Each returned stat reports `observedDayCount`, sorted `observedDates`,
-and `throughDate`; scope the claim to those observed completed days, and do not
-infer that unobserved days were zero or that the full week is represented.
+Newsletter `prepare` excludes the open local calendar day from every average
+and includes only the seven local calendar days before it. Each returned stat
+reports `completedDaysAvg`, `observedDayCount`, sorted `observedDates`, and
+`throughDate`; scope the claim to those observed completed days, and do not
+infer that unobserved days were zero or that the full window is represented.
 A settled cross-person leader, winner, or crown for a metric requires identical
 `observedDates` across every compared member. When coverage differs, scope each
 average to its own dates and avoid a crown. For current-chat raw records, derive
-the equivalent sorted usable date set from the current local Monday through
-yesterday after semantic validation. Exclude both the current local day and
-older records from the rolling read window. Apply the same identical-date rule.
+the equivalent sorted usable date set from the seven local calendar days before
+today after semantic validation. Exclude both the current local day and older
+records from the rolling read window. Apply the same identical-date rule.
 A current-day value may appear only as a separate, explicit "today so far"
 aside, never as input to a weekly leader, crown, or challenge. This group-level
 qualifier is not a member-specific missing-data callout.
@@ -233,11 +238,13 @@ cannot support weekly workout totals or workout-count rankings. The payload
 also cannot support prior-week change, monthly highs, or four-week highs. Call
 genuinely broad activity "movement" and reserve "exercise" for
 workout/exercise sources. A normal rich edition may use roughly 6–12 useful
-stats, but every number should establish a leader, race, surprise, or current-
-week group pattern instead of merely proving the field was
+stats, but every number should establish a leader, race, surprise, or recent
+group pattern instead of merely proving the field was
 available. Omit member-specific missing-data callouts. Build the featured set only from
-participants with a verified email and at least one current-week stat; do not
+participants with a verified email and at least one completed-day stat; do not
 use any other participant's health data in the subject or body.
+When no usable stats are returned, state only that fact; never speculate that
+sync or permission failures caused it.
 
 ### Tone
 
@@ -330,11 +337,11 @@ the automation and grants.
 2. Group-send path in the hosted-email transport: assemble the participant address list web-side, build one shared MIME (`To`: all, stable `Message-ID`/`References`), HTML body, send one envelope copy per participant.
 3. A direct, model-triggered Web shared-data reader over exact active grants,
    bounded encrypted grant-row snapshots, and live explicitly consented device
-   status. The reusable current-week summary builder lives in `packages/query`;
-   trusted newsletter preparation calls it without destination-local share
-   state.
+   status. The reusable seven-completed-day summary builder lives in
+   `packages/query`; trusted newsletter preparation calls it without
+   destination-local share state.
 4. `group-newsletter` skill + one structured newsletter save action over the existing automation port (group-chosen name as title, schedule as cron, delivery tag, scopes and tone in configuration text), including setup questions, ordinary current-chat delivery, announce-before-first-email + opt-out window, normal group conversation/tool continuity during scheduled composition, and Murph taking part in email-thread replies via the existing inbound ingress.
-5. Complete replacement of each Web-owned encrypted health snapshot, bounded to the latest seven records per projection kind.
+5. Complete replacement of each Web-owned encrypted health snapshot, bounded to the latest eight records per projection kind (the open local date plus seven prior completed dates).
 6. `?addEmail=true` settings deep-link + private missing-email reminder through the member's own Murph.
 
 Everything else is reuse: scheduling, current-chat outbox, health projections, rollup engine, roster, grant plumbing, tone guardrails, outbound email transport, inbound email ingress.
@@ -366,13 +373,13 @@ redundant model-controlled field. This makes the skew window compatible in the
 forward direction; roll back the runner before Web. After both are live, run
 one preparation call and confirm the trusted web wire contains
 only member ids, email eligibility, and address-free share ids/scope keys, while
-the model-facing runner result contains only the authorized current-week facts
+the model-facing runner result contains only the authorized completed-day facts
 and no raw email addresses or grant metadata. Confirm a scheduled send first
 persists the existing-outbox parent and recipient children, re-resolves the
 current authorization snapshot, fails closed when either recipients or health
-grants change after preparation, preserves the occurrence until a terminal
-delivery result, and preserves its idempotency key without replaying a sent or
-ambiguous child.
+grants change after preparation, records the accepted parent as the cron
+occurrence's existing pending-delivery intent, and settles that occurrence when
+Web marks the parent terminal without rerunning the model.
 
 The base newsletter change spans **Cloudflare** (`apps/cloudflare`: HTML MIME, group-send path, address-resolution callback, inbound thread participation) and **Vercel/web** (`apps/web`: `group-email.v0` display + default request, address-resolution endpoint, `?addEmail=true`). Safe deploy order is **web first, then Cloudflare** — the web resolution endpoint and the new grant kind must exist before the Worker calls them. Both sides must recognize `group-email.v0` during the window.
 
