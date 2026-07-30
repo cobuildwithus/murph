@@ -699,7 +699,7 @@ test("HostedAuthPanel restores phone session recovery after a queued alternate h
   expect(rendered.container.textContent).not.toContain("Connecting...");
 });
 
-test("HostedAuthPanel keeps phone code entry mounted through an indeterminate provider restart", async () => {
+test("HostedAuthPanel keeps phone code entry mounted while an authenticated provider is not ready", async () => {
   let privyAuthenticated = false;
   let privyReady = true;
   const privyUser: {
