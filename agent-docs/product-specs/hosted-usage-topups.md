@@ -173,8 +173,11 @@ validated signed upload; neither becomes native Codex browsing. The turn uses
 the ordinary delivery path. Its prompt tells the model to call that tool exactly once for one
 roughly 15-second original sponsor song. The song transforms one vivid, recent,
 non-sensitive detail, exchange, or room dynamic from the current group
-conversation into a surprising room-specific hook instead of merely summarizing
-the chat or writing generic sponsor lyrics.
+conversation into a surprising room-specific hook when one is available. A
+present sponsor message is the preferred creative seed when it blends naturally
+with the room. When neither source offers a safe, usable premise, the song
+becomes a gentle group celebration without inventing personal facts or referring
+to sensitive history.
 Serious, urgent, medical, sensitive, or conflict-heavy recent context makes the
 song gentle and non-comedic. A creative provider failure terminally settles
 this optional notification instead of asking the model to make another song.

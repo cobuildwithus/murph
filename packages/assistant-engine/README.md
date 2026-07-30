@@ -59,8 +59,8 @@ application-owned song tool retains the bound provider transport plus the
 existing authority-free public transport required for a validated signed Linq
 upload; those transports are not native Codex browsing capabilities. The
 ordinary response-media and outbox owners remain unchanged. The prompt tells
-the model to call that tool exactly once with `durationSeconds` fixed at 15 for
-one short original sponsor song. The notification task supplies the
+the model to call that tool exactly once and pass `durationSeconds: 15` for one
+short original sponsor song. The notification task supplies the
 room-specific current-conversation premise and lyric pacing. A creative provider
 failure settles the optional notification instead of starting another song
 attempt; a committed delivery intent retains the ordinary outbox retry and
