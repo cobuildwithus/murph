@@ -11,7 +11,10 @@ import {
 import { Button } from "@/src/components/ui/button";
 import { Spinner } from "@/src/components/ui/spinner";
 
-import { HostedAuthPanel } from "./hosted-auth-panel";
+import {
+  HostedAuthPanel,
+  type HostedPrivyWaitReason,
+} from "./hosted-auth-panel";
 import { HostedPrivyProvider } from "./privy-provider";
 
 const HOSTED_PRIVY_SLOW_READY_NOTICE_MS = 1_500;
@@ -24,9 +27,11 @@ type HostedPrivyReadinessEvent =
   | "hosted_auth_privy_ready_timeout";
 
 export function HostedPrivyReadinessState({
+  message = "Your selection is saved while secure sign in finishes loading.",
   onRestart,
   restartAvailable,
 }: {
+  message?: string;
   onRestart: () => void;
   restartAvailable: boolean;
 }) {
@@ -38,9 +43,7 @@ export function HostedPrivyReadinessState({
       className="flex flex-wrap items-center gap-x-2 gap-y-1 px-1 text-xs leading-relaxed text-muted-foreground"
     >
       <Spinner aria-hidden="true" className="size-3.5 shrink-0" />
-      <span>
-        Your selection is saved while secure sign in finishes loading.
-      </span>
+      <span>{message}</span>
       {restartAvailable ? (
         <Button
           className="h-auto p-0 text-xs"
@@ -92,7 +95,8 @@ export function HostedAuthPanelWithinPrivy({
   onRestartPrivy: () => void;
   privyAttempt: number;
 }) {
-  const [authActionActive, setAuthActionActive] = useState(false);
+  const [privyWaitReason, setPrivyWaitReason] =
+    useState<HostedPrivyWaitReason>(null);
   const [restartRequested, setRestartRequested] = useState(false);
 
   function handleRestart() {
@@ -105,13 +109,21 @@ export function HostedAuthPanelWithinPrivy({
       {!restartRequested ? (
         <HostedAuthPanel
           {...props}
-          onPrivyWaitChange={setAuthActionActive}
+          onPrivyWaitChange={setPrivyWaitReason}
         />
       ) : null}
-      {!restartRequested && authActionActive ? (
+      {!restartRequested && privyWaitReason !== null ? (
         <HostedPrivyReadinessFeedback
           attempt={privyAttempt}
+          key={privyWaitReason}
+          message={
+            privyWaitReason === "session"
+              ? "Secure sign in is checking your existing session."
+              : undefined
+          }
+          noticeImmediately={privyWaitReason === "session"}
           onRestart={handleRestart}
+          reason={privyWaitReason}
         />
       ) : null}
     </>
@@ -120,22 +132,32 @@ export function HostedAuthPanelWithinPrivy({
 
 function HostedPrivyReadinessFeedback({
   attempt,
+  message,
+  noticeImmediately,
   onRestart,
+  reason,
 }: {
   attempt: number;
+  message?: string;
+  noticeImmediately: boolean;
   onRestart: () => void;
+  reason: Exclude<HostedPrivyWaitReason, null>;
 }) {
-  const [noticeVisible, setNoticeVisible] = useState(false);
+  const [noticeVisible, setNoticeVisible] = useState(noticeImmediately);
   const [timeoutCount, setTimeoutCount] = useState(0);
   const timeoutCountRef = useRef(0);
 
   useEffect(() => {
+    if (noticeImmediately) {
+      return;
+    }
+
     const timeoutId = window.setTimeout(() => {
       setNoticeVisible(true);
     }, HOSTED_PRIVY_SLOW_READY_NOTICE_MS);
 
     return () => window.clearTimeout(timeoutId);
-  }, []);
+  }, [noticeImmediately]);
 
   useEffect(() => {
     if (timeoutCount >= HOSTED_PRIVY_RESTART_TIMEOUT_COUNT) return;
@@ -147,19 +169,22 @@ function HostedPrivyReadinessFeedback({
       reportHostedPrivyReadiness(
         "hosted_auth_privy_ready_timeout",
         attempt,
+        reason,
         nextTimeoutCount,
       );
     }, HOSTED_PRIVY_READY_TIMEOUT_MS);
 
     return () => window.clearTimeout(timeoutId);
-  }, [attempt, timeoutCount]);
+  }, [attempt, reason, timeoutCount]);
 
   return noticeVisible ? (
     <HostedPrivyReadinessState
+      message={message}
       onRestart={() => {
         reportHostedPrivyReadiness(
           "hosted_auth_privy_ready_restart",
           attempt,
+          reason,
           timeoutCount,
         );
         onRestart();
@@ -174,6 +199,7 @@ function HostedPrivyReadinessFeedback({
 function reportHostedPrivyReadiness(
   event: HostedPrivyReadinessEvent,
   attempt: number,
+  reason: Exclude<HostedPrivyWaitReason, null>,
   timeoutCount: number,
 ) {
   if (
@@ -189,6 +215,7 @@ function reportHostedPrivyReadiness(
       attempt,
       online:
         typeof navigator.onLine === "boolean" ? navigator.onLine : "unknown",
+      reason,
       timeoutCount,
     });
   } catch {
