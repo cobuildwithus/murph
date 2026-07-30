@@ -5,6 +5,7 @@ import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncControlPlane: vi.fn(),
   describeProviders: vi.fn(),
+  dispatchHostedGroupSponsorshipRefills: vi.fn(),
   drainHostedGroupJoinOutreachSweep: vi.fn(),
   getPrisma: vi.fn(),
   reconcileDueHostedStripeEvents: vi.fn(),
@@ -21,6 +22,11 @@ vi.mock("@/src/lib/hosted-execution/vercel-cron", () => ({
 
 vi.mock("@/src/lib/hosted-groups/group-join-outreach-drain", () => ({
   drainHostedGroupJoinOutreachSweep: mocks.drainHostedGroupJoinOutreachSweep,
+}));
+
+vi.mock("@/src/lib/hosted-groups/group-sponsorship-refill-dispatch", () => ({
+  dispatchHostedGroupSponsorshipRefills:
+    mocks.dispatchHostedGroupSponsorshipRefills,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/stripe-event-reconciliation", () => ({
@@ -156,6 +162,11 @@ describe("hosted onboarding Stripe cron route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getPrisma.mockReturnValue({ label: "test-prisma" });
+    mocks.dispatchHostedGroupSponsorshipRefills.mockResolvedValue({
+      attempted: 0,
+      dispatched: 0,
+      recoveryRequired: 0,
+    });
     mocks.drainHostedGroupJoinOutreachSweep.mockResolvedValue({
       attempted: 0,
       results: [],
@@ -180,6 +191,9 @@ describe("hosted onboarding Stripe cron route", () => {
       prisma: { label: "test-prisma" },
       signal: request.signal,
     });
+    expect(mocks.dispatchHostedGroupSponsorshipRefills).toHaveBeenCalledWith({
+      prisma: { label: "test-prisma" },
+    });
     expect(mocks.reconcileDueHostedStripeEvents).toHaveBeenCalledWith({
       prisma: { label: "test-prisma" },
     });
@@ -194,6 +208,11 @@ describe("hosted onboarding Stripe cron route", () => {
     );
     await expect(response.json()).resolves.toEqual({
       groupJoinOutreach: { attempted: 0, results: [], sent: 0 },
+      groupSponsorshipRefills: {
+        attempted: 0,
+        dispatched: 0,
+        recoveryRequired: 0,
+      },
       reconciledEventIds: ["evt_paid", "evt_trial"],
     });
   });
@@ -216,6 +235,11 @@ describe("hosted onboarding Stripe cron route", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       groupJoinOutreach: { kind: "failed" },
+      groupSponsorshipRefills: {
+        attempted: 0,
+        dispatched: 0,
+        recoveryRequired: 0,
+      },
       reconciledEventIds: ["evt_paid", "evt_trial"],
     });
   });
@@ -236,6 +260,7 @@ describe("hosted onboarding Stripe cron route", () => {
     expect(response.status).toBe(401);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(mocks.getPrisma).not.toHaveBeenCalled();
+    expect(mocks.dispatchHostedGroupSponsorshipRefills).not.toHaveBeenCalled();
     expect(mocks.drainHostedGroupJoinOutreachSweep).not.toHaveBeenCalled();
     expect(mocks.reconcileDueHostedStripeEvents).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({

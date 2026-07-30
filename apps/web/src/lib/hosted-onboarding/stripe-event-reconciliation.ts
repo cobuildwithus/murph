@@ -114,6 +114,7 @@ import {
 import { signalHostedRuntimeRecheckRuntime } from "../hosted-orchestration/signal-runtime";
 import {
   materializeHostedGroupSponsorshipIfApplicable,
+  materializeHostedGroupSponsorshipNearCapNotification,
 } from "../hosted-groups/group-sponsorship-notification";
 
 // Top-up reads use no SDK retries, hard per-request/KMS bounds, an aggregate
@@ -887,6 +888,10 @@ async function processClaimedHostedStripeEvent(
       usageCreditReconciliation.purchaseId
     ) {
       await materializeHostedGroupSponsorshipIfApplicable({
+        prisma,
+        purchaseId: usageCreditReconciliation.purchaseId,
+      });
+      await materializeHostedGroupSponsorshipNearCapNotification({
         prisma,
         purchaseId: usageCreditReconciliation.purchaseId,
       });

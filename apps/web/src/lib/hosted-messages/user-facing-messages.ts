@@ -1,5 +1,8 @@
 const USER_FACING_MESSAGE_MIN_VARIANT_COUNT = 20
 
+export const HOSTED_SPONSORED_GROUP_PAUSE_MESSAGE =
+  "Murph is paused in this chat right now."
+
 /**
  * A percentage stands in for the hidden credit balance on the personal notices.
  * The group thread notice is excluded: its copy already says the chat is out,

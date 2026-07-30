@@ -158,18 +158,28 @@ export async function readHostedActiveUsageCreditPurchaseForPayer(input: {
       },
     },
     where: {
-      OR: [
+      AND: [
         {
-          status: {
-            in: [
-              HostedUsageCreditPurchaseStatus.checkout_open,
-              HostedUsageCreditPurchaseStatus.payment_pending,
-            ],
-          },
+          OR: [
+            {
+              status: {
+                in: [
+                  HostedUsageCreditPurchaseStatus.checkout_open,
+                  HostedUsageCreditPurchaseStatus.payment_pending,
+                ],
+              },
+            },
+            {
+              checkoutExpiresAt: { gt: now },
+              status: HostedUsageCreditPurchaseStatus.created,
+            },
+          ],
         },
         {
-          checkoutExpiresAt: { gt: now },
-          status: HostedUsageCreditPurchaseStatus.created,
+          OR: [
+            { groupSponsorshipAuthorizationId: null },
+            { groupSponsorshipChargeOrdinal: 0 },
+          ],
         },
       ],
       ...(input.beneficiaryMemberId
@@ -382,7 +392,11 @@ export async function expireHostedUsageCreditCheckout(input: {
     });
   }
   if (canCancelHostedUsageCreditDirectPayment(purchase)) {
+    const target = projectHostedUsageCreditPurchaseTarget(purchase);
     const reconciled = await cancelHostedUsageCreditDirectPayment({
+      ...(target.kind === "group"
+        ? { groupBeneficiaryMemberId: target.beneficiaryMemberId }
+        : {}),
       now,
       prisma,
       purchase,
@@ -619,6 +633,11 @@ export async function closeExpiredUnattachedHostedUsageCreditPurchasesTx(input: 
   purchaseId?: string;
   tx: Prisma.TransactionClient;
 }): Promise<void> {
+  // This is payer-owned purchase cleanup only. It deliberately does not lock a
+  // group beneficiary or mutate sponsorship authorization state. The
+  // beneficiary-owned authorization normalizer observes a terminal activation
+  // purchase and closes that authorization under the canonical beneficiary-
+  // first lock order.
   await input.tx.hostedUsageCreditPurchase.updateMany({
     data: {
       reconciliationVersion: { increment: 1n },
