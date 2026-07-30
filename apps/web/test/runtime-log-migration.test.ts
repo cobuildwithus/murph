@@ -195,6 +195,27 @@ describe("hosted runtime log database migration", () => {
     ]))).rejects.toThrow(/same PostgreSQL cluster as DIRECT_DATABASE_URL/u);
   });
 
+  it("requires a bounded server-side timeout on the pooled runtime role", async () => {
+    const clients = [
+      new RuntimeLogProbeClient(undefined, undefined, false),
+      new RuntimeLogProbeClient(),
+    ];
+
+    await expect(verifyHostedRuntimeLogDatabaseEndpoints({
+      directDatabaseUrl: "postgresql://logs-direct.test/runtime_logs",
+      primaryDirectDatabaseUrl: "postgresql://primary-direct.test/murph",
+      runtimeDatabaseUrl: "postgresql://logs-pool.test/runtime_logs",
+    }, () => {
+      const client = clients.shift();
+      if (!client) {
+        throw new Error("Unexpected runtime-log topology probe client.");
+      }
+      return client;
+    })).rejects.toThrow(
+      /statement_timeout set to a positive value no greater than 10 seconds/u,
+    );
+  });
+
   it("fails closed when PostgreSQL cannot prove the cluster identity", async () => {
     await expect(verifyHostedRuntimeLogDatabaseEndpoints({
       directDatabaseUrl: "postgresql://logs-direct.test/runtime_logs",
@@ -307,6 +328,7 @@ class RuntimeLogProbeClient implements HostedRuntimeLogEndpointProbeClient {
   constructor(
     private readonly tryLockAcquired?: boolean,
     private readonly systemIdentifier?: string,
+    private readonly statementTimeoutConfigured = true,
   ) {}
 
   async connect(): Promise<void> {
@@ -325,6 +347,11 @@ class RuntimeLogProbeClient implements HostedRuntimeLogEndpointProbeClient {
       throw new Error("Runtime-log probe query ran before connect.");
     }
     this.queries.push({ text, values });
+    if (text.includes("current_setting('statement_timeout')")) {
+      return {
+        rows: [{ configured: this.statementTimeoutConfigured }],
+      };
+    }
     if (text.includes("pg_try_advisory_xact_lock")) {
       if (this.tryLockAcquired === undefined) {
         throw new Error("Runtime-log probe client has no try-lock result.");
