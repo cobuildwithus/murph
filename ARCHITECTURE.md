@@ -578,8 +578,11 @@ enter later attended and scheduled hosted group turns, and saved room voice
 enters later generated voice
 output. They never read, inherit, or mutate a speaker's private Murph
 preferences. Group email may apply the room's already saved style but cannot
-mutate it. Model and reasoning controls remain unavailable to group runtimes and
-continue to use their separate relation-derived resolution.
+mutate it. Group provider and reasoning controls remain unavailable. The
+separate room-scoped `murph.assistant_configuration` contract may read or change
+only the synthetic room member's model from an authenticated, accepted Linq or
+Telegram group turn; it never reads or changes a participant's private
+configuration.
 
 Model and reasoning
 changes remain exclusively owned by `murph.assistant_configuration`. The
@@ -596,8 +599,13 @@ reasoning effort on that next turn's `turn/start`, matching Codex's native
 model-switch lifecycle instead of rebuilding context from a fresh thread.
 Only the authoritative
 web response updates an ephemeral invocation-local projection; web remains the
-sole durable owner, and a later invocation rereads the preference there. Idle
-maintenance attributes compaction usage to the model actually bound to the
+sole durable owner, and a later invocation rereads the preference there.
+For a synthetic thread-container member, the same input-bound path accepts
+model changes only. Null retains the existing relation-derived Sol default,
+while explicit Luna or Terra choices use the member's existing nullable model
+field. Provider and reasoning stay fixed to OpenAI and `low`; no participant
+identity, plan state, or private preference enters the room path.
+Idle maintenance attributes compaction usage to the model actually bound to the
 warm thread, not a future preference, and skips provider work when that model
 cannot be priced. The
 runtime and web control plane
@@ -702,12 +710,14 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   billing-gated control facts. Active personal members may select Luna or
   Terra; only an active paid Edge personal member may select Sol. The common
   reasoning set is `low`/`medium`/`high`/`xhigh`, with Terra and low represented
-  by absent overrides. Synthetic thread-container members remain
-  non-configurable and derive a Sol invocation override from their existing
-  relation. The signed hosted-workspace read projects eligible non-default
-  values or that derived override to Cloudflare for the next invocation; a
-  running turn keeps the target it started with, and neither the vault nor the
-  hosted workspace snapshot stores a second preference.
+  by absent personal overrides. Synthetic thread-container members derive Sol
+  from their existing relation when the nullable model field is absent and may
+  store an explicit Luna or Terra room override through accepted group input.
+  Their provider and reasoning remain fixed to OpenAI and `low`. The signed
+  hosted-workspace read projects the resolved personal or room model to
+  Cloudflare for the next invocation; a running turn keeps the target it
+  started with, and neither the vault nor the hosted workspace snapshot stores
+  a second preference.
 
   Monthly and valid in-window trial allowance remain measured and noticed,
   retaining requested-model and served-model attribution. Subsequent

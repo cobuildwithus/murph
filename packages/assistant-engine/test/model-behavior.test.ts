@@ -157,6 +157,31 @@ describe('assistant execution prompt contract', () => {
     )
   })
 
+  it('allows explicit room-model selection without exposing group provider or reasoning controls', () => {
+    const prompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput({
+        assistantStyleSettingsAvailable: true,
+        conversationScope: 'group',
+      }),
+    )
+
+    expect(prompt).toContain(
+      'use the room-scoped `murph.assistant_configuration` tool to read or select Luna, Terra, or Sol for the room',
+    )
+    expect(prompt).toContain(
+      'a saved model starts on the next turn',
+    )
+    expect(prompt).toContain(
+      'Provider and reasoning controls remain unavailable in a group',
+    )
+    expect(prompt).not.toContain(
+      'Do not use or offer `murph.assistant_configuration` here',
+    )
+    expect(prompt).not.toContain(
+      'Model, provider, and reasoning controls remain unavailable in a group',
+    )
+  })
+
   it('keeps completed group reads and participant message-ref ownership unambiguous', () => {
     const groupPrompt = buildAssistantSystemPrompt(
       createCommonCodexPromptInput({
@@ -2653,6 +2678,12 @@ describe('assistant conversation scope', () => {
       'Casual is a persistent user-facing writing invariant',
     )
     expect(prompt).toContain(
+      'select Luna, Terra, or Sol for the room',
+    )
+    expect(prompt).toContain(
+      'Provider and reasoning controls remain unavailable in a group',
+    )
+    expect(prompt).not.toContain(
       'Model, provider, and reasoning controls remain unavailable in a group',
     )
     expect(prompt).toContain(

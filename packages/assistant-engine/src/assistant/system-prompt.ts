@@ -532,7 +532,7 @@ function buildAssistantStyleSettingsGuidanceText(input: {
       ? "- Read or save this room's explicit tone and voice fields with `murph.personalization`. Report status; `unchanged` means no save. Saved tone (formal/casual) and voice begin on a later group turn and do not change the reply already running."
       : "- Private hosted conversations: read or save explicit tone and voice fields with `murph.personalization`. Report status; `unchanged` means no save. Saved tone (formal/casual) and voice do not change the reply already running.",
     groupConversation
-      ? "- Model, provider, and reasoning controls remain unavailable in a group. Do not use or offer `murph.assistant_configuration` here."
+      ? "- For an explicit current-room request, use the room-scoped `murph.assistant_configuration` tool to read or select Luna, Terra, or Sol for the room; a saved model starts on the next turn. Provider and reasoning controls remain unavailable in a group. Never switch the room model automatically."
       : "- Use `murph.assistant_configuration` for explicit user-requested model, core-reply provider, or reasoning changes; a saved change starts on the next turn. Never switch configuration automatically.",
     "- Read each tool schema; never guess voice, model, provider, or reasoning ids; never use a same-turn voice demo as activation proof.",
     groupConversation
