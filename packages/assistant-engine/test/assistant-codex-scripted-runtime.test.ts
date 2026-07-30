@@ -877,6 +877,16 @@ text(JSON.stringify(result));
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
     const planUsageRequests: unknown[] = []
+    const olderTopUps = Array.from({ length: 48 }, (_, index) => ({
+      addedUsd: '1.000000',
+      adjustedUsd: '0.000000',
+      creditedAt: new Date(Date.UTC(2026, 5, index + 1)).toISOString(),
+      remainingUsd: '0.000000',
+      source: 'added_for_you' as const,
+      usedUsd: '1.000000',
+    }))
+    const expectedFinal =
+      'Your latest $5.00 top-up posted on July 29 and was purchased by you. You have used $1.00, $0.50 was adjusted, and $3.50 remains. An earlier $10.00 top-up added for you was fully used. There are 51 top-ups total; this history shows the newest 50, so one older entry is not shown.'
     scenario.stub.queue(
       {
         functionCall: {
@@ -886,8 +896,7 @@ text(JSON.stringify(result));
         },
       },
       {
-        text:
-          'Your latest $5.00 top-up posted. You have used $1.25 of it and have $3.75 remaining. An earlier $10.00 top-up added for you has been fully used.',
+        text: expectedFinal,
       },
     )
 
@@ -917,15 +926,15 @@ text(JSON.stringify(result));
               remainingPercent: 9,
               status: 'active',
               topUpHistory: {
-                hasMore: false,
+                hasMore: true,
                 topUps: [
                   {
                     addedUsd: '5.000000',
-                    adjustedUsd: '0.000000',
+                    adjustedUsd: '0.500000',
                     creditedAt: '2026-07-29T14:23:42.000Z',
-                    remainingUsd: '3.750000',
+                    remainingUsd: '3.500000',
                     source: 'purchased_by_you',
-                    usedUsd: '1.250000',
+                    usedUsd: '1.000000',
                   },
                   {
                     addedUsd: '10.000000',
@@ -935,8 +944,9 @@ text(JSON.stringify(result));
                     source: 'added_for_you',
                     usedUsd: '10.000000',
                   },
+                  ...olderTopUps,
                 ],
-                totalCount: 2,
+                totalCount: 51,
               },
               usedPercent: 91,
             }
@@ -957,11 +967,65 @@ text(JSON.stringify(result));
     ).toEqual(expect.arrayContaining([
       expect.stringContaining('"source":"purchased_by_you"'),
       expect.stringContaining('"source":"added_for_you"'),
-      expect.stringContaining('"totalCount":2'),
+      expect.stringContaining('"adjustedUsd":"0.500000"'),
+      expect.stringContaining('"creditedAt":"2026-07-29T14:23:42.000Z"'),
+      expect.stringContaining('"hasMore":true'),
+      expect.stringContaining('"totalCount":51'),
     ]))
-    expect(result.finalMessage).toBe(
-      'Your latest $5.00 top-up posted. You have used $1.25 of it and have $3.75 remaining. An earlier $10.00 top-up added for you has been fully used.',
+    expect(result.finalMessage).toBe(expectedFinal)
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
+
+  it('fails closed when an explicit top-up history read is unavailable', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const planUsageRequests: unknown[] = []
+    const expectedFinal =
+      'I could not verify your top-up history right now. The overall usage percentage does not show whether a purchase posted, so I cannot infer it from that.'
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: { includeTopUpHistory: true },
+          name: 'plan_usage',
+          namespace: 'murph',
+        },
+      },
+      { text: expectedFinal },
     )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: resolveMurphDynamicTools({
+        planUsageAvailable: true,
+        progressUpdatesAvailable: false,
+      }),
+      hostedToolContext: {
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        planUsageTool: {
+          read: async (request) => {
+            planUsageRequests.push(request)
+            throw new Error('private history store detail')
+          },
+        },
+        sendVaultFile: async () => {
+          throw new Error('Vault-file sending is unavailable for this turn.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Did the usage top-up I just bought post?',
+    })
+
+    expect(planUsageRequests).toEqual([{ includeTopUpHistory: true }])
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.functionCallOutputs ?? [])
+    expect(toolOutputs).toEqual(expect.arrayContaining([
+      expect.stringContaining('plan usage could not be read'),
+    ]))
+    expect(toolOutputs.join('\n')).not.toContain('private history store detail')
+    expect(result.finalMessage).toBe(expectedFinal)
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
 
