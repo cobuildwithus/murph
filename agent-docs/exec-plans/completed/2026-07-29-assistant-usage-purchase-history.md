@@ -1,6 +1,6 @@
 # Assistant usage purchase history
 
-Status: active
+Status: completed
 Created: 2026-07-29
 Updated: 2026-07-29
 
@@ -89,14 +89,25 @@ Updated: 2026-07-29
   boundary.
 - The frontend lens is not applicable because this task changes no rendered
   UI.
+- Accept both preliminary specialist evidence findings: replace any claim that
+  a scripted provider proves model choice with an opt-in real-model probe, and
+  lock the producer/parser boundary at 51 total rows with the newest 50
+  returned.
+- Parent final review found no residual accounting, identity-binding, privacy,
+  rollout, or proof gap after those corrections.
 
 ## Verification
 
-- Focused Vitest slices for hosted-execution, assistant-engine,
-  assistant-runtime/Cloudflare transport, and hosted Web status/route
-  projection.
-- Focused package/app typechecks for every changed owner.
-- Direct projection scenario covering a self-funded grant, a Family-funded
-  grant, FIFO usage debits, an adjustment, and bounded-history metadata.
-- Provider-input measurement for the changed dynamic-tool schema in the
-  private personal route.
+- Focused hosted-execution contract, assistant tool/skill, deterministic real
+  App Server protocol, Cloudflare port, and hosted Web status/route suites
+  passed.
+- Assistant-engine, assistant-runtime, hosted-execution, Cloudflare, and Web
+  typechecks passed.
+- A real local PostgreSQL race proof passed and shows the aggregate plus
+  history response is coherently before or after a concurrent grant commit.
+- The opt-in paid-model selection/failure/compact-read probe is typechecked and
+  skipped by default. A live local execution was unavailable because this
+  checkout has no configured provider credential.
+- Provider-input measurement for the private personal route found a 40-token
+  (0.121%) eager-input increase and no group-route increase.
+Completed: 2026-07-29
