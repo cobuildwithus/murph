@@ -22,11 +22,11 @@ import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 
 import { ConsentSkeleton, HostedLegalConsentCard } from "../legal/hosted-legal-consent-card";
 import { ConnectTelegram } from "../settings/hosted-telegram-settings";
+import { HostedPhoneSettings } from "../settings/hosted-phone-settings";
 import { requestHostedBillingCheckout } from "./client-api";
 import { HostedEmailAuthButton } from "./hosted-email-auth-button";
 import { logoutHostedAppSession } from "./hosted-app-session-client";
 import { HostedInvitePhoneAuth } from "./hosted-invite-phone-auth";
-import { HostedPhoneAuth } from "./hosted-phone-auth";
 import { useHostedInviteStatusRefresh } from "./invite-status-client";
 import type { JoinInviteTelegramAccountSeed } from "./join-invite-page-model";
 import {
@@ -207,10 +207,14 @@ export function JoinInviteSignOutButtonIsland({
 
 export function JoinInviteMessagingSetupIsland({
   authenticated,
+  expectedPrivyUserId,
   initialTelegramAccount,
+  privySessionMatchesAppSession,
 }: {
   authenticated: boolean;
+  expectedPrivyUserId: string | null;
   initialTelegramAccount: JoinInviteTelegramAccountSeed | null;
+  privySessionMatchesAppSession: boolean;
 }) {
   const router = useRouter();
 
@@ -220,7 +224,14 @@ export function JoinInviteMessagingSetupIsland({
 
   return (
     <div className="space-y-5">
-      <HostedPhoneAuth intent="link" onLinked={refresh} />
+      <HostedPhoneSettings
+        authenticated={authenticated}
+        autoOpen
+        expectedPrivyUserId={expectedPrivyUserId}
+        initialPhoneNumber={null}
+        onLinked={refresh}
+        privySessionMatchesAppSession={privySessionMatchesAppSession}
+      />
 
       <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
         <span className="h-px flex-1 bg-border" />
@@ -229,7 +240,7 @@ export function JoinInviteMessagingSetupIsland({
       </div>
 
       <ConnectTelegram
-        authenticated={authenticated}
+        authenticated={authenticated && privySessionMatchesAppSession}
         initialTelegramAccount={initialTelegramAccount}
         onSynced={refresh}
       />

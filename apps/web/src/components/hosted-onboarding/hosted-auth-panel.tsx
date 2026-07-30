@@ -18,7 +18,10 @@ import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/s
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import { cn } from "@/src/lib/utils";
 import type { HostedAuthCompletionResult } from "./hosted-auth-completion";
-import { logoutHostedAppSession } from "./hosted-app-session-client";
+import {
+  declineHostedLaunchConsent,
+  logoutHostedAppSession,
+} from "./hosted-app-session-client";
 import { navigateHostedAuthRedirect } from "./hosted-auth-navigation";
 
 import {
@@ -274,9 +277,9 @@ export function HostedAuthPanel({
     consentDeclinedRef.current = true;
     setConsentDeclinePending(true);
     try {
-      await logoutHostedAppSession({ logoutPrivy: logout });
+      await declineHostedLaunchConsent({ logoutPrivy: logout });
     } catch {
-      // logoutHostedAppSession owns recovery: it revalidates authority by
+      // The session-ending client owns recovery: it revalidates authority by
       // reloading the document, and the fail-closed gate reappears if the
       // session survived. Nothing rendered here would outlive that reload.
       // The decline did not take effect, so it does not keep terminal priority.
