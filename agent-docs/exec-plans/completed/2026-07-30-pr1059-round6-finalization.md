@@ -1,6 +1,6 @@
 # Finalize PR 1059 after the ReviewGPT round cap
 
-Status: active
+Status: completed
 Created: 2026-07-30
 Updated: 2026-07-30
 
@@ -25,22 +25,34 @@ Updated: 2026-07-30
 
 ## Tasks
 
-1. [ ] Merge current `main` normally and resolve every conflict from the
+1. [x] Merge current `main` normally and resolve every conflict from the
    current owner contracts and the PR's intended behavior.
-2. [ ] Inspect the full current-base diff for obsolete or duplicated changes
+2. [x] Inspect the full current-base diff for obsolete or duplicated changes
    and keep only the smallest still-required implementation.
-3. [ ] Run focused device-sync/Web/Cloudflare tests and direct source-scoped
+3. [x] Run focused device-sync/Web/Cloudflare tests and direct source-scoped
    admission proof for every conflict-affected path.
-4. [ ] Update the PR intent, architecture, verification, review-chain, and
+4. [x] Prepare the PR intent, architecture, verification, review-chain, and
    deployment-skew evidence for the exact reconciled head.
-5. [ ] Push the candidate, reopen the draft PR, and run exact-head CI and
-   ReviewGPT Round 6 concurrently.
-6. [ ] Resolve any accepted finding, repeat affected focused proof, and require
-   a final exact-head `PASS` plus green required checks before completion.
+5. [x] Complete the parent final review and close this implementation plan
+   before the final ReviewGPT gate.
+
+## Post-plan merge gates
+
+- Push the candidate and update/reopen the draft PR.
+- Run exact-head CI and ReviewGPT Round 6 concurrently.
+- Resolve any accepted finding, repeat affected focused proof, and require a
+  final exact-head `PASS` plus green required checks before merge.
 
 ## Verification
 
-- Pending conflict-resolution proof.
-- Pending focused source-scoped Junction lifecycle and import-boundary tests.
+- `git diff --check` passed with no unresolved conflict markers.
+- Device-sync focused tests: 5 files, 432 tests passed.
+- Web focused tests: 10 files, 254 tests passed.
+- Cloudflare deploy-focused tests: 2 files, 88 tests passed.
+- Device-sync, Web, and Cloudflare scoped typechecks passed.
+- The merge exposed and the focused Web suite caught a source-attribution
+  mismatch. The resolved boundary now keeps lifecycle source attribution for
+  admission while using data-source attribution for receipts and signals.
 - Pending exact-head CI.
 - Pending ReviewGPT Round 6.
+Completed: 2026-07-30

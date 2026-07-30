@@ -584,15 +584,16 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     acceptedAt: input.now,
     acceptanceMode: input.webhook.acceptanceMode,
     connectionId: input.account.id,
+    dataSourceProviderSlug: normalizeJunctionProviderSlug(
+      input.webhook.dataSourceProviderSlug,
+    ),
     expectedConnectedAt: input.account.connectedAt,
     dirtyResources,
     eventType: input.webhook.eventType,
     occurredAt: input.webhook.occurredAt ?? input.now,
     provider: input.account.provider,
     resourceCategory,
-    sourceProviderSlug: normalizeJunctionProviderSlug(
-      input.webhook.dataSourceProviderSlug,
-    ),
+    sourceProviderSlug: input.webhook.sourceProviderSlug ?? null,
     store: input.store,
     claimToken: input.claimToken,
     traceId,
@@ -1034,6 +1035,7 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
   acceptedAt: string;
   acceptanceMode: DeviceSyncWebhookAcceptanceMode;
   connectionId: string;
+  dataSourceProviderSlug: string | null;
   dirtyResources: readonly HostedDeviceSyncDirtyResource[];
   eventType: string;
   expectedConnectedAt: string;
@@ -1168,7 +1170,7 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
         traceId: input.traceId,
         eventType: input.eventType,
         resourceCategory: input.resourceCategory ?? null,
-        sourceProviderSlug: input.sourceProviderSlug,
+        sourceProviderSlug: input.dataSourceProviderSlug,
         createdAt: input.acceptedAt,
         tx,
       });
