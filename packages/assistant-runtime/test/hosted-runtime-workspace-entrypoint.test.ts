@@ -6690,7 +6690,10 @@ describe("hosted workspace runtime entrypoint", () => {
           },
           async importItem(item, context) {
             if (item.item.kind === "assistant.ask.completed") {
-              assert.equal(context?.assistantAskCompletionKind, "joined_group");
+              assert.equal(
+                "assistantAskCompletionKind" in (context ?? {}),
+                false,
+              );
             }
             events.push(`mailbox.importItem:${item.item.id}`);
             return { status: "imported" };
@@ -7322,7 +7325,10 @@ describe("hosted workspace runtime entrypoint", () => {
           },
           async importItem(item, context) {
             assert.equal(item.route.action, "continue-assistant-ask");
-            assert.equal(context?.assistantAskCompletionKind, "joined_group");
+            assert.equal(
+              "assistantAskCompletionKind" in (context ?? {}),
+              false,
+            );
             events.push(`mailbox.importItem:${item.item.id}`);
             if (
               item.item.id

@@ -523,15 +523,15 @@ requester membership `participantId`; first-person references map only to the
 `read_shared` member with that exact id. Display name, handle, or member order
 cannot substitute, and the opaque id cannot appear in the answer.
 
-When a joined-group request or legacy joined-group completion reaches a dirty
-warm runtime, the mailbox prefetch may import it before the routine idle
-checkpoint only when the entire fetched prefix contains pre-checkpoint-safe
-system wakes. One shared import context revalidates the decoded adapter shape
+When a joined-group request or accepted-input completion reaches a dirty warm
+runtime, the mailbox prefetch may import it before the routine idle checkpoint
+only when the entire fetched prefix contains pre-checkpoint-safe system wakes.
+One shared import context revalidates the decoded request adapter shape
 throughout that pre-checkpoint pass, including pre-assistant follow-up imports
-and foreground reruns; a consented-member request or reviewed completion
-remains checkpoint-gated regardless of which import observes it. Request import
-kicks the existing detached controller; completion import uses the existing
-foreground-causal delivery path. Neither starts or advances the
+and foreground reruns. A consented-member request remains checkpoint-gated;
+every accepted-input completion is admitted without a completion-kind context.
+Request import kicks the existing detached controller; completion import uses
+the existing foreground-causal delivery path. Neither starts or advances the
 at-least-180-second idle snapshot. Any unrelated system wake in that prefix
 keeps the whole system prefix checkpoint-gated. A progressed foreground-causal
 pass re-enters the existing bounded pass loop after admitting any newly arrived
@@ -621,6 +621,11 @@ the request identity. Exact retries reuse that mailbox item, a changed question
 for the same grant conflicts, and another current grant in the same invocation
 is independent.
 
+The one-time `group_sender` adapter instead derives the target and fixed
+self-only permission from one exact authenticated current-sender group input.
+Every request requires fresh exact-message authority and grants no standing
+access.
+
 Prepare revalidates the same authority immediately before private context is
 read and returns the exact immutable permission to the runtime. The personal
 read-only child proposes one candidate under that permission. There is no
@@ -635,10 +640,14 @@ On an allow, the completion control path revalidates the group, personal
 runtime, membership generation, grant generation, permission digest, origin,
 expiry, and active fences again. It appends one deterministic
 `assistant.ask.completed` item to the bound group runtime. The trusted `origin`
-discriminant owns what happens next. `accepted_input` bypasses a provider
-continuation and delivers the reviewed answer byte-for-byte on the revalidated
-original group route through the existing outbox. `automation_occurrence` does
-not wake the group runtime or create a delivery. The live scheduled Codex turn
+discriminant owns what happens next. `accepted_input` immediately starts one
+isolated output-only continuation in the bound caller group. The group Murph
+receives the reviewed answer as bounded untrusted data plus its existing room
+history, may resolve public references, and has no target private read or tool
+authority. Its ordinary outbox intent retains the completion id, expiry,
+deterministic delivery key, and route proof for provider-entry revalidation.
+`automation_occurrence` does not wake the group runtime or create a delivery.
+The live scheduled Codex turn
 starts every selected ask, then uses ordinary shell waits and exact replay to
 poll each accepted `ask_member` call until it returns completed or unavailable.
 The existing request expiry bounds the loop. Web returns a flat completed

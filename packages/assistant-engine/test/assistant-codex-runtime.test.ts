@@ -2053,7 +2053,6 @@ describe('assistant codex runtime', () => {
           await firstUpdateStarted.promise
           try {
             expect(configurationCalls).toEqual([
-              `read:${HOSTED_ASSISTANT_TERRA_MODEL}`,
               `update:${HOSTED_ASSISTANT_SOL_MODEL}`,
             ])
           } finally {
@@ -2070,9 +2069,7 @@ describe('assistant codex runtime', () => {
             result: { success: true },
           })
           expect(configurationCalls).toEqual([
-            `read:${HOSTED_ASSISTANT_TERRA_MODEL}`,
             `update:${HOSTED_ASSISTANT_SOL_MODEL}`,
-            `read:${HOSTED_ASSISTANT_SOL_MODEL}`,
             `update:${HOSTED_ASSISTANT_TERRA_MODEL}`,
           ])
 
