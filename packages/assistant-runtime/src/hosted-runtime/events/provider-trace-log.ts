@@ -135,6 +135,7 @@ const HOSTED_ASSISTANT_CODEX_PROCESS_LIFECYCLE_STAGE_VALUES = new Set([
 ]);
 const HOSTED_ASSISTANT_CODEX_APP_SERVER_TIMING_STAGE_VALUES = new Set([
   "initialized",
+  "preinitialized",
   "shutdown",
   "spawn-ready",
   "thread-resumed",
@@ -975,7 +976,7 @@ function readHostedAssistantCodexAppServerTimingTrace(
     providerTraceKind: "codex.app_server_timing",
     schema: ASSISTANT_CODEX_APP_SERVER_TIMING_TRACE_SCHEMA,
   };
-  if (stage === "initialized") {
+  if (stage === "initialized" || stage === "preinitialized") {
     maybeSetHostedAssistantProviderDiagnosticDetail(
       details,
       "codexTimingColdStartReason",

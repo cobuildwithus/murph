@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 
 import type {
+  HostedExecutionConversationMessageChannel,
   HostedExecutionConversationMessageWake,
   HostedExecutionEmailConversationMessagePayload,
 } from "@murphai/hosted-execution";
@@ -254,7 +255,9 @@ export function createHostedConversationMailboxImportItem(input: {
   context?: {
     latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
     onConversationActivityObserved?: (() => void) | null;
-    onConversationInputStaged?: (() => void) | null;
+    onConversationInputStaged?: ((
+      channel: HostedExecutionConversationMessageChannel,
+    ) => void) | null;
     runtimeAttemptId?: string | null;
     signal?: AbortSignal | null;
   },
@@ -280,7 +283,9 @@ export async function importHostedConversationMailboxItem(input: {
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
   onDecodedConversationWake?(wake: HostedExecutionConversationMessageWake): void;
   onConversationActivityObserved?: (() => void) | null;
-  onConversationInputStaged?: (() => void) | null;
+  onConversationInputStaged?: ((
+    channel: HostedExecutionConversationMessageChannel,
+  ) => void) | null;
   runtime: HostedConversationMailboxRuntime;
   runtimeAttemptId?: string | null;
   signal?: AbortSignal | null;
@@ -399,8 +404,17 @@ export async function importHostedConversationMailboxItem(input: {
     notifyConversationInputStagedBestEffort(
       input.onConversationActivityObserved ?? null,
     );
-    if (foregroundAssistantInputId) {
-      notifyConversationInputStagedBestEffort(input.onConversationInputStaged ?? null);
+    if (
+      foregroundAssistantInputId
+      && (
+        !isHostedLinqConversationMessageWake(decoded.wake)
+        || decoded.wake.message.linqMessage.isFromMe !== true
+      )
+    ) {
+      notifyForegroundConversationInputStagedBestEffort(
+        input.onConversationInputStaged ?? null,
+        decoded.wake.message.channel,
+      );
     }
     recordHostedConversationLatencyTraceAssistantInputStagedBestEffort({
       inputId: stagedInput.inputId,
@@ -505,6 +519,22 @@ function notifyConversationInputStagedBestEffort(
     notify();
   } catch {
     // Staging observation is a foreground-yield hint only.
+  }
+}
+
+function notifyForegroundConversationInputStagedBestEffort(
+  notify: ((
+    channel: HostedExecutionConversationMessageChannel,
+  ) => void) | null,
+  channel: HostedExecutionConversationMessageChannel,
+): void {
+  if (!notify) {
+    return;
+  }
+  try {
+    notify(channel);
+  } catch {
+    // Process preparation and foreground yielding are best-effort hints.
   }
 }
 

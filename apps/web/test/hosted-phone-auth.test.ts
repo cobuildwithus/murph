@@ -544,6 +544,7 @@ describe("HostedPhoneAuth", () => {
         activeAttempt: { maskedPhoneNumber: string; phoneNumber: string } | null;
         onPhoneNumberChange: (value: string) => void;
         pendingAction: string | null;
+        phoneInputDisabled: boolean;
         phoneNumber: string;
         sendCodeDisabled: boolean;
         onSubmitPhoneEntry: (event?: React.FormEvent<HTMLFormElement>) => void;
@@ -553,6 +554,7 @@ describe("HostedPhoneAuth", () => {
           {
             "data-active-attempt": props.activeAttempt?.maskedPhoneNumber ?? "",
             "data-pending-action": props.pendingAction ?? "",
+            "data-phone-input-disabled": props.phoneInputDisabled ? "yes" : "no",
             "data-phone-number": props.phoneNumber,
             "data-send-disabled": props.sendCodeDisabled ? "yes" : "no",
           },
@@ -656,9 +658,43 @@ describe("HostedPhoneAuth", () => {
       expect(mocks.sendCode).not.toHaveBeenCalled();
       assert.equal(
         container.querySelector("[data-pending-action]")?.getAttribute("data-pending-action"),
+        "send-code",
+      );
+      assert.match(container.textContent ?? "", /Sending code\.\.\./);
+      assert.equal(sendCodeButton.disabled, true);
+      assert.equal(
+        container
+          .querySelector("[data-phone-input-disabled]")
+          ?.getAttribute("data-phone-input-disabled"),
+        "no",
+      );
+
+      await act(async () => {
+        setPhoneButton.dispatchEvent(new Event("click", { bubbles: true }));
+        await flushHostedPhoneAuthEffects();
+      });
+
+      expect(mocks.sendCode).not.toHaveBeenCalled();
+      assert.equal(
+        container
+          .querySelector("[data-pending-action]")
+          ?.getAttribute("data-pending-action"),
         "",
       );
-      assert.doesNotMatch(container.textContent ?? "", /Sending code\.\.\./);
+      assert.equal(sendCodeButton.disabled, false);
+
+      await act(async () => {
+        sendCodeButton.dispatchEvent(new Event("click", { bubbles: true }));
+        await flushHostedPhoneAuthEffects(2);
+      });
+
+      expect(mocks.sendCode).not.toHaveBeenCalled();
+      assert.equal(
+        container
+          .querySelector("[data-pending-action]")
+          ?.getAttribute("data-pending-action"),
+        "send-code",
+      );
 
       const updatePrivyReady = readyHarnessState.setPrivyReady;
       assert.ok(updatePrivyReady);
@@ -1036,6 +1072,7 @@ describe("HostedPhoneAuth", () => {
         pendingAction: null,
         phoneFieldDescription: "Enter the number that received your Murph invite.",
         phoneFieldLabel: "Phone number",
+        phoneInputDisabled: false,
         phoneCountryOptions: [{ code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" }],
         phoneNumber: "",
         sendCodeDisabled: false,
@@ -1135,6 +1172,7 @@ describe("HostedPhoneAuth", () => {
         pendingAction: null,
         phoneFieldDescription: null,
         phoneFieldLabel: null,
+        phoneInputDisabled: false,
         phoneCountryOptions: [{ code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" }],
         phoneNumber: "",
         sendCodeDisabled: false,
@@ -1169,6 +1207,7 @@ describe("HostedPhoneAuth", () => {
         pendingAction: null,
         phoneFieldDescription: "Enter the number that received your Murph invite.",
         phoneFieldLabel: "Phone number",
+        phoneInputDisabled: false,
         phoneCountryOptions: [{ code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" }],
         phoneNumber: "",
         sendCodeDisabled: true,
@@ -1202,6 +1241,7 @@ describe("HostedPhoneAuth", () => {
         pendingAction: null,
         phoneFieldDescription: "Enter the number that received your Murph invite.",
         phoneFieldLabel: "Phone number",
+        phoneInputDisabled: false,
         phoneCountryOptions: [{ code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" }],
         phoneNumber: "4155552671",
         sendCodeDisabled: false,
@@ -3075,6 +3115,7 @@ describe("HostedPhoneAuth", () => {
         pendingAction: null,
         phoneFieldDescription: null,
         phoneFieldLabel: null,
+        phoneInputDisabled: false,
         phoneCountryOptions: [{ code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" }],
         phoneNumber: "4155552671",
         sendCodeDisabled: false,
@@ -3108,6 +3149,7 @@ describe("HostedPhoneAuth", () => {
         pendingAction: null,
         phoneFieldDescription: null,
         phoneFieldLabel: null,
+        phoneInputDisabled: false,
         phoneCountryOptions: [{ code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" }],
         phoneNumber: "4155552671",
         sendCodeDisabled: false,
@@ -3135,6 +3177,7 @@ describe("HostedPhoneAuth", () => {
         pendingAction: null,
         phoneFieldDescription: null,
         phoneFieldLabel: null,
+        phoneInputDisabled: false,
         phoneCountryOptions: [{ code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" }],
         phoneNumber: "4155552671",
         sendCodeDisabled: false,
@@ -3156,6 +3199,30 @@ describe("HostedPhoneAuth", () => {
     assert.doesNotMatch(phoneEntryMarkup, /Text me a sign-in code/);
     assert.match(codeEntryMarkup, /We texted the latest code to \*\*\* 2671\./);
     assert.match(codeEntryMarkup, />Verify phone</);
+  });
+
+  it("shows queued SMS progress inside the real send-code button", async () => {
+    const { HostedPhoneEntryStep } = await import(
+      "@/src/components/hosted-onboarding/hosted-phone-auth-step-views"
+    );
+    const markup = renderToStaticMarkup(
+      React.createElement(HostedPhoneEntryStep, {
+        intent: "auth",
+        pendingAction: "send-code",
+        phoneCountryOptions: [US_PHONE_COUNTRY],
+        phoneNumber: "4155552671",
+        sendCodeDisabled: true,
+        selectedPhoneCountry: US_PHONE_COUNTRY,
+        onPhoneCountryChange() {},
+        onPhoneNumberChange() {},
+        onSubmitPhoneEntry() {},
+      }),
+    );
+
+    assert.match(markup, /aria-busy="true"/);
+    assert.match(markup, /data-slot="spinner"/);
+    assert.match(markup, /Sending code\.\.\./);
+    assert.match(markup, /disabled=""/);
   });
 
   it("builds the active verification attempt with a masked phone hint", async () => {

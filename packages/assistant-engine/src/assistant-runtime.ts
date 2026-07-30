@@ -23,6 +23,13 @@ export type {
 } from './assistant/content-types.js'
 export * from './assistant/conversation-policy.js'
 export * from './assistant/conversation-ref.js'
+export {
+  prepareHostedCodexAssistantProcess,
+} from './assistant/codex-runtime.js'
+export type {
+  HostedCodexAssistantProcessPreparation,
+  HostedCodexAssistantProcessPreparationInput,
+} from './assistant/codex-runtime.js'
 export * from './assistant/hosted-context-diagnostics.js'
 export * from './assistant/hosted-turn-timing.js'
 export * from './assistant/quarantine.js'

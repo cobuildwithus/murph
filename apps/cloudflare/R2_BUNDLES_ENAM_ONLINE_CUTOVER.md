@@ -231,11 +231,15 @@ Continue with step 6 while that exact process waits. A timing-only rehearsal
 must omit this flag; if it exits with destination-only churn, keep that
 destination as rehearsal evidence only and never restart copying into it.
 
-CopyObject is deliberately attempted once. A transport error, `429`, or `5xx`
-is ambiguous because the first request may still commit, so the command fails
-closed without retrying it. Keep copy admission closed, wait out the request
-bound, then run the source-active read-only check below. A destination-only
-eligible object blocks reuse of that destination.
+CopyObject allows one additional attempt only when the first built-in-fetch
+rejection is a `TypeError` whose direct cause code is
+`UND_ERR_CONNECT_TIMEOUT`, proving that the failed connection attempt never
+reached the server. Redirects, terminal HTTP responses (including `429` and
+`5xx`), socket failures, response-body failures, and any failure from the
+second attempt remain terminal and one-shot because the request may have
+committed. Keep copy admission closed after such an ambiguous outcome, wait
+out the request bound, then run the source-active read-only check below. A
+destination-only eligible object blocks reuse of that destination.
 
 ### 5. Complete normally or audit an abnormal stop
 

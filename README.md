@@ -21,8 +21,9 @@ The main installable product entrypoint is `@murphai/murph`, which gives you the
 - local wearable/device sync through the workspace-private `packages/device-syncd` runtime bundled into `@murphai/murph`
 - a hosted Next.js integration control plane in `apps/web`
 - a hosted Cloudflare execution plane in `apps/cloudflare`
-- a private hosted Temporal worker in `packages/hosted-orchestrator-temporal`,
-  with a root Render Background Worker Blueprint for production orchestration
+- public Temporal contracts, hosted-local integration, and a temporary rollback
+  implementation in `packages/hosted-orchestrator-temporal`; private
+  `cobuildwithus/murph-cloud` owns the production worker and Render deployment
 - shared hosted execution contracts and env/client helpers in `@murphai/hosted-execution`
 - workspace-private headless owner/runtime packages such as `@murphai/assistant-engine`, `@murphai/operator-config`, `@murphai/assistant-runtime`, and `@murphai/assistantd`, plus the public contract package `@murphai/gateway-core`
 
