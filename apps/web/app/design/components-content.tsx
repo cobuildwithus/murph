@@ -1335,9 +1335,8 @@ export function ComponentsContent() {
 
         <Section title="Hosted AI usage credits and missions">
           <p className="text-sm text-muted-foreground">
-            Read-only Settings detail for one-time usage credits and explicit
-            referral missions. The production component keeps a single semantic
-            table tree for desktop and mobile layouts.
+            Read-only Settings detail with missions first, optional mission
+            details on demand, and a compact one-time credit ledger.
           </p>
           <div
             aria-label="Read-only hosted AI usage activity previews"
