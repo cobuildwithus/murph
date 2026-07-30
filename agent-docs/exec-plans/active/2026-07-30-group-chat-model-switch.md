@@ -108,8 +108,8 @@ Updated: 2026-07-30
   - Generic hot-runtime next-phase configuration projection scenario: 1 passed.
   - Assistant-engine and hosted-web typechecks: passed.
   - Complete provider input capture using pinned Codex App Server and
-    `gpt-tokenizer` 3.4.0 `o200k_base`: personal 120,889 bytes / 26,429 tokens
-    at base and head; group 103,980 bytes / 22,840 tokens at base and 105,271
-    bytes / 23,148 tokens at head. The +1,291-byte / +308-token group delta
+    `gpt-tokenizer` 3.4.0 `o200k_base`: personal 121,334 bytes / 26,538 tokens
+    at base and head; group 105,043 bytes / 23,078 tokens at base and 106,334
+    bytes / 23,386 tokens at head. The +1,291-byte / +308-token group delta
     (+1.242% / +1.349%) is the generated room tool (+1,128 bytes / +275
     tokens) plus the corrected group guidance (+163 bytes / +33 tokens).
