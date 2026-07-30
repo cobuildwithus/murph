@@ -381,23 +381,26 @@ inventing a billing menu:
   owner must make the change, while Family Edge has no higher current tier; and
 - a hosted group gets a proactive first heads-up: on the first trusted
   low-usage turn the assistant calls `murph.group action="read_usage"` once.
-  The segment stays conversational, link-free, and route-neutral: it calls the
+  A sponsored group receives only the binary acknowledgment that Murph is
+  sponsored in the chat; payer identity, cap, charges, balance, percentages,
+  message counts, and refill events stay private. For an unsponsored group with
+  `fundingNeeded: false`, the heads-up is suppressed. When funding is needed,
+  the segment stays conversational, link-free, and route-neutral: it calls the
   shared capacity "Murph time," says Murph may pause for the room, and asks
   whether they want Murph to check the options without naming or counting any
-  path. It never frames each text as a unit being purchased or spent. A
-  `healthy` read suppresses the heads-up entirely. After someone asks for the
-  options, asks for more Murph time, asks how to keep the room going, or accepts
-  the quick path, the assistant reads the options for that responding sender,
-  using the exact accepted request-bearing message as participant authority
-  rather than inferring one sender from the whole grouped turn. It refreshes
-  current usage as needed, presents every returned earned and sponsored path,
-  and places the funding URL after the sponsored path instead of leading with
-  it. Playful payer
-  nomination is allowed, but who actually paid, purchase status, and amounts
-  stay private, and the assistant never promises a URL the read did not return.
-  For a group without an owner-created join code, the funding URL carries a
-  signed funding-only locator that grants no enrollment
-  or sharing, so the URL is normally present without any write.
+  path. It never frames each text as a unit being purchased or spent. After
+  someone asks for the options, asks for more Murph time, asks how to keep the
+  room going, or accepts the quick path, the assistant reads the options for
+  that responding sender, using the exact accepted request-bearing message as
+  participant authority rather than inferring one sender from the whole grouped
+  turn. It refreshes current usage as needed, presents every returned earned
+  and sponsored path, and includes a returned first-party funding URL only when
+  `fundingNeeded` is true, after the sponsored path instead of leading with it.
+  Playful payer nomination is allowed, but who actually paid, purchase status,
+  and amounts stay private, and the assistant never promises a URL the read did
+  not return. For a group without an owner-created join code, the funding URL
+  carries a signed funding-only locator that grants no enrollment or sharing,
+  so the URL is normally present without any write.
 
 For an explicit Family member-usage management request, the assistant first
 calls `murph.family_plan action="read_status"`. It may provide

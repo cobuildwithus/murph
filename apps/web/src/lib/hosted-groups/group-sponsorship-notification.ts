@@ -233,6 +233,7 @@ export async function materializeHostedGroupSponsorshipNearCapNotification(
       "near-cap",
       sponsorship.authorizationId,
       sponsorship.periodStartedAt.toISOString(),
+      String(sponsorship.monthlyCapMinor),
     ].join(":"),
     instructions: [
       "Send one concise private billing notice to the sponsor only.",
@@ -292,6 +293,7 @@ export async function materializeHostedGroupSponsorshipRecoveryNotification(
       "recovery",
       sponsorship.authorizationId,
       sponsorship.periodStartedAt.toISOString(),
+      input.purchaseId,
     ].join(":"),
     instructions: [
       "Send one concise private billing notice to the sponsor only.",

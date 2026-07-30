@@ -104,18 +104,27 @@ group's existing capacity owner says more credit is needed.
   suite passes against it. The replacement active-payer index is created
   before the legacy index is dropped, and the predeploy exception is limited
   to the proved check/index relaxation.
-- The production-component design study was captured at desktop and mobile
-  viewports with synthetic data and uploaded through the design-proof path for
-  PR review. The desktop proof covers the primary activation dialog; the mobile
-  proof covers activation, ordinary participant, active, paused, payment
-  recovery, and one-time recovery states.
+- The first preliminary specialist pass was structurally invalid because the
+  desktop screenshot showed only the activation dialog while the remaining
+  states were legible only in the mobile composite. It produced no code
+  findings or patch. The catalog now derives desktop and mobile proof from one
+  canonical synthetic instance of each production component state instead of
+  duplicating viewport-specific markup.
+- Fresh hosted proof now covers the activation dialog plus ordinary participant,
+  active/near-cap, paused/resume, payment-recovery, and one-time-recovery states
+  at both 1440px desktop and 390px mobile viewports. The rendered design-proof
+  PR contract passes locally.
+- Parent review made near-cap notice identity cap-specific and failed-payment
+  notice identity purchase-specific, so a cap increase or later failed refill
+  cannot be suppressed by an earlier private notice. Focused Web, assistant
+  skill, catalog, and design-proof tests pass for this remediation.
 - The required Claude UI double-check was attempted from the task checkout.
   Opus produced no usable result and was stopped after remaining silent; the
   prescribed Fable retry reported explicit usage-credit exhaustion. Per the
   completion workflow this is recorded as a non-blocking gap, not a passed
   review.
-- Pending preliminary specialist pass, final ReviewGPT pass, exact-head CI, and
-  PR-head preflight.
+- Pending preliminary specialist retry, final ReviewGPT pass, exact-head CI,
+  and PR-head preflight.
 
 ## Deployment compatibility
 

@@ -235,7 +235,7 @@ const DESIGN_FULFILLED_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
 
 function GroupUsageFundingStudy() {
   const endpoint = "/api/design/group-sponsorship-management";
-  const oneTimeContribution = (state: "desktop" | "mobile") => (
+  const oneTimeContribution = (
     <div className="space-y-4">
       <p className="text-center text-sm text-muted-foreground">
         Murph is sponsored in this chat.
@@ -247,7 +247,6 @@ function GroupUsageFundingStudy() {
         offers={DESIGN_GROUP_SPONSORSHIP_OFFERS}
         payerMemberId={DESIGN_PAYER_MEMBER_ID}
         triggerVariant="outline"
-        {...(state === "mobile" ? { triggerSize: "lg" } : {})}
       />
     </div>
   );
@@ -294,8 +293,8 @@ function GroupUsageFundingStudy() {
       </div>
 
       <DesignSponsorshipState
-        label="Activation · desktop · only open dialog"
-        state="monthly-activation-desktop"
+        label="Activation"
+        state="monthly-activation"
       >
         <GroupUsageFundingCard
           action={(
@@ -316,54 +315,20 @@ function GroupUsageFundingStudy() {
         />
       </DesignSponsorshipState>
 
-      <DesignSponsorshipState
-        label="Activation · mobile"
-        mobile
-        state="monthly-activation-mobile"
-      >
-        <GroupUsageFundingCard
-          action={(
-            <div inert>
-              <GroupSponsorshipDialog
-                checkoutUrl="/api/design/usage-credit-preview"
-                customizationAllowed
-                mode="monthly"
-                monthlyCapMinor={500}
-                monthlyCapOptions={DESIGN_GROUP_MONTHLY_CAPS}
-                offers={[DESIGN_GROUP_SPONSORSHIP_OFFERS[0]]}
-                payerMemberId={DESIGN_PAYER_MEMBER_ID}
-              />
-            </div>
-          )}
-          groupName="Sunday sleep crew"
-        />
-      </DesignSponsorshipState>
-
       <div className="grid gap-6 xl:grid-cols-2">
         <DesignSponsorshipState
-          label="Ordinary sponsored participant + one-time action · desktop"
-          state="ordinary-sponsored-one-time-desktop"
+          label="Ordinary sponsored participant + one-time action"
+          state="ordinary-sponsored-one-time"
         >
           <GroupUsageFundingCard
-            action={<div inert>{oneTimeContribution("desktop")}</div>}
+            action={<div inert>{oneTimeContribution}</div>}
             groupName="Sunday sleep crew"
           />
         </DesignSponsorshipState>
 
         <DesignSponsorshipState
-          label="Ordinary sponsored participant + one-time action · mobile"
-          mobile
-          state="ordinary-sponsored-one-time-mobile"
-        >
-          <GroupUsageFundingCard
-            action={<div inert>{oneTimeContribution("mobile")}</div>}
-            groupName="Sunday sleep crew"
-          />
-        </DesignSponsorshipState>
-
-        <DesignSponsorshipState
-          label="Active management near cap · desktop"
-          state="monthly-active-desktop"
+          label="Active management near cap"
+          state="monthly-active"
         >
           <GroupSponsorshipManagementCard
             endpoint={endpoint}
@@ -382,9 +347,8 @@ function GroupUsageFundingStudy() {
         </DesignSponsorshipState>
 
         <DesignSponsorshipState
-          label="Paused with next-period decrease · mobile"
-          mobile
-          state="monthly-paused-mobile"
+          label="Paused with next-period decrease"
+          state="monthly-paused"
         >
           <GroupSponsorshipManagementCard
             endpoint={endpoint}
@@ -403,8 +367,8 @@ function GroupUsageFundingStudy() {
         </DesignSponsorshipState>
 
         <DesignSponsorshipState
-          label="Payment recovery · desktop"
-          state="monthly-recovery-desktop"
+          label="Payment recovery"
+          state="monthly-recovery"
         >
           <GroupSponsorshipManagementCard
             endpoint={endpoint}
@@ -423,19 +387,8 @@ function GroupUsageFundingStudy() {
         </DesignSponsorshipState>
 
         <DesignSponsorshipState
-          label="Sponsored-chat one-time purchase recovery · desktop"
-          state="sponsored-one-time-recovery-desktop"
-        >
-          <GroupUsageFundingCard
-            action={<div inert>{oneTimeRecovery()}</div>}
-            groupName="Sunday sleep crew"
-          />
-        </DesignSponsorshipState>
-
-        <DesignSponsorshipState
-          label="Sponsored-chat one-time purchase recovery · mobile"
-          mobile
-          state="sponsored-one-time-recovery-mobile"
+          label="Sponsored-chat one-time purchase recovery"
+          state="sponsored-one-time-recovery"
         >
           <GroupUsageFundingCard
             action={<div inert>{oneTimeRecovery()}</div>}
@@ -450,7 +403,6 @@ function GroupUsageFundingStudy() {
 function DesignSponsorshipState(props: {
   children: ReactNode;
   label: string;
-  mobile?: boolean;
   state: string;
 }) {
   return (
@@ -458,7 +410,7 @@ function DesignSponsorshipState(props: {
       <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
         {props.label}
       </p>
-      <div className={props.mobile ? "mx-auto w-full max-w-[23rem]" : "w-full max-w-xl"}>
+      <div className="w-full max-w-xl">
         {props.children}
       </div>
     </section>

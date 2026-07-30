@@ -386,6 +386,45 @@ describe("group sponsorship notification", () => {
     expect(JSON.stringify(envelope)).not.toContain("member_group_runtime");
   });
 
+  it("uses a fresh near-cap notice identity after the payer raises the cap", async () => {
+    const prisma = createPrismaHarness({
+      authorizationStatus: HostedGroupSponsorshipAuthorizationStatus.active,
+    });
+    mocks.resolveDestination.mockResolvedValue(DIRECT_DESTINATION);
+    mocks.readAuthorizationByPurchase
+      .mockResolvedValueOnce({
+        authorizationId: "hgsa_abcdefghijklmnop",
+        chargeOrdinal: 1,
+        monthlyCapMinor: 1_000,
+        payerMemberId: "member_sponsor",
+        periodStartedAt: new Date("2026-07-27T12:00:00.000Z"),
+      })
+      .mockResolvedValueOnce({
+        authorizationId: "hgsa_abcdefghijklmnop",
+        chargeOrdinal: 3,
+        monthlyCapMinor: 2_000,
+        payerMemberId: "member_sponsor",
+        periodStartedAt: new Date("2026-07-27T12:00:00.000Z"),
+      });
+
+    await materializeHostedGroupSponsorshipNearCapNotification({
+      prisma: prisma as never,
+      purchaseId: "purchase_cap_10",
+    });
+    await materializeHostedGroupSponsorshipNearCapNotification({
+      prisma: prisma as never,
+      purchaseId: "purchase_cap_20",
+    });
+
+    const keys = new Set(mocks.readMailboxItem.mock.calls.map(
+      ([input]) => input.dedupeKey,
+    ));
+    expect(keys.size).toBe(2);
+    for (const key of keys) {
+      expect(key).toMatch(/^assistant\.notification\.requested:/u);
+    }
+  });
+
   it.each([
     "a canceled authorization",
     "a delayed prior-period fulfillment",
@@ -490,6 +529,39 @@ describe("group sponsorship notification", () => {
       mailboxItemId: "mailbox_recovered",
       prisma,
     });
+  });
+
+  it("uses a fresh recovery notice identity for a later failed refill", async () => {
+    const prisma = createPrismaHarness({
+      authorizationStatus:
+        HostedGroupSponsorshipAuthorizationStatus.recovery_required,
+      status: HostedUsageCreditPurchaseStatus.payment_failed,
+    });
+    mocks.readAuthorizationByPurchase.mockResolvedValue({
+      authorizationId: "hgsa_abcdefghijklmnop",
+      chargeOrdinal: 1,
+      monthlyCapMinor: 2_000,
+      payerMemberId: "member_sponsor",
+      periodStartedAt: new Date("2026-07-27T12:00:00.000Z"),
+    });
+    mocks.resolveDestination.mockResolvedValue(DIRECT_DESTINATION);
+
+    await materializeHostedGroupSponsorshipRecoveryNotification({
+      prisma: prisma as never,
+      purchaseId: "purchase_failed_1",
+    });
+    await materializeHostedGroupSponsorshipRecoveryNotification({
+      prisma: prisma as never,
+      purchaseId: "purchase_failed_2",
+    });
+
+    const keys = new Set(mocks.readMailboxItem.mock.calls.map(
+      ([input]) => input.dedupeKey,
+    ));
+    expect(keys.size).toBe(2);
+    for (const key of keys) {
+      expect(key).toMatch(/^assistant\.notification\.requested:/u);
+    }
   });
 
   it("does nothing before fulfillment and rejects a conflicting mailbox identity", async () => {
