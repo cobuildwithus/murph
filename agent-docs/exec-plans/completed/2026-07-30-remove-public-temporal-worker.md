@@ -1,6 +1,6 @@
 # Remove Public Temporal Worker Implementation
 
-Status: active
+Status: completed
 Created: 2026-07-30
 Updated: 2026-07-30
 
@@ -95,10 +95,11 @@ Updated: 2026-07-30
 - [x] Update the hosted-local external-worker contract and focused tests.
 - [x] Update guards and durable ownership/testing documentation.
 - [x] Run focused local proof and the private cross-repository integration check.
-- [ ] Publish the cleanup draft PR, run preliminary ReviewGPT, parent final review,
-   final ReviewGPT, and exact-head CI.
-- [ ] Merge only after production soak evidence remains clean, then retire the
-    task worktree.
+- [x] Publish the cleanup draft PR, run preliminary ReviewGPT, resolve its
+   findings, complete the parent final review, and prove exact-head CI.
+- [x] Complete the three-hour production reply soak and close the implementation
+   plan. Final ReviewGPT, merge, and task-worktree retirement remain the
+   post-plan PR release gates required by the completion workflow.
 
 ## Decisions
 
@@ -114,6 +115,10 @@ Updated: 2026-07-30
 - Preliminary review findings are resolved at their owners: top-level
   hosted-local startup now validates the external worker before side effects,
   and test-owned Temporal connections close after each signal/query helper.
+- All seven production reply checkpoints received replies. One delivered
+  checkpoint was delayed by the exhausted usage allowance and recovered after
+  the allowance was refilled; the fresh final checkpoint then passed normally.
+  No runtime or deployment correction was required.
 
 ## Verification
 
@@ -125,3 +130,10 @@ Updated: 2026-07-30
   the smallest truthful local proof.
 - Murph Cloud `Public Murph Integration` against the public PR head.
 - Full required public GitHub Actions and ReviewGPT gates on the exact PR head.
+- Corrected-head Murph Cloud integration passed all 11 scenario legs plus the
+  Temporal orchestration aggregator.
+- Corrected-head public required checks passed.
+- Seven production message checkpoints across three hours were sent and
+  delivered without provider errors and received replies; the final post-refill
+  checkpoint completed normally.
+Completed: 2026-07-30
