@@ -808,46 +808,14 @@ export async function planHostedOnboardingLinqWebhook(input: {
     threadId: summary.chatId,
   });
   if (explicitThreadRoute) {
-    let routeAccountLookupKey = accountLookupKey;
-    let sourceMailboxConsumedAt: Date | null = null;
-    if (requiresHostedThreadDeliveryRouteRefresh({
-      accountLookupKey,
-      route: explicitThreadRoute,
-      threadId: summary.chatId,
-    })) {
-      if (!accountLookupKey) {
-        throw new TypeError(
-          "Hosted Linq thread route refresh requires the current account lookup key.",
-        );
-      }
-      const refreshedRoute = await refreshHostedThreadContainerDeliveryRouteTx({
-        accountLookupKey,
-        accountLookupKeys: threadRouteAccountLookupKeys,
-        mailboxDedupeKey: input.event.event_id,
-        prisma: input.prisma,
-        route: explicitThreadRoute,
-        threadId: summary.chatId,
-      });
-      if (refreshedRoute.deliveryRoute?.channel === "linq") {
-        routeAccountLookupKey = refreshedRoute.deliveryRoute.accountLookupKey;
-      }
-      sourceMailboxConsumedAt = refreshedRoute.demotedMailboxConsumedAt;
-    } else if (isHostedLinqGroupChat(messageEvent)) {
-      const demotion = await demoteHostedMemberLinqGroupChatBindingsTx({
-        linqChatId: summary.chatId,
-        mailboxDedupeKey: input.event.event_id,
-        prisma: input.prisma,
-      });
-      sourceMailboxConsumedAt = demotion.mailboxConsumedAt;
-    }
-    return planHostedLinqExplicitThreadRouteWebhook({
+    return planHostedLinqExistingThreadRouteWebhook({
       ...(input.affirmativeReaction ? { affirmativeReaction: true } : {}),
-      accountLookupKey: routeAccountLookupKey,
+      accountLookupKey,
+      accountLookupKeys: threadRouteAccountLookupKeys,
       context,
       event: input.event,
       prisma: input.prisma,
       route: explicitThreadRoute,
-      sourceMailboxConsumedAt,
     });
   }
 
@@ -2038,6 +2006,70 @@ async function resolveIncomingHostedLinqHomeLineRouteBindingTx(input: {
   };
 }
 
+/**
+ * Canonical convergence boundary for a route that already exists by thread
+ * identity. It recovers the stored delivery account before building the
+ * mailbox wake, so another Linq line cannot fork conversation or delivery
+ * authority.
+ */
+async function planHostedLinqExistingThreadRouteWebhook(input: {
+  accountLookupKey: string | null;
+  accountLookupKeys: readonly string[];
+  affirmativeReaction?: boolean;
+  context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
+  event: HostedLinqWebhookEvent;
+  prisma: Prisma.TransactionClient;
+  resolvedParticipantMemberId?: string;
+  route: HostedThreadRouteSnapshot;
+}): Promise<HostedOnboardingLinqDirectPlan> {
+  const { messageEvent, summary } = input.context;
+  let routeAccountLookupKey = input.accountLookupKey;
+  let sourceMailboxConsumedAt: Date | null = null;
+  if (requiresHostedThreadDeliveryRouteRefresh({
+    accountLookupKey: input.accountLookupKey,
+    route: input.route,
+    threadId: summary.chatId,
+  })) {
+    if (!input.accountLookupKey) {
+      throw new TypeError(
+        "Hosted Linq thread route refresh requires the current account lookup key.",
+      );
+    }
+    const refreshedRoute = await refreshHostedThreadContainerDeliveryRouteTx({
+      accountLookupKey: input.accountLookupKey,
+      accountLookupKeys: input.accountLookupKeys,
+      mailboxDedupeKey: input.event.event_id,
+      prisma: input.prisma,
+      route: input.route,
+      threadId: summary.chatId,
+    });
+    if (refreshedRoute.deliveryRoute?.channel === "linq") {
+      routeAccountLookupKey = refreshedRoute.deliveryRoute.accountLookupKey;
+    }
+    sourceMailboxConsumedAt = refreshedRoute.demotedMailboxConsumedAt;
+  } else if (isHostedLinqGroupChat(messageEvent)) {
+    const demotion = await demoteHostedMemberLinqGroupChatBindingsTx({
+      linqChatId: summary.chatId,
+      mailboxDedupeKey: input.event.event_id,
+      prisma: input.prisma,
+    });
+    sourceMailboxConsumedAt = demotion.mailboxConsumedAt;
+  }
+
+  return planHostedLinqExplicitThreadRouteWebhook({
+    ...(input.affirmativeReaction ? { affirmativeReaction: true } : {}),
+    accountLookupKey: routeAccountLookupKey,
+    context: input.context,
+    event: input.event,
+    prisma: input.prisma,
+    ...(input.resolvedParticipantMemberId
+      ? { resolvedParticipantMemberId: input.resolvedParticipantMemberId }
+      : {}),
+    route: input.route,
+    sourceMailboxConsumedAt,
+  });
+}
+
 async function planHostedLinqExplicitThreadRouteWebhook(input: {
   accountLookupKey?: string | null;
   affirmativeReaction?: boolean;
@@ -2538,6 +2570,7 @@ async function planHostedLinqGroupChatWebhook(input: {
 
   let createdContainerMemberId: string | null = null;
   let demotedMailboxConsumedAt: Date | null = null;
+  let routeEnsured = false;
   try {
     const preparedResult = await ensureHostedPreparedLinqThreadContainerRouteTx({
       accountLookupKey,
@@ -2564,6 +2597,7 @@ async function planHostedLinqGroupChatWebhook(input: {
       // distinct message can append to that winner.
     } else {
       const ensureResult = preparedResult.ensure;
+      routeEnsured = true;
       createdContainerMemberId = ensureResult.created
         ? ensureResult.containerMemberId
         : null;
@@ -2596,17 +2630,31 @@ async function planHostedLinqGroupChatWebhook(input: {
         );
   }
 
-  const plan = await planHostedLinqExplicitThreadRouteWebhook({
-    ...(input.affirmativeReaction ? { affirmativeReaction: true } : {}),
-    context: input.context,
-    event: input.event,
-    prisma: input.prisma,
-    ...(activeSenderMemberId
-      ? { resolvedParticipantMemberId: activeSenderMemberId }
-      : {}),
-    route,
-    sourceMailboxConsumedAt: demotedMailboxConsumedAt,
-  });
+  const plan = routeEnsured
+    ? await planHostedLinqExplicitThreadRouteWebhook({
+        ...(input.affirmativeReaction ? { affirmativeReaction: true } : {}),
+        accountLookupKey,
+        context: input.context,
+        event: input.event,
+        prisma: input.prisma,
+        ...(activeSenderMemberId
+          ? { resolvedParticipantMemberId: activeSenderMemberId }
+          : {}),
+        route,
+        sourceMailboxConsumedAt: demotedMailboxConsumedAt,
+      })
+    : await planHostedLinqExistingThreadRouteWebhook({
+        ...(input.affirmativeReaction ? { affirmativeReaction: true } : {}),
+        accountLookupKey,
+        accountLookupKeys: input.threadRouteAccountLookupKeys,
+        context: input.context,
+        event: input.event,
+        prisma: input.prisma,
+        ...(activeSenderMemberId
+          ? { resolvedParticipantMemberId: activeSenderMemberId }
+          : {}),
+        route,
+      });
   if (createdContainerMemberId && route.containerMemberId === createdContainerMemberId) {
     return {
       ...plan,

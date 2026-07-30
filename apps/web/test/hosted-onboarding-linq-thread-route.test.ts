@@ -2044,14 +2044,18 @@ async function runRoutedMessageTransaction(
   }));
 }
 
-function readAppendedConversationMessage(index: number) {
+function readAppendedConversationWake(index: number) {
   const envelope = vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx)
     .mock.calls[index]?.[0].envelope;
   expect(envelope?.kind).toBe("conversation.message");
   if (!envelope || envelope.kind !== "conversation.message") {
     throw new Error("Expected a conversation message envelope.");
   }
-  return envelope.message;
+  return envelope;
+}
+
+function readAppendedConversationMessage(index: number) {
+  return readAppendedConversationWake(index).message;
 }
 
 function configureHostedContactPrivacyKeyringForTest(input: {
@@ -5810,108 +5814,248 @@ describe("Linq group chat auto-provision", () => {
 });
 
 describe("Linq group chat concurrent provisioning race", () => {
-  it("routes a concurrent-loser first group message into the winner's container", async () => {
-    const prisma = createStatefulThreadRoutePrisma();
-    prisma.seedActiveManagedLinqLine("+15550000000");
-    const senderCore = {
-      billingStatus: HostedBillingStatus.active,
-      createdAt: new Date("2026-06-24T00:00:00.000Z"),
-      id: "member_owner_123",
-      suspendedAt: null,
-      updatedAt: new Date("2026-06-24T00:00:00.000Z"),
-    };
-    const accountLookupKey = createHostedPhoneLookupKey("+15550000000");
-    const threadLookupKey = createHostedExternalThreadLookupKey({
-      accountLookupKey,
-      channel: "linq",
-      threadId: "chat_group_123",
-    });
-    const threadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
-      channel: "linq",
-      threadId: "chat_group_123",
-    });
-    if (!threadLookupKey || !threadIdentityLookupKey) {
-      throw new Error("Expected test lookup keys.");
-    }
-    // Another active member on the same pooled line already won the provisioning
-    // race and committed this route while our webhook was in flight.
-    prisma.seedThreadRoute({
-      channel: "linq",
-      containerMemberId: "member_thread_container_999",
-      ownerMemberId: "member_winner_456",
-      threadIdentityLookupKey,
-      threadLookupKey,
-    });
-    // The planner's initial route lookup ran before the winner committed, so
-    // it misses; every later read observes the committed route.
-    const statefulFindMany = prisma.hostedThreadRoute.findMany.getMockImplementation()!;
-    let findManyCalls = 0;
-    prisma.hostedThreadRoute.findMany.mockImplementation(async (args: never) => {
-      findManyCalls += 1;
-      if (findManyCalls <= 1) {
-        return [];
+  it.each([
+    {
+      description: "same-line unknown sender",
+      recipient: "+15550000000",
+      sender: "+15551112222",
+      senderState: "unknown",
+    },
+    {
+      description: "cross-line unknown sender",
+      recipient: "+15559999999",
+      sender: "+15551112222",
+      senderState: "unknown",
+    },
+    {
+      description: "cross-line unverified-email sender",
+      recipient: "+15559999999",
+      sender: "unverified-sender@example.com",
+      senderState: "unknown",
+    },
+    {
+      description: "cross-line inactive sender",
+      recipient: "+15559999999",
+      sender: "+15551112222",
+      senderState: "inactive",
+    },
+  ] as const)(
+    "converges a $description on the winner's canonical route",
+    async ({ recipient, sender, senderState }) => {
+      const prisma = createStatefulThreadRoutePrisma();
+      prisma.seedActiveManagedLinqLine(recipient);
+      const originalAccountLookupKey =
+        requireTestPhoneLookupKey("+15550000000");
+      const routeDeliveryRouteEncrypted = await sealHostedThreadDeliveryRoute({
+        containerMemberId: "member_thread_container_999",
+        route: buildHostedThreadDeliveryRoute({
+          accountLookupKey: originalAccountLookupKey,
+          channel: "linq",
+          threadId: "chat_group_123",
+        }),
+      });
+      const threadLookupKey = createHostedExternalThreadLookupKey({
+        accountLookupKey: originalAccountLookupKey,
+        channel: "linq",
+        threadId: "chat_group_123",
+      });
+      const threadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
+        channel: "linq",
+        threadId: "chat_group_123",
+      });
+      if (!threadLookupKey || !threadIdentityLookupKey) {
+        throw new Error("Expected test route lookup keys.");
       }
-      return statefulFindMany(args);
-    });
-    vi.mocked(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber).mockResolvedValue({
-      core: senderCore,
-      identity: {},
-      matchedBy: "phoneNumber",
-    } as Awaited<ReturnType<typeof memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber>>);
-    vi.mocked(hostedMemberStore.readHostedMemberCoreState).mockResolvedValue(senderCore);
-    vi.mocked(mailboxStore.readHostedMailboxItemByDedupeKey).mockResolvedValue(null);
-    vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockResolvedValueOnce({
-      dedupeConflict: false,
-      duplicate: false,
-      inserted: true,
-      item: buildHostedMailboxItem({
-        id: "mailbox_group_race_123",
-        userId: "member_thread_container_999",
-      }),
-    });
-    vi.mocked(linqDailyState.incrementHostedLinqInboundDailyState).mockResolvedValueOnce({
-      dayUtc: new Date("2026-06-24T00:00:00.000Z"),
-      inboundCount: 1,
-      memberId: "member_thread_container_999",
-      outboundCount: 0,
-      quotaReplySentAt: null,
-    } as Awaited<ReturnType<typeof linqDailyState.incrementHostedLinqInboundDailyState>>);
-    vi.mocked(usageAllowance.checkHostedAiUsageGate).mockResolvedValueOnce({
-      allowed: true,
-      allowanceSource: "thread_container",
-      billingPlanCode: "launch_monthly",
-      limitUsdMicros: 4_500_000n,
-      memberId: "member_thread_container_999",
-      periodEnd: new Date("2026-07-01T00:00:00.000Z"),
-      periodStart: new Date("2026-06-01T00:00:00.000Z"),
-      remainingUsdMicros: 4_500_000n,
-      spentUsdMicros: 0n,
-      usageCreditBalanceUsdMicros: 0n,
-      usageCreditLedgerVersion: 0n,
-    });
-    preparedThreadMocks.ensureHostedPreparedLinqThreadContainerRouteTx
-      .mockResolvedValueOnce({
-        kind: "owner_unavailable",
-        pendingSetupResolution: "claim_raced",
+      prisma.seedThreadRoute({
+        accountLookupKey: originalAccountLookupKey,
+        channel: "linq",
+        containerMemberId: "member_thread_container_999",
+        deliveryRouteEncrypted: routeDeliveryRouteEncrypted,
+        ownerMemberId: "member_winner_456",
+        threadIdentityLookupKey,
+        threadLookupKey,
       });
 
-    const plan = await planHostedOnboardingLinqWebhook({
-      event: buildLinqMessageReceivedEvent({}),
-      prisma: prisma as never,
-    });
+      // The first lookup ran before the winner committed. Every later read,
+      // including the canonical delivery-route refresh, sees the winner.
+      const statefulFindMany =
+        prisma.hostedThreadRoute.findMany.getMockImplementation()!;
+      let findManyCalls = 0;
+      prisma.hostedThreadRoute.findMany.mockImplementation(async (args: never) => {
+        findManyCalls += 1;
+        return findManyCalls === 1 ? [] : statefulFindMany(args);
+      });
 
-    expect(plan.response).toMatchObject({
-      ignored: false,
-      ok: true,
-      reason: "wake-appended-thread-route",
-    });
-    expect(readSingleWakeHandoff(plan)).toMatchObject({
-      eventId: "evt_group_123",
-      source: "linq",
-      userId: "member_thread_container_999",
-    });
-    expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
-    expect(prisma.hostedThreadRoute.create).not.toHaveBeenCalled();
-    expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
-  });
+      const inactiveSenderCore = {
+        billingStatus: HostedBillingStatus.active,
+        createdAt: new Date("2026-06-24T00:00:00.000Z"),
+        id: "member_inactive_sender_123",
+        suspendedAt: new Date("2026-06-23T00:00:00.000Z"),
+        updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+      };
+      vi.mocked(
+        memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber,
+      ).mockResolvedValue(
+        senderState === "inactive"
+          ? {
+              core: inactiveSenderCore,
+              identity: {},
+              matchedBy: "phoneNumber",
+            } as Awaited<
+              ReturnType<
+                typeof memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber
+              >
+            >
+          : null,
+      );
+      vi.mocked(hostedMemberStore.readHostedMemberCoreState)
+        .mockResolvedValue(inactiveSenderCore);
+      const existingMailboxItem = buildHostedMailboxItem({
+        id: "mailbox_group_race_123",
+        userId: "member_thread_container_999",
+      });
+      vi.mocked(mailboxStore.readHostedMailboxItemByDedupeKey)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(existingMailboxItem)
+        .mockResolvedValueOnce(null);
+      vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx)
+        .mockResolvedValueOnce({
+          dedupeConflict: false,
+          duplicate: false,
+          inserted: true,
+          item: existingMailboxItem,
+        })
+        .mockResolvedValueOnce({
+          dedupeConflict: false,
+          duplicate: false,
+          inserted: true,
+          item: buildHostedMailboxItem({
+            id: "mailbox_group_after_race_123",
+            userId: "member_thread_container_999",
+          }),
+        });
+      vi.mocked(linqDailyState.incrementHostedLinqInboundDailyState)
+        .mockResolvedValue({
+          dayUtc: new Date("2026-06-24T00:00:00.000Z"),
+          inboundCount: 1,
+          memberId: "member_thread_container_999",
+          outboundCount: 0,
+          quotaReplySentAt: null,
+        } as Awaited<
+          ReturnType<typeof linqDailyState.incrementHostedLinqInboundDailyState>
+        >);
+      vi.mocked(usageAllowance.checkHostedAiUsageGate).mockResolvedValue({
+        allowed: true,
+        allowanceSource: "thread_container",
+        billingPlanCode: "launch_monthly",
+        limitUsdMicros: 4_500_000n,
+        memberId: "member_thread_container_999",
+        periodEnd: new Date("2026-07-01T00:00:00.000Z"),
+        periodStart: new Date("2026-06-01T00:00:00.000Z"),
+        remainingUsdMicros: 4_500_000n,
+        spentUsdMicros: 0n,
+        usageCreditBalanceUsdMicros: 0n,
+        usageCreditLedgerVersion: 0n,
+      });
+      preparedThreadMocks.ensureHostedPreparedLinqThreadContainerRouteTx
+        .mockResolvedValueOnce({
+          kind: "owner_unavailable",
+          pendingSetupResolution: "claim_raced",
+        });
+
+      const loserEvent = buildLinqMessageReceivedEvent({
+        eventId: "evt_group_race_loser_123",
+        messageId: "msg_group_race_loser_123",
+        recipient,
+        sender,
+      });
+      const firstPlan = await planHostedOnboardingLinqWebhook({
+        event: loserEvent,
+        prisma: prisma as never,
+      });
+      const replayPlan = await planHostedOnboardingLinqWebhook({
+        event: loserEvent,
+        prisma: prisma as never,
+      });
+      const laterPlan = await planHostedOnboardingLinqWebhook({
+        event: buildLinqMessageReceivedEvent({
+          eventId: "evt_group_after_race_123",
+          messageId: "msg_group_after_race_123",
+          recipient,
+          sender,
+        }),
+        prisma: prisma as never,
+      });
+
+      expect(firstPlan.response).toMatchObject({
+        ignored: false,
+        ok: true,
+        reason: "wake-appended-thread-route",
+      });
+      expect(replayPlan.response).toMatchObject({
+        duplicate: true,
+        ignored: true,
+        ok: true,
+        reason: "duplicate-webhook-event",
+      });
+      expect(laterPlan.response).toMatchObject({
+        ignored: false,
+        ok: true,
+        reason: "wake-appended-thread-route",
+      });
+      expect(readSingleWakeHandoff(firstPlan)).toMatchObject({
+        eventId: "evt_group_race_loser_123",
+        source: "linq",
+        userId: "member_thread_container_999",
+      });
+      expect(firstPlan.linqReadReceiptRouteAuthority).toEqual({
+        accountLookupKey: originalAccountLookupKey,
+        channel: "linq",
+        containerMemberId: "member_thread_container_999",
+        threadId: "chat_group_123",
+      });
+      expect(laterPlan.linqReadReceiptRouteAuthority).toEqual(
+        firstPlan.linqReadReceiptRouteAuthority,
+      );
+
+      const firstWake = readAppendedConversationWake(0);
+      const laterWake = readAppendedConversationWake(1);
+      expect(firstWake.message).toMatchObject({
+        accountLookupKey: originalAccountLookupKey,
+        linqMessage: {
+          messageId: "msg_group_race_loser_123",
+        },
+        routeAuthority: firstPlan.linqReadReceiptRouteAuthority,
+      });
+      expect(laterWake.message).toMatchObject({
+        accountLookupKey: originalAccountLookupKey,
+        linqMessage: {
+          messageId: "msg_group_after_race_123",
+        },
+        routeAuthority: firstPlan.linqReadReceiptRouteAuthority,
+      });
+      expect(readHostedConversationAssistantIdentifierSecret(firstWake)).toBe(
+        originalAccountLookupKey,
+      );
+      expect(readHostedConversationAssistantIdentifierSecret(laterWake)).toBe(
+        originalAccountLookupKey,
+      );
+      expect(
+        preparedThreadMocks.ensureHostedPreparedLinqThreadContainerRouteTx,
+      ).toHaveBeenCalledTimes(1);
+      expect(
+        preparedThreadMocks.ensureHostedPreparedLinqThreadContainerRouteTx,
+      ).toHaveBeenCalledWith(expect.objectContaining({
+        fallbackOwnerMemberId: null,
+        senderMemberId: null,
+      }));
+      expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(2);
+      expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
+      expect(prisma.hostedThreadRoute.create).not.toHaveBeenCalled();
+      expect(prisma.hostedThreadRoute.update).not.toHaveBeenCalled();
+      expect(
+        prisma.readAccountLookupKeyProjection("member_thread_container_999"),
+      ).toBe(originalAccountLookupKey);
+    },
+  );
 });
