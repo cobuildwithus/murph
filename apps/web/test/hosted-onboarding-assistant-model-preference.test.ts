@@ -460,6 +460,7 @@ describe("hosted member assistant model preference", () => {
       prisma: tx,
       provider: "venice",
     })).resolves.toMatchObject({
+      effectiveProviderUpdated: true,
       hostedAssistantProviderOverride: "venice",
       model: "gpt-5.6-terra",
       updated: true,
@@ -493,6 +494,7 @@ describe("hosted member assistant model preference", () => {
   });
 
   it("clears the stored provider override when switching back to OpenAI", async () => {
+    process.env.HOSTED_VENICE_ENABLED = "1";
     const tx = createTransactionClient();
     mocks.findUniqueHostedMember.mockResolvedValue(buildMemberState({
       assistantModelPreference: null,
@@ -506,6 +508,7 @@ describe("hosted member assistant model preference", () => {
     });
 
     expect(result).toMatchObject({
+      effectiveProviderUpdated: true,
       model: "gpt-5.6-terra",
       updated: true,
     });
@@ -579,6 +582,7 @@ describe("hosted member assistant model preference", () => {
       model: "gpt-5.6-sol",
       prisma: tx,
     })).resolves.toMatchObject({
+      effectiveProviderUpdated: false,
       hostedAssistantModelOverride: "gpt-5.6-sol",
       model: "gpt-5.6-sol",
       reasoningEffort: "low",
@@ -706,6 +710,7 @@ describe("hosted member assistant model preference", () => {
       model: "gpt-5.6-terra",
       prisma: tx,
     })).resolves.toMatchObject({
+      effectiveProviderUpdated: false,
       dormantSolPreference: false,
       model: "gpt-5.6-terra",
       reasoningEffort: "low",
