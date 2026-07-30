@@ -366,7 +366,9 @@ not enter evidence; and attachment-only input fails closed before provider work.
   trace suppressed while blocked, then proves older-than-24-hour resumed
   staging, the five-minute monitor cadence edge, timely progress, a slow
   completed reply, pre-denial execution, and the 20,000-row cap against the real
-  bounded monitor query.
+  bounded monitor query. It also proves that recent resumed activity survives
+  seven-day trace cleanup through quiet-hour deferral and alerts after quiet
+  hours, while a fully stale trace is deleted.
 - `apps/cloudflare/test/database-health-{metrics,monitor,worker}.test.ts`
   covers the independent PlanetScale/Linq database-health plane. The tests
   prove strict metric normalization and required-series failure, positive

@@ -327,7 +327,10 @@ Last verified: 2026-07-30
   before applying its 24-hour window, bounded scan, or delivery/provider
   grouping. Post-denial execution is measured from its earliest milestone even
   when the original ingress is older than the window. An unblocked row sharing
-  the same reply remains alertable.
+  the same reply remains alertable. The existing seven-day ingress-trace cleanup
+  retires a trace only after both its original ingress and latest activity are
+  stale, so a resumed trace survives quiet-hour deferral without making
+  inactive traces unbounded.
   Outbound paging requires the shared Resend operational-email sender and
   recipients plus a valid IANA operator timezone; it never falls back to
   Linq/iMessage. It suppresses sends from 11 PM through 7 AM local time and

@@ -2288,7 +2288,10 @@ before applying its 24-hour window and row cap. When all execution evidence
 follows the denial, latency starts at the earliest milestone instead of ingress,
 including when original ingress is older than the monitor window. An unblocked
 row sharing the same delivery remains independently alertable. Missing or
-impossible denial chronology provides no suppression.
+impossible denial chronology provides no suppression. The existing seven-day
+trace cleanup requires both original ingress and latest trace activity to be
+older than its cutoff, preserving a resumed trace across quiet-hour alert
+deferral while still bounding inactive traces.
 Durable consumption remains the long-term terminal proof and the rolling-deploy
 or best-effort-link fallback after handling is otherwise known.
 Accepted grouped Linq replies keep the complete answered mailbox-item set on the

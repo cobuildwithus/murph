@@ -1,13 +1,17 @@
 import type { PrismaClient } from "@prisma/client";
 import { Prisma } from "@prisma/client";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   tryMarkHostedMailboxConversationAiUsageDenied,
 } from "@/src/lib/hosted-mailbox/store";
 import {
   readHostedRuntimeLatencyHealth,
+  runHostedRuntimeLatencyAlertMonitor,
 } from "@/src/lib/hosted-runtime-latency/alert-monitor";
+import {
+  deleteExpiredIngressLatencyTraces,
+} from "@/src/lib/hosted-retention/cleanup";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -50,6 +54,7 @@ describe.skipIf(!runPostgresProof)(
           `);
           await tx.$executeRaw(Prisma.sql`
             CREATE TEMP TABLE hosted_ingress_latency_trace (
+              id TEXT PRIMARY KEY,
               user_id TEXT NOT NULL,
               mailbox_item_id TEXT NOT NULL,
               source TEXT NOT NULL,
@@ -59,7 +64,13 @@ describe.skipIf(!runPostgresProof)(
               phase_breakdown_json JSONB,
               provider_request_ordinal INTEGER,
               runtime_attempt_id TEXT,
-              linq_delivery_id TEXT
+              linq_delivery_id TEXT,
+              updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+            ) ON COMMIT DROP
+          `);
+          await tx.$executeRaw(Prisma.sql`
+            CREATE TEMP TABLE hosted_linq_alert (
+              LIKE public.hosted_linq_alert INCLUDING ALL
             ) ON COMMIT DROP
           `);
           await tx.$executeRaw(Prisma.sql`
@@ -80,12 +91,14 @@ describe.skipIf(!runPostgresProof)(
           `);
           await tx.$executeRaw(Prisma.sql`
             INSERT INTO hosted_ingress_latency_trace (
+              id,
               user_id,
               mailbox_item_id,
               source,
               accepted_at
             )
             VALUES (
+              'trace-observed',
               'member-mailbox-window',
               'mailbox-observed',
               'linq',
@@ -131,10 +144,10 @@ describe.skipIf(!runPostgresProof)(
             firstPass[0]?.createdAt.getTime() ?? Number.POSITIVE_INFINITY,
           );
           expect(firstPass[1]?.aiUsageDeniedAt).toBeNull();
-          const deniedAt = requireDate(firstPass[0]?.aiUsageDeniedAt);
-          const monitorNow = deniedAt;
+          requireDate(firstPass[0]?.aiUsageDeniedAt);
+          const monitorNow = new Date("2026-07-30T20:30:00.000Z");
           const historicalAcceptedAt = new Date(
-            monitorNow.getTime() - 24 * 60 * 60_000 - 1,
+            monitorNow.getTime() - 8 * 24 * 60 * 60_000,
           );
           const historicalDeniedAt = new Date(
             historicalAcceptedAt.getTime() + 1,
@@ -161,7 +174,9 @@ describe.skipIf(!runPostgresProof)(
 
           await tx.$executeRaw(Prisma.sql`
             UPDATE hosted_ingress_latency_trace
-            SET assistant_input_staged_at = ${resumedAt}
+            SET
+              assistant_input_staged_at = ${resumedAt},
+              updated_at = ${resumedAt}
             WHERE mailbox_item_id = 'mailbox-observed'
           `);
           await expect(readHostedRuntimeLatencyHealth({
@@ -172,6 +187,66 @@ describe.skipIf(!runPostgresProof)(
             oldestUnresolvedAgeMs: 5 * 60_000,
             unresolvedReplyCount: 1,
           });
+
+          await tx.$executeRaw(Prisma.sql`
+            INSERT INTO hosted_ingress_latency_trace (
+              id,
+              user_id,
+              mailbox_item_id,
+              source,
+              accepted_at,
+              updated_at
+            )
+            VALUES (
+              'trace-fully-stale',
+              'member-fully-stale',
+              'mailbox-fully-stale',
+              'linq',
+              ${historicalAcceptedAt},
+              ${historicalAcceptedAt}
+            )
+          `);
+          await expect(deleteExpiredIngressLatencyTraces({
+            now: monitorNow,
+            prisma: tx,
+          })).resolves.toBe(1);
+          await expect(readHostedRuntimeLatencyHealth({
+            now: monitorNow,
+            prisma: tx,
+          })).resolves.toMatchObject({
+            anomalous: true,
+            oldestUnresolvedAgeMs: 5 * 60_000,
+            unresolvedReplyCount: 1,
+          });
+
+          const sendAlert = vi.fn(async () => ({
+            providerMessageId: "resend-usage-resume-proof",
+          }));
+          const alertEnv = {
+            HOSTED_LINQ_ALERT_EMAIL_FROM:
+              "Murph Alerts <alerts@example.test>",
+            HOSTED_LINQ_ALERT_EMAILS: "operator@example.test",
+            HOSTED_RUNTIME_LATENCY_ALERT_TIME_ZONE: "Etc/GMT-10",
+            RESEND_API_KEY: "re_test",
+          };
+          await expect(runHostedRuntimeLatencyAlertMonitor({
+            env: alertEnv,
+            now: monitorNow,
+            prisma: tx,
+            sendAlert,
+          })).resolves.toMatchObject({
+            outcome: "deferred_quiet_hours",
+          });
+          expect(sendAlert).not.toHaveBeenCalled();
+          await expect(runHostedRuntimeLatencyAlertMonitor({
+            env: alertEnv,
+            now: new Date("2026-07-30T22:00:00.000Z"),
+            prisma: tx,
+            sendAlert,
+          })).resolves.toMatchObject({
+            outcome: "alert_sent",
+          });
+          expect(sendAlert).toHaveBeenCalledTimes(1);
 
           const progressAt = new Date(resumedAt.getTime() + 29_999);
           await tx.$executeRaw(Prisma.sql`
@@ -275,6 +350,7 @@ describe.skipIf(!runPostgresProof)(
           `);
           await tx.$executeRaw(Prisma.sql`
             INSERT INTO hosted_ingress_latency_trace (
+              id,
               user_id,
               mailbox_item_id,
               source,
@@ -282,6 +358,7 @@ describe.skipIf(!runPostgresProof)(
               assistant_input_staged_at
             )
             SELECT
+              'cap-trace-' || ordinal,
               'cap-member-' || ordinal,
               'cap-mailbox-' || ordinal,
               'linq',
