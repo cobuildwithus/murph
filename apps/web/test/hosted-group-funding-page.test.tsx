@@ -164,6 +164,22 @@ describe("hosted group funding page", () => {
     });
   });
 
+  it("calls an unnamed funding target a Murph group", async () => {
+    mocks.readHostedGroupUsageFundingTargetByJoinCode.mockResolvedValueOnce({
+      displayName: "  ",
+      joinCode: "group_join_code_1234",
+      kind: "group",
+      runtimeMemberId: "member_group_runtime",
+    });
+
+    const markup = renderToStaticMarkup(await GroupFundingPage({
+      params: Promise.resolve({ joinCode: "group_join_code_1234" }),
+    }));
+
+    assert.match(markup, />Murph group<\/p>/u);
+    assert.doesNotMatch(markup, />this group<\/p>/u);
+  });
+
   it("shows a payer-wide target conflict without another amount picker", async () => {
     mocks.readHostedActiveUsageCreditPurchaseForPayer.mockResolvedValueOnce({
       offerCode: "usage_10_usd",

@@ -84,7 +84,7 @@ export default async function GroupFundingPage({
     return <GroupFundingUnavailable />;
   }
 
-  const groupName = target.displayName?.trim() || describeGroupKind(target.kind);
+  const groupName = target.displayName?.trim() || "Murph group";
   const member = auth.authenticatedMember;
   const requestedPurchaseReturn = readUsageTopUpPurchaseReturn(
     resolvedSearchParams,
@@ -262,15 +262,4 @@ function formatUsageTopUpAmount(amountUsdCents: number): string {
   return cents === 0
     ? `$${wholeDollars}`
     : `$${wholeDollars}.${String(cents).padStart(2, "0")}`;
-}
-
-function describeGroupKind(kind: string): string {
-  switch (kind) {
-    case "couple": return "this couple";
-    case "family": return "this family";
-    case "friends": return "this circle";
-    case "household": return "this household";
-    case "team": return "this team";
-    default: return "this group";
-  }
 }
