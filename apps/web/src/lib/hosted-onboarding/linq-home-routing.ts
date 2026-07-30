@@ -27,6 +27,7 @@ import {
   claimHostedLinqProactiveConversationCapacityTx,
   type HostedLinqAssignableHomeLine,
   listHostedLinqAssignableHomeLines,
+  readHostedLinqRecentMessageEffectCountsTx,
   listHostedLinqHealthyProactiveLines,
 } from "./linq-line-store";
 import {
@@ -618,9 +619,9 @@ async function reserveHostedLinqHomeLineFromCandidatesTx(input: {
     : null;
 
   // A healthy contacted line owns member-initiated first contact. Weighted
-  // planning balances proactive placement and degraded-line fallback; it must
-  // never turn a reciprocal inbound conversation into a cross-line send that
-  // can be suppressed by proactive pacing.
+  // planning and recent traffic balance proactive placement and degraded-line
+  // fallback; neither may turn a reciprocal inbound conversation into a
+  // cross-line send that can be suppressed by proactive pacing.
   if (preferredInboundLine) {
     return {
       assignedAt: now,
@@ -648,12 +649,20 @@ async function reserveHostedLinqHomeLineFromCandidatesTx(input: {
         : 0,
     ]),
   );
+  const recentMessageEffectsByLineLookupKey = input.lines.length > 1
+    ? await readHostedLinqRecentMessageEffectCountsTx({
+        lineLookupKeys: input.lines.map((line) => line.phoneNumberLookupKey),
+        now,
+        prisma: input.prisma,
+      })
+    : new Map<string, number>();
   const preferredOrFallbackLine = chooseHostedLinqHomeLine({
     ignoreDailyNewConversationLimit: true,
     lines: input.lines,
     newAssignmentsByRecipientPhone: proactiveConversationCounts,
     plannedMessagesByRecipientPhone,
     preferredRecipientPhone: input.preferredRecipientPhone ?? null,
+    recentMessageEffectsByLineLookupKey,
   });
 
   if (input.reservationKind === "inbound") {
@@ -662,6 +671,7 @@ async function reserveHostedLinqHomeLineFromCandidatesTx(input: {
       newAssignmentsByRecipientPhone: proactiveConversationCounts,
       plannedMessagesByRecipientPhone,
       preferredRecipientPhone: input.preferredRecipientPhone ?? null,
+      recentMessageEffectsByLineLookupKey,
     });
     const selectedLine = proactiveLine ?? preferredOrFallbackLine;
     if (!selectedLine) {
@@ -681,6 +691,7 @@ async function reserveHostedLinqHomeLineFromCandidatesTx(input: {
       newAssignmentsByRecipientPhone: proactiveConversationCounts,
       plannedMessagesByRecipientPhone,
       preferredRecipientPhone: input.preferredRecipientPhone ?? null,
+      recentMessageEffectsByLineLookupKey,
     });
     if (!proactiveLine) {
       break;
