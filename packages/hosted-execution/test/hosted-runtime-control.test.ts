@@ -1310,7 +1310,7 @@ describe("hosted runtime control contracts", () => {
       event: {
         assistantInputIds: ["input_1", "input_2"],
         at: "2026-04-26T00:00:01.500Z",
-        milestone: "first_codex_text_observed",
+        milestone: "progress_update_accepted",
         runtimeAttemptId: "attempt_1",
         source: "linq",
         type: "assistant_milestone",
@@ -1319,6 +1319,25 @@ describe("hosted runtime control contracts", () => {
       event: {
         assistantInputIds: ["input_1", "input_2"],
         at: "2026-04-26T00:00:01.500Z",
+        milestone: "progress_update_accepted",
+        runtimeAttemptId: "attempt_1",
+        source: "linq",
+        type: "assistant_milestone",
+      },
+    });
+    expect(parseHostedRuntimeLatencyTraceRequest({
+      event: {
+        assistantInputIds: ["input_1", "input_2"],
+        at: "2026-04-26T00:00:01.600Z",
+        milestone: "first_codex_text_observed",
+        runtimeAttemptId: "attempt_1",
+        source: "linq",
+        type: "assistant_milestone",
+      },
+    })).toEqual({
+      event: {
+        assistantInputIds: ["input_1", "input_2"],
+        at: "2026-04-26T00:00:01.600Z",
         milestone: "first_codex_text_observed",
         runtimeAttemptId: "attempt_1",
         source: "linq",
@@ -1833,6 +1852,45 @@ describe("hosted runtime control contracts", () => {
     expect(idempotent).toEqual({
       changed: false,
       value: merged.value,
+    });
+
+    const earlierProgressMerged = mergeHostedRuntimeLatencyPhaseBreakdownJson({
+      existing: {
+        assistant: {
+          progressUpdateAcceptedAtEpochMs: 1_777_000_030_000,
+        },
+        schemaVersion: 1,
+      },
+      incoming: {
+        assistant: {
+          progressUpdateAcceptedAtEpochMs: 1_777_000_029_999,
+        },
+        schemaVersion: 1,
+      },
+      phases: ["assistant"],
+    });
+
+    expect(earlierProgressMerged).toEqual({
+      changed: true,
+      value: {
+        assistant: {
+          progressUpdateAcceptedAtEpochMs: 1_777_000_029_999,
+        },
+        schemaVersion: 1,
+      },
+    });
+    expect(mergeHostedRuntimeLatencyPhaseBreakdownJson({
+      existing: earlierProgressMerged.value,
+      incoming: {
+        assistant: {
+          progressUpdateAcceptedAtEpochMs: 1_777_000_030_001,
+        },
+        schemaVersion: 1,
+      },
+      phases: ["assistant"],
+    })).toEqual({
+      changed: false,
+      value: earlierProgressMerged.value,
     });
 
     const providerMerged = mergeHostedRuntimeLatencyPhaseBreakdownJson({
