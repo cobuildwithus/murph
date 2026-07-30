@@ -295,6 +295,92 @@ test("device sync store rolls back webhook jobs when the trace claim was lost", 
   }
 });
 
+test("device sync store commits source admission with initial jobs atomically", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-connection-admission");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-user-1",
+      displayName: "Junction",
+      scopes: [],
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      connectedAt: "2026-07-28T10:00:00.000Z",
+    });
+    const source = {
+      connectionId: account.id,
+      sourceInstanceKey: "junction-source-garmin",
+      sourceProviderSlug: "garmin",
+      status: "disconnected" as const,
+      firstSeenAt: "2026-07-28T10:00:00.000Z",
+      lastSeenAt: "2026-07-28T10:00:00.000Z",
+    };
+    store.upsertConnectionSource(source);
+
+    const circularPayload: Record<string, unknown> = {};
+    circularPayload.self = circularPayload;
+    assert.throws(() =>
+      store.commitConnectionEstablished({
+        accountId: account.id,
+        provider: account.provider,
+        source: {
+          ...source,
+          status: "connected",
+          lastSeenAt: "2026-07-28T10:01:00.000Z",
+        },
+        jobs: [{
+          availableAt: "2026-07-28T10:01:00.000Z",
+          kind: "reconcile",
+          payload: circularPayload,
+        }],
+      }),
+    );
+    assert.equal(
+      store.listConnectionSources({ connectionId: account.id })[0]?.status,
+      "disconnected",
+    );
+    assert.equal(
+      store.claimDueJob("worker-a", "2026-07-28T10:02:00.000Z", 60_000),
+      null,
+    );
+
+    const committed = store.commitConnectionEstablished({
+      accountId: account.id,
+      provider: account.provider,
+      source: {
+        ...source,
+        status: "connected",
+        lastSeenAt: "2026-07-28T10:03:00.000Z",
+      },
+      jobs: [{
+        availableAt: "2026-07-28T10:03:00.000Z",
+        kind: "reconcile",
+        payload: {},
+      }],
+    });
+    assert.equal(committed.length, 1);
+    assert.equal(
+      store.listConnectionSources({ connectionId: account.id })[0]?.status,
+      "connected",
+    );
+    assert.equal(
+      store.claimDueJob("worker-a", "2026-07-28T10:04:00.000Z", 60_000)?.id,
+      committed[0]?.id,
+    );
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
 test("device sync store prunes processed webhook traces older than the retention window", async () => {
   const tempDir = await makeTempDirectory("murph-device-syncd-webhook-trace-prune");
   const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
@@ -4116,6 +4202,49 @@ test("device sync store preserves guarded Junction historical progress across ca
         "e2|2026-04-01T00:00:00.000Z|2026-04-03T00:00:00.000Z|garmin:1",
       callbackOutcome: "complete",
     });
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store never promotes pending setup from ordinary sync success", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-pending-sync");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const pending = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-pending-sync",
+      displayName: "Junction",
+      status: "active",
+      setupPhase: "pending_link",
+      setupExpiresAt: "2026-04-03T00:15:00.000Z",
+      scopes: [],
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      connectedAt: "2026-04-03T00:00:00.000Z",
+      nextReconcileAt: null,
+    });
+
+    assert.equal(
+      store.markSyncSucceeded(
+        pending.id,
+        "2026-04-03T00:05:00.000Z",
+        pending.disconnectGeneration,
+      ),
+      true,
+    );
+
+    const after = store.getAccountById(pending.id);
+    assert.equal(after?.status, "active");
+    assert.equal(after?.setupPhase, "pending_link");
+    assert.equal(after?.setupExpiresAt, "2026-04-03T00:15:00.000Z");
   } finally {
     store.close();
     await rm(tempDir, {

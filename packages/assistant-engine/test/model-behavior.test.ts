@@ -103,7 +103,7 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).not.toContain('extra nudges')
   })
 
-  it('tells group turns how later responses and finish-without-reply affect completed answers', () => {
+  it('keeps one response lifecycle while preserving group floor etiquette', () => {
     const groupPrompt = buildAssistantSystemPrompt(
       createCommonCodexPromptInput({
         conversationScope: 'group',
@@ -112,16 +112,31 @@ describe('assistant execution prompt contract', () => {
     const directPrompt = buildAssistantSystemPrompt(
       createCommonCodexPromptInput(),
     )
+    const sharedIdentity =
+      'You are Murph, a durable personal health assistant.'
+    const sharedStyleOwner =
+      'Current-conversation style settings override these defaults.'
 
+    expect(groupPrompt).toContain(sharedIdentity)
+    expect(directPrompt).toContain(sharedIdentity)
+    expect(groupPrompt).toContain(sharedStyleOwner)
+    expect(directPrompt).toContain(sharedStyleOwner)
     expect(groupPrompt).toContain(
       'It does not withdraw an answer already completed in that turn; that answer still sends.',
     )
     expect(groupPrompt).toContain(
-      'If a newer group message leads to another completed response in the same turn, that response replaces the earlier answer.',
+      'Messages accepted before the first completed assistant response may join this turn.',
     )
     expect(groupPrompt).toContain(
-      'Make it stand alone and carry forward anything still worth saying.',
+      'never replace, retract, or suppress completed text or media',
     )
+    expect(groupPrompt).toContain(
+      'Messages accepted after the first completed response stay pending for the next ordinary turn.',
+    )
+    expect(groupPrompt).not.toContain('replaces the earlier answer')
+    expect(groupPrompt).not.toContain('carry forward anything still worth saying')
+    expect(groupPrompt).not.toContain('Use light humor when it fits')
+    expect(groupPrompt).not.toContain('plainspoken, and casual')
     expect(groupPrompt).toContain(
       'When the room is mid-volley and nothing needs you yet, watch instead of answering: run a short shell `sleep` for a few seconds, never more than about 10, then look again.',
     )
@@ -134,18 +149,56 @@ describe('assistant execution prompt contract', () => {
       'Answer immediately when someone needs you or the beat is yours.',
     )
     expect(groupPrompt).toContain(
-      'Messages that arrive during the sleep appear as normal messages; rule 7 covers replacing an unsent answer.',
+      'Messages that arrive during the sleep appear as normal messages; rule 7 governs whether they join this turn or remain pending.',
     )
-    expect(directPrompt).not.toContain(
-      'that answer still sends',
-    )
-    expect(directPrompt).not.toContain(
-      'that response replaces the earlier answer',
-    )
+    expect(directPrompt).not.toContain('run a short shell `sleep`')
     expect(groupPrompt).toContain(
       'use the CLI only for public reference reads, group-owned state other than the `group-room-model` page, and a brief shell `sleep` when the room is mid-volley',
     )
-    expect(directPrompt).not.toContain('run a short shell `sleep`')
+  })
+
+  it('allows explicit room-model selection without exposing group provider or reasoning controls', () => {
+    const prompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput({
+        assistantStyleSettingsAvailable: true,
+        conversationScope: 'group',
+      }),
+    )
+
+    expect(prompt).toContain(
+      'use the room-scoped `murph.assistant_configuration` tool to read or select Luna, Terra, or Sol for the room',
+    )
+    expect(prompt).toContain(
+      'a saved model starts on the next turn',
+    )
+    expect(prompt).toContain(
+      'Provider and reasoning controls remain unavailable in a group',
+    )
+    expect(prompt).not.toContain(
+      'Do not use or offer `murph.assistant_configuration` here',
+    )
+    expect(prompt).not.toContain(
+      'Model, provider, and reasoning controls remain unavailable in a group',
+    )
+  })
+
+  it('keeps completed group reads and participant message-ref ownership unambiguous', () => {
+    const groupPrompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput({
+        conversationScope: 'group',
+      }),
+    )
+
+    expect(groupPrompt).toContain('`status="ok"` is complete')
+    expect(groupPrompt).toContain(
+      'select the exact server-issued message_ref printed beside the request-bearing message',
+    )
+    expect(groupPrompt).toContain(
+      'the host reloads that message and derives its sender',
+    )
+    expect(groupPrompt).not.toContain(
+      'only the server-selected message reference can authorize participant-scoped effects',
+    )
   })
 
   it('keeps the group social role active, low-ego, and human-first', () => {
@@ -262,6 +315,36 @@ describe('assistant execution prompt contract', () => {
     )
   })
 
+  it('grounds niche group-chat references with brief public research before joking', () => {
+    const groupLayers = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput({
+        conversationScope: 'group',
+      }),
+    )
+    const directLayers = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput(),
+    )
+
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'When a floor-authorized playful turn hinges on a niche public cultural reference',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'If you cannot confidently name the concrete premise, characters, vocabulary, or recurring bit needed to make the reply specific',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'do a narrow public web lookup before replying',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'one short, original, reference-native joke or callback',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'stay plain rather than inventing lore',
+    )
+    expect(directLayers.staticCacheableCorePrompt).not.toContain(
+      'When a floor-authorized playful turn hinges on a niche public cultural reference',
+    )
+  })
+
   it('keeps a comic register from downgrading a described unsafe act in a group', () => {
     const groupLayers = buildAssistantSystemPromptLayers(
       createCommonCodexPromptInput({
@@ -352,22 +435,26 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).not.toContain('No child outlives the final reply')
   })
 
-  it('keeps unrelated professional errands outside Murph scope', () => {
+  it('allows schoolwork while keeping unrelated professional work outside Murph scope', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain('Scope boundary:')
     expect(prompt).toContain(
-      'Own personal health, vault records, experiments, routines, health-relevant research/logistics, and Murph setup.',
+      'Use primary purpose, not subject.',
     )
     expect(prompt).toContain(
-      'Briefly decline unrelated work/school tasks, customer support, procurement, bulk operations, or non-health research',
+      'Answer assignments and educational code directly in professional subjects; no hypothetical/practice or scope disclaimer.',
     )
     expect(prompt).toContain(
-      'tool availability does not expand scope',
+      'Decline only actual professional work—production code, client deliverables, or operations—in one plain sentence',
     )
     expect(prompt).toContain(
-      'Work and life context is relevant when it affects health, schedule, stress, travel, or routines.',
+      'tools do not expand scope',
     )
+    expect(prompt).toContain(
+      'Own health, schoolwork, Murph setup, records, routines, and context.',
+    )
+    expect(prompt).not.toContain('unrelated work/school tasks')
   })
 
   it('uses formal by default and applies a saved tone as a strict writing contract', () => {
@@ -762,19 +849,19 @@ describe('assistant execution prompt contract', () => {
       '`unchanged` means no save',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'never guess voice, model, or reasoning ids',
+      'never guess voice, model, provider, or reasoning ids',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'use `/settings?voice=true` only for voice or sound changes',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'Use `/settings` for tone, model, or reasoning changes',
+      'Use `/settings` for tone, model, provider, or reasoning changes',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'never use a same-turn voice demo as activation proof',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'explicit user-requested model or reasoning changes',
+      'explicit user-requested model, core-reply provider, or reasoning changes',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'a saved change starts on the next turn',
@@ -1222,8 +1309,15 @@ describe('assistant local PDF evidence guidance', () => {
     expect(prompt).toContain(
       'Use `murph.device` to list accounts, create a real connection link, or queue reconciliation',
     )
+    expect(prompt).toContain('Murph iOS app:')
     expect(prompt).toContain(
-      'Apple Watch/iPhone/Apple Health: send https://apps.apple.com/us/app/murph-ai/id6786145859; download/open Murph',
+      'Canonical public App Store listing: https://apps.apple.com/us/app/murph-ai/id6786145859',
+    )
+    expect(prompt).toContain(
+      'It is not a TestFlight invitation; do not search for another listing or claim the public app cannot be verified.',
+    )
+    expect(prompt).toContain(
+      'Apple Watch/iPhone/Apple Health and WHOOP relay handoffs: apply the app-link rule above, then after opening Murph, sign in and connect Apple Health.',
     )
     expect(prompt).toContain('Apple Health relay:')
     expect(prompt).toContain('WHOOP limits third-party access')
@@ -1306,9 +1400,10 @@ describe('assistant local PDF evidence guidance', () => {
 
     expect(readHostedWearableProviderList(prompt)).toBeNull()
     expect(prompt).not.toContain('Hosted wearable connection links are available')
+    expect(prompt).toContain('Murph iOS app:')
     expect(prompt).toContain('Apple Health relay:')
     expect(prompt).toContain(
-      'Apple Watch/iPhone/Apple Health: send https://apps.apple.com/us/app/murph-ai/id6786145859; download/open Murph',
+      'Apple Watch/iPhone/Apple Health and WHOOP relay handoffs: apply the app-link rule above, then after opening Murph, sign in and connect Apple Health.',
     )
     expect(prompt).toContain('No documented WHOOP settings deeplink; never invent one')
     expect(prompt).toContain('WHOOP limits third-party access')
@@ -1917,7 +2012,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      'd12bea1bda587aa3b5d76617a6b7facd88c4931945271c21f43b673fb585aeb1',
+      'b549d87c520c878ea8a049d8f02969011c7c7f775c77b8e8749daad2fbf4bd11',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -2122,7 +2217,7 @@ describe('assistant experiment onboarding guidance', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain(
-      'You are Murph, the user\'s durable, long-term personal health assistant.',
+      'You are Murph, a durable personal health assistant.',
     )
     expect(prompt).toContain(
       'Returning between messages is a core edge over stateless chatbots.',
@@ -2132,7 +2227,7 @@ describe('assistant experiment onboarding guidance', () => {
     )
     expect(prompt).toContain('Delight is care.')
     expect(prompt).toContain(
-      'use an image, voice memo, or song only when requested, preferred, or required by a skill',
+      'use media only when requested, preferred, or skill-required',
     )
     expect(prompt).toContain('Understand before recommending:')
     expect(prompt).toContain(
@@ -2420,7 +2515,7 @@ describe('assistant Murph onboarding guidance', () => {
 })
 
 describe('assistant conversation scope', () => {
-  it('keeps personal settings and authorization surfaces out of group prompts', () => {
+  it('allows the public iOS download while keeping personal setup out of group prompts', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       assistantCliContract: [
         'vault-cli device connect <provider> --format json',
@@ -2451,7 +2546,29 @@ describe('assistant conversation scope', () => {
     expect(prompt).not.toContain('vault-cli assistant style set')
     expect(prompt).not.toContain('vault-cli device connect <provider>')
     expect(prompt).not.toContain('Never invent invite/share/auth/wearable URLs')
-    expect(prompt).not.toContain('apps.apple.com/us/app/murph-ai')
+    expect(prompt).toContain('Murph iOS app:')
+    expect(prompt).toContain(
+      'https://apps.apple.com/us/app/murph-ai/id6786145859',
+    )
+    expect(prompt).toContain(
+      'App-link rule: when someone asks how to get, download, or install the Murph iPhone/iOS app, answer directly with this listing.',
+    )
+    expect(prompt).toContain(
+      'In a group, this is ordinary public product information, not a personal account, settings, authorization, or wearable-connect link.',
+    )
+    expect(prompt).toContain(
+      'Do not send personal settings, wearable-connect, OAuth, billing, account, or browser-handoff links from this room.',
+    )
+    expect(prompt).toContain(
+      'Separately, the canonical public Murph iOS App Store listing named in this prompt may be shared when the app-link rule above applies',
+    )
+    expect(prompt).not.toContain(
+      'when someone asks how to get or install the app',
+    )
+    expect(prompt).toContain(
+      'is the requested canonical public Murph iOS App Store listing',
+    )
+    expect(prompt).not.toContain('Apple Health relay:')
     expect(prompt).not.toContain('WHOOP limits third-party access')
     expect(prompt).not.toContain('Computer-use tools:')
     expect(prompt).not.toContain('Phone calls:')
@@ -2471,7 +2588,7 @@ describe('assistant conversation scope', () => {
     expect(prompt).not.toContain("the user's compiled wiki")
     expect(prompt).not.toContain('vault-cli memory set-name')
     expect(prompt).toContain('The room container is not a person')
-    expect(prompt).toContain('Scope boundary:')
+    expect(prompt).toContain('Group audience and scope:')
     expect(prompt).toContain(
       'make shared decisions, plan ordinary life and leisure',
     )
@@ -2482,11 +2599,18 @@ describe('assistant conversation scope', () => {
       'Ordinary shared-life help is in scope: research public options, compare choices, plan travel or outings, build an itinerary, and coordinate or carry out group logistics with available group-safe tools.',
     )
     expect(prompt).toContain(
-      'A plan, comparison, or reservation for the room is not a work deliverable.',
+      'Schoolwork and study help are also in scope, including assignments, essays, exam questions, drafts, and educational code.',
     )
     expect(prompt).toContain(
-      'Decline requests to write, review, or debug code, and requests whose primary purpose is a work, school, or professional deliverable, in one plain sentence without lecturing; tool availability does not expand scope.',
+      'Answer directly in the room\'s register without requiring "hypothetical" or "practice" framing or adding a school/professional-scope disclaimer, even when the subject is professional.',
     )
+    expect(prompt).toContain(
+      'A plan, comparison, reservation, school assignment, or study answer is not professional work.',
+    )
+    expect(prompt).toContain(
+      'Decline only requests whose primary purpose is actual professional work—such as production code, a client deliverable, or an operational work task—in one plain sentence without lecturing; tool availability does not expand scope.',
+    )
+    expect(prompt).not.toContain('work, school, or professional deliverable')
     expect(prompt).toContain('Do not log medications, symptoms, meals, measurements')
     expect(prompt).not.toContain('murph.assistant_style')
     expect(prompt).toContain(
@@ -2554,7 +2678,13 @@ describe('assistant conversation scope', () => {
       'Casual is a persistent user-facing writing invariant',
     )
     expect(prompt).toContain(
-      'Model and reasoning controls remain unavailable in a group',
+      'select Luna, Terra, or Sol for the room',
+    )
+    expect(prompt).toContain(
+      'Provider and reasoning controls remain unavailable in a group',
+    )
+    expect(prompt).not.toContain(
+      'Model, provider, and reasoning controls remain unavailable in a group',
     )
     expect(prompt).toContain(
       'Saved room-style changes begin on a later group turn',

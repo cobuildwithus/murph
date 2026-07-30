@@ -74,15 +74,27 @@ const HEART_RATE_ZONE_MINUTES_METRIC_KEYS = Array.from(
   (_, zone) => `heart-rate-zone-${zone}-minutes`,
 );
 
-export const HOSTED_VAULT_SHARE_PROJECTION_NIGHT_WINDOW = 7;
+export const HOSTED_VAULT_SHARE_PROJECTION_NIGHT_WINDOW = 8;
 
-export const HOSTED_VAULT_SHARE_PROJECTION_MAX_NIGHT_AGE_DAYS = 7;
+export const HOSTED_VAULT_SHARE_PROJECTION_MAX_NIGHT_AGE_DAYS = 8;
 
-export const HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW = 7;
+export const HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW = 8;
 
-export const HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS = 7;
+export const HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS = 8;
 
 const HOSTED_VAULT_SHARE_WORKOUT_CALENDAR_TIME_ZONE = "Etc/GMT+12";
+
+function projectionCutoffDate(nowMs: number, maxAgeDays: number): string {
+  return new Date(projectionCutoffMs(nowMs, maxAgeDays))
+    .toISOString()
+    .slice(0, 10);
+}
+
+function projectionCutoffMs(nowMs: number, maxAgeDays: number): number {
+  const date = new Date(nowMs);
+  date.setUTCHours(0, 0, 0, 0);
+  return date.getTime() - maxAgeDays * DAY_MS;
+}
 
 type MetricSourceOwnerPoint = Pick<
   MetricSeriesPoint,
@@ -485,9 +497,10 @@ export async function readProjectableDailyMetricDays(
   spec: HostedVaultShareDailyMetricProjectionSpec,
 ): Promise<HostedVaultShareDeliveryRecord[]> {
   const nowMs = Date.now();
-  const cutoffDate = new Date(
-    nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS,
-  ).toISOString().slice(0, 10);
+  const cutoffDate = projectionCutoffDate(
+    nowMs,
+    HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS,
+  );
   const points = await listMetricPoints(vaultRoot, {
     from: cutoffDate,
     limit: null,
@@ -518,9 +531,10 @@ export async function readProjectableWorkoutDays(
   vaultRoot: string,
 ): Promise<HostedVaultShareDeliveryRecord[]> {
   const nowMs = Date.now();
-  const cutoffDate = new Date(
-    nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS,
-  ).toISOString().slice(0, 10);
+  const cutoffDate = projectionCutoffDate(
+    nowMs,
+    HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS,
+  );
   const points = await listMetricPointsBatch(vaultRoot, [
     {
       from: cutoffDate,
@@ -570,7 +584,7 @@ export async function readProjectableWorkoutsDays(
   }
   // The oldest emitted UTC-12 date can begin on the preceding UTC date in a
   // positive-offset event zone. Read that one preceding date, then let the
-  // event-zone conversion and fixed seven-date producer window filter it.
+  // event-zone conversion and fixed eight-date producer window filter it.
   const sourceReadFromDate = shiftIsoDate(
     calendarCurrentDate,
     -HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW,
@@ -616,9 +630,10 @@ export async function readProjectableActivityMinutesDays(
   context?: HostedVaultShareProjectionReadContext,
 ): Promise<HostedVaultShareDeliveryRecord[]> {
   const nowMs = Date.now();
-  const cutoffDate = new Date(
-    nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS,
-  ).toISOString().slice(0, 10);
+  const cutoffDate = projectionCutoffDate(
+    nowMs,
+    HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS,
+  );
   const activityRead = await readProjectableActivitySessionRows(
     vaultRoot,
     cutoffDate,
@@ -633,9 +648,10 @@ export async function readProjectableActivityDistanceDays(
   context?: HostedVaultShareProjectionReadContext,
 ): Promise<HostedVaultShareDeliveryRecord[]> {
   const nowMs = Date.now();
-  const cutoffDate = new Date(
-    nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS,
-  ).toISOString().slice(0, 10);
+  const cutoffDate = projectionCutoffDate(
+    nowMs,
+    HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS,
+  );
   const activityRead = await readProjectableActivitySessionRows(
     vaultRoot,
     cutoffDate,
@@ -650,9 +666,10 @@ export async function readProjectableActivitySessionCountDays(
   context?: HostedVaultShareProjectionReadContext,
 ): Promise<HostedVaultShareDeliveryRecord[]> {
   const nowMs = Date.now();
-  const cutoffDate = new Date(
-    nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS,
-  ).toISOString().slice(0, 10);
+  const cutoffDate = projectionCutoffDate(
+    nowMs,
+    HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS,
+  );
   const activityRead = await readProjectableActivitySessionRows(
     vaultRoot,
     cutoffDate,
@@ -669,9 +686,10 @@ export async function readProjectableHeartRateZoneDays(
   vaultRoot: string,
 ): Promise<HostedVaultShareDeliveryRecord[]> {
   const nowMs = Date.now();
-  const cutoffDate = new Date(
-    nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS,
-  ).toISOString().slice(0, 10);
+  const cutoffDate = projectionCutoffDate(
+    nowMs,
+    HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS,
+  );
   const points = await listMetricPointsBatch(
     vaultRoot,
     HEART_RATE_ZONE_MINUTES_METRIC_KEYS.map((metricKey) => ({
@@ -706,8 +724,10 @@ export function selectProjectableSleepNights(
   summaries: readonly Pick<ProjectedWearableSleepSummary, "date" | "sleepEndAt" | "sleepStartAt">[],
   nowMs: number,
 ): HostedVaultShareDeliveryRecord[] {
-  const cutoffMs =
-    nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_NIGHT_AGE_DAYS * DAY_MS;
+  const cutoffMs = projectionCutoffMs(
+    nowMs,
+    HOSTED_VAULT_SHARE_PROJECTION_MAX_NIGHT_AGE_DAYS,
+  );
   const records: HostedVaultShareDeliveryRecord[] = [];
 
   for (const summary of summaries) {
@@ -743,8 +763,10 @@ export function selectProjectableDailyMetricDays(
   spec: HostedVaultShareDailyMetricProjectionSpec,
   nowMs: number,
 ): HostedVaultShareDeliveryRecord[] {
-  const cutoffMs =
-    nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS;
+  const cutoffMs = projectionCutoffMs(
+    nowMs,
+    HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS,
+  );
   const records: HostedVaultShareDeliveryRecord[] = [];
 
   for (const point of [...points].sort((left, right) => right.date.localeCompare(left.date))) {
@@ -803,9 +825,10 @@ export async function readProjectableMealNutritionDays(
   context?: HostedVaultShareProjectionReadContext,
 ): Promise<HostedVaultShareDeliveryRecord[]> {
   const nowMs = Date.now();
-  const cutoffDate = new Date(
-    nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS,
-  ).toISOString().slice(0, 10);
+  const cutoffDate = projectionCutoffDate(
+    nowMs,
+    HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS,
+  );
   const summary = await readProjectableMealNutritionTotals(vaultRoot, cutoffDate, context);
   return selectProjectableMealNutritionDays(summary.days, spec, nowMs);
 }
@@ -847,8 +870,10 @@ export function selectProjectableMealNutritionDays(
     return [];
   }
   const totalKey = spec.source.totalKey;
-  const cutoffMs =
-    nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS;
+  const cutoffMs = projectionCutoffMs(
+    nowMs,
+    HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS,
+  );
   const records: HostedVaultShareDeliveryRecord[] = [];
 
   for (const day of [...days].sort((left, right) => right.date.localeCompare(left.date))) {
@@ -896,8 +921,10 @@ export function selectProjectableWorkoutDays(
     nowMs: number;
   },
 ): HostedVaultShareDeliveryRecord[] {
-  const cutoffMs =
-    input.nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS;
+  const cutoffMs = projectionCutoffMs(
+    input.nowMs,
+    HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS,
+  );
   const records: HostedVaultShareDeliveryRecord[] = [];
   const minuteRowsByDate = new Map(
     input.minuteRows
@@ -1183,8 +1210,10 @@ export function selectProjectableActivityMinutesDays(
     spec: HostedVaultShareActivityMinutesProjectionSpec;
   },
 ): HostedVaultShareDeliveryRecord[] {
-  const cutoffMs =
-    input.nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS;
+  const cutoffMs = projectionCutoffMs(
+    input.nowMs,
+    HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS,
+  );
   const groups = new Map<string, {
     date: string;
     rows: ActivitySessionProjectionRow[];
@@ -1251,8 +1280,10 @@ export function selectProjectableActivityDistanceDays(
     spec: HostedVaultShareActivityDistanceProjectionSpec;
   },
 ): HostedVaultShareDeliveryRecord[] {
-  const cutoffMs =
-    input.nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS;
+  const cutoffMs = projectionCutoffMs(
+    input.nowMs,
+    HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS,
+  );
   const groups = new Map<string, {
     date: string;
     hasIncompleteDistance: boolean;
@@ -1324,8 +1355,10 @@ export function selectProjectableActivitySessionCountDays(
     spec: HostedVaultShareActivitySessionCountProjectionSpec;
   },
 ): HostedVaultShareDeliveryRecord[] {
-  const cutoffMs =
-    input.nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS;
+  const cutoffMs = projectionCutoffMs(
+    input.nowMs,
+    HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS,
+  );
   const groups = new Map<string, {
     date: string;
     rows: ActivitySessionProjectionRow[];
@@ -1375,8 +1408,10 @@ export function selectProjectableHeartRateZoneDays(
   points: readonly HeartRateZoneMetricProjectionRow[],
   nowMs: number,
 ): HostedVaultShareDeliveryRecord[] {
-  const cutoffMs =
-    nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS;
+  const cutoffMs = projectionCutoffMs(
+    nowMs,
+    HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS,
+  );
   const records: HostedVaultShareDeliveryRecord[] = [];
 
   const zonesBySourceDay = new Map<string, {

@@ -788,6 +788,7 @@ describe("parseHostedExecutionEvent", () => {
           from: "1234567890",
           messageId: "message-1",
           schema: "murph.hosted-telegram-message.v1",
+          senderDisplayName: "Alice Example",
           senderUsername: "alice_example",
           text: "hello group",
           threadId: "chat_group",
@@ -807,7 +808,18 @@ describe("parseHostedExecutionEvent", () => {
       throw new Error("Expected a telegram conversation message wake.");
     }
     expect(parsed.message.telegramMessage.from).toBe("1234567890");
+    expect(parsed.message.telegramMessage.senderDisplayName).toBe("Alice Example");
     expect(parsed.message.telegramMessage.senderUsername).toBe("alice_example");
+    expect(() => parseHostedExecutionWake({
+      ...wake,
+      message: {
+        ...wake.message,
+        telegramMessage: {
+          ...wake.message.telegramMessage,
+          senderDisplayName: "x".repeat(121),
+        },
+      },
+    })).toThrow(/senderDisplayName is too long/u);
   });
 
   it("rejects legacy provider message event kinds", () => {
@@ -1078,15 +1090,30 @@ describe("parseHostedRuntimeGroupTool", () => {
     });
     expect(parseHostedRuntimeGroupToolRequest({
       action: "revoke_own_email_share",
+      participant: {
+        assistantInputId: "ain_11111111111111111111111111111111",
+        senderHandle: "  +15551110000  ",
+        source: "linq",
+      },
+    })).toEqual({
+      action: "revoke_own_email_share",
+      participant: {
+        assistantInputId: "ain_11111111111111111111111111111111",
+        senderHandle: "+15551110000",
+        source: "linq",
+      },
+    });
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "revoke_own_email_share",
       selfOptOut: {
-        senderHandle: "person@example.test",
-        source: "email",
+        senderHandle: "+15551110000",
+        source: "linq",
       },
     })).toEqual({
       action: "revoke_own_email_share",
       selfOptOut: {
-        senderHandle: "person@example.test",
-        source: "email",
+        senderHandle: "+15551110000",
+        source: "linq",
       },
     });
 
@@ -1264,9 +1291,33 @@ describe("parseHostedRuntimeGroupTool", () => {
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
         action: "revoke_own_email_share",
-        selfOptOut: { senderHandle: "person@example.test", source: "sms" },
+        participant: {
+          assistantInputId: "ain_11111111111111111111111111111111",
+          senderHandle: "+15551110000",
+          source: "sms",
+        },
       })
     ).toThrow(/not supported/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "revoke_own_email_share",
+        participant: {
+          assistantInputId: "ain_not_exact",
+          senderHandle: "+15551110000",
+          source: "linq",
+        },
+      })
+    ).toThrow(/assistantInputId is invalid/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "revoke_own_email_share",
+        participant: {
+          assistantInputId: "ain_11111111111111111111111111111111",
+          senderHandle: "   ",
+          source: "telegram",
+        },
+      })
+    ).toThrow(/senderHandle is invalid/u);
   });
 
   it("parses bounded self-membership responses without accepting roster fields", () => {
@@ -1755,6 +1806,141 @@ describe("parseHostedRuntimeGroupTool", () => {
     ).toThrow(/not allowed/u);
   });
 
+  it("parses a bounded participant display-name request and response", () => {
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "read_participant_display_names",
+      linqSenderHandles: [" +15551110001 ", " member@example.test "],
+    })).toEqual({
+      action: "read_participant_display_names",
+      linqSenderHandles: ["+15551110001", "member@example.test"],
+    });
+    for (const linqSenderHandles of [
+      [],
+      ["+15551110001", "+15551110001"],
+      [" "],
+      ["a".repeat(513)],
+    ]) {
+      expect(() => parseHostedRuntimeGroupToolRequest({
+        action: "read_participant_display_names",
+        linqSenderHandles,
+      })).toThrow();
+    }
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "read_participant_display_names",
+      linqSenderHandles: ["+15551110001"],
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    })).toThrow(/not allowed/u);
+
+    const legacyResponse = {
+      action: "read_participant_display_names",
+      result: {
+        participants: [{
+          displayName: "Alice Example",
+          senderHandle: "+15551110001",
+        }],
+        status: "ok",
+      },
+    };
+    expect(parseHostedRuntimeGroupToolResponse(legacyResponse)).toEqual({
+      action: "read_participant_display_names",
+      result: {
+        participants: [{
+          displayName: "Alice Example",
+          displayNameSource: "profile-name",
+          senderHandle: "+15551110001",
+        }],
+        status: "ok",
+      },
+    });
+    const response = {
+      action: "read_participant_display_names",
+      result: {
+        nameMissSenderHandles: ["member@example.test"],
+        participants: [{
+          displayName: "Mara P.",
+          displayNameSource: "unverified-owner-contact",
+          senderHandle: "+15551110001",
+        }],
+        status: "ok",
+      },
+    };
+    expect(parseHostedRuntimeGroupToolResponse(response)).toEqual(response);
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "read_participant_display_names",
+      result: {
+        status: "unavailable",
+        unavailableReason: "runtime_inactive",
+      },
+    })).toEqual({
+      action: "read_participant_display_names",
+      result: {
+        status: "unavailable",
+        unavailableReason: "runtime_inactive",
+      },
+    });
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      ...response,
+      result: {
+        ...response.result,
+        nameMissSenderHandles: ["+15551110001"],
+      },
+    })).toThrow(/must not overlap participants/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      ...response,
+      result: {
+        ...response.result,
+        nameMissSenderHandles: [
+          "member@example.test",
+          "member@example.test",
+        ],
+      },
+    })).toThrow();
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      ...response,
+      result: {
+        ...response.result,
+        participants: [
+          response.result.participants[0],
+          response.result.participants[0],
+        ],
+      },
+    })).toThrow(/senderHandles must be unique/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      ...response,
+      result: {
+        ...response.result,
+        participants: [{
+          displayName: null,
+          displayNameSource: "profile-name",
+          senderHandle: "+15551110001",
+        }],
+      },
+    })).toThrow(/must not be null/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      ...response,
+      result: {
+        ...response.result,
+        participants: [{
+          displayName: "Alice Example",
+          displayNameSource: "unsafe-source",
+          senderHandle: "+15551110001",
+        }],
+      },
+    })).toThrow(/displayNameSource is invalid/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      ...response,
+      result: {
+        ...response.result,
+        participants: [{
+          displayName: "Alice Example",
+          displayNameSource: "profile-name",
+          participantId: "private_participant_id",
+          senderHandle: "+15551110001",
+        }],
+      },
+    })).toThrow(/not allowed/u);
+  });
+
   it("parses bounded read_shared requests in requested order", () => {
     const projectionScopes = [
       { projectionKind: "device-sync-status.v0" },
@@ -1866,13 +2052,28 @@ describe("parseHostedRuntimeGroupTool", () => {
     expect(parseHostedRuntimeGroupToolRequest({
       action: "read_usage_referral",
       linqSenderHandles: [" +15551110001 "],
+      sourceConversation: {
+        channel: "linq",
+        linqService: "imessage",
+        threadId: `hid_${"c".repeat(32)}`,
+        threadIsDirect: true,
+      },
     })).toEqual({
       action: "read_usage_referral",
       linqSenderHandles: ["+15551110001"],
+      sourceConversation: {
+        channel: "linq",
+        linqService: "imessage",
+        threadId: `hid_${"c".repeat(32)}`,
+        threadIsDirect: true,
+      },
     });
     expect(parseHostedRuntimeGroupToolRequest({
       action: "arm_usage_referral",
-      policyCode: "active_group_v1",
+      policyCodes: [
+        "new_person_activation_v1",
+        "active_group_v1",
+      ],
       sourceConversation: {
         channel: "telegram",
         threadId: `hid_${"a".repeat(32)}`,
@@ -1881,7 +2082,10 @@ describe("parseHostedRuntimeGroupTool", () => {
       telegramSenderHandles: [" 1234567890 "],
     })).toEqual({
       action: "arm_usage_referral",
-      policyCode: "active_group_v1",
+      policyCodes: [
+        "new_person_activation_v1",
+        "active_group_v1",
+      ],
       sourceConversation: {
         channel: "telegram",
         threadId: `hid_${"a".repeat(32)}`,
@@ -1891,11 +2095,26 @@ describe("parseHostedRuntimeGroupTool", () => {
     });
     expect(parseHostedRuntimeGroupToolRequest({
       action: "cancel_usage_referral",
-    })).toEqual({ action: "cancel_usage_referral" });
+      policyCode: "new_person_activation_v1",
+    })).toEqual({
+      action: "cancel_usage_referral",
+      policyCode: "new_person_activation_v1",
+    });
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "cancel_usage_referral",
+    })).toThrow(/policyCode must be a non-empty string/u);
     expect(() => parseHostedRuntimeGroupToolRequest({
       action: "arm_usage_referral",
-      policyCode: "future_policy",
+      policyCodes: ["future_policy"],
     })).toThrow(/not supported/u);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "arm_usage_referral",
+      policyCodes: [],
+    })).toThrow(/between 1 and 2 entries/u);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "arm_usage_referral",
+      policyCodes: ["active_group_v1", "active_group_v1"],
+    })).toThrow(/must have unique entries/u);
     expect(() => parseHostedRuntimeGroupToolRequest({
       action: "read_usage_referral",
       linqSenderHandles: ["+15551110001"],
@@ -1903,7 +2122,7 @@ describe("parseHostedRuntimeGroupTool", () => {
     })).toThrow(/more than one channel/u);
     expect(() => parseHostedRuntimeGroupToolRequest({
       action: "arm_usage_referral",
-      policyCode: "active_group_v1",
+      policyCodes: ["active_group_v1"],
       sourceConversation: {
         channel: "telegram",
         threadId: "raw-provider-thread",
@@ -1912,7 +2131,7 @@ describe("parseHostedRuntimeGroupTool", () => {
     })).toThrow(/threadId is invalid/u);
     expect(() => parseHostedRuntimeGroupToolRequest({
       action: "arm_usage_referral",
-      policyCode: "active_group_v1",
+      policyCodes: ["active_group_v1"],
       sourceConversation: {
         channel: "telegram",
         identityId: `hid_${"b".repeat(32)}`,
@@ -1920,6 +2139,24 @@ describe("parseHostedRuntimeGroupTool", () => {
         threadIsDirect: true,
       },
     })).toThrow(/identityId is not allowed/u);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "read_usage_referral",
+      sourceConversation: {
+        channel: "telegram",
+        linqService: "imessage",
+        threadId: `hid_${"a".repeat(32)}`,
+        threadIsDirect: true,
+      },
+    })).toThrow(/linqService is invalid/u);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "read_usage_referral",
+      sourceConversation: {
+        channel: "linq",
+        linqService: "unknown",
+        threadId: `hid_${"a".repeat(32)}`,
+        threadIsDirect: true,
+      },
+    })).toThrow(/linqService is invalid/u);
   });
 
   it("parses a closed, canonical read_shared roster and status matrix", () => {
@@ -2147,14 +2384,14 @@ describe("parseHostedRuntimeGroupTool", () => {
           ...result.members[0],
           projections: [{
             ...projection,
-            records: Array.from({ length: 8 }, (_, index) => ({
+            records: Array.from({ length: 9 }, (_, index) => ({
               ...projection.records[0],
               recordKey: `2026-07-0${index + 1}`,
             })),
           }],
         }],
       },
-    })).toThrow(/at most 7/u);
+    })).toThrow(/at most 8/u);
     expect(() => parseHostedRuntimeGroupToolResponse({
       action: "read_shared",
       result: {
@@ -2607,13 +2844,13 @@ describe("parseHostedRuntimeGroupTool", () => {
       result: {
         outcome: "read" as const,
         referral: {
-          active: {
+          activeMissions: [{
             destinationKind: "group" as const,
             expiresAt: "2026-08-02T12:00:00.000Z",
             policyCode: "active_group_v1" as const,
             rewardLabel: "$3.50 of Murph usage",
             state: "armed" as const,
-          },
+          }],
           availablePolicies: [{
             code: "new_person_activation_v1" as const,
             requirementsLabel: "Introduce one new person.",
@@ -2625,6 +2862,55 @@ describe("parseHostedRuntimeGroupTool", () => {
       },
     };
     expect(parseHostedRuntimeGroupToolResponse(response)).toEqual(response);
+    const pluralResponse = {
+      ...response,
+      result: {
+        ...response.result,
+        referral: {
+          ...response.result.referral,
+          activeMissions: [
+            response.result.referral.activeMissions[0],
+            {
+              destinationKind: "group" as const,
+              expiresAt: "2026-08-03T12:00:00.000Z",
+              policyCode: "new_person_activation_v1" as const,
+              rewardLabel: "$2 of Murph usage",
+              state: "target_bound" as const,
+            },
+          ],
+          availablePolicies: [],
+        },
+      },
+    };
+    expect(parseHostedRuntimeGroupToolResponse(pluralResponse)).toEqual(
+      pluralResponse,
+    );
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      ...response,
+      result: {
+        ...response.result,
+        referral: {
+          ...response.result.referral,
+          activeMissions: [
+            response.result.referral.activeMissions[0],
+            response.result.referral.activeMissions[0],
+          ],
+        },
+      },
+    })).toThrow(/activeMissions must have unique policies/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      ...response,
+      result: {
+        ...response.result,
+        referral: {
+          ...response.result.referral,
+          availablePolicies: [{
+            ...response.result.referral.availablePolicies[0],
+            code: "active_group_v1",
+          }],
+        },
+      },
+    })).toThrow(/policy cannot be both active and available/u);
     expect(parseHostedRuntimeGroupToolResponse({
       action: "arm_usage_referral",
       result: {

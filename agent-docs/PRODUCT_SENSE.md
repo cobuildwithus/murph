@@ -1,12 +1,18 @@
 # Product Sense
 
-Last verified: 2026-07-22
+Last verified: 2026-07-29
 
 ## Current Posture
 
 - Murph is a private, conversation-first personal health assistant. It helps a
   member understand, decide, act, and follow through across health; no single
   feature or workflow defines the product.
+- Learning and schoolwork are ordinary conversational help, including
+  assignments, essays, studying, exam questions, drafts, and educational code.
+  A professional subject does not turn study into professional work. Murph
+  answers directly without requiring hypothetical or practice framing or adding
+  a school/professional-scope disclaimer. Production code, client deliverables,
+  and operational work remain outside scope.
 - General model capability is the substrate. Murph's compounding advantage is
   longitudinal member context: relevant history, evidence, preferences,
   constraints, goals, actions, and outcomes that it can retrieve when they
@@ -111,9 +117,19 @@ default destination for every goal or the definition of activation.
   equivalent would be unsafe or materially unusable. Do not exempt the rest of
   the workflow. When safe, conversation still handles discovery, setup, the
   smallest authorized handoff, and status or confirmation afterward.
+- Wearable-provider authorization uses that exception narrowly. A provider
+  callback may show a first-party confirmation but must not attach an account
+  on navigation alone; the initiating browser must explicitly finish the
+  connection. A callback that cannot prove that browser context fails safely
+  and sends the member back to start again.
 - Apple Health follows that exception narrowly: Murph can explain and hand off
   setup in a direct conversation with the canonical App Store listing, while
   the iOS app owns sign-in and the operating-system HealthKit permission flow.
+- The canonical public Murph iOS App Store listing is ordinary public product
+  information and may be shared in a hosted group when someone asks how to get
+  the app. The link only downloads the app; the app owns sign-in and
+  authorization, while personalized setup help stays in the person's private
+  Murph conversation.
 - WHOOP relay setup stays factual and sequential: explain that WHOOP limits
   third-party data access, give WHOOP's documented Apple Health menu path, then
   hand off to the Murph iOS app. Never invent an undocumented WHOOP deep link.
@@ -121,6 +137,12 @@ default destination for every goal or the definition of activation.
   another join. Default to the route-bound server-owned like-to-consent offer;
   liking adds only the disclosed snapshot, while the first-party page is the
   customize path.
+- Speaker labels should make authenticated group conversation easier to follow
+  without pretending uncertainty is identity. Prefer the member's current
+  authorized profile name. Use a human owner's explicitly shared contact label
+  only as an unmistakably unverified fallback, and leave the speaker unnamed
+  when neither source is safe. Convenience text never authorizes membership,
+  consent, routing, matching, delivery, or participant actions.
 
 ## First-Class Product Objects
 
@@ -148,6 +170,9 @@ Assistant runtime state is never the source of truth for these objects.
   or deletion easy.
 - Prefer the lowest-burden useful response. Silence and “leave it alone” are
   valid outcomes.
+- On secondary web control surfaces, show the actionable state first and keep
+  explanatory history or requirements on demand. Do not repeat the same truth
+  in a heading, introduction, and row labels.
 - Rank learning, confidence, and life fit before engagement or protocol volume.
 - Any experiment result that can be shared or aggregated must stay tied to the
   exact protocol revision, test plan, and confidence language that produced it.

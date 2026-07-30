@@ -63,6 +63,531 @@ export interface ChangelogPage {
 
 const RAW_CHANGELOG_EDITIONS = [
   {
+    id: "2026-07-30",
+    publishedOn: "2026-07-30",
+    title: "More ways through, less waiting around",
+    summary:
+      "Usage choices arrive together, experiments can end in more than a number, and group conversations gain sharper voice, GIF, name, and app-download context. Sign-in, checkout, wearable setup, and cold replies all get a cleaner way through.",
+    items: [
+      {
+        id: "usage-options-together",
+        kind: "feature",
+        priority: 5,
+        title: "See every way to get more usage",
+        summary:
+          "Ask Murph how to get more usage and it now checks the available plan, top-up, group funding, and ways to earn usage together. Settings also shows recent credits and each current or completed mission.",
+        details:
+          "Choosing one or both missions remains explicit. Each tracks and can be cancelled independently, and a mission past its action deadline reads as final activity being checked rather than still actionable.",
+        relevanceTags: ["usage", "credits", "missions", "settings"],
+        sourcePullRequests: [1120, 1136, 1138, 1157],
+        tryIt: {
+          label: "Ask about more usage",
+          prompt: "How can I get more Murph usage?",
+        },
+      },
+      {
+        id: "open-ended-experiment-outcomes",
+        kind: "feature",
+        priority: 5,
+        title: "Experiments can end in more than a number",
+        summary:
+          "Murph can now save custom experiments with numeric, photo, document, or structured-review outcomes when the intervention, capture route, and review timing are clear.",
+        details:
+          "Numeric outcomes use their declared comparison. Qualitative evidence gets an honest before-and-after review receipt instead of a made-up numeric effect, and incomplete evidence stays recoverable.",
+        relevanceTags: ["experiments", "results", "photos", "documents"],
+        sourcePullRequests: [1094],
+      },
+      {
+        id: "core-reply-provider-choice",
+        kind: "feature",
+        priority: 4,
+        title: "Choose the provider for core replies",
+        summary:
+          "Eligible personal members can choose OpenAI or Venice beneath the Luna, Terra, and Sol model choices in Settings, then save both choices together.",
+        details:
+          "The compact setting always says which provider is saved and when a draft will take effect. The choice changes future core replies only; specialized tools keep their own managed providers.",
+        relevanceTags: ["assistant", "models", "settings", "providers"],
+        sourcePullRequests: [1114, 1152],
+      },
+      {
+        id: "schoolwork-conversation-help",
+        kind: "feature",
+        priority: 4,
+        title: "Bring Murph your schoolwork",
+        summary:
+          "Murph can now help with assignments, essays, exam questions, drafts, and educational code in the current private or group conversation.",
+        details:
+          "The boundary follows the purpose of the request: schoolwork is in scope even when the subject is professional, while production code, client deliverables, and operational work stay out.",
+        relevanceTags: ["assistant", "schoolwork", "learning", "groups"],
+        sourcePullRequests: [1143],
+      },
+      {
+        id: "group-voice-only-punchlines",
+        kind: "feature",
+        priority: 4,
+        title: "Some group punchlines can be just a voice memo",
+        summary:
+          "When a group clearly keeps a playful jab going, Murph may answer with one short, self-deprecating voice memo and no duplicate text.",
+        details:
+          "A stop request, a correction, a human-owned beat, or ambiguous hostility still means silence or a plain reply. Saved Humor 0 disables the unprompted sarcastic memo.",
+        relevanceTags: ["groups", "voice", "humor", "messaging"],
+        sourcePullRequests: [1141, 1144],
+      },
+      {
+        id: "animated-gif-filmstrips",
+        kind: "feature",
+        priority: 4,
+        title: "Murph can see the beat inside a GIF",
+        summary:
+          "Animated GIFs sent through a supported iMessage conversation now become a compact left-to-right filmstrip that Murph can inspect in the ordinary reply.",
+        details:
+          "Frame selection follows playback time so held reactions and punchlines survive. Malformed or oversized animations keep the existing unavailable-attachment path and are not stored.",
+        relevanceTags: ["imessage", "gifs", "images", "assistant"],
+        sourcePullRequests: [1140],
+      },
+      {
+        id: "ios-app-link-in-chat",
+        kind: "improvement",
+        priority: 5,
+        title: "Get the iPhone app link right in chat",
+        summary:
+          "Ask Murph how to download the iPhone app in a private or group conversation and it now shares the canonical App Store listing in the same reply.",
+        details:
+          "The public download link can be shared with the room, while personal sign-in, Apple Health authorization, and wearable setup still stay private or in the app.",
+        relevanceTags: ["ios", "groups", "download", "assistant"],
+        sourcePullRequests: [1150],
+      },
+      {
+        id: "time-aware-immediate-advice",
+        kind: "improvement",
+        priority: 5,
+        title: "Advice now knows what time it is",
+        summary:
+          "In a private hosted chat, Murph now uses the current time with your saved timezone before suggesting an immediate meal, workout, caffeine choice, or bedtime step.",
+        details:
+          "Group Murph can reason about the room's current clock without treating the room timezone as any participant's personal local time.",
+        relevanceTags: ["assistant", "time", "recommendations", "context"],
+        sourcePullRequests: [1121],
+      },
+      {
+        id: "group-bursts-one-turn",
+        kind: "improvement",
+        priority: 5,
+        title: "Group bursts become one named conversation",
+        summary:
+          "Several group messages arriving together now become one natural Murph turn and one reply, with safe participant names used naturally when they are available.",
+        details:
+          "Names remain presentation help, never identity or permission. Explicit alternatives stay visible, and participant-specific actions still resolve from the exact source message.",
+        relevanceTags: ["groups", "assistant", "names", "messaging"],
+        sourcePullRequests: [1032, 1133],
+      },
+      {
+        id: "homepage-auth-stays-usable",
+        kind: "improvement",
+        priority: 5,
+        title: "Sign-in stays usable while auth wakes up",
+        summary:
+          "Opening Signup or Log in from a cold homepage now shows the ordinary phone, Telegram, and email form immediately instead of replacing it with an inert loading state.",
+        details:
+          "The chosen method becomes busy at once, waits for the shared auth runtime when needed, and keeps the same action in place through account setup and consent.",
+        relevanceTags: ["signup", "login", "homepage", "reliability"],
+        sourcePullRequests: [1127, 1154],
+      },
+      {
+        id: "wearable-connect-owner-confirmation",
+        kind: "improvement",
+        priority: 5,
+        title: "Wearable setup finishes where it started",
+        summary:
+          "A hosted wearable connection now returns to the same signed-in browser that started it and waits for an explicit Finish connection before attaching the account.",
+        details:
+          "Adding or retrying one source leaves established sources active. A pending or disconnected source stays inert until the owner-bound confirmation succeeds.",
+        relevanceTags: ["wearables", "connect", "privacy", "reliability"],
+        sourcePullRequests: [1059],
+      },
+      {
+        id: "checkout-resumes-one-session",
+        kind: "improvement",
+        priority: 5,
+        title: "Checkout picks up the same payment",
+        summary:
+          "Starting or retrying standard or Pulse Checkout now returns to the same open Stripe session instead of creating a competing payment path.",
+        details:
+          "Only the first valid completion can become the subscription. Conflicting, stale, or ambiguous ownership keeps the existing recovery guidance rather than starting another charge.",
+        relevanceTags: ["billing", "checkout", "subscriptions", "reliability"],
+        sourcePullRequests: [1041],
+      },
+      {
+        id: "group-newsletters-compose-once",
+        kind: "improvement",
+        priority: 4,
+        title: "Group newsletters compose once and keep delivering",
+        summary:
+          "Scheduled group newsletters now use the seven completed local days before the run, regardless of weekday, and continue delivery from one accepted edition.",
+        details:
+          "A restart or later receipt repair no longer recomposes the newsletter. If no usable completed-day stats exist, the edition says only that.",
+        relevanceTags: ["groups", "newsletters", "email", "reliability"],
+        sourcePullRequests: [1128],
+      },
+      {
+        id: "group-sponsorship-cleaner-finish",
+        kind: "improvement",
+        priority: 4,
+        title: "Sponsoring a group has a cleaner finish",
+        summary:
+          "The contribution dialog now leads with Sponsor more messages, keeps optional context under Add a note, and turns verified success into a clear receipt with Open Messages.",
+        details:
+          "Amount choice, payment verification, recovery, and group-credit delivery keep their existing owners. The receipt stays honest that Messages opens at the app level.",
+        relevanceTags: ["groups", "billing", "usage", "design"],
+        sourcePullRequests: [1134, 1137, 1163],
+      },
+      {
+        id: "cold-replies-start-sooner",
+        kind: "improvement",
+        priority: 4,
+        title: "Cold replies start sooner",
+        summary:
+          "When a supported message wakes a stopped hosted Murph, it can begin warming up while the message finishes arriving, shortening the cold path before the same reply starts.",
+        details:
+          "The reply, conversation history, model, and delivery path stay the same. If the early start cannot be reused safely, Murph falls back to the ordinary startup path.",
+        relevanceTags: ["assistant", "messaging", "latency", "reliability"],
+        sourcePullRequests: [1149],
+      },
+      {
+        id: "obscure-group-references-grounded",
+        kind: "improvement",
+        priority: 3,
+        title: "Murph checks the obscure reference before joking",
+        summary:
+          "In a playful group turn, Murph can do one brief public lookup when it needs the premise or vocabulary for a specific reference-native reply.",
+        details:
+          "Known references add no lookup. If the reference stays unresolved, Murph replies plainly instead of bluffing, and it never turns the joke into a research summary.",
+        relevanceTags: ["groups", "humor", "research", "assistant"],
+        sourcePullRequests: [1132],
+      },
+    ],
+  },
+  {
+    id: "2026-07-29",
+    publishedOn: "2026-07-29",
+    title: "Corrections that carry forward",
+    summary:
+      "iMessage edits become real corrections, dense reminders become a natural reply loop, group challenges gain team and multi-metric scorecards, Telegram can hand off the right iMessage line, and onboarding, clubs, group context, images, experiments, and the public site all get clearer.",
+    items: [
+      {
+        id: "post-onboarding-choice-point",
+        kind: "feature",
+        priority: 5,
+        title: "Murph circles back once after onboarding",
+        summary:
+          "Around three weeks after answered onboarding, Murph can send one low-pressure question about what feels worth improving, understanding, or handling now, or stay quiet when the context is not useful enough.",
+        details:
+          "It is a one-time choice point, not a recurring nudge. Existing eligible members get one future catch-up rather than an immediate late message, and nothing changes until they reply.",
+        relevanceTags: ["onboarding", "assistant", "follow-up", "goals"],
+        sourcePullRequests: [1061],
+      },
+      {
+        id: "additive-group-challenge-scorecards",
+        kind: "feature",
+        priority: 5,
+        title: "Group challenges can score the game you meant",
+        summary:
+          "Murph can now run individual, team, or whole-group challenges with up to five additive scoring components, including weighted combinations such as steps, logged protein, and qualifying workouts.",
+        details:
+          "Rules and team membership freeze before scoring. Missing data stays visibly partial instead of becoming zero, and cumulative challenges can roll forward without rewriting earlier results.",
+        relevanceTags: ["groups", "challenges", "scoring", "wearables"],
+        sourcePullRequests: [1097],
+      },
+      {
+        id: "dense-reminders-become-conversation",
+        kind: "improvement",
+        priority: 5,
+        title: "Frequent reminders become one conversation",
+        summary:
+          "When you ask for several same-purpose reminders in one day, Murph can offer one finite check-in loop that asks naturally about the previous action while cueing the current one.",
+        details:
+          "It carries forward at most one unresolved occurrence, never builds reminder debt, and goes quiet after one unanswered combined check-in until you re-engage.",
+        relevanceTags: ["reminders", "automation", "assistant", "messaging"],
+        sourcePullRequests: [1116],
+      },
+      {
+        id: "clubs-challenge-pilot-page",
+        kind: "feature",
+        priority: 4,
+        title: "Club challenges have a home",
+        summary:
+          "The Clubs page explains collective, team, and head-to-head challenges, shows how iMessage and supported wearables keep standings current, and makes it easy to email Murph to start.",
+        details:
+          "Organizers can preview setup, scoring, private member support, and launch details without a spreadsheet. The page stays public, and the email address remains visible if a mail app cannot open.",
+        relevanceTags: ["clubs", "groups", "challenges", "web"],
+        sourcePullRequests: [1098, 1105, 1115],
+        tryIt: {
+          href: "/clubs",
+          label: "Explore club challenges",
+        },
+      },
+      {
+        id: "group-chat-title-on-demand",
+        kind: "feature",
+        priority: 4,
+        title: "Murph can read the room name",
+        summary:
+          "When the current group title matters, Murph can now read it on demand and carry the exact name into a new-group setup instead of guessing.",
+        details:
+          "Missing, synthetic, or unavailable titles stay unnamed, and the title is treated as display text rather than an instruction.",
+        relevanceTags: ["groups", "assistant", "messaging", "setup"],
+        sourcePullRequests: [1088],
+      },
+      {
+        id: "telegram-imessage-contact-handoff",
+        kind: "feature",
+        priority: 4,
+        title: "Ask Telegram for your iMessage number",
+        summary:
+          "In a private Telegram chat, ask Murph for its iMessage number and it can return your existing assigned line or reserve one healthy line for the exact verified phone on your account.",
+        details:
+          "A success names the masked phone that should send the first iMessage. Email-only, mismatched-phone, or unavailable-capacity cases keep Telegram working and point to Settings when account proof needs attention.",
+        relevanceTags: ["telegram", "imessage", "messaging", "setup"],
+        sourcePullRequests: [1103],
+      },
+      {
+        id: "imessage-edits-become-corrections",
+        kind: "improvement",
+        priority: 5,
+        title: "Edited iMessages become real corrections",
+        summary:
+          "When you edit a message, Murph can use the corrected wording in the active or next turn instead of silently keeping the first version.",
+        details:
+          "If Murph already answered, it follows up only when the edit materially changes the answer or action. Typo-only edits stay quiet.",
+        relevanceTags: ["imessage", "assistant", "messaging", "reliability"],
+        sourcePullRequests: [1085],
+      },
+      {
+        id: "group-participant-changes-in-context",
+        kind: "improvement",
+        priority: 4,
+        title: "Group joins and leaves reach the next real turn",
+        summary:
+          "When someone is added to or removed from a supported iMessage group, Murph can carry that bounded context into the next ordinary message instead of losing the change or announcing it on its own.",
+        details:
+          "Duplicate events do not restage it, and optional contact labels remain advisory rather than identity.",
+        relevanceTags: ["groups", "assistant", "messaging", "context"],
+        sourcePullRequests: [1100],
+      },
+      {
+        id: "confident-image-generation-status",
+        kind: "improvement",
+        priority: 4,
+        title: "Image requests sound underway",
+        summary:
+          "After accepting a direct image request, Murph now says it is making the image and that the result should return separately, without an awkward success caveat.",
+        details:
+          "Simple requests may be described as taking about a minute. The existing background result and failure paths remain in charge.",
+        relevanceTags: ["images", "assistant", "messaging", "copy"],
+        sourcePullRequests: [1099],
+      },
+      {
+        id: "home-experiment-history-hierarchy",
+        kind: "improvement",
+        priority: 3,
+        title: "Experiment history leads with the result",
+        summary:
+          "Completed experiment cards on Home now give the lead result more space and tuck supporting results into a compact ledger, making history faster to scan without hiding any comparable result.",
+        relevanceTags: ["experiments", "home", "results", "design"],
+        sourcePullRequests: [1093],
+      },
+      {
+        id: "homepage-private-murph-first",
+        kind: "improvement",
+        priority: 3,
+        title: "The homepage starts with private Murph",
+        summary:
+          "The homepage now opens with one private health question and evidence-backed answer before showing group challenges, so Murph's one-to-one role is clear first.",
+        details:
+          "Reduced-motion visitors see the complete private exchange immediately, and the group story remains as the second act.",
+        relevanceTags: ["homepage", "assistant", "privacy", "design"],
+        sourcePullRequests: [1090],
+      },
+      {
+        id: "conflicting-contact-aliases-preserved",
+        kind: "improvement",
+        priority: 2,
+        title: "Conflicting contact names stay visible",
+        summary:
+          "When several shared contact cards use different safe names for the same phone, Murph can now keep up to four explicit alternatives instead of dropping the name entirely.",
+        details:
+          "The alternatives remain unverified display help and never become identity or membership authority.",
+        relevanceTags: ["contacts", "groups", "iphone", "privacy"],
+        sourcePullRequests: [1087],
+      },
+    ],
+  },
+  {
+    id: "2026-07-28",
+    publishedOn: "2026-07-28",
+    title: "A first text that goes somewhere",
+    summary:
+      "Eligible new people can start Murph from one iMessage, generated media stays on the private path, and group sharing, sponsorship, recovery, challenge setup, usage, and image requests all have cleaner ways through.",
+    items: [
+      {
+        id: "imessage-instant-start",
+        kind: "feature",
+        priority: 5,
+        title: "Start Murph with one iMessage",
+        summary:
+          "Eligible new people in supported launch markets can text Murph a normal question and receive the answer in the same thread while a full 14-day Pulse trial starts behind the scenes.",
+        details:
+          "The path is limited to direct iMessage and one verified line. Unsupported messages, unsafe admission, or enrollment trouble keep the existing signup-link fallback.",
+        relevanceTags: ["imessage", "onboarding", "pulse", "messaging"],
+        sourcePullRequests: [1030, 1079],
+      },
+      {
+        id: "current-sender-group-disclosure",
+        kind: "feature",
+        priority: 5,
+        title: "Tell the group about your own data, once",
+        summary:
+          "In an authenticated group, a participant can ask Murph to share a specific piece of their own private context with that exact room, without setting up a standing group permission.",
+        details:
+          "The request expires within ten minutes, runs through an isolated private read and disclosure review, and grants no future access.",
+        relevanceTags: ["groups", "privacy", "sharing", "assistant"],
+        sourcePullRequests: [1053],
+      },
+      {
+        id: "join-offer-private-continuation",
+        kind: "feature",
+        priority: 4,
+        title: "Like the join offer, then continue privately",
+        summary:
+          "An eligible nonmember who likes a group's ordinary join offer now gets one short private opener. Replying returns the phone-bound link for that same group.",
+        details:
+          "Nothing extra is announced in the room, and there is no automated follow-up sequence.",
+        relevanceTags: ["groups", "onboarding", "reactions", "messaging"],
+        sourcePullRequests: [932],
+      },
+      {
+        id: "group-sponsorship-moments",
+        kind: "feature",
+        priority: 4,
+        title: "Sponsor the room and make it a bit",
+        summary:
+          "A current participant can sponsor about 100, 200, or 400 group messages for $5, $10, or $20, add an optional public alias or note, and turn a larger pack into a short-lived running bit.",
+        details:
+          "Verified payment grants ordinary group usage first. Murph then sends one short original sponsor song in that group; the optional creative moment never controls the credit.",
+        relevanceTags: ["groups", "billing", "usage", "music"],
+        sourcePullRequests: [1026, 1135],
+      },
+      {
+        id: "generated-media-private-path",
+        kind: "improvement",
+        priority: 5,
+        title: "Generated media takes the private path",
+        summary:
+          "Generated images and experiment result cards now stay in the member vault and travel through private message attachments instead of public asset links.",
+        details:
+          "Group-avatar updates use a short-lived opaque handoff only for the immediate import. Signed-in experiment participants keep the explicit browser Share or Download flow.",
+        relevanceTags: ["images", "experiments", "privacy", "messaging"],
+        sourcePullRequests: [966],
+      },
+      {
+        id: "saved-card-usage-topups",
+        kind: "improvement",
+        priority: 5,
+        title: "Saved cards make usage top-ups quicker",
+        summary:
+          "Eligible personal members and Family owners topping up their own seat can ask Murph for the right page, choose $5, $10, or $25, and use one reusable saved card when available.",
+        details:
+          "The amount is never preselected. Card authentication or collection falls back to secure checkout, and only verified payment adds usage.",
+        relevanceTags: ["billing", "usage", "family", "settings"],
+        sourcePullRequests: [1052, 1106],
+      },
+      {
+        id: "overall-ai-usage-bar",
+        kind: "improvement",
+        priority: 4,
+        title: "One AI usage bar shows everything available",
+        summary:
+          "Settings now combines unused monthly allowance and added or earned usage into one AI usage bar, so a top-up or referral visibly moves the same bar backward.",
+        details:
+          "The recurring reset date stays visible while the internal allowance and credit-source split stays private.",
+        relevanceTags: ["billing", "usage", "settings", "privacy"],
+        sourcePullRequests: [1047],
+      },
+      {
+        id: "group-access-recovery-stays-private",
+        kind: "improvement",
+        priority: 4,
+        title: "Group access recovery stays private",
+        summary:
+          "If a recognized member cannot activate Murph in a group because setup, billing, or a trial needs attention, Murph now sends the recovery step privately when a safe direct route exists.",
+        details:
+          "The room never sees account state. Unknown or unsafe cases stay silent or get account-neutral group guidance.",
+        relevanceTags: ["groups", "access", "billing", "privacy"],
+        sourcePullRequests: [1043],
+      },
+      {
+        id: "group-humans-get-first-refusal",
+        kind: "improvement",
+        priority: 4,
+        title: "People get first refusal in the group",
+        summary:
+          "Murph now gives friends the floor when a message is a personal artifact, shared memory, relationship question, or human-to-human beat, even when it ends with a question mark.",
+        details:
+          "A direct ask to Murph still gets a brief answer. If Murph lacks authority to answer a personal fact, it says so plainly instead of guessing or turning the correction into a bit.",
+        relevanceTags: ["groups", "assistant", "messaging", "privacy"],
+        sourcePullRequests: [1060, 1080],
+      },
+      {
+        id: "room-native-group-challenges",
+        kind: "improvement",
+        priority: 4,
+        title: "Group challenges start with the room",
+        summary:
+          "A loose challenge idea now starts from the group's existing energy and habits instead of a generic intake or an unrequested exercise program.",
+        details:
+          "Concrete games can start immediately, human-owned stakes come first, and photos or cast material stay optional.",
+        relevanceTags: ["groups", "challenges", "assistant", "setup"],
+        sourcePullRequests: [1062],
+      },
+      {
+        id: "supportive-proactive-health-outreach",
+        kind: "improvement",
+        priority: 4,
+        title: "Health outreach helps without grading",
+        summary:
+          "Weekly and monthly health outreach now favors verified progress, meaningful context, and useful questions over step-score judgment, tracking guilt, or generic nudges.",
+        details:
+          "Silence is the default when evidence or goal relevance is weak. Zone 2 experiments can also count qualifying walking, cycling, rowing, and elliptical sessions.",
+        relevanceTags: ["assistant", "insights", "experiments", "activity"],
+        sourcePullRequests: [1055],
+      },
+      {
+        id: "image-requests-stay-one-request",
+        kind: "improvement",
+        priority: 3,
+        title: "Slow image requests stay one request",
+        summary:
+          "If you ask where an image is, Murph now reports whether the original is still generating or queued instead of starting a duplicate.",
+        details:
+          "After delivery, later turns also remember that the prior reply included an image, so Murph does not contradict what arrived.",
+        relevanceTags: ["images", "assistant", "messaging", "reliability"],
+        sourcePullRequests: [1065, 1078],
+      },
+      {
+        id: "named-voice-memo-overrides",
+        kind: "improvement",
+        priority: 3,
+        title: "One-off voice requests use the voice you named",
+        summary:
+          "Ask for a named Murph voice for one voice memo and Murph now resolves that voice correctly, including a save-and-demo in the same turn.",
+        details:
+          "A one-off override does not change your saved voice unless you ask to save it.",
+        relevanceTags: ["voice", "assistant", "personalization", "messaging"],
+        sourcePullRequests: [1054],
+      },
+    ],
+  },
+  {
     id: "2026-07-27",
     publishedOn: "2026-07-27",
     title: "Reminders on your time, not ours",
@@ -232,7 +757,7 @@ const RAW_CHANGELOG_EDITIONS = [
         details:
           "Stale billing or access events cannot quietly restore a deleted member while cleanup is still draining.",
         relevanceTags: ["privacy", "account", "deletion", "reliability"],
-        sourcePullRequests: [974],
+        sourcePullRequests: [974, 1160],
       },
       {
         id: "destructive-requests-check-targets",

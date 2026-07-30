@@ -1,15 +1,22 @@
 # Hosted Usage Top-Ups
 
 Status: Implemented personal, Family-member, and hosted-group sponsorship
-Last verified: 2026-07-27
+Last verified: 2026-07-29
 
 ## Decision
 
 Use a one-time Stripe payment and a Murph-owned, append-only usage-credit ledger
 to decide who receives the usage and how it is consumed. Current-policy
-personal, Family, and group funding first reuse one canonical card attached to
-the authenticated payer's Stripe Customer and fall back to Checkout for card
-collection or authentication.
+personal and Family funding reuses the exact Murph billing Subscription's
+attached default card, or the attached Customer default that Subscription
+inherits. The billing Subscription must match the frozen purchase Customer;
+missing, stale, terminal, customer-mismatched, unattached, or legacy Source-only
+state falls back to Checkout, and unrelated Subscriptions never participate.
+Hosted-group funding does not require a Murph billing Subscription and may use
+the attached Customer default or sole attached card only when no legacy
+Customer default Source exists. Stripe's `allow_redisplay` setting
+controls whether Checkout may show a stored method again; it does not gate the
+payer's explicit use of the existing subscription card for a top-up.
 
 The personal and Family offer catalog is:
 
@@ -125,9 +132,9 @@ selection conflict and acknowledges the durable key match. The new draft is
 not applied. A `created` purchase past its checkout deadline is first closed by
 the existing expiry owner, so a lost response cannot pin the browser in a
 request-key conflict loop.
-If the payer has one canonical reusable card, Murph confirms that payment
+If the payer has one canonical attached card, Murph confirms that payment
 without a Checkout redirect. Otherwise Stripe Checkout collects or verifies
-the card and saves it for a later group contribution.
+the card.
 
 An active Family owner can use the same dialog from an exact active member row
 in Settings. The fixed pack is credited only to that selected member. A
@@ -159,9 +166,11 @@ fulfilled group purchase, Web idempotently:
    mailbox.
 
 The creative turn is isolated, projects only `generate_song`, applies the
-output-only native-capability deny set, retains the bound provider transport
-required by that application-owned tool, and uses the ordinary delivery path.
-Its prompt tells the model to call that tool exactly once for one
+output-only native-capability deny set, and runs as a fresh ephemeral thread on
+the resident App Server. The application-owned song tool retains the existing
+provider and authority-free public transports needed for generation and its
+validated signed upload; neither becomes native Codex browsing. The turn uses
+the ordinary delivery path. Its prompt tells the model to call that tool exactly once for one
 5–15-second original sponsor song.
 Serious, urgent, medical, sensitive, or conflict-heavy recent context makes the
 song gentle and non-comedic. A creative provider failure terminally settles
@@ -227,6 +236,13 @@ remaining effective capacity. Buying credit can move that bar backward
 immediately. The presentation does not expose the internal dollar value of the
 plan allowance or the usage-credit balance.
 
+Settings may separately show a bounded history of immutable purchase grants
+with the original added amount, source, and date. That history does not read or
+display aggregate or per-grant remaining capacity; the combined AI usage bar
+remains the only current-capacity view. Present that history as compact flat
+rows after mission activity, with one short clarification that the amounts are
+added credit rather than the current balance.
+
 Purchased capacity must not be called cash, wallet funds, an account balance,
 or refundable dollars. Accounting stays in integer USD micros behind the
 web-owned projection.
@@ -252,6 +268,9 @@ The target composition is:
 - Description: **Choose a one-time credit amount for your account. We’ll use
   your saved card when available. Stripe will ask when card details or
   verification are needed.**
+- Group description: **Choose a one-time contribution to keep Murph talking for
+  everyone here.** Do not repeat saved-card or verification mechanics in the
+  group dialog.
 - Primary action after selection: **Add usage · $10**
 - Pending action: **Adding usage…**
 - Secondary action: **Cancel**
@@ -680,17 +699,27 @@ funding route share this sequence:
     configured Stripe Price, and verify its live/test mode, active state,
     one-time per-unit shape, currency, exact amount, and absence of custom,
     transformed, or multi-currency amount semantics.
-11. For current-policy personal, Family, and group purchases, resolve one
-    canonical reusable card attached to the payer Customer. Conflicting
-    Customer/Subscription defaults or multiple cards without one canonical
-    choice skip this path.
+11. For current-policy personal and Family purchases, resolve the exact Murph
+    billing Subscription already owned by the target and require its Customer
+    to match the frozen purchase. Use that Subscription's attached explicit
+    default, or its inherited attached Customer default. Missing, stale,
+    terminal, customer-mismatched, unattached, or legacy Source-only
+    exact-subscription state skips this path, and unrelated Subscriptions never
+    participate. Group funding has no required billing Subscription and may
+    use the attached Customer default or require exactly one attached card only
+    when no legacy Customer default Source exists. Do not treat
+    `allow_redisplay` as a chargeability signal.
 12. When a canonical card exists, create one unconfirmed PaymentIntent with a
     purchase-derived idempotency key. Under the payer-row lock, re-read the
-    payer and purchase, bind only an active payer's still-`created` purchase to
-    that exact intent, and only then confirm it off session. If suspension,
-    deletion, or another terminal transition wins that lock, cancel the
-    unbound intent and never confirm it. A retry retrieves and continues only
-    an exact already-bound intent. A definitive authentication or card failure
+    payer and purchase. Personal and Family attempts also re-read the current
+    persisted billing Customer, Subscription, billing status, suspension state,
+    and last accepted Stripe-event time under that lock. Bind only an active
+    payer's still-`created` purchase whose complete selected billing authority
+    still matches to that exact intent, and only then confirm it off session. If
+    a billing change, suspension, deletion, or another terminal transition wins
+    that lock, cancel the unbound intent and never confirm it. A retry retrieves
+    and continues only an exact already-bound intent without retargeting after a
+    later billing change. A definitive authentication or card failure
     must reach verified `canceled` state before its binding is cleared and
     Checkout may begin. An ambiguous outcome remains `payment_pending` and
     cannot start a second payment. The client keeps the original amount and
@@ -714,6 +743,12 @@ The Stripe Session uses:
 - `setup_future_usage=off_session` for current-policy personal, Family, and
   group Checkout, so the collected card can be reused for a later explicit
   top-up;
+- `saved_payment_method_options.payment_method_save=enabled` for current-policy
+  Checkout, so the payer can let Stripe present the method again in later
+  Checkout flows;
+- `saved_payment_method_options.allow_redisplay_filters=["always"]`, so
+  historical subscription-limited methods are not silently exposed in a
+  separate top-up context;
 - a frozen `expires_at` 90 minutes after purchase creation;
 - Adaptive Pricing explicitly disabled so Dashboard defaults cannot change the
   frozen USD catalog contract;
@@ -744,9 +779,25 @@ Request policy `hosted-usage-credit-checkout-v1` remains reconstructible
 without card saving so an in-flight idempotent Checkout request never changes
 shape. Version two remains reconstructible with future-use saving and direct
 saved-card payment for group purchases only. New purchases freeze
-`hosted-usage-credit-checkout-v3`, which enables both behaviors for personal,
-Family, and group targets. Every retry and Stripe proof check uses the
-purchase's frozen policy version rather than the latest global version.
+version three with both behaviors for personal, Family, and group targets.
+New purchases freeze `hosted-usage-credit-checkout-v4`, which retains those
+targets, adds Stripe's explicit payment-method save choice to Checkout, and
+binds personal and Family card selection to the target's exact Murph billing
+Subscription. It uses that Subscription's explicit default or inherited
+Customer default regardless of whether Stripe may redisplay the card in
+Checkout. Group funding remains Customer-scoped because it has no required
+Murph billing Subscription. Legacy default Sources are unsupported for direct
+v4 reuse and stay in Checkout.
+Versions one through three retain their original request and selection shapes.
+Every retry and Stripe proof check uses the purchase's frozen policy version
+rather than the latest global version.
+
+After production persists its first v4 purchase, a v4-capable Web bundle is the
+minimum compatible consumer for status, cancellation, Stripe reconciliation,
+and account deletion involving retained v4 financial state. A safe rollback
+first disables new Add usage and group-funding intake, keeps v4-compatible
+consumers running, and forward-fixes. Rolling Web below that floor requires
+proof that no v4 purchase or retained v4 financial state exists.
 
 ## Stripe Catalog And Payment Configuration
 
@@ -880,9 +931,17 @@ expose debt in a group chat, or charge another participant.
 - Checkout creation is bounded per authenticated payer and request key; Stripe
   Radar and a reviewed operational velocity ceiling must be configured before
   production launch.
-- Saved-card group funding never accepts a browser-supplied PaymentMethod.
-  Murph selects only one canonical card attached to the authenticated payer's
-  verified Customer, persists the resulting PaymentIntent before confirmation,
+- Saved-card funding never accepts a browser-supplied PaymentMethod.
+  For personal and Family purchases, Murph selects only the exact billing
+  Subscription's attached explicit default or inherited Customer default,
+  after matching the Subscription owner to the verified Customer. Unrelated
+  Subscriptions never participate, and legacy default Sources stay in Checkout.
+  Group funding may use the attached Customer default or sole attached card
+  because it has no required billing Subscription, but it does not replace a
+  legacy Customer default Source. The exact personal or Family billing
+  reference is revalidated under the payer lock before bind; a mismatch cancels
+  the unbound intent before Checkout. `allow_redisplay` is used only for Stripe Checkout
+  presentation. Murph persists the resulting PaymentIntent before confirmation
   and never stores raw card details.
 - Payment records and health-sharing permissions remain separate. Buying usage
   never grants access to another person's data.
@@ -915,8 +974,8 @@ does not expose contributors, receipts, cash value, or internal USD-micro
 accounting.
 
 Choosing an amount has no payment effect. The explicit **Sponsor ~200 messages · $10** click
-authorizes only that one fixed contribution. Murph uses one unambiguous
-Customer or nonterminal Subscription default card, or the sole attached card.
+authorizes only that one fixed contribution. Murph uses the payer Customer's
+attached default card, or its sole attached card.
 If there is no canonical choice, Stripe Checkout collects a card. This is
 neither recurring billing nor auto-recharge.
 

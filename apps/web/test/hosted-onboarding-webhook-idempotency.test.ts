@@ -1037,9 +1037,11 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       handleHostedOnboardingLinqWebhook({
         rawBody: buildLinqProviderWebhookBody({
           data: {
+            changed_at: "2026-03-26T12:00:00.000Z",
+            new_reputation: "AT_RISK",
+            new_status: "FLAGGED",
             phone_number: "+15550000000",
             reason: "carrier review",
-            status: "flagged",
           },
           eventId: "evt_status_123",
           eventType: "phone_number.status_updated",
@@ -1056,12 +1058,19 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(prisma.hostedLinqLine.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          healthStatus: "unhealthy",
-          providerReason: "[redacted]",
-          providerStatus: "flagged",
+          providerServiceStatus: "FLAGGED",
         }),
       }),
     );
+    expect(prisma.hostedLinqLine.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          providerReputationStatus: "AT_RISK",
+        }),
+      }),
+    );
+    expect(prisma.hostedLinqLine.updateMany.mock.calls.at(-1)?.[0].data)
+      .not.toHaveProperty("healthStatus");
     expect(prisma.hostedLinqAlert.createMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -2126,6 +2135,7 @@ function createPrismaStub() {
     hostedThreadRoute: {
       findFirst: vi.fn().mockResolvedValue(null),
       findMany: vi.fn().mockResolvedValue([]),
+      groupBy: vi.fn().mockResolvedValue([]),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
   } as const;

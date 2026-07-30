@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Menu } from "lucide-react";
 
 import { LandingAuthActions, LandingAuthDialog } from "./auth-controls";
+import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import {
   Drawer,
   DrawerContent,
@@ -48,6 +49,7 @@ export function StickyNav({
   preloadAuthPanel?: boolean;
   splitUnauthenticatedAuth?: boolean;
 }) {
+  const auth = useAuth();
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
@@ -204,7 +206,11 @@ export function StickyNav({
                     className={`${MOBILE_MENU_ROW} text-left`}
                     onClick={() => {
                       setMenuOpen(false);
-                      setLoginOpen(true);
+                      if (auth.shared) {
+                        auth.openAuthDialog();
+                      } else {
+                        setLoginOpen(true);
+                      }
                     }}
                   >
                     Log in
@@ -215,7 +221,7 @@ export function StickyNav({
           </DrawerContent>
         </Drawer>
       </div>
-      {!authenticated && splitUnauthenticatedAuth ? (
+      {!auth.shared && !authenticated && splitUnauthenticatedAuth ? (
         <LandingAuthDialog open={loginOpen} onOpenChange={setLoginOpen} />
       ) : null}
     </nav>

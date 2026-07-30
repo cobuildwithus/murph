@@ -155,6 +155,17 @@ interface JunctionDirectSummaryImportResult {
   normalizationEvidence: readonly JunctionSummaryNormalizationEvidence[];
 }
 
+interface JunctionImportAdmissionSource {
+  sourceProviderSlug: string;
+  status: DeviceConnectionSourceStatus;
+}
+
+interface PreparedJunctionImportSnapshot {
+  connections: Array<Record<string, unknown>>;
+  sourceProviders: readonly JunctionProviderConnection[];
+  snapshots: Record<string, unknown[]>;
+}
+
 interface JunctionHistoricalBackfillCoverage {
   complete: boolean;
   pendingProviderSlugs: string[];
@@ -435,7 +446,7 @@ export function createJunctionDeviceSyncProvider(
         providerConfigKey: JUNCTION_PROVIDER_CONFIG_KEY,
       },
       setupPhase: "link_returned",
-      initialJobs: buildInitialJobs(context.now),
+      initialJobs: buildInitialJobs(context.now, context.sourceProviderSlug),
       nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
     };
   }
@@ -487,6 +498,39 @@ export function createJunctionDeviceSyncProvider(
         },
       });
     }
+  }
+
+  async function revokeSourceAccess(
+    account: DeviceSyncAccount,
+    sourceProviderSlug: string,
+  ): Promise<void> {
+    const userId = normalizeString(account.externalAccountId);
+    const targetProviderSlug = normalizeProviderSlug(sourceProviderSlug);
+    if (!userId || !targetProviderSlug) {
+      throw deviceSyncError({
+        code: "JUNCTION_SOURCE_DEREGISTER_INPUT_INVALID",
+        message: "Junction source cleanup requires a stored user and provider slug.",
+        retryable: false,
+        httpStatus: 409,
+      });
+    }
+
+    const providers = await client.listUserProviders(userId);
+    const targetIsRegistered = providers.some((provider) =>
+      mapJunctionSourceStatus(provider.status) !== "disconnected"
+      && (
+        normalizeProviderSlug(provider.origin.sourceProviderSlug)
+        ?? normalizeProviderSlug(provider.slug)
+      ) === targetProviderSlug
+    );
+    if (!targetIsRegistered) {
+      return;
+    }
+
+    await client.deregisterProvider({
+      providerSlug: targetProviderSlug,
+      userId,
+    });
   }
 
   function createScheduledJobs(
@@ -845,8 +889,23 @@ export function createJunctionDeviceSyncProvider(
     if (profileSummaryResult.records.length > 0) {
       summaries[JUNCTION_PROFILE_SUMMARY_RESOURCE] = profileSummaryResult.records;
     }
-    const importConnections = sanitizeJunctionImportConnections(sourceProviders);
-    const importSummaries = sanitizeJunctionImportSnapshots(summaries, sourceProviders);
+    const summaryHasFetchedRecords = hasJunctionSnapshotRecords(summaries);
+    const preparedSummaryImport =
+      job.kind === "backfill"
+      && !summaryHasFetchedRecords
+      && context.shouldYield?.() === true
+        ? prepareJunctionImportSnapshotForSources(
+            summaries,
+            sourceProviders,
+            context.account.sources ?? [],
+          )
+        : await prepareJunctionImportSnapshot(
+            context,
+            summaries,
+            sourceProviders,
+          );
+    const importConnections = preparedSummaryImport.connections;
+    const importSummaries = preparedSummaryImport.snapshots;
     const summaryNormalizationEvidence = classifyJunctionSummaryNormalizationEvidence({
       connections: importConnections,
       importedAt: summaryWindow.windowEnd,
@@ -857,7 +916,6 @@ export function createJunctionDeviceSyncProvider(
     const historicalSummaryHasRecords = hasJunctionHistoricalBackfillSummaryRecords(
       summaryNormalizationEvidence,
     );
-    const summaryHasFetchedRecords = hasJunctionSnapshotRecords(summaries);
     const baseTimeseriesWindowStart = job.kind === "backfill"
       ? maxIsoTimestamp(window.windowStart, subtractDays(window.windowEnd, timeseriesBackfillDays))
       : window.windowStart;
@@ -887,7 +945,7 @@ export function createJunctionDeviceSyncProvider(
       : null;
     const historicalSummaryCoverage = evaluateJunctionHistoricalBackfillCoverage(
       summaryNormalizationEvidence,
-      sourceProviders,
+      preparedSummaryImport.sourceProviders,
       summaryResources,
       providerFilter,
       historicalPullSnapshot,
@@ -980,7 +1038,7 @@ export function createJunctionDeviceSyncProvider(
       )
     ) {
       const pendingProviderSlugs = new Set(historicalSummaryCoverage.pendingProviderSlugs);
-      const hasCoveredProvider = sourceProviders.some((provider) => {
+      const hasCoveredProvider = preparedSummaryImport.sourceProviders.some((provider) => {
         const providerSlug = resolveJunctionHistoricalCoverageProviderSlug(
           provider.origin.sourceProviderSlug ?? provider.slug,
           providerFilter,
@@ -1523,6 +1581,15 @@ export function createJunctionDeviceSyncProvider(
     const resource = normalizeJunctionResourceName(job.payload.resource);
     const resourceCategory = normalizeString(job.payload.resourceCategory);
     const sourceProviderSlug = normalizeProviderSlug(job.payload.sourceProviderSlug);
+    if (
+      sourceProviderSlug
+      && !isJunctionSourceAdmittedForImport(
+        context.account.sources ?? [],
+        sourceProviderSlug,
+      )
+    ) {
+      return {};
+    }
     let listedSourceProviders: readonly JunctionProviderConnection[] | null = null;
     let projectedSourceProviders: readonly JunctionProviderConnection[] | null = null;
     const loadSourceProviders = async (): Promise<readonly JunctionProviderConnection[]> => {
@@ -1551,6 +1618,14 @@ export function createJunctionDeviceSyncProvider(
     if (resource) {
       const directInput = readJunctionDirectResourceJobInput(job, window);
       if (directInput) {
+        if (
+          !isJunctionSourceAdmittedForImport(
+            context.account.sources ?? [],
+            directInput.sourceProviderSlug,
+          )
+        ) {
+          return {};
+        }
         // This lookup uses the stable provider-config authority, not the
         // replaceable per-connection credential epoch. It resolves source
         // provenance only; the accepted inline payload remains the data
@@ -1703,6 +1778,11 @@ export function createJunctionDeviceSyncProvider(
     }
 
     const sourceProviders = await loadAndProjectSourceProviders();
+    const preparedImport = await prepareJunctionImportSnapshot(
+      context,
+      summaries,
+      sourceProviders,
+    );
     await context.importSnapshot({
       provider: "junction",
       accountId: buildJunctionImportAccountId(context.account.externalAccountId),
@@ -1710,8 +1790,8 @@ export function createJunctionDeviceSyncProvider(
       importedAt: context.now,
       windowStart: window.windowStart,
       windowEnd: window.windowEnd,
-      connections: sanitizeJunctionImportConnections(sourceProviders),
-      summaries: sanitizeJunctionImportSnapshots(summaries, sourceProviders),
+      connections: preparedImport.connections,
+      summaries: preparedImport.snapshots,
       timeseries: {},
     });
 
@@ -1941,6 +2021,7 @@ export function createJunctionDeviceSyncProvider(
       traceId: verified.messageId,
       occurredAt,
       resourceCategory: resource?.category ?? null,
+      sourceProviderSlug,
       // A historical-pull completion is a data-less notification, so accepting
       // its fetch job proves nothing arrived. Treating it as delivery would
       // refresh the arrival signal and hide the very stall this detects.
@@ -2151,17 +2232,24 @@ export function createJunctionDeviceSyncProvider(
 
     const dedupedTimeseries = dedupeJunctionTimeseriesSnapshotRecords(accumulatedTimeseries);
     if (executionWindowStart && executionWindowEnd && hasJunctionSnapshotRecords(dedupedTimeseries)) {
-      await context.importSnapshot({
-        provider: "junction",
-        accountId: buildJunctionImportAccountId(context.account.externalAccountId),
-        connectionId: context.account.id,
-        importedAt: executionWindowEnd,
-        windowStart: executionWindowStart,
-        windowEnd: executionWindowEnd,
-        connections: sanitizeJunctionImportConnections(sourceProviders),
-        summaries: {},
-        timeseries: sanitizeJunctionImportSnapshots(dedupedTimeseries, sourceProviders),
-      });
+      const preparedImport = await prepareJunctionImportSnapshot(
+        context,
+        dedupedTimeseries,
+        sourceProviders,
+      );
+      if (hasJunctionSnapshotRecords(preparedImport.snapshots)) {
+        await context.importSnapshot({
+          provider: "junction",
+          accountId: buildJunctionImportAccountId(context.account.externalAccountId),
+          connectionId: context.account.id,
+          importedAt: executionWindowEnd,
+          windowStart: executionWindowStart,
+          windowEnd: executionWindowEnd,
+          connections: preparedImport.connections,
+          summaries: {},
+          timeseries: preparedImport.snapshots,
+        });
+      }
     }
 
     return {
@@ -2197,17 +2285,24 @@ export function createJunctionDeviceSyncProvider(
         continue;
       }
 
-      await context.importSnapshot({
-        provider: "junction",
-        accountId: buildJunctionImportAccountId(context.account.externalAccountId),
-        connectionId: context.account.id,
-        importedAt: window.windowEnd,
-        windowStart: window.windowStart,
-        windowEnd: window.windowEnd,
-        connections: sanitizeJunctionImportConnections(sourceProviders),
-        summaries: {},
-        timeseries: sanitizeJunctionImportSnapshots(timeseries, sourceProviders),
-      });
+      const preparedImport = await prepareJunctionImportSnapshot(
+        context,
+        timeseries,
+        sourceProviders,
+      );
+      if (hasJunctionSnapshotRecords(preparedImport.snapshots)) {
+        await context.importSnapshot({
+          provider: "junction",
+          accountId: buildJunctionImportAccountId(context.account.externalAccountId),
+          connectionId: context.account.id,
+          importedAt: window.windowEnd,
+          windowStart: window.windowStart,
+          windowEnd: window.windowEnd,
+          connections: preparedImport.connections,
+          summaries: {},
+          timeseries: preparedImport.snapshots,
+        });
+      }
     }
     return {
       yieldedAt: null,
@@ -2224,10 +2319,16 @@ export function createJunctionDeviceSyncProvider(
     historicalEvidenceWindow: { windowEnd: string; windowStart: string },
   ): Promise<JunctionDirectSummaryImportResult> {
     const snapshots: Record<string, unknown[]> = { [resource]: [...records] };
-    const connections = sanitizeJunctionImportConnections(sourceProviders);
-    const summaries = sanitizeJunctionImportSnapshots(snapshots, sourceProviders, {
-      blockedStringValues: [context.account.externalAccountId],
-    });
+    const preparedImport = await prepareJunctionImportSnapshot(
+      context,
+      snapshots,
+      sourceProviders,
+      {
+        blockedStringValues: [context.account.externalAccountId],
+      },
+    );
+    const connections = preparedImport.connections;
+    const summaries = preparedImport.snapshots;
     const normalizationEvidence = classifyJunctionSummaryNormalizationEvidence({
       connections,
       importedAt: context.now,
@@ -2235,6 +2336,13 @@ export function createJunctionDeviceSyncProvider(
       windowEnd,
       windowStart,
     }, historicalEvidenceWindow);
+
+    if (!hasJunctionSnapshotRecords(summaries)) {
+      return {
+        durableDeliveryAccepted: false,
+        normalizationEvidence,
+      };
+    }
 
     const receipt = await context.importSnapshot({
       provider: "junction",
@@ -2421,17 +2529,26 @@ export function createJunctionDeviceSyncProvider(
     };
   }
 
-  function buildInitialJobs(now: string): DeviceSyncJobInput[] {
+  function buildInitialJobs(
+    now: string,
+    sourceProviderSlug?: string | null,
+  ): DeviceSyncJobInput[] {
+    const normalizedSourceProviderSlug = normalizeProviderSlug(sourceProviderSlug);
+    const payload = normalizedSourceProviderSlug
+      ? { sourceProviderSlug: normalizedSourceProviderSlug }
+      : undefined;
     return [
       buildWindowJob({
         kind: "backfill",
         now,
+        payload,
         windowStart: subtractDays(now, summaryBackfillDays),
         priority: 30,
       }),
       buildWindowJob({
         kind: "reconcile",
         now,
+        payload,
         windowStart: subtractDays(now, reconcileDays),
         priority: 40,
       }),
@@ -2449,6 +2566,7 @@ export function createJunctionDeviceSyncProvider(
       beginConnection,
       completeConnection,
       revokeAccess,
+      revokeSourceAccess,
     },
     sdkConnectionHandler: {
       ensureConnection: ensureSdkConnection,
@@ -3831,6 +3949,94 @@ function sanitizeJunctionImportConnections(
   }));
 }
 
+async function prepareJunctionImportSnapshot(
+  context: ProviderJobContext,
+  snapshots: Record<string, unknown[]>,
+  providers: readonly JunctionProviderConnection[],
+  options: JunctionImportSnapshotSanitizeOptions = {},
+): Promise<PreparedJunctionImportSnapshot> {
+  const currentSources: readonly JunctionImportAdmissionSource[] =
+    context.listConnectionSources
+      ? await context.listConnectionSources()
+      : context.account.sources ?? [];
+
+  return prepareJunctionImportSnapshotForSources(
+    snapshots,
+    providers,
+    currentSources,
+    options,
+  );
+}
+
+function prepareJunctionImportSnapshotForSources(
+  snapshots: Record<string, unknown[]>,
+  providers: readonly JunctionProviderConnection[],
+  currentSources: readonly JunctionImportAdmissionSource[],
+  options: JunctionImportSnapshotSanitizeOptions = {},
+): PreparedJunctionImportSnapshot {
+  const sourceProviders = providers.filter((provider) =>
+    isJunctionSourceAdmittedForImport(
+      currentSources,
+      provider.origin.sourceProviderSlug ?? provider.slug,
+    )
+  );
+
+  return {
+    connections: sanitizeJunctionImportConnections(sourceProviders),
+    sourceProviders,
+    snapshots: sanitizeJunctionImportSnapshots(
+      filterJunctionImportSnapshots(snapshots, providers, currentSources),
+      providers,
+      options,
+    ),
+  };
+}
+
+function filterJunctionImportSnapshots(
+  snapshots: Record<string, unknown[]>,
+  providers: readonly JunctionProviderConnection[],
+  sources: readonly JunctionImportAdmissionSource[],
+): Record<string, unknown[]> {
+  const sourceReferences = buildJunctionSourceReferenceMap(providers);
+  const hasPendingSourceAdmission = sources.some((source) => source.status === "disconnected");
+
+  return Object.fromEntries(
+    Object.entries(snapshots).map(([resource, records]) => [
+      resource,
+      records.filter((record) =>
+        isJunctionImportRecordAdmitted(
+          record,
+          sourceReferences,
+          sources,
+          hasPendingSourceAdmission,
+        )
+      ),
+    ]),
+  );
+}
+
+function isJunctionImportRecordAdmitted(
+  value: unknown,
+  sourceReferences: ReadonlyMap<string, Record<string, unknown>>,
+  sources: readonly JunctionImportAdmissionSource[],
+  hasPendingSourceAdmission: boolean,
+): boolean {
+  const record = readPlainObject(value);
+  if (!record) {
+    return true;
+  }
+
+  const fallback = readJunctionSourceReference(record, sourceReferences);
+  const sourceProviderSlug = normalizeProviderSlug(
+    resolveJunctionOrigin(record, fallback).sourceProviderSlug,
+  );
+  if (sourceProviderSlug) {
+    return isJunctionSourceAdmittedForImport(sources, sourceProviderSlug);
+  }
+
+  return !hasPendingSourceAdmission || !hasJunctionSourceReferenceIdentity(record);
+}
+
 function sanitizeJunctionImportSnapshots(
   snapshots: Record<string, unknown[]>,
   providers: readonly JunctionProviderConnection[],
@@ -4904,6 +5110,7 @@ function buildConnectHistoricalBackfillWindow(
 function buildWindowJob(input: {
   kind: "backfill" | "reconcile";
   now: string;
+  payload?: Record<string, unknown>;
   windowStart: string;
   priority: number;
 }): DeviceSyncJobInput {
@@ -4912,6 +5119,7 @@ function buildWindowJob(input: {
 
   return buildExactWindowJob({
     kind: input.kind,
+    payload: input.payload,
     windowStart,
     windowEnd,
     availableAt: input.now,
@@ -4927,6 +5135,14 @@ function buildExactWindowJob(input: {
   windowEnd: string;
   priority: number;
 }): DeviceSyncJobInput {
+  const sourceProviderSlug = normalizeString(input.payload?.sourceProviderSlug);
+  const dedupeIdentity = [
+    "junction",
+    input.kind,
+    input.windowStart,
+    input.windowEnd,
+    ...(sourceProviderSlug ? [sourceProviderSlug] : []),
+  ];
   return {
     kind: input.kind,
     payload: {
@@ -4936,7 +5152,7 @@ function buildExactWindowJob(input: {
     },
     priority: input.priority,
     ...(input.availableAt ? { availableAt: input.availableAt } : {}),
-    dedupeKey: sha256Text(JSON.stringify(["junction", input.kind, input.windowStart, input.windowEnd])),
+    dedupeKey: sha256Text(JSON.stringify(dedupeIdentity)),
   };
 }
 
@@ -6008,17 +6224,26 @@ async function projectJunctionSources(
     options.preserveHistoricalReconnectProviderSlugs === undefined
       ? null
       : new Set(options.preserveHistoricalReconnectProviderSlugs);
-  const existingSources = context.listConnectionSources
-    ? await context.listConnectionSources()
-    : [];
-  const existingByInstanceKey = new Map(
-    existingSources.map((source) => [source.sourceInstanceKey, source] as const),
-  );
-
   for (const source of projectJunctionSourcesByProviderSlug(
     context.account.id,
     providers,
   )) {
+    const existingSources = context.listConnectionSources
+      ? await context.listConnectionSources()
+      : [];
+    const admissionSources: readonly JunctionImportAdmissionSource[] =
+      context.listConnectionSources
+        ? existingSources
+        : context.account.sources ?? [];
+    if (!isJunctionSourceAdmittedForImport(admissionSources, source.sourceProviderSlug)) {
+      continue;
+    }
+    const existingByInstanceKey = new Map(
+      existingSources.map((existingSource) => [
+        existingSource.sourceInstanceKey,
+        existingSource,
+      ] as const),
+    );
     const existing = existingByInstanceKey.get(source.sourceInstanceKey) ?? existingSources.find(
       (candidate) =>
         normalizeProviderSlug(candidate.sourceProviderSlug) === source.sourceProviderSlug,
@@ -6042,7 +6267,9 @@ async function projectJunctionSources(
       sourceInstanceKey: existing?.sourceInstanceKey ?? source.sourceInstanceKey,
       sourceProviderSlug: source.sourceProviderSlug,
       displayName: existing?.displayName ?? null,
-      status: keepHistoricalReconnect ? "error" : source.status,
+      status: keepHistoricalReconnect
+        ? "error"
+        : source.status,
       resourceAvailabilitySummary: source.resourceAvailabilitySummary,
       // Only assert error fields when this projection saw an errored entry;
       // omitting the keys lets the store preserve existing detail while the
@@ -6058,6 +6285,22 @@ async function projectJunctionSources(
       lastSeenAt: context.now,
     });
   }
+}
+
+function isJunctionSourceAdmittedForImport(
+  sources: readonly JunctionImportAdmissionSource[],
+  sourceProviderSlug: string | null | undefined,
+): boolean {
+  const normalizedSourceProviderSlug = normalizeProviderSlug(sourceProviderSlug);
+  if (!normalizedSourceProviderSlug) {
+    return true;
+  }
+
+  const matchingSources = sources.filter((source) =>
+    normalizeProviderSlug(source.sourceProviderSlug) === normalizedSourceProviderSlug
+  );
+  return matchingSources.length === 0
+    || matchingSources.some((source) => source.status !== "disconnected");
 }
 
 interface ProjectedJunctionSource {

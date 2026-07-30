@@ -6,6 +6,7 @@ import {
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 
 import {
+  buildAssistantProviderMurphToolCall,
   buildAssistantProviderVaultCliCall,
   buildHostedLocalDeviceSyncProviderEnvClearances,
   buildHostLoopbackStubBaseUrl,
@@ -160,6 +161,46 @@ describe("startAssistantProviderStubServer", () => {
 
       expect(followupResponse.status).toBe(200);
       expect(followupBody).toContain("follow-up text reply");
+    } finally {
+      await stopHttpStubServer(server);
+    }
+  });
+
+  it("streams a scripted custom_tool_call item for Terra dynamic tools", async () => {
+    const server = await startAssistantProviderStubServer({
+      responseState: {
+        queuedResponses: [
+          buildAssistantProviderMurphToolCall("automation", {
+            action: "save",
+            title: "Morning reminder",
+          }),
+        ],
+      },
+    });
+
+    try {
+      const response = await fetch(
+        `${buildHostLoopbackStubBaseUrl(server, "assistant provider test")}/v1/responses`,
+        {
+          body: JSON.stringify({
+            input: [],
+            model: "gpt-5.6-terra",
+            stream: true,
+          }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+      );
+      const body = await response.text();
+
+      expect(response.status).toBe(200);
+      expect(body).toContain("response.completed");
+      expect(body).toContain('"type":"custom_tool_call"');
+      expect(body).toContain('"name":"exec"');
+      expect(body).toContain("tools.murph__automation");
+      expect(body).toContain("Morning reminder");
     } finally {
       await stopHttpStubServer(server);
     }
@@ -497,6 +538,9 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     expectAdvertisedMurphDynamicTools([
       buildResponsesRequest(baseToolNames, "additional-tools"),
     ]);
+    expectAdvertisedMurphDynamicTools([
+      buildResponsesRequest(baseToolNames, "code-mode"),
+    ]);
     expectAdvertisedMurphDynamicTools(
       [buildResponsesRequest(baseToolNamesWithoutProgress)],
       {
@@ -519,6 +563,23 @@ describe("expectAdvertisedMurphDynamicTools", () => {
         askGrokAvailable: true,
       },
     );
+  });
+});
+
+describe("buildAssistantProviderMurphToolCall", () => {
+  it("scripts Terra dynamic tools through canonical Codex code mode", () => {
+    const response = buildAssistantProviderMurphToolCall("automation", {
+      action: "save",
+      title: "Morning reminder",
+    });
+
+    expect(response).toMatchObject({
+      customToolCall: {
+        name: "exec",
+      },
+    });
+    expect(JSON.stringify(response)).toContain("tools.murph__automation");
+    expect(JSON.stringify(response)).toContain("Morning reminder");
   });
 });
 
@@ -612,6 +673,7 @@ describe("hosted local e2e scenario registration", () => {
     const codexContainerContinuity = listHostedLocalE2eScenarios().find((scenario) => scenario.name === "codex-container-continuity");
     const directR2PresignedPut = listHostedLocalE2eScenarios().find((scenario) => scenario.name === "direct-r2-presigned-put");
     const linqLostActiveOperation = listHostedLocalE2eScenarios().find((scenario) => scenario.name === "linq-lost-active-operation");
+    const linqGroupIosAppDownload = listHostedLocalE2eScenarios().find((scenario) => scenario.name === "linq-group-ios-app-download");
     const vaultPersistence = listHostedLocalE2eScenarios().find((scenario) => scenario.name === "vault-persistence");
 
     expect(containerContinuity).toMatchObject({
@@ -633,6 +695,11 @@ describe("hosted local e2e scenario registration", () => {
       manualOnly: true,
       name: "linq-lost-active-operation",
     });
+    expect(linqGroupIosAppDownload).toMatchObject({
+      file: "apps/cloudflare/test/hosted-local-linq-group-ios-app-download-e2e.test.ts",
+      manualOnly: true,
+      name: "linq-group-ios-app-download",
+    });
     expect(vaultPersistence).toMatchObject({
       file: "apps/cloudflare/test/hosted-local-vault-persistence-e2e.test.ts",
       manualOnly: true,
@@ -642,6 +709,7 @@ describe("hosted local e2e scenario registration", () => {
     expect(allScenarios.map((scenario) => scenario.name)).not.toContain("codex-container-continuity");
     expect(allScenarios.map((scenario) => scenario.name)).toContain("direct-r2-presigned-put");
     expect(allScenarios.map((scenario) => scenario.name)).not.toContain("linq-lost-active-operation");
+    expect(allScenarios.map((scenario) => scenario.name)).not.toContain("linq-group-ios-app-download");
     expect(allScenarios.map((scenario) => scenario.name)).not.toContain("vault-persistence");
     expect(resolveHostedLocalE2eScenarios("container-continuity")).toEqual([expect.objectContaining({
       file: "apps/cloudflare/test/hosted-local-container-continuity-e2e.test.ts",
@@ -662,6 +730,11 @@ describe("hosted local e2e scenario registration", () => {
       manualOnly: true,
       name: "linq-lost-active-operation",
     })]);
+    expect(resolveHostedLocalE2eScenarios("linq-group-ios-app-download")).toEqual([expect.objectContaining({
+      file: "apps/cloudflare/test/hosted-local-linq-group-ios-app-download-e2e.test.ts",
+      manualOnly: true,
+      name: "linq-group-ios-app-download",
+    })]);
     expect(resolveHostedLocalE2eScenarios("vault-persistence")).toEqual([expect.objectContaining({
       file: "apps/cloudflare/test/hosted-local-vault-persistence-e2e.test.ts",
       manualOnly: true,
@@ -672,7 +745,7 @@ describe("hosted local e2e scenario registration", () => {
 
 function buildResponsesRequest(
   namespacedToolNames: readonly string[],
-  toolLocation: "additional-tools" | "top-level" = "top-level",
+  toolLocation: "additional-tools" | "code-mode" | "top-level" = "top-level",
 ): HostedLocalAssistantProviderStubRequest {
   const tools = [
     {
@@ -695,6 +768,20 @@ function buildResponsesRequest(
                 type: "additional_tools",
               },
             ],
+          }
+        : toolLocation === "code-mode"
+        ? {
+            tools: [{
+              description: namespacedToolNames
+                .filter((name) =>
+                  name !== "murph.automation" && name !== "murph.group"
+                )
+                .map((name) => name.replace(/^murph\./u, "murph__"))
+                .concat("ALL_TOOLS")
+                .join("\n"),
+              name: "exec",
+              type: "custom",
+            }],
           }
         : { tools },
     ),

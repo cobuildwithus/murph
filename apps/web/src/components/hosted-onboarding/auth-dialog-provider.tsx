@@ -41,11 +41,15 @@ const SETTINGS_PATH = "/settings";
 interface AuthContextValue {
   authenticated: boolean;
   openAuthDialog: () => void;
+  prepareAuth: () => void;
+  shared: boolean;
 }
 
-const AuthContext = createContext<AuthContextValue>({
+export const AuthContext = createContext<AuthContextValue>({
   authenticated: false,
   openAuthDialog: () => {},
+  prepareAuth: () => {},
+  shared: false,
 });
 
 export function useAuth() {
@@ -95,7 +99,12 @@ export function AuthProvider({
   }, [authenticated]);
 
   const value = useMemo(
-    () => ({ authenticated, openAuthDialog }),
+    () => ({
+      authenticated,
+      openAuthDialog,
+      prepareAuth: () => {},
+      shared: false,
+    }),
     [authenticated, openAuthDialog],
   );
 

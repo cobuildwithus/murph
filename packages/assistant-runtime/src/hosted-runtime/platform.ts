@@ -77,6 +77,10 @@ import type {
   HostedWorkspaceSnapshotV2Ref,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 import type {
+  HostedRuntimeLinqDeliveryBlockCode,
+  HostedRuntimeLinqDeliveryPosture,
+} from "@murphai/hosted-execution/routes";
+import type {
   HostedPhoneCallStartRequest,
   HostedPhoneCallStartResponse,
 } from "@murphai/hosted-execution/phone-calls";
@@ -292,6 +296,8 @@ export interface HostedRuntimeLinqTargetOverride {
 
 export interface HostedRuntimeLinqRecentInboundEngagementResult {
   assistantAskFallbackRequired?: boolean | null;
+  deliveryBlockCode?: HostedRuntimeLinqDeliveryBlockCode | null;
+  deliveryPosture?: HostedRuntimeLinqDeliveryPosture | null;
   providerDispatchClaimed?: boolean | null;
   targetOverride?: HostedRuntimeLinqTargetOverride | null;
   threadIsDirect?: boolean | null;

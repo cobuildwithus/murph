@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { CircleAlertIcon, MessageCircle } from "lucide-react";
+import { CheckIcon, CircleAlertIcon, MessageCircle } from "lucide-react";
 
 import { MurphContactChannelRows } from "@/src/components/murph/murph-contact-channel-rows";
 import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
@@ -203,28 +203,61 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
       ) : null}
       <DialogContent
         ref={dialogContentRef}
-        className="max-h-[calc(100dvh-2rem)] gap-7 overflow-y-auto border border-border bg-popover p-6 sm:max-w-xl sm:p-8"
+        className={cn(
+          "max-h-[calc(100dvh-2rem)] gap-7 overflow-y-auto border border-border bg-popover p-6 sm:max-w-xl sm:p-8",
+          showGroupMessagesAction && "sm:max-w-2xl sm:gap-8 sm:p-10",
+        )}
         initialFocus={titleRef}
       >
-        <DialogHeader className="pr-10">
+        <DialogHeader className={cn("pr-10", showGroupMessagesAction && "gap-4")}>
+          {showGroupMessagesAction && statusContent ? (
+            <div
+              className="flex items-center gap-3"
+              role="status"
+              aria-live="polite"
+              aria-label={`${statusContent.title}. ${statusContent.message}`}
+            >
+              <span
+                className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground"
+                aria-hidden="true"
+              >
+                <CheckIcon className="size-5 stroke-[2.5]" />
+              </span>
+              <span className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-primary">
+                Nice one
+              </span>
+            </div>
+          ) : null}
           <DialogTitle
             ref={titleRef}
             tabIndex={-1}
-            className="text-3xl font-semibold leading-[1.1] tracking-tight outline-none"
+            className={cn(
+              "text-3xl font-semibold leading-[1.1] tracking-tight outline-none",
+              showGroupMessagesAction &&
+                "max-w-lg text-[2.5rem] leading-[1.02] tracking-[-0.035em] sm:text-5xl",
+            )}
           >
             {statusContent
               ? `${statusContent.title}${familyTarget && !purchase?.targetConflict ? ` for ${familyTarget}` : ""}`
               : props.offers.length === 0
                 ? "Usage credit unavailable"
                 : props.scope === "group"
-                  ? "How many messages do you want to sponsor?"
+                  ? "Sponsor more messages"
                   : familyTarget
                     ? `Choose an amount for ${familyTarget}`
                     : "Choose an amount"}
           </DialogTitle>
-          <DialogDescription className="max-w-md text-base leading-6">
+          <DialogDescription
+            className={cn(
+              "max-w-md text-base leading-6",
+              showGroupMessagesAction &&
+                "max-w-lg text-[1.0625rem] leading-7 text-muted-foreground",
+            )}
+          >
             {purchase
-              ? purchase.targetConflict
+              ? showGroupMessagesAction && statusContent
+                ? statusContent.message
+                : purchase.targetConflict
                 ? "Manage the unfinished checkout before starting one for this usage destination."
                 : purchase.selectionConflict
                   ? purchase.selectionConflict === "sponsorship"
@@ -238,7 +271,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
               : props.offers.length === 0
                 ? "There isn’t a usage-credit offer available for this account right now."
                 : props.scope === "group"
-                  ? "Choose a one-time contribution to keep Murph talking for everyone here. We’ll use your saved card when available and ask only when card details or verification are needed."
+                  ? "Choose a one-time contribution to keep Murph talking for everyone here."
                   : familyTarget
                     ? `Choose a one-time credit amount for ${familyTarget}. We’ll use your saved card when available. Stripe will ask when card details or verification are needed.`
                     : "Choose a one-time credit amount for your account. We’ll use your saved card when available. Stripe will ask when card details or verification are needed."}
@@ -247,18 +280,47 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
 
         {purchase && statusContent ? (
           <div className="flex flex-col gap-5">
-            <div
-              className="rounded-2xl border border-border bg-muted/30 p-5"
-              role="status"
-              aria-live="polite"
-            >
-              <p className="text-pretty text-sm leading-6 text-foreground">
-                {statusContent.message}
-              </p>
-            </div>
-            {props.renderPurchaseDetails}
+            {!showGroupMessagesAction ? (
+              <div
+                className="rounded-2xl border border-border bg-muted/30 p-5"
+                role="status"
+                aria-live="polite"
+              >
+                <p className="text-pretty text-sm leading-6 text-foreground">
+                  {statusContent.message}
+                </p>
+              </div>
+            ) : null}
+            {showGroupMessagesAction ? null : props.renderPurchaseDetails}
             <FieldError>{purchase.checkoutError}</FieldError>
             <div className="flex flex-col gap-2">
+              {showGroupMessagesAction ? (
+                <div className="grid gap-5 border-y border-border py-5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:py-6">
+                  <div className="space-y-1.5">
+                    <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                      Back to the chat
+                    </p>
+                    <p className="text-pretty text-sm leading-6 text-foreground">
+                      Messages will open. Choose this group to keep going.
+                    </p>
+                  </div>
+                  {/* Messages has no deep link into an existing group thread, so
+                  the group follow-up can only open the app itself. */}
+                  <a
+                    href="sms:"
+                    className={cn(
+                      buttonVariants({ size: "xl" }),
+                      "w-full sm:w-auto",
+                    )}
+                  >
+                    <MessageCircle
+                      className="size-4 shrink-0"
+                      aria-hidden="true"
+                    />
+                    Open Messages
+                  </a>
+                </div>
+              ) : null}
               {canResume ? (
                 <Button
                   type="button"
@@ -329,17 +391,6 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                   Check again
                 </Button>
               ) : null}
-              {showGroupMessagesAction ? (
-                // Messages has no deep link into an existing group thread, so
-                // the group follow-up can only open the app itself.
-                <a
-                  href="sms:"
-                  className={cn(buttonVariants({ size: "lg" }), "w-full")}
-                >
-                  <MessageCircle className="size-4 shrink-0" aria-hidden="true" />
-                  Open Messages
-                </a>
-              ) : null}
               {showContactAction ? (
                 contactOptions.length === 1 ? (
                   <MurphContactLink
@@ -366,10 +417,12 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                 type="button"
                 variant="ghost"
                 size="lg"
-                className="w-full"
+                className={cn(
+                  showGroupMessagesAction ? "mt-3 self-center px-8" : "w-full",
+                )}
                 onClick={() => controller.handleOpenChange(false)}
               >
-                Close
+                {showGroupMessagesAction ? "Done" : "Close"}
               </Button>
             </div>
           </div>

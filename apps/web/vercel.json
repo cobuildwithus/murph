@@ -21,6 +21,10 @@
       "schedule": "0 * * * *"
     },
     {
+      "path": "/api/internal/hosted-onboarding/linq/health/cron",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/internal/hosted-runtime/latency-alert/cron",
       "schedule": "*/5 * * * *"
     },

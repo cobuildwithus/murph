@@ -6,6 +6,7 @@ import {
 } from "@murphai/runtime-state/node/assistant-state-fs";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
+  type HostedExecutionConversationMessageChannel,
 } from "@murphai/hosted-execution";
 import type {
   AssistantUsageRecord,
@@ -318,11 +319,12 @@ export type HostedWorkspaceDurableCheckpointEffects =
 const HOSTED_PRE_ASSISTANT_SYSTEM_IMPORT_MAX_PAGES = 4;
 
 export interface HostedWorkspaceRunnerMailboxImportContext {
-  assistantAskCompletionKind?: "joined_group";
   assistantAskRequestTargetKind?: "joined_group";
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
   onConversationActivityObserved?: (() => void) | null;
-  onConversationInputStaged?: (() => void) | null;
+  onConversationInputStaged?: ((
+    channel: HostedExecutionConversationMessageChannel,
+  ) => void) | null;
   runtimeAttemptId?: string | null;
   signal?: AbortSignal | null;
 }
@@ -2061,13 +2063,8 @@ async function importHostedMailboxForWorkspaceRunnerUntracked(
   const signal = input.signal ?? input.importItemContext?.signal ?? input.input.signal ?? null;
   const initialAssistantAskRequestTargetKind =
     input.input.initialMailboxImportContext?.assistantAskRequestTargetKind;
-  const initialAssistantAskCompletionKind =
-    input.input.initialMailboxImportContext?.assistantAskCompletionKind;
   const importItemContext = stampHostedMailboxImportStartedLatencyMilestone(
     {
-      ...(initialAssistantAskCompletionKind
-        ? { assistantAskCompletionKind: initialAssistantAskCompletionKind }
-        : {}),
       ...(initialAssistantAskRequestTargetKind
         ? { assistantAskRequestTargetKind: initialAssistantAskRequestTargetKind }
         : {}),

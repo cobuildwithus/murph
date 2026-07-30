@@ -21,6 +21,7 @@ import {
   DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE,
   DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE,
   isEstablishedDeviceSyncConnection,
+  isDeviceSyncConnectionSetupPending,
   isDeviceSyncDisconnectInProgress,
   isHistoricalResetIncompleteDeviceSyncAccount,
   requiresHistoricalResetDeviceSyncSource,
@@ -414,7 +415,12 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
   const ownerId = await input.store.getConnectionOwnerId(input.account.id);
 
   if (!ownerId) {
-    return;
+    throw deviceSyncError({
+      code: "CONNECTION_ESTABLISHMENT_STALE",
+      message: "Device connection ownership changed during completion. Start the connection again.",
+      retryable: false,
+      httpStatus: 409,
+    });
   }
 
   const hint = {
@@ -448,7 +454,12 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
         || current.status !== input.account.status
         || current.connectedAt !== input.account.connectedAt
       ) {
-        return null;
+        throw deviceSyncError({
+          code: "CONNECTION_ESTABLISHMENT_STALE",
+          message: "Device connection changed during completion. Start the connection again.",
+          retryable: false,
+          httpStatus: 409,
+        });
       }
 
       const linkedSource = resolveHostedJunctionLinkedSource({
@@ -478,10 +489,19 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
         tx,
       });
 
-      return appendHostedMailboxEnvelopeTx({
+      const mailboxAppend = await appendHostedMailboxEnvelopeTx({
         envelope: wake,
         tx,
       });
+      if (mailboxAppend.dedupeConflict) {
+        throw deviceSyncError({
+          code: "CONNECTION_ESTABLISHMENT_WORK_CONFLICT",
+          message: "Device connection completion conflicted with existing initial work. Start the connection again.",
+          retryable: false,
+          httpStatus: 409,
+        });
+      }
+      return mailboxAppend;
     },
   );
 
@@ -564,15 +584,16 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     acceptedAt: input.now,
     acceptanceMode: input.webhook.acceptanceMode,
     connectionId: input.account.id,
+    dataSourceProviderSlug: normalizeJunctionProviderSlug(
+      input.webhook.dataSourceProviderSlug,
+    ),
     expectedConnectedAt: input.account.connectedAt,
     dirtyResources,
     eventType: input.webhook.eventType,
     occurredAt: input.webhook.occurredAt ?? input.now,
     provider: input.account.provider,
     resourceCategory,
-    sourceProviderSlug: normalizeJunctionProviderSlug(
-      input.webhook.dataSourceProviderSlug,
-    ),
+    sourceProviderSlug: input.webhook.sourceProviderSlug ?? null,
     store: input.store,
     claimToken: input.claimToken,
     traceId,
@@ -1014,6 +1035,7 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
   acceptedAt: string;
   acceptanceMode: DeviceSyncWebhookAcceptanceMode;
   connectionId: string;
+  dataSourceProviderSlug: string | null;
   dirtyResources: readonly HostedDeviceSyncDirtyResource[];
   eventType: string;
   expectedConnectedAt: string;
@@ -1043,6 +1065,32 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
         return {
           wakeMailboxItemId: null,
         };
+      }
+      if (isDeviceSyncConnectionSetupPending(current)) {
+        throw deviceSyncError({
+          code: "WEBHOOK_ACCOUNT_NOT_READY",
+          message: "Device sync setup changed before webhook work could be committed.",
+          retryable: true,
+          httpStatus: 503,
+        });
+      }
+      const sourceProviderSlug = normalizeNullableString(input.sourceProviderSlug);
+      if (sourceProviderSlug) {
+        const matchingSources = await input.store.listConnectionSources({
+          connectionId: input.connectionId,
+          sourceProviderSlug,
+        }, tx);
+        if (
+          matchingSources.length > 0
+          && !matchingSources.some((source) => source.status === "connected")
+        ) {
+          throw deviceSyncError({
+            code: "WEBHOOK_SOURCE_NOT_READY",
+            message: "Device source setup changed before webhook work could be committed.",
+            retryable: true,
+            httpStatus: 503,
+          });
+        }
       }
 
       // Level webhooks may be coalesced only after committed dirty state exists.
@@ -1122,7 +1170,7 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
         traceId: input.traceId,
         eventType: input.eventType,
         resourceCategory: input.resourceCategory ?? null,
-        sourceProviderSlug: input.sourceProviderSlug,
+        sourceProviderSlug: input.dataSourceProviderSlug,
         createdAt: input.acceptedAt,
         tx,
       });

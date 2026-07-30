@@ -80,7 +80,7 @@ describe("database health monitor", () => {
         serverPoolSaturationRatio: 0.2,
       }),
     ]);
-    expect(harness.linqRequests).toEqual([]);
+    expect(harness.primaryLinqRequests).toEqual([]);
   });
 
   it("admits only one collection while the durable run lease is held", async () => {
@@ -136,12 +136,12 @@ describe("database health monitor", () => {
       harness.runScheduledCheck(FIVE_MINUTES_MS + THIRTY_MINUTES_MS),
     ).resolves.toMatchObject({ outcome: "alert_sent" });
 
-    expect(harness.linqRequests).toHaveLength(2);
-    const first = await readLinqRequestBody(harness.linqRequests[0]);
-    const second = await readLinqRequestBody(harness.linqRequests[1]);
-    expect(new URL(harness.linqRequests[0]?.url ?? "").pathname)
+    expect(harness.primaryLinqRequests).toHaveLength(2);
+    const first = await readLinqRequestBody(harness.primaryLinqRequests[0]);
+    const second = await readLinqRequestBody(harness.primaryLinqRequests[1]);
+    expect(new URL(harness.primaryLinqRequests[0]?.url ?? "").pathname)
       .toBe("/api/partner/v3/messages");
-    expect(harness.linqRequests[0]?.headers.get("idempotency-key"))
+    expect(harness.primaryLinqRequests[0]?.headers.get("idempotency-key"))
       .toBe(first.message.idempotency_key);
     expect(first.message.parts[0]?.value).toContain("PgBouncer wait 8s");
     expect(first.message.parts[0]?.value).toContain("UTC");
@@ -151,6 +151,333 @@ describe("database health monitor", () => {
     expect(second.message.idempotency_key).not.toBe(first.message.idempotency_key);
     expect(second.message.parts[0]?.value).toContain("PgBouncer wait 12s");
     expect(second.message.parts[0]?.value).toContain("Checked 00:35 UTC");
+  });
+
+  it("fans one admitted alert out to two separate direct chats", async () => {
+    const harness = createMonitorHarness({
+      metricsBody: buildMetricsBody({
+        branchId: BRANCH_ID,
+        clientWaitSeconds: 8,
+      }),
+      secondaryLinqChatId: "chat_secondary_test",
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "alert_sent" });
+
+    expect(harness.allLinqRequests).toHaveLength(2);
+    const bodies = await Promise.all(
+      harness.allLinqRequests.map(readLinqRequestBody),
+    );
+    const primary = bodies.find((body) => body.to[0] === "+12025550123");
+    const secondary = bodies.find((body) => body.to[0] === "+12025550124");
+    expect(primary).toBeDefined();
+    expect(secondary).toBeDefined();
+    expect(secondary?.message.parts).toEqual(primary?.message.parts);
+    expect(primary?.message.idempotency_key).toBe("murph-db-1-1");
+    expect(secondary?.message.idempotency_key)
+      .toBe("murph-db-1-1-recipient-2");
+  });
+
+  it("keeps the cycle pending when distinct chats resolve to the same recipient", async () => {
+    const harness = createMonitorHarness({
+      metricsBody: buildMetricsBody({
+        branchId: BRANCH_ID,
+        clientWaitSeconds: 8,
+      }),
+      secondaryLinqRecipient: "+12025550123",
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "alert_failed" });
+    expect(harness.allLinqRequests).toHaveLength(1);
+    const pendingAlert = harness.monitor.readAlertState();
+    const initialPrimaryBody = await readLinqRequestBody(
+      harness.allLinqRequests[0],
+    );
+    expect(initialPrimaryBody.message.idempotency_key)
+      .toBe(pendingAlert.pendingAlertIdempotencyKey);
+    expect(initialPrimaryBody.message.parts[0]?.value)
+      .toBe(pendingAlert.pendingAlertMessage);
+
+    harness.setSecondaryLinqRecipient("+12025550124");
+    harness.restartMonitor();
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS + THIRTY_MINUTES_MS),
+    ).resolves.toMatchObject({ outcome: "alert_sent" });
+
+    expect(harness.allLinqRequests).toHaveLength(3);
+    const replayBodies = await Promise.all(
+      harness.allLinqRequests.slice(1).map(readLinqRequestBody),
+    );
+    expect(replayBodies.map((body) => body.message.idempotency_key))
+      .toEqual([
+        pendingAlert.pendingAlertIdempotencyKey,
+        `${pendingAlert.pendingAlertIdempotencyKey}-recipient-2`,
+      ]);
+    expect(
+      replayBodies.every(
+        (body) =>
+          body.message.parts[0]?.value === pendingAlert.pendingAlertMessage,
+      ),
+    ).toBe(true);
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      pendingAlertIdempotencyKey: null,
+      pendingAlertMessage: null,
+    });
+  });
+
+  it("requires primary recipient identity before secondary provider entry", async () => {
+    const harness = createMonitorHarness({
+      linqHealthResponses: [
+        () => new Response(null, { status: 503 }),
+        () => Response.json(createHealthyLinqPhoneNumbersBody()),
+      ],
+      metricsBody: buildMetricsBody({
+        branchId: BRANCH_ID,
+        clientWaitSeconds: 8,
+      }),
+      secondaryLinqRecipient: "+12025550123",
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "alert_failed" });
+    expect(harness.allLinqRequests).toEqual([]);
+    const pendingAlert = harness.monitor.readAlertState();
+
+    harness.restartMonitor();
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS + THIRTY_MINUTES_MS),
+    ).resolves.toMatchObject({ outcome: "alert_failed" });
+    expect(harness.allLinqRequests).toHaveLength(1);
+    const collisionPrimaryBody = await readLinqRequestBody(
+      harness.allLinqRequests[0],
+    );
+    expect(collisionPrimaryBody.message.idempotency_key)
+      .toBe(pendingAlert.pendingAlertIdempotencyKey);
+    expect(collisionPrimaryBody.message.parts[0]?.value)
+      .toBe(pendingAlert.pendingAlertMessage);
+
+    harness.setSecondaryLinqRecipient("+12025550124");
+    harness.restartMonitor();
+    await expect(
+      harness.runScheduledCheck(
+        FIVE_MINUTES_MS + THIRTY_MINUTES_MS * 2,
+      ),
+    ).resolves.toMatchObject({ outcome: "alert_sent" });
+
+    expect(harness.allLinqRequests).toHaveLength(3);
+    const recoveryBodies = await Promise.all(
+      harness.allLinqRequests.slice(1).map(readLinqRequestBody),
+    );
+    expect(recoveryBodies.map((body) => body.message.idempotency_key))
+      .toEqual([
+        pendingAlert.pendingAlertIdempotencyKey,
+        `${pendingAlert.pendingAlertIdempotencyKey}-recipient-2`,
+      ]);
+    expect(
+      recoveryBodies.every(
+        (body) =>
+          body.message.parts[0]?.value === pendingAlert.pendingAlertMessage,
+      ),
+    ).toBe(true);
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      pendingAlertIdempotencyKey: null,
+      pendingAlertMessage: null,
+    });
+  });
+
+  it("retries a partially failed fan-out only after the global fence", async () => {
+    const harness = createMonitorHarness({
+      linqResponses: [
+        () => new Response(null, { status: 202 }),
+        () => new Response(null, { status: 202 }),
+      ],
+      secondaryLinqResponses: [
+        () => new Response(null, { status: 503 }),
+        () => new Response(null, { status: 202 }),
+      ],
+      metricsBody: buildMetricsBody({
+        branchId: BRANCH_ID,
+        clientWaitSeconds: 8,
+      }),
+      secondaryLinqChatId: "chat_secondary_test",
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "alert_failed" });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 2),
+    ).resolves.toMatchObject({ outcome: "alert_deferred" });
+    expect(harness.allLinqRequests).toHaveLength(2);
+
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS + THIRTY_MINUTES_MS),
+    ).resolves.toMatchObject({ outcome: "alert_sent" });
+    expect(harness.allLinqRequests).toHaveLength(4);
+
+    const bodies = await Promise.all(
+      harness.allLinqRequests.map(readLinqRequestBody),
+    );
+    const primaryBodies = bodies.filter(
+      (body) => body.to[0] === "+12025550123",
+    );
+    const secondaryBodies = bodies.filter(
+      (body) => body.to[0] === "+12025550124",
+    );
+    expect(primaryBodies).toHaveLength(2);
+    expect(secondaryBodies).toHaveLength(2);
+    expect(primaryBodies[1]).toEqual(primaryBodies[0]);
+    expect(secondaryBodies[1]).toEqual(secondaryBodies[0]);
+  });
+
+  it("attempts a healthy destination when the other chat fails closed", async () => {
+    const harness = createMonitorHarness({
+      metricsBody: buildMetricsBody({
+        branchId: BRANCH_ID,
+        clientWaitSeconds: 8,
+      }),
+      secondaryLinqChatHealthStatus: "AT_RISK",
+      secondaryLinqChatId: "chat_secondary_test",
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "alert_failed" });
+    expect(harness.primaryLinqRequests).toHaveLength(1);
+    await expect(
+      readLinqRequestBody(harness.primaryLinqRequests[0]),
+    ).resolves.toMatchObject({ to: ["+12025550123"] });
+  });
+
+  it("attempts the healthy secondary when primary identity is known but its chat is unhealthy", async () => {
+    const harness = createMonitorHarness({
+      linqChatHealthStatus: "AT_RISK",
+      metricsBody: buildMetricsBody({
+        branchId: BRANCH_ID,
+        clientWaitSeconds: 8,
+      }),
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "alert_failed" });
+    expect(harness.allLinqRequests).toHaveLength(1);
+    await expect(
+      readLinqRequestBody(harness.allLinqRequests[0]),
+    ).resolves.toMatchObject({
+      message: {
+        idempotency_key: "murph-db-1-1-recipient-2",
+      },
+      to: ["+12025550124"],
+    });
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      pendingAlertIdempotencyKey: "murph-db-1-1",
+      pendingAlertMessage: expect.any(String),
+    });
+  });
+
+  it("attempts the healthy secondary when primary identity is known but its line health is unavailable", async () => {
+    const harness = createMonitorHarness({
+      linqHealthResponses: [
+        () => Response.json(createLinqChatResponseBody()),
+        () => new Response(null, { status: 503 }),
+      ],
+      metricsBody: buildMetricsBody({
+        branchId: BRANCH_ID,
+        clientWaitSeconds: 8,
+      }),
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "alert_failed" });
+    expect(harness.allLinqRequests).toHaveLength(1);
+    await expect(
+      readLinqRequestBody(harness.allLinqRequests[0]),
+    ).resolves.toMatchObject({
+      message: {
+        idempotency_key: "murph-db-1-1-recipient-2",
+      },
+      to: ["+12025550124"],
+    });
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      pendingAlertIdempotencyKey: "murph-db-1-1",
+      pendingAlertMessage: expect.any(String),
+    });
+  });
+
+  it("replays stable per-recipient keys after an unhealthy primary recovers", async () => {
+    const harness = createMonitorHarness({
+      linqHealthResponses: [
+        () => Response.json({
+          ...createLinqChatResponseBody(),
+          health_status: { status: "AT_RISK" },
+        }),
+        () => Response.json(createHealthyLinqPhoneNumbersBody()),
+      ],
+      metricsBody: buildMetricsBody({
+        branchId: BRANCH_ID,
+        clientWaitSeconds: 8,
+      }),
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "alert_failed" });
+    const pendingAlert = harness.monitor.readAlertState();
+    expect(harness.allLinqRequests).toHaveLength(1);
+    const initialSecondaryBody = await readLinqRequestBody(
+      harness.allLinqRequests[0],
+    );
+    expect(initialSecondaryBody.message.idempotency_key)
+      .toBe(`${pendingAlert.pendingAlertIdempotencyKey}-recipient-2`);
+    expect(initialSecondaryBody.message.parts[0]?.value)
+      .toBe(pendingAlert.pendingAlertMessage);
+
+    harness.restartMonitor();
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS + THIRTY_MINUTES_MS),
+    ).resolves.toMatchObject({ outcome: "alert_sent" });
+
+    expect(harness.allLinqRequests).toHaveLength(3);
+    const recoveryBodies = await Promise.all(
+      harness.allLinqRequests.slice(1).map(readLinqRequestBody),
+    );
+    expect(recoveryBodies.map((body) => body.message.idempotency_key))
+      .toEqual([
+        pendingAlert.pendingAlertIdempotencyKey,
+        `${pendingAlert.pendingAlertIdempotencyKey}-recipient-2`,
+      ]);
+    expect(recoveryBodies[1]).toEqual(initialSecondaryBody);
+    expect(
+      recoveryBodies.every(
+        (body) =>
+          body.message.parts[0]?.value === pendingAlert.pendingAlertMessage,
+      ),
+    ).toBe(true);
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      pendingAlertIdempotencyKey: null,
+      pendingAlertMessage: null,
+    });
+  });
+
+  it("fails closed when the secondary direct chat is missing", () => {
+    expect(() =>
+      createMonitorHarness({ omitSecondaryLinqChatId: true })
+    ).toThrowError(
+      "HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID is required.",
+    );
+  });
+
+  it("fails closed when the secondary direct chat is blank", () => {
+    expect(() =>
+      createMonitorHarness({ secondaryLinqChatId: "   " })
+    ).toThrowError(
+      "HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID is required.",
+    );
+  });
+
+  it("rejects duplicate direct-chat configuration", () => {
+    expect(() =>
+      createMonitorHarness({ secondaryLinqChatId: "chat_test" })
+    ).toThrowError("Database health alert chat IDs must be distinct.");
   });
 
   it("does not send a fenced gauge recurrence after recovery", async () => {
@@ -181,7 +508,7 @@ describe("database health monitor", () => {
       harness.runScheduledCheck(FIVE_MINUTES_MS + THIRTY_MINUTES_MS),
     ).resolves.toMatchObject({ outcome: "healthy" });
 
-    expect(harness.linqRequests).toHaveLength(1);
+    expect(harness.primaryLinqRequests).toHaveLength(1);
   });
 
   it("keeps the 30-minute attempt fence across recovery and a new incident", async () => {
@@ -210,7 +537,7 @@ describe("database health monitor", () => {
       harness.runScheduledCheck(FIVE_MINUTES_MS + THIRTY_MINUTES_MS),
     ).resolves.toMatchObject({ outcome: "alert_sent" });
 
-    expect(harness.linqRequests).toHaveLength(2);
+    expect(harness.primaryLinqRequests).toHaveLength(2);
   });
 
   it("paces provider attempts by wall time when cron delivery is delayed", async () => {
@@ -231,9 +558,9 @@ describe("database health monitor", () => {
       ),
     ).resolves.toMatchObject({ outcome: "alert_deferred" });
 
-    expect(harness.linqRequests).toHaveLength(1);
+    expect(harness.primaryLinqRequests).toHaveLength(1);
     expect(
-      (await readLinqRequestBody(harness.linqRequests[0])).message.parts[0]?.value,
+      (await readLinqRequestBody(harness.primaryLinqRequests[0])).message.parts[0]?.value,
     ).toContain("Checked 00:45 UTC");
   });
 
@@ -251,8 +578,12 @@ describe("database health monitor", () => {
       await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
         .toMatchObject({ outcome: "alert_failed" });
 
-      expect(harness.linqHealthRequests).toHaveLength(2);
-      expect(harness.linqRequests).toEqual([]);
+      expect(harness.primaryLinqHealthRequests).toHaveLength(2);
+      expect(harness.primaryLinqRequests).toEqual([]);
+      expect(harness.allLinqRequests).toHaveLength(1);
+      await expect(
+        readLinqRequestBody(harness.allLinqRequests[0]),
+      ).resolves.toMatchObject({ to: ["+12025550124"] });
     },
   );
 
@@ -270,8 +601,12 @@ describe("database health monitor", () => {
       await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
         .toMatchObject({ outcome: "alert_failed" });
 
-      expect(harness.linqHealthRequests).toHaveLength(2);
-      expect(harness.linqRequests).toEqual([]);
+      expect(harness.primaryLinqHealthRequests).toHaveLength(2);
+      expect(harness.primaryLinqRequests).toEqual([]);
+      expect(harness.allLinqRequests).toHaveLength(1);
+      await expect(
+        readLinqRequestBody(harness.allLinqRequests[0]),
+      ).resolves.toMatchObject({ to: ["+12025550124"] });
     },
   );
 
@@ -316,7 +651,7 @@ describe("database health monitor", () => {
 
       await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
         .toMatchObject({ outcome: "alert_sent" });
-      expect(harness.linqRequests).toHaveLength(1);
+      expect(harness.primaryLinqRequests).toHaveLength(1);
     },
   );
 
@@ -377,7 +712,11 @@ describe("database health monitor", () => {
 
       await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
         .toMatchObject({ outcome: "alert_failed" });
-      expect(harness.linqRequests).toEqual([]);
+      expect(harness.primaryLinqRequests).toEqual([]);
+      expect(harness.allLinqRequests).toHaveLength(1);
+      await expect(
+        readLinqRequestBody(harness.allLinqRequests[0]),
+      ).resolves.toMatchObject({ to: ["+12025550124"] });
     },
   );
 
@@ -395,7 +734,8 @@ describe("database health monitor", () => {
     await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
       .toMatchObject({ outcome: "alert_failed" });
 
-    expect(harness.linqRequests).toEqual([]);
+    expect(harness.primaryLinqRequests).toEqual([]);
+    expect(harness.allLinqRequests).toEqual([]);
   });
 
   it.each([
@@ -427,7 +767,8 @@ describe("database health monitor", () => {
         .toMatchObject({ outcome: "alert_failed" });
       const pendingAlert = harness.monitor.readAlertState();
 
-      expect(harness.linqRequests).toEqual([]);
+      expect(harness.primaryLinqRequests).toEqual([]);
+      expect(harness.allLinqRequests).toEqual([]);
       expect(pendingAlert).toMatchObject({
         incidentOpen: true,
         pendingAlertIdempotencyKey: expect.any(String),
@@ -438,8 +779,8 @@ describe("database health monitor", () => {
         harness.runScheduledCheck(FIVE_MINUTES_MS + THIRTY_MINUTES_MS),
       ).resolves.toMatchObject({ outcome: "alert_sent" });
 
-      expect(harness.linqRequests).toHaveLength(1);
-      const deliveredBody = await readLinqRequestBody(harness.linqRequests[0]);
+      expect(harness.primaryLinqRequests).toHaveLength(1);
+      const deliveredBody = await readLinqRequestBody(harness.primaryLinqRequests[0]);
       expect(deliveredBody.message.idempotency_key)
         .toBe(pendingAlert.pendingAlertIdempotencyKey);
       expect(deliveredBody.message.parts[0]?.value)
@@ -472,16 +813,16 @@ describe("database health monitor", () => {
     await expect(
       harness.runScheduledCheck(FIVE_MINUTES_MS + 10 * 60 * 1_000),
     ).resolves.toMatchObject({ outcome: "alert_deferred" });
-    expect(harness.linqRequests).toHaveLength(1);
+    expect(harness.primaryLinqRequests).toHaveLength(1);
     await expect(
       harness.runScheduledCheck(FIVE_MINUTES_MS + THIRTY_MINUTES_MS),
     ).resolves.toMatchObject({ outcome: "alert_sent" });
 
-    expect(harness.linqRequests).toHaveLength(2);
-    expect(await readLinqRequestBody(harness.linqRequests[1])).toEqual(
-      await readLinqRequestBody(harness.linqRequests[0]),
+    expect(harness.primaryLinqRequests).toHaveLength(2);
+    expect(await readLinqRequestBody(harness.primaryLinqRequests[1])).toEqual(
+      await readLinqRequestBody(harness.primaryLinqRequests[0]),
     );
-    const retryBody = await readLinqRequestBody(harness.linqRequests[1]);
+    const retryBody = await readLinqRequestBody(harness.primaryLinqRequests[1]);
     expect(retryBody.message.idempotency_key)
       .toBe(pendingAlert.pendingAlertIdempotencyKey);
     expect(retryBody.message.parts[0]?.value)
@@ -524,7 +865,7 @@ describe("database health monitor", () => {
       consecutiveScrapeFailures: 0,
       incidentOpen: false,
     });
-    expect(harness.linqRequests).toHaveLength(1);
+    expect(harness.primaryLinqRequests).toHaveLength(1);
   });
 
   it("retains an admitted page across failed and healthy samples until delivery", async () => {
@@ -579,9 +920,9 @@ describe("database health monitor", () => {
       pendingAlertIdempotencyKey: null,
       pendingAlertMessage: null,
     });
-    expect(harness.linqRequests).toHaveLength(2);
-    expect(await readLinqRequestBody(harness.linqRequests[1])).toEqual(
-      await readLinqRequestBody(harness.linqRequests[0]),
+    expect(harness.primaryLinqRequests).toHaveLength(2);
+    expect(await readLinqRequestBody(harness.primaryLinqRequests[1])).toEqual(
+      await readLinqRequestBody(harness.primaryLinqRequests[0]),
     );
   });
 
@@ -612,7 +953,7 @@ describe("database health monitor", () => {
     });
 
     expect(
-      (await readLinqRequestBody(harness.linqRequests[0])).message.parts[0]?.value,
+      (await readLinqRequestBody(harness.primaryLinqRequests[0])).message.parts[0]?.value,
     ).toContain("2 direct migration connection errors");
   });
 
@@ -659,8 +1000,8 @@ describe("database health monitor", () => {
       outcome: "alert_sent",
     });
 
-    expect(harness.linqRequests).toHaveLength(2);
-    const deliveredBody = await readLinqRequestBody(harness.linqRequests[1]);
+    expect(harness.primaryLinqRequests).toHaveLength(2);
+    const deliveredBody = await readLinqRequestBody(harness.primaryLinqRequests[1]);
     expect(deliveredBody.message.idempotency_key)
       .toBe(pendingAlert.pendingAlertIdempotencyKey);
     expect(deliveredBody.message.parts[0]?.value)
@@ -719,7 +1060,7 @@ describe("database health monitor", () => {
     ).resolves.toMatchObject({ outcome: "alert_sent" });
 
     const delayedMessage = (
-      await readLinqRequestBody(harness.linqRequests[1])
+      await readLinqRequestBody(harness.primaryLinqRequests[1])
     ).message.parts[0]?.value;
     expect(delayedMessage).toContain("2 direct migration connection errors");
     expect(delayedMessage).not.toContain("PgBouncer wait");
@@ -747,7 +1088,7 @@ describe("database health monitor", () => {
     ).resolves.toMatchObject({ outcome: "alert_sent" });
 
     const currentMessage = (
-      await readLinqRequestBody(harness.linqRequests[1])
+      await readLinqRequestBody(harness.primaryLinqRequests[1])
     ).message.parts[0]?.value;
     expect(currentMessage).toContain("PgBouncer wait 12s");
     expect(currentMessage).toContain("2 direct migration connection errors");
@@ -809,7 +1150,7 @@ describe("database health monitor", () => {
     await expect(
       harness.runScheduledCheck(FIVE_MINUTES_MS + THIRTY_MINUTES_MS),
     ).resolves.toMatchObject({ outcome: "alert_failed" });
-    expect(harness.linqRequests).toHaveLength(1);
+    expect(harness.primaryLinqRequests).toHaveLength(1);
     expect(harness.monitor.readAlertState()).toMatchObject({
       deferredDirectErrorCount: 2,
     });
@@ -845,9 +1186,9 @@ describe("database health monitor", () => {
       ),
     ).resolves.toMatchObject({ outcome: "alert_sent" });
 
-    expect(harness.linqRequests).toHaveLength(3);
-    const olderGaugePage = await readLinqRequestBody(harness.linqRequests[1]);
-    const directErrorPage = await readLinqRequestBody(harness.linqRequests[2]);
+    expect(harness.primaryLinqRequests).toHaveLength(3);
+    const olderGaugePage = await readLinqRequestBody(harness.primaryLinqRequests[1]);
+    const directErrorPage = await readLinqRequestBody(harness.primaryLinqRequests[2]);
     expect(olderGaugePage.message.parts[0]?.value)
       .toContain("PgBouncer wait 9s");
     expect(directErrorPage.message.parts[0]?.value)
@@ -933,7 +1274,7 @@ describe("database health monitor", () => {
     await expect(
       harness.runScheduledCheck(FIVE_MINUTES_MS * 14),
     ).resolves.toMatchObject({ outcome: "alert_failed" });
-    expect(harness.linqRequests).toHaveLength(2);
+    expect(harness.primaryLinqRequests).toHaveLength(2);
     expect(harness.monitor.readAlertState()).toMatchObject({
       deferredDirectErrorCheckedAtMs: null,
       deferredDirectErrorCount: 0,
@@ -958,8 +1299,8 @@ describe("database health monitor", () => {
       harness.runScheduledCheck(FIVE_MINUTES_MS * 20),
     ).resolves.toMatchObject({ outcome: "alert_sent" });
 
-    expect(harness.linqRequests).toHaveLength(3);
-    const directErrorPage = await readLinqRequestBody(harness.linqRequests[2]);
+    expect(harness.primaryLinqRequests).toHaveLength(3);
+    const directErrorPage = await readLinqRequestBody(harness.primaryLinqRequests[2]);
     expect(directErrorPage.message.parts[0]?.value)
       .toContain("2 direct migration connection errors");
     expect(directErrorPage.message.parts[0]?.value)
@@ -999,7 +1340,7 @@ describe("database health monitor", () => {
       harness.runScheduledCheck(FIVE_MINUTES_MS * 2),
     ).resolves.toMatchObject({ outcome: "alert_failed" });
     const pendingAlert = harness.monitor.readAlertState();
-    expect(harness.linqRequests).toEqual([]);
+    expect(harness.primaryLinqRequests).toEqual([]);
 
     harness.restartMonitor();
     await expect(
@@ -1015,8 +1356,8 @@ describe("database health monitor", () => {
       outcome: "alert_sent",
     });
 
-    expect(harness.linqRequests).toHaveLength(1);
-    const deliveredBody = await readLinqRequestBody(harness.linqRequests[0]);
+    expect(harness.primaryLinqRequests).toHaveLength(1);
+    const deliveredBody = await readLinqRequestBody(harness.primaryLinqRequests[0]);
     expect(deliveredBody.message.idempotency_key)
       .toBe(pendingAlert.pendingAlertIdempotencyKey);
     expect(deliveredBody.message.parts[0]?.value)
@@ -1060,7 +1401,7 @@ describe("database health monitor", () => {
       ],
       outcome: "alert_sent",
     });
-    expect(harness.linqRequests).toHaveLength(1);
+    expect(harness.primaryLinqRequests).toHaveLength(1);
   });
 
   it.each(POSTGRES_STATE_ALERT_CASES)(
@@ -1079,7 +1420,7 @@ describe("database health monitor", () => {
           outcome: "alert_sent",
         });
       expect(
-        (await readLinqRequestBody(harness.linqRequests[0]))
+        (await readLinqRequestBody(harness.primaryLinqRequests[0]))
           .message.parts[0]?.value,
       ).toContain(evidence);
     },
@@ -1096,7 +1437,7 @@ describe("database health monitor", () => {
       throw new Error("Expected discovery and metrics requests.");
     }
     expect(discoveryRequest.headers.get("authorization"))
-      .toBe("token service-token-id:service-token");
+      .toBe("service-token-id:service-token");
     expect(metricsRequest.headers.get("authorization")).toBeNull();
     expect(new URL(metricsRequest.url).searchParams.get("sig"))
       .toBe("signed-scrape-token");
@@ -1175,7 +1516,7 @@ describe("database health monitor", () => {
       });
 
     expect(harness.planetScaleRequests).toHaveLength(1);
-    expect(harness.linqRequests).toEqual([]);
+    expect(harness.primaryLinqRequests).toEqual([]);
   });
 
   it("prunes metric history older than 30 days", async () => {
@@ -1200,9 +1541,21 @@ function createMonitorHarness(input: {
   linqPhoneNumbersBody?: unknown;
   linqResponses?: Array<() => Response | Promise<Response>>;
   metricsBody?: string;
+  omitSecondaryLinqChatId?: boolean;
   readMetricsBody?: () => string;
+  secondaryLinqChatHealthStatus?:
+    | "AT_RISK"
+    | "CRITICAL"
+    | "HEALTHY"
+    | "OPTED_OUT";
+  secondaryLinqChatId?: string;
+  secondaryLinqRecipient?: string;
+  secondaryLinqResponses?: Array<() => Response | Promise<Response>>;
   serviceDiscoveryResponses?: Array<() => Response | Promise<Response>>;
 } = {}) {
+  const secondaryLinqChatId = input.omitSecondaryLinqChatId
+    ? undefined
+    : (input.secondaryLinqChatId ?? "chat_secondary_test");
   let failBeforeSuccessfulSamplePersist = false;
   const sql = createTestSqlStorage({
     beforeExec(query) {
@@ -1218,15 +1571,20 @@ function createMonitorHarness(input: {
       }
     },
   });
-  const linqHealthRequests: Request[] = [];
-  const linqRequests: Request[] = [];
+  const allLinqRequests: Request[] = [];
+  const primaryLinqHealthRequests: Request[] = [];
+  const primaryLinqRequests: Request[] = [];
   const planetScaleRequests: Request[] = [];
+  let linqPhoneNumbersRequestCount = 0;
   let nowMs = FIVE_MINUTES_MS;
   const linqHealthResponses = [...(input.linqHealthResponses ?? [])];
   const linqResponses = [...(input.linqResponses ?? [])];
+  const secondaryLinqResponses = [...(input.secondaryLinqResponses ?? [])];
   const serviceDiscoveryResponses = [
     ...(input.serviceDiscoveryResponses ?? []),
   ];
+  let secondaryLinqRecipient =
+    input.secondaryLinqRecipient ?? "+12025550124";
   const fetchImplementation = vi.fn(async (
     requestInput: RequestInfo | URL,
     init?: RequestInit,
@@ -1252,7 +1610,28 @@ function createMonitorHarness(input: {
     }
     if (url.hostname === "api.linqapp.com") {
       if (request.method === "GET") {
-        linqHealthRequests.push(request);
+        const isPhoneNumbersRequest =
+          url.pathname.endsWith("/phone_numbers");
+        if (isPhoneNumbersRequest) {
+          linqPhoneNumbersRequestCount += 1;
+        }
+        const isSecondaryRequest = isPhoneNumbersRequest
+          ? linqPhoneNumbersRequestCount % 2 === 0
+          : url.pathname.endsWith(`/chats/${secondaryLinqChatId}`);
+        if (isSecondaryRequest) {
+          if (isPhoneNumbersRequest) {
+            return Response.json(createHealthyLinqPhoneNumbersBody());
+          }
+          return Response.json({
+            ...createLinqChatResponseBody({
+              recipients: [secondaryLinqRecipient],
+            }),
+            health_status: {
+              status: input.secondaryLinqChatHealthStatus ?? "HEALTHY",
+            },
+          });
+        }
+        primaryLinqHealthRequests.push(request);
         const next = linqHealthResponses.shift();
         if (next) {
           return await next();
@@ -1272,7 +1651,13 @@ function createMonitorHarness(input: {
           },
         });
       }
-      linqRequests.push(request);
+      allLinqRequests.push(request);
+      const body = await readLinqRequestBody(request);
+      if (body.to[0] === "+12025550124") {
+        const next = secondaryLinqResponses.shift();
+        return next ? await next() : new Response(null, { status: 202 });
+      }
+      primaryLinqRequests.push(request);
       const next = linqResponses.shift();
       return next ? await next() : new Response(null, { status: 202 });
     }
@@ -1280,6 +1665,7 @@ function createMonitorHarness(input: {
   });
   const environment = {
     HOSTED_DATABASE_ALERT_LINQ_CHAT_ID: "chat_test",
+    HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID: secondaryLinqChatId,
     HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_ID: BRANCH_ID,
     HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_NAME: BRANCH_NAME,
     HOSTED_DATABASE_ALERT_PLANETSCALE_DATABASE_NAME: DATABASE_NAME,
@@ -1303,12 +1689,13 @@ function createMonitorHarness(input: {
   let monitor = createMonitor();
 
   return {
+    allLinqRequests,
     failBeforeNextSuccessfulSamplePersist() {
       failBeforeSuccessfulSamplePersist = true;
     },
     fetchImplementation,
-    linqHealthRequests,
-    linqRequests,
+    primaryLinqHealthRequests,
+    primaryLinqRequests,
     get monitor() {
       return monitor;
     },
@@ -1316,6 +1703,9 @@ function createMonitorHarness(input: {
     restartMonitor() {
       monitor = createMonitor();
       return monitor;
+    },
+    setSecondaryLinqRecipient(recipient: string) {
+      secondaryLinqRecipient = recipient;
     },
     runScheduledCheck(
       scheduledAtMs: number,

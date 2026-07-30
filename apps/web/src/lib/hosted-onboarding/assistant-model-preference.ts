@@ -5,16 +5,22 @@ import {
   type Prisma,
 } from "@prisma/client";
 import {
+  HOSTED_ASSISTANT_DEFAULT_PROVIDER,
   HOSTED_ASSISTANT_DEFAULT_REASONING_EFFORT,
   HOSTED_ASSISTANT_PRODUCT_MODELS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
   HOSTED_ASSISTANT_SOL_MODEL,
   HOSTED_ASSISTANT_TERRA_MODEL,
+  HOSTED_ASSISTANT_VENICE_PROVIDER,
+  isHostedAssistantProductModel,
   isHostedAssistantReasoningEffort,
   parseHostedAssistantModelOverride,
+  parseHostedAssistantProviderOverride,
   parseHostedAssistantReasoningEffortOverride,
   type HostedAssistantModelOverride,
   type HostedAssistantProductModel,
+  type HostedAssistantProvider,
+  type HostedAssistantProviderOverride,
   type HostedAssistantReasoningEffort,
   type HostedAssistantReasoningEffortOverride,
 } from "@murphai/hosted-execution/assistant-model";
@@ -30,6 +36,26 @@ import {
   lockHostedMemberRow,
   lockHostedMemberSponsoredAccessRows,
 } from "./shared";
+
+const HOSTED_VENICE_ENABLED_ENV = "HOSTED_VENICE_ENABLED";
+const HOSTED_VENICE_ENABLED_VALUES = new Set(["1", "enabled", "on", "true", "yes"]);
+
+export function isHostedVeniceAssistantEnabled(
+  source: Readonly<Record<string, string | undefined>> = process.env,
+): boolean {
+  const value = source[HOSTED_VENICE_ENABLED_ENV]?.trim().toLowerCase() ?? "";
+  return HOSTED_VENICE_ENABLED_VALUES.has(value);
+}
+
+export function resolveAvailableHostedAssistantProvider(
+  providerOverride: HostedAssistantProviderOverride | null | undefined,
+  source: Readonly<Record<string, string | undefined>> = process.env,
+): HostedAssistantProvider {
+  return providerOverride === HOSTED_ASSISTANT_VENICE_PROVIDER
+      && isHostedVeniceAssistantEnabled(source)
+    ? HOSTED_ASSISTANT_VENICE_PROVIDER
+    : HOSTED_ASSISTANT_DEFAULT_PROVIDER;
+}
 
 export const HOSTED_MEMBER_ASSISTANT_MODEL_SELECT = {
   accountGroupMemberships: {
@@ -48,6 +74,7 @@ export const HOSTED_MEMBER_ASSISTANT_MODEL_SELECT = {
     },
   },
   assistantModelPreference: true,
+  assistantProviderPreference: true,
   assistantReasoningEffortPreference: true,
   billingRef: {
     select: {
@@ -87,12 +114,15 @@ type HostedMemberAssistantModelTransactionClient = Pick<
 
 export interface HostedMemberAssistantModelResolution {
   availableModels: readonly HostedAssistantProductModel[];
+  availableProviders: readonly HostedAssistantProvider[];
   availableReasoningEfforts: readonly HostedAssistantReasoningEffort[];
   configurationAvailable: boolean;
   dormantSolPreference: boolean;
   hostedAssistantModelOverride?: HostedAssistantModelOverride;
+  hostedAssistantProviderOverride?: HostedAssistantProviderOverride;
   hostedAssistantReasoningEffortOverride?: HostedAssistantReasoningEffortOverride;
   model: HostedAssistantProductModel;
+  provider: HostedAssistantProvider;
   reasoningEffort: HostedAssistantReasoningEffort;
   solAvailable: boolean;
 }
@@ -157,13 +187,18 @@ export async function updateHostedMemberAssistantConfigurationTx(input: {
   memberId: string;
   model?: HostedAssistantProductModel;
   prisma: HostedMemberAssistantModelTransactionClient;
+  provider?: HostedAssistantProvider;
   reasoningEffort?: HostedAssistantReasoningEffort;
 }): Promise<HostedMemberAssistantModelUpdateResult> {
-  if (input.model === undefined && input.reasoningEffort === undefined) {
+  if (
+    input.model === undefined
+    && input.provider === undefined
+    && input.reasoningEffort === undefined
+  ) {
     throw hostedOnboardingError({
       code: "ASSISTANT_CONFIGURATION_INVALID_REQUEST",
       httpStatus: 400,
-      message: "Choose a model or reasoning effort to update.",
+      message: "Choose a provider, model, or reasoning effort to update.",
     });
   }
   await lockHostedMemberRow(input.prisma, input.memberId);
@@ -178,16 +213,34 @@ export async function updateHostedMemberAssistantConfigurationTx(input: {
     });
   }
 
+  const isThreadContainerMember = member.threadContainer !== null;
   const current = resolveHostedMemberAssistantModel(member);
   if (!current.configurationAvailable) {
     throw hostedOnboardingError({
-      code: member.threadContainer
-        ? "ASSISTANT_CONFIGURATION_PERSONAL_CHAT_REQUIRED"
-        : "HOSTED_ACCESS_REQUIRED",
+      code: "HOSTED_ACCESS_REQUIRED",
       httpStatus: 403,
-      message: member.threadContainer
-        ? "Assistant model controls are available in your personal Murph chat."
-        : "Active Murph access is required to change assistant settings.",
+      message: "Active Murph access is required to change assistant settings.",
+    });
+  }
+  if (
+    isThreadContainerMember
+    && (input.provider !== undefined || input.reasoningEffort !== undefined)
+  ) {
+    throw hostedOnboardingError({
+      code: "ASSISTANT_CONFIGURATION_PERSONAL_CHAT_REQUIRED",
+      httpStatus: 403,
+      message:
+        "Group rooms support model changes only. Provider and reasoning controls are available in your personal Murph chat.",
+    });
+  }
+  if (
+    input.provider === HOSTED_ASSISTANT_VENICE_PROVIDER
+    && !isHostedVeniceAssistantEnabled()
+  ) {
+    throw hostedOnboardingError({
+      code: "ASSISTANT_PROVIDER_VENICE_UNAVAILABLE",
+      httpStatus: 403,
+      message: "Venice is not available for this Murph deployment.",
     });
   }
   if (input.model === HOSTED_ASSISTANT_SOL_MODEL && !current.solAvailable) {
@@ -198,19 +251,28 @@ export async function updateHostedMemberAssistantConfigurationTx(input: {
     });
   }
 
+  const defaultModel = isThreadContainerMember
+    ? HOSTED_ASSISTANT_SOL_MODEL
+    : HOSTED_ASSISTANT_TERRA_MODEL;
   const nextModelPreference = input.model === undefined
     ? member.assistantModelPreference
-    : input.model === HOSTED_ASSISTANT_TERRA_MODEL
+    : input.model === defaultModel
       ? null
       : input.model;
+  const nextProviderPreference = input.provider === undefined
+    ? member.assistantProviderPreference
+    : input.provider === HOSTED_ASSISTANT_DEFAULT_PROVIDER
+      ? null
+      : input.provider;
   const nextReasoningEffortPreference = input.reasoningEffort === undefined
     ? member.assistantReasoningEffortPreference
     : input.reasoningEffort === HOSTED_ASSISTANT_DEFAULT_REASONING_EFFORT
       ? null
       : input.reasoningEffort;
   if (
-    member.assistantModelPreference === nextModelPreference &&
-    member.assistantReasoningEffortPreference === nextReasoningEffortPreference
+    member.assistantModelPreference === nextModelPreference
+    && member.assistantProviderPreference === nextProviderPreference
+    && member.assistantReasoningEffortPreference === nextReasoningEffortPreference
   ) {
     return {
       ...current,
@@ -224,6 +286,9 @@ export async function updateHostedMemberAssistantConfigurationTx(input: {
       ...(input.model === undefined
         ? {}
         : { assistantModelPreference: nextModelPreference }),
+      ...(input.provider === undefined
+        ? {}
+        : { assistantProviderPreference: nextProviderPreference }),
       ...(input.reasoningEffort === undefined
         ? {}
         : {
@@ -239,11 +304,15 @@ export async function updateHostedMemberAssistantConfigurationTx(input: {
   const updated = resolveHostedMemberAssistantModel({
     ...member,
     assistantModelPreference: nextModelPreference,
+    assistantProviderPreference: nextProviderPreference,
     assistantReasoningEffortPreference: nextReasoningEffortPreference,
   });
   return {
     ...updated,
-    effectiveModelUpdated: current.model !== updated.model,
+    effectiveModelUpdated:
+      current.model !== updated.model
+      || current.hostedAssistantProviderOverride
+        !== updated.hostedAssistantProviderOverride,
     updated: true,
   };
 }
@@ -266,20 +335,22 @@ export function resolveHostedMemberAssistantModel(
   if (!member) {
     return {
       availableModels: [],
+      availableProviders: [],
       availableReasoningEfforts: [],
       configurationAvailable: false,
       dormantSolPreference: false,
       model: HOSTED_ASSISTANT_TERRA_MODEL,
+      provider: HOSTED_ASSISTANT_DEFAULT_PROVIDER,
       reasoningEffort: HOSTED_ASSISTANT_DEFAULT_REASONING_EFFORT,
       solAvailable: false,
     };
   }
 
   const isThreadContainerMember = member.threadContainer !== null;
-  const configurationAvailable = isHostedPersonalAssistantConfigurationAvailable(
-    member,
-  );
-  const solAvailable = isHostedMemberSolModelEligible({
+  const configurationAvailable = isThreadContainerMember
+    ? member.suspendedAt === null
+    : isHostedPersonalAssistantConfigurationAvailable(member);
+  const solAvailable = isThreadContainerMember || isHostedMemberSolModelEligible({
     accountGroupMemberships: member.accountGroupMemberships,
     billingStatus: member.billingStatus,
     currentBillingPhase: member.billingRef?.currentBillingPhase ?? null,
@@ -287,23 +358,34 @@ export function resolveHostedMemberAssistantModel(
     isThreadContainerMember,
     suspendedAt: member.suspendedAt,
   });
-  const storedModelOverride = configurationAvailable
-    ? parseHostedAssistantModelOverride(member.assistantModelPreference)
+  const storedModelPreference = configurationAvailable
+    ? isThreadContainerMember
+      ? isHostedAssistantProductModel(member.assistantModelPreference)
+        ? member.assistantModelPreference
+        : null
+      : parseHostedAssistantModelOverride(member.assistantModelPreference)
+    : null;
+  const storedProviderOverride = configurationAvailable && !isThreadContainerMember
+    ? parseHostedAssistantProviderOverride(member.assistantProviderPreference)
     : null;
   const dormantSolPreference =
-    storedModelOverride === HOSTED_ASSISTANT_SOL_MODEL && !solAvailable;
+    !isThreadContainerMember
+    && storedModelPreference === HOSTED_ASSISTANT_SOL_MODEL
+    && !solAvailable;
   const model = isThreadContainerMember
-    ? HOSTED_ASSISTANT_SOL_MODEL
+    ? storedModelPreference ?? HOSTED_ASSISTANT_SOL_MODEL
     : dormantSolPreference
       ? HOSTED_ASSISTANT_TERRA_MODEL
-      : storedModelOverride ?? HOSTED_ASSISTANT_TERRA_MODEL;
+      : storedModelPreference ?? HOSTED_ASSISTANT_TERRA_MODEL;
   const storedReasoningEffort = configurationAvailable &&
+      !isThreadContainerMember &&
       isHostedAssistantReasoningEffort(member.assistantReasoningEffortPreference)
     ? member.assistantReasoningEffortPreference
     : HOSTED_ASSISTANT_DEFAULT_REASONING_EFFORT;
   const reasoningEffortOverride = parseHostedAssistantReasoningEffortOverride(
     storedReasoningEffort,
   );
+  const provider = resolveAvailableHostedAssistantProvider(storedProviderOverride);
 
   return {
     availableModels: configurationAvailable
@@ -311,18 +393,31 @@ export function resolveHostedMemberAssistantModel(
           (candidate) => candidate !== HOSTED_ASSISTANT_SOL_MODEL || solAvailable,
         )
       : [],
+    availableProviders: configurationAvailable
+      ? isThreadContainerMember
+        ? [HOSTED_ASSISTANT_DEFAULT_PROVIDER]
+        : isHostedVeniceAssistantEnabled()
+          ? [HOSTED_ASSISTANT_DEFAULT_PROVIDER, HOSTED_ASSISTANT_VENICE_PROVIDER]
+          : [HOSTED_ASSISTANT_DEFAULT_PROVIDER]
+      : [],
     availableReasoningEfforts: configurationAvailable
-      ? HOSTED_ASSISTANT_REASONING_EFFORTS
+      ? isThreadContainerMember
+        ? [HOSTED_ASSISTANT_DEFAULT_REASONING_EFFORT]
+        : HOSTED_ASSISTANT_REASONING_EFFORTS
       : [],
     configurationAvailable,
     dormantSolPreference,
     ...(model !== HOSTED_ASSISTANT_TERRA_MODEL
       ? { hostedAssistantModelOverride: model }
       : {}),
+    ...(storedProviderOverride
+      ? { hostedAssistantProviderOverride: storedProviderOverride }
+      : {}),
     ...(reasoningEffortOverride
       ? { hostedAssistantReasoningEffortOverride: reasoningEffortOverride }
       : {}),
     model,
+    provider,
     reasoningEffort: storedReasoningEffort,
     solAvailable,
   };

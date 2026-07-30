@@ -1,0 +1,29 @@
+datasource db {
+  provider = "postgresql"
+}
+
+model HostedRuntimeLog {
+  id                String   @id
+  subjectKey        String   @map("subject_key")
+  at                DateTime @db.Timestamptz(3)
+  level             String
+  component         String
+  phase             String
+  eventCode         String   @map("event_code")
+  attemptId         String?  @map("attempt_id")
+  leaseGeneration   BigInt?  @map("lease_generation")
+  workspaceVersion  BigInt?  @map("workspace_version")
+  checkpointVersion BigInt?  @map("checkpoint_version")
+  mailboxLane       String?  @map("mailbox_lane")
+  mailboxSeqStart   BigInt?  @map("mailbox_seq_start")
+  mailboxSeqEnd     BigInt?  @map("mailbox_seq_end")
+  outboxIntentRef   String?  @map("outbox_intent_ref")
+  errorCode         String?  @map("error_code")
+  redactedJson      Json?    @map("redacted_json")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([subjectKey, at(sort: Desc), id(sort: Desc)], map: "hosted_runtime_log_subject_recent_idx")
+  @@index([attemptId, eventCode, at(sort: Desc)], map: "hosted_runtime_log_attempt_event_at_idx")
+  @@index([at, id], map: "hosted_runtime_log_retention_idx")
+  @@map("hosted_runtime_log")
+}

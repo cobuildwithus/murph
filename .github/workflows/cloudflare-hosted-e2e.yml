@@ -116,7 +116,7 @@ jobs:
   # and reset their full-stack state between scenarios.
   hosted-scenarios:
     name: ${{ matrix.name }}
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.runner || 'ubuntu-24.04' }}
     timeout-minutes: ${{ matrix.timeoutMinutes || 25 }}
     needs: runner-bundle
     strategy:
@@ -124,6 +124,7 @@ jobs:
       matrix:
         include:
           - name: Codex media + provider egress E2E
+            runner: blacksmith-4vcpu-ubuntu-2404
             slug: codex-media-provider-egress
             scenarios: codex-image-media-delivery openai-egress-authority provider-egress-token-bridge warm-reuse-egress
           - name: Linq reminder + onboarding follow-up E2E
@@ -274,6 +275,7 @@ jobs:
           apps/web/test/hosted-onboarding-linq-participant-addition-concurrency.test.ts
           apps/web/test/prisma-database-retry-postgres.test.ts
           apps/web/test/hosted-linq-invite-deletion-contract-migration-postgres.test.ts
+          apps/web/test/hosted-linq-provider-health-contract-migration-postgres.test.ts
           apps/web/test/hosted-production-500-regressions-postgres.test.ts
           apps/web/test/hosted-usage-credit-postgres-concurrency.test.ts
 

@@ -38,6 +38,7 @@ import {
   emitHostedExecutionStructuredLog,
   readHostedExecutionSafeErrorName,
   summarizeHostedExecutionError,
+  type HostedExecutionConversationMessageChannel,
   type HostedExecutionLogPhase,
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
@@ -49,8 +50,17 @@ import {
   resolveAssistantDiagnosticsPolicy,
 } from "@murphai/assistant-engine";
 import {
+  prepareHostedCodexAssistantProcess,
+  type HostedCodexAssistantProcessPreparation,
+} from "@murphai/assistant-engine/assistant-runtime";
+import {
+  AssistantActiveTurnInputUnavailableError,
   hasCompleteAssistantAutoReplyDeliveryTerminalEvidence,
 } from "@murphai/assistant-engine/assistant-automation";
+import {
+  isHostedAssistantProvider,
+  type HostedAssistantProvider,
+} from "@murphai/hosted-execution/assistant-model";
 import {
   createHostedAssistantTurnEnvironment,
   normalizeHostedAssistantRuntimeConfig,
@@ -86,6 +96,9 @@ import {
   resolveHostedCurrentInputIdForAcceptedInputs,
   type HostedConversationActivityObservation,
 } from "./hosted-runtime/turn-input.ts";
+import {
+  readHostedAssistantExecutionDefaultTarget,
+} from "./hosted-runtime/context.ts";
 import type {
   HostedAssistantWorkspaceRuntimeJobResult,
   HostedAssistantWorkspaceRuntimeJobInput,
@@ -589,10 +602,11 @@ export interface HostedWorkspaceRuntimeJobOptions {
 }
 
 export interface HostedWorkspaceRuntimeJobImportContext {
-  assistantAskCompletionKind?: "joined_group";
   assistantAskRequestTargetKind?: "joined_group";
   onConversationActivityObserved?: (() => void) | null;
-  onConversationInputStaged?: (() => void) | null;
+  onConversationInputStaged?: ((
+    channel: HostedExecutionConversationMessageChannel,
+  ) => void) | null;
   recordMessagingReturnTarget?(
     target: HostedRuntimeDeviceSyncMessagingReturnTarget | null,
   ): void;
@@ -958,9 +972,26 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   let pauseDetachedAssistantAskBeforeWorkspaceBoundary = async (): Promise<void> => undefined;
   let resumeDetachedAssistantAskAfterWorkspaceBoundary = (): void => undefined;
   let closeDetachedAssistantAskBeforeWorkspaceRelease = async (): Promise<void> => undefined;
+  let codexProcessPreparationStart:
+    | Promise<HostedCodexAssistantProcessPreparation | null>
+    | null = null;
+  let startCodexProcessPreparationForConversation:
+    | ((channel: HostedExecutionConversationMessageChannel) => void)
+    | null = null;
+  const settleCodexProcessPreparation = async (): Promise<void> => {
+    startCodexProcessPreparationForConversation = null;
+    const started = codexProcessPreparationStart ?? Promise.resolve(null);
+    codexProcessPreparationStart ??= started;
+    const preparation = await started;
+    await preparation?.cancelPending();
+    if (codexProcessPreparationStart === started) {
+      codexProcessPreparationStart = Promise.resolve(null);
+    }
+  };
   let latestCheckpointSnapshotCleanForWarmReuse = false;
   const createAbortGuardedCheckpointSnapshot: HostedWorkspaceSnapshotCheckpointBuilder =
     async (snapshotInput, context) => {
+      await settleCodexProcessPreparation();
       await pauseDetachedAssistantAskBeforeWorkspaceBoundary();
       assertRuntimeNotAborted();
       const checkpointSignal = context?.signal
@@ -1073,9 +1104,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const createMailboxImportContext = (
       context: HostedWorkspaceRunnerMailboxImportContext | undefined,
     ): HostedWorkspaceRuntimeJobImportContext => ({
-      ...(context?.assistantAskCompletionKind
-        ? { assistantAskCompletionKind: context.assistantAskCompletionKind }
-        : {}),
       ...(context?.assistantAskRequestTargetKind
         ? { assistantAskRequestTargetKind: context.assistantAskRequestTargetKind }
         : {}),
@@ -1089,7 +1117,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       onConversationActivityObserved: () => {
         options.onConversationActivityObserved?.("observed");
       },
-      onConversationInputStaged: context?.onConversationInputStaged ?? null,
+      onConversationInputStaged:
+        context?.onConversationInputStaged
+        ?? startCodexProcessPreparationForConversation,
       runtimeAttemptId: input.request.attemptId,
       signal: context?.signal ?? runtimeAbortController.signal,
     });
@@ -1368,6 +1398,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       confirmedAssistantTarget;
     const assistantConfigurationToolPort =
       guardedRuntime.platform.assistantConfigurationToolPort ?? null;
+    let assistantProviderHandoffRequested = false;
     const invocationAssistantConfigurationToolPort: HostedRuntimePlatform[
       "assistantConfigurationToolPort"
     ] = assistantConfigurationToolPort
@@ -1477,6 +1508,48 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const initialMailboxImportPlan = resolveHostedInitialMailboxImportPlan({
       vaultRoot: restored.vaultRoot,
     });
+    if (
+      (input.request.processingMode ?? "default") === "default"
+      && !initialMailboxImportPlan.bootstrapRequired
+    ) {
+      startCodexProcessPreparationForConversation = (channel) => {
+        if (codexProcessPreparationStart) {
+          return;
+        }
+        if (channel !== "linq" && channel !== "telegram") {
+          codexProcessPreparationStart = Promise.resolve(null);
+          return;
+        }
+        codexProcessPreparationStart = (async () => {
+          try {
+            const target = await readHostedAssistantExecutionDefaultTarget({
+              homeDirectory: restored.operatorHomeRoot,
+              runtimeEnv: hostedCodexRuntime.runtimeEnv,
+            });
+            assertRuntimeNotAborted();
+            if (!target) {
+              return null;
+            }
+            const turnEnvironment = createHostedAssistantTurnEnvironment({
+              operatorHomeRoot: restored.operatorHomeRoot,
+              runtimeEnv: hostedCodexRuntime.runtimeEnv,
+              vaultRoot: restored.vaultRoot,
+            });
+            return await prepareHostedCodexAssistantProcess({
+              env: turnEnvironment.env,
+              signal: runtimeAbortController.signal,
+              target,
+              workingDirectory: restored.vaultRoot,
+            });
+          } catch {
+            // Process preparation is only a latency optimization. Foreground
+            // execution remains authoritative for config errors and startup.
+            return null;
+          }
+        })();
+      };
+    }
+    assertRuntimeNotAborted();
     const initialMailboxImportLanes =
       input.request.processingMode === "system_mailbox"
         ? (["system"] as const)
@@ -1748,6 +1821,45 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       return await returnInitialMailboxImportBeforeForeground();
     }
     const runtimeEnv = hostedCodexRuntime.runtimeEnv;
+    const invocationAssistantProvider = runtimeEnv.HOSTED_ASSISTANT_PROVIDER;
+    if (!isHostedAssistantProvider(invocationAssistantProvider)) {
+      throw new TypeError(
+        "Hosted runtime invocation assistant provider is not supported.",
+      );
+    }
+    const readLiveAssistantProvider = async (): Promise<HostedAssistantProvider> => {
+      if (!assistantConfigurationToolPort) {
+        throw new AssistantActiveTurnInputUnavailableError(
+          "Assistant provider choice is temporarily unavailable; retry the turn later.",
+        );
+      }
+      let response: Awaited<
+        ReturnType<typeof assistantConfigurationToolPort.request>
+      >;
+      try {
+        response = await assistantConfigurationToolPort.request({ action: "read" });
+      } catch {
+        throw new AssistantActiveTurnInputUnavailableError(
+          "Assistant provider choice is temporarily unavailable; retry the turn later.",
+        );
+      }
+      if (response.action !== "read") {
+        throw new AssistantActiveTurnInputUnavailableError(
+          "Assistant provider choice is temporarily unavailable; retry the turn later.",
+        );
+      }
+      return response.result.provider;
+    };
+    const resolveInvocationAssistantProviderAuthority = async (): Promise<
+      "current" | "handoff"
+    > => {
+      const liveAssistantProvider = await readLiveAssistantProvider();
+      if (liveAssistantProvider === invocationAssistantProvider) {
+        return "current";
+      }
+      assistantProviderHandoffRequested = true;
+      return "handoff";
+    };
     let stagedDeviceSyncDirtyAcks: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] = [];
     let suppressDirtyPendingFetchUntilCheckpoint = false;
     let deviceSyncWorkspaceWakeHandledUntilCheckpoint: HostedWorkspaceRunnerHandledDeviceSyncWake | null = null;
@@ -1897,6 +2009,14 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 beforeProviderAcceptedInputs: async ({
                   acceptedInputs,
                 }) => {
+                  if (
+                    await resolveInvocationAssistantProviderAuthority()
+                      === "handoff"
+                  ) {
+                    throw new AssistantActiveTurnInputUnavailableError(
+                      "Assistant provider changed; retrying the turn with the saved provider.",
+                    );
+                  }
                   const acceptedInputsOnlyAssistant = acceptedInputs.every(
                     (acceptedInput) => acceptedInput.source === "assistant-input",
                   );
@@ -2078,7 +2198,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }
     };
     const markIdleCheckpointTimerAfterDirtyWork = () => {
-      setIdleCheckpointStartBy(Date.now() + idleCheckpointDelayMs);
+      setIdleCheckpointStartBy(
+        Date.now() + (assistantProviderHandoffRequested ? 0 : idleCheckpointDelayMs),
+      );
     };
     if (runtimeStateDirty) {
       markIdleCheckpointTimerAfterDirtyWork();
@@ -2141,7 +2263,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       onStateMutation() {
         runtimeStateDirty = true;
         markIdleCheckpointTimerAfterDirtyWork();
+        options.runtimeWakeSignal?.notify();
       },
+      resolveProviderAuthority:
+        resolveInvocationAssistantProviderAuthority,
       usageRecordPort: runtime.platform.usageRecordPort ?? null,
       userEnvKeys: Object.keys(runtime.userEnv),
       vaultRoot: restored.vaultRoot,
@@ -2807,9 +2932,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         let passResult = await runSingleForegroundPass(wakeInput);
         // irreducible: "late foreground input during system work runs before idle checkpointing" fails without this.
         let rerunAssistantInputBatch =
-          resolveForegroundRerunAssistantInputBatch(passResult);
+          assistantProviderHandoffRequested
+            ? null
+            : resolveForegroundRerunAssistantInputBatch(passResult);
         let continueForegroundCausalPass =
-          shouldContinueForegroundCausalPass(passResult);
+          !assistantProviderHandoffRequested
+          && shouldContinueForegroundCausalPass(passResult);
         while (rerunAssistantInputBatch || continueForegroundCausalPass) {
           passResult = await runSingleForegroundPass({
             foregroundCausalOnly:
@@ -2818,25 +2946,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             initialAssistantInputBatch: rerunAssistantInputBatch,
             initialMailboxImport: passResult.latestMailboxImport,
             initialMailboxImportContext:
-              wakeInput.initialMailboxImportContext?.assistantAskCompletionKind
-              || wakeInput.initialMailboxImportContext?.assistantAskRequestTargetKind
+              wakeInput.initialMailboxImportContext?.assistantAskRequestTargetKind
                 ? {
-                    ...(wakeInput.initialMailboxImportContext
-                      .assistantAskCompletionKind
-                      ? {
-                          assistantAskCompletionKind:
-                            wakeInput.initialMailboxImportContext
-                              .assistantAskCompletionKind,
-                        }
-                      : {}),
-                    ...(wakeInput.initialMailboxImportContext
-                      .assistantAskRequestTargetKind
-                      ? {
-                          assistantAskRequestTargetKind:
-                            wakeInput.initialMailboxImportContext
-                              .assistantAskRequestTargetKind,
-                        }
-                      : {}),
+                    assistantAskRequestTargetKind:
+                      wakeInput.initialMailboxImportContext
+                        .assistantAskRequestTargetKind,
                   }
                 : null,
             latencySeed: wakeInput.latencySeed ?? null,
@@ -2844,9 +2958,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             signal: wakeInput.signal,
           });
           rerunAssistantInputBatch =
-            resolveForegroundRerunAssistantInputBatch(passResult);
+            assistantProviderHandoffRequested
+              ? null
+              : resolveForegroundRerunAssistantInputBatch(passResult);
           continueForegroundCausalPass =
-            shouldContinueForegroundCausalPass(passResult);
+            !assistantProviderHandoffRequested
+            && shouldContinueForegroundCausalPass(passResult);
         }
         return passResult;
       };
@@ -2926,7 +3043,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           input.systemMailboxAdmission === "pre_checkpoint_safe"
             ? {
                 ...(wakeInitialMailboxImportContext ?? {}),
-                assistantAskCompletionKind: "joined_group" as const,
                 assistantAskRequestTargetKind: "joined_group" as const,
               }
             : wakeInitialMailboxImportContext;
@@ -3321,7 +3437,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           checkpointWakeLatencySeed ??= pendingWakeLatencySeed;
         }
         const idleMaintenancePendingWork =
-          invocationStatus === "budget_exhausted"
+          assistantProviderHandoffRequested
+          || invocationStatus === "budget_exhausted"
           || (pendingWake.nextWakeAt !== null
             && Date.parse(pendingWake.nextWakeAt) - Date.now()
               < HOSTED_IDLE_COMPACT_TIMEOUT_MS);
@@ -3866,9 +3983,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     await drainDeferredUsageBestEffort();
     throw error;
   } finally {
-    await imageGenerationController?.close();
-    await closeDetachedAssistantAskBeforeWorkspaceRelease();
-    hostAbortSignal?.removeEventListener("abort", abortFromHost);
+    try {
+      await settleCodexProcessPreparation();
+    } finally {
+      try {
+        await imageGenerationController?.close();
+        await closeDetachedAssistantAskBeforeWorkspaceRelease();
+      } finally {
+        hostAbortSignal?.removeEventListener("abort", abortFromHost);
+      }
+    }
   }
 }
 

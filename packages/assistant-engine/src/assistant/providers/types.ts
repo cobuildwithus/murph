@@ -106,6 +106,7 @@ export interface AssistantProviderFinishWithoutReplyAcceptedEvent {
 export type AssistantProviderServiceTier = 'flex'
 
 export interface AssistantProviderDynamicTool {
+  readonly deferLoading?: boolean
   readonly description: string
   readonly inputSchema: object
   readonly name: string
@@ -120,6 +121,7 @@ export interface AssistantProviderTurn {
   authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
   abortSignal?: AbortSignal
   codexConfigOverrides?: readonly string[] | null
+  codexThreadConfig?: Readonly<Record<string, unknown>> | null
   conversationHistoryMessages?: ReadonlyArray<AssistantProviderConversationMessage>
   developerInstructions?: string | null
   dynamicTools: readonly AssistantProviderDynamicTool[]

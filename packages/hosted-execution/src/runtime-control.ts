@@ -16,10 +16,13 @@ import type {
 import type {
   HostedAssistantModelOverride,
   HostedAssistantProductModel,
+  HostedAssistantProvider,
+  HostedAssistantProviderOverride,
   HostedAssistantReasoningEffort,
   HostedAssistantReasoningEffortOverride,
 } from "./assistant-model.ts";
 import type {
+  HostedExecutionAcceptedGroupMessageParticipant,
   HostedExecutionAssistantAskOrigin,
   HostedExecutionAssistantAskResult,
   HostedBrowserVaultReplicaCursorRef,
@@ -990,14 +993,16 @@ export const HOSTED_USAGE_REFERRAL_POLICY_CODES = [
 export type HostedUsageReferralPolicyCode =
   (typeof HOSTED_USAGE_REFERRAL_POLICY_CODES)[number];
 
+export interface HostedRuntimeUsageReferralMissionSnapshot {
+  destinationKind: "group" | "personal";
+  expiresAt: string;
+  policyCode: HostedUsageReferralPolicyCode;
+  rewardLabel: string;
+  state: "armed" | "target_bound";
+}
+
 export interface HostedRuntimeUsageReferralSnapshot {
-  active: {
-    destinationKind: "group" | "personal";
-    expiresAt: string;
-    policyCode: HostedUsageReferralPolicyCode;
-    rewardLabel: string;
-    state: "armed" | "target_bound";
-  } | null;
+  activeMissions: HostedRuntimeUsageReferralMissionSnapshot[];
   availablePolicies: Array<{
     code: HostedUsageReferralPolicyCode;
     requirementsLabel: string;
@@ -1018,6 +1023,11 @@ export interface HostedRuntimeGroupToolSenderContext {
 
 export interface HostedRuntimeUsageReferralSourceConversation {
   channel: "linq" | "telegram";
+  /**
+   * Ephemeral provider service observed by the Linq runtime. It is used only
+   * to gate service-specific referral behavior and is never persisted.
+   */
+  linqService?: "imessage" | "rcs" | "sms";
   threadId: string;
   threadIsDirect: boolean;
 }
@@ -1176,6 +1186,8 @@ export interface HostedRuntimeGroupToolLinqThreadContext {
   chatId: string;
 }
 
+// Legacy runner-to-Web request shape retained at the old-facing control-plane
+// boundary during the accepted-message participant rollout.
 export interface HostedRuntimeGroupToolSelfOptOutContext {
   senderHandle: string;
   source: "email" | "linq";
@@ -1205,8 +1217,9 @@ export interface HostedRuntimeGroupChatParticipant {
   /** Durable activation proof, not current access or membership in this group. */
   hasOwnMurph: boolean;
   /**
-   * Optional, unverified, current-turn label from the human group owner's
-   * address-book projection. It grants no identity or routing authority.
+   * Optional, host-sanitized current-turn presentation name from the human
+   * group owner's address-book projection. It grants no identity or routing
+   * authority.
    */
   ownerAdvisoryName?: string;
 }
@@ -1252,6 +1265,37 @@ export type HostedRuntimeGroupSharedReadResult =
       unavailableReason: string;
     };
 
+export const HOSTED_RUNTIME_GROUP_PARTICIPANT_DISPLAY_NAME_SOURCES = [
+  "profile-name",
+  "unverified-owner-contact",
+] as const;
+
+export type HostedRuntimeGroupParticipantDisplayNameSource =
+  (typeof HOSTED_RUNTIME_GROUP_PARTICIPANT_DISPLAY_NAME_SOURCES)[number];
+
+export interface HostedRuntimeGroupParticipantDisplayName {
+  displayName: string;
+  displayNameSource: HostedRuntimeGroupParticipantDisplayNameSource;
+  senderHandle: string;
+}
+
+export type HostedRuntimeGroupParticipantDisplayNamesResult =
+  | {
+      /**
+       * Requested handles for which Web successfully checked every applicable
+       * authorized name source and found no safe display name. Omitted by
+       * legacy Web deployments and never includes policy or authority
+       * omissions.
+       */
+      nameMissSenderHandles?: readonly string[];
+      participants: readonly HostedRuntimeGroupParticipantDisplayName[];
+      status: "ok";
+    }
+  | {
+      status: "unavailable";
+      unavailableReason: string;
+    };
+
 export type HostedRuntimeGroupToolRequest =
   | {
       action: "ask";
@@ -1283,13 +1327,30 @@ export type HostedRuntimeGroupToolRequest =
   | { action: "read_current" }
   | { action: "read_chat_name" }
   | { action: "read_usage" }
-  | ({ action: "read_usage_referral" } & HostedRuntimeGroupToolSenderContext)
+  | {
+      action: "read_participant_display_names";
+      /**
+       * Exact route-admitted current-turn Linq sender evidence supplied by the
+       * hosted runtime. Web preserves exact-member profile precedence and may
+       * apply an unverified owner-contact label to an otherwise-unregistered
+       * canonical phone. It returns presentation labels only, never
+       * participant or member identifiers.
+       */
+      linqSenderHandles: readonly string[];
+    }
   | ({
-      action: "arm_usage_referral";
-      policyCode: HostedUsageReferralPolicyCode;
+      action: "read_usage_referral";
     } & HostedRuntimeGroupToolSenderContext
       & HostedRuntimeUsageReferralSourceContext)
-  | ({ action: "cancel_usage_referral" } & HostedRuntimeGroupToolSenderContext)
+  | ({
+      action: "arm_usage_referral";
+      policyCodes: HostedUsageReferralPolicyCode[];
+    } & HostedRuntimeGroupToolSenderContext
+      & HostedRuntimeUsageReferralSourceContext)
+  | ({
+      action: "cancel_usage_referral";
+      policyCode: HostedUsageReferralPolicyCode;
+    } & HostedRuntimeGroupToolSenderContext)
   | ({
       action: "read_shared";
       /**
@@ -1328,6 +1389,7 @@ export type HostedRuntimeGroupToolRequest =
   | { action: "share_contact_card"; linqThread?: HostedRuntimeGroupToolLinqThreadContext | null }
   | {
       action: "revoke_own_email_share";
+      participant?: HostedExecutionAcceptedGroupMessageParticipant | null;
       selfOptOut?: HostedRuntimeGroupToolSelfOptOutContext | null;
     };
 
@@ -1385,6 +1447,10 @@ export type HostedRuntimeGroupToolResponse =
       result:
         | { status: "ok"; usage: HostedRuntimeGroupUsageStatus }
         | { status: "unavailable"; unavailableReason: string; usage: null };
+    }
+  | {
+      action: "read_participant_display_names";
+      result: HostedRuntimeGroupParticipantDisplayNamesResult;
     }
   | {
       action: "read_shared";
@@ -1731,10 +1797,17 @@ export type HostedRuntimeAssistantConfigurationToolRequest =
 export type HostedRuntimeAssistantConfigurationChanges =
   | {
       model: HostedAssistantProductModel;
+      provider?: HostedAssistantProvider;
       reasoningEffort?: HostedAssistantReasoningEffort;
     }
   | {
       model?: never;
+      provider: HostedAssistantProvider;
+      reasoningEffort?: HostedAssistantReasoningEffort;
+    }
+  | {
+      model?: never;
+      provider?: never;
       reasoningEffort: HostedAssistantReasoningEffort;
     };
 
@@ -1749,10 +1822,12 @@ export type HostedRuntimeAssistantConfigurationControlRequest =
 
 export interface HostedRuntimeAssistantConfigurationSnapshot {
   availableModels: HostedAssistantProductModel[];
+  availableProviders: HostedAssistantProvider[];
   availableReasoningEfforts: HostedAssistantReasoningEffort[];
   configurationAvailable: boolean;
   dormantSolPreference: boolean;
   model: HostedAssistantProductModel;
+  provider: HostedAssistantProvider;
   reasoningEffort: HostedAssistantReasoningEffort;
   solAvailable: boolean;
 }
@@ -1844,6 +1919,7 @@ export const HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES = [
 export const HOSTED_RUNTIME_ASSISTANT_MILESTONES = [
   "linq_typing_request_started",
   "linq_typing_accepted",
+  "progress_update_accepted",
   "first_codex_output_observed",
   "first_codex_text_observed",
   "terminal_non_reply_committed",
@@ -1960,6 +2036,7 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
   assistant?: {
     linqTypingRequestStartedAtEpochMs?: number;
     linqTypingAcceptedAtEpochMs?: number;
+    progressUpdateAcceptedAtEpochMs?: number;
     firstCodexOutputObservedAtEpochMs?: number;
     firstCodexTextObservedAtEpochMs?: number;
     terminalNonReplyCommittedAtEpochMs?: number;
@@ -2090,6 +2167,7 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
   assistant: [
     "linqTypingRequestStartedAtEpochMs",
     "linqTypingAcceptedAtEpochMs",
+    "progressUpdateAcceptedAtEpochMs",
     "firstCodexOutputObservedAtEpochMs",
     "firstCodexTextObservedAtEpochMs",
     "terminalNonReplyCommittedAtEpochMs",
@@ -2191,7 +2269,9 @@ export function sanitizeHostedRuntimeOrchestrationLatencyDiagnostics(
 
 // Diagnostic JSON can be merged repeatedly as late runtime phases arrive.
 // Existing leaves win so retries cannot clobber earlier timestamps, while stale
-// stored leaves are dropped before the next write.
+// stored leaves are dropped before the next write. Accepted progress is the one
+// repeated milestone: retain its earliest timestamp when callbacks arrive out
+// of order.
 export function mergeHostedRuntimeLatencyPhaseBreakdownJson(input: {
   existing: unknown;
   incoming: HostedRuntimeLatencyPhaseBreakdown;
@@ -2230,6 +2310,18 @@ export function mergeHostedRuntimeLatencyPhaseBreakdownJson(input: {
     let phaseChanged = false;
 
     for (const [leafKey, leaf] of Object.entries(incomingPhase)) {
+      if (
+        phase === "assistant"
+        && leafKey === "progressUpdateAcceptedAtEpochMs"
+        && typeof leaf === "number"
+        && typeof mergedPhase[leafKey] === "number"
+      ) {
+        if (leaf < mergedPhase[leafKey]) {
+          mergedPhase[leafKey] = leaf;
+          phaseChanged = true;
+        }
+        continue;
+      }
       if (mergedPhase[leafKey] !== undefined) {
         continue;
       }
@@ -2449,6 +2541,7 @@ export interface HostedWorkspaceState {
 export interface HostedWorkspaceReadResponse {
   fetchedAt: string;
   hostedAssistantModelOverride?: HostedAssistantModelOverride;
+  hostedAssistantProviderOverride?: HostedAssistantProviderOverride;
   hostedAssistantReasoningEffortOverride?: HostedAssistantReasoningEffortOverride;
   workspace: HostedWorkspaceState | null;
 }

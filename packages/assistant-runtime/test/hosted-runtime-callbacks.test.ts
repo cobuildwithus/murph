@@ -8669,6 +8669,69 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
   });
 
+  it("blocks changed Linq health at provider entry before any provider message request", async () => {
+    const effect = createEffect({
+      bindingDeliveryTarget: "linq_chat_123",
+      channel: "linq",
+      transportIdempotent: true,
+    });
+    const storedIntent = createPendingHostedDeliveryIntent({
+      bindingDelivery: { kind: "thread", target: "linq_chat_123" },
+      channel: "linq",
+      deliveryIdempotencyKey: "assistant-outbox:intent_123",
+      deliveryTransportIdempotent: true,
+      explicitTarget: null,
+      intentId: effect.effectId,
+      message: "scheduled check-in",
+    }) as AssistantOutboxIntent;
+    const assertRecentInbound = vi.fn(async (request: {
+      authorityCheckOnly: boolean;
+    }) => request.authorityCheckOnly
+      ? {}
+      : { deliveryBlockCode: "chat_critical" as const });
+    const providerFetch = vi.fn<typeof fetch>();
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+      async ({ dependencies, dispatchHooks }) => {
+        await dispatchHooks?.preflightDispatchIntent?.({
+          intent: storedIntent,
+          now: new Date("2026-04-08T00:01:00.000Z"),
+          vault: HOSTED_WAKE.vaultRoot,
+        });
+        await dependencies.sendLinq({
+          idempotencyKey: "assistant-outbox:intent_123",
+          message: storedIntent.message,
+          target: "linq_chat_123",
+          targetKind: "thread",
+        });
+        throw new Error("unreachable after the provider-entry health block");
+      },
+    );
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+      platformEnv: {},
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_LINQ_EGRESS_CHAT_CRITICAL",
+    });
+
+    expect(assertRecentInbound.mock.calls.map(([request]) =>
+      request.authorityCheckOnly
+    )).toEqual([false]);
+    expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+    expect(providerFetch).toHaveBeenCalledTimes(1);
+    expect(providerFetch).toHaveBeenCalledWith(
+      expect.stringMatching(/\/typing$/u),
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+
   it("carries distinct stable identities through hosted Linq voice transcript fallback", async () => {
     const answeredMailboxItemIds = ["mailbox_item_answered_1"];
     const effect = createEffect({

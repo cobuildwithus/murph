@@ -57,13 +57,21 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // remain the guard against that regression, while the existing tolerances cover
 // ordinary small authored-code growth.
 //
-// The private-media and current hosted-alert integration measured 9,761,860B
-// total and an 8,009,225B static closure on 2026-07-28. The combined graph added
-// no forbidden boot input; production assembly below still fails closed if any
-// dimension exceeds its reviewed measurement plus the existing allowance.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_761_860 + 32_768;
+// Direct/group turn parity, exact-message participant authorization, private
+// media, hosted-alert integration, and open-ended experiment outcomes add
+// authored code to existing runner chunks without adding a forbidden boot
+// input. The combined 2026-07-29 macOS assembly measured an 8,117,894B static
+// closure while remaining within the reviewed total budget. Ratchet the static
+// baseline to that combined measurement and retain the established small-growth
+// tolerances.
+//
+// Linq group-line recovery adds authored code to the existing runner chunks
+// without adding a forbidden boot input. The 2026-07-30 assemblies measured
+// 9,889,299B on Linux and 9,936,771B on macOS. Ratchet the total baseline to the
+// higher cross-platform measurement and retain the established 32KB allowance.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_936_771 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_649_331;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_009_225;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_117_894;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:

@@ -127,7 +127,7 @@ function buildHostedLinqGroupParticipantContextText(input: {
   participantHandle: string;
 }): string {
   const label = input.ownerAdvisoryName
-    ? ` (unverified owner contact label: ${input.ownerAdvisoryName})`
+    ? ` (address-book name: ${input.ownerAdvisoryName})`
     : "";
   const action = input.eventType === "participant.added"
     ? "was added to"

@@ -106,6 +106,11 @@ export interface HostedOnboardingEnvironment {
   linqFirstContactAdmissionOpenAiApiKey: string | null;
   linqInstantStartPhonePrefixes: readonly string[];
   linqLocalAllowedInboundPhoneNumbers?: readonly string[];
+  /**
+   * @deprecated Rollback compatibility for application builds that still
+   * populate HostedLinqLine.activeMemberLimit. Weighted assignment does not
+   * read this value.
+   */
   linqMaxActiveMembersPerConversationPhone: number | null;
   linqWebhookSecret: string | null;
   linqWebhookTimestampToleranceMs: number;

@@ -24,11 +24,20 @@ vi.mock('../src/assistant/outbox.js', () => ({
 }))
 
 describe('assistant ask continuation', () => {
-  it('builds an isolated queue-only read-only turn with no recursive capability', () => {
+  it('builds an isolated turn and preserves reviewed group-delivery proof', () => {
+    const routeAuthority = {
+      channel: 'telegram' as const,
+      containerMemberId: 'member-group',
+      threadId: 'thread-group',
+    }
     const message = buildAssistantAskContinuationMessageInput({
+      answeredMailboxItemIds: ['aask_done_reviewed'],
+      expectedConversationScope: 'group',
       instructions: 'Use only the quoted group result.',
       originAssistantInputId: `ain_${'a'.repeat(32)}`,
+      outboxExternalThreadRouteAuthority: routeAuthority,
       requestId: 'request-1',
+      reviewedAssistantAskCompletionExpiresAt: '2099-01-01T00:00:00.000Z',
       sessionId: 'session-private',
       vault: '/vault',
     })
@@ -40,10 +49,14 @@ describe('assistant ask continuation', () => {
       toolProfile: 'output-only-turn',
     })
     expect(message).toMatchObject({
+      answeredMailboxItemIds: ['aask_done_reviewed'],
       approvalPolicy: 'never',
       deliverResponse: true,
       deliveryDispatchMode: 'queue-only',
+      outboxExternalThreadRouteAuthority: routeAuthority,
       persistUserPromptOnFailure: false,
+      reviewedAssistantAskCompletionExpiresAt:
+        '2099-01-01T00:00:00.000Z',
       sandbox: 'read-only',
       sessionId: 'session-private',
       suppressProviderFailureTranscriptAudit: true,
@@ -51,8 +64,7 @@ describe('assistant ask continuation', () => {
       userMessageContent: null,
     })
     expect(message.acceptedTurnInput).toBeUndefined()
-    expect(message.codexConfigOverrides).toContain('features.shell_tool=false')
-    expect(message.codexConfigOverrides).toContain('web_search="disabled"')
+    expect(message.codexConfigOverrides).toBeUndefined()
   })
 
   it('loads the exact propagated origin session despite more than 512 unrelated receipts', async () => {

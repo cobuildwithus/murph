@@ -8,15 +8,12 @@ import { renderClientComponent } from "./render-client-component";
 const mocks = vi.hoisted(() => ({
   completeHostedPrivyAuth: vi.fn(),
   hostedPhoneAuthProps: null as {
-    onAuthCompleted?: (result: {
-      payload: {
-        activationPending: boolean;
-        inviteCode: string;
-        joinUrl: string;
-        stage: string;
-      };
-      redirectUrl: string;
-    }) => Promise<void> | void;
+    interactionGated?: boolean;
+    onAuthCancel?: () => void;
+    onAuthQueue?: () => boolean;
+    onAuthQueueCancel?: () => void;
+    onAuthStart?: () => boolean;
+    onAuthenticated?: (input: { authMethod: "phone" }) => Promise<void> | void;
     onCodeSent?: () => void;
     onCompleted?: (payload: unknown) => Promise<void> | void;
   } | null,
@@ -24,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   loginWithTelegram: vi.fn(),
   legalConsentCardProps: null as {
     declinePending?: boolean;
+    initialStatus?: unknown;
     mode?: string;
     onAccepted?: () => Promise<void> | void;
     onDecline?: () => void;
@@ -37,6 +35,16 @@ const mocks = vi.hoisted(() => ({
   useUser: vi.fn(),
 }));
 
+const launchConsentStatus = {
+  documents: [],
+  generatedAt: "2026-07-29T12:00:00.000Z",
+  launchGranted: false,
+  launchScopes: [],
+  ok: true,
+  schema: "murph.hosted-consent-status.v1",
+  scopes: [],
+} as const;
+
 vi.mock("@privy-io/react-auth", () => ({
   Captcha() {
     return createElement("div", { "data-privy-captcha": "mounted" });
@@ -49,6 +57,13 @@ vi.mock("@privy-io/react-auth", () => ({
     };
   },
   useLoginWithTelegram() {
+    if (typeof window !== "undefined") {
+      Reflect.set(window, "Telegram", {
+        Login: {
+          auth: () => {},
+        },
+      });
+    }
     return {
       login: mocks.loginWithTelegram,
       state: { status: "initial" },
@@ -105,7 +120,12 @@ vi.mock("@/src/components/legal/hosted-legal-consent-card", () => ({
 vi.mock("@/src/components/hosted-onboarding/hosted-phone-auth", () => ({
   HostedPhoneAuth(input: {
     disableSignup?: boolean;
-    onAuthCompleted?: unknown;
+    interactionGated?: boolean;
+    onAuthCancel?: () => void;
+    onAuthQueue?: () => boolean;
+    onAuthQueueCancel?: () => void;
+    onAuthStart?: () => boolean;
+    onAuthenticated?: unknown;
     onCodeSent?: () => void;
     onCompleted?: unknown;
     suppressAuthenticatedSessionIssue?: boolean;
@@ -177,6 +197,7 @@ beforeEach(() => {
       activationPending: false,
       inviteCode: "invite-code",
       joinUrl: "/join/invite-code",
+      launchConsentStatus,
       stage: "active",
     },
     redirectUrl: "/home",
@@ -188,6 +209,299 @@ afterEach(async () => {
     await cleanupRender();
     cleanupRender = null;
   }
+});
+
+test("HostedAuthPanel keeps a pre-ready method queued and dismissible until its provider call starts", async () => {
+  const onPrivyWaitChange = vi.fn();
+  const onViewChange = vi.fn();
+  mocks.usePrivy.mockReturnValue({
+    authenticated: false,
+    logout: vi.fn(),
+    ready: false,
+  });
+
+  const { cleanup, container } = await renderClientComponent(
+    createElement(HostedAuthPanel, {
+      methods: ["phone", "telegram", "email"],
+      onPrivyWaitChange,
+      onViewChange,
+    }),
+  );
+  cleanupRender = cleanup;
+
+  const readAlternateButton = (label: string) =>
+    Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.trim() === label,
+    ) as HTMLButtonElement | undefined;
+
+  expect(readAlternateButton("Telegram")?.disabled).toBe(false);
+  expect(readAlternateButton("Email")?.disabled).toBe(false);
+  expect(mocks.hostedPhoneAuthProps?.interactionGated).toBe(false);
+  expect(onViewChange).toHaveBeenLastCalledWith("auth");
+
+  let queued = false;
+  await act(async () => {
+    queued = mocks.hostedPhoneAuthProps?.onAuthQueue?.() ?? false;
+  });
+
+  expect(queued).toBe(true);
+  expect(onPrivyWaitChange).toHaveBeenLastCalledWith(true);
+  expect(onViewChange).toHaveBeenLastCalledWith("auth");
+  expect(readAlternateButton("Telegram")?.disabled).toBe(true);
+  expect(readAlternateButton("Email")?.disabled).toBe(true);
+  expect(mocks.hostedPhoneAuthProps?.interactionGated).toBe(false);
+
+  let started = false;
+  await act(async () => {
+    started = mocks.hostedPhoneAuthProps?.onAuthStart?.() ?? false;
+  });
+
+  expect(started).toBe(true);
+  expect(onPrivyWaitChange).toHaveBeenLastCalledWith(false);
+  expect(onViewChange).toHaveBeenLastCalledWith("auth-active");
+
+  await act(async () => {
+    mocks.hostedPhoneAuthProps?.onAuthCancel?.();
+  });
+
+  expect(onViewChange).toHaveBeenLastCalledWith("auth");
+  expect(readAlternateButton("Telegram")?.disabled).toBe(false);
+  expect(readAlternateButton("Email")?.disabled).toBe(false);
+});
+
+test("HostedAuthPanel retires Telegram continuation when phone takes over", async () => {
+  let privyReady = false;
+  mocks.usePrivy.mockImplementation(() => ({
+    authenticated: false,
+    logout: vi.fn(),
+    ready: privyReady,
+  }));
+  const renderPanel = () => createElement(HostedAuthPanel, {
+    methods: ["phone", "telegram", "email"],
+  });
+  const rendered = await renderClientComponent(renderPanel(), {
+    requireButton: false,
+  });
+  cleanupRender = rendered.cleanup;
+
+  const readTelegramButton = () =>
+    Array.from(rendered.container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Telegram"),
+    ) as HTMLButtonElement | undefined;
+  const telegramButton = readTelegramButton();
+  expect(telegramButton).toBeTruthy();
+
+  await act(async () => {
+    telegramButton?.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  expect(telegramButton?.textContent).toContain("Connecting...");
+  expect(mocks.loginWithTelegram).not.toHaveBeenCalled();
+
+  privyReady = true;
+  await rendered.rerender(renderPanel());
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
+  expect(telegramButton?.textContent).toContain(
+    "Continue with Telegram",
+  );
+  expect(rendered.container.textContent).toContain(
+    "Telegram is ready. Continue to open sign in.",
+  );
+
+  let phoneStarted = false;
+  await act(async () => {
+    phoneStarted = mocks.hostedPhoneAuthProps?.onAuthStart?.() ?? false;
+  });
+  expect(phoneStarted).toBe(true);
+
+  await act(async () => {
+    mocks.hostedPhoneAuthProps?.onAuthCancel?.();
+    await Promise.resolve();
+  });
+
+  expect(readTelegramButton()?.disabled).toBe(false);
+  expect(readTelegramButton()?.textContent).toBe("Telegram");
+  expect(rendered.container.textContent).not.toContain(
+    "Telegram is ready. Continue to open sign in.",
+  );
+  expect(mocks.loginWithTelegram).not.toHaveBeenCalled();
+});
+
+test("HostedAuthPanel discards queued email when Privy hydrates an existing session", async () => {
+  let authenticated = false;
+  let ready = false;
+  let user: { linkedAccounts?: unknown } | null = null;
+  mocks.usePrivy.mockImplementation(() => ({
+    authenticated,
+    logout: vi.fn(),
+    ready,
+  }));
+  mocks.useUser.mockImplementation(() => ({ user }));
+  const renderPanel = () => createElement(HostedAuthPanel, {
+    methods: ["phone", "telegram", "email"],
+  });
+  const rendered = await renderClientComponent(renderPanel(), {
+    requireButton: false,
+  });
+  cleanupRender = rendered.cleanup;
+
+  const emailButton = Array.from(
+    rendered.container.querySelectorAll("button"),
+  ).find((candidate) => candidate.textContent?.trim() === "Email");
+  await act(async () => {
+    emailButton?.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  const emailInput = rendered.container.querySelector(
+    'input[id="homepage-email-address"]',
+  ) as HTMLInputElement | null;
+  const emailForm = rendered.container.querySelector("form");
+  await act(async () => {
+    if (emailInput) {
+      setInputValue(rendered.window, emailInput, "login@example.com");
+    }
+    emailForm?.dispatchEvent(
+      new rendered.window.Event("submit", {
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
+
+  expect(mocks.sendCode).not.toHaveBeenCalled();
+  expect(rendered.container.textContent).toContain("Sending...");
+
+  authenticated = true;
+  ready = true;
+  user = {
+    linkedAccounts: [
+      {
+        address: "login@example.com",
+        latest_verified_at: 1741194420,
+        type: "email",
+      },
+    ],
+  };
+  await rendered.rerender(renderPanel());
+
+  expect(mocks.sendCode).not.toHaveBeenCalled();
+  expect(rendered.container.textContent).toContain("Continue with email");
+  expect(rendered.container.textContent).toContain(
+    "You're signed in as login@example.com.",
+  );
+  expect(rendered.container.textContent).not.toContain("Sending...");
+});
+
+test("HostedAuthPanel discards queued Telegram when Privy hydrates an existing session", async () => {
+  let authenticated = false;
+  let ready = false;
+  let user: { linkedAccounts?: unknown } | null = null;
+  mocks.usePrivy.mockImplementation(() => ({
+    authenticated,
+    logout: vi.fn(),
+    ready,
+  }));
+  mocks.useUser.mockImplementation(() => ({ user }));
+  const renderPanel = () => createElement(HostedAuthPanel, {
+    methods: ["phone", "telegram", "email"],
+  });
+  const rendered = await renderClientComponent(renderPanel(), {
+    requireButton: false,
+  });
+  cleanupRender = rendered.cleanup;
+
+  const telegramButton = Array.from(
+    rendered.container.querySelectorAll("button"),
+  ).find((candidate) => candidate.textContent?.trim() === "Telegram");
+  await act(async () => {
+    telegramButton?.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  expect(mocks.loginWithTelegram).not.toHaveBeenCalled();
+  expect(rendered.container.textContent).toContain("Connecting...");
+
+  authenticated = true;
+  ready = true;
+  user = {
+    linkedAccounts: [
+      {
+        id: "telegram-user-123",
+        type: "telegram",
+        username: "telegram_user",
+      },
+    ],
+  };
+  await rendered.rerender(renderPanel());
+
+  expect(mocks.loginWithTelegram).not.toHaveBeenCalled();
+  expect(rendered.container.textContent).toContain("Continue with Telegram");
+  expect(rendered.container.textContent).toContain(
+    "You're signed in as @telegram_user.",
+  );
+  expect(rendered.container.textContent).not.toContain("Telegram is ready.");
+});
+
+test("HostedAuthPanel restores phone session recovery after a queued alternate hydrates", async () => {
+  let authenticated = false;
+  let ready = false;
+  let user: { linkedAccounts?: unknown } | null = null;
+  mocks.usePrivy.mockImplementation(() => ({
+    authenticated,
+    logout: vi.fn(),
+    ready,
+  }));
+  mocks.useUser.mockImplementation(() => ({ user }));
+  const renderPanel = () => createElement(HostedAuthPanel, {
+    methods: ["phone", "telegram", "email"],
+  });
+  const rendered = await renderClientComponent(renderPanel(), {
+    requireButton: false,
+  });
+  cleanupRender = rendered.cleanup;
+
+  const telegramButton = Array.from(
+    rendered.container.querySelectorAll("button"),
+  ).find((candidate) => candidate.textContent?.trim() === "Telegram");
+  await act(async () => {
+    telegramButton?.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  expect(
+    rendered.container
+      .querySelector('[data-hosted-phone-auth="mounted"]')
+      ?.getAttribute("data-hosted-phone-auth-suppressed"),
+  ).toBe("yes");
+
+  authenticated = true;
+  ready = true;
+  user = {
+    linkedAccounts: [
+      {
+        number: "+14155552671",
+        type: "phone",
+      },
+    ],
+  };
+  await rendered.rerender(renderPanel());
+
+  expect(mocks.loginWithTelegram).not.toHaveBeenCalled();
+  expect(
+    rendered.container
+      .querySelector('[data-hosted-phone-auth="mounted"]')
+      ?.getAttribute("data-hosted-phone-auth-suppressed"),
+  ).toBe("no");
+  expect(rendered.container.textContent).not.toContain("Connecting...");
 });
 
 test("HostedAuthPanel keeps phone auth mounted after SMS code entry starts", async () => {
@@ -246,7 +560,9 @@ test("HostedAuthPanel keeps phone auth mounted after SMS code entry starts", asy
   expect(container.textContent).not.toContain("Continue with email");
 });
 
-test("HostedAuthPanel resumes a phone-less Telegram Privy session without showing phone recovery", async () => {
+test("HostedAuthPanel keeps a phone-less Telegram resume busy while completion is pending", async () => {
+  mocks.completeHostedPrivyAuth.mockReturnValueOnce(new Promise(() => {}));
+
   const privyUser = {
     linkedAccounts: [
       {
@@ -267,7 +583,7 @@ test("HostedAuthPanel resumes a phone-less Telegram Privy session without showin
     user: privyUser,
   });
 
-  const { cleanup, container, window } = await renderClientComponent(
+  const { cleanup, container } = await renderClientComponent(
     createElement(HostedAuthPanel, {
       methods: ["phone", "telegram", "email"],
     }),
@@ -293,6 +609,19 @@ test("HostedAuthPanel resumes a phone-less Telegram Privy session without showin
       authMethod: "telegram",
     }),
   );
+
+  const finishingButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.includes("Finishing..."),
+  ) as HTMLButtonElement | undefined;
+  const usePhoneButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.trim() === "Use phone",
+  ) as HTMLButtonElement | undefined;
+
+  expect(finishingButton).toBeTruthy();
+  expect(finishingButton?.disabled).toBe(true);
+  expect(finishingButton?.getAttribute("aria-busy")).toBe("true");
+  expect(finishingButton?.querySelector('[data-slot="spinner"]')).toBeTruthy();
+  expect(usePhoneButton?.disabled).toBe(true);
 });
 
 test("HostedAuthPanel keeps only one alternate auth method active at a time", async () => {
@@ -341,7 +670,14 @@ test("HostedAuthPanel keeps only one alternate auth method active at a time", as
   expect(container.querySelector('input[id="homepage-email-address"]')).toBeNull();
 });
 
-test("HostedAuthPanel keeps split CTA presentation out of Privy auth behavior", async () => {
+test("HostedAuthPanel keeps the email journey authoritative after requesting a code", async () => {
+  let resolveEmailCodeRequest: (() => void) | null = null;
+  mocks.sendCode.mockReturnValueOnce(
+    new Promise<void>((resolve) => {
+      resolveEmailCodeRequest = resolve;
+    }),
+  );
+
   const { cleanup, container, window } = await renderClientComponent(
     createElement(HostedAuthPanel, {
       methods: ["phone", "telegram", "email"],
@@ -376,15 +712,23 @@ test("HostedAuthPanel keeps split CTA presentation out of Privy auth behavior", 
   expect(mocks.sendCode).toHaveBeenCalledWith({
     email: "login@example.com",
   });
+  expect(telegramButton?.disabled).toBe(true);
 
   await act(async () => {
     telegramButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
 
-  expect(mocks.loginWithTelegram).toHaveBeenCalledWith(undefined);
+  expect(mocks.loginWithTelegram).not.toHaveBeenCalled();
+
+  await act(async () => {
+    resolveEmailCodeRequest?.();
+    await Promise.resolve();
+  });
+
+  expect(container.contains(telegramButton ?? null)).toBe(false);
 });
 
-test("HostedAuthPanel swaps to the shared finishing notice while completion runs", async () => {
+test("HostedAuthPanel keeps auth mounted and puts completion progress on the active button", async () => {
   mocks.completeHostedPrivyAuth.mockReturnValueOnce(new Promise(() => {}));
 
   const { cleanup, container, window } = await renderClientComponent(
@@ -402,9 +746,169 @@ test("HostedAuthPanel swaps to the shared finishing notice while completion runs
     telegramButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
 
-  expect(container.textContent).toContain("Setting things up");
-  expect(container.textContent).toContain("Keep this tab open");
-  expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeNull();
+  const pendingTelegramButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.includes("Finishing..."),
+  ) as HTMLButtonElement | undefined;
+  const pendingEmailButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.trim() === "Email",
+  ) as HTMLButtonElement | undefined;
+
+  expect(pendingTelegramButton).toBeTruthy();
+  expect(pendingTelegramButton?.disabled).toBe(true);
+  expect(pendingTelegramButton?.getAttribute("aria-busy")).toBe("true");
+  expect(pendingTelegramButton?.querySelector('[data-slot="spinner"]')).toBeTruthy();
+  expect(pendingEmailButton?.disabled).toBe(true);
+  expect(container.textContent).not.toContain("Setting things up");
+  expect(container.textContent).not.toContain("Keep this tab open");
+  expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeTruthy();
+  expect(mocks.hostedPhoneAuthProps?.interactionGated).toBe(true);
+});
+
+test("HostedAuthPanel makes a started Telegram journey reject a late phone provider result", async () => {
+  let resolveTelegramLogin: (() => void) | null = null;
+  mocks.loginWithTelegram.mockReturnValueOnce(
+    new Promise<void>((resolve) => {
+      resolveTelegramLogin = resolve;
+    }),
+  );
+
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedAuthPanel, {
+      methods: ["phone", "telegram", "email"],
+      requireLaunchConsentOnCompletion: true,
+    }),
+  );
+  cleanupRender = cleanup;
+
+  const telegramButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.includes("Telegram"),
+  ) as HTMLButtonElement | undefined;
+
+  await act(async () => {
+    telegramButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+    await Promise.resolve();
+  });
+
+  expect(mocks.loginWithTelegram).toHaveBeenCalledTimes(1);
+  expect(mocks.hostedPhoneAuthProps?.interactionGated).toBe(true);
+
+  await act(async () => {
+    await mocks.hostedPhoneAuthProps?.onAuthenticated?.({
+      authMethod: "phone",
+    });
+  });
+
+  expect(mocks.completeHostedPrivyAuth).not.toHaveBeenCalled();
+
+  await act(async () => {
+    resolveTelegramLogin?.();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  await vi.waitFor(() => {
+    expect(mocks.completeHostedPrivyAuth).toHaveBeenCalledTimes(1);
+  });
+  expect(mocks.completeHostedPrivyAuth).toHaveBeenCalledWith({
+    authMethod: "telegram",
+  });
+  expect(container.textContent).toContain("Hosted legal consent card");
+});
+
+test("HostedAuthPanel makes a started phone request reject Telegram provider initiation", async () => {
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedAuthPanel, {
+      methods: ["phone", "telegram", "email"],
+      requireLaunchConsentOnCompletion: true,
+    }),
+  );
+  cleanupRender = cleanup;
+
+  const telegramButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.includes("Telegram"),
+  ) as HTMLButtonElement | undefined;
+
+  let phoneJourneyStarted = false;
+  await act(async () => {
+    phoneJourneyStarted = mocks.hostedPhoneAuthProps?.onAuthStart?.() ?? false;
+  });
+  expect(phoneJourneyStarted).toBe(true);
+  expect(telegramButton?.disabled).toBe(true);
+
+  await act(async () => {
+    telegramButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  expect(mocks.loginWithTelegram).not.toHaveBeenCalled();
+
+  await act(async () => {
+    mocks.hostedPhoneAuthProps?.onCodeSent?.();
+  });
+  expect(container.contains(telegramButton ?? null)).toBe(false);
+
+  await act(async () => {
+    await mocks.hostedPhoneAuthProps?.onAuthenticated?.({
+      authMethod: "phone",
+    });
+  });
+
+  expect(mocks.completeHostedPrivyAuth).toHaveBeenCalledTimes(1);
+  expect(mocks.completeHostedPrivyAuth).toHaveBeenCalledWith({
+    authMethod: "phone",
+  });
+  expect(container.textContent).toContain("Hosted legal consent card");
+});
+
+test("HostedAuthPanel locks every competing method while phone completion is pending", async () => {
+  let resolveCompletion: (() => void) | null = null;
+  mocks.completeHostedPrivyAuth.mockReturnValueOnce(
+    new Promise((resolve) => {
+      resolveCompletion = () =>
+        resolve({
+          payload: {
+            inviteCode: "invite-code",
+            joinUrl: "/join/invite-code",
+            stage: "active",
+          },
+          redirectUrl: "/home",
+        });
+    }),
+  );
+
+  const { cleanup, container } = await renderClientComponent(
+    createElement(HostedAuthPanel, {
+      methods: ["phone", "telegram", "email"],
+    }),
+  );
+  cleanupRender = cleanup;
+
+  await act(async () => {
+    void mocks.hostedPhoneAuthProps?.onAuthenticated?.({
+      authMethod: "phone",
+    });
+    await Promise.resolve();
+  });
+
+  const telegramButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.trim() === "Telegram",
+  ) as HTMLButtonElement | undefined;
+  const emailButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.trim() === "Email",
+  ) as HTMLButtonElement | undefined;
+
+  expect(mocks.completeHostedPrivyAuth).toHaveBeenCalledWith({
+    authMethod: "phone",
+  });
+  expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeTruthy();
+  expect(mocks.hostedPhoneAuthProps?.interactionGated).toBe(false);
+  expect(telegramButton?.disabled).toBe(true);
+  expect(emailButton?.disabled).toBe(true);
+  expect(container.textContent).not.toContain("Setting things up");
+
+  await act(async () => {
+    resolveCompletion?.();
+    await Promise.resolve();
+  });
 });
 
 test("HostedAuthPanel surfaces shared completion failures and restores the auth methods", async () => {
@@ -427,9 +931,71 @@ test("HostedAuthPanel surfaces shared completion failures and restores the auth 
     telegramButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
 
+  const recoveredTelegramButton = Array.from(
+    container.querySelectorAll("button"),
+  ).find(
+    (candidate) => candidate.textContent?.trim() === "Telegram",
+  ) as HTMLButtonElement | undefined;
+  const recoveredEmailButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.trim() === "Email",
+  ) as HTMLButtonElement | undefined;
+
   expect(assign).not.toHaveBeenCalled();
   expect(container.textContent).toContain("Checkout did not return a redirect URL.");
+  expect(container.textContent).not.toContain("Finishing...");
   expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeTruthy();
+  expect(mocks.hostedPhoneAuthProps?.interactionGated).toBe(false);
+  expect(recoveredTelegramButton?.disabled).toBe(false);
+  expect(recoveredEmailButton?.disabled).toBe(false);
+});
+
+test("HostedAuthPanel restores phone recovery and competing methods after phone completion fails", async () => {
+  mocks.completeHostedPrivyAuth.mockRejectedValueOnce(
+    new Error("Phone completion did not finish."),
+  );
+
+  const { cleanup, container } = await renderClientComponent(
+    createElement(HostedAuthPanel, {
+      methods: ["phone", "telegram", "email"],
+    }),
+  );
+  cleanupRender = cleanup;
+
+  expect(mocks.hostedPhoneAuthProps?.onAuthenticated).toBeTypeOf("function");
+  let completionError: unknown = null;
+
+  await act(async () => {
+    try {
+      await mocks.hostedPhoneAuthProps?.onAuthenticated?.({
+        authMethod: "phone",
+      });
+    } catch (error) {
+      completionError = error;
+    }
+  });
+
+  const telegramButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.trim() === "Telegram",
+  ) as HTMLButtonElement | undefined;
+  const emailButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.trim() === "Email",
+  ) as HTMLButtonElement | undefined;
+
+  expect(completionError).toEqual(new Error("Phone completion did not finish."));
+  expect(container.textContent).not.toContain("Phone completion did not finish.");
+  expect(container.textContent).not.toContain("Setting things up");
+  expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeTruthy();
+  expect(mocks.hostedPhoneAuthProps?.interactionGated).toBe(false);
+  expect(telegramButton?.disabled).toBe(false);
+  expect(emailButton?.disabled).toBe(false);
+
+  await act(async () => {
+    await mocks.hostedPhoneAuthProps?.onAuthenticated?.({
+      authMethod: "phone",
+    });
+  });
+
+  expect(mocks.completeHostedPrivyAuth).toHaveBeenCalledTimes(2);
 });
 
 test("HostedAuthPanel can require launch consent after homepage login completion", async () => {
@@ -453,6 +1019,7 @@ test("HostedAuthPanel can require launch consent after homepage login completion
   expect(assign).not.toHaveBeenCalled();
   expect(container.textContent).toContain("Hosted legal consent card");
   expect(mocks.legalConsentCardProps).toMatchObject({
+    initialStatus: launchConsentStatus,
     mode: "compact",
     preferredScope: "launch.legal",
     source: "homepage-auth-dialog",
@@ -623,6 +1190,7 @@ test("HostedAuthPanel shows launch consent after homepage signup auth before red
   expect(assign).not.toHaveBeenCalled();
   expect(container.textContent).toContain("Hosted legal consent card");
   expect(mocks.legalConsentCardProps).toMatchObject({
+    initialStatus: launchConsentStatus,
     mode: "compact",
     preferredScope: "launch.legal",
     source: "homepage-auth-dialog",
@@ -643,6 +1211,15 @@ test("HostedAuthPanel shows launch consent after homepage signup auth before red
 
 test("HostedAuthPanel phone signup completion pauses on launch consent before redirecting", async () => {
   const onCompleted = vi.fn();
+  mocks.completeHostedPrivyAuth.mockResolvedValueOnce({
+    payload: {
+      activationPending: false,
+      inviteCode: "invite-code",
+      joinUrl: "/join/invite-code",
+      stage: "active",
+    },
+    redirectUrl: "/home",
+  });
   const { assign, cleanup, container, window } = await renderClientComponent(
     createElement(HostedAuthPanel, {
       methods: ["phone", "telegram", "email"],
@@ -652,17 +1229,11 @@ test("HostedAuthPanel phone signup completion pauses on launch consent before re
   );
   cleanupRender = cleanup;
 
-  expect(mocks.hostedPhoneAuthProps?.onAuthCompleted).toBeTypeOf("function");
+  expect(mocks.hostedPhoneAuthProps?.onAuthenticated).toBeTypeOf("function");
 
   await act(async () => {
-    await mocks.hostedPhoneAuthProps?.onAuthCompleted?.({
-      payload: {
-        activationPending: false,
-        inviteCode: "invite-code",
-        joinUrl: "/join/invite-code",
-        stage: "active",
-      },
-      redirectUrl: "/home",
+    await mocks.hostedPhoneAuthProps?.onAuthenticated?.({
+      authMethod: "phone",
     });
   });
 
@@ -703,6 +1274,15 @@ test("HostedAuthPanel keeps consent mounted until downstream completion succeeds
   const onCompleted = vi.fn()
     .mockRejectedValueOnce(new Error("Could not finish sign in."))
     .mockResolvedValueOnce(undefined);
+  mocks.completeHostedPrivyAuth.mockResolvedValueOnce({
+    payload: {
+      activationPending: false,
+      inviteCode: "invite-code",
+      joinUrl: "/join/invite-code",
+      stage: "active",
+    },
+    redirectUrl: "/home",
+  });
   const { cleanup, container } = await renderClientComponent(
     createElement(HostedAuthPanel, {
       methods: ["phone", "telegram", "email"],
@@ -713,14 +1293,8 @@ test("HostedAuthPanel keeps consent mounted until downstream completion succeeds
   cleanupRender = cleanup;
 
   await act(async () => {
-    await mocks.hostedPhoneAuthProps?.onAuthCompleted?.({
-      payload: {
-        activationPending: false,
-        inviteCode: "invite-code",
-        joinUrl: "/join/invite-code",
-        stage: "active",
-      },
-      redirectUrl: "/home",
+    await mocks.hostedPhoneAuthProps?.onAuthenticated?.({
+      authMethod: "phone",
     });
   });
 
@@ -757,6 +1331,25 @@ function setInputValue(
 
 test("HostedAuthPanel keeps Decline terminal when a late status result says consent is no longer required", async () => {
   const onCompleted = vi.fn();
+  mocks.completeHostedPrivyAuth
+    .mockResolvedValueOnce({
+      payload: {
+        activationPending: false,
+        inviteCode: "invite-code",
+        joinUrl: "/join/invite-code",
+        stage: "active",
+      },
+      redirectUrl: "/home",
+    })
+    .mockResolvedValueOnce({
+      payload: {
+        activationPending: false,
+        inviteCode: "second-invite-code",
+        joinUrl: "/join/second-invite-code",
+        stage: "active",
+      },
+      redirectUrl: "/home",
+    });
   let releaseLogout: (() => void) | null = null;
   mocks.logoutHostedAppSession.mockImplementationOnce(
     () =>
@@ -775,14 +1368,8 @@ test("HostedAuthPanel keeps Decline terminal when a late status result says cons
   cleanupRender = cleanup;
 
   await act(async () => {
-    await mocks.hostedPhoneAuthProps?.onAuthCompleted?.({
-      payload: {
-        activationPending: false,
-        inviteCode: "invite-code",
-        joinUrl: "/join/invite-code",
-        stage: "active",
-      },
-      redirectUrl: "/home",
+    await mocks.hostedPhoneAuthProps?.onAuthenticated?.({
+      authMethod: "phone",
     });
   });
 
@@ -819,14 +1406,8 @@ test("HostedAuthPanel keeps Decline terminal when a late status result says cons
   // The panel stays mounted and returns to auth after a successful decline, so
   // a member who changes their mind must be able to finish a fresh attempt.
   await act(async () => {
-    await mocks.hostedPhoneAuthProps?.onAuthCompleted?.({
-      payload: {
-        activationPending: false,
-        inviteCode: "second-invite-code",
-        joinUrl: "/join/second-invite-code",
-        stage: "active",
-      },
-      redirectUrl: "/home",
+    await mocks.hostedPhoneAuthProps?.onAuthenticated?.({
+      authMethod: "phone",
     });
   });
 

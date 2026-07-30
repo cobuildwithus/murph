@@ -1,5 +1,9 @@
 "use client";
 
+import {
+  HOSTED_ASSISTANT_OPENAI_PROVIDER,
+  type HostedAssistantProvider,
+} from "@murphai/hosted-execution/assistant-model";
 import { useState } from "react";
 import { CheckCircle2, ContactRound, Monitor } from "lucide-react";
 import { SourceCard } from "@/app/(dashboard)/connect/connect-source-card";
@@ -9,6 +13,7 @@ import {
   DeviceSyncSetupGuideDialog,
 } from "@/app/(dashboard)/home/device-sync-completion-dialog";
 import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
+import { HostedDeviceSyncCallbackConfirmation } from "@/src/components/device-sync/hosted-device-sync-callback-confirmation";
 import { HomeExperimentCard } from "@/src/components/home/home-experiment-card";
 import { GroupUsageFundingCard } from "@/src/components/hosted-groups/group-usage-funding-card";
 import { GroupSponsorshipDialog } from "@/src/components/hosted-groups/group-sponsorship-dialog";
@@ -26,11 +31,24 @@ import {
   ASSISTANT_MODEL_CHOICE_CARD_CLASSES,
   AssistantModelArtwork,
 } from "@/src/components/settings/assistant-model-artwork";
+import {
+  AssistantProviderDialog,
+  AssistantProviderSummary,
+} from "@/src/components/settings/hosted-assistant-model-settings";
 import { HealthDomainCard } from "@/src/components/overview/health-domain-card";
 import { ActiveExperimentBanner } from "@/src/components/overview/active-experiment-banner";
 import { TrialBillingBanner } from "@/src/components/home/trial-billing-banner";
 import { ProfileStats } from "@/src/components/overview/profile-stats";
-import { HostedAuthFinishingNotice } from "@/src/components/hosted-onboarding/hosted-auth-shared";
+import { HostedResumableAuthState } from "@/src/components/hosted-onboarding/hosted-auth-panel";
+import { HostedPrivyReadinessState } from "@/src/components/hosted-onboarding/hosted-auth-panel-island";
+import { EmailIcon } from "@/src/components/homepage/email-icon";
+import {
+  resolveAuthDialogHeaderPresentation,
+} from "@/src/components/hosted-onboarding/auth-dialog";
+import { HostedInlineAuthButton } from "@/src/components/hosted-onboarding/hosted-inline-auth-button";
+import { HostedCodeEntryStep } from "@/src/components/hosted-onboarding/hosted-phone-auth-step-views";
+import { HostedAuthenticatedPhoneAuthState } from "@/src/components/hosted-onboarding/hosted-phone-auth-views";
+import { HostedTelegramAuthButtonPresentation } from "@/src/components/hosted-onboarding/hosted-telegram-auth-button";
 import {
   HostedLegalConsentCard,
   type HostedLegalConsentAcceptanceInput,
@@ -94,22 +112,35 @@ import type { DeviceSyncCompletionDialogModel } from "@/src/lib/device-sync/conn
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 import { buildWhoopAppleHealthSetupGuide } from "@/src/lib/device-sync/whoop-apple-health-setup-guide";
 import { MurphAssistantStylePicker } from "@/src/components/murph/murph-assistant-style-picker";
+import { HostedAiUsageActivity } from "@/src/components/settings/hosted-ai-usage-activity";
 import { HostedFamilyManager } from "@/src/components/settings/hosted-family-settings-actions";
 import { PulseTrialBillingContinuationView } from "@/src/components/settings/hosted-start-paid-pulse-button";
 import { MurphPersonalitySettingsDialog } from "@/src/components/settings/murph-personality-settings-dialog";
-import { MURPH_TELEGRAM_URL } from "@/src/lib/murph-contact-routing";
 import {
+  DESIGN_AI_USAGE_ACTIVITY,
+  DESIGN_AI_USAGE_DISABLED_HISTORY,
+  DESIGN_AI_USAGE_EMPTY_ACTIVITY,
+  DESIGN_AI_USAGE_WAITING_ACTIVITY,
   DESIGN_GROUP_SPONSORSHIP_OFFERS,
   DESIGN_USAGE_OFFERS,
+  DESIGN_USAGE_MISSION_CONTACT_OPTION,
 } from "./group-usage-funding-study";
 import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
 import { HostedAccountDeletionStatus } from "@/src/components/settings/hosted-data-privacy-settings";
 import { GarminHistoricalDataDialog } from "../(dashboard)/connect/connect-page-dialogs";
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  children,
+  id,
+  title,
+}: {
+  children: React.ReactNode;
+  id?: string;
+  title: string;
+}) {
   return (
-    <div className="flex flex-col gap-6">
+    <div id={id} className="flex flex-col gap-6">
       <h2 className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">{title}</h2>
       {children}
     </div>
@@ -120,15 +151,27 @@ function DialogPreviewFrame({ label, children }: { label: string; children: Reac
   return (
     <div className="flex flex-col gap-3">
       <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">{label}</p>
-      <div className="rounded-2xl bg-[#FAF8F4] p-6 shadow-[0_1px_2px_rgba(26,31,22,0.04)] ring-1 ring-[#1A1F16]/[0.06]">
-        <p className="font-serif text-xl font-semibold tracking-tight text-[#1A1F16]">
-          Log in or sign up
-        </p>
-        <p className="mt-1 text-sm text-[#5C5A52]">
-          Discover what actually makes you healthier.
-        </p>
+      <div className="max-w-md rounded-2xl bg-[#FAF8F4] p-6 shadow-[0_1px_2px_rgba(26,31,22,0.04)] ring-1 ring-[#1A1F16]/[0.06] md:p-7">
+        <DialogPreviewHeader />
         <div className="mt-5">{children}</div>
       </div>
+    </div>
+  );
+}
+
+function DialogPreviewHeader() {
+  const header = resolveAuthDialogHeaderPresentation({
+    panelView: "auth-active",
+  });
+
+  return (
+    <div className={header.headerClassName}>
+      <h3 className="text-xl font-bold tracking-tight text-foreground">
+        {header.title}
+      </h3>
+      <p className="text-sm text-pretty text-muted-foreground">
+        {header.description}
+      </p>
     </div>
   );
 }
@@ -148,27 +191,24 @@ function resolveDesignPhoneCountryOption(value: string) {
 const EXPERIMENT_START_CHANNEL_OPTIONS: ExperimentStartContactOption[] = [
   {
     connected: true,
-    description: "Open Messages with the note ready to send.",
-    href: "sms:?body=I%20want%20to%20start%20the%20Finnish%20Dry%20Sauna%20experiment.",
+    description: "Preview a prepared Messages draft.",
+    href: "#experiment-start-channel-picker-study",
     kind: "text",
-    label: "Text",
-    meta: "Messages",
+    label: "Messages",
   },
   {
     connected: true,
-    description: "Open Telegram with Murph.",
-    href: MURPH_TELEGRAM_URL,
+    description: "Preview a prepared Telegram draft.",
+    href: "#experiment-start-channel-picker-study",
     kind: "telegram",
     label: "Telegram",
-    meta: "Telegram",
   },
   {
     connected: true,
-    description: "Open an email draft to Murph.",
-    href: "mailto:murph@mail.withmurph.ai",
+    description: "Preview a prepared email draft.",
+    href: "#experiment-start-channel-picker-study",
     kind: "email",
     label: "Email",
-    meta: "Email",
   },
 ];
 
@@ -255,47 +295,72 @@ const DESIGN_AVAILABLE_CONNECT_SOURCES: ConnectSource[] = [
     name: "Garmin",
   },
 ];
-const DESIGN_DASHBOARD_CONSENT_STATUS: HostedConsentStatus = {
-  documents: DESIGN_LEGAL_DOCUMENTS,
-  generatedAt: "2026-07-23T12:00:00.000Z",
-  launchGranted: false,
-  launchScopes: [
-    {
-      granted: false,
-      missingDocuments: DESIGN_LEGAL_SCOPE_DOCUMENTS,
-      scope: "launch.legal",
-    },
-    {
-      granted: false,
-      missingDocuments: DESIGN_HEALTH_DATA_SCOPE_DOCUMENTS,
-      scope: "launch.health-data",
-    },
-  ],
-  ok: true,
-  schema: "murph.hosted-consent-status.v1",
-  scopes: [
-    {
-      current: false,
-      documents: DESIGN_LEGAL_SCOPE_DOCUMENTS,
-      grant: null,
-      granted: false,
-      label: "Terms, privacy, and AI disclosure",
-      missingDocuments: DESIGN_LEGAL_SCOPE_DOCUMENTS,
-      revocable: false,
-      scope: "launch.legal",
-    },
-    {
-      current: false,
-      documents: DESIGN_HEALTH_DATA_SCOPE_DOCUMENTS,
-      grant: null,
-      granted: false,
-      label: "Health data notice and processing authorization",
-      missingDocuments: DESIGN_HEALTH_DATA_SCOPE_DOCUMENTS,
-      revocable: false,
-      scope: "launch.health-data",
-    },
-  ],
-};
+function createDesignLaunchConsentStatus({
+  healthDataGranted,
+  legalGranted,
+}: {
+  healthDataGranted: boolean;
+  legalGranted: boolean;
+}): HostedConsentStatus {
+  return {
+    documents: DESIGN_LEGAL_DOCUMENTS,
+    generatedAt: "2026-07-23T12:00:00.000Z",
+    launchGranted: legalGranted && healthDataGranted,
+    launchScopes: [
+      {
+        granted: legalGranted,
+        missingDocuments: legalGranted ? [] : DESIGN_LEGAL_SCOPE_DOCUMENTS,
+        scope: "launch.legal",
+      },
+      {
+        granted: healthDataGranted,
+        missingDocuments: healthDataGranted
+          ? []
+          : DESIGN_HEALTH_DATA_SCOPE_DOCUMENTS,
+        scope: "launch.health-data",
+      },
+    ],
+    ok: true,
+    schema: "murph.hosted-consent-status.v1",
+    scopes: [
+      {
+        current: legalGranted,
+        documents: DESIGN_LEGAL_SCOPE_DOCUMENTS,
+        grant: null,
+        granted: legalGranted,
+        label: "Terms, privacy, and AI disclosure",
+        missingDocuments: legalGranted ? [] : DESIGN_LEGAL_SCOPE_DOCUMENTS,
+        revocable: false,
+        scope: "launch.legal",
+      },
+      {
+        current: healthDataGranted,
+        documents: DESIGN_HEALTH_DATA_SCOPE_DOCUMENTS,
+        grant: null,
+        granted: healthDataGranted,
+        label: "Health data notice and processing authorization",
+        missingDocuments: healthDataGranted
+          ? []
+          : DESIGN_HEALTH_DATA_SCOPE_DOCUMENTS,
+        revocable: false,
+        scope: "launch.health-data",
+      },
+    ],
+  };
+}
+
+const DESIGN_DASHBOARD_CONSENT_STATUS = createDesignLaunchConsentStatus({
+  healthDataGranted: false,
+  legalGranted: false,
+});
+const DESIGN_LEGAL_ONLY_CONSENT_STATUS = createDesignLaunchConsentStatus({
+  healthDataGranted: true,
+  legalGranted: false,
+});
+const DESIGN_HEALTH_DATA_ONLY_CONSENT_STATUS = createDesignLaunchConsentStatus({
+  healthDataGranted: false,
+  legalGranted: true,
+});
 
 const SEGMENTED_CONTROL_OPTIONS: ReadonlyArray<
   SegmentedControlOption<SegmentedControlDemoValue>
@@ -441,6 +506,10 @@ export function ComponentsContent() {
   const [warmSegmentedControlValue, setWarmSegmentedControlValue] =
     useState<SegmentedControlDemoValue>("email");
   const [choiceCardValue, setChoiceCardValue] = useState("terra");
+  const [providerDialogOpen, setProviderDialogOpen] = useState(false);
+  const [providerValue, setProviderValue] = useState<HostedAssistantProvider>(
+    HOSTED_ASSISTANT_OPENAI_PROVIDER,
+  );
   const [addedContactAvatar, setAddedContactAvatar] =
     useState<MurphContactAvatarOption | null>(null);
   const [inlineContactAvatarId, setInlineContactAvatarId] = useState("hooded");
@@ -485,6 +554,154 @@ export function ComponentsContent() {
               onDismiss={() => {}}
               status="confirming"
             />
+          </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Homepage auth transitions">
+          <div
+            className="flex flex-col gap-6"
+            data-design-homepage-auth-transitions
+          >
+            <p className="text-sm text-muted-foreground">
+              Secure sign in keeps the ordinary methods visible while the
+              provider initializes. A selected method owns the pending state
+              immediately, then account completion stays on that production
+              action through the next view.
+            </p>
+            <div
+              className="grid items-start gap-5 lg:grid-cols-2"
+              data-design-homepage-auth-readiness
+              inert
+            >
+              <DialogPreviewFrame label="Queued action delay">
+                <HostedPrivyReadinessState
+                  onRestart={() => {}}
+                  restartAvailable={false}
+                />
+              </DialogPreviewFrame>
+              <DialogPreviewFrame label="Repeated provider delay">
+                <HostedPrivyReadinessState
+                  onRestart={() => {}}
+                  restartAvailable
+                />
+              </DialogPreviewFrame>
+              <DialogPreviewFrame label="Enabled alternate methods">
+                <div className="grid grid-cols-2 gap-3">
+                  <HostedTelegramAuthButtonPresentation onClick={() => {}} />
+                  <HostedInlineAuthButton
+                    icon={<EmailIcon className="size-5" />}
+                    onClick={() => {}}
+                  >
+                    Email
+                  </HostedInlineAuthButton>
+                </div>
+              </DialogPreviewFrame>
+              <DialogPreviewFrame label="Telegram ready handoff">
+                <HostedTelegramAuthButtonPresentation
+                  active
+                  onClick={() => {}}
+                  readyToContinue
+                />
+              </DialogPreviewFrame>
+            </div>
+            <div className="grid items-start gap-5 lg:grid-cols-2" inert>
+              <DialogPreviewFrame label="Telegram completion">
+                <div className="grid grid-cols-2 gap-3">
+                  <HostedTelegramAuthButtonPresentation
+                    active
+                    completionPending
+                    disabled
+                    onClick={() => {}}
+                  />
+                  <HostedInlineAuthButton
+                    disabled
+                    icon={<CheckCircle2 aria-hidden="true" className="size-5" />}
+                    onClick={() => {}}
+                  >
+                    Email
+                  </HostedInlineAuthButton>
+                </div>
+              </DialogPreviewFrame>
+              <DialogPreviewFrame label="Phone verification completion">
+                <HostedCodeEntryStep
+                  autoFocus={false}
+                  code="123456"
+                  disableSignup={false}
+                  disabled
+                  intent="auth"
+                  onCodeChange={() => {}}
+                  onResendCode={() => {}}
+                  onUseDifferentNumber={() => {}}
+                  onVerifyCode={() => {}}
+                  pendingAction="verify-code"
+                  secondaryActionSize="lg"
+                  size="compact"
+                  verificationPhoneNumberHint="*** 2671"
+                />
+              </DialogPreviewFrame>
+              <DialogPreviewFrame label="Phone resume completion">
+                <HostedAuthenticatedPhoneAuthState
+                  body=""
+                  description=""
+                  disabled
+                  onContinue={() => {}}
+                  onUseDifferentNumber={() => {}}
+                  pendingAction="continue"
+                  secondaryActionSize="lg"
+                  title=""
+                  view="manual-resume"
+                />
+              </DialogPreviewFrame>
+              <DialogPreviewFrame label="Resumable completion">
+                <HostedResumableAuthState
+                  auth={{ identityLabel: null, method: "telegram" }}
+                  disabled
+                  onContinue={() => {}}
+                  onSignOut={() => {}}
+                  pending
+                />
+              </DialogPreviewFrame>
+            </div>
+            <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              Consent appears directly from completion status
+            </p>
+            <div className="grid items-start gap-5 lg:grid-cols-2" inert>
+              <div
+                className="max-w-md rounded-2xl bg-[#FAF8F4] p-6 ring-1 ring-[#1A1F16]/[0.06] sm:p-7"
+                data-design-homepage-consent="combined"
+              >
+                <HostedLegalConsentCard
+                  initialStatus={DESIGN_DASHBOARD_CONSENT_STATUS}
+                  mode="compact"
+                  onDecline={() => {}}
+                  source="design-homepage-consent-combined"
+                />
+              </div>
+              <div
+                className="max-w-md rounded-2xl bg-[#FAF8F4] p-6 ring-1 ring-[#1A1F16]/[0.06] sm:p-7"
+                data-design-homepage-consent="health-data"
+              >
+                <HostedLegalConsentCard
+                  initialStatus={DESIGN_HEALTH_DATA_ONLY_CONSENT_STATUS}
+                  mode="compact"
+                  onDecline={() => {}}
+                  source="design-homepage-consent-health-data"
+                />
+              </div>
+              <div
+                className="max-w-md rounded-2xl bg-[#FAF8F4] p-6 ring-1 ring-[#1A1F16]/[0.06] sm:p-7"
+                data-design-homepage-consent="legal"
+              >
+                <HostedLegalConsentCard
+                  initialStatus={DESIGN_LEGAL_ONLY_CONSENT_STATUS}
+                  mode="compact"
+                  onDecline={() => {}}
+                  source="design-homepage-consent-legal"
+                />
+              </div>
+            </div>
           </div>
         </Section>
 
@@ -713,9 +930,10 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Radio Group & Choice Cards">
+        <Section title="Radio Group, Choice Cards & Provider Picker">
           <p className="max-w-2xl text-sm text-muted-foreground">
-            Choose the intelligence behind your personal health assistant.
+            Compare model choice cards and the compact, save-gated provider
+            picker used by assistant settings.
           </p>
           <RadioGroup
             className="grid gap-3 sm:grid-cols-3"
@@ -752,6 +970,17 @@ export function ComponentsContent() {
               value="sol"
             />
           </RadioGroup>
+          <AssistantProviderSummary
+            currentProvider={HOSTED_ASSISTANT_OPENAI_PROVIDER}
+            draftProvider={providerValue}
+            onChangeClick={() => setProviderDialogOpen(true)}
+          />
+          <AssistantProviderDialog
+            onOpenChange={setProviderDialogOpen}
+            onProviderChange={setProviderValue}
+            open={providerDialogOpen}
+            provider={providerValue}
+          />
         </Section>
 
         <Separator />
@@ -802,21 +1031,6 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Auth Finishing Notice">
-          <p className="text-sm text-muted-foreground">
-            Shown inside the sign-in dialog while the account is being provisioned.
-            The animated Murph mark ripples outward from its warm center — core dots
-            breathe first, mid amber ring trails by 200ms, sage outer ring by 400ms.
-          </p>
-          <div className="max-w-md">
-            <DialogPreviewFrame label="In dialog context">
-              <HostedAuthFinishingNotice />
-            </DialogPreviewFrame>
-          </div>
-        </Section>
-
-        <Separator />
-
         <Section title="Setup Loader">
           <p className="text-sm text-muted-foreground">
             Full-page loader shown on <code className="font-mono text-xs">/join/[inviteCode]</code> while
@@ -847,6 +1061,17 @@ export function ComponentsContent() {
           <div className="flex flex-col gap-4">
             <Alert><AlertTitle>Experiment in progress</AlertTitle><AlertDescription>Day 15 of 28. Next session scheduled for this evening.</AlertDescription></Alert>
             <Alert variant="destructive"><AlertTitle>Oura disconnected</AlertTitle><AlertDescription>Reconnect your ring to continue tracking metrics.</AlertDescription></Alert>
+          </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Device Sync Callback Confirmation">
+          <div className="overflow-hidden rounded-2xl border border-border" inert>
+            <HostedDeviceSyncCallbackConfirmation
+              action="/"
+              state="confirmation"
+            />
           </div>
         </Section>
 
@@ -1071,16 +1296,18 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Experiment Start Channel Picker">
+        <Section
+          id="experiment-start-channel-picker-study"
+          title="Experiment Start Channel Picker"
+        >
           <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="font-serif text-xl font-semibold tracking-normal text-foreground">
-                Start from the app you already use
+                Continue in the app you already use
               </p>
               <p className="mt-1 max-w-md text-sm leading-6 text-muted-foreground">
-                If several apps are connected, choose where this experiment
-                begins. Murph opens the app and prepares a note when the
-                channel supports it.
+                The compact picker keeps the selected experiment visible and
+                prepares a short message for review.
               </p>
             </div>
             <Button onClick={() => setChannelPickerOpen(true)}>
@@ -1092,7 +1319,7 @@ export function ComponentsContent() {
             open={channelPickerOpen}
             options={EXPERIMENT_START_CHANNEL_OPTIONS}
             protocolDays={14}
-            protocolTitle="Finnish Dry Sauna"
+            protocolTitle="Example Evening Routine"
           />
         </Section>
 
@@ -1143,6 +1370,62 @@ export function ComponentsContent() {
                 <HostedEmailMurphContactDialog
                   murphEmailAddress="murph@mail.withmurph.ai"
                   userEmailAddress={variant.userEmail}
+                />
+              </div>
+            ))}
+          </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Hosted AI usage credits and missions">
+          <p className="text-sm text-muted-foreground">
+            Read-only Settings detail with missions first, optional mission
+            details on demand, and a compact purchased-credit ledger.
+          </p>
+          <div
+            aria-label="Read-only hosted AI usage activity previews"
+            className="flex max-w-3xl flex-col gap-8"
+            data-design-component="hosted-ai-usage-activity-states"
+            inert
+          >
+            {[
+              {
+                activity: DESIGN_AI_USAGE_ACTIVITY,
+                contactOption: DESIGN_USAGE_MISSION_CONTACT_OPTION,
+                label: "Active and completed missions",
+                state: "active-and-completed",
+              },
+              {
+                activity: DESIGN_AI_USAGE_WAITING_ACTIVITY,
+                contactOption: DESIGN_USAGE_MISSION_CONTACT_OPTION,
+                label: "Mission selected, waiting for a new group",
+                state: "waiting-for-group",
+              },
+              {
+                activity: DESIGN_AI_USAGE_EMPTY_ACTIVITY,
+                contactOption: DESIGN_USAGE_MISSION_CONTACT_OPTION,
+                label: "Missions available, none selected",
+                state: "empty",
+              },
+              {
+                activity: DESIGN_AI_USAGE_DISABLED_HISTORY,
+                contactOption: null,
+                label: "New missions disabled, existing history retained",
+                state: "disabled-history",
+              },
+            ].map((preview) => (
+              <div
+                className="flex flex-col gap-3"
+                data-design-state={preview.state}
+                key={preview.label}
+              >
+                <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                  {preview.label}
+                </p>
+                <HostedAiUsageActivity
+                  activity={preview.activity}
+                  missionContactOption={preview.contactOption}
                 />
               </div>
             ))}

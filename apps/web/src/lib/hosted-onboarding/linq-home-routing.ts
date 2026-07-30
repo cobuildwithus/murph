@@ -5,7 +5,6 @@ import {
 } from "./contact-privacy";
 import {
   acquireHostedMemberHomeLinqRouteLockTx,
-  countHostedMemberHomeLinqBindingsByRecipientPhone,
   readHostedMemberRoutingState,
   type HostedMemberRoutingStateSnapshot,
   upsertHostedMemberHomeLinqBindingTx,
@@ -29,7 +28,12 @@ import {
   type HostedLinqAssignableHomeLine,
   listHostedLinqAssignableHomeLines,
   readHostedLinqRecentMessageEffectCountsTx,
+  listHostedLinqHealthyProactiveLines,
 } from "./linq-line-store";
+import {
+  buildHostedLinqAssignmentPlanningMessages,
+  readHostedLinqLinePlanningLoadSnapshot,
+} from "./linq-line-planning-load";
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
 } from "./linq-observability-identifiers";
@@ -262,6 +266,35 @@ export async function reserveHostedLinqHomeLineFromPoolTx(input: {
     prisma: input.prisma,
     reservationKind: "inbound",
   });
+}
+
+/**
+ * Claims one healthy line for a new participant-target conversation. The
+ * shared chooser, active-home load, UTC-day capacity, and atomic line counter
+ * remain owned here; callers receive no line unless capacity was reserved.
+ */
+export async function reserveHostedLinqHealthyProactiveLineTx(input: {
+  excludedPhoneNumberLookupKey?: string | null;
+  now?: Date;
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedLinqHomeLinePhoneReservationResult> {
+  const healthyLines = await listHostedLinqHealthyProactiveLines({ prisma: input.prisma });
+  const lines = input.excludedPhoneNumberLookupKey
+    ? healthyLines.filter((line) =>
+        line.phoneNumberLookupKey !== input.excludedPhoneNumberLookupKey
+      )
+    : healthyLines;
+  const reservation = await reserveHostedLinqHomeLineFromCandidatesTx({
+    lines,
+    ...(input.now ? { now: input.now } : {}),
+    preferredRecipientPhone: null,
+    prisma: input.prisma,
+    reservationKind: "required_proactive",
+  });
+
+  return reservation
+    ? { kind: "reserved", reservation }
+    : { kind: "capacity_exhausted" };
 }
 
 type HostedLinqHomeLineRouteBindingDecision =
@@ -571,7 +604,7 @@ async function reserveHostedLinqHomeLineFromCandidatesTx(input: {
   now?: Date;
   preferredRecipientPhone?: string | null;
   prisma: Prisma.TransactionClient;
-  reservationKind: "inbound" | "signup_welcome";
+  reservationKind: "inbound" | "required_proactive" | "signup_welcome";
 }): Promise<HostedLinqHomeLineAssignmentReservation | null> {
   const recipientPhones = input.lines.map((line) => line.phoneNumber);
 
@@ -580,14 +613,33 @@ async function reserveHostedLinqHomeLineFromCandidatesTx(input: {
   }
 
   const now = input.now ?? new Date();
-  const activeMembersByRecipientPhone = await countHostedMemberHomeLinqBindingsByRecipientPhone({
+  const preferredRecipientPhone = normalizePhoneNumber(input.preferredRecipientPhone);
+  const preferredInboundLine = input.reservationKind === "inbound"
+    ? input.lines.find((line) => line.phoneNumber === preferredRecipientPhone)
+    : null;
+
+  // A healthy contacted line owns member-initiated first contact. Weighted
+  // planning and recent traffic balance proactive placement and degraded-line
+  // fallback; neither may turn a reciprocal inbound conversation into a
+  // cross-line send that can be suppressed by proactive pacing.
+  if (preferredInboundLine) {
+    return {
+      assignedAt: now,
+      line: preferredInboundLine,
+      proactiveConversationReserved: false,
+    };
+  }
+
+  const planningLoadSnapshot = await readHostedLinqLinePlanningLoadSnapshot({
     ...(input.excludedActiveMemberId
-      ? { excludedMemberId: input.excludedActiveMemberId }
+      ? { excludedActiveMemberId: input.excludedActiveMemberId }
       : {}),
+    lines: input.lines,
     now,
     prisma: input.prisma,
-    recipientPhones,
   });
+  const plannedMessagesByRecipientPhone =
+    buildHostedLinqAssignmentPlanningMessages(planningLoadSnapshot);
   const dayUtc = startOfUtcDay(now);
   const proactiveConversationCounts = new Map(
     input.lines.map((line) => [
@@ -605,31 +657,19 @@ async function reserveHostedLinqHomeLineFromCandidatesTx(input: {
       })
     : new Map<string, number>();
   const preferredOrFallbackLine = chooseHostedLinqHomeLine({
-    activeMembersByRecipientPhone,
     ignoreDailyNewConversationLimit: true,
     lines: input.lines,
     newAssignmentsByRecipientPhone: proactiveConversationCounts,
+    plannedMessagesByRecipientPhone,
     preferredRecipientPhone: input.preferredRecipientPhone ?? null,
     recentMessageEffectsByLineLookupKey,
   });
-  const preferredRecipientPhone = normalizePhoneNumber(input.preferredRecipientPhone);
-
-  if (
-    input.reservationKind === "inbound"
-    && preferredOrFallbackLine?.phoneNumber === preferredRecipientPhone
-  ) {
-    return {
-      assignedAt: now,
-      line: preferredOrFallbackLine,
-      proactiveConversationReserved: false,
-    };
-  }
 
   if (input.reservationKind === "inbound") {
     const proactiveLine = chooseHostedLinqSignupWelcomeLine({
-      activeMembersByRecipientPhone,
       lines: input.lines,
       newAssignmentsByRecipientPhone: proactiveConversationCounts,
+      plannedMessagesByRecipientPhone,
       preferredRecipientPhone: input.preferredRecipientPhone ?? null,
       recentMessageEffectsByLineLookupKey,
     });
@@ -647,9 +687,9 @@ async function reserveHostedLinqHomeLineFromCandidatesTx(input: {
 
   for (let lineAttempt = 0; lineAttempt < input.lines.length; lineAttempt += 1) {
     const proactiveLine = chooseHostedLinqSignupWelcomeLine({
-      activeMembersByRecipientPhone,
       lines: input.lines,
       newAssignmentsByRecipientPhone: proactiveConversationCounts,
+      plannedMessagesByRecipientPhone,
       preferredRecipientPhone: input.preferredRecipientPhone ?? null,
       recentMessageEffectsByLineLookupKey,
     });
@@ -669,6 +709,9 @@ async function reserveHostedLinqHomeLineFromCandidatesTx(input: {
           limit,
           phoneNumberLookupKey: proactiveLine.phoneNumberLookupKey,
           prisma: input.prisma,
+          ...(input.reservationKind === "required_proactive"
+            ? { requiredHealthStatus: "healthy" as const }
+            : {}),
         });
       if (proactiveConversationReserved) {
         break;
@@ -684,6 +727,10 @@ async function reserveHostedLinqHomeLineFromCandidatesTx(input: {
     }
 
     proactiveConversationCounts.set(proactiveLine.phoneNumber, limit);
+  }
+
+  if (input.reservationKind === "required_proactive") {
+    return null;
   }
 
   return preferredOrFallbackLine
