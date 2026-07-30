@@ -333,7 +333,7 @@ test("Vercel telemetry ownership is explicit and matches the allowlist", () => {
     "/changelog": "app/changelog/page.tsx",
     "/clubs": "app/clubs/page.tsx",
     "/home": "app/(dashboard)/home/page.tsx",
-    "/pitch": "app/pitch/page.tsx",
+    "/pitch": "app/pitch/pitch-deck.tsx",
   };
   const readAppFile = (path: string) =>
     readFileSync(new URL(`../${path}`, import.meta.url), "utf8");

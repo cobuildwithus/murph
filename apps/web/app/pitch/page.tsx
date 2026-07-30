@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 
-import { VercelTelemetry } from "@/src/components/observability/vercel-telemetry";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
 import { PitchDeck } from "./pitch-deck";
@@ -22,10 +21,5 @@ export const metadata: Metadata = createMurphPageMetadata({
 });
 
 export default function Page() {
-  return (
-    <>
-      <VercelTelemetry />
-      <PitchDeck />
-    </>
-  );
+  return <PitchDeck />;
 }

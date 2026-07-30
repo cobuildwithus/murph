@@ -10,6 +10,7 @@ import { promisify } from "node:util";
 
 import {
   isFrontendUiPath,
+  isNonVisualVercelTelemetryOnlyDiff,
   validateFrontendDesignProof,
 } from "./check-frontend-design-proof.mjs";
 
@@ -217,6 +218,38 @@ test("skips backend-only and design-catalog-only hosted Web diffs", () => {
         "apps/web/app/design/components-content.tsx",
         "apps/web/app/design/group-usage-funding-study.tsx",
       ],
+      prBodyHtml: "",
+    }),
+    { required: false },
+  );
+});
+
+test("skips only exact non-visual Vercel telemetry mount diffs", () => {
+  const directMountDiff = `
+diff --git a/apps/web/app/clubs/page.tsx b/apps/web/app/clubs/page.tsx
+--- a/apps/web/app/clubs/page.tsx
++++ b/apps/web/app/clubs/page.tsx
+@@ -4,0 +5 @@
++import { VercelTelemetry } from "@/src/components/observability/vercel-telemetry";
+@@ -43,0 +45 @@
++      <VercelTelemetry />
+`;
+  const directUnmountDiff = directMountDiff
+    .replaceAll("+import", "-import")
+    .replaceAll("+      <VercelTelemetry />", "-      <VercelTelemetry />");
+
+  assert.equal(isNonVisualVercelTelemetryOnlyDiff(directMountDiff), true);
+  assert.equal(isNonVisualVercelTelemetryOnlyDiff(directUnmountDiff), true);
+  assert.equal(
+    isNonVisualVercelTelemetryOnlyDiff(
+      `${directMountDiff}\n+      <VisibleBanner />\n`,
+    ),
+    false,
+  );
+  assert.deepEqual(
+    validateFrontendDesignProof({
+      changedPaths: ["apps/web/app/clubs/page.tsx"],
+      nonVisualPaths: ["apps/web/app/clubs/page.tsx"],
       prBodyHtml: "",
     }),
     { required: false },
