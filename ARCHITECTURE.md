@@ -735,26 +735,45 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   plan facts.
 
   Personal and exact Family-member top-ups use the server-owned $5, $10, or $25
-  one-time Stripe Checkout offers. The same purchase owner supports
-  authenticated hosted-group funding while keeping payer and beneficiary
-  separate. Current-policy personal and Family purchases resolve the exact
-  Murph billing Subscription whose Customer matches the purchase. They use
-  that Subscription's attached default card, or the attached Customer default
-  it inherits. Unrelated Subscriptions never participate; missing, stale,
-  terminal, customer-mismatched, or legacy Source-only billing identity stays
-  in Checkout.
-  Hosted-group funding has no required Murph billing Subscription, so it may
-  use the attached Customer default or the only attached card. Stripe's
-  `allow_redisplay` controls Checkout presentation, not whether the
-  subscription card can fund the payer's explicit top-up. Web revalidates the
-  same billing reference under the existing payer lock, persists the
-  unconfirmed PaymentIntent on the purchase, and then confirms it. A billing
-  change before bind cancels the unbound intent and uses Checkout; after bind,
-  recovery remains tied to that exact intent. Only verified cancellation may
-  release that binding before Checkout fallback. Only verified Stripe-event
-  reconciliation
-  can grant purchased credit; a browser return or synchronous PaymentIntent
-  response cannot. Conversational referrals instead require explicit arming by
+  one-time offers. Hosted-group funding keeps the same purchase owner and
+  payer/beneficiary split, but its primary flow is a durable payer authorization
+  for one group with a $5, $10, or $20 calendar-month maximum. Activation is an
+  ordinary $5 usage-credit purchase. Later purchases are deterministic exact-$5
+  `HostedUsageCreditPurchase` rows admitted only at the existing beneficiary-
+  serialized settlement/capacity seam when capacity is low or exhausted. The
+  authorization stores status, selected cap, and anchored period only; fulfilled
+  plus pending purchases derive the current-period commitment, while
+  `HostedUsageCreditEntry` remains the sole balance and carries unused credit
+  across sponsorship periods. A partial unique database index permits only one
+  live automatic sponsor per group.
+
+  Current-policy personal and Family purchases resolve the exact Murph billing
+  Subscription whose Customer matches the purchase. Hosted-group funding has no
+  required Murph billing Subscription and may use the attached Customer default
+  or the only attached card. The initial purchase establishes the reusable card;
+  automatic refills reuse the existing saved-card PaymentIntent, bind-before-
+  confirm authority check, verified Stripe-event grant, refund/dispute handling,
+  and runtime recheck. Refill admission under the beneficiary lock is the
+  linearization point for need and cap headroom: the deterministic purchase is
+  the durable exact-$5 reservation. The provider sweep later rechecks the
+  authorization, period, cap, purchase identity, and runtime access, but does
+  not reinterpret need after admission or hold a database transaction open
+  across Stripe I/O. Any credit not ultimately consumed carries forward. The
+  existing minute Stripe sweep dispatches admitted purchases post-commit; ambiguous
+  provider outcomes retain the deterministic purchase, while safe card or
+  authentication failure marks the authorization recovery-required and privately
+  notifies only the payer. Same-period payer recovery reuses the failed purchase
+  only while its exact $5 still fits under the current cap; otherwise it leaves
+  that history failed and reactivates at cap without provider work. Period
+  rollover is lazy and activation-anchored, including end-of-month behavior.
+  Cap increases require explicit payer confirmation; a decrease below already
+  committed charges is deferred to the next period. Only the activation
+  purchase may own a public sponsorship moment; refills are silent. Group
+  projections expose only sponsored versus unsponsored, never payer, cap,
+  charges, balance, percentages, message counts, or refill events. Only
+  verified Stripe-event reconciliation can grant purchased credit; a browser
+  return or synchronous PaymentIntent response
+  cannot. Conversational referrals instead require explicit arming by
   one trusted current sender, reserve both rolling caps under the beneficiary
   serialization boundary, bind only to that referrer's next newly created
   thread container, normalize Linq and Telegram evidence into one
@@ -765,6 +784,20 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   the normal runtime recheck through the durable event owner so pending
   accepted work can resume. Inactive, suspended, malformed or expired trial
   entitlement, and separate daily Linq anti-abuse gates, remain enforceable.
+
+  The group-tool privacy projection has one bounded rolling-deploy reader seam.
+  A compatible runtime accepts both the current exact
+  `{fundingNeeded,fundingUrl,sponsorshipStatus}` response and the immediately
+  preceding exact `{capacityState,fundingUrl,periodEnd,remainingPercent?}`
+  response. It maps the preceding shape to `not_sponsored`, derives only the
+  funding boolean, and discards period and percentage fields before they reach
+  assistant policy. Deploy that reader throughout Cloudflare/runner before Web
+  begins emitting the current shape. Because the preceding producer cannot
+  represent an active monthly sponsorship, the Web switch becomes a
+  forward-only tandem cutover once authorization creation is enabled. Remove
+  the preceding-shape reader only after that producer is neither routable nor a
+  rollback candidate and every warm runner from before the reader deployment
+  has been drained.
 
   The app-local GCP KMS adapter owns web-side root wrapping plus authority
   signing. Hosted billing may store an encrypted unverified Stripe checkout

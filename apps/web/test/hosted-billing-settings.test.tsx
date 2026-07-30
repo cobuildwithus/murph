@@ -482,7 +482,6 @@ describe("HostedBillingSettings", () => {
       }),
       usageTopUpOffers: [{
         amountLabel: "$5",
-        estimatedMessages: 100,
         offerCode: "usage_5_usd",
       }],
     }));
@@ -591,7 +590,6 @@ describe("HostedBillingSettings", () => {
       usageStatus,
       usageTopUpOffers: [{
         amountLabel: "$5",
-        estimatedMessages: 100,
         offerCode: "usage_5_usd",
       }],
     }));
@@ -620,17 +618,14 @@ describe("HostedBillingSettings", () => {
       usageTopUpOffers: [
         {
           amountLabel: "$5",
-          estimatedMessages: 100,
           offerCode: "usage_5_usd",
         },
         {
           amountLabel: "$10",
-          estimatedMessages: 200,
           offerCode: "usage_10_usd",
         },
         {
           amountLabel: "$25",
-          estimatedMessages: 500,
           offerCode: "usage_25_usd",
         },
       ],
@@ -659,7 +654,6 @@ describe("HostedBillingSettings", () => {
       usageTopUpInitialOpen: true,
       usageTopUpOffers: [{
         amountLabel: "$10",
-        estimatedMessages: 200,
         offerCode: "usage_10_usd",
       }],
     }));
@@ -679,7 +673,6 @@ describe("HostedBillingSettings", () => {
       usageTopUpInitialOpen: true,
       usageTopUpOffers: [{
         amountLabel: "$10",
-        estimatedMessages: 200,
         offerCode: "usage_10_usd",
       }],
     }));
@@ -755,7 +748,6 @@ describe("HostedBillingSettings", () => {
       }),
       usageTopUpOffers: [{
         amountLabel: "$5",
-        estimatedMessages: 100,
         offerCode: "usage_5_usd",
       }],
     }));
