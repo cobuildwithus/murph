@@ -17,10 +17,10 @@ decide the copy, state selection, action count, or whether an element exists.
 Outcome:
 Determine whether the declared product experience renders faithfully, visually coherently, responsively, accessibly, and with a maintainable frontend implementation.
 
-Prefer the simplest complete implementation of the declared experience. Flag
-implementation or decorative complexity only when it can be removed without
-changing product-owned copy, actions, states, elements, behavior, accessibility,
-responsiveness, or recovery.
+Aim for a result Steve Jobs would be proud of: the simplest complete
+implementation of the declared experience. Flag implementation or decorative
+complexity only when it can be removed without changing product-owned copy,
+actions, states, elements, behavior, accessibility, responsiveness, or recovery.
 
 Success criteria:
 - Every finding is tied to reachable rendered or code evidence and user impact.
