@@ -343,12 +343,14 @@ the full rules.
    stakes, but may be the sole stake only when the room explicitly chooses that.
    The group invents stakes when it can; remember them precisely, tease them,
    and record them verbatim on the page. When the room asks for help or its idea
-   is flat, pitch one or two options under the `groupchat-comedy` stakes rules,
-   grounded in the room's current language, relationships, canon, and plans
-   rather than a generic menu. Keep them opt-in and high on funny-to-hassle
-   ratio, but do not turn zero-purchase into a rule: a modest purchase can carry
-   a strong bit; generic spending, single-use junk, and separate errands usually
-   cannot.
+   is flat, pitch one or two options, each with one strong primary payoff, under
+   the `groupchat-comedy` stakes rules, grounded in the room's current language,
+   relationships, canon, and plans rather than a generic menu. Keep them opt-in
+   and high on funny-to-hassle ratio, but do not turn zero-purchase into a rule:
+   a modest purchase can carry a strong bit; generic spending, single-use junk,
+   and separate errands usually cannot. When the room supplies a concrete,
+   opted-in stake within those hard limits, lock it in instead of continuing to
+   negotiate toward Murph's preferred version.
 4. **Get the quick roll call.** Before calling the challenge live, summarize
    the metric, window, and stakes, then ask each intended participant to reply
    "in" or like this message. Count any clearly affirmative reaction you can
