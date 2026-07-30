@@ -52,6 +52,7 @@ export type {
   AssistantProviderUsageDraft,
 } from './assistant/providers/types.js'
 import type {
+  AssistantCodexChatGptAuthResolver,
   AssistantHostedGroupSharedReader,
 } from './assistant/execution-context.js'
 import type {
@@ -173,6 +174,8 @@ export interface ReadOnlyAssistantAskInput {
   codexHome?: string | null
   developerInstructions?: string | null
   env?: NodeJS.ProcessEnv
+  codexChatGptAuthResolver?: AssistantCodexChatGptAuthResolver | null
+  codexChatGptAuthSubject?: string | null
   groupSharedReader?: AssistantHostedGroupSharedReader | null
   model?: string | null
   modelProvider?: string | null
@@ -383,6 +386,8 @@ async function executeConfinedReadOnlyAssistantAskTurn(
         baseInstructions: turn.baseInstructions,
         codexCommand: input.codexCommand,
         codexHome: input.codexHome,
+        codexChatGptAuthResolver: input.codexChatGptAuthResolver ?? null,
+        codexChatGptAuthSubject: input.codexChatGptAuthSubject ?? null,
         developerInstructions: turn.developerInstructions,
         dynamicTools,
         env: stripReadOnlyAssistantAskCapabilityEnv(input.env),

@@ -1064,6 +1064,8 @@ describe('Codex model catalog', () => {
       'features.shell_tool=false',
     )
     expect(providerInput).toMatchObject({
+      codexChatGptAuthResolver,
+      codexChatGptAuthSubject: 'member-system-notification',
       dynamicTools: [],
       environments: [],
       hostedToolContext: null,

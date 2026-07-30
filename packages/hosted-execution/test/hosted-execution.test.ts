@@ -703,6 +703,7 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH",
       "HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH",
       "HOSTED_RUNTIME_CODEX_AUTH_PATH",
+      "HOSTED_RUNTIME_CODEX_AUTH_SEED_PATH",
       "HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH",
       "HOSTED_RUNTIME_CRYPTO_ROOT_PATH",
       "HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH",
@@ -742,6 +743,9 @@ describe("hosted execution coverage gaps", () => {
     );
     expect(routeModule.HOSTED_RUNTIME_NEWSLETTER_TOOL_PATH).toBe(
       "/api/internal/hosted-execution/groups/newsletter-tool",
+    );
+    expect(routeModule.HOSTED_RUNTIME_CODEX_AUTH_SEED_PATH).toBe(
+      "/api/internal/hosted-runtime/codex-auth/seed",
     );
     expect(routeModule.HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH).toBe(
       "/api/internal/hosted-execution/assistant-configuration/tool",

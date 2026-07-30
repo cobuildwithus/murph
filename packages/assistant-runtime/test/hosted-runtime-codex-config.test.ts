@@ -676,6 +676,90 @@ test("hosted Codex runtime config writes no auth.json without subscription auth"
   await assert.rejects(() => readFile(path.join(result.codexHome, "auth.json"), "utf8"));
 });
 
+test("hosted Codex runtime config enables external ChatGPT auth without an API key or auth.json", async () => {
+  const operatorHomeRoot = await createTemporaryDirectory();
+  const result = await prepareHostedCodexRuntimeEnvironment({
+    externalChatGptAuth: true,
+    operatorHomeRoot,
+    runtimeEnv: {
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+    },
+  });
+
+  assert.equal(
+    result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
+    "hosted-chatgpt-openai",
+  );
+  await assert.rejects(() => readFile(path.join(result.codexHome, "auth.json"), "utf8"));
+
+  const config = await readFile(result.codexConfigPath, "utf8");
+  assert.match(config, /^model_provider = "hosted-chatgpt-openai"$/mu);
+  assert.match(config, /^requires_openai_auth = true$/mu);
+  assert.doesNotMatch(config, /env_key/u);
+});
+
+test("hosted Codex external auth removes legacy file credentials without reading or replacing them", async () => {
+  const operatorHomeRoot = await createTemporaryDirectory();
+  const codexHome = path.join(operatorHomeRoot, ".codex-hosted");
+  const codexAuthPath = path.join(codexHome, "auth.json");
+  await mkdir(codexHome, {
+    mode: 0o700,
+    recursive: true,
+  });
+  await writeFile(codexAuthPath, buildManagedChatGptCodexAuthJson(), {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+
+  await prepareHostedCodexRuntimeEnvironment({
+    externalChatGptAuth: true,
+    operatorHomeRoot,
+    runtimeEnv: {
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      [HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV]:
+        encodeChatGptCodexAuthEnvValue(buildChatGptCodexAuthJson()),
+      NODE_ENV: "development",
+    },
+  });
+
+  await assert.rejects(() => readFile(codexAuthPath, "utf8"));
+});
+
+test("hosted Codex cleared seed auth cannot revive file-backed credentials", async () => {
+  const operatorHomeRoot = await createTemporaryDirectory();
+  const codexHome = path.join(operatorHomeRoot, ".codex-hosted");
+  const codexAuthPath = path.join(codexHome, "auth.json");
+  await mkdir(codexHome, {
+    mode: 0o700,
+    recursive: true,
+  });
+  await writeFile(codexAuthPath, buildManagedChatGptCodexAuthJson(), {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+
+  const result = await prepareHostedCodexRuntimeEnvironment({
+    clearFileBackedChatGptAuth: true,
+    operatorHomeRoot,
+    runtimeEnv: {
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      [HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV]:
+        encodeChatGptCodexAuthEnvValue(buildChatGptCodexAuthJson()),
+      NODE_ENV: "development",
+      OPENAI_API_KEY: "fixture-openai-key",
+    },
+  });
+
+  await assert.rejects(() => readFile(codexAuthPath, "utf8"));
+  assert.equal(
+    result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
+    "hosted-openai",
+  );
+  const config = await readFile(result.codexConfigPath, "utf8");
+  assert.match(config, /^model_provider = "hosted-openai"$/mu);
+  assert.doesNotMatch(config, /^model_provider = "hosted-chatgpt-openai"$/mu);
+});
+
 test("hosted Codex runtime config removes stale subscription auth from a persistent home", async () => {
   const operatorHomeRoot = await createTemporaryDirectory();
   const subscriptionResult = await prepareHostedCodexRuntimeEnvironment({

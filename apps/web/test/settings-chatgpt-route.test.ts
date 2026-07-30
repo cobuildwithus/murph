@@ -89,37 +89,33 @@ describe("ChatGPT settings route", () => {
     });
   });
 
-  it("starts a connect attempt for an active hosted member", async () => {
+  it("retires the legacy browser device-code connect mutation", async () => {
     const response = await route.POST(jsonRequest("POST", {}));
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(410);
     await expect(response.json()).resolves.toEqual({
-      state: "connecting",
-      userCode: null,
-      verificationUrl: null,
+      error: {
+        code: "HOSTED_CODEX_AUTH_DEVICE_CODE_DISABLED",
+        message: "Connect ChatGPT from the Murph iOS app.",
+        retryable: false,
+      },
     });
-    expect(mocks.requireActiveHostedAppSessionFromRequest).toHaveBeenCalledWith(expect.any(Request));
+    expect(mocks.requireActiveHostedAppSessionFromRequest).not.toHaveBeenCalled();
     expect(mocks.assertHostedLaunchRequiredConsentGranted).not.toHaveBeenCalled();
-    expect(mocks.beginHostedCodexAuthAttempt).toHaveBeenCalledWith({
-      action: "connect",
-      memberId: "member_123",
-    });
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-      expectedUserId: "member_123",
-      mailboxItemId: "mailbox_item_codex_auth",
-    });
+    expect(mocks.beginHostedCodexAuthAttempt).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
-  it("rejects non-empty mutation bodies before starting an attempt", async () => {
+  it("returns the same retirement response without inspecting legacy POST bodies", async () => {
     const response = await route.POST(jsonRequest("POST", {
       unexpected: true,
     }));
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(410);
     await expect(response.json()).resolves.toEqual({
       error: {
-        code: "HOSTED_CODEX_AUTH_INVALID_REQUEST",
-        message: "ChatGPT connection request must be empty.",
+        code: "HOSTED_CODEX_AUTH_DEVICE_CODE_DISABLED",
+        message: "Connect ChatGPT from the Murph iOS app.",
         retryable: false,
       },
     });

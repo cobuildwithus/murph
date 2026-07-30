@@ -737,7 +737,12 @@ describe("hosted detached assistant ask controller", () => {
     }));
     const groupSharedReader = { request: sharedRead };
     const createGroupSharedReader = vi.fn(() => groupSharedReader);
+    const codexChatGptAuthResolver = {
+      resolve: vi.fn(async () => ({ kind: "unchanged" as const })),
+    };
     const executeAsk = vi.fn(async (input) => {
+      assert.equal(input.codexChatGptAuthResolver, codexChatGptAuthResolver);
+      assert.equal(input.codexChatGptAuthSubject, TEST_USER_ID);
       assert.equal(input.groupSharedReader, groupSharedReader);
       assert.equal(sharedRead.mock.calls.length, 0);
       return { answer: "answer", outcome: "answered" as const };
@@ -761,6 +766,8 @@ describe("hosted detached assistant ask controller", () => {
             };
           },
         },
+        codexChatGptAuthResolver,
+        codexChatGptAuthSubject: TEST_USER_ID,
         codexHome: null,
         createGroupSharedReader,
         env: {},
@@ -872,6 +879,49 @@ describe("hosted detached assistant ask controller", () => {
       assert.equal(executeAsk.mock.calls.length, 1);
     } finally {
       childExited.resolve();
+      await removeVaultRoot(vaultRoot);
+    }
+  });
+
+  test("requeues a newly claimed ask when auth mode admission closes before provider work", async () => {
+    const vaultRoot = await createVaultRoot();
+    const assistantAskRequest = vi.fn();
+    const beforeProviderAdmission = vi.fn(async () => true);
+    const executeAsk = vi.fn();
+
+    try {
+      await writePending(vaultRoot, [
+        createPendingAsk({
+          eventId: "ask_event_auth_mode_restart",
+          itemId: "item_auth_mode_restart",
+        }),
+      ]);
+      const controller = createHostedDetachedAssistantAskController({
+        assistantAskPort: {
+          request: assistantAskRequest,
+        },
+        beforeProviderAdmission,
+        codexHome: null,
+        env: {},
+        executeAsk,
+        now: () => TEST_NOW,
+        onStateMutation() {},
+        vaultRoot,
+      });
+
+      controller.kick();
+      await waitUntil(async () => {
+        const pending = (await readHostedSystemMailboxState(vaultRoot)).pending[0];
+        assert.equal(pending?.attemptCount, 1);
+        assert.equal(pending?.nextAttemptAt, null);
+        assert.equal(pending?.status, "pending");
+      });
+      await controller.closeAndRequeue();
+
+      assert.equal(beforeProviderAdmission.mock.calls.length, 1);
+      assert.equal(assistantAskRequest.mock.calls.length, 0);
+      assert.equal(executeAsk.mock.calls.length, 0);
+    } finally {
       await removeVaultRoot(vaultRoot);
     }
   });

@@ -26,6 +26,7 @@ import {
   type HostedWorkspaceSnapshotV2Ref,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 import {
+  HOSTED_CODEX_AUTH_SEED_RESPONSE_MAX_BYTES,
   HOSTED_RUNTIME_ASSISTANT_ASK_DIAGNOSTIC_CODE_HEADER,
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER,
   type HostedWorkspaceCheckpointRequest,
@@ -41,6 +42,7 @@ import {
   HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH,
   HOSTED_RUNTIME_GROUP_TOOL_PATH,
   HOSTED_RUNTIME_CODEX_AUTH_PATH,
+  HOSTED_RUNTIME_CODEX_AUTH_SEED_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
   HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
@@ -4289,6 +4291,157 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         humor: 8,
       },
     });
+  });
+
+  it("reads the current Codex auth seed through the active fenced sensitive route", async () => {
+    const connectionVersion = `hca_${"a".repeat(16)}`;
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      accessToken: "fixture-time-limited-access",
+      chatgptAccountId: "account_fixture",
+      connectionVersion,
+      expiresAt: "2026-07-22T00:00:00.000Z",
+      schemaVersion: 1,
+      status: "available",
+    }), {
+      headers: { "content-type": "application/json; charset=utf-8" },
+      status: 200,
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "runtime_write_123",
+          leaseGeneration: "7",
+          userId: "member_123",
+          workspaceVersion: "6",
+        }),
+      },
+    });
+
+    await expect(platform.codexAuthPort!.readAccessSeed({
+      includeCredentials: true,
+      knownConnectionVersion: null,
+      schemaVersion: 1,
+    })).resolves.toEqual({
+      accessToken: "fixture-time-limited-access",
+      chatgptAccountId: "account_fixture",
+      connectionVersion,
+      expiresAt: "2026-07-22T00:00:00.000Z",
+      schemaVersion: 1,
+      status: "available",
+    });
+
+    const request = requireFetchRequest(
+      fetchMock.mock.calls[0],
+      "Codex auth seed callback request",
+    );
+    expect(request.url).toBe(
+      `http://web-control.worker${HOSTED_RUNTIME_CODEX_AUTH_SEED_PATH}`,
+    );
+    expect(request.method).toBe("POST");
+    expectDefaultRuntimeWriteFenceHeaders(request);
+    await expect(request.json()).resolves.toEqual({
+      includeCredentials: true,
+      knownConnectionVersion: null,
+      schemaVersion: 1,
+    });
+  });
+
+  it("reads token-free Codex auth connection metadata without widening the response", async () => {
+    const connectionVersion = `hca_${"m".repeat(16)}`;
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      connectionVersion,
+      schemaVersion: 1,
+      status: "available_metadata",
+    }), {
+      headers: { "content-type": "application/json; charset=utf-8" },
+      status: 200,
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "runtime_write_123",
+          leaseGeneration: "7",
+          userId: "member_123",
+          workspaceVersion: "6",
+        }),
+      },
+    });
+
+    await expect(platform.codexAuthPort!.readAccessSeed({
+      includeCredentials: false,
+      knownConnectionVersion: connectionVersion,
+      schemaVersion: 1,
+    })).resolves.toEqual({
+      connectionVersion,
+      schemaVersion: 1,
+      status: "available_metadata",
+    });
+
+    const request = requireFetchRequest(
+      fetchMock.mock.calls[0],
+      "Codex auth metadata callback request",
+    );
+    await expect(request.json()).resolves.toEqual({
+      includeCredentials: false,
+      knownConnectionVersion: connectionVersion,
+      schemaVersion: 1,
+    });
+  });
+
+  it("fails closed when the Codex auth seed route is missing", async () => {
+    const fetchMock = vi.fn(async () => new Response("not found", { status: 404 }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "runtime_write_123",
+          leaseGeneration: "7",
+          userId: "member_123",
+          workspaceVersion: "6",
+        }),
+      },
+    });
+
+    await expect(platform.codexAuthPort!.readAccessSeed({
+      includeCredentials: true,
+      knownConnectionVersion: null,
+      schemaVersion: 1,
+    })).rejects.toMatchObject({
+      status: 404,
+      statusCode: 404,
+    });
+  });
+
+  it("fails closed before buffering an oversized Codex auth seed response", async () => {
+    const fetchMock = vi.fn(async () => new Response(
+      "x".repeat(HOSTED_CODEX_AUTH_SEED_RESPONSE_MAX_BYTES + 1), {
+      status: 200,
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "runtime_write_123",
+          leaseGeneration: "7",
+          userId: "member_123",
+          workspaceVersion: "6",
+        }),
+      },
+    });
+
+    await expect(platform.codexAuthPort!.readAccessSeed({
+      includeCredentials: true,
+      knownConnectionVersion: null,
+      schemaVersion: 1,
+    })).rejects.toThrow(
+      `response exceeded the ${HOSTED_CODEX_AUTH_SEED_RESPONSE_MAX_BYTES} byte safety limit`,
+    );
   });
 
   it("rejects malformed personality update responses", async () => {

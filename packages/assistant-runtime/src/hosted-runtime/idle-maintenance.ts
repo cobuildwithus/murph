@@ -70,6 +70,7 @@ export type HostedIdleMaintenanceOutcome =
   | ({
       kind: "skipped";
       reason:
+        | "external_chatgpt_auth"
         | "missing_model"
         | "missing_provider"
         | "pending_work"
@@ -87,6 +88,7 @@ export type HostedIdleMaintenanceOutcome =
 // statements.
 export async function runHostedIdleCheckpointMaintenance(input: {
   credentialSource: AssistantUsageCredentialSource;
+  externalChatGptAuth: boolean;
   materializeRetentionCandidatePaths?: ((
     storedPaths: readonly string[]
   ) => Promise<InboxMediaRetentionMaterializeResult | void>) | null;

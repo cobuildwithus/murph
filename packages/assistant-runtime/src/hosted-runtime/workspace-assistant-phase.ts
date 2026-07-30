@@ -46,6 +46,7 @@ import {
   type AssistantCronStatusOptions,
   type AssistantBeforeProviderAcceptedInputsHook,
   type AssistantAutomationOperationScope,
+  type AssistantCodexChatGptAuthResolver,
   type AssistantExecutionContext,
   type AssistantHostedGroupPermissionOfferTool,
   type AssistantHostedGroupSharedReader,
@@ -1473,6 +1474,7 @@ export async function runHostedWorkspaceAssistantPhase(
     {
       hosted: {
         actionApprovalPort: input.runtime.platform.actionApprovalPort ?? null,
+        codexChatGptAuthResolver: input.codexChatGptAuthResolver ?? null,
         ...(input.currentAssistantInputId
           ? {
               currentAssistantInputId: input.currentAssistantInputId,

@@ -49,6 +49,7 @@ vi.mock('node:os', async (importOriginal) => {
 import {
   buildCodexAppServerSteerRequest,
   buildCodexAppServerArgs,
+  clearWarmCodexChatGptAuthForSubject,
   compactWarmCodexThread,
   executeCodexAppServerTurn as executeCodexAppServerTurnUnchecked,
   executeCodexManagedAccountOperation,
@@ -61,6 +62,9 @@ import type {
   CodexAppServerLiveTurn,
   CodexAppServerTurnInput,
 } from '../src/assistant-codex.ts'
+import type {
+  AssistantCodexChatGptAuthResolveInput,
+} from '../src/assistant/execution-context.ts'
 import {
   buildRuntimeIssueInputForFailedCodexAction,
   CODEX_ACTION_DIAGNOSTICS_TRACE_SCHEMA,
@@ -11904,6 +11908,829 @@ describe('assistant codex runtime', () => {
     })
 
     expect(codexMocks.spawn).not.toHaveBeenCalled()
+  })
+
+  it('reconciles access-only ChatGPT auth by subject and version on one warm process', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-chatgpt-auth-work-')
+    const child = new MockChildProcess()
+    const spawnedChildren = [child]
+    const firstAccessToken = ['synthetic', 'access', 'v1'].join('-')
+    const replacementAccessToken = ['synthetic', 'access', 'v2'].join('-')
+    const completeTurn = (threadId: string, turnId: string): void => {
+      child.stdout.write(jsonLine({
+        method: 'turn/completed',
+        params: {
+          threadId,
+          turn: {
+            id: turnId,
+            status: 'completed',
+          },
+        },
+      }))
+    }
+    mockProcessGroupSignalsForChildren(spawnedChildren)
+    codexMocks.spawn.mockImplementation(() => {
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          const firstLogin = await waitForRpcMethodCount(
+            child,
+            'account/login/start',
+            1,
+          )
+          expect(firstLogin.params).toEqual({
+            accessToken: firstAccessToken,
+            chatgptAccountId: 'chatgpt-account-a',
+            type: 'chatgptAuthTokens',
+          })
+          child.stdout.write(jsonLine({
+            id: firstLogin.id,
+            result: { type: 'chatgptAuthTokens' },
+          }))
+          await writeWarmTurnStarted({
+            child,
+            requestCount: 1,
+            threadId: 'thread-chatgpt-v1',
+            turnId: 'turn-chatgpt-v1',
+          })
+          completeTurn('thread-chatgpt-v1', 'turn-chatgpt-v1')
+
+          await writeWarmTurnStarted({
+            child,
+            requestCount: 2,
+            threadId: 'thread-chatgpt-v1-reused',
+            turnId: 'turn-chatgpt-v1-reused',
+          })
+          completeTurn('thread-chatgpt-v1-reused', 'turn-chatgpt-v1-reused')
+
+          const replacementLogin = await waitForRpcMethodCount(
+            child,
+            'account/login/start',
+            2,
+          )
+          expect(replacementLogin.params).toEqual({
+            accessToken: replacementAccessToken,
+            chatgptAccountId: 'chatgpt-account-a',
+            type: 'chatgptAuthTokens',
+          })
+          child.stdout.write(jsonLine({
+            id: replacementLogin.id,
+            result: { type: 'chatgptAuthTokens' },
+          }))
+          await writeWarmTurnStarted({
+            child,
+            requestCount: 3,
+            threadId: 'thread-chatgpt-v2',
+            turnId: 'turn-chatgpt-v2',
+          })
+          completeTurn('thread-chatgpt-v2', 'turn-chatgpt-v2')
+
+          const crossSubjectLogout = await waitForRpcMethodCount(
+            child,
+            'account/logout',
+            1,
+          )
+          expect(readWrittenRpcMessages(child).filter(
+            (message) => message.method === 'thread/start',
+          )).toHaveLength(3)
+          child.stdout.write(jsonLine({
+            id: crossSubjectLogout.id,
+            result: {},
+          }))
+          await writeWarmTurnStarted({
+            child,
+            requestCount: 4,
+            threadId: 'thread-chatgpt-other-subject',
+            turnId: 'turn-chatgpt-other-subject',
+          })
+          completeTurn(
+            'thread-chatgpt-other-subject',
+            'turn-chatgpt-other-subject',
+          )
+        })()
+      })
+      return child
+    })
+
+    const resolutions = [
+      {
+        accessToken: firstAccessToken,
+        chatgptAccountId: 'chatgpt-account-a',
+        connectionVersion: 'connection-v1',
+        expiresAt: '2999-01-01T00:00:00.000Z',
+        kind: 'login' as const,
+      },
+      {
+        accessToken: firstAccessToken,
+        chatgptAccountId: 'chatgpt-account-a',
+        connectionVersion: 'connection-v1',
+        expiresAt: '2999-01-01T00:00:00.000Z',
+        kind: 'login' as const,
+      },
+      {
+        accessToken: replacementAccessToken,
+        chatgptAccountId: 'chatgpt-account-a',
+        connectionVersion: 'connection-v2',
+        expiresAt: '2999-01-01T00:00:00.000Z',
+        kind: 'login' as const,
+      },
+    ]
+    let nextResolution = 0
+    const resolver = {
+      reportLoginResult: vi.fn(async () => 'current' as const),
+      resolve: vi.fn(async (_request: AssistantCodexChatGptAuthResolveInput) => {
+        const resolution = resolutions[nextResolution]
+        nextResolution += 1
+        if (!resolution) {
+          throw new Error('Unexpected ChatGPT auth resolution.')
+        }
+        return resolution
+      }),
+    }
+    const otherSubjectResolver = {
+      resolve: vi.fn(async (_request: AssistantCodexChatGptAuthResolveInput) => ({
+        authRequired: false,
+        connectionVersion: null,
+        kind: 'logout' as const,
+      })),
+    }
+    const results = []
+    for (let index = 0; index < 3; index += 1) {
+      results.push(await executeCodexAppServerTurn({
+        codexChatGptAuthResolver: resolver,
+        codexChatGptAuthSubject: 'member-a',
+        prompt: `ChatGPT auth turn ${index + 1}`,
+        workingDirectory,
+      }))
+    }
+    results.push(await executeCodexAppServerTurn({
+      codexChatGptAuthResolver: otherSubjectResolver,
+      codexChatGptAuthSubject: 'member-b',
+      prompt: 'Other member turn',
+      workingDirectory,
+    }))
+
+    expect(resolver.resolve.mock.calls.map(([request]) => request)).toEqual([
+      expect.objectContaining({
+        knownConnectionVersion: null,
+        reason: 'turn_start',
+      }),
+      expect.objectContaining({
+        knownConnectionVersion: 'connection-v1',
+        reason: 'turn_start',
+      }),
+      expect.objectContaining({
+        knownConnectionVersion: 'connection-v1',
+        reason: 'turn_start',
+      }),
+    ])
+    expect(otherSubjectResolver).toMatchObject({
+      resolve: expect.any(Function),
+    })
+    expect(otherSubjectResolver.resolve).toHaveBeenCalledWith(
+      expect.objectContaining({
+        knownConnectionVersion: null,
+        reason: 'turn_start',
+      }),
+    )
+    expect(readWrittenRpcMessages(child).filter(
+      (message) => message.method === 'account/login/start',
+    )).toHaveLength(2)
+    expect(readWrittenRpcMessages(child).filter(
+      (message) => message.method === 'account/logout',
+    )).toHaveLength(1)
+    expect(resolver.reportLoginResult).toHaveBeenCalledTimes(2)
+    expect(resolver.reportLoginResult).toHaveBeenNthCalledWith(1, {
+      connectionVersion: 'connection-v1',
+      result: 'connected',
+    })
+    expect(resolver.reportLoginResult).toHaveBeenNthCalledWith(2, {
+      connectionVersion: 'connection-v2',
+      result: 'connected',
+    })
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
+    expect(JSON.stringify(results)).not.toContain(firstAccessToken)
+    expect(JSON.stringify(results)).not.toContain(replacementAccessToken)
+  })
+
+  it.each([
+    {
+      expectedCode: 'ASSISTANT_CODEX_CHATGPT_AUTH_SUPERSEDED',
+      reportOutcome: 'superseded',
+    },
+    {
+      expectedCode: 'ASSISTANT_CODEX_CHATGPT_AUTH_RESULT_REPORT_FAILED',
+      reportOutcome: 'failed',
+    },
+  ] as const)(
+    'fails a warm unchanged ChatGPT auth fence when reporting is $reportOutcome',
+    async ({ expectedCode, reportOutcome }) => {
+      const workingDirectory = await createTempDir('assistant-codex-chatgpt-unchanged-fence-work-')
+      const child = new MockChildProcess()
+      const spawnedChildren = [child]
+      const accessToken = ['synthetic', 'unchanged', 'fence'].join('-')
+      let reportCount = 0
+      const reportLoginResult = vi.fn(async () => {
+        reportCount += 1
+        if (reportCount === 1) {
+          return 'current' as const
+        }
+        if (reportOutcome === 'failed') {
+          throw new Error(`failed auth fence ${accessToken}`)
+        }
+        return 'superseded' as const
+      })
+      mockProcessGroupSignalsForChildren(spawnedChildren)
+      codexMocks.spawn.mockImplementation(() => {
+        queueMicrotask(() => {
+          void (async () => {
+            const initialize = await waitForRpcMethod(child, 'initialize')
+            child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+            const login = await waitForRpcMethod(child, 'account/login/start')
+            child.stdout.write(jsonLine({
+              id: login.id,
+              result: { type: 'chatgptAuthTokens' },
+            }))
+            await writeWarmTurnStarted({
+              child,
+              requestCount: 1,
+              threadId: 'thread-chatgpt-unchanged-initial',
+              turnId: 'turn-chatgpt-unchanged-initial',
+            })
+            child.stdout.write(jsonLine({
+              method: 'turn/completed',
+              params: {
+                threadId: 'thread-chatgpt-unchanged-initial',
+                turn: {
+                  id: 'turn-chatgpt-unchanged-initial',
+                  status: 'completed',
+                },
+              },
+            }))
+          })()
+        })
+        return child
+      })
+
+      let resolveCount = 0
+      const resolver = {
+        reportLoginResult,
+        resolve: vi.fn(async () => {
+          resolveCount += 1
+          return resolveCount === 1
+            ? {
+                accessToken,
+                chatgptAccountId: 'chatgpt-account-unchanged-fence',
+                connectionVersion: 'connection-unchanged-fence',
+                expiresAt: '2999-01-01T00:00:00.000Z',
+                kind: 'login' as const,
+              }
+            : { kind: 'unchanged' as const }
+        }),
+      }
+      await executeCodexAppServerTurn({
+        codexChatGptAuthResolver: resolver,
+        codexChatGptAuthSubject: 'member-unchanged-fence',
+        prompt: 'Establish warm auth before unchanged fencing',
+        workingDirectory,
+      })
+
+      let failure: unknown
+      try {
+        await executeCodexAppServerTurn({
+          codexChatGptAuthResolver: resolver,
+          codexChatGptAuthSubject: 'member-unchanged-fence',
+          prompt: 'Revalidate unchanged warm auth',
+          workingDirectory,
+        })
+      } catch (error) {
+        failure = error
+      }
+
+      expect(failure).toMatchObject({
+        code: expectedCode,
+        context: { retryable: true },
+      })
+      expect(reportLoginResult).toHaveBeenCalledTimes(2)
+      expect(reportLoginResult).toHaveBeenNthCalledWith(2, {
+        connectionVersion: 'connection-unchanged-fence',
+        result: 'connected',
+      })
+      expect(JSON.stringify(reportLoginResult.mock.calls)).not.toContain(accessToken)
+      expect(readWrittenRpcMessages(child).filter(
+        (message) => message.method === 'account/login/start',
+      )).toHaveLength(1)
+      expect(readWrittenRpcMessages(child).filter(
+        (message) => message.method === 'thread/start',
+      )).toHaveLength(1)
+      expect(String(failure)).not.toContain(accessToken)
+      expect(JSON.stringify(
+        readCodexAppServerTurnFailureContext(failure)?.jsonEvents ?? [],
+      )).not.toContain(accessToken)
+      expect(child.exitCode === null && child.signalCode === null).toBe(false)
+    },
+  )
+
+  it('clears only an idle warm ChatGPT bearer owned by the requested subject', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-chatgpt-clear-work-')
+    const child = new MockChildProcess()
+    const spawnedChildren = [child]
+    const accessToken = ['synthetic', 'clear', 'access'].join('-')
+    const secondTurnStarted = createDeferred<void>()
+    const releaseSecondTurn = createDeferred<void>()
+    mockProcessGroupSignalsForChildren(spawnedChildren)
+    codexMocks.spawn.mockImplementation(() => {
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+          const login = await waitForRpcMethod(child, 'account/login/start')
+          child.stdout.write(jsonLine({
+            id: login.id,
+            result: { type: 'chatgptAuthTokens' },
+          }))
+          await writeWarmTurnStarted({
+            child,
+            requestCount: 1,
+            threadId: 'thread-chatgpt-clear',
+            turnId: 'turn-chatgpt-clear',
+          })
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              threadId: 'thread-chatgpt-clear',
+              turn: {
+                id: 'turn-chatgpt-clear',
+                status: 'completed',
+              },
+            },
+          }))
+
+          await writeWarmTurnStarted({
+            child,
+            requestCount: 2,
+            threadId: 'thread-chatgpt-clear-busy',
+            turnId: 'turn-chatgpt-clear-busy',
+          })
+          secondTurnStarted.resolve()
+          await releaseSecondTurn.promise
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              threadId: 'thread-chatgpt-clear-busy',
+              turn: {
+                id: 'turn-chatgpt-clear-busy',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+      return child
+    })
+
+    const codexChatGptAuthResolver = {
+      resolve: async () => ({
+        accessToken,
+        chatgptAccountId: 'chatgpt-account-clear',
+        connectionVersion: 'connection-clear',
+        expiresAt: '2999-01-01T00:00:00.000Z',
+        kind: 'login' as const,
+      }),
+    }
+    await executeCodexAppServerTurn({
+      codexChatGptAuthResolver,
+      codexChatGptAuthSubject: 'member-clear',
+      prompt: 'Seed warm auth for explicit clearing',
+      workingDirectory,
+    })
+
+    const activeTurn = executeCodexAppServerTurn({
+      codexChatGptAuthResolver,
+      codexChatGptAuthSubject: 'member-clear',
+      prompt: 'Keep warm auth busy while explicit clearing retries',
+      workingDirectory,
+    })
+    await secondTurnStarted.promise
+    await expect(
+      clearWarmCodexChatGptAuthForSubject('member-clear'),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_APP_SERVER_BUSY',
+      context: { retryable: true },
+    })
+    releaseSecondTurn.resolve()
+    await activeTurn
+
+    await expect(
+      clearWarmCodexChatGptAuthForSubject('member-other'),
+    ).resolves.toBe(false)
+    expect(child.exitCode).toBeNull()
+    await expect(
+      clearWarmCodexChatGptAuthForSubject('member-clear'),
+    ).resolves.toBe(true)
+    expect(child.exitCode === null && child.signalCode === null).toBe(false)
+    await expect(
+      clearWarmCodexChatGptAuthForSubject('member-clear'),
+    ).resolves.toBe(false)
+  })
+
+  it('clears stale ChatGPT auth and fails before provider start when auth is required', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-chatgpt-required-work-')
+    const child = new MockChildProcess()
+    const spawnedChildren = [child]
+    const accessToken = ['synthetic', 'required', 'access'].join('-')
+    mockProcessGroupSignalsForChildren(spawnedChildren)
+    codexMocks.spawn.mockImplementation(() => {
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+          const login = await waitForRpcMethod(child, 'account/login/start')
+          child.stdout.write(jsonLine({
+            id: login.id,
+            result: { type: 'chatgptAuthTokens' },
+          }))
+          await writeWarmTurnStarted({
+            child,
+            requestCount: 1,
+            threadId: 'thread-chatgpt-required-initial',
+            turnId: 'turn-chatgpt-required-initial',
+          })
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              threadId: 'thread-chatgpt-required-initial',
+              turn: {
+                id: 'turn-chatgpt-required-initial',
+                status: 'completed',
+              },
+            },
+          }))
+
+          const logout = await waitForRpcMethod(child, 'account/logout')
+          child.stdout.write(jsonLine({ id: logout.id, result: {} }))
+        })()
+      })
+      return child
+    })
+
+    let resolveCount = 0
+    const resolver = {
+      resolve: vi.fn(async () => {
+        resolveCount += 1
+        return resolveCount === 1
+          ? {
+              accessToken,
+              chatgptAccountId: 'chatgpt-account-required',
+              connectionVersion: 'connection-required',
+              expiresAt: '2999-01-01T00:00:00.000Z',
+              kind: 'login' as const,
+            }
+          : {
+              authRequired: true,
+              connectionVersion: 'connection-required',
+              kind: 'logout' as const,
+            }
+      }),
+    }
+    await executeCodexAppServerTurn({
+      codexChatGptAuthResolver: resolver,
+      codexChatGptAuthSubject: 'member-required',
+      prompt: 'Seed required auth',
+      workingDirectory,
+    })
+
+    let failure: unknown
+    try {
+      await executeCodexAppServerTurn({
+        codexChatGptAuthResolver: resolver,
+        codexChatGptAuthSubject: 'member-required',
+        prompt: 'Required auth must fail',
+        workingDirectory,
+      })
+    } catch (error) {
+      failure = error
+    }
+
+    expect(failure).toMatchObject({
+      code: 'ASSISTANT_CODEX_CHATGPT_AUTH_REQUIRED',
+      context: { retryable: false },
+      message: 'ChatGPT authentication needs attention before this assistant can run.',
+    })
+    expect(resolver).toMatchObject({ resolve: expect.any(Function) })
+    expect(resolver.resolve).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        knownConnectionVersion: 'connection-required',
+      }),
+    )
+    expect(readWrittenRpcMessages(child).filter(
+      (message) => message.method === 'thread/start',
+    )).toHaveLength(1)
+    expect(readWrittenRpcMessages(child).filter(
+      (message) => message.method === 'account/logout',
+    )).toHaveLength(1)
+    expect(String(failure)).not.toContain(accessToken)
+    expect(JSON.stringify(
+      readCodexAppServerTurnFailureContext(failure)?.jsonEvents ?? [],
+    )).not.toContain(accessToken)
+  })
+
+  it('fails fresh auth-required resolution without issuing a redundant logout', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-chatgpt-fresh-required-work-')
+    const child = new MockChildProcess()
+    const spawnedChildren = [child]
+    mockProcessGroupSignalsForChildren(spawnedChildren)
+    codexMocks.spawn.mockImplementation(() => {
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+        })()
+      })
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        codexChatGptAuthResolver: {
+          resolve: async () => ({
+            authRequired: true,
+            connectionVersion: 'connection-fresh-required',
+            kind: 'logout',
+          }),
+        },
+        codexChatGptAuthSubject: 'member-fresh-required',
+        prompt: 'Fresh required auth must fail before provider start',
+        workingDirectory,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_CHATGPT_AUTH_REQUIRED',
+      context: { retryable: false },
+    })
+
+    expect(readWrittenRpcMessages(child).some(
+      (message) => message.method === 'account/logout',
+    )).toBe(false)
+    expect(readWrittenRpcMessages(child).some(
+      (message) => message.method === 'thread/start',
+    )).toBe(false)
+  })
+
+  it('refuses provider start when a successful ChatGPT login was superseded', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-chatgpt-superseded-work-')
+    const child = new MockChildProcess()
+    const spawnedChildren = [child]
+    const accessToken = ['synthetic', 'superseded', 'access'].join('-')
+    const reportLoginResult = vi.fn(async () => 'superseded' as const)
+    mockProcessGroupSignalsForChildren(spawnedChildren)
+    codexMocks.spawn.mockImplementation(() => {
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+          const login = await waitForRpcMethod(child, 'account/login/start')
+          child.stdout.write(jsonLine({
+            id: login.id,
+            result: { type: 'chatgptAuthTokens' },
+          }))
+        })()
+      })
+      return child
+    })
+
+    let failure: unknown
+    try {
+      await executeCodexAppServerTurn({
+        codexChatGptAuthResolver: {
+          reportLoginResult,
+          resolve: async () => ({
+            accessToken,
+            chatgptAccountId: 'chatgpt-account-superseded',
+            connectionVersion: 'connection-superseded',
+            expiresAt: '2999-01-01T00:00:00.000Z',
+            kind: 'login',
+          }),
+        },
+        codexChatGptAuthSubject: 'member-superseded',
+        prompt: 'Superseded auth must fail before provider start',
+        workingDirectory,
+      })
+    } catch (error) {
+      failure = error
+    }
+
+    expect(failure).toMatchObject({
+      code: 'ASSISTANT_CODEX_CHATGPT_AUTH_SUPERSEDED',
+      context: { retryable: true },
+      message: 'ChatGPT authentication changed before this assistant could run.',
+    })
+    expect(reportLoginResult).toHaveBeenCalledWith({
+      connectionVersion: 'connection-superseded',
+      result: 'connected',
+    })
+    expect(JSON.stringify(reportLoginResult.mock.calls)).not.toContain(accessToken)
+    expect(readWrittenRpcMessages(child).some(
+      (message) => message.method === 'thread/start',
+    )).toBe(false)
+    expect(String(failure)).not.toContain(accessToken)
+    expect(child.exitCode === null && child.signalCode === null).toBe(false)
+  })
+
+  it('fails external ChatGPT login with secret-safe errors and recorded events', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-chatgpt-unsupported-work-')
+    const child = new MockChildProcess()
+    const spawnedChildren = [child]
+    const accessToken = ['synthetic', 'unsupported', 'access'].join('-')
+    const reportLoginResult = vi.fn(async () => 'current' as const)
+    mockProcessGroupSignalsForChildren(spawnedChildren)
+    codexMocks.spawn.mockImplementation(() => {
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+          const login = await waitForRpcMethod(child, 'account/login/start')
+          child.stdout.write(jsonLine({
+            error: {
+              code: -32602,
+              message: `unsupported login payload ${accessToken}`,
+            },
+            id: login.id,
+          }))
+        })()
+      })
+      return child
+    })
+
+    let failure: unknown
+    try {
+      await executeCodexAppServerTurn({
+        codexChatGptAuthResolver: {
+          reportLoginResult,
+          resolve: async () => ({
+            accessToken,
+            chatgptAccountId: 'chatgpt-account-unsupported',
+            connectionVersion: 'connection-unsupported',
+            expiresAt: '2999-01-01T00:00:00.000Z',
+            kind: 'login',
+          }),
+        },
+        codexChatGptAuthSubject: 'member-unsupported',
+        prompt: 'Unsupported external login',
+        workingDirectory,
+      })
+    } catch (error) {
+      failure = error
+    }
+
+    expect(failure).toMatchObject({
+      code: 'ASSISTANT_CODEX_CHATGPT_AUTH_LOGIN_FAILED',
+      context: { retryable: false },
+      message: 'Codex app-server could not apply external ChatGPT authentication.',
+    })
+    expect(String(failure)).not.toContain(accessToken)
+    expect(JSON.stringify(
+      readCodexAppServerTurnFailureContext(failure)?.jsonEvents ?? [],
+    )).not.toContain(accessToken)
+    expect(reportLoginResult).toHaveBeenCalledWith({
+      connectionVersion: 'connection-unsupported',
+      result: 'failed',
+    })
+    expect(JSON.stringify(reportLoginResult.mock.calls)).not.toContain(accessToken)
+    expect(readWrittenRpcMessages(child).some(
+      (message) => message.method === 'thread/start',
+    )).toBe(false)
+    expect(child.exitCode === null && child.signalCode === null).toBe(false)
+  })
+
+  it('keeps a ChatGPT login rejection retryable when failure reporting fails', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-chatgpt-rejection-report-work-')
+    const child = new MockChildProcess()
+    const spawnedChildren = [child]
+    const accessToken = ['synthetic', 'rejection', 'report'].join('-')
+    const reportLoginResult = vi.fn(async () => {
+      throw new Error(`failed auth result report ${accessToken}`)
+    })
+    mockProcessGroupSignalsForChildren(spawnedChildren)
+    codexMocks.spawn.mockImplementation(() => {
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+          const login = await waitForRpcMethod(child, 'account/login/start')
+          child.stdout.write(jsonLine({
+            error: {
+              code: -32602,
+              message: `rejected login payload ${accessToken}`,
+            },
+            id: login.id,
+          }))
+        })()
+      })
+      return child
+    })
+
+    let failure: unknown
+    try {
+      await executeCodexAppServerTurn({
+        codexChatGptAuthResolver: {
+          reportLoginResult,
+          resolve: async () => ({
+            accessToken,
+            chatgptAccountId: 'chatgpt-account-rejection-report',
+            connectionVersion: 'connection-rejection-report',
+            expiresAt: '2999-01-01T00:00:00.000Z',
+            kind: 'login',
+          }),
+        },
+        codexChatGptAuthSubject: 'member-rejection-report',
+        prompt: 'Retry rejected auth when result reporting fails',
+        workingDirectory,
+      })
+    } catch (error) {
+      failure = error
+    }
+
+    expect(failure).toMatchObject({
+      code: 'ASSISTANT_CODEX_CHATGPT_AUTH_RESULT_REPORT_FAILED',
+      context: { retryable: true },
+    })
+    expect(reportLoginResult).toHaveBeenCalledWith({
+      connectionVersion: 'connection-rejection-report',
+      result: 'failed',
+    })
+    expect(JSON.stringify(reportLoginResult.mock.calls)).not.toContain(accessToken)
+    expect(String(failure)).not.toContain(accessToken)
+    expect(JSON.stringify(
+      readCodexAppServerTurnFailureContext(failure)?.jsonEvents ?? [],
+    )).not.toContain(accessToken)
+    expect(readWrittenRpcMessages(child).some(
+      (message) => message.method === 'thread/start',
+    )).toBe(false)
+    expect(child.exitCode === null && child.signalCode === null).toBe(false)
+  })
+
+  it('keeps a superseded ChatGPT login failure retryable', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-chatgpt-failed-superseded-work-')
+    const child = new MockChildProcess()
+    const spawnedChildren = [child]
+    const accessToken = ['synthetic', 'failed', 'superseded'].join('-')
+    const reportLoginResult = vi.fn(async () => 'superseded' as const)
+    mockProcessGroupSignalsForChildren(spawnedChildren)
+    codexMocks.spawn.mockImplementation(() => {
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+          const login = await waitForRpcMethod(child, 'account/login/start')
+          child.stdout.write(jsonLine({
+            error: {
+              code: -32602,
+              message: `stale login payload ${accessToken}`,
+            },
+            id: login.id,
+          }))
+        })()
+      })
+      return child
+    })
+
+    let failure: unknown
+    try {
+      await executeCodexAppServerTurn({
+        codexChatGptAuthResolver: {
+          reportLoginResult,
+          resolve: async () => ({
+            accessToken,
+            chatgptAccountId: 'chatgpt-account-failed-superseded',
+            connectionVersion: 'connection-failed-superseded',
+            expiresAt: '2999-01-01T00:00:00.000Z',
+            kind: 'login',
+          }),
+        },
+        codexChatGptAuthSubject: 'member-failed-superseded',
+        prompt: 'Superseded login failure can retry current auth',
+        workingDirectory,
+      })
+    } catch (error) {
+      failure = error
+    }
+
+    expect(failure).toMatchObject({
+      code: 'ASSISTANT_CODEX_CHATGPT_AUTH_SUPERSEDED',
+      context: { retryable: true },
+    })
+    expect(reportLoginResult).toHaveBeenCalledWith({
+      connectionVersion: 'connection-failed-superseded',
+      result: 'failed',
+    })
+    expect(JSON.stringify(reportLoginResult.mock.calls)).not.toContain(accessToken)
+    expect(String(failure)).not.toContain(accessToken)
+    expect(readWrittenRpcMessages(child).some(
+      (message) => message.method === 'thread/start',
+    )).toBe(false)
+    expect(child.exitCode === null && child.signalCode === null).toBe(false)
   })
 
   it('hands managed disconnect cleanup attribution to the next assistant turn', async () => {

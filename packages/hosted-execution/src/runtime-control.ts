@@ -1864,6 +1864,61 @@ export interface HostedCodexAuthUpdateResponse {
   status: HostedCodexAuthUpdateResponseStatus;
 }
 
+export const HOSTED_CODEX_AUTH_SEED_ACCESS_TOKEN_MAX_LENGTH = 6 * 1_024;
+export const HOSTED_CODEX_AUTH_SEED_CHATGPT_ACCOUNT_ID_MAX_LENGTH = 256;
+export const HOSTED_CODEX_AUTH_SEED_RESPONSE_MAX_BYTES = 16 * 1_024;
+
+export const HOSTED_CODEX_AUTH_SEED_UNAVAILABLE_REASONS = [
+  "unconfigured",
+  "legacy_device_code",
+  "disconnected",
+  "expired",
+  "needs_attention",
+] as const;
+
+export type HostedCodexAuthSeedUnavailableReason =
+  (typeof HOSTED_CODEX_AUTH_SEED_UNAVAILABLE_REASONS)[number];
+
+export interface HostedCodexAuthSeedRequest {
+  schemaVersion: 1;
+  knownConnectionVersion: string | null;
+  includeCredentials: boolean;
+}
+
+export interface HostedCodexAuthSeedAvailableResponse {
+  schemaVersion: 1;
+  status: "available";
+  connectionVersion: string;
+  expiresAt: string;
+  accessToken: string;
+  chatgptAccountId: string;
+}
+
+export interface HostedCodexAuthSeedAvailableMetadataResponse {
+  schemaVersion: 1;
+  status: "available_metadata";
+  connectionVersion: string;
+}
+
+export interface HostedCodexAuthSeedUnchangedResponse {
+  schemaVersion: 1;
+  status: "unchanged";
+  connectionVersion: string;
+}
+
+export interface HostedCodexAuthSeedUnavailableResponse {
+  schemaVersion: 1;
+  status: "unavailable";
+  connectionVersion: string | null;
+  reason: HostedCodexAuthSeedUnavailableReason;
+}
+
+export type HostedCodexAuthSeedResponse =
+  | HostedCodexAuthSeedAvailableResponse
+  | HostedCodexAuthSeedAvailableMetadataResponse
+  | HostedCodexAuthSeedUnchangedResponse
+  | HostedCodexAuthSeedUnavailableResponse;
+
 export interface HostedRuntimeIssueExportRequest {
   issues: AssistantRuntimeIssueRecord[];
 }

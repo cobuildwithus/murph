@@ -768,6 +768,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   });
 
   it("hydrates the hosted default assistant target before running automation", async () => {
+    const codexChatGptAuthResolver = {
+      resolve: vi.fn(async () => ({ kind: "unchanged" as const })),
+    };
     const hostedDefaultTarget = {
       adapter: "codex-cli" as const,
       approvalPolicy: "never" as const,
@@ -787,11 +790,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       },
     }));
 
-    await runHostedWorkspaceAssistantPhase(createPhaseInput({}));
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      codexChatGptAuthResolver,
+    }));
 
     expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith(
       {
         hosted: expect.objectContaining({
+          codexChatGptAuthResolver,
           memberId: "member_synthetic_phase",
           userEnvKeys: [],
         }),
@@ -805,6 +811,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect.objectContaining({
         executionContext: expect.objectContaining({
           hosted: expect.objectContaining({
+            codexChatGptAuthResolver,
             defaultTarget: hostedDefaultTarget,
           }),
         }),
@@ -15759,6 +15766,8 @@ function createPhaseInput(input: {
     HostedWorkspaceRuntimeAssistantPhaseInput["initialMailboxImport"]["importResult"]["assistantInputRecords"]
   >;
   conversationImportedCount?: number;
+  codexChatGptAuthResolver?:
+    HostedWorkspaceRuntimeAssistantPhaseInput["codexChatGptAuthResolver"];
   currentAssistantInputId?:
     HostedWorkspaceRuntimeAssistantPhaseInput["currentAssistantInputId"];
   deviceSyncMessagingReturnTarget?:
@@ -15823,6 +15832,7 @@ function createPhaseInput(input: {
     foregroundCausalOnly: input.foregroundCausalOnly,
     clearAssistantAutomationScheduleChanged:
       input.clearAssistantAutomationScheduleChanged,
+    codexChatGptAuthResolver: input.codexChatGptAuthResolver,
     currentAssistantInputId: input.currentAssistantInputId,
     deviceSyncMessagingReturnTarget: input.deviceSyncMessagingReturnTarget,
     deviceSyncWorkspaceWakeHandled: input.deviceSyncWorkspaceWakeHandled,

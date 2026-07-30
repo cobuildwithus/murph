@@ -16,6 +16,7 @@ import {
   resolveAssistantUsageCredentialSource,
 } from "@murphai/hosted-execution/assistant-usage";
 import type {
+  AssistantCodexChatGptAuthResolver,
   AssistantHostedGroupSharedReader,
 } from "@murphai/assistant-engine";
 import type {
@@ -54,6 +55,11 @@ export interface HostedDetachedAssistantAskController {
 
 export interface HostedDetachedAssistantAskControllerInput {
   assistantAskPort: HostedRuntimeAssistantAskPort | null;
+  beforeProviderAdmission?: ((input: {
+    signal: AbortSignal;
+  }) => Promise<boolean>) | null;
+  codexChatGptAuthResolver?: AssistantCodexChatGptAuthResolver | null;
+  codexChatGptAuthSubject?: string | null;
   codexHome: string | null;
   createGroupSharedReader?(): AssistantHostedGroupSharedReader | null;
   env: Readonly<Record<string, string>>;
@@ -107,6 +113,9 @@ export function createHostedDetachedAssistantAskController(
     const completion = runOneHostedDetachedAssistantAsk({
       abortSignal: abortController.signal,
       assistantAskPort: input.assistantAskPort,
+      beforeProviderAdmission: input.beforeProviderAdmission ?? null,
+      codexChatGptAuthResolver: input.codexChatGptAuthResolver ?? null,
+      codexChatGptAuthSubject: input.codexChatGptAuthSubject ?? null,
       codexHome: input.codexHome,
       ...(input.createGroupSharedReader
         ? { createGroupSharedReader: input.createGroupSharedReader }
@@ -209,6 +218,11 @@ export function createHostedDetachedAssistantAskController(
 async function runOneHostedDetachedAssistantAsk(input: {
   abortSignal: AbortSignal;
   assistantAskPort: HostedRuntimeAssistantAskPort | null;
+  beforeProviderAdmission: ((input: {
+    signal: AbortSignal;
+  }) => Promise<boolean>) | null;
+  codexChatGptAuthResolver: AssistantCodexChatGptAuthResolver | null;
+  codexChatGptAuthSubject: string | null;
   codexHome: string | null;
   createGroupSharedReader?: () => AssistantHostedGroupSharedReader | null;
   env: Readonly<Record<string, string>>;
@@ -244,6 +258,14 @@ async function runOneHostedDetachedAssistantAsk(input: {
       return "idle";
     }
     input.onStateMutation();
+    if (await input.beforeProviderAdmission?.({ signal: input.abortSignal }) === true) {
+      await requeueHostedDetachedAssistantAsk({
+        claimed,
+        input,
+        nextAttemptAt: null,
+      });
+      return "paused";
+    }
     if (input.abortSignal.aborted) {
       await requeueHostedDetachedAssistantAsk({
         claimed,
@@ -301,6 +323,8 @@ async function runOneHostedDetachedAssistantAsk(input: {
           }
         : {}),
       codexHome: input.codexHome,
+      codexChatGptAuthResolver: input.codexChatGptAuthResolver,
+      codexChatGptAuthSubject: input.codexChatGptAuthSubject,
       env: { ...input.env },
       model: input.model,
       modelProvider: input.modelProvider,

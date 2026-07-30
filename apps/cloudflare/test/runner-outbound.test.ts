@@ -78,6 +78,7 @@ import {
   HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH,
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
   HOSTED_RUNTIME_CODEX_AUTH_PATH,
+  HOSTED_RUNTIME_CODEX_AUTH_SEED_PATH,
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
   HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
   HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH,
@@ -424,6 +425,15 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
   },
   {
     body: {
+      includeCredentials: true,
+      knownConnectionVersion: null,
+      schemaVersion: 1,
+    },
+    name: "hosted Codex auth seed read",
+    path: HOSTED_RUNTIME_CODEX_AUTH_SEED_PATH,
+  },
+  {
+    body: {
       attemptId: "hca_abcdefghijklmnop",
       phase: "connected",
     },
@@ -614,7 +624,7 @@ describe("handleRunnerOutboundRequest", () => {
       createRunnerOutboundEnv({
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       }),
-      "member_123" ,
+      "member_123",
     );
 
     expect(response.status).toBe(404);
@@ -661,7 +671,7 @@ describe("handleRunnerOutboundRequest", () => {
       createRunnerOutboundEnv({
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       }),
-      "member_123" ,
+      "member_123",
     );
 
     expect(response.status).toBe(404);
@@ -1263,6 +1273,41 @@ describe("handleRunnerOutboundRequest", () => {
         body: JSON.stringify({
           attemptId: "hca_abcdefghijklmnop",
           phase: "connected",
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        USER_RUNNER: {
+          getByName() {
+            return {
+              validateRuntimeWriteFence,
+            };
+          },
+        },
+      }),
+      "member_123" ,
+    );
+
+    expect(response.status).toBe(401);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects hosted Codex auth seed reads without the active runtime fence", async () => {
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_CODEX_AUTH_SEED_PATH}`, {
+        body: JSON.stringify({
+          includeCredentials: false,
+          knownConnectionVersion: null,
+          schemaVersion: 1,
         }),
         headers: createRunnerProxyHeaders({
           "content-type": "application/json; charset=utf-8",

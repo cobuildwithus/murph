@@ -165,6 +165,8 @@ const HOSTED_CODEX_REJECTED_RUNTIME_AUTHORITY_ENV_KEYS = Object.values(
 );
 
 export interface HostedCodexRuntimeEnvironmentInput {
+  clearFileBackedChatGptAuth?: boolean;
+  externalChatGptAuth?: boolean;
   operatorHomeRoot: string;
   runtimeEnv: Readonly<Record<string, string>>;
 }

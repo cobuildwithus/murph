@@ -40,6 +40,8 @@ import type {
   HostedRuntimeNewsletterToolResponse,
   HostedRuntimeProductFeedbackRecord,
   HostedRuntimeProductFeedbackRecordResponse,
+  HostedCodexAuthSeedRequest,
+  HostedCodexAuthSeedResponse,
   HostedCodexAuthUpdate,
   HostedCodexAuthUpdateResponse,
   HostedRuntimeUsageNoticeDeliveryTarget,
@@ -501,6 +503,10 @@ export interface HostedRuntimeNewsletterToolPort {
 }
 
 export interface HostedRuntimeCodexAuthPort {
+  readAccessSeed(
+    request: HostedCodexAuthSeedRequest,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<HostedCodexAuthSeedResponse>;
   update(update: HostedCodexAuthUpdate): Promise<HostedCodexAuthUpdateResponse>;
 }
 

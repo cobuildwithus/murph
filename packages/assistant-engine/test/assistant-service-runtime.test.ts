@@ -3379,6 +3379,46 @@ describe("assistant delivery orchestration seam", () => {
 });
 
 describe("assistant execution context normalization", () => {
+  it("preserves bound Codex ChatGPT auth resolver callbacks", async () => {
+    const resolver = {
+      calls: [] as string[],
+      async reportLoginResult() {
+        this.calls.push("reported");
+        return "current" as const;
+      },
+      async resolve() {
+        this.calls.push("resolved");
+        return {
+          authRequired: false,
+          connectionVersion: null,
+          kind: "logout" as const,
+        };
+      },
+    };
+    const normalized = normalizeAssistantExecutionContext({
+      hosted: {
+        codexChatGptAuthResolver: resolver,
+        memberId: "member-auth-resolver",
+        userEnvKeys: [],
+      },
+    });
+    const normalizedResolver = normalized.hosted?.codexChatGptAuthResolver;
+    if (!normalizedResolver?.reportLoginResult) {
+      throw new Error("expected normalized Codex ChatGPT auth resolver");
+    }
+
+    await expect(normalizedResolver.resolve({
+      knownConnectionVersion: null,
+      reason: "turn_start",
+      signal: null,
+    })).resolves.toMatchObject({ kind: "logout" });
+    await expect(normalizedResolver.reportLoginResult({
+      connectionVersion: "connection-normalized",
+      result: "connected",
+    })).resolves.toBe("current");
+    expect(resolver.calls).toEqual(["resolved", "reported"]);
+  });
+
   it("drops hosted execution context when the hosted member id is blank", () => {
     expect(
       normalizeAssistantExecutionContext({
