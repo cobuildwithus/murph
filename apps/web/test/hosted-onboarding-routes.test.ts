@@ -246,6 +246,7 @@ describe("hosted onboarding routes", () => {
     expect(response.headers.get("Set-Cookie")).toBe(
       "murph-session=session-token; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000",
     );
+    expect(mocks.getHostedAppSessionFromRequest).toHaveBeenCalledTimes(1);
     expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith({
       authMethod: "phone",
       identity: {
