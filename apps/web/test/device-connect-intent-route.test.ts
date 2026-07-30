@@ -72,6 +72,7 @@ describe("hosted device connect intent route", () => {
     });
     mocks.startHostedDeviceSyncConnection.mockResolvedValue({
       authorizationUrl: "https://provider.example.test/oauth/start",
+      callbackProofCookie: "murph-device-sync-whoop=proof; Path=/; HttpOnly",
     });
     mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
   });
@@ -123,6 +124,7 @@ describe("hosted device connect intent route", () => {
     expect(response.headers.get("location")).toBe("https://provider.example.test/oauth/start");
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(response.headers.get("set-cookie")).toContain("murph-device-sync-whoop=proof");
     expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.claimHostedDeviceConnectIntentForStart).toHaveBeenCalledWith({
       claim: "dc_opaque",
@@ -193,6 +195,7 @@ describe("hosted device connect intent route", () => {
       authorizationUrl: "https://provider.example.test/oauth/start",
     });
     expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("set-cookie")).toContain("murph-device-sync-whoop=proof");
   });
 
   it("maps JSON app-page start failures through the hosted browser mutation guard", async () => {

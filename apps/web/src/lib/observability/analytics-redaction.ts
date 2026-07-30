@@ -115,6 +115,8 @@ const CLINICAL_RECORDS_CALLBACK_PATH = "/records";
 const CLINICAL_RECORDS_CALLBACK_QUERY_KEY = "clinicalRecords";
 const CLINICAL_RECORDS_CONNECT_PATH = "/records/connect";
 const CLINICAL_RECORDS_CONNECT_FRAGMENT_KEY = "clinicalRecordsIntent";
+const DEVICE_SYNC_CALLBACK_PATH_PATTERN =
+  /^\/api\/device-sync\/(?:connect|oauth)\/[^/]+\/callback\/?$/u;
 const URL_PARSE_BASE = "https://murph.invalid";
 
 export type VercelSpeedInsightsBeforeSendEvent = {

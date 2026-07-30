@@ -48,6 +48,34 @@ export function resolveConfiguredHostedDeviceSyncPublicBaseUrl(
   return null;
 }
 
+export function assertHostedDeviceSyncBrowserCallbackHostname(input: {
+  appSessionUrl: string;
+  callbackBaseUrl: string | null;
+}): void {
+  if (!input.callbackBaseUrl) {
+    return;
+  }
+
+  const appSessionHostname = new URL(input.appSessionUrl).hostname;
+  const callbackHostname = new URL(input.callbackBaseUrl).hostname;
+  if (appSessionHostname === callbackHostname) {
+    return;
+  }
+
+  throw deviceSyncError({
+    cause: {
+      errorObservabilityClass: "configuration",
+      errorPhase: "browser_oauth_start",
+    },
+    code: "DEVICE_SYNC_PUBLIC_BASE_URL_HOST_MISMATCH",
+    message:
+      "Hosted browser OAuth callbacks must use the same hostname as the first-party hosted app session. "
+      + "Align DEVICE_SYNC_PUBLIC_BASE_URL with the hosted Web public URL.",
+    retryable: false,
+    httpStatus: 500,
+  });
+}
+
 export function resolveHostedDeviceSyncAllowedReturnOrigins(
   input: {
     configuredOrigins: readonly string[];

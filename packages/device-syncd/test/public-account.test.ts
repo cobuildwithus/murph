@@ -5,6 +5,7 @@ import { test } from "vitest";
 import {
   DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
   isDeviceSyncConnectionSetupConfirmed,
+  isDeviceSyncConnectionSetupPending,
   isEstablishedDeviceSyncConnection,
   isJunctionHistoricalResetProviderSlug,
   redactPublicDeviceSyncMetadata,
@@ -82,6 +83,11 @@ test("established connection status requires active source-confirmed setup", () 
     setupPhase: "source_confirmed",
     status: "disconnected",
   }), false);
+
+  assert.equal(isDeviceSyncConnectionSetupPending({ setupPhase: "pending_link" }), true);
+  assert.equal(isDeviceSyncConnectionSetupPending({ setupPhase: "link_returned" }), true);
+  assert.equal(isDeviceSyncConnectionSetupPending({ setupPhase: "source_confirmed" }), false);
+  assert.equal(isDeviceSyncConnectionSetupPending({ setupPhase: null }), false);
 });
 
 test("historical connection reset recovery is limited to Garmin error sources", () => {

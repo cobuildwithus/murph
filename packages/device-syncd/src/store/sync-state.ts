@@ -58,14 +58,6 @@ export function markSyncSucceededInTransaction(
   const connectionResult = database.prepare(`
     update device_connection
     set status = case when status = 'disconnected' then status else 'active' end,
-        setup_phase = case
-          when setup_phase in ('pending_link', 'link_returned') then 'source_confirmed'
-          else setup_phase
-        end,
-        setup_expires_at = case
-          when setup_phase in ('pending_link', 'link_returned') then null
-          else setup_expires_at
-        end,
         metadata_json = ?,
         updated_at = ?
     where id = ?
@@ -272,6 +264,10 @@ export function readNextActiveReconcileAt(database: DatabaseSync): string | null
     join device_connection as connection
       on connection.id = observation.account_id
     where connection.status = 'active'
+      and (
+        connection.setup_phase is null
+        or connection.setup_phase not in ('pending_link', 'link_returned')
+      )
       and observation.next_reconcile_at is not null
     order by observation.next_reconcile_at asc, observation.updated_at asc, connection.id asc
     limit 1
