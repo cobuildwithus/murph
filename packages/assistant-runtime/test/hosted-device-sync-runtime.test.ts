@@ -1149,6 +1149,411 @@ describe("hosted device-sync runtime", () => {
 
   test.each([
     {
+      initialTargetStatus: "missing",
+      label: "account summary with an absent runner source",
+      resource: "activity",
+      resourceCategory: "summary",
+      windowEnd: "2026-07-29T00:00:00.000Z",
+      windowStart: "2026-07-27T00:00:00.000Z",
+    },
+    {
+      initialTargetStatus: "connected",
+      label: "chunked timeseries with a stale connected runner source",
+      resource: "blood_oxygen",
+      resourceCategory: "timeseries",
+      windowEnd: "2026-07-29T00:00:00.000Z",
+      windowStart: "2026-07-27T00:00:00.000Z",
+    },
+  ] as const)(
+    "hosted Junction imports reread Web source state for $label",
+    async (testCase) => {
+      const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+        "hosted-device-sync-runtime-live-source-",
+      );
+      await initializeVault({
+        createdAt: "2026-07-27T00:00:00.000Z",
+        timezone: "UTC",
+        vaultRoot,
+      });
+
+      const hostedConnectionId = `hosted_conn_live_source_${testCase.resourceCategory}`;
+      const externalAccountId = `junction-live-source-${testCase.resourceCategory}`;
+      const buildSource = (
+        sourceProviderSlug: "garmin" | "oura",
+        status: "connected" | "disconnected",
+      ) => {
+        const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+          connectionId: hostedConnectionId,
+          sourceProviderSlug,
+        });
+        assert.ok(sourceInstanceKey);
+        return {
+          displayName: sourceProviderSlug === "garmin" ? "Garmin" : "Oura",
+          firstSeenAt: "2026-07-27T00:00:00.000Z",
+          lastDataAt: null,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSeenAt: status === "connected"
+            ? "2026-07-27T00:00:00.000Z"
+            : "2026-07-30T00:00:00.000Z",
+          resourceCount: 2,
+          resourceAvailabilitySummary: {
+            activity: true,
+            blood_oxygen: true,
+          },
+          sourceInstanceKey,
+          sourceProviderSlug,
+          status,
+        };
+      };
+      const buildSnapshot = (targetStatus: "missing" | "connected" | "disconnected") =>
+        buildRuntimeSnapshot({
+          connectedAt: "2026-07-27T00:00:00.000Z",
+          connectionId: hostedConnectionId,
+          credential: {
+            credentialMetadata: {},
+            kind: "provider_config",
+            providerConfigKey: "junction",
+          },
+          externalAccountId,
+          hostedUpdatedAt: targetStatus === "disconnected"
+            ? "2026-07-30T00:00:00.000Z"
+            : "2026-07-27T00:00:00.000Z",
+          provider: "junction",
+          sources: [
+            buildSource("oura", "connected"),
+            ...(targetStatus === "missing"
+              ? []
+              : [buildSource("garmin", targetStatus)]),
+          ],
+        });
+      let hostedSnapshot = buildSnapshot(testCase.initialTargetStatus);
+      let releaseProviderRequest: () => void = () => undefined;
+      let markProviderRequestStarted: () => void = () => undefined;
+      let shouldBlockProviderRequest = true;
+      const providerRequestStarted = new Promise<void>((resolve) => {
+        markProviderRequestStarted = resolve;
+      });
+      const providerRequestRelease = new Promise<void>((resolve) => {
+        releaseProviderRequest = resolve;
+      });
+      const importedSnapshots: unknown[] = [];
+      const liveSnapshotRequests: Array<Parameters<HostedRuntimeDeviceSyncPort["fetchSnapshot"]>[0]> = [];
+      const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+        ...createNoDirtyStateDeviceSyncPortMethods(),
+        async applyUpdates() {
+          throw new Error("applyUpdates should not be called during live source admission.");
+        },
+        async createConnectLink() {
+          throw new Error("createConnectLink should not be called during live source admission.");
+        },
+        async fetchSnapshot(input) {
+          liveSnapshotRequests.push(input);
+          return hostedSnapshot;
+        },
+      };
+      const [provider] = createConfiguredDeviceSyncProvidersFromConfigs({
+        junction: {
+          apiKey: "sk_us_test_123",
+          clientUserIdSecret: "junction-live-source-secret",
+          environment: "sandbox",
+          fetchImpl: async (input) => {
+            const url = readTestUrl(input);
+
+            if (
+              url
+                === `https://api.sandbox.us.junction.com/v2/user/providers/${externalAccountId}`
+            ) {
+              return createTestJsonResponse({
+                providers: [
+                  {
+                    id: "provider-garmin-1",
+                    name: "Garmin",
+                    resource_availability: {
+                      activity: true,
+                      blood_oxygen: true,
+                    },
+                    slug: "garmin",
+                    status: "connected",
+                  },
+                  {
+                    id: "provider-oura-1",
+                    name: "Oura",
+                    resource_availability: {
+                      activity: true,
+                      blood_oxygen: true,
+                    },
+                    slug: "oura",
+                    status: "connected",
+                  },
+                ],
+              });
+            }
+
+            const isSummaryRequest = url.includes(
+              `/v2/summary/activity/${externalAccountId}`,
+            );
+            const isTimeseriesRequest = url.includes(
+              `/v2/timeseries/${externalAccountId}/blood_oxygen/grouped`,
+            );
+            if (isSummaryRequest || isTimeseriesRequest) {
+              if (shouldBlockProviderRequest) {
+                shouldBlockProviderRequest = false;
+                markProviderRequestStarted();
+                await providerRequestRelease;
+              }
+
+              if (isSummaryRequest) {
+                return createTestJsonResponse({
+                  data: [
+                    {
+                      connectionId: "provider-garmin-1",
+                      id: "garmin-activity-1",
+                      steps: 4321,
+                    },
+                    {
+                      connectionId: "provider-oura-1",
+                      id: "oura-activity-1",
+                      steps: 1234,
+                    },
+                  ],
+                });
+              }
+
+              const observedAt = new URL(url).searchParams.get("start_date");
+              return createTestJsonResponse({
+                groups: {
+                  garmin: [{
+                    data: [{
+                      id: `garmin-blood-oxygen-${observedAt}`,
+                      timestamp: observedAt,
+                      unit: "%",
+                      value: 97,
+                    }],
+                    source: { provider: "garmin", type: "watch" },
+                  }],
+                  oura: [{
+                    data: [{
+                      id: `oura-blood-oxygen-${observedAt}`,
+                      timestamp: observedAt,
+                      unit: "%",
+                      value: 95,
+                    }],
+                    source: { provider: "oura", type: "ring" },
+                  }],
+                },
+              });
+            }
+
+            throw new Error(`Unexpected Junction request during live source admission: ${url}`);
+          },
+          region: "us",
+          summaryResources: ["activity"],
+          timeseriesResources: ["blood_oxygen"],
+        },
+      });
+      assert.ok(provider);
+      const service = createHostedRuntimeDeviceSyncService({
+        config: {
+          publicBaseUrl: "https://sync.example.test/device-sync",
+          stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+          vaultRoot,
+        },
+        importer: {
+          async importDeviceProviderSnapshot(input) {
+            importedSnapshots.push(input.snapshot);
+            return { events: [{}] };
+          },
+        },
+        deviceSyncPort,
+        providers: [provider],
+        secret: DEVICE_SYNC_SECRET,
+      });
+
+      try {
+        const initialState = await syncHostedDeviceSyncControlPlaneState({
+          deviceSyncPort,
+          secret: DEVICE_SYNC_SECRET,
+          service,
+          wake: buildCronWake("2026-07-30T00:00:00.000Z"),
+        });
+        const localAccountId = initialState.hostedToLocalAccountIds.get(hostedConnectionId);
+        assert.ok(localAccountId);
+        getStore(service).enqueueJob({
+          accountId: localAccountId,
+          availableAt: "2026-07-30T00:00:00.000Z",
+          dedupeKey: `live-source-denied-${testCase.resourceCategory}`,
+          kind: "resource",
+          payload: {
+            resource: testCase.resource,
+            resourceCategory: testCase.resourceCategory,
+            windowEnd: testCase.windowEnd,
+            windowStart: testCase.windowStart,
+          },
+          provider: "junction",
+        });
+
+        const deniedWorker = service.runWorkerOnce();
+        await providerRequestStarted;
+        hostedSnapshot = buildSnapshot("disconnected");
+        releaseProviderRequest();
+        await deniedWorker;
+
+        const deniedImport = JSON.stringify(importedSnapshots);
+        assert.match(deniedImport, /oura/u);
+        assert.doesNotMatch(
+          deniedImport,
+          /garmin|provider-garmin-1|garmin-activity-1|4321|"value":97/u,
+        );
+        assert.equal(
+          getStore(service).listConnectionSources({ connectionId: localAccountId }).length,
+          testCase.initialTargetStatus === "missing" ? 1 : 2,
+        );
+
+        hostedSnapshot = buildSnapshot("connected");
+        await syncHostedDeviceSyncControlPlaneState({
+          deviceSyncPort,
+          secret: DEVICE_SYNC_SECRET,
+          service,
+          wake: buildCronWake("2026-07-30T00:05:00.000Z"),
+        });
+        importedSnapshots.length = 0;
+        getStore(service).enqueueJob({
+          accountId: localAccountId,
+          availableAt: "2026-07-30T00:05:00.000Z",
+          dedupeKey: `live-source-admitted-${testCase.resourceCategory}`,
+          kind: "resource",
+          payload: {
+            resource: testCase.resource,
+            resourceCategory: testCase.resourceCategory,
+            windowEnd: testCase.windowEnd,
+            windowStart: testCase.windowStart,
+          },
+          provider: "junction",
+        });
+
+        await service.runWorkerOnce();
+
+        const admittedImport = JSON.stringify(importedSnapshots);
+        assert.match(admittedImport, /garmin/u);
+        assert.match(admittedImport, /oura/u);
+        const finalSources = getStore(service).listConnectionSources({
+          connectionId: localAccountId,
+        });
+        assert.equal(finalSources.length, 2);
+        assert.equal(
+          finalSources.find((source) => source.sourceProviderSlug === "garmin")
+            ?.sourceInstanceKey,
+          buildJunctionProviderSourceInstanceKey({
+            connectionId: hostedConnectionId,
+            sourceProviderSlug: "garmin",
+          }),
+        );
+        assert.equal(
+          liveSnapshotRequests.some((input) =>
+            input?.connectionId === hostedConnectionId
+            && input.includeCredentialMaterial === false
+            && input.sourceProviderSlug === undefined
+          ),
+          true,
+        );
+      } finally {
+        closeHostedRuntimeDeviceSyncService(service);
+        await cleanup();
+      }
+    },
+  );
+
+  test("hosted job source reads fail closed when Web cannot return the mapped connection", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-live-source-missing-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+    const hostedConnectionId = "hosted_conn_live_source_missing";
+    let hostedSnapshot = buildRuntimeSnapshot({
+      connectionId: hostedConnectionId,
+      externalAccountId: "demo-live-source-missing",
+      sources: [],
+    });
+    let imported = false;
+    const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      async applyUpdates() {
+        throw new Error("applyUpdates should not be called during source read failure.");
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called during source read failure.");
+      },
+      async fetchSnapshot() {
+        return hostedSnapshot;
+      },
+    };
+    const provider = createFakeProvider({
+      jobExecutor: {
+        async executeJob(context) {
+          await context.listConnectionSources?.();
+          await context.importSnapshot({ provider: "demo" });
+          return {};
+        },
+      },
+    });
+    const service = createHostedRuntimeDeviceSyncService({
+      config: {
+        publicBaseUrl: "https://sync.example.test/device-sync",
+        stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+        vaultRoot,
+      },
+      deviceSyncPort,
+      importer: {
+        async importDeviceProviderSnapshot() {
+          imported = true;
+          return { events: [{}] };
+        },
+      },
+      providers: [provider],
+      secret: DEVICE_SYNC_SECRET,
+    });
+
+    try {
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        secret: DEVICE_SYNC_SECRET,
+        service,
+        wake: buildCronWake("2026-07-30T00:00:00.000Z"),
+      });
+      const localAccountId = state.hostedToLocalAccountIds.get(hostedConnectionId);
+      assert.ok(localAccountId);
+      const job = getStore(service).enqueueJob({
+        accountId: localAccountId,
+        availableAt: "2026-07-30T00:00:00.000Z",
+        kind: "reconcile",
+        payload: {},
+        provider: "demo",
+      });
+      hostedSnapshot = buildEmptyRuntimeSnapshot();
+
+      await service.runWorkerOnce();
+
+      assert.equal(imported, false);
+      assert.equal(getStore(service).getJobById(job.id)?.status, "queued");
+      assert.deepEqual(
+        service.listJobFailureDiagnostics().map((diagnostic) => ({
+          code: diagnostic.code,
+          retryable: diagnostic.retryable,
+        })),
+        [{
+          code: "HOSTED_DEVICE_SYNC_SOURCE_STATE_UNAVAILABLE",
+          retryable: true,
+        }],
+      );
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test.each([
+    {
       localLastSeenAt: "2026-04-06T09:20:00.000Z",
       timestampOrder: "newer than",
     },

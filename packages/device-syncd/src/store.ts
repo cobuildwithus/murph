@@ -13,6 +13,7 @@ import {
   getAccountByExternalAccount as getStoredAccountByExternalAccount,
   getAccountByHostedConnectionId as getStoredAccountByHostedConnectionId,
   getAccountById as getStoredAccountById,
+  getHostedConnectionIdForAccountId as getStoredHostedConnectionIdForAccountId,
   getUnboundAccountByConnectionEpoch as getStoredUnboundAccountByConnectionEpoch,
   listAccounts as listStoredAccounts,
   patchAccount as patchStoredAccount,
@@ -198,6 +199,10 @@ export class SqliteDeviceSyncStore {
   getAccountByHostedConnectionId(hostedConnectionId: string): StoredDeviceSyncAccount | null {
     const account = getStoredAccountByHostedConnectionId(this.database, hostedConnectionId);
     return account ? this.hydrateAccountSources(account) : null;
+  }
+
+  getHostedConnectionIdForAccountId(accountId: string): string | null {
+    return getStoredHostedConnectionIdForAccountId(this.database, accountId);
   }
 
   getUnboundAccountByConnectionEpoch(

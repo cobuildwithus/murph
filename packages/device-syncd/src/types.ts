@@ -1,5 +1,7 @@
 import type {
+  DeviceConnectionSourceResourceAvailabilitySummary,
   DeviceConnectionSourceRecord,
+  DeviceConnectionSourceStatus,
   DeviceSyncAccountSetupPhase,
   DeviceSyncAccountStatus,
   DeviceSyncAccountRecord,
@@ -680,6 +682,16 @@ export interface ProviderSnapshotImportReceipt {
   durableDeliveryAccepted: boolean;
 }
 
+export interface ProviderJobConnectionSource {
+  displayName: string | null;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  resourceAvailabilitySummary?: DeviceConnectionSourceResourceAvailabilitySummary;
+  sourceInstanceKey?: string;
+  sourceProviderSlug: string;
+  status: DeviceConnectionSourceStatus;
+}
+
 export interface ProviderJobContext {
   account: DeviceSyncAccount;
   now: string;
@@ -694,7 +706,7 @@ export interface ProviderJobContext {
   ): DeviceConnectionSourceRecord | Promise<DeviceConnectionSourceRecord>;
   listConnectionSources?(
     input?: Omit<ListDeviceConnectionSourcesInput, "connectionId">,
-  ): DeviceConnectionSourceRecord[] | Promise<DeviceConnectionSourceRecord[]>;
+  ): ProviderJobConnectionSource[] | Promise<ProviderJobConnectionSource[]>;
   refreshAccountTokens(): Promise<DeviceSyncAccount>;
   disconnectAccount?(): Promise<void>;
   logger: DeviceSyncLogger;

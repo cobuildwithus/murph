@@ -63,6 +63,7 @@ import type {
   HandleWebhookResult,
   ListDeviceSyncAccountsInput,
   ProviderAuthTokens,
+  ProviderJobConnectionSource,
   ProviderJobContext,
   ProviderJobBatchDescriptor,
   ProviderSnapshotImportReceipt,
@@ -138,6 +139,15 @@ export interface CreateDeviceSyncServiceInput {
   providers?: readonly DeviceSyncProvider[];
   registry?: DeviceSyncRegistry;
   importer?: DeviceSyncImporterPort;
+  // Hosted runtimes override job-time reads so Web remains the source of truth;
+  // local runtimes continue reading the service's SQLite store.
+  listConnectionSourcesForJob?(input: {
+    accountId: string;
+    provider: string;
+    signal?: AbortSignal;
+    sourceProviderSlug?: string | null;
+    status?: ProviderJobConnectionSource["status"] | null;
+  }): ProviderJobConnectionSource[] | Promise<ProviderJobConnectionSource[]>;
   store?: SqliteDeviceSyncStore;
   clock?: DeviceSyncClock;
   schedulerMutex?: DeviceSyncTickMutex;
@@ -217,6 +227,7 @@ class DeviceSyncServiceController {
 
   private readonly logger: DeviceSyncLogger;
   private readonly importer: DeviceSyncImporterPort;
+  private readonly listConnectionSourcesForJob: CreateDeviceSyncServiceInput["listConnectionSourcesForJob"];
   private readonly store: SqliteDeviceSyncStore;
   private readonly publicIngress: DeviceSyncPublicIngress;
   private readonly codec: ReturnType<typeof createSecretCodec>;
@@ -245,6 +256,7 @@ class DeviceSyncServiceController {
     this.allowedReturnOrigins = normalizeOriginList(input.config.allowedReturnOrigins);
     this.registry = input.registry ?? createDeviceSyncRegistry(input.providers ?? []);
     this.importer = input.importer ?? createDefaultImporterPort();
+    this.listConnectionSourcesForJob = input.listConnectionSourcesForJob;
     this.logger = input.config.log ?? console;
     this.clock = input.clock ?? defaultDeviceSyncClock;
     this.schedulerMutex = input.schedulerMutex ?? createDeviceSyncTickMutex();
@@ -983,12 +995,21 @@ class DeviceSyncServiceController {
             connectionId: currentAccount.id,
           });
         },
-        listConnectionSources: (input = {}) => {
+        listConnectionSources: async (input = {}) => {
           ensureExecutionActive();
-          return this.store.listConnectionSources({
-            ...input,
-            connectionId: currentAccount.id,
-          });
+          const sources = this.listConnectionSourcesForJob
+            ? await this.listConnectionSourcesForJob({
+                accountId: currentAccount.id,
+                provider: currentAccount.provider,
+                signal: jobAbortController.signal,
+                ...input,
+              })
+            : this.store.listConnectionSources({
+                ...input,
+                connectionId: currentAccount.id,
+              });
+          ensureExecutionActive();
+          return sources;
         },
         refreshAccountTokens: async () => {
           ensureExecutionActive();
