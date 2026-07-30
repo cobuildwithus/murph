@@ -628,7 +628,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           await contextCiphertext.promise,
         );
         expect(stagedValue).toContain(
-          "Participant +15559870001 (unverified owner contact label: Taylor R.) was added to the group.",
+          "Participant +15559870001 (address-book name: Taylor R.) was added to the group.",
         );
 
         const deletionPid = await readBackendPid(fixture.messageClient);

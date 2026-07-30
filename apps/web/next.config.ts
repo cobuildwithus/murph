@@ -192,7 +192,7 @@ export function buildHostedWebSecurityHeaders(
     },
     {
       key: "Referrer-Policy",
-      value: "strict-origin-when-cross-origin",
+      value: "strict-origin",
     },
     {
       key: "X-Content-Type-Options",

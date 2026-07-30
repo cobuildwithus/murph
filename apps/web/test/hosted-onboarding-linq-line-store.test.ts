@@ -9,6 +9,7 @@ import {
 import {
   assertHostedLinqAssignableHomeLinePoolReady,
   claimHostedLinqProactiveConversationCapacityTx,
+  hasActiveHostedLinqManagedLine,
   HOSTED_LINQ_ASSIGNABLE_HOME_LINE_LIMIT,
   listHostedLinqAssignableHomeLines,
   listHostedLinqContactCardLines,
@@ -38,13 +39,15 @@ describe("listHostedLinqContactCardLines", () => {
       .mockResolvedValueOnce([
         buildLineRow("+15550100001", {
           providerLastSeenAt: new Date("2026-06-30T12:00:00.000Z"),
-          providerStatus: "ACTIVE",
+          providerReputationStatus: "HEALTHY",
+          providerServiceStatus: "ACTIVE",
         }),
       ])
       .mockResolvedValueOnce([
         buildLineRow("+15550100002", {
           providerLastSeenAt: new Date("2026-06-30T12:10:00.000Z"),
-          providerStatus: "ACTIVE",
+          providerReputationStatus: "AT_RISK",
+          providerServiceStatus: "ACTIVE",
         }),
       ]);
     const prisma = {
@@ -62,10 +65,14 @@ describe("listHostedLinqContactCardLines", () => {
       {
         phoneNumber: "+15550100001",
         phoneNumberHint: "*** 0001",
+        providerReputationStatus: "HEALTHY",
+        providerServiceStatus: "ACTIVE",
       },
       {
         phoneNumber: "+15550100002",
         phoneNumberHint: "*** 0002",
+        providerReputationStatus: "AT_RISK",
+        providerServiceStatus: "ACTIVE",
       },
     ]);
 
@@ -84,6 +91,30 @@ describe("listHostedLinqContactCardLines", () => {
         providerSeenAt: { not: null },
       },
     }));
+  });
+});
+
+describe("hasActiveHostedLinqManagedLine", () => {
+  it("recognizes configured inbound lines independently of outbound health", async () => {
+    const findFirst = vi.fn().mockResolvedValue({
+      phoneNumberLookupKey: "lookup:line",
+    });
+
+    await expect(hasActiveHostedLinqManagedLine({
+      phoneNumberLookupKeys: ["lookup:line"],
+      prisma: {
+        hostedLinqLine: { findFirst },
+      } as never,
+    })).resolves.toBe(true);
+
+    expect(findFirst).toHaveBeenCalledWith({
+      select: { phoneNumberLookupKey: true },
+      where: {
+        configuredAt: { not: null },
+        phoneNumberEncrypted: { not: null },
+        phoneNumberLookupKey: { in: ["lookup:line"] },
+      },
+    });
   });
 });
 
@@ -122,6 +153,20 @@ describe("listHostedLinqAssignableHomeLines", () => {
         egressPolicy: "enabled",
         healthStatus: { in: ["healthy", "unknown"] },
         phoneNumberEncrypted: { not: null },
+        AND: [
+          {
+            OR: [
+              { providerServiceStatus: null },
+              { providerServiceStatus: { not: "FLAGGED" } },
+            ],
+          },
+          {
+            OR: [
+              { providerReputationStatus: null },
+              { providerReputationStatus: { notIn: ["AT_RISK", "CRITICAL"] } },
+            ],
+          },
+        ],
       },
     }));
     expect(findMany).toHaveBeenCalledTimes(1);
@@ -152,24 +197,34 @@ describe("listHostedLinqAssignableHomeLines", () => {
 });
 
 describe("readHostedLinqIncomingLineState", () => {
-  it("distinguishes assignable, exact at-risk, and hard-blocked line states", async () => {
+  it("distinguishes assignable, exact at-risk, hard-blocked, and degraded line states", async () => {
     const findMany = vi.fn()
       .mockResolvedValueOnce([
         buildIncomingLineRow("+15550100001", {
           healthStatus: "healthy",
-          providerStatus: "active",
+          providerReputationStatus: "HEALTHY",
+          providerServiceStatus: "ACTIVE",
         }),
       ])
       .mockResolvedValueOnce([
         buildIncomingLineRow("+15550100001", {
           healthStatus: "healthy",
-          providerStatus: "AT-RISK",
+          providerReputationStatus: "AT_RISK",
+          providerServiceStatus: "ACTIVE",
         }),
       ])
       .mockResolvedValueOnce([
         buildIncomingLineRow("+15550100001", {
           healthStatus: "healthy",
-          providerStatus: "temporarily blocked",
+          providerReputationStatus: "HEALTHY",
+          providerServiceStatus: "FLAGGED",
+        }),
+      ])
+      .mockResolvedValueOnce([
+        buildIncomingLineRow("+15550100001", {
+          healthStatus: "warning",
+          providerReputationStatus: "HEALTHY",
+          providerServiceStatus: "ACTIVE",
         }),
       ]);
     const prisma = {
@@ -190,6 +245,10 @@ describe("readHostedLinqIncomingLineState", () => {
       phoneNumberLookupKeys,
       prisma,
     })).resolves.toMatchObject({ kind: "hard_blocked" });
+    await expect(readHostedLinqIncomingLineState({
+      phoneNumberLookupKeys,
+      prisma,
+    })).resolves.toEqual({ kind: "degraded_unavailable" });
   });
 
   it("fails closed for ambiguous or structurally unavailable incoming lines", async () => {
@@ -206,7 +265,7 @@ describe("readHostedLinqIncomingLineState", () => {
         buildIncomingLineRow("+15550100001", {
           configuredAt: null,
           healthStatus: "unhealthy",
-          providerStatus: "blocked",
+          providerReputationStatus: "CRITICAL",
         }),
       ]);
     const prisma = {
@@ -260,7 +319,8 @@ describe("readHostedLinqReceiptCorrelatedRecoveryLineTx", () => {
         lastReceiptEventId: true,
         phoneNumberEncrypted: true,
         phoneNumberLookupKey: true,
-        providerStatus: true,
+        providerReputationStatus: true,
+        providerServiceStatus: true,
       },
     });
   });
@@ -300,7 +360,7 @@ describe("readHostedLinqReceiptCorrelatedRecoveryLineTx", () => {
       overrides: {
         healthStatus: "warning",
         lastReceiptEventId: expectedFailureReceiptEventId,
-        providerStatus: "at_risk",
+        providerReputationStatus: "AT_RISK",
       },
     },
     {
@@ -308,7 +368,7 @@ describe("readHostedLinqReceiptCorrelatedRecoveryLineTx", () => {
       overrides: {
         healthStatus: "warning",
         lastReceiptEventId: expectedFailureReceiptEventId,
-        providerStatus: "blocked",
+        providerReputationStatus: "CRITICAL",
       },
     },
     {
@@ -360,39 +420,31 @@ describe("readHostedLinqReceiptCorrelatedRecoveryLineTx", () => {
 });
 
 describe("assertHostedLinqAssignableHomeLinePoolReady", () => {
-  it("passes when at least one configured assignable DB line exists", async () => {
-    const findFirst = vi.fn().mockResolvedValue({
-      phoneNumberLookupKey: "lookup:line",
-    });
+  it("passes when at least one configured provider-eligible line exists", async () => {
     const prisma = {
       hostedLinqLine: {
-        findFirst,
+        findMany: vi.fn().mockResolvedValue([
+          buildAssignableLineRow("+15550100001"),
+        ]),
       },
     } as never;
 
-    await expect(
-      assertHostedLinqAssignableHomeLinePoolReady({
-        prisma,
-      }),
-    ).resolves.toBeUndefined();
+    await expect(assertHostedLinqAssignableHomeLinePoolReady({ prisma }))
+      .resolves.toBeUndefined();
   });
 
-  it("fails visibly when production cutover would leave the DB line pool empty", async () => {
-    const findFirst = vi.fn().mockResolvedValue(null);
+  it("fails visibly when no provider-eligible configured line remains", async () => {
     const prisma = {
       hostedLinqLine: {
-        findFirst,
+        findMany: vi.fn().mockResolvedValue([]),
       },
     } as never;
 
-    await expect(
-      assertHostedLinqAssignableHomeLinePoolReady({
-        prisma,
-      }),
-    ).rejects.toMatchObject({
-      code: "HOSTED_LINQ_ASSIGNABLE_LINE_POOL_REQUIRED",
-      httpStatus: 500,
-    });
+    await expect(assertHostedLinqAssignableHomeLinePoolReady({ prisma }))
+      .rejects.toMatchObject({
+        code: "HOSTED_LINQ_ASSIGNABLE_LINE_POOL_REQUIRED",
+        httpStatus: 500,
+      });
   });
 });
 
@@ -643,7 +695,8 @@ function buildLineRow(
   phoneNumber: string,
   input: {
     providerLastSeenAt: Date;
-    providerStatus: string;
+    providerReputationStatus: string;
+    providerServiceStatus: string;
   },
 ) {
   return {
@@ -651,7 +704,8 @@ function buildLineRow(
     phoneNumberHint: `*** ${phoneNumber.slice(-4)}`,
     phoneNumberLookupKey: `lookup:${phoneNumber}`,
     providerLastSeenAt: input.providerLastSeenAt,
-    providerStatus: input.providerStatus,
+    providerReputationStatus: input.providerReputationStatus,
+    providerServiceStatus: input.providerServiceStatus,
   };
 }
 
@@ -682,7 +736,8 @@ function buildIncomingLineRow(
     healthStatus: string;
     phoneNumberEncrypted: string | null;
     phoneNumberLookupKey: string;
-    providerStatus: string | null;
+    providerReputationStatus: string | null;
+    providerServiceStatus: string | null;
   }> = {},
 ) {
   return {
@@ -700,7 +755,9 @@ function buildIncomingLineRow(
       overrides.phoneNumberLookupKey
       ?? createHostedPhoneLookupKey(phoneNumber)
       ?? `lookup:${phoneNumber}`,
-    providerStatus: overrides.providerStatus ?? "active",
+    providerReputationStatus:
+      overrides.providerReputationStatus ?? "HEALTHY",
+    providerServiceStatus: overrides.providerServiceStatus ?? "ACTIVE",
   };
 }
 
@@ -712,7 +769,8 @@ function buildReceiptCorrelatedRecoveryLineRow(
     healthStatus: string;
     lastReceiptEventId: string | null;
     phoneNumberEncrypted: string | null;
-    providerStatus: string | null;
+    providerReputationStatus: string | null;
+    providerServiceStatus: string | null;
   }> = {},
 ) {
   return {
@@ -729,7 +787,9 @@ function buildReceiptCorrelatedRecoveryLineRow(
         : overrides.phoneNumberEncrypted,
     phoneNumberLookupKey:
       createHostedPhoneLookupKey(phoneNumber) ?? "lookup:recovery",
-    providerStatus: overrides.providerStatus ?? "active",
+    providerReputationStatus:
+      overrides.providerReputationStatus ?? "HEALTHY",
+    providerServiceStatus: overrides.providerServiceStatus ?? "ACTIVE",
   };
 }
 

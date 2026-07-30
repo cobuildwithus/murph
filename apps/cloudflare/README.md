@@ -95,6 +95,7 @@ Root `pnpm dev` starts the same local Cloudflare container path and uses the ima
 - Hosted raw email payloads now live under the encrypted, root-independent `hosted-email/messages/{storageNamespaceId}/` prefix. Raw blobs and their encrypted recovery refs carry an R2 lifecycle backstop under `hosted-email/messages/` that makes them deletion-eligible after 24 hours, while account-deletion cleanup removes the same user prefix directly. Normal worker deploys reapply that checked-in lifecycle rule before `wrangler deploy`. Removed pre-launch root-derived raw-email paths are unsupported under the greenfield hard cut; the same lifecycle prefix bounds any transient leftovers.
 - Account deletion removes user-scoped R2 objects and destroys the warm container before deleting Durable Object state. It clears the alarm and calls Durable Object storage `deleteAll()` after the SQL owner check; already-absent SQL state is idempotent success, while missing `deleteAll` support or any R2/container/state failure remains incomplete so web's durable cleanup receipt retries it. The response carries explicit `deleteAllCompleted` evidence; web must treat a legacy response without that field as pending. Deploy this Worker before the receipt-producing web release and do not roll Cloudflare below this capability while those receipts can run.
 - Other encrypted execution blobs remain owner-cleaned or durable by design, including workspace snapshots, legacy artifact blobs, and runner-secrets blobs. Hosted device-sync runtime authority stays in `apps/web` behind narrow signed callbacks.
+- The OC-to-ENAM online copier treats approved immutable keys as immutable identities, not permanent-retention promises. A CopyObject `404` is accepted only when a strongly consistent source HEAD proves that the planned object was deleted, and the skipped key must remain absent from the final destination inventory. A successful or precondition-failed copy followed by a missing source is an ambiguous copy/delete ordering and fails closed. CopyObject is never retried after a transport or server outcome because that outcome may still commit; apply requires the runbook's explicit single-copier assertion, must never overlap, and is prohibited after destination activation. One source-active apply process retains the source keys it observes, brackets R2 inventories with equal active-owner snapshots, and performs internal convergence cycles. Production cutover holds that exact process at temporary convergence until the operator supplies the existing source-PUT-drained assertion; timing-only rehearsals omit the hold. A fresh process has no provenance and strictly rejects every destination-only eligible object. Every object present in the final OC inventory must still exist identically in ENAM. The online copier never overwrites or deletes an object in either bucket.
 - Runtime domain-root material comes from a signed web callback as ingress/runtime
   envelopes only. Cloudflare verifies the GCP KMS authority signature and unwraps
   only its configured P-256 automation recipient; it does not receive GCP KMS
@@ -116,6 +117,7 @@ Required worker secrets:
 
 - `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK`
 - `HOSTED_DATABASE_ALERT_LINQ_CHAT_ID`
+- `HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID`
 - `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN`
 - `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID`
 - `HOSTED_LOG_FINGERPRINT_SECRET`
@@ -196,11 +198,18 @@ Before each message POST it requires the configured direct
 [Linq chat health](https://docs.linqapp.com/guides/chats/chat-health/) and its
 current [line reputation](https://docs.linqapp.com/guides/phone-numbers/phone-reputation/)
 to be `HEALTHY`. It derives that chat's sole external phone recipient in memory,
-never persists or logs it, and sends through Linq's no-`from` auto-selection
-endpoint so a newly flagged line can fail over. Unhealthy or indeterminate
-delivery health suppresses the POST and leaves the alert pending for the next
-paced attempt. This path does not share state or fallback behavior with the
-Resend-only hosted reply-latency monitor.
+never persists or logs it, and requires the two resolved recipients to differ
+before the secondary operation can enter Linq. If primary identity cannot be
+resolved, neither operation posts; if only the secondary is unavailable, the
+healthy primary can still post. If the primary identity is known but its chat
+or line health is unsafe or indeterminate, a healthy distinct secondary can
+still post. A duplicate resolved recipient allows the primary operation only
+and leaves the alert pending. Distinct healthy recipients are sent through
+Linq's no-`from` auto-selection endpoint so a newly flagged line can fail over.
+Unhealthy or indeterminate delivery health suppresses that destination's POST
+and leaves the alert pending for the next paced attempt. This path does not
+share state or fallback behavior with the Resend-only hosted reply-latency
+monitor.
 
 Defaulted worker vars:
 

@@ -2367,14 +2367,14 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
     });
   }
 
-  let qualificationCandidateReferralId: string | null = null;
+  let qualificationCandidateReferralIds: string[] = [];
   if (!input.affirmativeReaction) {
     const eventKey = createHostedLinqMessageLookupKey(summary.messageId);
     const senderSubjectKey = participantContact.kind === "email"
       ? createHostedEmailLookupKey(participantContact.value)
       : createHostedPhoneLookupKey(participantContact.value);
     if (eventKey && senderSubjectKey) {
-      qualificationCandidateReferralId = (
+      qualificationCandidateReferralIds = (
         await observeHostedUsageReferralInboundTx({
           containerMemberId: input.route.containerMemberId,
           eventKey,
@@ -2383,15 +2383,15 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
           senderSubjectKey,
           tx: input.prisma,
         })
-      ).qualificationCandidateReferralId;
+      ).qualificationCandidateReferralIds;
     }
   }
 
   return logHostedLinqWebhookPlannerDecisionAndReturn(
     buildActiveMemberDirectPlan({
       desiredSideEffects: [],
-      ...(qualificationCandidateReferralId
-        ? { postCommitUsageReferralIds: [qualificationCandidateReferralId] }
+      ...(qualificationCandidateReferralIds.length > 0
+        ? { postCommitUsageReferralIds: qualificationCandidateReferralIds }
         : {}),
       response: {
         ignored: false,
@@ -2648,6 +2648,8 @@ async function planHostedLinqGroupChatWebhook(input: {
       await bindArmedHostedUsageReferralToNewContainerTx({
         occurredAt: new Date(occurredAt),
         ownerMemberId: sender.id,
+        targetChannel: "linq",
+        targetLinqService: messageEvent.data.service ?? null,
         targetContainerMemberId: ensureResult.containerMemberId,
         tx: input.prisma,
       });

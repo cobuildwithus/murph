@@ -1,78 +1,65 @@
-export type HostedLinqProjectedHealthStatus =
-  | "degraded"
-  | "healthy"
-  | "unhealthy"
-  | "unknown";
+import { normalizeNullableString } from "./shared";
 
-const HOSTED_LINQ_HEALTHY_PROVIDER_STATUSES = new Set([
-  "active",
-  "healthy",
-  "ok",
-  "ready",
-]);
-const HOSTED_LINQ_HARD_BLOCK_PROVIDER_STATUS_PATTERN =
-  /critical|flagged|blocked|disabled|suspended|banned/u;
-const HOSTED_LINQ_DEGRADED_PROVIDER_STATUS_PATTERN =
-  /at_risk|degraded|warning|limited|throttled/u;
+export const HOSTED_LINQ_LINE_SERVICE_STATUSES = [
+  "ACTIVE",
+  "FLAGGED",
+] as const;
 
-export function normalizeHostedLinqProviderStatus(
-  value: string | null | undefined,
-): string {
-  return value?.trim().toLowerCase().replace(/[\s-]+/gu, "_") ?? "";
+export type HostedLinqLineServiceStatus =
+  typeof HOSTED_LINQ_LINE_SERVICE_STATUSES[number];
+
+export const HOSTED_LINQ_LINE_REPUTATION_STATUSES = [
+  "HEALTHY",
+  "AT_RISK",
+  "CRITICAL",
+] as const;
+
+export type HostedLinqLineReputationStatus =
+  typeof HOSTED_LINQ_LINE_REPUTATION_STATUSES[number];
+
+export const HOSTED_LINQ_CHAT_HEALTH_STATUSES = [
+  "HEALTHY",
+  "AT_RISK",
+  "CRITICAL",
+  "OPTED_OUT",
+] as const;
+
+export type HostedLinqChatHealthStatus =
+  typeof HOSTED_LINQ_CHAT_HEALTH_STATUSES[number];
+
+export function parseHostedLinqLineServiceStatus(
+  value: unknown,
+): HostedLinqLineServiceStatus | null {
+  return parseHostedLinqProviderStatus(value, HOSTED_LINQ_LINE_SERVICE_STATUSES);
 }
 
-export function isHostedLinqProviderStatusAtRisk(
-  value: string | null | undefined,
-): boolean {
-  return normalizeHostedLinqProviderStatus(value) === "at_risk";
+export function parseHostedLinqLineReputationStatus(
+  value: unknown,
+): HostedLinqLineReputationStatus | null {
+  return parseHostedLinqProviderStatus(value, HOSTED_LINQ_LINE_REPUTATION_STATUSES);
 }
 
-export function isHostedLinqProviderStatusCritical(
-  value: string | null | undefined,
-): boolean {
-  return normalizeHostedLinqProviderStatus(value) === "critical";
+export function parseHostedLinqChatHealthStatus(
+  value: unknown,
+): HostedLinqChatHealthStatus | null {
+  return parseHostedLinqProviderStatus(value, HOSTED_LINQ_CHAT_HEALTH_STATUSES);
 }
 
-export function isHostedLinqProviderStatusHardBlocked(
-  value: string | null | undefined,
-): boolean {
-  return HOSTED_LINQ_HARD_BLOCK_PROVIDER_STATUS_PATTERN.test(
-    normalizeHostedLinqProviderStatus(value),
-  );
-}
+function parseHostedLinqProviderStatus<TStatus extends string>(
+  value: unknown,
+  allowed: readonly TStatus[],
+): TStatus | null {
+  const normalized = normalizeNullableString(
+    typeof value === "string" ? value : null,
+  )?.toUpperCase();
+  if (!normalized) {
+    return null;
+  }
 
-export function classifyHostedLinqProviderStatus(
-  value: string | null | undefined,
-): HostedLinqProjectedHealthStatus {
-  const normalized = normalizeHostedLinqProviderStatus(value);
-  if (HOSTED_LINQ_HEALTHY_PROVIDER_STATUSES.has(normalized)) {
-    return "healthy";
+  for (const status of allowed) {
+    if (status === normalized) {
+      return status;
+    }
   }
-  if (HOSTED_LINQ_HARD_BLOCK_PROVIDER_STATUS_PATTERN.test(normalized)) {
-    return "unhealthy";
-  }
-  if (HOSTED_LINQ_DEGRADED_PROVIDER_STATUS_PATTERN.test(normalized)) {
-    return "degraded";
-  }
-  return "unknown";
-}
-
-/**
- * Provider-event conflict ordering. Unknown < healthy < degraded < hard-blocked.
- * Keep this single ordering shared by event parsing and line projection.
- */
-export function rankHostedLinqProviderStatus(
-  value: string | null | undefined,
-): number {
-  const healthStatus = classifyHostedLinqProviderStatus(value);
-  if (healthStatus === "unhealthy") {
-    return 4;
-  }
-  if (healthStatus === "degraded") {
-    return 3;
-  }
-  if (healthStatus === "healthy") {
-    return 2;
-  }
-  return 1;
+  return null;
 }

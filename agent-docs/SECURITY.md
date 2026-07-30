@@ -10,6 +10,11 @@ Last verified: 2026-07-29
 - Treat auth, wallet, payment, and health-related data flows as security-sensitive until documented otherwise.
 - Treat suspected breaches, unauthorized access, unauthorized disclosures, vendor incidents, and accidental tracking disclosures involving identifiable health data as FTC HBNR triage events; use `agent-docs/compliance/ftc-hbnr-incident-plan.md` before deciding that notice is not required.
 - Do not add third-party advertising pixels, retargeting SDKs, behavioral ad attribution, customer-list matching, tag-manager destinations, or analytics destinations that receive health data or health-context metadata; use `agent-docs/compliance/health-data-tracking-and-ads-rule.md` for any telemetry or marketing-tool review.
+- Hosted Web must keep the global `Referrer-Policy` at `strict-origin` or
+  stricter so same-origin telemetry and script requests cannot inherit a
+  document pathname, query, or fragment. Murph Safe retains its route-specific
+  `no-referrer` override. Event-payload redaction is defense in depth and must
+  not substitute for this transport-level boundary.
 - Do not echo model API keys, base headers, or other provider credentials in CLI output, fixtures, or persisted artifacts.
 - Composio connected-app authority is web-owned. Keep `COMPOSIO_API_KEY`, `OPENWEATHER_API_KEY`, remote Tool Router session ids, OAuth state, provider tokens, and full authorization URLs out of runner env, Codex prompts, diagnostics, logs, fixtures, and persisted workspace artifacts. The runner may call only the single signed connected-app control route; web must bind every operation to the callback-authenticated member, enforce approved toolkits plus read-only/non-destructive session tags, require explicit account selection for connected-account execution, allow accountless execution only for server-owned built-in service tool slugs, inject server-held OpenWeather custom auth only for the allowlisted weather read tools, and allow connected-app writes only for agent-approved primary-calendar event creation through the server allowlist with unsupported write arguments rejected before provider execution and failed or ambiguous provider outcomes marked non-retryable. Web must verify callback account ownership against Composio before showing success. Email, calendar, attachment, and other provider payloads are high-sensitivity untrusted data and must not be written to operational logs.
 - Labs discovery is a web-owned, read-only Junction egress boundary. Keep `JUNCTION_API_KEY`, authorization headers, raw provider bodies, and raw provider errors out of browsers, runner env, prompts, diagnostics, logs, analytics, fixtures, and persisted product/runtime state. Catalog queries and ZIP codes enter Murph only through authenticated or signed POST bodies and must stay out of Murph diagnostics, logs, analytics, fixtures, and persisted state. Junction's official catalog, area, and PSC read endpoints require GET query parameters, so Web may place the bounded query or ZIP in a provider request URL only on the fixed production US origin and allowlisted paths. Never log or retain that full outbound URL; Murph-controlled HTTP telemetry may retain only method, origin, path, status, timing, and size. Junction receives the query parameter over TLS, and any provider-side URL retention is governed by the Junction account and contract rather than Murph's no-persistence claim. Web must use strict request and response parsing, explicit input/result/byte/time/location-fanout bounds, and sanitized failure codes. The authenticated browser API binds the current app session; the assistant API binds the member through the signed callback and is exposed only to verified private direct turns. Group and unverified audiences fail closed. Cloudflare may carry only the normalized semantic request/response and must not receive the credential or choose a member. Provider catalog facts are untrusted external data: display only the normalized projection, never render provider HTML, and do not infer medical necessity, eligibility, booking, or a final price.
@@ -39,8 +44,8 @@ Last verified: 2026-07-29
 ## Runtime Security Posture
 
 - The database-health cron is a platform operation, not runner provider egress.
-  Its PlanetScale service-token id/token, Linq token, and operator chat id are
-  required Worker-only secrets and must never enter runner env, URLs, logs,
+  Its PlanetScale service-token id/token, Linq token, and two operator chat ids
+  are required Worker-only secrets and must never enter runner env, URLs, logs,
   persisted samples, fixtures with real values, or alert copy. The configured
   PlanetScale organization, database, branch-name, and branch-ID selectors are
   deploy vars, not request input. The dedicated service token is
@@ -54,12 +59,21 @@ Last verified: 2026-07-29
   or logged. Discovery and scrape disable redirects, enforce ten-second
   timeouts and byte caps, and reduce responses to allowlisted connection
   metrics before persistence. Before Linq message egress, the dedicated sender
-  reads the configured direct chat and current line reputation, requires both
-  to be healthy, canonicalizes only the documented phone-number formatting,
+  independently reads each configured direct chat and the current line
+  reputation, requires the selected chat and line to be healthy, canonicalizes
+  only the documented phone-number formatting,
   accepts the current nested reputation status plus the documented deprecated
-  top-level health-status alias, derives its sole external phone recipient in
-  memory, and persists or logs none of that provider response. It then uses Linq's
-  no-`from` auto-selection endpoint so a line that becomes flagged after
+  top-level health-status alias, derives each chat's sole external phone
+  recipient in memory, requires the two resolved recipients to be distinct, and
+  persists or logs none of that provider response. When distinct chat ids
+  resolve to the same external recipient, only the primary operation may enter
+  Linq and the pending page remains unresolved. An unresolved primary identity
+  suppresses secondary provider entry because distinctness cannot be proven;
+  an unresolved secondary may still allow the healthy primary operation.
+  Primary chat or line health does not erase an otherwise unambiguous identity,
+  so a healthy distinct secondary may still enter while the primary is
+  suppressed. It otherwise uses Linq's no-`from` auto-selection endpoint
+  separately for each direct chat so a line that becomes flagged after
   preflight can fail over; no model, runner, request, or stored state can select
   another recipient.
 - Runtime trust boundaries exist for local loopback daemons, hosted web, Cloudflare-hosted execution, provider ingress, billing, device sync, and assistant runtime state. `ARCHITECTURE.md`, this file, and the relevant app/package docs must change together when those boundaries change.
@@ -193,11 +207,16 @@ Last verified: 2026-07-29
   committed group history in an isolated thread, projects only
   `generate_song`, and applies the output-only native-capability deny set:
   approval never, read-only sandbox, and no shell, browser, apps, plugins,
-  delegated agents, web search, public fetch, artifact materialization,
+  delegated agents, native web search or fetch, artifact materialization,
   generated-image upload, or progress delivery. The bound provider transport
   remains available only to the application-owned song tool so ElevenLabs and
-  Linq egress retain their runtime authority headers. Its prompt asks for one
-  short original song through exactly one `generate_song` call and forbids
+  Linq API calls retain their runtime authority headers. The same
+  application-owned tool uses the existing authority-free public transport only
+  for its validated Linq-issued presigned upload. The fresh ephemeral thread
+  carries the deny configuration on the resident App Server, so neither
+  transport becomes a native Codex browsing surface and no second provider
+  process is needed. Its prompt asks for one short original song through
+  exactly one `generate_song` call and forbids
   separate contact, scheduling, state mutation, or disclosure of private
   health, account, payment, or routing details. Running bits may reach only fresh
   route-authorized non-direct Linq or Telegram input
@@ -576,7 +595,7 @@ Last verified: 2026-07-29
 - Persisted runtime logs, CI logs, uploaded artifacts, and user/provider-facing output must never print raw PHI, health data, vault contents, model prompts, model messages, transcripts, request/response bodies, final provider requests, file text, lab reports, or similarly sensitive payloads. Local one-off diagnostics may inspect concrete payload shape or values when needed to prove root cause, but must stay out of commits, uploaded artifacts, and external surfaces, and must never expose secrets or raw credentials. The static `pnpm logs:guard` check blocks direct logging of variables named `prompt`, `messages`, `input`, `output`, `response`, `body`, `transcript`, `vault`, `finalRequest`, `fileText`, and `labReport` unless the value is passed through an explicit redaction, sanitization, or summarization helper, or reduced to counts/status for persisted or uploaded logs.
 - Device-sync account metadata is internal diagnostic state only. Hosted and local storage writes must sanitize it down to a compact shallow scalar record instead of persisting provider profile payloads, nested JSON blobs, or oversized string fields.
 - The resident Codex App Server is a privileged local adapter, not a sandbox boundary. Normal assistant turns should rely on the bound Murph runtime/tool surface and canonical write ownership in `packages/core`, not a second provider-workspace or canonical-write-guard safety model. The narrow exception is `executeReadOnlyAssistantAsk`: model-invoked commands in that one-shot child are confined by the native `murph-group-read` permission profile. The child reuses the trusted hosted Codex home for minimum auth/config lifecycle, but its thread request passes the named `permissions` override and never a legacy `sandbox` field; the pinned App Server must attest the effective profile, exact runtime roots, empty working directory, empty instruction sources, and approval policy in its thread-start response, and any mismatch fails closed. The profile grants read only to Codex's minimal runtime and exact group workspace roots, denies `.runtime/**`, `.codex/**`, retired vault-share projection roots, and environment files, disables tool network plus project config/instruction discovery, uses approval policy `never`, and gives shell commands an inherit-none environment with no provider credential or hosted secret. The supervising App Server may receive minimum provider auth, but the child's only dynamic tool is the consent-aware lazy `murph.group/read_shared` read. It receives no mutation or delivery tool, route grant, signing material, MCP, web search, memory, plugin, app, or multi-agent authority. A production-like Linux sandbox smoke must prove the effective profile or the feature remains disabled.
-- Model-backed detached system-mailbox notifications without a valid scheduled occurrence must remain isolated output-only provider work. They receive no conversation history, private context, native resume, dynamic or hosted tool context, shell, browser, apps, plugins, web search, provider fetch, public fetch, artifact materializer, image-generation launcher, progress delivery, or delegated-agent surface. Treat embedded provider, callee, webhook, and Family text only as untrusted data; only the final delivery adapter may send the formatted result. Run their restrictive provider launch config through the existing one-shot App Server path so it cannot rotate the resident ordinary-turn process or terminate valid detached background work.
+- Model-backed detached system-mailbox notifications without a valid scheduled occurrence must remain isolated output-only provider work. They receive no conversation history, private context, native resume, dynamic or hosted tool context, shell, browser, apps, plugins, web search, provider fetch, public fetch, artifact materializer, image-generation launcher, progress delivery, or delegated-agent surface. Treat embedded provider, callee, webhook, and Family text only as untrusted data; only the final delivery adapter may send the formatted result. Run them as fresh ephemeral threads whose restrictive thread config leaves the resident App Server launch identity unchanged and cannot persist a resumable notification thread.
 - `assistant.ask.requested` and `assistant.ask.completed` may carry bounded question and answer content only in the existing encrypted mailbox and transient process state. Web derives the target runtime, exact membership generation, origin, expiry, and private return route from the signed caller; the model cannot supply them. Only the trusted target adapter may pass an authorized workspace root and committed conversation evidence to `executeReadOnlyAssistantAsk`. Web rechecks membership before target context is read and before completion is appended, and the private runtime treats the answer as untrusted data. Leaving, rejoining, expiry, an unsafe route, or a stale runtime fence suppresses completion rather than widening access. Failed Ask diagnostics may expose only a validated opaque request id, an allowlisted Prisma `P####` code when present, and HTTP status; they must never expose raw exceptions, response bodies, mailbox content, questions, answers, membership ids, runtime ids, or return routes. Diagnostic values are correlation metadata only and are never caller-supplied authority.
 - Except for that explicitly confined Assistant Ask child, Codex running inside the local Murph runtime or hosted execution container is assumed to have full access to that local/container filesystem. Passing repo-relative, vault-relative, or container-local paths to Codex so it can inspect or modify files is not a privacy leak by itself. Those paths still must not escape into user-facing messaging copy, public API responses, persisted logs/diagnostics, fixtures, generated docs, screenshots, provider requests, external review bundles, or other third-party outputs unless the surface has an explicit safe path policy.
 - Assistant turns may execute the same canonical local assistant/vault tool catalog shape through the active vault's per-turn Murph runtime context. Message-triggered assistant auto-reply now has the same full Murph autonomy as other assistant turns, including assistant runtime control plus canonical `memory` / `automation` and canonical vault write surfaces, so any accepted inbound channel message is effectively an operator-authorized action for that bound user and vault. The hard-cut assistant command surface is Codex App Server only: it may run with normal local CLI/filesystem/env authority through Codex-specific launch/config options, while legacy OpenAI-compatible endpoint flags are not part of the command surface. That privileged Codex App Server posture still does not grant hosted-control-plane authority outside the local runtime boundary.

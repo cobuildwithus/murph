@@ -166,9 +166,11 @@ fulfilled group purchase, Web idempotently:
    mailbox.
 
 The creative turn is isolated, projects only `generate_song`, applies the
-output-only native-capability deny set, retains the bound provider transport
-required by that application-owned tool, and uses the ordinary delivery path.
-Its prompt tells the model to call that tool exactly once for one
+output-only native-capability deny set, and runs as a fresh ephemeral thread on
+the resident App Server. The application-owned song tool retains the existing
+provider and authority-free public transports needed for generation and its
+validated signed upload; neither becomes native Codex browsing. The turn uses
+the ordinary delivery path. Its prompt tells the model to call that tool exactly once for one
 5–15-second original sponsor song.
 Serious, urgent, medical, sensitive, or conflict-heavy recent context makes the
 song gentle and non-comedic. A creative provider failure terminally settles
@@ -234,6 +236,11 @@ remaining effective capacity. Buying credit can move that bar backward
 immediately. The presentation does not expose the internal dollar value of the
 plan allowance or the usage-credit balance.
 
+Settings may separately show a bounded history of immutable purchase grants
+with the original added amount, source, and date. That history does not read or
+display aggregate or per-grant remaining capacity; the combined AI usage bar
+remains the only current-capacity view.
+
 Purchased capacity must not be called cash, wallet funds, an account balance,
 or refundable dollars. Accounting stays in integer USD micros behind the
 web-owned projection.
@@ -259,6 +266,9 @@ The target composition is:
 - Description: **Choose a one-time credit amount for your account. We’ll use
   your saved card when available. Stripe will ask when card details or
   verification are needed.**
+- Group description: **Choose a one-time contribution to keep Murph talking for
+  everyone here.** Do not repeat saved-card or verification mechanics in the
+  group dialog.
 - Primary action after selection: **Add usage · $10**
 - Pending action: **Adding usage…**
 - Secondary action: **Cancel**

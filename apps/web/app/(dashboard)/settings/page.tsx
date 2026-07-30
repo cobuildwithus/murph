@@ -8,6 +8,7 @@ import {
 import { HostedPrivyProvider } from "@/src/components/hosted-onboarding/privy-provider";
 import { CustomizeMurphSettings } from "@/src/components/settings/customize-murph-settings";
 import { HostedAccountSettingsCards } from "@/src/components/settings/hosted-account-settings-cards";
+import { HostedAiUsageActivity } from "@/src/components/settings/hosted-ai-usage-activity";
 import { HostedAssistantModelSettings } from "@/src/components/settings/hosted-assistant-model-settings";
 import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-settings";
 import type {
@@ -58,6 +59,7 @@ import {
 import { getPrisma } from "@/src/lib/prisma";
 import { readHostedSecureApprovalStatus } from "@/src/lib/sensitive-actions/secure-approval-status";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
+import { readHostedAiUsageActivity } from "@/src/lib/hosted-execution/usage-activity";
 import { readHostedPersonalAiUsageStatus } from "@/src/lib/hosted-execution/usage-status";
 import {
   estimateHostedUsageCreditMessages,
@@ -160,6 +162,7 @@ export default async function SettingsPage({
   const secureApprovalStatus =
     settingsData?.secureApprovalStatus ?? ({ status: "unavailable" } as const);
   const usageStatus = settingsData?.usageStatus ?? null;
+  const usageActivity = settingsData?.usageActivity ?? null;
   const usageTopUpOfferCodes = settingsData?.usageTopUpOfferCodes ?? [];
   const usageTopUpActivePurchase = settingsData?.usageTopUpActivePurchase ?? null;
   const usageTopUpReturnTarget = settingsData?.usageTopUpReturnTarget ?? null;
@@ -298,13 +301,42 @@ export default async function SettingsPage({
         userEmailAddress: account.email.address,
       })
     : [];
+  const usageMissionContactOption =
+    usageActivity?.missionsEnabled === true && account
+      ? resolveMurphContactOptions({
+          contactChannels: {
+            email: false,
+            telegram: Boolean(account.telegram.telegramUserId),
+            text: Boolean(account.phone.number),
+          },
+          message: {
+            body: "Hey Murph, what usage missions can I choose from?",
+          },
+          murphEmailAddress: account.email.murphEmailAddress ?? null,
+          murphPhoneNumber: routing?.linqRecipientPhone ?? null,
+          preferredKind: "text",
+          userEmailAddress: account.email.address,
+        })[0] ?? null
+      : null;
+  const canStartUsageMissions =
+    usageActivity?.missionsEnabled === true
+    && usageMissionContactOption !== null;
+  const visibleUsageActivity =
+    usageActivity
+    && (
+      canStartUsageMissions
+      || usageActivity.credits.length > 0
+      || usageActivity.missions.length > 0
+    )
+      ? usageActivity
+      : null;
 
   return (
     <div className="flex flex-col gap-12">
       <PageHeader
         eyebrow="Settings"
         title="Your account"
-        description="Plan, model, connected accounts, and data privacy."
+        description="Plan, AI usage, model, connected accounts, and data privacy."
       />
 
       <section id="subscription" className="flex scroll-mt-24 flex-col gap-4">
@@ -353,6 +385,17 @@ export default async function SettingsPage({
           usageTopUpInitialOpen={openPersonalUsageTopUp}
           usageTopUpOffers={usageTopUpOffers}
           usageTopUpPurchaseReturn={personalUsageTopUpPurchaseReturn}
+          usageActivityDetail={visibleUsageActivity ? (
+            <section id="ai-usage" className="flex scroll-mt-24 flex-col gap-4">
+              <h2 className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                AI usage
+              </h2>
+              <HostedAiUsageActivity
+                activity={visibleUsageActivity}
+                missionContactOption={usageMissionContactOption}
+              />
+            </section>
+          ) : null}
         />
       </section>
 
@@ -507,6 +550,10 @@ async function readSettingsPageData(input: {
     memberId,
     prisma,
   });
+  const usageActivity = await readHostedAiUsageActivity({
+    memberId,
+    prisma,
+  }).catch(() => null);
   const usageTopUpOfferCodes = await readHostedPersonalUsageCreditOfferCodes({
     memberId,
     prisma,
@@ -542,6 +589,7 @@ async function readSettingsPageData(input: {
     freshPrivySession: await freshPrivySessionPromise,
     secureApprovalStatus: await secureApprovalStatusPromise,
     settingsSnapshot,
+    usageActivity,
     usageStatus,
     usageTopUpActivePurchase,
     usageTopUpOfferCodes,

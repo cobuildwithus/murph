@@ -86,16 +86,31 @@ Last verified: 2026-07-29
   actual wall time, not the Cron slot, and is written before network egress.
   The message's UTC check time likewise comes from the actual completed
   collection run while the Cron slot remains only the persisted sample
-  identity. Every eligible attempt retrieves the configured direct chat and
-  current line reputation; unhealthy or indeterminate delivery health produces
-  no message POST and retains the pending alert for the next paced attempt.
-  Healthy delivery uses Linq's no-`from` auto-selection route. A
-  transport-ambiguous or rejected send keeps the exact persisted body and Linq
-  idempotency key for the next eligible attempt; acknowledged recurrences
-  advance the alert sequence and choose another fixed opening from current
-  metric evidence. Message variation must remain contextual and
-  deterministic, never random padding. Database pages intentionally have no
-  quiet hours.
+  identity. Every eligible cycle independently retrieves both configured
+  direct chats and current line reputation; unhealthy or indeterminate health
+  suppresses that destination's message POST without blocking the other
+  destination, and retains the pending alert for the next paced cycle. Healthy
+  destinations are compared before provider entry. Primary recipient identity
+  is required before any secondary POST: an unresolved primary identity
+  suppresses both positions, while an unresolved secondary identity does not
+  block a healthy primary. A known primary identity with unhealthy or
+  indeterminate delivery health still permits a healthy distinct secondary
+  POST; the suppressed primary keeps the page pending.
+  Distinct chat ids that resolve to the same external recipient admit only the
+  primary POST and keep the page pending; after configuration is corrected,
+  stable provider
+  idempotency deduplicates that primary replay while the actual secondary
+  receives the page. Delivery otherwise uses Linq's no-`from` auto-selection
+  route separately for each chat. The primary retains the persisted Linq
+  idempotency key and the secondary uses a stable derived key. A
+  transport-ambiguous or rejected send keeps the exact persisted body and both
+  destination keys for the next eligible cycle; only acknowledged entry to both
+  distinct recipients clears the pending alert. An idempotent replay of a
+  destination that already succeeded cannot produce another recipient-visible
+  message. Acknowledged recurrences advance the alert
+  sequence and choose another fixed opening from current metric evidence.
+  Message variation must remain contextual and deterministic, never random
+  padding. Database pages intentionally have no quiet hours.
 - Linq edit delivery is at-least-once and remains owned by the existing hosted
   mailbox. A per-source advisory lock serializes correction planners from
   lineage read through correction append; ordinary accepted messages write the
@@ -131,12 +146,40 @@ Last verified: 2026-07-29
   report convergence before the receipt itself is deleted.
 - Every direct subscription Checkout attempt is an encrypted member-owned row;
   Family retains its single encrypted session in the existing billing attempt
-  owner. After Stripe creates a session, Checkout creation re-locks the owner
-  and returns the URL only after binding that reference; if suspension or
-  deletion won, it expires the session instead. Account deletion suspends
-  first, re-reads all direct attempts and Family billing owners, expires every
-  open session, absorbs an expiry/completion race by canceling the resulting
-  subscription, and only then prepares the final customer-cleanup receipt.
+  owner. A first-time direct subscription Checkout never pre-creates a
+  standalone Customer: subscription-mode Checkout creates it only when the
+  owned Session completes, and completion binds the Customer and Subscription
+  together. Direct Checkout completion prepares its live provider snapshot,
+  encrypted billing identifiers, and email before taking the member lock; the
+  transaction only revalidates durable ownership, accepts the existing attempt,
+  and writes the prepared values. Pulse Session metadata resolves only the
+  member ID: after taking that lock, completion rereads the authoritative
+  redemption, phase, status, and subscription lookup key before deciding
+  whether an identity is replaceable. That decision read selects no encrypted
+  fields and therefore cannot call KMS. A loser preserves the current identity
+  and is canceled after commit; an unexpected policy rejection after acceptance
+  aborts the transaction. Before browser or webhook completion takes the member
+  lock, it durably provisions only control and ingress through their existing
+  short transactions, unwraps both into the request-scoped cache, and prepares
+  ephemeral device and runtime candidates. Complete root presence is also
+  activation proof for group participant projection, phone-call authority, and
+  activation recovery, so those final candidates become durable only inside the
+  accepted winner transaction. The locked winner path selects only attempt,
+  lookup-key, freshness, and entitlement scalars, writes the accepted scalar
+  trial facts, and lets private-field batch projection reuse the concrete root
+  keys already in the scoped cache; it does not project a rich billing snapshot
+  or make a KMS request. Stripe event reconciliation likewise prepares its
+  canonical provider snapshot before the lock and revalidates the database
+  owner inside it. After Stripe creates a session, Checkout creation
+  re-locks the owner and returns the URL only after binding that reference; if
+  suspension or deletion won, it expires the session instead. Account deletion
+  suspends first, re-reads all direct attempts and Family billing owners,
+  expires every open session, absorbs an expiry/completion race by canceling
+  the resulting subscription, and only then prepares the final
+  customer-cleanup receipt.
+  Pulse Trial loser cleanup validates exact provider targets before one short
+  member-owner revalidation transaction and cancels them only after that
+  transaction releases; no Stripe request is made while that lock is held.
 - Participant-derived hosted-group access is bounded by the shared seven-day
   observation lease. Provider rosters larger than the reconciliation cap cannot
   leave a participant authoritative forever: stale relationships age out.
@@ -221,7 +264,7 @@ Last verified: 2026-07-29
 - Managed automation ownership is exact-seed and route-authority based. Built-in seeds without an explicit scope default to `member`; member seeds run only on personal/direct routes, while `authenticated-group` seeds run only on live non-direct Linq/iMessage or Telegram routes. Group email is excluded. Reconciliation archives every nonterminal wrong-owner built-in record, including paused records, while already archived records and caller-supplied unscoped custom seeds retain their prior behavior. Claimed static built-ins and registered dynamic identities resolve immutable ownership by automation id before lifecycle hooks and revalidate the same owner and live route before provider admission, tools, delivery, and commit; editable tags, slugs, titles, and instructions cannot acquire authority. Permanently retired built-in IDs are not seeds: reconciliation archives matching persisted records and claimed occurrences fail closed before lifecycle or model work. The post-onboarding choice point is the one registered dynamic member identity. Dynamically generated experiment-lifecycle seeds remain on their existing path until their separately coordinated owner exposes an exact resolver. Immutable personal-memory and group-room-model IDs still exclusively select silent maintenance policy and its provider-admission replay barrier.
 - The post-onboarding choice point is installed as one ordinary managed one-shot after answered onboarding. Its original window begins 21 local-calendar days after completion and expires seven days later. Maintenance gives an eligible older member one future same-weekday occurrence instead of dropping all pre-existing completions or sending a late catch-up immediately; once installed, that occurrence remains anchored. Claim and queued delivery revalidate canonical answered-onboarding authority so a successfully read reopened, declined, manual, or replaced completion state cannot send. An unreadable or malformed authority document is availability failure, not revocation: the existing cron or outbox owner retains and retries the same occurrence or intent within its finite window. The restricted provider attempt uses a fresh ephemeral one-shot process with committed session history and preserves the ordinary provider resume state. A current-home Linq correction derives the conversation locator from the canonical route participant lookup key, including email-keyed routes, with member phone identity only as a legacy fallback. The occurrence otherwise uses the ordinary scheduled notification path and its existing retry, outbox, session, and tool owners. A model skip consumes the one-shot normally and never creates a nag loop.
 - Closed integration-ingest months compact only in the abortable hosted idle-shutdown lane. Core publishes a verified deterministic gzip before deleting raw bytes, normal readers and amendments stream bounded gzip output, and startup repairs only an independently valid, newline-terminated, byte-identical raw/gzip pair. A wake preserves foreground priority; a 30-second pass budget or ordinary compaction failure leaves any unfinished source intact and does not block checkpointing. Remaining raw months are the next pass's durable worklist, while a non-identical representation pair fails closed without a repair queue or marker.
-- The single group newsletter automation reuses canonical cron occurrence state for both delivery modes. Current-chat editions finish through the ordinary conversation outbox and its route retry policy. A scheduled non-direct Telegram occurrence resolves its exact Web-owned route before group tools or model work, persists that authority with the outbox intent, and rechecks it before provider entry. Missing route authority remains retryable; a locally mismatched target fails stale, while live ownership revocation fails permanently without sending. Email editions alone use the existing newsletter parent/recipient outbox lifecycle. The runtime appends the current execution contract on every occurrence so legacy saved instructions cannot retain a retired workflow; no migration queue, repair state, or second scheduler exists.
+- The single group newsletter automation reuses canonical cron occurrence state for both delivery modes. Current-chat editions finish through the ordinary conversation outbox and its route retry policy. A scheduled non-direct Telegram occurrence resolves its exact Web-owned route before group tools or model work, persists that authority with the outbox intent, and rechecks it before provider entry. Missing route authority remains retryable; a locally mismatched target fails stale, while live ownership revocation fails permanently without sending. Email editions report the accepted newsletter parent to cron immediately and put it into the same canonical pending-delivery field used by ordinary queued notifications, even when the notification turn later fails; that failure remains on the run record instead of reopening composition. A restart before that cron write derives the parent from the durable occurrence-scoped outbox key before admitting the provider and reconnects the existing intent to the same pending-delivery field. Web marks the parent sent only after durable recipient fanout planning; the existing cron reconciler then settles the occurrence without another model turn, while recipient intents keep the generic outbox retry policy. The runtime appends the current execution contract on every occurrence so legacy saved instructions cannot retain a retired workflow; no migration queue, repair state, or second scheduler exists.
 - Direct and authenticated group input share one active-turn lifecycle. Initial and live exact-successor input is capped at 50 messages cumulatively; the first completed assistant response closes new admission while preserving the existing provider-turn key only long enough for an already-started steer to settle, and a rejected steer plus overflow or later input remains durable and pending for the next ordinary turn. Every completed text or media segment is retained for delivery rather than replaced by a group-only latest response. Telegram speaker labels ride the already-durable wake, while Linq labels are an optional fail-soft read after ingress; only that display-name action receives a one-second soft deadline bounded by the configured control timeout, and lookup failure, timeout, or rollout skew must fall back unnamed without blocking or acknowledging conversation work.
 - Reviewed Assistant Ask delivery uses the ordinary outbox retry owner. Linq and Telegram revalidate the exact completion and disclosure authority inside their existing Web-owned provider-entry checks. If the authority expires or changes after queueing, the outbox first persists the fixed text-only fallback and retries that same intent; the reviewed answer never enters the provider. Route validity alone cannot admit a reviewed completion.
 - A usage-credit purchase persists one reconstructible `created` purchase before
@@ -407,6 +450,11 @@ Last verified: 2026-07-29
   not silently complete the event.
 - Subscription refund and dispute reversals keep event freshness, the billing
   cursor, unpaid status, and suspension in the same locked billing owner.
+  Subscription, latest-invoice, and invoice-payment evidence is prepared before
+  that owner lock. The transaction re-resolves the reversal owner and checks
+  that the prepared Subscription is still the member's current durable
+  identity before applying only the database transition; it never waits on a
+  Stripe request.
   Exact replay may repeat that atomic transition, but an already-suspended
   snapshot cannot substitute for event freshness: a distinct newer reversal
   must advance the cursor so an older restore cannot reactivate the member.
@@ -415,7 +463,7 @@ Last verified: 2026-07-29
   fence.
 - Read-only Labs discovery has no automatic provider retry, background refresh, or stale cache fallback. Web applies explicit time, response-byte, result-count, and location-fanout bounds and propagates caller cancellation. A Junction timeout, rate limit, or server failure is `temporarily_unavailable`; it must not be collapsed into an empty catalog or `not_served`. Only a clean provider response that reports no ZIP coverage is `not_served`.
 - Labs capability rollout is additive and fail-closed. Deploy Web's signed callback and provider configuration before Cloudflare/runtime registration; a missing or incompatible route surfaces as unavailable rather than falling back to a copied catalog. Roll back the runtime capability before removing the Web route. Because the feature has no DB, cache, queue, or retry owner, recovery is a later member-initiated live request.
-- Definite assistant outbox delivery failures may run at most 48 persisted dispatch attempts. A definite failure on attempt 48 terminalizes as `ASSISTANT_DELIVERY_RETRY_EXHAUSTED`, and no 49th provider call begins; newsletter parent and recipient replay must preserve that logical terminal state instead of resetting the budget with a new token. A delivery that may already have succeeded is not exhausted as an ordinary failure: hosted non-idempotent confirmation remains parked without an automatic wake, while replay-safe delivery checks persisted or provider reconciliation evidence before terminalization.
+- Definite assistant outbox delivery failures may run at most 48 persisted dispatch attempts. A definite failure on attempt 48 terminalizes as `ASSISTANT_DELIVERY_RETRY_EXHAUSTED`, and no 49th provider call begins; newsletter parent and recipient intents use that same terminal lifecycle and never reset the budget with a new token. A delivery that may already have succeeded is not exhausted as an ordinary failure: hosted non-idempotent confirmation remains parked without an automatic wake, while replay-safe delivery checks persisted or provider reconciliation evidence before terminalization.
 - A canonical pending or retryable signup welcome is obsolete once durable auto-reply provenance proves a newer accepted reply for the same recipient route. Hosted collection must abandon that welcome before provider dispatch; a `sending` welcome remains under the normal delivery-confirmation contract rather than being hidden mid-flight.
 - Accepted canonical Linq signup welcomes require a completed delivery-outcome callback even when they answer no conversation mailbox item. Web records acceptance and materializes the provider's direct chat in one transaction under existing route ownership locks; callback failure is a may-have-succeeded delivery, and replay relies on the canonical provider idempotency key instead of issuing an ordinary duplicate send.
 - Assistant Ask uses `assistant.ask.requested` and

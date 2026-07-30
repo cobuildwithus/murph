@@ -7,6 +7,8 @@ import type {
 } from "@murphai/assistant-runtime/hosted-email";
 import {
   HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH,
+  HOSTED_RUNTIME_LINQ_DELIVERY_BLOCK_CODES,
+  HOSTED_RUNTIME_LINQ_DELIVERY_POSTURES,
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
   HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
@@ -325,12 +327,30 @@ function parseHostedRuntimeLinqRecentInboundEngagementResult(
   const result: HostedRuntimeLinqRecentInboundEngagementResult = {};
   const response = value as {
     assistantAskFallbackRequired?: unknown;
+    deliveryBlockCode?: unknown;
+    deliveryPosture?: unknown;
     providerDispatchClaimed?: unknown;
     targetOverride?: unknown;
     threadIsDirect?: unknown;
   };
   if (typeof response.assistantAskFallbackRequired === "boolean") {
     result.assistantAskFallbackRequired = response.assistantAskFallbackRequired;
+  }
+  if (
+    typeof response.deliveryBlockCode === "string"
+    && (HOSTED_RUNTIME_LINQ_DELIVERY_BLOCK_CODES as readonly string[])
+      .includes(response.deliveryBlockCode)
+  ) {
+    result.deliveryBlockCode = response.deliveryBlockCode as
+      (typeof HOSTED_RUNTIME_LINQ_DELIVERY_BLOCK_CODES)[number];
+  }
+  if (
+    typeof response.deliveryPosture === "string"
+    && (HOSTED_RUNTIME_LINQ_DELIVERY_POSTURES as readonly string[])
+      .includes(response.deliveryPosture)
+  ) {
+    result.deliveryPosture = response.deliveryPosture as
+      (typeof HOSTED_RUNTIME_LINQ_DELIVERY_POSTURES)[number];
   }
   if (typeof response.providerDispatchClaimed === "boolean") {
     result.providerDispatchClaimed = response.providerDispatchClaimed;

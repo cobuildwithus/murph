@@ -1854,7 +1854,14 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
       maxNetworkRetries: 0,
       timeout: 5_000,
     });
-    expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledWith(
+      "sub_losing_trial_123",
+      {},
+      {
+        maxNetworkRetries: 0,
+        timeout: 5_000,
+      },
+    );
     expect(mocks.stripe.subscriptions.cancel).not.toHaveBeenCalled();
   });
 

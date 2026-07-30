@@ -56,14 +56,14 @@ const secureBoxMocks = vi.hoisted(() => ({
 }));
 const usageReferralMocks = vi.hoisted(() => ({
   bindArmedHostedUsageReferralToNewContainerTx: vi.fn(async () => ({
-    referralId: null,
+    referralIds: [],
   })),
   observeHostedUsageReferralInboundTx: vi.fn(async (): Promise<{
     isBoundReferralTarget: boolean;
-    qualificationCandidateReferralId: string | null;
+    qualificationCandidateReferralIds: string[];
   }> => ({
     isBoundReferralTarget: false,
-    qualificationCandidateReferralId: null,
+    qualificationCandidateReferralIds: [],
   })),
   reconcileHostedUsageReferralRewardAfterCommit: vi.fn(async () => null),
 }));
@@ -236,10 +236,10 @@ const TEST_KEYRING_ENTRIES = {
 beforeEach(() => {
   vi.clearAllMocks();
   usageReferralMocks.bindArmedHostedUsageReferralToNewContainerTx
-    .mockResolvedValue({ referralId: null });
+    .mockResolvedValue({ referralIds: [] });
   usageReferralMocks.observeHostedUsageReferralInboundTx.mockResolvedValue({
     isBoundReferralTarget: false,
-    qualificationCandidateReferralId: null,
+    qualificationCandidateReferralIds: [],
   });
   usageReferralMocks.reconcileHostedUsageReferralRewardAfterCommit
     .mockResolvedValue(null);
@@ -931,7 +931,8 @@ function createStatefulThreadRoutePrisma() {
     phoneNumberLookupKey: string;
     proactiveConversationCount: number | null;
     proactiveConversationDayUtc: Date | null;
-    providerStatus: string | null;
+    providerReputationStatus: string | null;
+    providerServiceStatus: string | null;
   };
   const linqLines = new Map<string, LinqLineFixture>();
   const linqDeliveries = new Map<string, {
@@ -1370,7 +1371,8 @@ function createStatefulThreadRoutePrisma() {
       maxNewConversationsPerDay: number | null;
       proactiveConversationCount: number | null;
       proactiveConversationDayUtc: Date | null;
-      providerStatus: string | null;
+      providerReputationStatus: string | null;
+      providerServiceStatus: string | null;
     }> = {}) {
       const lookupKey = createHostedPhoneLookupKey(phoneNumber);
       if (!lookupKey) {
@@ -1391,7 +1393,9 @@ function createStatefulThreadRoutePrisma() {
           overrides.proactiveConversationCount ?? null,
         proactiveConversationDayUtc:
           overrides.proactiveConversationDayUtc ?? null,
-        providerStatus: overrides.providerStatus ?? "active",
+        providerReputationStatus:
+          overrides.providerReputationStatus ?? "HEALTHY",
+        providerServiceStatus: overrides.providerServiceStatus ?? "ACTIVE",
       });
     },
     seedLinqDelivery(input: {
@@ -3034,7 +3038,7 @@ describe("Linq explicit external-thread routing", () => {
       routeContainerMemberId: "member_thread_container_123",
     });
     const participantContext =
-      "Participant +15551234567 (unverified owner contact label: Taylor R.) was removed from the group.";
+      "Participant +15551234567 (address-book name: Taylor R.) was removed from the group.";
     await expect(
       prisma.$transaction((transaction) =>
         appendHostedLinqThreadRouteParticipantContextTx({
@@ -4441,7 +4445,8 @@ describe("Linq group chat auto-provision", () => {
         healthStatus: true,
         phoneNumberEncrypted: true,
         phoneNumberLookupKey: true,
-        providerStatus: true,
+        providerReputationStatus: true,
+        providerServiceStatus: true,
       },
       where: {
         phoneNumberLookupKey: {
@@ -5136,6 +5141,8 @@ describe("Linq group chat auto-provision", () => {
       .toHaveBeenCalledExactlyOnceWith({
         occurredAt: new Date("2026-06-24T12:00:00.000Z"),
         ownerMemberId: "member_owner_123",
+        targetChannel: "linq",
+        targetLinqService: "iMessage",
         targetContainerMemberId: containerCreate.data.memberId,
         tx: prisma,
       });
@@ -5190,7 +5197,7 @@ describe("Linq group chat auto-provision", () => {
     mockSuccessfulGroupProvision({ prisma, senderCore });
     prisma.seedActiveManagedLinqLine("+15550000000", {
       healthStatus: "degraded",
-      providerStatus: "AT_RISK",
+      providerReputationStatus: "AT_RISK",
     });
     mockHomeLinqRoute("+15550000000");
 
@@ -5228,7 +5235,7 @@ describe("Linq group chat auto-provision", () => {
       const prisma = createStatefulThreadRoutePrisma();
       prisma.seedActiveManagedLinqLine("+15550000000", {
         healthStatus: "degraded",
-        providerStatus: "AT_RISK",
+        providerReputationStatus: "AT_RISK",
       });
       mockSenderLookup(senderCore);
       mockHomeLinqRoute(homeRecipientPhone);
@@ -5260,11 +5267,11 @@ describe("Linq group chat auto-provision", () => {
     const prisma = createStatefulThreadRoutePrisma();
     prisma.seedActiveManagedLinqLine("+15550000000", {
       healthStatus: "unhealthy",
-      providerStatus: "BLOCKED",
+      providerReputationStatus: "CRITICAL",
     });
     prisma.seedActiveManagedLinqLine("+15550000042", {
       healthStatus: "healthy",
-      providerStatus: "active",
+      providerReputationStatus: "HEALTHY",
     });
     mockSenderLookup(senderCore);
     mockHomeLinqRoute("+15550000000");
@@ -5311,11 +5318,11 @@ describe("Linq group chat auto-provision", () => {
       const prisma = createStatefulThreadRoutePrisma();
       prisma.seedActiveManagedLinqLine("+15550000000", {
         healthStatus: "unhealthy",
-        providerStatus: "BLOCKED",
+        providerReputationStatus: "CRITICAL",
       });
       prisma.seedActiveManagedLinqLine("+15550000042", {
         healthStatus: "healthy",
-        providerStatus: "active",
+        providerReputationStatus: "HEALTHY",
       });
       mockSenderLookup(senderCore);
       mockHomeLinqRoute("+15550000000");
@@ -5347,15 +5354,15 @@ describe("Linq group chat auto-provision", () => {
     const prisma = createStatefulThreadRoutePrisma();
     prisma.seedActiveManagedLinqLine("+15550000000", {
       healthStatus: "unhealthy",
-      providerStatus: "BLOCKED",
+      providerReputationStatus: "CRITICAL",
     });
     prisma.seedActiveManagedLinqLine("+15550000041", {
       healthStatus: "healthy",
-      providerStatus: "active",
+      providerReputationStatus: "HEALTHY",
     });
     prisma.seedActiveManagedLinqLine("+15550000042", {
       healthStatus: "healthy",
-      providerStatus: "active",
+      providerReputationStatus: "HEALTHY",
     });
     const lostLineLookupKey = createHostedPhoneLookupKey("+15550000041");
     const selectedLineLookupKey = createHostedPhoneLookupKey("+15550000042");
@@ -5408,7 +5415,7 @@ describe("Linq group chat auto-provision", () => {
     const dayUtc = new Date("2026-06-24T00:00:00.000Z");
     prisma.seedActiveManagedLinqLine("+15550000000", {
       healthStatus: "unhealthy",
-      providerStatus: "BLOCKED",
+      providerReputationStatus: "CRITICAL",
     });
     for (const phoneNumber of ["+15550000042", "+15550000043"]) {
       prisma.seedActiveManagedLinqLine(phoneNumber, {
@@ -5416,7 +5423,7 @@ describe("Linq group chat auto-provision", () => {
         maxNewConversationsPerDay: 1,
         proactiveConversationCount: 1,
         proactiveConversationDayUtc: dayUtc,
-        providerStatus: "active",
+        providerReputationStatus: "HEALTHY",
       });
     }
     mockSenderLookup(senderCore);
@@ -5452,7 +5459,7 @@ describe("Linq group chat auto-provision", () => {
     const prisma = createStatefulThreadRoutePrisma();
     prisma.seedActiveManagedLinqLine("+15550000000", {
       healthStatus: "unhealthy",
-      providerStatus: "BLOCKED",
+      providerReputationStatus: "CRITICAL",
     });
     mockSenderLookup(senderCore);
     mockHomeLinqRoute("+15550000000");
@@ -5489,15 +5496,15 @@ describe("Linq group chat auto-provision", () => {
     const prisma = createStatefulThreadRoutePrisma();
     prisma.seedActiveManagedLinqLine("+15550000000", {
       healthStatus: "unhealthy",
-      providerStatus: "BLOCKED",
+      providerReputationStatus: "CRITICAL",
     });
     prisma.seedActiveManagedLinqLine("+15550000042", {
       healthStatus: "healthy",
-      providerStatus: "active",
+      providerReputationStatus: "HEALTHY",
     });
     prisma.seedActiveManagedLinqLine("+15550000043", {
       healthStatus: "unhealthy",
-      providerStatus: "BLOCKED",
+      providerReputationStatus: "CRITICAL",
     });
     const effectId = buildHostedLinqGroupLineRecoveryEffectId({
       incomingRecipientPhone: "+15550000000",
@@ -5549,11 +5556,11 @@ describe("Linq group chat auto-provision", () => {
     prisma.seedActiveManagedLinqLine("+15550000000", {
       egressPolicy: "disabled",
       healthStatus: "unhealthy",
-      providerStatus: "BLOCKED",
+      providerReputationStatus: "CRITICAL",
     });
     prisma.seedActiveManagedLinqLine("+15550000042", {
       healthStatus: "healthy",
-      providerStatus: "active",
+      providerReputationStatus: "HEALTHY",
     });
     mockSenderLookup(senderCore);
     mockHomeLinqRoute("+15550000000");
@@ -5584,15 +5591,15 @@ describe("Linq group chat auto-provision", () => {
     const prisma = createStatefulThreadRoutePrisma();
     prisma.seedActiveManagedLinqLine("+15550000000", {
       healthStatus: "unhealthy",
-      providerStatus: "BLOCKED",
+      providerReputationStatus: "CRITICAL",
     });
     prisma.seedActiveManagedLinqLine("+15550000042", {
       healthStatus: "healthy",
-      providerStatus: "active",
+      providerReputationStatus: "HEALTHY",
     });
     prisma.seedActiveManagedLinqLine("+15550000043", {
       healthStatus: "healthy",
-      providerStatus: "active",
+      providerReputationStatus: "HEALTHY",
     });
     const effectId = buildHostedLinqGroupLineRecoveryEffectId({
       incomingRecipientPhone: "+15550000000",
@@ -5680,7 +5687,10 @@ describe("Linq group chat auto-provision", () => {
     mockSuccessfulGroupProvision({ prisma, senderCore });
     usageReferralMocks.observeHostedUsageReferralInboundTx.mockResolvedValue({
       isBoundReferralTarget: true,
-      qualificationCandidateReferralId: "usage_referral_1",
+      qualificationCandidateReferralIds: [
+        "usage_referral_1",
+        "usage_referral_2",
+      ],
     });
     vi.mocked(linqClient.getHostedLinqChatHandles).mockImplementation(async () => {
       expect(transactionOpen).toBe(false);
@@ -5710,11 +5720,21 @@ describe("Linq group chat auto-provision", () => {
       chatId: "chat_group_123",
     });
     expect(linqClient.getHostedLinqChatSummary).not.toHaveBeenCalled();
-    expect(usageReferralMocks.reconcileHostedUsageReferralRewardAfterCommit)
-      .toHaveBeenCalledExactlyOnceWith({
-        prisma,
-        referralId: "usage_referral_1",
-      });
+    expect(
+      usageReferralMocks.reconcileHostedUsageReferralRewardAfterCommit,
+    ).toHaveBeenCalledTimes(2);
+    expect(
+      usageReferralMocks.reconcileHostedUsageReferralRewardAfterCommit,
+    ).toHaveBeenNthCalledWith(1, {
+      prisma,
+      referralId: "usage_referral_1",
+    });
+    expect(
+      usageReferralMocks.reconcileHostedUsageReferralRewardAfterCommit,
+    ).toHaveBeenNthCalledWith(2, {
+      prisma,
+      referralId: "usage_referral_2",
+    });
     expect(prisma.hostedThreadContainerParticipant.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         create: expect.objectContaining({

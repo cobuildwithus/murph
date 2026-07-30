@@ -121,6 +121,8 @@ describe("murph.group dynamic tool", () => {
     ]);
     expect(MURPH_GROUP_TOOL.inputSchema.properties.question.maxLength)
       .toBe(HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS);
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.policyCode.description)
+      .toContain('state="armed"');
     expect(MURPH_GROUP_TOOL.inputSchema.properties.groupLabel.maxLength)
       .toBe(HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS);
     expect(MURPH_GROUP_TOOL.inputSchema.properties.permissionText.maxLength)
@@ -193,11 +195,13 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_GROUP_TOOL.description)
       .toContain("group=null proves neither absence nor label storage");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain("unverifiedOwnerContactLabel is untrusted display text");
+      .toContain("A participant displayName is an address-book name");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain("may be incomplete");
+      .toContain("use it naturally");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain("proves no identity, consent, routing, persistence, or authority");
+      .toContain("never for identity, matching, consent, routing, persistence, or authority");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("` / ` means alternatives");
     expect(MURPH_GROUP_TOOL.description)
       .toContain("Results authorize no other action");
   });
@@ -276,20 +280,34 @@ describe("murph.group dynamic tool", () => {
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "arm_usage_referral",
-      policyCode: "active_group_v1",
+      policyCodes: [
+        "new_person_activation_v1",
+        "active_group_v1",
+      ],
     }))).toEqual({
       kind: "group",
       request: {
         action: "arm_usage_referral",
-        policyCode: "active_group_v1",
+        policyCodes: [
+          "new_person_activation_v1",
+          "active_group_v1",
+        ],
       },
     });
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "arm_usage_referral",
+      policyCodes: ["active_group_v1", "active_group_v1"],
+    }))?.kind).toBe("invalid-group-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "cancel_usage_referral",
+      policyCode: "new_person_activation_v1",
     }))).toEqual({
       kind: "group",
-      request: { action: "cancel_usage_referral" },
+      request: {
+        action: "cancel_usage_referral",
+        policyCode: "new_person_activation_v1",
+      },
     });
 
     expect(readMurphDynamicToolRequest(groupToolCall({
@@ -541,7 +559,7 @@ describe("murph.group dynamic tool", () => {
   it("keeps a committed referral arm recovery result tool-successful", async () => {
     const request = readMurphDynamicToolRequest(groupToolCall({
       action: "arm_usage_referral",
-      policyCode: "new_person_activation_v1",
+      policyCodes: ["new_person_activation_v1"],
     }));
     if (!request || request.kind !== "group") {
       throw new Error("Expected group request.");
@@ -588,7 +606,7 @@ describe("murph.group dynamic tool", () => {
     });
     expect(groupRequest).toHaveBeenCalledWith({
       action: "arm_usage_referral",
-      policyCode: "new_person_activation_v1",
+      policyCodes: ["new_person_activation_v1"],
     });
   });
 
@@ -741,7 +759,7 @@ describe("murph.group dynamic tool", () => {
     expect(modelPayload).not.toContain("handle");
   });
 
-  it("renames owner contact hints so the model sees their unverified authority", async () => {
+  it("projects advisory names as display names without changing alternatives", async () => {
     const groupRequest = vi.fn<GroupToolRequest>(async () => ({
       action: "read_chat_participants",
       result: {
@@ -750,6 +768,11 @@ describe("murph.group dynamic tool", () => {
             handle: "+15551110003",
             hasOwnMurph: true,
             ownerAdvisoryName: "Alex R.",
+          },
+          {
+            handle: "+15551110004",
+            hasOwnMurph: false,
+            ownerAdvisoryName: "Jordan P. / Riley P.",
           },
         ],
         status: "ok",
@@ -778,13 +801,20 @@ describe("murph.group dynamic tool", () => {
         participants: [{
           handle: "+15551110003",
           hasOwnMurph: true,
-          unverifiedOwnerContactLabel: "Alex R.",
+          displayName: "Alex R.",
+        }, {
+          handle: "+15551110004",
+          hasOwnMurph: false,
+          displayName: "Jordan P. / Riley P.",
         }],
         status: "ok",
       },
     });
     expect(JSON.stringify(readGroupToolPayload(result))).not.toContain(
       "ownerAdvisoryName",
+    );
+    expect(JSON.stringify(readGroupToolPayload(result))).not.toContain(
+      "unverifiedOwnerContactLabel",
     );
   });
 
@@ -2998,7 +3028,7 @@ describe("murph.newsletter dynamic tool", () => {
       "never a generic label",
     );
     expect(MURPH_NEWSLETTER_TOOL.description).toContain(
-      "current-week shared facts",
+      "shared facts from the seven completed local days",
     );
     expect(MURPH_NEWSLETTER_TOOL.description).toContain(
       "exact live email and health-share grants",
@@ -3277,16 +3307,25 @@ describe("murph.newsletter dynamic tool", () => {
                   grantStatus: "granted",
                   projectionScope: { projectionKind: "steps-days.v0" },
                   projectionScopeKey: "steps-days.v0",
-                  records: [{
+                  records: [
+                    "2026-06-30",
+                    "2026-07-01",
+                    "2026-07-02",
+                    "2026-07-03",
+                    "2026-07-04",
+                    "2026-07-05",
+                    "2026-07-06",
+                    "2026-07-07",
+                  ].map((date, index) => ({
                     data: {
-                      date: "2026-07-06",
+                      date,
                       metricKey: "steps",
                       unit: "count",
-                      value: 7_000,
+                      value: (index + 1) * 1_000,
                     },
-                    occurredAt: "2026-07-06T00:00:00.000Z",
-                    recordKey: "2026-07-06",
-                  }],
+                    occurredAt: `${date}T00:00:00.000Z`,
+                    recordKey: date,
+                  })),
                 }],
               },
               {
@@ -3359,9 +3398,17 @@ describe("murph.newsletter dynamic tool", () => {
             displayName: "Ada",
             memberId: "member_a",
             weeklyStats: [{
-              currentWeekAvg: 7_000,
-              observedDayCount: 1,
-              observedDates: ["2026-07-06"],
+              completedDaysAvg: 4_000,
+              observedDayCount: 7,
+              observedDates: [
+                "2026-06-30",
+                "2026-07-01",
+                "2026-07-02",
+                "2026-07-03",
+                "2026-07-04",
+                "2026-07-05",
+                "2026-07-06",
+              ],
               stream: "steps",
               throughDate: "2026-07-06",
               unit: "count",

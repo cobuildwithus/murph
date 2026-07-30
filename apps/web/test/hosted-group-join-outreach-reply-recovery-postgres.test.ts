@@ -1987,7 +1987,6 @@ describe.skipIf(!runPostgresProof)(
           observedAt: new Date("2026-07-27T15:59:00.000Z"),
           phoneNumber: recoveryLinePhone,
           prisma: fixture.deletionPrisma,
-          providerStatus: "ACTIVE",
           source: "configured",
         });
         await fixture.deletionPrisma.hostedLinqDailyState.create({
@@ -2473,7 +2472,7 @@ describe.skipIf(!runPostgresProof)(
               eventId: blockedEventId,
               occurredAt: "2026-07-29T17:03:00.000Z",
               phoneNumber: fixture.backupPhone,
-              providerStatus: "CRITICAL",
+              providerReputationStatus: "CRITICAL",
             }),
             prisma: tx,
           })
@@ -2481,12 +2480,12 @@ describe.skipIf(!runPostgresProof)(
         await expect(fixture.prisma.hostedLinqLine.findUnique({
           select: {
             healthStatus: true,
-            providerStatus: true,
+            providerReputationStatus: true,
           },
           where: { phoneNumberLookupKey: fixture.backupPhoneLookupKey },
         })).resolves.toEqual({
-          healthStatus: "unhealthy",
-          providerStatus: "CRITICAL",
+          healthStatus: "warning",
+          providerReputationStatus: "CRITICAL",
         });
         await expect(drainHostedLinqEffectWithMilestones({
           effect: thirdEffect,
@@ -2647,21 +2646,28 @@ async function createGroupLineRecoveryFixture():
     observedAt: assignedAt,
     phoneNumber: incomingPhone,
     prisma,
-    providerStatus: "CRITICAL",
     source: "configured",
   });
   await upsertHostedLinqLineForPhoneTx({
     observedAt: assignedAt,
     phoneNumber: backupPhone,
     prisma,
-    providerStatus: "ACTIVE",
     source: "configured",
+  });
+  await prisma.hostedLinqLine.update({
+    data: {
+      providerReputationStatus: "CRITICAL",
+      providerServiceStatus: "ACTIVE",
+    },
+    where: { phoneNumberLookupKey: incomingPhoneLookupKey },
   });
   await prisma.hostedLinqLine.update({
     data: {
       assignmentWeight: 2_147_483_647,
       healthStatus: "healthy",
       maxNewConversationsPerDay: 10,
+      providerReputationStatus: "HEALTHY",
+      providerServiceStatus: "ACTIVE",
     },
     where: { phoneNumberLookupKey: backupPhoneLookupKey },
   });
@@ -2796,7 +2802,6 @@ async function createOpenerRaceFixture(): Promise<OpenerRaceFixture> {
     observedAt: now,
     phoneNumber: linePhone,
     prisma: drainPrisma,
-    providerStatus: "ACTIVE",
     source: "configured",
   });
   await drainPrisma.hostedLinqLine.update({
@@ -2804,6 +2809,8 @@ async function createOpenerRaceFixture(): Promise<OpenerRaceFixture> {
       assignmentWeight: 1_000_000,
       healthStatus: "healthy",
       maxNewConversationsPerDay: 100,
+      providerReputationStatus: "HEALTHY",
+      providerServiceStatus: "ACTIVE",
     },
     where: { phoneNumberLookupKey: linePhoneLookupKey },
   });
@@ -3262,7 +3269,7 @@ function buildParsedProviderStatusEvent(input: {
   eventId: string;
   occurredAt: string;
   phoneNumber: string;
-  providerStatus: string;
+  providerReputationStatus: string;
 }) {
   const parsed = parseHostedLinqProviderEvent({
     event: parseHostedLinqWebhookEvent(JSON.stringify({
@@ -3270,7 +3277,7 @@ function buildParsedProviderStatusEvent(input: {
       created_at: input.occurredAt,
       data: {
         changed_at: input.occurredAt,
-        new_reputation: input.providerStatus,
+        new_reputation: input.providerReputationStatus,
         phone_number: input.phoneNumber,
       },
       event_id: input.eventId,

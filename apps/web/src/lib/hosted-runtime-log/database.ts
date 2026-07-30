@@ -9,7 +9,7 @@ const DEFAULT_HOSTED_RUNTIME_LOG_DATABASE_POOL_MAX = 5;
 const MAX_HOSTED_RUNTIME_LOG_DATABASE_POOL_MAX = 10;
 const HOSTED_RUNTIME_LOG_DATABASE_CONNECTION_TIMEOUT_MS = 3_000;
 const HOSTED_RUNTIME_LOG_DATABASE_IDLE_TIMEOUT_MS = 30_000;
-const HOSTED_RUNTIME_LOG_DATABASE_STATEMENT_TIMEOUT_MS = 10_000;
+const HOSTED_RUNTIME_LOG_DATABASE_QUERY_TIMEOUT_MS = 12_000;
 
 const globalForHostedRuntimeLogDatabase = globalThis as typeof globalThis & {
   __murphHostedRuntimeLogPool?: PgPool;
@@ -131,7 +131,11 @@ export function getHostedRuntimeLogPool(): PgPool {
     connectionTimeoutMillis: HOSTED_RUNTIME_LOG_DATABASE_CONNECTION_TIMEOUT_MS,
     idleTimeoutMillis: HOSTED_RUNTIME_LOG_DATABASE_IDLE_TIMEOUT_MS,
     max,
-    statement_timeout: HOSTED_RUNTIME_LOG_DATABASE_STATEMENT_TIMEOUT_MS,
+    // PlanetScale's transaction-mode PgBouncer rejects statement_timeout as a
+    // startup parameter. Migration preflight verifies the runtime role's
+    // server-side 10-second bound; this slightly longer client timeout covers
+    // transport failures after PostgreSQL has had time to cancel the query.
+    query_timeout: HOSTED_RUNTIME_LOG_DATABASE_QUERY_TIMEOUT_MS,
   });
   attachDatabasePool(hostedRuntimeLogPool);
   hostedRuntimeLogPool.on("error", (error: Error) => {

@@ -675,9 +675,16 @@ Hosted onboarding extras:
   and `HOSTED_LINQ_ALERT_EMAILS`. The historical Linq-prefixed email names are
   shared operational configuration; the latency path never sends through or
   falls back to Linq/iMessage. The monitor uses the fixed 30-second product
-  boundary, sends one email per continuous incident, suppresses sends from 11
-  PM through 7 AM operator-local time, and adds up to ten minutes of stable
-  wake/retry jitter. Provider attempts therefore stay at least ten minutes
+  boundary for the first accepted user-visible response: either a progress
+  update or the final reply. Completed grouped traces count once by their
+  shared Linq delivery, and traces for one in-flight provider request count
+  once while unresolved. Progress accepted before 30 seconds suppresses that
+  turn; progress at or after the boundary remains alertable. The monitor sends
+  no alert for scheduled automation turns, including Flex-tier turns, because
+  they do not own a user-ingress reply trace. The monitor sends one email per
+  continuous incident, suppresses sends from 11 PM through 7 AM
+  operator-local time, and adds up to ten minutes of stable wake/retry jitter.
+  Provider attempts therefore stay at least ten minutes
   apart and spread across more than one five-minute cron tick. A fresh health
   and operator-time recheck before provider admission makes no attempt-state
   change when latency recovered or quiet hours began. Only the exact
@@ -1054,6 +1061,25 @@ backfill or dual-write as needed, switch application reads/writes in a later
 deploy, then add validating constraints or clean up the old shape only after
 the replacement deployment is live and the prior production function window
 has drained.
+
+The Linq provider-health rollout follows the same boundary. Predeploy adds the
+independent service/reputation columns and their per-dimension ordering
+metadata, but does not rewrite legacy `hosted_linq_line.health_status` while an
+old Web build can still use that column for provider blocks. After the
+replacement build is live and the standard prior-function drain and alias
+proofs pass, contract migration
+`20260729183000_rebuild_linq_delivery_health_after_drain` first preserves any
+final legacy provider update written during the rollout window, then
+reconstructs that column from Murph-observed delivery evidence. Independent
+`FLAGGED` and `CRITICAL` provider fields continue to block through the existing
+egress policy. Successful application establishes the first production Web
+revision containing this migration as the rollback floor: do not move the Web
+alias to a pre-migration revision afterward. Incident recovery is a forward
+redeploy of that revision or a later compatible Web revision. Cloudflare may
+roll back independently because final provider authorization remains Web-owned.
+`hosted-linq-provider-health-contract-migration-postgres.test.ts` executes the
+exact SQL transition, while `production-migration-guard.test.ts` pins the
+production-alias proof, drain, second alias proof, and migration-owner order.
 
 The Linq weighted-capacity rollout follows that rule. Predeploy adds nullable
 `HostedThreadRoute.accountLookupKey` and its index; old application code remains
