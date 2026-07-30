@@ -11,7 +11,6 @@ import {
 } from "@murphai/hosted-execution";
 import {
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
-  HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
   HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
   type HostedRuntimeGroupToolLinqThreadContext,
   type HostedRuntimeGroupToolRequest,
@@ -414,27 +413,151 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
         });
       }
       if (
-        request.action !== "read_chat_participants"
-        && request.action !== "update_display_name"
+        request.action === "read_chat_participants"
+      ) {
+        const linqRoute = resolveHostedGroupToolLinqRouteContext(
+          input.linqDeliveryContexts,
+        );
+        return await input.groupToolPort.request(
+          linqRoute
+            ? { ...request, linqThread: linqRoute.thread }
+            : request,
+        );
+      }
+      if (request.action === "post_join_offer") {
+        const linqRoute = resolveHostedGroupToolLinqRouteContext(
+          input.linqDeliveryContexts,
+        );
+        if (linqRoute?.service === "imessage") {
+          return await input.groupToolPort.request({
+            ...request,
+            linqThread: linqRoute.thread,
+          });
+        }
+        if (
+          linqRoute?.service === "sms"
+          || isHostedGroupToolTelegramGroupRoute(input.currentDeliveryRoute)
+        ) {
+          return await input.groupToolPort.request(
+            buildHostedGroupJoinLinkFallbackRequest(request),
+          );
+        }
+        return await input.groupToolPort.request(request);
+      }
+      if (
+        request.action !== "update_display_name"
         && request.action !== "post_disclosure_request"
-        && request.action !== "post_join_offer"
         && request.action !== "preflight_set_chat_avatar"
         && request.action !== "set_chat_avatar"
         && request.action !== "share_contact_card"
       ) {
         return await input.groupToolPort.request(request);
       }
-      const linqThread = resolveHostedGroupToolLinqThreadContext(
+      const linqRoute = resolveHostedGroupToolLinqRouteContext(
         input.linqDeliveryContexts,
-        request.action === "read_chat_participants"
-          ? "imessage_or_sms"
-          : "imessage_only",
       );
-      return await input.groupToolPort.request(
-        linqThread ? { ...request, linqThread } : request,
-      );
+      if (linqRoute?.service === "imessage") {
+        return await input.groupToolPort.request({
+          ...request,
+          linqThread: linqRoute.thread,
+        });
+      }
+      return linqRoute?.service === "sms"
+        ? buildHostedGroupSmsUnsupportedResponse(request)
+        : await input.groupToolPort.request(request);
     },
   };
+}
+
+function isHostedGroupToolTelegramGroupRoute(
+  route: AssistantCurrentDeliveryRoute | null | undefined,
+): boolean {
+  return normalizeAssistantRouteString(route?.channel)?.toLowerCase()
+      === "telegram"
+    && route?.threadIsDirect === false;
+}
+
+function buildHostedGroupJoinLinkFallbackRequest(
+  request: Extract<HostedRuntimeGroupToolRequest, { action: "post_join_offer" }>,
+): Extract<HostedRuntimeGroupToolRequest, { action: "create_join_link" }> {
+  const joinOffer = request.joinOffer;
+  if (!joinOffer) {
+    return { action: "create_join_link" };
+  }
+  const joinLink = {
+    ...(joinOffer.displayName
+      ? { displayName: joinOffer.displayName }
+      : {}),
+    ...(joinOffer.projectionScopes?.length
+      ? {
+        requestedVaultShareProjectionScopes: [
+          ...joinOffer.projectionScopes,
+        ],
+      }
+      : joinOffer.projectionKinds?.length
+        ? {
+          requestedVaultShareProjectionKinds: [
+            ...joinOffer.projectionKinds,
+          ],
+        }
+        : {}),
+  };
+  return Object.keys(joinLink).length > 0
+    ? { action: "create_join_link", joinLink }
+    : { action: "create_join_link" };
+}
+
+type HostedRuntimeGroupSmsUnsupportedRequest = Extract<
+  HostedRuntimeGroupToolRequest,
+  {
+    action:
+      | "post_disclosure_request"
+      | "preflight_set_chat_avatar"
+      | "set_chat_avatar"
+      | "share_contact_card"
+      | "update_display_name";
+  }
+>;
+
+function buildHostedGroupSmsUnsupportedResponse(
+  request: HostedRuntimeGroupSmsUnsupportedRequest,
+): HostedRuntimeGroupToolResponse {
+  switch (request.action) {
+    case "update_display_name":
+      return {
+        action: request.action,
+        result: {
+          group: null,
+          status: "unavailable",
+          unavailableReason: "sms_chat_customization_unsupported",
+        },
+      };
+    case "preflight_set_chat_avatar":
+    case "set_chat_avatar":
+      return {
+        action: request.action,
+        result: {
+          status: "unavailable",
+          unavailableReason: "sms_chat_customization_unsupported",
+        },
+      };
+    case "share_contact_card":
+      return {
+        action: request.action,
+        result: {
+          status: "unavailable",
+          unavailableReason: "sms_attachments_unsupported",
+        },
+      };
+    case "post_disclosure_request":
+      return {
+        action: request.action,
+        result: {
+          status: "unavailable",
+          unavailableReason: "sms_reactions_unsupported",
+        },
+      };
+  }
 }
 
 function resolveHostedUsageReferralSourceContext(
@@ -567,19 +690,20 @@ function resolveHostedGroupToolLinqSenderHandles(
 ): string[] {
   // Use only route-authorized Linq group inputs. Hosted email reply aliases
   // authenticate a route, not the human From header, and never enter here.
-  const linqThread = resolveHostedGroupToolLinqThreadContext(contexts);
-  if (!linqThread) {
+  const linqRoute = resolveHostedGroupToolLinqRouteContext(contexts);
+  if (!linqRoute) {
     return [];
   }
   const eligible = new Set<string>();
   for (const context of contexts) {
     const authority = context.routeAuthority;
+    const service = normalizeHostedGroupToolLinqService(context.service);
     if (
       !authority
-      || authority.channel !== linqThread.authority.channel
-      || authority.containerMemberId !== linqThread.authority.containerMemberId
-      || authority.threadId !== linqThread.authority.threadId
-      || context.service?.trim().toLowerCase() !== "imessage"
+      || authority.channel !== linqRoute.thread.authority.channel
+      || authority.containerMemberId !== linqRoute.thread.authority.containerMemberId
+      || authority.threadId !== linqRoute.thread.authority.threadId
+      || service !== linqRoute.service
       || context.threadIsDirect !== false
     ) {
       continue;
@@ -597,21 +721,24 @@ function resolveHostedGroupToolLinqSenderHandles(
   return [...eligible].slice(0, HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX);
 }
 
-function resolveHostedGroupToolLinqThreadContext(
+type HostedGroupToolLinqService = "imessage" | "sms";
+
+type HostedGroupToolLinqRouteContext = {
+  service: HostedGroupToolLinqService;
+  thread: HostedRuntimeGroupToolLinqThreadContext;
+};
+
+function resolveHostedGroupToolLinqRouteContext(
   contexts: readonly HostedAssistantLinqDeliveryContext[],
-  serviceScope: "imessage_only" | "imessage_or_sms" = "imessage_only",
-): HostedRuntimeGroupToolLinqThreadContext | null {
-  const eligible = new Map<string, HostedRuntimeGroupToolLinqThreadContext>();
+): HostedGroupToolLinqRouteContext | null {
+  const eligible = new Map<string, HostedGroupToolLinqRouteContext>();
   for (const context of contexts) {
     const authority = context.routeAuthority;
-    const service = context.service?.trim().toLowerCase();
+    const service = normalizeHostedGroupToolLinqService(context.service);
     if (
       !authority
+      || !service
       || authority.threadId.trim().length === 0
-      || (
-        service !== "imessage"
-        && (serviceScope !== "imessage_or_sms" || service !== "sms")
-      )
       || context.threadIsDirect !== false
     ) {
       continue;
@@ -620,29 +747,42 @@ function resolveHostedGroupToolLinqThreadContext(
       authority.channel,
       authority.containerMemberId,
       authority.threadId,
+      service,
     ]);
     if (!eligible.has(routeKey)) {
       eligible.set(routeKey, {
-        authority: {
-          ...(authority.accountLookupKey === undefined
-            ? {}
-            : { accountLookupKey: authority.accountLookupKey }),
-          channel: authority.channel,
-          containerMemberId: authority.containerMemberId,
-          threadId: authority.threadId,
+        service,
+        thread: {
+          authority: {
+            ...(authority.accountLookupKey === undefined
+              ? {}
+              : { accountLookupKey: authority.accountLookupKey }),
+            channel: authority.channel,
+            containerMemberId: authority.containerMemberId,
+            threadId: authority.threadId,
+          },
+          chatId: authority.threadId,
         },
-        chatId: authority.threadId,
       });
     }
   }
 
-  // Two distinct route-authorized threads in one turn (for example around a
-  // provider chat re-key) make the target ambiguous; fail closed and let the
-  // web handler answer linq_thread_unavailable.
+  // A service mismatch or a second authorized route makes the provider target
+  // ambiguous. Fail closed rather than choosing iMessage or SMS by iteration
+  // order during a provider re-key or mixed input batch.
   if (eligible.size !== 1) {
     return null;
   }
   return [...eligible.values()][0] ?? null;
+}
+
+function normalizeHostedGroupToolLinqService(
+  service: string | null | undefined,
+): HostedGroupToolLinqService | null {
+  const normalized = service?.trim().toLowerCase();
+  return normalized === "imessage" || normalized === "sms"
+    ? normalized
+    : null;
 }
 
 function resolveHostedInitialLinqDeliveryContexts(
@@ -999,18 +1139,10 @@ function createHostedScheduledGroupTools(input: {
     return null;
   }
 
-  // Linq can post a provider-side join offer. Telegram instead uses the normal
-  // create_join_link result in the assistant's ordinary chat reply.
-  if (channel === "telegram") {
-    return {
-      groupSharedReader: createHostedGroupSharedReader({
-        groupToolPort: input.groupToolPort,
-      }),
-      groupTool: input.groupToolPort,
-    };
-  }
-
-  // This state belongs to one scheduled Linq model operation. It proves a
+  // Scheduled routes deliberately use the first-party link on both Linq and
+  // Telegram. The durable automation route does not preserve whether a Linq
+  // thread is iMessage or SMS, and the link is the common consent surface.
+  // This state belongs to one scheduled group model operation. It proves a
   // missing grant from the model-triggered read and prevents repeated offers.
   const observedNotGrantedScopeKeys = new Set<string>();
   let permissionOfferAttempted = false;
@@ -1060,22 +1192,12 @@ function createHostedScheduledGroupTools(input: {
 
       try {
         const response = await input.groupToolPort.request({
-          action: "post_join_offer",
-          joinOffer: {
-            messageTemplate:
-              HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
-            projectionScopes,
-          },
-          linqThread: {
-            authority: {
-              channel: "linq",
-              containerMemberId,
-              threadId: target,
-            },
-            chatId: target,
+          action: "create_join_link",
+          joinLink: {
+            requestedVaultShareProjectionScopes: projectionScopes,
           },
         });
-        return response.action === "post_join_offer"
+        return response.action === "create_join_link"
           ? response
           : buildHostedScheduledGroupPermissionOfferUnavailable();
       } catch {
@@ -1093,10 +1215,10 @@ function createHostedScheduledGroupTools(input: {
 
 function buildHostedScheduledGroupPermissionOfferUnavailable(): Extract<
   HostedRuntimeGroupToolResponse,
-  { action: "post_join_offer" }
+  { action: "create_join_link" }
 > {
   return {
-    action: "post_join_offer",
+    action: "create_join_link",
     result: {
       group: null,
       status: "unavailable",

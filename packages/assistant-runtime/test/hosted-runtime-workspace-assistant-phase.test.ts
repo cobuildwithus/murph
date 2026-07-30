@@ -5,7 +5,6 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
-  HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
   type HostedMailboxItem,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeLatencyTraceRequest,
@@ -882,7 +881,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       if (!telegramGroupTools) {
         throw new Error("Expected scheduled Telegram group capabilities.");
       }
-      expect(telegramGroupTools.groupPermissionOfferTool).toBeUndefined();
+      expect(telegramGroupTools.groupPermissionOfferTool).toEqual({
+        request: expect.any(Function),
+      });
       await expect(telegramGroupTools.groupSharedReader.request({
         projectionScopes: [{ projectionKind: "steps-days.v0" }],
       })).resolves.toMatchObject({ status: "ok" });
@@ -906,7 +907,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }
   });
 
-  it("allows one scheduled offer only for exact not-granted evidence from the same model operation", async () => {
+  it("allows one scheduled access link only for exact not-granted evidence from the same model operation", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "hosted-scheduled-group-offer-"));
     const groupToolRequests: HostedRuntimeGroupToolRequest[] = [];
     let readGrantStatus: "granted" | "not_granted" = "not_granted";
@@ -936,9 +937,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           },
         };
       }
-      if (groupToolRequest.action === "post_join_offer") {
+      if (groupToolRequest.action === "create_join_link") {
         return {
-          action: "post_join_offer" as const,
+          action: "create_join_link" as const,
           result: {
             group: null,
             status: "unavailable" as const,
@@ -960,9 +961,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         threadIsDirect: false,
       })).toBeNull();
 
-      const createTools = () => {
+      const createTools = (channel: "linq" | "telegram" = "linq") => {
         const tools = factory({
-          channel: "linq",
+          channel,
           target: "chat_current_group",
           threadIsDirect: false,
         });
@@ -1033,6 +1034,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           },
         });
 
+      const telegramAllowed = createTools("telegram");
+      await telegramAllowed.groupSharedReader.request({
+        projectionScopes: [{ projectionKind: "steps-days.v0" }],
+      });
+      await expect(requirePermissionOffer(telegramAllowed).request(stepsOffer))
+        .resolves.toMatchObject({
+          result: { unavailableReason: "synthetic_web_unavailable" },
+        });
+
       return {
         assistantAutomationProgressed: false,
         assistantAutomationCurrentTurnDeliveryIntentIds: [],
@@ -1047,24 +1057,26 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         vaultRoot,
       }));
       expect(groupToolRequests.filter((item) => item.action === "read_shared"))
-        .toHaveLength(4);
-      expect(groupToolRequests.filter((item) => item.action === "post_join_offer"))
-        .toEqual([{
-          action: "post_join_offer",
-          joinOffer: {
-            messageTemplate:
-              HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
-            projectionScopes: [{ projectionKind: "steps-days.v0" }],
-          },
-          linqThread: {
-            authority: {
-              channel: "linq",
-              containerMemberId: "member_synthetic_phase",
-              threadId: "chat_current_group",
+        .toHaveLength(5);
+      expect(groupToolRequests.filter((item) => item.action === "create_join_link"))
+        .toEqual([
+          {
+            action: "create_join_link",
+            joinLink: {
+              requestedVaultShareProjectionScopes: [
+                { projectionKind: "steps-days.v0" },
+              ],
             },
-            chatId: "chat_current_group",
           },
-        }]);
+          {
+            action: "create_join_link",
+            joinLink: {
+              requestedVaultShareProjectionScopes: [
+                { projectionKind: "steps-days.v0" },
+              ],
+            },
+          },
+        ]);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }

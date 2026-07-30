@@ -341,7 +341,7 @@ describe('assistant group challenge diagnostics guidance', () => {
       'Do not create a hosted group or post a permission offer as a side effect of challenge kickoff.',
     )
     expect(challenge).toContain(
-      'During later standings, Murph may proactively open the existing server-authored permission offer',
+      'During later standings, Murph may proactively open the existing server-authored access flow',
     )
     expect(challenge).toContain(
       'neither an explicit decline for that exact share nor a prior handled offer action for that exact participant and scope.',
@@ -368,7 +368,7 @@ describe('assistant group challenge diagnostics guidance', () => {
       'A prior handled action for one participant does not cover a newly affected participant.',
     )
     expect(challenge).toContain(
-      'call `murph.group action="post_join_offer"` exactly once after the read with only those `projectionScopes`.',
+      'call `murph.group action="offer_access"` exactly once after the read with only those `projectionScopes`.',
     )
     expect(challenge).toContain(
       'it adds no scheduler-side message and no pre-model work.',
@@ -383,10 +383,13 @@ describe('assistant group challenge diagnostics guidance', () => {
       'permission offer cannot connect a source, grant Apple Health or operating-system Steps access',
     )
     expect(challenge).toContain(
-      'Treat a `sent` result as an opaque handled result',
+      'Treat `status="ok"` as an opaque handled result.',
     )
     expect(challenge).toContain(
-      'Do not infer, announce, or append a separate assistant message claiming that a card is visible or newly posted.',
+      'do not infer, announce, or append a companion message claiming a card is visible.',
+    )
+    expect(challenge).toContain(
+      'For `presentation="link"`, include the exact returned `joinUrl` once',
     )
     expect(challenge).not.toContain(
       'Say only that a separate permission card is available',
@@ -396,7 +399,7 @@ describe('assistant group challenge diagnostics guidance', () => {
       'record that the offer action was handled for that exact participant and scope',
     )
     expect(challenge).toContain(
-      'When the card is the only user-facing outcome, call `murph.finish_without_reply`',
+      'When native consent is the only user-facing outcome, call',
     )
     expect(challenge).not.toContain('If the returned group proves')
     expect(challenge).toContain('active-offer/all-granted dedupe')
@@ -404,7 +407,7 @@ describe('assistant group challenge diagnostics guidance', () => {
       'Never offer the scoring scope merely because its grant exists but current data is missing.',
     )
     expect(challenge).toContain(
-      'literal disconnected, `needs-reconnect`, and other device statuses may get status-appropriate guidance and no permission card.',
+      'literal disconnected, `needs-reconnect`, and other device statuses may get status-appropriate guidance and no access offer.',
     )
     expect(challenge).not.toContain('Gap disclosure log')
     expect(challenge).not.toContain('gapState')

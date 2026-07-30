@@ -77,17 +77,17 @@ because diagnostics failed.
 
 Permission-offer evidence belongs to the read that proved it, and only the most
 recent read counts. So if the scoring read shows the scoring scope
-`not_granted` for an eligible participant, post that offer immediately from
+`not_granted` for an eligible participant, call `offer_access` immediately from
 that read, before any device-status read. Do not make the diagnostic read first
 and then try to offer the scoring scope: the later read replaces the evidence
-and the offer is refused, leaving that member with no consent card. When the
-scoring read needs no offer, the diagnostic read may prove and post an offer
+and the offer is refused, leaving that member with no access offer. When the
+scoring read needs no offer, the diagnostic read may prove and offer
 for `device-sync-status.v0` on its own evidence. One offer per turn either way.
 
 Do not create a hosted group or post
 a permission offer as a side effect of challenge kickoff. During later
-standings, Murph may proactively open the existing server-authored permission
-offer only after `read_shared` proves an exact required scope is `not_granted`
+standings, Murph may proactively open the existing server-authored access
+flow only after `read_shared` proves an exact required scope is `not_granted`
 for at least one affected participant whose challenge-page state contains
 neither an explicit decline for that exact share nor a prior handled offer
 action for that exact participant and scope. A handled action for one
@@ -99,9 +99,8 @@ grants only the disclosed Murph group shares; it cannot connect a source or
 grant Apple Health access.
 
 Whenever a challenge turn is authorized under `group-chat`'s rules to send an
-*up-front* permission request — a `create_join_link` reply or an explicitly
-requested permission flow — the request must name everything the challenge
-needs to score, all in that single request:
+*up-front* permission request through `offer_access`, the request must name
+everything the challenge needs to score, all in that single request:
 
 - `group-email.v0` and `device-sync-status.v0`, always.
 - The exact scoring scope (or scopes) for the agreed metric — a steps
@@ -122,7 +121,7 @@ That all-scopes rule does **not** apply to the evidence-gated standings offer.
 A proactive offer during standings may name only the scopes the most recent
 read proved `not_granted`, because the runtime accepts exactly those and
 spends the turn's one offer attempt on any wider request, leaving the member
-with no card at all.
+with no access offer at all.
 
 - Activity minutes for a specific recognized activity alias:
   `{ "projectionKind": "activity-minutes-days.v1", "selector": { "activityKind": "<alias>" } }`
@@ -604,25 +603,24 @@ automation action rules with a `dailyLocal` schedule and
    not cover a newly affected participant. Deduplicate the list.
 
    When that list is nonempty and the narrow scheduled action is available,
-   call `murph.group action="post_join_offer"` exactly once after the read with
-   only those `projectionScopes`. This is a model decision inside the already-
-   started turn; it adds no scheduler-side message and no pre-model work. Web
-   owns the complete separate Like-or-heart consent message, exact scope
-   disclosure, recipient-safe delivery, and active-offer/all-granted dedupe.
-   Never author generic permission copy or tell someone to Like the standings.
+   call `murph.group action="offer_access"` exactly once after the read with only
+   those `projectionScopes`. This is a model decision inside the already-started
+   turn; it adds no scheduler-side message and no pre-model work. The trusted
+   host owns the consent copy, exact scope disclosure, recipient-safe
+   presentation, and active-offer/all-granted dedupe. Never author generic
+   permission copy or tell someone to Like the standings.
 
-   Treat a `sent` result as an opaque handled result: Web may have posted a
-   card, reused an active one, or found that no card was needed because every
-   current member already grants the requested scopes. Do not infer, announce,
-   or append a separate assistant message claiming that a card is visible or
-   newly posted. For each participant whose same read showed `not_granted`,
-   record that the offer action was handled for that exact participant and
-   scope so future standings do not retry or nag; do not record that a card was
-   visible. If the turn also owes a substantive standings update, keep that one
-   assistant response focused on the standings. When the card is the only
-   user-facing outcome, call `murph.finish_without_reply` instead of sending a
-   companion confirmation. If the tool is absent or returns
-   `unavailable`, do not claim a card exists or record the action as handled. If
+   Treat `status="ok"` as an opaque handled result. For
+   `presentation="native"`, the host may have posted or reused native consent UI
+   or found that no UI was needed; do not infer, announce, or append a companion
+   message claiming a card is visible. For `presentation="link"`, include the
+   exact returned `joinUrl` once in the same substantive standings response.
+   For each participant whose same read showed `not_granted`, record that the
+   offer action was handled for that exact participant and scope so future
+   standings do not retry or nag; never record that a card was visible. When
+   native consent is the only user-facing outcome, call
+   `murph.finish_without_reply`. If the tool is absent or returns `unavailable`,
+   do not claim a consent surface exists or record the action as handled. If
    a participant explicitly says they do not want to share a scope, record that
    choice and do not offer, repeat, or nag. A permission offer cannot connect a
    source, grant Apple Health or operating-system Steps access, or fix missing
@@ -630,7 +628,7 @@ automation action rules with a `dailyLocal` schedule and
    Never offer the scoring scope merely because its grant exists but current
    data is missing. Apart from the exact diagnostic `not_granted` case above,
    literal disconnected, `needs-reconnect`, and other device statuses may get
-   status-appropriate guidance and no permission card.
+   status-appropriate guidance and no access offer.
 5. Compose ONE dispatch in ONE format, in the `groupchat-comedy` voice.
    The scheduled dispatch is the one group message where the required
    completeness statement and per-person missing-data lines always count as
