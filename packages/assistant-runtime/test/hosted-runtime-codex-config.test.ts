@@ -19,6 +19,7 @@ import {
 import {
   MURPH_GROUP_READ_PERMISSION_PROFILE,
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
+  MURPH_MEMBER_READ_PERMISSION_PROFILE,
 } from "@murphai/hosted-execution/assistant-permissions";
 import {
   HostedAssistantConfigurationError,
@@ -153,6 +154,32 @@ afterEach(async () => {
   );
 });
 
+test("hosted Codex runtime config writes Venice Responses config without secret values", async () => {
+  const operatorHomeRoot = await createTemporaryDirectory();
+  const result = await prepareHostedCodexRuntimeEnvironment({
+    operatorHomeRoot,
+    runtimeEnv: {
+      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+      HOSTED_ASSISTANT_PROVIDER: "venice",
+      VENICE_API_KEY: "signed-venice-egress-credential",
+    },
+  });
+
+  assert.equal(
+    result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
+    "venice",
+  );
+  const config = await readFile(result.codexConfigPath, "utf8");
+  assert.match(config, /^model = "gpt-5\.6-terra"$/mu);
+  assert.match(config, /^model_provider = "venice"$/mu);
+  assert.match(config, /\[model_providers\."venice"\]/u);
+  assert.match(config, /base_url = "https:\/\/api\.venice\.ai\/api\/v1"/u);
+  assert.match(config, /env_key = "VENICE_API_KEY"/u);
+  assert.match(config, /wire_api = "responses"/u);
+  assert.doesNotMatch(config, /^supports_websockets = true$/mu);
+  assert.doesNotMatch(config, /signed-venice-egress-credential/u);
+});
+
 test("hosted Codex runtime config writes OpenAI Responses config without secret values", async () => {
   const operatorHomeRoot = await createTemporaryDirectory();
   const result = await prepareHostedCodexRuntimeEnvironment({
@@ -233,9 +260,10 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
     ),
   );
   assert.match(config, /\[features\]\nplugins = false\nmemories = true/u);
+  assert.doesNotMatch(config, /direct_only_tool_namespaces/u);
   assert.match(
     config,
-    /\[features\.code_mode\]\ndirect_only_tool_namespaces = \["murph"\]/u,
+    /\[features\.current_time_reminder\]\nenabled = true\nclock_source = "system"\ndelivery_mode = "after_user_or_tool_output"\nreminder_interval_seconds = 60/u,
   );
   assert.ok(config.includes([
     "[features.multi_agent_v2]",
@@ -478,6 +506,32 @@ test("hosted Codex runtime config accepts a local test-only model provider base 
   assert.match(config, /request_max_retries = 4/u);
   assert.match(config, /stream_max_retries = 0/u);
   assert.doesNotMatch(config, /https:\/\/api\.openai\.com\/v1/u);
+});
+
+test("hosted Codex runtime config applies the local provider override to Venice", async () => {
+  const operatorHomeRoot = await createTemporaryDirectory();
+  const result = await prepareHostedCodexRuntimeEnvironment({
+    operatorHomeRoot,
+    runtimeEnv: {
+      HOSTED_ASSISTANT_PROVIDER: "venice",
+      [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
+        "http://host.docker.internal:4567/v1",
+      NODE_ENV: "test",
+      VENICE_API_KEY: "signed-venice-egress-credential",
+    },
+  });
+
+  assert.equal(
+    result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
+    "venice-local-test",
+  );
+
+  const config = await readFile(result.codexConfigPath, "utf8");
+  assert.match(config, /model_provider = "venice-local-test"/u);
+  assert.match(config, /\[model_providers\."venice-local-test"\]/u);
+  assert.match(config, /base_url = "http:\/\/host\.docker\.internal:4567\/v1"/u);
+  assert.match(config, /env_key = "VENICE_API_KEY"/u);
+  assert.doesNotMatch(config, /https:\/\/api\.venice\.ai\/api\/v1/u);
 });
 
 test("hosted Codex runtime config accepts a Linux Docker bridge model provider override", async () => {
@@ -889,6 +943,15 @@ testHostedCodexAuthE2e(
           .slice(0, fixedRequestCount)
           .some((request) => /hello hosted auth regression/u.test(request)),
       );
+      const currentTimeReminders = requests
+        .slice(0, fixedRequestCount)
+        .flatMap(
+          (request) =>
+            request.match(
+              /"role":"developer","content":\[\{"type":"input_text","text":"It is \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\."\}\]/gu,
+            ) ?? [],
+        );
+      assert.equal(currentTimeReminders.length, 1);
 
       const legacyCodexHome = await prepareLegacyBuiltInOpenAiCodexHome({
         baseUrl: `${readServerBaseUrl(server)}/v1`,
@@ -1419,14 +1482,32 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       `[permissions.${MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE}.network]`,
       "enabled = false",
       "",
+      "# Read-only scheduled member reflection using the current private vault.",
+      `[permissions.${MURPH_MEMBER_READ_PERMISSION_PROFILE}.filesystem]`,
+      '":minimal" = "read"',
+      "glob_scan_max_depth = 64",
+      "",
+      `[permissions.${MURPH_MEMBER_READ_PERMISSION_PROFILE}.filesystem.":workspace_roots"]`,
+      '"." = "read"',
+      '".runtime" = "deny"',
+      '".codex" = "deny"',
+      '"**/.env" = "deny"',
+      '"**/.env.*" = "deny"',
+      "",
+      `[permissions.${MURPH_MEMBER_READ_PERMISSION_PROFILE}.network]`,
+      "enabled = false",
+      "",
       "# Hosted runs should not perform Codex plugin marketplace or remote plugin",
       "# sync work on cold wake; Murph owns the hosted runtime tool surface.",
       "[features]",
       "plugins = false",
       "memories = true",
       "",
-      "[features.code_mode]",
-      'direct_only_tool_namespaces = ["murph"]',
+      "[features.current_time_reminder]",
+      "enabled = true",
+      'clock_source = "system"',
+      'delivery_mode = "after_user_or_tool_output"',
+      "reminder_interval_seconds = 60",
       "",
       "# This table owns enablement and the proactive per-turn mode/tool hints.",
       "# A CLI boolean override would replace the table and silently drop them.",

@@ -14,20 +14,30 @@ import {
   hostedBrowserVaultReplicaUserPrefix,
   hostedBundleUserPrefix,
   hostedMealPhotoUserPrefix,
+  hostedPrivateMediaUserPrefix,
   hostedRunnerSecretsObjectKey,
   hostedWorkspaceSnapshotUserPrefix,
 } from "../storage-paths.js";
 import { safeCleanupErrorCode } from "./diagnostics.js";
-import { deleteR2ObjectIfSupported, deleteR2ObjectsWithPrefix } from "./r2-delete.js";
+import {
+  assertR2ObjectAbsent,
+  assertR2PrefixEmpty,
+  deleteR2ObjectRequired,
+  deleteR2ObjectsWithPrefix,
+  requireR2DeletionCapabilities,
+} from "./r2-delete.js";
 import type { RunnerStateStore } from "./runner-state-store.js";
 import type { DurableObjectStateLike } from "./types.js";
+import {
+  readHostedWorkspaceSnapshotR2PutDrainUntil,
+} from "./workspace-snapshot-sessions.js";
 
 type HostedRunnerUserDataDeletionStateStore = Pick<
   RunnerStateStore,
   "assertStateForUser" | "clearWriteFenceForUserDeletion" | "deleteStateForUser"
 >;
 
-export interface HostedRunnerUserDataDeletionResult {
+export interface HostedRunnerUserDataDeletionCompletedResult {
   deletedAt: string;
   durableObject: {
     alarmCleared: boolean;
@@ -44,6 +54,17 @@ export interface HostedRunnerUserDataDeletionResult {
   userId: string;
 }
 
+export interface HostedRunnerUserDataDeletionPendingResult {
+  ok: false;
+  reason: "r2_upload_drain_pending";
+  retryAfterSeconds: number;
+  userId: string;
+}
+
+export type HostedRunnerUserDataDeletionResult =
+  | HostedRunnerUserDataDeletionCompletedResult
+  | HostedRunnerUserDataDeletionPendingResult;
+
 export class HostedRunnerUserDataDeletionRunnerStillActiveError extends Error {
   constructor() {
     super("Hosted runner container cleanup failed before user data deletion.");
@@ -59,7 +80,10 @@ class HostedRunnerUserDataDeletionR2CleanupFailedError extends Error {
 }
 
 export interface HostedRunnerUserDataDeletionServiceInput {
-  bucket: R2BucketLike;
+  buckets: {
+    destination: R2BucketLike;
+    source: R2BucketLike;
+  };
   runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
   runnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
   state: DurableObjectStateLike;
@@ -71,21 +95,37 @@ export async function deleteHostedRunnerUserData(input: HostedRunnerUserDataDele
 }): Promise<HostedRunnerUserDataDeletionResult> {
   await input.stateStore.assertStateForUser(input.userId);
   const runnerCleanup = await stopRunnerBeforeUserDataDeletion(input);
+  const drainUntil = await readHostedWorkspaceSnapshotR2PutDrainUntil({
+    state: input.state,
+    userId: input.userId,
+  });
+  const drainUntilMs = drainUntil === null ? null : Date.parse(drainUntil);
+  if (drainUntilMs !== null && drainUntilMs > Date.now()) {
+    return {
+      ok: false,
+      reason: "r2_upload_drain_pending",
+      retryAfterSeconds: Math.max(1, Math.ceil((drainUntilMs - Date.now()) / 1000)),
+      userId: input.userId,
+    };
+  }
+  const deleteAll = input.state.storage.deleteAll;
+  if (typeof deleteAll !== "function") {
+    throw new Error("Durable Object deleteAll is required before hosted user deletion can proceed.");
+  }
   const r2 = await deleteHostedUserR2DataBeforeStateDeletion(input);
   const stateDeletion = await input.stateStore.deleteStateForUser(input.userId);
+  if (!stateDeletion.deleted) {
+    throw new Error("Hosted runner logical state was not deleted after R2 cleanup.");
+  }
   const deleteAlarm = input.state.storage.deleteAlarm;
   if (typeof deleteAlarm === "function") {
     await deleteAlarm.call(input.state.storage);
   }
-  const deleteAll = input.state.storage.deleteAll;
-  const deleteAllCompleted = typeof deleteAll === "function";
-  const stateDeleted = stateDeletion.deleted && deleteAllCompleted;
-  if (typeof deleteAll === "function") {
-    await deleteAll.call(input.state.storage);
-  }
+  await deleteAll.call(input.state.storage);
   // With this Worker's compatibility date, deleteAll also removes alarms.
-  const alarmCleared =
-    typeof deleteAlarm === "function" || typeof deleteAll === "function";
+  const alarmCleared = true;
+  const deleteAllCompleted = true;
+  const stateDeleted = true;
 
   emitHostedExecutionStructuredLog({
     component: "hosted.runner",
@@ -174,9 +214,9 @@ async function stopRunnerBeforeUserDataDeletion(input: {
 }
 
 async function deleteHostedUserR2DataBeforeStateDeletion(input: {
-  bucket: R2BucketLike;
+  buckets: HostedRunnerUserDataDeletionServiceInput["buckets"];
   userId: string;
-}): Promise<HostedRunnerUserDataDeletionResult["r2"]> {
+}): Promise<HostedRunnerUserDataDeletionCompletedResult["r2"]> {
   try {
     return await deleteHostedUserR2Data(input);
   } catch (error) {
@@ -197,46 +237,45 @@ async function deleteHostedUserR2DataBeforeStateDeletion(input: {
 }
 
 async function deleteHostedUserR2Data(input: {
-  bucket: R2BucketLike;
+  buckets: HostedRunnerUserDataDeletionServiceInput["buckets"];
   userId: string;
-}): Promise<HostedRunnerUserDataDeletionResult["r2"]> {
-  const supportsObjectDeletion = Boolean(input.bucket.delete);
-  const supportsPrefixDeletion = Boolean(input.bucket.delete && input.bucket.list);
-  const userScopedSkipReasons: string[] = [];
-
+}): Promise<HostedRunnerUserDataDeletionCompletedResult["r2"]> {
+  const prefixes = [
+    await hostedBundleUserPrefix({ userId: input.userId }),
+    await hostedArtifactUserPrefix({ userId: input.userId }),
+    await hostedBrowserVaultReplicaUserPrefix({ userId: input.userId }),
+    await hostedMealPhotoUserPrefix({ userId: input.userId }),
+    await hostedPrivateMediaUserPrefix({ userId: input.userId }),
+    await hostedWorkspaceSnapshotUserPrefix({ userId: input.userId }),
+    await hostedEmailRawMessageUserPrefix({ userId: input.userId }),
+  ];
+  const fixedKey = await hostedRunnerSecretsObjectKey({ userId: input.userId });
+  const buckets = input.buckets.source === input.buckets.destination
+    ? [input.buckets.source]
+    : [input.buckets.source, input.buckets.destination];
   let deletedObjectCount = 0;
-  if (supportsPrefixDeletion) {
-    const prefixes = [
-      await hostedBundleUserPrefix({ userId: input.userId }),
-      await hostedArtifactUserPrefix({ userId: input.userId }),
-      await hostedBrowserVaultReplicaUserPrefix({ userId: input.userId }),
-      await hostedMealPhotoUserPrefix({ userId: input.userId }),
-      await hostedWorkspaceSnapshotUserPrefix({ userId: input.userId }),
-    ];
+  for (const bucket of buckets) {
+    requireR2DeletionCapabilities(bucket);
     for (const prefix of prefixes) {
-      deletedObjectCount += (await deleteR2ObjectsWithPrefix(input.bucket, prefix)).deletedCount;
+      deletedObjectCount += (await deleteR2ObjectsWithPrefix(bucket, prefix)).deletedCount;
     }
-
-    deletedObjectCount += (await deleteR2ObjectIfSupported(
-      input.bucket,
-      await hostedRunnerSecretsObjectKey({ userId: input.userId }),
-    )).deletedCount;
-    deletedObjectCount += (await deleteR2ObjectsWithPrefix(
-      input.bucket,
-      await hostedEmailRawMessageUserPrefix({ userId: input.userId }),
-    )).deletedCount;
-  } else {
-    userScopedSkipReasons.push("R2PrefixDeletionUnsupported");
+    deletedObjectCount += (await deleteR2ObjectRequired(bucket, fixedKey)).deletedCount;
   }
 
-  const skippedUserScopedPrefixes =
-    !supportsPrefixDeletion;
+  // The write fence and the recorded direct-PUT drain deadline make these
+  // stable-empty checks the final effect boundary. Any late object prevents
+  // Durable Object state deletion and leaves the whole operation retryable.
+  for (const bucket of buckets) {
+    for (const prefix of prefixes) {
+      await assertR2PrefixEmpty(bucket, prefix);
+    }
+    await assertR2ObjectAbsent(bucket, fixedKey);
+  }
+
   return {
     deletedObjectCount,
-    skippedUserScopedPrefixes,
-    supported: supportsObjectDeletion && supportsPrefixDeletion,
-    userScopedSkipReason: skippedUserScopedPrefixes
-      ? Array.from(new Set(userScopedSkipReasons)).join(",") || null
-      : null,
+    skippedUserScopedPrefixes: false,
+    supported: true,
+    userScopedSkipReason: null,
   };
 }

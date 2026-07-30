@@ -385,21 +385,22 @@ describe("runHostedWorkerDeployment", () => {
       undefined,
     ],
     [
-      "a production device callback origin",
+      "a split-host device callback origin",
       {
-        DEVICE_SYNC_PUBLIC_BASE_URL: "https://app.example.test/api/device-sync",
+        DEVICE_SYNC_PUBLIC_BASE_URL:
+          "https://device-sync-staging.example.test/api/device-sync",
       },
-      "DEVICE_SYNC_PUBLIC_BASE_URL must not use the HOSTED_WEB_PRODUCTION_BASE_URL origin in preview deploys.",
+      "DEVICE_SYNC_PUBLIC_BASE_URL must use the HOSTED_WEB_BASE_URL hostname in preview deploys.",
       undefined,
     ],
     [
       "a private device callback DNS result",
       {
         DEVICE_SYNC_PUBLIC_BASE_URL:
-          "https://device-sync-staging.example.test/api/device-sync",
+          "https://web-staging.example.test/api/device-sync",
       },
       "DEVICE_SYNC_PUBLIC_BASE_URL must not resolve to private-network addresses in preview deploys.",
-      "device-sync-staging.example.test",
+      "web-staging.example.test",
     ],
   ] as const)(
     "rejects preview %s before artifact validation, lifecycle changes, or Wrangler",
@@ -410,6 +411,11 @@ describe("runHostedWorkerDeployment", () => {
             source,
             { deployWorker: true },
             {
+              readR2BucketInfo: async (bucketName) => ({
+                defaultStorageClass: "Standard",
+                location: bucketName.includes("enam") ? "ENAM" : "OC",
+                name: bucketName,
+              }),
               resolveHostnameAddresses: async (hostname) =>
                 hostname === privateHostname ? ["10.1.2.3"] : ["8.8.8.8"],
             },

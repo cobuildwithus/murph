@@ -3,8 +3,8 @@ import type { Prisma } from "@prisma/client";
 import type { HostedRuntimeAiAccessNoticeCode } from "./member-access";
 
 import {
-  buildHostedInviteUrl,
-} from "./invite-service";
+  buildHostedGroupAwareInviteUrl,
+} from "../hosted-groups/group-join-invite-link";
 import {
   incrementHostedLinqInboundDailyState,
 } from "./linq-daily-state";
@@ -129,6 +129,8 @@ export function buildIgnoredLinqWebhookPlan(
 
 export function buildSignupLinkResponse(input: {
   chatId: string;
+  groupJoinCode?: string | null;
+  groupJoinOutreachId?: string | null;
   inviteCode: string;
   inviteId: string;
   memberId: string;
@@ -138,12 +140,17 @@ export function buildSignupLinkResponse(input: {
   sourceEventId: string;
   threadIsDirect?: boolean | null;
 }): HostedOnboardingLinqDirectPlan {
-  const joinUrl = buildHostedInviteUrl(input.inviteCode);
+  const joinUrl = buildHostedGroupAwareInviteUrl({
+    groupJoinCode: input.groupJoinCode,
+    inviteCode: input.inviteCode,
+  });
 
   return buildActiveMemberDirectPlan({
     desiredSideEffects: [
       createHostedWebhookLinqMessageSideEffect({
         chatId: input.chatId,
+        groupJoinCode: input.groupJoinCode ?? null,
+        groupJoinOutreachId: input.groupJoinOutreachId ?? null,
         inviteId: input.inviteId,
         memberId: input.memberId,
         occurredAt: input.occurredAt,
@@ -165,6 +172,8 @@ export function buildSignupLinkResponse(input: {
 
 export function buildFallbackSignupLinkResponse(input: {
   assignedPhone: string;
+  groupJoinCode?: string | null;
+  groupJoinOutreachId?: string | null;
   inviteCode: string;
   inviteId: string;
   memberId: string;
@@ -172,12 +181,17 @@ export function buildFallbackSignupLinkResponse(input: {
   occurredAt: string;
   sourceEventId: string;
 }): HostedOnboardingLinqDirectPlan {
-  const joinUrl = buildHostedInviteUrl(input.inviteCode);
+  const joinUrl = buildHostedGroupAwareInviteUrl({
+    groupJoinCode: input.groupJoinCode,
+    inviteCode: input.inviteCode,
+  });
 
   return buildActiveMemberDirectPlan({
     desiredSideEffects: [
       createHostedWebhookLinqMessageSideEffect({
         assignedRecipientPhone: input.assignedPhone,
+        groupJoinCode: input.groupJoinCode ?? null,
+        groupJoinOutreachId: input.groupJoinOutreachId ?? null,
         inviteId: input.inviteId,
         memberId: input.memberId,
         memberPhone: input.memberPhone,
@@ -191,6 +205,33 @@ export function buildFallbackSignupLinkResponse(input: {
       inviteCode: input.inviteCode,
       joinUrl,
       reason: "sent-signup-link",
+    },
+  });
+}
+
+export function buildGroupLineRecoveryResponse(input: {
+  incomingRecipientPhone: string;
+  memberId: string;
+  occurredAt: string;
+  participantContact: Pick<HostedLinqParticipantContact, "kind" | "value">;
+  sourceEventId: string;
+  threadId: string;
+}): HostedOnboardingLinqDirectPlan {
+  return buildActiveMemberDirectPlan({
+    desiredSideEffects: [
+      createHostedWebhookLinqMessageSideEffect({
+        incomingRecipientPhone: input.incomingRecipientPhone,
+        memberId: input.memberId,
+        occurredAt: input.occurredAt,
+        participantContact: input.participantContact,
+        sourceEventId: input.sourceEventId,
+        threadId: input.threadId,
+        template: "group_line_recovery",
+      }),
+    ],
+    response: {
+      ok: true,
+      reason: "sent-group-line-recovery",
     },
   });
 }
@@ -380,6 +421,24 @@ export async function bindHostedMemberPendingLinqChatAndTrackInbound(input: {
   prisma: Prisma.TransactionClient;
   recipientPhone: string | null;
 }) {
+  await bindHostedMemberPendingLinqChat(input);
+
+  return incrementHostedLinqInboundDailyState({
+    memberId: input.memberId,
+    occurredAt: input.occurredAt,
+    prisma: input.prisma,
+  });
+}
+
+export async function bindHostedMemberPendingLinqChat(input: {
+  chatId: string;
+  homeLineAssignedAt?: Date | null;
+  memberId: string;
+  occurredAt: string;
+  participantContact?: HostedLinqParticipantContact | null;
+  prisma: Prisma.TransactionClient;
+  recipientPhone: string | null;
+}): Promise<void> {
   await upsertHostedMemberPendingLinqBindingTx({
     homeLineAssignedAt: input.homeLineAssignedAt ?? null,
     linqChatId: input.chatId,
@@ -388,12 +447,6 @@ export async function bindHostedMemberPendingLinqChatAndTrackInbound(input: {
     participantContactObservedAt: new Date(input.occurredAt),
     prisma: input.prisma,
     recipientPhone: input.recipientPhone,
-  });
-
-  return incrementHostedLinqInboundDailyState({
-    memberId: input.memberId,
-    occurredAt: input.occurredAt,
-    prisma: input.prisma,
   });
 }
 

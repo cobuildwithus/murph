@@ -49,25 +49,13 @@ import {
 import { resolveAssistantTurnSharedPlan } from './turn-plan.js'
 import { createAssistantTurnId } from './turns.js'
 import { withAssistantTurnLock } from './turn-lock.js'
-import { resolveAssistantConversationScope } from './conversation-policy.js'
+import {
+  resolveAssistantConversationScope,
+  type AssistantConversationScope,
+} from './conversation-policy.js'
 
 const ASSISTANT_ASK_CONTINUATION_RECEIPT_PROMPT =
-  'assistant.ask.completed private continuation'
-export const ASSISTANT_ASK_CONTINUATION_CODEX_CONFIG_OVERRIDES = [
-  'memories.use_memories=false',
-  'memories.generate_memories=false',
-  'features.shell_tool=false',
-  'web_search="disabled"',
-  'features.web_search_request=false',
-  'features.standalone_web_search=false',
-  'features.apps=false',
-  'features.enable_mcp_apps=false',
-  'features.browser_use=false',
-  'features.plugins=false',
-  'features.multi_agent=false',
-  'features.multi_agent_v2=false',
-  'features.tool_suggest=false',
-] as const
+  'assistant.ask.completed continuation'
 
 export const ASSISTANT_ASK_CONTINUATION_TURN_PROFILE: Required<
   AssistantCodexTurnThreadScopeProfile
@@ -82,6 +70,7 @@ export interface AssistantAskContinuationInput
   extends Pick<
     AssistantMessageInput,
     | 'abortSignal'
+    | 'answeredMailboxItemIds'
     | 'actorId'
     | 'bindingDeliveryTarget'
     | 'channel'
@@ -95,7 +84,9 @@ export interface AssistantAskContinuationInput
     | 'onProviderRequestStarted'
     | 'onTraceEvent'
     | 'operatorAuthority'
+    | 'outboxExternalThreadRouteAuthority'
     | 'participantId'
+    | 'reviewedAssistantAskCompletionExpiresAt'
     | 'serviceTier'
     | 'showThinkingTraces'
     | 'threadId'
@@ -105,6 +96,7 @@ export interface AssistantAskContinuationInput
     | 'workingDirectory'
   > {
   canCommit?: (() => boolean | Promise<boolean>) | null
+  expectedConversationScope?: Extract<AssistantConversationScope, 'direct' | 'group'>
   instructions: string
   originAssistantInputId: string
   requestId: string
@@ -147,11 +139,13 @@ export function buildAssistantAskContinuationMessageInput(
 ): AssistantMessageInput {
   return {
     abortSignal: input.abortSignal,
+    ...(input.answeredMailboxItemIds
+      ? { answeredMailboxItemIds: input.answeredMailboxItemIds }
+      : {}),
     actorId: input.actorId,
     approvalPolicy: 'never',
     bindingDeliveryTarget: input.bindingDeliveryTarget,
     channel: input.channel,
-    codexConfigOverrides: ASSISTANT_ASK_CONTINUATION_CODEX_CONFIG_OVERRIDES,
     conversation: input.conversation,
     deliverResponse: true,
     deliveryDispatchMode: 'queue-only',
@@ -168,10 +162,19 @@ export function buildAssistantAskContinuationMessageInput(
     onProviderRequestStarted: input.onProviderRequestStarted ?? null,
     onTraceEvent: input.onTraceEvent,
     operatorAuthority: input.operatorAuthority,
+    ...(input.outboxExternalThreadRouteAuthority
+      ? {
+          outboxExternalThreadRouteAuthority:
+            input.outboxExternalThreadRouteAuthority,
+        }
+      : {}),
     participantId: input.participantId,
     persistUserPromptOnFailure: false,
     prompt: normalizeRequiredText(input.instructions, 'assistant ask continuation instructions'),
     receiptMetadata: null,
+    ...(input.reviewedAssistantAskCompletionExpiresAt
+      ? { reviewedAssistantAskCompletionExpiresAt: input.reviewedAssistantAskCompletionExpiresAt }
+      : {}),
     sandbox: 'read-only',
     serviceTier: input.serviceTier ?? null,
     sessionId: input.sessionId,
@@ -230,10 +233,12 @@ export async function sendAssistantAskContinuationLocal(
       }
 
       const sharedPlan = await resolveAssistantTurnSharedPlan(messageInput, resolved)
+      const expectedConversationScope =
+        input.expectedConversationScope ?? 'direct'
       if (
         resolveAssistantConversationScope(
           sharedPlan.conversationPolicy.audience,
-        ) !== 'direct'
+        ) !== expectedConversationScope
       ) {
         return {
           session: resolved.session,

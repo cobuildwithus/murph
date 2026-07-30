@@ -149,7 +149,9 @@ test("dashboard consent reloads the exact route once after the accepted handoff"
     await flushPromises();
   });
 
-  expect(continueButton.textContent).toContain("Refreshing your dashboard");
+  expect(continueButton.textContent).toBe("Refreshing...");
+  expect(continueButton.disabled).toBe(true);
+  expect(continueButton.getAttribute("aria-busy")).toBe("true");
   expect(rendered.reload).not.toHaveBeenCalled();
 
   await act(async () => {
@@ -232,7 +234,7 @@ test("dashboard consent keeps a failed save retryable and continues after retry"
     await flushPromises();
   });
 
-  expect(continueButton.textContent).toContain("Refreshing your dashboard");
+  expect(continueButton.textContent).toBe("Refreshing...");
   await act(async () => {
     await vi.advanceTimersByTimeAsync(100);
   });

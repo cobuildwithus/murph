@@ -75,7 +75,18 @@ const LINQ_TYPING_POST_MESSAGE_REFRESH_MS = 1_000
 
 type TelegramParsedTarget = TelegramThreadTarget
 type TelegramSendOperation = 'sendMessage' | 'sendPhoto' | 'sendVoice'
-type TelegramImageResponseMedia = Extract<AssistantResponseMedia, { kind: 'image' }>
+type TelegramImageResponseMedia = Extract<
+  AssistantResponseMedia,
+  { kind: 'image' | 'vault_image' }
+>
+type PreparedTelegramPhoto =
+  | { kind: 'url'; url: string }
+  | {
+      bytes: Uint8Array
+      contentType: 'image/jpeg' | 'image/png' | 'image/webp'
+      filename: string
+      kind: 'upload'
+    }
 
 type TelegramMessageEntity = {
   length: number
@@ -178,7 +189,10 @@ export async function sendTelegramImageMessage(
   providerMessageIds?: string[]
   target: string
 }> {
-  const media = input.media.filter((item) => item.kind === 'image')
+  const media = input.media.filter(
+    (item): item is TelegramImageResponseMedia =>
+      item.kind === 'image' || item.kind === 'vault_image',
+  )
   if (media.length === 0) {
     throw new VaultCliError(
       'ASSISTANT_TELEGRAM_IMAGE_REQUIRED',
@@ -252,7 +266,7 @@ export async function sendTelegramImageMessage(
         baseUrl,
         caption: index === 0 ? caption : null,
         fetchImplementation,
-        photoUrl: image.url,
+        photo: await prepareTelegramPhoto(image, dependencies),
         replyToMessageId,
         signal: dependencies.signal,
         target,
@@ -312,6 +326,33 @@ export async function sendTelegramImageMessage(
     providerMessageId: lastProviderMessageId,
     ...(providerMessageIds.length > 1 ? { providerMessageIds } : {}),
     target: targetLabel,
+  }
+}
+
+async function prepareTelegramPhoto(
+  media: TelegramImageResponseMedia,
+  dependencies: TelegramRuntimeDependencies,
+): Promise<PreparedTelegramPhoto> {
+  if (media.kind === 'image') {
+    return { kind: 'url', url: media.url }
+  }
+  if (!dependencies.loadVaultImage) {
+    throw new VaultCliError(
+      'ASSISTANT_VAULT_IMAGE_LOADER_REQUIRED',
+      'Private image delivery requires a trusted vault-image loader.',
+    )
+  }
+  if (typeof FormData !== 'function' || typeof Blob !== 'function') {
+    throw new VaultCliError(
+      'ASSISTANT_TELEGRAM_IMAGE_UPLOAD_UNAVAILABLE',
+      'Private Telegram image delivery requires FormData and Blob support.',
+    )
+  }
+  return {
+    bytes: await dependencies.loadVaultImage(media),
+    contentType: media.contentType,
+    filename: media.filename,
+    kind: 'upload',
   }
 }
 
@@ -575,10 +616,34 @@ async function prepareLinqMessageMedia(
       continue
     }
 
+    if (item.kind === 'vault_image') {
+      if (!dependencies.loadVaultImage) {
+        throw new VaultCliError(
+          'ASSISTANT_VAULT_IMAGE_LOADER_REQUIRED',
+          'Private image delivery requires a trusted vault-image loader.',
+        )
+      }
+      const upload = await uploadLinqAttachment(
+        {
+          bytes: await dependencies.loadVaultImage(item),
+          contentType: item.contentType,
+          filename: item.filename,
+        },
+        {
+          env: dependencies.env,
+          fetchImplementation: dependencies.fetchImplementation,
+          publicFetchImplementation: dependencies.publicFetchImplementation,
+          ...(dependencies.signal ? { signal: dependencies.signal } : {}),
+        },
+      )
+      prepared.push({ attachmentId: upload.attachmentId })
+      continue
+    }
+
     if (item.kind !== 'vault_file') {
       throw new VaultCliError(
         'ASSISTANT_LINQ_MEDIA_KIND_UNSUPPORTED',
-        'Standard iMessage delivery only supports image and approved vault-file media parts.',
+        'Standard iMessage delivery only supports public images, private vault images, and approved vault files.',
       )
     }
 
@@ -1426,7 +1491,7 @@ async function sendTelegramPhoto(input: {
   baseUrl: string
   caption: DecoratedTelegramPhotoCaption | null
   fetchImplementation: TelegramFetchImplementation
-  photoUrl: string
+  photo: PreparedTelegramPhoto
   replyToMessageId: string | null
   signal?: AbortSignal
   target: TelegramParsedTarget
@@ -1455,7 +1520,7 @@ async function sendTelegramPhoto(input: {
         baseUrl: input.baseUrl,
         caption: input.caption,
         fetchImplementation: input.fetchImplementation,
-        photoUrl: input.photoUrl,
+        photo: input.photo,
         replyToMessageId: input.replyToMessageId,
         signal: input.signal,
         target,
@@ -1696,6 +1761,37 @@ async function sendTelegramBotApiRequest(input: {
   } finally {
     timeout.cleanup()
   }
+}
+
+function buildTelegramPhotoFormData(input: {
+  caption: DecoratedTelegramPhotoCaption | null
+  photo: Extract<PreparedTelegramPhoto, { kind: 'upload' }>
+  replyToMessageId: string | null
+  target: TelegramParsedTarget
+}): FormData {
+  const form = new FormData()
+  for (const [key, value] of Object.entries(buildTelegramTargetPayload(input.target))) {
+    appendTelegramFormField(form, key, value)
+  }
+  if (input.caption) {
+    appendTelegramFormField(form, 'caption', input.caption.text)
+    if (input.caption.entities.length > 0) {
+      appendTelegramFormField(
+        form,
+        'caption_entities',
+        JSON.stringify(input.caption.entities),
+      )
+    }
+  }
+  appendTelegramFormField(form, 'reply_to_message_id', input.replyToMessageId)
+  form.append(
+    'photo',
+    new Blob([copyUint8ArrayToArrayBuffer(input.photo.bytes)], {
+      type: input.photo.contentType,
+    }),
+    input.photo.filename,
+  )
+  return form
 }
 
 function buildTelegramVoiceMemoFormData(input: {
@@ -1985,7 +2081,7 @@ async function sendTelegramPhotoOnce(input: {
   baseUrl: string
   caption: DecoratedTelegramPhotoCaption | null
   fetchImplementation: TelegramFetchImplementation
-  photoUrl: string
+  photo: PreparedTelegramPhoto
   replyToMessageId: string | null
   signal?: AbortSignal
   target: TelegramParsedTarget
@@ -1995,23 +2091,34 @@ async function sendTelegramPhotoOnce(input: {
   try {
     const result = await sendTelegramBotApiRequest({
       baseUrl: input.baseUrl,
-      fetchImplementation: input.fetchImplementation,
-      operation: 'sendPhoto',
-      payload: {
-        ...buildTelegramTargetPayload(input.target),
-        ...(input.caption
-          ? {
-              caption: input.caption.text,
-              ...(input.caption.entities.length > 0
+      ...(input.photo.kind === 'url'
+        ? {
+            payload: {
+              ...buildTelegramTargetPayload(input.target),
+              ...(input.caption
                 ? {
-                    caption_entities: input.caption.entities,
+                    caption: input.caption.text,
+                    ...(input.caption.entities.length > 0
+                      ? { caption_entities: input.caption.entities }
+                      : {}),
                   }
                 : {}),
-            }
-          : {}),
-        photo: input.photoUrl,
-        reply_to_message_id: input.replyToMessageId ? Number.parseInt(input.replyToMessageId, 10) : undefined,
-      },
+              photo: input.photo.url,
+              reply_to_message_id: input.replyToMessageId
+                ? Number.parseInt(input.replyToMessageId, 10)
+                : undefined,
+            },
+          }
+        : {
+            body: buildTelegramPhotoFormData({
+              caption: input.caption,
+              photo: input.photo,
+              replyToMessageId: input.replyToMessageId,
+              target: input.target,
+            }),
+          }),
+      fetchImplementation: input.fetchImplementation,
+      operation: 'sendPhoto',
       signal: input.signal,
       token: input.token,
     })

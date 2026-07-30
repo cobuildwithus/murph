@@ -13,10 +13,11 @@ import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/t
 import { cn } from "@/src/lib/utils";
 
 import type { HostedAuthPanelView } from "./hosted-auth-panel";
+import type { HostedAuthRuntimeState } from "./hosted-auth-runtime";
 
-type HostedAuthPanelIslandComponent = typeof import(
+type HostedAuthPanelModule = typeof import(
   "@/src/components/hosted-onboarding/hosted-auth-panel-island"
-)["HostedAuthPanelIsland"];
+);
 
 type WindowWithIdleCallback = typeof window & {
   cancelIdleCallback?: (handle: number) => void;
@@ -26,47 +27,107 @@ type WindowWithIdleCallback = typeof window & {
   ) => number;
 };
 
-let hostedAuthPanelIslandComponent: HostedAuthPanelIslandComponent | null = null;
-let hostedAuthPanelIslandLoadPromise: Promise<HostedAuthPanelIslandComponent> | null =
-  null;
+let hostedAuthPanelModule: HostedAuthPanelModule | null = null;
+let hostedAuthPanelLoadPromise: Promise<HostedAuthPanelModule> | null = null;
 
-function loadHostedAuthPanelIsland(): Promise<HostedAuthPanelIslandComponent> {
-  if (hostedAuthPanelIslandComponent) {
-    return Promise.resolve(hostedAuthPanelIslandComponent);
+export type AuthDialogPrivyRuntimeState = HostedAuthRuntimeState;
+
+export const DEFAULT_AUTH_DIALOG_TITLE = "Log in or sign up";
+export const DEFAULT_AUTH_DIALOG_DESCRIPTION =
+  "Murph helps you build healthier habits that fit your life.";
+
+export function resolveAuthDialogHeaderPresentation({
+  description = DEFAULT_AUTH_DIALOG_DESCRIPTION,
+  panelView,
+  title = DEFAULT_AUTH_DIALOG_TITLE,
+}: {
+  description?: string;
+  panelView: HostedAuthPanelView;
+  title?: string;
+}) {
+  const consentPresentation = panelView === "consent";
+  const resolvedCopy = consentPresentation
+    ? {
+        description: "Review how Murph uses health data before continuing.",
+        title: "Use your health data with Murph",
+      }
+    : { description, title };
+
+  return {
+    consentPresentation,
+    description: resolvedCopy.description,
+    headerClassName: cn({
+      "pr-10": !consentPresentation,
+      "sr-only": consentPresentation,
+    }),
+    title: resolvedCopy.title,
+  };
+}
+
+export function AuthDialogHeaderPresentation({
+  description = DEFAULT_AUTH_DIALOG_DESCRIPTION,
+  panelView,
+  title = DEFAULT_AUTH_DIALOG_TITLE,
+}: {
+  description?: string;
+  panelView: HostedAuthPanelView;
+  title?: string;
+}) {
+  const header = resolveAuthDialogHeaderPresentation({
+    description,
+    panelView,
+    title,
+  });
+
+  return (
+    <DialogHeader className={header.headerClassName}>
+      <DialogTitle className="text-xl font-bold tracking-tight text-foreground">
+        {header.title}
+      </DialogTitle>
+      <DialogDescription>{header.description}</DialogDescription>
+    </DialogHeader>
+  );
+}
+
+function loadHostedAuthPanelModule(): Promise<HostedAuthPanelModule> {
+  if (hostedAuthPanelModule) {
+    return Promise.resolve(hostedAuthPanelModule);
   }
 
-  if (!hostedAuthPanelIslandLoadPromise) {
-    hostedAuthPanelIslandLoadPromise = import(
+  if (!hostedAuthPanelLoadPromise) {
+    hostedAuthPanelLoadPromise = import(
       "@/src/components/hosted-onboarding/hosted-auth-panel-island"
     )
       .then((mod) => {
-        hostedAuthPanelIslandComponent = mod.HostedAuthPanelIsland;
-        return mod.HostedAuthPanelIsland;
+        hostedAuthPanelModule = mod;
+        return mod;
       })
       .catch((error: unknown) => {
-        hostedAuthPanelIslandLoadPromise = null;
+        hostedAuthPanelLoadPromise = null;
         throw error;
       });
   }
 
-  return hostedAuthPanelIslandLoadPromise;
+  return hostedAuthPanelLoadPromise;
 }
 
-export function readLoadedHostedAuthPanelIsland(): HostedAuthPanelIslandComponent | null {
-  return hostedAuthPanelIslandComponent;
+export function readLoadedHostedAuthPanelIsland():
+  | HostedAuthPanelModule["HostedAuthPanelIsland"]
+  | null {
+  return hostedAuthPanelModule?.HostedAuthPanelIsland ?? null;
 }
 
 export function preloadHostedAuthPanelIsland() {
-  if (hostedAuthPanelIslandComponent) {
+  if (hostedAuthPanelModule) {
     return;
   }
 
-  void loadHostedAuthPanelIsland().catch(() => {});
+  void loadHostedAuthPanelModule().catch(() => {});
 }
 
 export function useHostedAuthPanelIslandIdlePreload(enabled: boolean) {
   useEffect(() => {
-    if (!enabled || typeof window === "undefined" || hostedAuthPanelIslandComponent) {
+    if (!enabled || typeof window === "undefined" || hostedAuthPanelModule) {
       return;
     }
 
@@ -97,45 +158,50 @@ export function useHostedAuthPanelIslandIdlePreload(enabled: boolean) {
 }
 
 export function AuthDialog({
+  autoSendPastedPhoneNumber = false,
+  inviteCode,
+  methods = ["phone", "telegram", "email"],
   open,
   onOpenChange,
-  title = "Log in or sign up",
-  description = "Murph helps you build healthier habits that fit your life.",
+  title = DEFAULT_AUTH_DIALOG_TITLE,
+  description = DEFAULT_AUTH_DIALOG_DESCRIPTION,
   onCompleted,
+  privyRuntime,
   requireLaunchConsentOnCompletion = false,
   showPassiveLegalNotice = false,
 }: {
+  autoSendPastedPhoneNumber?: boolean;
+  inviteCode?: string | null;
+  methods?: readonly ("phone" | "telegram" | "email")[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title?: string;
   description?: string;
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
+  privyRuntime?: AuthDialogPrivyRuntimeState;
   requireLaunchConsentOnCompletion?: boolean;
   showPassiveLegalNotice?: boolean;
 }) {
-  const [AuthPanelIsland, setAuthPanelIsland] =
-    useState<HostedAuthPanelIslandComponent | null>(() =>
-      readLoadedHostedAuthPanelIsland(),
-    );
+  const [AuthPanelModule, setAuthPanelModule] =
+    useState<HostedAuthPanelModule | null>(() => hostedAuthPanelModule);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [panelView, setPanelView] = useState<HostedAuthPanelView>("auth");
 
   useEffect(() => {
-    if (!open || AuthPanelIsland) {
+    if (!open || privyRuntime !== undefined || AuthPanelModule) {
       return;
     }
 
-    const loaded = readLoadedHostedAuthPanelIsland();
     let cancelled = false;
-    const loadPanel = loaded
-      ? Promise.resolve(loaded)
-      : loadHostedAuthPanelIsland();
+    const loadPanel = hostedAuthPanelModule
+      ? Promise.resolve(hostedAuthPanelModule)
+      : loadHostedAuthPanelModule();
 
     loadPanel
-      .then((Component) => {
+      .then((module) => {
         if (!cancelled) {
           setLoadError(null);
-          setAuthPanelIsland(() => Component);
+          setAuthPanelModule(module);
         }
       })
       .catch(() => {
@@ -147,21 +213,16 @@ export function AuthDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, AuthPanelIsland]);
+  }, [open, privyRuntime, AuthPanelModule]);
 
-  const resolvedTitle = panelView === "consent"
-    ? "Use your health data with Murph"
-    : panelView === "finishing"
-      ? "Setting things up"
-      : title;
-  const resolvedDescription = panelView === "consent"
-    ? "Review how Murph uses health data before continuing."
-    : panelView === "finishing"
-      ? "Murph is preparing your account."
-      : description;
+  const dismissLocked = panelView !== "auth";
+  const consentPresentation = panelView === "consent";
+  const runtimeError = privyRuntime?.kind === "unconfigured"
+    ? "Sign in is not configured yet."
+    : null;
 
   function handleOpenChange(nextOpen: boolean) {
-    if (!nextOpen && panelView === "consent") {
+    if (!nextOpen && dismissLocked) {
       return;
     }
 
@@ -171,39 +232,47 @@ export function AuthDialog({
     onOpenChange(nextOpen);
   }
 
+  const authPanelProps = {
+    autoSendPastedPhoneNumber,
+    methods,
+    onViewChange: setPanelView,
+    requireLaunchConsentOnCompletion,
+    showPassiveLegalNotice,
+    size: "compact" as const,
+    ...(inviteCode !== undefined ? { inviteCode } : {}),
+    ...(onCompleted ? { onCompleted } : {}),
+  };
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
         className={cn(
           "max-w-md gap-6 p-6 md:p-7",
-          panelView === "consent" ? "rounded-2xl" : null,
+          consentPresentation ? "rounded-2xl" : null,
         )}
-        showCloseButton={panelView !== "consent"}
+        showCloseButton={!dismissLocked}
       >
-        <DialogHeader
-          className={cn({
-            "pr-10": panelView === "auth",
-            "sr-only": panelView !== "auth",
-          })}
-        >
-          <DialogTitle className="text-xl font-bold tracking-tight text-foreground">
-            {resolvedTitle}
-          </DialogTitle>
-          <DialogDescription>{resolvedDescription}</DialogDescription>
-        </DialogHeader>
-        {AuthPanelIsland ? (
-          <AuthPanelIsland
-            methods={["phone", "telegram", "email"]}
-            onCompleted={onCompleted}
-            onViewChange={setPanelView}
-            requireLaunchConsentOnCompletion={requireLaunchConsentOnCompletion}
-            showPassiveLegalNotice={showPassiveLegalNotice}
-            size="compact"
+        <AuthDialogHeaderPresentation
+          description={description}
+          panelView={panelView}
+          title={title}
+        />
+        {!open ? null : runtimeError ? (
+          <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
+            {runtimeError}
+          </div>
+        ) : privyRuntime?.kind === "configured" ? (
+          <privyRuntime.AuthPanel
+            {...authPanelProps}
+            onRestartPrivy={privyRuntime.restart}
+            privyAttempt={privyRuntime.attempt}
           />
         ) : loadError ? (
           <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
             {loadError}
           </div>
+        ) : AuthPanelModule ? (
+          <AuthPanelModule.HostedAuthPanelIsland {...authPanelProps} />
         ) : open ? (
           <AuthPanelSkeleton />
         ) : null}

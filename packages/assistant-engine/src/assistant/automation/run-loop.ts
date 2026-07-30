@@ -9,6 +9,7 @@ import {
   processDueAssistantCronJobsLocal as processDueAssistantCronJobs,
 } from '../cron.js'
 import {
+  appendAssistantHostedDynamicContextPrompt,
   normalizeAssistantExecutionContext,
   type AssistantExecutionContext,
 } from '../execution-context.js'
@@ -63,6 +64,7 @@ import {
   createEmptyInboxScanResult,
   earliestAssistantAutomationWakeAt,
   type AssistantAutomationPassResult,
+  type AssistantAutoReplyTerminalNonReplyHook,
   type AssistantRunEvent,
 } from './shared.js'
 import { scanAssistantAutomationOnce } from './scanner.js'
@@ -97,6 +99,7 @@ export interface RunAssistantAutomationInput {
   onEvent?: (event: AssistantRunEvent) => void
   onProviderEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onProviderRequestStarted?: AssistantAutoReplyProviderRequestStartHook | null
+  onTerminalNonReplyCommitted?: AssistantAutoReplyTerminalNonReplyHook | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   onInboxEvent?: (event: InboxRunEvent) => void
   once?: boolean
@@ -912,7 +915,7 @@ export async function runAssistantAutomationPass(
         signal: input.signal,
       })
       if (finalInputRefreshResult.reason !== 'ingested_input') {
-        executionContext = appendHostedDynamicContextPrompt({
+        executionContext = appendAssistantHostedDynamicContextPrompt({
           executionContext,
           prompt: dynamicContextPrompt,
         })
@@ -937,6 +940,7 @@ export async function runAssistantAutomationPass(
     onEvent: input.onEvent,
     onProviderEvent: input.onProviderEvent ?? null,
     onProviderRequestStarted: input.onProviderRequestStarted ?? null,
+    onTerminalNonReplyCommitted: input.onTerminalNonReplyCommitted ?? null,
     onTraceEvent: input.onTraceEvent,
     requestId: input.requestId,
     signal: input.signal,
@@ -1082,25 +1086,6 @@ export async function runAssistantAutomationPass(
     progressed,
     replies,
     routing: scanResult.routing,
-  }
-}
-
-function appendHostedDynamicContextPrompt(input: {
-  executionContext: AssistantExecutionContext
-  prompt: string | null
-}): AssistantExecutionContext {
-  if (!input.prompt || !input.executionContext.hosted) {
-    return input.executionContext
-  }
-
-  return {
-    hosted: {
-      ...input.executionContext.hosted,
-      dynamicContextPrompts: [
-        ...(input.executionContext.hosted.dynamicContextPrompts ?? []),
-        input.prompt,
-      ],
-    },
   }
 }
 

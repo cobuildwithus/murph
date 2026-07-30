@@ -23,7 +23,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'hosted-low-usage',
     name: 'hosted-low-usage',
     triggerHint:
-      'Use when trusted hosted turn context says Murph usage is running low, or when a user follows up on that warning and asks how to keep a direct trial, paid plan, Family-sponsored Murph, or hosted group conversation going.',
+      'Use when trusted hosted turn context says Murph usage is running low; when a user asks about hosted plan, AI usage, billing, group funding, or the available ways to add or earn more usage; or when they ask how to keep a direct trial, paid plan, Family-sponsored Murph, or hosted group conversation going.',
   },
   {
     slug: 'experiment-onboarding',
@@ -203,7 +203,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'phone-calls',
     name: 'phone-calls',
     triggerHint:
-      'Use when Murph may place an outbound health-related phone call to a clinic, dentist, pharmacy, lab, insurer, provider office, or similar destination. Owns call choice, explicit consent, appointment readiness handoff, minimal disclosure, transfer policy, and truthful interpretation of call lifecycle results.',
+      'Use when Murph may place one authorized outbound call for a health task, or when hosted group Murph may call a public venue or service business for an ordinary shared-life logistics task. Owns call choice, explicit consent, health appointment readiness handoff, reservation bounds, minimal disclosure, group transfer policy, and truthful interpretation of call lifecycle results.',
   },
   {
     slug: 'murph-family',
@@ -239,7 +239,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'physical-therapy',
     name: 'physical-therapy',
     triggerHint:
-      'Use when a user reports musculoskeletal pain, stiffness, weakness, loss of function, injury, rehabilitation, return-to-activity needs, or asks for PT-style assessment or exercises—including workout modification because of pain. Before asking questions, reuse relevant current-conversation and vault context and ask only decision-changing gaps. Read before suggesting exercises for a new or materially changed pain complaint. Do not use for ordinary workout programming without pain, injury, or rehabilitation needs.',
+      'Use when a user reports musculoskeletal pain, stiffness, weakness, loss of function, injury, rehabilitation, return-to-activity needs, or asks for PT-style assessment or exercises—including workout modification because of pain. Before asking questions, reuse relevant current-conversation and vault context and ask only decision-changing gaps. Read before recommending exercises, rest, activity restriction, or load changes for a new or materially changed pain complaint. Do not use for ordinary workout programming without pain, injury, or rehabilitation needs.',
   },
   {
     slug: 'running-cardio',
@@ -269,7 +269,13 @@ export const ASSISTANT_SKILLS = [
     slug: 'group-challenge',
     name: 'group-challenge',
     triggerHint:
-      'Read whenever a group chat starts, runs, scores, or closes a challenge, and on every scheduled challenge dispatch. Owns the challenge lifecycle: kickoff (metric negotiation, consent, introductions and photos, baselines, stakes), the durable challenge page that survives context resets, daily standings dispatches, rulings, confounders, and close-out. Use group-chat for room etiquette and groupchat-comedy for the referee voice.',
+      'Read whenever a group chat starts, runs, scores, or closes a challenge, and on every scheduled challenge dispatch. Owns social-first formation grounded in the current room, metric and window selection, human-owned real-world stakes, challenge buy-in, room-native cast material and approved photos, baselines, consented scoring, the durable challenge page, daily dispatches, rulings, confounders, and close-out. A vague challenge request is not exercise programming. Use group-challenge-scorecards alongside it for teams, collective targets, weighted points, or multiple metrics. Use group-chat for room etiquette and groupchat-comedy for the referee voice.',
+  },
+  {
+    slug: 'group-challenge-scorecards',
+    name: 'group-challenge-scorecards',
+    triggerHint:
+      'Read alongside group-challenge whenever a challenge uses teams, a shared or participant target, multiple metrics, weighted additive points, or a long-running cumulative group goal, and on every scheduled dispatch for such a challenge. Owns only format, up-to-five-component scorecard mechanics, point-balance preview, aggregate scoring, and format-specific presentation; group-challenge still owns formation, buy-in, consent, durable state, scheduling, diagnostics, and close-out.',
   },
   {
     slug: 'music-generation',

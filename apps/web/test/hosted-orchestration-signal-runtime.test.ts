@@ -71,8 +71,10 @@ import {
   signalHostedDeviceSyncMailboxRuntime,
   signalHostedMailboxAppendRuntime,
   signalHostedManualRunRuntime,
+  signalHostedRetentionRuntimeRecheck,
   signalHostedRuntimeRecheckRuntime,
   signalHostedRuntimeMaintenanceRuntime,
+  signalHostedRuntimeWakeRuntime,
 } from "@/src/lib/hosted-orchestration/signal-runtime";
 
 describe("hosted runtime Temporal signaling", () => {
@@ -345,6 +347,31 @@ describe("hosted runtime Temporal signaling", () => {
     );
   });
 
+  it("signals runtime wakes only after active access without upserting workspace", async () => {
+    const abortSignal = new AbortController().signal;
+    await signalHostedRuntimeWakeRuntime({
+      abortSignal,
+      client: buildClient(),
+      userId: "member_123",
+    });
+
+    expectHostedRuntimeActiveAccessRead(mocks.hostedMemberFindUnique, "member_123");
+    expect(mocks.ensureHostedWorkspace).not.toHaveBeenCalled();
+    expect(mocks.signalWithStart).toHaveBeenCalledWith(
+      HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
+      expect.objectContaining({
+        signalArgs: [{
+          kind: "runtime_wake_requested",
+        }],
+        workflowId: "hosted-user-runtime:member_123",
+      }),
+    );
+    expect(mocks.withAbortSignal).toHaveBeenCalledWith(
+      abortSignal,
+      expect.any(Function),
+    );
+  });
+
   it("does not signal runtime rechecks when a thread-container owner is inactive", async () => {
     mocks.hostedMemberFindUnique.mockResolvedValue(buildActiveMemberRecord({
       threadContainer: {
@@ -364,6 +391,27 @@ describe("hosted runtime Temporal signaling", () => {
     expectHostedRuntimeActiveAccessRead(mocks.hostedMemberFindUnique, "member_123");
     expect(mocks.ensureHostedWorkspace).not.toHaveBeenCalled();
     expect(mocks.signalWithStart).not.toHaveBeenCalled();
+  });
+
+  it("signals retention rechecks for inactive workspaces without granting active runtime access", async () => {
+    mocks.hostedMemberFindUnique.mockResolvedValue(null);
+
+    await signalHostedRetentionRuntimeRecheck({
+      client: buildClient(),
+      userId: "member_inactive",
+    });
+
+    expect(mocks.hostedMemberFindUnique).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedWorkspace).not.toHaveBeenCalled();
+    expect(mocks.signalWithStart).toHaveBeenCalledWith(
+      HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
+      expect.objectContaining({
+        signalArgs: [{
+          kind: "runtime_recheck_requested",
+        }],
+        workflowId: "hosted-user-runtime:member_inactive",
+      }),
+    );
   });
 
   it("signals device-sync mailbox wakes as normal mailbox work", async () => {

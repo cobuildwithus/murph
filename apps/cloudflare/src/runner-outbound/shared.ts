@@ -88,17 +88,17 @@ export async function resolveRunnerOutboundUserRunnerStub(
   return env.USER_RUNNER.getByName(userId);
 }
 
+type WorkerUserRunnerStubWithMethod<
+  TKey extends keyof WorkerUserRunnerStubLike,
+> = WorkerUserRunnerStubLike & Required<Pick<WorkerUserRunnerStubLike, TKey>>;
+
 export function requireRunnerOutboundUserStubMethod<TKey extends keyof WorkerUserRunnerStubLike>(
   stub: WorkerUserRunnerStubLike,
   key: TKey,
-): Exclude<WorkerUserRunnerStubLike[TKey], undefined> {
-  const method = stub[key];
-
-  if (typeof method !== "function") {
+): asserts stub is WorkerUserRunnerStubWithMethod<TKey> {
+  if (typeof stub[key] !== "function") {
     throw new TypeError(`User runner stub does not implement ${String(key)}.`);
   }
-
-  return method as Exclude<WorkerUserRunnerStubLike[TKey], undefined>;
 }
 
 function cryptoContextCacheKey(input: {

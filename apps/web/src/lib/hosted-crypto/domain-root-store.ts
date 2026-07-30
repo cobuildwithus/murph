@@ -390,14 +390,25 @@ export async function unwrapHostedDomainRootsForWebByRootKeyIds(input: {
   try {
     for (let offset = 0; offset < verified.length; offset += WEB_BATCH_UNWRAP_CONCURRENCY) {
       const chunk = verified.slice(offset, offset + WEB_BATCH_UNWRAP_CONCURRENCY);
-      const results = await Promise.allSettled(chunk.map(async ({ envelope, reference }) => ({
-        ...reference,
-        envelope,
-        rootKey: await unwrapEnvelopeForWeb({
-          envelope,
-          signal: input.signal,
+      const results = await Promise.allSettled(
+        chunk.map(async ({ envelope, reference }) => {
+          const cached = await unwrapWithScopedCache(
+            createHostedDomainRootReferenceKey(reference),
+            async () => ({
+              envelope,
+              rootKey: await unwrapEnvelopeForWeb({
+                envelope,
+                signal: input.signal,
+              }),
+            }),
+          );
+          return {
+            ...reference,
+            envelope,
+            rootKey: cached.rootKey,
+          };
         }),
-      })));
+      );
       let hasError = false;
       let firstError: unknown;
       for (const result of results) {

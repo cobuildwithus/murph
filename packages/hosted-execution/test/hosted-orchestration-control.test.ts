@@ -41,6 +41,9 @@ describe("hosted orchestration control contracts", () => {
       {
         kind: "runtime_recheck_requested",
       },
+      {
+        kind: "runtime_wake_requested",
+      },
     ];
 
     for (const signal of signals) {

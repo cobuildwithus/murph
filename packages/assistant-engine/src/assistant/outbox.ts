@@ -104,6 +104,8 @@ import {
 } from './outbox/automation-authority.js'
 
 const ASSISTANT_OUTBOX_INTENT_SCHEMA = 'murph.assistant-outbox-intent.v1'
+const ASSISTANT_OUTBOX_ANSWERED_ITEMS_UNCOVERED_CODE =
+  'ASSISTANT_OUTBOX_ANSWERED_ITEMS_UNCOVERED'
 
 export type { AssistantChannelDelivery }
 export type {
@@ -1153,6 +1155,10 @@ export async function deliverAssistantOutboxMessage(input: {
   vault: string
 }): Promise<DeliverAssistantOutboxMessageResult> {
   throwIfAssistantOutboxSignalAborted(input.signal)
+  const requestedAnsweredMailboxItemIds =
+    normalizeAssistantOutboxAnsweredMailboxItemIds(
+      input.answeredMailboxItemIds ?? [],
+    )
   const intent = await createAssistantOutboxIntent({
     actorId: input.actorId,
     answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
@@ -1182,6 +1188,32 @@ export async function deliverAssistantOutboxMessage(input: {
     turnTrigger: input.turnTrigger ?? null,
     vault: input.vault,
   })
+
+  const coveredAnsweredMailboxItemIds = new Set(
+    intent.answeredMailboxItemIds,
+  )
+  if (
+    requestedAnsweredMailboxItemIds.some(
+      (mailboxItemId) => !coveredAnsweredMailboxItemIds.has(mailboxItemId),
+    )
+  ) {
+    const error = Object.assign(
+      new Error(
+        'The existing outbound delivery does not cover every requested input; retry after the current dispatch settles.',
+      ),
+      {
+        code: ASSISTANT_OUTBOX_ANSWERED_ITEMS_UNCOVERED_CODE,
+        retryable: true,
+      },
+    )
+    return {
+      kind: 'failed',
+      intent,
+      delivery: null,
+      deliveryError: normalizeAssistantDeliveryError(error),
+      session: null,
+    }
+  }
 
   if (intent.status === 'sent' && intent.delivery) {
     return {
@@ -2241,12 +2273,24 @@ function maybeUpgradeAssistantOutboxIntentAnsweredMailboxItemIds(input: {
   intent: AssistantOutboxIntent
 }): AssistantOutboxIntent {
   if (
-    input.intent.answeredMailboxItemIds.length > 0
-    || input.answeredMailboxItemIds.length === 0
+    input.answeredMailboxItemIds.length === 0
     || (
       input.intent.status !== 'pending'
       && input.intent.status !== 'retryable'
-      && input.intent.status !== 'sending'
+    )
+  ) {
+    return input.intent
+  }
+
+  const answeredMailboxItemIds = normalizeAssistantOutboxAnsweredMailboxItemIds([
+    ...input.intent.answeredMailboxItemIds,
+    ...input.answeredMailboxItemIds,
+  ])
+  if (
+    answeredMailboxItemIds.length === input.intent.answeredMailboxItemIds.length
+    && answeredMailboxItemIds.every(
+      (mailboxItemId, index) =>
+        mailboxItemId === input.intent.answeredMailboxItemIds[index],
     )
   ) {
     return input.intent
@@ -2255,7 +2299,7 @@ function maybeUpgradeAssistantOutboxIntentAnsweredMailboxItemIds(input: {
   return assistantOutboxIntentSchema.parse(
     sanitizeAssistantOutboxIntentForPersistence({
       ...input.intent,
-      answeredMailboxItemIds: [...input.answeredMailboxItemIds],
+      answeredMailboxItemIds,
     }),
   )
 }

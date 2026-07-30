@@ -121,6 +121,31 @@
           "minLength": 1,
           "maxLength": 160
         },
+        "activitySessionEvidence": {
+          "type": "object",
+          "properties": {
+            "activityKinds": {
+              "minItems": 1,
+              "maxItems": 16,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              },
+              "uniqueItems": true
+            },
+            "minimumDurationMinutes": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "activityKinds"
+          ],
+          "additionalProperties": false
+        },
         "frequency": {
           "type": "object",
           "properties": {
@@ -422,6 +447,21 @@
                         "minLength": 1,
                         "maxLength": 80
                       },
+                      "activityKinds": {
+                        "minItems": 1,
+                        "maxItems": 16,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 80
+                        },
+                        "uniqueItems": true
+                      },
+                      "minimumDurationMinutes": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
                       "partialCredit": {
                         "type": "number",
                         "minimum": 0,
@@ -685,6 +725,125 @@
           "type": "string",
           "pattern": "^[a-z_]+:[A-Za-z0-9][A-Za-z0-9._:/-]*(?:@[A-Za-z0-9._:-]+)?$"
         },
+        "primaryOutcome": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "metric"
+                },
+                "key": {
+                  "type": "string",
+                  "pattern": "^[a-z_]+:[A-Za-z0-9][A-Za-z0-9._:/-]*(?:@[A-Za-z0-9._:-]+)?$"
+                },
+                "label": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160
+                },
+                "statistic": {
+                  "type": "string",
+                  "enum": [
+                    "latest",
+                    "count",
+                    "mean",
+                    "median",
+                    "min",
+                    "max",
+                    "sum"
+                  ]
+                },
+                "capture": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "measurement"
+                        }
+                      },
+                      "required": [
+                        "kind"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "session_field"
+                        },
+                        "fieldId": {
+                          "type": "string",
+                          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$"
+                        },
+                        "unit": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9._/%-]+$"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "fieldId"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "derived_metric"
+                        },
+                        "sourceMetricKey": {
+                          "type": "string",
+                          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "sourceMetricKey"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "kind",
+                "key"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "structured_review"
+                },
+                "key": {
+                  "type": "string",
+                  "pattern": "^[a-z_]+:[A-Za-z0-9][A-Za-z0-9._:/-]*(?:@[A-Za-z0-9._:-]+)?$"
+                },
+                "label": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160
+                }
+              },
+              "required": [
+                "kind",
+                "key"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
         "secondaryBiomarkerKeys": {
           "type": "array",
           "items": {
@@ -746,6 +905,8 @@
                   "lab_panel",
                   "wearable_summary",
                   "manual_measurement",
+                  "text",
+                  "photo",
                   "document"
                 ]
               },
@@ -795,6 +956,8 @@
                   "lab_panel",
                   "wearable_summary",
                   "manual_measurement",
+                  "text",
+                  "photo",
                   "document"
                 ]
               },

@@ -8,6 +8,9 @@ import type {
   DeclarativeRoute,
 } from "./routes.ts";
 import {
+  privateMediaRoutes,
+} from "./route-handlers/private-media.ts";
+import {
   matchExactPath,
 } from "./routes.ts";
 
@@ -16,6 +19,7 @@ export const workerPublicRoutes: readonly DeclarativeRoute<{
   request: Request;
   url: URL;
 }>[] = [
+  ...privateMediaRoutes,
   {
     handle(context) {
       return createServiceBannerResponse(context.env);

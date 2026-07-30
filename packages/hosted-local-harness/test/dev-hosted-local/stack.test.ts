@@ -1473,6 +1473,8 @@ describe("hosted local dev stack", () => {
         HOSTED_R2_PRESIGN_ACCOUNT_ID: "hosted-local-r2-account",
         HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT: "1",
         HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-local-r2-bundles",
+        HOSTED_R2_CUTOVER_PHASE: "source_active",
+        HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "hosted-local-r2-bundles-enam",
         HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: "http://127.0.0.1:39000",
         HOSTED_R2_PRESIGN_ENDPOINT: "http://host.docker.internal:39000",
         HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "hosted-local-r2-secret-key",
@@ -1513,6 +1515,8 @@ describe("hosted local dev stack", () => {
         HOSTED_R2_PRESIGN_ACCOUNT_ID: "hosted-local-r2-account",
         HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT: "1",
         HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-local-r2-bundles",
+        HOSTED_R2_CUTOVER_PHASE: "source_active",
+        HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "hosted-local-r2-bundles-enam",
         HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: "http://127.0.0.1:39000",
         HOSTED_R2_PRESIGN_ENDPOINT: "http://host.docker.internal:39000",
         HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "hosted-local-r2-secret-key",
@@ -2462,7 +2466,7 @@ describe("hosted local dev stack", () => {
     );
   });
 
-  it("passes hosted OpenAI config to the worker but strips host-only Codex env", async () => {
+  it("passes hosted provider credentials to the worker but strips host-only Codex env", async () => {
     spawnChildProcess
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 125 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 126 }));
@@ -2519,6 +2523,7 @@ describe("hosted local dev stack", () => {
         HOSTED_ASSISTANT_PROVIDER: "openai",
         MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON: "/tmp/spoofed-catalog.json",
         OPENAI_API_KEY: "local-openai-key",
+        VENICE_API_KEY: "local-venice-key",
       },
     });
     await stack.ready;
@@ -2529,6 +2534,7 @@ describe("hosted local dev stack", () => {
     const cloudflareEnv = cloudflareCall?.[3] as NodeJS.ProcessEnv;
     expect(cloudflareEnv.CODEX_HOME).toBeUndefined();
     expect(cloudflareEnv.OPENAI_API_KEY).toBe("local-openai-key");
+    expect(cloudflareEnv.VENICE_API_KEY).toBe("local-venice-key");
     expect(cloudflareEnv.HOSTED_ASSISTANT_PROVIDER).toBe("openai");
     expect(cloudflareEnv.MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON).toBe(
       "/tmp/murph-dev-env-test/codex-model-catalog.openai-flex.json",
@@ -2552,6 +2558,7 @@ describe("hosted local dev stack", () => {
       .mock.calls.at(-1)?.[0] as NodeJS.ProcessEnv;
     expect(envFileSource.CODEX_HOME).toBeUndefined();
     expect(envFileSource.OPENAI_API_KEY).toBe("local-openai-key");
+    expect(envFileSource.VENICE_API_KEY).toBe("local-venice-key");
     expect(envFileSource.HOSTED_ASSISTANT_PROVIDER).toBe("openai");
     expect(envFileSource.MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON).toBe(
       "/tmp/murph-dev-env-test/codex-model-catalog.openai-flex.json",
@@ -3273,6 +3280,7 @@ describe("hosted local dev stack", () => {
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_vercel_monthly",
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_5_USD: "price_vercel_usage_5",
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_10_USD: "price_vercel_usage_10",
+      HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_20_USD: "price_vercel_usage_20",
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_25_USD: "price_vercel_usage_25",
       STRIPE_SECRET_KEY: "sk_test_vercel",
     });
@@ -3300,6 +3308,7 @@ describe("hosted local dev stack", () => {
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_local_monthly",
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_5_USD: undefined,
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_10_USD: "price_local_usage_10",
+        HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_20_USD: undefined,
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_25_USD: undefined,
         STRIPE_SECRET_KEY: "sk_test_local",
       }),

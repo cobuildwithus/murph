@@ -159,6 +159,7 @@ model DeviceSyncSignal {
   traceId              String?           @map("trace_id")
   eventType            String?           @map("event_type")
   resourceCategory     String?           @map("resource_category")
+  sourceProviderSlug   String?           @map("source_provider_slug")
   reason               String?           @map("reason")
   nextReconcileAt      DateTime?         @map("next_reconcile_at")
   revokeWarningCode    String?           @map("revoke_warning_code")
@@ -167,6 +168,7 @@ model DeviceSyncSignal {
   connection           DeviceConnection? @relation(fields: [connectionId], references: [id], onDelete: Cascade)
 
   @@index([userId, id])
+  @@index([userId, sourceProviderSlug, id], map: "device_sync_signal_user_source_idx")
   @@index([connectionId])
   @@map("device_sync_signal")
 }
@@ -513,6 +515,7 @@ model HostedMember {
   usageCreditBalanceUsdMicros    BigInt?                         @default(0) @map("usage_credit_balance_usd_micros")
   usageCreditLedgerVersion       BigInt?                         @default(0) @map("usage_credit_ledger_version")
   assistantModelPreference       String?                         @map("assistant_model_preference")
+  assistantProviderPreference    String?                         @map("assistant_provider_preference")
   assistantReasoningEffortPreference String?                     @map("assistant_reasoning_effort_preference")
   assistantPersona               String?                         @map("assistant_persona")
   assistantPersonaCausalSeq      BigInt?                         @map("assistant_persona_causal_seq")
@@ -555,6 +558,7 @@ model HostedMember {
   hostedAiUsagePeriods           HostedAiUsagePeriod[]
   usageCreditPurchasesPaid       HostedUsageCreditPurchase[]     @relation("HostedUsageCreditPurchasePayer")
   usageCreditPurchasesReceived   HostedUsageCreditPurchase[]     @relation("HostedUsageCreditPurchaseBeneficiary")
+  groupSponsorshipMomentsCreated HostedGroupSponsorshipMoment[]  @relation("HostedGroupSponsorshipMomentCreator")
   usageCreditEntries             HostedUsageCreditEntry[]
   usageReferralsAsReferrer       HostedUsageReferral[]            @relation("HostedUsageReferralReferrer")
   usageReferralsAsBeneficiary    HostedUsageReferral[]            @relation("HostedUsageReferralBeneficiary")
@@ -893,6 +897,11 @@ model HostedMemberBillingRef {
   stripeSubscriptionIdEncrypted String?      @map("stripe_subscription_id_encrypted")
   stripeSubscriptionScheduleLookupKey   String?      @unique @map("stripe_subscription_schedule_lookup_key")
   stripeSubscriptionScheduleIdEncrypted String?      @map("stripe_subscription_schedule_id_encrypted")
+  stripeCheckoutSessionLookupKey    String?      @unique @map("stripe_checkout_session_lookup_key")
+  stripeCheckoutSessionIdEncrypted  String?      @map("stripe_checkout_session_id_encrypted")
+  checkoutAttemptId                 String?      @map("checkout_attempt_id")
+  checkoutIntentHash                String?      @map("checkout_intent_hash")
+  checkoutCreatedAt                 DateTime?    @map("checkout_created_at")
   currentBillingPlanCode        String?      @map("current_billing_plan_code")
   currentBillingPhase           String?      @map("current_billing_phase")
   currentCheckoutOffer          String?      @map("current_checkout_offer")
@@ -944,6 +953,7 @@ model HostedMailboxItem {
   id                      String                @id
   userId                  String                @map("user_id")
   assistantInputLookupKey String?               @map("assistant_input_lookup_key")
+  sourceMessageLookupKey  String?               @map("source_message_lookup_key")
   subscriptionActionClaim String?               @map("subscription_action_claim")
   causalSeq               BigInt?               @map("causal_seq")
   lane                    String
@@ -958,6 +968,8 @@ model HostedMailboxItem {
   payloadHash             String?               @map("payload_hash")
   consumedAt              DateTime?             @map("consumed_at")
   expiresAt               DateTime?             @map("expires_at")
+  contentRetiredAt        DateTime?             @map("content_retired_at")
+  retentionDisposition    String?               @map("retention_disposition")
   createdAt               DateTime              @default(now()) @map("created_at")
   updatedAt               DateTime              @updatedAt @map("updated_at")
   member                  HostedMember          @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -970,6 +982,7 @@ model HostedMailboxItem {
   @@unique([userId, assistantInputLookupKey])
   @@unique([userId, dedupeKey])
   @@index([userId, lane, laneSeq])
+  @@index([sourceMessageLookupKey, causalSeq])
   @@index([userId, kind, createdAt])
   @@index([userId, expiresAt])
   @@index([expiresAt, id])
@@ -1129,17 +1142,19 @@ model HostedRuntimeLog {
 }
 
 model HostedInvite {
-  id         String       @id
-  memberId   String       @map("member_id")
-  inviteCode String       @unique @map("invite_code")
-  channel    String       @default("linq")
-  sentAt     DateTime?    @map("sent_at")
-  expiresAt  DateTime     @map("expires_at")
-  createdAt  DateTime     @default(now()) @map("created_at")
-  updatedAt  DateTime     @updatedAt @map("updated_at")
-  member     HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  id                           String       @id
+  memberId                     String       @map("member_id")
+  inviteCode                   String       @unique @map("invite_code")
+  channel                      String       @default("linq")
+  sentAt                       DateTime?    @map("sent_at")
+  instantStartAdmissionEventId String?      @map("instant_start_admission_event_id")
+  expiresAt                    DateTime     @map("expires_at")
+  createdAt                    DateTime     @default(now()) @map("created_at")
+  updatedAt                    DateTime     @updatedAt @map("updated_at")
+  member                       HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@index([memberId, createdAt])
+  @@index([memberId, instantStartAdmissionEventId])
   @@index([expiresAt])
   @@map("hosted_invite")
 }
@@ -1359,6 +1374,7 @@ model HostedAccountDeletionCleanup {
   cloudflareCompletedAt DateTime? @map("cloudflare_completed_at")
   stripeCompletedAt     DateTime? @map("stripe_completed_at")
   privyCompletedAt      DateTime? @map("privy_completed_at")
+  runtimeLogsCompletedAt DateTime? @map("runtime_logs_completed_at")
   attemptCount          Int       @default(0) @map("attempt_count")
   nextAttemptAt         DateTime  @map("next_attempt_at")
   lastAttemptedAt       DateTime? @map("last_attempted_at")
@@ -1418,6 +1434,7 @@ model HostedUsageCreditPurchase {
   payer                             HostedMember?                        @relation("HostedUsageCreditPurchasePayer", fields: [payerMemberId], references: [id], onDelete: Restrict)
   beneficiary                       HostedMember                         @relation("HostedUsageCreditPurchaseBeneficiary", fields: [beneficiaryMemberId], references: [id], onDelete: Restrict)
   entries                           HostedUsageCreditEntry[]
+  groupSponsorshipMoment            HostedGroupSponsorshipMoment?
 
   @@unique([payerMemberId, clientRequestKey], map: "hosted_usage_credit_purchase_payer_request_key")
   @@index([payerMemberId, status, createdAt], map: "hosted_usage_credit_purchase_payer_status_idx")
@@ -1425,6 +1442,26 @@ model HostedUsageCreditPurchase {
   @@index([stripePriceLookupKey], map: "hosted_usage_credit_purchase_price_lookup_idx")
   @@index([stripeCustomerLookupKey], map: "hosted_usage_credit_purchase_customer_lookup_idx")
   @@map("hosted_usage_credit_purchase")
+}
+
+model HostedGroupSponsorshipMoment {
+  purchaseId                 String   @id @map("purchase_id")
+  beneficiaryMemberId        String   @map("beneficiary_member_id")
+  creatorMemberId            String   @map("creator_member_id")
+  configurationDigest        String   @map("configuration_digest")
+  publicAliasEncrypted       String?  @map("public_alias_encrypted")
+  sponsorMessageEncrypted    String?  @map("sponsor_message_encrypted")
+  runningBitRequestEncrypted String?  @map("running_bit_request_encrypted")
+  activatedAt                DateTime? @map("activated_at")
+  expiresAt                  DateTime? @map("expires_at")
+  createdAt                  DateTime  @default(now()) @map("created_at")
+  updatedAt                  DateTime  @updatedAt @map("updated_at")
+  purchase                   HostedUsageCreditPurchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  creator                    HostedMember @relation("HostedGroupSponsorshipMomentCreator", fields: [creatorMemberId], references: [id], onDelete: Cascade)
+
+  @@index([beneficiaryMemberId, expiresAt], map: "hosted_group_sponsorship_moment_active_idx")
+  @@index([creatorMemberId, createdAt], map: "hosted_group_sponsorship_moment_creator_idx")
+  @@map("hosted_group_sponsorship_moment")
 }
 
 model HostedUsageCreditEntry {
@@ -1481,7 +1518,7 @@ model HostedUsageReferral {
   status                  HostedUsageReferralStatus     @default(armed)
   referrerSubjectKey      String?                       @map("referrer_subject_key")
   sourceConversationJson  Json?                         @map("source_conversation_json")
-  targetContainerMemberId String?                       @unique(map: "hosted_usage_referral_target_container_key") @map("target_container_member_id")
+  targetContainerMemberId String?                       @map("target_container_member_id")
   humanMessageCount       Int                           @default(0) @map("human_message_count")
   nonReferrerMessageCount Int                           @default(0) @map("non_referrer_message_count")
   observedEventKeysJson   Json?                         @map("observed_event_keys_json")
@@ -1505,6 +1542,7 @@ model HostedUsageReferral {
   creditEntries           HostedUsageCreditEntry[]
 
   @@index([referrerMemberId, status, armedAt], map: "hosted_usage_referral_referrer_status_armed_idx")
+  @@unique([targetContainerMemberId, policyCode], map: "hosted_usage_referral_target_policy_key")
   @@index([beneficiaryMemberId, rewardedAt], map: "hosted_usage_referral_beneficiary_rewarded_idx")
   @@index([expiresAt, status], map: "hosted_usage_referral_expiry_status_idx")
   @@index([introducedMemberId], map: "hosted_usage_referral_introduced_member_idx")
@@ -1578,9 +1616,30 @@ model HostedGroupJoinOffer {
   postedAt            DateTime    @map("posted_at")
   revokedAt           DateTime?   @map("revoked_at")
   group               HostedGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  joinOutreaches       HostedGroupJoinOutreach[]
 
   @@index([groupId, revokedAt, postedAt])
   @@map("hosted_group_join_offer")
+}
+
+model HostedGroupJoinOutreach {
+  id                        String               @id
+  offerId                   String               @map("offer_id")
+  participantPhoneLookupKey String               @map("participant_phone_lookup_key")
+  participantPhoneEncrypted String               @map("participant_phone_encrypted")
+  requestedAt               DateTime             @map("requested_at")
+  nextAttemptAt             DateTime             @map("next_attempt_at")
+  attemptCount              Int                  @default(0) @map("attempt_count")
+  lastDeferralReason        String?              @map("last_deferral_reason")
+  createdAt                 DateTime             @default(now()) @map("created_at")
+  updatedAt                 DateTime             @updatedAt @map("updated_at")
+  offer                     HostedGroupJoinOffer @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  deliveries                HostedLinqDelivery[]
+
+  @@unique([offerId, participantPhoneLookupKey], map: "hosted_group_join_outreach_offer_participant_key")
+  @@index([nextAttemptAt, requestedAt], map: "hosted_group_join_outreach_due_idx")
+  @@index([participantPhoneLookupKey, nextAttemptAt], map: "hosted_group_join_outreach_participant_due_idx")
+  @@map("hosted_group_join_outreach")
 }
 
 model HostedGroupMember {
@@ -1660,7 +1719,7 @@ model HostedThreadContainer {
   owner                      HostedMember        @relation("HostedThreadContainerOwner", fields: [ownerMemberId], references: [id], onDelete: Restrict)
   participants               HostedThreadContainerParticipant[]
   routes                     HostedThreadRoute[]
-  usageReferralTarget        HostedUsageReferral?
+  usageReferralTargets       HostedUsageReferral[]
 
   @@index([ownerMemberId])
   @@map("hosted_thread_container")
@@ -1685,6 +1744,9 @@ model HostedThreadContainerParticipant {
 
 model HostedThreadRoute {
   channel                 String
+  /// Blinded canonical delivery-account projection. Null is limited to the
+  /// additive rollout window and legacy rows awaiting the one-shot backfill.
+  accountLookupKey        String?               @map("account_lookup_key")
   threadLookupKey         String                @map("thread_lookup_key")
   threadIdentityLookupKey String                @map("thread_identity_lookup_key")
   containerMemberId       String                @map("container_member_id")
@@ -1696,6 +1758,7 @@ model HostedThreadRoute {
   container               HostedThreadContainer @relation(fields: [containerMemberId], references: [memberId], onDelete: Cascade)
 
   @@id([channel, threadIdentityLookupKey])
+  @@index([channel, accountLookupKey])
   @@index([channel, threadLookupKey])
   @@index([containerMemberId])
   @@map("hosted_thread_route")
@@ -1715,6 +1778,12 @@ model HostedLinqLine {
   egressPolicy               String    @default("enabled") @map("egress_policy")
   providerStatus             String?   @map("provider_status")
   providerReason             String?   @map("provider_reason")
+  providerServiceStatus      String?   @map("provider_service_status")
+  providerServiceUpdatedAt   DateTime? @map("provider_service_updated_at")
+  lastServiceStatusEventId   String?   @map("last_service_status_event_id")
+  providerReputationStatus   String?   @map("provider_reputation_status")
+  providerReputationUpdatedAt DateTime? @map("provider_reputation_updated_at")
+  lastReputationStatusEventId String?   @map("last_reputation_status_event_id")
   providerUpdatedAt          DateTime? @map("provider_updated_at")
   lastStatusEventId          String?   @map("last_status_event_id")
   lastOutboundAt             DateTime? @map("last_outbound_at")
@@ -1730,6 +1799,8 @@ model HostedLinqLine {
   totalDeliveredCount        Int       @default(0) @map("total_delivered_count")
   totalFailedCount           Int       @default(0) @map("total_failed_count")
   totalInboundCount          Int       @default(0) @map("total_inbound_count")
+  /// Deprecated rollout compatibility for builds predating weighted planning.
+  /// Current assignment does not read this column.
   activeMemberLimit          Int?      @map("active_member_limit")
   maxNewConversationsPerDay  Int?      @map("max_new_conversations_per_day")
   proactiveConversationDayUtc DateTime? @db.Date @map("proactive_conversation_day_utc")
@@ -1744,13 +1815,33 @@ model HostedLinqLine {
   providerEvents             HostedLinqProviderEvent[]
   deliveries                 HostedLinqDelivery[]
   alerts                     HostedLinqAlert[]
+  chatHealth                 HostedLinqChatHealth[]
 
   @@index([healthStatus, egressPolicy])
   @@index([configuredAt, egressPolicy, healthStatus])
   @@index([providerStatus])
+  @@index([providerServiceStatus])
+  @@index([providerReputationStatus])
   @@index([providerLastSeenAt])
   @@index([lastFailedAt])
   @@map("hosted_linq_line")
+}
+
+model HostedLinqChatHealth {
+  linqChatLookupKey     String   @id @map("linq_chat_lookup_key")
+  phoneNumberLookupKey String?  @map("phone_number_lookup_key")
+  providerStatus       String   @map("provider_status")
+  providerUpdatedAt    DateTime @map("provider_updated_at")
+  providerObservedAt   DateTime @map("provider_observed_at")
+  isGroup              Boolean? @map("is_group")
+  service              String?
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+  line                 HostedLinqLine? @relation(fields: [phoneNumberLookupKey], references: [phoneNumberLookupKey], onDelete: SetNull)
+
+  @@index([phoneNumberLookupKey, providerStatus], map: "hosted_linq_chat_health_phone_status_idx")
+  @@index([providerStatus, providerUpdatedAt], map: "hosted_linq_chat_health_status_updated_idx")
+  @@map("hosted_linq_chat_health")
 }
 
 model HostedLinqProviderEvent {
@@ -1774,6 +1865,11 @@ model HostedLinqProviderEvent {
   failureReason        String?  @map("failure_reason")
   providerStatus       String?  @map("provider_status")
   providerReason       String?  @map("provider_reason")
+  providerServiceStatus String? @map("provider_service_status")
+  providerReputationStatus String? @map("provider_reputation_status")
+  chatHealthStatus     String?  @map("chat_health_status")
+  chatHealthUpdatedAt  DateTime? @map("chat_health_updated_at")
+  groupJoinOfferHandledAt DateTime? @map("group_join_offer_handled_at")
   extractionVersion    Int      @default(1) @map("extraction_version")
   extractionJson       Json?    @map("extraction_json")
   payloadShapeJson     Json?    @map("payload_shape_json")
@@ -1786,6 +1882,7 @@ model HostedLinqProviderEvent {
   @@index([eventType, providerCreatedAt])
   @@index([phoneNumberLookupKey, providerCreatedAt])
   @@index([phoneNumberLookupKey, eventType, providerCreatedAt])
+  @@index([linqChatLookupKey, providerCreatedAt], map: "hosted_linq_provider_event_chat_created_idx")
   @@index([messageLookupKey, providerCreatedAt])
   @@index([receivedAt, eventId])
   @@index([deliveryStatus, providerCreatedAt])
@@ -1793,36 +1890,40 @@ model HostedLinqProviderEvent {
 }
 
 model HostedLinqDelivery {
-  id                   String   @id
-  idempotencyKey       String?  @unique @map("idempotency_key")
-  source               String
-  sourceRef            String?  @map("source_ref")
-  template             String?
-  phoneNumberLookupKey String?  @map("phone_number_lookup_key")
-  phoneNumberHint      String?  @map("phone_number_hint")
-  targetKind           String?  @map("target_kind")
-  linqChatLookupKey    String?  @map("linq_chat_lookup_key")
-  messageLookupKey     String?  @unique @map("message_lookup_key")
-  messageIdSuffix      String?  @map("message_id_suffix")
-  service              String?
-  status               String   @default("attempted")
-  attemptedAt          DateTime @map("attempted_at")
-  acceptedAt           DateTime? @map("accepted_at")
-  deliveredAt          DateTime? @map("delivered_at")
-  failedAt             DateTime? @map("failed_at")
-  retryAfterAt         DateTime? @map("retry_after_at")
-  skippedAt            DateTime? @map("skipped_at")
-  lastReceiptAt        DateTime? @map("last_receipt_at")
-  lastProviderEventId  String?  @map("last_provider_event_id")
-  failureCode          String?  @map("failure_code")
-  failureReason        String?  @map("failure_reason")
-  skipReason           String?  @map("skip_reason")
-  createdAt            DateTime @default(now()) @map("created_at")
-  updatedAt            DateTime @updatedAt @map("updated_at")
-  line                 HostedLinqLine? @relation(fields: [phoneNumberLookupKey], references: [phoneNumberLookupKey], onDelete: SetNull)
-  alerts               HostedLinqAlert[]
-  ingressLatencyTraces HostedIngressLatencyTrace[]
+  id                       String   @id
+  idempotencyKey           String?  @unique @map("idempotency_key")
+  source                   String
+  sourceRef                String?  @map("source_ref")
+  template                 String?
+  groupJoinOutreachId      String?  @map("group_join_outreach_id")
+  groupJoinReplyOccurredAt DateTime? @map("group_join_reply_occurred_at")
+  phoneNumberLookupKey     String?  @map("phone_number_lookup_key")
+  phoneNumberHint          String?  @map("phone_number_hint")
+  targetKind               String?  @map("target_kind")
+  linqChatLookupKey        String?  @map("linq_chat_lookup_key")
+  messageLookupKey         String?  @unique @map("message_lookup_key")
+  messageIdSuffix          String?  @map("message_id_suffix")
+  service                  String?
+  status                   String   @default("attempted")
+  attemptedAt              DateTime @map("attempted_at")
+  acceptedAt               DateTime? @map("accepted_at")
+  deliveredAt              DateTime? @map("delivered_at")
+  failedAt                 DateTime? @map("failed_at")
+  retryAfterAt             DateTime? @map("retry_after_at")
+  skippedAt                DateTime? @map("skipped_at")
+  lastReceiptAt            DateTime? @map("last_receipt_at")
+  lastProviderEventId      String?  @map("last_provider_event_id")
+  failureCode              String?  @map("failure_code")
+  failureReason            String?  @map("failure_reason")
+  skipReason               String?  @map("skip_reason")
+  createdAt                DateTime @default(now()) @map("created_at")
+  updatedAt                DateTime @updatedAt @map("updated_at")
+  groupJoinOutreach        HostedGroupJoinOutreach? @relation(fields: [groupJoinOutreachId], references: [id], onDelete: Cascade)
+  line                     HostedLinqLine? @relation(fields: [phoneNumberLookupKey], references: [phoneNumberLookupKey], onDelete: SetNull)
+  alerts                   HostedLinqAlert[]
+  ingressLatencyTraces     HostedIngressLatencyTrace[]
 
+  @@index([groupJoinOutreachId, status, attemptedAt], map: "hosted_linq_delivery_group_join_outreach_status_idx")
   @@index([phoneNumberLookupKey, attemptedAt])
   @@index([status, attemptedAt])
   @@index([linqChatLookupKey, attemptedAt])

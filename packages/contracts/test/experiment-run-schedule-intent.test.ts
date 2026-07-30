@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  effectiveProtocolSnapshotSchema,
   experimentAdherenceTargetSchema,
   experimentAdherenceTargetsSchema,
   experimentRunPlanSchema,
   experimentRunScheduleIntentSchema,
+  healthCommonsProtocolSpecSchema,
+  protocolEffectiveSpecSchema,
 } from "../src/index.ts";
 import { experimentFrontmatterSchema } from "../src/schemas.ts";
 import type { JsonSchema } from "../src/types.ts";
@@ -188,6 +191,58 @@ describe("experiment adherence targets", () => {
     expect(experimentRunPlanSchema.parse({ adherenceTargets: [target] }).adherenceTargets).toEqual([
       target,
     ]);
+  });
+
+  it("supports plural activity evidence with an optional minimum duration", () => {
+    const target = {
+      targetId: "easy-cardio",
+      label: "Easy cardio",
+      phase: "intervention",
+      evidence: {
+        kind: "linkedEventCount",
+        eventKind: "activity_session",
+        activityKinds: ["walking", "cycling", "rowing", "elliptical"],
+        minimumDurationMinutes: 35,
+        missing: "missed_after_grace",
+      },
+    } as const;
+
+    expect(experimentAdherenceTargetSchema.parse(target)).toEqual(target);
+    expect(experimentAdherenceTargetSchema.safeParse({
+      ...target,
+      evidence: {
+        ...target.evidence,
+        activityKind: "cycling",
+      },
+    }).success).toBe(false);
+    expect(experimentAdherenceTargetSchema.safeParse({
+      ...target,
+      evidence: {
+        ...target.evidence,
+        eventKind: "intervention_session",
+      },
+    }).success).toBe(false);
+  });
+
+  it("keeps accepted activity evidence in protocol specs and immutable snapshots", () => {
+    const activitySessionEvidence = {
+      activityKinds: ["walking", "cycling", "rowing", "elliptical"],
+      minimumDurationMinutes: 35,
+    } as const;
+
+    expect(healthCommonsProtocolSpecSchema.parse({
+      doseSignature: "3 sessions per week",
+      activitySessionEvidence,
+    }).activitySessionEvidence).toEqual(activitySessionEvidence);
+    expect(effectiveProtocolSnapshotSchema.parse({
+      effectiveSpecHash: `sha256:${"4".repeat(64)}`,
+      doseSignature: "3 sessions per week",
+      activitySessionEvidence,
+    }).activitySessionEvidence).toEqual(activitySessionEvidence);
+    expect(protocolEffectiveSpecSchema.parse({
+      doseSignature: "3 sessions per week",
+      activitySessionEvidence,
+    }).activitySessionEvidence).toEqual(activitySessionEvidence);
   });
 
   it("limits assumed missing policy to intervention-session evidence", () => {

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Menu } from "lucide-react";
 
 import { LandingAuthActions, LandingAuthDialog } from "./auth-controls";
+import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import {
   Drawer,
   DrawerContent,
@@ -15,12 +16,16 @@ import { formatStarCount } from "@/src/lib/github-stars";
 
 const GITHUB_REPO_URL = "https://github.com/cobuildwithus/murph";
 
-const NAV_LINKS = [
+const NAV_LINKS: ReadonlyArray<{
+  href: string;
+  label: string;
+}> = [
   { href: "/#how", label: "How it works" },
+  { href: "/clubs", label: "Clubs" },
   { href: "/#faq", label: "FAQ" },
   { href: "/knowledge", label: "Knowledge" },
   { href: "/security", label: "Security" },
-] as const;
+];
 
 // Large tap rows matching the /home sidebar's mobile nav sizing.
 const MOBILE_MENU_ROW =
@@ -44,6 +49,7 @@ export function StickyNav({
   preloadAuthPanel?: boolean;
   splitUnauthenticatedAuth?: boolean;
 }) {
+  const auth = useAuth();
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
@@ -110,7 +116,7 @@ export function StickyNav({
           <a
             key={href}
             href={href}
-            className={`hidden text-sm transition-colors md:block ${
+            className={`hidden text-sm transition-colors lg:block ${
               onDark
                 ? "text-white/75 hover:text-white"
                 : "text-[#2d3436]/80 hover:text-[#2d3436]"
@@ -128,7 +134,7 @@ export function StickyNav({
               ? `Star Murph on GitHub (${githubStarCount} stars)`
               : "Star Murph on GitHub"
           }
-          className={`hidden items-center gap-1.5 text-sm transition-colors md:inline-flex ${
+          className={`hidden items-center gap-1.5 text-sm transition-colors lg:inline-flex ${
             onDark
               ? "text-white/75 hover:text-white"
               : "text-[#2d3436]/80 hover:text-[#2d3436]"
@@ -156,7 +162,7 @@ export function StickyNav({
         <Drawer open={menuOpen} onOpenChange={setMenuOpen}>
           <DrawerTrigger
             aria-label="Open menu"
-            className={`inline-flex size-9 items-center justify-center rounded-lg transition-colors md:hidden ${
+            className={`inline-flex size-9 items-center justify-center rounded-lg transition-colors lg:hidden ${
               onDark
                 ? "text-white/85 hover:bg-white/10"
                 : "text-[#2d3436]/85 hover:bg-[#2d3436]/[0.06]"
@@ -200,7 +206,11 @@ export function StickyNav({
                     className={`${MOBILE_MENU_ROW} text-left`}
                     onClick={() => {
                       setMenuOpen(false);
-                      setLoginOpen(true);
+                      if (auth.shared) {
+                        auth.openAuthDialog();
+                      } else {
+                        setLoginOpen(true);
+                      }
                     }}
                   >
                     Log in
@@ -211,7 +221,7 @@ export function StickyNav({
           </DrawerContent>
         </Drawer>
       </div>
-      {!authenticated && splitUnauthenticatedAuth ? (
+      {!auth.shared && !authenticated && splitUnauthenticatedAuth ? (
         <LandingAuthDialog open={loginOpen} onOpenChange={setLoginOpen} />
       ) : null}
     </nav>

@@ -802,8 +802,13 @@ describe("executeHostedMailboxEvent", () => {
     expect(JSON.stringify(entry?.redacted)).not.toContain("api.openai.com");
   });
 
-  it("captures hosted Codex warm app-server timing traces", () => {
-    for (const stage of ["warm-reused", "warm-idle", "warm-abort-poisoned"]) {
+  it("captures hosted Codex reusable app-server timing traces", () => {
+    for (const stage of [
+      "preinitialized",
+      "warm-reused",
+      "warm-idle",
+      "warm-abort-poisoned",
+    ]) {
       const eventId = `evt_codex_${stage.replaceAll("-", "_")}_timing`;
       const wake = buildHostedExecutionAssistantNotificationRequestedWake({
         eventId,
@@ -833,6 +838,7 @@ describe("executeHostedMailboxEvent", () => {
           rawEvent: {
             schema: "murph.assistant-codex-app-server-timing.v1",
             type: "assistant.codex.app_server_timing",
+            codexTimingColdStartReason: "node-process-first-use",
             codexTimingElapsedMs: 12,
             codexTimingStage: stage,
             codexTimingTotalElapsedMs: 34,
@@ -850,6 +856,9 @@ describe("executeHostedMailboxEvent", () => {
         message: "Hosted assistant Codex app-server timing captured.",
         phase: "wake.running",
         redacted: expect.objectContaining({
+          ...(stage === "preinitialized"
+            ? { codexTimingColdStartReason: "node-process-first-use" }
+            : {}),
           codexTimingElapsedMs: 12,
           codexTimingStage: stage,
           codexTimingTotalElapsedMs: 34,
@@ -2625,6 +2634,51 @@ describe("executeHostedMailboxEvent", () => {
       conversationMetrics: null,
       mailboxLane: "assistant-notification",
     });
+  });
+
+  it("settles a failed creative notification without regenerating its media", async () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_notification_creative_failure",
+      memberId: "member_group_runtime",
+      notification: {
+        instructions: "Create one brief sponsorship thank-you.",
+        notificationPromptProfile: "creative-response",
+        responsePolicy: {
+          kind: "require_send",
+        },
+        route: {
+          actorId: null,
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_group_sponsorship",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_group_sponsorship",
+          threadIsDirect: false,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+    mocks.sendAssistantNotification.mockRejectedValueOnce(
+      new Error("creative notification delivery failed"),
+    );
+
+    await expect(executeHostedMailboxEvent({
+      wake,
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    })).resolves.toMatchObject({
+      conversationMetrics: null,
+      mailboxLane: "assistant-notification",
+    });
+    expect(mocks.sendAssistantNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        notificationPromptProfile: "creative-response",
+      }),
+    );
   });
 
   it("still fails closed for non-first-contact required notifications", async () => {

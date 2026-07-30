@@ -1,13 +1,17 @@
 import type { AssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import type { AssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
 import type {
-  AssistantResponseMedia,
+  AssistantVaultImageResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeAssistantBackendTarget } from '@murphai/operator-config/assistant-backend'
 import type { AssistantUsageRecord } from '@murphai/hosted-execution/assistant-usage'
 import type {
   HostedExecutionExternalThreadRouteAuthority,
 } from '@murphai/hosted-execution/contracts'
+import type {
+  HostedRuntimeLinqDeliveryBlockCode,
+  HostedRuntimeLinqDeliveryPosture,
+} from '@murphai/hosted-execution/routes'
 import type {
   AutomationAssistantTargetOverride,
   AutomationContinuityPolicy,
@@ -31,11 +35,14 @@ import type {
 import type { AssistantRuntimeIssueInput } from './issue-reporting.js'
 import type {
   HostedRuntimeProductFeedbackRecord,
-  HostedRuntimeProductFeedbackRecordResponse,
   HostedRuntimeFamilyPlanToolRequest,
   HostedRuntimeFamilyPlanToolResponse,
+  HostedRuntimeIMessageContactToolRequest,
+  HostedRuntimeIMessageContactToolResponse,
   HostedRuntimeAssistantConfigurationControlRequest,
   HostedRuntimeAssistantConfigurationToolResponse,
+  HostedRuntimeGroupParticipantDisplayName,
+  HostedRuntimeGroupParticipantDisplayNameSource,
   HostedRuntimeGroupSharedMember,
   HostedRuntimeGroupSharedProjection,
   HostedRuntimeGroupSharedReadRequest,
@@ -226,10 +233,10 @@ export interface AssistantHostedActionApprovalPort {
   request(input: HostedActionApprovalRequest): Promise<HostedActionApprovalResult>
 }
 
-export interface AssistantHostedProductFeedbackRecorder {
-  recordProductFeedback(
+export interface AssistantHostedProductFeedbackCandidateSink {
+  acceptProductFeedbackCandidate(
     feedback: HostedRuntimeProductFeedbackRecord,
-  ): Promise<HostedRuntimeProductFeedbackRecordResponse>
+  ): void
 }
 
 export interface AssistantHostedFamilyPlanTool {
@@ -240,6 +247,12 @@ export interface AssistantHostedFamilyPlanTool {
 
 export interface AssistantHostedPlanUsageTool {
   read(): Promise<HostedPlanUsageStatus>
+}
+
+export interface AssistantHostedIMessageContactTool {
+  ensure(
+    request: HostedRuntimeIMessageContactToolRequest,
+  ): Promise<HostedRuntimeIMessageContactToolResponse>
 }
 
 export interface AssistantHostedSubscriptionTool {
@@ -292,6 +305,18 @@ export type AssistantHostedGroupSharedMember = HostedRuntimeGroupSharedMember
 export type AssistantHostedGroupSharedReadResponse =
   HostedRuntimeGroupSharedReadResult
 
+export type AssistantGroupParticipantDisplayNameSource =
+  HostedRuntimeGroupParticipantDisplayNameSource
+export type AssistantGroupParticipantDisplayName =
+  HostedRuntimeGroupParticipantDisplayName
+
+export interface AssistantHostedGroupParticipantDisplayNameReader {
+  read(input: {
+    channel: 'linq'
+    senderHandles: readonly string[]
+  }): Promise<readonly AssistantGroupParticipantDisplayName[]>
+}
+
 export interface AssistantHostedGroupSharedReader {
   request(
     request: AssistantHostedGroupSharedReadRequest,
@@ -313,28 +338,27 @@ export interface AssistantPhoneCallPort {
   ): Promise<HostedPhoneCallStartResponse>
 }
 
-export type AssistantGeneratedImageContentType =
+export type AssistantPrivateImageContentType =
   | 'image/jpeg'
   | 'image/png'
   | 'image/webp'
 
-export interface AssistantHostedGeneratedImageUploadInput {
-  alt: string | null
+export interface AssistantHostedPrivateImageUrlPublishInput {
   bytes: Uint8Array
-  contentType: AssistantGeneratedImageContentType
-  filename: string
-  metadata: Record<string, string>
-  source: string
+  contentType: AssistantPrivateImageContentType
 }
 
-export interface AssistantHostedGeneratedImageUploader {
-  uploadGeneratedImage(
-    input: AssistantHostedGeneratedImageUploadInput,
-  ): Promise<AssistantResponseMedia>
+export interface AssistantHostedPrivateImageUrlPublisher {
+  publishPrivateImageUrl(
+    input: AssistantHostedPrivateImageUrlPublishInput,
+  ): Promise<{
+    expiresAt: string
+    url: string
+  }>
 }
 
 export interface AssistantHostedImageGenerationResult {
-  media: AssistantResponseMedia | null
+  media: AssistantVaultImageResponseMedia | null
   runtimeIssue: AssistantRuntimeIssueInput | null
   savedImageRef: string | null
 }
@@ -343,11 +367,13 @@ export interface AssistantHostedImageGenerationLauncher {
   launch(input: {
     operationId: string
     originAssistantInputId: string
+    scopeId?: string | null
     run(
       signal: AbortSignal,
       persistCanonicalWrite: <T>(write: () => Promise<T>) => Promise<T>,
     ): Promise<AssistantHostedImageGenerationResult>
-  }): 'already-started' | 'started'
+  }): 'already-pending' | 'already-started' | 'started'
+  readStatus?(scopeId: string): 'pending' | 'queued' | null
 }
 
 export interface AssistantWorkspaceArtifactMaterializationResult {
@@ -385,31 +411,36 @@ export interface AssistantHostedExecutionContext {
   deviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[]
   deviceTool?: AssistantHostedDeviceTool | null
   familyPlanTool?: AssistantHostedFamilyPlanTool | null
+  imessageContactTool?: AssistantHostedIMessageContactTool | null
   personalizationTool?: AssistantHostedPersonalizationTool | null
+  groupParticipantDisplayNameReader?: AssistantHostedGroupParticipantDisplayNameReader | null
   groupPermissionOfferTool?: AssistantHostedGroupPermissionOfferTool | null
   groupSharedReader?: AssistantHostedGroupSharedReader | null
   groupTool?: AssistantHostedGroupTool | null
   labsTool?: AssistantHostedLabsTool | null
   newsletterTool?: AssistantHostedNewsletterTool | null
   planUsageTool?: AssistantHostedPlanUsageTool | null
+  privateImageUrlPublisher?: AssistantHostedPrivateImageUrlPublisher | null
   subscriptionTool?: AssistantHostedSubscriptionTool | null
   dynamicContextPrompts?: readonly string[] | null
-  generatedImageUploader?: AssistantHostedGeneratedImageUploader | null
-  generatedImageUploaderRequired?: boolean | null
   imageGenerationLauncher?: AssistantHostedImageGenerationLauncher | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   memberId: string
   progressDeliveryDependencies?: AssistantHostedProgressDeliveryDependencies
-  productFeedbackRecorder?: AssistantHostedProductFeedbackRecorder | null
+  productFeedbackCandidateSink?: AssistantHostedProductFeedbackCandidateSink | null
   providerFetch?: typeof fetch | null
   phoneCalls?: AssistantPhoneCallPort | null
   publicInternetFetch?: typeof fetch | null
   resolveScheduledLinqRoute?(input: {
+    fromPhoneNumber?: string | null
     homeRouteFallbackAllowed: boolean
     signal?: AbortSignal | null
     target: string
     targetKind: 'explicit' | 'thread'
   }): Promise<{
+    conversationThreadId?: string | null
+    deliveryBlockCode?: HostedRuntimeLinqDeliveryBlockCode | null
+    deliveryPosture?: HostedRuntimeLinqDeliveryPosture | null
     target: string
     threadIsDirect: boolean
   }>
@@ -424,6 +455,24 @@ export interface AssistantHostedExecutionContext {
 
 export interface AssistantExecutionContext {
   hosted: AssistantHostedExecutionContext | null
+}
+
+export function appendAssistantHostedDynamicContextPrompt(input: {
+  executionContext: AssistantExecutionContext
+  prompt: string | null
+}): AssistantExecutionContext {
+  if (!input.prompt || !input.executionContext.hosted) {
+    return input.executionContext
+  }
+  return {
+    hosted: {
+      ...input.executionContext.hosted,
+      dynamicContextPrompts: [
+        ...(input.executionContext.hosted.dynamicContextPrompts ?? []),
+        input.prompt,
+      ],
+    },
+  }
 }
 
 export function normalizeAssistantExecutionContext(
@@ -456,13 +505,17 @@ export function normalizeAssistantExecutionContext(
   const dynamicContextPrompts = normalizeAssistantDynamicContextPrompts(
     hosted?.dynamicContextPrompts,
   )
-  const generatedImageUploader = normalizeAssistantGeneratedImageUploader(
-    hosted?.generatedImageUploader,
-  )
   const familyPlanTool = normalizeAssistantFamilyPlanTool(hosted?.familyPlanTool)
+  const imessageContactTool = normalizeAssistantIMessageContactTool(
+    hosted?.imessageContactTool,
+  )
   const personalizationTool = normalizeAssistantPersonalizationTool(
     hosted?.personalizationTool,
   )
+  const groupParticipantDisplayNameReader =
+    normalizeAssistantGroupParticipantDisplayNameReader(
+      hosted?.groupParticipantDisplayNameReader,
+    )
   const groupPermissionOfferTool = normalizeAssistantGroupPermissionOfferTool(
     hosted?.groupPermissionOfferTool,
   )
@@ -477,8 +530,11 @@ export function normalizeAssistantExecutionContext(
     hosted?.subscriptionTool,
   )
   const phoneCalls = normalizeAssistantPhoneCallPort(hosted?.phoneCalls)
-  const productFeedbackRecorder = normalizeAssistantProductFeedbackRecorder(
-    hosted?.productFeedbackRecorder,
+  const privateImageUrlPublisher = normalizeAssistantPrivateImageUrlPublisher(
+    hosted?.privateImageUrlPublisher,
+  )
+  const productFeedbackCandidateSink = normalizeAssistantProductFeedbackCandidateSink(
+    hosted?.productFeedbackCandidateSink,
   )
   const usageRecorder = normalizeAssistantUsageRecorder(hosted?.usageRecorder)
   if (!memberId) {
@@ -502,22 +558,23 @@ export function normalizeAssistantExecutionContext(
       ...(assistantConfigurationTool ? { assistantConfigurationTool } : {}),
       ...(connectedApps ? { connectedApps } : {}),
       ...(clinicalRecordsConnectLinkTool ? { clinicalRecordsConnectLinkTool } : {}),
-      ...(generatedImageUploader ? { generatedImageUploader } : {}),
       ...(hosted?.imageGenerationLauncher
         ? { imageGenerationLauncher: hosted.imageGenerationLauncher }
         : {}),
       ...(familyPlanTool ? { familyPlanTool } : {}),
+      ...(imessageContactTool ? { imessageContactTool } : {}),
       ...(personalizationTool ? { personalizationTool } : {}),
+      ...(groupParticipantDisplayNameReader
+        ? { groupParticipantDisplayNameReader }
+        : {}),
       ...(groupPermissionOfferTool ? { groupPermissionOfferTool } : {}),
       ...(groupSharedReader ? { groupSharedReader } : {}),
       ...(groupTool ? { groupTool } : {}),
       ...(labsTool ? { labsTool } : {}),
       ...(newsletterTool ? { newsletterTool } : {}),
       ...(planUsageTool ? { planUsageTool } : {}),
+      ...(privateImageUrlPublisher ? { privateImageUrlPublisher } : {}),
       ...(subscriptionTool ? { subscriptionTool } : {}),
-      ...(hosted?.generatedImageUploaderRequired === true
-        ? { generatedImageUploaderRequired: true }
-        : {}),
       ...(typeof hosted?.materializeWorkspaceArtifacts === 'function'
         ? {
             materializeWorkspaceArtifacts: hosted.materializeWorkspaceArtifacts,
@@ -544,7 +601,7 @@ export function normalizeAssistantExecutionContext(
             dynamicContextPrompts,
           }
         : {}),
-      ...(productFeedbackRecorder ? { productFeedbackRecorder } : {}),
+      ...(productFeedbackCandidateSink ? { productFeedbackCandidateSink } : {}),
       ...(usageRecorder ? { usageRecorder } : {}),
       memberId,
       ...(progressDeliveryDependencies
@@ -661,15 +718,28 @@ function normalizeAssistantPhoneCallPort(
   }
 }
 
-function normalizeAssistantProductFeedbackRecorder(
-  input: AssistantHostedExecutionContext['productFeedbackRecorder'] | undefined,
-): AssistantHostedProductFeedbackRecorder | undefined {
-  if (!input || typeof input.recordProductFeedback !== 'function') {
+function normalizeAssistantPrivateImageUrlPublisher(
+  input: AssistantHostedExecutionContext['privateImageUrlPublisher'] | undefined,
+): AssistantHostedPrivateImageUrlPublisher | undefined {
+  if (!input || typeof input.publishPrivateImageUrl !== 'function') {
     return undefined
   }
 
   return {
-    recordProductFeedback: input.recordProductFeedback,
+    publishPrivateImageUrl: input.publishPrivateImageUrl.bind(input),
+  }
+}
+
+function normalizeAssistantProductFeedbackCandidateSink(
+  input: AssistantHostedExecutionContext['productFeedbackCandidateSink'] | undefined,
+): AssistantHostedProductFeedbackCandidateSink | undefined {
+  if (!input || typeof input.acceptProductFeedbackCandidate !== 'function') {
+    return undefined
+  }
+
+  return {
+    acceptProductFeedbackCandidate:
+      input.acceptProductFeedbackCandidate.bind(input),
   }
 }
 
@@ -694,6 +764,18 @@ function normalizeAssistantPlanUsageTool(
 
   return {
     read: input.read.bind(input),
+  }
+}
+
+function normalizeAssistantIMessageContactTool(
+  input: AssistantHostedExecutionContext['imessageContactTool'] | undefined,
+): AssistantHostedIMessageContactTool | undefined {
+  if (!input || typeof input.ensure !== 'function') {
+    return undefined
+  }
+
+  return {
+    ensure: input.ensure.bind(input),
   }
 }
 
@@ -742,6 +824,20 @@ function normalizeAssistantGroupTool(
 
   return {
     request: input.request.bind(input),
+  }
+}
+
+function normalizeAssistantGroupParticipantDisplayNameReader(
+  input:
+    | AssistantHostedExecutionContext['groupParticipantDisplayNameReader']
+    | undefined,
+): AssistantHostedGroupParticipantDisplayNameReader | undefined {
+  if (!input || typeof input.read !== 'function') {
+    return undefined
+  }
+
+  return {
+    read: input.read.bind(input),
   }
 }
 
@@ -802,18 +898,6 @@ function normalizeAssistantUsageRecorder(
 
   return {
     recordUsage: input.recordUsage,
-  }
-}
-
-function normalizeAssistantGeneratedImageUploader(
-  input: AssistantHostedExecutionContext['generatedImageUploader'] | undefined,
-): AssistantHostedGeneratedImageUploader | undefined {
-  if (!input || typeof input.uploadGeneratedImage !== 'function') {
-    return undefined
-  }
-
-  return {
-    uploadGeneratedImage: input.uploadGeneratedImage,
   }
 }
 

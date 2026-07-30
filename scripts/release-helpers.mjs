@@ -476,6 +476,10 @@ export function validateReleaseContext(context, options = {}) {
   const { manifest, orderedPackages, packageByName, packages, primaryPackage } =
     context;
 
+  if (expectVersion !== undefined) {
+    assertSupportedReleaseVersion(expectVersion, 'Expected release version');
+  }
+
   if (typeof manifest.repositoryUrl !== 'string' || manifest.repositoryUrl.length === 0) {
     errors.push('scripts/release-manifest.json must declare repositoryUrl.');
   }

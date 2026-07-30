@@ -6,12 +6,10 @@ import {
   ChevronRightIcon,
   MailIcon,
   MessageSquareTextIcon,
-  NotebookPenIcon,
   SendIcon,
 } from "lucide-react";
 
 import { AuthButton } from "@/src/components/ui/auth-button";
-import { buttonVariants } from "@/src/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -25,16 +23,13 @@ import {
   type ExperimentStartContactChannels,
   type ExperimentStartContactKind,
   type ExperimentStartContactOption,
-  type ExperimentStartProtocolReference,
 } from "@/src/lib/experiments/start-experiment-contact";
-import { cn } from "@/src/lib/utils";
 import { useExperimentStartContactContext } from "./start-experiment-contact-context";
 
 interface StartExperimentButtonProps {
   initialContactChannels?: Partial<ExperimentStartContactChannels> | null;
   murphPhoneNumber?: string | null;
   protocolDays: number;
-  protocolRef?: ExperimentStartProtocolReference | null;
   protocolTitle: string;
 }
 
@@ -56,7 +51,6 @@ export function StartExperimentButton({
   initialContactChannels = null,
   murphPhoneNumber = null,
   protocolDays,
-  protocolRef = null,
   protocolTitle,
 }: StartExperimentButtonProps) {
   const contactDefaults = useExperimentStartContactContext();
@@ -68,10 +62,9 @@ export function StartExperimentButton({
     () => resolveExperimentStartContactAction({
       initialContactChannels: resolvedInitialContactChannels,
       murphPhoneNumber: resolvedMurphPhoneNumber,
-      protocolRef,
       protocolTitle,
     }),
-    [protocolRef, protocolTitle, resolvedInitialContactChannels, resolvedMurphPhoneNumber],
+    [protocolTitle, resolvedInitialContactChannels, resolvedMurphPhoneNumber],
   );
 
   function handleAuthenticatedStartClick() {
@@ -127,63 +120,36 @@ export function StartExperimentChannelDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="!bottom-3 !left-3 !right-3 !top-auto !w-auto !max-w-none !translate-x-0 !translate-y-0 gap-0 overflow-hidden rounded-2xl border-border bg-popover p-0 text-popover-foreground sm:!bottom-auto sm:!left-1/2 sm:!right-auto sm:!top-1/2 sm:!w-full sm:!max-w-[620px] sm:!-translate-x-1/2 sm:!-translate-y-1/2">
+      <DialogContent className="!bottom-[max(env(safe-area-inset-bottom),0.75rem)] !left-3 !right-3 !top-auto !w-auto !max-w-none !translate-x-0 !translate-y-0 gap-0 overflow-hidden rounded-2xl border-border bg-popover p-0 text-popover-foreground sm:!bottom-auto sm:!left-1/2 sm:!right-auto sm:!top-1/2 sm:!w-full sm:!max-w-[540px] sm:!-translate-x-1/2 sm:!-translate-y-1/2">
         <div className="max-h-[calc(100dvh-1.5rem)] overflow-y-auto sm:max-h-[calc(100dvh-3rem)]">
-          <div className="border-b border-border bg-card px-5 py-5 sm:px-7 sm:py-6">
-            <DialogHeader className="gap-4 pr-8 sm:pr-9">
-              <div className="flex items-start gap-4">
-                <div className="flex min-w-0 flex-1 flex-col gap-3">
-                  <span className="font-mono text-[10px]/3 uppercase tracking-[0.14em] text-primary">
-                    Start Experiment
-                  </span>
-                  <DialogTitle className="text-balance font-serif text-2xl/7 font-semibold tracking-normal text-foreground sm:text-3xl/8">
-                    Choose where to start.
-                  </DialogTitle>
-                  <DialogDescription className="max-w-[48ch] text-pretty text-sm leading-6">
-                    Murph opens the app you pick. When a draft is available,
-                    review it before sending.
-                  </DialogDescription>
-                </div>
-                <div
-                  aria-hidden="true"
-                  className="hidden size-12 shrink-0 items-center justify-center rounded-xl border border-border bg-muted text-primary sm:flex"
-                >
-                  <NotebookPenIcon />
-                </div>
+          <div className="bg-card px-5 pb-5 pt-5 sm:px-6 sm:pb-6 sm:pt-6">
+            <DialogHeader className="gap-0 pr-8 sm:pr-9">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[10px]/3 uppercase tracking-[0.13em] text-primary">
+                <span>Start experiment</span>
+                <span aria-hidden="true" className="text-border">·</span>
+                <span>{protocolSummary}</span>
               </div>
+              <DialogTitle className="mt-3 text-pretty font-serif text-[1.65rem]/8 font-semibold tracking-[-0.02em] text-foreground sm:text-3xl/9">
+                {protocolTitle}
+              </DialogTitle>
+              <DialogDescription className="mt-2 max-w-[48ch] text-pretty text-sm/6 text-muted-foreground">
+                Choose the app you already use. Murph will prepare a short
+                message for you to review and send.
+              </DialogDescription>
             </DialogHeader>
-
-            <div className="mt-5 flex flex-col gap-2 rounded-xl border border-border bg-background/65 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-5">
-              <div className="min-w-0">
-                <span className="font-mono text-[10px]/3 uppercase tracking-[0.12em] text-muted-foreground">
-                  Protocol
-                </span>
-                <p className="mt-1 truncate font-serif text-lg/6 font-semibold tracking-normal text-foreground">
-                  {protocolTitle}
-                </p>
-              </div>
-              <span className="shrink-0 font-mono text-[10px]/3 uppercase tracking-[0.12em] text-primary">
-                {protocolSummary}
-              </span>
-            </div>
           </div>
 
-          <div className="flex flex-col gap-3 px-5 py-5 sm:px-7 sm:py-6">
-            <div className="flex items-center justify-between gap-3">
-              <span className="font-mono text-[10px]/3 uppercase tracking-[0.12em] text-muted-foreground">
-                Ways to start
-              </span>
-              <span className="font-mono text-[10px]/3 uppercase tracking-[0.12em] text-primary">
-                {options.length} available
-              </span>
-            </div>
-            <div className="grid gap-3">
+          <div className="flex flex-col gap-3 border-t border-border px-5 pb-5 pt-4 sm:px-6 sm:pb-6">
+            <span className="font-mono text-[10px]/3 uppercase tracking-[0.12em] text-muted-foreground">
+              Choose an app
+            </span>
+            <div className="grid gap-2">
               {options.map((option) => (
                 <ContactOptionLink key={option.kind} option={option} />
               ))}
             </div>
-            <p className="text-xs/5 text-muted-foreground">
-              Nothing is sent until you send it.
+            <p className="pt-1 text-xs/5 text-muted-foreground">
+              Review the message, then send when you&apos;re ready.
             </p>
           </div>
         </div>
@@ -194,39 +160,30 @@ export function StartExperimentChannelDialog({
 
 function ContactOptionLink({ option }: { option: ExperimentStartContactOption }) {
   const Icon = CONTACT_OPTION_ICONS[option.kind];
-  const isExternal = option.kind === "telegram";
+  const isExternal =
+    option.kind === "telegram" && /^https?:\/\//u.test(option.href);
 
   return (
     <a
       href={option.href}
       target={isExternal ? "_blank" : undefined}
       rel={isExternal ? "noreferrer" : undefined}
-      aria-label={`Start experiment by ${option.label}`}
-      className={cn(
-        buttonVariants({ variant: "outline" }),
-        "group/channel h-auto min-h-[92px] w-full justify-start gap-0 overflow-hidden whitespace-normal rounded-xl border-border bg-background/70 p-0 text-left hover:border-primary/40 hover:bg-card focus-visible:ring-primary/30 sm:min-h-[104px]",
-      )}
+      aria-label={`Continue experiment setup in ${option.label}`}
+      className="group/channel flex min-h-16 w-full items-center gap-3.5 whitespace-normal rounded-lg border border-border bg-background/55 px-3 py-3 text-left text-foreground outline-none transition-[background-color,border-color,transform] duration-200 hover:border-primary/40 hover:bg-background active:translate-y-px focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-popover sm:min-h-[72px] sm:px-3.5"
     >
-      <span className="flex min-w-0 flex-1 items-stretch">
-        <span className="flex w-12 shrink-0 items-center justify-center border-r border-border bg-muted text-primary sm:w-16">
-          <Icon data-icon="inline-start" />
+      <span className="flex size-10 shrink-0 items-center justify-center rounded-md bg-muted text-primary">
+        <Icon className="size-[18px]" data-icon="inline-start" />
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="font-serif text-base/6 font-semibold tracking-normal text-foreground">
+          {option.label}
         </span>
-        <span className="flex min-w-0 flex-1 flex-col gap-2 px-3.5 py-3.5 sm:px-5">
-          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="font-serif text-lg/6 font-semibold tracking-normal text-foreground">
-              {option.label}
-            </span>
-            <span className="rounded-md bg-muted px-2 py-1 font-mono text-[10px]/3 uppercase tracking-[0.12em] text-muted-foreground">
-              {option.meta}
-            </span>
-          </span>
-          <span className="break-words text-wrap text-sm/5 text-muted-foreground">
-            {option.description}
-          </span>
+        <span className="break-words text-sm/5 text-muted-foreground">
+          {option.description}
         </span>
-        <span className="flex shrink-0 items-center px-2 text-muted-foreground transition-[color,transform] duration-150 group-hover/channel:translate-x-0.5 group-hover/channel:text-primary sm:px-4">
-          <ChevronRightIcon data-icon="inline-end" />
-        </span>
+      </span>
+      <span className="flex shrink-0 items-center text-muted-foreground transition-[color,transform] duration-200 group-hover/channel:translate-x-0.5 group-hover/channel:text-primary">
+        <ChevronRightIcon className="size-4" data-icon="inline-end" />
       </span>
     </a>
   );

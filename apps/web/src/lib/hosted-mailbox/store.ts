@@ -37,7 +37,6 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
-import { recordHostedRuntimeLogTx } from "../hosted-workspace/store";
 import { advanceHostedMailboxLaneConsumedSeq } from "./lane-counter-store";
 import {
   createHostedAssistantInputLookupKey,
@@ -80,6 +79,7 @@ export interface HostedMailboxItemRow {
   payloadRef: string | null;
   payloadBytes: number | null;
   payloadHash: string | null;
+  sourceMessageLookupKey?: string | null;
   consumedAt: Date | null;
   expiresAt: Date | null;
   createdAt: Date;
@@ -110,6 +110,13 @@ export interface AppendHostedMailboxItemResult {
   dedupeConflict: boolean;
   inserted: boolean;
   item: HostedMailboxItemRecord;
+}
+
+export interface HostedMailboxSourceConversationEntry {
+  contentAvailable: boolean;
+  itemId: string;
+  userId: string;
+  wake: HostedExecutionConversationMessageWake | null;
 }
 
 export interface HostedMailboxLaneCursor {
@@ -171,6 +178,7 @@ interface AppendHostedMailboxItemBaseInput {
 
 interface AppendHostedMailboxItemInternalInput extends AppendHostedMailboxItemBaseInput {
   itemId?: string;
+  sourceMessageLookupKey?: string | null;
 }
 
 export async function appendHostedMailboxItem(
@@ -254,6 +262,13 @@ async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
     userId,
   });
   const { payloadBytes, payloadHash, serialized } = payloadMetadata;
+  const sourceMessageLookupKey = input.sourceMessageLookupKey === undefined
+    || input.sourceMessageLookupKey === null
+    ? null
+    : requireNonEmptyString(
+        input.sourceMessageLookupKey,
+        "Hosted mailbox sourceMessageLookupKey",
+      );
   await acquireHostedMailboxDedupeAppendLockTx({
     dedupeKey,
     tx: input.tx,
@@ -274,7 +289,7 @@ async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
       payloadHash,
       payloadSchema,
     });
-    await recordHostedMailboxDedupeConflictLogTx({
+    recordHostedMailboxDedupeConflictLog({
       dedupeConflict,
       existing,
       kind,
@@ -282,15 +297,6 @@ async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
       payloadBytes,
       payloadHash,
       payloadSchema,
-      tx: input.tx,
-      userId,
-    });
-    await recordHostedMailboxAppendLogTx({
-      outcome: "duplicate",
-      item: existing,
-      payloadStorage: existing.payloadRef ? "ref" : "inline",
-      tx: input.tx,
-      userId,
     });
 
     return {
@@ -337,6 +343,7 @@ async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
       id,
       user_id,
       assistant_input_lookup_key,
+      source_message_lookup_key,
       causal_seq,
       lane,
       lane_seq,
@@ -356,6 +363,7 @@ async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
       ${itemId},
       ${userId},
       ${input.assistantInputLookupKey},
+      ${sourceMessageLookupKey},
       ${causalSeq},
       ${lane},
       ${laneSeq},
@@ -376,6 +384,7 @@ async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
       id,
       user_id AS "userId",
       assistant_input_lookup_key AS "assistantInputLookupKey",
+      source_message_lookup_key AS "sourceMessageLookupKey",
       causal_seq AS "causalSeq",
       lane,
       lane_seq AS "laneSeq",
@@ -413,7 +422,7 @@ async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
       payloadHash,
       payloadSchema,
     });
-    await recordHostedMailboxDedupeConflictLogTx({
+    recordHostedMailboxDedupeConflictLog({
       dedupeConflict,
       existing: concurrentExisting,
       kind,
@@ -421,15 +430,6 @@ async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
       payloadBytes,
       payloadHash,
       payloadSchema,
-      tx: input.tx,
-      userId,
-    });
-    await recordHostedMailboxAppendLogTx({
-      outcome: "duplicate",
-      item: concurrentExisting,
-      payloadStorage: concurrentExisting.payloadRef ? "ref" : "inline",
-      tx: input.tx,
-      userId,
     });
 
     return {
@@ -453,14 +453,6 @@ async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
     });
   }
 
-  await recordHostedMailboxAppendLogTx({
-    outcome: "inserted",
-    item,
-    payloadStorage: payloadStorage.storage,
-    tx: input.tx,
-    userId,
-  });
-
   return {
     duplicate: false,
     dedupeConflict: false,
@@ -473,6 +465,14 @@ async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
 
 export async function appendHostedMailboxEnvelopeTx(input: {
   envelope: HostedMailboxProducerEnvelope;
+  tx: HostedMailboxMutationTx;
+}): Promise<AppendHostedMailboxItemResult> {
+  return appendHostedMailboxEnvelopeInternalTx(input);
+}
+
+export async function appendHostedMailboxEnvelopeWithSourceMessageTx(input: {
+  envelope: HostedMailboxProducerEnvelope;
+  sourceMessageLookupKey: string;
   tx: HostedMailboxMutationTx;
 }): Promise<AppendHostedMailboxItemResult> {
   return appendHostedMailboxEnvelopeInternalTx(input);
@@ -495,6 +495,7 @@ async function appendHostedMailboxEnvelopeInternalTx(input: {
   envelope: HostedMailboxProducerEnvelope;
   expiresAt?: Date | string | null;
   itemId?: string;
+  sourceMessageLookupKey?: string | null;
   tx: HostedMailboxMutationTx;
 }): Promise<AppendHostedMailboxItemResult> {
   const envelope = input.envelope;
@@ -535,6 +536,9 @@ async function appendHostedMailboxEnvelopeInternalTx(input: {
     lane,
     occurredAt: envelope.occurredAt,
     payloadSerializedJson: encodedPayload.serialized,
+    ...(input.sourceMessageLookupKey === undefined
+      ? {}
+      : { sourceMessageLookupKey: input.sourceMessageLookupKey }),
     tx: input.tx,
     userId: envelope.userId,
   });
@@ -830,7 +834,7 @@ async function fetchHostedRuntimeMailboxProjectionTx(input: {
         FROM hosted_mailbox_item AS mailbox_item
         WHERE mailbox_item.user_id = ${userId}
           AND mailbox_item.lane = requested_lane.lane
-          AND mailbox_item.created_at >= ${retainedAt}
+          AND mailbox_item.created_at > ${retainedAt}
           AND (mailbox_item.expires_at IS NULL OR mailbox_item.expires_at > ${fetchedAt})
         ORDER BY mailbox_item.lane_seq ASC
         LIMIT 1
@@ -840,7 +844,7 @@ async function fetchHostedRuntimeMailboxProjectionTx(input: {
         FROM hosted_mailbox_item AS mailbox_item
         WHERE mailbox_item.user_id = ${userId}
           AND mailbox_item.lane = requested_lane.lane
-          AND mailbox_item.created_at >= ${retainedAt}
+          AND mailbox_item.created_at > ${retainedAt}
           AND (mailbox_item.expires_at IS NULL OR mailbox_item.expires_at > ${fetchedAt})
         ORDER BY mailbox_item.lane_seq DESC
         LIMIT 1
@@ -880,7 +884,7 @@ async function fetchHostedRuntimeMailboxProjectionTx(input: {
             THEN lane_projection.imported_seq
           ELSE LEAST(lane_projection.imported_seq, lane_projection.consumed_seq)
         END
-        AND mailbox_item.created_at >= ${retainedAt}
+        AND mailbox_item.created_at > ${retainedAt}
         AND (mailbox_item.expires_at IS NULL OR mailbox_item.expires_at > ${fetchedAt})
       ORDER BY mailbox_item.lane_seq ASC
       LIMIT ${limitPerLane}
@@ -1309,6 +1313,62 @@ export async function readHostedMailboxWakeByDedupeKey(input: {
     userId: item.userId,
   });
   return decoded ? parseHostedExecutionWake(decoded) : null;
+}
+
+export async function readHostedMailboxSourceConversationEntriesTx(input: {
+  sourceMessageLookupKeys: readonly string[];
+  tx: HostedMailboxMutationTx;
+}): Promise<HostedMailboxSourceConversationEntry[]> {
+  const sourceMessageLookupKeys = normalizeHostedMailboxSourceMessageLookupKeys(
+    input.sourceMessageLookupKeys,
+  );
+  if (sourceMessageLookupKeys.length === 0) {
+    return [];
+  }
+
+  // Edit planners hold this lock from the lineage read through correction
+  // append. Ordinary source-indexed appends do not take it: an edit that races
+  // an uncommitted original sees a missing source and uses the bounded provider
+  // retry path after the original commits.
+  await acquireHostedMailboxSourceMessageLocksTx({
+    sourceMessageLookupKeys,
+    tx: input.tx,
+  });
+  const rows = await input.tx.hostedMailboxItem.findMany({
+    orderBy: [
+      { causalSeq: "asc" },
+      { id: "asc" },
+    ],
+    select: {
+      id: true,
+      userId: true,
+    },
+    // One original plus Linq's documented five-edit limit fits in six rows.
+    // Read one extra so callers can fail closed on impossible lineage.
+    take: 7,
+    where: {
+      kind: "conversation.message",
+      sourceMessageLookupKey: {
+        in: sourceMessageLookupKeys,
+      },
+    },
+  });
+
+  return Promise.all(rows.map(async (row) => {
+    const wake = await readHostedMailboxWakeByItemId({
+      mailboxItemId: row.id,
+      prisma: input.tx,
+    });
+    const conversationWake = wake?.kind === "conversation.message"
+      ? wake
+      : null;
+    return {
+      contentAvailable: conversationWake !== null,
+      itemId: row.id,
+      userId: row.userId,
+      wake: conversationWake,
+    };
+  }));
 }
 
 export async function readHostedMailboxWakeByItemId(input: {
@@ -1922,37 +1982,32 @@ async function acquireHostedMailboxDedupeAppendLockTx(input: {
   `;
 }
 
-async function recordHostedMailboxAppendLogTx(input: {
-  outcome: "duplicate" | "inserted";
-  item: HostedMailboxItemRow;
-  payloadStorage: "inline" | "ref";
+export async function acquireHostedMailboxSourceMessageLocksTx(input: {
+  sourceMessageLookupKeys: readonly string[];
   tx: HostedMailboxMutationTx;
-  userId: string;
 }): Promise<void> {
-  const inserted = input.outcome === "inserted";
-  await recordHostedRuntimeLogTx({
-    component: "mailbox",
-    eventCode: "mailbox.appended",
-    level: "info",
-    mailboxLane: input.item.lane,
-    mailboxSeqEnd: input.item.laneSeq,
-    mailboxSeqStart: input.item.laneSeq,
-    phase: "import",
-    redacted: {
-      bytes: input.item.payloadBytes ?? null,
-      dedupeKeyPresent: true,
-      duplicate: !inserted,
-      inserted,
-      kind: input.item.kind,
-      schema: input.item.payloadSchema,
-      storage: input.payloadStorage,
-    },
-    tx: input.tx,
-    userId: input.userId,
-  });
+  const sourceMessageLookupKeys = normalizeHostedMailboxSourceMessageLookupKeys(
+    input.sourceMessageLookupKeys,
+  );
+  for (const sourceMessageLookupKey of sourceMessageLookupKeys) {
+    await input.tx.$executeRaw`
+      SELECT pg_advisory_xact_lock(
+        hashtext('mailbox-source-message'),
+        hashtext(${sourceMessageLookupKey})
+      )
+    `;
+  }
 }
 
-async function recordHostedMailboxDedupeConflictLogTx(input: {
+function normalizeHostedMailboxSourceMessageLookupKeys(
+  values: readonly string[],
+): string[] {
+  return [...new Set(values.map((value) =>
+    requireNonEmptyString(value, "Hosted mailbox sourceMessageLookupKey")
+  ))].sort();
+}
+
+function recordHostedMailboxDedupeConflictLog(input: {
   dedupeConflict: boolean;
   existing: HostedMailboxItemRow;
   kind: HostedMailboxKind;
@@ -1960,36 +2015,42 @@ async function recordHostedMailboxDedupeConflictLogTx(input: {
   payloadBytes: number;
   payloadHash: string | null;
   payloadSchema: string;
-  tx: HostedMailboxMutationTx;
-  userId: string;
-}): Promise<void> {
+}): void {
   if (!input.dedupeConflict) {
     return;
   }
 
-  await recordHostedRuntimeLogTx({
+  // The mailbox row is already the durable append authority. Keep only this
+  // rare mismatch in platform logs, with content-free metadata, so optional
+  // diagnostics cannot add work to or abort the canonical transaction.
+  console.warn(
+    "Hosted mailbox dedupe conflict.",
+    summarizeHostedMailboxDedupeConflictForLog(input),
+  );
+}
+
+function summarizeHostedMailboxDedupeConflictForLog(input: {
+  existing: HostedMailboxItemRow;
+  kind: HostedMailboxKind;
+  lane: HostedMailboxLane;
+  payloadBytes: number;
+  payloadHash: string | null;
+  payloadSchema: string;
+}) {
+  return {
     component: "mailbox",
     eventCode: "mailbox.dedupe_conflict",
-    level: "warn",
-    mailboxLane: input.existing.lane,
-    mailboxSeqEnd: input.existing.laneSeq,
-    mailboxSeqStart: input.existing.laneSeq,
-    phase: "import",
-    redacted: {
-      existingBytes: input.existing.payloadBytes ?? null,
-      existingHasHash: input.existing.payloadHash != null,
-      existingKind: input.existing.kind,
-      existingLane: input.existing.lane,
-      existingSchema: input.existing.payloadSchema,
-      requestedBytes: input.payloadBytes,
-      requestedHasHash: input.payloadHash != null,
-      requestedKind: input.kind,
-      requestedLane: input.lane,
-      requestedSchema: input.payloadSchema,
-    },
-    tx: input.tx,
-    userId: input.userId,
-  });
+    existingBytes: input.existing.payloadBytes ?? null,
+    existingHasHash: input.existing.payloadHash != null,
+    existingKind: input.existing.kind,
+    existingLane: input.existing.lane,
+    existingSchema: input.existing.payloadSchema,
+    requestedBytes: input.payloadBytes,
+    requestedHasHash: input.payloadHash != null,
+    requestedKind: input.kind,
+    requestedLane: input.lane,
+    requestedSchema: input.payloadSchema,
+  };
 }
 
 export async function hydrateHostedMailboxItemTx(input: {
@@ -2238,7 +2299,13 @@ export function resolveHostedMailboxPayloadRef(payloadRef: string): string {
 }
 
 const HOSTED_MAILBOX_FETCH_LIMIT_MAX = 100;
-const HOSTED_MAILBOX_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+// The read filter below and the retention DELETE in hosted-retention/cleanup.ts
+// must apply the same window: a read that still surfaces rows the sweep has
+// already deleted (or hides rows it has not) desynchronizes the consumed
+// watermark. Exported so cleanup.ts consumes this value rather than restating
+// it. Retention direction is one-way — cleanup depends on the mailbox, never
+// the reverse — so this stays the single definition.
+export const HOSTED_MAILBOX_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 
 async function fetchHostedMailboxItemRowsAfterSeq(input: {
   afterSeq: bigint;
@@ -2304,17 +2371,17 @@ function isHostedMailboxItemExpired(
 ): boolean {
   return (
     (item.expiresAt !== null && item.expiresAt.getTime() <= at.getTime())
-    || item.createdAt.getTime() < at.getTime() - HOSTED_MAILBOX_RETENTION_MS
+    || item.createdAt.getTime() <= at.getTime() - HOSTED_MAILBOX_RETENTION_MS
   );
 }
 
 export function buildHostedMailboxLiveItemWhere(at: Date): {
-  createdAt: { gte: Date };
+  createdAt: { gt: Date };
   OR: [{ expiresAt: null }, { expiresAt: { gt: Date } }];
 } {
   return {
     createdAt: {
-      gte: new Date(at.getTime() - HOSTED_MAILBOX_RETENTION_MS),
+      gt: new Date(at.getTime() - HOSTED_MAILBOX_RETENTION_MS),
     },
     OR: [
       {

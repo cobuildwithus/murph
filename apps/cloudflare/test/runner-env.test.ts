@@ -13,6 +13,7 @@ import {
   buildHostedRunnerJobRuntime,
   buildHostedRunnerJobRuntimeConfig,
   buildHostedRunnerContainerEnv,
+  buildHostedRunnerContainerPlatformEnv,
   buildHostedRunnerChannelPlatformEnv,
   buildHostedRunnerLegacyDeviceSyncPlatformEnv,
   buildHostedRunnerPlatformEnv,
@@ -34,14 +35,19 @@ import {
 } from "../src/runner-egress-intercept.ts";
 
 const REQUIRED_HOSTED_CRYPTO_WORKER_VARS = {
+  CF_PUBLIC_BASE_URL: "https://murph-hosted.cobuildwithus.workers.dev",
+  CF_BUNDLES_ENAM_BUCKET: "hosted-bundles-enam",
+  CF_BUNDLES_ENAM_PREVIEW_BUCKET: "hosted-bundles-enam-preview",
   HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION:
     "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1",
   HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
     "-----BEGIN PUBLIC KEY-----\\n...\\n-----END PUBLIC KEY-----",
   HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cloudflare-automation:v1",
   HOSTED_CRYPTO_ENV: "production",
+  HOSTED_R2_CUTOVER_PHASE: "source_active",
   HOSTED_R2_PRESIGN_ACCOUNT_ID: "r2-account-test",
   HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-bundles",
+  HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "hosted-bundles-enam",
 } as const;
 const REQUIRED_OPENAI_PROVIDER_ENV = {
   HOSTED_ASSISTANT_PROVIDER: "openai",
@@ -242,6 +248,23 @@ describe("buildHostedRunnerContainerEnv", () => {
       HOSTED_EMAIL_SEND_READY: "false",
       NODE_ENV: "development",
       OPENAI_API_KEY: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+    });
+  });
+
+  it("forwards the managed Venice credential for per-member provider overrides", () => {
+    expect(buildHostedRunnerContainerEnv({
+      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      OPENAI_API_KEY: "openai-worker-secret",
+      VENICE_API_KEY: "venice-worker-secret",
+    })).toEqual({
+      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      HOSTED_EMAIL_INGRESS_READY: "false",
+      HOSTED_EMAIL_SEND_READY: "false",
+      NODE_ENV: "production",
+      OPENAI_API_KEY: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+      VENICE_API_KEY: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
     });
   });
 
@@ -1161,8 +1184,8 @@ describe("buildHostedRuntimeResolvedConfig", () => {
 describe("hosted deploy automation device-sync surface", () => {
   it("keeps device-sync outside the default runner env profiles while reusing shared provider env key lists", () => {
     const deployEnv = readHostedDeployAutomationEnvironment({
-      CF_BUNDLES_BUCKET: "bundles",
-      CF_BUNDLES_PREVIEW_BUCKET: "bundles-preview",
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_WORKER_NAME: "murph-runner",
       ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
     });
@@ -1202,9 +1225,13 @@ describe("hosted deploy automation device-sync surface", () => {
     expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).toEqual(
       expect.arrayContaining([
         "HOSTED_ASSISTANT_PROVIDER",
+        "HOSTED_VENICE_LUNA_MODEL",
+        "HOSTED_VENICE_SOL_MODEL",
+        "HOSTED_VENICE_TERRA_MODEL",
         "WHOOP_SCOPES",
       ]),
     );
+    expect(HOSTED_WORKER_OPTIONAL_SECRET_NAMES).toContain("VENICE_API_KEY");
     for (const retiredWhatsAppVar of [
       "WHATSAPP_API_BASE_URL",
       "WHATSAPP_GRAPH_VERSION",
@@ -1219,7 +1246,6 @@ describe("hosted deploy automation device-sync surface", () => {
       "LITELLM_PROXY_API_KEY",
       "OLLAMA_API_KEY",
       "OPENROUTER_API_KEY",
-      "VENICE_API_KEY",
     ]) {
       expect(HOSTED_WORKER_OPTIONAL_SECRET_NAMES).not.toContain(
         removedProviderSecret,
@@ -1250,5 +1276,15 @@ describe("hosted deploy automation device-sync surface", () => {
     expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).not.toContain("FFMPEG_COMMAND");
     expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).not.toContain("WHISPER_COMMAND");
     expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).not.toContain("WHISPER_MODEL_PATH");
+  });
+});
+
+describe("hosted private-media platform env", () => {
+  it("keeps the deployment Worker origin in the trusted container platform env", () => {
+    expect(buildHostedRunnerContainerPlatformEnv({
+      CF_PUBLIC_BASE_URL: "https://hosted-runner-staging.example.test",
+    })).toEqual({
+      CF_PUBLIC_BASE_URL: "https://hosted-runner-staging.example.test",
+    });
   });
 });

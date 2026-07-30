@@ -299,6 +299,8 @@ function aggregateMetricValues(values: readonly number[], aggregation: MetricSer
   switch (aggregation) {
     case "count":
       return values.length;
+    case "latest":
+      return values.at(-1) ?? 0;
     case "max":
       return Math.max(...values);
     case "mean":

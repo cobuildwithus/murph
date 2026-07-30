@@ -123,6 +123,24 @@ export {
   decideExperimentFollowupDue,
   summarizeExperimentProgress,
 } from "./experiments.ts";
+export {
+  humanizeExperimentOutcomeKey,
+  resolveExperimentMetricOutcome,
+  resolveExperimentPrimaryOutcome,
+  summarizeExperimentOutcomeEvidencePlan,
+} from "./experiment-outcomes.ts";
+export {
+  isRegisteredExperimentMetricSource,
+  resolveExperimentMetricIdentity,
+} from "./experiment-metrics.ts";
+export type {
+  ExperimentOutcomeEvidenceOptions,
+  ExperimentOutcomeEvidencePlanSummary,
+  ExperimentOutcomeEvidenceRoleSummary,
+  ResolvedExperimentMetricOutcome,
+  ResolvedExperimentPrimaryOutcome,
+  ResolvedExperimentStructuredReviewOutcome,
+} from "./experiment-outcomes.ts";
 export { buildExperimentProgressCard } from "./experiment-progress-card.ts";
 export type {
   BuildExperimentProgressCardOptions,
@@ -132,6 +150,7 @@ export type {
 } from "./experiment-progress-card.ts";
 export {
   resolveAdherenceObservationActivityKind,
+  resolveExperimentAdherenceTargets,
   synthesizeLegacySessionAdherenceTargets,
 } from "./experiment-adherence.ts";
 export type {

@@ -56,6 +56,7 @@ export type HostedThreadRouteChannel = Extract<
 export type HostedThreadRouteOwnerState = HostedMemberCoreState & HostedMemberPersonAccessState;
 
 export interface HostedThreadRouteSnapshot {
+  accountLookupKey?: string;
   channel: HostedThreadRouteChannel;
   container: HostedMemberCoreState;
   containerMemberId: string;
@@ -94,6 +95,7 @@ export async function readHostedThreadRouteByThreadIdentity(input: {
   const rows = await input.prisma.hostedThreadRoute.findMany({
     orderBy: { createdAt: "asc" },
     select: {
+      accountLookupKey: true,
       channel: true,
       container: {
         select: {
@@ -174,6 +176,7 @@ export async function readHostedThreadRouteByThreadIdentity(input: {
       : null;
 
   return {
+    ...(row.accountLookupKey ? { accountLookupKey: row.accountLookupKey } : {}),
     channel: row.channel,
     container: row.container.member,
     containerMemberId: row.containerMemberId,
@@ -341,14 +344,45 @@ export async function appendHostedLinqThreadRouteReactionContextTx(input: {
   text: string;
   threadId: string;
 }): Promise<"appended" | "route_unavailable"> {
+  return appendHostedLinqThreadRouteGroupEventContextTx(input);
+}
+
+export async function appendHostedLinqThreadRouteParticipantContextTx(input: {
+  containerMemberId: string;
+  excludedAccountLookupKeys: readonly string[];
+  prisma: Prisma.TransactionClient;
+  text: string;
+  threadId: string;
+}): Promise<"appended" | "route_unavailable"> {
+  return appendHostedLinqThreadRouteGroupEventContextTx(input);
+}
+
+async function appendHostedLinqThreadRouteGroupEventContextTx(input: {
+  accountLookupKey?: string;
+  containerMemberId: string;
+  excludedAccountLookupKeys?: readonly string[];
+  prisma: Prisma.TransactionClient;
+  text: string;
+  threadId: string;
+}): Promise<"appended" | "route_unavailable"> {
   const route = await lockAndReadHostedLinqThreadRoutePendingContextRowTx(input);
   if (
     !route
-    || !doesHostedLinqRouteMatchAccount({
-      accountLookupKey: input.accountLookupKey,
-      route,
-      threadId: input.threadId,
-    })
+    || (
+      input.accountLookupKey !== undefined
+      && !doesHostedLinqRouteMatchAccount({
+        accountLookupKey: input.accountLookupKey,
+        route,
+        threadId: input.threadId,
+      })
+    )
+    || input.excludedAccountLookupKeys?.some((accountLookupKey) =>
+      doesHostedLinqRouteMatchAccount({
+        accountLookupKey,
+        route,
+        threadId: input.threadId,
+      })
+    ) === true
     || !(await readActiveHostedMemberAccess({
       memberId: route.containerMemberId,
       prisma: input.prisma,
@@ -387,7 +421,7 @@ export async function appendHostedLinqThreadRouteReactionContextTx(input: {
 }
 
 async function lockAndReadHostedLinqThreadRoutePendingContextRowTx(input: {
-  accountLookupKey: string;
+  accountLookupKey?: string;
   containerMemberId: string;
   prisma: Prisma.TransactionClient;
   threadId: string;

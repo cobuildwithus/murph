@@ -370,6 +370,8 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_R2_PRESIGN_ACCESS_KEY_ID).toBe("hosted-local-r2-access-key");
     expect(merged.HOSTED_R2_PRESIGN_ACCOUNT_ID).toBe("hosted-local-r2-account");
     expect(merged.HOSTED_R2_PRESIGN_BUCKET_NAME).toBe("hosted-local-r2-bundles");
+    expect(merged.HOSTED_R2_CUTOVER_PHASE).toBe("source_active");
+    expect(merged.HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME).toBe("hosted-local-r2-bundles-enam");
     expect(merged.HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY).toBe("hosted-local-r2-secret-key");
   });
 
@@ -387,6 +389,8 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_R2_PRESIGN_ACCESS_KEY_ID).toBe("hosted-local-r2-access-key");
     expect(merged.HOSTED_R2_PRESIGN_ACCOUNT_ID).toBe("hosted-local-r2-account");
     expect(merged.HOSTED_R2_PRESIGN_BUCKET_NAME).toBe("hosted-local-r2-bundles");
+    expect(merged.HOSTED_R2_CUTOVER_PHASE).toBe("source_active");
+    expect(merged.HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME).toBe("hosted-local-r2-bundles-enam");
     expect(merged.HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY).toBe("hosted-local-r2-secret-key");
   });
 
@@ -405,6 +409,8 @@ describe("mergeCloudflareLocalEnv", () => {
       expect(merged.HOSTED_R2_PRESIGN_ACCESS_KEY_ID).toBeUndefined();
       expect(merged.HOSTED_R2_PRESIGN_ACCOUNT_ID).toBeUndefined();
       expect(merged.HOSTED_R2_PRESIGN_BUCKET_NAME).toBeUndefined();
+      expect(merged.HOSTED_R2_CUTOVER_PHASE).toBeUndefined();
+      expect(merged.HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME).toBeUndefined();
       expect(merged.HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY).toBeUndefined();
     }
   });
@@ -430,6 +436,8 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_R2_PRESIGN_ACCOUNT_ID).toBe("hosted-local-r2-account");
     expect(merged.HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT).toBe("1");
     expect(merged.HOSTED_R2_PRESIGN_BUCKET_NAME).toBe("hosted-local-r2-bundles");
+    expect(merged.HOSTED_R2_CUTOVER_PHASE).toBe("source_active");
+    expect(merged.HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME).toBe("hosted-local-r2-bundles-enam");
     expect(merged.HOSTED_R2_PRESIGN_CONTROL_ENDPOINT).toBe("http://127.0.0.1:9000");
     expect(merged.HOSTED_R2_PRESIGN_ENDPOINT).toBe("http://host.docker.internal:9000");
     expect(merged.HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY).toBe("hosted-local-r2-secret-key");
@@ -454,6 +462,8 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_R2_PRESIGN_CONTROL_ENDPOINT).toBe("http://127.0.0.1:9000");
     expect(merged.HOSTED_R2_PRESIGN_ENDPOINT).toBe("http://host.docker.internal:9000");
     expect(merged.HOSTED_R2_PRESIGN_BUCKET_NAME).toBe("hosted-local-r2-bundles");
+    expect(merged.HOSTED_R2_CUTOVER_PHASE).toBe("source_active");
+    expect(merged.HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME).toBe("hosted-local-r2-bundles-enam");
   });
 
   it("keeps local generated hosted crypto keys ahead of pulled Vercel values by default", () => {
@@ -1324,16 +1334,10 @@ describe("buildWranglerVarArgs", () => {
   it("emits hosted provider optional vars inspected by the Worker", () => {
     expect(
       buildWranglerVarArgs({
-        CLOUDFLARE_IMAGES_ACCOUNT_ID: "images-account",
-        CLOUDFLARE_IMAGES_VARIANT: "public",
         MURPH_ELEVENLABS_MODEL_ID: "eleven_multilingual_v2",
         MURPH_ELEVENLABS_VOICE_ID: "voice-murph",
       }),
     ).toEqual([
-      "--var",
-      "CLOUDFLARE_IMAGES_ACCOUNT_ID:images-account",
-      "--var",
-      "CLOUDFLARE_IMAGES_VARIANT:public",
       "--var",
       "MURPH_ELEVENLABS_MODEL_ID:eleven_multilingual_v2",
       "--var",
@@ -1453,8 +1457,14 @@ describe("buildWranglerEnvFileText", () => {
         MURPH_HOSTED_LOCAL_PROFILE: "dev",
         MURPH_DATA_API_KEY: "local-data-api-key",
         OPENAI_API_KEY: "local-openai-key",
+        VENICE_API_KEY: "local-venice-key",
       }),
     ).toContain('OPENAI_API_KEY="local-openai-key"');
+    expect(
+      buildWranglerEnvFileText({
+        VENICE_API_KEY: "local-venice-key",
+      }),
+    ).toContain('VENICE_API_KEY="local-venice-key"');
     expect(
       buildWranglerEnvFileText({
         MURPH_DATA_API_KEY: "local-data-api-key",
@@ -1469,9 +1479,6 @@ describe("buildWranglerEnvFileText", () => {
 
   it("includes hosted provider optional env inspected by the Worker", () => {
     const text = buildWranglerEnvFileText({
-      CLOUDFLARE_IMAGES_ACCOUNT_ID: "images-account",
-      CLOUDFLARE_IMAGES_API_KEY: "images-secret",
-      CLOUDFLARE_IMAGES_VARIANT: "public",
       ELEVENLABS_API_KEY: "elevenlabs-secret",
       EXA_API_KEY: "exa-secret",
       HOSTED_EMAIL_DEFAULT_SUBJECT: "Murph",
@@ -1481,9 +1488,6 @@ describe("buildWranglerEnvFileText", () => {
       MURPH_ELEVENLABS_VOICE_ID: "voice-murph",
     });
 
-    expect(text).toContain('CLOUDFLARE_IMAGES_ACCOUNT_ID="images-account"');
-    expect(text).toContain('CLOUDFLARE_IMAGES_API_KEY="images-secret"');
-    expect(text).toContain('CLOUDFLARE_IMAGES_VARIANT="public"');
     expect(text).toContain('ELEVENLABS_API_KEY="elevenlabs-secret"');
     expect(text).toContain('EXA_API_KEY="exa-secret"');
     expect(text).toContain('HOSTED_EMAIL_DEFAULT_SUBJECT="Murph"');
@@ -1611,6 +1615,23 @@ describe("buildWranglerLocalDevConfig", () => {
       "RunnerContainer",
       "DeploySmokeRunnerContainer",
     ]);
+    expect(config.durable_objects).toMatchObject({
+      bindings: expect.arrayContaining([
+        {
+          class_name: "DatabaseHealthDurableObject",
+          name: "DATABASE_HEALTH_MONITOR",
+        },
+      ]),
+    });
+    expect(config.migrations).toEqual(expect.arrayContaining([
+      {
+        new_sqlite_classes: ["DatabaseHealthDurableObject"],
+        tag: "v4",
+      },
+    ]));
+    expect(config.triggers).toEqual({
+      crons: ["*/5 * * * *"],
+    });
     expect(container.image).toBe("../../../Dockerfile.cloudflare-hosted-runner");
     expect(container.image_build_context).toBe("..");
     expect(container.image_vars).toEqual({
@@ -1815,17 +1836,19 @@ describe("buildWranglerLocalDevConfig", () => {
     });
   });
 
-  it("declares Worker-owned data API and OpenAI credentials as local worker secrets", () => {
+  it("declares Worker-owned data API and provider credentials as local worker secrets", () => {
     const config = buildWranglerLocalDevConfig({
       HOSTED_ASSISTANT_PROVIDER: "openai",
       MURPH_DATA_API_KEY: "local-data-api-key",
       OPENAI_API_KEY: "local-openai-key",
+      VENICE_API_KEY: "local-venice-key",
     });
 
     expect(config.secrets).toEqual({
       required: expect.arrayContaining([
         "MURPH_DATA_API_KEY",
         "OPENAI_API_KEY",
+        "VENICE_API_KEY",
       ]),
     });
     expect(config.vars).toMatchObject({
@@ -1833,6 +1856,7 @@ describe("buildWranglerLocalDevConfig", () => {
     });
     expect(config.vars).not.toHaveProperty("MURPH_DATA_API_KEY");
     expect(config.vars).not.toHaveProperty("OPENAI_API_KEY");
+    expect(config.vars).not.toHaveProperty("VENICE_API_KEY");
   });
 
   it("declares the dev Codex subscription auth JSON as a local worker secret, never a config var", () => {

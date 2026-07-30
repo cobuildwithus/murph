@@ -734,6 +734,7 @@ export function buildHostedLinqInboundEvent(
     messageId?: string;
     parts?: HostedLinqInboundPartInput[];
     recipientUserId?: string;
+    replyToMessageId?: string;
     service?: string;
     text?: string;
   } = {},
@@ -773,6 +774,13 @@ export function buildHostedLinqInboundEvent(
       message: {
         id: input.messageId ?? `msg_local_${userId}`,
         parts,
+        ...(input.replyToMessageId
+          ? {
+              reply_to: {
+                message_id: input.replyToMessageId,
+              },
+            }
+          : {}),
       },
       recipient_handle: {
         handle: buildLinqHomePhoneNumber(recipientUserId),

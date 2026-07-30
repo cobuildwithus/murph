@@ -512,6 +512,148 @@ describe("hosted onboarding member activation", () => {
     });
   });
 
+  it("activates verified-email-only family members without assigning a Linq home line", async () => {
+    const member = makeMemberSnapshot({
+      core: {
+        billingStatus: HostedBillingStatus.canceled,
+      },
+      emailAuthorization: {
+        directPublicSender: null,
+        memberId: "member_123",
+        stripeCheckoutEmail: null,
+        verifiedEmail: {
+          address: "member@example.com",
+          lookupKey: "hbidx:email:v1:lookup",
+          verifiedAt: new Date("2026-06-18T12:00:00.000Z"),
+        },
+      },
+      identity: {
+        phoneLookupKey: null,
+        phoneNumber: null,
+        phoneNumberVerifiedAt: null,
+      },
+      routing: null,
+    });
+    setActivationMemberSnapshot(member);
+
+    await expect(activateHostedMemberForFamilySponsorshipTx({
+      memberId: member.core.id,
+      occurredAt: new Date("2026-06-18T12:00:00.000Z"),
+      prisma: makeTransactionHarness({
+        accountGroupMemberships: [{
+          group: { billingStatus: HostedBillingStatus.active, suspendedAt: null },
+          status: "active",
+        }],
+        billingStatus: HostedBillingStatus.canceled,
+        suspendedAt: null,
+        threadContainer: null,
+      }) as never,
+      sourceEventId: "family-invite:email-only",
+    })).resolves.toMatchObject({
+      activated: true,
+      memberId: "member_123",
+    });
+
+    expect(mocks.resolveHostedMemberActivationLinqRoute).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        kind: "member.activated",
+        memberChannels: {
+          email: true,
+          linq: false,
+          telegram: false,
+        },
+        signupWelcome: null,
+      }),
+      tx: expect.anything(),
+    });
+  });
+
+  it.each([
+    {
+      name: "an established Linq thread",
+      routing: {
+        linqChatId: "chat_home_email",
+        linqHomeLineAssignedAt: new Date("2026-06-18T11:00:00.000Z"),
+        linqRecipientPhone: null,
+        memberId: "member_123",
+        pendingLinqChatId: null,
+        pendingLinqParticipantContact: null,
+        pendingLinqRecipientPhone: null,
+        telegramThreadId: null,
+        telegramUserId: null,
+        telegramUserLookupKey: null,
+      },
+    },
+    {
+      name: "a pending email-handle Linq thread",
+      routing: {
+        linqChatId: null,
+        linqHomeLineAssignedAt: null,
+        linqRecipientPhone: null,
+        memberId: "member_123",
+        pendingLinqChatId: "chat_pending_email",
+        pendingLinqParticipantContact: {
+          kind: "email" as const,
+          lookupKey: "hbidx:email:v1:lookup",
+          observedAt: new Date("2026-06-18T11:00:00.000Z"),
+          value: "member@example.com",
+        },
+        pendingLinqRecipientPhone: null,
+        telegramThreadId: null,
+        telegramUserId: null,
+        telegramUserLookupKey: null,
+      },
+    },
+  ])("reuses $name for verified-email-only family members", async ({ routing }) => {
+    const member = makeMemberSnapshot({
+      core: {
+        billingStatus: HostedBillingStatus.canceled,
+      },
+      emailAuthorization: {
+        directPublicSender: null,
+        memberId: "member_123",
+        stripeCheckoutEmail: null,
+        verifiedEmail: {
+          address: "member@example.com",
+          lookupKey: "hbidx:email:v1:lookup",
+          verifiedAt: new Date("2026-06-18T12:00:00.000Z"),
+        },
+      },
+      identity: {
+        phoneLookupKey: null,
+        phoneNumber: null,
+        phoneNumberVerifiedAt: null,
+      },
+      routing,
+    });
+    setActivationMemberSnapshot(member);
+
+    await expect(activateHostedMemberForFamilySponsorshipTx({
+      memberId: member.core.id,
+      occurredAt: new Date("2026-06-18T12:00:00.000Z"),
+      prisma: makeTransactionHarness({
+        accountGroupMemberships: [{
+          group: { billingStatus: HostedBillingStatus.active, suspendedAt: null },
+          status: "active",
+        }],
+        billingStatus: HostedBillingStatus.canceled,
+        suspendedAt: null,
+        threadContainer: null,
+      }) as never,
+      sourceEventId: `family-invite:${routing.linqChatId ?? routing.pendingLinqChatId}`,
+    })).resolves.toMatchObject({
+      activated: true,
+      memberId: "member_123",
+    });
+
+    expect(mocks.resolveHostedMemberActivationLinqRoute).toHaveBeenCalledWith({
+      member,
+      prisma: expect.anything(),
+    });
+  });
+
   it("uses caller-prepared roots for family sponsorship without the legacy bridge", async () => {
     const member = makeMemberSnapshot({
       core: {
@@ -599,6 +741,37 @@ describe("hosted onboarding member activation", () => {
       },
     });
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(4);
+  });
+
+  it("suppresses the canned signup welcome when the accepted inbound is the welcome turn", async () => {
+    const member = makeMemberSnapshot();
+
+    await expect(
+      activateHostedMemberForPositiveSourceTx({
+        dispatchContext: {
+          eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
+          occurredAt: "2026-04-12T00:00:00.000Z",
+          sourceEventId: "evt_instant_start",
+          sourceType: "hosted.linq.instant-start",
+        },
+        memberId: member.core.id,
+        prisma: makeTransactionHarness() as never,
+        suppressSignupWelcome: true,
+      }),
+    ).resolves.toMatchObject({
+      activated: true,
+      memberId: "member_123",
+    });
+
+    expect(mocks.resolveHostedMemberActivationLinqRoute).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        kind: "member.activated",
+        signupWelcome: null,
+      }),
+      tx: expect.anything(),
+    });
   });
 
   it("does not enqueue a signup welcome when Linq only assigned a home line", async () => {

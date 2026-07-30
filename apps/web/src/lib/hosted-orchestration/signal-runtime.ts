@@ -103,7 +103,7 @@ export interface SignalHostedManualRunInput {
   userId: string;
 }
 
-export interface SignalHostedRuntimeRecheckInput {
+export interface SignalHostedRuntimeControlInput {
   abortSignal?: AbortSignal;
   client?: HostedRuntimeTemporalSignalClient | null;
   environment?: NodeJS.ProcessEnv;
@@ -228,7 +228,7 @@ export async function signalHostedManualRunRuntime(
 }
 
 export async function signalHostedRuntimeRecheckRuntime(
-  input: SignalHostedRuntimeRecheckInput,
+  input: SignalHostedRuntimeControlInput,
 ): Promise<HostedRuntimeSignalResult> {
   const prisma = input.prisma ?? getPrisma();
   await requireHostedRuntimeActiveAccess(input.userId, {
@@ -243,6 +243,45 @@ export async function signalHostedRuntimeRecheckRuntime(
     environment: input.environment,
     ensureWorkspace: false,
     prisma,
+    signal: parseHostedRuntimeSignal({
+      kind: "runtime_recheck_requested",
+    }),
+    userId: input.userId,
+  });
+}
+
+export async function signalHostedRuntimeWakeRuntime(
+  input: SignalHostedRuntimeControlInput,
+): Promise<HostedRuntimeSignalResult> {
+  const prisma = input.prisma ?? getPrisma();
+  await requireHostedRuntimeActiveAccess(input.userId, {
+    code: "HOSTED_RUNTIME_USER_INACTIVE",
+    message: "Hosted runtime user is not active.",
+    prisma,
+  });
+
+  return signalHostedUserRuntimeWorkflow({
+    abortSignal: input.abortSignal,
+    client: input.client,
+    environment: input.environment,
+    ensureWorkspace: false,
+    prisma,
+    signal: parseHostedRuntimeSignal({
+      kind: "runtime_wake_requested",
+    }),
+    userId: input.userId,
+  });
+}
+
+export async function signalHostedRetentionRuntimeRecheck(
+  input: SignalHostedRuntimeControlInput,
+): Promise<HostedRuntimeSignalResult> {
+  return signalHostedUserRuntimeWorkflow({
+    abortSignal: input.abortSignal,
+    client: input.client,
+    environment: input.environment,
+    ensureWorkspace: false,
+    prisma: input.prisma,
     signal: parseHostedRuntimeSignal({
       kind: "runtime_recheck_requested",
     }),

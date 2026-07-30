@@ -6,10 +6,13 @@ import { hostedLookupKeyMatchesValue } from "./contact-privacy";
 import { normalizeNullableString } from "./shared";
 import {
   HOSTED_USAGE_CREDIT_CHECKOUT_PURPOSE,
-  HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION,
+  HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V2,
   HOSTED_USAGE_CREDIT_SAVED_CARD_PURPOSE,
+  isHostedUsageCreditSavedCardPolicyVersion,
   parseHostedUsageCreditCheckoutRequestPolicyVersion,
 } from "./usage-credit-offers";
+import { isHostedUsageCreditGroupReturnUrl } from
+  "./usage-credit-purchase-stripe";
 import type {
   HostedUsageCreditPurchaseForReconciliation,
 } from "./usage-credit-stripe-reconciliation-context";
@@ -172,6 +175,9 @@ export function readHostedUsageCreditSavedCardPurchaseId(
   metadata: Prisma.JsonValue | Stripe.Metadata | null,
 ): string | null {
   const value = readStringRecord(metadata);
+  const policyVersion = value
+    ? parseHostedUsageCreditCheckoutRequestPolicyVersion(value.policyVersion)
+    : null;
   if (value?.purpose !== HOSTED_USAGE_CREDIT_SAVED_CARD_PURPOSE) {
     return null;
   }
@@ -179,7 +185,8 @@ export function readHostedUsageCreditSavedCardPurchaseId(
   if (
     Object.keys(value).length !== expectedKeys.length ||
     expectedKeys.some((key) => !(key in value)) ||
-    value.policyVersion !== HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION ||
+    !policyVersion ||
+    !isHostedUsageCreditSavedCardPolicyVersion(policyVersion) ||
     !normalizeNullableString(value.purchaseId)
   ) {
     throw new Error("Saved-card usage-credit metadata did not match.");
@@ -459,7 +466,20 @@ function assertHostedUsageCreditMetadataForPurpose(input: {
     !policyVersion ||
     (
       input.purpose === HOSTED_USAGE_CREDIT_SAVED_CARD_PURPOSE &&
-      policyVersion !== HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION
+      (
+        !isHostedUsageCreditSavedCardPolicyVersion(policyVersion) ||
+        (
+          policyVersion === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V2 &&
+          (
+            !isHostedUsageCreditGroupReturnUrl(
+              input.purchase.checkoutCancelUrl,
+            ) ||
+            !isHostedUsageCreditGroupReturnUrl(
+              input.purchase.checkoutSuccessUrl,
+            )
+          )
+        )
+      )
     )
   ) {
     throw new Error("Usage-credit payment policy did not match.");

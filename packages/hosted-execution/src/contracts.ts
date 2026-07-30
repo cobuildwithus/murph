@@ -133,6 +133,17 @@ export type HostedExecutionTelegramExternalThreadRouteAuthority =
     channel: "telegram";
   };
 
+/**
+ * Provider-authenticated sender evidence for one exact accepted group message.
+ * The assistant runtime derives this after reloading the opaque assistant
+ * input id; the model never supplies a canonical member id.
+ */
+export interface HostedExecutionAcceptedGroupMessageParticipant {
+  assistantInputId: string;
+  senderHandle: string;
+  source: "linq" | "telegram";
+}
+
 export interface HostedExecutionBaseEvent {
   kind: HostedExecutionEventKind;
   userId: string;
@@ -192,6 +203,13 @@ export type HostedExecutionAssistantNotificationDeliveryDispatchMode =
   | "immediate"
   | "queue-only";
 
+export const HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_PROMPT_PROFILES = [
+  "creative-response",
+] as const;
+
+export type HostedExecutionAssistantNotificationPromptProfile =
+  (typeof HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_PROMPT_PROFILES)[number];
+
 export type HostedExecutionAssistantNotificationResponsePolicy =
   | { kind: "allow_send_or_skip" }
   | { kind: "require_send" }
@@ -228,6 +246,7 @@ export interface HostedExecutionAssistantNotificationRequestedPayload {
   externalThreadRouteAuthority?: HostedExecutionExternalThreadRouteAuthority | null;
   firstContact?: HostedExecutionAssistantNotificationFirstContactPolicy | null;
   instructions: string;
+  notificationPromptProfile?: HostedExecutionAssistantNotificationPromptProfile | null;
   responsePolicy?: HostedExecutionAssistantNotificationResponsePolicy | null;
   route: HostedExecutionAssistantNotificationRoute;
 }
@@ -257,9 +276,16 @@ export interface HostedExecutionAssistantAskConsentedMemberTarget {
   permissionDigest: string;
 }
 
+export interface HostedExecutionAssistantAskGroupSenderTarget {
+  groupRuntimeMemberId: string;
+  kind: "group_sender";
+  permissionDigest: string;
+}
+
 export type HostedExecutionAssistantAskTarget =
   | HostedExecutionAssistantAskJoinedGroupTarget
-  | HostedExecutionAssistantAskConsentedMemberTarget;
+  | HostedExecutionAssistantAskConsentedMemberTarget
+  | HostedExecutionAssistantAskGroupSenderTarget;
 
 export interface HostedExecutionAssistantAskAcceptedInputOrigin {
   assistantInputId: string;
@@ -302,9 +328,17 @@ export interface HostedExecutionAssistantAskConsentedMemberRequestedPayload {
   target: HostedExecutionAssistantAskConsentedMemberTarget;
 }
 
+export interface HostedExecutionAssistantAskGroupSenderRequestedPayload {
+  expiresAt: string;
+  origin: HostedExecutionAssistantAskAcceptedInputOrigin;
+  question: string;
+  target: HostedExecutionAssistantAskGroupSenderTarget;
+}
+
 export type HostedExecutionAssistantAskRequestedPayload =
   | HostedExecutionAssistantAskJoinedGroupRequestedPayload
-  | HostedExecutionAssistantAskConsentedMemberRequestedPayload;
+  | HostedExecutionAssistantAskConsentedMemberRequestedPayload
+  | HostedExecutionAssistantAskGroupSenderRequestedPayload;
 
 export interface HostedExecutionAssistantAskJoinedGroupCompletedPayload {
   expiresAt: string;
@@ -367,6 +401,11 @@ export interface HostedExecutionTelegramMessage {
   messageId: string;
   replyContextPreview?: string | null;
   schema: typeof HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA;
+  /**
+   * Presentation-only display name from trusted Telegram ingress. Never
+   * identity, membership, routing, or effect authority.
+   */
+  senderDisplayName?: string | null;
   /**
    * Sending Telegram `@username`, carried only so the assistant can address
    * participants by name. Never identity authority: usernames are optional,
@@ -495,6 +534,8 @@ export type HostedExecutionLinqConversationMessagePart =
 export interface HostedExecutionLinqConversationMessage {
   affirmativeReaction?: true;
   chatId: string;
+  editedSourceInputId?: string;
+  editedTextPartIndex?: number;
   from: string;
   isFromMe: boolean;
   messageId: string;
@@ -616,6 +657,26 @@ export type HostedExecutionConversationMessagePayload =
   | HostedExecutionLinqConversationMessagePayload
   | HostedExecutionTelegramConversationMessagePayload
   | HostedExecutionEmailConversationMessagePayload;
+
+/**
+ * Returns only the human-authored text represented by a conversation wake.
+ * It performs no truncation so callers can either preserve the exact text or
+ * reject it at their own authorization boundary.
+ */
+export function readHostedExecutionConversationMessageText(
+  payload: HostedExecutionConversationMessagePayload,
+): string | null {
+  const text = payload.channel === "linq"
+    ? payload.linqMessage.parts
+      .filter((part) => part.type === "text")
+      .map((part) => part.value)
+      .join("\n")
+    : payload.channel === "telegram"
+      ? payload.telegramMessage.text ?? ""
+      : "";
+  const normalized = text.trim();
+  return normalized.length > 0 ? normalized : null;
+}
 
 export interface HostedExecutionConversationMessageWake extends HostedExecutionBaseWake {
   kind: "conversation.message";

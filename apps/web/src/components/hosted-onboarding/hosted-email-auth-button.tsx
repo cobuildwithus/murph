@@ -1,12 +1,19 @@
 "use client";
 
 import { useLoginWithEmail, usePrivy } from "@privy-io/react-auth";
-import { useRef, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
 import { Input } from "@/src/components/ui/input";
 import { Label } from "@/src/components/ui/label";
+import { Spinner } from "@/src/components/ui/spinner";
 import { EmailIcon } from "@/src/components/homepage/email-icon";
 
 import {
@@ -21,23 +28,37 @@ import type { HostedPrivyAuthenticatedInput } from "./use-hosted-auth-completion
 
 export function HostedEmailAuthButton({
   active = false,
+  completionPending = false,
   disableSignup = false,
+  disabled: externallyDisabled = false,
   inline = false,
   initialEmailAddress = null,
   lockedEmailAddress = null,
   onActivate = () => undefined,
+  onAuthCancel,
+  onAuthQueue,
+  onAuthQueueCancel,
+  onAuthStart,
   onAuthenticated,
+  onCodeEntryChange,
 }: {
   active?: boolean;
+  completionPending?: boolean;
   disableSignup?: boolean;
+  disabled?: boolean;
   inline?: boolean;
   initialEmailAddress?: string | null;
   lockedEmailAddress?: string | null;
   onActivate?: () => void;
+  onAuthCancel?: () => void;
+  onAuthQueue?: () => boolean;
+  onAuthQueueCancel?: () => void;
+  onAuthStart?: () => boolean;
   onAuthenticated: (input: HostedPrivyAuthenticatedInput) => Promise<void> | void;
+  onCodeEntryChange?: (active: boolean) => void;
 }) {
   const { loginWithCode, sendCode, state } = useLoginWithEmail();
-  const { ready } = usePrivy();
+  const { authenticated, ready } = usePrivy();
   const lockedEmail = normalizeEmailAddress(lockedEmailAddress);
   const [changeEmailDialogOpen, setChangeEmailDialogOpen] = useState(false);
   const [code, setCode] = useState("");
@@ -48,13 +69,41 @@ export function HostedEmailAuthButton({
   const [pendingEmailAddress, setPendingEmailAddress] = useState<string | null>(
     null,
   );
+  const [emailCodeSendPending, setEmailCodeSendPending] = useState(false);
   const emailInputRef = useRef<HTMLInputElement | null>(null);
   const codeInputRef = useRef<HTMLInputElement | null>(null);
+  const emailCodeSendInFlightRef = useRef(false);
+  const pendingEmailCodeSendRef = useRef<{
+    emailAddress: string;
+    startAuthOnDrain: boolean;
+  } | null>(null);
 
   const loading =
-    state.status === "sending-code" || state.status === "submitting-code";
-  const disabled = !ready || loading;
+    emailCodeSendPending
+    || state.status === "sending-code"
+    || state.status === "submitting-code";
+  const disabled = externallyDisabled || loading || completionPending;
   const showCodeEntry = pendingEmailAddress !== null;
+  const drainPendingEmailCodeSendEffect = useEffectEvent(() => {
+    void drainPendingEmailCodeSend();
+  });
+  const cancelPendingEmailCodeSendEffect = useEffectEvent(() => {
+    cancelPendingEmailCodeSend();
+  });
+
+  useEffect(() => {
+    const pendingSend = pendingEmailCodeSendRef.current;
+    if (!pendingSend) return;
+
+    if (authenticated && pendingSend.startAuthOnDrain) {
+      cancelPendingEmailCodeSendEffect();
+      return;
+    }
+
+    if (ready) {
+      drainPendingEmailCodeSendEffect();
+    }
+  }, [authenticated, ready]);
 
   function clearCode() {
     setCode("");
@@ -85,18 +134,30 @@ export function HostedEmailAuthButton({
       return;
     }
 
-    try {
-      await sendEmailCode(nextEmailAddress);
-      setPendingEmailAddress(nextEmailAddress);
-      clearCode();
-    } catch (error) {
-      setErrorMessage(
-        toErrorMessage(
-          error,
-          "We could not send a verification code to that email address.",
-        ),
-      );
+    if (
+      emailCodeSendInFlightRef.current
+      || pendingEmailCodeSendRef.current !== null
+    ) {
+      return;
     }
+
+    if (!ready) {
+      const startAuthOnDrain = onAuthQueue !== undefined;
+      const authClaimed = onAuthQueue
+        ? onAuthQueue()
+        : onAuthStart
+          ? onAuthStart()
+          : true;
+      if (!authClaimed) return;
+
+      queueEmailCodeSend(nextEmailAddress, startAuthOnDrain);
+      return;
+    }
+
+    if (onAuthStart && !onAuthStart()) return;
+
+    queueEmailCodeSend(nextEmailAddress, false);
+    await drainPendingEmailCodeSend();
   }
 
   async function handleResendCode() {
@@ -172,9 +233,71 @@ export function HostedEmailAuthButton({
   }
 
   function handleUseAnotherEmail() {
+    cancelPendingEmailCodeSend();
+    onAuthCancel?.();
     clearCode();
     setErrorMessage(null);
     setPendingEmailAddress(null);
+    onCodeEntryChange?.(false);
+  }
+
+  function queueEmailCodeSend(
+    emailAddress: string,
+    startAuthOnDrain: boolean,
+  ) {
+    pendingEmailCodeSendRef.current = {
+      emailAddress,
+      startAuthOnDrain,
+    };
+    setEmailCodeSendPending(true);
+  }
+
+  async function drainPendingEmailCodeSend() {
+    const pendingSend = pendingEmailCodeSendRef.current;
+    if (!ready || !pendingSend || emailCodeSendInFlightRef.current) return;
+
+    emailCodeSendInFlightRef.current = true;
+
+    if (
+      pendingSend.startAuthOnDrain
+      && onAuthStart
+      && !onAuthStart()
+    ) {
+      cancelPendingEmailCodeSend();
+      emailCodeSendInFlightRef.current = false;
+      return;
+    }
+
+    pendingEmailCodeSendRef.current = null;
+
+    try {
+      await sendEmailCode(pendingSend.emailAddress);
+      setPendingEmailAddress(pendingSend.emailAddress);
+      onCodeEntryChange?.(true);
+      clearCode();
+    } catch (error) {
+      onAuthCancel?.();
+      setErrorMessage(
+        toErrorMessage(
+          error,
+          "We could not send a verification code to that email address.",
+        ),
+      );
+    } finally {
+      emailCodeSendInFlightRef.current = false;
+      setEmailCodeSendPending(false);
+    }
+  }
+
+  function cancelPendingEmailCodeSend() {
+    const pendingSend = pendingEmailCodeSendRef.current;
+    if (!pendingSend) return;
+
+    pendingEmailCodeSendRef.current = null;
+    setEmailCodeSendPending(false);
+    if (pendingSend.startAuthOnDrain) {
+      onAuthQueueCancel?.();
+    }
   }
 
   const changeEmailDialog = lockedEmail ? (
@@ -246,9 +369,11 @@ export function HostedEmailAuthButton({
             }
             disabled={disabled}
             inputRef={codeInputRef}
-            pendingAction={loading ? "verify-code" : null}
+            pendingAction={loading || completionPending ? "verify-code" : null}
             primaryActionLabel="Verify email"
-            primaryActionPendingLabel="Verifying..."
+            primaryActionPendingLabel={
+              completionPending ? "Finishing..." : "Verifying..."
+            }
             secondaryAction={codeStepSecondaryAction}
             onCodeChange={setCode}
             onResendCode={handleResendCode}
@@ -267,6 +392,7 @@ export function HostedEmailAuthButton({
                   inputMode="email"
                   placeholder="you@example.com"
                   ref={emailInputRef}
+                  disabled={emailCodeSendPending}
                   value={emailAddress}
                   onChange={(event) => setEmailAddress(event.currentTarget.value)}
                   inputSize="xl"
@@ -275,14 +401,18 @@ export function HostedEmailAuthButton({
               </div>
             )}
             <Button
+              aria-busy={emailCodeSendPending || state.status === "sending-code"}
               type="submit"
               size="xl"
               disabled={disabled}
               className="w-full"
             >
-              {state.status === "sending-code"
-                ? "Sending..."
-                : "Email me a code"}
+              {emailCodeSendPending || state.status === "sending-code" ? (
+                <>
+                  <Spinner aria-hidden="true" />
+                  Sending...
+                </>
+              ) : "Email me a code"}
             </Button>
           </form>
         )}
@@ -322,9 +452,11 @@ export function HostedEmailAuthButton({
               }
               disabled={disabled}
               inputRef={codeInputRef}
-              pendingAction={loading ? "verify-code" : null}
+              pendingAction={loading || completionPending ? "verify-code" : null}
               primaryActionLabel="Verify email"
-              primaryActionPendingLabel="Verifying..."
+              primaryActionPendingLabel={
+                completionPending ? "Finishing..." : "Verifying..."
+              }
               secondaryAction={codeStepSecondaryAction}
               onCodeChange={setCode}
               onResendCode={handleResendCode}
@@ -341,6 +473,7 @@ export function HostedEmailAuthButton({
                   inputMode="email"
                   placeholder="you@example.com"
                   ref={emailInputRef}
+                  disabled={emailCodeSendPending}
                   value={emailAddress}
                   onChange={(event) => setEmailAddress(event.currentTarget.value)}
                   inputSize="xl"
@@ -348,14 +481,18 @@ export function HostedEmailAuthButton({
                 />
               )}
               <Button
+                aria-busy={emailCodeSendPending || state.status === "sending-code"}
                 type="submit"
                 size="xl"
                 disabled={disabled}
                 className="w-full"
               >
-                {state.status === "sending-code"
-                  ? "Sending..."
-                  : "Email me a code"}
+                {emailCodeSendPending || state.status === "sending-code" ? (
+                  <>
+                    <Spinner aria-hidden="true" />
+                    Sending...
+                  </>
+                ) : "Email me a code"}
               </Button>
             </form>
           )}

@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => {
     appendHostedMailboxEnvelopeTx: vi.fn(async (input: {
       envelope?: { eventId: string };
       eventId?: string;
+      tx?: unknown;
     }) => {
       const eventId = input.eventId ?? input.envelope?.eventId;
       if (!eventId) {
@@ -133,6 +134,13 @@ vi.mock("@/src/lib/hosted-mailbox/store", async () => {
   return {
     ...actual,
     appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
+    appendHostedMailboxEnvelopeWithSourceMessageTx: (
+      input: Parameters<typeof actual.appendHostedMailboxEnvelopeWithSourceMessageTx>[0],
+    ) =>
+      mocks.appendHostedMailboxEnvelopeTx({
+        envelope: input.envelope,
+        tx: input.tx,
+      }),
     readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
     readHostedMailboxItemOwnerById: mocks.readHostedMailboxItemOwnerById,
   };
@@ -344,6 +352,7 @@ type UsageResetPrismaFixture = {
   };
   hostedThreadRoute: {
     findMany: MockedFunction;
+    groupBy: MockedFunction;
     updateMany: MockedFunction;
   };
 };
@@ -784,6 +793,7 @@ function createUsageResetPrismaFixture(input: {
     },
     hostedThreadRoute: {
       findMany: vi.fn().mockResolvedValue([]),
+      groupBy: vi.fn().mockResolvedValue([]),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
   };

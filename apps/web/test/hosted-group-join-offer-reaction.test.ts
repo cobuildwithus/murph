@@ -14,8 +14,13 @@ import {
 const mocks = vi.hoisted(() => ({
   acceptHostedGroupDisclosurePermissionReactionTx: vi.fn(),
   acceptHostedGroupJoinOfferTx: vi.fn(),
+  enqueueHostedGroupJoinOutreachTx: vi.fn(),
+  revokeHostedGroupJoinOutreachForRemovedReactionTx: vi.fn(),
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort: vi.fn(),
+  lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
+  markHostedLinqGroupJoinOfferHandledTx: vi.fn(),
+  readHostedGroupJoinOfferTargetTx: vi.fn(),
   materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
   resolveHostedPublicBaseUrl: vi.fn(),
@@ -30,6 +35,13 @@ vi.mock("@/src/lib/hosted-groups/group-newsletter", () => ({
 
 vi.mock("@/src/lib/hosted-groups/group-store", () => ({
   acceptHostedGroupJoinOfferTx: mocks.acceptHostedGroupJoinOfferTx,
+  readHostedGroupJoinOfferTargetTx: mocks.readHostedGroupJoinOfferTargetTx,
+}));
+
+vi.mock("@/src/lib/hosted-groups/group-join-outreach-store", () => ({
+  enqueueHostedGroupJoinOutreachTx: mocks.enqueueHostedGroupJoinOutreachTx,
+  revokeHostedGroupJoinOutreachForRemovedReactionTx:
+    mocks.revokeHostedGroupJoinOutreachForRemovedReactionTx,
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-disclosure-store", () => ({
@@ -48,8 +60,18 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
   lookupHostedMemberIdentityByPhoneNumber: mocks.lookupHostedMemberIdentityByPhoneNumber,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
+  lookupHostedMemberByVerifiedEmailAddress:
+    mocks.lookupHostedMemberByVerifiedEmailAddress,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
   readActiveHostedMemberAccess: mocks.readActiveHostedMemberAccess,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/linq-provider-event-store", () => ({
+  markHostedLinqGroupJoinOfferHandledTx:
+    mocks.markHostedLinqGroupJoinOfferHandledTx,
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
@@ -77,6 +99,9 @@ let restoreKeyring: (() => void) | null = null;
 describe("handleHostedGroupJoinOfferReaction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.revokeHostedGroupJoinOutreachForRemovedReactionTx.mockResolvedValue({
+      kind: "not_pending",
+    });
     mocks.acceptHostedGroupDisclosurePermissionReactionTx.mockResolvedValue({
       kind: "not_found",
     });
@@ -94,8 +119,22 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       revokedVaultShareProjectionKinds: [],
       selectedVaultShareProjectionKinds: ["sleep-times.v0"],
     });
+    mocks.enqueueHostedGroupJoinOutreachTx.mockResolvedValue({
+      kind: "enqueued",
+      outreachId: "hgrpjoa_opaque",
+    });
+    mocks.lookupHostedMemberByVerifiedEmailAddress.mockResolvedValue(null);
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
       core: { id: "member_reactor", suspendedAt: null },
+    });
+    mocks.readHostedGroupJoinOfferTargetTx.mockResolvedValue({
+      displayName: "Training circle",
+      groupId: "hgrp_opaque",
+      joinCode: "join_opaque",
+      messageLookupKey: "hbidx:linq-message:v1:offer",
+      offerId: "hgrpjo_opaque",
+      projectionKindsJson: [],
+      runtimeMemberId: "hbm_runtime",
     });
     mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort.mockResolvedValue(
       undefined,
@@ -105,6 +144,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     mocks.signalHostedGroupJoinConfirmationRuntimeBestEffort.mockResolvedValue(undefined);
     mocks.signalHostedRuntimeMaintenanceRuntime.mockResolvedValue(undefined);
     mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mockResolvedValue(undefined);
+    mocks.markHostedLinqGroupJoinOfferHandledTx.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -138,6 +178,11 @@ describe("handleHostedGroupJoinOfferReaction", () => {
         ]),
       }),
     );
+    expect(mocks.markHostedLinqGroupJoinOfferHandledTx).toHaveBeenCalledWith({
+      eventId: "evt_reaction_123",
+      handledAt: new Date("2026-03-26T12:01:00.000Z"),
+      prisma: expect.anything(),
+    });
     expect(mocks.acceptHostedGroupDisclosurePermissionReactionTx).toHaveBeenCalledWith(
       expect.objectContaining({
         memberId: "member_reactor",
@@ -217,6 +262,42 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     expect(mocks.acceptHostedGroupDisclosurePermissionReactionTx).not.toHaveBeenCalled();
   });
 
+  it("emits recipient_region_unsupported for a refused-region canonical removal", async () => {
+    // The producer half of the ownership exception: the webhook can only consume
+    // this decision if the handler actually emits it, so assert it here rather
+    // than mocking the handler at the consumer.
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValueOnce(null);
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent({
+        eventType: "reaction.removed",
+        handle: "+353871234567",
+        reactionType: "like",
+      }),
+      prisma,
+    })).resolves.toEqual({
+      reason: "recipient_region_unsupported",
+      status: "ignored",
+    });
+
+    // Nothing durable is written for a participant this feature declines.
+    expect(mocks.enqueueHostedGroupJoinOutreachTx).not.toHaveBeenCalled();
+  });
+
+  it("keeps a supported-region removal on its ordinary reaction_removed path", async () => {
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValueOnce(null);
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent({
+        eventType: "reaction.removed",
+        reactionType: "like",
+      }),
+      prisma,
+    })).resolves.toEqual({ reason: "reaction_removed", status: "ignored" });
+  });
+
   it("does not treat a removed Like as disclosure consent or a legacy join", async () => {
     const prisma = createPrismaStub();
 
@@ -232,18 +313,78 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
   });
 
-  it("does not turn a nonmember's disclosure Like into a join", async () => {
-    mocks.acceptHostedGroupDisclosurePermissionReactionTx.mockResolvedValueOnce({
-      kind: "not_group_member",
-    });
+  it("durably enqueues first outreach for a nonmember phone reaction", async () => {
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValueOnce(null);
     const prisma = createPrismaStub();
 
     await expect(handleHostedGroupJoinOfferReaction({
       event: parseReactionEvent({ reactionType: "like" }),
       prisma,
-    })).resolves.toEqual({ status: "ignored", reason: "not_a_member" });
+    })).resolves.toEqual({
+      status: "accepted",
+      reason: "outreach_enqueued",
+    });
 
+    expect(mocks.readHostedGroupJoinOfferTargetTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageLookupKeyReadCandidates: expect.arrayContaining([
+          expect.stringMatching(/^hbidx:linq-message:/u),
+        ]),
+      }),
+    );
+    expect(mocks.enqueueHostedGroupJoinOutreachTx).toHaveBeenCalledWith({
+      offerId: "hgrpjo_opaque",
+      participantPhoneNumber: "+15551234567",
+      // Reaction events carry `reacted_at` as providerCreatedAt, matching the
+      // existing join path's `now`.
+      requestedAt: new Date("2026-03-26T12:01:00.000Z"),
+      tx: expect.anything(),
+    });
+    expect(mocks.markHostedLinqGroupJoinOfferHandledTx).toHaveBeenCalledWith({
+      eventId: "evt_reaction_123",
+      handledAt: new Date("2026-03-26T12:01:00.000Z"),
+      prisma: expect.anything(),
+    });
+    expect(mocks.acceptHostedGroupDisclosurePermissionReactionTx).not.toHaveBeenCalled();
     expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+  });
+
+  it("records a non-phone pre-member handle instead of silently dropping it", async () => {
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent({
+        handle: "usr_pre@example.test",
+        reactionType: "like",
+      }),
+      prisma,
+    })).resolves.toEqual({
+      status: "ignored",
+      reason: "non_phone_handle",
+    });
+
+    expect(mocks.lookupHostedMemberByVerifiedEmailAddress).toHaveBeenCalled();
+    expect(mocks.enqueueHostedGroupJoinOutreachTx).not.toHaveBeenCalled();
+  });
+
+  it("records a revoked pre-member offer before enqueue", async () => {
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValueOnce(null);
+    mocks.readHostedGroupJoinOfferTargetTx.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "HOSTED_GROUP_JOIN_OFFER_REVOKED",
+        httpStatus: 410,
+        message: "This group offer has been revoked.",
+        retryable: false,
+      }),
+    );
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent({ reactionType: "like" }),
+      prisma,
+    })).resolves.toEqual({ status: "ignored", reason: "offer_revoked" });
+
+    expect(mocks.enqueueHostedGroupJoinOutreachTx).not.toHaveBeenCalled();
   });
 
   it("does not treat a reaction from the hosted line as member consent", async () => {
@@ -461,6 +602,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
 function parseReactionEvent(input: {
   customEmoji?: string | null;
   eventType?: "reaction.added" | "reaction.removed";
+  handle?: string;
   isFromMe?: boolean;
   reactionType: string;
 }) {
@@ -471,7 +613,10 @@ function parseReactionEvent(input: {
       data: {
         chat_id: "chat_group_1",
         custom_emoji: input.customEmoji ?? undefined,
-        from_handle: { handle: "+15551234567", service: "iMessage" },
+        from_handle: {
+          handle: input.handle ?? "+15551234567",
+          service: "iMessage",
+        },
         is_from_me: input.isFromMe,
         line: { phone_number: "+15550000000" },
         message_id: "msg_offer_123",

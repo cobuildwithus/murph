@@ -163,6 +163,22 @@ async function createLegacyFixture(input: {
   };
 }
 
+test("envelope migration preserves a foreground abort reason before scanning", async () => {
+  const vaultRoot = await makeTempDirectory("inbox-envelope-migration-abort");
+  const controller = new AbortController();
+  const reason = new Error("foreground work interrupted envelope migration");
+  controller.abort(reason);
+
+  await assert.rejects(
+    runInboxEnvelopeMigration({
+      apply: true,
+      signal: controller.signal,
+      vaultRoot,
+    }),
+    (error) => error === reason,
+  );
+});
+
 test("inbox envelope migration appends v2 and deletes v1 metadata atomically", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-envelope-migration");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });

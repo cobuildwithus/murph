@@ -1115,6 +1115,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       })
       .mockResolvedValueOnce({
         targetOverride: {
+          conversationThreadId: "hid_current_direct",
+          target: "chat_current_direct",
+          targetKind: "thread" as const,
+        },
+        threadIsDirect: true,
+      })
+      .mockResolvedValueOnce({
+        targetOverride: {
           target: "chat_current_direct",
           targetKind: "thread" as const,
         },
@@ -1138,6 +1146,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         })).resolves.toEqual({
           target: "chat_current_group",
           threadIsDirect: false,
+        });
+        await expect(resolveScheduledLinqRoute({
+          homeRouteFallbackAllowed: true,
+          target: "chat_saved_direct",
+          targetKind: "explicit",
+        })).resolves.toEqual({
+          conversationThreadId: "hid_current_direct",
+          target: "chat_current_direct",
+          threadIsDirect: true,
         });
         await expect(resolveScheduledLinqRoute({
           homeRouteFallbackAllowed: true,
@@ -3959,6 +3976,186 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
   });
 
+  it("carries persisted direct Linq service through the real operation scope to referral tools", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-referral-service-"));
+    const vaultRoot = path.join(parentRoot, "vault");
+    const referralRequests: HostedRuntimeGroupToolRequest[] = [];
+    const groupToolPort: NonNullable<
+      HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["groupToolPort"]
+    > = {
+      async request(request) {
+        referralRequests.push(request);
+        if (request.action === "read_usage_referral") {
+          return {
+            action: request.action,
+            result: {
+              referral: null,
+              status: "unavailable" as const,
+              unavailableReason: "synthetic_web_unavailable",
+            },
+          };
+        }
+        if (request.action === "arm_usage_referral") {
+          return {
+            action: request.action,
+            result: {
+              referral: null,
+              status: "unavailable" as const,
+              unavailableReason: "synthetic_web_unavailable",
+            },
+          };
+        }
+        throw new Error(`Unexpected group tool request: ${request.action}`);
+      },
+    };
+    const serviceCases = [
+      { expected: "imessage", observed: "iMessage" },
+      { expected: "sms", observed: "SMS" },
+      { expected: "rcs", observed: "RCS" },
+      { expected: null, observed: null },
+    ] as const;
+
+    try {
+      await initializeVault({
+        createdAt: "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      });
+      const persistedInputs = await Promise.all(serviceCases.map(async (serviceCase, index) =>
+        await upsertAssistantInputEvent({
+          event: {
+            content: {
+              text: `direct referral service ${index}`,
+              transcriptText: `direct referral service ${index}`,
+              userMessageContent: [{
+                text: `direct referral service ${index}`,
+                type: "text" as const,
+              }],
+            },
+            conversation: {
+              accountId: `hid_${"1".repeat(32)}`,
+              actorId: `hid_${"2".repeat(32)}`,
+              actorIsSelf: false,
+              source: "linq",
+              threadId: `hid_${"3".repeat(32)}`,
+              threadIsDirect: true,
+            },
+            occurredAt: `2026-04-27T00:00:0${index}.000Z`,
+            receivedAt: `2026-04-27T00:00:0${index}.500Z`,
+            replyTarget: {
+              channel: "linq",
+              messageId: `message_direct_referral_${index}`,
+              threadId: "chat_direct_referral",
+            },
+            sourceMetadata: {
+              externalThreadRouteAuthorityPresent: false,
+              kind: "linq" as const,
+              partCount: 0,
+              reactionEligible: false,
+              replyToMessageId: null,
+              senderHandle: "+15555550123",
+              service: serviceCase.observed,
+            },
+            sourceRef: {
+              dedupeKey: `dedupe_direct_referral_${index}`,
+              eventId: `event_direct_referral_${index}`,
+              itemId: `mailbox_item_direct_referral_${index}`,
+              kind: "hosted-mailbox" as const,
+              lane: "conversation" as const,
+              laneSeq: String(index),
+              payloadSchema: "murph.hosted-mailbox-payload.v1",
+              payloadSource: "inline" as const,
+              source: "hosted-mailbox" as const,
+              wakeSchema: "murph.hosted-execution-wake.v1",
+            },
+          },
+          vault: vaultRoot,
+        })
+      ));
+      const assistantAutomation = await vi.importActual<
+        typeof import("@murphai/assistant-engine/assistant-automation")
+      >("@murphai/assistant-engine/assistant-automation");
+      mocks.readAssistantInputEvent.mockImplementation(
+        assistantAutomation.readAssistantInputEvent,
+      );
+
+      await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        assistantInputIds: persistedInputs.map((persisted) => persisted.inputId),
+        importedCount: persistedInputs.length,
+        runtimeGroupToolPort: groupToolPort,
+        vaultRoot,
+      }));
+
+      const laneInput = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+      const operationScope = laneInput?.operationScope as
+        | AssistantAutomationOperationScope
+        | undefined;
+      if (!laneInput?.executionContext || !operationScope) {
+        throw new Error("Expected hosted automation operation scope.");
+      }
+
+      for (const [index, persisted] of persistedInputs.entries()) {
+        const requestCountBefore = referralRequests.length;
+        await operationScope.runAutoReplyGroup({
+          executionContext: laneInput.executionContext,
+          inputIds: [persisted.inputId],
+          operation: async (executionContext) => {
+            const groupTool = executionContext.hosted?.groupTool;
+            if (!groupTool) {
+              throw new Error("Expected operation-scoped group tool.");
+            }
+            await groupTool.request({ action: "read_usage_referral" });
+            await groupTool.request({
+              action: "arm_usage_referral",
+              policyCodes: ["new_person_activation_v1"],
+            });
+          },
+          turnEnvironment: null,
+        });
+
+        const expectedService = serviceCases[index]?.expected ?? null;
+        const expectedSourceConversation = {
+          channel: "linq" as const,
+          ...(expectedService ? { linqService: expectedService } : {}),
+          threadId: expect.stringMatching(/^hid_[a-f0-9]{32}$/u),
+          threadIsDirect: true,
+        };
+        expect(referralRequests.slice(requestCountBefore)).toEqual([
+          {
+            action: "read_usage_referral",
+            sourceConversation: expectedSourceConversation,
+          },
+          {
+            action: "arm_usage_referral",
+            policyCodes: ["new_person_activation_v1"],
+            sourceConversation: expectedSourceConversation,
+          },
+        ]);
+      }
+
+      const requestCountBeforeMixed = referralRequests.length;
+      await operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: persistedInputs.slice(0, 2).map((persisted) => persisted.inputId),
+        operation: async (executionContext) => {
+          await executionContext.hosted?.groupTool?.request({
+            action: "read_usage_referral",
+          });
+        },
+        turnEnvironment: null,
+      });
+      expect(referralRequests.slice(requestCountBeforeMixed)).toEqual([{
+        action: "read_usage_referral",
+        sourceConversation: {
+          channel: "linq",
+          threadId: expect.stringMatching(/^hid_[a-f0-9]{32}$/u),
+          threadIsDirect: true,
+        },
+      }]);
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true });
+    }
+  });
+
   it("scopes automation and group mutation authority to each durable accepted input", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-automation-tool-"));
     const vaultRoot = path.join(parentRoot, "vault");
@@ -4338,6 +4535,113 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       })).resolves.toEqual(expect.objectContaining({ status: "active" }));
     } finally {
       await rm(parentRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("reuses the production-scoped Linq speaker reader across ordinary warm turns", async () => {
+    const vaultRoot = await mkdtemp(path.join(
+      tmpdir(),
+      "hosted-warm-speaker-cache-",
+    ));
+    try {
+      const firstInputId = "ain_81818181818181818181818181818181";
+      const secondInputId = "ain_82828282828282828282828282828282";
+      const senderHandle = "+15558880001";
+      const groupRequest = vi.fn(async (
+        request: HostedRuntimeGroupToolRequest,
+      ) => {
+        if (request.action !== "read_participant_display_names") {
+          throw new Error(`Unexpected group action: ${request.action}`);
+        }
+        return {
+          action: "read_participant_display_names" as const,
+          result: {
+            participants: [{
+              displayName: "Warm Speaker",
+              displayNameSource: "profile-name" as const,
+              senderHandle,
+            }],
+            status: "ok" as const,
+          },
+        };
+      });
+      mocks.readAssistantInputEvent.mockImplementation(async ({ inputId }) => ({
+        conversation: {
+          accountId: "linq_identity_warm_speaker",
+          actorId: "linq_participant_warm_speaker",
+          actorIsSelf: false,
+          source: "linq",
+          threadId: "linq_hidden_warm_speaker_thread",
+          threadIsDirect: false,
+        },
+        replyTarget: {
+          channel: "linq",
+          messageId: inputId === firstInputId
+            ? "linq_warm_speaker_message_one"
+            : "linq_warm_speaker_message_two",
+          threadId: "linq_warm_speaker_chat",
+        },
+        sourceMetadata: {
+          externalThreadRouteAuthorityPresent: true,
+          kind: "linq",
+          partCount: 1,
+          reactionEligible: true,
+          replyToMessageId: null,
+          senderHandle,
+          service: "imessage",
+        },
+      }));
+
+      const runOrdinaryTurn = async (inputId: string) => {
+        await runHostedWorkspaceAssistantPhase(createPhaseInput({
+          assistantInputIds: [inputId],
+          conversationImportedCount: 1,
+          importedCount: 1,
+          runtimeGroupToolPort: { request: groupRequest },
+          vaultRoot,
+        }));
+        const laneInput = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+        const operationScope = laneInput?.operationScope as
+          | AssistantAutomationOperationScope
+          | undefined;
+        if (!laneInput?.executionContext || !operationScope) {
+          throw new Error("Expected hosted automation operation scope.");
+        }
+        return await operationScope.runAutoReplyGroup({
+          executionContext: laneInput.executionContext,
+          inputIds: [inputId],
+          operation: async (executionContext) => {
+            const reader =
+              executionContext.hosted?.groupParticipantDisplayNameReader;
+            if (!reader) {
+              throw new Error("Expected the production-scoped speaker reader.");
+            }
+            return await reader.read({
+              channel: "linq",
+              senderHandles: [senderHandle],
+            });
+          },
+          turnEnvironment: null,
+        });
+      };
+
+      await expect(runOrdinaryTurn(firstInputId)).resolves.toEqual([{
+        displayName: "Warm Speaker",
+        displayNameSource: "profile-name",
+        senderHandle,
+      }]);
+      await expect(runOrdinaryTurn(secondInputId)).resolves.toEqual([{
+        displayName: "Warm Speaker",
+        displayNameSource: "profile-name",
+        senderHandle,
+      }]);
+      expect(groupRequest).toHaveBeenCalledTimes(1);
+      expect(groupRequest).toHaveBeenCalledWith({
+        action: "read_participant_display_names",
+        linqSenderHandles: [senderHandle],
+      });
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
     }
   });
 
@@ -7282,6 +7586,93 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(finishLogIndex).toBeGreaterThan(outboxLogIndex);
   });
 
+  it("waits for optional product feedback only after a queue-only foreground reply is sent", async () => {
+    const deliveryEffect = {
+      ...createDeliveryEffect(),
+      payload: {
+        ...createDeliveryEffect().payload,
+        transportIdempotent: false,
+      },
+    };
+    const feedback = {
+      idempotencyKey: "feedback-after-member-delivery",
+      kind: "feature_request" as const,
+      relatedChangelogItemIds: [],
+      summary: "Speculative: support the missing Murph path.",
+    };
+    let resolveFeedback: (value: {
+      feedbackId: string;
+      recorded: boolean;
+    }) => void = () => {
+      throw new Error("Product feedback completion was not initialized.");
+    };
+    const feedbackCompletion = new Promise<{
+      feedbackId: string;
+      recorded: boolean;
+    }>((resolve) => {
+      resolveFeedback = resolve;
+    });
+    let memberDeliveryCompleted = false;
+    const recordProductFeedback = vi.fn(() => {
+      expect(memberDeliveryCompleted).toBe(true);
+      return feedbackCompletion;
+    });
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(
+      async (laneInput) => {
+        laneInput.executionContext.hosted?.productFeedbackCandidateSink
+          ?.acceptProductFeedbackCandidate(feedback);
+        return {
+          assistantAutomationCurrentTurnDeliveryIntentIds: [
+            deliveryEffect.effectId,
+          ],
+          assistantAutomationProgressed: true,
+          nextWakeAt: null,
+          redactedLogEntries: [],
+        };
+      },
+    );
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      deliveryEffect,
+    ]);
+    mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValueOnce({
+      preparedDispatches: createPreparedDispatchesForDeliveryEffect(deliveryEffect),
+    });
+    mocks.drainHostedPreparedAssistantDeliveries.mockImplementationOnce(
+      async () => {
+        memberDeliveryCompleted = true;
+        return [createSentDeliveryOutcome()];
+      },
+    );
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      runtimeProductFeedbackPort: { recordProductFeedback },
+    }));
+
+    expect(result.afterCheckpoint).toEqual(expect.any(Function));
+    expect(recordProductFeedback).not.toHaveBeenCalled();
+
+    const postCheckpointPromise = result.afterCheckpoint?.();
+    await vi.waitFor(() => {
+      expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledOnce();
+      expect(recordProductFeedback).toHaveBeenCalledWith(feedback);
+    });
+    expect(memberDeliveryCompleted).toBe(true);
+
+    let postCheckpointSettled = false;
+    void postCheckpointPromise?.then(() => {
+      postCheckpointSettled = true;
+    });
+    await Promise.resolve();
+    expect(postCheckpointSettled).toBe(false);
+
+    resolveFeedback({
+      feedbackId: "feedback_synthetic",
+      recorded: true,
+    });
+    await postCheckpointPromise;
+  });
+
   it("does not re-emit a stale pre-delivery outbox wake after deferred foreground delivery drains", async () => {
     const staleOutboxWakeAt = "2026-05-08T16:00:05.000Z";
     const deliveryEffect = createDeliveryEffect();
@@ -9214,6 +9605,100 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       .toHaveBeenCalledTimes(1);
     expect(mocks.getAssistantCronStatus).not.toHaveBeenCalled();
   });
+
+  it.each([
+    {
+      cronStatus: {
+        dueJobs: 2,
+        enabledJobs: 7,
+        nextRunAt: "2026-05-08T16:00:00.000Z",
+        runningJobs: 0,
+        totalJobs: 7,
+      },
+      expectedNextWakeAt: "2026-05-08T16:00:00.000Z",
+      label: "available due work",
+    },
+    {
+      cronStatus: {
+        dueJobs: 0,
+        enabledJobs: 7,
+        nextRunAt: "2026-05-08T17:00:00.000Z",
+        runningJobs: 0,
+        totalJobs: 7,
+      },
+      expectedNextWakeAt: "2026-05-08T17:00:00.000Z",
+      label: "available future work",
+    },
+    {
+      cronStatus: {
+        dueJobs: 0,
+        enabledJobs: 0,
+        nextRunAt: null,
+        runningJobs: 0,
+        totalJobs: 0,
+      },
+      expectedNextWakeAt: null,
+      label: "available empty state",
+    },
+    {
+      cronStatus: null,
+      expectedNextWakeAt: null,
+      label: "unavailable status",
+    },
+  ])(
+    "reconciles live post-scan cron status through clean fast dispatch: $label",
+    async ({ cronStatus, expectedNextWakeAt }) => {
+      const now = "2026-05-08T16:00:00.000Z";
+      mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+        assistantAutomationCronProcessed: 1,
+        assistantAutomationProgressed: true,
+        deviceSyncProcessed: 0,
+        deviceSyncSkipped: true,
+        nextWakeAt: null,
+        parserProcessed: 0,
+        postCheckpointRecord: null,
+        redactedLogEntries: [],
+      });
+      mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+        createDeliveryEffect(),
+      ]);
+      mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+        createSentDeliveryOutcome(),
+      ]);
+      mocks.getAssistantCronStatus.mockResolvedValueOnce({
+        dueJobs: 1,
+        enabledJobs: 7,
+        nextRunAt: now,
+        runningJobs: 0,
+        totalJobs: 7,
+      });
+      if (cronStatus) {
+        mocks.getAssistantCronStatus.mockResolvedValueOnce(cronStatus);
+      } else {
+        mocks.getAssistantCronStatus.mockRejectedValueOnce(
+          new Error("synthetic cron status unavailable"),
+        );
+      }
+
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        assistantInputIds: [],
+        conversationImportedCount: 0,
+        importedCount: 1,
+        now: () => now,
+        workspace: createDueAssistantWorkspace({
+          nextWakeAt: now,
+        }),
+      }));
+
+      expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledTimes(1);
+      expect(mocks.getAssistantCronStatus).toHaveBeenCalledTimes(2);
+      expect(result).toEqual(expect.objectContaining({
+        checkpointReason: "outbox_receipt",
+        nextWakeAt: expectedNextWakeAt,
+        progressed: true,
+      }));
+    },
+  );
 
   it("returns a fast-dispatch foreground reply without starting a stalled cron read", async () => {
     const cronStatusPromise = new Promise<never>(() => undefined);
@@ -14868,6 +15353,62 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("preserves the post-scan cron wake through due provider cleanup", async () => {
+    const now = "2026-04-27T00:10:00.000Z";
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
+      nextWakeAt: now,
+    });
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: true,
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      progressed: true,
+      redactedLogEntries: [],
+    });
+    mocks.getAssistantCronStatus.mockResolvedValueOnce({
+      dueJobs: 3,
+      enabledJobs: 7,
+      nextRunAt: now,
+      runningJobs: 0,
+      totalJobs: 7,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      logRequests,
+      now: () => now,
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "canonical_runtime_commit",
+      nextWakeAt: now,
+      progressed: true,
+    }));
+    expect(
+      withoutAssistantTurnTimingLogs(logRequests)
+        .find((request) =>
+          request.entries[0]?.eventCode === "assistant.pass_finished"
+        )
+        ?.entries[0]?.redactedJson,
+    ).toEqual(expect.objectContaining({
+      nextWakeAtPresent: true,
+      progressed: true,
+    }));
+
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(mocks.drainHostedProviderCleanupAfterCommit).toHaveBeenCalledTimes(1);
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "provider_cleanup",
+      nextWakeAt: now,
+      nextWakeReason: "assistant",
+    }));
+  });
+
   it("does not preserve a consumed provider cleanup wake after background delivery drains cleanup", async () => {
     const providerCleanupWakeAt = "2026-04-27T00:14:00.000Z";
     const deliveryEffect = createDeliveryEffect();
@@ -15430,6 +15971,9 @@ function createPhaseInput(input: {
   runtimePhoneCalls?: NonNullable<
     HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["phoneCalls"]
   >;
+  runtimeProductFeedbackPort?: NonNullable<
+    HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["productFeedbackPort"]
+  >;
   runtimeEnv?: Record<string, string>;
   operatorHomeRoot?: string;
   shouldYieldBackgroundMaintenance?: HostedWorkspaceRuntimeAssistantPhaseInput["shouldYieldBackgroundMaintenance"];
@@ -15593,6 +16137,9 @@ function createPhaseInput(input: {
           ? { labsToolPort: input.runtimeLabsToolPort }
           : {}),
         ...(input.runtimePhoneCalls ? { phoneCalls: input.runtimePhoneCalls } : {}),
+        ...(input.runtimeProductFeedbackPort
+          ? { productFeedbackPort: input.runtimeProductFeedbackPort }
+          : {}),
         ...(input.runtimeSubscriptionToolPort
           ? { subscriptionToolPort: input.runtimeSubscriptionToolPort }
           : {}),

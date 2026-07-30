@@ -39,19 +39,72 @@ describe('assistant capability policy skills', () => {
     }
   })
 
-  it('keeps phone consent, disclosure, transfer, and result semantics together', async () => {
+  it('keeps group logistics, consent, disclosure, transfer, and result semantics together', async () => {
     const skill = await readSkill('phone-calls')
     const normalized = normalizeWhitespace(skill)
-
-    expect(normalized).toContain(
-      'Place a call only when the user asked for it or clearly approved this specific call.',
+    const registration = ASSISTANT_SKILLS.find(
+      (candidate) => candidate.slug === 'phone-calls',
     )
+
+    expect(registration?.triggerHint).toContain(
+      'hosted group Murph may call a public venue or service business',
+    )
+    expect(registration?.triggerHint).toContain(
+      'ordinary shared-life logistics task',
+    )
+    expect(normalized).toContain(
+      'For a hosted group call, first deliver one complete canonical preview, then stop without invoking `murph.create_phone_call`.',
+    )
+    expect(normalized).toContain(
+      'Render exactly these ten lines, with each value encoded as compact JSON',
+    )
+    expect(normalized).toContain(
+      'Only a later inbound message received after that preview was successfully delivered may confirm it.',
+    )
+    expect(normalized).toContain(
+      'The runtime compares the entire delivered preview with this canonical rendering',
+    )
+    expect(normalized).toContain(
+      'Set `message_ref` to that confirming inbound message\'s visible `ain_...` reference.',
+    )
+    expect(normalized).toContain(
+      'If any term or disclosure changes, deliver the complete revised preview and stop again.',
+    )
+    expect(normalized).toContain(
+      'do not add an extra round trip when the existing private-call gate is already satisfied',
+    )
+    expect(normalized).toContain(
+      'The current confirmation message must itself explicitly approve any requester name or contact fact used in the call',
+    )
+    expect(normalized).toContain(
+      'One participant\'s acknowledgement never authorizes a different participant\'s identity, account, contact details, or private facts',
+    )
+    expect(normalized).toContain(
+      'For a hosted-group reservation, availability check, or service call',
+    )
+    expect(normalized).toContain(
+      'do not load `appointment-scheduling` unless health care is involved',
+    )
+    expect(normalized).toContain('party size or resource count')
+    expect(normalized).toContain(
+      'charge, commitment, materially different booking, or failed reservation',
+    )
+    expect(normalized).toContain(
+      'This skill never expands the conversation\'s scope boundary or authorizes code production or work, school, or professional operations.',
+    )
+    expect(normalized).toContain('room-visible logistical facts may be used')
     expect(normalized).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/appointment-scheduling/SKILL.md',
     )
     expect(normalized).toContain('satisfy its ready-to-act gate')
     expect(normalized).toContain('Set `callerName`')
-    expect(normalized).toContain('only user-approved, call-relevant, disclosable facts')
+    expect(normalized).toContain('call-relevant, disclosable facts approved by the requester')
+    expect(normalized).toContain(
+      'A requester name or contact fact may be disclosed only when the destination requires it and the current confirmation message explicitly supplies or approves it again',
+    )
+    expect(normalized).toContain(
+      'never infer or disclose another participant\'s private identity, account, contact, or health facts',
+    )
     expect(normalized).toContain('Never include unrelated health details')
     expect(normalized).toContain('Set `allowTransferToUser: true`')
     expect(normalized).toContain('Set it to `false` for information-only calls')
@@ -84,7 +137,13 @@ describe('assistant capability policy skills', () => {
     expect(normalized).toContain('`billingActive: true`')
     expect(normalized).toContain('matches exactly one member row')
     expect(normalized).toContain(
-      'Provide `https://www.withmurph.ai/settings#family` only when all three conditions hold',
+      'When that exact row has `isOwner: true`, send `https://www.withmurph.ai/settings?addUsage=family#family`',
+    )
+    expect(normalized).toContain(
+      'For another active member, send `https://www.withmurph.ai/settings#family`',
+    )
+    expect(normalized).toContain(
+      'Never place member or Family identifiers into a model-composed URL.',
     )
     expect(skill).not.toMatch(/Provide `?\/settings#family/iu)
     expect(MURPH_FAMILY_PLAN_TOOL.description).not.toContain('https://')

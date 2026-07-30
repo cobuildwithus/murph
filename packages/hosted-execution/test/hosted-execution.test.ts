@@ -708,9 +708,12 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH",
       "HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH",
       "HOSTED_RUNTIME_GROUP_TOOL_PATH",
+      "HOSTED_RUNTIME_IMESSAGE_CONTACT_TOOL_PATH",
       "HOSTED_RUNTIME_ISSUE_RECORD_PATH",
       "HOSTED_RUNTIME_LABS_TOOL_PATH",
       "HOSTED_RUNTIME_LATENCY_TRACE_PATH",
+      "HOSTED_RUNTIME_LINQ_DELIVERY_BLOCK_CODES",
+      "HOSTED_RUNTIME_LINQ_DELIVERY_POSTURES",
       "HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH",
       "HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH",
       "HOSTED_RUNTIME_LOG_PATH",
@@ -747,6 +750,9 @@ describe("hosted execution coverage gaps", () => {
     );
     expect(routeModule.HOSTED_RUNTIME_SUBSCRIPTION_TOOL_PATH).toBe(
       "/api/internal/hosted-execution/subscription/tool",
+    );
+    expect(routeModule.HOSTED_RUNTIME_IMESSAGE_CONTACT_TOOL_PATH).toBe(
+      "/api/internal/hosted-execution/imessage-contact/tool",
     );
     expect(routeModule.HOSTED_RUNTIME_LABS_TOOL_PATH).toBe(
       "/api/internal/hosted-execution/labs/tool",

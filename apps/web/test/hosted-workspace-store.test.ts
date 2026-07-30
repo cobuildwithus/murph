@@ -10,9 +10,6 @@ import {
   HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_REASON_STATUS_KEY,
   HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_STATUS_KEY,
 } from "@murphai/hosted-execution/runtime-control";
-import type {
-  HostedRuntimeRedactedJson,
-} from "@murphai/hosted-execution/runtime-control";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -20,11 +17,8 @@ import {
   checkpointHostedWorkspaceTx,
   ensureHostedWorkspace,
   publishLatestBrowserVaultReplicaRefTx,
-  projectHostedRuntimeLog,
   claimHostedAcceptedAttemptFailureRecheck,
   recordHostedRuntimeLogs,
-  recordHostedRuntimeLogTx,
-  type HostedRuntimeLogRow,
   type HostedWorkspaceTransactionRunner,
   type HostedWorkspaceRow,
 } from "@/src/lib/hosted-workspace/store";
@@ -1847,6 +1841,67 @@ describe("hosted runtime log store", () => {
     expect(createMany).not.toHaveBeenCalled();
   });
 
+  it("drops a late diagnostic batch after its member was deleted", async () => {
+    const createMany = vi.fn(async () => {
+      throw new Prisma.PrismaClientKnownRequestError(
+        "Foreign key constraint failed.",
+        {
+          clientVersion: "7.8.0",
+          code: "P2003",
+          meta: {
+            constraint: "hosted_runtime_log_user_id_fkey",
+            modelName: "HostedRuntimeLog",
+          },
+        },
+      );
+    });
+    const prisma = Object.assign(Object.create(null), {
+      hostedRuntimeLog: { createMany },
+    }) as Parameters<typeof recordHostedRuntimeLogs>[0]["prisma"];
+
+    await expect(recordHostedRuntimeLogs({
+      entries: [{
+        component: "mailbox",
+        eventCode: "mailbox.imported",
+        level: "info",
+        phase: "import",
+      }],
+      prisma,
+      userId: "member_deleted",
+    })).resolves.toBe(0);
+  });
+
+  it("does not hide a different runtime-log foreign-key failure", async () => {
+    const error = new Prisma.PrismaClientKnownRequestError(
+      "Foreign key constraint failed.",
+      {
+        clientVersion: "7.8.0",
+        code: "P2003",
+        meta: {
+          constraint: "different_runtime_log_constraint",
+          modelName: "HostedRuntimeLog",
+        },
+      },
+    );
+    const createMany = vi.fn(async () => {
+      throw error;
+    });
+    const prisma = Object.assign(Object.create(null), {
+      hostedRuntimeLog: { createMany },
+    }) as Parameters<typeof recordHostedRuntimeLogs>[0]["prisma"];
+
+    await expect(recordHostedRuntimeLogs({
+      entries: [{
+        component: "mailbox",
+        eventCode: "mailbox.imported",
+        level: "info",
+        phase: "import",
+      }],
+      prisma,
+      userId: "member_workspace_1",
+    })).rejects.toBe(error);
+  });
+
   it("rejects a batch entry with a forbidden field just like a single write", async () => {
     const createMany = vi.fn(async () => ({ count: 0 }));
     const prisma = Object.assign(Object.create(null), {
@@ -1947,771 +2002,6 @@ describe("hosted runtime log store", () => {
     })).resolves.toBe(false);
   });
 
-  it("inserts parser-accepted structured log fields", async () => {
-    const hostedRuntimeLog = createHostedRuntimeLogDelegate();
-    const tx = createHostedWorkspaceTx({
-      hostedRuntimeLog,
-      hostedWorkspace: createHostedWorkspaceDelegate(),
-    });
-
-    const result = await recordHostedRuntimeLogTx({
-      at: "2026-04-26T00:02:00.000Z",
-      component: "mailbox",
-      eventCode: "mailbox.imported",
-      level: "warn",
-      mailboxLane: "conversation",
-      mailboxSeqStart: "12",
-      phase: "import",
-      redacted: {
-        dedupeConflict: true,
-        incomingKind: "conversation.message",
-        messageReactionsAvailable: true,
-        unallowlistedDetail: "DROP_THIS",
-      },
-      tx,
-      userId: "member_workspace_1",
-      workspaceVersion: 5n,
-    });
-
-    expect(hostedRuntimeLog.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        at: new Date("2026-04-26T00:02:00.000Z"),
-        component: "mailbox",
-        eventCode: "mailbox.imported",
-        level: "warn",
-        mailboxLane: "conversation",
-        mailboxSeqStart: 12n,
-        phase: "import",
-        redactedJson: {
-          dedupeConflict: true,
-          incomingKind: "conversation.message",
-          messageReactionsAvailable: true,
-          unallowlistedDetail: "DROP_THIS",
-        },
-        userId: "member_workspace_1",
-        workspaceVersion: 5n,
-      }),
-    });
-    expect(result.redactedJson).toEqual({
-      dedupeConflict: true,
-      incomingKind: "conversation.message",
-      messageReactionsAvailable: true,
-      unallowlistedDetail: "DROP_THIS",
-    });
-  });
-
-  it("persists empty redacted JSON as null", async () => {
-    const hostedRuntimeLog = createHostedRuntimeLogDelegate();
-    const tx = createHostedWorkspaceTx({
-      hostedRuntimeLog,
-      hostedWorkspace: createHostedWorkspaceDelegate(),
-    });
-
-    const result = await recordHostedRuntimeLogTx({
-      at: "2026-04-26T00:02:00.000Z",
-      component: "mailbox",
-      eventCode: "mailbox.imported",
-      level: "info",
-      phase: "import",
-      redacted: {},
-      tx,
-      userId: "member_workspace_1",
-    });
-
-    expect(hostedRuntimeLog.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        redactedJson: Prisma.DbNull,
-      }),
-    });
-    expect(result.redactedJson).toBeNull();
-  });
-
-  it("rejects URLs and direct identifiers before persisting redacted JSON", async () => {
-    const hostedRuntimeLog = createHostedRuntimeLogDelegate();
-    const tx = createHostedWorkspaceTx({
-      hostedRuntimeLog,
-      hostedWorkspace: createHostedWorkspaceDelegate(),
-    });
-
-    for (const [unsafeValue, expectedError] of [
-      ["Provider failed at https://provider.example.test/private", /URL/u],
-      ["retrying hosted-user-runtime:opaque-test", /direct identifier/u],
-    ] as const) {
-      await expect(recordHostedRuntimeLogTx({
-        at: "2026-04-26T00:02:00.000Z",
-        component: "mailbox",
-        eventCode: "mailbox.imported",
-        level: "warn",
-        phase: "import",
-        redacted: {
-          safeErrorMessage: unsafeValue,
-        },
-        tx,
-        userId: "member_workspace_1",
-      })).rejects.toThrow(expectedError);
-    }
-
-    expect(hostedRuntimeLog.create).not.toHaveBeenCalled();
-  });
-
-  it("persists sanitized device-sync provider failure diagnostics", async () => {
-    const hostedRuntimeLog = createHostedRuntimeLogDelegate();
-    const tx = createHostedWorkspaceTx({
-      hostedRuntimeLog,
-      hostedWorkspace: createHostedWorkspaceDelegate(),
-    });
-    const diagnostic = {
-      failureCode: "WHOOP_TOKEN_REQUEST_FAILED",
-      failureRetryable: false,
-      failureSummary: "WHOOP token request failed.",
-      provider: "whoop",
-      providerHttpStatus: 400,
-      providerHttpStatusText: "Bad Request",
-      providerRequestAuthKind: "oauth_client_secret_body",
-      providerRequestBodyFieldCount: 5,
-      providerRequestBodyFieldNames: "client_id.client_secret.grant_type.refresh_token.scope",
-      providerRequestBodyKind: "form_urlencoded",
-      providerRequestEndpointKind: "whoop_oauth_token",
-      providerRequestMethod: "POST",
-      providerResponseErrorCode: "invalid_grant",
-      providerResponseErrorDescription: "Refresh token expired. Reconnect WHOOP.",
-      providerResponseShapeKind: "json_object",
-      providerOAuthErrorCode: "invalid_grant",
-      providerOAuthErrorDescription: "Refresh token expired. Reconnect WHOOP.",
-      providerOAuthGrantType: "refresh_token",
-      providerOAuthRequestBodyBuilderKind: "url_search_params_record",
-      providerOAuthRequestClientAuthPlacement: "body_parameters",
-      providerOAuthRequestClientCredentialPresent: true,
-      providerOAuthRequestClientIdPresent: true,
-      providerOAuthRequestContentType: "application_x_www_form_urlencoded",
-      providerOAuthRequestDuplicateParameterCount: 0,
-      providerOAuthRequestEncodingKind: "form_urlencoded",
-      providerOAuthRequestHasDuplicateParameters: false,
-      providerOAuthRequestMethod: "POST",
-      providerOAuthRequestOfflineScopePresent: true,
-      providerOAuthRequestParameterCount: 5,
-      providerOAuthRequestParameterNames: "client_id.client_secret.grant_type.refresh_token.scope",
-      providerOAuthRequestRefreshCredentialPresent: true,
-      providerOAuthRequestScopeCount: 1,
-      providerOAuthRequestScopePresent: true,
-      providerOAuthRequestScopeValue: "offline",
-      providerOAuthRequestTokenEndpointKind: "whoop_oauth_token",
-      providerOAuthResponseErrorDescriptionFieldPresent: true,
-      providerOAuthResponseErrorFieldPresent: true,
-      providerOAuthResponseShapeKind: "json_object",
-    };
-
-    const result = await recordHostedRuntimeLogTx({
-      at: "2026-05-19T22:03:27.378Z",
-      component: "device-sync",
-      errorCode: "WHOOP_TOKEN_REQUEST_FAILED",
-      eventCode: "device-sync.job_failed",
-      level: "warn",
-      phase: "invoke",
-      redacted: diagnostic,
-      tx,
-      userId: "member_workspace_1",
-    });
-
-    expect(hostedRuntimeLog.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        component: "device-sync",
-        errorCode: "WHOOP_TOKEN_REQUEST_FAILED",
-        eventCode: "device-sync.job_failed",
-        level: "warn",
-        phase: "invoke",
-        redactedJson: diagnostic,
-      }),
-    });
-    expect(result.redactedJson).toEqual(diagnostic);
-  });
-
-  it("persists OpenAI cache diagnostics as bounded redacted metadata", async () => {
-    const hostedRuntimeLog = createHostedRuntimeLogDelegate();
-    const tx = createHostedWorkspaceTx({
-      hostedRuntimeLog,
-      hostedWorkspace: createHostedWorkspaceDelegate(),
-    });
-    const diagnostic = {
-      cacheNamespaceFingerprint: `hmac-sha256:${"a".repeat(64)}`,
-      cacheNamespaceFingerprintPresent: true,
-      cacheNamespacePresent: true,
-      cacheRetentionKind: "24h",
-      diagnosticVersion: 1,
-      endpointKind: "responses",
-      fingerprintKind: "hmac-sha256",
-      inputBytes: 8192,
-      inputCount: 1,
-      inputFingerprintPresent: true,
-      inputPrefixFingerprints: [`hmac-sha256:${"b".repeat(64)}`],
-      inputPrefixLengths: [8192],
-      inputPresent: true,
-      inputType: "array",
-      instructionsBytes: 4096,
-      instructionsPresent: true,
-      jsonType: "object",
-      jsonValid: true,
-      methodKind: "POST",
-      modelKind: "gpt-5.6-terra",
-      previousResponseFingerprint: `hmac-sha256:${"c".repeat(64)}`,
-      previousResponseFingerprintPresent: true,
-      previousResponsePresent: true,
-      providerKind: "openai",
-      requestBytes: 16384,
-      requestFieldCount: 9,
-      requestFingerprintPresent: true,
-      requestPrefixFingerprints: [`hmac-sha256:${"d".repeat(64)}`],
-      requestPrefixLengths: [8192],
-      storePresent: true,
-      streamPresent: true,
-      toolCount: 1,
-    };
-
-    const result = await recordHostedRuntimeLogTx({
-      at: "2026-04-26T00:02:00.000Z",
-      attemptId: "attempt_1",
-      component: "runner",
-      eventCode: "runner.provider_egress_diagnostic",
-      leaseGeneration: "7",
-      level: "debug",
-      phase: "fetch",
-      redacted: diagnostic,
-      tx,
-      userId: "member_workspace_1",
-      workspaceVersion: "4",
-    });
-
-    expect(hostedRuntimeLog.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        attemptId: "attempt_1",
-        component: "runner",
-        eventCode: "runner.provider_egress_diagnostic",
-        leaseGeneration: 7n,
-        level: "debug",
-        phase: "fetch",
-        redactedJson: diagnostic,
-        userId: "member_workspace_1",
-        workspaceVersion: 4n,
-      }),
-    });
-    expect(result.redactedJson).toEqual(diagnostic);
-  });
-
-  it("persists bounded Codex action tool summaries", async () => {
-    const hostedRuntimeLog = createHostedRuntimeLogDelegate();
-    const tx = createHostedWorkspaceTx({
-      hostedRuntimeLog,
-      hostedWorkspace: createHostedWorkspaceDelegate(),
-    });
-    const diagnostic: HostedRuntimeRedactedJson = {
-      codexActionToolSummaries: [
-        {
-          callCount: 1,
-          kind: "dynamic.tool.call",
-          namespacePresent: true,
-          outputBytesMax: 64,
-          outputBytesTotal: 96,
-          tool: "readSummary",
-        },
-        {
-          callCount: 1,
-          kind: "command.execution",
-          outputBytesMax: 32,
-          outputBytesTotal: 32,
-        },
-      ],
-    };
-
-    const result = await recordHostedRuntimeLogTx({
-      at: "2026-04-26T00:02:00.000Z",
-      component: "assistant",
-      eventCode: "assistant.automation_detail",
-      level: "info",
-      phase: "invoke",
-      redacted: diagnostic,
-      tx,
-      userId: "member_workspace_1",
-    });
-
-    expect(hostedRuntimeLog.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        component: "assistant",
-        eventCode: "assistant.automation_detail",
-        phase: "invoke",
-        redactedJson: diagnostic,
-      }),
-    });
-    expect(result.redactedJson).toEqual(diagnostic);
-
-    for (const key of [
-      "assistantContextSnapshotRefreshAttempted",
-      "assistantContextSnapshotRefreshed",
-    ] as const) {
-      for (const value of [null, "true", 1] as const) {
-        await expect(recordHostedRuntimeLogTx({
-          at: "2026-04-26T00:02:00.000Z",
-          component: "assistant",
-          eventCode: "assistant.automation_detail",
-          level: "info",
-          phase: "invoke",
-          redacted: {
-            codexActionToolSummaries: [
-              {
-                [key]: value,
-              },
-            ],
-          },
-          tx,
-          userId: "member_workspace_1",
-        })).rejects.toThrow(/must be a boolean/u);
-      }
-    }
-    expect(hostedRuntimeLog.create).toHaveBeenCalledTimes(1);
-  });
-
-  it("persists bounded delivery error summaries", async () => {
-    const hostedRuntimeLog = createHostedRuntimeLogDelegate();
-    const tx = createHostedWorkspaceTx({
-      hostedRuntimeLog,
-      hostedWorkspace: createHostedWorkspaceDelegate(),
-    });
-    const diagnostic: HostedRuntimeRedactedJson = {
-      deliveryErrorSummaries: [
-        {
-          deliveryChannel: "telegram",
-          deliveryStatus: "failed_ambiguous",
-          deliveryErrorCode: "TELEGRAM_API_BAD_REQUEST",
-          deliveryErrorDetailDescription: "Forbidden: reaction is unavailable.",
-          deliveryErrorDetailFieldCount: 7,
-          deliveryErrorDetailOperation: "Telegram Bot API setMessageReaction",
-          deliveryErrorDetailProviderCode: 403,
-          deliveryErrorDetailRetryable: false,
-          deliveryErrorDetailStatus: 403,
-          deliveryErrorMessage: "Telegram HTTP 400 bad request.",
-          journalStatus: "500",
-          retryable: true,
-          targetKind: "message",
-        },
-      ],
-    };
-
-    const result = await recordHostedRuntimeLogTx({
-      at: "2026-04-26T00:02:00.000Z",
-      component: "outbox",
-      eventCode: "outbox.delivery_finished",
-      level: "warn",
-      phase: "outbox",
-      redacted: diagnostic,
-      tx,
-      userId: "member_workspace_1",
-    });
-
-    expect(hostedRuntimeLog.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        component: "outbox",
-        eventCode: "outbox.delivery_finished",
-        phase: "outbox",
-        redactedJson: diagnostic,
-      }),
-    });
-    expect(result.redactedJson).toEqual(diagnostic);
-
-    await expect(recordHostedRuntimeLogTx({
-      at: "2026-04-26T00:03:00.000Z",
-      component: "outbox",
-      eventCode: "outbox.delivery_finished",
-      level: "warn",
-      phase: "outbox",
-      redacted: {
-        deliveryErrorSummaries: [
-          Object.fromEntries(
-            Array.from({ length: 17 }, (_, index) => [`extraCode${index}`, index]),
-          ),
-        ],
-      },
-      tx,
-      userId: "member_workspace_1",
-    })).rejects.toThrow(/at most 16 fields/u);
-
-    const nestedDeliveryErrorSummary: HostedRuntimeRedactedJson = JSON.parse(JSON.stringify({
-      deliveryErrorSummaries: [
-        {
-          deliveryErrorCode: "TELEGRAM_API_BAD_REQUEST",
-          nestedDetail: { status: 403 },
-        },
-      ],
-    }));
-    await expect(recordHostedRuntimeLogTx({
-      at: "2026-04-26T00:04:00.000Z",
-      component: "outbox",
-      eventCode: "outbox.delivery_finished",
-      level: "warn",
-      phase: "outbox",
-      redacted: nestedDeliveryErrorSummary,
-      tx,
-      userId: "member_workspace_1",
-    })).rejects.toThrow(/shallow redacted scalar/u);
-    expect(hostedRuntimeLog.create).toHaveBeenCalledTimes(1);
-  });
-
-  it("rejects raw OpenAI diagnostic payload fields before persistence", async () => {
-    const hostedRuntimeLog = createHostedRuntimeLogDelegate();
-    const tx = createHostedWorkspaceTx({
-      hostedRuntimeLog,
-      hostedWorkspace: createHostedWorkspaceDelegate(),
-    });
-
-    await expect(recordHostedRuntimeLogTx({
-      at: "2026-04-26T00:02:00.000Z",
-      component: "runner",
-      eventCode: "runner.provider_egress_diagnostic",
-      level: "debug",
-      phase: "fetch",
-      redacted: {
-        promptText: "redacted",
-      },
-      tx,
-      userId: "member_workspace_1",
-    })).rejects.toThrow(/not allowed/u);
-
-    await expect(recordHostedRuntimeLogTx({
-      at: "2026-04-26T00:02:00.000Z",
-      component: "runner",
-      eventCode: "runner.provider_egress_diagnostic",
-      level: "debug",
-      phase: "fetch",
-      redacted: {
-        requestBody: "redacted",
-      },
-      tx,
-      userId: "member_workspace_1",
-    })).rejects.toThrow(/not allowed/u);
-
-    expect(hostedRuntimeLog.create).not.toHaveBeenCalled();
-  });
-
-  it("allows bounded sanitized device-sync failure summaries", async () => {
-    const hostedRuntimeLog = createHostedRuntimeLogDelegate();
-    const tx = createHostedWorkspaceTx({
-      hostedRuntimeLog,
-      hostedWorkspace: createHostedWorkspaceDelegate(),
-    });
-    const failureSummary = [
-      "Device provider snapshot import input is invalid.",
-      `validationIssues=${"collectionTypeMismatch ".repeat(40).trim()}`,
-    ].join(" | ");
-
-    const result = await recordHostedRuntimeLogTx({
-      at: "2026-04-26T00:02:00.000Z",
-      component: "device-sync",
-      errorCode: "SYNC_JOB_FAILED",
-      eventCode: "device-sync.job_failed",
-      level: "warn",
-      phase: "invoke",
-      redacted: {
-        failureCode: "SYNC_JOB_FAILED",
-        failureSummary,
-        provider: "whoop",
-      },
-      tx,
-      userId: "member_workspace_1",
-    });
-
-    expect(failureSummary.length).toBeGreaterThan(128);
-    expect(hostedRuntimeLog.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        component: "device-sync",
-        errorCode: "SYNC_JOB_FAILED",
-        eventCode: "device-sync.job_failed",
-        level: "warn",
-        phase: "invoke",
-        redactedJson: {
-          failureCode: "SYNC_JOB_FAILED",
-          failureSummary,
-          provider: "whoop",
-        },
-      }),
-    });
-    expect(result.redactedJson).toEqual({
-      failureCode: "SYNC_JOB_FAILED",
-      failureSummary,
-      provider: "whoop",
-    });
-  });
-
-  it("allows bounded safe runtime diagnostic text keys", async () => {
-    const hostedRuntimeLog = createHostedRuntimeLogDelegate();
-    const tx = createHostedWorkspaceTx({
-      hostedRuntimeLog,
-      hostedWorkspace: createHostedWorkspaceDelegate(),
-    });
-
-    const result = await recordHostedRuntimeLogTx({
-      at: "2026-04-26T00:02:00.000Z",
-      component: "assistant",
-      errorCode: "ASSISTANT_CODEX_FAILED",
-      eventCode: "assistant.automation_detail",
-      level: "warn",
-      phase: "invoke",
-      redacted: {
-        assistantNotificationErrorMessage: "Hosted assistant notification failed.",
-        customProviderErrorDetail: "Provider rejected the request after resume.",
-        failureAssistantProviderErrorMessage: "provider rejected the request",
-        safeErrorMessage: "Codex app-server failed before producing a reply.",
-      },
-      tx,
-      userId: "member_workspace_1",
-    });
-
-    expect(result.redactedJson).toEqual({
-      assistantNotificationErrorMessage: "Hosted assistant notification failed.",
-      customProviderErrorDetail: "Provider rejected the request after resume.",
-      failureAssistantProviderErrorMessage: "provider rejected the request",
-      safeErrorMessage: "Codex app-server failed before producing a reply.",
-    });
-  });
-
-  it("allows metadata-only redacted keys that mention sensitive field names", async () => {
-    const hostedRuntimeLog = createHostedRuntimeLogDelegate();
-    const tx = createHostedWorkspaceTx({
-      hostedRuntimeLog,
-      hostedWorkspace: createHostedWorkspaceDelegate(),
-    });
-
-    const result = await recordHostedRuntimeLogTx({
-      at: "2026-04-26T00:02:00.000Z",
-      component: "assistant",
-      errorCode: "ASSISTANT_CODEX_FAILED",
-      eventCode: "assistant.automation_detail",
-      level: "warn",
-      phase: "invoke",
-      redacted: {
-        authorizationHeaderPresent: false,
-        codexInvalidOutputErrorMessageLength: 96,
-        codexResumeFailureErrorMessageLength: 251,
-        messageStatus: "failed",
-        promptTokenCount: 120,
-        rawPayloadBytes: 2048,
-        authorizationHeaderValue: "redacted",
-        bodyJson: "redacted",
-        messageContent: "redacted",
-        messageText: 1,
-        payloadValue: "redacted",
-        tokenPreview: "redacted",
-        routePlanningActiveExperimentContextElapsedMs: 6000,
-        routePlanningAssistantContextSnapshotElapsedMs: 8,
-        routePlanningCliBootstrapElapsedMs: null,
-        routePlanningElapsedMs: 16,
-        routePlanningFallbackInstructionsElapsedMs: null,
-        routePlanningAnyBootstrapContextPrepared: true,
-        routePlanningBootstrapContextPrepared: false,
-        routePlanningMeasuredElapsedMs: 15,
-        routePlanningMemoryOverviewElapsedMs: null,
-        routePlanningPrimaryInstructionsElapsedMs: 12,
-        routePlanningPrimarySystemPromptElapsedMs: 12,
-        routePlanningResumeBindingElapsedMs: 0,
-        routePlanningSlowestStage: "assistant_context_snapshot",
-        routePlanningSlowestStageElapsedMs: 8,
-        routePlanningSupportedExperimentProtocolsElapsedMs: 0,
-        routePlanningTargetCapabilitiesElapsedMs: 1,
-        routePlanningUnaccountedElapsedMs: 1,
-        routePlanningVaultOverviewElapsedMs: null,
-      },
-      tx,
-      userId: "member_workspace_1",
-    });
-
-    expect(result.redactedJson).toEqual({
-      authorizationHeaderPresent: false,
-      codexInvalidOutputErrorMessageLength: 96,
-      codexResumeFailureErrorMessageLength: 251,
-      messageStatus: "failed",
-      promptTokenCount: 120,
-      rawPayloadBytes: 2048,
-      authorizationHeaderValue: "redacted",
-      bodyJson: "redacted",
-      messageContent: "redacted",
-      messageText: 1,
-      payloadValue: "redacted",
-      tokenPreview: "redacted",
-      routePlanningActiveExperimentContextElapsedMs: 6000,
-      routePlanningAssistantContextSnapshotElapsedMs: 8,
-      routePlanningCliBootstrapElapsedMs: null,
-      routePlanningElapsedMs: 16,
-      routePlanningFallbackInstructionsElapsedMs: null,
-      routePlanningAnyBootstrapContextPrepared: true,
-      routePlanningBootstrapContextPrepared: false,
-      routePlanningMeasuredElapsedMs: 15,
-      routePlanningMemoryOverviewElapsedMs: null,
-      routePlanningPrimaryInstructionsElapsedMs: 12,
-      routePlanningPrimarySystemPromptElapsedMs: 12,
-      routePlanningResumeBindingElapsedMs: 0,
-      routePlanningSlowestStage: "assistant_context_snapshot",
-      routePlanningSlowestStageElapsedMs: 8,
-      routePlanningSupportedExperimentProtocolsElapsedMs: 0,
-      routePlanningTargetCapabilitiesElapsedMs: 1,
-      routePlanningUnaccountedElapsedMs: 1,
-      routePlanningVaultOverviewElapsedMs: null,
-    });
-
-    for (const timingKey of [
-      "routePlanningActiveExperimentContextElapsedMs",
-      "routePlanningAssistantContextSnapshotElapsedMs",
-      "routePlanningElapsedMs",
-      "routePlanningPrimarySystemPromptElapsedMs",
-      "routePlanningVaultOverviewElapsedMs",
-    ] as const) {
-      await expect(recordHostedRuntimeLogTx({
-        at: "2026-04-26T00:02:00.000Z",
-        component: "assistant",
-        errorCode: "ASSISTANT_CODEX_FAILED",
-        eventCode: "assistant.automation_detail",
-        level: "warn",
-        phase: "invoke",
-        redacted: {
-          [timingKey]: "prompt-like timing text",
-        },
-        tx,
-        userId: "member_workspace_1",
-      })).rejects.toThrow(/finite number or null/u);
-      await expect(recordHostedRuntimeLogTx({
-        at: "2026-04-26T00:02:00.000Z",
-        component: "assistant",
-        errorCode: "ASSISTANT_CODEX_FAILED",
-        eventCode: "assistant.automation_detail",
-        level: "warn",
-        phase: "invoke",
-        redacted: {
-          [timingKey]: -1,
-        },
-        tx,
-        userId: "member_workspace_1",
-      })).rejects.toThrow(/nonnegative finite number or null/u);
-    }
-    await expect(recordHostedRuntimeLogTx({
-      at: "2026-04-26T00:02:00.000Z",
-      component: "assistant",
-      errorCode: "ASSISTANT_CODEX_FAILED",
-      eventCode: "assistant.automation_detail",
-      level: "warn",
-      phase: "invoke",
-      redacted: {
-        routePlanningGlucoseContextElapsedMs: 12,
-      },
-      tx,
-      userId: "member_workspace_1",
-    })).rejects.toThrow(/allowed route-planning diagnostic key/u);
-    for (const [removedKey, removedValue] of [
-      ["routePlanningFreshThreadFallbackPrepared", true],
-      ["routePlanningFreshThreadFallbackPromptElapsedMs", 12],
-    ] as const) {
-      await expect(recordHostedRuntimeLogTx({
-        at: "2026-04-26T00:02:00.000Z",
-        component: "assistant",
-        errorCode: "ASSISTANT_CODEX_FAILED",
-        eventCode: "assistant.automation_detail",
-        level: "warn",
-        phase: "invoke",
-        redacted: {
-          [removedKey]: removedValue,
-        },
-        tx,
-        userId: "member_workspace_1",
-      })).rejects.toThrow(/allowed route-planning diagnostic key/u);
-    }
-    await expect(recordHostedRuntimeLogTx({
-      at: "2026-04-26T00:02:00.000Z",
-      component: "assistant",
-      errorCode: "ASSISTANT_CODEX_FAILED",
-      eventCode: "assistant.automation_detail",
-      level: "warn",
-      phase: "invoke",
-      redacted: {
-        routePlanningSlowestStage: "oura_sleep_context",
-      },
-      tx,
-      userId: "member_workspace_1",
-    })).rejects.toThrow(/known route-planning stage/u);
-  });
-
-  it("rejects raw-value redacted keys that mention sensitive field names", async () => {
-    const hostedRuntimeLog = createHostedRuntimeLogDelegate();
-    const tx = createHostedWorkspaceTx({
-      hostedRuntimeLog,
-      hostedWorkspace: createHostedWorkspaceDelegate(),
-    });
-
-    for (const rawKey of [
-      "authorizationHeaderRawValue",
-      "bodyJsonRawValue",
-      "messageContentRawValue",
-      "payloadRawValue",
-      "tokenRawValue",
-    ]) {
-      await expect(recordHostedRuntimeLogTx({
-        at: "2026-04-26T00:02:00.000Z",
-        component: "assistant",
-        errorCode: "ASSISTANT_CODEX_FAILED",
-        eventCode: "assistant.automation_detail",
-        level: "warn",
-        phase: "invoke",
-        redacted: {
-          [rawKey]: "redacted",
-        },
-        tx,
-        userId: "member_workspace_1",
-      })).rejects.toThrow(/not allowed/u);
-    }
-  });
-
-  it("rejects unsafe or oversized redacted log metadata before persistence", async () => {
-    const hostedRuntimeLog = createHostedRuntimeLogDelegate();
-    const tx = createHostedWorkspaceTx({
-      hostedRuntimeLog,
-      hostedWorkspace: createHostedWorkspaceDelegate(),
-    });
-
-    await expect(recordHostedRuntimeLogTx({
-      at: "2026-04-26T00:02:00.000Z",
-      component: "mailbox",
-      eventCode: "mailbox.imported",
-      level: "warn",
-      phase: "import",
-      redacted: {
-        reason: `sent to ${["person", "example.test"].join("@")}`,
-      },
-      tx,
-      userId: "member_workspace_1",
-    })).rejects.toThrow(/email address/u);
-
-    await expect(recordHostedRuntimeLogTx({
-      at: "2026-04-26T00:02:00.000Z",
-      component: "mailbox",
-      eventCode: "mailbox.imported",
-      level: "warn",
-      phase: "import",
-      redacted: Object.fromEntries(
-        Array.from({ length: 97 }, (_, index) => [`count${index}`, index]),
-      ),
-      tx,
-      userId: "member_workspace_1",
-    })).rejects.toThrow(/at most 96 fields/u);
-
-    await expect(recordHostedRuntimeLogTx({
-      at: "2026-04-26T00:02:00.000Z",
-      component: "device-sync",
-      eventCode: "device-sync.job_failed",
-      level: "warn",
-      phase: "invoke",
-      redacted: {
-        failureSummary: "x".repeat(2049),
-      },
-      tx,
-      userId: "member_workspace_1",
-    })).rejects.toThrow(/at most 2048 characters/u);
-
-    expect(hostedRuntimeLog.create).not.toHaveBeenCalled();
-  });
 });
 
 interface HostedWorkspaceUpdateManyArgs {
@@ -2736,28 +2026,6 @@ interface HostedWorkspaceUpsertArgs {
   update: Record<string, never>;
   where: {
     userId: string;
-  };
-}
-
-interface HostedRuntimeLogCreateArgs {
-  data: {
-    at: Date;
-    attemptId: string | null;
-    checkpointVersion: bigint | null;
-    component: string;
-    errorCode: string | null;
-    eventCode: string;
-    id: string;
-    leaseGeneration: bigint | null;
-    level: string;
-    mailboxLane: string | null;
-    mailboxSeqEnd: bigint | null;
-    mailboxSeqStart: bigint | null;
-    outboxIntentRef: string | null;
-    phase: string;
-    redactedJson: Prisma.InputJsonValue | typeof Prisma.DbNull;
-    userId: string;
-    workspaceVersion: bigint | null;
   };
 }
 
@@ -2790,7 +2058,6 @@ interface HostedMailboxItemFindFirstArgs {
 type HostedWorkspaceUpdateMany = (args: HostedWorkspaceUpdateManyArgs) => Promise<{ count: number }>;
 type HostedWorkspaceFindUnique = (args: HostedWorkspaceFindUniqueArgs) => Promise<HostedWorkspaceRow | null>;
 type HostedWorkspaceUpsert = (args: HostedWorkspaceUpsertArgs) => Promise<HostedWorkspaceRow>;
-type HostedRuntimeLogCreate = (args: HostedRuntimeLogCreateArgs) => Promise<HostedRuntimeLogRow>;
 type HostedMailboxItemFindFirst = (
   args: HostedMailboxItemFindFirstArgs,
 ) => Promise<{ laneSeq: bigint } | null>;
@@ -2822,35 +2089,6 @@ function buildHostedWorkspaceRow(
     updatedAt: FIXED_NOW,
     userId: "member_workspace_1",
     version: 4n,
-    ...overrides,
-  };
-}
-
-function buildHostedRuntimeLogRow(
-  overrides: Partial<HostedRuntimeLogRow> = {},
-): HostedRuntimeLogRow {
-  return {
-    at: FIXED_NOW,
-    attemptId: null,
-    checkpointVersion: null,
-    component: "mailbox",
-    createdAt: FIXED_NOW,
-    errorCode: null,
-    eventCode: "mailbox.imported",
-    id: "runtime_log_1",
-    leaseGeneration: null,
-    level: "warn",
-    mailboxLane: "conversation",
-    mailboxSeqEnd: null,
-    mailboxSeqStart: 12n,
-    outboxIntentRef: null,
-    phase: "import",
-    redactedJson: {
-      dedupeConflict: true,
-      incomingKind: "conversation.message",
-    },
-    userId: "member_workspace_1",
-    workspaceVersion: 5n,
     ...overrides,
   };
 }
@@ -2951,24 +2189,6 @@ function createHostedMailboxItemDelegate(overrides: Partial<{
   };
 }
 
-function createHostedRuntimeLogDelegate(overrides: Partial<{
-  create: ReturnType<typeof vi.fn<HostedRuntimeLogCreate>>;
-}> = {}) {
-  return {
-    create: vi.fn<HostedRuntimeLogCreate>(async (args) => {
-      const { redactedJson, ...data } = args.data;
-
-      return buildHostedRuntimeLogRow({
-        ...data,
-        redactedJson: redactedJson === Prisma.DbNull
-          ? null
-          : JSON.parse(JSON.stringify(redactedJson)) as Prisma.JsonValue,
-      });
-    }),
-    ...overrides,
-  };
-}
-
 function createHostedWorkspaceTx(input: {
   $executeRaw?: ReturnType<typeof vi.fn<HostedWorkspaceExecuteRaw>>;
   $queryRaw?: ReturnType<typeof vi.fn<HostedWorkspaceQueryRaw>>;
@@ -2977,7 +2197,6 @@ function createHostedWorkspaceTx(input: {
     updateMany?: ReturnType<typeof vi.fn<HostedMailboxItemUpdateMany>>;
   };
   hostedMailboxLaneCounter?: ReturnType<typeof createHostedMailboxLaneCounterDelegate>;
-  hostedRuntimeLog?: ReturnType<typeof createHostedRuntimeLogDelegate>;
   hostedWorkspace: ReturnType<typeof createHostedWorkspaceDelegate>;
 }) {
   return Object.assign(Object.create(null), {
@@ -2987,7 +2206,6 @@ function createHostedWorkspaceTx(input: {
     ...(input.hostedMailboxLaneCounter
       ? { hostedMailboxLaneCounter: input.hostedMailboxLaneCounter }
       : {}),
-    hostedRuntimeLog: input.hostedRuntimeLog ?? createHostedRuntimeLogDelegate(),
     hostedWorkspace: input.hostedWorkspace,
   }) as Parameters<typeof checkpointHostedWorkspaceTx>[0]["tx"];
 }

@@ -7,10 +7,7 @@ import {
 import type { HostedPrivyClientPendingAction } from "@/src/lib/hosted-onboarding/privy-client";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 
-import {
-  completeHostedPrivyAuth,
-  type HostedAuthCompletionResult,
-} from "./hosted-auth-completion";
+import { completeHostedPrivyAuth } from "./hosted-auth-completion";
 import { navigateHostedAuthRedirect } from "./hosted-auth-navigation";
 import { HostedOnboardingApiError, requestHostedOnboardingJson } from "./client-api";
 import type {
@@ -131,18 +128,12 @@ export function readSubmittedPhoneNumber(event: FormEvent<HTMLFormElement> | und
 
 export async function finalizeHostedPrivyVerification(input: {
   inviteCode?: string | null;
-  onAuthCompleted?: (result: HostedAuthCompletionResult) => Promise<void> | void;
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
 }) {
   const result = await completeHostedPrivyAuth({
     authMethod: "phone",
     inviteCode: input.inviteCode,
   });
-
-  if (input.onAuthCompleted) {
-    await input.onAuthCompleted(result);
-    return;
-  }
 
   if (input.onCompleted) {
     await input.onCompleted(result.payload);

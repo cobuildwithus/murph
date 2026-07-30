@@ -67,13 +67,13 @@ describe("hosted public URL helpers", () => {
     expect(resolveHostedDeviceSyncPublicBaseUrl(source)).toBe("https://www.withmurph.ai/api/device-sync");
   });
 
-  it("preserves explicit device-sync public base URLs", () => {
+  it("preserves explicit same-host device-sync public base URLs", () => {
     const source = createProcessEnv({
-      DEVICE_SYNC_PUBLIC_BASE_URL: "https://api.example.test/device-sync",
+      DEVICE_SYNC_PUBLIC_BASE_URL: "https://www.withmurph.ai/device-sync",
       VERCEL_PROJECT_PRODUCTION_URL: "www.withmurph.ai",
     });
 
-    expect(resolveHostedDeviceSyncPublicBaseUrl(source)).toBe("https://api.example.test/device-sync");
+    expect(resolveHostedDeviceSyncPublicBaseUrl(source)).toBe("https://www.withmurph.ai/device-sync");
   });
 
   it("fails closed when a configured hosted public base URL includes a non-root path", () => {

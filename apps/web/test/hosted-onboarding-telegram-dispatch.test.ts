@@ -27,7 +27,7 @@ const mocks = vi.hoisted(() => {
     drainHostedExecutionOutboxBestEffort: vi.fn(),
     enqueueHostedExecutionOutbox: vi.fn(),
     bindArmedHostedUsageReferralToNewContainerTx: vi.fn(async () => ({
-      referralId: null,
+      referralIds: [],
     })),
     ensureHostedThreadContainerRouteTx: vi.fn(async () => ({
       activationEventId: null,
@@ -91,10 +91,10 @@ const mocks = vi.hoisted(() => {
     provisionActiveHostedDomainRootEnvelopeForUserOnly: vi.fn(async () => ({})),
     observeHostedUsageReferralInboundTx: vi.fn(async (): Promise<{
       isBoundReferralTarget: boolean;
-      qualificationCandidateReferralId: string | null;
+      qualificationCandidateReferralIds: string[];
     }> => ({
       isBoundReferralTarget: false,
-      qualificationCandidateReferralId: null,
+      qualificationCandidateReferralIds: [],
     })),
     reconcileHostedUsageReferralRewardAfterCommit: vi.fn(async () => null),
     readHostedThreadRouteByThreadIdentity: vi.fn(async (): Promise<{
@@ -274,6 +274,11 @@ type TelegramWebhookPrismaHarness = {
   hostedMember?: {
     findUnique?: ReturnType<typeof vi.fn>;
   };
+  hostedThreadContainerParticipant?: {
+    findMany?: ReturnType<typeof vi.fn>;
+    updateMany?: ReturnType<typeof vi.fn>;
+    upsert?: ReturnType<typeof vi.fn>;
+  };
   hostedMemberRouting?: {
     findMany?: (...args: unknown[]) => Promise<unknown>;
     findFirst?: (...args: unknown[]) => Promise<unknown>;
@@ -302,11 +307,11 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       demotedMailboxConsumedAt: null,
     });
     mocks.bindArmedHostedUsageReferralToNewContainerTx.mockResolvedValue({
-      referralId: null,
+      referralIds: [],
     });
     mocks.observeHostedUsageReferralInboundTx.mockResolvedValue({
       isBoundReferralTarget: false,
-      qualificationCandidateReferralId: null,
+      qualificationCandidateReferralIds: [],
     });
     mocks.reconcileHostedUsageReferralRewardAfterCommit.mockResolvedValue(null);
     mocks.readHostedThreadRouteByThreadIdentity.mockResolvedValue(null);
@@ -531,6 +536,8 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       .toHaveBeenCalledExactlyOnceWith({
         occurredAt: new Date("2026-03-26T10:56:40.000Z"),
         ownerMemberId: "member_telegram_owner",
+        targetChannel: "telegram",
+        targetLinqService: null,
         targetContainerMemberId: "member_telegram_group_container",
         tx: prisma,
       });
@@ -565,6 +572,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
               // username keeps the case the room sees; only the separate
               // lookup key is lowercased for identity matching.
               from: "456",
+              senderDisplayName: "Alice",
               senderUsername: "Alice_Example",
               text: "set up our weekly health newsletter",
               threadId: "-100123",
@@ -591,11 +599,20 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     });
     mocks.observeHostedUsageReferralInboundTx.mockResolvedValue({
       isBoundReferralTarget: true,
-      qualificationCandidateReferralId: "usage_referral_1",
+      qualificationCandidateReferralIds: [
+        "usage_referral_1",
+        "usage_referral_2",
+      ],
     });
+    const participantUpsert = vi.fn().mockResolvedValue({});
     const prisma = withPrismaTransaction({
       hostedMemberRouting: {
         findMany: vi.fn().mockResolvedValue([]),
+      },
+      hostedThreadContainerParticipant: {
+        findMany: vi.fn().mockResolvedValue([]),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        upsert: participantUpsert,
       },
     });
 
@@ -630,13 +647,24 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         senderSubjectKey: createHostedTelegramUserLookupKey("789"),
         tx: prisma,
       });
-    expect(mocks.reconcileHostedUsageReferralRewardAfterCommit)
-      .toHaveBeenCalledExactlyOnceWith({
-        prisma,
-        referralId: "usage_referral_1",
-      });
+    expect(
+      mocks.reconcileHostedUsageReferralRewardAfterCommit,
+    ).toHaveBeenCalledTimes(2);
+    expect(
+      mocks.reconcileHostedUsageReferralRewardAfterCommit,
+    ).toHaveBeenNthCalledWith(1, {
+      prisma,
+      referralId: "usage_referral_1",
+    });
+    expect(
+      mocks.reconcileHostedUsageReferralRewardAfterCommit,
+    ).toHaveBeenNthCalledWith(2, {
+      prisma,
+      referralId: "usage_referral_2",
+    });
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.ensureHostedThreadContainerRouteTx).not.toHaveBeenCalled();
+    expect(participantUpsert).not.toHaveBeenCalled();
   });
 
   it("reuses an existing Telegram group route for another linked active sender", async () => {
@@ -714,6 +742,275 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     );
   });
 
+  it("admits an active linked sender to an existing Telegram container whose owner expired", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-28T12:00:00.000Z"));
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    mocks.readHostedThreadRouteByThreadIdentity.mockResolvedValue({
+      channel: "telegram",
+      containerMemberId: "member_existing_group_container",
+      owner: { id: "member_expired_owner" },
+    });
+    const participantUpsert = vi.fn().mockResolvedValue({});
+    const participantUpdateMany = vi.fn().mockResolvedValue({ count: 0 });
+    const prisma = withPrismaTransaction({
+      hostedMember: {
+        findUnique: vi.fn(async (query: {
+          where: { id: string };
+        }) => query.where.id === "member_existing_group_container"
+          ? {
+              accountGroupMemberships: [],
+              billingStatus: HostedBillingStatus.not_started,
+              suspendedAt: null,
+              threadContainer: {
+                owner: {
+                  accountGroupMemberships: [],
+                  billingRef: {
+                    currentBillingPhase: "trial",
+                    currentBillingPlanCode: "launch_monthly",
+                    currentCheckoutOffer: "pulse_trial_7d",
+                    currentTrialEndsAt: new Date("2026-03-27T12:00:00.000Z"),
+                    currentTrialStartedAt: new Date("2026-03-20T12:00:00.000Z"),
+                    pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+                    pulseTrialRedeemedAt: new Date("2026-03-20T12:00:00.000Z"),
+                    stripeSubscriptionLookupKey: "subscription_lookup_expired_owner",
+                  },
+                  billingStatus: HostedBillingStatus.active,
+                  suspendedAt: null,
+                },
+              },
+            }
+          : {
+              accountGroupMemberships: [],
+              billingRef: null,
+              billingStatus: HostedBillingStatus.active,
+              suspendedAt: null,
+              threadContainer: null,
+            }),
+      },
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue({
+          member: {
+            billingStatus: HostedBillingStatus.active,
+            id: "member_second_group_sender",
+            suspendedAt: null,
+          },
+          memberId: "member_second_group_sender",
+        }),
+      },
+      hostedThreadContainerParticipant: {
+        findMany: vi.fn().mockResolvedValue([{
+          participant: {
+            accountGroupMemberships: [],
+            billingRef: null,
+            billingStatus: HostedBillingStatus.active,
+            suspendedAt: null,
+          },
+        }]),
+        updateMany: participantUpdateMany,
+        upsert: participantUpsert,
+      },
+    });
+
+    await expect(handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        message: {
+          chat: { id: -100123, title: "Trial chat", type: "group" },
+          date: 1_774_522_601,
+          from: { first_name: "Casey", id: 789 },
+          message_id: 3,
+          text: "thanks murph",
+        },
+        update_id: 324,
+      }),
+      secretToken: "telegram-secret",
+    })).resolves.toEqual({
+      ok: true,
+      reason: "wake-appended-active-group",
+    });
+
+    expect(mocks.ensureHostedThreadContainerRouteTx).not.toHaveBeenCalled();
+    expect(participantUpsert).toHaveBeenCalledWith({
+      create: {
+        containerMemberId: "member_existing_group_container",
+        firstSeenAt: new Date("2026-03-26T10:56:41.000Z"),
+        handleLookupKey: createHostedTelegramUserLookupKey("789"),
+        lastSeenAt: new Date("2026-03-26T10:56:41.000Z"),
+        participantMemberId: "member_second_group_sender",
+        removedAt: null,
+      },
+      update: {
+        handleLookupKey: createHostedTelegramUserLookupKey("789"),
+      },
+      where: {
+        containerMemberId_participantMemberId: {
+          containerMemberId: "member_existing_group_container",
+          participantMemberId: "member_second_group_sender",
+        },
+      },
+    });
+    expect(participantUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        containerMemberId: "member_existing_group_container",
+        participantMemberId: "member_second_group_sender",
+      }),
+    }));
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledOnce();
+  });
+
+  it("does not let a delayed participant observation reactivate an expired Telegram container", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    mocks.readHostedThreadRouteByThreadIdentity.mockResolvedValue({
+      channel: "telegram",
+      containerMemberId: "member_existing_group_container",
+      owner: { id: "member_expired_owner" },
+    });
+    const participantUpsert = vi.fn().mockResolvedValue({});
+    const prisma = withPrismaTransaction({
+      hostedMember: {
+        findUnique: vi.fn(async (query: {
+          where: { id: string };
+        }) => query.where.id === "member_existing_group_container"
+          ? {
+              accountGroupMemberships: [],
+              billingStatus: HostedBillingStatus.not_started,
+              suspendedAt: null,
+              threadContainer: {
+                owner: {
+                  accountGroupMemberships: [],
+                  billingRef: {
+                    currentBillingPhase: "trial",
+                    currentBillingPlanCode: "launch_monthly",
+                    currentCheckoutOffer: "pulse_trial_7d",
+                    currentTrialEndsAt: new Date("2026-03-27T12:00:00.000Z"),
+                    currentTrialStartedAt: new Date("2026-03-20T12:00:00.000Z"),
+                    pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+                    pulseTrialRedeemedAt: new Date("2026-03-20T12:00:00.000Z"),
+                    stripeSubscriptionLookupKey: "subscription_lookup_expired_owner",
+                  },
+                  billingStatus: HostedBillingStatus.active,
+                  suspendedAt: null,
+                },
+              },
+            }
+          : {
+              accountGroupMemberships: [],
+              billingRef: null,
+              billingStatus: HostedBillingStatus.active,
+              suspendedAt: null,
+              threadContainer: null,
+            }),
+      },
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue({
+          member: {
+            billingStatus: HostedBillingStatus.active,
+            id: "member_second_group_sender",
+            suspendedAt: null,
+          },
+          memberId: "member_second_group_sender",
+        }),
+      },
+      hostedThreadContainerParticipant: {
+        findMany: vi.fn().mockResolvedValue([]),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        upsert: participantUpsert,
+      },
+    });
+
+    await expect(handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        message: {
+          chat: { id: -100123, title: "Trial chat", type: "group" },
+          date: 1_774_522_601,
+          from: { first_name: "Casey", id: 789 },
+          message_id: 4,
+          text: "old delayed message",
+        },
+        update_id: 325,
+      }),
+      secretToken: "telegram-secret",
+    })).resolves.toEqual({
+      ignored: true,
+      ok: true,
+      reason: "group-chat-provision-unavailable",
+    });
+
+    expect(participantUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        lastSeenAt: new Date("2026-03-26T10:56:41.000Z"),
+      }),
+    }));
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+  });
+
+  it("does not provision a delayed Telegram group message sent during a trial that has expired by processing time", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const prisma = withPrismaTransaction({
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingRef: {
+            currentBillingPhase: "trial",
+            currentBillingPlanCode: "launch_monthly",
+            currentCheckoutOffer: "pulse_trial_7d",
+            currentTrialEndsAt: new Date("2026-03-27T12:00:00.000Z"),
+            currentTrialStartedAt: new Date("2026-03-20T12:00:00.000Z"),
+            pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+            pulseTrialRedeemedAt: new Date("2026-03-20T12:00:00.000Z"),
+            stripeSubscriptionLookupKey: "subscription_lookup_expired_trial",
+          },
+          billingStatus: HostedBillingStatus.active,
+          suspendedAt: null,
+          threadContainer: null,
+        }),
+      },
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue({
+          member: {
+            billingStatus: HostedBillingStatus.active,
+            id: "member_telegram_owner",
+            suspendedAt: null,
+          },
+          memberId: "member_telegram_owner",
+        }),
+      },
+    });
+
+    await expect(handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        message: {
+          chat: {
+            id: -100124,
+            title: "Trial chat",
+            type: "group",
+          },
+          date: 1_774_522_600,
+          from: {
+            first_name: "Alice",
+            id: 456,
+          },
+          message_id: 3,
+          text: "Murph?",
+        },
+        update_id: 325,
+      }),
+      secretToken: "telegram-secret",
+    })).resolves.toEqual({
+      ignored: true,
+      ok: true,
+      reason: "inactive-member",
+    });
+
+    expect(mocks.ensureHostedThreadContainerRouteTx).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+  });
+
   it("repairs non-empty corrupt Telegram delivery material on owner ingress", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
     const containerMemberId = "member_existing_group_container";
@@ -731,6 +1028,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       throw new Error("Expected current Telegram thread route lookup keys.");
     }
     const routeRow: {
+      accountLookupKey: string | null;
       channel: "telegram";
       containerMemberId: string;
       deliveryRouteEncrypted: string | null;
@@ -738,6 +1036,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       threadIdentityLookupKey: string;
       threadLookupKey: string;
     } = {
+      accountLookupKey: null,
       channel: "telegram",
       containerMemberId,
       deliveryRouteEncrypted: "corrupt-delivery-route",
@@ -750,12 +1049,14 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       data,
     }: {
       data: {
+        accountLookupKey: string;
         deliveryRouteEncrypted: string;
         pendingGroupReactionContextEncrypted?: string | null;
         threadIdentityLookupKey: string;
         threadLookupKey: string;
       };
     }) => {
+      routeRow.accountLookupKey = data.accountLookupKey;
       routeRow.deliveryRouteEncrypted = data.deliveryRouteEncrypted;
       routeRow.threadIdentityLookupKey = data.threadIdentityLookupKey;
       routeRow.threadLookupKey = data.threadLookupKey;
@@ -824,6 +1125,9 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
 
     expect(mocks.ensureHostedThreadContainerRouteTx).not.toHaveBeenCalled();
     expect(hostedThreadRouteUpdate).toHaveBeenCalledTimes(1);
+    expect(routeRow.accountLookupKey).toBe(
+      HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
+    );
     expect(routeRow.deliveryRouteEncrypted).toMatch(/^hsb-test:/u);
     await expect(openHostedThreadDeliveryRoute({
       channel: "telegram",
@@ -1404,9 +1708,15 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         memberId: "member_telegram_123",
       })
       .mockResolvedValueOnce(null);
+    const participantUpsert = vi.fn().mockResolvedValue({});
     const prisma = withPrismaTransaction({
       hostedMemberRouting: {
         findUnique: hostedMemberRoutingFindUnique,
+      },
+      hostedThreadContainerParticipant: {
+        findMany: vi.fn().mockResolvedValue([]),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        upsert: participantUpsert,
       },
     });
 
@@ -1438,6 +1748,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     expect(mocks.ensureHostedThreadContainerRouteTx).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    expect(participantUpsert).not.toHaveBeenCalled();
   });
 
   it("preserves a richer persisted Telegram thread target when a later webhook only carries a plain DM thread", async () => {
@@ -2024,6 +2335,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     const hostedWebhookReceiptCreate = vi.fn().mockResolvedValue({});
     const hostedWebhookReceiptUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
     const hostedMemberRoutingUpsert = vi.fn();
+    const participantUpsert = vi.fn().mockResolvedValue({});
     const prisma = withPrismaTransaction({
       hostedWebhookReceipt: {
         create: hostedWebhookReceiptCreate,
@@ -2050,6 +2362,11 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         }),
         upsert: hostedMemberRoutingUpsert,
       },
+      hostedThreadContainerParticipant: {
+        findMany: vi.fn().mockResolvedValue([]),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        upsert: participantUpsert,
+      },
     });
 
     const response = await handleHostedOnboardingTelegramWebhook({
@@ -2057,8 +2374,8 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       rawBody: JSON.stringify({
         message: {
           chat: {
-            id: 123,
-            type: "private",
+            id: -100123,
+            type: "group",
           },
           date: 1_774_522_600,
           from: {
@@ -2083,6 +2400,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     expect(hostedWebhookReceiptCreate).not.toHaveBeenCalled();
     expect(hostedWebhookReceiptUpdateMany).not.toHaveBeenCalled();
     expect(hostedMemberRoutingUpsert).not.toHaveBeenCalled();
+    expect(participantUpsert).not.toHaveBeenCalled();
   });
 
   it("persists an inactive signup's direct thread without waking the runtime", async () => {
@@ -2153,6 +2471,66 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     });
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
+  it("does not record group participant authority until the linked sender becomes active", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const participantUpsert = vi.fn().mockResolvedValue({});
+    const prisma = withPrismaTransaction({
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingRef: null,
+          billingStatus: HostedBillingStatus.not_started,
+          suspendedAt: null,
+          threadContainer: null,
+        }),
+      },
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue({
+          member: {
+            billingStatus: HostedBillingStatus.not_started,
+            id: "member_telegram_123",
+            suspendedAt: null,
+          },
+          memberId: "member_telegram_123",
+        }),
+      },
+      hostedThreadContainerParticipant: {
+        findMany: vi.fn().mockResolvedValue([]),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        upsert: participantUpsert,
+      },
+    });
+
+    await expect(handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        message: {
+          chat: {
+            id: -100123,
+            type: "group",
+          },
+          date: 1_774_522_600,
+          from: {
+            first_name: "Alice",
+            id: 456,
+          },
+          message_id: 1,
+          text: "hello",
+        },
+        update_id: 657,
+      }),
+      secretToken: "telegram-secret",
+    })).resolves.toEqual({
+      ignored: true,
+      ok: true,
+      reason: "inactive-member",
+    });
+
+    expect(participantUpsert).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedThreadContainerRouteTx).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 
   it("ignores business-account self messages flagged through sender_business_bot", async () => {
@@ -2660,6 +3038,20 @@ function withPrismaTransaction<T extends Record<string, unknown>>(
         threadContainer: null,
       })),
     };
+  }
+  if (!prismaWithTransaction.hostedThreadContainerParticipant) {
+    prismaWithTransaction.hostedThreadContainerParticipant = {
+      findMany: vi.fn().mockResolvedValue([]),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      upsert: vi.fn().mockResolvedValue({}),
+    };
+  } else {
+    prismaWithTransaction.hostedThreadContainerParticipant.findMany ??=
+      vi.fn().mockResolvedValue([]);
+    prismaWithTransaction.hostedThreadContainerParticipant.updateMany ??=
+      vi.fn().mockResolvedValue({ count: 0 });
+    prismaWithTransaction.hostedThreadContainerParticipant.upsert ??=
+      vi.fn().mockResolvedValue({});
   }
   if (!prismaWithTransaction.hostedWebhookReceiptSideEffect?.deleteMany || !prismaWithTransaction.hostedWebhookReceiptSideEffect?.upsert) {
     prismaWithTransaction.hostedWebhookReceiptSideEffect = {

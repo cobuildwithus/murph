@@ -3,11 +3,15 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, expect, test, vi } from "vitest";
 
 import type { HostedVaultShareFixedProjectionKind } from "@murphai/hosted-execution/vault-share";
+import { HostedOnboardingApiError } from "@/src/components/hosted-onboarding/client-api";
 import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
   authDialogProps: null as {
+    autoSendPastedPhoneNumber?: boolean;
     description: string;
+    inviteCode?: string | null;
+    methods?: readonly ("phone" | "telegram" | "email")[];
     onCompleted?: (payload: {
       initialVisitEligible?: boolean;
       stage: "active" | "activating" | "blocked" | "checkout";
@@ -31,7 +35,10 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
   AuthDialog(props: {
+    autoSendPastedPhoneNumber?: boolean;
     description: string;
+    inviteCode?: string | null;
+    methods?: readonly ("phone" | "telegram" | "email")[];
     onCompleted?: (payload: {
       initialVisitEligible?: boolean;
       stage: "active" | "activating" | "blocked" | "checkout";
@@ -50,12 +57,32 @@ vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
   },
 }));
 
-vi.mock("@/src/components/hosted-onboarding/client-api", () => ({
-  requestHostedOnboardingJson: mocks.requestHostedOnboardingJson,
-}));
+vi.mock("@/src/components/hosted-onboarding/client-api", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/components/hosted-onboarding/client-api")
+  >();
+
+  return {
+    ...actual,
+    requestHostedOnboardingJson: mocks.requestHostedOnboardingJson,
+  };
+});
 
 vi.mock("@/src/components/hosted-onboarding/hosted-auth-navigation", () => ({
   navigateHostedAuthRedirect: mocks.navigateHostedAuthRedirect,
+}));
+
+vi.mock("@/src/components/hosted-onboarding/join-invite-islands", () => ({
+  JoinInviteSignOutButtonIsland(props: { idleLabel?: string }) {
+    return createElement(
+      "button",
+      {
+        "data-invite-account-recovery": "true",
+        type: "button",
+      },
+      props.idleLabel ?? "Use this invite instead",
+    );
+  },
 }));
 
 vi.mock("@/src/components/legal/hosted-legal-consent-card", () => ({
@@ -208,6 +235,7 @@ test("renders one Daily macros card that toggles every macro scope together", as
       alreadyActiveMember: false,
       expectedMembershipId: null,
       groupName: "Sunday Sleep Crew",
+      inviteCode: "invite_phone_bound",
       joinCode: "JOIN123",
       permissions: [
         macroPermission("protein-days.v0", "protein"),
@@ -245,6 +273,7 @@ test("renders one Daily macros card that toggles every macro scope together", as
     method: "POST",
     payload: {
       expectedMembershipId: null,
+      inviteCode: "invite_phone_bound",
       selectedVaultShareProjectionScopes: [
         { projectionKind: "protein-days.v0" },
         { projectionKind: "carbs-days.v0" },
@@ -348,7 +377,9 @@ test("automatically opens the intent-first auth prompt on a valid group join pag
     "@/src/components/hosted-groups/group-join-client"
   );
   const { cleanup, container } = await renderClientComponent(
-    createElement(GroupJoinSignInButton),
+    createElement(GroupJoinSignInButton, {
+      inviteCode: "invite_opaque",
+    }),
     {
       location: {
         hash: "",
@@ -365,6 +396,9 @@ test("automatically opens the intent-first auth prompt on a valid group join pag
   });
 
   expect(container.textContent).toContain("Continue to join");
+  expect(mocks.authDialogProps?.inviteCode).toBe("invite_opaque");
+  expect(mocks.authDialogProps?.methods).toEqual(["phone"]);
+  expect(mocks.authDialogProps?.autoSendPastedPhoneNumber).toBeUndefined();
   expect(container.querySelector(
     '[data-auth-title="Continue to join this Murph group"]',
   )).toBeTruthy();
@@ -408,6 +442,8 @@ test("returns an authenticated new member to the same group intent", async () =>
     expect(mocks.authDialogProps?.open).toBe(true);
   });
 
+  expect(mocks.authDialogProps?.methods).toBeUndefined();
+
   await act(async () => {
     await mocks.authDialogProps?.onCompleted?.({
       initialVisitEligible: true,
@@ -418,6 +454,61 @@ test("returns an authenticated new member to the same group intent", async () =>
   expect(mocks.navigateHostedAuthRedirect).toHaveBeenCalledWith(
     "/groups/join/JOIN123?source=text&postJoin=initial-visit#sharing",
   );
+});
+
+test("offers same-link account recovery for a mismatched phone-bound invite", async () => {
+  mocks.requestHostedOnboardingJson.mockRejectedValueOnce(
+    new HostedOnboardingApiError({
+      code: "AUTH_INVITE_MISMATCH",
+      message: "That invite belongs to a different hosted member.",
+    }),
+  );
+  const { GroupJoinAcceptForm } = await import(
+    "@/src/components/hosted-groups/group-join-client"
+  );
+  const { button, cleanup, container, window } = await renderClientComponent(
+    createElement(GroupJoinAcceptForm, {
+      activeVaultShareProjectionScopes: [],
+      alreadyActiveMember: false,
+      expectedMembershipId: null,
+      groupName: "Sunday Sleep Crew",
+      inviteCode: "invite_phone_bound",
+      joinCode: "JOIN123",
+      permissions: [],
+      postJoinContactOption: null,
+      postJoinDestination: "/home",
+    }),
+  );
+  cleanupRender = cleanup;
+
+  await act(async () => {
+    button.dispatchEvent(new window.Event("click", { bubbles: true }));
+    await Promise.resolve();
+  });
+
+  await vi.waitFor(() => {
+    expect(container.textContent).toContain("Use the invited phone number");
+  });
+  expect(container.textContent).toContain(
+    "Sign out, then verify the phone number that received this invite.",
+  );
+  expect(container.querySelector(
+    '[data-invite-account-recovery="true"]',
+  )).toBeTruthy();
+  expect(container.textContent).toContain("Sign out and continue");
+  expect(container.textContent).not.toContain("Join group");
+  expect(container.textContent).not.toContain(
+    "That invite belongs to a different hosted member.",
+  );
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+    method: "POST",
+    payload: {
+      expectedMembershipId: null,
+      inviteCode: "invite_phone_bound",
+      selectedVaultShareProjectionScopes: [],
+    },
+    url: "/api/groups/join/JOIN123/accept",
+  });
 });
 
 test("returns to the dashboard through a real link once membership succeeds", async () => {

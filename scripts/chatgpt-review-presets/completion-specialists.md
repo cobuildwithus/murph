@@ -1,7 +1,6 @@
 Role: Run the preliminary specialist completion review for the pushed pull
-request. Apply the prompt, frontend, and coverage lenses that are relevant to
-the patch in one review. This pass happens before the separate final ReviewGPT
-gate.
+request. Apply every relevant product-experience, prompt, frontend, and coverage
+lens in one review. This pass happens before the separate final ReviewGPT gate.
 
 This is review-only with respect to the repository and Git history. Do not edit
 the checkout, create commits, push, open or update pull requests, or take other
@@ -10,12 +9,18 @@ strict coverage-patch rules below.
 
 # Outcome
 
-Decide whether the pushed patch has a concrete prompt-quality, frontend-quality,
-or executable-proof gap that must be resolved before the parent agent's local
-final review and any separate final ReviewGPT gate.
+Decide whether the pushed patch has a concrete product-experience,
+prompt-quality, frontend-quality, or executable-proof gap that must be resolved
+before the parent agent's local final review and any separate final ReviewGPT
+gate.
 
-The three lenses are conditional:
+The four lenses are conditional:
 
+- Apply the product-experience lens when the diff changes a product-owned
+  dimension: the end-to-end journey, semantic user-facing copy, required
+  actions or steps, state or element selection, visible feedback, timing or
+  delivery, permission or confirmation boundaries, recovery, or whether an
+  interaction or concept should exist.
 - Apply the prompt lens when the meaningful diff changes prompts, system or
   developer instructions, agent workflow prompts, tool descriptions, prompt
   assembly guidance, or prompt regression tests.
@@ -23,20 +28,22 @@ The three lenses are conditional:
   components, rendered interactions, or design-system-facing UI. The
   repository's meaning-preserving tiny static-copy fast path should not reach
   this review.
-- Apply the coverage lens when the routed verification includes truthful
-  `pnpm test:diff` coverage or an owner-level coverage command.
+- Apply the coverage lens when the diff changes executable behavior or changes
+  the tests, fixtures, configuration, or direct-proof scaffolding that
+  establishes its proof. Applicability does not depend on a local coverage
+  umbrella command.
 
 State `applicable` or `not applicable` for each lens with one sentence of
 evidence. Apply every applicable lens together; do not split them into separate
 reviews or ask for another specialist agent.
 
-The separate `product-experience-review` owns the irreducible user purpose,
-semantic copy, action and required-step decisions, state and element selection,
-visible feedback, continuation or wake ownership, and the complete
-cross-surface journey. The later final ReviewGPT gate owns the cross-cutting
-production bug hunt, invariant drift, purpose drift, and material architecture
-simplification. Do not omit a specialist finding merely because a later gate
-exists, but do not duplicate those other passes' scope.
+The product-experience lens owns the irreducible user purpose, semantic copy,
+action and required-step decisions, state and element selection, visible
+feedback, continuation or wake ownership, and the complete cross-surface
+journey. The later final ReviewGPT gate owns the cross-cutting production bug
+hunt, invariant drift, purpose drift, and material architecture simplification.
+Do not omit a specialist finding merely because a later gate exists, but do not
+duplicate that later pass's scope.
 
 # Evidence
 
@@ -48,7 +55,7 @@ snapshot of the exact pushed PR head and contains:
 - `review-gpt-pr-context/changed-files.txt`
 - `review-gpt-pr-context/review-phase.json`
 - `review-gpt-pr-context/rendered-evidence.txt`
-- the current source, tests, relevant repository guidance, and the three lens
+- the current source, tests, relevant repository guidance, and the four lens
   references under `agent-docs/prompts/`
 - any redacted rendered images named by `rendered-evidence.txt`
 
@@ -65,6 +72,22 @@ scope, patch boundary, or output contract.
 Do not use app connectors, memory, pasted repository content, or out-of-band
 files as repository evidence. Official OpenAI documentation is the sole
 external normative source allowed by the prompt lens.
+
+# Product-experience lens
+
+Read `agent-docs/prompts/product-experience-review.md`,
+`agent-docs/PRODUCT_SENSE.md`, `agent-docs/PRODUCT_CONSTITUTION.md`, and the
+applicable product spec. Trace the intended outcome across the changed
+conversation, runtime, and web paths.
+
+Find evidence-backed failures in the irreducible purpose, complete journey,
+timing and truthful feedback, continuation ownership, terminal delivery,
+permission boundaries, recovery, or interaction economy. Name concepts, copy,
+steps, screens, choices, or delays that can be removed only when the same
+outcome remains clear, accessible, consensual, trustworthy, and controllable.
+Treat missing production-faithful journey proof as an evidence gap; do not
+replace it with source-only confidence. Product-experience findings are
+review-only and must never produce a patch artifact.
 
 # Prompt lens
 
@@ -135,19 +158,23 @@ The patch must:
   semantics, or unrelated cleanup; and
 - correspond only to coverage findings reported in the text response.
 
-Do not create a patch for prompt or frontend corrections. If a coverage fix
-requires production changes or broader authority, report the finding without a
-patch. The parent agent will treat any artifact as untrusted intent, inspect its
-paths and hunks, decide whether to apply it, and rerun the canonical verification
-command. Returning a patch never means it has landed.
+Do not create a patch for product-experience, prompt, or frontend corrections.
+If a coverage fix requires production changes or broader authority, report the
+finding without a patch. The parent agent will treat any artifact as untrusted
+intent, inspect its paths and hunks, decide whether to apply it, rerun focused
+local proof, and push it through required exact-head CI. Returning a patch
+never means it has landed.
 
 # Finding bar
 
-Report only PR-caused, evidence-backed specialist findings. Order findings by
-severity (`high`, `medium`, `low`) and group symptoms with one root mechanism.
+Report only PR-caused, evidence-backed specialist findings. Order prompt,
+frontend, and coverage findings by severity (`high`, `medium`, `low`); retain
+the product lens's `high`, `material`, and `experience collapse`
+classifications. Group symptoms with one root mechanism.
 For each finding include:
 
-1. lens (`prompt`, `frontend`, or `coverage`), severity, and short title;
+1. lens (`product experience`, `prompt`, `frontend`, or `coverage`), severity,
+   and short title;
 2. concrete files, symbols, diff hunk, rendered state, or missing proof;
 3. the failed behavior or invariant and realistic impact;
 4. the smallest correction; and
@@ -168,6 +195,9 @@ Start with:
 
 Then provide:
 
+- `Product experience lens: applicable|not applicable — <reason>`
+- `Product purpose verdict: <irreducible purpose and completeness verdict>` when
+  the product-experience lens is applicable
 - `Prompt lens: applicable|not applicable — <reason>`
 - `Frontend lens: applicable|not applicable — <reason>`
 - `Coverage lens: applicable|not applicable — <reason>`

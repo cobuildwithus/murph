@@ -1,7 +1,5 @@
 "use client";
 
-import type { HostedAuthCompletionResult } from "./hosted-auth-completion";
-
 import {
   HostedPhoneAuthFlow,
   HostedPhoneAuthScaffold,
@@ -11,38 +9,57 @@ import { HostedPrivyCaptcha } from "./hosted-privy-captcha";
 import type { HostedPhoneAuthIntent, HostedPhoneLinkPayload } from "./hosted-phone-auth-types";
 
 interface HostedPhoneAuthProps {
+  autoSendPastedPhoneNumber?: boolean;
   disableSignup?: boolean;
+  inviteCode?: string | null;
   intent?: HostedPhoneAuthIntent;
-  onAuthCompleted?: (result: HostedAuthCompletionResult) => Promise<void> | void;
+  interactionGated?: boolean;
+  onAuthCancel?: () => void;
+  onAuthQueue?: () => boolean;
+  onAuthQueueCancel?: () => void;
+  onAuthStart?: () => boolean;
+  onAuthenticated?: (input: { authMethod: "phone" }) => Promise<void> | void;
   onCodeSent?: () => void;
   onLinked?: (payload: HostedPhoneLinkPayload) => Promise<void> | void;
   onSignOut?: () => Promise<void> | void;
   phoneFieldLabel?: string | null;
   phoneInputAutoFocus?: boolean;
   renderCaptcha?: boolean;
-  sendCodeGated?: boolean;
   size?: "default" | "compact";
   suppressAuthenticatedSessionIssue?: boolean;
 }
 
 export function HostedPhoneAuth({
+  autoSendPastedPhoneNumber = false,
   disableSignup = false,
+  inviteCode,
   intent = "auth",
-  onAuthCompleted,
+  interactionGated = false,
+  onAuthCancel,
+  onAuthQueue,
+  onAuthQueueCancel,
+  onAuthStart,
+  onAuthenticated,
   onCodeSent,
   onLinked,
   onSignOut,
   phoneFieldLabel,
   phoneInputAutoFocus = false,
   renderCaptcha = true,
-  sendCodeGated = false,
   size,
   suppressAuthenticatedSessionIssue = false,
 }: HostedPhoneAuthProps) {
   const controller = useHostedPhoneAuthController({
+    autoSendPastedPhoneNumber,
     disableSignup,
+    inviteCode,
     intent,
-    onAuthCompleted,
+    interactionGated,
+    onAuthCancel,
+    onAuthQueue,
+    onAuthQueueCancel,
+    onAuthStart,
+    onAuthenticated,
     onCodeSent,
     onLinked,
     onSignOut,
@@ -67,7 +84,6 @@ export function HostedPhoneAuth({
         {...controller.sharedFlowProps}
         phoneFieldLabel={phoneFieldLabel ?? controller.sharedFlowProps.phoneFieldLabel}
         phoneInputAutoFocus={phoneInputAutoFocus}
-        sendCodeDisabled={controller.sharedFlowProps.sendCodeDisabled || sendCodeGated}
         size={size}
       />
     </HostedPhoneAuthScaffold>

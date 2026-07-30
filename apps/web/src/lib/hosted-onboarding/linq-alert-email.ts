@@ -1,19 +1,18 @@
 import type { HostedLinqAlert, PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
-import { normalizeNullableString, parseCommaSeparatedList, parseInteger } from "../primitives";
+import {
+  readHostedOperationalAlertEmailConfig,
+  type HostedOperationalAlertEmailConfig,
+} from "./operational-alert-email-config";
 import {
   HostedResendPlainTextEmailError,
   sendHostedResendPlainTextEmail,
-  type HostedResendPlainTextEmailConfig,
 } from "./resend-plain-text-email";
 
 type HostedLinqAlertEmailEnv = Readonly<Record<string, string | undefined>>;
 
-const HOSTED_LINQ_ALERT_EMAIL_DEFAULT_TIMEOUT_MS = 10_000;
 const HOSTED_LINQ_ALERT_EMAIL_SENDING_LEASE_MS = 15 * 60 * 1000;
-const HOSTED_LINQ_ALERT_EMAIL_MIN_TIMEOUT_MS = 1_000;
-const HOSTED_LINQ_ALERT_EMAIL_MAX_TIMEOUT_MS = 30_000;
 
 export async function sendPendingHostedLinqAlertsBestEffort(input: {
   alertIds: readonly string[];
@@ -61,7 +60,9 @@ async function sendPendingHostedLinqAlerts(input: {
   now?: Date;
   prisma?: PrismaClient;
 }): Promise<void> {
-  const config = readHostedLinqAlertEmailConfig(input.env ?? process.env);
+  const config = readHostedOperationalAlertEmailConfig(
+    input.env ?? process.env,
+  );
   if (!config) {
     return;
   }
@@ -92,7 +93,7 @@ async function sendPendingHostedLinqAlerts(input: {
 
 async function sendHostedLinqAlertEmail(input: {
   alert: HostedLinqAlert;
-  config: HostedLinqAlertEmailConfig;
+  config: HostedOperationalAlertEmailConfig;
   fetchImpl?: typeof fetch;
   prisma: PrismaClient;
 }): Promise<void> {
@@ -179,45 +180,13 @@ function buildHostedLinqAlertClaimableStatusWhere(now: Date | null) {
   ];
 }
 
-type HostedLinqAlertEmailConfig = {
-  recipients: string[];
-  resend: HostedResendPlainTextEmailConfig;
-};
-
-function readHostedLinqAlertEmailConfig(source: HostedLinqAlertEmailEnv): HostedLinqAlertEmailConfig | null {
-  const apiKey = normalizeNullableString(source.RESEND_API_KEY);
-  const from = normalizeNullableString(source.HOSTED_LINQ_ALERT_EMAIL_FROM);
-  const recipients = parseCommaSeparatedList(source.HOSTED_LINQ_ALERT_EMAILS);
-  if (!apiKey || !from || recipients.length === 0) {
-    return null;
-  }
-
-  return {
-    recipients,
-    resend: {
-      apiKey,
-      from,
-      timeoutMs: readHostedLinqAlertEmailTimeoutMs(source),
-    },
-  };
-}
-
-function readHostedLinqAlertEmailTimeoutMs(source: HostedLinqAlertEmailEnv): number {
-  const configured = parseInteger(source.HOSTED_LINQ_ALERT_EMAIL_TIMEOUT_MS);
-  if (!configured) {
-    return HOSTED_LINQ_ALERT_EMAIL_DEFAULT_TIMEOUT_MS;
-  }
-
-  return Math.min(
-    Math.max(configured, HOSTED_LINQ_ALERT_EMAIL_MIN_TIMEOUT_MS),
-    HOSTED_LINQ_ALERT_EMAIL_MAX_TIMEOUT_MS,
-  );
-}
-
 function buildHostedLinqAlertEmailText(alert: HostedLinqAlert): string {
   const details = alert.detailsJson && typeof alert.detailsJson === "object"
     ? alert.detailsJson as Record<string, unknown>
     : {};
+  const independentProviderStatusPresent =
+    typeof details.providerServiceStatus === "string"
+    || typeof details.providerReputationStatus === "string";
   return [
     "Linq operational alert.",
     "",
@@ -229,11 +198,19 @@ function buildHostedLinqAlertEmailText(alert: HostedLinqAlert): string {
     typeof details.service === "string" ? `Service: ${details.service}` : null,
     typeof details.failureCode === "string" ? `Failure code: ${details.failureCode}` : null,
     typeof details.failureReason === "string" ? `Failure reason: ${details.failureReason}` : null,
-    typeof details.providerStatus === "string" ? `Provider status: ${details.providerStatus}` : null,
+    typeof details.providerServiceStatus === "string"
+      ? `Line service status: ${details.providerServiceStatus}`
+      : null,
+    typeof details.providerReputationStatus === "string"
+      ? `Line reputation: ${details.providerReputationStatus}`
+      : null,
+    !independentProviderStatusPresent && typeof details.providerStatus === "string"
+      ? `Provider status: ${details.providerStatus}`
+      : null,
     typeof details.providerReason === "string" ? `Provider reason: ${details.providerReason}` : null,
     typeof details.providerCreatedAt === "string" ? `Provider created at: ${details.providerCreatedAt}` : null,
     "",
-    "Action taken: recorded provider event and updated Linq line state only. No routing failover is enabled in this patch.",
+    "Action taken: recorded the provider event and refreshed Linq service and reputation projections. Existing routes stay sticky; current egress policy is evaluated separately at send time.",
   ].filter((line): line is string => line !== null).join("\n");
 }
 

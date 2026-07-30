@@ -8,6 +8,7 @@ import {
 import {
   buildMurphGroupReadPermissionProfileTomlLines,
   buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines,
+  buildMurphMemberReadPermissionProfileTomlLines,
 } from "@murphai/hosted-execution/assistant-permissions";
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
@@ -30,7 +31,9 @@ import {
 import {
   type AssistantCodexModelProviderConfig,
   HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
   OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
+  VENICE_CODEX_MODEL_PROVIDER_ID,
   resolveAssistantCodexModelProviderConfig,
 } from "@murphai/operator-config/assistant/target-runtime";
 import {
@@ -138,8 +141,12 @@ const HOSTED_CODEX_REJECTED_SEED_ENV_KEYS = [
   // dev subscription mode it is persisted to CODEX_HOME/auth.json instead.
   HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
 ] as const;
+const HOSTED_CODEX_SUPPORTED_PROVIDER_IDS = new Set<string>([
+  OPENAI_CODEX_MODEL_PROVIDER_CONFIG.id,
+  VENICE_CODEX_MODEL_PROVIDER_ID,
+]);
 const HOSTED_CODEX_SUPPORTED_PROVIDER_LABEL =
-  OPENAI_CODEX_MODEL_PROVIDER_CONFIG.id;
+  [...HOSTED_CODEX_SUPPORTED_PROVIDER_IDS].join(" or ");
 const HOSTED_CODEX_OPENAI_MODEL_PROVIDER_ID = "hosted-openai";
 const HOSTED_CODEX_BOUND_USER_ID_ENV = "MURPH_HOSTED_CODEX_BOUND_USER_ID";
 const HOSTED_CODEX_RUNTIME_ATTEMPT_ID_ENV = "MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID";
@@ -182,14 +189,22 @@ export async function prepareHostedCodexRuntimeEnvironment(
   const codexHome = path.join(input.operatorHomeRoot, HOSTED_CODEX_CONFIG_DIR_NAME);
   const codexConfigPath = path.join(codexHome, HOSTED_CODEX_CONFIG_FILE_NAME);
   const codexAuthPath = path.join(codexHome, HOSTED_CODEX_AUTH_FILE_NAME);
-  const seededChatGptAuthJson = readHostedCodexChatGptAuthJson(input.runtimeEnv);
+  const openAiProvider = providerConfig.id === HOSTED_CODEX_OPENAI_MODEL_PROVIDER_ID;
+  const seededChatGptAuthJson = openAiProvider
+    ? readHostedCodexChatGptAuthJson(input.runtimeEnv)
+    : null;
 
   await mkdir(codexHome, {
     mode: 0o700,
     recursive: true,
   });
   await chmod(codexHome, 0o700);
-  let chatGptAuthKind = await readHostedCodexAuthKind(codexAuthPath);
+  if (!openAiProvider) {
+    await rm(codexAuthPath, { force: true });
+  }
+  let chatGptAuthKind = openAiProvider
+    ? await readHostedCodexAuthKind(codexAuthPath)
+    : null;
   if (
     chatGptAuthKind === "invalid"
     || (chatGptAuthKind === "managed" && seededChatGptAuthJson !== null)
@@ -209,7 +224,7 @@ export async function prepareHostedCodexRuntimeEnvironment(
     await rm(codexAuthPath, { force: true });
     chatGptAuthKind = null;
   }
-  const chatGptAuth = chatGptAuthKind !== null;
+  const chatGptAuth = openAiProvider && chatGptAuthKind !== null;
   const apiKeyValue = normalizeHostedCodexEnvString(input.runtimeEnv[providerConfig.envKey]);
   if (!chatGptAuth && !apiKeyValue) {
     throw new HostedAssistantConfigurationError(
@@ -407,7 +422,8 @@ function resolveHostedCodexModelProviderConfig(input: {
   provider: string | null;
   runtimeEnv: Readonly<Record<string, string | undefined>>;
 }): AssistantCodexModelProviderConfig {
-  const resolvedProviderConfig = input.provider === OPENAI_CODEX_MODEL_PROVIDER_CONFIG.id
+  const resolvedProviderConfig = input.provider
+    && HOSTED_CODEX_SUPPORTED_PROVIDER_IDS.has(input.provider)
     ? resolveAssistantCodexModelProviderConfig(input.provider)
     : null;
   if (!resolvedProviderConfig) {
@@ -416,10 +432,12 @@ function resolveHostedCodexModelProviderConfig(input: {
       `Hosted Codex runtime only supports HOSTED_ASSISTANT_PROVIDER=${HOSTED_CODEX_SUPPORTED_PROVIDER_LABEL}.`,
     );
   }
-  const providerConfig = {
-    ...resolvedProviderConfig,
-    id: HOSTED_CODEX_OPENAI_MODEL_PROVIDER_ID,
-  };
+  const providerConfig = resolvedProviderConfig.id === OPENAI_CODEX_MODEL_PROVIDER_CONFIG.id
+    ? {
+        ...resolvedProviderConfig,
+        id: HOSTED_CODEX_OPENAI_MODEL_PROVIDER_ID,
+      }
+    : resolvedProviderConfig;
 
   const override = normalizeHostedCodexEnvString(
     input.runtimeEnv[HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV],
@@ -463,6 +481,9 @@ function resolveHostedCodexModelProviderConfig(input: {
   return {
     ...providerConfig,
     baseUrl: url.toString(),
+    id: providerConfig.id === VENICE_CODEX_MODEL_PROVIDER_ID
+      ? HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID
+      : providerConfig.id,
     supportsWebSockets: false,
   };
 }
@@ -564,20 +585,18 @@ export function buildHostedCodexConfigToml(input: {
     ...providerConfigLines,
     ...buildMurphGroupReadPermissionProfileTomlLines(),
     ...buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines(),
+    ...buildMurphMemberReadPermissionProfileTomlLines(),
     "# Hosted runs should not perform Codex plugin marketplace or remote plugin",
     "# sync work on cold wake; Murph owns the hosted runtime tool surface.",
     "[features]",
     "plugins = false",
     `memories = ${HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.featureEnabled}`,
     "",
-    // Murph dynamic tools are dispatched through the app-server item/tool/call
-    // path. Keep the "murph" namespace advertised as structured function tools
-    // even when a model enables code_mode_only (e.g. gpt-5.6-terra in Codex
-    // >= 0.144), instead of being folded into the exec tool's description.
-    // Codex reads this under [features.code_mode]; a top-level [code_mode]
-    // table is silently ignored.
-    "[features.code_mode]",
-    'direct_only_tool_namespaces = ["murph"]',
+    "[features.current_time_reminder]",
+    "enabled = true",
+    'clock_source = "system"',
+    'delivery_mode = "after_user_or_tool_output"',
+    "reminder_interval_seconds = 60",
     "",
     "# This table owns enablement and the proactive per-turn mode/tool hints.",
     "# A CLI boolean override would replace the table and silently drop them.",

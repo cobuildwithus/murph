@@ -161,6 +161,7 @@ const automationArgumentsSchema = z.discriminatedUnion('action', [
 export const MURPH_AUTOMATION_TOOL = {
   namespace: 'murph',
   name: 'automation',
+  deferLoading: true,
   description:
     'Create, update, or reconcile durable Murph automations for the current authenticated conversation. save_newsletter creates or replaces this group\'s one health newsletter from structured name, cron schedule, delivery, tone, and health scopes; use it for both current-chat and group-email delivery instead of authoring newsletter instructions. save binds an ordinary automation to this conversation and accepts no route fields. patch preserves the stored route unless retargetToCurrentConversation=true is explicit. reconcile archives members of one supportSeriesId that are absent from desiredAutomationIds. Use patch status to pause, reactivate, or archive. Never pass credentials, delivery targets, filesystem paths, reserved system tags, or generic commands.',
   inputSchema: z.toJSONSchema(automationArgumentsSchema, { io: 'input' }),

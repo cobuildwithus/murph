@@ -9,6 +9,15 @@ import {
 import worker from "../../src/index.ts";
 import type { R2BucketLike } from "../../src/bundle-store.js";
 import {
+  DatabaseHealthMonitor,
+  type DatabaseHealthMonitorEnvironment,
+  type DatabaseHealthMonitorResult,
+} from "../../src/database-health/monitor.ts";
+import type {
+  DatabaseHealthAlertState,
+  DatabaseHealthStoredSample,
+} from "../../src/database-health/store.ts";
+import {
   readHostedExecutionEnvironment,
   type HostedExecutionEnvironment,
 } from "../../src/env.ts";
@@ -32,6 +41,9 @@ import {
   handleRunnerGeneratedImageUploadRequest,
 } from "../../src/runner-outbound/generated-images.ts";
 import {
+  DatabaseHealthDurableObject,
+} from "../../src/worker/database-health-durable-object.ts";
+import {
   armInvalidRunnerOutputBundleFault,
   clearRunnerInvocationState,
   clearRunnerOutputBundleFault,
@@ -43,6 +55,42 @@ import type {
   HostedExecutionWake,
 } from "@murphai/hosted-execution";
 import type { HostedRunnerStatusResponse } from "@murphai/hosted-execution/runtime-control";
+import { handleDatabaseHealthEgress } from "./database-health-fetch.ts";
+
+export { DatabaseHealthDurableObject };
+
+export class VitestDatabaseHealthDurableObject
+  extends DatabaseHealthDurableObject {
+  private readonly testMonitor: DatabaseHealthMonitor;
+
+  constructor(
+    state: DurableObjectStateLike,
+    environment: DatabaseHealthMonitorEnvironment,
+  ) {
+    super(state, environment);
+    this.testMonitor = new DatabaseHealthMonitor(
+      state.storage,
+      environment,
+      handleDatabaseHealthEgress,
+    );
+  }
+
+  override async runScheduledCheck(input?: {
+    scheduledAtMs?: number;
+  }): Promise<DatabaseHealthMonitorResult> {
+    return await this.testMonitor.runScheduledCheck(input?.scheduledAtMs);
+  }
+
+  override readRecentSamples(input?: {
+    limit?: number;
+  }): DatabaseHealthStoredSample[] {
+    return this.testMonitor.readRecentSamples(input?.limit);
+  }
+
+  readAlertState(): DatabaseHealthAlertState {
+    return this.testMonitor.readAlertState();
+  }
+}
 
 type TestWorkerEnvironment = WorkerEnvironmentSource & {
   RUNNER_CONTAINER: HostedExecutionContainerNamespaceLike;
@@ -261,6 +309,13 @@ export default {
 
     return worker.fetch(request, _env);
   },
+  scheduled(
+    controller: ScheduledController,
+    _env: WorkerEnvironmentSource,
+    ctx: ExecutionContext,
+  ): void {
+    worker.scheduled(controller, _env, ctx);
+  },
 };
 
 async function handleTestRoute(request: Request): Promise<Response | null> {
@@ -302,7 +357,7 @@ async function handleTestRoute(request: Request): Promise<Response | null> {
     url.pathname === "/__test/generated-images/upload-handler-signal"
     && request.method === "POST"
   ) {
-    return Response.json(await exerciseGeneratedImageUploadHandlerSignal(request));
+    return Response.json(await exerciseGeneratedImageUploadTombstone());
   }
 
   if (url.pathname === "/__test/alarm" && request.method === "POST") {
@@ -482,9 +537,7 @@ async function measureRunnerLeaseLatency(request: Request): Promise<{
   };
 }
 
-async function exerciseGeneratedImageUploadHandlerSignal(request: Request): Promise<{
-  observedHasSignal: boolean;
-  observedSignalIsIncoming: boolean;
+async function exerciseGeneratedImageUploadTombstone(): Promise<{
   status: number;
 }> {
   const userId = `member_generated_image_upload_worker_${Date.now()}`;
@@ -503,45 +556,16 @@ async function exerciseGeneratedImageUploadHandlerSignal(request: Request): Prom
   });
 
   const uploadRequest = new Request("http://results.worker/generated-images", {
-    body: JSON.stringify({
-      alt: "Generated image upload worker test",
-      bytesBase64: "UklGRgAAAABXRUJQ",
-      contentType: "image/webp",
-      filename: "generated.webp",
-      metadata: {
-        source: "worker-generated-image-upload-signal",
-      },
-      source: "worker-generated-image-upload-signal",
-    }),
     headers,
     method: "POST",
-    signal: request.signal,
   });
-  let observedHasSignal = false;
-  let observedSignalIsIncoming = false;
   const response = await handleRunnerGeneratedImageUploadRequest({
-    env: {
-      ...readWorkerEnvironmentSource(),
-      CLOUDFLARE_IMAGES_ACCOUNT_ID: "worker-test-account",
-      CLOUDFLARE_IMAGES_API_KEY: "worker-test-token",
-    },
-    fetchImpl: async (_input, init) => {
-      observedHasSignal = init?.signal instanceof AbortSignal;
-      observedSignalIsIncoming = init?.signal === uploadRequest.signal;
-      return Response.json({
-        result: {
-          variants: ["https://imagedelivery.net/worker-test/generated/public"],
-        },
-        success: true,
-      });
-    },
+    env: readWorkerEnvironmentSource(),
     request: uploadRequest,
     userId,
   });
 
   return {
-    observedHasSignal,
-    observedSignalIsIncoming,
     status: response.status,
   };
 }

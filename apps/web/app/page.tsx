@@ -23,11 +23,13 @@ import { SignupCtaSection } from "@/src/components/homepage/signup-cta-section";
 import { TogetherSection } from "@/src/components/homepage/together-section";
 import { TrustSection } from "@/src/components/homepage/trust-section";
 import type { HomepageSignupCta } from "@/src/components/homepage/types";
+import { HomepageAuthRuntimeProvider } from "@/src/components/hosted-onboarding/homepage-auth-runtime-provider";
 import { fetchHeroContactInfo } from "@/src/lib/hero-contact-info";
 import {
   formatHostedLandingTrialDurationPhrase,
   formatHostedLandingTrialPricingNote,
 } from "@/src/lib/hosted-onboarding/billing-plans";
+import { isHostedVeniceAssistantEnabled } from "@/src/lib/hosted-onboarding/assistant-model-preference";
 import { resolveHostedInstallScriptUrl } from "@/src/lib/hosted-onboarding/landing";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { getMurphGithubStarCount } from "@/src/lib/github-stars";
@@ -126,7 +128,7 @@ export default async function HomePage() {
       };
 
   return (
-    <>
+    <HomepageAuthRuntimeProvider authenticated={authenticated}>
       <main className="min-h-screen bg-[#f5f0e8] antialiased">
         {authenticated ? <LandingBrowserVaultWarm /> : null}
         <StickyNav
@@ -151,11 +153,11 @@ export default async function HomePage() {
         <AssistantSection murphHeadshotSrc={murphHeadshotSrc} />
         <HowItWorksSection />
         <SecurityTeaserSection />
-        <FaqSection />
+        <FaqSection veniceAvailable={isHostedVeniceAssistantEnabled()} />
         <SignupCtaSection authenticated={authenticated} signupCta={signupCta} />
         <LocalRunSection installCommandUrl={installCommandUrl} />
       </main>
       <SiteFooter />
-    </>
+    </HomepageAuthRuntimeProvider>
   );
 }

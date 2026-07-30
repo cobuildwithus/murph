@@ -22,6 +22,21 @@ describe("changelog registry", () => {
     expect(ids.length).toBeGreaterThan(0);
   });
 
+  it("keeps each try-it action bound to exactly one behavior", () => {
+    const invalidItems = listPublishedChangelogItems().flatMap((item) => {
+      const tryIt = item.tryIt;
+      if (!tryIt) {
+        return [];
+      }
+      const modes = [tryIt.href, tryIt.prompt].filter(
+        (value) => value !== undefined,
+      );
+      return modes.length === 1 ? [] : [item.id];
+    });
+
+    expect(invalidItems).toEqual([]);
+  });
+
   it("bounds direct-chat access recovery to shared billing states", () => {
     const item = listPublishedChangelogItems().find(
       (candidate) => candidate.id === "recognized-members-always-get-an-answer",
@@ -39,13 +54,166 @@ describe("changelog registry", () => {
     );
   });
 
-  it("publishes the complete July 20 through July 27 shipment set", () => {
+  it("ties the Clubs launch note to every shipped page iteration", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "clubs-challenge-pilot-page",
+    );
+
+    expect(item).toMatchObject({
+      sourcePullRequests: [1098, 1105, 1115],
+      tryIt: {
+        href: "/clubs",
+        label: "Explore club challenges",
+      },
+    });
+  });
+
+  it("bounds participant-change context to supported iMessage groups", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "group-participant-changes-in-context",
+    );
+
+    expect(item).toMatchObject({
+      sourcePullRequests: [1100],
+      summary: expect.stringContaining("supported iMessage group"),
+    });
+  });
+
+  it("keeps the Telegram handoff bound to the exact verified phone", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "telegram-imessage-contact-handoff",
+    );
+
+    expect(item).toMatchObject({
+      sourcePullRequests: [1103],
+      summary: expect.stringContaining("exact verified phone"),
+    });
+  });
+
+  it("keeps additive challenge scorecards bounded and evidence-aware", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "additive-group-challenge-scorecards",
+    );
+
+    expect(item).toMatchObject({
+      sourcePullRequests: [1097],
+      summary: expect.stringContaining("up to five additive scoring components"),
+      details: expect.stringContaining("Missing data stays visibly partial"),
+    });
+  });
+
+  it("keeps dense reminder conversations finite", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "dense-reminders-become-conversation",
+    );
+
+    expect(item).toMatchObject({
+      sourcePullRequests: [1116],
+      details: expect.stringContaining("at most one unresolved occurrence"),
+    });
+  });
+
+  it("keeps the July 30 usage and experiment claims bounded", () => {
+    const items = new Map(
+      listPublishedChangelogItems().map((item) => [item.id, item]),
+    );
+
+    expect(items.get("usage-options-together")).toMatchObject({
+      sourcePullRequests: [1120, 1136, 1138, 1157],
+      details: expect.stringContaining("can be cancelled independently"),
+    });
+    expect(items.get("open-ended-experiment-outcomes")).toMatchObject({
+      sourcePullRequests: [1094],
+      details: expect.stringContaining("instead of a made-up numeric effect"),
+    });
+  });
+
+  it("keeps the July 30 identity and payment claims narrow", () => {
+    const items = new Map(
+      listPublishedChangelogItems().map((item) => [item.id, item]),
+    );
+
+    expect(items.get("group-bursts-one-turn")).toMatchObject({
+      sourcePullRequests: [1032, 1133],
+      details: expect.stringContaining("never identity or permission"),
+    });
+    expect(items.get("checkout-resumes-one-session")).toMatchObject({
+      sourcePullRequests: [1041],
+      summary: expect.stringContaining("same open Stripe session"),
+    });
+    expect(items.get("wearable-connect-owner-confirmation")).toMatchObject({
+      sourcePullRequests: [1059],
+      summary: expect.stringContaining("explicit Finish connection"),
+    });
+    expect(items.get("ios-app-link-in-chat")).toMatchObject({
+      sourcePullRequests: [1150],
+      details: expect.stringContaining("still stay private or in the app"),
+    });
+  });
+
+  it("publishes the complete July 21 through July 30 shipment set", () => {
     expect(
-      listChangelogEditions().slice(0, 8).map((edition) => ({
+      listChangelogEditions().slice(0, 10).map((edition) => ({
         id: edition.id,
         itemIds: edition.items.map((item) => item.id),
       })),
     ).toEqual([
+      {
+        id: "2026-07-30",
+        itemIds: [
+          "usage-options-together",
+          "open-ended-experiment-outcomes",
+          "core-reply-provider-choice",
+          "schoolwork-conversation-help",
+          "group-voice-only-punchlines",
+          "animated-gif-filmstrips",
+          "ios-app-link-in-chat",
+          "time-aware-immediate-advice",
+          "group-bursts-one-turn",
+          "homepage-auth-stays-usable",
+          "wearable-connect-owner-confirmation",
+          "checkout-resumes-one-session",
+          "group-newsletters-compose-once",
+          "group-sponsorship-cleaner-finish",
+          "cold-replies-start-sooner",
+          "obscure-group-references-grounded",
+        ],
+      },
+      {
+        id: "2026-07-29",
+        itemIds: [
+          "post-onboarding-choice-point",
+          "additive-group-challenge-scorecards",
+          "dense-reminders-become-conversation",
+          "clubs-challenge-pilot-page",
+          "group-chat-title-on-demand",
+          "telegram-imessage-contact-handoff",
+          "imessage-edits-become-corrections",
+          "group-participant-changes-in-context",
+          "confident-image-generation-status",
+          "home-experiment-history-hierarchy",
+          "homepage-private-murph-first",
+          "conflicting-contact-aliases-preserved",
+        ],
+      },
+      {
+        id: "2026-07-28",
+        itemIds: [
+          "imessage-instant-start",
+          "current-sender-group-disclosure",
+          "join-offer-private-continuation",
+          "group-sponsorship-moments",
+          "generated-media-private-path",
+          "saved-card-usage-topups",
+          "overall-ai-usage-bar",
+          "group-access-recovery-stays-private",
+          "group-humans-get-first-refusal",
+          "room-native-group-challenges",
+          "supportive-proactive-health-outreach",
+          "image-requests-stay-one-request",
+          "named-voice-memo-overrides",
+        ],
+      },
       {
         id: "2026-07-27",
         itemIds: [
@@ -157,23 +325,6 @@ describe("changelog registry", () => {
           "experiment-results-match-the-dashboard",
         ],
       },
-      {
-        id: "2026-07-20",
-        itemIds: [
-          "challenge-standings-explain-missing-data",
-          "phone-link-settings-recovery",
-          "weekly-insights-skip-obvious-weekend",
-          "scheduled-messages-get-the-full-murph",
-          "pulse-finishes-after-payment-setup",
-          "contaminant-tests-on-product-pages",
-          "private-experiments-open-from-home",
-          "named-lab-marker-answers-faster",
-          "dense-voice-memo-keeps-onboarding-moving",
-          "welcome-continues-your-conversation",
-          "approval-page-sign-in-recovery",
-          "strava-connections-paused",
-        ],
-      },
     ]);
   });
 
@@ -270,8 +421,8 @@ describe("changelog registry", () => {
   it("keeps the default archive window to seven calendar days", () => {
     const firstPage = resolveChangelogPage(1);
     expect(firstPage?.editions).toHaveLength(7);
-    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-07-27");
-    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-07-21");
+    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-07-30");
+    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-07-24");
   });
 
   it("resolves only known canonical edition cursors", () => {

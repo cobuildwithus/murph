@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { expect, test, vi } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getMurphGithubStarCount: vi.fn(),
@@ -102,8 +102,13 @@ vi.mock("../app/auth-controls", () => ({
   LandingAuthDialog: () => null,
 }));
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 test("HomePage renders the canonical landing page at the root route", async () => {
   vi.clearAllMocks();
+  vi.stubEnv("HOSTED_VENICE_ENABLED", "");
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: false,
   });
@@ -194,6 +199,10 @@ test("HomePage renders the canonical landing page at the root route", async () =
     markup,
     /<h1 class="sr-only">Health is hard\. Don’t do it alone\.<\/h1>/,
   );
+  assert.match(
+    markup,
+    /Wearables, bloodwork, doctor visits, supplements, blood pressure, sleep\. Murph reads it all/,
+  );
   assert.match(markup, /Start a health challenge with your friends/);
   assert.match(markup, /referees the week/);
   assert.match(markup, /Better together/);
@@ -245,11 +254,31 @@ test("HomePage renders the canonical landing page at the root route", async () =
   assert.match(markup, /Wearable apps show status/);
   assert.doesNotMatch(markup, /Strava/);
   assert.doesNotMatch(markup, /Perplexity Health/);
+  assert.doesNotMatch(markup, /Can I choose which AI provider Murph uses\?/);
   assert.doesNotMatch(markup, /Your wearable shows data/);
+});
+
+test("HomePage shows the provider FAQ only when Venice is available", async () => {
+  vi.clearAllMocks();
+  vi.stubEnv("HOSTED_VENICE_ENABLED", "1");
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: false,
+  });
+  mocks.getMurphGithubStarCount.mockResolvedValue(null);
+  mocks.headers.mockResolvedValue(new Headers({
+    "x-vercel-ip-country": "US",
+  }));
+
+  const { default: HomePage } = await import("../app/page");
+  const markup = renderToStaticMarkup(await HomePage());
+
+  assert.match(markup, /Can I choose which AI provider Murph uses\?/);
+  assert.match(markup, /choose OpenAI or Venice/);
 });
 
 test("SecurityPage splits the shared sticky nav into Log in + Signup when logged out", async () => {
   vi.clearAllMocks();
+  vi.stubEnv("HOSTED_VENICE_ENABLED", "");
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: false,
   });
@@ -276,6 +305,22 @@ test("SecurityPage splits the shared sticky nav into Log in + Signup when logged
     /curl -fsSL https:\/\/www\.withmurph\.ai\/install\.sh \| bash/
   );
   assert.doesNotMatch(markup, /curl -sSL withmurph\.ai\/install\.sh \| bash/);
+  assert.doesNotMatch(markup, /security-model-provider-title/);
+});
+
+test("SecurityPage shows provider security guidance only when Venice is available", async () => {
+  vi.clearAllMocks();
+  vi.stubEnv("HOSTED_VENICE_ENABLED", "true");
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: false,
+  });
+  mocks.getMurphGithubStarCount.mockResolvedValue(null);
+
+  const { default: SecurityPage } = await import("../app/security/page");
+  const markup = renderToStaticMarkup(await SecurityPage());
+
+  assert.match(markup, /security-model-provider-title/);
+  assert.match(markup, /OpenAI remains the default/);
 });
 
 test("HomePage metadata keeps the root route as the canonical landing URL", async () => {

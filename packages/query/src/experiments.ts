@@ -6,12 +6,14 @@ import {
   experimentOutcomeSchema,
   experimentProgressSnapshotSchema,
   safeParseContract,
+  summarizeExperimentOutcomeValues,
   toLocalDayKey,
-  activityTextMatchesKind,
   type DeviceDataOrigin,
   type ExperimentFrontmatter,
   type ExperimentOutcome,
   type ExperimentOutcomeMetricPoint,
+  type ExperimentOutcomeStatistic,
+  type ExperimentStructuredReviewResult,
   type ExperimentProgressMetricSignal,
   type ExperimentProgressSnapshot,
 } from "@murphai/contracts";
@@ -23,18 +25,28 @@ import {
   countCompletedAdherenceSessions,
   eventKindIsCandidateForEvidence,
   experimentAdherenceTargetPlansDate,
+  linkedEventObservationMatchesEvidence,
   resolveActivityEvidenceLocalDate,
   resolveAdherenceObservationActivityKind,
   resolveExperimentAdherenceRollupTarget,
+  resolveExperimentAdherenceTargets,
   resolveInterventionSessionLocalDate,
-  synthesizeLegacySessionAdherenceTargets,
   type ExperimentAdherenceCalendarResult,
   type ExperimentAdherenceObservation,
 } from "./experiment-adherence.ts";
 import {
+  isRegisteredExperimentMetricSource,
   matchesExperimentMetricIdentity,
   resolveExperimentMetricIdentity,
 } from "./experiment-metrics.ts";
+import {
+  resolveExperimentMetricOutcome,
+  resolveExperimentPrimaryOutcome,
+  summarizeExperimentOutcomeEvidencePlan,
+  type ExperimentOutcomeEvidencePlanSummary,
+  type ResolvedExperimentMetricOutcome,
+  type ResolvedExperimentPrimaryOutcome,
+} from "./experiment-outcomes.ts";
 import { metricPointRecordIds } from "./metrics/index.ts";
 import {
   readExperimentProtocolProjectionFields,
@@ -42,19 +54,14 @@ import {
 } from "./protocols.ts";
 import {
   assessExperimentPrimaryMetricCapture,
+  metricWindowUnitsAreCompatible,
   resolveMetricDefinition,
-  resolveMetricDefinitionForBiomarker,
   resolveExperimentSessionMetricSpec,
   validateExperimentSessionMetricValue,
-  normalizeMetricKey,
-  resolveComparableMetricPointValue,
   selectMetricSeries,
-  selectMetricValue,
-  selectMetricWindowComparison,
   unitsEquivalent,
   type MetricPoint,
   type MetricSeriesPoint,
-  type MetricWindowSummary,
 } from "./metrics/index.ts";
 import { buildMetricProjection } from "./metrics/projection.ts";
 import { summarizeWearableDay, type WearableDaySummary } from "./wearables.ts";
@@ -140,6 +147,7 @@ export interface ExperimentMetricResult {
   intervention: ExperimentMetricPeriodSummary;
   label: string;
   movedAsExpected: boolean | null;
+  statistic?: ExperimentOutcomeStatistic;
   unit: string | null;
 }
 
@@ -156,6 +164,8 @@ export interface ExperimentProgressSummary extends ExperimentProgressSnapshot {
     evidence?: {
       eventKind: "activity_session" | "intervention_session";
       activityKind?: string;
+      activityKinds?: string[];
+      minimumDurationMinutes?: number;
     };
     confirmedSessions?: number;
     expectedSessionsByNow: number | null;
@@ -243,6 +253,7 @@ export interface ExperimentOutcomeSummary extends ExperimentOutcome {
   commonsProtocolRef: ExperimentProtocolProjectionFields["commonsProtocolRef"];
   effectiveProtocolSnapshot: ExperimentProtocolProjectionFields["effectiveProtocolSnapshot"];
   metricResults: ExperimentOutcomeMetricResult[];
+  structuredReview?: ExperimentStructuredReviewResult;
   protocolRef: ExperimentProtocolProjectionFields["protocolRef"];
   windows: ExperimentProgressSummary["windows"];
 }
@@ -323,8 +334,12 @@ export function summarizeExperimentProgress(
   const completedSessionEventIds = context.events
     .filter(isCompletedSessionEvent)
     .map((event) => event.entityId);
-  const primarySignal = signals[0] ?? null;
-  const primaryBiomarkerKey = context.frontmatter.analysisPlan?.primaryBiomarkerKey ?? null;
+  const primaryOutcome = resolveExperimentPrimaryOutcome(context.frontmatter.analysisPlan);
+  const primarySignal =
+    primaryOutcome?.kind === "metric"
+      ? signals.find((signal) => signal.biomarkerKey === primaryOutcome.key) ?? null
+      : null;
+  const primaryBiomarkerKey = primaryOutcome?.key ?? null;
   const hasPrimarySignal =
     primaryBiomarkerKey !== null && primarySignal?.biomarkerKey === primaryBiomarkerKey;
   const metricDaysAvailable = summarizeSignalDayCoverage(signals);
@@ -406,14 +421,36 @@ export function analyzeExperimentOutcome(
   options: { asOf?: string } & ExperimentMetricPointOptions = {},
 ): ExperimentOutcomeSummary {
   const context = buildExperimentSummaryContext(vault, slug, options);
+  const primaryOutcome = resolveExperimentPrimaryOutcome(context.frontmatter.analysisPlan);
+  const outcomeEvidence = primaryOutcome
+    ? summarizeExperimentOutcomeEvidencePlan(
+        context.frontmatter.analysisPlan,
+        primaryOutcome.key,
+        {
+          evidenceObservedOnByRecordId: collectVaultEvidenceObservedOn(vault),
+          observedThrough: context.asOf,
+        },
+      )
+    : null;
   const metricResults = buildMetricResults(context, { includePoints: true });
   const adherence = buildAdherenceSummary(context);
+  const primary =
+    primaryOutcome?.kind === "metric"
+      ? metricResults.find((metric) => metric.biomarkerKey === primaryOutcome.key) ?? null
+      : null;
   const confidence = buildOutcomeConfidence({
     adherence,
     confounders: context.confounders,
-    metricResults,
+    legacyPrimaryBiomarker:
+      context.frontmatter.analysisPlan?.primaryOutcome === undefined,
+    outcomeEvidence,
+    primary,
+    primaryOutcome,
   });
-  const primary = metricResults[0] ?? null;
+  const structuredReview = buildStructuredReviewResult(
+    primaryOutcome,
+    outcomeEvidence,
+  );
 
   const result = safeParseContract(experimentOutcomeSchema, {
     schemaVersion: EXPERIMENT_OUTCOME_SCHEMA_VERSION,
@@ -426,7 +463,13 @@ export function analyzeExperimentOutcome(
       targetSessions: adherence.targetSessions,
     },
     asOf: context.asOf,
-    conclusion: buildOutcomeConclusion(primary, confidence.level),
+    conclusion: buildOutcomeConclusion(
+      primaryOutcome,
+      primary,
+      outcomeEvidence,
+      confidence.level,
+      context.frontmatter.analysisPlan?.primaryOutcome === undefined,
+    ),
     confidence,
     confounders: context.confounders,
     experiment: {
@@ -438,6 +481,7 @@ export function analyzeExperimentOutcome(
     commonsProtocolRef: context.frontmatter.commonsProtocolRef ?? null,
     effectiveProtocolSnapshot: context.frontmatter.effectiveProtocolSnapshot ?? null,
     metricResults,
+    ...(structuredReview === undefined ? {} : { structuredReview }),
     outcomeId: `${context.frontmatter.experimentId}-outcome-${context.asOf}`,
     protocolRef: context.frontmatter.protocolRef ?? null,
     windows: buildWindowSummary(context.frontmatter),
@@ -533,6 +577,23 @@ function buildExperimentSummaryContext(
   };
 }
 
+function collectVaultEvidenceObservedOn(
+  vault: VaultReadModel,
+): Map<string, string | null> {
+  const observedOnByRecordId = new Map<string, string | null>();
+  for (const entity of vault.entities) {
+    const observedOn = entity.date ?? extractDate(entity.occurredAt);
+    for (const recordId of [
+      entity.entityId,
+      entity.primaryLookupId,
+      ...entity.lookupIds,
+    ]) {
+      observedOnByRecordId.set(recordId, observedOn);
+    }
+  }
+  return observedOnByRecordId;
+}
+
 function buildExperimentFollowupContext(
   vault: VaultReadModel,
   slug: string,
@@ -582,65 +643,112 @@ function buildMetricResults(
   context: ExperimentSummaryContext,
   options: { includePoints?: boolean } = {},
 ): Array<ExperimentMetricResult & { points?: ExperimentOutcomeMetricPoint[] }> {
-  const biomarkerKeys = [
-    context.frontmatter.analysisPlan?.primaryBiomarkerKey,
-    ...(context.frontmatter.analysisPlan?.secondaryBiomarkerKeys ?? []),
-  ].filter((value): value is string => typeof value === "string" && value.length > 0);
-
-  return biomarkerKeys.map((biomarkerKey) => {
-    const metricWindows = selectMetricWindows(context, biomarkerKey);
+  return resolveMetricOutcomes(context.frontmatter).map((outcome) => {
+    const metricWindows = selectMetricWindows(context, outcome);
     const baselineWindow = metricWindows.baseline;
     const interventionWindow = metricWindows.intervention;
     const baselineMean = baselineWindow.mean;
     const interventionMean = interventionWindow.mean;
+    const windowsSummarizable =
+      (baselineWindow.daysWithData === 0 || baselineMean !== null) &&
+      (interventionWindow.daysWithData === 0 || interventionMean !== null);
+    const unitsCompatible =
+      windowsSummarizable &&
+      metricWindowUnitsAreCompatible({
+        left: {
+          unit: baselineWindow.unit,
+          value: baselineMean,
+        },
+        right: {
+          unit: interventionWindow.unit,
+          value: interventionMean,
+        },
+        statistic: outcome.statistic,
+      });
     const deltaAbs =
-      baselineMean !== null && interventionMean !== null
+      unitsCompatible && baselineMean !== null && interventionMean !== null
         ? round(interventionMean - baselineMean)
         : null;
     const deltaPct =
+      unitsCompatible &&
       baselineMean !== null &&
       interventionMean !== null &&
       baselineMean !== 0
         ? round(((interventionMean - baselineMean) / Math.abs(baselineMean)) * 100)
         : null;
-    const unit = interventionWindow.unit ?? baselineWindow.unit;
-    const expectedDirection = resolveExpectedDirection(context.frontmatter.analysisPlan, biomarkerKey);
+    const unit = unitsCompatible
+      ? interventionWindow.unit ?? baselineWindow.unit
+      : null;
+    const expectedDirection = resolveExpectedDirection(
+      context.frontmatter.analysisPlan,
+      outcome.key,
+    );
     const baselineSummary = {
       daysWithData: baselineWindow.daysWithData,
       mean: baselineMean,
       totalDays: baselineWindow.totalDays,
-      unit,
+      unit: unitsCompatible ? unit : baselineWindow.unit,
     };
     const interventionSummary = {
       daysWithData: interventionWindow.daysWithData,
       mean: interventionMean,
       totalDays: interventionWindow.totalDays,
-      unit,
+      unit: unitsCompatible ? unit : interventionWindow.unit,
     };
 
     return {
       baselineDayCount: baselineWindow.daysWithData,
       baselineMean,
       baseline: baselineSummary,
-      biomarkerKey,
-      completeness: classifyMetricCompleteness(
-        baselineWindow.daysWithData,
-        interventionWindow.daysWithData,
-        { pointMeasurement: metricWindows.source === "point_measurement" },
-      ),
+      biomarkerKey: outcome.key,
+      completeness: unitsCompatible
+        ? classifyMetricCompleteness(
+            baselineWindow.daysWithData,
+            interventionWindow.daysWithData,
+            { pointMeasurement: metricWindows.source === "point_measurement" },
+          )
+        : "insufficient",
       deltaAbs,
       deltaPct,
       expectedDirection,
       interventionDayCount: interventionWindow.daysWithData,
       interventionMean,
       intervention: interventionSummary,
-      label: humanizeBiomarkerKey(biomarkerKey),
+      label: outcome.label,
       movedAsExpected: movedAsExpected(deltaAbs, expectedDirection),
+      ...(outcome.statistic === "mean" ? {} : { statistic: outcome.statistic }),
       ...(options.includePoints
-        ? { points: [...baselineWindow.points, ...interventionWindow.points] }
+        ? {
+            points: [...baselineWindow.points, ...interventionWindow.points].map(
+              (point) =>
+                unitsCompatible && unit !== null
+                  ? { ...point, unit }
+                  : point,
+            ),
+          }
         : {}),
       unit,
     };
+  });
+}
+
+function resolveMetricOutcomes(
+  frontmatter: ExperimentFrontmatter,
+): ResolvedExperimentMetricOutcome[] {
+  const primary = resolveExperimentPrimaryOutcome(frontmatter.analysisPlan);
+  const candidates = [
+    ...(primary?.kind === "metric" ? [primary] : []),
+    ...(frontmatter.analysisPlan?.secondaryBiomarkerKeys ?? []).map((key) =>
+      resolveExperimentMetricOutcome(key),
+    ),
+  ];
+  const seen = new Set<string>();
+  return candidates.filter((outcome) => {
+    if (seen.has(outcome.key)) {
+      return false;
+    }
+    seen.add(outcome.key);
+    return true;
   });
 }
 
@@ -655,7 +763,10 @@ function resolveExpectedDirection(
     return explicitDirection;
   }
 
-  if (analysisPlan?.primaryBiomarkerKey === biomarkerKey) {
+  if (
+    analysisPlan &&
+    resolveExperimentPrimaryOutcome(analysisPlan)?.key === biomarkerKey
+  ) {
     return analysisPlan.desiredDirection ?? null;
   }
 
@@ -686,12 +797,13 @@ function resolveAdherenceTargets(
 function resolveAdherenceTargetsFromFrontmatter(
   frontmatter: QueryExperimentFrontmatter,
 ): QueryExperimentAdherenceTarget[] {
-  return (
-    frontmatter.runPlan?.adherenceTargets ??
-    synthesizeLegacySessionAdherenceTargets({
-      runPlan: frontmatter.runPlan,
-    })
-  );
+  return resolveExperimentAdherenceTargets({
+    explicitTargets: frontmatter.runPlan?.adherenceTargets,
+    protocolActivitySessionEvidence:
+      frontmatter.effectiveProtocolSnapshot?.activitySessionEvidence,
+    protocolKey: frontmatter.commonsProtocolRef?.key,
+    runPlan: frontmatter.runPlan,
+  });
 }
 
 function buildAdherenceCalendarFromContext(
@@ -836,6 +948,15 @@ function buildProgressAdherenceEvidence(
   return {
     eventKind: target.evidence.eventKind,
     ...(target.evidence.activityKind ? { activityKind: target.evidence.activityKind } : {}),
+    ...(target.evidence.activityKinds
+      ? { activityKinds: [...target.evidence.activityKinds] }
+      : {}),
+    ...(target.evidence.minimumDurationMinutes === undefined
+      ? {}
+      : {
+          minimumDurationMinutes:
+            target.evidence.minimumDurationMinutes,
+        }),
   };
 }
 
@@ -855,6 +976,7 @@ function buildAdherenceObservations(
             activityKind: resolveAdherenceObservationActivityKind({
               attributes: event.attributes as Record<string, unknown>,
             }),
+            durationMinutes: readActivityDurationMinutes(event),
             evidenceId: event.entityId,
             eventKind: event.kind,
             localDate:
@@ -926,6 +1048,42 @@ function buildCoverageSummary(input: {
   summariesByDate: Map<string, WearableDaySummary | null>;
   vault: VaultReadModel;
 }): ExperimentProgressSummary["dataCoverage"] {
+  const primaryOutcome = resolveExperimentPrimaryOutcome(input.frontmatter.analysisPlan);
+  const activityProviders = buildActivityProviderCoverage(input.vault, input.asOf);
+  const wearableProviders = normalizeDataCoverageProviderList(
+    [...input.summariesByDate.values()].flatMap((summary) => summary?.providers ?? []),
+  );
+
+  if (primaryOutcome?.kind === "structured_review") {
+    const evidence = summarizeExperimentOutcomeEvidencePlan(
+      input.frontmatter.analysisPlan,
+      primaryOutcome.key,
+      {
+        evidenceObservedOnByRecordId: collectVaultEvidenceObservedOn(input.vault),
+        observedThrough: input.asOf,
+      },
+    );
+    const primaryMetricDaysAvailable =
+      evidence.baseline.observedCount + evidence.followup.observedCount;
+    const status: ExperimentCoverageStatus =
+      evidence.reviewReady &&
+        (input.progressPhase === "review_due" || input.progressPhase === "completed")
+        ? "ready_for_review"
+        : primaryMetricDaysAvailable > 0
+          ? "partial"
+          : "insufficient";
+
+    return {
+      activityProviders,
+      baselineDaysAvailable: evidence.baseline.observedCount,
+      interventionDaysAvailable: evidence.followup.observedCount,
+      primaryBiomarkerKey: primaryOutcome.key,
+      primaryMetricDaysAvailable,
+      status,
+      wearableProviders,
+    };
+  }
+
   const primaryMetricDaysAvailable =
     (input.primarySignal?.baselineDayCount ?? 0) +
     (input.primarySignal?.interventionDayCount ?? 0);
@@ -945,6 +1103,7 @@ function buildCoverageSummary(input: {
 
   if (
     input.primarySignal !== null &&
+    input.frontmatter.analysisPlan?.primaryOutcome === undefined &&
     hasCompleteMetricWindow &&
     primaryMetricDaysAvailable === 0 &&
     !anySignalMetricData &&
@@ -973,16 +1132,11 @@ function buildCoverageSummary(input: {
     status = "insufficient";
   }
 
-  const activityProviders = buildActivityProviderCoverage(input.vault, input.asOf);
-  const wearableProviders = normalizeDataCoverageProviderList(
-    [...input.summariesByDate.values()].flatMap((summary) => summary?.providers ?? []),
-  );
-
   return {
     activityProviders,
     baselineDaysAvailable: input.baselineDaysAvailable,
     interventionDaysAvailable: input.interventionDaysAvailable,
-    primaryBiomarkerKey: input.primarySignal?.biomarkerKey ?? null,
+    primaryBiomarkerKey: primaryOutcome?.key ?? input.primarySignal?.biomarkerKey ?? null,
     primaryMetricDaysAvailable,
     status,
     wearableProviders,
@@ -1108,28 +1262,41 @@ function buildAnalysisReadiness(
   frontmatter: ExperimentFrontmatter,
 ): ExperimentProgressSummary["analysisReadiness"] {
   const blockingReasons: ExperimentProgressReadinessReason[] = [];
+  const primaryOutcome = resolveExperimentPrimaryOutcome(frontmatter.analysisPlan);
 
   if (!frontmatter.analysisPlan) {
     blockingReasons.push("missing_analysis_plan");
   }
-  if (!frontmatter.analysisPlan?.primaryBiomarkerKey) {
+  if (!primaryOutcome) {
     blockingReasons.push("missing_primary_biomarker");
   }
-  const primaryBiomarkerKey = frontmatter.analysisPlan?.primaryBiomarkerKey;
-  if (primaryBiomarkerKey) {
-    const capture = assessExperimentPrimaryMetricCapture({
-      primaryBiomarkerKey,
-      sessionFields: frontmatter.runPlan?.logging?.sessionFields,
-    });
-    if (capture.issue === "unsupported_primary_biomarker") {
-      blockingReasons.push("unsupported_primary_biomarker");
-    } else if (capture.issue === "uncapturable_primary_biomarker") {
+  if (primaryOutcome?.kind === "metric") {
+    const sessionFields = frontmatter.runPlan?.logging?.sessionFields ?? [];
+    const capture = primaryOutcome.capture;
+    if (
+      capture.kind === "session_field" &&
+      sessionFields.filter((fieldId) => fieldId === capture.fieldId).length !== 1
+    ) {
       blockingReasons.push("uncapturable_primary_biomarker");
+    } else if (
+      capture.kind === "measurement" &&
+      frontmatter.analysisPlan?.primaryOutcome === undefined &&
+      !isRegisteredExperimentMetricSource(primaryOutcome.key)
+    ) {
+      blockingReasons.push("unsupported_primary_biomarker");
+    } else if (capture.kind === "measurement") {
+      const captureAssessment = assessExperimentPrimaryMetricCapture({
+        primaryBiomarkerKey: primaryOutcome.key,
+        sessionFields,
+      });
+      if (captureAssessment.issue === "unsupported_primary_biomarker") {
+        blockingReasons.push("unsupported_primary_biomarker");
+      } else if (captureAssessment.issue === "uncapturable_primary_biomarker") {
+        blockingReasons.push("uncapturable_primary_biomarker");
+      }
     }
   }
-  if (
-    !hasAnalysisMetricWindow(frontmatter)
-  ) {
+  if (!hasAnalysisMetricWindow(frontmatter)) {
     blockingReasons.push("missing_metric_window");
   }
 
@@ -1140,6 +1307,12 @@ function buildExperimentSessionMetricPoints(
   events: readonly CanonicalEntity[],
   frontmatter: ExperimentFrontmatter,
 ): MetricPoint[] {
+  const primaryOutcome = resolveExperimentPrimaryOutcome(frontmatter.analysisPlan);
+  const customSessionCapture =
+    primaryOutcome?.kind === "metric" &&
+      primaryOutcome.capture.kind === "session_field"
+      ? primaryOutcome
+      : null;
   const declaredSessionFields = new Set(
     frontmatter.runPlan?.logging?.sessionFields ?? [],
   );
@@ -1180,21 +1353,37 @@ function buildExperimentSessionMetricPoints(
         return [];
       }
       const spec = resolveExperimentSessionMetricSpec(fieldId);
-      if (!spec || typeof value !== "number" || !Number.isFinite(value)) {
+      const isCustomPrimaryField =
+        customSessionCapture?.capture.kind === "session_field" &&
+        customSessionCapture.capture.fieldId === fieldId;
+      if (
+        (!spec && !isCustomPrimaryField) ||
+        typeof value !== "number" ||
+        !Number.isFinite(value)
+      ) {
         return [];
       }
-      if (seenMetricKeys.has(spec.key)) {
+      if (spec && !validateExperimentSessionMetricValue({ fieldId, value }).success) {
         return [];
       }
-      if (!validateExperimentSessionMetricValue({ fieldId, value }).success) {
+      const metricKey = isCustomPrimaryField
+        ? customSessionCapture.metricKey
+        : spec?.key;
+      if (!metricKey || seenMetricKeys.has(metricKey)) {
         return [];
       }
-      seenMetricKeys.add(spec.key);
+      seenMetricKeys.add(metricKey);
+      const unit = isCustomPrimaryField &&
+          customSessionCapture.capture.kind === "session_field"
+        ? customSessionCapture.capture.unit ?? spec?.canonicalUnit ?? null
+        : spec?.canonicalUnit ?? null;
 
       return [{
         schemaVersion: "murph.metric-point.v1",
-        biomarkerKey: spec.biomarkerKey,
-        canonicalUnit: spec.canonicalUnit,
+        biomarkerKey: isCustomPrimaryField
+          ? customSessionCapture.key
+          : spec?.biomarkerKey ?? null,
+        canonicalUnit: unit,
         canonicalValue: value,
         comparator: null,
         confidence: "medium",
@@ -1205,8 +1394,8 @@ function buildExperimentSessionMetricPoints(
         },
         effectiveDate,
         grain: "day",
-        id: `metric-point:${event.entityId}:session-field:${spec.key}`,
-        metricKey: spec.key,
+        id: `metric-point:${event.entityId}:session-field:${metricKey}`,
+        metricKey,
         observedAt,
         provenance: {
           dataOrigin: null,
@@ -1227,7 +1416,7 @@ function buildExperimentSessionMetricPoints(
         },
         statistic: "value",
         textValue: null,
-        unit: spec.canonicalUnit,
+        unit,
         value,
       } satisfies MetricPoint];
     });
@@ -1241,6 +1430,19 @@ function readRecordAttribute(
   const value = (entity.attributes as Record<string, unknown>)[key];
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
+    : null;
+}
+
+function readActivityDurationMinutes(entity: CanonicalEntity): number | null {
+  const attributes = entity.attributes as Record<string, unknown>;
+  const direct = attributes.durationMinutes;
+  if (typeof direct === "number" && Number.isFinite(direct)) {
+    return direct;
+  }
+
+  const nested = readRecordAttribute(entity, "workout")?.durationMinutes;
+  return typeof nested === "number" && Number.isFinite(nested)
+    ? nested
     : null;
 }
 
@@ -1304,14 +1506,27 @@ function buildProgressRecommendation(input: {
 function buildOutcomeConfidence(input: {
   adherence: ExperimentProgressSummary["adherence"];
   confounders: string[];
-  metricResults: ExperimentMetricResult[];
+  legacyPrimaryBiomarker: boolean;
+  outcomeEvidence: ExperimentOutcomeEvidencePlanSummary | null;
+  primary: ExperimentMetricResult | null;
+  primaryOutcome: ResolvedExperimentPrimaryOutcome | null;
 }): ExperimentOutcomeSummary["confidence"] {
   const reasons: string[] = [];
-  const primary = input.metricResults[0] ?? null;
   const loggedSessions = readLoggedAdherenceSessions(input.adherence);
 
-  if (!primary || primary.completeness === "insufficient") {
-    reasons.push("Primary biomarker coverage is insufficient for a strong before-and-after read.")
+  if (input.primaryOutcome?.kind === "structured_review") {
+    if (!input.outcomeEvidence?.reviewReady) {
+      reasons.push("Baseline or follow-up review evidence is still missing.");
+    }
+    reasons.push(
+      "The result is a structured before-and-after review rather than a quantified effect estimate.",
+    );
+  } else if (!input.primary || input.primary.completeness === "insufficient") {
+    reasons.push(
+      input.legacyPrimaryBiomarker
+        ? "Primary biomarker coverage is insufficient for a strong before-and-after read."
+        : "Primary outcome coverage is insufficient for a strong before-and-after read.",
+    );
   }
 
   if (
@@ -1352,19 +1567,86 @@ function readLoggedAdherenceSessions(
     adherence.completedSessions + (adherence.partialSessions ?? 0);
 }
 
+function buildStructuredReviewResult(
+  primaryOutcome: ResolvedExperimentPrimaryOutcome | null,
+  outcomeEvidence: ExperimentOutcomeEvidencePlanSummary | null,
+): ExperimentStructuredReviewResult | undefined {
+  if (primaryOutcome?.kind !== "structured_review" || !outcomeEvidence) {
+    return undefined;
+  }
+
+  const baselineRecordIds = outcomeEvidence.baseline.recordIds;
+  const followupRecordIds = outcomeEvidence.followup.recordIds;
+  const status =
+    baselineRecordIds.length > 0 && followupRecordIds.length > 0
+      ? "ready_for_review"
+      : baselineRecordIds.length > 0
+        ? "baseline_only"
+        : followupRecordIds.length > 0
+          ? "followup_only"
+          : "missing";
+
+  return {
+    kind: "structured_review",
+    key: primaryOutcome.key,
+    label: primaryOutcome.label,
+    status,
+    baseline: {
+      kinds: outcomeEvidence.baseline.kinds,
+      recordIds: baselineRecordIds,
+    },
+    followup: {
+      kinds: outcomeEvidence.followup.kinds,
+      recordIds: followupRecordIds,
+    },
+  };
+}
+
 function buildOutcomeConclusion(
+  primaryOutcome: ResolvedExperimentPrimaryOutcome | null,
   primary: ExperimentMetricResult | null,
+  outcomeEvidence: ExperimentOutcomeEvidencePlanSummary | null,
   confidenceLevel: ExperimentOutcomeConfidenceLevel,
+  legacyPrimaryBiomarker: boolean,
 ): ExperimentOutcomeSummary["conclusion"] {
+  if (primaryOutcome?.kind === "structured_review") {
+    if (outcomeEvidence?.reviewReady) {
+      return {
+        caveats: [
+          "This is an N-of-1 structured review, not medical advice.",
+          "Qualitative evidence can support a decision without yielding a numeric effect estimate.",
+        ],
+        headline: `${primaryOutcome.label} is ready for a structured before-and-after review.`,
+        plainLanguage:
+          "Murph preserved the baseline and follow-up evidence for review without inventing a numeric score, percentage, or causal claim.",
+      };
+    }
+
+    const missingRoles = [
+      outcomeEvidence?.baseline.observedCount ? null : "baseline",
+      outcomeEvidence?.followup.observedCount ? null : "follow-up",
+    ].filter((value): value is string => value !== null);
+    return {
+      caveats: [
+        "This is an N-of-1 structured review, not medical advice.",
+        "Qualitative evidence should be compared directly rather than converted into a made-up score.",
+      ],
+      headline: `${primaryOutcome.label} needs ${missingRoles.join(" and ")} evidence before review.`,
+      plainLanguage:
+        "The experiment can stay saved and supported, but Murph will not fabricate a result before the planned evidence is available.",
+    };
+  }
+
   if (!primary || primary.deltaAbs === null || primary.interventionMean === null) {
+    const primaryTerm = legacyPrimaryBiomarker ? "biomarker" : "outcome";
     return {
       caveats: [
         "This is an N-of-1 readout, not medical advice.",
-        "Sparse biomarker coverage or missing sessions can make this directional rather than decisive.",
+        `Sparse ${primaryTerm} coverage or missing sessions can make this directional rather than decisive.`,
       ],
-      headline: "The experiment finished, but the primary biomarker readout is incomplete.",
+      headline: `The experiment finished, but the primary ${primaryTerm} readout is incomplete.`,
       plainLanguage:
-        "Murph reached the end of the run, but there was not enough primary biomarker data to make a trustworthy before-and-after comparison.",
+        `Murph reached the end of the run, but there was not enough primary ${primaryTerm} data to make a trustworthy before-and-after comparison.`,
     };
   }
 
@@ -1404,7 +1686,7 @@ function buildProgressSignals(
     movedAsExpected: signal.movedAsExpected,
     reason:
       signal.interventionDayCount === 0
-        ? "No intervention-window wearable data is available yet."
+        ? "No intervention-window metric data is available yet."
         : `Only ${signal.interventionDayCount} intervention day(s) are available so far.`,
     unit: signal.unit,
   }));
@@ -1652,12 +1934,16 @@ function hasSessionLogForDate(context: ExperimentFollowupContext, date: string):
     const activityKind = resolveAdherenceObservationActivityKind({
       attributes: event.attributes as Record<string, unknown>,
     });
-    return activityEvidenceTargets.some((evidence) => {
-      if (!evidence.activityKind) {
-        return true;
-      }
-      return activityTextMatchesKind(activityKind, evidence.activityKind);
-    });
+    const observation: ExperimentAdherenceObservation = {
+      activityKind,
+      durationMinutes: readActivityDurationMinutes(event),
+      evidenceId: event.entityId,
+      eventKind: event.kind,
+      localDate: eventDate,
+    };
+    return activityEvidenceTargets.some((evidence) =>
+      linkedEventObservationMatchesEvidence(observation, evidence)
+    );
   });
 }
 
@@ -1746,9 +2032,16 @@ function hasSafetyFollowUp(events: readonly CanonicalEntity[]): boolean {
 }
 
 function hasAnalysisMetricWindow(frontmatter: ExperimentFrontmatter): boolean {
-  const primaryBiomarkerKey = frontmatter.analysisPlan?.primaryBiomarkerKey;
-  if (!primaryBiomarkerKey) {
+  const primaryOutcome = resolveExperimentPrimaryOutcome(frontmatter.analysisPlan);
+  if (!primaryOutcome) {
     return false;
+  }
+
+  if (primaryOutcome.kind === "structured_review") {
+    return summarizeExperimentOutcomeEvidencePlan(
+      frontmatter.analysisPlan,
+      primaryOutcome.key,
+    ).completePlan;
   }
 
   if (hasCompletePrimaryPointMeasurementPlan(frontmatter)) {
@@ -1770,7 +2063,9 @@ function hasAnalysisMetricWindow(frontmatter: ExperimentFrontmatter): boolean {
 function hasCompletePrimaryPointMeasurementPlan(
   frontmatter: ExperimentFrontmatter,
 ): boolean {
-  const primaryBiomarkerKey = frontmatter.analysisPlan?.primaryBiomarkerKey;
+  const primaryBiomarkerKey = resolveExperimentPrimaryOutcome(
+    frontmatter.analysisPlan,
+  )?.key;
   return Boolean(
     primaryBiomarkerKey &&
       hasCompletePointMeasurementPlanForBiomarker(
@@ -1783,7 +2078,9 @@ function hasCompletePrimaryPointMeasurementPlan(
 function hasObservedPrimaryPointMeasurementWindow(
   frontmatter: ExperimentFrontmatter,
 ): boolean {
-  const primaryBiomarkerKey = frontmatter.analysisPlan?.primaryBiomarkerKey;
+  const primaryBiomarkerKey = resolveExperimentPrimaryOutcome(
+    frontmatter.analysisPlan,
+  )?.key;
   return Boolean(
     primaryBiomarkerKey &&
       hasMeasurementAnchorForRole(
@@ -1804,7 +2101,8 @@ function hasCompletePointMeasurementPlanForBiomarker(
   biomarkerKey: string,
 ): boolean {
   return (
-    hasMeasurementAnchorForRole(analysisPlan, biomarkerKey, "baseline") &&
+    (hasMeasurementAnchorForRole(analysisPlan, biomarkerKey, "baseline") ||
+      hasPlannedMeasurementForRole(analysisPlan, biomarkerKey, "baseline")) &&
     (hasMeasurementAnchorForRole(analysisPlan, biomarkerKey, "followup") ||
       hasPlannedMeasurementForRole(analysisPlan, biomarkerKey, "followup"))
   );
@@ -1836,36 +2134,33 @@ function hasPlannedMeasurementForRole(
 
 function selectMetricWindows(
   context: ExperimentSummaryContext,
-  biomarkerKey: string,
+  outcome: ResolvedExperimentMetricOutcome,
 ): MetricWindowPair {
   if (
+    hasMeasurementAnchorForRole(
+      context.frontmatter.analysisPlan,
+      outcome.key,
+      "baseline",
+    ) &&
     hasCompletePointMeasurementPlanForBiomarker(
       context.frontmatter.analysisPlan,
-      biomarkerKey,
+      outcome.key,
     )
   ) {
     return {
-      baseline: collectAnchoredMetricWindow(context, biomarkerKey, "baseline") ?? {
-        daysWithData: 0,
-        mean: null,
-        points: [],
-        totalDays: 0,
-        unit: null,
-      },
+      baseline:
+        collectAnchoredMetricWindow(context, outcome, "baseline") ??
+        collectPlannedMetricWindow(context, outcome.key, "baseline") ??
+        emptyMetricWindowSelection(0),
       intervention:
-        collectAnchoredMetricWindow(context, biomarkerKey, "followup") ??
-        collectPlannedMetricWindow(context, biomarkerKey, "followup") ?? {
-          daysWithData: 0,
-          mean: null,
-          points: [],
-          totalDays: 0,
-          unit: null,
-        },
+        collectAnchoredMetricWindow(context, outcome, "followup") ??
+        collectPlannedMetricWindow(context, outcome.key, "followup") ??
+        emptyMetricWindowSelection(0),
       source: "point_measurement",
     };
   }
 
-  const runWindows = collectRunMetricWindows(context, biomarkerKey);
+  const runWindows = collectRunMetricWindows(context, outcome);
   return {
     baseline: runWindows.baseline,
     intervention: runWindows.intervention,
@@ -1875,66 +2170,44 @@ function selectMetricWindows(
 
 function collectRunMetricWindows(
   context: ExperimentSummaryContext,
-  biomarkerKey: string,
+  outcome: ResolvedExperimentMetricOutcome,
 ): Pick<MetricWindowPair, "baseline" | "intervention"> {
-  const emptyWindows = {
-    baseline: emptyMetricWindowSelection(context.baselineDates.length),
-    intervention: emptyMetricWindowSelection(context.interventionDates.length),
-  };
-  const metricKey = resolveMetricKeyForBiomarker(biomarkerKey);
-  if (!metricKey) {
-    return emptyWindows;
-  }
-
-  const seriesPoints = selectMetricSeries({
-    metricKey,
+  const aggregation = resolveOutcomeSameDayAggregation(
+    context.frontmatter,
+    outcome,
+  );
+  const seriesPoints = selectExperimentOutcomeSeries({
+    ...(aggregation !== undefined ? { aggregation } : {}),
+    outcome,
     points: context.metricPoints,
-  }).rows;
-  const comparison = selectMetricWindowComparison({
-    baselineWindow: metricWindowRangeFromDates(context.baselineDates),
-    comparisonWindow: metricWindowRangeFromDates(context.interventionDates),
-    metricKey,
-    points: seriesPoints,
-    statistic: "mean",
   });
 
   return {
-    baseline: metricWindowSelectionFromSummary(
-      comparison.baseline,
-      selectOutcomeMetricPoints(seriesPoints, comparison.baseline, "baseline"),
+    baseline: collectSeriesMetricWindow(
+      seriesPoints,
+      context.baselineDates,
+      "baseline",
+      outcome.statistic,
     ),
-    intervention: metricWindowSelectionFromSummary(
-      comparison.comparison,
-      selectOutcomeMetricPoints(seriesPoints, comparison.comparison, "intervention"),
+    intervention: collectSeriesMetricWindow(
+      seriesPoints,
+      context.interventionDates,
+      "intervention",
+      outcome.statistic,
     ),
   };
-}
-
-function resolveMetricKeyForBiomarker(biomarkerKey: string): string | null {
-  const normalized = biomarkerKey.trim().toLowerCase();
-  const slug = normalized.split(":").at(-1) ?? normalized;
-  const normalizedBiomarkerKey = normalized.startsWith("biomarker:")
-    ? normalized
-    : `biomarker:${slug}`;
-
-  return (
-    resolveMetricDefinitionForBiomarker(normalizedBiomarkerKey)?.key ??
-    resolveMetricDefinition(slug)?.key ??
-    null
-  );
 }
 
 function collectPlannedMetricWindow(
   context: ExperimentSummaryContext,
-  biomarkerKey: string,
+  outcomeKey: string,
   role: "baseline" | "followup",
 ): MetricWindowSelection | null {
   const plannedMeasurement = (context.frontmatter.analysisPlan?.plannedMeasurements ?? []).find(
     (measurement) =>
       measurement.role === role &&
-      measurement.biomarkerKeys.includes(biomarkerKey) &&
-      dateRange(measurement.targetWindow?.start, measurement.targetWindow?.end).length >
-        0,
+      measurement.biomarkerKeys.includes(outcomeKey) &&
+      dateRange(measurement.targetWindow?.start, measurement.targetWindow?.end).length > 0,
   );
   if (!plannedMeasurement) {
     return null;
@@ -1950,71 +2223,106 @@ function collectPlannedMetricWindow(
 
 function collectAnchoredMetricWindow(
   context: ExperimentSummaryContext,
-  biomarkerKey: string,
+  outcome: ResolvedExperimentMetricOutcome,
   role: "baseline" | "followup",
 ): MetricWindowSelection | null {
   const anchors = (context.frontmatter.analysisPlan?.measurementAnchors ?? []).filter(
-    (anchor) => anchor.role === role && anchor.biomarkerKeys.includes(biomarkerKey),
+    (anchor) => anchor.role === role && anchor.biomarkerKeys.includes(outcome.key),
   );
   if (anchors.length === 0) {
     return null;
   }
 
-  const metricKey = resolveMetricKeyForBiomarker(biomarkerKey);
-  const definition = metricKey ? resolveMetricDefinition(metricKey) : null;
-  const points: ExperimentOutcomeMetricPoint[] = [];
-  for (const anchor of anchors) {
-    const anchoredPoints = context.metricPoints.filter(
-      (point) =>
-        point.effectiveDate <= context.asOf &&
-        metricPointRecordIds(point).includes(anchor.recordId) &&
-        (metricKey ? point.metricKey === metricKey : point.biomarkerKey === biomarkerKey),
-    );
-    const selection = selectMetricValue({
-      biomarkerKey,
-      now: context.asOf,
-      points: anchoredPoints,
-    });
-    const fallback = definition
-      ? anchoredPoints
-          .map((point) => ({
-            point,
-            value: resolveComparableMetricPointValue(point, definition),
-          }))
-          .find((candidate) =>
-            candidate.value !== null
-            && (
-              definition.canonicalUnit === null
-              || unitsEquivalent(candidate.value.unit, definition.canonicalUnit)
-            )
-          ) ?? null
-      : null;
-    const value = typeof selection.value === "number"
-      ? selection.value
-      : fallback?.value?.value ?? null;
-    if (typeof value !== "number" || !Number.isFinite(value)) {
-      continue;
-    }
+  const anchorRecordIds = new Set(anchors.map((anchor) => anchor.recordId));
+  const anchoredPoints = context.metricPoints.filter(
+    (point) =>
+      point.effectiveDate <= context.asOf &&
+      metricPointRecordIds(point).some((recordId) => anchorRecordIds.has(recordId)) &&
+      matchesExperimentMetricIdentity(outcome.metricKey, point),
+  );
+  const aggregation = resolveOutcomeSameDayAggregation(
+    context.frontmatter,
+    outcome,
+  );
+  const points = selectExperimentOutcomeSeries({
+    ...(aggregation !== undefined ? { aggregation } : {}),
+    outcome,
+    points: anchoredPoints,
+  }).flatMap((point) =>
+    typeof point.value === "number" && Number.isFinite(point.value)
+      ? [{
+          date: point.date,
+          phase: role === "baseline" ? "baseline" as const : "intervention" as const,
+          unit: point.unit,
+          value: point.value,
+        }]
+      : []
+  );
 
-    const sourcePoint = typeof selection.value === "number"
-      ? selection.point
-      : fallback?.point ?? null;
-    const date = sourcePoint?.effectiveDate ?? anchor.observedOn ?? null;
-    if (!date) {
-      continue;
-    }
+  return metricWindowSelectionFromValues(points, anchors.length, outcome.statistic);
+}
 
-    points.push({
-      date,
-      phase: role === "baseline" ? "baseline" : "intervention",
-      unit: typeof selection.value === "number"
-        ? selection.unit
-        : fallback?.value?.unit ?? null,
-      value,
-    });
+function selectExperimentOutcomeSeries(input: {
+  aggregation?: ExperimentOutcomeStatistic;
+  outcome: ResolvedExperimentMetricOutcome;
+  points: readonly MetricPoint[];
+}): MetricSeriesPoint[] {
+  const rows = selectMetricSeries({
+    ...(input.aggregation !== undefined ? { aggregation: input.aggregation } : {}),
+    metricKey: input.outcome.metricKey,
+    points: input.points,
+  }).rows;
+  if (input.aggregation === "count") {
+    return rows;
+  }
+  const canonicalUnit = resolveMetricDefinition(input.outcome.metricKey)?.canonicalUnit ?? null;
+  if (canonicalUnit === null) {
+    return rows;
   }
 
-  return metricWindowSelectionFromValues(points, anchors.length);
+  return rows.filter(
+    (row) => row.unit !== null && unitsEquivalent(row.unit, canonicalUnit),
+  );
+}
+
+function resolveOutcomeSameDayAggregation(
+  frontmatter: ExperimentFrontmatter,
+  outcome: ResolvedExperimentMetricOutcome,
+): ExperimentOutcomeStatistic | undefined {
+  const configured = frontmatter.analysisPlan?.primaryOutcome;
+  return configured?.kind === "metric" &&
+      configured.key.trim().toLowerCase() === outcome.key
+    ? outcome.statistic
+    : undefined;
+}
+
+function collectSeriesMetricWindow(
+  seriesPoints: readonly MetricSeriesPoint[],
+  dates: readonly string[],
+  phase: ExperimentOutcomeMetricPoint["phase"],
+  statistic: ExperimentOutcomeStatistic,
+): MetricWindowSelection {
+  const start = dates[0] ?? null;
+  const end = dates.at(-1) ?? null;
+  if (!start || !end) {
+    return emptyMetricWindowSelection(dates.length);
+  }
+
+  const points = seriesPoints.flatMap((point) =>
+    point.date >= start &&
+      point.date <= end &&
+      typeof point.value === "number" &&
+      Number.isFinite(point.value)
+      ? [{
+          date: point.date,
+          phase,
+          unit: point.unit,
+          value: point.value,
+        }]
+      : [],
+  );
+
+  return metricWindowSelectionFromValues(points, dates.length, statistic);
 }
 
 function emptyMetricWindowSelection(totalDays: number): MetricWindowSelection {
@@ -2027,69 +2335,33 @@ function emptyMetricWindowSelection(totalDays: number): MetricWindowSelection {
   };
 }
 
-function metricWindowSelectionFromSummary(
-  summary: MetricWindowSummary,
-  points: ExperimentOutcomeMetricPoint[],
-): MetricWindowSelection {
-  return {
-    daysWithData: summary.daysWithData,
-    mean: summary.value !== null ? round(summary.value) : null,
-    points,
-    totalDays: summary.totalDays,
-    unit: summary.unit,
-  };
-}
-
 function metricWindowSelectionFromValues(
   points: ExperimentOutcomeMetricPoint[],
   totalDays: number,
+  statistic: ExperimentOutcomeStatistic,
 ): MetricWindowSelection {
   if (points.length === 0) {
     return emptyMetricWindowSelection(totalDays);
   }
 
-  const values = points.map((point) => point.value);
+  const units = [...new Set(points.map((point) => point.unit).filter(
+    (unit): unit is string => unit !== null,
+  ))];
+  const unit = statistic === "count"
+    ? "count"
+    : units.length === 0
+      ? null
+      : units.every((candidate) => unitsEquivalent(units[0] ?? null, candidate))
+        ? units.at(-1) ?? null
+        : null;
+  const compatible = statistic === "count" || units.length < 2 || unit !== null;
+
   return {
     daysWithData: points.length,
-    mean: round(values.reduce((sum, value) => sum + value, 0) / values.length),
+    mean: compatible ? summarizeExperimentOutcomeValues(points, statistic) : null,
     points,
     totalDays,
-    unit: points[0]?.unit ?? null,
-  };
-}
-
-function selectOutcomeMetricPoints(
-  seriesPoints: readonly MetricSeriesPoint[],
-  window: MetricWindowSummary,
-  phase: ExperimentOutcomeMetricPoint["phase"],
-): ExperimentOutcomeMetricPoint[] {
-  const { start, end } = window;
-  if (!start || !end) {
-    return [];
-  }
-
-  return seriesPoints.flatMap((point) =>
-    point.date >= start &&
-      point.date <= end &&
-      typeof point.value === "number" &&
-      Number.isFinite(point.value)
-      ? [{
-          date: point.date,
-          phase,
-          unit: point.unit,
-          value: point.value,
-        }]
-      : []
-  );
-}
-
-function metricWindowRangeFromDates(
-  dates: readonly string[],
-): { end: string | null; start: string | null; totalDays: number } {
-  return {
-    end: dates.at(-1) ?? null,
-    start: dates[0] ?? null,
-    totalDays: dates.length,
+    unit,
   };
 }
 

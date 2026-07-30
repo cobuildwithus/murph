@@ -61,13 +61,14 @@ const RUNNER_SECRET_PROCESS_CONTROL_KEY_SET = new Set<string>(
   RUNNER_SECRET_PROCESS_CONTROL_KEYS,
 );
 const HOSTED_RUNNER_OPENAI_ASSISTANT_PROVIDER = "openai";
+const HOSTED_RUNNER_VENICE_ASSISTANT_PROVIDER = "venice";
 const HOSTED_RUNNER_OPENAI_API_KEY_ENV = "OPENAI_API_KEY";
 const HOSTED_RUNNER_MURPH_DATA_API_KEY_ENV = "MURPH_DATA_API_KEY";
 const HOSTED_RUNNER_PROVIDER_INTERCEPT_INJECTED_ENV_KEYS =
   HOSTED_ASSISTANT_WORKER_SECRET_ENV_NAMES;
 const HOSTED_RUNNER_INTERCEPT_INJECTED_ENV_KEYS = new Set([
   ...HOSTED_RUNNER_PROVIDER_INTERCEPT_INJECTED_ENV_KEYS,
-  HOSTED_RUNNER_OPENAI_API_KEY_ENV,
+  ...HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES,
   HOSTED_RUNNER_MURPH_DATA_API_KEY_ENV,
 ]);
 
@@ -91,11 +92,6 @@ const DISALLOWED_RUNNER_SECRET_KEYS = new Set([
   ...HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES,
   ...HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES,
   "HOME",
-  // Generated image uploads use Worker-owned Cloudflare Images config. Runner
-  // secrets must not override the account, token, or delivery variant.
-  "CLOUDFLARE_IMAGES_ACCOUNT_ID",
-  "CLOUDFLARE_IMAGES_API_KEY",
-  "CLOUDFLARE_IMAGES_VARIANT",
   // This is a platform metering secret forwarded by the assistant env profile,
   // not a member-supplied runner secret. Letting userEnv override it would
   // break stable anonymized usage reporting IDs.
@@ -108,6 +104,10 @@ const DISALLOWED_RUNNER_SECRET_KEYS = new Set([
   // Platform-owned data API auth is injected by the Worker on matching hosted
   // web egress. The hosted container and member runner secrets must not carry it.
   "MURPH_DATA_API_KEY",
+  // The private-media capability key encrypts provider-ingress lookup tokens
+  // and derives per-user staging keys. It stays behind the write-fenced Worker
+  // publisher and public capability-reader boundaries.
+  "HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET",
   // This non-secret origin is platform-owned. Member runner secrets cannot
   // redirect Worker-authorized data API egress to arbitrary origins.
   "HOSTED_WEB_BASE_URL",
@@ -317,6 +317,10 @@ export function isHostedRunnerSupportedAssistantProvider(
 
 export function isHostedRunnerOpenAiProvider(value: unknown): boolean {
   return isHostedRunnerSupportedAssistantProvider(value);
+}
+
+export function isHostedRunnerVeniceProvider(value: unknown): boolean {
+  return normalizeStringEnvValue(value) === HOSTED_RUNNER_VENICE_ASSISTANT_PROVIDER;
 }
 
 export function hasHostedRunnerModelCredential(input: {

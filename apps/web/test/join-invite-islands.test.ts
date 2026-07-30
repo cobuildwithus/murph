@@ -8,6 +8,7 @@ import {
   JoinInviteLegalConsentIsland,
   JoinInviteMessagingSetupIsland,
   JoinInvitePhoneVerificationIsland,
+  JoinInviteSignOutButtonIsland,
   JoinInviteStatusRefreshIsland,
 } from "@/src/components/hosted-onboarding/join-invite-islands";
 import { JoinInviteAutoTrialIsland } from "@/src/components/hosted-onboarding/join-invite-auto-trial-island";
@@ -24,6 +25,7 @@ import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 import { buildJoinInviteStatusRefreshSnapshot } from "@/src/components/hosted-onboarding/join-invite-state";
 
 const mocks = vi.hoisted(() => ({
+  privyLogout: vi.fn(),
   refresh: vi.fn(),
   replace: vi.fn(),
   requestHostedAutoPulseTrialEnrollment: vi.fn(),
@@ -43,7 +45,7 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@privy-io/react-auth", () => ({
   usePrivy: () => ({
-    logout: vi.fn(),
+    logout: mocks.privyLogout,
   }),
   useUser: () => ({
     refreshUser: vi.fn(),
@@ -137,6 +139,33 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.hostedEmailAuthProps = null;
   mocks.hostedPhoneAuthProps = null;
+});
+
+test("JoinInviteSignOutButtonIsland preserves the invite URL while switching accounts", async () => {
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ ok: true });
+  const { button, cleanup } = await renderClientComponent(
+    createElement(JoinInviteSignOutButtonIsland),
+  );
+
+  expect(button.textContent).toBe("Use this invite instead");
+
+  await act(async () => {
+    button.click();
+    await Promise.resolve();
+  });
+
+  await vi.waitFor(() => {
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+  });
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith(
+    expect.objectContaining({
+      method: "POST",
+      url: "/api/hosted-onboarding/session/logout",
+    }),
+  );
+  expect(mocks.privyLogout).toHaveBeenCalledTimes(1);
+  expect(mocks.replace).not.toHaveBeenCalled();
+  await cleanup();
 });
 
 test("JoinInviteCheckoutPlanButtonIsland sends the clicked plan code to checkout", async () => {
@@ -495,6 +524,34 @@ test("JoinInviteStatusRefreshIsland refreshes when a pending server state change
       },
       stage: "checkout",
     }));
+  });
+
+  expect(mocks.refresh).toHaveBeenCalledTimes(1);
+  await cleanup();
+});
+
+test("JoinInviteStatusRefreshIsland rereads a pending Family server projection", async () => {
+  const status = createStatus({
+    session: {
+      authenticated: true,
+      expiresAt: null,
+      matchesInvite: true,
+    },
+    stage: "checkout",
+  });
+  const { cleanup } = await renderClientComponent(
+    createElement(JoinInviteStatusRefreshIsland, {
+      current: buildJoinInviteStatusRefreshSnapshot(status, "checkout"),
+      inviteCode: "invite-code",
+      legalGateActive: false,
+    }),
+    { requireButton: false },
+  );
+
+  const refreshOptions = mocks.useHostedInviteStatusRefresh.mock.calls[0]?.[0];
+
+  act(() => {
+    refreshOptions.onStatus(status);
   });
 
   expect(mocks.refresh).toHaveBeenCalledTimes(1);

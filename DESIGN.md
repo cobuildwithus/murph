@@ -182,6 +182,18 @@ Every component lives on cream paper, wears warm hairline borders, and speaks in
 - **Ghost / text:** slate text, no background, underline on hover. For low-priority links.
 - **Hover / Focus:** primary shifts from sage-dark to sage. Focus ring uses `--ring` (`#7a8c6e`) at 2px offset 2px.
 
+### Experiment Start Channel Picker
+When more than one connected channel can continue a public experiment start,
+use one compact dialog rather than a stack of large destination cards. Lead
+with a mono `START EXPERIMENT · {N}-DAY PROTOCOL` line, then show the full
+Fraunces protocol title without truncation and one sentence explaining that
+Murph prepares a reviewable message. Channel links are flat 64–72px rows with
+one muted icon tile, channel name, plain-language destination description, and
+a right chevron. Do not repeat the protocol inside a nested card, add
+availability counts, or show redundant channel badges. End with the quiet
+review-before-send reminder. On phones the dialog sits above the safe-area edge;
+on larger screens it centers at no more than 540px wide.
+
 ### Cards
 - **Corner Style:** rounded-lg (10–12px).
 - **Background:** `rgba(255, 252, 246, 0.9)` — translucent card surface, warmer than cream.
@@ -202,7 +214,11 @@ cannot disagree. A hit uses primary sage. A miss uses Tailwind `red-700` as a
 deliberate binary target exception because the standard sienna warning token
 reads brown rather than the explicitly required red; always pair either color
 with `10% target hit` or `Below 10% target` text. A missing comparison stays
-neutral and must not claim that a snapshot exists.
+neutral and must not claim that a snapshot exists. Active-user windows must not
+present intentionally retired group-sender evidence as an exact count: prefix
+an affected WAU or MAU with `At least`, explain the private evidence retirement
+in the supporting copy, and withhold a week-over-week rate when either compared
+window is incomplete.
 
 ### Measured Biomarker Index
 On `/biomarkers`, device-derived reading rows lead in a flat full-width notebook
@@ -356,21 +372,54 @@ full card remains one predictable radio target. Stack on narrow screens and use
 a compact grid only when the options are true peers. Do not use choice cards as
 navigation or as a substitute for ordinary buttons.
 
+### Device Connection Callback
+
+Provider return is a quiet, full-height confirmation page built from the shared
+Card primitives. Use one mono kicker, one serif decision heading, one short
+safety instruction, and explicit primary/secondary actions. The callback GET
+never mutates: the primary button is the member's visible completion act. The
+failure state removes that action, says that nothing was connected, and offers
+one route back to Connect. Keep both states readable at narrow mobile widths,
+with 44px-or-larger controls and no provider-supplied copy.
+
 ### Group Usage Funding
 Use `GroupUsageFundingCard` as the public entry surface for one-time group usage
 credit. Lead with the group name, one concise sentence explaining that the
 credit belongs to the group, and one primary action. Do not add a decorative
 status badge; retain `Open Murph` as the quiet secondary action.
 
-Use `HostedUsageTopUpDialog` for amount selection. Present the fixed offers as
-large choice cards, then one primary **Add messages · $10** action and a plain
-cancel action. Explain once that Murph uses a saved card when available and
-that Stripe handles card entry or verification when needed. Do not imply that
+Use `GroupSponsorshipDialog` for amount selection. Present the fixed offers as
+large choice cards, then one primary **Sponsor ~200 messages · $10** action and
+a plain cancel action. Keep the description to the one-time group contribution;
+do not repeat saved-card or verification mechanics there. Do not imply that
 selecting an amount charges the card; only the explicit primary action
-authorizes that one-time contribution. Stack amount cards and actions on
-narrow screens, preserve visible focus and selection states, and render the
-production components on both the Components and Sections tabs of `/design`
-for review.
+authorizes the contribution. Keep the alias, note, and eligible temporary
+running bit behind one optional disclosure, and state the server-owned bit
+duration beside that field. Optional text fields use the sage focus border
+without an outer glow. Stack amount cards and actions on narrow screens,
+preserve visible focus and selection states, and render the production
+components on both the Components and Sections tabs of `/design` for review.
+
+When group funding is fulfilled, switch from the payment-status composition to
+one confident success hierarchy: a compact sage confirmation mark and mono
+`NICE ONE` label, the Fraunces headline `This group has more Murph`, one
+sentence confirming that the contribution is ready, then a warm-divider handoff
+to **Open Messages**. State that Messages opens without a group deep link and
+the member must choose the group. Do not repeat the confirmation in a bordered
+status card, keep payment-pending copy visible, invent an amount, or add
+celebration graphics. Once fulfillment is verified, do not carry frozen sponsor
+details or their payment-recovery instructions into the success receipt.
+
+### Hosted AI Usage Activity
+On authenticated Settings, keep this read-only surface mission-first and
+compact. Do not add an explanatory hero or use a wide ledger table. Each
+mission row shows its title, status, concise deadline, reward, and reward owner;
+keep qualification requirements and selection date in one native `details`
+disclosure. Follow with flat purchase-credit history rows showing source, date,
+and added amount, plus one short clarification that the amounts are not the
+current balance. Keep the existing Murph conversation handoff beside the
+Missions heading, and hide it when the member has no supported conversation
+route or new missions are disabled.
 
 ### Spinner
 Use the shared `Spinner` for compact pending feedback inside buttons or beside a

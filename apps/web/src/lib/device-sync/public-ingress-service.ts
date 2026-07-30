@@ -2,6 +2,10 @@ import {
   createDeviceSyncPublicIngress,
   resolveDeviceSyncWebhookPreflightResponse,
 } from "@murphai/device-syncd/public-ingress";
+import {
+  buildJunctionProviderSourceInstanceKey,
+  type DeviceSyncConnectTarget,
+} from "@murphai/device-syncd/connect-config";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
   DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE,
@@ -75,6 +79,9 @@ export class HostedDeviceSyncPublicIngressService {
           });
 
           await this.webhookAdmin.ensureHostedWebhookAdminUpkeepForConnectionEstablished(provider);
+          return {
+            sourceAdmissionCommitted: true,
+          };
         },
         onLevelDirtyWebhookAlreadySatisfied: async ({ account }) => {
           const pending = await this.context.store.hasPendingDirtyConnection(account.id);
@@ -131,9 +138,68 @@ export class HostedDeviceSyncPublicIngressService {
     });
   }
 
+  async prepareConnectionStart(
+    userId: string,
+    target: DeviceSyncConnectTarget,
+  ): Promise<void> {
+    if (target.provider !== "junction" || !target.sourceProviderSlug) {
+      return;
+    }
+
+    const connections = (await this.context.store.listConnectionsForUser(userId))
+      .filter((connection) =>
+        connection.provider === target.provider
+        && connection.status !== "disconnected"
+      );
+
+    for (const connection of connections) {
+      const storedAccount = await this.context.store.getStoredConnectionAccountForUser(
+        userId,
+        connection.id,
+      );
+      const revokeSourceAccess =
+        this.registry.get(target.provider)?.connectionHandler?.revokeSourceAccess;
+
+      try {
+        if (!storedAccount || !revokeSourceAccess) {
+          throw new TypeError("Junction source cleanup authority is unavailable.");
+        }
+        await revokeSourceAccess(storedAccount, target.sourceProviderSlug);
+      } catch {
+        throw deviceSyncError({
+          cause: {
+            errorObservabilityClass: "provider_cleanup",
+            errorPhase: "browser_oauth_start",
+          },
+          code: "JUNCTION_PENDING_LINK_CLEANUP_FAILED",
+          message:
+            "Murph could not clear the earlier device connection attempt. Retry before opening another connection link.",
+          retryable: true,
+          httpStatus: 503,
+        });
+      }
+
+      const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+        connectionId: connection.id,
+        sourceProviderSlug: target.sourceProviderSlug,
+      });
+      if (sourceInstanceKey) {
+        const now = new Date().toISOString();
+        await this.context.store.upsertConnectionSource({
+          connectionId: connection.id,
+          sourceInstanceKey,
+          sourceProviderSlug: target.sourceProviderSlug,
+          status: "disconnected",
+          firstSeenAt: now,
+          lastSeenAt: now,
+        });
+      }
+    }
+  }
+
   async handleOAuthCallback(
     provider: string,
-    options: { expectedOwnerId?: string | null } = {},
+    options: { expectedOwnerId: string },
   ): Promise<CompleteConnectionResult> {
     return this.handleConnectionCallback(provider, options);
   }
@@ -193,6 +259,20 @@ export class HostedDeviceSyncPublicIngressService {
     });
   }
 
+  async discardConnectionCallback(provider: string): Promise<void> {
+    const url = new URL(this.context.request.url);
+    const state = url.searchParams.get("murph_state") ?? url.searchParams.get("state");
+    if (!state) {
+      return;
+    }
+
+    await this.context.store.consumeOAuthState(
+      state,
+      new Date().toISOString(),
+      provider,
+    );
+  }
+
   async acceptCompanionHrvRmssdObservation(input: {
     acceptedAt: string;
     observation: CompanionHrvRmssdObservation;
@@ -244,7 +324,7 @@ export class HostedDeviceSyncPublicIngressService {
 
   async handleConnectionCallback(
     provider: string,
-    options: { expectedOwnerId?: string | null } = {},
+    options: { expectedOwnerId: string },
   ): Promise<CompleteConnectionResult> {
     const url = new URL(this.context.request.url);
     const handleConnectionCallback =
@@ -256,7 +336,7 @@ export class HostedDeviceSyncPublicIngressService {
       provider,
       query: url.searchParams,
       code: url.searchParams.get("code"),
-      expectedOwnerId: options.expectedOwnerId ?? null,
+      expectedOwnerId: options.expectedOwnerId,
       state: url.searchParams.get("murph_state") ?? url.searchParams.get("state"),
       scope: url.searchParams.get("scope"),
       error: url.searchParams.get("error"),

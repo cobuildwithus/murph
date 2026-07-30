@@ -170,6 +170,46 @@ it("allows an explicitly named fault-injection scenario to use interventions", a
   expect(harness.assertNoInterventions).not.toHaveBeenCalled();
 });
 
+it("keeps Wrangler inspector traffic out of streamed hosted E2E logs", async () => {
+  const harness = createScenarioHarness();
+  mocks.startHostedLocalDevHarness.mockResolvedValue(harness);
+
+  const scenario = await startScenario();
+  try {
+    expect(mocks.startHostedLocalDevHarness).toHaveBeenCalledWith(
+      expect.objectContaining({
+        env: expect.objectContaining({
+          MURPH_DEV_CF_WRANGLER_LOG_LEVEL: "info",
+        }),
+      }),
+    );
+  } finally {
+    await scenario.stop();
+  }
+});
+
+it("forwards explicitly supplied provider credentials to the worker harness", async () => {
+  const harness = createScenarioHarness();
+  mocks.startHostedLocalDevHarness.mockResolvedValue(harness);
+
+  const scenario = await startScenario({
+    additionalEnv: {
+      VENICE_API_KEY: "synthetic-local-venice-key",
+    },
+  });
+  try {
+    expect(mocks.startHostedLocalDevHarness).toHaveBeenCalledWith(
+      expect.objectContaining({
+        env: expect.objectContaining({
+          VENICE_API_KEY: "synthetic-local-venice-key",
+        }),
+      }),
+    );
+  } finally {
+    await scenario.stop();
+  }
+});
+
 function createScenarioHarness(input: {
   assertNoInterventions?: () => void;
   completionStatuses?: HostedRunnerStatusResponse[];
@@ -193,12 +233,16 @@ function createScenarioHarness(input: {
   };
 }
 
-async function startScenario(input: { faultInjection?: boolean } = {}) {
+async function startScenario(input: {
+  additionalEnv?: NodeJS.ProcessEnv;
+  faultInjection?: boolean;
+} = {}) {
   const { startHostedLocalFullStackScenario } = await import(
     "./hosted-local-full-stack-scenario.js"
   );
 
   return await startHostedLocalFullStackScenario({
+    additionalEnv: input.additionalEnv,
     assistantProviderMode: "live",
     faultInjection: input.faultInjection,
     localDatabaseUrl: "postgresql://127.0.0.1:5432/murph_test",

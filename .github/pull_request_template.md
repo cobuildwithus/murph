@@ -18,6 +18,39 @@
 
 <!-- Name each non-obvious production surface and its regression proof, or write "None". -->
 
+## Architecture and reuse
+
+<!-- Keep this concrete and specific to the final diff. If an item is "none," explain why the existing design is sufficient. -->
+
+- Existing systems reused: <!-- Frameworks, owners, stores, workflows, or primitives this change builds on -->
+- New logic: <!-- New product, business, scheduling, validation, or failure-handling behavior -->
+- New abstractions: <!-- New shared types, helpers, services, state owners, or "None; ..." with a reason -->
+- Complexity intentionally avoided: <!-- Tables, queues, services, compatibility layers, or other machinery deliberately not added -->
+
+## Hot reply path impact
+
+<!-- The hot reply path runs from durable acceptance of a current conversation message through provider start and durable reply handoff. If this PR does not change that path, write "Not applicable" and say why. If it does, list every database call, network/provider call, or other awaited operation added or moved onto the path. Include call counts, serial/parallel ordering, timeout/retry/fallback behavior, expected or measured latency, and the proof used to compare before and after. -->
+
+- Path status: <!-- Touched, or Not applicable — reason -->
+- Database calls: <!-- Added or moved-on-path calls, or None -->
+- Network/provider calls: <!-- Added or moved-on-path calls, or None -->
+- Other awaited latency: <!-- Added or moved-on-path work, or None -->
+- Before/after proof: <!-- Call-count test, trace, benchmark, or other focused evidence -->
+
+## Murph initial provider input impact
+
+<!-- Report the complete first provider-visible input assembled by Murph and Codex for representative individual and group turns. Include final instructions/messages, eager tool definitions and schemas, deferred-tool metadata, and Codex-generated tool or code-mode guidance. Do not report only authored system-prompt text. Use identical base/head fixtures and the target model tokenizer; serialize the same provider-visible fields for byte counts. If no provider-input surface changed, write "Not applicable" and name the reason instead of claiming a measured zero. -->
+
+| Runtime | Base input tokens | Head input tokens | Delta | Percent | Base bytes | Head bytes | Byte delta |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Individual Murph | <!-- count, or Not applicable --> | <!-- count, or Not applicable --> | <!-- signed count, or Not applicable --> | <!-- signed percent, or Not applicable --> | <!-- count, or Not applicable --> | <!-- count, or Not applicable --> | <!-- signed count, or Not applicable --> |
+| Group Murph | <!-- count, or Not applicable --> | <!-- count, or Not applicable --> | <!-- signed count, or Not applicable --> | <!-- signed percent, or Not applicable --> | <!-- count, or Not applicable --> | <!-- count, or Not applicable --> | <!-- signed count, or Not applicable --> |
+
+- Assembled instructions: <!-- Base/head characters or tokens for individual and group, plus changed files/builders/layers; or Unchanged -->
+- Tool/schema/generated guidance: <!-- Base/head tokens or bytes for individual and group, naming eager/deferred changes; or Unchanged -->
+- Other provider-visible input: <!-- Base/head tokens or bytes for any changed wrapper/history/fixture content; or Unchanged -->
+- Measurement method: <!-- Base/head refs, model and tokenizer/version, identical fixtures, command or capture method, included fields, and any exclusions; or Not run — no provider-input surface changed -->
+
 ## Design proof
 
 <!-- Required for user-facing apps/web UI changes. Update /design?tab=components for reusable components or /design?tab=sections for full page sections. Embed hosted screenshots captured from that design-page state. -->

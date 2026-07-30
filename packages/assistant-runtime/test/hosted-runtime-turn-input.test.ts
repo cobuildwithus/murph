@@ -13,6 +13,9 @@ import {
 import {
   saveAssistantAutomationState,
 } from "@murphai/assistant-engine/assistant-state";
+import {
+  readAssistantAutoReplyTerminalEvidenceByEvidenceId,
+} from "@murphai/assistant-engine/assistant-automation";
 
 import {
   enqueueHostedPendingAssistantInputId,
@@ -29,6 +32,7 @@ import {
 const tempRoots: string[] = [];
 
 afterEach(async () => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   await Promise.all(
     tempRoots.splice(0).map((root) =>
@@ -532,6 +536,8 @@ describe("createHostedAssistantInputSource", () => {
   });
 
   it("batches newly enqueued exact successors while the pre-provider selection is empty", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-04-24T00:00:00.000Z"));
     const vaultRoot = await createTempVault();
     await enableLinqAutoReply(vaultRoot);
     const source = createHostedAssistantInputSource({
@@ -635,6 +641,8 @@ describe("createHostedAssistantInputSource", () => {
   });
 
   it("discovers input queued after an empty background selection", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-04-24T00:00:00.000Z"));
     const vaultRoot = await createTempVault();
     await enableLinqAutoReply(vaultRoot);
     const selection = await selectHostedAssistantInputIds({
@@ -977,7 +985,7 @@ describe("selectHostedAssistantInputIds", () => {
     expect(selection.inputIds).toEqual([first.inputId]);
   });
 
-  it("ends a same-thread group batch when the actor changes", async () => {
+  it("keeps exact-successor authenticated group messages in one batch across actor and reply-anchor changes", async () => {
     const vaultRoot = await createTempVault();
     const first = await upsertAssistantInputEvent({
       vault: vaultRoot,
@@ -990,6 +998,9 @@ describe("selectHostedAssistantInputIds", () => {
         laneSeq: "10",
         occurredAt: "2026-04-23T00:00:01.000Z",
         receivedAt: "2026-04-23T00:00:02.000Z",
+        replyToMessageId: "assistant_message_a",
+        routeAuthority: true,
+        senderHandle: "+15551110000",
         threadIsDirect: false,
       }),
     });
@@ -1001,6 +1012,91 @@ describe("selectHostedAssistantInputIds", () => {
         dedupeKey: "dedupe_group_actor_boundary_second",
         eventId: "evt_group_actor_boundary_second",
         itemId: "item_group_actor_boundary_second",
+        laneSeq: "11",
+        occurredAt: "2026-04-23T00:00:03.000Z",
+        receivedAt: "2026-04-23T00:00:04.000Z",
+        replyToMessageId: "assistant_message_b",
+        routeAuthority: true,
+        senderHandle: "+15552220000",
+        threadIsDirect: false,
+      }),
+    });
+
+    const selection = await selectHostedAssistantInputIds({
+      freshAssistantInputIds: [first.inputId, nextActor.inputId],
+      mode: "foreground",
+      vaultRoot,
+    });
+
+    expect(selection.inputIds).toEqual([first.inputId, nextActor.inputId]);
+  });
+
+  it("keeps authenticated group batching independent of participant attribution", async () => {
+    const vaultRoot = await createTempVault();
+    const first = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        actorId: "actor_a",
+        causalSeq: "7",
+        dedupeKey: "dedupe_group_unattributed_first",
+        eventId: "evt_group_unattributed_first",
+        itemId: "item_group_unattributed_first",
+        laneSeq: "10",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        routeAuthority: true,
+        threadIsDirect: false,
+      }),
+    });
+    const nextActor = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        actorId: "actor_b",
+        causalSeq: "8",
+        dedupeKey: "dedupe_group_unattributed_second",
+        eventId: "evt_group_unattributed_second",
+        itemId: "item_group_unattributed_second",
+        laneSeq: "11",
+        occurredAt: "2026-04-23T00:00:03.000Z",
+        receivedAt: "2026-04-23T00:00:04.000Z",
+        routeAuthority: true,
+        threadIsDirect: false,
+      }),
+    });
+
+    const selection = await selectHostedAssistantInputIds({
+      freshAssistantInputIds: [first.inputId, nextActor.inputId],
+      mode: "foreground",
+      vaultRoot,
+    });
+
+    expect(selection.inputIds).toEqual([first.inputId, nextActor.inputId]);
+  });
+
+  it("keeps unauthenticated group actor changes as a batch boundary", async () => {
+    const vaultRoot = await createTempVault();
+    const first = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        actorId: "actor_a",
+        causalSeq: "7",
+        dedupeKey: "dedupe_group_actor_untrusted_first",
+        eventId: "evt_group_actor_untrusted_first",
+        itemId: "item_group_actor_untrusted_first",
+        laneSeq: "10",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        threadIsDirect: false,
+      }),
+    });
+    const nextActor = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        actorId: "actor_b",
+        causalSeq: "8",
+        dedupeKey: "dedupe_group_actor_untrusted_second",
+        eventId: "evt_group_actor_untrusted_second",
+        itemId: "item_group_actor_untrusted_second",
         laneSeq: "11",
         occurredAt: "2026-04-23T00:00:03.000Z",
         receivedAt: "2026-04-23T00:00:04.000Z",
@@ -1295,7 +1391,67 @@ describe("selectHostedAssistantInputIds", () => {
       .resolves.toHaveLength(52);
   });
 
+  it("retires overdue pending input before background selection", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-04-30T00:00:02.000Z"));
+    const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
+    const overdue = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_overdue_background",
+        eventId: "evt_overdue_background",
+        itemId: "item_overdue_background",
+        laneSeq: "9",
+        messageId: "msg_overdue_background",
+        occurredAt: "2026-04-16T00:00:01.000Z",
+        receivedAt: "2026-04-16T00:00:02.000Z",
+        text: "private overdue background input",
+      }),
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: overdue.inputId,
+      vaultRoot,
+    });
+
+    const selection = await selectHostedAssistantInputIds({
+      mode: "background",
+      vaultRoot,
+    });
+
+    expect(selection).toEqual({
+      inputIds: [],
+      mode: "background",
+      pendingInputIds: [],
+    });
+    await expect(assistantEngine.readAssistantInputEvent({
+      inputId: overdue.inputId,
+      vault: vaultRoot,
+    })).resolves.toMatchObject({
+      content: {
+        text: null,
+      },
+      contentRetiredAt: "2026-04-30T00:00:02.000Z",
+    });
+    await expect(readAssistantAutoReplyTerminalEvidenceByEvidenceId(
+      vaultRoot,
+      overdue.inputId,
+    )).resolves.toMatchObject({
+      terminal: {
+        kind: "suppressed",
+      },
+    });
+    // Terminal conversation IDs remain in the checkpoint until the server
+    // acknowledgement floor proves their mailbox row committed. The selector's
+    // pendingInputIds above are the runnable compaction result, which must be
+    // empty after suppression.
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot }))
+      .resolves.toEqual([overdue.inputId]);
+  });
+
   it("background mode selects bounded oldest non-terminal pending ids", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-04-24T00:00:00.000Z"));
     const vaultRoot = await createTempVault();
     await enableLinqAutoReply(vaultRoot);
     const oldest = await upsertAssistantInputEvent({
@@ -1510,12 +1666,14 @@ function createAssistantInputEvent(input: {
   itemId?: string;
   lane?: "conversation" | "system";
   laneSeq?: string;
+  deliveryTarget?: string;
   messageId?: string;
   occurredAt?: string;
   receivedAt?: string;
   replyToMessageId?: string | null;
   replyTarget?: string | null;
   routeAuthority?: boolean;
+  senderHandle?: string | null;
   source?: string;
   sourceKind?: "hosted-mailbox" | "inbox-capture";
   text?: string;
@@ -1551,7 +1709,7 @@ function createAssistantInputEvent(input: {
       : {
           channel: input.replyTarget ?? source,
           messageId: input.messageId ?? "msg_selected",
-          threadId,
+          threadId: input.deliveryTarget ?? threadId,
         },
     sourceMetadata: source === "linq"
       ? {
@@ -1560,7 +1718,10 @@ function createAssistantInputEvent(input: {
           partCount: 1,
           reactionEligible: false,
           replyToMessageId: input.replyToMessageId ?? null,
-          service: null,
+          ...(input.senderHandle !== undefined
+            ? { senderHandle: input.senderHandle }
+            : {}),
+          service: "iMessage",
         }
       : null,
     sourceRef: input.sourceKind === "inbox-capture"
