@@ -71,13 +71,13 @@ afterEach(() => {
 });
 
 test("a homepage click before idle opens immediately and starts the shared runtime", async () => {
-  const { AuthProvider } = await import(
+  const { HomepageAuthRuntimeProvider } = await import(
     "@/src/components/hosted-onboarding/auth-dialog-provider"
   );
   const { LandingAuthActions } = await import("@/app/auth-controls");
   const rendered = await renderClientComponent(
     createElement(
-      AuthProvider,
+      HomepageAuthRuntimeProvider,
       { authenticated: false },
       createElement(LandingAuthActions, {
         authLabel: "Get started",
