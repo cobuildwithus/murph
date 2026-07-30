@@ -453,8 +453,10 @@ export default async function SettingsPage({
         {accountWithPrivyDisplay ? (
           <HostedAccountSettingsCards
             account={accountWithPrivyDisplay}
+            expectedPrivyUserId={session?.privyUserId ?? null}
             murphPhoneNumber={murphPhoneNumber}
             openEmailLink={openEmailLink}
+            privySessionMatchesAppSession={privySessionMatchesAppSession}
           />
         ) : null}
       </section>

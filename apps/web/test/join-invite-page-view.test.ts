@@ -408,6 +408,8 @@ test("JoinInvitePageView keeps messaging setup before auto Pulse Trial when mess
   expect(mocks.autoTrialProps).toBeNull();
   expect(mocks.messagingSetupProps).toMatchObject({
     authenticated: true,
+    expectedPrivyUserId: "privy-user-a",
+    privySessionMatchesAppSession: true,
   });
 });
 
@@ -470,6 +472,8 @@ test("JoinInvitePageView keeps messaging setup when auto Pulse Trial billing is 
   expect(mocks.autoTrialProps).toBeNull();
   expect(mocks.messagingSetupProps).toMatchObject({
     authenticated: true,
+    expectedPrivyUserId: "privy-user-a",
+    privySessionMatchesAppSession: true,
   });
 });
 
@@ -529,10 +533,12 @@ test("JoinInvitePageView renders messaging setup before checkout pricing", () =>
   assert.doesNotMatch(markup, /Get Pulse/);
   expect(mocks.messagingSetupProps).toMatchObject({
     authenticated: true,
+    expectedPrivyUserId: "privy-user-a",
     initialTelegramAccount: {
       telegramUserId: "telegram-test-user",
       username: "murph_test",
     },
+    privySessionMatchesAppSession: true,
   });
 });
 
@@ -613,6 +619,7 @@ function createModel(
 
   return {
     awaitingInviteSessionResolution: false,
+    expectedPrivyUserId: "privy-user-a",
     familyBillingRecovery: null,
     inviteCode: "invite-code",
     launchConsent: {
@@ -621,6 +628,7 @@ function createModel(
       status: "not_required",
     },
     preview: false,
+    privySessionMatchesAppSession: true,
     status,
     telegramAccountForMessagingSetup: null,
     ...overrides,
