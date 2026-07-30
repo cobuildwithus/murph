@@ -88,13 +88,13 @@ Updated: 2026-07-30
 - [x] Move Cloudflare deployment and its real-worker predeploy scenarios into Murph
    Cloud, initially deploy-disabled, then prove the private owner and retire the
    public deploy owner without changing production resources or identities.
-- [ ] Update public required checks and CI so public changes retain contract and
+- [x] Update public required checks and CI so public changes retain contract and
    harness proof without requiring confidential worker source.
 - [x] Delete the public worker package and remove implementation-owned workspace
    wiring.
 - [x] Update the hosted-local external-worker contract and focused tests.
 - [x] Update guards and durable ownership/testing documentation.
-- [ ] Run focused local proof and the private cross-repository integration check.
+- [x] Run focused local proof and the private cross-repository integration check.
 - [ ] Publish the cleanup draft PR, run preliminary ReviewGPT, parent final review,
    final ReviewGPT, and exact-head CI.
 - [ ] Merge only after production soak evidence remains clean, then retire the
@@ -109,6 +109,11 @@ Updated: 2026-07-30
 - Full worker-backed E2E and Cloudflare deployment belong on the same private
   trust boundary as the worker; public CI must not receive private source or a
   credential that exposes it.
+- The private exact-ref integration matrix passed against the first public PR
+  head before the obsolete public hosted-E2E required contexts were retired.
+- Preliminary review findings are resolved at their owners: top-level
+  hosted-local startup now validates the external worker before side effects,
+  and test-owned Temporal connections close after each signal/query helper.
 
 ## Verification
 

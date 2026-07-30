@@ -451,8 +451,14 @@ export interface HostedWebTestkitDeps {
   prisma: HostedTestPrismaClient;
 }
 
+type HostedRuntimeTemporalTestClient = HostedRuntimeTemporalSignalClient & {
+  connection?: {
+    close(): Promise<void>;
+  };
+};
+
 export interface HostedWebSignalTestkitDeps extends HostedWebTestkitDeps {
-  temporalSignalClient: HostedRuntimeTemporalSignalClient | null;
+  temporalSignalClient: HostedRuntimeTemporalTestClient | null;
 }
 
 interface HostedTemporalClientModule {
@@ -1553,7 +1559,11 @@ async function withHostedWebSignalTestkitDeps<T>(
   try {
     return await callback(deps);
   } finally {
-    await deps.prisma.$disconnect();
+    try {
+      await deps.temporalSignalClient?.connection?.close();
+    } finally {
+      await deps.prisma.$disconnect();
+    }
   }
 }
 
