@@ -21,21 +21,31 @@ selection dialog.
 
 ## Proof
 
-- Focused component tests cover opening, choosing, cancelling, saving, stale
-  availability, and read-only behavior.
+- Focused component tests cover opening, choosing, dismissing, cancelling,
+  saving, stale availability, and read-only behavior: 18 tests passed.
 - The real production settings component and provider picker appear in the
   design catalog with desktop and mobile rendered evidence.
-- Focused Web typecheck and frontend design-proof checks.
-- Product-experience review, preliminary completion-specialists ReviewGPT,
-  Claude UI double-check, parent review, and exact-head required CI.
+- The exact-head production Web artifact kept the dialog contained and
+  internally scrollable at 844×390 and 844×320 with 125% text sizing; keyboard
+  selection and Escape both restored focus to the `Change` trigger.
+- Focused Web typecheck, targeted ESLint, diff checks, and the frontend
+  design-proof gate passed.
+- Product-experience review returned `NO FINDINGS`.
+- Preliminary completion-specialists ReviewGPT returned two findings. The
+  accepted short-viewport containment and dismissal/cancellation coverage
+  findings were resolved and reverified.
+- The separate Claude UI check was attempted and stopped after explicit credit
+  exhaustion, as required by the workflow.
 
 ## Progress
 
 - [x] Confirmed the existing settings surface and save-state ownership.
 - [x] Replace provider cards with the compact provider row and dialog.
 - [x] Update focused tests and design-catalog studies.
-- [ ] Capture desktop/mobile proof and complete required reviews.
-- [ ] Push a scoped PR, resolve review findings, merge, and retire the worktree.
+- [x] Capture desktop/mobile proof and complete required reviews.
+- [x] Push a scoped PR and resolve review findings.
+- [x] Reconcile the PR candidate with the latest `main`.
 
-Status: active
+Status: completed
 Updated: 2026-07-29
+Completed: 2026-07-29
