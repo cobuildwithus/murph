@@ -400,6 +400,17 @@ status card, keep payment-pending copy visible, invent an amount, or add
 celebration graphics. Once fulfillment is verified, do not carry frozen sponsor
 details or their payment-recovery instructions into the success receipt.
 
+### Hosted AI Usage Activity
+On authenticated Settings, keep this read-only surface mission-first and
+compact. Do not add an explanatory hero or use a wide ledger table. Each
+mission row shows its title, status, concise deadline, reward, and reward owner;
+keep qualification requirements and selection date in one native `details`
+disclosure. Follow with flat purchase-credit history rows showing source, date,
+and added amount, plus one short clarification that the amounts are not the
+current balance. Keep the existing Murph conversation handoff beside the
+Missions heading, and hide it when the member has no supported conversation
+route or new missions are disabled.
+
 ### Spinner
 Use the shared `Spinner` for compact pending feedback inside buttons or beside a
 short status label. Pair it with a disabled control and visible action copy such
