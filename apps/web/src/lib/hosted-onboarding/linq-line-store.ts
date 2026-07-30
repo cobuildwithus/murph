@@ -14,6 +14,7 @@ import {
   decryptHostedLinqLinePhoneNumber,
   encryptHostedLinqLinePhoneNumber,
 } from "./linq-line-phone-codec";
+import { evaluateHostedLinqEgressPolicy } from "./linq-egress-policy";
 import {
   parseHostedLinqLineReputationStatus,
   parseHostedLinqLineServiceStatus,
@@ -269,7 +270,7 @@ export async function listHostedLinqAssignableHomeLines(input: {
 }): Promise<HostedLinqAssignableHomeLine[]> {
   const limit = HOSTED_LINQ_ASSIGNABLE_HOME_LINE_LIMIT;
   const rows = await input.prisma.hostedLinqLine.findMany({
-    where: buildActiveHostedLinqManagedLineWhere(),
+    where: buildHostedLinqAssignableHomeLineWhere(),
     orderBy: [
       { assignmentWeight: "desc" },
       { phoneNumberLookupKey: "asc" },
@@ -329,6 +330,99 @@ export async function hasActiveHostedLinqManagedLine(input: {
   return line !== null;
 }
 
+export type HostedLinqIncomingLineState =
+  | {
+      kind: "assignable" | "at_risk" | "hard_blocked";
+      phoneNumberLookupKey: string;
+    }
+  | {
+      kind:
+        | "conflicting"
+        | "degraded_unavailable"
+        | "structurally_unavailable"
+        | "unmanaged";
+    };
+
+/**
+ * Reads managed inbound-line state without reusing assignment eligibility as
+ * relationship authority. Multiple privacy-key candidates must converge on
+ * one row; ambiguous rows fail closed rather than selecting an arbitrary line.
+ * Existing inbound authority is independent of predictive reputation so an
+ * at-risk line can still receive replies and recover.
+ */
+export async function readHostedLinqIncomingLineState(input: {
+  phoneNumberLookupKeys: readonly string[];
+  prisma: HostedLinqLineClient;
+}): Promise<HostedLinqIncomingLineState> {
+  const phoneNumberLookupKeys = [...new Set(input.phoneNumberLookupKeys)];
+  if (phoneNumberLookupKeys.length === 0) {
+    return { kind: "unmanaged" };
+  }
+
+  const lines = await input.prisma.hostedLinqLine.findMany({
+    where: {
+      phoneNumberLookupKey: {
+        in: phoneNumberLookupKeys,
+      },
+    },
+    select: {
+      configuredAt: true,
+      egressPolicy: true,
+      healthStatus: true,
+      phoneNumberEncrypted: true,
+      phoneNumberLookupKey: true,
+      providerReputationStatus: true,
+      providerServiceStatus: true,
+    },
+  });
+  if (lines.length === 0) {
+    return { kind: "unmanaged" };
+  }
+  if (lines.length !== 1) {
+    return { kind: "conflicting" };
+  }
+
+  const line = lines[0]!;
+  if (
+    !line.configuredAt
+    || !line.phoneNumberEncrypted
+  ) {
+    return { kind: "structurally_unavailable" };
+  }
+
+  const policy = evaluateHostedLinqEgressPolicy({
+    chatHealthStatus: null,
+    lineDeliveryHealthStatus: line.healthStatus,
+    lineEgressPolicy: line.egressPolicy,
+    lineReputationStatus: line.providerReputationStatus,
+    lineServiceStatus: line.providerServiceStatus,
+    newConversation: false,
+  });
+  if (policy.kind === "block") {
+    if (policy.code === "operator_disabled") {
+      return { kind: "structurally_unavailable" };
+    }
+    return {
+      kind: "hard_blocked",
+      phoneNumberLookupKey: line.phoneNumberLookupKey,
+    };
+  }
+  if (line.providerReputationStatus === "AT_RISK") {
+    return {
+      kind: "at_risk",
+      phoneNumberLookupKey: line.phoneNumberLookupKey,
+    };
+  }
+  if (line.healthStatus === "healthy" || line.healthStatus === "unknown") {
+    return {
+      kind: "assignable",
+      phoneNumberLookupKey: line.phoneNumberLookupKey,
+    };
+  }
+
+  return { kind: "degraded_unavailable" };
+}
+
 export async function listHostedLinqHealthyProactiveLines(input: {
   prisma: HostedLinqLineClient;
 }): Promise<HostedLinqAssignableHomeLine[]> {
@@ -369,18 +463,108 @@ export async function listHostedLinqHealthyProactiveLines(input: {
   return mapHostedLinqAssignableHomeLineRows(rows);
 }
 
+export type HostedLinqReceiptCorrelatedRecoveryLine = {
+  phoneNumber: string;
+  phoneNumberLookupKey: string;
+};
+
+/**
+ * Reuses an already-selected recovery sender without reopening healthy-pool
+ * assignment. A provider failure projects the same line to `warning`; that
+ * warning is eligible only while its latest receipt is the exact failed
+ * recovery receipt the caller observed.
+ */
+export async function readHostedLinqReceiptCorrelatedRecoveryLineTx(input: {
+  expectedFailureReceiptEventId: string;
+  phoneNumberLookupKey: string;
+  prisma: HostedLinqLineClient;
+}): Promise<HostedLinqReceiptCorrelatedRecoveryLine | null> {
+  const expectedFailureReceiptEventId =
+    normalizeNullableString(input.expectedFailureReceiptEventId);
+  const phoneNumberLookupKey = normalizeNullableString(input.phoneNumberLookupKey);
+  if (!expectedFailureReceiptEventId || !phoneNumberLookupKey) {
+    return null;
+  }
+
+  const line = await input.prisma.hostedLinqLine.findUnique({
+    where: { phoneNumberLookupKey },
+    select: {
+      configuredAt: true,
+      egressPolicy: true,
+      healthStatus: true,
+      lastReceiptEventId: true,
+      phoneNumberEncrypted: true,
+      phoneNumberLookupKey: true,
+      providerReputationStatus: true,
+      providerServiceStatus: true,
+    },
+  });
+  const exactCorrelatedWarning =
+    line?.healthStatus === "warning"
+    && line.lastReceiptEventId === expectedFailureReceiptEventId;
+  const policy = line
+    ? evaluateHostedLinqEgressPolicy({
+        chatHealthStatus: null,
+        lineDeliveryHealthStatus: exactCorrelatedWarning
+          ? "healthy"
+          : line.healthStatus,
+        lineEgressPolicy: line.egressPolicy,
+        lineReputationStatus: line.providerReputationStatus,
+        lineServiceStatus: line.providerServiceStatus,
+        newConversation: true,
+      })
+    : null;
+  if (
+    !line?.configuredAt
+    || !line.phoneNumberEncrypted
+    || policy?.kind !== "allow"
+    || (
+      line.healthStatus !== "healthy"
+      && !exactCorrelatedWarning
+    )
+  ) {
+    return null;
+  }
+
+  try {
+    const phoneNumber = normalizePhoneNumber(
+      decryptHostedLinqLinePhoneNumber(line.phoneNumberEncrypted),
+    );
+    return phoneNumber
+      ? {
+          phoneNumber,
+          phoneNumberLookupKey: line.phoneNumberLookupKey,
+        }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function claimHostedLinqProactiveConversationCapacityTx(input: {
   dayUtc: Date;
   limit: number;
   phoneNumberLookupKey: string;
   prisma: Prisma.TransactionClient;
+  requiredHealthStatus?: "healthy";
 }): Promise<boolean> {
   if (!Number.isInteger(input.limit) || input.limit <= 0) {
     return false;
   }
+  const requiredLineStateWhere: Prisma.HostedLinqLineWhereInput =
+    input.requiredHealthStatus
+      ? {
+          configuredAt: { not: null },
+          egressPolicy: "enabled",
+          healthStatus: input.requiredHealthStatus,
+          phoneNumberEncrypted: { not: null },
+          ...buildHostedLinqProviderEligibleWhere(),
+        }
+      : {};
 
   const incremented = await input.prisma.hostedLinqLine.updateMany({
     where: {
+      ...requiredLineStateWhere,
       phoneNumberLookupKey: input.phoneNumberLookupKey,
       proactiveConversationCount: {
         lt: input.limit,
@@ -399,6 +583,7 @@ export async function claimHostedLinqProactiveConversationCapacityTx(input: {
 
   const started = await input.prisma.hostedLinqLine.updateMany({
     where: {
+      ...requiredLineStateWhere,
       phoneNumberLookupKey: input.phoneNumberLookupKey,
       OR: [
         { proactiveConversationDayUtc: null },
@@ -428,7 +613,7 @@ export async function assertHostedLinqAssignableHomeLinePoolReady(input: {
   }
 }
 
-function buildActiveHostedLinqManagedLineWhere(): Prisma.HostedLinqLineWhereInput {
+function buildHostedLinqAssignableHomeLineWhere(): Prisma.HostedLinqLineWhereInput {
   return {
     configuredAt: { not: null },
     egressPolicy: "enabled",
