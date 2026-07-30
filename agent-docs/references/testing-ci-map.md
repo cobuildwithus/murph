@@ -341,6 +341,21 @@ not enter evidence; and attachment-only input fails closed before provider work.
   input.
   `packages/assistant-runtime/test/hosted-runtime-maintenance.test.ts` proves
   that projection uses the existing nonblocking assistant-milestone port.
+  `packages/assistant-engine/test/assistant-member-maintenance-policy.test.ts`
+  proves the exact member-maintenance tool remains default-off, source-bound,
+  read-only, and isolated from group maintenance. The managed-automation,
+  planning, notification, and cron suites prove exact-id nightly admission and
+  memory-first prompt behavior.
+  `packages/assistant-runtime/test/hosted-runtime-workspace-assistant-phase.test.ts`
+  proves the hosted automation owner rejects fixed, unauthorized-source,
+  non-preserving, and provider-text-shaped maintenance requests while accepting
+  one canonical expiring timestamp suffix idempotently.
+  `packages/hosted-execution/test/assistant-permissions.test.ts` and
+  `packages/assistant-runtime/test/hosted-runtime-codex-config.test.ts` prove
+  the one-shot member-maintenance profile writes only canonical memory
+  infrastructure and disables network access.
+  `packages/core/test/markdown-documents.test.ts` proves stale observed
+  automation updates cannot overwrite a newer definition.
   The latency-store proof also shows that terminal evidence carries an initial
   publication expectation and later dirty-window resets advance that expectation
   monotonically across the fenced runtime attempt. A strictly newer authenticated

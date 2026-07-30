@@ -95,6 +95,9 @@ import {
 import {
   MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
 } from './onboarding-goal-checkin-automation.js'
+import {
+  MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+} from './managed-automations.js'
 
 const assistantNotificationSkipDecisionSchema = z
   .object({
@@ -373,13 +376,41 @@ export async function sendAssistantNotificationLocal(
       }
 
       const turnId = createAssistantTurnId()
+      const memberMaintenanceHostedToolsAuthorized =
+        isAssistantNotificationMaintenanceExactSkip(input) &&
+        input.turnPolicy?.maintenanceProfile === 'member-memory' &&
+        input.scheduledInvocationAuthority?.automationId ===
+          MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID
       const hostedExecutionContext =
         isAssistantNotificationScheduledOccurrence(input) &&
-        !isAssistantNotificationMaintenanceExactSkip(input)
+        (
+          !isAssistantNotificationMaintenanceExactSkip(input)
+          || memberMaintenanceHostedToolsAuthorized
+        )
           ? executionContext?.hosted ?? null
           : null
+      const memberMaintenanceAutomationTool =
+        memberMaintenanceHostedToolsAuthorized
+          ? hostedExecutionContext?.createScheduledMemberMaintenanceTool?.() ?? null
+          : null
+      const turnHostedExecutionContext = (() => {
+        if (!hostedExecutionContext || !memberMaintenanceHostedToolsAuthorized) {
+          return hostedExecutionContext
+        }
+        const {
+          automationTool: _ordinaryAutomationTool,
+          ...maintenanceHostedExecutionContext
+        } = hostedExecutionContext
+        void _ordinaryAutomationTool
+        return memberMaintenanceAutomationTool
+          ? {
+              ...maintenanceHostedExecutionContext,
+              automationTool: memberMaintenanceAutomationTool,
+            }
+          : maintenanceHostedExecutionContext
+      })()
       const route = resolveAssistantTurnRoute(messageInput, defaults, resolved)
-      const hostedToolContext = hostedExecutionContext
+      const hostedToolContext = turnHostedExecutionContext
         ? createAssistantHostedToolContext({
             beforeToolExecution: input.beforeToolExecution
               ? async () => {
@@ -387,8 +418,8 @@ export async function sendAssistantNotificationLocal(
                 }
               : undefined,
             computerToolsAvailable:
-              typeof hostedExecutionContext.providerFetch === 'function',
-            executionContext: hostedExecutionContext,
+              typeof turnHostedExecutionContext.providerFetch === 'function',
+            executionContext: turnHostedExecutionContext,
             getConversationScope: () => conversationScope,
             messageInput,
             newsletterOutbox: {

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildMurphGroupReadPermissionProfileTomlLines,
   buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines,
+  buildMurphMemberMemoryMaintenancePermissionProfileTomlLines,
 } from "../src/assistant-permissions.ts";
 
 describe("group-read Codex permissions", () => {
@@ -41,6 +42,32 @@ describe("group-read Codex permissions", () => {
       '"." = "deny"',
       "",
       "[permissions.murph-group-room-model-maintenance.network]",
+      "enabled = false",
+      "",
+    ]);
+  });
+
+  it("confines silent member maintenance writes to canonical memory infrastructure", () => {
+    expect(
+      buildMurphMemberMemoryMaintenancePermissionProfileTomlLines(),
+    ).toEqual([
+      "# Silent member maintenance may read the vault and write only canonical memory infrastructure.",
+      "[permissions.murph-member-memory-maintenance.filesystem]",
+      '":minimal" = "read"',
+      "glob_scan_max_depth = 64",
+      "",
+      '[permissions.murph-member-memory-maintenance.filesystem.":workspace_roots"]',
+      '"." = "read"',
+      '"bank/memory.md" = "write"',
+      '"audit" = "write"',
+      '".runtime/locks/canonical-write" = "write"',
+      '".runtime/locks/canonical-resources" = "write"',
+      '".runtime/operations" = "write"',
+      '".codex" = "deny"',
+      '"**/.env" = "deny"',
+      '"**/.env.*" = "deny"',
+      "",
+      "[permissions.murph-member-memory-maintenance.network]",
       "enabled = false",
       "",
     ]);

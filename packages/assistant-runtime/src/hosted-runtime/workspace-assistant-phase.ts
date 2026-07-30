@@ -1244,6 +1244,23 @@ type HostedAssistantAutomationTool = NonNullable<
   NonNullable<AssistantExecutionContext["hosted"]>["automationTool"]
 >;
 
+const AVAILABILITY_CONFLICT_POLICY_FIXED =
+  "Availability conflict policy: fixed";
+const AVAILABILITY_CONFLICT_POLICY_SKIP_WHEN_BUSY =
+  "Availability conflict policy: skip-when-busy";
+const AVAILABILITY_SOURCE_POLICY_TRAVEL_CONFIRMATIONS =
+  "Availability source policy: calendar-and-travel-confirmations";
+const AVAILABILITY_CONFLICT_BLOCK_START =
+  "<!-- murph:availability-conflicts:start -->";
+const AVAILABILITY_CONFLICT_BLOCK_END =
+  "<!-- murph:availability-conflicts:end -->";
+const AVAILABILITY_CONFLICT_BLOCK_INSTRUCTION =
+  "- If one interval satisfies `busyStart <= scheduledOccurrenceAt < busyEnd`, return `skip` and send nothing. Do not mention calendar, email, event labels, or provider details.";
+const MEMBER_MAINTENANCE_MAX_BUSY_INTERVALS = 256;
+const MEMBER_MAINTENANCE_MAX_SNAPSHOT_MS = 7 * 24 * 60 * 60 * 1_000;
+const MEMBER_MAINTENANCE_GENERATED_AT_MAX_AGE_MS = 24 * 60 * 60 * 1_000;
+const MEMBER_MAINTENANCE_GENERATED_AT_FUTURE_TOLERANCE_MS = 5 * 60 * 1_000;
+
 function scopeHostedAutomationToolToAssistantOperation(input: {
   executionContext: AssistantExecutionContext;
   route: AssistantCurrentDeliveryRoute | null;
@@ -1283,7 +1300,6 @@ function createHostedAssistantAutomationTool(input: {
   const currentRoute = automationRouteSchema.parse(
     resolveAssistantDeliveryRouteWithCurrentRoute({}, input.route),
   );
-
   return {
     async request(request, context) {
       context?.signal?.throwIfAborted();
@@ -1304,6 +1320,15 @@ function createHostedAssistantAutomationTool(input: {
           supportSeriesId: request.supportSeriesId,
           unchangedCount: result.unchangedCount,
         };
+      }
+      if (
+        request.action === "authorize_maintenance_source"
+        || request.action === "patch_maintenance_instructions"
+      ) {
+        throw new VaultCliError(
+          "invalid_option",
+          "Member maintenance operations require the scheduled maintenance owner.",
+        );
       }
       if (request.action === "save") {
         const requestedSlug = resolveAutomationUpsertSlug({
@@ -1444,6 +1469,284 @@ function createHostedAssistantAutomationTool(input: {
       });
     },
   };
+}
+
+function createHostedAssistantMemberMaintenanceAutomationTool(input: {
+  vaultRoot: string;
+}): HostedAssistantAutomationTool {
+  return {
+    async request(request, context) {
+      context?.signal?.throwIfAborted();
+      if (request.action === "authorize_maintenance_source") {
+        const existing = await requireMemberMaintenanceAutomation({
+          lookup: request.lookup,
+          vaultRoot: input.vaultRoot,
+        });
+        assertMemberMaintenanceSourceAuthorized({
+          existing,
+          source: request.source,
+        });
+        context?.signal?.throwIfAborted();
+        return {
+          action: request.action,
+          automationId: existing.automationId,
+          authorized: true,
+          source: request.source,
+        };
+      }
+      if (request.action === "patch_maintenance_instructions") {
+        const existing = await requireMemberMaintenanceAutomation({
+          lookup: request.lookup,
+          vaultRoot: input.vaultRoot,
+        });
+        assertMemberMaintenanceInstructionsPatch({
+          current: existing.instructions,
+          replacement: request.instructions,
+        });
+        context?.signal?.throwIfAborted();
+        if (request.instructions === existing.instructions) {
+          return {
+            action: request.action,
+            automationId: existing.automationId,
+            changed: false,
+            lookupId: existing.slug,
+            status: existing.status,
+          };
+        }
+        const result = await patchAutomation({
+          expectedUpdatedAt: existing.updatedAt,
+          instructions: request.instructions,
+          lookup: existing.automationId,
+          vaultRoot: input.vaultRoot,
+        });
+        return {
+          action: request.action,
+          automationId: result.record.automationId,
+          changed: true,
+          lookupId: result.record.slug,
+          status: result.record.status,
+        };
+      }
+      throw new VaultCliError(
+        "invalid_option",
+        "Only member maintenance automation operations are available.",
+      );
+    },
+  };
+}
+
+async function requireMemberMaintenanceAutomation(input: {
+  lookup: string;
+  vaultRoot: string;
+}): Promise<NonNullable<Awaited<ReturnType<typeof showAutomation>>>> {
+  const existing = await showAutomation({
+    automationId: input.lookup,
+    slug: input.lookup,
+    vaultRoot: input.vaultRoot,
+  });
+  if (!existing) {
+    throw new VaultCliError(
+      "automation_not_found",
+      "Automation was not found.",
+    );
+  }
+  assertMemberMaintenanceAutomationEligible(existing);
+  return existing;
+}
+
+function assertMemberMaintenanceAutomationEligible(
+  existing: NonNullable<Awaited<ReturnType<typeof showAutomation>>>,
+): void {
+  const activeUntilMs = existing.activeUntil === null
+    ? null
+    : Date.parse(existing.activeUntil);
+  if (
+    existing.status !== "active"
+    || existing.route.threadIsDirect !== true
+    || existing.supportKind === "weekly_digest"
+    || existing.tags.includes("runtime-maintenance")
+    || (
+      activeUntilMs !== null
+      && (!Number.isFinite(activeUntilMs) || activeUntilMs <= Date.now())
+    )
+  ) {
+    throw new VaultCliError(
+      "invalid_option",
+      "Automation is not eligible for private reminder maintenance.",
+    );
+  }
+
+  const instructionLines = existing.instructions.split(/\r?\n/gu);
+  const skipPolicyCount = instructionLines.filter(
+    (line) => line === AVAILABILITY_CONFLICT_POLICY_SKIP_WHEN_BUSY,
+  ).length;
+  const fixedPolicyCount = instructionLines.filter(
+    (line) => line === AVAILABILITY_CONFLICT_POLICY_FIXED,
+  ).length;
+  if (skipPolicyCount !== 1 || fixedPolicyCount !== 0) {
+    throw new VaultCliError(
+      "invalid_option",
+      "Automation does not explicitly authorize skip-when-busy maintenance.",
+    );
+  }
+}
+
+function assertMemberMaintenanceSourceAuthorized(input: {
+  existing: NonNullable<Awaited<ReturnType<typeof showAutomation>>>;
+  source: "calendar" | "travel-confirmations";
+}): void {
+  if (input.source === "calendar") {
+    return;
+  }
+  const instructionLines = input.existing.instructions.split(/\r?\n/gu);
+  if (
+    instructionLines.filter(
+      (line) => line === AVAILABILITY_SOURCE_POLICY_TRAVEL_CONFIRMATIONS,
+    ).length === 1
+  ) {
+    return;
+  }
+  throw new VaultCliError(
+    "invalid_option",
+    "Automation does not explicitly authorize travel-confirmation maintenance.",
+  );
+}
+
+function assertMemberMaintenanceInstructionsPatch(input: {
+  current: string;
+  replacement: string;
+}): void {
+  const current = splitMemberMaintenanceConflictBlock(input.current);
+  const replacement = splitMemberMaintenanceConflictBlock(input.replacement);
+  if (current.base !== replacement.base) {
+    throw new VaultCliError(
+      "invalid_option",
+      "Maintenance must preserve every instruction byte outside its owned conflict block.",
+    );
+  }
+  if (replacement.block !== null) {
+    assertValidMemberMaintenanceConflictBlock(replacement.block);
+  }
+}
+
+function splitMemberMaintenanceConflictBlock(input: string): {
+  base: string;
+  block: string | null;
+} {
+  const startCount = countExactText(input, AVAILABILITY_CONFLICT_BLOCK_START);
+  const endCount = countExactText(input, AVAILABILITY_CONFLICT_BLOCK_END);
+  if (startCount === 0 && endCount === 0) {
+    return { base: input, block: null };
+  }
+  const separator = `\n\n${AVAILABILITY_CONFLICT_BLOCK_START}`;
+  const blockStart = input.lastIndexOf(separator);
+  if (
+    startCount !== 1
+    || endCount !== 1
+    || blockStart < 0
+    || !input.endsWith(AVAILABILITY_CONFLICT_BLOCK_END)
+  ) {
+    throw new VaultCliError(
+      "invalid_option",
+      "Availability conflict block must be one complete owned suffix.",
+    );
+  }
+  return {
+    base: input.slice(0, blockStart),
+    block: input.slice(blockStart + 2),
+  };
+}
+
+function assertValidMemberMaintenanceConflictBlock(block: string): void {
+  const lines = block.split("\n");
+  if (
+    lines.length < 7
+    || lines.length > MEMBER_MAINTENANCE_MAX_BUSY_INTERVALS + 6
+    || lines[0] !== AVAILABILITY_CONFLICT_BLOCK_START
+    || lines[1] !== "Availability conflict snapshot:"
+    || lines[4] !== AVAILABILITY_CONFLICT_BLOCK_INSTRUCTION
+    || lines.at(-1) !== AVAILABILITY_CONFLICT_BLOCK_END
+  ) {
+    throw invalidMemberMaintenanceConflictBlock();
+  }
+  const generatedAt = parseCanonicalMemberMaintenanceTimestamp(
+    lines[2],
+    "- generatedAt: ",
+  );
+  const expiresAt = parseCanonicalMemberMaintenanceTimestamp(
+    lines[3],
+    "- expiresAt: ",
+  );
+  const nowMs = Date.now();
+  if (
+    generatedAt > nowMs + MEMBER_MAINTENANCE_GENERATED_AT_FUTURE_TOLERANCE_MS
+    || generatedAt < nowMs - MEMBER_MAINTENANCE_GENERATED_AT_MAX_AGE_MS
+    || expiresAt <= generatedAt
+    || expiresAt - generatedAt > MEMBER_MAINTENANCE_MAX_SNAPSHOT_MS
+  ) {
+    throw invalidMemberMaintenanceConflictBlock();
+  }
+
+  let previousEnd = Number.NEGATIVE_INFINITY;
+  for (const line of lines.slice(5, -1)) {
+    const match = /^- (\S+) \/ (\S+)$/u.exec(line);
+    if (!match) {
+      throw invalidMemberMaintenanceConflictBlock();
+    }
+    const busyStart = parseCanonicalIsoTimestamp(match[1]);
+    const busyEnd = parseCanonicalIsoTimestamp(match[2]);
+    if (
+      busyStart >= busyEnd
+      || busyStart < previousEnd
+      || busyEnd <= generatedAt
+      || busyStart >= expiresAt
+      || busyEnd > expiresAt
+    ) {
+      throw invalidMemberMaintenanceConflictBlock();
+    }
+    previousEnd = busyEnd;
+  }
+}
+
+function parseCanonicalMemberMaintenanceTimestamp(
+  line: string | undefined,
+  prefix: string,
+): number {
+  if (!line?.startsWith(prefix)) {
+    throw invalidMemberMaintenanceConflictBlock();
+  }
+  return parseCanonicalIsoTimestamp(line.slice(prefix.length));
+}
+
+function parseCanonicalIsoTimestamp(input: string | undefined): number {
+  if (!input) {
+    throw invalidMemberMaintenanceConflictBlock();
+  }
+  const parsed = Date.parse(input);
+  if (!Number.isFinite(parsed) || new Date(parsed).toISOString() !== input) {
+    throw invalidMemberMaintenanceConflictBlock();
+  }
+  return parsed;
+}
+
+function countExactText(input: string, text: string): number {
+  let count = 0;
+  let offset = 0;
+  while (true) {
+    const index = input.indexOf(text, offset);
+    if (index < 0) {
+      return count;
+    }
+    count += 1;
+    offset = index + text.length;
+  }
+}
+
+function invalidMemberMaintenanceConflictBlock(): VaultCliError {
+  return new VaultCliError(
+    "invalid_option",
+    "Availability conflict block is malformed, stale, or outside its seven-day bound.",
+  );
 }
 
 function assertHostedAutomationSaveRequest(input: {
@@ -1686,6 +1989,10 @@ export async function runHostedWorkspaceAssistantPhase(
     {
       hosted: {
         actionApprovalPort: input.runtime.platform.actionApprovalPort ?? null,
+        createScheduledMemberMaintenanceTool: () =>
+          createHostedAssistantMemberMaintenanceAutomationTool({
+            vaultRoot: input.restored.vaultRoot,
+          }),
         ...(input.currentAssistantInputId
           ? {
               currentAssistantInputId: input.currentAssistantInputId,

@@ -4358,6 +4358,210 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }
   });
 
+  it("limits reminder maintenance reads and patches to eligible private automation instructions", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-reminder-maintenance-"));
+    const vaultRoot = path.join(parentRoot, "vault");
+    const inputId = "ain_00000000000000000000000000000001";
+    const route = {
+      channel: "linq",
+      deliveryTarget: "direct-maintenance-chat",
+      identityId: "direct-maintenance-identity",
+      participantId: "direct-maintenance-participant",
+      threadId: "direct-maintenance-thread",
+      threadIsDirect: true,
+    } as const;
+    const instructions = [
+      "Send one flexible reminder about the planned task.",
+      "Availability conflict policy: skip-when-busy",
+      "Availability source policy: calendar-only",
+      "Preserve trailing space here. ",
+    ].join("\n");
+
+    try {
+      await initializeVault({
+        createdAt: "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      });
+      const eligible = await upsertAutomation({
+        activeUntil: "2099-08-01T00:00:00.000Z",
+        continuityPolicy: "preserve",
+        instructions,
+        route,
+        schedule: { kind: "dailyLocal", localTime: "08:30" },
+        slug: "flexible-private-reminder",
+        status: "active",
+        supportKind: "reminder",
+        tags: ["assistant", "scheduled"],
+        title: "Flexible private reminder",
+        vaultRoot,
+      });
+      const fixed = await upsertAutomation({
+        activeUntil: "2099-08-01T00:00:00.000Z",
+        continuityPolicy: "preserve",
+        instructions: [
+          "Send one exact-time reminder.",
+          "Availability conflict policy: fixed",
+        ].join("\n"),
+        route,
+        schedule: { kind: "dailyLocal", localTime: "09:00" },
+        slug: "fixed-private-reminder",
+        status: "active",
+        supportKind: "reminder",
+        tags: ["assistant", "scheduled"],
+        title: "Fixed private reminder",
+        vaultRoot,
+      });
+      mocks.readAssistantInputEvent.mockResolvedValue({
+        conversation: {
+          accountId: "direct-maintenance-identity",
+          actorId: "direct-maintenance-participant",
+          actorIsSelf: false,
+          source: "linq",
+          threadId: "direct-maintenance-thread",
+          threadIsDirect: true,
+        },
+        replyTarget: {
+          channel: "linq",
+          messageId: "direct-maintenance-message",
+          threadId: "direct-maintenance-chat",
+        },
+      });
+
+      await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        assistantInputIds: [inputId],
+        importedCount: 1,
+        vaultRoot,
+      }));
+      const laneInput = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+      const automationTool =
+        laneInput?.executionContext?.hosted
+          ?.createScheduledMemberMaintenanceTool?.() ?? null;
+      if (!automationTool) {
+        throw new Error("Expected scheduled member maintenance automation tool.");
+      }
+
+      const generatedAt = new Date();
+      const expiresAt = new Date(generatedAt.getTime() + 7 * 24 * 60 * 60 * 1_000);
+      const busyStart = new Date(generatedAt.getTime() + 60 * 60 * 1_000);
+      const busyEnd = new Date(generatedAt.getTime() + 2 * 60 * 60 * 1_000);
+      const block = [
+        "<!-- murph:availability-conflicts:start -->",
+        "Availability conflict snapshot:",
+        `- generatedAt: ${generatedAt.toISOString()}`,
+        `- expiresAt: ${expiresAt.toISOString()}`,
+        "- If one interval satisfies `busyStart <= scheduledOccurrenceAt < busyEnd`, return `skip` and send nothing. Do not mention calendar, email, event labels, or provider details.",
+        `- ${busyStart.toISOString()} / ${busyEnd.toISOString()}`,
+        "<!-- murph:availability-conflicts:end -->",
+      ].join("\n");
+      const replacement = `${eligible.record.instructions}\n\n${block}`;
+
+      await expect(automationTool.request({
+        action: "save",
+        instructions: "Create another automation.",
+        schedule: { kind: "dailyLocal", localTime: "10:00" },
+        title: "Unauthorized save",
+      })).rejects.toThrow(
+        "Only member maintenance automation operations are available.",
+      );
+      await expect(automationTool.request({
+        action: "authorize_maintenance_source",
+        lookup: eligible.record.automationId,
+        source: "calendar",
+      })).resolves.toEqual({
+        action: "authorize_maintenance_source",
+        automationId: eligible.record.automationId,
+        authorized: true,
+        source: "calendar",
+      });
+      await expect(automationTool.request({
+        action: "authorize_maintenance_source",
+        lookup: eligible.record.automationId,
+        source: "travel-confirmations",
+      })).rejects.toThrow(
+        "Automation does not explicitly authorize travel-confirmation maintenance.",
+      );
+      await expect(automationTool.request({
+        action: "authorize_maintenance_source",
+        lookup: fixed.record.automationId,
+        source: "calendar",
+      })).rejects.toThrow(
+        "Automation does not explicitly authorize skip-when-busy maintenance.",
+      );
+      await expect(automationTool.request({
+        action: "patch_maintenance_instructions",
+        instructions: replacement.replace(
+          "Send one flexible reminder",
+          "Rewrite the reminder",
+        ),
+        lookup: eligible.record.automationId,
+      })).rejects.toThrow(
+        "Maintenance must preserve every instruction byte outside its owned conflict block.",
+      );
+      await expect(automationTool.request({
+        action: "patch_maintenance_instructions",
+        instructions: replacement.replace(
+          `${busyStart.toISOString()} / ${busyEnd.toISOString()}`,
+          `${busyStart.toISOString()} / private event label`,
+        ),
+        lookup: eligible.record.automationId,
+      })).rejects.toThrow(
+        "Availability conflict block is malformed, stale, or outside its seven-day bound.",
+      );
+      const excessiveIntervals = Array.from({ length: 257 }, (_, index) => {
+        const start = new Date(generatedAt.getTime() + index * 60_000);
+        const end = new Date(start.getTime() + 30_000);
+        return `- ${start.toISOString()} / ${end.toISOString()}`;
+      });
+      await expect(automationTool.request({
+        action: "patch_maintenance_instructions",
+        instructions: `${eligible.record.instructions}\n\n${[
+          "<!-- murph:availability-conflicts:start -->",
+          "Availability conflict snapshot:",
+          `- generatedAt: ${generatedAt.toISOString()}`,
+          `- expiresAt: ${expiresAt.toISOString()}`,
+          "- If one interval satisfies `busyStart <= scheduledOccurrenceAt < busyEnd`, return `skip` and send nothing. Do not mention calendar, email, event labels, or provider details.",
+          ...excessiveIntervals,
+          "<!-- murph:availability-conflicts:end -->",
+        ].join("\n")}`,
+        lookup: eligible.record.automationId,
+      })).rejects.toThrow(
+        "Availability conflict block is malformed, stale, or outside its seven-day bound.",
+      );
+      await expect(automationTool.request({
+        action: "patch_maintenance_instructions",
+        instructions: replacement,
+        lookup: eligible.record.automationId,
+      })).resolves.toMatchObject({
+        action: "patch_maintenance_instructions",
+        automationId: eligible.record.automationId,
+        changed: true,
+      });
+      await expect(automationTool.request({
+        action: "patch_maintenance_instructions",
+        instructions: replacement,
+        lookup: eligible.record.automationId,
+      })).resolves.toMatchObject({
+        action: "patch_maintenance_instructions",
+        automationId: eligible.record.automationId,
+        changed: false,
+      });
+
+      await expect(showAutomation({
+        automationId: eligible.record.automationId,
+        vaultRoot,
+      })).resolves.toMatchObject({
+        instructions: replacement,
+        route,
+        schedule: eligible.record.schedule,
+        status: "active",
+        supportKind: "reminder",
+        tags: eligible.record.tags,
+      });
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true });
+    }
+  });
+
   it("scopes automation and group mutation authority to each durable accepted input", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-automation-tool-"));
     const vaultRoot = path.join(parentRoot, "vault");

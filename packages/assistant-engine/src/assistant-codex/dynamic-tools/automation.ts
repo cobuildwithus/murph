@@ -275,8 +275,10 @@ export async function executeAutomationDynamicTool(input: {
 function serializeAutomationToolResponse(
   response: AssistantHostedAutomationToolResponse,
 ): string | null {
-  const payload = response.action === 'reconcile'
-    ? {
+  let payload: Readonly<Record<string, unknown>>
+  switch (response.action) {
+    case 'reconcile':
+      payload = {
         action: response.action,
         archivedCount: response.archivedCount,
         matchedCount: response.matchedCount,
@@ -284,7 +286,27 @@ function serializeAutomationToolResponse(
         supportSeriesId: response.supportSeriesId,
         unchangedCount: response.unchangedCount,
       }
-    : {
+      break
+    case 'authorize_maintenance_source':
+      payload = {
+        action: response.action,
+        automationId: response.automationId,
+        authorized: response.authorized,
+        source: response.source,
+      }
+      break
+    case 'patch_maintenance_instructions':
+      payload = {
+        action: response.action,
+        automationId: response.automationId,
+        changed: response.changed,
+        lookupId: response.lookupId,
+        status: response.status,
+      }
+      break
+    case 'patch':
+    case 'save':
+      payload = {
         action: response.action,
         automationId: response.automationId,
         created: response.created,
@@ -292,6 +314,8 @@ function serializeAutomationToolResponse(
         routeBinding: response.routeBinding,
         status: response.status,
       }
+      break
+  }
   try {
     const text = JSON.stringify(payload) ?? 'null'
     return new TextEncoder().encode(text).byteLength <= AUTOMATION_TOOL_RESULT_MAX_BYTES

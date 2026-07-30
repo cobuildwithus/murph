@@ -203,6 +203,15 @@ import {
   type ConnectedAppsDynamicToolRequest,
 } from './dynamic-tools/connected-apps.js'
 import {
+  executeMemberMaintenanceDynamicTool,
+  MURPH_MEMBER_MAINTENANCE_TOOL,
+  readMemberMaintenanceDynamicToolRequest,
+  type MemberMaintenanceDynamicToolRequest,
+} from './dynamic-tools/member-maintenance.js'
+export {
+  MURPH_MEMBER_MAINTENANCE_TOOL,
+} from './dynamic-tools/member-maintenance.js'
+import {
   executeGenerateVoiceMemoDynamicTool,
   MURPH_GENERATE_VOICE_MEMO_TOOL,
   parseGenerateVoiceMemoArguments,
@@ -1276,6 +1285,7 @@ export const MURPH_COMPUTER_FINISH_RUN_TOOL = {
 
 const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_SEND_PROGRESS_UPDATE_TOOL,
+  MURPH_MEMBER_MAINTENANCE_TOOL,
   MURPH_AUTOMATION_TOOL,
   MURPH_DEVICE_TOOL,
   MURPH_ASSISTANT_STYLE_TOOL,
@@ -1347,6 +1357,7 @@ export interface MurphDynamicToolAvailability {
   groupSharedReadAvailable?: boolean | null
   newsletterAvailable?: boolean | null
   messageTargetingAvailable?: boolean | null
+  memberMaintenanceAvailable?: boolean | null
   personalizationAvailable?: boolean | null
   productFeedbackAvailable?: boolean | null
   progressUpdateMode?: 'direct' | 'group'
@@ -1375,6 +1386,8 @@ const defaultOff = (
 const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
   new Map<MurphDynamicTool, AvailabilityPredicate>([
     [MURPH_SEND_PROGRESS_UPDATE_TOOL, defaultOn((a) => a.progressUpdatesAvailable)],
+    [MURPH_MEMBER_MAINTENANCE_TOOL, defaultOff((a) =>
+      a.memberMaintenanceAvailable)],
     [MURPH_AUTOMATION_TOOL, defaultOff((a) => a.automationAvailable)],
     [MURPH_DEVICE_TOOL, defaultOff((a) => a.deviceAvailable)],
     [MURPH_ASSISTANT_STYLE_TOOL, defaultOff((a) => a.assistantStyleSettingsAvailable)],
@@ -2114,6 +2127,7 @@ type MurphGroupToolRequest =
 
 export type MurphDynamicToolRequest =
   | ConnectedAppsDynamicToolRequest
+  | MemberMaintenanceDynamicToolRequest
   | AutomationDynamicToolRequest
   | DeviceDynamicToolRequest
   | LabsDynamicToolRequest
@@ -2323,6 +2337,14 @@ export function readMurphDynamicToolRequest(
       namespace: request.namespace,
       tool: request.tool,
     }
+  }
+
+  const memberMaintenanceRequest = readMemberMaintenanceDynamicToolRequest({
+    arguments: request.arguments,
+    tool: request.tool,
+  })
+  if (memberMaintenanceRequest) {
+    return memberMaintenanceRequest
   }
 
   const automationRequest = readAutomationDynamicToolRequest({
@@ -2797,6 +2819,7 @@ export async function executeMurphDynamicToolRequest(input: {
   assistantStyleSettingsAvailable?: boolean | null
   groupRoomModelAvailable?: boolean | null
   groupRoomModelMaintenanceAuthorized?: boolean | null
+  memberMaintenanceAuthorized?: boolean | null
   abortSignal?: AbortSignal | null
   codexHome?: string | null
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
@@ -2827,6 +2850,8 @@ export async function executeMurphDynamicToolRequest(input: {
   }
 
   switch (input.request.kind) {
+    case 'invalid-member-maintenance-arguments':
+      return toolTextResult(false, 'invalid member maintenance arguments')
     case 'invalid-automation-arguments':
       return toolTextResult(false, 'invalid automation arguments')
     case 'invalid-device-arguments':
@@ -2934,6 +2959,15 @@ export async function executeMurphDynamicToolRequest(input: {
         request: input.request,
       })
     }
+    case 'member-maintenance-automation':
+    case 'member-maintenance-connected-apps':
+      return await executeMemberMaintenanceDynamicTool({
+        abortSignal: input.abortSignal ?? null,
+        automationTool: input.hostedToolContext?.automationTool ?? null,
+        authorized: input.memberMaintenanceAuthorized === true,
+        connectedApps: input.hostedToolContext?.connectedApps ?? null,
+        request: input.request,
+      })
     case 'group-room-model':
       return await executeGroupRoomModelDynamicTool({
         available: input.groupRoomModelAvailable === true,

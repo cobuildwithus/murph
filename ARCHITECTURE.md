@@ -91,6 +91,24 @@ decrypted contact roster, or compatibility branch. The legacy `read_current`
 wire is unchanged, and assistant-engine still removes the global member id and
 legacy roster handle before any group summary reaches the model.
 
+The immutable hosted member-memory automation runs nightly and keeps memory
+consolidation as phase one. Its second phase may maintain only active direct
+automations that explicitly opt into `skip-when-busy`. The exact managed
+automation id admits one narrow `murph.maintenance` tool; execution rechecks
+that authority and binds every connected read to one eligible automation and
+its authorized calendar or travel-confirmation source. The tool reuses the
+Web-owned read-only connected-app session and the existing hosted automation
+owner. The one-shot Codex turn uses the network-denied
+`murph-member-memory-maintenance` permission profile: it can read the vault and
+write only canonical memory plus the audit, staging, and lock infrastructure
+that canonical memory writes require. It cannot manage accounts, execute
+connected-app writes, create or retarget automations, or change lifecycle
+fields. The automation owner accepts only a canonical, expiring, timestamp-only
+seven-day conflict suffix while preserving every byte outside that suffix, and
+applies the replacement with the observed automation `updatedAt` as a
+compare-and-swap fence. No calendar or email content becomes memory, automation
+metadata, logs, or another state owner.
+
 Each synthetic hosted group runtime may additionally keep one assistant-authored
 `group-room-model` derived knowledge page. A twice-weekly managed automation
 installed only on authenticated non-direct Linq/iMessage or Telegram routes

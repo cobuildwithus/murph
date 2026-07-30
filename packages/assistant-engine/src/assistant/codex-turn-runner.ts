@@ -6,6 +6,7 @@ import {
 } from '@murphai/hosted-execution/assistant-usage'
 import {
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
+  MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
 import {
@@ -74,6 +75,7 @@ import {
 } from './turn-progress.js'
 import {
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
+  MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
 } from './managed-automations.js'
 import type {
   AssistantHostedToolContext,
@@ -486,8 +488,15 @@ async function executeAssistantCodexAttempt(input: {
       executionPlan.input.maintenanceProfile === 'group-room-model' &&
       executionPlan.input.scheduledInvocationAuthority?.automationId ===
         MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID
+    const memberMaintenanceTurn =
+      executionPlan.profile.toolProfile === 'maintenance-turn' &&
+      executionPlan.input.maintenanceProfile === 'member-memory' &&
+      executionPlan.input.scheduledInvocationAuthority?.automationId ===
+        MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID
     const restrictedOneShotTurn =
-      groupRoomModelMaintenanceTurn || readOnlyAutomationTurn
+      groupRoomModelMaintenanceTurn ||
+      memberMaintenanceTurn ||
+      readOnlyAutomationTurn
     const audience = executionPlan.sharedPlan.conversationPolicy.audience
     const groupConversation =
       resolveAssistantConversationScope(audience) === 'group'
@@ -549,6 +558,7 @@ async function executeAssistantCodexAttempt(input: {
         env: attemptEnv,
         groupConversation,
         groupRoomModelMaintenanceAuthorized: groupRoomModelMaintenanceTurn,
+        memberMaintenanceAuthorized: memberMaintenanceTurn,
         hostedToolContext:
           nativeCapabilitiesRestrictedTurn || readOnlyAutomationTurn
           ? null
@@ -595,7 +605,9 @@ async function executeAssistantCodexAttempt(input: {
         permissions:
           groupRoomModelMaintenanceTurn
             ? MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE
-            : readOnlyAutomationTurn && executionPlan.executionContext?.hosted
+            : memberMaintenanceTurn
+              ? MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE
+              : readOnlyAutomationTurn && executionPlan.executionContext?.hosted
               ? MURPH_MEMBER_READ_PERMISSION_PROFILE
               : null,
         ...(restrictedOneShotTurn

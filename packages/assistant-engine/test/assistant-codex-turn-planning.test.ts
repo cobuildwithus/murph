@@ -73,6 +73,7 @@ import {
 } from '../src/assistant/codex-contract-fingerprint.js'
 import {
   MURPH_GROUP_ROOM_MODEL_TOOL,
+  MURPH_MEMBER_MAINTENANCE_TOOL,
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.js'
 import {
@@ -80,6 +81,7 @@ import {
 } from '../src/assistant-codex/dynamic-tools/generate-song.js'
 import {
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
+  MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
 } from '../src/assistant/managed-automations.js'
 import {
   MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
@@ -634,7 +636,7 @@ describe('assistant Codex turn planning', () => {
     }
   })
 
-  it('resolves no dynamic tools and no non-evidence prompt context for maintenance turns', async () => {
+  it('exposes only the exact member-maintenance adapter and no non-evidence prompt context', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(
       'Context snapshot: active condition hypertension.',
@@ -669,6 +671,10 @@ describe('assistant Codex turn planning', () => {
       input: {
         ...createMessageInput(),
         maintenanceProfile: 'member-memory',
+        scheduledInvocationAuthority: {
+          automationId: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+          occurrenceAt: '2026-05-03T19:00:00.000Z',
+        },
       },
       preferenceContext,
       profile: {
@@ -681,7 +687,9 @@ describe('assistant Codex turn planning', () => {
       session: createSession(),
       sharedPlan: createSharedPlan(),
     })
-    expect(maintenancePlan.dynamicTools).toEqual([])
+    expect(maintenancePlan.dynamicTools).toEqual([
+      MURPH_MEMBER_MAINTENANCE_TOOL,
+    ])
     expect(maintenancePlan.systemPrompt).not.toContain('hypertension')
     expect(maintenancePlan.systemPrompt).not.toContain('device sync pending')
     expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
@@ -692,6 +700,8 @@ describe('assistant Codex turn planning', () => {
     expect(maintenancePlan.systemPrompt).toContain(
       'deduplication and update targeting only',
     )
+    expect(maintenancePlan.systemPrompt).toContain('`murph.maintenance`')
+    expect(maintenancePlan.systemPrompt).toContain('`vault-cli automation list`')
     expect(maintenancePlan.systemPrompt).not.toContain('meals')
     expect(maintenancePlan.systemPrompt).not.toContain('Health Commons')
     expect(maintenancePlan.systemPrompt).not.toContain(

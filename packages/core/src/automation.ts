@@ -142,6 +142,7 @@ export interface UpsertAutomationResult {
 export interface PatchAutomationInput {
   activeUntil?: string | null;
   continuityPolicy?: AutomationContinuityPolicy;
+  expectedUpdatedAt?: string;
   instructions?: string;
   lookup: string;
   now?: Date;
@@ -1017,6 +1018,15 @@ export async function patchAutomation(
     if (!existingRecord) {
       throw new VaultError("VAULT_AUTOMATION_MISSING", "Automation was not found.");
     }
+    if (
+      input.expectedUpdatedAt !== undefined
+      && input.expectedUpdatedAt !== existingRecord.updatedAt
+    ) {
+      throw new VaultError(
+        "VAULT_AUTOMATION_CONFLICT",
+        "Automation changed before the patch could be applied.",
+      );
+    }
     return upsertAutomationWithLatestRegistry({
       activeUntil:
         input.activeUntil === undefined
@@ -1461,7 +1471,13 @@ export async function advanceAutomationDeviceActivityCursor(
 }
 
 function assertAutomationPatchHasChanges(input: PatchAutomationInput): void {
-  const { lookup: _lookup, now: _now, vaultRoot: _vaultRoot, ...patch } = input;
+  const {
+    expectedUpdatedAt: _expectedUpdatedAt,
+    lookup: _lookup,
+    now: _now,
+    vaultRoot: _vaultRoot,
+    ...patch
+  } = input;
   if (Object.values(patch).some((value) => value !== undefined)) {
     return;
   }

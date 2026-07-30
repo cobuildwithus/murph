@@ -909,7 +909,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     })
   })
 
-  it('creates hosted overnight memory consolidation through the canonical automation registry', async () => {
+  it('creates hosted overnight memory-first reminder maintenance through the canonical automation registry', async () => {
     const vaultRoot = await createVaultRoot()
 
     await expect(applyMurphManagedAutomations({
@@ -938,7 +938,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       route: defaultRoute,
       schedule: {
         kind: 'cron',
-        expression: '0 3 * * 1,3,5',
+        expression: '0 3 * * *',
       },
       slug: 'overnight-memory-consolidation',
       status: 'active',
@@ -946,16 +946,17 @@ describe('applyMurphManagedAutomations core integration', () => {
         'murph-managed:overnight-memory-consolidation',
         'runtime-maintenance',
       ]),
-      title: 'Overnight memory consolidation',
+      title: 'Overnight memory and reminder maintenance',
     })
     const automation = await showAutomation({
       automationId: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
       vaultRoot,
     })
     if (automation === null) {
-      throw new Error('Expected overnight memory consolidation automation')
+      throw new Error('Expected overnight memory and reminder maintenance automation')
     }
-    expect(automation.instructions).toContain('Goal: consolidate durable user context')
+    expect(automation.instructions).toContain('Phase 1 — memory consolidation:')
+    expect(automation.instructions).toContain('Phase 2 — flexible reminder conflict audit:')
     expect(automation.instructions).toContain(
       'engine-supplied "Conversation evidence" section',
     )
@@ -963,6 +964,8 @@ describe('applyMurphManagedAutomations core integration', () => {
       'bounded committed user and assistant conversation messages from the last 7 days',
     )
     expect(automation.instructions).toContain('supplied conversation evidence')
+    expect(automation.instructions).toContain('vault-cli automation list --status active')
+    expect(automation.instructions).toContain('`murph.maintenance`')
     expect(automation.instructions).toContain('Do not read transcript files or session storage')
     expect(automation.instructions).toContain('Do not save assistant speculation')
   })

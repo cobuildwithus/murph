@@ -129,6 +129,7 @@ export interface AssistantProviderTurn {
   env?: NodeJS.ProcessEnv
   groupConversation?: boolean | null
   groupRoomModelMaintenanceAuthorized?: boolean | null
+  memberMaintenanceAuthorized?: boolean | null
   onFinishWithoutReplyAccepted?: ((
     event: AssistantProviderFinishWithoutReplyAcceptedEvent
   ) => Promise<void> | void) | null
