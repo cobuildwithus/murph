@@ -176,8 +176,8 @@ compatibility paths in the completed hard cut. Operators stopped the old
 workers, terminated the incompatible `hosted-user-runtime:*` histories,
 deployed the matching web, Temporal, and Cloudflare contract set, and reseeded
 new histories with `runtime_recheck_requested` or mailbox signals. Do not repeat
-that history reset for the repository relocation: the current public and
-private workers retain the same Workflow code and identities.
+that history reset for the repository relocation: the private worker was
+relocated without changing Workflow code or identities.
 
 Workflow implementations must version-gate future command-order changes around
 awaited facts reads and execution calls unless the deployment is another
