@@ -125,6 +125,11 @@ default destination for every goal or the definition of activation.
 - Apple Health follows that exception narrowly: Murph can explain and hand off
   setup in a direct conversation with the canonical App Store listing, while
   the iOS app owns sign-in and the operating-system HealthKit permission flow.
+- The canonical public Murph iOS App Store listing is ordinary public product
+  information and may be shared in a hosted group when someone asks how to get
+  the app. The link only downloads the app; the app owns sign-in and
+  authorization, while personalized setup help stays in the person's private
+  Murph conversation.
 - WHOOP relay setup stays factual and sequential: explain that WHOOP limits
   third-party data access, give WHOOP's documented Apple Health menu path, then
   hand off to the Murph iOS app. Never invent an undocumented WHOOP deep link.

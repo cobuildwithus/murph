@@ -101,6 +101,14 @@ describe("hosted-local harness", () => {
       "apps/cloudflare/test/hosted-local-linq-group-route-drift-e2e.test.ts",
     );
     expect(
+      resolveHostedLocalE2eScenarios("linq-group-ios-app-download")[0],
+    ).toEqual({
+      file:
+        "apps/cloudflare/test/hosted-local-linq-group-ios-app-download-e2e.test.ts",
+      manualOnly: true,
+      name: "linq-group-ios-app-download",
+    });
+    expect(
       resolveHostedLocalE2eScenarios("linq-home-line-reroute-retry")[0]?.file,
     ).toBe(
       "apps/cloudflare/test/hosted-local-linq-home-line-reroute-retry-e2e.test.ts",
@@ -165,6 +173,8 @@ describe("hosted-local harness", () => {
     expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).toContain(
       "linq-group-route-drift",
     );
+    expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name))
+      .not.toContain("linq-group-ios-app-download");
     expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).toContain(
       "linq-home-line-reroute-retry",
     );
