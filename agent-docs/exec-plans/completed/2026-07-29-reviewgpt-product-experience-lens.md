@@ -26,7 +26,7 @@ Key decisions:
   product journey evidence in the PR intent and preliminary ReviewGPT packet.
 
 State:
-- In progress.
+- Complete.
 
 Done:
 - Traced the current split across workflow docs, ReviewGPT preset/config,
@@ -40,14 +40,17 @@ Done:
 - ReviewGPT completed the exact-head preliminary pass with one accepted medium
   finding: materially journey-changing product remediation still needs a
   refreshed purpose verdict.
+- Added parent-owned corrected-head product revalidation for that case, with no
+  second specialist run or product-review subagent.
+- Parent final review removed the last live final-gate reference to a routed
+  local product-experience review and added regression coverage.
+- Repeated focused Vitest and CLI typecheck successfully after remediation.
 
 Now:
-- Add the bounded parent-owned corrected-head product revalidation required by
-  the accepted finding, without adding another subagent or ReviewGPT run.
+- Archive this plan and publish the final task head.
 
 Next:
-- Resolve any findings, complete parent final review, close this plan, and prove
-  exact-head CI and merge readiness.
+- Require green exact-head CI and prove merge readiness before handoff.
 
 Open questions (UNCONFIRMED if needed):
 - None.
@@ -69,3 +72,6 @@ Working set (files/ids/commands):
   packages/cli/test/release-script-coverage-audit.test.ts
 - pnpm --filter @murphai/murph typecheck
 - pnpm docs:drift
+Status: completed
+Updated: 2026-07-29
+Completed: 2026-07-29

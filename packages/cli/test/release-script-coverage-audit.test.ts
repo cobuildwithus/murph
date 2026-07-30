@@ -1343,6 +1343,12 @@ describe('monorepo release flow coverage audit', () => {
       'Every non-obvious affected surface is also disclosed',
     )
     expect(prDeepReviewPrompt).toContain(
+      'applicable frontend and product-experience lenses own rendered proof',
+    )
+    expect(prDeepReviewPrompt).not.toContain(
+      'routed local product-experience review',
+    )
+    expect(prDeepReviewPrompt).toContain(
       'Disclosure does not make\nan unsafe or needless change acceptable',
     )
     expect(prDeepReviewPrompt).toContain(
