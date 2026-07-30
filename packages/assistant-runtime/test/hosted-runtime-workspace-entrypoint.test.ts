@@ -6520,20 +6520,27 @@ describe("hosted workspace runtime entrypoint", () => {
       expectImmediateRecheck: false,
       expectedElapsedBoundaryMs: 850,
       label: "keeps the idle window when the provider still matches",
-      liveProvider: "openai" as const,
+      providerReadOutcome: "openai" as const,
       slug: "matching_provider",
     },
     {
       expectImmediateRecheck: true,
       expectedElapsedBoundaryMs: 650,
       label: "hands off immediately when the provider changed",
-      liveProvider: "venice" as const,
+      providerReadOutcome: "venice" as const,
       slug: "changed_provider",
+    },
+    {
+      expectImmediateRecheck: false,
+      expectedElapsedBoundaryMs: 850,
+      label: "keeps the idle window when provider authority is unavailable",
+      providerReadOutcome: "unavailable" as const,
+      slug: "provider_unavailable",
     },
   ])("$label after an external runtime wake with no foreground work", async ({
     expectImmediateRecheck,
     expectedElapsedBoundaryMs,
-    liveProvider,
+    providerReadOutcome,
     slug,
   }) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
@@ -6620,6 +6627,9 @@ describe("hosted workspace runtime entrypoint", () => {
           assistantConfigurationToolPort: {
             async request() {
               providerReadCount += 1;
+              if (providerReadOutcome === "unavailable") {
+                throw new Error("control plane unavailable");
+              }
               return {
                 action: "read",
                 result: {
@@ -6629,7 +6639,7 @@ describe("hosted workspace runtime entrypoint", () => {
                   configurationAvailable: true,
                   dormantSolPreference: false,
                   model: "gpt-5.6-terra",
-                  provider: liveProvider,
+                  provider: providerReadOutcome,
                   reasoningEffort: "low",
                   solAvailable: false,
                 },

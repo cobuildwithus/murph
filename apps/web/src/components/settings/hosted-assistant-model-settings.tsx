@@ -170,7 +170,7 @@ export function AssistantProviderSummary({
           </>
         ) : (
           <>
-            Core replies use{" "}
+            New core replies use{" "}
             <span className="font-medium text-foreground">
               {currentProviderName}
             </span>
@@ -182,7 +182,7 @@ export function AssistantProviderSummary({
         aria-label={
           hasPendingChange
             ? `Change model provider. Core replies will switch to ${draftProviderName} after Save.`
-            : `Change model provider. Core replies currently use ${currentProviderName}.`
+            : `Change model provider. New core replies use ${currentProviderName}.`
         }
         className="text-muted-foreground"
         disabled={disabled}
@@ -315,6 +315,7 @@ function HostedAssistantModelSettingsForm(
     message: string;
     tone: "destructive" | "neutral";
   } | null>(null);
+  const [saveAnnouncement, setSaveAnnouncement] = useState<string | null>(null);
   const controlsDisabled = isSaving || !props.configurationAvailable;
   const hasChanges =
     draftModel !== currentModel
@@ -324,6 +325,7 @@ function HostedAssistantModelSettingsForm(
   async function saveModel() {
     setIsSaving(true);
     setStatus(null);
+    setSaveAnnouncement(null);
 
     try {
       const modelChanged = draftModel !== currentModel;
@@ -365,6 +367,9 @@ function HostedAssistantModelSettingsForm(
       setDraftProvider(provider);
       setDormantSolPreference(response.dormantSolPreference);
       setSolAvailable(response.solAvailable);
+      setSaveAnnouncement(
+        `Saved. ${readProductModelName(response.model)} through ${readProviderName(provider)} is your default.`,
+      );
     } catch (error) {
       const solNoLongerAvailable =
         error instanceof HostedOnboardingApiError &&
@@ -528,6 +533,13 @@ function HostedAssistantModelSettingsForm(
             tone={status.tone}
           />
         ) : null}
+        {saveAnnouncement ? (
+          <SettingsStatusLine
+            className="sr-only min-h-0"
+            message={saveAnnouncement}
+            tone="neutral"
+          />
+        ) : null}
       </div>
     </form>
   );
@@ -540,7 +552,7 @@ function readModelOptionBadge(input: {
   unavailable: boolean;
 }): React.ReactNode {
   if (input.current) {
-    return <ModelOptionBadge>Current</ModelOptionBadge>;
+    return <ModelOptionBadge>Default</ModelOptionBadge>;
   }
 
   if (input.selected) {
