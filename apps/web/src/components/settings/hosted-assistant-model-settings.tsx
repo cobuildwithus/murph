@@ -132,7 +132,7 @@ export function AssistantProviderDialog({
 }: AssistantProviderDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[min(28rem,calc(100vw-2rem))] gap-6 border border-border/80 bg-popover p-6 text-popover-foreground ring-border sm:max-w-[28rem] md:p-7">
+      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[min(28rem,calc(100vw-2rem))] gap-6 overflow-y-auto border border-border/80 bg-popover p-6 text-popover-foreground ring-border sm:max-w-[28rem] md:p-7">
         <DialogHeader className="gap-2 pr-10">
           <DialogTitle className="font-serif text-2xl/8 font-semibold tracking-normal">
             Choose model provider

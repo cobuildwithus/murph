@@ -47,12 +47,29 @@ vi.mock("@/src/components/ui/badge", () => ({
 vi.mock("@/src/components/ui/dialog", () => ({
   Dialog({
     children,
+    onOpenChange,
     open,
   }: {
     children?: ReactNode;
+    onOpenChange?: (open: boolean) => void;
     open?: boolean;
   }) {
-    return open ? createElement("div", { role: "dialog" }, children) : null;
+    return open
+      ? createElement(
+          "div",
+          { role: "dialog" },
+          children,
+          createElement(
+            "button",
+            {
+              "data-dialog-dismiss": "true",
+              onClick: () => onOpenChange?.(false),
+              type: "button",
+            },
+            "Dismiss dialog",
+          ),
+        )
+      : null;
   },
   DialogContent({
     children,
@@ -178,6 +195,7 @@ test("members can switch the provider without changing Terra, Luna, or Sol", asy
   await act(async () => {
     veniceControl.click();
   });
+  assert.equal(view.document.querySelector('[role="dialog"]'), null);
   assert.match(view.container.textContent ?? "", /Served on Venice/u);
   await act(async () => {
     submitForm(view.container);
@@ -200,6 +218,39 @@ test("members can switch the provider without changing Terra, Luna, or Sol", asy
     view.container,
     HOSTED_ASSISTANT_TERRA_MODEL,
   )));
+  view.cleanup();
+});
+
+test("closing the provider dialog leaves the draft unchanged", async () => {
+  const view = await renderClient(
+    createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: false,
+      configurationAvailable: true,
+      initialDormantSolPreference: false,
+      initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      initialProvider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
+      solAvailable: true,
+      veniceAvailable: true,
+    }),
+  );
+  const saveButton = findButton(view.container, "Save change");
+
+  await act(async () => {
+    findButton(view.container, "Change").click();
+  });
+  const dismissButton = view.document.querySelector<HTMLButtonElement>(
+    '[data-dialog-dismiss="true"]',
+  );
+  assert.ok(dismissButton);
+  await act(async () => {
+    dismissButton.click();
+  });
+
+  assert.equal(view.document.querySelector('[role="dialog"]'), null);
+  assert.match(view.container.textContent ?? "", /Served on OpenAI/u);
+  assert.ok(saveButton.disabled);
+  expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+
   view.cleanup();
 });
 
