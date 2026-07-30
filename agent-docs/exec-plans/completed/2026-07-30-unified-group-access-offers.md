@@ -1,6 +1,6 @@
 # Unify group access offers across iMessage and SMS
 
-Status: active
+Status: completed
 Created: 2026-07-30
 Updated: 2026-07-30
 
@@ -104,6 +104,17 @@ Updated: 2026-07-30
   model branching. The implementation keeps that experience to one semantic
   action, the existing native or link surface, no extra confirmation, and a
   truthful unavailable result when route proof is incomplete.
+- Parent final review after preliminary remediation: `NO FINDINGS`. The full
+  diff and model parser -> engine adapter -> operation-scoped route selector ->
+  existing Web port call paths were re-read. The final route resolver admits a
+  supported route only when every authoritative non-direct candidate is
+  complete and agrees; direct candidates remain outside group authority.
+  Scheduled execution has one link-only branch, and the engine accepts either
+  existing internal response while exposing only the semantic result.
+- Residual validation is deliberately operational rather than architectural:
+  exact-head CI and final ReviewGPT remain PR gates after this plan-closing
+  commit, followed by provider spot checks after deployment. No live-provider
+  credential or production mutation is required for the local direct scenario.
 
 ## Verification
 
@@ -140,3 +151,4 @@ Updated: 2026-07-30
     tokens on the candidate; delta +369 bytes (+0.34%) / +63 tokens (+0.27%).
   - Group: 94,850 bytes / 20,634 tokens on base; 95,219 bytes / 20,697 tokens
     on the candidate; delta +369 bytes (+0.39%) / +63 tokens (+0.31%).
+Completed: 2026-07-30
