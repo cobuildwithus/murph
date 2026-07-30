@@ -8,6 +8,10 @@ import {
   preloadHostedAuthPanelIsland,
   useHostedAuthPanelIslandIdlePreload,
 } from "@/src/components/hosted-onboarding/auth-dialog";
+import {
+  useAuth,
+  useAuthRuntimeIdlePreload,
+} from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import { navigateHostedAuthRedirect } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
 import {
   HOSTED_APP_HOME_PATH,
@@ -34,17 +38,23 @@ export function LandingAuthDialogButton({
   showArrow?: boolean;
   showPassiveLegalNotice?: boolean;
 }) {
+  const auth = useAuth();
   const [open, setOpen] = useState(false);
+  // Production landing pages are wrapped by AuthProvider and share its warmed
+  // runtime. The fallback keeps isolated catalog/test renders self-contained.
+  const prepareAuth = auth.shared
+    ? auth.prepareAuth
+    : preloadHostedAuthPanelIsland;
 
   return (
     <>
       <button
         type="button"
         className={buttonClassName}
-        onFocus={preloadHostedAuthPanelIsland}
-        onPointerDown={preloadHostedAuthPanelIsland}
-        onPointerEnter={preloadHostedAuthPanelIsland}
-        onClick={() => setOpen(true)}
+        onFocus={prepareAuth}
+        onPointerDown={prepareAuth}
+        onPointerEnter={prepareAuth}
+        onClick={auth.shared ? auth.openAuthDialog : () => setOpen(true)}
       >
         {leadingIcon ? (
           <span aria-hidden="true" className="inline-flex shrink-0">
@@ -61,13 +71,15 @@ export function LandingAuthDialogButton({
           </span>
         ) : null}
       </button>
-      <AuthDialog
-        open={open}
-        onCompleted={handleLandingAuthCompleted}
-        onOpenChange={setOpen}
-        requireLaunchConsentOnCompletion={requireLaunchConsentOnCompletion}
-        showPassiveLegalNotice={showPassiveLegalNotice}
-      />
+      {!auth.shared ? (
+        <AuthDialog
+          open={open}
+          onCompleted={handleLandingAuthCompleted}
+          onOpenChange={setOpen}
+          requireLaunchConsentOnCompletion={requireLaunchConsentOnCompletion}
+          showPassiveLegalNotice={showPassiveLegalNotice}
+        />
+      ) : null}
     </>
   );
 }
@@ -173,9 +185,12 @@ export function LandingAuthActions({
   splitUnauthenticated?: boolean;
   signupLabel?: string;
 }) {
+  const auth = useAuth();
   const styles = getLandingAuthClasses(context, onDarkSurface);
+  const shouldPreload = preloadAuthPanel && !authenticated;
 
-  useHostedAuthPanelIslandIdlePreload(preloadAuthPanel && !authenticated);
+  useAuthRuntimeIdlePreload(shouldPreload && auth.shared);
+  useHostedAuthPanelIslandIdlePreload(shouldPreload && !auth.shared);
 
   if (authenticated) {
     const showArrow = context !== "nav";
@@ -215,7 +230,7 @@ export function LandingAuthActions({
           buttonClassName={cn(
             styles.signup,
             context !== "nav" ? "group gap-2" : null,
-            "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#5a6e32]"
+            "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#5a6e32]",
           )}
           buttonLabel={authLabel}
           leadingIcon={leadingIcon}
@@ -231,7 +246,7 @@ export function LandingAuthActions({
       <LandingAuthDialogButton
         buttonClassName={cn(
           styles.login,
-          "shrink-0"
+          "shrink-0",
         )}
         buttonLabel={loginLabel}
         requireLaunchConsentOnCompletion
