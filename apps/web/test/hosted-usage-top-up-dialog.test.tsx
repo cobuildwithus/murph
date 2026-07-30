@@ -21,6 +21,7 @@ import {
 } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
+  isMobile: vi.fn(() => false),
   randomUUID: vi.fn(() => "00000000-0000-4000-8000-000000000001"),
   requestHostedOnboardingJson: vi.fn(),
   routerRefresh: vi.fn(),
@@ -68,7 +69,7 @@ vi.mock("@/src/components/hosted-onboarding/auth-dialog-provider", () => ({
 }));
 
 vi.mock("@/src/hooks/use-mobile", () => ({
-  useIsMobile: () => false,
+  useIsMobile: mocks.isMobile,
 }));
 
 vi.mock("@/src/components/ui/button", () => ({
@@ -171,6 +172,36 @@ vi.mock("@/src/components/ui/dialog", async () => {
     },
   };
 });
+
+vi.mock("@/src/components/ui/drawer", () => ({
+  Drawer: ({
+    children,
+    open,
+  }: {
+    children?: ReactNode;
+    open?: boolean;
+  }) =>
+    open
+      ? createElement("div", { "data-drawer-open": "true" }, children)
+      : null,
+  DrawerClose: ({ children }: { children?: ReactNode }) => children,
+  DrawerContent: ({
+    children,
+    className,
+  }: HTMLAttributes<HTMLDivElement>) =>
+    createElement(
+      "div",
+      { className, "data-slot": "drawer-content", role: "dialog" },
+      children,
+    ),
+  DrawerDescription: (props: HTMLAttributes<HTMLParagraphElement>) =>
+    createElement("p", props),
+  DrawerHeader: (props: HTMLAttributes<HTMLDivElement>) =>
+    createElement("div", props),
+  DrawerTitle: (props: HTMLAttributes<HTMLHeadingElement>) =>
+    createElement("h2", props),
+  DrawerTrigger: ({ children }: { children?: ReactNode }) => children,
+}));
 
 vi.mock("@/src/components/ui/field", () => ({
   Field: (props: HTMLAttributes<HTMLDivElement>) =>
@@ -300,6 +331,7 @@ vi.mock("@/src/components/ui/choice-card", () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.isMobile.mockReturnValue(false);
   vi.stubGlobal("crypto", {
     randomUUID: mocks.randomUUID,
   });
@@ -642,6 +674,12 @@ test("keeps the private monthly maximum out of the public sponsorship moment", a
       /Choose your monthly sponsorship limit\./u,
     );
     assert.doesNotMatch(dialogText, /required first \$5 activation purchase/u);
+    const initialChargeButton = Array.from(
+      rendered.container.querySelectorAll<HTMLButtonElement>("button"),
+    ).find(
+      (button) => button.textContent?.trim() === "Sponsor this chat · $5",
+    );
+    assert.ok(initialChargeButton);
     assert.match(dialogText, /Add a note/u);
     assert.ok(
       rendered.container.querySelector('[data-default-open="true"]'),
@@ -716,6 +754,40 @@ test("keeps the private monthly maximum out of the public sponsorship moment", a
       purchaseId: "hucp_group_monthly_sponsorship",
       status: "payment_pending",
     });
+    await rendered.cleanup();
+  }
+});
+
+test("identifies the fixed activation charge in the mobile sponsorship drawer", async () => {
+  mocks.isMobile.mockReturnValue(true);
+  const { GroupSponsorshipDialog } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(GroupSponsorshipDialog, {
+      checkoutUrl:
+        "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
+      customizationAllowed: true,
+      initialOpen: true,
+      mode: "monthly",
+      monthlyCapOptions: groupSponsorshipMonthlyCaps(),
+      offers: [groupSponsorshipOffers()[0]],
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    assert.ok(
+      rendered.container.querySelector('[data-slot="drawer-content"]'),
+    );
+    const initialChargeButton = Array.from(
+      rendered.container.querySelectorAll<HTMLButtonElement>("button"),
+    ).find(
+      (button) => button.textContent?.trim() === "Sponsor this chat · $5",
+    );
+    assert.ok(initialChargeButton);
+  } finally {
     await rendered.cleanup();
   }
 });

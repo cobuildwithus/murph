@@ -576,7 +576,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                     : controller.selectedOffer
                       ? props.scope === "group"
                         ? groupPaymentMode === "monthly"
-                          ? "Sponsor this chat"
+                          ? `Sponsor this chat · ${controller.selectedOffer.amountLabel}`
                           : `Contribute ${controller.selectedOffer.amountLabel}`
                         : `Add usage · ${controller.selectedOffer.amountLabel}`
                       : "Choose an amount"}
