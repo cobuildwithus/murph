@@ -2656,14 +2656,26 @@ describe('assistant Codex turn planning', () => {
         'automation',
         'group',
         'newsletter',
+        'assistant_configuration',
         'assistant_style',
         'personalization',
         'create_phone_call',
       ]),
     )
+    const groupAssistantConfigurationTool = plan.dynamicTools.find(
+      (tool) => tool.name === 'assistant_configuration',
+    )
+    expect(groupAssistantConfigurationTool?.description).toContain(
+      'synthetic Murph instance for this room',
+    )
+    const groupAssistantConfigurationSchema = JSON.stringify(
+      groupAssistantConfigurationTool?.inputSchema,
+    )
+    expect(groupAssistantConfigurationSchema).toContain('"model"')
+    expect(groupAssistantConfigurationSchema).not.toContain('"provider"')
+    expect(groupAssistantConfigurationSchema).not.toContain('"reasoningEffort"')
     for (const personalTool of [
       'computer_open',
-      'assistant_configuration',
       'connected_apps_manage',
       'create_clinical_records_connect_link',
       'family_plan',

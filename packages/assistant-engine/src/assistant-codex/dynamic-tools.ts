@@ -633,6 +633,44 @@ export const MURPH_ASSISTANT_CONFIGURATION_TOOL = {
   },
 } as const
 
+export const MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL = {
+  namespace: 'murph',
+  name: 'assistant_configuration',
+  description:
+    'Read the current group room model and the choices available for the next turn, or save an explicit current-room request to change it. This changes only the synthetic Murph instance for this room; it never reads or changes any participant\'s private model, provider, reasoning, account, or billing settings. Group rooms default to Sol, and Luna or Terra may be selected for the room. Use action="read" whenever model facts are needed. Use action="update" only when the current user-sourced group turn explicitly asks for the exact model. Never switch models automatically because usage is low. Do not claim a change is saved unless the result says updated or unchanged. A saved update does not change the running turn and takes effect on the next turn.',
+  inputSchema: {
+    oneOf: [
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['read'],
+          },
+        },
+        required: ['action'],
+      },
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['update'],
+          },
+          model: {
+            type: 'string',
+            enum: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
+            description: 'Required next-turn group room model.',
+          },
+        },
+        required: ['action', 'model'],
+      },
+    ],
+  },
+} as const
+
 const GROUP_VAULT_SHARE_FIXED_PROJECTION_SCOPE_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -1268,6 +1306,7 @@ export const MURPH_DYNAMIC_TOOLS = [
 
 export type MurphDynamicTool =
   | (typeof MURPH_DYNAMIC_TOOLS)[number]
+  | typeof MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL
   | typeof MURPH_GROUP_SEND_PROGRESS_UPDATE_TOOL
   | typeof MURPH_GROUP_SHARED_READ_TOOL
   | typeof MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL
@@ -1289,6 +1328,7 @@ export interface MurphDynamicToolAvailability {
   imessageContactAvailable?: boolean | null
   subscriptionAvailable?: boolean | null
   groupAvailable?: boolean | null
+  groupAssistantConfigurationAvailable?: boolean | null
   groupRoomModelAvailable?: boolean | null
   groupPermissionOfferAvailable?: boolean | null
   groupSharedReadAvailable?: boolean | null
@@ -1367,6 +1407,12 @@ export function resolveMurphDynamicTools(
     if (progressToolIndex >= 0) {
       tools[progressToolIndex] = MURPH_GROUP_SEND_PROGRESS_UPDATE_TOOL
     }
+  }
+  if (
+    availability.assistantConfigurationAvailable !== true &&
+    availability.groupAssistantConfigurationAvailable === true
+  ) {
+    tools.push(MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL)
   }
   if (
     availability.groupAvailable !== true &&
@@ -3606,6 +3652,21 @@ async function executeAssistantConfigurationTool(input: {
     return toolTextResult(
       false,
       'assistant configuration tools are unavailable for this turn',
+    )
+  }
+  const conversationScope =
+    input.hostedToolContext?.currentUserActionScope?.()?.conversationScope ?? null
+  if (
+    input.request.action === 'update' &&
+    conversationScope === 'group' &&
+    (
+      input.request.provider !== undefined ||
+      input.request.reasoningEffort !== undefined
+    )
+  ) {
+    return toolTextResult(
+      false,
+      'group assistant configuration supports room model changes only',
     )
   }
 

@@ -11,6 +11,7 @@ import {
 import {
   executeMurphDynamicToolRequest,
   MURPH_ASSISTANT_CONFIGURATION_TOOL,
+  MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL,
   readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
 } from "../src/assistant-codex/dynamic-tools.js";
@@ -28,13 +29,129 @@ describe("assistant configuration tool", () => {
     );
   });
 
-  it("exposes the dynamic tool only when hosted configuration is available", () => {
+  it("exposes the scope-specific dynamic tool only when configuration is available", () => {
     expect(resolveMurphDynamicTools({
       assistantConfigurationAvailable: true,
     })).toContain(MURPH_ASSISTANT_CONFIGURATION_TOOL);
     expect(resolveMurphDynamicTools({
       assistantConfigurationAvailable: false,
     })).not.toContain(MURPH_ASSISTANT_CONFIGURATION_TOOL);
+
+    const groupTools = resolveMurphDynamicTools({
+      assistantConfigurationAvailable: false,
+      groupAssistantConfigurationAvailable: true,
+    });
+    expect(groupTools).toContain(MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL);
+    expect(groupTools).not.toContain(MURPH_ASSISTANT_CONFIGURATION_TOOL);
+    const groupSchema = JSON.stringify(
+      MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL.inputSchema,
+    );
+    expect(groupSchema).toContain('"model"');
+    expect(groupSchema).not.toContain('"provider"');
+    expect(groupSchema).not.toContain('"reasoningEffort"');
+  });
+
+  it("saves an explicit group room model for the next turn", async () => {
+    const request = readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          action: "update",
+          model: HOSTED_ASSISTANT_TERRA_MODEL,
+        },
+        namespace: "murph",
+        tool: "assistant_configuration",
+      },
+    });
+    if (!request) {
+      throw new Error("Expected an assistant configuration dynamic tool request.");
+    }
+    const savedForNextTurn = createGroupSavedConfiguration(
+      HOSTED_ASSISTANT_SOL_MODEL,
+    );
+    const updatedSaved = {
+      ...createGroupSavedConfiguration(HOSTED_ASSISTANT_TERRA_MODEL),
+      appliesAt: "next_turn" as const,
+      requiredPlan: null,
+      status: "updated" as const,
+    };
+    const assistantConfigurationTool = {
+      request: vi.fn()
+        .mockResolvedValueOnce({ action: "read", result: savedForNextTurn })
+        .mockResolvedValueOnce({ action: "update", result: updatedSaved }),
+    };
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        assistantConfigurationTool,
+        assistantInputId: `ain_${"g".repeat(32)}`,
+        conversationScope: "group",
+        currentModel: HOSTED_ASSISTANT_SOL_MODEL,
+        currentReasoningEffort: "low",
+      }),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request,
+    });
+
+    expect(assistantConfigurationTool.request).toHaveBeenNthCalledWith(1, {
+      action: "read",
+    });
+    expect(assistantConfigurationTool.request).toHaveBeenNthCalledWith(2, {
+      action: "update",
+      assistantInputId: `ain_${"g".repeat(32)}`,
+      model: HOSTED_ASSISTANT_TERRA_MODEL,
+    });
+    expect(readToolPayload(result)).toEqual({
+      currentTurn: {
+        model: HOSTED_ASSISTANT_SOL_MODEL,
+        provider: "openai",
+        reasoningEffort: "low",
+      },
+      savedForNextTurn: updatedSaved,
+    });
+  });
+
+  it("rejects provider and reasoning mutations from a group room", async () => {
+    const assistantConfigurationTool = {
+      request: vi.fn(),
+    };
+    for (const change of [
+      { provider: "venice" as const },
+      { reasoningEffort: "high" as const },
+    ]) {
+      const request = readMurphDynamicToolRequest({
+        method: "item/tool/call",
+        params: {
+          arguments: { action: "update", ...change },
+          namespace: "murph",
+          tool: "assistant_configuration",
+        },
+      });
+      if (!request) {
+        throw new Error("Expected an assistant configuration dynamic tool request.");
+      }
+
+      const result = await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext: createHostedToolContext({
+          assistantConfigurationTool,
+          assistantInputId: `ain_${"h".repeat(32)}`,
+          conversationScope: "group",
+          currentModel: HOSTED_ASSISTANT_SOL_MODEL,
+          currentReasoningEffort: "low",
+        }),
+        nextUsageOrdinal: () => 0,
+        progressDelivery: null,
+        request,
+      });
+
+      expect(result.rpcResult.success).toBe(false);
+    }
+    expect(assistantConfigurationTool.request).not.toHaveBeenCalled();
   });
 
   it("reads the saved next-turn target without rewriting the current turn", async () => {
@@ -576,11 +693,30 @@ function createSavedConfiguration(input: {
   };
 }
 
+function createGroupSavedConfiguration(
+  model: typeof HOSTED_ASSISTANT_LUNA_MODEL
+    | typeof HOSTED_ASSISTANT_TERRA_MODEL
+    | typeof HOSTED_ASSISTANT_SOL_MODEL,
+) {
+  return {
+    availableModels: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
+    availableProviders: ["openai"] as const,
+    availableReasoningEfforts: ["low"] as const,
+    configurationAvailable: true,
+    dormantSolPreference: false,
+    model,
+    provider: "openai" as const,
+    reasoningEffort: "low" as const,
+    solAvailable: true,
+  };
+}
+
 function createHostedToolContext(input: {
   assistantInputId?: string | null;
   assistantConfigurationTool: NonNullable<
     AssistantHostedToolContext["assistantConfigurationTool"]
   >;
+  conversationScope?: "direct" | "group";
   currentModel: string;
   currentReasoningEffort: string;
 }): AssistantHostedToolContext {
@@ -596,6 +732,16 @@ function createHostedToolContext(input: {
     }),
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => [],
+    currentUserActionScope: () => input.conversationScope
+      ? {
+          acceptedInputIds: input.assistantInputId ? [input.assistantInputId] : [],
+          conversationId: null,
+          conversationScope: input.conversationScope,
+          inboundMailboxItemIds: [],
+          originSessionId: "session-test",
+          recipientKey: null,
+        }
+      : null,
     sendVaultFile: vi.fn(async () => ({
       approvalUrl: "https://murph.test/approve/unused",
       filename: "unused.pdf",
