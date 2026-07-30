@@ -309,6 +309,36 @@ describe("readHostedAiUsageActivity", () => {
     ]);
   });
 
+  it("keeps the year in mission timing when the deadline crosses into a new year", async () => {
+    const now = new Date("2026-12-31T23:30:00.000Z");
+    mocks.creditFindMany.mockResolvedValue([]);
+    mocks.missionFindMany.mockResolvedValueOnce([
+      {
+        armedAt: new Date("2026-12-31T12:00:00.000Z"),
+        beneficiaryMemberId: "member_group",
+        expiresAt: new Date("2027-01-01T00:30:00.000Z"),
+        id: "hur_cross_year",
+        policyCode: "active_group_v1",
+        qualifiedAt: null,
+        rewardedAt: null,
+        rewardUsdMicros: 3_500_000n,
+        status: "target_bound",
+      },
+    ]).mockResolvedValueOnce([]);
+
+    const { readHostedAiUsageActivity } = await import(
+      "@/src/lib/hosted-execution/usage-activity"
+    );
+    const activity = await readHostedAiUsageActivity({
+      memberId: "member_123",
+      now,
+    });
+
+    expect(activity.missions[0]?.timingLabel).toBe(
+      "Ends Jan 1, 2027 at 12:30 AM UTC",
+    );
+  });
+
   it("does not fan out its bounded database reads", async () => {
     let resolveCredits!: (rows: unknown[]) => void;
     let resolveOutstanding!: (rows: unknown[]) => void;
@@ -382,6 +412,17 @@ describe("HostedAiUsageActivity", () => {
             timingLabel: "Ends Aug 3, 2026",
             title: "Start an active group",
           },
+          {
+            destinationLabel: "the group",
+            id: "mission_2",
+            requirementsLabel: "Wait while Murph checks final activity.",
+            rewardLabel: "$3.50",
+            selectedLabel: "Jul 28, 2026",
+            status: "checking_final_activity",
+            statusLabel: "Checking final activity",
+            timingLabel: "Closed Jul 29, 2026",
+            title: "Start an active group",
+          },
         ],
         missionsEnabled: true,
       },
@@ -400,7 +441,24 @@ describe("HostedAiUsageActivity", () => {
     assert.doesNotMatch(markup, /Remaining|\$6\.42/);
     assert.match(markup, /Start an active group/);
     assert.match(markup, /to the group/);
-    assert.match(markup, /<details/);
+    const detailMarkup = /<details\b[^>]*>[\s\S]*?<\/details>/u.exec(markup)?.[0];
+    assert.ok(detailMarkup);
+    const detailOpeningTag = /^<details\b[^>]*>/u.exec(detailMarkup)?.[0];
+    assert.ok(detailOpeningTag);
+    assert.doesNotMatch(detailOpeningTag, /\sopen(?:=|\s|>)/u);
+    assert.match(
+      detailMarkup,
+      /Start a fresh group and get people talking\./,
+    );
+    assert.match(detailMarkup, /Selected Jul 27, 2026/);
+    assert.match(
+      markup,
+      /aria-label="Details for Start an active group, In progress, selected Jul 27, 2026"/,
+    );
+    assert.match(
+      markup,
+      /aria-label="Details for Start an active group, Checking final activity, selected Jul 28, 2026"/,
+    );
     assert.match(markup, /Ask Murph/);
     assert.match(
       markup,

@@ -79,7 +79,10 @@ export function HostedAiUsageActivity(props: {
                     </div>
                   </div>
                   <details className="group mt-3 text-xs text-muted-foreground">
-                    <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 rounded-sm transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+                    <summary
+                      aria-label={`Details for ${mission.title}, ${mission.statusLabel}, selected ${mission.selectedLabel}`}
+                      className="inline-flex cursor-pointer list-none items-center gap-1.5 rounded-sm transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden"
+                    >
                       Details
                       <ChevronDown
                         aria-hidden="true"
