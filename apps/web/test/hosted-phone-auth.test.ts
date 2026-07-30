@@ -832,6 +832,71 @@ describe("HostedPhoneAuth", () => {
     }
   });
 
+  it("keeps pasted-phone metadata manual without an explicit surface opt-in", async () => {
+    vi.resetModules();
+    interface FlowProps {
+      activeAttempt: { maskedPhoneNumber: string; phoneNumber: string } | null;
+      onPhoneNumberChange: (
+        value: string,
+        metadata?: { autoSendCandidate: true; countryCode: string },
+      ) => void;
+      onSubmitPhoneEntry: () => Promise<void>;
+    }
+    const flowState: { current: FlowProps | null } = { current: null };
+
+    vi.doMock("@/src/components/hosted-onboarding/hosted-phone-auth-views", () => ({
+      HostedPhoneAuthFlow(props: FlowProps) {
+        flowState.current = props;
+        return React.createElement("div", { "data-phone-flow": "mounted" });
+      },
+      HostedPhoneAuthScaffold({ children }: { children: React.ReactNode }) {
+        return React.createElement(React.Fragment, null, children);
+      },
+    }));
+    vi.doMock("@/src/components/hosted-onboarding/hosted-privy-captcha", () => ({
+      HostedPrivyCaptcha() {
+        return null;
+      },
+    }));
+    mocks.sendCode.mockResolvedValue(undefined);
+
+    const { HostedPhoneAuth } = await import(
+      "@/src/components/hosted-onboarding/hosted-phone-auth"
+    );
+    const { cleanup } = await renderClientComponent(
+      React.createElement(HostedPhoneAuth),
+      { requireButton: false },
+    );
+
+    try {
+      await act(async () => {
+        flowState.current?.onPhoneNumberChange("4155552671", {
+          autoSendCandidate: true,
+          countryCode: "US",
+        });
+        await flushHostedPhoneAuthEffects();
+      });
+
+      expect(mocks.sendCode).not.toHaveBeenCalled();
+
+      await act(async () => {
+        await flowState.current?.onSubmitPhoneEntry();
+        await flushHostedPhoneAuthEffects();
+      });
+
+      expect(mocks.sendCode).toHaveBeenCalledTimes(1);
+      expect(mocks.sendCode).toHaveBeenCalledWith({
+        phoneNumber: "+14155552671",
+      });
+      assert.equal(flowState.current?.activeAttempt?.maskedPhoneNumber, "*** 2671");
+    } finally {
+      await cleanup();
+      vi.doUnmock("@/src/components/hosted-onboarding/hosted-phone-auth-views");
+      vi.doUnmock("@/src/components/hosted-onboarding/hosted-privy-captcha");
+      vi.resetModules();
+    }
+  });
+
   it("queues manual phone verification sends until Privy initializes", async () => {
     vi.resetModules();
     vi.doMock("@/src/components/hosted-onboarding/hosted-phone-auth-views", () => ({
