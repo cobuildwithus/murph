@@ -1,7 +1,6 @@
 "use client";
 
 import { cn } from "@/src/lib/utils";
-import { MurphPulseLoader } from "@/src/components/ui/murph-pulse-loader";
 
 const HOSTED_TERMS_URL = "/legal/terms.pdf";
 const HOSTED_PRIVACY_URL = "/legal/privacy.pdf";
@@ -63,22 +62,6 @@ export function describeTelegramAuthError(error: unknown): TelegramAuthNotice {
   }
 
   return { tone: "error", message: raw };
-}
-
-export function HostedAuthFinishingNotice() {
-  return (
-    <div className="flex items-center gap-4 rounded-xl bg-[#1A1F16]/[0.035] px-4 py-3.5">
-      <MurphPulseLoader className="h-9 w-auto shrink-0" />
-      <div className="min-w-0 flex-1">
-        <p className="font-serif text-[15px] font-medium leading-tight text-[#1A1F16]">
-          Setting things up
-        </p>
-        <p className="mt-1 text-xs leading-snug text-pretty text-[#7A7870]">
-          Keep this tab open — should just be a moment.
-        </p>
-      </div>
-    </div>
-  );
 }
 
 export function HostedAuthLegalNotice({

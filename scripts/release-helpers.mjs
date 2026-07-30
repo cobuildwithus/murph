@@ -97,66 +97,6 @@ export function resolveNpmTag(version) {
   );
 }
 
-export function validatePublicApiReleaseBoundary(manifest, expectedVersion) {
-  const boundary = manifest?.publicApiReleaseBoundary;
-  if (boundary === undefined) {
-    return [];
-  }
-
-  const errors = [];
-  if (!Number.isInteger(boundary.minimumMajor) || boundary.minimumMajor < 1) {
-    errors.push(
-      'scripts/release-manifest.json publicApiReleaseBoundary.minimumMajor must be a positive integer.',
-    );
-  }
-  if (typeof boundary.reason !== 'string' || boundary.reason.trim().length === 0) {
-    errors.push(
-      'scripts/release-manifest.json publicApiReleaseBoundary.reason must explain the breaking API change.',
-    );
-  }
-  if (!Array.isArray(boundary.removals) || boundary.removals.length === 0) {
-    errors.push(
-      'scripts/release-manifest.json publicApiReleaseBoundary.removals must list the removed public API.',
-    );
-  } else {
-    for (const removal of boundary.removals) {
-      if (typeof removal?.package !== 'string' || removal.package.length === 0) {
-        errors.push(
-          'Each publicApiReleaseBoundary removal must name its public package.',
-        );
-      }
-      if (
-        !Array.isArray(removal?.rootExports)
-        || removal.rootExports.length === 0
-        || removal.rootExports.some(
-          (exportName) =>
-            typeof exportName !== 'string' || exportName.trim().length === 0,
-        )
-      ) {
-        errors.push(
-          `publicApiReleaseBoundary removal ${removal?.package ?? '<unknown>'} must list nonempty rootExports.`,
-        );
-      }
-    }
-  }
-
-  if (
-    expectedVersion
-    && Number.isInteger(boundary.minimumMajor)
-    && boundary.minimumMajor >= 1
-  ) {
-    assertSupportedReleaseVersion(expectedVersion, 'Expected release version');
-    const expectedMajor = Number.parseInt(expectedVersion.split('.')[0], 10);
-    if (expectedMajor < boundary.minimumMajor) {
-      errors.push(
-        `Release version ${expectedVersion} is blocked by the public API boundary: ${boundary.reason} Use pnpm release:major so every manifest package publishes at ${boundary.minimumMajor}.0.0 or later.`,
-      );
-    }
-  }
-
-  return errors;
-}
-
 export async function readJson(filePath) {
   return JSON.parse(await readFile(filePath, 'utf8'));
 }
@@ -536,6 +476,10 @@ export function validateReleaseContext(context, options = {}) {
   const { manifest, orderedPackages, packageByName, packages, primaryPackage } =
     context;
 
+  if (expectVersion !== undefined) {
+    assertSupportedReleaseVersion(expectVersion, 'Expected release version');
+  }
+
   if (typeof manifest.repositoryUrl !== 'string' || manifest.repositoryUrl.length === 0) {
     errors.push('scripts/release-manifest.json must declare repositoryUrl.');
   }
@@ -549,8 +493,6 @@ export function validateReleaseContext(context, options = {}) {
       'scripts/release-manifest.json must declare releaseArtifacts.changelogPath and releaseArtifacts.releaseNotesDir.',
     );
   }
-
-  errors.push(...validatePublicApiReleaseBoundary(manifest, expectVersion));
 
   if (!primaryPackage) {
     errors.push(
