@@ -1,10 +1,15 @@
 import type { AssistantStatusOutboxSummary } from '@murphai/operator-config/assistant-cli-contracts'
 import { listAssistantOutboxIntentsLocal } from './store.js'
+import {
+  resolveAssistantOutboxRequiredBeforeFinalDependencies,
+} from './ordering.js'
 
 export async function buildAssistantOutboxSummary(
   vault: string,
 ): Promise<AssistantStatusOutboxSummary> {
   const intents = await listAssistantOutboxIntentsLocal(vault)
+  const requiredDependencyState =
+    resolveAssistantOutboxRequiredBeforeFinalDependencies(intents)
   let oldestPendingAt: string | null = null
   let nextAttemptAt: string | null = null
 
@@ -25,6 +30,10 @@ export async function buildAssistantOutboxSummary(
         intent.status === 'awaiting_approval' ||
         intent.status === 'pending' ||
         intent.status === 'retryable'
+      ) &&
+      (
+        !requiredDependencyState.blockedIntentIds.has(intent.intentId) ||
+        requiredDependencyState.unavailableFinalIntentIds.has(intent.intentId)
       ) &&
       intent.nextAttemptAt &&
       (!nextAttemptAt || intent.nextAttemptAt < nextAttemptAt)

@@ -669,7 +669,7 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
         {
           type: 'inputText',
           text:
-            'invalid response media arguments; do not call finish_without_reply; explain that you could not attach the requested image in this reply',
+            'invalid response media arguments; do not call finish_without_reply; explain that an attachment could not be included in this reply',
         },
       ],
     })

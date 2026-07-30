@@ -132,6 +132,10 @@ import {
   finalizeAssistantTurnFromDeliveryOutcome,
 } from "../src/assistant/delivery-service.ts";
 import {
+  buildAssistantOutboxRequiredBeforeFinalSequenceBase,
+  compareAssistantOutboxDeliverySequenceOrder,
+} from "../src/assistant/outbox.ts";
+import {
   normalizeAssistantExecutionContext,
   resolveAssistantExecutionDefaultTarget,
   resolveAssistantExecutionOperatorDefaults,
@@ -1949,6 +1953,117 @@ describe("assistant delivery orchestration seam", () => {
         (call) => call[0]?.dedupeToken
       )
     ).toEqual(["delivery-base:segment:0", "delivery-base:segment:1"]);
+  });
+
+  it("orders a queued cross-context recovery before final media in the existing delivery sequence", async () => {
+    const session = createAssistantSession();
+    runtimeState.outbox.deliverMessage
+      .mockResolvedValueOnce({
+        deliveryError: null,
+        intent: {
+          intentId: "intent-required-recovery",
+        },
+        kind: "queued",
+        session: null,
+      })
+      .mockResolvedValueOnce({
+        deliveryError: null,
+        intent: {
+          intentId: "intent-final-media",
+        },
+        kind: "queued",
+        session: null,
+      });
+    const recoveryContextInput = {
+      deliverResponse: true,
+      deliveryDispatchMode: "queue-only" as const,
+      deliveryIdempotencyKey: "delivery-old-context",
+      prompt: "hello",
+      vault: "/vault",
+    };
+    const finalContextInput = {
+      ...recoveryContextInput,
+      deliveryIdempotencyKey: "delivery-new-context",
+      deliveryNativeReplyRequested: true as const,
+      deliveryReplyToMessageId: "message-final-media",
+    };
+    const turnId = "turn-required-recovery-sequence";
+    const sequencedFinalContextInput = {
+      ...finalContextInput,
+      deliveryIdempotencyKey:
+        buildAssistantOutboxRequiredBeforeFinalSequenceBase({
+          deliveryIdempotencyKey:
+            finalContextInput.deliveryIdempotencyKey,
+          turnId,
+        }),
+    };
+
+    await deliverAssistantPrecedingReplies({
+      input: recoveryContextInput,
+      requiredSegmentSequenceInput: sequencedFinalContextInput,
+      resolveSegmentDeliveryInput: async ({ input }) => ({
+        ...input,
+        deliveryNativeReplyRequested: true,
+        deliveryReplyToMessageId: "message-required-recovery",
+      }),
+      segments: [
+        {
+          media: [],
+          requiredBeforeFinal: true,
+          response:
+            "An attachment couldn't be included in this reply.",
+        },
+      ],
+      session,
+      sharedPlan: createSharedPlan(),
+      turnId,
+    });
+    await deliverAssistantReply({
+      input: sequencedFinalContextInput,
+      media: [
+        {
+          alt: "Later response image",
+          kind: "image",
+          source: "later-response-image",
+          url: "https://cdn.example.test/assistant/later-response-image.png",
+        },
+      ],
+      response: "",
+      session,
+      sharedPlan: createSharedPlan(),
+      turnId,
+    });
+
+    const deliveryCalls = runtimeState.outbox.deliverMessage.mock.calls;
+    const recoveryKey =
+      deliveryCalls[0]?.[0]?.deliveryIdempotencyKey ?? null;
+    const finalKey =
+      deliveryCalls[1]?.[0]?.deliveryIdempotencyKey ?? null;
+    expect(deliveryCalls.map((call) => ({
+      deliveryIdempotencyKey: call[0]?.deliveryIdempotencyKey,
+      replyToMessageId: call[0]?.replyToMessageId,
+    }))).toEqual([
+      {
+        deliveryIdempotencyKey:
+          "delivery-new-context:required-before-final:segment:0",
+        replyToMessageId: "message-required-recovery",
+      },
+      {
+        deliveryIdempotencyKey:
+          "delivery-new-context:required-before-final",
+        replyToMessageId: "message-final-media",
+      },
+    ]);
+    expect(compareAssistantOutboxDeliverySequenceOrder(
+      {
+        deliveryIdempotencyKey: recoveryKey,
+        turnId,
+      },
+      {
+        deliveryIdempotencyKey: finalKey,
+        turnId,
+      },
+    )).toBeLessThan(0);
   });
 
   it("composes preceding segment and bubble idempotency keys", async () => {

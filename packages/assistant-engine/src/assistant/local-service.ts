@@ -24,6 +24,9 @@ import {
   normalizeAssistantDeliveryError,
 } from './outbox.js'
 import {
+  buildAssistantOutboxRequiredBeforeFinalSequenceBase,
+} from './outbox/ordering.js'
+import {
   ASSISTANT_IMAGE_RESPONSE_TRANSCRIPT_MARKER,
 } from './response-media.js'
 import { recordAssistantDiagnosticEvent } from './diagnostics.js'
@@ -1604,6 +1607,9 @@ export async function sendAssistantMessageLocal(
               deliveryContext: resolvedDeliveryContext.context,
               response: segment.response,
               media: segment.media ?? [],
+              ...(segment.requiredBeforeFinal
+                ? { requiredBeforeFinal: true }
+                : {}),
               ...(segment.targetInputId
                 ? {
                     deliveryContextOrdinal: segment.deliveryContextOrdinal,
@@ -1694,13 +1700,33 @@ export async function sendAssistantMessageLocal(
         })
         // Preceding-answer delivery is best-effort only when a final reply can
         // still compensate. If no final reply is selected, preceding delivery
-        // work is the turn's only user-visible outbound work.
+        // work is the turn's only user-visible outbound work. A required
+        // recovery must either be sent or queued before later-context media
+        // can enter the final delivery path.
+        const requiredPrecedingSegmentIndexes = new Set(
+          precedingResponseSegments.flatMap((segment, index) =>
+            segment.requiredBeforeFinal ? [index] : []
+          ),
+        )
+        const sequencedFinalReplyInput =
+          requiredPrecedingSegmentIndexes.size === 0
+            ? finalReplyInput
+            : {
+                ...finalReplyInput,
+                deliveryIdempotencyKey:
+                  buildAssistantOutboxRequiredBeforeFinalSequenceBase({
+                    deliveryIdempotencyKey:
+                      finalReplyInput.deliveryIdempotencyKey,
+                    turnId: currentUserTurn.turnId,
+                  }),
+              }
         let precedingDeliveryOutcomes: Awaited<
           ReturnType<typeof deliverAssistantPrecedingReplies>
         > = []
         try {
           precedingDeliveryOutcomes = await deliverAssistantPrecedingReplies({
             input: currentInput,
+            requiredSegmentSequenceInput: sequencedFinalReplyInput,
             resolveSegmentDeliveryInput: async (segmentInput) => {
               const targetInputId = segmentInput.segment.targetInputId
               const deliveryContextOrdinal =
@@ -1788,14 +1814,57 @@ export async function sendAssistantMessageLocal(
             }),
           )
         }
+        let requiredPrecedingDeliveryInterruption:
+          AssistantDeliveryOutcome | null = null
+        let requiredPrecedingDeliveryQueued = false
+        if (currentInput.deliverResponse) {
+          for (const requiredIndex of requiredPrecedingSegmentIndexes) {
+            const requiredOutcome =
+              precedingDeliveryOutcomes[requiredIndex] ?? null
+            if (requiredOutcome?.kind === 'queued') {
+              requiredPrecedingDeliveryQueued = true
+            }
+            const requiredRecoveryPrecedesFinal =
+              requiredOutcome?.kind === 'sent' ||
+              requiredOutcome?.kind === 'queued'
+            if (requiredRecoveryPrecedesFinal) {
+              continue
+            }
+            requiredPrecedingDeliveryInterruption =
+              requiredOutcome?.kind === 'failed'
+                ? requiredOutcome
+                : {
+                    kind: 'failed',
+                    error: normalizeAssistantDeliveryError(
+                      new VaultCliError(
+                        'ASSISTANT_REQUIRED_PRECEDING_REPLY_UNOWNED',
+                        'Required preceding assistant reply did not create a delivery intent.',
+                      ),
+                    ),
+                    intentId: null,
+                    media: [],
+                    session:
+                      precedingDeliveryOutcomes.at(-1)?.session ?? session,
+                  }
+            break
+          }
+        }
         let deliverySession =
           precedingDeliveryOutcomes.at(-1)?.session ?? session
         const replyDispatchStartedAt = Date.now()
-        let finalDeliveryInput = finalReplyInput
+        let finalDeliveryInput =
+          requiredPrecedingDeliveryQueued ||
+          requiredPrecedingDeliveryInterruption !== null
+          ? {
+              ...sequencedFinalReplyInput,
+              deliveryDispatchMode: 'queue-only' as const,
+            }
+          : sequencedFinalReplyInput
         let finalTargetResolutionError: ReturnType<
           typeof normalizeAssistantDeliveryError
         > | null = null
-        if (finalResponseText !== null && providerResult.targetInputId) {
+        const finalReplyCanPersist = finalResponseText !== null
+        if (finalReplyCanPersist && providerResult.targetInputId) {
           try {
             finalDeliveryInput =
               await applyAssistantAcceptedMessageTargetToDeliveryInput({
@@ -1803,7 +1872,7 @@ export async function sendAssistantMessageLocal(
                 action: 'native-reply',
                 deliveryContextOrdinal:
                   providerResult.responseDeliveryContextOrdinal,
-                input: finalReplyInput,
+                input: finalDeliveryInput,
                 session: deliverySession,
                 sharedPlan,
                 targetInputId: providerResult.targetInputId,
@@ -1812,7 +1881,7 @@ export async function sendAssistantMessageLocal(
             finalTargetResolutionError = normalizeAssistantDeliveryError(error)
           }
         }
-        const deliveryOutcome =
+        const selectedFinalDeliveryOutcome =
           finalResponseText !== null
             ? finalTargetResolutionError
               ? {
@@ -1834,9 +1903,18 @@ export async function sendAssistantMessageLocal(
                 precedingDeliveryOutcomes,
                 session: deliverySession,
               })
-        const replyIntentReadyAt = finalResponseText === null ? null : Date.now()
-        const finalReplyDeliveryFields =
+        const deliveryOutcome =
+          requiredPrecedingDeliveryInterruption !== null &&
           finalResponseText !== null
+            ? await failAssistantFinalReplyForUnavailableRequiredPredecessor({
+                fallbackSession: deliverySession,
+                finalOutcome: selectedFinalDeliveryOutcome,
+                media: providerResult.responseMedia ?? [],
+              })
+            : selectedFinalDeliveryOutcome
+        const replyIntentReadyAt = finalReplyCanPersist ? Date.now() : null
+        const finalReplyDeliveryFields =
+          finalReplyCanPersist
             ? resolveAssistantCurrentAudienceDeliveryFields({
                 input: finalDeliveryInput,
                 session: deliveryOutcome.session,
@@ -1847,7 +1925,7 @@ export async function sendAssistantMessageLocal(
           deliverySupersededTypingIndicator ||
           assistantDeliveryOutcomeSupersedesTypingIndicatorForTarget({
             deliveryFields: finalReplyDeliveryFields,
-            kind: finalResponseText !== null ? deliveryOutcome.kind : null,
+            kind: finalReplyCanPersist ? deliveryOutcome.kind : null,
             typingIndicatorDeliveryFields,
           })
         const reactionDeliveryResult = await deliverAssistantProviderReactions({
@@ -2621,6 +2699,38 @@ async function applyAssistantAcceptedMessageTargetToDeliveryInput(input: {
       deliveryReplyToMessageId: target.deliveryReplyToMessageId,
     },
   })
+}
+
+async function failAssistantFinalReplyForUnavailableRequiredPredecessor(input: {
+  fallbackSession: AssistantSession
+  finalOutcome: AssistantDeliveryOutcome
+  media: readonly AssistantResponseMedia[]
+}): Promise<AssistantDeliveryOutcome> {
+  const unavailableError = new VaultCliError(
+    'ASSISTANT_REQUIRED_PREDECESSOR_UNAVAILABLE',
+    'Assistant delivery was not attempted because its required preceding reply was not confirmed sent.',
+    { retryable: false },
+  )
+  const normalizedError = normalizeAssistantDeliveryError(unavailableError)
+  if (
+    input.finalOutcome.kind !== 'queued' ||
+    input.finalOutcome.intentId === null
+  ) {
+    return input.finalOutcome.kind === 'failed'
+      ? {
+          ...input.finalOutcome,
+          media: [...input.media],
+        }
+      : input.finalOutcome
+  }
+
+  return {
+    kind: 'failed',
+    error: normalizedError,
+    intentId: input.finalOutcome.intentId,
+    media: [...input.media],
+    session: input.finalOutcome.session ?? input.fallbackSession,
+  }
 }
 
 function resolveAssistantNoReplyDeliveryOutcome(input: {

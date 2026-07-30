@@ -27,6 +27,7 @@ import {
   buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionRuntimeControlWake,
+  buildHostedExecutionRuntimeTimerWake,
 } from "@murphai/hosted-execution";
 import {
   VAULT_LAYOUT,
@@ -34,6 +35,7 @@ import {
 import {
   ASSISTANT_GROUP_PHONE_CALL_PREVIEW_HEADING,
   appendAssistantTranscriptEntries,
+  compareAssistantInputCursors,
   createAssistantOutboxIntent,
   ensureAutomaticMealCloseoutAutomation,
   getAssistantCronStatus,
@@ -297,6 +299,12 @@ import {
   runHostedWorkspaceAssistantPhase,
 } from "../src/hosted-runtime/workspace-assistant-phase.ts";
 import {
+  collectHostedAssistantDeliverySideEffects,
+  drainHostedPreparedAssistantDeliveries,
+  prepareHostedAssistantDeliveryEffectsForDispatch,
+  resolveHostedAssistantOutboxNextWakeAt,
+} from "../src/hosted-runtime/callbacks.ts";
+import {
   prepareHostedWakeContext,
 } from "../src/hosted-runtime/context.ts";
 import {
@@ -372,6 +380,9 @@ import type {
   HostedAssistantRuntimeResolvedConfig,
   HostedAssistantWorkspaceRuntimeJobInput,
 } from "../src/hosted-runtime/models.ts";
+import {
+  createHostedRuntimeEffectsPortStub,
+} from "./hosted-runtime-test-helpers.ts";
 
 const TEST_NOW = "2026-04-27T00:00:00.000Z";
 const TEST_USER_ID = "member_synthetic_workspace_entrypoint";
@@ -474,6 +485,172 @@ function readCapturedRuntimePhaseLogs(input: {
 }
 
 describe("hosted workspace runtime entrypoint", () => {
+  test("projects an unavailable required final through the real hosted delivery composition without provider entry", async () => {
+    const vaultRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-required-final-composition-"),
+    );
+    const providerFetch = vi.fn<typeof fetch>();
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const final = await createAssistantOutboxIntent({
+        channel: "telegram",
+        dedupeToken: "required-final-composition",
+        deliveryIdempotencyKey:
+          "required-final-composition:required-before-final",
+        explicitTarget: "chat_required_final_composition",
+        identityId: "participant_required_final_composition",
+        media: [{
+          alt: "Generated progress card",
+          kind: "image",
+          source: "progress-card",
+          url: "https://cdn.example.test/progress-card.png",
+        }],
+        message: "",
+        sessionId: "session_required_final_composition",
+        threadId: "thread_required_final_composition",
+        threadIsDirect: true,
+        turnId: "turn_required_final_composition",
+        vault: vaultRoot,
+      });
+
+      const effects = await collectHostedAssistantDeliverySideEffects({
+        includeBackgroundDueIntents: false,
+        preferredIntentIds: [final.intentId],
+        vaultRoot,
+      });
+      assert.deepEqual(
+        effects.map((effect) => effect.effectId),
+        [final.intentId],
+      );
+      assert.equal(effects[0]?.payload.media.length, 1);
+
+      const preparation =
+        await prepareHostedAssistantDeliveryEffectsForDispatch({
+          assistantDeliveryEffects: effects,
+          vaultRoot,
+        });
+      assert.deepEqual(preparation.preparedDispatches, []);
+
+      const outcomes = await drainHostedPreparedAssistantDeliveries({
+        assistantDeliveryEffects: effects,
+        effectsPort: createHostedRuntimeEffectsPortStub(),
+        preparedDispatches: preparation.preparedDispatches,
+        providerFetch,
+        vaultRoot,
+        wake: buildHostedExecutionRuntimeTimerWake({
+          eventId: "evt_required_final_composition",
+          occurredAt: TEST_NOW,
+          triggerKind: "runtime_timer",
+          userId: TEST_USER_ID,
+        }),
+      });
+
+      assert.deepEqual(
+        outcomes.map((outcome) => ({
+          deliveryErrorCode: outcome.deliveryErrorCode,
+          deliveryStatus: outcome.deliveryStatus,
+          effectId: outcome.effectId,
+        })),
+        [{
+          deliveryErrorCode:
+            "ASSISTANT_REQUIRED_PREDECESSOR_UNAVAILABLE",
+          deliveryStatus: "failed",
+          effectId: final.intentId,
+        }],
+      );
+      assert.equal(providerFetch.mock.calls.length, 0);
+      assert.equal(effects[0]?.payload.media.length, 1);
+      const persisted = await listAssistantOutboxIntents(vaultRoot);
+      assert.equal(
+        persisted.find((intent) => intent.intentId === final.intentId)
+          ?.media?.length,
+        1,
+      );
+
+      const seededAmbiguousFinal = await createAssistantOutboxIntent({
+        channel: "telegram",
+        createdAt: TEST_NOW,
+        dedupeToken: "required-final-composition-ambiguous",
+        deliveryIdempotencyKey:
+          "required-final-composition-ambiguous:required-before-final",
+        explicitTarget: "chat_required_final_composition",
+        identityId: "participant_required_final_composition",
+        media: final.media,
+        message: "",
+        sessionId: "session_required_final_composition",
+        threadId: "thread_required_final_composition",
+        threadIsDirect: true,
+        turnId: "turn_required_final_composition_ambiguous",
+        vault: vaultRoot,
+      });
+      const ambiguousFinal = await saveAssistantOutboxIntent(vaultRoot, {
+        ...seededAmbiguousFinal,
+        attemptCount: 1,
+        deliveryConfirmationPending: true,
+        deliveryTransportIdempotent: false,
+        lastAttemptAt: TEST_NOW,
+        lastError: {
+          code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+          message: "Delivery confirmation is still pending.",
+        },
+        nextAttemptAt: TEST_NOW,
+        status: "retryable",
+        updatedAt: TEST_NOW,
+      });
+      const ambiguousEffects =
+        await collectHostedAssistantDeliverySideEffects({
+          includeBackgroundDueIntents: false,
+          preferredIntentIds: [ambiguousFinal.intentId],
+          vaultRoot,
+        });
+      assert.deepEqual(
+        ambiguousEffects.map((effect) => effect.effectId),
+        [ambiguousFinal.intentId],
+      );
+      const ambiguousPreparation =
+        await prepareHostedAssistantDeliveryEffectsForDispatch({
+          assistantDeliveryEffects: ambiguousEffects,
+          vaultRoot,
+        });
+      assert.deepEqual(ambiguousPreparation.preparedDispatches, []);
+      const ambiguousOutcomes =
+        await drainHostedPreparedAssistantDeliveries({
+          assistantDeliveryEffects: ambiguousEffects,
+          effectsPort: createHostedRuntimeEffectsPortStub(),
+          preparedDispatches: ambiguousPreparation.preparedDispatches,
+          providerFetch,
+          vaultRoot,
+          wake: buildHostedExecutionRuntimeTimerWake({
+            eventId: "evt_required_final_composition_ambiguous",
+            occurredAt: TEST_NOW,
+            triggerKind: "runtime_timer",
+            userId: TEST_USER_ID,
+          }),
+        });
+      assert.deepEqual(
+        ambiguousOutcomes.map((outcome) => ({
+          deliveryErrorCode: outcome.deliveryErrorCode,
+          deliveryStatus: outcome.deliveryStatus,
+        })),
+        [{
+          deliveryErrorCode: "ASSISTANT_DELIVERY_AMBIGUOUS",
+          deliveryStatus: "failed",
+        }],
+      );
+      assert.equal(providerFetch.mock.calls.length, 0);
+      assert.equal(
+        await resolveHostedAssistantOutboxNextWakeAt({
+          now: new Date(TEST_NOW),
+          vaultRoot,
+        }),
+        null,
+      );
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("rejects a blocked runtime when the host signal aborts", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const hostAbortController = new AbortController();
@@ -17631,6 +17808,570 @@ describe("hosted workspace runtime entrypoint", () => {
         new DOMException("Synthetic test cleanup.", "AbortError"),
       );
       await resultPromise?.catch(() => undefined);
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("projects a retained image completion wake through graceful shutdown", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-image-shutdown-wake-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeAbortController = new AbortController();
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const imageGenerationStarted = createDeferred<void>();
+    const imageGenerationRelease = createDeferred<void>();
+    const pendingIndexFailuresFinished = createDeferred<void>();
+    const shutdownController = new AbortController();
+    const mailboxItems = [createMailboxItem({
+      id: "mailbox_item_image_shutdown_wake_origin",
+      laneSeq: "1",
+    })];
+    let completionEnqueueAttempts = 0;
+    let completionInputId: string | null = null;
+    let resultPromise:
+      ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const actualEnqueue = mocks.actualEnqueueHostedPendingAssistantInputId;
+      assert.ok(actualEnqueue);
+      mocks.enqueueHostedPendingAssistantInputId.mockImplementation(
+        async (request) => {
+          const event = await readAssistantInputEvent({
+            inputId: request.inputId,
+            vault: request.vaultRoot,
+          });
+          if (
+            event?.sourceRef.kind !== "hosted-mailbox"
+            || event.sourceRef.payloadSchema
+              !== "murph.hosted-image-completion.v1"
+          ) {
+            return await actualEnqueue(request);
+          }
+          completionInputId ??= request.inputId;
+          assert.equal(request.inputId, completionInputId);
+          completionEnqueueAttempts += 1;
+          if (completionEnqueueAttempts <= 2) {
+            if (completionEnqueueAttempts === 2) {
+              pendingIndexFailuresFinished.resolve();
+            }
+            throw new Error("Synthetic retained image pending-index failure.");
+          }
+          return await actualEnqueue(request);
+        },
+      );
+
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_image_shutdown_wake",
+            budget: { maxMailboxItems: 2 },
+            idleCheckpointDelayMs: 120_000,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            const retainedCompletionInputId = completionInputId;
+            assert.ok(retainedCompletionInputId);
+            assert.equal(
+              (
+                await readHostedPendingAssistantInputIds({ vaultRoot })
+              ).includes(retainedCompletionInputId),
+              true,
+            );
+            return {
+              snapshotRef: createBundleRef({
+                hash: "a".repeat(64),
+                key: "users/bundles/member-synthetic/image-shutdown-wake.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            const assistantInputId =
+              await stagePendingLinqAssistantInputForMailboxItem({
+                item: item.item,
+                threadId: "thread_image_shutdown_wake",
+                vaultRoot,
+              });
+            return {
+              assistantInputId,
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: mailboxItems,
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase(phaseInput) {
+            const assistantInputIds =
+              phaseInput.initialAssistantInputBatch?.assistantInputIds
+              ?? phaseInput.initialMailboxImport.importResult.assistantInputIds
+              ?? [];
+            assert.equal(assistantInputIds.length, 1);
+            const assistantInputId = assistantInputIds[0]!;
+            const releaseProviderInputs =
+              await phaseInput.beforeProviderAcceptedInputs?.({
+                acceptedInputs: [{
+                  id: assistantInputId,
+                  source: "assistant-input",
+                }],
+              });
+            assert.equal(
+              phaseInput.imageGenerationLauncher?.launch({
+                operationId: "image_operation_shutdown_wake",
+                originAssistantInputId: assistantInputId,
+                scopeId: "session_image_shutdown_wake",
+                async run() {
+                  imageGenerationStarted.resolve();
+                  await imageGenerationRelease.promise;
+                  return {
+                    media: null,
+                    runtimeIssue: null,
+                    savedImageRef: null,
+                  };
+                },
+              }),
+              "started",
+            );
+            await writeSyntheticAssistantAutoReplyTerminalEvidence({
+              inputId: assistantInputId,
+              vaultRoot,
+            });
+            await releaseProviderInputs?.();
+            return {
+              checkpointReason: "assistant_runtime_commit" as const,
+              foregroundReplyFailed: 0,
+              nextWakeAt: null,
+              progressed: true,
+            };
+          },
+          shutdownSignal: shutdownController.signal,
+          signal: runtimeAbortController.signal,
+          vaultRoot,
+        },
+      );
+
+      await withRealTimeout(
+        imageGenerationStarted.promise,
+        15_000,
+        () => "Image generation did not start.",
+      );
+      imageGenerationRelease.resolve();
+      await withRealTimeout(
+        pendingIndexFailuresFinished.promise,
+        15_000,
+        () => `Retained image staging did not fail twice; attempts=${completionEnqueueAttempts}`,
+      );
+      const shutdownRequestedAtMs = Date.now();
+      shutdownController.abort(
+        new DOMException("Synthetic graceful shutdown.", "AbortError"),
+      );
+      const result = await withRealTimeout(
+        resultPromise,
+        15_000,
+        () => `Retained image shutdown did not checkpoint; attempts=${completionEnqueueAttempts}`,
+      );
+
+      const checkpoint = checkpointRequests.find(
+        (request) => request.reason === "idle_shutdown",
+      );
+      assert.ok(checkpoint);
+      assert.equal(checkpoint.nextWakeReason, "assistant");
+      assert.ok(checkpoint.nextWakeAt);
+      assert.ok(Date.parse(checkpoint.nextWakeAt) >= shutdownRequestedAtMs);
+      assert.ok(Date.parse(checkpoint.nextWakeAt) <= Date.now());
+      assert.equal(result.nextWakeAt, checkpoint.nextWakeAt);
+      assert.equal(result.nextWakeReason, "assistant");
+      assert.equal(result.immediateRecheckRequested, true);
+      assert.equal(result.status, "scheduled");
+      assert.equal(completionEnqueueAttempts, 3);
+      assert.deepEqual(
+        await inspectHostedPendingAssistantInputWakeCandidate({ vaultRoot }),
+        {
+          hasCandidate: true,
+          indexComplete: true,
+        },
+      );
+      const retainedCompletionInputId = completionInputId;
+      assert.ok(retainedCompletionInputId);
+      assert.equal(
+        (
+          await readHostedPendingAssistantInputIds({ vaultRoot })
+        ).includes(retainedCompletionInputId),
+        true,
+      );
+    } finally {
+      runtimeAbortController.abort(
+        new DOMException("Synthetic test cleanup.", "AbortError"),
+      );
+      imageGenerationRelease.resolve();
+      await resultPromise?.catch(() => undefined);
+      const actualEnqueue = mocks.actualEnqueueHostedPendingAssistantInputId;
+      if (actualEnqueue) {
+        mocks.enqueueHostedPendingAssistantInputId.mockImplementation(
+          actualEnqueue,
+        );
+      }
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("paces and recovers retained image completion after pending-index failures", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-image-index-retry-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeAbortController = new AbortController();
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const imageGenerationStarted = createDeferred<void>();
+    const imageGenerationRelease = createDeferred<void>();
+    const firstRetryBatchFailed = createDeferred<void>();
+    const foregroundAssistantCompleted = createDeferred<void>();
+    const secondRetryBatchFailed = createDeferred<void>();
+    const shutdownController = new AbortController();
+    const thirdEnqueueStarted = createDeferred<void>();
+    const thirdEnqueueRelease = createDeferred<void>();
+    const mailboxItems = [createMailboxItem({
+      id: "mailbox_item_image_index_retry_origin",
+      laneSeq: "1",
+    })];
+    let completionEnqueueAttempts = 0;
+    let completionInputId: string | null = null;
+    let resultPromise:
+      ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+    let thirdEnqueueObserved = false;
+    let initialAssistantPhaseCompleted = false;
+
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const actualEnqueue = mocks.actualEnqueueHostedPendingAssistantInputId;
+      assert.ok(actualEnqueue);
+      mocks.enqueueHostedPendingAssistantInputId.mockImplementation(
+        async (request) => {
+          const event = await readAssistantInputEvent({
+            inputId: request.inputId,
+            vault: request.vaultRoot,
+          });
+          if (
+            event?.sourceRef.kind !== "hosted-mailbox"
+            || event.sourceRef.payloadSchema
+              !== "murph.hosted-image-completion.v1"
+          ) {
+            return await actualEnqueue(request);
+          }
+          completionInputId ??= request.inputId;
+          assert.equal(request.inputId, completionInputId);
+
+          completionEnqueueAttempts += 1;
+          if (completionEnqueueAttempts === 2) {
+            firstRetryBatchFailed.resolve();
+          } else if (completionEnqueueAttempts === 3) {
+            thirdEnqueueObserved = true;
+            thirdEnqueueStarted.resolve();
+            await thirdEnqueueRelease.promise;
+          } else if (completionEnqueueAttempts === 4) {
+            secondRetryBatchFailed.resolve();
+          } else if (completionEnqueueAttempts === 5) {
+            return await actualEnqueue(request);
+          }
+          throw new Error("Synthetic retained image pending-index failure.");
+        },
+      );
+
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_image_index_retry",
+            budget: { maxMailboxItems: 4 },
+            idleCheckpointDelayMs: 1_000,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            const retainedCompletionInputId = completionInputId;
+            assert.ok(retainedCompletionInputId);
+            assert.equal(
+              (
+                await readHostedPendingAssistantInputIds({ vaultRoot })
+              ).includes(retainedCompletionInputId),
+              true,
+            );
+            return {
+              snapshotRef: createBundleRef({
+                hash: "9".repeat(64),
+                key: "users/bundles/member-synthetic/image-index-retry.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            const assistantInputId =
+              await stagePendingLinqAssistantInputForMailboxItem({
+                item: item.item,
+                threadId: "thread_image_index_retry",
+                vaultRoot,
+              });
+            return {
+              assistantInputId,
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: mailboxItems,
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase(phaseInput) {
+            const assistantInputIds =
+              phaseInput.initialAssistantInputBatch?.assistantInputIds
+              ?? phaseInput.initialMailboxImport.importResult.assistantInputIds
+              ?? [];
+            if (initialAssistantPhaseCompleted) {
+              if (assistantInputIds.length === 0) {
+                return { progressed: false };
+              }
+              assert.equal(assistantInputIds.length, 1);
+              const assistantInputId = assistantInputIds[0]!;
+              const event = await readAssistantInputEvent({
+                inputId: assistantInputId,
+                vault: vaultRoot,
+              });
+              assert.equal(
+                event?.sourceRef.kind === "hosted-mailbox"
+                  ? event.sourceRef.itemId
+                  : null,
+                "mailbox_item_image_index_retry_followup",
+              );
+              const releaseProviderInputs =
+                await phaseInput.beforeProviderAcceptedInputs?.({
+                  acceptedInputs: [{
+                    id: assistantInputId,
+                    source: "assistant-input",
+                  }],
+                });
+              await writeSyntheticAssistantAutoReplyTerminalEvidence({
+                inputId: assistantInputId,
+                vaultRoot,
+              });
+              const retainedCompletion = await readAssistantInputEvent({
+                inputId: completionInputId ?? "",
+                vault: vaultRoot,
+              });
+              assert.ok(event);
+              assert.ok(retainedCompletion);
+              assert.equal(
+                compareAssistantInputCursors(
+                  event.cursor,
+                  retainedCompletion.cursor,
+                ) > 0,
+                true,
+              );
+              await updateAssistantAutomationState(vaultRoot, (state) => ({
+                ...state,
+                autoReply: state.autoReply.map((entry) => ({
+                  ...entry,
+                  eligibleAfter: event.cursor,
+                })),
+                updatedAt: TEST_NOW,
+              }));
+              await releaseProviderInputs?.();
+              foregroundAssistantCompleted.resolve();
+              return {
+                checkpointReason: "assistant_runtime_commit" as const,
+                foregroundReplyFailed: 0,
+                nextWakeAt: null,
+                progressed: true,
+              };
+            }
+            assert.equal(assistantInputIds.length, 1);
+            const assistantInputId = assistantInputIds[0]!;
+            const releaseProviderInputs =
+              await phaseInput.beforeProviderAcceptedInputs?.({
+                acceptedInputs: [{
+                  id: assistantInputId,
+                  source: "assistant-input",
+                }],
+              });
+            assert.equal(
+              phaseInput.imageGenerationLauncher?.launch({
+                operationId: "image_operation_index_retry",
+                originAssistantInputId: assistantInputId,
+                scopeId: "session_image_index_retry",
+                async run() {
+                  imageGenerationStarted.resolve();
+                  await imageGenerationRelease.promise;
+                  return {
+                    media: null,
+                    runtimeIssue: null,
+                    savedImageRef: null,
+                  };
+                },
+              }),
+              "started",
+            );
+            await writeSyntheticAssistantAutoReplyTerminalEvidence({
+              inputId: assistantInputId,
+              vaultRoot,
+            });
+            await releaseProviderInputs?.();
+            initialAssistantPhaseCompleted = true;
+            return {
+              checkpointReason: "assistant_runtime_commit" as const,
+              foregroundReplyFailed: 0,
+              nextWakeAt: null,
+              progressed: true,
+            };
+          },
+          shutdownSignal: shutdownController.signal,
+          signal: runtimeAbortController.signal,
+          vaultRoot,
+        },
+      );
+
+      await withRealTimeout(
+        imageGenerationStarted.promise,
+        15_000,
+        () => "Image generation did not start.",
+      );
+      await waitForFakeTimerScheduled(() =>
+        `No hosted runtime timer was installed after image launch; attempts=${completionEnqueueAttempts}`
+      );
+      vi.setSystemTime(new Date(Date.parse(TEST_NOW) + 30_000));
+      imageGenerationRelease.resolve();
+      await withRealTimeout(
+        firstRetryBatchFailed.promise,
+        15_000,
+        () => `First retained image retry batch did not finish; attempts=${completionEnqueueAttempts}`,
+      );
+      await new Promise<void>((resolve) => REAL_SET_TIMEOUT(resolve, 25));
+
+      assert.equal(completionEnqueueAttempts, 2);
+      assert.equal(thirdEnqueueObserved, false);
+
+      await vi.advanceTimersByTimeAsync(500);
+      mailboxItems.push(createMailboxItem({
+        createdAt: "2026-04-27T00:00:30.250Z",
+        id: "mailbox_item_image_index_retry_followup",
+        laneSeq: "2",
+        occurredAt: "2026-04-27T00:00:30.250Z",
+      }));
+      runtimeWakeSignal.notify();
+      await withRealTimeout(
+        foregroundAssistantCompleted.promise,
+        15_000,
+        () => `Foreground input did not run before the retained image retry; attempts=${completionEnqueueAttempts}`,
+      );
+      assert.equal(completionEnqueueAttempts, 2);
+
+      await vi.advanceTimersByTimeAsync(500);
+      await withRealTimeout(
+        thirdEnqueueStarted.promise,
+        1_000,
+        () => `Retained image retry did not resume after the idle window; attempts=${completionEnqueueAttempts}`,
+      );
+      assert.equal(completionEnqueueAttempts, 3);
+      thirdEnqueueRelease.resolve();
+      await withRealTimeout(
+        secondRetryBatchFailed.promise,
+        1_000,
+        () => `Second retained image retry batch did not finish; attempts=${completionEnqueueAttempts}`,
+      );
+      const retainedCompletionWakeAt = new Date().toISOString();
+      shutdownController.abort(
+        new DOMException("Synthetic graceful shutdown.", "AbortError"),
+      );
+      const result = await withRealTimeout(
+        resultPromise,
+        15_000,
+        () => `Retained image retry runtime did not checkpoint on shutdown; attempts=${completionEnqueueAttempts}`,
+      );
+      const retainedCompletionCheckpoint = checkpointRequests.find(
+        (request) => request.reason === "idle_shutdown",
+      );
+      assert.ok(retainedCompletionCheckpoint);
+      assert.ok(retainedCompletionCheckpoint.nextWakeAt);
+      assert.ok(
+        Date.parse(retainedCompletionCheckpoint.nextWakeAt)
+          <= Date.parse(retainedCompletionWakeAt),
+      );
+      assert.equal(retainedCompletionCheckpoint.nextWakeReason, "assistant");
+      assert.equal(
+        result.nextWakeAt,
+        retainedCompletionCheckpoint.nextWakeAt,
+      );
+      assert.equal(result.nextWakeReason, "assistant");
+      assert.equal(result.immediateRecheckRequested, true);
+      assert.equal(result.status, "scheduled");
+      assert.equal(completionEnqueueAttempts, 5);
+      assert.deepEqual(
+        await inspectHostedPendingAssistantInputWakeCandidate({ vaultRoot }),
+        {
+          hasCandidate: true,
+          indexComplete: true,
+        },
+      );
+
+      const recoveredInputIds =
+        await compactHostedPendingAssistantInputIds({ vaultRoot });
+      const recoveredEvents = await Promise.all(
+        recoveredInputIds.map((inputId) =>
+          readAssistantInputEvent({
+            inputId,
+            vault: vaultRoot,
+          })
+        ),
+      );
+      assert.deepEqual(
+        recoveredEvents.filter((event) =>
+          event?.sourceRef.kind === "hosted-mailbox"
+          && event.sourceRef.payloadSchema
+            === "murph.hosted-image-completion.v1"
+        ).map((event) => event?.inputId),
+        [completionInputId],
+      );
+    } finally {
+      runtimeAbortController.abort(
+        new DOMException("Synthetic test cleanup.", "AbortError"),
+      );
+      thirdEnqueueRelease.resolve();
+      imageGenerationRelease.resolve();
+      if (resultPromise) {
+        await withRealTimeout(
+          resultPromise.catch(() => undefined),
+          15_000,
+          () => `Retained image retry runtime did not stop; attempts=${completionEnqueueAttempts}`,
+        );
+      }
+      const actualEnqueue = mocks.actualEnqueueHostedPendingAssistantInputId;
+      if (actualEnqueue) {
+        mocks.enqueueHostedPendingAssistantInputId.mockImplementation(
+          actualEnqueue,
+        );
+      }
+      vi.useRealTimers();
       await removeTempRoot(vaultRoot);
     }
   });

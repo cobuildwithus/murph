@@ -1047,13 +1047,24 @@ representations. A failed or schema-invalid media replacement clears the
 current response-media batch and establishes a visible-reply obligation. That
 obligation remains authoritative for the rest of the turn, across later steer
 contexts and successful outputs, so neither `finish_without_reply` nor a
-vault-file completion can turn recovery into silence. When an approved
-vault-file send shares that obligation, the same final-action patch retains
-vault-file ownership so later response-media tools cannot create a second
-competing delivery while recovery text and any explicitly selected reply target
-remain available. Stateful media and final-action tools apply in request order;
-receiving a later no-reply request cannot suppress an earlier queued media
-mutation or its recovery obligation.
+vault-file completion can turn recovery into silence. If the provider supplies
+no nonblank recovery text, finalization emits one neutral attachment-failure
+sentence in both delivery and transcript state, using the obligation's original
+delivery context and selected reply target. Valid media selected in the same
+context accompanies that sentence. Valid media selected for a later steered
+context remains the final segment on its own context and target, while the
+recovery becomes an earlier response segment; the existing segment
+idempotency-key ordering persists both outbox intents before the later input can
+be terminal. Media alone never discharges the recovery obligation. When an
+approved vault-file send shares that obligation, the same final-action patch
+retains vault-file ownership so later response-media tools cannot create a
+second competing delivery while recovery text and any explicitly selected
+reply target remain available. Successful vault-file approval records that
+ownership independently of generic no-reply eligibility, so an earlier visible
+response remains an earlier segment instead of erasing the file-delivery fence.
+Stateful media and final-action tools apply in request order; receiving a later
+no-reply request cannot suppress an earlier queued media mutation or its
+recovery obligation.
 
 Provider-native thread continuity is not a delivery ledger. Preserve a resumable Codex thread even when `finish_without_reply` or delivery-context filtering means its internal history differs slightly from the durable semantic transcript, and preserve it after authenticated private reads. Runtime-owned capability URLs belong only to the ephemeral delivery response: do not put them in the durable assistant transcript, fresh-thread replay, stale-resume fallback, or provider-native turn. Do not clear or abandon provider continuity as a privacy or delivery-reconciliation mechanism; enforce privacy at authority, output, logging, and snapshot boundaries instead.
 Hosted group-email assistant replies use the assistant outbox as their single durability owner. The parent effect resolves authorized group members and creates privacy-blind, member-scoped child intents before it is considered sent; the no-send parent planner remains replay-safe through bounded response-body and partial child-intent persistence failures until that durable expansion completes, and stable per-member dedupe fills only missing children after a restart. Each child resolves only that member's current authorized address at delivery time. A deleted group or child whose recipient authority has changed before the provider call is durably abandoned with a typed authority-superseded reason, and transient failures proven to occur before provider entry remain retryable across the runner response boundary, while a lost internal response or liveness failure after the recipient-scoped provider request starts is terminal ambiguity. Successful siblings remain durable when another recipient fails, and an ambiguous child send is recorded terminally instead of replaying the whole group. Production Worker config embeds the prepared runner bundle and source fingerprints. Every warm or cold runner must report those exact fingerprints before a user workspace invocation is admitted, so a stale warm shell is replaced and a stale cold shell fails closed even before post-deploy smoke completes.
@@ -1276,10 +1287,17 @@ the canonical capture save waits for an invocation boundary and rebases its
 existing receipt checkpoint onto the latest workspace. The exact private
 `vault_image` result is upserted on the original accepted conversation route and registered with the
 ordinary pending assistant-input index before invocation-local completion state
-is released. The existing runtime wake interrupts the dirty idle window; normal
-foreground selection keeps fresh conversation ahead of the completion and owns
-retry and terminal evidence. Provider completion starts the existing generic
-usage recorder without awaiting it, and image delivery never waits for
+is released. If pending-index registration exhausts its bounded immediate
+attempts, the controller retains the completion and the runtime sets one
+dedicated retry deadline before the next staging batch. Foreground work may
+interrupt that wait and reset the shared checkpoint debounce, but cannot slide
+the completion deadline. Before any graceful snapshot can release a retained
+completion, the controller performs one final event-stage attempt when needed
+and awaits exact idempotent registration of that completion input ID in the
+existing pending index; a staging or index failure aborts the checkpoint.
+Normal foreground selection keeps fresh conversation ahead of the completion
+and owns retry and terminal evidence. Provider completion starts the existing
+generic usage recorder without awaiting it, and image delivery never waits for
 accounting or diagnostic writes. This adds no durable image job, mailbox kind,
 scheduler, reservation, allowance implementation, or image-specific usage
 lifecycle; unfinished provider work may be lost with the runner invocation.

@@ -50,6 +50,7 @@ export interface AssistantPrecedingReplySegment {
   deliveryContextOrdinal?: number
   deliveryContext?: AssistantReplyDeliveryContext | null
   media?: readonly AssistantResponseMedia[] | null
+  requiredBeforeFinal?: boolean
   response: string
   targetInputId?: string | null
 }
@@ -416,6 +417,7 @@ export function buildAssistantReactionDeliveryIdempotencyKey(input: {
 // dropped by last-wins extraction.
 export async function deliverAssistantPrecedingReplies(input: {
   input: AssistantMessageInput
+  requiredSegmentSequenceInput?: AssistantMessageInput | null
   resolveSegmentDeliveryInput?: ((input: {
     input: AssistantMessageInput
     segment: AssistantPrecedingReplySegment
@@ -446,16 +448,25 @@ export async function deliverAssistantPrecedingReplies(input: {
             session,
           })
         : baseSegmentInput
-      const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields({
-        input: segmentInput,
-        session,
-        sharedPlan: input.sharedPlan,
-      })
+      // A required recovery keeps its own route and reply target, but it must
+      // share the selected final reply's sequence base so the outbox can order
+      // the recovery segment before later-context media.
+      const sequenceInput =
+        segment.requiredBeforeFinal &&
+        input.requiredSegmentSequenceInput
+          ? input.requiredSegmentSequenceInput
+          : segmentInput
+      const sequenceDeliveryFields =
+        resolveAssistantCurrentAudienceDeliveryFields({
+          input: sequenceInput,
+          session,
+          sharedPlan: input.sharedPlan,
+        })
       const baseDeliveryIdempotencyKey = resolveAssistantHostedDeliveryIdempotency({
         audience: input.sharedPlan.conversationPolicy.audience,
-        channel: deliveryFields.channel,
-        deliveryFields,
-        input: segmentInput,
+        channel: sequenceDeliveryFields.channel,
+        deliveryFields: sequenceDeliveryFields,
+        input: sequenceInput,
         session,
       }).deliveryIdempotencyKey
       const segmentKey = baseDeliveryIdempotencyKey
@@ -499,6 +510,7 @@ function normalizeAssistantPrecedingReplySegments(input: {
     deliveryContext: segment.deliveryContext ?? null,
     response: segment.response,
     media: normalizeAssistantResponseMediaList(segment.media ?? []),
+    ...(segment.requiredBeforeFinal ? { requiredBeforeFinal: true } : {}),
     ...(segment.targetInputId ? { targetInputId: segment.targetInputId } : {}),
   }))
 }

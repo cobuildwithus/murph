@@ -24,7 +24,14 @@ import {
   normalizeAssistantDeliveryError,
   resolveAssistantOutboxRetryDelayMs,
 } from './retry-policy.js'
-import { readAssistantOutboxIntentAtPath } from './store.js'
+import {
+  isAssistantOutboxRequiredBeforeFinalIntentProvenUnattempted,
+  resolveAssistantOutboxRequiredBeforeFinalDependencies,
+} from './ordering.js'
+import {
+  listAssistantOutboxIntentsLocal,
+  readAssistantOutboxIntentAtPath,
+} from './store.js'
 
 /**
  * Dispatch-state owns the persisted outbox intent transitions that happen once
@@ -658,6 +665,7 @@ function readNonEmptyStringArray(value: unknown): string[] | null {
 export async function rescheduleAssistantOutboxConfirmationRetry(input: {
   error: AssistantDeliveryError
   intentPath: string
+  onlyCurrentStatuses?: readonly AssistantOutboxIntent['status'][]
   scheduledAt: Date
   sending: AssistantOutboxIntent
   vault: string
@@ -667,7 +675,14 @@ export async function rescheduleAssistantOutboxConfirmationRetry(input: {
     const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
       vault: input.vault,
     })
-    if (current && !assistantOutboxIntentMatchesDispatchOwner(current, input.sending)) {
+    if (
+      current &&
+      !assistantOutboxIntentMatchesDispatchOwner(
+        current,
+        input.sending,
+        input.onlyCurrentStatuses,
+      )
+    ) {
       await repairAssistantOutboxReceiptForIntent({
         at: current.updatedAt,
         intent: current,
@@ -1258,6 +1273,7 @@ export async function markAssistantOutboxIntentMirrorTerminal(input: {
   intent: AssistantOutboxIntent
   intentPath: string
   onlyCurrentStatuses?: readonly AssistantOutboxIntent['status'][]
+  requireUnavailableRequiredPredecessor?: boolean
   status: 'abandoned' | 'failed'
   vault: string
 }): Promise<AssistantOutboxIntent> {
@@ -1273,6 +1289,7 @@ async function persistAssistantOutboxIntentMirrorFailure(input: {
   intent: AssistantOutboxIntent
   intentPath: string
   onlyCurrentStatuses?: readonly AssistantOutboxIntent['status'][]
+  requireUnavailableRequiredPredecessor?: boolean
   retryable: boolean
   status: 'abandoned' | 'failed' | 'retryable'
   vault: string
@@ -1286,6 +1303,30 @@ async function persistAssistantOutboxIntentMirrorFailure(input: {
     const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
       vault: input.vault,
     })
+    const currentOrInput = current ?? input.intent
+    if (
+      input.requireUnavailableRequiredPredecessor === true
+    ) {
+      const dependencyState =
+        resolveAssistantOutboxRequiredBeforeFinalDependencies(
+          await listAssistantOutboxIntentsLocal(input.vault),
+        )
+      if (
+        !dependencyState.unavailableFinalIntentIds.has(
+          currentOrInput.intentId,
+        ) ||
+        !isAssistantOutboxRequiredBeforeFinalIntentProvenUnattempted(
+          currentOrInput,
+        )
+      ) {
+        await repairAssistantOutboxReceiptForIntent({
+          at: currentOrInput.updatedAt,
+          intent: currentOrInput,
+          vault: input.vault,
+        })
+        return currentOrInput
+      }
+    }
     if (
       current &&
       input.onlyCurrentStatuses &&

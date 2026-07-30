@@ -18,10 +18,19 @@ Updated: 2026-07-29
   the foreground turn.
 - Dirty image work cannot spin past the existing runtime wake waiter when the
   idle checkpoint window is already due.
+- A completed image whose pending-index enqueue repeatedly fails retries only
+  at a dedicated non-sliding deadline, while foreground input remains
+  admissible.
+- Before a graceful snapshot releases a retained completion, its exact input ID
+  is staged and registered in the existing pending index or the checkpoint
+  fails closed.
+- A private-media failure cannot finalize silently when the provider omits its
+  required recovery text, and an approved vault-file send cannot lose its
+  delivery-owner fence after earlier visible output.
 - The correction uses the existing runtime wake signal and image controller;
   it adds no queue, scheduler, retry manager, or persisted owner.
-- Focused regression coverage, canonical verification, ReviewGPT, and exact-head
-  CI pass.
+- Focused regression coverage and package typechecks pass locally. Exact-head
+  CI and final ReviewGPT remain merge gates for the pushed PR candidate.
 
 ## Scope
 
@@ -51,6 +60,30 @@ Updated: 2026-07-29
   non-abort foreground import exception could consume the only wake before
   returning a result. The existing notification can be restored locally before
   handing off the watcher; no new state owner is required.
+- The final runtime audit identified a retained-completion edge: the controller
+  keeps completed image work after two failed pending-index enqueue attempts,
+  but an already-due checkpoint let the outer loop retry immediately. A
+  deterministic fake-timer regression proved the hot loop before the runtime
+  tied subsequent staging batches to a dedicated invocation-local retry
+  deadline.
+- Follow-up review proved that cursor-based backfill was not sufficient
+  shutdown ownership: later foreground completion can advance `eligibleAfter`
+  beyond an earlier staged image-completion event. Graceful checkpoint
+  preparation now performs a final event-stage attempt when needed and awaits
+  exact pending-index registration of every retained completion ID. Either
+  failure aborts the snapshot.
+- The final private-media audit proved that `reply-required` blocked
+  `finish_without_reply` but did not itself guarantee nonblank final text. The
+  finalizer now emits one neutral requested-attachment failure sentence only
+  when model recovery text is blank, writes it to semantic transcript state,
+  and uses the obligation's originating delivery context and selected target.
+  Same-context valid media accompanies that recovery; later-context media stays
+  on its own final context and target while the recovery becomes an ordered
+  preceding segment.
+- The same audit proved that a successful vault-file approval could occur
+  before generic no-reply eligibility rejected the owner patch. Vault-file
+  ownership is now classified immediately after approval, preserving earlier
+  visible output as an earlier response segment while fencing later media.
 
 ## Tasks
 
@@ -58,10 +91,12 @@ Updated: 2026-07-29
 2. Add a deterministic regression that holds image generation while delivering
    a fresh conversation wake.
 3. Implement the smallest owner-correct wait-loop correction.
-4. Run focused tests, typecheck, canonical verification, preliminary specialist
-   review, parent review, and final exact-head ReviewGPT/CI.
-5. Merge, deploy the hosted runtime, verify one live foreground/image turn, and
-   retire the worktree.
+4. Run focused tests, package typechecks, preliminary specialist review,
+   product-experience review, and parent review for the final local candidate.
+5. Archive the PR-ready local plan in the final scoped commit. Then require
+   exact-head CI and final ReviewGPT before merge. Merge, deployment, live
+   foreground/image smoke, and worktree retirement remain post-merge work and
+   are not claimed by this plan snapshot.
 
 ## Decisions
 
@@ -77,11 +112,29 @@ Updated: 2026-07-29
   existing wake paths. Runtimes without a wake signal retain the existing idle
   checkpoint behavior.
 - Keep completed-but-not-enqueued image work on the ordinary idle retry path;
-  only unresolved provider work extends the wait to the next real wake.
+  only unresolved provider work extends the wait to the next real wake. After a
+  bounded staging batch fails, one dedicated invocation-local retry deadline
+  defers the next batch without being moved by later foreground checkpoint
+  debounce; it adds no durable retry owner.
+- Before snapshot, make one final staging attempt for a retained completion
+  without a cached ID, then await exact idempotent enqueue of each retained ID
+  into the existing pending index. Do not rely on cursor backfill; a failure
+  aborts the checkpoint.
 - If foreground mailbox import throws a non-abort error after consuming a wake,
   restore the same notification before logging and stop that watcher. The next
   existing watcher or outer pass retries it, avoiding both notification loss
   and a same-watcher hot loop.
+- Resolve the latest non-vault recovery obligation through the final delivery
+  context. If selected model text is blank, synthesize one neutral
+  requested-attachment recovery sentence and route it through that obligation's
+  context and target. Same-context media stays attached to that reply;
+  later-context media stays final on its own context and target while the
+  recovery uses the existing preceding-segment/outbox ordering. Ordinary
+  media-only replies without a recovery obligation remain unchanged.
+- Record successful vault-file ownership independently of generic no-reply
+  eligibility. A pre-existing recovery obligation keeps reply-required
+  classification and target; otherwise the approved file remains the no-reply
+  owner even when earlier output must be preserved as a preceding segment.
 - Preliminary specialist finding dispositions:
   - accepted: do not extend the wait for a retained completed image;
   - accepted: approved vault-file guidance yields to an already-required
@@ -95,18 +148,37 @@ Updated: 2026-07-29
 
 - Focused assistant-runtime regression for unresolved image work plus a fresh
   conversation wake.
-- Existing runtime-wake and hosted image-generation suites.
-- Assistant-runtime typecheck.
-- Canonical `pnpm test:diff` and `pnpm verify:acceptance`.
-- Exact-head hosted image/provider E2E and final ReviewGPT gate.
+- Focused retained-completion retry-pacing regression.
+- Focused runtime-wake, hosted image-state, response-finalization, vault-owner,
+  prompt/tool, and local-delivery regressions.
+- Assistant-runtime and assistant-engine package typechecks.
+- Exact-head hosted image/provider CI and final ReviewGPT gate after the plan
+  archive commit is pushed.
 
 ## Verification evidence
 
 - Focused foreground/image regression passed and serviced the origin,
   intervening conversation, and hosted image completion in that order.
 - Adjacent focused image-state and runtime-wake suites passed 4/4.
-- The complete hosted workspace entrypoint suite passed 253/253.
+- A prior candidate's complete hosted workspace entrypoint suite passed
+  253/253; the final exact-head broad suite remains owned by GitHub CI.
 - Assistant-runtime typecheck passed.
+- The retained-completion regression proved exactly two immediate enqueue
+  attempts, no third attempt before the dedicated deadline, fresh foreground
+  admission without moving that deadline, and retry when the original bound
+  arrived. It then advanced `eligibleAfter` beyond the completion, proved the
+  exact completion ID was indexed inside snapshot creation, and recovered that
+  same ID after compaction. The focused entrypoint case passed 1/254.
+- Image-controller tests passed 4/4, including a final shutdown-time stage when
+  the event had not yet been created and fail-closed exact-index persistence.
+- Six current response-finalization and delivery regressions passed: blank
+  targeted recovery keeps its originating context and transcript, an earlier
+  completed answer becomes a preceding segment instead of masking later
+  recovery, same-context valid media accompanies synthesized text, later-context
+  media retains its own target after an ordered recovery segment, approved
+  vault-file ownership survives earlier visible output, and final media remains
+  durably owned when recovery delivery queues.
+- Assistant-engine typecheck passed.
 - The non-abort import regression injects one failure after one ingress wake,
   then proves two import attempts, one failure log, preserved mailbox
   watermark retry, and follow-up admission by the next assistant pass in the
@@ -118,3 +190,10 @@ Updated: 2026-07-29
   separate active bundle-ratchet change already records a higher clean
   Linux/macOS measurement; this task does not duplicate or weaken that guard.
   Exact-head Linux CI remains the production-bundle proof.
+
+## Closure boundary
+
+This plan closes at the final scoped PR candidate. Exact-head CI and final
+ReviewGPT remain required merge gates. Merge, production deployment, live
+foreground/image verification, and worktree retirement are post-merge
+operations and are not claimed by this archived snapshot.

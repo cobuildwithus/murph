@@ -1998,6 +1998,364 @@ test('sendAssistantMessageLocal records a diagnostic when a preceding answer fai
     .toBe('session-after-preceding')
 })
 
+test('sendAssistantMessageLocal keeps final media owned when a preceding recovery is queued', async () => {
+  const session = createAssistantSession({
+    sessionId: 'session-required-recovery-queued',
+  })
+  const laterMedia: AssistantResponseMedia = {
+    alt: 'Later response image',
+    kind: 'image',
+    source: 'later-response-image-queued',
+    url:
+      'https://cdn.example.test/assistant/' +
+      'later-response-image-queued.png',
+  }
+  const finalDeliveryOutcome = {
+    error: null,
+    intentId: 'intent-later-media-queued',
+    kind: 'queued' as const,
+    media: [laterMedia],
+    session,
+  }
+  const { mocks, sendAssistantMessageLocal } =
+    await loadLocalServiceModule({
+      deliveryOutcome: finalDeliveryOutcome,
+      plan: createDirectSharedPlan(),
+      session,
+    })
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async () => ({
+    kind: 'succeeded',
+    providerTurn: {
+      onboardingGuidanceInjected: false,
+      codexContinuation: { kind: 'explicit-structured-history' },
+      precedingResponseSegments: [
+        {
+          deliveryContextOrdinal: 0,
+          media: [],
+          requiredBeforeFinal: true,
+          response:
+            "An attachment couldn't be included in this reply.",
+        },
+      ],
+      response: '',
+      responseDeliveryContextOrdinal: 0,
+      responseMedia: [laterMedia],
+      transcriptResponse: '',
+      session,
+    },
+  }))
+  mocks.deliverAssistantPrecedingReplies.mockResolvedValueOnce([
+    {
+      error: {
+        code: 'ASSISTANT_DELIVERY_DEFERRED',
+        message: 'required recovery queued',
+      },
+      intentId: 'intent-required-recovery-queued',
+      kind: 'queued',
+      media: [],
+      session,
+    },
+  ])
+
+  const result = await sendAssistantMessageLocal({
+    deliverResponse: true,
+    prompt: 'Send both images.',
+    vault: '/vaults/test',
+  })
+
+  expect(mocks.dispatchAssistantReply).toHaveBeenCalledWith(
+    expect.objectContaining({
+      input: expect.objectContaining({
+        deliveryDispatchMode: 'queue-only',
+        deliveryIdempotencyKey:
+          expect.stringMatching(/:required-before-final$/),
+      }),
+      media: [laterMedia],
+      response: '',
+    }),
+  )
+  expect(
+    mocks.deliverAssistantPrecedingReplies.mock.invocationCallOrder[0],
+  ).toBeLessThan(
+    mocks.dispatchAssistantReply.mock.invocationCallOrder[0]!,
+  )
+  expect(result).toMatchObject({
+    deliveryDeferred: true,
+    deliveryIntentId: 'intent-later-media-queued',
+    media: [laterMedia],
+    response: '',
+  })
+  expect(mocks.finalizeDeliveredAssistantTurn.mock.calls[0]?.[0]?.outcome)
+    .toBe(finalDeliveryOutcome)
+})
+
+test('sendAssistantMessageLocal preserves the caller dispatch mode after a required recovery is sent', async () => {
+  const session = createAssistantSession({
+    sessionId: 'session-required-recovery-sent',
+  })
+  const laterMedia: AssistantResponseMedia = {
+    alt: 'Later response image',
+    kind: 'image',
+    source: 'later-response-image-sent',
+    url:
+      'https://cdn.example.test/assistant/' +
+      'later-response-image-sent.png',
+  }
+  const { mocks, sendAssistantMessageLocal } =
+    await loadLocalServiceModule({
+      plan: createDirectSharedPlan(),
+      session,
+    })
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async () => ({
+    kind: 'succeeded',
+    providerTurn: {
+      onboardingGuidanceInjected: false,
+      codexContinuation: { kind: 'explicit-structured-history' },
+      precedingResponseSegments: [
+        {
+          deliveryContextOrdinal: 0,
+          media: [],
+          requiredBeforeFinal: true,
+          response:
+            "An attachment couldn't be included in this reply.",
+        },
+      ],
+      response: '',
+      responseDeliveryContextOrdinal: 0,
+      responseMedia: [laterMedia],
+      transcriptResponse: '',
+      session,
+    },
+  }))
+  mocks.deliverAssistantPrecedingReplies.mockResolvedValueOnce([
+    {
+      delivery: {
+        channel: 'telegram',
+        idempotencyKey: null,
+        messageLength: 0,
+        providerMessageId: 'provider-required-recovery-sent',
+        providerThreadId: 'thread-1',
+        sentAt: '2026-04-08T12:00:04.000Z',
+        target: 'thread-1',
+        targetKind: 'thread',
+      },
+      intentId: 'intent-required-recovery-sent',
+      kind: 'sent',
+      media: [],
+      session,
+    },
+  ])
+
+  await sendAssistantMessageLocal({
+    deliverResponse: true,
+    deliveryDispatchMode: 'immediate',
+    prompt: 'Send both images.',
+    vault: '/vaults/test',
+  })
+
+  expect(mocks.dispatchAssistantReply).toHaveBeenCalledWith(
+    expect.objectContaining({
+      input: expect.objectContaining({
+        deliveryDispatchMode: 'immediate',
+        deliveryIdempotencyKey:
+          expect.stringMatching(/:required-before-final$/),
+      }),
+      media: [laterMedia],
+      response: '',
+    }),
+  )
+})
+
+test('sendAssistantMessageLocal preserves final media as not requested when delivery is disabled', async () => {
+  const session = createAssistantSession({
+    sessionId: 'session-required-recovery-not-requested',
+  })
+  const laterMedia: AssistantResponseMedia = {
+    alt: 'Undelivered later response image',
+    kind: 'image',
+    source: 'later-response-image-not-requested',
+    url:
+      'https://cdn.example.test/assistant/' +
+      'later-response-image-not-requested.png',
+  }
+  const finalDeliveryOutcome = {
+    intentId: 'unused-not-requested-intent',
+    kind: 'not-requested' as const,
+    media: [laterMedia],
+    session,
+  }
+  const { mocks, sendAssistantMessageLocal } =
+    await loadLocalServiceModule({
+      plan: createDirectSharedPlan(),
+      session,
+    })
+  mocks.dispatchAssistantReply.mockResolvedValueOnce(finalDeliveryOutcome)
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async () => ({
+    kind: 'succeeded',
+    providerTurn: {
+      onboardingGuidanceInjected: false,
+      codexContinuation: { kind: 'explicit-structured-history' },
+      precedingResponseSegments: [
+        {
+          deliveryContextOrdinal: 0,
+          media: [],
+          requiredBeforeFinal: true,
+          response:
+            "An attachment couldn't be included in this reply.",
+        },
+      ],
+      response: '',
+      responseDeliveryContextOrdinal: 0,
+      responseMedia: [laterMedia],
+      transcriptResponse: '',
+      session,
+    },
+  }))
+
+  const result = await sendAssistantMessageLocal({
+    deliverResponse: false,
+    prompt: 'Prepare both images without delivering.',
+    vault: '/vaults/test',
+  })
+
+  expect(mocks.dispatchAssistantReply).toHaveBeenCalledWith(
+    expect.objectContaining({
+      input: expect.objectContaining({
+        deliverResponse: false,
+      }),
+      media: [laterMedia],
+      response: '',
+    }),
+  )
+  expect(result).toMatchObject({
+    delivery: null,
+    deliveryDeferred: false,
+    deliveryError: null,
+    deliveryIntentId: null,
+    media: [laterMedia],
+    response: '',
+  })
+  expect(mocks.finalizeDeliveredAssistantTurn.mock.calls[0]?.[0]?.outcome)
+    .toBe(finalDeliveryOutcome)
+})
+
+test.each([
+  'failed with an intent',
+  'failed without an intent',
+  'threw before intent creation',
+] as const)(
+  'sendAssistantMessageLocal blocks final media when required recovery %s',
+  async (recoveryFailure) => {
+    const session = createAssistantSession({
+      sessionId: 'session-required-recovery-unowned',
+    })
+    const laterMedia: AssistantResponseMedia = {
+      alt: 'Blocked later response image',
+      kind: 'image',
+      source: 'later-response-image-unowned',
+      url:
+        'https://cdn.example.test/assistant/' +
+        'later-response-image-unowned.png',
+    }
+    const { mocks, sendAssistantMessageLocal } =
+      await loadLocalServiceModule({
+        deliveryOutcome: {
+          error: {
+            code: 'ASSISTANT_DELIVERY_DEFERRED',
+            message: 'final held queue-only',
+          },
+          intentId: 'intent-required-final-failed',
+          kind: 'queued',
+          media: [laterMedia],
+          session,
+        },
+        plan: createDirectSharedPlan(),
+        session,
+      })
+    mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async () => ({
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        precedingResponseSegments: [
+          {
+            deliveryContextOrdinal: 0,
+            media: [],
+            requiredBeforeFinal: true,
+            response:
+              "An attachment couldn't be included in this reply.",
+          },
+        ],
+        response: '',
+        responseDeliveryContextOrdinal: 0,
+        responseMedia: [laterMedia],
+        transcriptResponse: '',
+        session,
+      },
+    }))
+    if (recoveryFailure !== 'threw before intent creation') {
+      const failedWithIntent = recoveryFailure === 'failed with an intent'
+      mocks.deliverAssistantPrecedingReplies.mockResolvedValueOnce([
+        {
+          error: {
+            code: 'ASSISTANT_DELIVERY_FAILED',
+            message: failedWithIntent
+              ? 'required recovery reached terminal failure'
+              : 'required recovery failed before intent creation',
+          },
+          intentId: failedWithIntent
+            ? 'intent-required-recovery-failed'
+            : null,
+          kind: 'failed',
+          media: [],
+          session,
+        },
+      ])
+    } else {
+      mocks.deliverAssistantPrecedingReplies.mockRejectedValueOnce(
+        new Error('required recovery outbox write failed'),
+      )
+    }
+
+    const result = await sendAssistantMessageLocal({
+      deliverResponse: true,
+      prompt: 'Send both images.',
+      vault: '/vaults/test',
+    })
+
+    expect(mocks.dispatchAssistantReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({
+          deliveryDispatchMode: 'queue-only',
+          deliveryIdempotencyKey:
+            expect.stringMatching(/:required-before-final$/),
+        }),
+        media: [laterMedia],
+      }),
+    )
+    expect(mocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled()
+    expect(mocks.markAssistantOutboxIntentMirrorTerminalById)
+      .not.toHaveBeenCalled()
+    expect(result).toMatchObject({
+      deliveryDeferred: false,
+      deliveryError: {
+        code: 'ASSISTANT_REQUIRED_PREDECESSOR_UNAVAILABLE',
+        message:
+          'Assistant delivery was not attempted because its required preceding reply was not confirmed sent.',
+      },
+      deliveryIntentId: 'intent-required-final-failed',
+      media: [laterMedia],
+      response: '',
+    })
+    expect(mocks.finalizeDeliveredAssistantTurn.mock.calls[0]?.[0]?.outcome)
+      .toMatchObject({
+        intentId: 'intent-required-final-failed',
+        kind: 'failed',
+        media: [laterMedia],
+      })
+  },
+)
+
 test('sendAssistantMessageLocal still sends the final reply when preceding delivery throws', async () => {
   const { mocks, sendAssistantMessageLocal, session } =
     await loadLocalServiceModule({
@@ -7892,7 +8250,9 @@ async function loadLocalServiceModule(input?: {
           precedingResponseSegments?: readonly {
             deliveryContextOrdinal: number
             media?: AssistantDeliveryOutcome['media']
+            requiredBeforeFinal?: boolean
             response: string
+            targetInputId?: string | null
           }[]
           reactions?: readonly {
             deliveryContextOrdinal: number
@@ -8172,9 +8532,43 @@ async function loadLocalServiceModule(input?: {
     ),
     getAssistantChannelAdapter: vi.fn((_channel: string | null) => input?.adapter ?? null),
     listAssistantTranscriptEntries: vi.fn(async () => []),
+    dispatchAssistantOutboxIntent: vi.fn(async (dispatchInput: {
+      intentId: string
+    }) => {
+      const deliveryError = {
+        code: 'ASSISTANT_REQUIRED_PREDECESSOR_UNAVAILABLE',
+        message:
+          'Assistant delivery was not attempted because its required preceding reply was not confirmed sent.',
+      }
+      return {
+        deliveryError,
+        intent: {
+          delivery: null,
+          intentId: dispatchInput.intentId,
+          lastError: deliveryError,
+          status: 'failed' as const,
+        },
+        session: null,
+      }
+    }),
+    markAssistantOutboxIntentMirrorTerminalById: vi.fn(async (markInput: {
+      error: Error & { code?: string | null }
+      intentId: string
+    }) => ({
+      intentId: markInput.intentId,
+      lastError: {
+        code:
+          markInput.error.code ??
+          'ASSISTANT_REQUIRED_PREDECESSOR_UNAVAILABLE',
+        message: markInput.error.message,
+      },
+      status: 'failed' as const,
+    })),
     normalizeAssistantAskResultForReturn: vi.fn((value) => value),
     normalizeAssistantDeliveryError: vi.fn((error: Error) => ({
-      code: 'ASSISTANT_DELIVERY_FAILED',
+      code:
+        (error as Error & { code?: string | null }).code ??
+        'ASSISTANT_DELIVERY_FAILED',
       message: error.message,
     })),
     normalizeAssistantExecutionContext: vi.fn((value) => value ?? null),
@@ -8443,6 +8837,9 @@ async function loadLocalServiceModule(input?: {
     }))
   }
   vi.doMock('../src/assistant/outbox.js', () => ({
+    dispatchAssistantOutboxIntent: mocks.dispatchAssistantOutboxIntent,
+    markAssistantOutboxIntentMirrorTerminalById:
+      mocks.markAssistantOutboxIntentMirrorTerminalById,
     normalizeAssistantDeliveryError: mocks.normalizeAssistantDeliveryError,
   }))
   vi.doMock('../src/assistant/diagnostics.js', () => ({

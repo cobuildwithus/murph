@@ -42,6 +42,7 @@ import {
   listAssistantOutboxIntents,
   markAssistantOutboxIntentMirrorTerminalById,
   normalizeAssistantDeliveryError,
+  readAssistantOutboxRequiredBeforeFinalSequenceMember,
   readAssistantAutomationState,
   readAssistantOutboxIntent,
   readAssistantVaultFileMedia,
@@ -50,6 +51,7 @@ import {
   sendTelegramMessage,
   readAssistantOutboxIntentMirrorState,
   resetAssistantOutboxPreparedDispatchById,
+  resolveAssistantOutboxRequiredBeforeFinalDependencies,
   saveAssistantOutboxIntentIfUnchanged,
   shouldDispatchAssistantOutboxIntent,
   type AssistantChannelDelivery,
@@ -196,18 +198,30 @@ export async function collectHostedAssistantDeliverySideEffects(
         intents: approvalReconciledIntents,
         vaultRoot: request.vaultRoot,
       });
+  const requiredSequenceReconciliation =
+    reconcileHostedAssistantRequiredBeforeFinalSequences({
+      includeBackgroundDueIntents: request.includeBackgroundDueIntents,
+      intents: approvalReconciledIntents,
+      preferredIntentIds: request.preferredIntentIds,
+    });
   const intents = approvalReconciledIntents;
   const approvalBlockedIntentIds = new Set<string>(
     Array.from(reconciliationByIntentId.values())
       .filter((reconciliation) => reconciliation.blocked)
       .map((reconciliation) => reconciliation.intent.intentId),
   );
-  const preferredIntentIds = [
+  const requestedPreferredIntentIds = [
     ...new Set([
       ...(causalOnly ? reconcileTargets.keys() : []),
       ...request.preferredIntentIds,
     ]),
   ];
+  const preferredIntentIds =
+    expandHostedAssistantRequiredBeforeFinalPreferredIntentIds({
+      predecessorByFinalIntentId:
+        requiredSequenceReconciliation.predecessorByFinalIntentId,
+      preferredIntentIds: requestedPreferredIntentIds,
+    });
   const preferredIntentOrder = new Map(
     preferredIntentIds.map((intentId, index) => [intentId, index] as const),
   );
@@ -215,6 +229,12 @@ export async function collectHostedAssistantDeliverySideEffects(
   const candidates: AssistantOutboxIntent[] = [];
   const nowIso = now.toISOString();
   for (const intent of intents) {
+    if (
+      requiredSequenceReconciliation.blockedIntentIds.has(intent.intentId) &&
+      !requiredSequenceReconciliation.observationIntentIds.has(intent.intentId)
+    ) {
+      continue;
+    }
     if (causalOnly && !reconcileTargets.has(intent.intentId)) {
       continue;
     }
@@ -239,6 +259,9 @@ export async function collectHostedAssistantDeliverySideEffects(
       intent.status === "retryable"
       && !intent.deliveryTransportIdempotent
       && intent.lastError?.code === "ASSISTANT_DELIVERY_CONFIRMATION_PENDING"
+      && !requiredSequenceReconciliation.observationIntentIds.has(
+        intent.intentId,
+      )
     ) {
       continue;
     }
@@ -320,6 +343,62 @@ export async function collectHostedAssistantDeliverySideEffects(
   ];
 
   return effects;
+}
+
+interface HostedAssistantRequiredBeforeFinalReconciliation {
+  blockedIntentIds: Set<string>;
+  observationIntentIds: Set<string>;
+  predecessorByFinalIntentId: Map<string, string>;
+}
+
+function reconcileHostedAssistantRequiredBeforeFinalSequences(input: {
+  includeBackgroundDueIntents: boolean;
+  intents: readonly AssistantOutboxIntent[];
+  preferredIntentIds: readonly string[];
+}): HostedAssistantRequiredBeforeFinalReconciliation {
+  const dependencyState =
+    resolveAssistantOutboxRequiredBeforeFinalDependencies(input.intents);
+  const observationIntentIds = new Set<string>();
+  const preferredIntentIds = new Set(input.preferredIntentIds);
+  for (const intent of input.intents) {
+    if (
+      !dependencyState.unavailableFinalIntentIds.has(intent.intentId)
+    ) {
+      continue;
+    }
+    if (
+      input.includeBackgroundDueIntents ||
+      preferredIntentIds.has(intent.intentId)
+    ) {
+      observationIntentIds.add(intent.intentId);
+    }
+  }
+  return {
+    blockedIntentIds: dependencyState.blockedIntentIds,
+    observationIntentIds,
+    predecessorByFinalIntentId:
+      dependencyState.predecessorByFinalIntentId,
+  };
+}
+
+function expandHostedAssistantRequiredBeforeFinalPreferredIntentIds(input: {
+  predecessorByFinalIntentId: ReadonlyMap<string, string>;
+  preferredIntentIds: readonly string[];
+}): string[] {
+  const expanded: string[] = [];
+  const seen = new Set<string>();
+  for (const intentId of input.preferredIntentIds) {
+    const predecessorId = input.predecessorByFinalIntentId.get(intentId);
+    if (predecessorId && !seen.has(predecessorId)) {
+      seen.add(predecessorId);
+      expanded.push(predecessorId);
+    }
+    if (!seen.has(intentId)) {
+      seen.add(intentId);
+      expanded.push(intentId);
+    }
+  }
+  return expanded;
 }
 
 /**
@@ -1454,14 +1533,21 @@ export async function resolveHostedAssistantOutboxNextWakeAt(input: {
 }): Promise<string | null> {
   const now = input.now ?? new Date();
   const intents = await listAssistantOutboxIntents(input.vaultRoot);
+  const dependencyState =
+    resolveAssistantOutboxRequiredBeforeFinalDependencies(intents);
+  const wakeEligibleIntents = intents.filter((intent) =>
+    !dependencyState.blockedIntentIds.has(intent.intentId) ||
+    dependencyState.unavailableFinalIntentIds.has(intent.intentId)
+  );
   let wakeAt: string | null = null;
 
   for (const boundaryIntents of groupHostedAssistantDeliveryBoundaryIntents(
-    intents,
+    wakeEligibleIntents,
   ).values()) {
     const candidate = resolveHostedAssistantDeliveryBoundaryWakeAt(
       boundaryIntents,
       now,
+      dependencyState.unavailableFinalIntentIds,
     );
     if (!candidate) {
       continue;
@@ -1477,10 +1563,15 @@ export async function resolveHostedAssistantOutboxNextWakeAt(input: {
 function resolveHostedAssistantDeliveryBoundaryWakeAt(
   intents: readonly AssistantOutboxIntent[],
   now: Date,
+  unavailableFinalIntentIds: ReadonlySet<string>,
 ): string | null {
   let approvalFallbackWakeAt: string | null = null;
   for (const intent of intents) {
-    const wakeAt = resolveHostedAssistantOutboxIntentWakeAt(intent, now);
+    const wakeAt = resolveHostedAssistantOutboxIntentWakeAt(
+      intent,
+      now,
+      unavailableFinalIntentIds.has(intent.intentId),
+    );
     if (!wakeAt) {
       continue;
     }
@@ -1500,6 +1591,7 @@ function resolveHostedAssistantDeliveryBoundaryWakeAt(
 function resolveHostedAssistantOutboxIntentWakeAt(
   intent: AssistantOutboxIntent,
   now: Date,
+  observeUnavailableFinal = false,
 ): string | null {
   switch (intent.status) {
     case "awaiting_approval":
@@ -1509,6 +1601,7 @@ function resolveHostedAssistantOutboxIntentWakeAt(
         intent.status === "retryable"
         && !intent.deliveryTransportIdempotent
         && intent.lastError?.code === "ASSISTANT_DELIVERY_CONFIRMATION_PENDING"
+        && !observeUnavailableFinal
       ) {
         return null;
       }
@@ -1546,11 +1639,26 @@ export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
 }): Promise<HostedAssistantDeliveryPreparation> {
   const startedAt = (input.now ?? (() => new Date().toISOString()))();
   const preparedDispatches: HostedAssistantDeliveryPreparedDispatch[] = [];
+  const hasRequiredFinalObservation = input.assistantDeliveryEffects.some(
+    (effect) =>
+      readAssistantOutboxRequiredBeforeFinalSequenceMember({
+        deliveryIdempotencyKey: effect.payload.idempotencyKey,
+        turnId: effect.payload.turnId,
+      })?.kind === "final",
+  );
+  const unavailableFinalIntentIds = hasRequiredFinalObservation
+    ? resolveAssistantOutboxRequiredBeforeFinalDependencies(
+        await listAssistantOutboxIntents(input.vaultRoot),
+      ).unavailableFinalIntentIds
+    : new Set<string>();
   const linqDeliveryContexts = resolveHostedAssistantLinqDeliveryContexts({
     context: input.linqDeliveryContext ?? null,
     contexts: input.linqDeliveryContexts ?? null,
   });
   for (const effect of input.assistantDeliveryEffects) {
+    if (unavailableFinalIntentIds.has(effect.effectId)) {
+      continue;
+    }
     if (!shouldPrepareHostedAssistantDeliveryEffectForDispatch(effect)) {
       continue;
     }
@@ -1834,6 +1942,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
   });
   const outcomes: HostedAssistantDeliveryOutcome[] = [];
   const blockedForegroundDeliveryKeys = new Set<string>();
+  const blockedRequiredSequenceKeys = new Set<string>();
   const linqTypingStopDrain = createHostedLinqTypingStopDrain();
   const preparedDispatchByIntentId = new Map(
     (input.preparedDispatches ?? []).map((preparedDispatch) => [
@@ -1862,9 +1971,21 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
         });
         break;
       }
-      if (blockedForegroundDeliveryKeys.has(
-        readHostedAssistantDeliveryEffectBoundaryKey(assistantDeliveryEffect),
-      )) {
+      const assistantDeliveryBoundaryKey =
+        readHostedAssistantDeliveryEffectBoundaryKey(assistantDeliveryEffect);
+      const assistantDeliveryRequiredSequenceKey =
+        readHostedAssistantRequiredBeforeFinalSequenceKey(
+          assistantDeliveryEffect,
+        );
+      if (
+        blockedForegroundDeliveryKeys.has(assistantDeliveryBoundaryKey) ||
+        (
+          assistantDeliveryRequiredSequenceKey !== null &&
+          blockedRequiredSequenceKeys.has(
+            assistantDeliveryRequiredSequenceKey,
+          )
+        )
+      ) {
         continue;
       }
       emitHostedExecutionStructuredLog({
@@ -1976,15 +2097,28 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
         effect: assistantDeliveryEffect,
         outcome,
       })) {
-        const boundaryKey = readHostedAssistantDeliveryEffectBoundaryKey(
-          assistantDeliveryEffect,
-        );
+        const boundaryKey = assistantDeliveryBoundaryKey;
+        const requiredSequenceKey =
+          shouldBlockLaterHostedAssistantRequiredSequenceDeliveries({
+              effect: assistantDeliveryEffect,
+              outcome,
+            })
+            ? assistantDeliveryRequiredSequenceKey
+            : null;
         const blockedEffects = input.assistantDeliveryEffects
           .slice(index + 1)
           .filter((effect) =>
             readHostedAssistantDeliveryEffectBoundaryKey(effect) === boundaryKey
+            || (
+              requiredSequenceKey !== null &&
+              readHostedAssistantRequiredBeforeFinalSequenceKey(effect) ===
+                requiredSequenceKey
+            )
           );
         blockedForegroundDeliveryKeys.add(boundaryKey);
+        if (requiredSequenceKey !== null) {
+          blockedRequiredSequenceKeys.add(requiredSequenceKey);
+        }
         recordHostedLinqTypingStopStillPendingEffects({
           effects: blockedEffects,
           linqDeliveryContexts,
@@ -2138,8 +2272,48 @@ function shouldBlockLaterHostedAssistantForegroundDeliveries(input: {
   if (input.outcome.deliveryStatus === "sent") {
     return false;
   }
+  if (
+    readAssistantOutboxRequiredBeforeFinalSequenceMember({
+      deliveryIdempotencyKey: input.effect.payload.idempotencyKey,
+      turnId: input.effect.payload.turnId,
+    })?.kind === "predecessor"
+  ) {
+    return true;
+  }
   return input.outcome.retryable === true
     || input.outcome.deliveryStatus === "pending";
+}
+
+function shouldBlockLaterHostedAssistantRequiredSequenceDeliveries(input: {
+  effect: HostedAssistantDeliveryEffect;
+  outcome: HostedAssistantDeliveryOutcome;
+}): boolean {
+  if (
+    input.effect.deliveryPhase !== "foreground_current_turn" ||
+    input.outcome.deliveryStatus === "sent"
+  ) {
+    return false;
+  }
+  return readAssistantOutboxRequiredBeforeFinalSequenceMember({
+    deliveryIdempotencyKey: input.effect.payload.idempotencyKey,
+    turnId: input.effect.payload.turnId,
+  })?.kind === "predecessor";
+}
+
+function readHostedAssistantRequiredBeforeFinalSequenceKey(
+  effect: HostedAssistantDeliveryEffect,
+): string | null {
+  const member = readAssistantOutboxRequiredBeforeFinalSequenceMember({
+    deliveryIdempotencyKey: effect.payload.idempotencyKey,
+    turnId: effect.payload.turnId,
+  });
+  return member
+    ? JSON.stringify([
+        effect.payload.sessionId,
+        member.turnId,
+        member.sequenceBaseKey,
+      ])
+    : null;
 }
 
 function markHostedDeliveryMayHaveSucceeded(error: unknown): unknown {

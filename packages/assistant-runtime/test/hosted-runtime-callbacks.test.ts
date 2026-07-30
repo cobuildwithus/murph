@@ -391,6 +391,24 @@ function createPendingHostedDeliveryIntent(
   };
 }
 
+function createRequiredHostedDeliveryIntent(
+  overrides: Record<string, unknown>,
+) {
+  return createPendingHostedDeliveryIntent({
+    attemptCount: 0,
+    delivery: null,
+    deliveryConfirmationPending: false,
+    deliveryIdempotencyKey:
+      "required-sequence:required-before-final",
+    lastAttemptAt: null,
+    media: [],
+    preparedDispatchToken: null,
+    sentAt: null,
+    updatedAt: "2026-04-08T00:01:00.000Z",
+    ...overrides,
+  });
+}
+
 function createPreparedPreviousDispatchState(
   overrides: Partial<AssistantOutboxPreparedDispatchState> = {},
 ): AssistantOutboxPreparedDispatchState {
@@ -3651,6 +3669,264 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
+  it("promotes only a required predecessor across a different boundary despite adversarial IDs and timestamps", async () => {
+    const predecessor = createRequiredHostedDeliveryIntent({
+      bindingDelivery: { kind: "participant", target: "chat_old" },
+      createdAt: "2026-04-08T00:02:00.000Z",
+      deliveryIdempotencyKey:
+        "required-sequence:required-before-final:segment:0",
+      explicitTarget: "chat_old",
+      intentId: "zzzz_required_predecessor",
+      message: "An attachment couldn't be included in this reply.",
+      replyToMessageId: "message_old",
+      targetFingerprint: "target_old",
+    });
+    const final = createRequiredHostedDeliveryIntent({
+      bindingDelivery: { kind: "participant", target: "chat_new" },
+      createdAt: "2026-04-08T00:00:00.000Z",
+      explicitTarget: "chat_new",
+      intentId: "aaaa_required_final",
+      media: [{
+        alt: "Generated progress card",
+        kind: "image",
+        source: "progress-card",
+        url: "https://cdn.example.test/progress-card.png",
+      }],
+      message: "",
+      replyToMessageId: "message_new",
+      targetFingerprint: "target_new",
+    });
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      final,
+      predecessor,
+    ]);
+
+    const effects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: ["aaaa_required_final"],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(effects.map((effect) => effect.effectId)).toEqual([
+      "zzzz_required_predecessor",
+    ]);
+    expect(effects[0]?.payload).toMatchObject({
+      bindingDeliveryTarget: "chat_old",
+      explicitTarget: "chat_old",
+      replyToMessageId: "message_old",
+    });
+  });
+
+  it("hides a required final behind a future predecessor and uses only the predecessor wake", async () => {
+    const predecessor = createRequiredHostedDeliveryIntent({
+      deliveryIdempotencyKey:
+        "required-sequence:required-before-final:segment:0",
+      intentId: "intent_required_predecessor",
+      lastError: {
+        code: "TELEGRAM_TEMPORARY_FAILURE",
+        message: "temporary failure",
+      },
+      nextAttemptAt: "2026-04-08T00:11:00.000Z",
+      status: "retryable",
+    });
+    const final = createRequiredHostedDeliveryIntent({
+      intentId: "intent_required_final",
+      nextAttemptAt: "2026-04-08T00:01:00.000Z",
+    });
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      final,
+      predecessor,
+    ]);
+    mocks.shouldDispatchAssistantOutboxIntent.mockImplementation(
+      (intent) => intent.intentId !== "intent_required_predecessor",
+    );
+
+    await expect(collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: ["intent_required_final"],
+      vaultRoot: "/tmp/vault",
+    })).resolves.toEqual([]);
+    await expect(resolveHostedAssistantOutboxNextWakeAt({
+      now: new Date("2026-04-08T00:01:00.000Z"),
+      vaultRoot: "/tmp/vault",
+    })).resolves.toBe("2026-04-08T00:11:00.000Z");
+  });
+
+  it.each([
+    ["missing", null],
+    ["failed", "failed"],
+    ["abandoned", "abandoned"],
+    ["sent without receipt", "sent"],
+    ["confirmation pending", "confirmation-pending"],
+  ] as const)(
+    "projects a proven-unattempted required final when its predecessor is %s",
+    async (_label, predecessorState) => {
+      const final = createRequiredHostedDeliveryIntent({
+        intentId: "intent_required_final",
+        media: [{
+          alt: "Generated progress card",
+          kind: "image",
+          source: "progress-card",
+          url: "https://cdn.example.test/progress-card.png",
+        }],
+        message: "",
+      });
+      const predecessor = predecessorState === null
+        ? null
+        : createRequiredHostedDeliveryIntent({
+            delivery:
+              predecessorState === "sent" ? null : undefined,
+            deliveryIdempotencyKey:
+              "required-sequence:required-before-final:segment:0",
+            intentId: "intent_required_predecessor",
+            lastError:
+              predecessorState === "confirmation-pending"
+                ? {
+                    code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+                    message: "delivery may have succeeded",
+                  }
+                : null,
+            status:
+              predecessorState === "confirmation-pending"
+                ? "retryable"
+                : predecessorState,
+          });
+      const intents = predecessor ? [predecessor, final] : [final];
+      mocks.listAssistantOutboxIntents.mockResolvedValue(intents);
+      mocks.shouldDispatchAssistantOutboxIntent.mockImplementation(
+        (intent) =>
+          intent.status === "pending" || intent.status === "retryable",
+      );
+
+      const effects = await collectHostedAssistantDeliverySideEffects({
+        includeBackgroundDueIntents: false,
+        preferredIntentIds: ["intent_required_final"],
+        vaultRoot: "/tmp/vault",
+      });
+
+      expect(effects.map((effect) => effect.effectId)).toEqual([
+        "intent_required_final",
+      ]);
+      expect(effects[0]?.payload.media).toMatchObject([{
+        kind: "image",
+        source: "progress-card",
+      }]);
+      expect(
+        mocks.markAssistantOutboxIntentMirrorTerminalById,
+      ).not.toHaveBeenCalled();
+
+      await prepareHostedAssistantDeliveryEffectsForDispatch({
+        assistantDeliveryEffects: effects,
+        vaultRoot: "/tmp/vault",
+      });
+      expect(
+        mocks.beginAssistantOutboxIntentMirrorPreparedDispatch,
+      ).not.toHaveBeenCalled();
+
+      await expect(resolveHostedAssistantOutboxNextWakeAt({
+        now: new Date("2026-04-08T00:01:00.000Z"),
+        vaultRoot: "/tmp/vault",
+      })).resolves.toBe("2026-04-08T00:01:00.000Z");
+    },
+  );
+
+  it("observes an attempted unavailable required final without pre-claiming it", async () => {
+    const predecessor = createRequiredHostedDeliveryIntent({
+      deliveryIdempotencyKey:
+        "required-sequence:required-before-final:segment:0",
+      intentId: "intent_required_predecessor",
+      lastError: {
+        code: "CHANNEL_REQUIRED",
+        message: "required predecessor failed",
+      },
+      nextAttemptAt: null,
+      status: "failed",
+    });
+    const final = createRequiredHostedDeliveryIntent({
+      attemptCount: 1,
+      deliveryTransportIdempotent: true,
+      intentId: "intent_required_final",
+      lastAttemptAt: "2026-04-08T00:00:30.000Z",
+      lastError: {
+        code: "REQUEST_FAILED",
+        message: "final delivery outcome needs reconciliation",
+      },
+      nextAttemptAt: "2026-04-08T00:01:00.000Z",
+      status: "retryable",
+    });
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      final,
+      predecessor,
+    ]);
+    mocks.shouldDispatchAssistantOutboxIntent.mockImplementation(
+      (intent) =>
+        intent.status === "pending" || intent.status === "retryable",
+    );
+
+    const effects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: ["intent_required_final"],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(effects.map((effect) => effect.effectId)).toEqual([
+      "intent_required_final",
+    ]);
+    await prepareHostedAssistantDeliveryEffectsForDispatch({
+      assistantDeliveryEffects: effects,
+      vaultRoot: "/tmp/vault",
+    });
+    expect(
+      mocks.beginAssistantOutboxIntentMirrorPreparedDispatch,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("allows a required final only after the predecessor has a sent receipt", async () => {
+    const predecessor = createRequiredHostedDeliveryIntent({
+      delivery: createDelivery({
+        idempotencyKey:
+          "required-sequence:required-before-final:segment:0",
+      }),
+      deliveryIdempotencyKey:
+        "required-sequence:required-before-final:segment:0",
+      intentId: "intent_required_predecessor",
+      nextAttemptAt: null,
+      sentAt: "2026-04-08T00:00:30.000Z",
+      status: "sent",
+    });
+    const final = createRequiredHostedDeliveryIntent({
+      deliveryTransportIdempotent: true,
+      intentId: "intent_required_final",
+    });
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      final,
+      predecessor,
+    ]);
+    mocks.shouldDispatchAssistantOutboxIntent.mockImplementation(
+      (intent) =>
+        intent.status === "pending" || intent.status === "retryable",
+    );
+
+    const effects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: ["intent_required_final"],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(effects.map((effect) => effect.effectId)).toEqual([
+      "intent_required_final",
+    ]);
+    await prepareHostedAssistantDeliveryEffectsForDispatch({
+      assistantDeliveryEffects: effects,
+      vaultRoot: "/tmp/vault",
+    });
+    expect(
+      mocks.beginAssistantOutboxIntentMirrorPreparedDispatch,
+    ).toHaveBeenCalledWith(expect.objectContaining({
+      intentId: "intent_required_final",
+    }));
+  });
+
   it("collects stale non-idempotent sending predecessors before later same-boundary replies", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T00:10:00.000Z"));
@@ -5150,6 +5426,169 @@ describe("hosted runtime callbacks", () => {
     ]);
     await flushHostedRuntimeCallbackTestMicrotasks();
     expect(providerFetch).not.toHaveBeenCalled();
+  });
+
+  it("blocks and resets a cross-boundary marked final after its required predecessor fails", async () => {
+    const predecessorEffect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe_required_predecessor",
+      deliveryPhase: "foreground_current_turn",
+      effectId: "intent_required_predecessor",
+      payload: createPayload({
+        bindingDeliveryTarget: "chat_old",
+        explicitTarget: "chat_old",
+        idempotencyKey:
+          "required-sequence:required-before-final:segment:0",
+        replyToMessageId: "message_old",
+        sessionId: "session_required",
+        turnId: "turn_required",
+      }),
+    });
+    const finalEffect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe_required_final",
+      deliveryPhase: "foreground_current_turn",
+      effectId: "intent_required_final",
+      payload: createPayload({
+        bindingDeliveryTarget: "chat_new",
+        explicitTarget: "chat_new",
+        idempotencyKey:
+          "required-sequence:required-before-final",
+        media: [{
+          alt: "Generated progress card",
+          kind: "image",
+          source: "progress-card",
+          url: "https://cdn.example.test/progress-card.png",
+        }],
+        message: "",
+        replyToMessageId: "message_new",
+        sessionId: "session_required",
+        turnId: "turn_required",
+      }),
+    });
+    const deliveryError = {
+      code: "ASSISTANT_DELIVERY_FAILED",
+      message: "required predecessor failed",
+    };
+    mocks.readAssistantOutboxIntentMirrorState.mockImplementation(
+      async ({ intentId }) => createMirrorState({
+        delivery: null,
+        intentId,
+        lastError: null,
+        status: "pending",
+      }),
+    );
+    mocks.dispatchAssistantOutboxIntent.mockImplementation(
+      async ({ intentId }) => {
+        if (intentId === "intent_required_predecessor") {
+          return createDispatchResult(
+            {
+              intentId,
+              lastError: deliveryError,
+              status: "failed",
+            },
+            deliveryError,
+          );
+        }
+        return createDispatchResult({
+          delivery: createDelivery(),
+          intentId,
+          status: "sent",
+        });
+      },
+    );
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      allowPreparedSending: true,
+      assistantDeliveryEffects: [predecessorEffect, finalEffect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      preparedDispatches: [{
+        intentId: finalEffect.effectId,
+        preparedDispatchToken: PREPARED_DISPATCH_TOKEN,
+        previousDispatchState: createPreparedPreviousDispatchState({
+          deliveryIdempotencyKey: finalEffect.payload.idempotencyKey,
+        }),
+      }],
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(outcomes.map((outcome) => outcome.deliveryStatus)).toEqual([
+      "failed",
+    ]);
+    expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledOnce();
+    expect(mocks.resetAssistantOutboxPreparedDispatchById)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        intentId: "intent_required_final",
+      }));
+  });
+
+  it("keeps an unavailable-final observation pending across a yielded drain", async () => {
+    const finalEffect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe_required_final_yield",
+      deliveryPhase: "foreground_current_turn",
+      effectId: "intent_required_final_yield",
+      payload: createPayload({
+        idempotencyKey:
+          "required-yield:required-before-final",
+        media: [{
+          alt: "Generated progress card",
+          kind: "image",
+          source: "progress-card",
+          url: "https://cdn.example.test/progress-card.png",
+        }],
+        message: "",
+        sessionId: "session_required_yield",
+        turnId: "turn_required_yield",
+      }),
+    });
+    const deliveryError = {
+      code: "ASSISTANT_REQUIRED_PREDECESSOR_UNAVAILABLE",
+      message:
+        "Assistant delivery was not attempted because its required preceding reply was not confirmed sent.",
+    };
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+      createMirrorState({
+        delivery: null,
+        intentId: finalEffect.effectId,
+        lastError: null,
+        status: "pending",
+      }),
+    );
+    mocks.dispatchAssistantOutboxIntent.mockResolvedValue(
+      createDispatchResult(
+        {
+          intentId: finalEffect.effectId,
+          lastError: deliveryError,
+          status: "failed",
+        },
+        deliveryError,
+      ),
+    );
+
+    const yielded = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [finalEffect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      shouldYieldBackgroundDelivery: () => true,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+    expect(yielded).toEqual([]);
+    expect(mocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
+
+    const drained = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [finalEffect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+    expect(drained).toMatchObject([{
+      deliveryErrorCode:
+        "ASSISTANT_REQUIRED_PREDECESSOR_UNAVAILABLE",
+      deliveryStatus: "failed",
+      effectId: "intent_required_final_yield",
+    }]);
+    expect(finalEffect.payload.media).toHaveLength(1);
+    expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledOnce();
+    expect(mocks.sendTelegramMessage).not.toHaveBeenCalled();
   });
 
   it("does not stop Linq typing when a later same-target delivery remains retryable", async () => {

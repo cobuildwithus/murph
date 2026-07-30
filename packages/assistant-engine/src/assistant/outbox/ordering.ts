@@ -3,6 +3,58 @@ export interface AssistantOutboxDeliverySequenceIntent {
   turnId: string
 }
 
+export interface AssistantOutboxRequiredBeforeFinalSequenceMember {
+  kind: 'final' | 'predecessor'
+  segmentOrdinal: number | null
+  sequenceBaseKey: string
+  turnId: string
+}
+
+export interface AssistantOutboxRequiredBeforeFinalDependencyIntent
+  extends AssistantOutboxDeliverySequenceIntent {
+  delivery?: unknown | null
+  deliveryTransportIdempotent: boolean
+  intentId: string
+  lastError?: {
+    code?: string | null
+  } | null
+  sessionId: string
+  status:
+    | 'abandoned'
+    | 'awaiting_approval'
+    | 'failed'
+    | 'pending'
+    | 'retryable'
+    | 'sending'
+    | 'sent'
+}
+
+export interface AssistantOutboxRequiredBeforeFinalDependencyState {
+  blockedIntentIds: Set<string>
+  predecessorByFinalIntentId: Map<string, string>
+  unavailableFinalIntentIds: Set<string>
+}
+
+export interface AssistantOutboxRequiredBeforeFinalAttemptState {
+  attemptCount: number
+  delivery?: unknown | null
+  deliveryConfirmationPending: boolean
+  lastAttemptAt: string | null
+  preparedDispatchToken: string | null
+  sentAt: string | null
+  status:
+    | 'abandoned'
+    | 'awaiting_approval'
+    | 'failed'
+    | 'pending'
+    | 'retryable'
+    | 'sending'
+    | 'sent'
+}
+
+const ASSISTANT_OUTBOX_REQUIRED_BEFORE_FINAL_SUFFIX =
+  ':required-before-final'
+
 interface AssistantOutboxDeliveryBubbleOrder {
   kind: 'fallback' | 'generated'
   ordinal: number
@@ -51,6 +103,214 @@ export function isAssistantOutboxReplyBubbleSuccessor(
       && nextOrder.bubble.ordinal > currentBubble.ordinal
   }
   return shouldAssistantOutboxBubblePrecedeNonBubble(currentBubble, nextOrder)
+}
+
+export function buildAssistantOutboxRequiredBeforeFinalSequenceBase(
+  intent: AssistantOutboxDeliverySequenceIntent,
+): string {
+  const explicitBaseKey = intent.deliveryIdempotencyKey?.trim() || null
+  if (explicitBaseKey?.endsWith(
+    ASSISTANT_OUTBOX_REQUIRED_BEFORE_FINAL_SUFFIX,
+  )) {
+    return explicitBaseKey
+  }
+  const baseKey = explicitBaseKey ?? `assistant-turn:${intent.turnId}`
+  return `${baseKey}${ASSISTANT_OUTBOX_REQUIRED_BEFORE_FINAL_SUFFIX}`
+}
+
+export function readAssistantOutboxRequiredBeforeFinalSequenceMember(
+  intent: AssistantOutboxDeliverySequenceIntent,
+): AssistantOutboxRequiredBeforeFinalSequenceMember | null {
+  const deliveryIdempotencyKey = intent.deliveryIdempotencyKey ?? null
+  if (!deliveryIdempotencyKey) {
+    return null
+  }
+  const bubbleMatch = /^(.*):bubble:([0-9]+)$/.exec(deliveryIdempotencyKey)
+  const memberKey = bubbleMatch?.[1] ?? deliveryIdempotencyKey
+  const segmentMatch = /^(.*):segment:([0-9]+)$/.exec(memberKey)
+  const sequenceBaseKey = segmentMatch?.[1] ?? memberKey
+  if (!sequenceBaseKey.endsWith(
+    ASSISTANT_OUTBOX_REQUIRED_BEFORE_FINAL_SUFFIX,
+  )) {
+    return null
+  }
+  if (!segmentMatch?.[2]) {
+    return {
+      kind: 'final',
+      segmentOrdinal: null,
+      sequenceBaseKey,
+      turnId: intent.turnId,
+    }
+  }
+  const segmentOrdinal = Number.parseInt(segmentMatch[2], 10)
+  if (!Number.isSafeInteger(segmentOrdinal)) {
+    return null
+  }
+  return {
+    kind: 'predecessor',
+    segmentOrdinal,
+    sequenceBaseKey,
+    turnId: intent.turnId,
+  }
+}
+
+export function isAssistantOutboxRequiredBeforeFinalPair(
+  predecessor: AssistantOutboxDeliverySequenceIntent,
+  final: AssistantOutboxDeliverySequenceIntent,
+): boolean {
+  const predecessorMember =
+    readAssistantOutboxRequiredBeforeFinalSequenceMember(predecessor)
+  const finalMember =
+    readAssistantOutboxRequiredBeforeFinalSequenceMember(final)
+  return (
+    predecessorMember?.kind === 'predecessor' &&
+    finalMember?.kind === 'final' &&
+    predecessorMember.turnId === finalMember.turnId &&
+    predecessorMember.sequenceBaseKey === finalMember.sequenceBaseKey
+  )
+}
+
+export function resolveAssistantOutboxRequiredBeforeFinalDependencies(
+  intents: readonly AssistantOutboxRequiredBeforeFinalDependencyIntent[],
+): AssistantOutboxRequiredBeforeFinalDependencyState {
+  const blockedIntentIds = new Set<string>()
+  const predecessorByFinalIntentId = new Map<string, string>()
+  const unavailableFinalIntentIds = new Set<string>()
+  const groups = new Map<
+    string,
+    AssistantOutboxRequiredBeforeFinalDependencyIntent[]
+  >()
+
+  for (const intent of intents) {
+    const member =
+      readAssistantOutboxRequiredBeforeFinalSequenceMember(intent)
+    if (!member) {
+      continue
+    }
+    const groupKey = JSON.stringify([
+      intent.sessionId,
+      member.turnId,
+      member.sequenceBaseKey,
+    ])
+    const group = groups.get(groupKey)
+    if (group) {
+      group.push(intent)
+    } else {
+      groups.set(groupKey, [intent])
+    }
+  }
+
+  for (const group of groups.values()) {
+    group.sort((left, right) =>
+      compareAssistantOutboxDeliverySequenceOrder(left, right) ||
+      left.intentId.localeCompare(right.intentId)
+    )
+    const predecessors = group.filter((intent) =>
+      readAssistantOutboxRequiredBeforeFinalSequenceMember(intent)?.kind ===
+        'predecessor'
+    )
+    const finals = group.filter((intent) =>
+      readAssistantOutboxRequiredBeforeFinalSequenceMember(intent)?.kind ===
+        'final'
+    )
+    if (finals.length === 0) {
+      continue
+    }
+
+    if (
+      predecessors.length === 0 ||
+      predecessors.some(
+        assistantOutboxRequiredBeforeFinalPredecessorIsUnavailable,
+      )
+    ) {
+      for (const intent of group) {
+        if (assistantOutboxRequiredBeforeFinalIntentIsActive(intent)) {
+          blockedIntentIds.add(intent.intentId)
+        }
+      }
+      for (const final of finals) {
+        if (assistantOutboxRequiredBeforeFinalIntentIsActive(final)) {
+          unavailableFinalIntentIds.add(final.intentId)
+        }
+      }
+      continue
+    }
+
+    const earliestActive =
+      group.find(assistantOutboxRequiredBeforeFinalIntentIsActive) ?? null
+    if (!earliestActive) {
+      continue
+    }
+    for (const intent of group) {
+      if (
+        intent.intentId !== earliestActive.intentId &&
+        assistantOutboxRequiredBeforeFinalIntentIsActive(intent)
+      ) {
+        blockedIntentIds.add(intent.intentId)
+      }
+    }
+    if (
+      readAssistantOutboxRequiredBeforeFinalSequenceMember(earliestActive)
+        ?.kind === 'predecessor'
+    ) {
+      for (const final of finals) {
+        if (assistantOutboxRequiredBeforeFinalIntentIsActive(final)) {
+          predecessorByFinalIntentId.set(
+            final.intentId,
+            earliestActive.intentId,
+          )
+        }
+      }
+    }
+  }
+
+  return {
+    blockedIntentIds,
+    predecessorByFinalIntentId,
+    unavailableFinalIntentIds,
+  }
+}
+
+export function isAssistantOutboxRequiredBeforeFinalIntentProvenUnattempted(
+  intent: AssistantOutboxRequiredBeforeFinalAttemptState,
+): boolean {
+  return (
+    (intent.status === 'pending' || intent.status === 'retryable') &&
+    intent.attemptCount === 0 &&
+    intent.lastAttemptAt === null &&
+    intent.sentAt === null &&
+    intent.delivery == null &&
+    intent.deliveryConfirmationPending === false &&
+    intent.preparedDispatchToken === null
+  )
+}
+
+function assistantOutboxRequiredBeforeFinalIntentIsActive(
+  intent: AssistantOutboxRequiredBeforeFinalDependencyIntent,
+): boolean {
+  return (
+    intent.status === 'awaiting_approval' ||
+    intent.status === 'pending' ||
+    intent.status === 'retryable' ||
+    intent.status === 'sending'
+  )
+}
+
+function assistantOutboxRequiredBeforeFinalPredecessorIsUnavailable(
+  intent: AssistantOutboxRequiredBeforeFinalDependencyIntent,
+): boolean {
+  if (intent.status === 'sent') {
+    return intent.delivery == null
+  }
+  if (intent.status === 'failed' || intent.status === 'abandoned') {
+    return true
+  }
+  return (
+    intent.status === 'retryable' &&
+    !intent.deliveryTransportIdempotent &&
+    intent.lastError?.code ===
+      'ASSISTANT_DELIVERY_CONFIRMATION_PENDING'
+  )
 }
 
 function readAssistantOutboxDeliverySequenceOrder(

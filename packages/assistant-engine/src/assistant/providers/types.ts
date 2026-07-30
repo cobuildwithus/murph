@@ -256,6 +256,7 @@ export interface AssistantProviderTurnExecutionResult {
 export interface AssistantProviderResponseSegment {
   deliveryContextOrdinal: number
   media?: readonly AssistantResponseMedia[] | null
+  requiredBeforeFinal?: boolean
   response: string
   targetInputId?: string | null
 }

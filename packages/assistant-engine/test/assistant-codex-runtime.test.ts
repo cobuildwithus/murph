@@ -1200,7 +1200,7 @@ describe('assistant codex runtime', () => {
                 {
                   type: 'inputText',
                   text:
-                    'invalid response media arguments; do not call finish_without_reply; explain that you could not attach the requested image in this reply',
+                    'invalid response media arguments; do not call finish_without_reply; explain that an attachment could not be included in this reply',
                 },
               ],
             },
@@ -19780,7 +19780,7 @@ describe('steered final segments', () => {
       {
         expectedSuccess: false,
         expectedText:
-          'invalid response media arguments; do not call finish_without_reply; explain that you could not attach the requested image in this reply',
+          'invalid response media arguments; do not call finish_without_reply; explain that an attachment could not be included in this reply',
         id: 103,
         kind: 'attach-response-media',
         media: [{
@@ -19809,12 +19809,221 @@ describe('steered final segments', () => {
     expect(result.responseMedia).toEqual([])
   })
 
+  it('synthesizes targeted recovery when required media recovery has no model text', async () => {
+    const replyRef = `ain_${'6'.repeat(32)}`
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-before-required-media-recovery',
+        message: 'Send the requested image.',
+        type: 'user_message',
+      }),
+      {
+        expectedText: 'selection recorded',
+        id: 1041,
+        kind: 'select-reply-target',
+        messageRef: replyRef,
+      },
+      {
+        expectedSuccess: false,
+        expectedText:
+          'invalid response media arguments; do not call finish_without_reply; explain that an attachment could not be included in this reply',
+        id: 1042,
+        kind: 'attach-response-media',
+        media: [{
+          kind: 'vault_image',
+          ref: 'raw/captures/incomplete-no-text.png',
+        }],
+      },
+      completedItemEvent({
+        id: 'user-after-required-media-recovery',
+        message: 'One more thing.',
+        type: 'user_message',
+      }),
+    ], {
+      authorizeAcceptedMessageTarget: async (input) => ({
+        targetInputId: input.messageRef,
+      }),
+    })
+
+    expect(result.finalAction).toBeNull()
+    expect(result.finalMessage).toBe(
+      "An attachment couldn't be included in this reply.",
+    )
+    expect(result.responseDeliveryContextOrdinal).toBe(0)
+    expect(result.responseMedia).toEqual([])
+    expect(result.targetInputId).toBe(replyRef)
+    expect(result.transcriptMessage).toBe(
+      "An attachment couldn't be included in this reply.",
+    )
+  })
+
+  it('keeps an earlier completed answer separate from blank required recovery', async () => {
+    const replyRef = `ain_${'8'.repeat(32)}`
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-before-completed-answer',
+        message: 'Answer this first.',
+        type: 'user_message',
+      }),
+      completedItemEvent({
+        id: 'assistant-before-required-recovery',
+        message: 'Here is the earlier answer.',
+        type: 'assistant_message',
+      }),
+      completedItemEvent({
+        id: 'user-requiring-media-recovery',
+        message: 'Now send the requested image.',
+        type: 'user_message',
+      }),
+      {
+        expectedText: 'selection recorded',
+        id: 1045,
+        kind: 'select-reply-target',
+        messageRef: replyRef,
+      },
+      {
+        expectedSuccess: false,
+        expectedText:
+          'invalid response media arguments; do not call finish_without_reply; explain that an attachment could not be included in this reply',
+        id: 1046,
+        kind: 'attach-response-media',
+        media: [{
+          kind: 'vault_image',
+          ref: 'raw/captures/incomplete-after-answer.png',
+        }],
+      },
+    ], {
+      authorizeAcceptedMessageTarget: async (input) => ({
+        targetInputId: input.messageRef,
+      }),
+    })
+
+    expect(result.finalAction).toBeNull()
+    expect(result.finalMessage).toBe(
+      "An attachment couldn't be included in this reply.",
+    )
+    expect(result.precedingAgentMessageSegments).toEqual([
+      expect.objectContaining({
+        deliveryContextOrdinal: 0,
+        response: 'Here is the earlier answer.',
+      }),
+    ])
+    expect(result.responseDeliveryContextOrdinal).toBe(1)
+    expect(result.responseMedia).toEqual([])
+    expect(result.targetInputId).toBe(replyRef)
+  })
+
+  it('requires recovery text even when later response media is deliverable', async () => {
+    const laterMedia = {
+      alt: 'A later public response image',
+      kind: 'image' as const,
+      source: 'later-public-image',
+      url: 'https://cdn.example.test/assistant/later-public-image.png',
+    }
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      {
+        expectedSuccess: false,
+        expectedText:
+          'invalid response media arguments; do not call finish_without_reply; explain that an attachment could not be included in this reply',
+        id: 1043,
+        kind: 'attach-response-media',
+        media: [{
+          kind: 'vault_image',
+          ref: 'raw/captures/incomplete-before-later-media.png',
+        }],
+      },
+      {
+        expectedText: '1 response image attached',
+        id: 1044,
+        kind: 'attach-response-media',
+        media: [laterMedia],
+      },
+    ])
+
+    expect(result.finalAction).toBeNull()
+    expect(result.finalMessage).toBe(
+      "An attachment couldn't be included in this reply.",
+    )
+    expect(result.responseMedia).toEqual([laterMedia])
+  })
+
+  it('keeps later-context media on its own target after required recovery', async () => {
+    const recoveryReplyRef = `ain_${'9'.repeat(32)}`
+    const laterReplyRef = `ain_${'a'.repeat(32)}`
+    const laterMedia = {
+      alt: 'A later-context public response image',
+      kind: 'image' as const,
+      source: 'later-context-public-image',
+      url: 'https://cdn.example.test/assistant/later-context-public-image.png',
+    }
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-before-cross-context-media-recovery',
+        message: 'Send the first image.',
+        type: 'user_message',
+      }),
+      {
+        expectedText: 'selection recorded',
+        id: 1047,
+        kind: 'select-reply-target',
+        messageRef: recoveryReplyRef,
+      },
+      {
+        expectedSuccess: false,
+        expectedText:
+          'invalid response media arguments; do not call finish_without_reply; explain that an attachment could not be included in this reply',
+        id: 1048,
+        kind: 'attach-response-media',
+        media: [{
+          kind: 'vault_image',
+          ref: 'raw/captures/incomplete-before-later-context.png',
+        }],
+      },
+      completedItemEvent({
+        id: 'user-owning-later-context-media',
+        message: 'Send this other image too.',
+        type: 'user_message',
+      }),
+      {
+        expectedText: 'selection recorded',
+        id: 1049,
+        kind: 'select-reply-target',
+        messageRef: laterReplyRef,
+      },
+      {
+        expectedText: '1 response image attached',
+        id: 1050,
+        kind: 'attach-response-media',
+        media: [laterMedia],
+      },
+    ], {
+      authorizeAcceptedMessageTarget: async (input) => ({
+        targetInputId: input.messageRef,
+      }),
+    })
+
+    expect(result.finalAction).toBeNull()
+    expect(result.finalMessage).toBe('')
+    expect(result.precedingAgentMessageSegments).toEqual([{
+      deliveryContextOrdinal: 0,
+      media: [],
+      requiredBeforeFinal: true,
+      response:
+        "An attachment couldn't be included in this reply.",
+      targetInputId: recoveryReplyRef,
+    }])
+    expect(result.responseDeliveryContextOrdinal).toBe(1)
+    expect(result.responseMedia).toEqual([laterMedia])
+    expect(result.targetInputId).toBe(laterReplyRef)
+    expect(result.transcriptMessage).toBe('')
+  })
+
   it.each([
     {
       expectedFinalMessage:
         "I couldn't attach the requested image in this reply.",
       expectedMediaText:
-        'invalid response media arguments; do not call finish_without_reply; explain that you could not attach the requested image in this reply',
+        'invalid response media arguments; do not call finish_without_reply; explain that an attachment could not be included in this reply',
       media: [{
         kind: 'vault_image',
         ref: 'raw/captures/incomplete-overlap.png',
@@ -20167,6 +20376,71 @@ describe('steered final segments', () => {
     expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([])
     expect(result.finalAction).toBeNull()
     expect(result.finalMessage).toBe('The first file attempt failed.')
+  })
+
+  it('retains approved vault-file ownership after an earlier visible response', async () => {
+    const sendVaultFile = vi.fn(async () => ({
+      filename: 'report.pdf',
+      status: 'approved' as const,
+    }))
+    const laterMedia = {
+      alt: 'Disallowed media after approved file ownership',
+      kind: 'image' as const,
+      source: 'post-vault-file-media',
+      url: 'https://cdn.example.test/assistant/post-vault-file-media.png',
+    }
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-before-first-visible-response',
+        message: 'Answer this first.',
+        type: 'user_message',
+      }),
+      completedItemEvent({
+        id: 'assistant-before-approved-vault-file',
+        message: 'Here is the answer to your first question.',
+        type: 'assistant_message',
+      }),
+      completedItemEvent({
+        id: 'user-after-first-visible-response',
+        message: 'Also send the report.',
+        type: 'user_message',
+      }),
+      {
+        expectedText: JSON.stringify({
+          filename: 'report.pdf',
+          note:
+            "Approval succeeded. The runtime owns delivery of the existing attachment intent. If another tool result already requires a visible reply, send only that result's recovery text without mentioning this file, approval, or delivery; otherwise call finish_without_reply. Do not attach the file or send a companion acknowledgment.",
+          status: 'approved',
+        }),
+        id: 1081,
+        kind: 'send-vault-file',
+        ref: `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/report.pdf`,
+      },
+      {
+        expectedSuccess: false,
+        expectedText:
+          'response media cannot be changed after a vault-file send',
+        id: 1082,
+        kind: 'attach-response-media',
+        media: [laterMedia],
+      },
+    ], {
+      hostedToolContext: createHostedToolContext({
+        computerToolsAvailable: false,
+        sendVaultFile,
+        vaultFileSendAvailable: true,
+      }),
+    })
+
+    expect(sendVaultFile).toHaveBeenCalledOnce()
+    expect(result.finalAction).toEqual({ kind: 'none' })
+    expect(result.finalMessage).toBe('')
+    expect(result.precedingAgentMessageSegments).toEqual([
+      expect.objectContaining({
+        response: 'Here is the answer to your first question.',
+      }),
+    ])
+    expect(result.responseMedia).toEqual([])
   })
 
   it('keeps a different generated-file request replyable while a prior send is active', async () => {

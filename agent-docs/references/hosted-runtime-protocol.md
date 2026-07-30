@@ -1243,13 +1243,21 @@ uses the existing receipt checkpoint against the latest workspace. After the
 private capture is ready, the runtime upserts one trusted system input containing
 its exact `vault_image` descriptor on the original route, registers that input
 with the ordinary pending assistant-input index, and notifies the existing wake
-signal. Normal foreground selection therefore keeps fresh conversation ahead of
-the completion and owns completion retry and terminal evidence. Provider
-completion starts the existing generic usage recorder without awaiting it, and
-image delivery never waits for accounting or diagnostic writes. When the model
-attaches the private ref, the
-assistant boundary reloads it and derives canonical byte metadata before response
-media can enter the outbox; final delivery reloads it again to prove the selected
+signal. If an index enqueue still fails after the bounded immediate attempts,
+the controller retains the completed item and the runtime sets one dedicated
+retry deadline before another staging batch. A foreground wake may interrupt
+that wait and reset the shared checkpoint debounce, but cannot postpone the
+completion retry. Before a graceful snapshot can release retained completed
+work, the controller performs a final event-stage attempt when needed and
+awaits exact idempotent registration of every completion input ID in the
+existing pending index. A staging or index failure aborts the checkpoint;
+cursor-based backfill is not the owner. Normal foreground selection therefore
+keeps fresh conversation ahead of the completion and owns completion retry and
+terminal evidence. Provider completion starts the existing generic usage
+recorder without awaiting it, and image delivery never waits for accounting or
+diagnostic writes. When the model attaches the private ref, the assistant
+boundary reloads it and derives canonical byte metadata before response media
+can enter the outbox; final delivery reloads it again to prove the selected
 bytes have not changed. This adds no image-specific sender, durable image job,
 mailbox kind, scheduler, reservation, allowance implementation, or usage
 lifecycle. Runner loss may drop unfinished provider work.

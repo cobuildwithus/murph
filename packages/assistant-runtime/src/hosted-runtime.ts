@@ -2579,6 +2579,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         };
       };
       let imageAssistantWakePending = false;
+      let imageCompletionRetryAtMs: number | null = null;
       const flushImageGenerationWork = async (): Promise<void> => {
         const controller = imageGenerationController;
         if (!controller) {
@@ -2608,10 +2609,36 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             }
           },
         );
-        const stagedInputCount = await controller.stageCompleted();
-        if (canonicalWriteCount > 0 || stagedInputCount > 0) {
+        const deferRetainedCompletionRetry =
+          imageCompletionRetryAtMs !== null
+          && Date.now() < imageCompletionRetryAtMs;
+        const stagedInputCount = deferRetainedCompletionRetry
+          ? 0
+          : await controller.stageCompleted();
+        const retainedCompletionRetryPending = controller.hasCompleted();
+        if (!retainedCompletionRetryPending) {
+          imageCompletionRetryAtMs = null;
+        } else if (!deferRetainedCompletionRetry) {
+          imageCompletionRetryAtMs = Date.now() + idleCheckpointDelayMs;
+        }
+        if (
+          canonicalWriteCount > 0
+          || stagedInputCount > 0
+          || (
+            retainedCompletionRetryPending
+            && !deferRetainedCompletionRetry
+          )
+        ) {
           runtimeStateDirty = true;
-          markIdleCheckpointTimerAfterDirtyWork();
+          if (
+            retainedCompletionRetryPending
+            && !deferRetainedCompletionRetry
+            && imageCompletionRetryAtMs !== null
+          ) {
+            setIdleCheckpointStartBy(imageCompletionRetryAtMs);
+          } else {
+            markIdleCheckpointTimerAfterDirtyWork();
+          }
         }
         imageAssistantWakePending ||= stagedInputCount > 0;
       };
@@ -3266,7 +3293,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           // deadline and starving the event loop.
           idleCheckpointStartByMs: imageGenerationWorkPending
             ? Date.now() + HOSTED_RUNTIME_MAX_TIMER_DELAY_MS
-            : idleCheckpointStartByMs,
+            : imageCompletionRetryAtMs === null
+              ? idleCheckpointStartByMs
+              : Math.min(
+                  idleCheckpointStartByMs,
+                  imageCompletionRetryAtMs,
+                ),
           projectedAssistantWakeAtMs: hotProjectedAssistantWake?.wakeAtMs ?? null,
           runtimeAbortSignal: runtimeAbortController.signal,
           runtimeWakeSignal: options.runtimeWakeSignal ?? null,
@@ -3298,6 +3330,26 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         ) {
           markIdleCheckpointTimerAfterDirtyWork();
           continue;
+        }
+        if (imageGenerationController?.hasCompleted()) {
+          // Graceful shutdown cannot carry the controller's invocation-local
+          // queue into the next runtime. Establish exact durable ownership for
+          // every retained completion and project its existing assistant wake
+          // before snapshotting; a staging or index write failure must abort
+          // the checkpoint instead of orphaning it.
+          await imageGenerationController
+            .prepareRetainedCompletionsForCheckpoint();
+          pendingWake = selectEarliestHostedRuntimeWake([
+            {
+              at: pendingWake.nextWakeAt,
+              reason: pendingWake.nextWakeReason,
+            },
+            {
+              at: new Date().toISOString(),
+              reason: HOSTED_ASSISTANT_WAKE_REASON,
+            },
+          ]);
+          recordUnservicedRecheckWake(pendingWake);
         }
         const dirtyWindowCheckpointTrigger = resolveHostedRuntimeIdleCheckpointTrigger({
           dirtyWaitResult,

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import {
+  createAssistantInputEventId,
   readAssistantInputEvent,
   upsertAssistantInputEvent,
 } from "@murphai/assistant-engine";
@@ -329,10 +330,189 @@ describe("hosted image generation", () => {
     );
     await controller.close();
   });
+
+  test("stages a retained completion one final time before checkpoint ownership", async () => {
+    const vaultRoot = await mkdtemp(path.join(
+      tmpdir(),
+      "murph-image-checkpoint-stage-",
+    ));
+    tempRoots.push(vaultRoot);
+    await initializeVault({
+      createdAt: "2026-07-26T12:00:00.000Z",
+      vaultRoot,
+    });
+    const originSourceRef = createSyntheticImageOriginSourceRef(
+      "checkpoint-stage",
+    );
+    const originInputId = createAssistantInputEventId({
+      sourceRef: originSourceRef,
+    });
+    const controller = createHostedImageGenerationController({
+      notifyReady: () => undefined,
+      onStarted: () => undefined,
+      vaultRoot,
+      withCanonicalWritePersistence: async (run) => await run(),
+    });
+
+    assert.equal(controller.launcher.launch({
+      operationId: "image_operation_checkpoint_stage",
+      originAssistantInputId: originInputId,
+      scopeId: "session_checkpoint_stage",
+      async run() {
+        return {
+          media: null,
+          runtimeIssue: null,
+          savedImageRef: null,
+        };
+      },
+    }), "started");
+    await vi.waitFor(() => {
+      assert.equal(controller.hasCompleted(), true);
+    });
+    assert.equal(await controller.stageCompleted(), 0);
+    assert.deepEqual(
+      await readHostedPendingAssistantInputIds({ vaultRoot }),
+      [],
+    );
+
+    const origin = await upsertSyntheticImageOrigin({
+      sourceRef: originSourceRef,
+      vaultRoot,
+    });
+    assert.equal(origin.inputId, originInputId);
+    await controller.prepareRetainedCompletionsForCheckpoint();
+
+    const pendingInputIds =
+      await readHostedPendingAssistantInputIds({ vaultRoot });
+    assert.equal(pendingInputIds.length, 1);
+    const completion = await readAssistantInputEvent({
+      inputId: pendingInputIds[0]!,
+      vault: vaultRoot,
+    });
+    assert.equal(
+      completion?.sourceRef.kind === "hosted-mailbox"
+        ? completion.sourceRef.payloadSchema
+        : null,
+      "murph.hosted-image-completion.v1",
+    );
+    await controller.close();
+  });
+
+  test("rejects checkpoint preparation when exact completion ownership cannot persist", async () => {
+    const vaultRoot = await mkdtemp(path.join(
+      tmpdir(),
+      "murph-image-checkpoint-index-",
+    ));
+    tempRoots.push(vaultRoot);
+    await initializeVault({
+      createdAt: "2026-07-26T12:00:00.000Z",
+      vaultRoot,
+    });
+    const origin = await upsertSyntheticImageOrigin({
+      sourceRef: createSyntheticImageOriginSourceRef("checkpoint-index"),
+      vaultRoot,
+    });
+    const enqueuePendingInputId = vi.fn(async () => {
+      throw new Error("Synthetic exact pending-index write failure.");
+    });
+    const controller = createHostedImageGenerationController({
+      enqueuePendingInputId,
+      notifyReady: () => undefined,
+      onStarted: () => undefined,
+      vaultRoot,
+      withCanonicalWritePersistence: async (run) => await run(),
+    });
+
+    assert.equal(controller.launcher.launch({
+      operationId: "image_operation_checkpoint_index",
+      originAssistantInputId: origin.inputId,
+      scopeId: "session_checkpoint_index",
+      async run() {
+        return {
+          media: null,
+          runtimeIssue: null,
+          savedImageRef: null,
+        };
+      },
+    }), "started");
+    await vi.waitFor(() => {
+      assert.equal(controller.hasCompleted(), true);
+    });
+    assert.equal(await controller.stageCompleted(), 0);
+    assert.equal(enqueuePendingInputId.mock.calls.length, 2);
+    await assert.rejects(
+      controller.prepareRetainedCompletionsForCheckpoint(),
+      /Synthetic exact pending-index write failure/u,
+    );
+    assert.equal(enqueuePendingInputId.mock.calls.length, 3);
+    assert.deepEqual(
+      await readHostedPendingAssistantInputIds({ vaultRoot }),
+      [],
+    );
+    await controller.close();
+  });
 });
 
 async function findCompletionInputId(vaultRoot: string): Promise<string> {
   const inputIds = await readHostedPendingAssistantInputIds({ vaultRoot });
   assert.equal(inputIds.length, 1);
   return inputIds[0]!;
+}
+
+function createSyntheticImageOriginSourceRef(identity: string) {
+  return {
+    dedupeKey: `origin_dedupe_${identity}`,
+    eventId: `origin_event_${identity}`,
+    itemId: `origin_item_${identity}`,
+    kind: "hosted-mailbox" as const,
+    lane: "conversation" as const,
+    laneSeq: "1",
+    payloadSchema: "murph.hosted-mailbox-payload.v1",
+    payloadSource: "inline" as const,
+    source: "hosted-mailbox" as const,
+    wakeSchema: "murph.hosted-execution-wake.v1",
+  };
+}
+
+async function upsertSyntheticImageOrigin(input: {
+  sourceRef: ReturnType<typeof createSyntheticImageOriginSourceRef>;
+  vaultRoot: string;
+}) {
+  const text = "Please draw a synthetic test image.";
+  return await upsertAssistantInputEvent({
+    event: {
+      content: {
+        text,
+        transcriptText: text,
+        userMessageContent: [{
+          text,
+          type: "text",
+        }],
+      },
+      conversation: {
+        accountId: "account_checkpoint",
+        actorId: "actor_checkpoint",
+        actorIsSelf: false,
+        source: "linq",
+        threadId: "thread_checkpoint",
+        threadIsDirect: true,
+      },
+      occurredAt: "2026-07-26T12:00:00.000Z",
+      receivedAt: "2026-07-26T12:00:00.000Z",
+      replyTarget: {
+        channel: "linq",
+        messageId: "message_checkpoint",
+        threadId: "thread_checkpoint",
+      },
+      sourceMetadata: {
+        kind: "linq",
+        partCount: 1,
+        reactionEligible: true,
+        replyToMessageId: null,
+        service: "iMessage",
+      },
+      sourceRef: input.sourceRef,
+    },
+    vault: input.vaultRoot,
+  });
 }

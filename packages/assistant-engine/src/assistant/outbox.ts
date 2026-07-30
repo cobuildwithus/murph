@@ -93,6 +93,11 @@ import { sanitizeAssistantOutboxIntentForPersistence } from './redaction.js'
 import {
   normalizeAssistantResponseMediaList,
 } from './response-media.js'
+import {
+  isAssistantOutboxRequiredBeforeFinalIntentProvenUnattempted,
+  readAssistantOutboxRequiredBeforeFinalSequenceMember,
+  resolveAssistantOutboxRequiredBeforeFinalDependencies,
+} from './outbox/ordering.js'
 import { writeAssistantAutoReplyIntentProvenance } from './automation/intent-provenance.js'
 import {
   assistantDeviceActivityAuthorityKeyMatches,
@@ -113,8 +118,19 @@ export type {
   AssistantOutboxPreparedMirrorDispatch,
 }
 export {
+  buildAssistantOutboxRequiredBeforeFinalSequenceBase,
   compareAssistantOutboxDeliverySequenceOrder,
+  isAssistantOutboxRequiredBeforeFinalPair,
+  isAssistantOutboxRequiredBeforeFinalIntentProvenUnattempted,
   isAssistantOutboxReplyBubbleSuccessor,
+  readAssistantOutboxRequiredBeforeFinalSequenceMember,
+  resolveAssistantOutboxRequiredBeforeFinalDependencies,
+} from './outbox/ordering.js'
+export type {
+  AssistantOutboxRequiredBeforeFinalAttemptState,
+  AssistantOutboxRequiredBeforeFinalDependencyIntent,
+  AssistantOutboxRequiredBeforeFinalDependencyState,
+  AssistantOutboxRequiredBeforeFinalSequenceMember,
 } from './outbox/ordering.js'
 export {
   assistantDeliveryErrorPreventsFreshIntentRetry,
@@ -630,6 +646,54 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       throw new Error(`Assistant outbox intent ${input.intentId} was not found.`)
     }
 
+    const requiredSequenceMember =
+      readAssistantOutboxRequiredBeforeFinalSequenceMember(intent)
+    if (requiredSequenceMember) {
+      const dependencyState =
+        resolveAssistantOutboxRequiredBeforeFinalDependencies(
+          await listAssistantOutboxIntentsLocalStore(input.vault),
+        )
+      if (dependencyState.blockedIntentIds.has(intent.intentId)) {
+        if (
+          dependencyState.unavailableFinalIntentIds.has(intent.intentId) &&
+          isAssistantOutboxRequiredBeforeFinalIntentProvenUnattempted(intent)
+        ) {
+          return {
+            action: 'required-predecessor-unavailable' as const,
+            intent,
+          }
+        }
+        if (
+          requiredSequenceMember.kind === 'final' &&
+          intent.status !== 'awaiting_approval' &&
+          !isAssistantOutboxRequiredBeforeFinalIntentProvenUnattempted(intent)
+        ) {
+          return {
+            action: 'required-predecessor-reconcile' as const,
+            intent,
+            intentPath,
+          }
+        }
+        return {
+          action: 'skip' as const,
+          intent,
+        }
+      }
+      if (
+        requiredSequenceMember.kind === 'final' &&
+        intent.status === 'retryable' &&
+        !inferAssistantOutboxDeliveryTransportIdempotent(intent) &&
+        intent.lastError?.code ===
+          'ASSISTANT_DELIVERY_CONFIRMATION_PENDING'
+      ) {
+        return {
+          action: 'required-predecessor-reconcile' as const,
+          intent,
+          intentPath,
+        }
+      }
+    }
+
     if (input.allowPreparedSending === true && intent.status === 'sending') {
       if (
         !input.preparedDispatch ||
@@ -748,6 +812,86 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
     return {
       intent: prepared.intent,
       deliveryError: prepared.intent.lastError,
+      session: null,
+    }
+  }
+
+  if (prepared.action === 'required-predecessor-unavailable') {
+    const failedIntent = await markAssistantOutboxIntentMirrorTerminalById({
+      error: createAssistantRequiredPredecessorUnavailableError(),
+      intentId: prepared.intent.intentId,
+      onlyCurrentStatuses: ['pending', 'retryable'],
+      requireUnavailableRequiredPredecessor: true,
+      status: 'failed',
+      vault: input.vault,
+    })
+    if (failedIntent?.status !== 'failed') {
+      return dispatchAssistantOutboxIntentInternal(input)
+    }
+    const intent = failedIntent ?? prepared.intent
+    return {
+      intent,
+      deliveryError:
+        intent.lastError ??
+        normalizeAssistantDeliveryError(
+          createAssistantRequiredPredecessorUnavailableError(),
+        ),
+      session: null,
+    }
+  }
+
+  if (prepared.action === 'required-predecessor-reconcile') {
+    const recoveredDelivery =
+      (await input.dispatchHooks?.resolveDeliveredIntent?.({
+        intent: prepared.intent,
+        vault: input.vault,
+      })) ??
+      resolvePersistedAssistantOutboxDelivery(prepared.intent)
+    if (recoveredDelivery) {
+      const sentIntent = await markAssistantOutboxIntentSent({
+        delivery: recoveredDelivery,
+        intent: prepared.intent,
+        intentPath: prepared.intentPath,
+        vault: input.vault,
+      })
+      return {
+        intent: sentIntent,
+        deliveryError: null,
+        session: null,
+      }
+    }
+    if (
+      inferAssistantOutboxDeliveryTransportIdempotent(prepared.intent)
+    ) {
+      const retryIntent = await rescheduleAssistantOutboxConfirmationRetry({
+        error: createAssistantDeliveryConfirmationPendingError(),
+        intentPath: prepared.intentPath,
+        onlyCurrentStatuses: ['pending', 'retryable', 'sending'],
+        scheduledAt: now,
+        sending: prepared.intent,
+        vault: input.vault,
+      })
+      return {
+        intent: retryIntent,
+        deliveryError: retryIntent.lastError,
+        session: null,
+      }
+    }
+    const failedIntent = await markAssistantOutboxIntentMirrorTerminal({
+      error: createAssistantDeliveryAmbiguousError(
+        new Error(
+          'Required-before-final delivery had no receipt to reconcile and cannot be retried safely.',
+        ),
+      ),
+      failedAt: now,
+      intent: prepared.intent,
+      intentPath: prepared.intentPath,
+      status: 'failed',
+      vault: input.vault,
+    })
+    return {
+      intent: failedIntent,
+      deliveryError: failedIntent.lastError,
       session: null,
     }
   }
@@ -1070,6 +1214,14 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       session: null,
     }
   }
+}
+
+function createAssistantRequiredPredecessorUnavailableError(): VaultCliError {
+  return new VaultCliError(
+    'ASSISTANT_REQUIRED_PREDECESSOR_UNAVAILABLE',
+    'Assistant delivery was not attempted because its required preceding reply was not confirmed sent.',
+    { retryable: false },
+  )
 }
 
 function assistantOutboxIntentMatchesPreparedDispatch(
@@ -1661,7 +1813,15 @@ export async function drainAssistantOutboxLocal(input: {
   })
   const now = input.now ?? new Date()
   const intents = await listAssistantOutboxIntents(input.vault)
-  const due = intents.filter((intent) => shouldDispatchAssistantOutboxIntent(intent, now))
+  const requiredDependencyState =
+    resolveAssistantOutboxRequiredBeforeFinalDependencies(intents)
+  const due = intents.filter((intent) =>
+    shouldDispatchAssistantOutboxIntent(intent, now) &&
+    (
+      !requiredDependencyState.blockedIntentIds.has(intent.intentId) ||
+      requiredDependencyState.unavailableFinalIntentIds.has(intent.intentId)
+    )
+  )
   const limit = Math.max(0, Math.trunc(input.limit ?? due.length))
   const selected = due.slice(0, limit)
   let sent = 0
@@ -1844,6 +2004,7 @@ export async function markAssistantOutboxIntentMirrorTerminalById(input: {
   failedAt?: Date
   intentId: string
   onlyCurrentStatuses?: readonly AssistantOutboxIntent['status'][]
+  requireUnavailableRequiredPredecessor?: boolean
   status: 'abandoned' | 'failed'
   vault: string
 }): Promise<AssistantOutboxIntent | null> {
@@ -1864,6 +2025,9 @@ export async function markAssistantOutboxIntentMirrorTerminalById(input: {
     intentPath,
     ...(input.onlyCurrentStatuses
       ? { onlyCurrentStatuses: input.onlyCurrentStatuses }
+      : {}),
+    ...(input.requireUnavailableRequiredPredecessor === true
+      ? { requireUnavailableRequiredPredecessor: true }
       : {}),
     status: input.status,
     vault: input.vault,

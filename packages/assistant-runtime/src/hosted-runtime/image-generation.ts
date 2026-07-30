@@ -15,6 +15,7 @@ const IMAGE_COMPLETION_SCHEMA = "murph.hosted-image-completion.v1";
 
 interface CompletedImageGeneration {
   completedAt: string;
+  completionInputId: string | null;
   operationId: string;
   originAssistantInputId: string;
   result: AssistantHostedImageGenerationResult;
@@ -34,6 +35,7 @@ export interface HostedImageGenerationController {
   ): Promise<number>;
   hasCompleted(): boolean;
   hasWork(): boolean;
+  prepareRetainedCompletionsForCheckpoint(): Promise<void>;
   releaseAcceptedInputs(
     inputIds: readonly string[],
     hasCompleteTerminalEvidence: (inputId: string) => Promise<boolean>,
@@ -111,6 +113,7 @@ export function createHostedImageGenerationController(input: {
           }
           completed.push({
             completedAt: new Date().toISOString(),
+            completionInputId: null,
             operationId: request.operationId,
             originAssistantInputId: request.originAssistantInputId,
             result,
@@ -129,6 +132,7 @@ export function createHostedImageGenerationController(input: {
           }
           completed.push({
             completedAt: new Date().toISOString(),
+            completionInputId: null,
             operationId: request.operationId,
             originAssistantInputId: request.originAssistantInputId,
             result: {
@@ -188,13 +192,16 @@ export function createHostedImageGenerationController(input: {
       let staged = 0;
       while (completed.length > 0) {
         const completion = completed[0]!;
-        let completionInputId: string | null = null;
+        let completionInputId = completion.completionInputId;
         for (let attempt = 0; attempt < 2; attempt += 1) {
           try {
-            const inputId = await stageImageGenerationCompletion({
-              completion,
-              vaultRoot: input.vaultRoot,
-            });
+            const inputId = completionInputId
+              ?? await stageImageGenerationCompletion({
+                completion,
+                vaultRoot: input.vaultRoot,
+              });
+            completion.completionInputId = inputId;
+            completionInputId = inputId;
             await enqueuePendingInputId({
               inputId,
               vaultRoot: input.vaultRoot,
@@ -223,6 +230,20 @@ export function createHostedImageGenerationController(input: {
         staged += 1;
       }
       return staged;
+    },
+    async prepareRetainedCompletionsForCheckpoint() {
+      for (const completion of completed) {
+        const completionInputId = completion.completionInputId
+          ?? await stageImageGenerationCompletion({
+            completion,
+            vaultRoot: input.vaultRoot,
+          });
+        completion.completionInputId = completionInputId;
+        await enqueuePendingInputId({
+          inputId: completionInputId,
+          vaultRoot: input.vaultRoot,
+        });
+      }
     },
     hasCompleted() {
       return completed.length > 0;
