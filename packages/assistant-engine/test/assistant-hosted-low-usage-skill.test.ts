@@ -218,7 +218,7 @@ describe('assistant hosted low-usage skill', () => {
     )
     expect(skill).toContain("Match the room's energy")
     expect(normalizedSkill).toContain('without naming or singling out a nonpayer')
-    expect(skill).toContain('guilt-trip, call out nonpayers')
+    expect(normalizedSkill).toContain('guilt-trip, call out nonpayers')
     expect(skill).toContain('skip the heads-up entirely')
     expect(skill).toContain('standing no-re-offer rule wins')
     expect(skill).toContain('Never switch it automatically')

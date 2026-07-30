@@ -1560,10 +1560,9 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
                     result: {
                       status: 'ok',
                       usage: {
-                        capacityState: 'low',
+                        fundingNeeded: true,
                         fundingUrl,
-                        periodEnd: '2026-08-29T00:00:00.000Z',
-                        remainingPercent: 12,
+                        sponsorshipStatus: 'not_sponsored',
                       },
                     },
                   }
@@ -1581,14 +1580,14 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
                             requirementsLabel:
                               'Bring Murph and one genuinely new person together in a fresh group.',
                             rewardLabel:
-                              'about 100 more messages on the model your Murph is using now',
+                              '$2.00 of cost-weighted usage credit for your Murph',
                           },
                           {
                             code: 'active_group_v1',
                             requirementsLabel:
                               'Start a fresh group and make it genuinely active, with multiple people actually talking.',
                             rewardLabel:
-                              'about 140 more messages on the model your Murph is using now',
+                              '$3.50 of cost-weighted usage credit for your Murph',
                           },
                         ],
                         trialCreditNotice: null,
@@ -1653,6 +1652,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
         expect(activeGroupPathIndex).toBeGreaterThanOrEqual(0)
         expect(fundingUrlIndex).toBeGreaterThan(newPersonPathIndex)
         expect(fundingUrlIndex).toBeGreaterThan(activeGroupPathIndex)
+        expect(second.finalMessage).not.toMatch(/messages?\b/iu)
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
