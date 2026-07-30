@@ -397,9 +397,10 @@ for (const width of [768, 1280] as const) {
     const card = activeState.locator(
       '[aria-label="Pulse AI usage"]',
     );
-    const trigger = card.getByRole("button", { name: "Add usage" });
-    const historyOnlyPreview = study.locator(
-      '[data-design-interaction="history-only"]',
+    const trigger = card.locator("button").filter({ hasText: "Add usage" });
+    const historyPreview = study.locator('[data-design-interaction="history-only"]');
+    const referralDetailsPreview = study.locator(
+      '[data-design-interaction="referral-details"]',
     );
     await expect(
       study.locator('[data-design-state="exhausted-with-credit"] [inert]'),
@@ -410,18 +411,50 @@ for (const width of [768, 1280] as const) {
     await expect(
       study.locator('[data-design-state="trial-conversion"] [inert]'),
     ).toHaveCount(1);
-    await expect(historyOnlyPreview).toHaveCount(1);
+    await expect(activeState.locator("[inert]")).toHaveCount(1);
+    await expect(historyPreview).toHaveCount(1);
     expect(
-      await historyOnlyPreview.evaluate((element) =>
+      await historyPreview.evaluate((element) =>
         element.hasAttribute("inert"),
       ),
     ).toBe(false);
     await expect(trigger).toBeVisible();
 
-    const history = historyOnlyPreview.locator("details");
+    const history = historyPreview.locator("details");
+    const historySummary = history.locator("summary");
     await expect(history).not.toHaveAttribute("open", "");
-    await history.locator("summary").click();
+    await historySummary.click();
     await expect(history).toHaveAttribute("open", "");
+    await historySummary.focus();
+    await page.keyboard.press("Enter");
+    await expect(history).not.toHaveAttribute("open", "");
+    await expect(
+      historyPreview.locator(
+        'a, button, input, select, textarea, summary, [tabindex]:not([tabindex="-1"])',
+      ),
+    ).toHaveCount(1);
+
+    const referralDetails = referralDetailsPreview.locator("details");
+    const referralDetailsSummary = referralDetails.locator("summary");
+    await expect(referralDetails).not.toHaveAttribute("open", "");
+    await referralDetailsSummary.click();
+    await expect(referralDetails).toHaveAttribute("open", "");
+    await expect(
+      referralDetails.getByText(
+        "Start a fresh group and make it genuinely active, with multiple people actually talking.",
+      ),
+    ).toBeVisible();
+    await referralDetailsSummary.focus();
+    await page.keyboard.press("Enter");
+    await expect(referralDetails).not.toHaveAttribute("open", "");
+
+    const trialConversion = study.locator(
+      '[data-design-state="trial-conversion"]',
+    );
+    await expect(trialConversion.getByText("Free trial", { exact: true })).toBeVisible();
+    await expect(
+      trialConversion.locator("button").filter({ hasText: "Start Pulse plan" }),
+    ).toBeVisible();
 
     const layout = await page.evaluate(() => {
       const owner = document.querySelector(

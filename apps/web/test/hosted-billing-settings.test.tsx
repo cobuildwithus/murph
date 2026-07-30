@@ -186,8 +186,8 @@ describe("HostedBillingSettings", () => {
       markup,
       /aria-label="Pulse Trial AI usage" class="[^"]*rounded-xl/u,
     );
-    assert.match(markup, /35% used/);
-    assert.match(markup, /65% remaining/);
+    assert.match(markup, /aria-label="35% used, 65% remaining"/);
+    assert.match(markup, /<span[^>]*>65% remaining<\/span>/u);
     assert.match(markup, /Trial ends Jul 17, 2026/);
     assert.match(markup, /may run out in about 3 days/);
     assert.ok(markup.indexOf("AI usage") < markup.indexOf("Run experiments"));
