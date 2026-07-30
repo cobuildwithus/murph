@@ -1,6 +1,6 @@
 # Assistant Ask bounded handoff port
 
-Status: active
+Status: completed
 Created: 2026-07-30
 
 ## Goal
@@ -78,9 +78,29 @@ Preliminary specialist disposition:
   and Assistant Ask completion integration boundaries. No test-only Temporal
   controls or parallel orchestration harness were added.
 
+Parent product-experience revalidation:
+
+- Pass. The corrected flow keeps the existing entry point and destination,
+  makes acceptance truthful at the durable Temporal boundary, preserves the
+  mailbox as reconciliation truth, and ties replay cancellation to the
+  initiating turn.
+- The stable owner-boundary tests, hosted-local Temporal scenario, and signed
+  loopback replay/cancellation scenarios directly prove the changed behavior.
+  A new monolithic scenario would require test-only orchestration controls and
+  would not add material product confidence for this patch.
+
+Parent final review:
+
+- No remaining findings. Retry is opt-in for stable Assistant Ask identities,
+  shares one deadline, excludes caller cancellation and non-`5xx` responses,
+  and does not change unrelated control requests.
+
 ## Deployment
 
 - Web and Cloudflare control-flow change only; no schema, wire-shape, or
   persisted-state change.
-- Determine and document the safe deploy order and temporary skew behavior
-  before final handoff.
+- Deploy Cloudflare and roll the runner revision first, then deploy Web. The
+  Cloudflare-first compatibility window accepts old Web behavior; Web-first
+  would omit the new exact-replay recovery from warm old runners.
+Updated: 2026-07-30
+Completed: 2026-07-30
