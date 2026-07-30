@@ -1070,6 +1070,9 @@ revision containing this migration as the rollback floor: do not move the Web
 alias to a pre-migration revision afterward. Incident recovery is a forward
 redeploy of that revision or a later compatible Web revision. Cloudflare may
 roll back independently because final provider authorization remains Web-owned.
+`hosted-linq-provider-health-contract-migration-postgres.test.ts` executes the
+exact SQL transition, while `production-migration-guard.test.ts` pins the
+production-alias proof, drain, second alias proof, and migration-owner order.
 
 The Linq weighted-capacity rollout follows that rule. Predeploy adds nullable
 `HostedThreadRoute.accountLookupKey` and its index; old application code remains
