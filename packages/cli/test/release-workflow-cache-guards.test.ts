@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
@@ -7,6 +7,18 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 const workflowsDir = path.join(repoRoot, '.github', 'workflows')
 
 describe('GitHub Actions cache trust-boundary guards', () => {
+  it('keeps the private Temporal deployment owner out of the public repository', () => {
+    expect(existsSync(path.join(repoRoot, 'render.yaml'))).toBe(false)
+    expect(
+      existsSync(
+        path.join(
+          workflowsDir,
+          'deploy-render-temporal-worker.yml',
+        ),
+      ),
+    ).toBe(false)
+  })
+
   it('keeps broad caches and privileged triggers out of release, deploy, and PR workflows', () => {
     const findings: string[] = []
     const workflowFiles = readdirSync(workflowsDir)
@@ -26,12 +38,6 @@ describe('GitHub Actions cache trust-boundary guards', () => {
 
       for (const [description, pattern] of forbiddenPatterns) {
         if (pattern.test(workflow)) {
-          if (
-            description === 'workflow_run handoff trigger' &&
-            isAllowedWorkflowRunHandoff(file, workflow)
-          ) {
-            continue
-          }
           if (isAllowedHostSupportTypeScriptCache(file, workflow, description)) {
             continue
           }
@@ -70,17 +76,4 @@ function isAllowedHostSupportTypeScriptCache(
   }
 
   return false
-}
-
-function isAllowedWorkflowRunHandoff(file: string, workflow: string): boolean {
-  if (file !== 'deploy-render-temporal-worker.yml') {
-    return false
-  }
-
-  return [
-    /branches:\s*\n\s*-\s+main/u,
-    /github\.event\.workflow_run\.event\s*==\s*'push'/u,
-    /github\.event\.workflow_run\.head_branch\s*==\s*'main'/u,
-    /github\.event\.workflow_run\.conclusion\s*==\s*'success'/u,
-  ].every((pattern) => pattern.test(workflow))
 }

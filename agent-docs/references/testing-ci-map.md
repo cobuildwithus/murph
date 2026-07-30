@@ -1,6 +1,6 @@
 # Testing And CI Map
 
-Last verified: 2026-07-29
+Last verified: 2026-07-30
 
 ## Current Repo Checks
 
@@ -286,7 +286,11 @@ not enter evidence; and attachment-only input fails closed before provider work.
 - `.github/workflows/web-viewport-overflow.yml` runs the `pnpm --dir apps/web test:viewport-overflow` Playwright gate on GitHub-hosted `ubuntu-24.04` for every pull request and `main` push. It installs only Chromium (`playwright install --with-deps chromium`); Playwright's `webServer` boots the hosted-web dev server with the placeholder smoke env, so the job needs no Postgres service or real secrets. On failure it uploads the Playwright HTML report as an artifact.
 - `.github/workflows/host-support.yml` runs a host-support matrix on GitHub-hosted `ubuntu-24.04` and `macos-latest`, installing with `pnpm install --frozen-lockfile`, building the workspace, preparing `pnpm build:test-runtime:prepared`, and then exercising the focused built-runtime CLI host-support suite (`packages/cli/test/setup-cli.test.ts` and `packages/cli/test/inbox-service-boundaries.test.ts`) with `MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1` on both hosts. The macOS host leg serializes package-script workspace builds so sibling `tsc -b --force` package scripts do not rewrite shared project-reference declarations at once while the Linux leg keeps the normal package-build fanout. The workflow also carries deterministic CI-only hosted-web build placeholders for `DATABASE_URL`, hosted device routing, contact privacy, hosted mailbox fingerprinting, and the public Privy app id so its Linux release shards can finish `apps/web verify` without inheriting production secrets.
 - The same workflow also preserves the Ubuntu `pnpm release:check` surface without running it as one long job: release metadata/build/typecheck, package coverage shards, app verification, and fixture coverage run as parallel jobs, then a final `Release checks (ubuntu)` aggregator preserves the required-check name. The app-verification shard provisions an isolated loopback PostgreSQL 17 service and sets the dedicated supplement-search test database variable, so its rollback-only 100+ query PostgreSQL corpus runs on pull requests and `main` while the ordinary hosted-web build database remains the unreachable CI placeholder. This keeps Linux bootstrap and release packaging exercised in CI while avoiding the serial package-coverage wall clock.
-- `.github/workflows/deploy-render-temporal-worker.yml` runs after successful `Murph Host Support` push runs on `main`, waits for both `Murph Host Support` and `Repo Hygiene` to be successful for the same current `main` commit, then calls the Render Temporal worker deploy hook with that exact commit `ref`. The hook URL lives only in the `RENDER_TEMPORAL_WORKER_DEPLOY_HOOK` GitHub Actions secret. This replaces Render's native `checksPass` auto-deploy gate for the worker so stale third-party check suites cannot block production deploys.
+- The private `cobuildwithus/murph-cloud` repository owns the Temporal worker's
+  cross-repository hosted-local integration check and protected post-CI Render
+  deploy. This public repository intentionally contains neither the Render
+  Blueprint nor the deploy-hook workflow; its CI continues to build and test
+  the temporary rollback implementation until that package is removed.
 - The hosted-orchestrator-temporal package build is a production-bundle memory
   gate in the host-support workspace build: it rejects a Workflow bundle above
   2.25 MiB, missing inline source-map dependency evidence, or containing the

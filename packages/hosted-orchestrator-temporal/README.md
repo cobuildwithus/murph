@@ -297,46 +297,16 @@ Worker concurrency:
   startup always sets explicit execution and cache values instead of relying on
   Temporal SDK defaults.
 
-## Render Deployment
+## Production Deployment Ownership
 
-The repo root `render.yaml` defines two `murph-temporal-worker` instances as
-Render Background Workers on the 2 GB Standard plan. They share one Temporal
-Task Queue, for an aggregate ceiling of 200 concurrent Activity executions and
-40 concurrent Workflow Task executions. The service build compiles the Temporal
-package, including the fail-closed production Workflow bundle. Each instance
-ensures the device-sync reconciler Schedule and starts
-`pnpm --dir packages/hosted-orchestrator-temporal temporal:worker:prod`.
-The schedule ensure command is idempotent, so concurrent instance startup keeps
-one canonical Schedule.
+The public repository retains this implementation temporarily as a rollback
+reference while the production worker source moves to the private
+[`cobuildwithus/murph-cloud`](https://github.com/cobuildwithus/murph-cloud)
+repository. Murph Cloud owns the Render Blueprint, deploy workflow, production
+configuration, and operational runbook. This repository must not contain a
+second Render service definition or deployment workflow.
 
-The 200-Activity aggregate is an execution ceiling, not a request-rate target.
-Reconciliation Activities reach the signed hosted-Web callback and its pooled
-Prisma path. The default Workflow reconciliation call uses the mutating AI
-allowance gate: denied fresh conversation work can claim and deliver a
-usage-limit notice through Linq or Telegram, while allowed pending work reaches
-Cloudflare's per-user runtime admission owner. Durable notice claims preserve
-notice idempotency when concurrency rises. During rollout, monitor Activity
-retries/timeouts, hosted-Web database-pool failures, unrelated signed callback
-health, usage-notice claim/delivery failures and provider errors, and
-Cloudflare ensure-processing acceptance. The Activity execution env override
-and Render instance count are the rollback controls if those shared boundaries
-regress.
-
-Use Render Blueprint sync from the dashboard or validate it with:
-
-```bash
-render blueprints validate render.yaml
-```
-
-Set Render secrets through the dashboard or Blueprint prompts. Use
-`TEMPORAL_API_KEY` for Temporal Cloud API-key auth. If the namespace still uses
-mTLS certificate auth, add the base64 mTLS vars manually in Render instead of
-putting certificate material in the Blueprint. The Blueprint intentionally does
-not hardcode account-specific Temporal, hosted web, Cloudflare, or
-signing-secret values.
-
-Render Workflows are unrelated to Temporal Workflows for this package; this
-worker must run as a continuously running Render Background Worker.
-
-Do not store real secrets in repo files. Use shell exports, local secret stores,
-or ignored local env files when exercising the worker.
+The existing production service, Temporal namespace, Task Queue, Workflow and
+signal names, Schedule id, and patch marker remain unchanged during the source
+cutover. Repository relocation uses rolling replacement; it does not require
+terminating current Workflow histories.

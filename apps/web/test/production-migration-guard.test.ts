@@ -1386,24 +1386,6 @@ describe("hosted web production migration guard", () => {
     assert.ok(!cronPaths.includes("/api/internal/device-sync/dirty-sweeper/cron"));
   });
 
-  test("Render worker startup ensures the Temporal device-sync schedule", async () => {
-    const renderYaml = await readFile(
-      path.resolve(appRoot, "..", "..", "render.yaml"),
-      "utf8",
-    );
-
-    const ensureCommand =
-      "temporal:ensure-device-sync-reconciler-schedule:prod";
-    const workerCommand = "temporal:worker:prod";
-
-    assert.match(renderYaml, new RegExp(ensureCommand, "u"));
-    assert.match(renderYaml, new RegExp(workerCommand, "u"));
-    assert.ok(
-      renderYaml.indexOf(ensureCommand) < renderYaml.indexOf(workerCommand),
-      "Render startup must ensure the Temporal Schedule before starting the worker.",
-    );
-  });
-
   test("generates Prisma before direct local Next dev starts", async () => {
     const packageJson = JSON.parse(
       await readFile(path.join(appRoot, "package.json"), "utf8"),
