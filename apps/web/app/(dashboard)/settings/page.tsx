@@ -406,9 +406,9 @@ export default async function SettingsPage({
             familyOwnerUsageTopUpAvailable ? "family" : "personal"
           }
           usageTopUpTargetLabel={
-            familyOwnerUsageTopUpMember?.label ?? (
-              familyOwnerUsageTopUpAvailable ? "you" : undefined
-            )
+            familyOwnerUsageTopUpMember
+              ? familyOwnerUsageTopUpMember.label ?? "you"
+              : undefined
           }
           usageActivityDetail={visibleUsageActivity ? (
             <section id="ai-usage" className="flex scroll-mt-24 flex-col gap-4">
