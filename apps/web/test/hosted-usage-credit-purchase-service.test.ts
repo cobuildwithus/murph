@@ -458,9 +458,9 @@ describe("parseHostedGroupSponsorshipCheckoutRequest", () => {
       clientRequestKey: CLIENT_REQUEST_KEY,
       offerCode: "usage_20_usd",
       sponsorship: {
-        publicAlias: " Jake’s Lower Back ",
+        publicAlias: " The Group Historian ",
         runningBitRequest: "Treat me like the exhausted CFO.",
-        sponsorMessage: "Please stop inviting Jake to basketball.",
+        sponsorMessage: "For whatever adventure comes next.",
       },
     })).toEqual({
       clientRequestKey: CLIENT_REQUEST_KEY,
@@ -468,9 +468,9 @@ describe("parseHostedGroupSponsorshipCheckoutRequest", () => {
       offerCode: "usage_20_usd",
       recoveryOnly: false,
       sponsorship: {
-        publicAlias: "Jake’s Lower Back",
+        publicAlias: "The Group Historian",
         runningBitRequest: "Treat me like the exhausted CFO.",
-        sponsorMessage: "Please stop inviting Jake to basketball.",
+        sponsorMessage: "For whatever adventure comes next.",
       },
       sponsorshipKind: "one_time",
     });
@@ -3173,9 +3173,9 @@ describe("createHostedUsageCreditCheckout", () => {
       buildStripeSession(request)
     );
     const sponsorship = {
-      publicAlias: "Jake’s Lower Back",
+      publicAlias: "The Group Historian",
       runningBitRequest: "Treat me like the exhausted CFO.",
-      sponsorMessage: "Please stop inviting Jake to basketball.",
+      sponsorMessage: "For whatever adventure comes next.",
     };
     await createHostedGroupUsageCreditCheckout({
       clientRequestKey: CLIENT_REQUEST_KEY,
@@ -3244,10 +3244,10 @@ describe("createHostedUsageCreditCheckout", () => {
     expect(fake.sponsorshipMoments.get(
       onlyPurchase(fake.purchases).id as string,
     )).toMatchObject({
-      publicAliasEncrypted: "sealed:Jake’s Lower Back",
+      publicAliasEncrypted: "sealed:The Group Historian",
       runningBitRequestEncrypted: "sealed:Treat me like the exhausted CFO.",
       sponsorMessageEncrypted:
-        "sealed:Please stop inviting Jake to basketball.",
+        "sealed:For whatever adventure comes next.",
     });
   });
 

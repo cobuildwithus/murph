@@ -259,7 +259,7 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 4,
         title: "One-time group contributions have a cleaner finish",
         summary:
-          "The one-time contribution dialog keeps optional context under Add a fun note and turns verified success into a clear receipt with Open Messages.",
+          "The one-time contribution dialog keeps optional context under Add a note and turns verified success into a clear receipt with Open Messages.",
         details:
           "Amount choice, payment verification, recovery, and group-credit delivery keep their existing owners. The receipt stays honest that Messages opens at the app level.",
         relevanceTags: ["groups", "billing", "usage", "design"],

@@ -389,21 +389,25 @@ credit belongs to the group, and one primary action. Do not add a decorative
 status badge; retain `Open Murph` as the quiet secondary action.
 
 Use `GroupSponsorshipDialog` for the primary monthly choice. Present $5, $10,
-and $20 as visually prominent monthly maximums. Keep the dialog explanation to
-one concise sentence: Murph adds $5 only when the chat needs it, up to the
-selected maximum. The explicit sponsor action authorizes the initial $5
-activation purchase, whose amount is shown before payment; selecting a maximum
-alone does not charge the card. Keep an explicit one-time contribution as the
-secondary action. Dollar amounts are cost-weighted usage credit, never an owned
-or promised number of messages. Every cap increase requires fresh payer
-confirmation. Keep the alias, note, and eligible temporary running bit behind
-one optional disclosure and attach them only to the activation or one-time
-purchase, never to automatic refills.
-Optional text fields use the sage focus border without an outer glow. Stack
-maximum cards and actions on narrow screens, preserve visible focus and
-selection states, and render the production activation, active-management,
-near-cap/recovery, paused, and one-time states at desktop and mobile sizes on
-`/design` with controls inert.
+and $20 as visually prominent monthly maximums. On desktop, use the shared
+choice cards. On phones, use a near-full-height bottom drawer with one large
+circular cap slider. The handle follows a pointer anywhere around the arc and
+snaps to the nearest available maximum on release; Arrow keys and Home/End
+provide the same three-stop selection. Keep the opening explanation to
+`Choose your monthly sponsorship limit.` The explicit sponsor action authorizes
+the initial $5 activation purchase, whose amount is shown before payment;
+selecting a maximum alone does not charge the card. Keep an explicit one-time
+contribution as the secondary action. Dollar amounts are cost-weighted usage
+credit, never an owned or promised number of messages. Every cap increase
+requires fresh payer confirmation. Keep the alias, note, and eligible temporary
+running bit in one collapsible `Add a note` section, open by default, and attach
+them only to the activation or one-time purchase, never to automatic refills.
+Optional text fields use the sage focus border without an outer glow. The
+drawer body owns overflow while the sponsor action stays available at the safe
+area edge, so expanded note fields never become unreachable. Preserve visible
+focus and selection states, and render the production activation,
+active-management, near-cap/recovery, paused, and one-time states at desktop and
+mobile sizes on `/design` with controls inert.
 
 When group funding is fulfilled, switch from the payment-status composition to
 one confident success hierarchy: a compact sage confirmation mark and mono

@@ -221,9 +221,9 @@ describe("hosted group funding page", () => {
 
   it("restores the payer's exact frozen sponsor details with a matching active purchase", async () => {
     const frozenSponsorship = {
-      publicAlias: "Jake’s Lower Back",
+      publicAlias: "The Group Historian",
       runningBitRequest: "Treat me like Murph’s exhausted CFO.",
-      sponsorMessage: "Please stop inviting Jake to basketball.",
+      sponsorMessage: "For whatever adventure comes next.",
     };
     mocks.readHostedActiveUsageCreditPurchaseForPayer.mockResolvedValueOnce({
       offerCode: "usage_10_usd",

@@ -67,6 +67,10 @@ vi.mock("@/src/components/hosted-onboarding/auth-dialog-provider", () => ({
   }),
 }));
 
+vi.mock("@/src/hooks/use-mobile", () => ({
+  useIsMobile: () => false,
+}));
+
 vi.mock("@/src/components/ui/button", () => ({
   Button: ({
     children,
@@ -186,8 +190,14 @@ vi.mock("@/src/components/ui/field", () => ({
 }));
 
 vi.mock("@/src/components/ui/collapsible", () => ({
-  Collapsible: (props: HTMLAttributes<HTMLDivElement>) =>
-    createElement("div", props),
+  Collapsible: ({
+    defaultOpen,
+    ...props
+  }: HTMLAttributes<HTMLDivElement> & { defaultOpen?: boolean }) =>
+    createElement("div", {
+      ...props,
+      "data-default-open": defaultOpen ? "true" : "false",
+    }),
   CollapsibleContent: (props: HTMLAttributes<HTMLDivElement>) =>
     createElement("div", props),
   CollapsibleTrigger: ({
@@ -533,7 +543,7 @@ test("freezes optional sponsorship copy with the selected group offer", async ()
   );
 
   try {
-    assert.match(rendered.container.textContent ?? "", /Add a fun note/);
+    assert.match(rendered.container.textContent ?? "", /Add a note/);
     assert.ok(rendered.container.querySelector(".h-auto"));
     await clickRadio(rendered.container, rendered.window, "usage_5_usd");
     assert.equal(
@@ -563,12 +573,12 @@ test("freezes optional sponsorship copy with the selected group offer", async ()
     await setTextInput(
       rendered.container.querySelector("#group-sponsor-alias"),
       rendered.window,
-      "Jake’s Lower Back",
+      "The Group Historian",
     );
     await setTextInput(
       rendered.container.querySelector("#group-sponsor-message"),
       rendered.window,
-      "Please stop inviting Jake to basketball.",
+      "For whatever adventure comes next.",
     );
     await setTextInput(
       runningBit,
@@ -587,9 +597,9 @@ test("freezes optional sponsorship copy with the selected group offer", async ()
         clientRequestKey: "00000000-0000-4000-8000-000000000001",
         offerCode: "usage_20_usd",
         sponsorship: {
-          publicAlias: "Jake’s Lower Back",
+          publicAlias: "The Group Historian",
           runningBitRequest: "Treat me like Murph’s exhausted CFO.",
-          sponsorMessage: "Please stop inviting Jake to basketball.",
+          sponsorMessage: "For whatever adventure comes next.",
         },
         sponsorshipKind: "one_time",
       },
@@ -629,17 +639,36 @@ test("keeps the private monthly maximum out of the public sponsorship moment", a
     const dialogText = rendered.container.textContent ?? "";
     assert.match(
       dialogText,
-      /Murph adds \$5 only when this chat needs it, up to your monthly maximum\./u,
+      /Choose your monthly sponsorship limit\./u,
     );
     assert.doesNotMatch(dialogText, /required first \$5 activation purchase/u);
-    assert.match(dialogText, /Add a fun note/u);
+    assert.match(dialogText, /Add a note/u);
+    assert.ok(
+      rendered.container.querySelector('[data-default-open="true"]'),
+    );
+    const capSlider = rendered.container.querySelector<HTMLElement>(
+      '[role="slider"][aria-valuetext="Up to $5 per month"]',
+    );
+    assert.ok(capSlider);
+    assert.equal(capSlider.getAttribute("aria-valuemin"), "5");
+    assert.equal(capSlider.getAttribute("aria-valuemax"), "20");
     const amountLabels = Array.from(
       rendered.container.querySelectorAll("span.font-serif.text-3xl"),
       (amountLabel) => amountLabel.textContent,
     );
     assert.deepEqual(amountLabels, ["$5", "$10", "$20"]);
 
-    await clickRadio(rendered.container, rendered.window, "2000");
+    await act(async () => {
+      const endKey = new rendered.window.Event("keydown", { bubbles: true });
+      Object.defineProperty(endKey, "key", { value: "End" });
+      capSlider.dispatchEvent(endKey);
+      await Promise.resolve();
+    });
+    assert.equal(capSlider.getAttribute("aria-valuenow"), "20");
+    assert.equal(
+      capSlider.getAttribute("aria-valuetext"),
+      "Up to $20 per month",
+    );
     assert.equal(
       rendered.container.querySelector("#group-sponsor-bit"),
       null,
@@ -857,7 +886,7 @@ test(
     try {
       assert.doesNotMatch(
         rendered.container.textContent ?? "",
-        /Add a fun note/,
+        /Add a note/,
       );
       assert.equal(
         rendered.container.querySelector("#group-sponsor-alias"),
@@ -898,9 +927,9 @@ test(
 
 test("shows and preserves exact frozen sponsor details when retrying payment", async () => {
   const frozenSponsorship = {
-    publicAlias: "Jake’s Lower Back",
+    publicAlias: "The Group Historian",
     runningBitRequest: "Treat me like Murph’s exhausted CFO.",
-    sponsorMessage: "Please stop inviting Jake to basketball.",
+    sponsorMessage: "For whatever adventure comes next.",
   };
   mocks.requestHostedOnboardingJson.mockImplementation(
     (request: { method: string }) =>
@@ -939,10 +968,10 @@ test("shows and preserves exact frozen sponsor details when retrying payment", a
       rendered.container.textContent ?? "",
       /Your original sponsor details are still attached/u,
     );
-    assert.match(rendered.container.textContent ?? "", /Jake’s Lower Back/u);
+    assert.match(rendered.container.textContent ?? "", /The Group Historian/u);
     assert.match(
       rendered.container.textContent ?? "",
-      /Please stop inviting Jake to basketball\./u,
+      /For whatever adventure comes next\./u,
     );
     assert.match(
       rendered.container.textContent ?? "",

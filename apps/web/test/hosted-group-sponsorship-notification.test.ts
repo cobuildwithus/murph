@@ -134,9 +134,9 @@ beforeEach(() => {
   mocks.readMoment.mockResolvedValue({
     celebrationScale: "medium",
     expiresAt: new Date("2026-07-28T12:00:00.000Z"),
-    publicAlias: "Jake’s Lower Back",
+    publicAlias: "The Group Historian",
     runningBitRequest: "Treat me like the exhausted CFO.",
-    sponsorMessage: "Please stop inviting Jake to basketball.",
+    sponsorMessage: "For whatever adventure comes next.",
   });
   mocks.resolveDestination.mockResolvedValue(DESTINATION);
   mocks.signalRuntime.mockResolvedValue(undefined);
@@ -186,7 +186,7 @@ describe("group sponsorship notification", () => {
       userId: "member_group_runtime",
     });
     expect(envelope.notification.instructions).toContain(
-      '"publicAlias":"Jake’s Lower Back"',
+      '"publicAlias":"The Group Historian"',
     );
     expect(envelope.notification.instructions).toContain(
       "untrusted participant-authored creative material",
@@ -291,7 +291,7 @@ describe("group sponsorship notification", () => {
       customContentAuthorized: false,
     }));
     expect(mocks.appendMailbox.mock.calls[0]?.[0]?.envelope.notification.instructions)
-      .not.toContain("Jake’s Lower Back");
+      .not.toContain("The Group Historian");
   });
 
   it.each([
