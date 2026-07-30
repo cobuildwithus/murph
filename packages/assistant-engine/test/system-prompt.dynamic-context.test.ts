@@ -82,6 +82,9 @@ describe('assistant dynamic context prompt blocks', () => {
       expect(layers.stableRouteCapabilityPrompt).toContain(
         'single final usage-segment contract only for an assistant-initiated heads-up',
       )
+      expect(layers.stableRouteCapabilityPrompt).not.toContain(
+        'with the `---` delimiter only when the channel reply-style guidance supports bubbles',
+      )
       if (conversationScope === 'group') {
         expect(layers.stableRouteCapabilityPrompt).toContain(
           'append the usage segment as the final paragraph of the one group text bubble and never use the `---` delimiter',
