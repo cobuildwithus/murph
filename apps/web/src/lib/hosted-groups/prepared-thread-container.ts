@@ -71,9 +71,15 @@ export async function ensureHostedPreparedLinqThreadContainerRouteTx(input: {
     senderMemberId: input.senderMemberId,
     tx: input.tx,
   });
+  const requiredPendingSetupCandidateId = normalizeNullableString(
+    input.requiredPendingSetupCandidateId,
+  );
   if (
     pendingSetupClaim.kind === "none"
-    && pendingSetupClaim.reason === "recipient_line_unmanaged"
+    && (
+      pendingSetupClaim.reason === "recipient_line_unmanaged"
+      || requiredPendingSetupCandidateId !== null
+    )
   ) {
     return {
       kind: "owner_unavailable",

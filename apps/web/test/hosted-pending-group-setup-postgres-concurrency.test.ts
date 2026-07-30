@@ -11,7 +11,11 @@ import {
   setHostedSecureBoxStringTestCodecForTests,
 } from "@/src/lib/hosted-crypto/secure-box";
 import {
+  encryptHostedWebNullableString,
+} from "@/src/lib/hosted-web/encryption";
+import {
   armHostedPendingGroupSetupTx,
+  cancelHostedPendingGroupSetupTx,
   claimHostedPendingGroupSetupForParticipantsTx,
   consumeHostedPendingGroupSetupClaimTx,
   readHostedPendingGroupSetup,
@@ -24,8 +28,14 @@ import {
   buildHostedLinqGroupLineRecoverySourceRef,
 } from "@/src/lib/hosted-onboarding/linq-group-line-recovery";
 import {
+  createHostedPhoneLookupKey,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
+import {
   createHostedLinqDeliveryIdempotencyLookupKey,
 } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
+import {
+  resolveHostedLinqRecoveredPendingGroupSetup,
+} from "@/src/lib/hosted-onboarding/webhook-provider-linq";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -332,20 +342,30 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     });
 
-    it("claims the exact setup once through its persisted replacement-line authority", async () => {
+    it("keeps the prepared owner when another roster member speaks first on the recovered line", async () => {
       const fixtureId = randomUUID();
       const ownerMemberId = `member_pending_group_recovery_${fixtureId}`;
+      const firstSpeakerMemberId =
+        `member_pending_group_first_speaker_${fixtureId}`;
+      const originalRecipientPhone = createUniqueTestPhone("+1555");
+      const recoveredRecipientPhone = createUniqueTestPhone("+1666");
       const originalRecipientPhoneLookupKey =
-        `pending-group-recovery-original:${fixtureId}`;
+        createHostedPhoneLookupKey(originalRecipientPhone);
       const recoveredRecipientPhoneLookupKey =
-        `pending-group-recovery-target:${fixtureId}`;
-      const originalRecipientPhone = "+15550100000";
+        createHostedPhoneLookupKey(recoveredRecipientPhone);
+      if (
+        !originalRecipientPhoneLookupKey
+        || !recoveredRecipientPhoneLookupKey
+      ) {
+        throw new Error("Expected recovery line lookup keys.");
+      }
       const threadId = `chat-pending-group-recovery-${fixtureId}`;
       const deliveryId = `hld_pending_group_recovery_${fixtureId}`;
       const client = createPrismaClient({ databaseUrl, poolMax: 1 });
-      const armedAt = new Date("2026-07-29T18:00:00.000Z");
-      const recoveryAttemptedAt = new Date("2026-07-29T18:01:00.000Z");
-      const retryOccurredAt = new Date("2026-07-29T18:02:00.000Z");
+      const retryOccurredAt = new Date();
+      const armedAt = new Date(retryOccurredAt.getTime() - 2 * 60_000);
+      const recoveryAttemptedAt =
+        new Date(retryOccurredAt.getTime() - 60_000);
 
       try {
         await client.hostedLinqLine.createMany({
@@ -372,10 +392,23 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             id: ownerMemberId,
             routing: {
               create: {
+                linqRecipientPhoneEncrypted:
+                  await encryptHostedWebNullableString({
+                    field:
+                      "hosted-member-routing.home-linq-recipient-phone",
+                    memberId: ownerMemberId,
+                    value: originalRecipientPhone,
+                  }),
                 linqRecipientPhoneLookupKey:
                   originalRecipientPhoneLookupKey,
               },
             },
+          },
+        });
+        await client.hostedMember.create({
+          data: {
+            billingStatus: HostedBillingStatus.active,
+            id: firstSpeakerMemberId,
           },
         });
         const setup = await client.$transaction((tx) =>
@@ -434,18 +467,78 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           threadId,
         })).resolves.toBe(true);
 
+        const recoveredSetup = await client.$transaction((tx) =>
+          resolveHostedLinqRecoveredPendingGroupSetup({
+            occurredAt: retryOccurredAt,
+            participantMemberIds: [
+              ownerMemberId,
+              firstSpeakerMemberId,
+            ],
+            recoveredRecipientPhoneLookupKey,
+            senderMemberId: firstSpeakerMemberId,
+            threadId,
+            tx,
+          })
+        );
+        expect(recoveredSetup).toEqual({
+          id: setup.id,
+          ownerMemberId,
+          recipientPhoneLookupKey: originalRecipientPhoneLookupKey,
+        });
+        await expect(client.$transaction((tx) =>
+          resolveHostedLinqRecoveredPendingGroupSetup({
+            occurredAt: retryOccurredAt,
+            participantMemberIds: [firstSpeakerMemberId],
+            recoveredRecipientPhoneLookupKey,
+            senderMemberId: firstSpeakerMemberId,
+            threadId,
+            tx,
+          })
+        )).resolves.toBeNull();
+        await expect(client.$transaction((tx) =>
+          resolveHostedLinqRecoveredPendingGroupSetup({
+            occurredAt: retryOccurredAt,
+            participantMemberIds: [
+              ownerMemberId,
+              firstSpeakerMemberId,
+            ],
+            recoveredRecipientPhoneLookupKey,
+            senderMemberId: firstSpeakerMemberId,
+            threadId: `${threadId}-other`,
+            tx,
+          })
+        )).resolves.toBeNull();
+        await expect(client.$transaction((tx) =>
+          resolveHostedLinqRecoveredPendingGroupSetup({
+            occurredAt: retryOccurredAt,
+            participantMemberIds: [
+              ownerMemberId,
+              firstSpeakerMemberId,
+            ],
+            recoveredRecipientPhoneLookupKey:
+              `wrong-recovery-line:${fixtureId}`,
+            senderMemberId: firstSpeakerMemberId,
+            threadId,
+            tx,
+          })
+        )).resolves.toBeNull();
+
         const claimed = await client.$transaction(async (tx) => {
           const result =
             await claimHostedPendingGroupSetupForParticipantsTx({
               now: retryOccurredAt,
               occurredAt: retryOccurredAt,
-              participantMemberIds: [ownerMemberId],
+              participantMemberIds: recoveredSetup
+                ? [recoveredSetup.ownerMemberId]
+                : [],
               recipientPhoneLookupKeys: [
                 recoveredRecipientPhoneLookupKey,
-                originalRecipientPhoneLookupKey,
+                ...(recoveredSetup
+                  ? [recoveredSetup.recipientPhoneLookupKey]
+                  : []),
               ],
-              requiredCandidateId: setup.id,
-              senderMemberId: ownerMemberId,
+              requiredCandidateId: recoveredSetup?.id,
+              senderMemberId: firstSpeakerMemberId,
               tx,
             });
           if (result.kind === "claimed") {
@@ -472,6 +565,64 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             },
           },
         });
+        const replacementArmedAt =
+          new Date(retryOccurredAt.getTime() + 1_000);
+        await expect(client.$transaction((tx) =>
+          resolveHostedLinqRecoveredPendingGroupSetup({
+            occurredAt: replacementArmedAt,
+            participantMemberIds: [
+              ownerMemberId,
+              firstSpeakerMemberId,
+            ],
+            recoveredRecipientPhoneLookupKey,
+            senderMemberId: firstSpeakerMemberId,
+            threadId,
+            tx,
+          })
+        )).resolves.toBeNull();
+        const replacement = await client.$transaction((tx) =>
+          armHostedPendingGroupSetupTx({
+            now: replacementArmedAt,
+            ownerMemberId,
+            setup: {
+              roomContextMarkdown: "A replacement setup.",
+            },
+            tx,
+          })
+        );
+        expect(replacement.id).not.toBe(setup.id);
+        await expect(client.$transaction((tx) =>
+          resolveHostedLinqRecoveredPendingGroupSetup({
+            occurredAt: new Date(replacementArmedAt.getTime() + 1_000),
+            participantMemberIds: [
+              ownerMemberId,
+              firstSpeakerMemberId,
+            ],
+            recoveredRecipientPhoneLookupKey,
+            senderMemberId: firstSpeakerMemberId,
+            threadId,
+            tx,
+          })
+        )).resolves.toBeNull();
+        await expect(client.$transaction((tx) =>
+          cancelHostedPendingGroupSetupTx({
+            ownerMemberId,
+            tx,
+          })
+        )).resolves.toBe(true);
+        await expect(client.$transaction((tx) =>
+          resolveHostedLinqRecoveredPendingGroupSetup({
+            occurredAt: new Date(replacementArmedAt.getTime() + 2_000),
+            participantMemberIds: [
+              ownerMemberId,
+              firstSpeakerMemberId,
+            ],
+            recoveredRecipientPhoneLookupKey,
+            senderMemberId: firstSpeakerMemberId,
+            threadId,
+            tx,
+          })
+        )).resolves.toBeNull();
         await expect(client.$transaction((tx) =>
           claimHostedPendingGroupSetupForParticipantsTx({
             now: retryOccurredAt,
@@ -482,7 +633,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
               originalRecipientPhoneLookupKey,
             ],
             requiredCandidateId: setup.id,
-            senderMemberId: ownerMemberId,
+            senderMemberId: firstSpeakerMemberId,
             tx,
           })
         )).resolves.toEqual({
@@ -494,7 +645,11 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           where: { id: deliveryId },
         });
         await client.hostedMember.deleteMany({
-          where: { id: ownerMemberId },
+          where: {
+            id: {
+              in: [ownerMemberId, firstSpeakerMemberId],
+            },
+          },
         });
         await client.hostedLinqLine.deleteMany({
           where: {
@@ -520,4 +675,10 @@ function isClearlyLocalPostgresUrl(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+function createUniqueTestPhone(prefix: string): string {
+  const digits = BigInt(`0x${randomUUID().replaceAll("-", "").slice(0, 12)}`)
+    % 10_000_000n;
+  return `${prefix}${digits.toString().padStart(7, "0")}`;
 }

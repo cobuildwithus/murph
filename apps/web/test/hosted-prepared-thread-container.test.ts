@@ -69,7 +69,7 @@ describe("ensureHostedPreparedLinqThreadContainerRouteTx", () => {
       linqService: "iMessage",
       mailboxDedupeKey: "event_group",
       occurredAt: new Date("2026-07-29T18:01:00.000Z"),
-      participantMemberIds: ["member_prepared_owner", "member_first_sender"],
+      participantMemberIds: ["member_prepared_owner"],
       recipientPhoneLookupKeys: ["hplk_recovered_line", "hplk_line"],
       requiredPendingSetupCandidateId: pendingSetup.id,
       senderMemberId: "member_first_sender",
@@ -84,10 +84,7 @@ describe("ensureHostedPreparedLinqThreadContainerRouteTx", () => {
 
     expect(mocks.claimPendingSetup).toHaveBeenCalledExactlyOnceWith({
       occurredAt: new Date("2026-07-29T18:01:00.000Z"),
-      participantMemberIds: [
-        "member_prepared_owner",
-        "member_first_sender",
-      ],
+      participantMemberIds: ["member_prepared_owner"],
       recipientPhoneLookupKeys: ["hplk_recovered_line", "hplk_line"],
       requiredCandidateId: pendingSetup.id,
       senderMemberId: "member_first_sender",
@@ -225,6 +222,34 @@ describe("ensureHostedPreparedLinqThreadContainerRouteTx", () => {
     })).resolves.toEqual({
       kind: "owner_unavailable",
       pendingSetupResolution: "recipient_line_unmanaged",
+    });
+
+    expect(mocks.ensureThreadContainer).not.toHaveBeenCalled();
+    expect(mocks.upsertPreferences).not.toHaveBeenCalled();
+    expect(mocks.bindUsageReferral).not.toHaveBeenCalled();
+  });
+
+  it("keeps a recovery-pinned setup route-free when its exact claim is unavailable", async () => {
+    mocks.claimPendingSetup.mockResolvedValue({
+      kind: "none",
+      reason: "claim_raced",
+    });
+
+    await expect(ensureHostedPreparedLinqThreadContainerRouteTx({
+      accountLookupKey: "hplk_recovered_line",
+      fallbackOwnerMemberId: "member_first_sender",
+      linqService: "iMessage",
+      mailboxDedupeKey: "event_group",
+      occurredAt: new Date("2026-07-29T18:01:00.000Z"),
+      participantMemberIds: ["member_prepared_owner"],
+      recipientPhoneLookupKeys: ["hplk_recovered_line", "hplk_line"],
+      requiredPendingSetupCandidateId: pendingSetup.id,
+      senderMemberId: "member_first_sender",
+      threadId: "chat_group",
+      tx,
+    })).resolves.toEqual({
+      kind: "owner_unavailable",
+      pendingSetupResolution: "claim_raced",
     });
 
     expect(mocks.ensureThreadContainer).not.toHaveBeenCalled();

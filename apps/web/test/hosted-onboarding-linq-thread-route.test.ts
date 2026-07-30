@@ -73,6 +73,7 @@ const preparedThreadMocks = vi.hoisted(() => ({
 }));
 const pendingGroupSetupMocks = vi.hoisted(() => ({
   readHostedPendingGroupSetup: vi.fn(),
+  readHostedPendingGroupSetupCandidatesForParticipantsTx: vi.fn(),
 }));
 
 vi.mock("../src/lib/hosted-routing/thread-route-store", async (importOriginal) => {
@@ -113,10 +114,15 @@ vi.mock("../src/lib/hosted-groups/pending-group-setup", async (importOriginal) =
     typeof import("../src/lib/hosted-groups/pending-group-setup")
   >();
   pendingGroupSetupMocks.readHostedPendingGroupSetup.mockResolvedValue(null);
+  pendingGroupSetupMocks.readHostedPendingGroupSetupCandidatesForParticipantsTx
+    .mockResolvedValue([]);
   return {
     ...actual,
     readHostedPendingGroupSetup:
       pendingGroupSetupMocks.readHostedPendingGroupSetup,
+    readHostedPendingGroupSetupCandidatesForParticipantsTx:
+      pendingGroupSetupMocks
+        .readHostedPendingGroupSetupCandidatesForParticipantsTx,
   };
 });
 
@@ -269,6 +275,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   pendingGroupSetupMocks.readHostedPendingGroupSetup.mockReset();
   pendingGroupSetupMocks.readHostedPendingGroupSetup.mockResolvedValue(null);
+  pendingGroupSetupMocks.readHostedPendingGroupSetupCandidatesForParticipantsTx
+    .mockReset();
+  pendingGroupSetupMocks.readHostedPendingGroupSetupCandidatesForParticipantsTx
+    .mockResolvedValue([]);
   usageReferralMocks.bindArmedHostedUsageReferralToNewContainerTx
     .mockResolvedValue({ referralIds: [] });
   usageReferralMocks.observeHostedUsageReferralInboundTx.mockResolvedValue({
@@ -5580,8 +5590,22 @@ describe("Linq group chat auto-provision", () => {
     const originalRecipientPhone = "+15550000000";
     const recoveredRecipientPhone = "+15550000042";
     const setupArmedAt = new Date("2026-06-24T11:59:00.000Z");
+    const firstSpeakerCore = {
+      ...senderCore,
+      id: "member_recovery_first_speaker",
+    };
     const prisma = createStatefulThreadRoutePrisma();
-    mockSenderLookup(senderCore);
+    mockSenderLookup(firstSpeakerCore);
+    vi.mocked(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber)
+      .mockResolvedValueOnce({
+        core: senderCore,
+        identity: {},
+        matchedBy: "phoneNumber",
+      } as Awaited<
+        ReturnType<
+          typeof memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber
+        >
+      >);
     mockSuccessfulGroupProvision({ prisma, senderCore });
     prisma.seedActiveManagedLinqLine(originalRecipientPhone, {
       healthStatus: "unhealthy",
@@ -5614,6 +5638,14 @@ describe("Linq group chat auto-provision", () => {
         },
       },
     });
+    pendingGroupSetupMocks
+      .readHostedPendingGroupSetupCandidatesForParticipantsTx
+      .mockResolvedValue([{
+        armedAt: setupArmedAt,
+        id: "hpgs_recovered_group",
+        ownerMemberId: senderCore.id,
+        recipientPhoneLookupKey: originalRecipientPhoneLookupKey,
+      }]);
 
     const recoveryPlan = await planHostedOnboardingLinqWebhook({
       event: buildLinqMessageReceivedEvent({
@@ -5692,9 +5724,13 @@ describe("Linq group chat auto-provision", () => {
         eventId: "evt_group_recovery_retry",
         messageId: "msg_group_recovery_retry",
         recipient: recoveredRecipientPhone,
-        text: "Retrying the prepared introduction.",
+        sender: "+15551113333",
+        text: "Did the new number work?",
       }),
-      pendingGroupParticipantMemberIds: ["member_unrelated_prepared_owner"],
+      pendingGroupParticipantMemberIds: [
+        senderCore.id,
+        firstSpeakerCore.id,
+      ],
       prisma: prisma as never,
     });
 
@@ -5719,14 +5755,14 @@ describe("Linq group chat auto-provision", () => {
       preparedThreadMocks.ensureHostedPreparedLinqThreadContainerRouteTx,
     ).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       accountLookupKey: recoveredRecipientPhoneLookupKey,
-      fallbackOwnerMemberId: senderCore.id,
+      fallbackOwnerMemberId: firstSpeakerCore.id,
       participantMemberIds: [senderCore.id],
       recipientPhoneLookupKeys: expect.arrayContaining([
         recoveredRecipientPhoneLookupKey,
         originalRecipientPhoneLookupKey,
       ]),
       requiredPendingSetupCandidateId: "hpgs_recovered_group",
-      senderMemberId: senderCore.id,
+      senderMemberId: firstSpeakerCore.id,
       threadId: "chat_group_123",
     }));
     expect(prisma.readAccountLookupKeyProjection(

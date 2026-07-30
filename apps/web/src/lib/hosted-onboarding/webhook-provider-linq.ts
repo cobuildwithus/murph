@@ -132,6 +132,8 @@ import {
 } from "../hosted-groups/prepared-thread-container";
 import {
   readHostedPendingGroupSetup,
+  readHostedPendingGroupSetupCandidatesForParticipantsTx,
+  selectHostedPendingGroupSetupCandidate,
 } from "../hosted-groups/pending-group-setup";
 import type {
   HostedLinqFirstContactAdmissionDecision,
@@ -2486,9 +2488,11 @@ type HostedLinqNewGroupAdmissionIgnoreReason =
  * or the existing active-sender fallback when the recipient line is
  * assignable. An AT_RISK or HARD_BLOCKED line retains the stricter recovery
  * boundary: only its exact active assigned sender may proceed, and a hard
- * block plans the private backup-number prompt instead of provisioning. The
- * webhook recipient alone is never line authority. Existing routes are
- * handled before this admission path.
+ * block plans the private backup-number prompt instead of provisioning.
+ * Once that private recovery is provider-correlated, its exact live setup can
+ * be selected from the current roster independently of who speaks first on
+ * the replacement line. The webhook recipient alone is never line authority.
+ * Existing routes are handled before this admission path.
  */
 async function planHostedLinqGroupChatWebhook(input: {
   affirmativeReaction?: boolean;
@@ -2725,17 +2729,27 @@ async function planHostedLinqGroupChatWebhook(input: {
         retryable: true,
       });
     }
-    const recoveredPendingSetup = activeSenderMemberId
+    const recoveryParticipantMemberIds = input.rosterUnavailable
+      ? activeSenderMemberId
+        ? [activeSenderMemberId]
+        : []
+      : activeSenderMemberId
+        ? [...new Set([...input.participantMemberIds, activeSenderMemberId])]
+        : input.participantMemberIds;
+    const recoveredPendingSetup = recoveryParticipantMemberIds.length > 0
       ? await resolveHostedLinqRecoveredPendingGroupSetup({
-          memberId: activeSenderMemberId,
           occurredAt: new Date(occurredAt),
+          participantMemberIds: recoveryParticipantMemberIds,
           recoveredRecipientPhoneLookupKey: lineState.phoneNumberLookupKey,
+          senderMemberId: activeSenderMemberId,
           threadId: summary.chatId,
           tx: input.prisma,
         })
       : null;
-    if (recoveredPendingSetup && activeSenderMemberId) {
-      pendingSetupParticipantMemberIds = [activeSenderMemberId];
+    if (recoveredPendingSetup) {
+      pendingSetupParticipantMemberIds = [
+        recoveredPendingSetup.ownerMemberId,
+      ];
       pendingSetupRecipientPhoneLookupKeys = [
         ...new Set([
           ...input.threadRouteAccountLookupKeys,
@@ -3559,64 +3573,86 @@ function isLocalHostedDomainRootAuthorityMismatch(error: unknown): boolean {
   );
 }
 
-async function resolveHostedLinqRecoveredPendingGroupSetup(input: {
-  memberId: string;
+export async function resolveHostedLinqRecoveredPendingGroupSetup(input: {
   occurredAt: Date;
+  participantMemberIds: readonly string[];
   recoveredRecipientPhoneLookupKey: string;
+  senderMemberId?: string | null;
   threadId: string;
   tx: Prisma.TransactionClient;
 }): Promise<{
   id: string;
+  ownerMemberId: string;
   recipientPhoneLookupKey: string;
 } | null> {
-  const setup = await readHostedPendingGroupSetup({
-    ownerMemberId: input.memberId,
-    prisma: input.tx,
-  });
-  if (!setup || setup.armedAt > input.occurredAt) {
-    return null;
-  }
-
-  const authority = readHostedLinqHomeLineAuthority(
-    await readHostedMemberRoutingState({
-      memberId: input.memberId,
-      prisma: input.tx,
-    }),
-  );
-  if (authority.kind === "none") {
-    return null;
-  }
-  const originalRecipientPhone = normalizePhoneNumber(
-    authority.recipientPhone,
-  );
-  if (!originalRecipientPhone) {
-    return null;
-  }
-  const originalRecipientPhoneLookupKeys =
-    createHostedPhoneLookupKeyReadCandidates(originalRecipientPhone);
-  if (
-    !originalRecipientPhoneLookupKeys.includes(setup.recipientPhoneLookupKey)
-    || originalRecipientPhoneLookupKeys.includes(
-      input.recoveredRecipientPhoneLookupKey,
-    )
-    || !(await hasHostedLinqGroupLineRecoveryAuthorityTx({
-      memberId: input.memberId,
+  const candidates =
+    await readHostedPendingGroupSetupCandidatesForParticipantsTx({
       occurredAt: input.occurredAt,
-      originalRecipientPhone,
-      pendingGroupSetupId: setup.id,
-      prisma: input.tx,
-      recoveredRecipientPhoneLookupKey:
+      participantMemberIds: input.participantMemberIds,
+      tx: input.tx,
+    });
+  const recoveredCandidates: typeof candidates = [];
+  for (const candidate of candidates) {
+    const authority = readHostedLinqHomeLineAuthority(
+      await readHostedMemberRoutingState({
+        memberId: candidate.ownerMemberId,
+        prisma: input.tx,
+      }),
+    );
+    if (authority.kind === "none") {
+      continue;
+    }
+    const originalRecipientPhone = normalizePhoneNumber(
+      authority.recipientPhone,
+    );
+    if (!originalRecipientPhone) {
+      continue;
+    }
+    const originalRecipientPhoneLookupKeys =
+      createHostedPhoneLookupKeyReadCandidates(originalRecipientPhone);
+    if (
+      !originalRecipientPhoneLookupKeys.includes(
+        candidate.recipientPhoneLookupKey,
+      )
+      || originalRecipientPhoneLookupKeys.includes(
         input.recoveredRecipientPhoneLookupKey,
-      setupArmedAt: setup.armedAt,
-      threadId: input.threadId,
-    }))
-  ) {
+      )
+      || !(await hasHostedLinqGroupLineRecoveryAuthorityTx({
+        memberId: candidate.ownerMemberId,
+        occurredAt: input.occurredAt,
+        originalRecipientPhone,
+        pendingGroupSetupId: candidate.id,
+        prisma: input.tx,
+        recoveredRecipientPhoneLookupKey:
+          input.recoveredRecipientPhoneLookupKey,
+        setupArmedAt: candidate.armedAt,
+        threadId: input.threadId,
+      }))
+    ) {
+      continue;
+    }
+    recoveredCandidates.push(candidate);
+  }
+  const selection = selectHostedPendingGroupSetupCandidate({
+    candidates: recoveredCandidates,
+    senderMemberId: input.senderMemberId,
+  });
+  if (selection.kind === "none") {
+    return null;
+  }
+  const selected = recoveredCandidates.find(
+    (candidate) =>
+      candidate.id === selection.candidate.id
+      && candidate.ownerMemberId === selection.candidate.ownerMemberId,
+  );
+  if (!selected) {
     return null;
   }
 
   return {
-    id: setup.id,
-    recipientPhoneLookupKey: setup.recipientPhoneLookupKey,
+    id: selected.id,
+    ownerMemberId: selected.ownerMemberId,
+    recipientPhoneLookupKey: selected.recipientPhoneLookupKey,
   };
 }
 

@@ -54,6 +54,12 @@ export interface HostedPendingGroupSetupCandidate {
   ownerMemberId: string;
 }
 
+export interface HostedPendingGroupSetupCandidateMetadata
+  extends HostedPendingGroupSetupCandidate {
+  armedAt: Date;
+  recipientPhoneLookupKey: string;
+}
+
 export type HostedPendingGroupSetupCandidateSelection =
   | {
       candidate: HostedPendingGroupSetupCandidate;
@@ -253,6 +259,80 @@ export async function cancelHostedPendingGroupSetupTx(input: {
     DELETE FROM "hosted_pending_group_setup"
     WHERE "owner_member_id" = ${ownerMemberId}
   `)) > 0;
+}
+
+/**
+ * Reads only live candidate metadata for a bounded, provider-proven roster.
+ * Payload bytes remain sealed until the exact winner is locked and claimed.
+ */
+export async function readHostedPendingGroupSetupCandidatesForParticipantsTx(
+  input: {
+    now?: Date;
+    occurredAt: Date;
+    participantMemberIds: readonly string[];
+    tx: Prisma.TransactionClient;
+  },
+): Promise<HostedPendingGroupSetupCandidateMetadata[]> {
+  const participantMemberIds = normalizeLookupKeys(
+    input.participantMemberIds,
+  );
+  if (
+    participantMemberIds.length === 0
+    || participantMemberIds.length
+      > HOSTED_PENDING_GROUP_SETUP_MAX_PARTICIPANT_MEMBERS
+  ) {
+    return [];
+  }
+  const now = requireValidDate(
+    input.now ?? new Date(),
+    "pending group setup candidate read time",
+  );
+  const occurredAt = requireValidDate(
+    input.occurredAt,
+    "pending group setup candidate event time",
+  );
+  const rows =
+    await input.tx.$queryRaw<HostedPendingGroupSetupCandidateMetadata[]>(
+      Prisma.sql`
+        SELECT
+          setup."id",
+          setup."owner_member_id" AS "ownerMemberId",
+          setup."recipient_phone_lookup_key" AS "recipientPhoneLookupKey",
+          setup."armed_at" AS "armedAt"
+        FROM "hosted_pending_group_setup" AS setup
+        INNER JOIN "hosted_member" AS owner
+          ON owner."id" = setup."owner_member_id"
+        INNER JOIN "hosted_member_routing" AS routing
+          ON routing."member_id" = setup."owner_member_id"
+          AND routing."linq_recipient_phone_lookup_key"
+            = setup."recipient_phone_lookup_key"
+        WHERE setup."owner_member_id" IN (${Prisma.join(participantMemberIds)})
+          AND setup."channel" = ${HOSTED_PENDING_GROUP_SETUP_CHANNEL}
+          AND setup."armed_at" <= ${occurredAt}
+          AND setup."expires_at" > ${occurredAt}
+          AND setup."expires_at" > ${now}
+          AND owner."suspended_at" IS NULL
+        ORDER BY setup."owner_member_id" ASC
+      `,
+    );
+
+  const eligible: HostedPendingGroupSetupCandidateMetadata[] = [];
+  for (const row of rows) {
+    if (
+      (await readHostedRuntimeAiAccessDecision({
+        memberId: row.ownerMemberId,
+        now,
+        prisma: input.tx,
+      })).allowed
+      && await hasActiveHostedLinqManagedLine({
+        phoneNumberLookupKeys: [row.recipientPhoneLookupKey],
+        prisma: input.tx,
+      })
+    ) {
+      eligible.push(row);
+    }
+  }
+  return eligible;
 }
 
 /** A lone roster candidate wins; only the sender's own setup breaks a conflict. */
