@@ -1368,11 +1368,34 @@ owning service primitive rather than hand-writing persisted runtime rows. Linq
 group-thread containers are no longer operator-provisioned: the Linq webhook
 planner auto-provisions the thread-container route through
 `ensureHostedThreadContainerRouteTx` when an attested group message arrives from
-an active member through a configured, enabled managed Linq line whose health
-is `healthy` or `unknown`. The webhook recipient only identifies the candidate
-line; the existing `HostedLinqLine` projection grants new-route authority.
-Established thread routes remain authoritative independently of current
-line-pool eligibility.
+an active member through a configured, enabled managed Linq line whose health is
+`healthy` or `unknown`. A member's exact assigned `AT_RISK` iMessage group line
+is also admitted because the member initiated that group. A hard-blocked exact
+assigned group line is not provisioned: Web plans a private group-line recovery
+intent, and transport revalidates member access, participant identity, hard
+blocked incoming-line state, current assignment, healthy backup sender capacity,
+and persisted delivery shape before creating the private Linq chat. The webhook
+recipient only identifies the candidate line; the existing `HostedLinqLine`
+projection grants new-route or recovery authority. Established thread routes
+remain authoritative independently of current line-pool eligibility.
+Recovery deliveries use a finite five-attempt sequence within the existing
+`HostedLinqDelivery` owner. A live or successful attempt converges every source
+event for that member, failed line, and group thread. Provider-correlated failed
+receipts are not treated as irrevocably final because a later delivered receipt
+may win ordering. Only a different source event may advance the provider
+attempt key after failure, and it must reuse the same pinned sender, rendered
+backup number, deterministic copy, and original proactive-conversation capacity
+reservation. That exact line may be healthy or may retain the `warning`
+projection written by the same failed receipt: its latest receipt event must
+equal the delivery's hashed last-provider-event identity. Any newer receipt,
+provider degradation or hard block, disabled or unconfigured egress, unreadable
+phone envelope, or other unhealthy state fails closed without selecting a
+replacement. Replay of the exact failed event cannot create another provider
+request. A late success can therefore duplicate only the same instruction,
+never direct the member to a conflicting number or claim another capacity slot.
+Safe structured digests in `sourceRef` preserve source-event
+identity without storing raw contacts, group identifiers, or provider event
+identifiers.
 
 For hard-cut rollouts, deploy consumers before producers: Cloudflare and the
 runtime parser must understand the new mailbox kind before web emits it. After
