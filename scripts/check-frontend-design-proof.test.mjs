@@ -223,6 +223,20 @@ test("skips backend-only and design-catalog-only hosted Web diffs", () => {
   );
 });
 
+test("skips deleted UI because it is no longer a shipped surface", async () => {
+  const fixture = await createDeletedUiFixture();
+  try {
+    const result = await runCli(fixture, "http://127.0.0.1:1", "");
+    assert.equal(result.code, 0);
+    assert.match(
+      result.stdout,
+      /No user-facing hosted Web UI changes detected\./u,
+    );
+  } finally {
+    await rm(fixture.directory, { force: true, recursive: true });
+  }
+});
+
 test("actual CLI trusts rendered GFM for composed Markdown cases", async () => {
   const fixture = await createCliFixture();
   const hiddenHeading = `
@@ -322,6 +336,45 @@ not proof
     await rm(fixture.directory, { force: true, recursive: true });
   }
 });
+
+async function createDeletedUiFixture() {
+  const directory = await mkdtemp(join(tmpdir(), "murph-design-proof-deletion-"));
+  execFileSync("git", ["init", "--quiet"], { cwd: directory });
+  execFileSync("git", ["config", "user.email", "codex@users.noreply.github.com"], {
+    cwd: directory,
+  });
+  execFileSync("git", ["config", "user.name", "Codex Test"], {
+    cwd: directory,
+  });
+  await mkdir(join(directory, "apps/web/src/components/settings"), {
+    recursive: true,
+  });
+  const deletedPath = join(
+    directory,
+    "apps/web/src/components/settings/unused.tsx",
+  );
+  await writeFile(
+    deletedPath,
+    "export function Unused() { return null; }\n",
+  );
+  execFileSync("git", ["add", "apps"], { cwd: directory });
+  execFileSync("git", ["commit", "--quiet", "-m", "base"], { cwd: directory });
+  const baseSha = execFileSync("git", ["rev-parse", "HEAD"], {
+    cwd: directory,
+    encoding: "utf8",
+  }).trim();
+
+  await rm(deletedPath);
+  execFileSync("git", ["add", "-u"], { cwd: directory });
+  execFileSync("git", ["commit", "--quiet", "-m", "delete UI"], {
+    cwd: directory,
+  });
+  const headSha = execFileSync("git", ["rev-parse", "HEAD"], {
+    cwd: directory,
+    encoding: "utf8",
+  }).trim();
+  return { baseSha, directory, headSha };
+}
 
 async function createCliFixture() {
   const directory = await mkdtemp(join(tmpdir(), "murph-design-proof-"));

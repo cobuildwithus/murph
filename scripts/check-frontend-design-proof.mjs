@@ -195,7 +195,7 @@ async function renderPrBody(markdown) {
 function readChangedPaths(baseSha, headSha) {
   return execFileSync(
     "git",
-    ["diff", "--name-only", "--diff-filter=ACDMRT", `${baseSha}...${headSha}`],
+    ["diff", "--name-only", "--diff-filter=ACMRT", `${baseSha}...${headSha}`],
     { encoding: "utf8" },
   )
     .split("\n")

@@ -8020,6 +8020,165 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("fails closed across a dirty checkpoint when ChatGPT auth authority is unavailable", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hot-chatgpt-auth-unavailable-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const phaseObserved = createDeferred<void>();
+    const sensitiveText = "synthetic-auth-authority-private-detail";
+    const idleCheckpointDelayMs = 180_000;
+    let assistantPhaseCalls = 0;
+    let authorityAvailable = true;
+    let metadataReadCount = 0;
+    let invocationPromise:
+      ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const readAccessSeed = vi.fn(async (
+        request: HostedCodexAuthSeedRequest,
+      ): Promise<HostedCodexAuthSeedResponse> => {
+        assert.deepEqual(request, {
+          includeCredentials: false,
+          knownConnectionVersion: null,
+          schemaVersion: 1,
+        });
+        metadataReadCount += 1;
+        if (!authorityAvailable) {
+          events.push("auth.probe:authority-unavailable");
+          throw new Error(sensitiveText);
+        }
+        events.push(`auth.probe:available:${metadataReadCount}`);
+        return {
+          connectionVersion: null,
+          reason: "unconfigured",
+          schemaVersion: 1,
+          status: "unavailable",
+        };
+      });
+      const workspacePort = createWorkspacePort({
+        checkpointRequests,
+        events,
+        workspace: createWorkspaceState({ version: "4" }),
+      });
+      const workspaceCheckpoint = vi.fn(
+        workspacePort.checkpoint.bind(workspacePort),
+      );
+      const stopWarmCallCountBefore =
+        mocks.stopWarmCodexAppServer.mock.calls.length;
+      mocks.stopWarmCodexAppServer.mockImplementationOnce(async () => {
+        events.push("codex.stop");
+      });
+      invocationPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_hot_chatgpt_auth_authority_unavailable",
+            idleCheckpointDelayMs,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "7".repeat(64),
+                key: "users/bundles/member-synthetic/hot-chatgpt-auth-unavailable.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            codexAuthPort: {
+              readAccessSeed,
+              update: vi.fn(),
+            },
+            logRequests,
+            mailboxPort: createMailboxPort({
+              events,
+              items: [createMailboxItem({
+                id: "mailbox_item_hot_chatgpt_auth_authority_unavailable",
+                laneSeq: "1",
+              })],
+            }),
+            workspacePort: {
+              ...workspacePort,
+              checkpoint: workspaceCheckpoint,
+            },
+          }),
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            phaseObserved.resolve();
+            return {
+              checkpointReason: "assistant_runtime_commit",
+              nextWakeAt: null,
+              nextWakeReason: null,
+              progressed: true as const,
+              redactedStatus: {
+                hostedAssistantProgressed: true,
+              },
+            };
+          },
+          runtimeWakeSignal,
+          vaultRoot,
+        },
+      );
+      void invocationPromise.catch(() => undefined);
+
+      await withRealTimeout(
+        phaseObserved.promise,
+        15_000,
+        () => events.join(","),
+      );
+      await waitForFakeTimerScheduled(() => events.join(","));
+      authorityAvailable = false;
+      runtimeWakeSignal.notify(Date.parse(TEST_NOW) + 1);
+      const result = await withRealTimeout(
+        invocationPromise,
+        15_000,
+        () => events.join(","),
+      );
+
+      assert.equal(assistantPhaseCalls, 1);
+      assert.ok(readAccessSeed.mock.calls.length >= 3);
+      assert.equal(readAccessSeed.mock.calls.every(
+        ([request]) => request.includeCredentials === false,
+      ), true);
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
+      assert.equal(result.immediateRecheckRequested, true);
+      expect(
+        mocks.stopWarmCodexAppServer.mock.calls.slice(stopWarmCallCountBefore),
+      ).toEqual([["chatgpt-auth-mode-changed"]]);
+      const checkpointCallOrder =
+        workspaceCheckpoint.mock.invocationCallOrder[0];
+      const stopWarmCallOrder =
+        mocks.stopWarmCodexAppServer.mock.invocationCallOrder[
+          stopWarmCallCountBefore
+        ];
+      assert.ok(checkpointCallOrder !== undefined);
+      assert.ok(stopWarmCallOrder !== undefined);
+      assert.ok(checkpointCallOrder < stopWarmCallOrder);
+      expect(JSON.stringify({ events, logRequests })).not.toContain(sensitiveText);
+    } finally {
+      await invocationPromise?.catch(() => undefined);
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test.each([
     {
       expectedStatus: "idle" as const,

@@ -12437,6 +12437,112 @@ describe('assistant codex runtime', () => {
     )).not.toContain(accessToken)
   })
 
+  it('discards a warm ChatGPT bearer when App Server logout rejects', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-chatgpt-logout-failed-work-')
+    const child = new MockChildProcess()
+    const spawnedChildren = [child]
+    const accessToken = ['synthetic', 'logout', 'access'].join('-')
+    const sensitiveText = ['synthetic', 'logout', 'rpc', 'detail'].join('-')
+    mockProcessGroupSignalsForChildren(spawnedChildren)
+    codexMocks.spawn.mockImplementation(() => {
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+          const login = await waitForRpcMethod(child, 'account/login/start')
+          child.stdout.write(jsonLine({
+            id: login.id,
+            result: { type: 'chatgptAuthTokens' },
+          }))
+          await writeWarmTurnStarted({
+            child,
+            requestCount: 1,
+            threadId: 'thread-chatgpt-logout-failed-initial',
+            turnId: 'turn-chatgpt-logout-failed-initial',
+          })
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              threadId: 'thread-chatgpt-logout-failed-initial',
+              turn: {
+                id: 'turn-chatgpt-logout-failed-initial',
+                status: 'completed',
+              },
+            },
+          }))
+
+          const logout = await waitForRpcMethod(child, 'account/logout')
+          child.stdout.write(jsonLine({
+            error: {
+              code: -32_603,
+              message: `logout rejected ${sensitiveText}`,
+            },
+            id: logout.id,
+          }))
+        })()
+      })
+      return child
+    })
+
+    let resolveCount = 0
+    const resolver = {
+      resolve: vi.fn(async () => {
+        resolveCount += 1
+        return resolveCount === 1
+          ? {
+              accessToken,
+              chatgptAccountId: 'chatgpt-account-logout-failed',
+              connectionVersion: 'connection-logout-failed',
+              expiresAt: '2999-01-01T00:00:00.000Z',
+              kind: 'login' as const,
+            }
+          : {
+              authRequired: false,
+              connectionVersion: null,
+              kind: 'logout' as const,
+            }
+      }),
+    }
+    await executeCodexAppServerTurn({
+      codexChatGptAuthResolver: resolver,
+      codexChatGptAuthSubject: 'member-logout-failed',
+      prompt: 'Seed auth before rejected logout',
+      workingDirectory,
+    })
+
+    let failure: unknown
+    try {
+      await executeCodexAppServerTurn({
+        codexChatGptAuthResolver: resolver,
+        codexChatGptAuthSubject: 'member-logout-failed',
+        prompt: 'Rejected logout must prevent provider start',
+        workingDirectory,
+      })
+    } catch (error) {
+      failure = error
+    }
+
+    expect(failure).toMatchObject({
+      code: 'ASSISTANT_CODEX_CHATGPT_AUTH_LOGOUT_FAILED',
+      context: { retryable: true },
+      message: 'Codex app-server could not clear external ChatGPT authentication.',
+    })
+    expect(readWrittenRpcMessages(child).filter(
+      (message) => message.method === 'thread/start',
+    )).toHaveLength(1)
+    expect(readWrittenRpcMessages(child).filter(
+      (message) => message.method === 'account/logout',
+    )).toHaveLength(1)
+    expect(String(failure)).not.toContain(accessToken)
+    expect(String(failure)).not.toContain(sensitiveText)
+    const jsonEvents = JSON.stringify(
+      readCodexAppServerTurnFailureContext(failure)?.jsonEvents ?? [],
+    )
+    expect(jsonEvents).not.toContain(accessToken)
+    expect(jsonEvents).not.toContain(sensitiveText)
+    expect(child.exitCode === null && child.signalCode === null).toBe(false)
+  })
+
   it('fails fresh auth-required resolution without issuing a redundant logout', async () => {
     const workingDirectory = await createTempDir('assistant-codex-chatgpt-fresh-required-work-')
     const child = new MockChildProcess()
@@ -12476,6 +12582,56 @@ describe('assistant codex runtime', () => {
     expect(readWrittenRpcMessages(child).some(
       (message) => message.method === 'thread/start',
     )).toBe(false)
+  })
+
+  it('fails secret-safe before provider start when ChatGPT auth resolution rejects', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-chatgpt-resolution-failed-work-')
+    const child = new MockChildProcess()
+    const spawnedChildren = [child]
+    const sensitiveText = ['synthetic', 'resolver', 'credential'].join('-')
+    mockProcessGroupSignalsForChildren(spawnedChildren)
+    codexMocks.spawn.mockImplementation(() => {
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+        })()
+      })
+      return child
+    })
+
+    let failure: unknown
+    try {
+      await executeCodexAppServerTurn({
+        codexChatGptAuthResolver: {
+          resolve: async () => {
+            throw new Error(`authority unavailable ${sensitiveText}`)
+          },
+        },
+        codexChatGptAuthSubject: 'member-resolution-failed',
+        prompt: 'Resolver failure must prevent provider start',
+        workingDirectory,
+      })
+    } catch (error) {
+      failure = error
+    }
+
+    expect(failure).toMatchObject({
+      code: 'ASSISTANT_CODEX_CHATGPT_AUTH_RESOLUTION_FAILED',
+      context: { retryable: true },
+      message: 'Hosted ChatGPT authentication could not be resolved.',
+    })
+    expect(readWrittenRpcMessages(child).some(
+      (message) => message.method === 'thread/start',
+    )).toBe(false)
+    expect(readWrittenRpcMessages(child).some(
+      (message) => message.method === 'account/login/start',
+    )).toBe(false)
+    expect(String(failure)).not.toContain(sensitiveText)
+    expect(JSON.stringify(
+      readCodexAppServerTurnFailureContext(failure)?.jsonEvents ?? [],
+    )).not.toContain(sensitiveText)
+    expect(child.exitCode === null && child.signalCode === null).toBe(false)
   })
 
   it('refuses provider start when a successful ChatGPT login was superseded', async () => {

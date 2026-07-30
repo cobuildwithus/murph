@@ -1,6 +1,6 @@
 # Ship optional ChatGPT connection from iOS Settings
 
-Status: active
+Status: completed
 Created: 2026-07-29
 Updated: 2026-07-29
 
@@ -76,16 +76,17 @@ Updated: 2026-07-29
 
 ## Tasks
 
-1. Audit the old backend/iOS prototypes against current ownership, security
+1. [x] Audit the old backend/iOS prototypes against current ownership, security
    changes, and the credential-isolation PR.
-2. Implement the smallest optional Settings flow plus bounded backend seed path
+2. [x] Implement the smallest optional Settings flow plus bounded backend seed path
    on current `main`.
-3. Add/update focused unit, integration, release-build, and UI-state proof.
-4. Run product-experience and preliminary specialist review, remediate findings,
+3. [x] Add/update focused unit, integration, release-build, and UI-state proof.
+4. [x] Run product-experience and preliminary specialist review, remediate findings,
    and perform the parent final review.
-5. Commit exact heads, push/open replacement PRs, run final ReviewGPT gates and
-   required CI, then record the safe deployment sequence and external release
-   blocker.
+5. [x] Commit and push reviewable heads, open replacement PRs, and record the safe
+   deployment sequence and external release blockers. The final exact-head
+   ReviewGPT and required CI gates run after this plan is archived so they
+   certify the immutable completion commit recorded in each PR.
 
 ## Decisions
 
@@ -111,3 +112,28 @@ Updated: 2026-07-29
     identifier leakage.
   - Settings screenshots show the optional disconnected row and connection
     detail sheet using synthetic data; state-machine tests cover transitions.
+
+## Completion evidence
+
+- Backend focused proof passed across Assistant Engine, Assistant Runtime,
+  hosted execution, Cloudflare runner, and the authenticated Web seed route.
+- The preliminary specialist review found two missing fail-closed coverage
+  cases. Added regressions now prove authority-read rejection across the dirty
+  checkpoint boundary, secret-safe resolver rejection before provider start,
+  and stale-bearer disposal when App Server logout rejects.
+- The final specialist-remediation files pass with 269 Assistant Runtime tests
+  and 240 Assistant Engine tests; both package typechecks also pass.
+- The deletion-only Web design-proof guard now correctly excludes removed,
+  no-longer-shipped UI. Its focused suite passes 11 tests and the canonical
+  docs-drift check passes.
+- iOS proof passes 398 unit tests, 19 UI tests, SwiftFormat lint, a Release
+  simulator build, and Release-binary credential-marker checks. Four synthetic
+  Settings screenshots are committed in the companion PR.
+- Product-experience re-review reported no remaining blockers after improving
+  action hierarchy, Dynamic Type behavior, unavailable-state proof, and
+  privacy language.
+- Production enablement remains default-off pending an OpenAI-approved OAuth
+  client and reviewed release decision. Physical-device installation remains a
+  local hardware step because the paired phone was not visible to Xcode at
+  final verification time.
+Completed: 2026-07-29
