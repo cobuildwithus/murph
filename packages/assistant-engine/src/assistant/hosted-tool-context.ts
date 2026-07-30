@@ -177,6 +177,7 @@ export function createAssistantHostedToolContext(input: {
   recordNewsletterSendResult?: (
     result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
   ) => void
+  recordNewsletterPendingDeliveryIntentId?: (intentId: string) => void
   sendVaultFile?: (
     ref: string,
     toolCallId?: string | null,
@@ -211,6 +212,8 @@ export function createAssistantHostedToolContext(input: {
         automationAuthority: input.messageInput.outboxAutomationAuthority ?? null,
         authority: input.messageInput.scheduledAutomationAuthority ?? null,
         newsletterTool: newsletterPort,
+        recordPendingDeliveryIntentId:
+          input.recordNewsletterPendingDeliveryIntentId,
         sessionId: input.session.sessionId,
         turnId: input.newsletterOutbox.turnId,
         vault: input.newsletterOutbox.vault,
