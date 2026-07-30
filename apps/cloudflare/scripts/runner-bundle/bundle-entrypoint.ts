@@ -64,7 +64,14 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // closure while remaining within the reviewed total budget. Ratchet the static
 // baseline to that combined measurement and retain the established small-growth
 // tolerances.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_856_451 + 32_768;
+//
+// Explicit group-room model configuration adds one scope-specific tool schema
+// and its prompt/execution guards to existing runner chunks without adding a
+// forbidden boot input. The 2026-07-30 Linux CI assembly measured 9,889,994B
+// total and the corresponding macOS assembly measured 9,926,114B. Ratchet the
+// packaged baseline to the larger platform measurement and retain the
+// established 32KB allowance for small reviewed additions.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_926_114 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_649_331;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_117_894;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
