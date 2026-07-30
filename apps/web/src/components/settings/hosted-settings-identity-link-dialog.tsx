@@ -2,7 +2,7 @@
 
 import { usePrivy, useUser } from "@privy-io/react-auth";
 import { useRouter } from "next/navigation";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import { HostedPrivyProvider } from "@/src/components/hosted-onboarding/privy-provider";
@@ -97,8 +97,11 @@ function HostedSettingsIdentityMutationContent({
   onSynced: () => void;
   privySessionMatchesAppSession: boolean;
 }) {
-  const { authenticated, ready } = usePrivy();
+  const { authenticated, logout, ready } = usePrivy();
   const { user } = useUser();
+  const [reauthError, setReauthError] = useState<string | null>(null);
+  const [reauthPending, setReauthPending] = useState(false);
+  const clientIdentityPending = !ready || (authenticated && user === null);
   const clientSessionMatchesAppSession =
     ready
     && authenticated
@@ -111,6 +114,26 @@ function HostedSettingsIdentityMutationContent({
       ? Boolean(account.email.address)
       : Boolean(account.telegram.telegramUserId);
 
+  async function handleClientAuthRequired() {
+    if (reauthPending) {
+      return;
+    }
+
+    setReauthError(null);
+    setReauthPending(true);
+
+    try {
+      if (authenticated) {
+        await logout();
+      }
+      onClientAuthRequired();
+    } catch {
+      setReauthError("Sign out did not finish. Try again.");
+    } finally {
+      setReauthPending(false);
+    }
+  }
+
   if (!clientSessionMatchesAppSession) {
     return (
       <HostedSettingsIdentityDialogFrame
@@ -118,10 +141,15 @@ function HostedSettingsIdentityMutationContent({
         initialMode={initialMode}
         onOpenChange={onOpenChange}
       >
-        {ready ? (
-          <HostedIdentitySessionMismatch onSignInAgain={onClientAuthRequired} />
-        ) : (
+        {clientIdentityPending ? (
           <HostedIdentitySessionLoading />
+        ) : (
+          <HostedIdentitySessionMismatch
+            disabled={reauthPending}
+            errorMessage={reauthError}
+            onSignInAgain={handleClientAuthRequired}
+            pending={reauthPending}
+          />
         )}
       </HostedSettingsIdentityDialogFrame>
     );
@@ -147,12 +175,7 @@ function HostedSettingsIdentityMutationContent({
       onOpenChange={onOpenChange}
     >
       {initialMode === "phone" ? (
-        <HostedPhoneSettings
-          authenticated
-          expectedPrivyUserId={expectedPrivyUserId}
-          onLinked={onSynced}
-          privySessionMatchesAppSession={privySessionMatchesAppSession}
-        />
+        <HostedPhoneSettings onLinked={onSynced} />
       ) : null}
       {initialMode === "telegram" ? (
         <HostedTelegramCardSettings
@@ -192,10 +215,12 @@ export function HostedIdentitySessionLoading() {
 
 export function HostedIdentitySessionMismatch({
   disabled = false,
+  errorMessage = null,
   onSignInAgain,
   pending = false,
 }: {
   disabled?: boolean;
+  errorMessage?: string | null;
   onSignInAgain: () => Promise<void> | void;
   pending?: boolean;
 }) {
@@ -214,6 +239,11 @@ export function HostedIdentitySessionMismatch({
       >
         {pending ? "Signing out…" : "Sign in again"}
       </Button>
+      {errorMessage ? (
+        <p role="alert" className="text-sm text-destructive">
+          {errorMessage}
+        </p>
+      ) : null}
     </div>
   );
 }

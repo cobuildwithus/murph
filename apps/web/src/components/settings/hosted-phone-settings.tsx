@@ -2,7 +2,6 @@
 
 import {
   useLinkAccount,
-  usePrivy,
   useUpdateAccount,
   useUser,
 } from "@privy-io/react-auth";
@@ -14,16 +13,11 @@ import { Spinner } from "@/src/components/ui/spinner";
 
 import type { HostedPhoneLinkPayload } from "../hosted-onboarding/hosted-phone-auth-types";
 import { SettingsStatusLine } from "./connected-account-card";
-import { HostedSettingsSessionState } from "./hosted-settings-session-state";
 import { toErrorMessage } from "./hosted-settings-utils";
 
 export function HostedPhoneSettings(props: {
-  authenticated: boolean;
-  expectedPrivyUserId: string | null;
   onLinked?: (payload: HostedPhoneLinkPayload) => Promise<void> | void;
-  privySessionMatchesAppSession: boolean;
 }) {
-  const { authenticated: privyAuthenticated, ready: privyReady } = usePrivy();
   const { refreshUser, user: privyUser } = useUser();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLinking, setIsLinking] = useState(false);
@@ -31,15 +25,6 @@ export function HostedPhoneSettings(props: {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const providerCompletionHandledRef = useRef(false);
 
-  const clientSessionMatchesAppSession =
-    props.privySessionMatchesAppSession
-    && props.expectedPrivyUserId !== null
-    && privyUser?.id === props.expectedPrivyUserId;
-  const canLinkPhone =
-    props.authenticated
-    && privyReady
-    && privyAuthenticated
-    && clientSessionMatchesAppSession;
   const shouldUpdatePhone = Boolean(privyUser?.phone?.number);
 
   const { linkPhone } = useLinkAccount({
@@ -111,21 +96,6 @@ export function HostedPhoneSettings(props: {
     setErrorMessage(null);
     setSuccessMessage(null);
 
-    if (!props.authenticated) {
-      setErrorMessage("Sign in to your Murph account first, then link your phone.");
-      return;
-    }
-
-    if (!privyReady) {
-      setErrorMessage("Phone linking is still loading. Try again in a moment.");
-      return;
-    }
-
-    if (!privyAuthenticated || !clientSessionMatchesAppSession) {
-      setErrorMessage("Your sign-in changed. Refresh this page before linking a phone.");
-      return;
-    }
-
     providerCompletionHandledRef.current = false;
     setIsLinking(true);
 
@@ -141,22 +111,7 @@ export function HostedPhoneSettings(props: {
     }
   }
 
-  if (!props.authenticated) {
-    return (
-      <div className="space-y-5">
-        <HostedSettingsSessionState
-          authenticated={props.authenticated}
-          signedOutDescription="Sign in to manage your phone number."
-        />
-      </div>
-    );
-  }
-
   const statusTone = errorMessage ? "destructive" : successMessage ? "success" : "neutral";
-  const sessionIssueMessage =
-    privyReady && !canLinkPhone
-      ? "Your sign-in changed. Refresh this page before linking a phone."
-      : null;
   const statusMessage =
     errorMessage
     ?? successMessage
@@ -164,12 +119,12 @@ export function HostedPhoneSettings(props: {
       ? "Saving your phone…"
       : isLinking
         ? "Opening secure phone verification…"
-        : sessionIssueMessage);
+        : null);
 
   return (
     <div className="space-y-5">
       <HostedPhoneLinkAction
-        disabled={isLinking || isSyncing || !privyReady || !canLinkPhone}
+        disabled={isLinking || isSyncing}
         isChangeFlow={shouldUpdatePhone}
         isLinking={isLinking}
         isSyncing={isSyncing}

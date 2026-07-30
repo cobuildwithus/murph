@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
   completeHostedPrivyVerification: vi.fn(),
   getPrisma: vi.fn(),
+  getHostedAppSessionFromRequest: vi.fn(),
   getHostedInviteStatus: vi.fn(),
   issueHostedAppSession: vi.fn(),
   requirePrivyCompletionSession: vi.fn(),
@@ -30,6 +31,7 @@ vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
+  getHostedAppSessionFromRequest: mocks.getHostedAppSessionFromRequest,
   issueHostedAppSession: mocks.issueHostedAppSession,
 }));
 
@@ -75,6 +77,7 @@ describe("hosted onboarding Privy completion route", () => {
       stage: "checkout",
     });
     mocks.getHostedInviteStatus.mockResolvedValue(createInviteStatus("checkout"));
+    mocks.getHostedAppSessionFromRequest.mockResolvedValue(null);
     mocks.getPrisma.mockReturnValue({ prisma: "mock" });
     mocks.issueHostedAppSession.mockResolvedValue({
       cookie: "murph-session=session-token; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000",
@@ -93,6 +96,78 @@ describe("hosted onboarding Privy completion route", () => {
       verifiedPrivyUser: {
         id: "did:privy:user_123",
       },
+    });
+  });
+
+  it("rejects a different live Privy identity before replacing an existing app session", async () => {
+    mocks.getHostedAppSessionFromRequest.mockResolvedValueOnce({
+      member: createHostedMember(),
+      privyUserId: "did:privy:user_a",
+    });
+    mocks.requirePrivyCompletionSession.mockResolvedValueOnce({
+      identity: {
+        phone: {
+          number: "+15550000000",
+          verifiedAt: 1742990400,
+        },
+        userId: "did:privy:user_b",
+        wallet: null,
+      },
+      verifiedPrivyUser: {
+        id: "did:privy:user_b",
+      },
+    });
+
+    const response = await privyCompleteRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+        body: JSON.stringify({
+          authIntent: {
+            method: "phone",
+          },
+        }),
+        headers: {
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "PRIVY_SESSION_MEMBER_MISMATCH",
+        retryable: false,
+      },
+    });
+    expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
+    expect(mocks.issueHostedAppSession).not.toHaveBeenCalled();
+  });
+
+  it("allows same-identity reauthentication to refresh the existing app session", async () => {
+    mocks.getHostedAppSessionFromRequest.mockResolvedValueOnce({
+      member: createHostedMember(),
+      privyUserId: "did:privy:user_123",
+    });
+
+    const response = await privyCompleteRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+        body: JSON.stringify({
+          authIntent: {
+            method: "phone",
+          },
+        }),
+        headers: {
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledTimes(1);
+    expect(mocks.issueHostedAppSession).toHaveBeenCalledWith({
+      memberId: "member_123",
+      privyUserId: "did:privy:user_123",
     });
   });
 
