@@ -1,0 +1,72 @@
+name: Agent physical notes bootstrap
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    if: github.event.pull_request.head.ref == 'agent/physical-notes'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: agent/physical-notes
+
+      - name: Apply physical-notes implementation
+        id: apply
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git log -1 --pretty=%B | grep -Fq '[physical-notes-applied]'; then
+            echo 'already_applied=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          gzip -dc .github/agent-physical-notes-base.patch.gz | git apply --3way
+          gzip -dc .github/agent-physical-notes-corrections.patch.gz | git apply
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'feat: add composable physical notes [physical-notes-applied]'
+          git push origin HEAD:agent/physical-notes
+          echo 'already_applied=false' >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        if: steps.apply.outputs.already_applied != 'true'
+        with:
+          node-version: 24.14.1
+
+      - name: Install dependencies
+        if: steps.apply.outputs.already_applied != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          pnpm install --frozen-lockfile
+
+      - name: Typecheck changed owners
+        if: steps.apply.outputs.already_applied != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --filter @murphai/hosted-execution typecheck
+          pnpm --filter @murphai/assistant-engine typecheck
+          pnpm --filter @murphai/assistant-runtime typecheck
+          pnpm --dir apps/web typecheck
+
+      - name: Run focused tests
+        if: steps.apply.outputs.already_applied != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --filter @murphai/hosted-execution test -- physical-notes
+          pnpm --filter @murphai/assistant-engine test -- assistant-physical-notes assistant-hosted-image-completion
+          pnpm --filter @murphai/assistant-runtime test -- hosted-runtime-image-generation
+          pnpm --dir apps/web test:prepared -- physical-notes-lob-runtime hosted-execution-usage-lob hosted-physical-note-storage-contract hosted-account-data-service
