@@ -814,8 +814,13 @@ describe("executeHostedMailboxEvent", () => {
     expect(JSON.stringify(entry?.redacted)).not.toContain("api.openai.com");
   });
 
-  it("captures hosted Codex warm app-server timing traces", () => {
-    for (const stage of ["warm-reused", "warm-idle", "warm-abort-poisoned"]) {
+  it("captures hosted Codex reusable app-server timing traces", () => {
+    for (const stage of [
+      "preinitialized",
+      "warm-reused",
+      "warm-idle",
+      "warm-abort-poisoned",
+    ]) {
       const eventId = `evt_codex_${stage.replaceAll("-", "_")}_timing`;
       const wake = buildHostedExecutionAssistantNotificationRequestedWake({
         eventId,
@@ -845,6 +850,7 @@ describe("executeHostedMailboxEvent", () => {
           rawEvent: {
             schema: "murph.assistant-codex-app-server-timing.v1",
             type: "assistant.codex.app_server_timing",
+            codexTimingColdStartReason: "node-process-first-use",
             codexTimingElapsedMs: 12,
             codexTimingStage: stage,
             codexTimingTotalElapsedMs: 34,
@@ -862,6 +868,9 @@ describe("executeHostedMailboxEvent", () => {
         message: "Hosted assistant Codex app-server timing captured.",
         phase: "wake.running",
         redacted: expect.objectContaining({
+          ...(stage === "preinitialized"
+            ? { codexTimingColdStartReason: "node-process-first-use" }
+            : {}),
           codexTimingElapsedMs: 12,
           codexTimingStage: stage,
           codexTimingTotalElapsedMs: 34,

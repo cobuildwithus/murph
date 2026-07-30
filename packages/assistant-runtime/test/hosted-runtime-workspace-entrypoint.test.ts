@@ -50,6 +50,10 @@ import {
   type AssistantHostedImageGenerationLauncher,
   type RunAssistantAutomationPassInput,
 } from "@murphai/assistant-engine";
+import type {
+  HostedCodexAssistantProcessPreparation,
+  HostedCodexAssistantProcessPreparationInput,
+} from "@murphai/assistant-engine/assistant-runtime";
 import {
   parseAssistantSessionRecord,
 } from "@murphai/operator-config/assistant-cli-contracts";
@@ -143,12 +147,18 @@ const mocks = vi.hoisted(() => ({
   executeReadOnlyAssistantAsk: vi.fn(),
   hasCompleteAssistantAutoReplyDeliveryTerminalEvidence:
     vi.fn<HasCompleteAssistantAutoReplyDeliveryTerminalEvidence>(),
+  prepareHostedCodexAssistantProcess: vi.fn<
+    (
+      input: HostedCodexAssistantProcessPreparationInput,
+    ) => Promise<HostedCodexAssistantProcessPreparation | null>
+  >(async () => null),
   prepareHostedCodexRuntimeEnvironment: vi.fn(),
   refreshHostedBrowserVaultReplicaFromRuntime: vi.fn(),
   runAssistantAutomationPass: vi.fn(),
   runHostedIdleCheckpointMaintenance: vi.fn(),
   summarizeWearableSleepRuntime: vi.fn(),
   snapshotHostedPortableWorkspaceDelta: vi.fn(),
+  cancelPendingWarmCodexPreinitialization: vi.fn(async () => undefined),
 }));
 
 vi.mock("../src/hosted-runtime/pending-input-index.ts", async (importOriginal) => {
@@ -206,6 +216,18 @@ vi.mock("@murphai/assistant-engine", async (importOriginal) => {
       mocks.runAssistantAutomationPass.mockImplementation(
         actual.runAssistantAutomationPass,
       ),
+  };
+});
+
+vi.mock("@murphai/assistant-engine/assistant-runtime", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@murphai/assistant-engine/assistant-runtime")
+  >();
+
+  return {
+    ...actual,
+    prepareHostedCodexAssistantProcess:
+      mocks.prepareHostedCodexAssistantProcess,
   };
 });
 
@@ -328,6 +350,7 @@ import {
   restoreHostedWorkspaceRuntimeJobWorkspace,
 } from "../src/hosted-runtime/workspace-restore.ts";
 import {
+  createHostedAssistantTurnEnvironment,
   normalizeHostedAssistantRuntimeConfig,
 } from "../src/hosted-runtime/environment.ts";
 import {
@@ -811,6 +834,548 @@ describe("hosted workspace runtime entrypoint", () => {
     } finally {
       prepareRelease.resolve();
       await resultPromise?.catch(() => undefined);
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("does not prepare Codex before a replyable conversation is staged", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const snapshotRef = createWorkspaceSnapshotV2Ref(
+      "snapshot-codex-preinitialization-early-return",
+    );
+    const sidecarItem = createMailboxItem({
+      id: "mailbox_item_codex_preinitialization_early_return",
+      laneSeq: "1",
+      payloadInlineCiphertext: null,
+      payloadRef: "hosted-mailbox-payload:codex-preinitialization-early-return",
+    });
+    const baseMailboxPort = createMailboxPort({
+      events,
+      items: [sidecarItem],
+    });
+    mocks.prepareHostedCodexAssistantProcess.mockClear();
+    mocks.cancelPendingWarmCodexPreinitialization.mockClear();
+
+    try {
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          forwardedEnv: {
+            HOSTED_ASSISTANT_APPROVAL_POLICY: "never",
+            HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
+            HOSTED_ASSISTANT_SANDBOX: "danger-full-access",
+          },
+          request: {
+            attemptId: "attempt_synthetic_codex_preinitialization_overlap",
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Retry-only mailbox scheduling should not checkpoint.");
+          },
+          async importItem() {
+            throw new Error("Unavailable mailbox payload should not import.");
+          },
+          platform: createPlatform({
+            mailboxPort: {
+              ...baseMailboxPort,
+              async fetchPayload(): Promise<HostedMailboxPayloadFetchResponse> {
+                events.push("mailbox.fetchPayload");
+                return {
+                  fetchedAt: TEST_NOW,
+                  payload: null,
+                  unavailable: {
+                    code: "not_found",
+                    retryable: true,
+                  },
+                };
+              },
+            },
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                snapshotRef,
+                version: "0",
+              }),
+            }),
+            workspaceSnapshotPort: {
+              async abortSnapshotSession() {
+                throw new Error("Early-return test should not abort snapshots.");
+              },
+              async completeSnapshotSession() {
+                throw new Error("Early-return test should not complete snapshots.");
+              },
+              async putSnapshotObjectDirect() {
+                throw new Error("Early-return test should not upload snapshots.");
+              },
+              async restoreWorkspaceSnapshot(input) {
+                await initializeVault({
+                  createdAt: TEST_NOW,
+                  vaultRoot: input.durableRoot,
+                });
+              },
+              async startSnapshotSession() {
+                throw new Error("Early-return test should not start snapshots.");
+              },
+            },
+          }),
+          vaultRoot,
+        },
+      );
+
+      assert.deepEqual(checkpointRequests, []);
+      assert.equal(
+        mocks.prepareHostedCodexAssistantProcess.mock.calls.length,
+        0,
+      );
+      assert.equal(mocks.cancelPendingWarmCodexPreinitialization.mock.calls.length, 0);
+      assert.ok(events.includes("mailbox.fetchPayload"));
+      assert.ok(!events.includes("codex.preinitialize"));
+      assert.ok(!events.includes("codex.workspace-boundary"));
+      assert.equal(result.status, "scheduled");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("joins staged Codex preparation before the workspace snapshot", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const snapshotRef = createWorkspaceSnapshotV2Ref(
+      "snapshot-codex-preinitialization-snapshot-join",
+    );
+    const conversationItem = createMailboxItem({
+      id: "mailbox_item_codex_preinitialization_snapshot_join",
+      laneSeq: "1",
+    });
+    const preparationStarted = createDeferred<void>();
+    const preparationRelease = createDeferred<void>();
+    const mailboxProjectionFinished = createDeferred<void>();
+    const prepareHostedCodexRuntimeEnvironmentImpl =
+      mocks.prepareHostedCodexRuntimeEnvironment.getMockImplementation();
+    let preparedRuntimeEnv: Readonly<Record<string, string>> | null = null;
+    let preparedOperatorHomeRoot: string | null = null;
+    let assistantInputId: string | null = null;
+    let conversationInputStaged = false;
+    let snapshotStarted = false;
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    assert.ok(prepareHostedCodexRuntimeEnvironmentImpl);
+    mocks.prepareHostedCodexRuntimeEnvironment.mockImplementationOnce(async (input) => {
+      const prepared = await prepareHostedCodexRuntimeEnvironmentImpl(input);
+      preparedOperatorHomeRoot = input.operatorHomeRoot;
+      preparedRuntimeEnv = prepared.runtimeEnv;
+      return prepared;
+    });
+    mocks.prepareHostedCodexAssistantProcess.mockClear();
+    mocks.cancelPendingWarmCodexPreinitialization.mockClear();
+    mocks.prepareHostedCodexAssistantProcess.mockImplementationOnce(async () => {
+      events.push("codex.preinitialize.start");
+      preparationStarted.resolve();
+      await preparationRelease.promise;
+      events.push("codex.preinitialize.admitted");
+      return {
+        cancelPending: async () => {
+          events.push("codex.preinitialize.cancel");
+          await mocks.cancelPendingWarmCodexPreinitialization();
+        },
+      };
+    });
+
+    try {
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_codex_preinitialization_snapshot_join",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            snapshotStarted = true;
+            events.push("snapshot");
+            return {
+              snapshotRef: createBundleRef({
+                hash: "7".repeat(64),
+                key: "users/bundles/member-synthetic/codex-preinitialization-snapshot-join.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item, context) {
+            assistantInputId ??= await stageAssistantInputEventForMailboxItem({
+              item: item.item,
+              vaultRoot,
+            });
+            if (!conversationInputStaged) {
+              conversationInputStaged = true;
+              events.push("mailbox.staged");
+              assert.ok(context?.onConversationInputStaged);
+              context.onConversationInputStaged("linq");
+              await preparationStarted.promise;
+              events.push("mailbox.projection.done");
+              mailboxProjectionFinished.resolve();
+            }
+            return {
+              assistantInputId,
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [conversationItem],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                snapshotRef,
+                version: "0",
+              }),
+            }),
+            workspaceSnapshotPort: {
+              async abortSnapshotSession() {
+                throw new Error("Snapshot-join test should not abort snapshots.");
+              },
+              async completeSnapshotSession() {
+                throw new Error("Snapshot-join test should not complete snapshot sessions.");
+              },
+              async putSnapshotObjectDirect() {
+                throw new Error("Snapshot-join test should not upload snapshot objects directly.");
+              },
+              async restoreWorkspaceSnapshot(input) {
+                await initializeVault({
+                  createdAt: TEST_NOW,
+                  vaultRoot: input.durableRoot,
+                });
+              },
+              async startSnapshotSession() {
+                throw new Error("Snapshot-join test should not start snapshot sessions.");
+              },
+            },
+          }),
+          async runAssistantPhase(input) {
+            events.push("assistant.foreground");
+            assert.ok(assistantInputId);
+            assert.deepEqual(
+              input.initialAssistantInputBatch?.assistantInputIds
+                ?? input.initialMailboxImport.importResult.assistantInputIds,
+              [assistantInputId],
+            );
+            await writeSyntheticAssistantAutoReplyTerminalEvidence({
+              inputId: assistantInputId,
+              vaultRoot,
+            });
+            return {
+              checkpointReason: "assistant_runtime_commit" as const,
+              progressed: true,
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      await withRealTimeout(
+        mailboxProjectionFinished.promise,
+        15_000,
+        () => events.join(","),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      assert.equal(snapshotStarted, false);
+
+      preparationRelease.resolve();
+      const result = await withRealTimeout(
+        resultPromise,
+        15_000,
+        () => events.join(","),
+      );
+      const preparationInput =
+        mocks.prepareHostedCodexAssistantProcess.mock.calls.at(-1)?.[0];
+      assert.ok(preparationInput);
+      assert.ok(preparedOperatorHomeRoot);
+      assert.ok(preparedRuntimeEnv);
+      assert.deepEqual(
+        preparationInput.env,
+        createHostedAssistantTurnEnvironment({
+          operatorHomeRoot: preparedOperatorHomeRoot,
+          runtimeEnv: preparedRuntimeEnv,
+          vaultRoot,
+        }).env,
+      );
+      assert.equal(preparationInput.workingDirectory, vaultRoot);
+      assert.equal(preparationInput.signal?.aborted, false);
+      assert.ok(
+        events.indexOf("mailbox.staged")
+          < events.indexOf("codex.preinitialize.start"),
+      );
+      assert.ok(
+        events.indexOf("codex.preinitialize.start")
+          < events.indexOf("mailbox.projection.done"),
+      );
+      assert.ok(
+        events.indexOf("codex.preinitialize.cancel")
+          < events.indexOf("snapshot"),
+      );
+      assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 1);
+      assert.equal(
+        mocks.cancelPendingWarmCodexPreinitialization.mock.calls.length,
+        1,
+      );
+      assert.equal(result.status, "idle");
+    } finally {
+      preparationRelease.resolve();
+      await resultPromise?.catch(() => undefined);
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("falls back to foreground startup when Codex preparation rejects before admission", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const preparationFailure = new Error("Synthetic Codex preparation failure.");
+    const snapshotRef = createWorkspaceSnapshotV2Ref(
+      "snapshot-codex-preinitialization-fallback",
+    );
+    const conversationItem = createMailboxItem({
+      id: "mailbox_item_codex_preinitialization_fallback",
+      laneSeq: "1",
+    });
+    const preparationAttempted = createDeferred<void>();
+    let assistantInputId: string | null = null;
+    let assistantPhaseCalls = 0;
+
+    mocks.prepareHostedCodexAssistantProcess.mockClear();
+    mocks.cancelPendingWarmCodexPreinitialization.mockClear();
+    mocks.prepareHostedCodexAssistantProcess.mockImplementationOnce(async () => {
+      events.push("codex.preinitialize.reject");
+      preparationAttempted.resolve();
+      throw preparationFailure;
+    });
+
+    try {
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_codex_preinitialization_fallback",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            events.push("snapshot");
+            return {
+              snapshotRef: createBundleRef({
+                hash: "8".repeat(64),
+                key: "users/bundles/member-synthetic/codex-preinitialization-fallback.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item, context) {
+            events.push("mailbox.import");
+            assistantInputId = await stageAssistantInputEventForMailboxItem({
+              item: item.item,
+              vaultRoot,
+            });
+            assert.ok(context?.onConversationInputStaged);
+            context.onConversationInputStaged("linq");
+            await withRealTimeout(
+              preparationAttempted.promise,
+              15_000,
+              () => events.join(","),
+            );
+            events.push("mailbox.projection.done");
+            return {
+              assistantInputId,
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [conversationItem],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                snapshotRef,
+                version: "0",
+              }),
+            }),
+            workspaceSnapshotPort: {
+              async abortSnapshotSession() {
+                throw new Error("Fallback test should not abort snapshots.");
+              },
+              async completeSnapshotSession() {
+                throw new Error("Fallback test should not complete snapshot sessions.");
+              },
+              async putSnapshotObjectDirect() {
+                throw new Error("Fallback test should not upload snapshot objects directly.");
+              },
+              async restoreWorkspaceSnapshot(input) {
+                await initializeVault({
+                  createdAt: TEST_NOW,
+                  vaultRoot: input.durableRoot,
+                });
+              },
+              async startSnapshotSession() {
+                throw new Error("Fallback test should not start snapshot sessions.");
+              },
+            },
+          }),
+          async runAssistantPhase(input) {
+            assistantPhaseCalls += 1;
+            events.push("assistant.foreground");
+            assert.ok(assistantInputId);
+            assert.deepEqual(
+              input.initialAssistantInputBatch?.assistantInputIds
+                ?? input.initialMailboxImport.importResult.assistantInputIds,
+              [assistantInputId],
+            );
+            return { progressed: false };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 1);
+      assert.ok(
+        events.indexOf("mailbox.import")
+          < events.indexOf("codex.preinitialize.reject"),
+      );
+      assert.ok(
+        events.indexOf("codex.preinitialize.reject")
+          < events.indexOf("mailbox.projection.done"),
+      );
+      assert.ok(
+        events.indexOf("mailbox.projection.done")
+          < events.indexOf("assistant.foreground"),
+      );
+      assert.equal(assistantPhaseCalls, 1);
+      assert.equal(
+        mocks.cancelPendingWarmCodexPreinitialization.mock.calls.length,
+        0,
+      );
+      assert.equal(result.status, "idle");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("lets the first staged email veto later generic preparation", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    let assistantPhaseCalls = 0;
+
+    mocks.prepareHostedCodexAssistantProcess.mockClear();
+    mocks.cancelPendingWarmCodexPreinitialization.mockClear();
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_email_first_preinitialization_veto",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            events.push("snapshot");
+            return {
+              snapshotRef: createBundleRef({
+                hash: "6".repeat(64),
+                key: "users/bundles/member-synthetic/email-first-preinitialization-veto.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item, context) {
+            const assistantInputId = await stageAssistantInputEventForMailboxItem({
+              item: item.item,
+              vaultRoot,
+            });
+            const channel = item.item.laneSeq === "1" ? "email" : "linq";
+            events.push(`mailbox.staged:${channel}`);
+            context?.onConversationInputStaged?.(channel);
+            return {
+              assistantInputId,
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [
+                createMailboxItem({
+                  id: "mailbox_item_email_first_preinitialization_veto",
+                  laneSeq: "1",
+                }),
+                createMailboxItem({
+                  id: "mailbox_item_linq_second_preinitialization_veto",
+                  laneSeq: "2",
+                }),
+              ],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase(input) {
+            assistantPhaseCalls += 1;
+            const inputIds =
+              input.initialAssistantInputBatch?.assistantInputIds
+              ?? input.initialMailboxImport.importResult.assistantInputIds
+              ?? [];
+            assert.ok(inputIds.length > 0);
+            for (const inputId of inputIds) {
+              await writeSyntheticAssistantAutoReplyTerminalEvidence({
+                inputId,
+                vaultRoot,
+              });
+            }
+            return {
+              checkpointReason: "assistant_runtime_commit" as const,
+              progressed: true,
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.deepEqual(
+        events.filter((event) => event.startsWith("mailbox.staged:")),
+        ["mailbox.staged:email", "mailbox.staged:linq"],
+      );
+      assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
+      assert.equal(
+        mocks.cancelPendingWarmCodexPreinitialization.mock.calls.length,
+        0,
+      );
+      assert.ok(assistantPhaseCalls >= 1);
+      assert.equal(result.status, "idle");
+    } finally {
       await removeTempRoot(vaultRoot);
     }
   });
@@ -5833,6 +6398,8 @@ describe("hosted workspace runtime entrypoint", () => {
     let queuedWakePending = false;
     let queuedWakeConsumed = false;
     let wakeNotifiedAt = 0;
+    mocks.prepareHostedCodexAssistantProcess.mockClear();
+    mocks.cancelPendingWarmCodexPreinitialization.mockClear();
     const runtimeWakeSignal: RuntimeWakeSignal = {
       consumePending() {
         if (!queuedWakePending || queuedWakeConsumed) {
@@ -5931,6 +6498,11 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.ok(Date.now() - wakeNotifiedAt >= 150);
       assert.equal(checkpointRequests[0]?.idleCheckpointTrigger, "idle_window");
       assert.equal(checkpointRequests[0]?.runtimeWakePendingAtCheckpoint, true);
+      assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
+      assert.equal(
+        mocks.cancelPendingWarmCodexPreinitialization.mock.calls.length,
+        0,
+      );
       assert.equal(result.status, "idle");
     } finally {
       if (previousStdIoLogSetting === undefined) {
@@ -7719,6 +8291,8 @@ describe("hosted workspace runtime entrypoint", () => {
     const imported: string[] = [];
     const assistantWorkspaceVersions: string[] = [];
     let bootstrapImported = false;
+    mocks.prepareHostedCodexAssistantProcess.mockClear();
+    mocks.cancelPendingWarmCodexPreinitialization.mockClear();
 
     const conversationItem = createMailboxItem({
       id: "mailbox_item_entrypoint_image_only_001",
@@ -7759,7 +8333,7 @@ describe("hosted workspace runtime entrypoint", () => {
               }),
             };
           },
-          async importItem(item) {
+          async importItem(item, context) {
             imported.push(`${item.item.lane}:${item.item.kind}`);
             if (item.item.kind === "member.activated") {
               await initializeVault({ createdAt: TEST_NOW, vaultRoot });
@@ -7768,6 +8342,7 @@ describe("hosted workspace runtime entrypoint", () => {
             }
 
             assert.equal(bootstrapImported, true);
+            context?.onConversationInputStaged?.("linq");
             return {
               assistantInputId: await stageAssistantInputEventForMailboxItem({
                 item: item.item,
@@ -7845,6 +8420,11 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(result.nextWakeAt, checkpointRequests[0]?.nextWakeAt);
       assert.equal(result.nextWakeReason, "assistant");
       assert.equal(result.status, "scheduled");
+      assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
+      assert.equal(
+        mocks.cancelPendingWarmCodexPreinitialization.mock.calls.length,
+        0,
+      );
     } finally {
       await removeTempRoot(vaultRoot);
     }
@@ -7982,6 +8562,8 @@ describe("hosted workspace runtime entrypoint", () => {
     const events: string[] = [];
     const fetchRequests: HostedMailboxFetchRequest[] = [];
     const imported: string[] = [];
+    mocks.prepareHostedCodexAssistantProcess.mockClear();
+    mocks.cancelPendingWarmCodexPreinitialization.mockClear();
     const mealPhotoItem = createMailboxItem({
       dedupeKey: "meal-photo:system-mailbox-only",
       id: "mailbox_item_system_mailbox_only_meal",
@@ -8100,6 +8682,11 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(result.nextWakeAt, importCheckpoint?.nextWakeAt);
       assert.equal(result.nextWakeReason, "assistant");
       assert.equal(result.status, "scheduled");
+      assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
+      assert.equal(
+        mocks.cancelPendingWarmCodexPreinitialization.mock.calls.length,
+        0,
+      );
       assert.ok(
         events.lastIndexOf("workspace.checkpoint") < events.indexOf("meal-photo.delete"),
       );
@@ -27227,6 +27814,8 @@ describe("hosted workspace runtime entrypoint", () => {
     const projectionNeverResolved = projectionStall.promise;
     void projectionNeverResolved.catch(() => undefined);
     let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+    mocks.prepareHostedCodexAssistantProcess.mockClear();
+    mocks.cancelPendingWarmCodexPreinitialization.mockClear();
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
@@ -27264,7 +27853,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 item: item.item,
                 vaultRoot,
               });
-              context?.onConversationInputStaged?.();
+              context?.onConversationInputStaged?.("linq");
               assert.ok(context?.signal);
               const signal = context.signal;
               const rejectForAbort = () => {
@@ -27381,6 +27970,11 @@ describe("hosted workspace runtime entrypoint", () => {
       // shutdown signal engages.
       assert.ok(assistantPhaseCalls >= 2);
       assert.equal(conversationImportAttempts, 2);
+      assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
+      assert.equal(
+        mocks.cancelPendingWarmCodexPreinitialization.mock.calls.length,
+        0,
+      );
       // The aborted first import must not have advanced the watermark: the
       // attempt-2 stub asserts it still read "0" before importing. Snapshot
       // ordering relative to that import is timing-dependent, so no assertion

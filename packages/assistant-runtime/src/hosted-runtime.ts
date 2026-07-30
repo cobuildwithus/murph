@@ -38,6 +38,7 @@ import {
   emitHostedExecutionStructuredLog,
   readHostedExecutionSafeErrorName,
   summarizeHostedExecutionError,
+  type HostedExecutionConversationMessageChannel,
   type HostedExecutionLogPhase,
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
@@ -48,6 +49,10 @@ import {
   recordAssistantRuntimeIssueInputsBestEffort,
   resolveAssistantDiagnosticsPolicy,
 } from "@murphai/assistant-engine";
+import {
+  prepareHostedCodexAssistantProcess,
+  type HostedCodexAssistantProcessPreparation,
+} from "@murphai/assistant-engine/assistant-runtime";
 import {
   AssistantActiveTurnInputUnavailableError,
   hasCompleteAssistantAutoReplyDeliveryTerminalEvidence,
@@ -91,6 +96,9 @@ import {
   resolveHostedCurrentInputIdForAcceptedInputs,
   type HostedConversationActivityObservation,
 } from "./hosted-runtime/turn-input.ts";
+import {
+  readHostedAssistantExecutionDefaultTarget,
+} from "./hosted-runtime/context.ts";
 import type {
   HostedAssistantWorkspaceRuntimeJobResult,
   HostedAssistantWorkspaceRuntimeJobInput,
@@ -597,7 +605,9 @@ export interface HostedWorkspaceRuntimeJobImportContext {
   assistantAskCompletionKind?: "joined_group";
   assistantAskRequestTargetKind?: "joined_group";
   onConversationActivityObserved?: (() => void) | null;
-  onConversationInputStaged?: (() => void) | null;
+  onConversationInputStaged?: ((
+    channel: HostedExecutionConversationMessageChannel,
+  ) => void) | null;
   recordMessagingReturnTarget?(
     target: HostedRuntimeDeviceSyncMessagingReturnTarget | null,
   ): void;
@@ -963,9 +973,26 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   let pauseDetachedAssistantAskBeforeWorkspaceBoundary = async (): Promise<void> => undefined;
   let resumeDetachedAssistantAskAfterWorkspaceBoundary = (): void => undefined;
   let closeDetachedAssistantAskBeforeWorkspaceRelease = async (): Promise<void> => undefined;
+  let codexProcessPreparationStart:
+    | Promise<HostedCodexAssistantProcessPreparation | null>
+    | null = null;
+  let startCodexProcessPreparationForConversation:
+    | ((channel: HostedExecutionConversationMessageChannel) => void)
+    | null = null;
+  const settleCodexProcessPreparation = async (): Promise<void> => {
+    startCodexProcessPreparationForConversation = null;
+    const started = codexProcessPreparationStart ?? Promise.resolve(null);
+    codexProcessPreparationStart ??= started;
+    const preparation = await started;
+    await preparation?.cancelPending();
+    if (codexProcessPreparationStart === started) {
+      codexProcessPreparationStart = Promise.resolve(null);
+    }
+  };
   let latestCheckpointSnapshotCleanForWarmReuse = false;
   const createAbortGuardedCheckpointSnapshot: HostedWorkspaceSnapshotCheckpointBuilder =
     async (snapshotInput, context) => {
+      await settleCodexProcessPreparation();
       await pauseDetachedAssistantAskBeforeWorkspaceBoundary();
       assertRuntimeNotAborted();
       const checkpointSignal = context?.signal
@@ -1094,7 +1121,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       onConversationActivityObserved: () => {
         options.onConversationActivityObserved?.("observed");
       },
-      onConversationInputStaged: context?.onConversationInputStaged ?? null,
+      onConversationInputStaged:
+        context?.onConversationInputStaged
+        ?? startCodexProcessPreparationForConversation,
       runtimeAttemptId: input.request.attemptId,
       signal: context?.signal ?? runtimeAbortController.signal,
     });
@@ -1483,6 +1512,48 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const initialMailboxImportPlan = resolveHostedInitialMailboxImportPlan({
       vaultRoot: restored.vaultRoot,
     });
+    if (
+      (input.request.processingMode ?? "default") === "default"
+      && !initialMailboxImportPlan.bootstrapRequired
+    ) {
+      startCodexProcessPreparationForConversation = (channel) => {
+        if (codexProcessPreparationStart) {
+          return;
+        }
+        if (channel !== "linq" && channel !== "telegram") {
+          codexProcessPreparationStart = Promise.resolve(null);
+          return;
+        }
+        codexProcessPreparationStart = (async () => {
+          try {
+            const target = await readHostedAssistantExecutionDefaultTarget({
+              homeDirectory: restored.operatorHomeRoot,
+              runtimeEnv: hostedCodexRuntime.runtimeEnv,
+            });
+            assertRuntimeNotAborted();
+            if (!target) {
+              return null;
+            }
+            const turnEnvironment = createHostedAssistantTurnEnvironment({
+              operatorHomeRoot: restored.operatorHomeRoot,
+              runtimeEnv: hostedCodexRuntime.runtimeEnv,
+              vaultRoot: restored.vaultRoot,
+            });
+            return await prepareHostedCodexAssistantProcess({
+              env: turnEnvironment.env,
+              signal: runtimeAbortController.signal,
+              target,
+              workingDirectory: restored.vaultRoot,
+            });
+          } catch {
+            // Process preparation is only a latency optimization. Foreground
+            // execution remains authoritative for config errors and startup.
+            return null;
+          }
+        })();
+      };
+    }
+    assertRuntimeNotAborted();
     const initialMailboxImportLanes =
       input.request.processingMode === "system_mailbox"
         ? (["system"] as const)
@@ -3931,9 +4002,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     await drainDeferredUsageBestEffort();
     throw error;
   } finally {
-    await imageGenerationController?.close();
-    await closeDetachedAssistantAskBeforeWorkspaceRelease();
-    hostAbortSignal?.removeEventListener("abort", abortFromHost);
+    try {
+      await settleCodexProcessPreparation();
+    } finally {
+      try {
+        await imageGenerationController?.close();
+        await closeDetachedAssistantAskBeforeWorkspaceRelease();
+      } finally {
+        hostAbortSignal?.removeEventListener("abort", abortFromHost);
+      }
+    }
   }
 }
 

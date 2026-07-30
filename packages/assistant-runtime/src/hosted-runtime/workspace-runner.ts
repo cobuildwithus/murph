@@ -6,6 +6,7 @@ import {
 } from "@murphai/runtime-state/node/assistant-state-fs";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
+  type HostedExecutionConversationMessageChannel,
 } from "@murphai/hosted-execution";
 import type {
   AssistantUsageRecord,
@@ -322,7 +323,9 @@ export interface HostedWorkspaceRunnerMailboxImportContext {
   assistantAskRequestTargetKind?: "joined_group";
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
   onConversationActivityObserved?: (() => void) | null;
-  onConversationInputStaged?: (() => void) | null;
+  onConversationInputStaged?: ((
+    channel: HostedExecutionConversationMessageChannel,
+  ) => void) | null;
   runtimeAttemptId?: string | null;
   signal?: AbortSignal | null;
 }

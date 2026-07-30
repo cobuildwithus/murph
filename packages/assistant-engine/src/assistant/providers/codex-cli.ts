@@ -3,6 +3,7 @@ import {
 } from '../../assistant-cli-access.js'
 import {
   executeCodexAppServerTurn,
+  preinitializeCodexAppServer,
   readCodexAppServerTurnFailureContext,
 } from '../../assistant-codex.js'
 import {
@@ -57,6 +58,8 @@ import type {
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
 import type {
   CodexAppServerImageInput,
+  CodexAppServerPreinitialization,
+  CodexAppServerTurnInput,
   CodexAppServerTurnFailureContext,
   CodexAppServerLiveTurn,
 } from '../../assistant-codex.js'
@@ -159,16 +162,43 @@ export const CODEX_ASSISTANT_CAPABILITIES: AssistantProviderCapabilities = {
   ]),
 }
 
+type CodexAssistantProcessPreparationInput = Pick<
+  AssistantProviderTurnExecutionInput,
+  | 'codexConfigOverrides'
+  | 'env'
+  | 'providerConfig'
+  | 'showThinkingTraces'
+  | 'workingDirectory'
+>
+
+type CodexAssistantProcessLaunchInput = Pick<
+  CodexAppServerTurnInput,
+  | 'codexCommand'
+  | 'codexHome'
+  | 'configOverrides'
+  | 'env'
+  | 'oss'
+  | 'profile'
+  | 'workingDirectory'
+>
+
+export async function preinitializeCodexAssistantProcess(
+  input: CodexAssistantProcessPreparationInput & {
+    signal?: AbortSignal | null
+  },
+): Promise<CodexAppServerPreinitialization | null> {
+  return await preinitializeCodexAppServer({
+    ...resolveCodexAssistantProcessLaunchInput(input),
+    signal: input.signal ?? undefined,
+  })
+}
+
 export async function executeCodexAssistantTurnAttempt(
   input: AssistantProviderTurnExecutionInput,
 ): Promise<AssistantProviderTurnAttemptResult> {
   const providerConfig = input.providerConfig
-  if (!isAssistantCodexTargetConfig(providerConfig)) {
-    throw new VaultCliError(
-      'ASSISTANT_PROVIDER_UNSUPPORTED',
-      'Codex app-server execution requires a Codex provider config.',
-    )
-  }
+  const codexProcessLaunchInput =
+    resolveCodexAssistantProcessLaunchInput(input)
   const modelProviderResolution = resolveStrictAssistantCodexModelProvider(
     providerConfig.target.modelProvider,
   )
@@ -199,16 +229,9 @@ export async function executeCodexAssistantTurnAttempt(
     env: input.env ?? process.env,
     fetchImpl: input.providerFetch ?? fetch,
   })
-  const codexProcessEnv = prepareAssistantDirectCliEnv(input.env)
-  const codexConfigOverrides = [
-    ...(mergeCodexConfigOverrides({
-      modelProvider: providerConfig.target.modelProvider,
-      showThinkingTraces: input.showThinkingTraces ?? false,
-    }) ?? []),
-    ...(input.codexConfigOverrides ?? []),
-  ]
 
   const baseAppServerInput = {
+    ...codexProcessLaunchInput,
     abortSignal: input.abortSignal,
     allowFinishWithoutReply: input.allowFinishWithoutReply ?? true,
     authorizeAcceptedMessageTarget:
@@ -219,11 +242,6 @@ export async function executeCodexAssistantTurnAttempt(
     dynamicTools: input.dynamicTools,
     environments: input.environments ?? undefined,
     ephemeral: input.providerThreadEphemeral ?? undefined,
-    codexCommand: providerConfig.target.codexCommand ?? undefined,
-    codexHome: providerConfig.target.codexHome ?? undefined,
-    configOverrides:
-      codexConfigOverrides.length > 0 ? codexConfigOverrides : undefined,
-    env: codexProcessEnv,
     fetchImpl: input.providerFetch ?? undefined,
     groupConversation: input.groupConversation === true,
     groupRoomModelMaintenanceAuthorized:
@@ -269,8 +287,6 @@ export async function executeCodexAssistantTurnAttempt(
     onProgress: input.onEvent ?? undefined,
     onProviderRequestStarted: input.onProviderRequestStarted ?? undefined,
     onTraceEvent: input.onTraceEvent,
-    oss: providerConfig.target.oss,
-    profile: providerConfig.target.profile ?? undefined,
     productFeedbackRecorder: input.productFeedbackRecorder ?? null,
     progressDelivery: input.progressDelivery ?? undefined,
     ...(input.processLifetime === 'one-shot'
@@ -291,7 +307,6 @@ export async function executeCodexAssistantTurnAttempt(
     vaultRoot: input.vaultRoot ?? null,
     voiceMemoRuntime,
     askGrokRuntime,
-    workingDirectory: input.workingDirectory,
   } as const
 
   let result: Awaited<ReturnType<typeof executeCodexAppServerTurn>>
@@ -516,6 +531,35 @@ function emitAssistantProviderPromptSizeTraceEvent(input: {
     })
   } catch {
     // Diagnostic traces are best-effort and must not affect assistant turns.
+  }
+}
+
+function resolveCodexAssistantProcessLaunchInput(
+  input: CodexAssistantProcessPreparationInput,
+): CodexAssistantProcessLaunchInput {
+  const providerConfig = input.providerConfig
+  if (!isAssistantCodexTargetConfig(providerConfig)) {
+    throw new VaultCliError(
+      'ASSISTANT_PROVIDER_UNSUPPORTED',
+      'Codex app-server execution requires a Codex provider config.',
+    )
+  }
+  const configOverrides = [
+    ...(mergeCodexConfigOverrides({
+      modelProvider: providerConfig.target.modelProvider,
+      showThinkingTraces: input.showThinkingTraces ?? false,
+    }) ?? []),
+    ...(input.codexConfigOverrides ?? []),
+  ]
+
+  return {
+    codexCommand: providerConfig.target.codexCommand ?? undefined,
+    codexHome: providerConfig.target.codexHome ?? undefined,
+    configOverrides: configOverrides.length > 0 ? configOverrides : undefined,
+    env: prepareAssistantDirectCliEnv(input.env),
+    oss: providerConfig.target.oss,
+    profile: providerConfig.target.profile ?? undefined,
+    workingDirectory: input.workingDirectory,
   }
 }
 
