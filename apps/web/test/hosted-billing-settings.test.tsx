@@ -414,8 +414,9 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, /Add usage/);
     const addUsageButton = markup.match(/<button[^>]*>Add usage<\/button>/u)?.[0];
     assert.ok(addUsageButton);
-    assert.match(addUsageButton, /\bh-11\b/u);
+    assert.match(addUsageButton, /\bh-7\b/u);
     assert.match(addUsageButton, /\bborder-foreground\/20\b/u);
+    assert.match(addUsageButton, /\bself-start\b/u);
     assert.doesNotMatch(addUsageButton, /\bw-full\b/u);
   });
 

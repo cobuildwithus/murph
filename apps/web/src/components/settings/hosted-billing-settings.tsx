@@ -317,6 +317,8 @@ function PlanUsageBand(props: {
       offers={props.usageTopUpOffers}
       payerMemberId={payerMemberId}
       purchaseReturn={props.usageTopUpPurchaseReturn}
+      triggerClassName="self-start"
+      triggerSize="sm"
     />
   ) : null;
 
