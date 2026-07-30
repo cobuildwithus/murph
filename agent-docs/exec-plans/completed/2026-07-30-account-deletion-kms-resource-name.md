@@ -52,9 +52,16 @@ Success criteria:
   coverage finding. Its test-only patch was inspected, path-scoped, applied,
   and verified; encrypt now has direct proof that a version resource is rejected
   before provider I/O.
+- Parent final review walked every KMS encrypt/decrypt caller, the cleanup
+  fanout, retry ownership, and rolling-deploy compatibility and found no
+  remaining issue.
 
 ## State
 
-Implementation and focused verification complete. PR completion gates pending.
-Status: active
+Implementation, focused verification, preliminary remediation, and parent final
+review complete. Exact-head CI and the final ReviewGPT gate continue after plan
+closure under the PR workflow.
+Status: completed
 Updated: 2026-07-30
+Completed: 2026-07-30
+Completed: 2026-07-30
