@@ -15,6 +15,11 @@ import {
 
 const now = instant("2026-07-26T16:00:00.000Z");
 const HOSTED_RUNTIME_LATENCY_TEST_READ_LIMIT = 20_000;
+const HOSTED_RUNTIME_LATENCY_TEST_UNRESOLVED_WINDOW_MS = 24 * 60 * 60_000;
+type HostedRuntimeLatencyFixtureRow = HostedRuntimeLatencyHealthRow & {
+  aiUsageDeniedAt: Date | null;
+  assistantInputStagedAt: Date | null;
+};
 const alertEnv = {
   HOSTED_LINQ_ALERT_EMAIL_FROM: "Murph Alerts <alerts@example.test>",
   HOSTED_LINQ_ALERT_EMAILS: "operator@example.test",
@@ -101,149 +106,6 @@ describe("hosted runtime latency health", () => {
 
     expect(health).toMatchObject({
       oldestUnresolvedAgeMs: 2 * 60_000,
-      unresolvedReplyCount: 1,
-    });
-  });
-
-  it("excludes blocked traces and rebases later completed execution", () => {
-    const health = summarizeHostedRuntimeLatencyRows({
-      now,
-      rows: [
-        latencyRow({
-          acceptedAt: "2026-07-26T15:58:00.000Z",
-          aiUsageDeniedAt: "2026-07-26T15:58:01.000Z",
-        }),
-        latencyRow({
-          acceptedAt: "2026-07-26T15:58:10.000Z",
-          aiUsageDeniedAt: "2026-07-26T15:58:11.000Z",
-          deliveryAcceptedAt: "2026-07-26T15:59:00.000Z",
-          linqDeliveryId: "delivery_usage_denied_1",
-        }),
-      ],
-    });
-
-    expect(health).toMatchObject({
-      anomalous: false,
-      invalidChronologyCount: 0,
-      recentCompletedReplyCount: 1,
-      recentSlowInitialResponseCount: 0,
-      unresolvedReplyCount: 0,
-    });
-  });
-
-  it("restarts latency from execution staged after a usage denial", () => {
-    const health = summarizeHostedRuntimeLatencyRows({
-      now,
-      rows: [
-        latencyRow({
-          acceptedAt: "2026-07-26T15:50:00.000Z",
-          aiUsageDeniedAt: "2026-07-26T15:55:00.000Z",
-          assistantInputStagedAt: "2026-07-26T15:59:00.000Z",
-        }),
-        latencyRow({
-          acceptedAt: "2026-07-26T15:50:10.000Z",
-          aiUsageDeniedAt: "2026-07-26T15:55:10.000Z",
-          assistantInputStagedAt: "2026-07-26T15:59:10.000Z",
-          deliveryAcceptedAt: "2026-07-26T15:59:50.000Z",
-          linqDeliveryId: "delivery_resumed_slow_1",
-        }),
-      ],
-    });
-
-    expect(health).toMatchObject({
-      anomalous: true,
-      maxFirstVisibleResponseLatencyMs: 40_000,
-      oldestUnresolvedAgeMs: 60_000,
-      recentCompletedReplyCount: 1,
-      recentSlowInitialResponseCount: 1,
-      unresolvedReplyCount: 1,
-    });
-  });
-
-  it("keeps a resumed turn healthy when progress follows staging within 30 seconds", () => {
-    const health = summarizeHostedRuntimeLatencyRows({
-      now,
-      rows: [
-        latencyRow({
-          acceptedAt: "2026-07-26T15:50:00.000Z",
-          aiUsageDeniedAt: "2026-07-26T15:55:00.000Z",
-          assistantInputStagedAt: "2026-07-26T15:59:00.000Z",
-          deliveryAcceptedAt: "2026-07-26T16:00:00.000Z",
-          linqDeliveryId: "delivery_resumed_progress_1",
-          progressUpdateAcceptedAt: "2026-07-26T15:59:29.999Z",
-        }),
-      ],
-    });
-
-    expect(health).toMatchObject({
-      anomalous: false,
-      maxFirstVisibleResponseLatencyMs: null,
-      recentCompletedReplyCount: 1,
-      recentSlowInitialResponseCount: 0,
-      unresolvedReplyCount: 0,
-    });
-  });
-
-  it("keeps execution staged before the denial alertable from ingress", () => {
-    const health = summarizeHostedRuntimeLatencyRows({
-      now,
-      rows: [
-        latencyRow({
-          acceptedAt: "2026-07-26T15:58:00.000Z",
-          aiUsageDeniedAt: "2026-07-26T15:58:02.000Z",
-          assistantInputStagedAt: "2026-07-26T15:58:01.000Z",
-        }),
-      ],
-    });
-
-    expect(health).toMatchObject({
-      anomalous: true,
-      invalidChronologyCount: 0,
-      oldestUnresolvedAgeMs: 2 * 60_000,
-      unresolvedReplyCount: 1,
-    });
-  });
-
-  it("keeps unblocked rows in a shared delivery alertable", () => {
-    const health = summarizeHostedRuntimeLatencyRows({
-      now,
-      rows: [
-        latencyRow({
-          acceptedAt: "2026-07-26T15:58:00.000Z",
-          aiUsageDeniedAt: "2026-07-26T15:58:01.000Z",
-          deliveryAcceptedAt: "2026-07-26T15:59:00.000Z",
-          linqDeliveryId: "delivery_mixed_usage_gate_1",
-        }),
-        latencyRow({
-          acceptedAt: "2026-07-26T15:58:20.000Z",
-          deliveryAcceptedAt: "2026-07-26T15:59:00.000Z",
-          linqDeliveryId: "delivery_mixed_usage_gate_1",
-        }),
-      ],
-    });
-
-    expect(health).toMatchObject({
-      anomalous: true,
-      maxFirstVisibleResponseLatencyMs: 40_000,
-      recentCompletedReplyCount: 1,
-      recentSlowInitialResponseCount: 1,
-    });
-  });
-
-  it("keeps impossible usage-denial chronology alertable", () => {
-    const health = summarizeHostedRuntimeLatencyRows({
-      now,
-      rows: [
-        latencyRow({
-          acceptedAt: "2026-07-26T15:58:00.000Z",
-          aiUsageDeniedAt: "2026-07-26T15:57:59.000Z",
-        }),
-      ],
-    });
-
-    expect(health).toMatchObject({
-      anomalous: true,
-      invalidChronologyCount: 1,
       unresolvedReplyCount: 1,
     });
   });
@@ -507,6 +369,7 @@ describe("hosted runtime latency alert monitor", () => {
 
     expect(result.health).toMatchObject({
       anomalous: true,
+      invalidChronologyCount: 10_000,
       scanTruncated: true,
     });
   });
@@ -516,8 +379,8 @@ describe("hosted runtime latency alert monitor", () => {
       Array.from(
         { length: HOSTED_RUNTIME_LATENCY_TEST_READ_LIMIT + 1 },
         () => latencyRow({
-          acceptedAt: "2026-07-26T15:50:00.000Z",
-          aiUsageDeniedAt: "2026-07-26T15:55:00.000Z",
+          acceptedAt: "2026-07-25T14:50:00.000Z",
+          aiUsageDeniedAt: "2026-07-25T14:55:00.000Z",
           assistantInputStagedAt: "2026-07-26T15:59:00.000Z",
         }),
       ),
@@ -532,6 +395,38 @@ describe("hosted runtime latency alert monitor", () => {
     expect(result.health).toMatchObject({
       anomalous: true,
       scanTruncated: true,
+    });
+  });
+
+  it("admits resumed execution before windowing old ingress rows", async () => {
+    const fixture = createMonitorPrismaFixture([
+      latencyRow({
+        acceptedAt: "2026-07-25T15:59:59.999Z",
+        aiUsageDeniedAt: "2026-07-25T16:01:00.000Z",
+        assistantInputStagedAt: "2026-07-26T15:55:00.000Z",
+      }),
+      latencyRow({
+        acceptedAt: "2026-07-25T14:00:00.000Z",
+        aiUsageDeniedAt: "2026-07-25T14:01:00.000Z",
+        assistantInputStagedAt: "2026-07-26T15:58:00.000Z",
+        deliveryAcceptedAt: "2026-07-26T15:58:40.000Z",
+        linqDeliveryId: "delivery_old_resumed_slow_1",
+      }),
+    ]);
+
+    const result = await runHostedRuntimeLatencyAlertMonitor({
+      env: {},
+      now,
+      prisma: fixture.prisma,
+    });
+
+    expect(result.health).toMatchObject({
+      anomalous: true,
+      maxFirstVisibleResponseLatencyMs: 40_000,
+      oldestUnresolvedAgeMs: 5 * 60_000,
+      recentCompletedReplyCount: 1,
+      recentSlowInitialResponseCount: 1,
+      unresolvedReplyCount: 1,
     });
   });
 
@@ -552,6 +447,35 @@ describe("hosted runtime latency alert monitor", () => {
     expect(result.health).toMatchObject({
       anomalous: false,
       unresolvedReplyCount: 0,
+    });
+  });
+
+  it("keeps an unblocked row in a shared delivery alertable", async () => {
+    const fixture = createMonitorPrismaFixture([
+      latencyRow({
+        acceptedAt: "2026-07-26T15:58:00.000Z",
+        aiUsageDeniedAt: "2026-07-26T15:58:01.000Z",
+        deliveryAcceptedAt: "2026-07-26T15:59:00.000Z",
+        linqDeliveryId: "delivery_mixed_usage_gate_1",
+      }),
+      latencyRow({
+        acceptedAt: "2026-07-26T15:58:20.000Z",
+        deliveryAcceptedAt: "2026-07-26T15:59:00.000Z",
+        linqDeliveryId: "delivery_mixed_usage_gate_1",
+      }),
+    ]);
+
+    const result = await runHostedRuntimeLatencyAlertMonitor({
+      env: {},
+      now,
+      prisma: fixture.prisma,
+    });
+
+    expect(result.health).toMatchObject({
+      anomalous: true,
+      maxFirstVisibleResponseLatencyMs: 40_000,
+      recentCompletedReplyCount: 1,
+      recentSlowInitialResponseCount: 1,
     });
   });
 
@@ -1509,7 +1433,7 @@ function latencyRow(input: {
   providerStartAt?: string | null;
   runtimeAttemptId?: string | null;
   terminalNonReplyCommittedAt?: string | null;
-}): HostedRuntimeLatencyHealthRow {
+}): HostedRuntimeLatencyFixtureRow {
   return {
     acceptedAt: instant(input.acceptedAt),
     aiUsageDeniedAt: input.aiUsageDeniedAt
@@ -1537,15 +1461,16 @@ function latencyRow(input: {
     terminalNonReplyCommittedAt: input.terminalNonReplyCommittedAt
       ? instant(input.terminalNonReplyCommittedAt)
       : null,
+    usageDenialChronologyInvalid: false,
   };
 }
 
 function createMonitorPrismaFixture(
-  initialRows: readonly HostedRuntimeLatencyHealthRow[],
+  initialRows: readonly HostedRuntimeLatencyFixtureRow[],
   options: { rejectNextClaim?: boolean } = {},
 ) {
   let rows = [...initialRows];
-  const queuedRows: HostedRuntimeLatencyHealthRow[][] = [];
+  const queuedRows: HostedRuntimeLatencyFixtureRow[][] = [];
   const traceReadEffects: Array<() => void> = [];
   let state: HostedLinqAlert | null = null;
   let rejectNextClaim = options.rejectNextClaim === true;
@@ -1554,19 +1479,15 @@ function createMonitorPrismaFixture(
     const selectedRows = queuedRows.shift() ?? rows;
     traceReadEffects.shift()?.();
     const queryNow = readLatestPrismaSqlDate(query);
+    const queryWindowStartMs = queryNow.getTime()
+      - HOSTED_RUNTIME_LATENCY_TEST_UNRESOLVED_WINDOW_MS;
     return selectedRows
-      .filter((row) => {
-        const deniedAt = row.aiUsageDeniedAt;
-        return deniedAt === null
-          || deniedAt < row.acceptedAt
-          || deniedAt > queryNow
-          || row.assistantInputStagedAt !== null
-          || row.providerStartAt !== null
-          || row.deliveryAcceptedAt !== null
-          || row.consumedAt !== null
-          || row.progressUpdateAcceptedAt !== null
-          || row.terminalNonReplyCommittedAt !== null;
-      })
+      .map((row) => readLatencyQueryVisibleRow(row, queryNow))
+      .filter((row): row is HostedRuntimeLatencyFixtureRow => row !== null)
+      .filter((row) =>
+        row.acceptedAt.getTime() >= queryWindowStartMs
+        && row.acceptedAt <= queryNow
+      )
       .sort(
         (left, right) =>
           right.acceptedAt.getTime() - left.acceptedAt.getTime(),
@@ -1574,8 +1495,6 @@ function createMonitorPrismaFixture(
       .slice(0, HOSTED_RUNTIME_LATENCY_TEST_READ_LIMIT + 1)
       .map((row) => ({
         acceptedAt: row.acceptedAt,
-        aiUsageDeniedAt: row.aiUsageDeniedAt,
-        assistantInputStagedAt: row.assistantInputStagedAt,
         consumedAt: row.consumedAt,
         deliveryAcceptedAt: row.deliveryAcceptedAt,
         linqDeliveryId: row.linqDeliveryId,
@@ -1610,6 +1529,7 @@ function createMonitorPrismaFixture(
         providerRequestOrdinal: row.providerRequestOrdinal,
         providerStartAt: row.providerStartAt,
         runtimeAttemptId: row.runtimeAttemptId,
+        usageDenialChronologyInvalid: row.usageDenialChronologyInvalid,
       }));
   });
   const alertUpsert = vi.fn(async (args: AlertUpsertArgs) => {
@@ -1662,7 +1582,7 @@ function createMonitorPrismaFixture(
     readState: () => state,
     traceQueryRaw,
     queueRowsForReads(
-      ...nextRows: readonly HostedRuntimeLatencyHealthRow[][]
+      ...nextRows: readonly HostedRuntimeLatencyFixtureRow[][]
     ) {
       queuedRows.push(...nextRows.map((readRows) => [...readRows]));
     },
@@ -1686,9 +1606,62 @@ function createMonitorPrismaFixture(
         updatedAt: new Date(state.updatedAt.getTime() + 1),
       };
     },
-    setRows(nextRows: readonly HostedRuntimeLatencyHealthRow[]) {
+    setRows(nextRows: readonly HostedRuntimeLatencyFixtureRow[]) {
       rows = [...nextRows];
     },
+  };
+}
+
+function readLatencyQueryVisibleRow(
+  row: HostedRuntimeLatencyFixtureRow,
+  queryNow: Date,
+): HostedRuntimeLatencyFixtureRow | null {
+  const deniedAtMs = row.aiUsageDeniedAt?.getTime() ?? null;
+  if (deniedAtMs === null) {
+    return {
+      ...row,
+      usageDenialChronologyInvalid: false,
+    };
+  }
+  if (
+    deniedAtMs < row.acceptedAt.getTime()
+    || deniedAtMs > queryNow.getTime()
+  ) {
+    return {
+      ...row,
+      usageDenialChronologyInvalid: true,
+    };
+  }
+  const executionEvidenceMs = [
+    row.assistantInputStagedAt,
+    row.providerStartAt,
+    row.deliveryAcceptedAt,
+    row.consumedAt,
+  ]
+    .filter((value): value is Date => value !== null)
+    .map((value) => value.getTime());
+  if (executionEvidenceMs.length === 0) {
+    return null;
+  }
+  if (
+    executionEvidenceMs.some((value) => value > queryNow.getTime())
+  ) {
+    return {
+      ...row,
+      usageDenialChronologyInvalid: true,
+    };
+  }
+  if (executionEvidenceMs.some((value) => value <= deniedAtMs)) {
+    return {
+      ...row,
+      usageDenialChronologyInvalid: false,
+    };
+  }
+  return {
+    ...row,
+    acceptedAt: new Date(Math.min(...executionEvidenceMs)),
+    aiUsageDeniedAt: null,
+    usageDenialChronologyInvalid: false,
   };
 }
 

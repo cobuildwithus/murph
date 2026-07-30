@@ -322,11 +322,12 @@ Last verified: 2026-07-30
   bounded by the observed replay floor and conversation high-water, happens
   before fallible usage-notice delivery, reuses the existing mailbox work
   owner, and cannot fail the gate. The monitor excludes only chronologically
-  valid stamps with no execution evidence before its bounded scan and
-  delivery/provider grouping. Existing staging, provider, progress, delivery,
-  consumption, or terminal evidence ends suppression; post-denial execution is
-  measured from its earliest such milestone. An unblocked row sharing the same
-  reply remains alertable.
+  valid stamps with no execution evidence. It derives one effective latency
+  origin from ingress, staging, provider, delivery, and consumption facts
+  before applying its 24-hour window, bounded scan, or delivery/provider
+  grouping. Post-denial execution is measured from its earliest milestone even
+  when the original ingress is older than the window. An unblocked row sharing
+  the same reply remains alertable.
   Outbound paging requires the shared Resend operational-email sender and
   recipients plus a valid IANA operator timezone; it never falls back to
   Linq/iMessage. It suppresses sends from 11 PM through 7 AM local time and

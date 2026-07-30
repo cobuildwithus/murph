@@ -132,10 +132,27 @@ describe.skipIf(!runPostgresProof)(
           );
           expect(firstPass[1]?.aiUsageDeniedAt).toBeNull();
           const deniedAt = requireDate(firstPass[0]?.aiUsageDeniedAt);
-          const resumedAt = new Date(deniedAt.getTime() + 1_000);
+          const monitorNow = deniedAt;
+          const historicalAcceptedAt = new Date(
+            monitorNow.getTime() - 24 * 60 * 60_000 - 1,
+          );
+          const historicalDeniedAt = new Date(
+            historicalAcceptedAt.getTime() + 1,
+          );
+          const resumedAt = new Date(monitorNow.getTime() - 5 * 60_000);
 
+          await tx.$executeRaw(Prisma.sql`
+            UPDATE hosted_ingress_latency_trace
+            SET accepted_at = ${historicalAcceptedAt}
+            WHERE mailbox_item_id = 'mailbox-observed'
+          `);
+          await tx.$executeRaw(Prisma.sql`
+            UPDATE hosted_mailbox_item
+            SET ai_usage_denied_at = ${historicalDeniedAt}
+            WHERE id = 'mailbox-observed'
+          `);
           await expect(readHostedRuntimeLatencyHealth({
-            now: new Date(resumedAt.getTime() + 30_000),
+            now: monitorNow,
             prisma: tx,
           })).resolves.toMatchObject({
             anomalous: false,
@@ -148,11 +165,11 @@ describe.skipIf(!runPostgresProof)(
             WHERE mailbox_item_id = 'mailbox-observed'
           `);
           await expect(readHostedRuntimeLatencyHealth({
-            now: new Date(resumedAt.getTime() + 30_000),
+            now: monitorNow,
             prisma: tx,
           })).resolves.toMatchObject({
             anomalous: true,
-            oldestUnresolvedAgeMs: 30_000,
+            oldestUnresolvedAgeMs: 5 * 60_000,
             unresolvedReplyCount: 1,
           });
 
@@ -168,7 +185,7 @@ describe.skipIf(!runPostgresProof)(
             WHERE mailbox_item_id = 'mailbox-observed'
           `);
           await expect(readHostedRuntimeLatencyHealth({
-            now: new Date(resumedAt.getTime() + 60_000),
+            now: monitorNow,
             prisma: tx,
           })).resolves.toMatchObject({
             anomalous: false,
@@ -194,13 +211,90 @@ describe.skipIf(!runPostgresProof)(
             WHERE id = 'mailbox-observed'
           `);
           await expect(readHostedRuntimeLatencyHealth({
-            now: new Date(deliveryAt.getTime() + 1_000),
+            now: monitorNow,
             prisma: tx,
           })).resolves.toMatchObject({
             anomalous: true,
             maxFirstVisibleResponseLatencyMs: 40_000,
             recentCompletedReplyCount: 1,
             recentSlowInitialResponseCount: 1,
+          });
+
+          const recentAcceptedAt = new Date(monitorNow.getTime() - 2 * 60_000);
+          const stagedBeforeDenialAt = new Date(
+            recentAcceptedAt.getTime() + 1_000,
+          );
+          const denialAfterStagingAt = new Date(
+            stagedBeforeDenialAt.getTime() + 1_000,
+          );
+          await tx.$executeRaw(Prisma.sql`
+            DELETE FROM hosted_linq_delivery
+            WHERE id = 'delivery-after-resume'
+          `);
+          await tx.$executeRaw(Prisma.sql`
+            UPDATE hosted_ingress_latency_trace
+            SET
+              accepted_at = ${recentAcceptedAt},
+              assistant_input_staged_at = ${stagedBeforeDenialAt},
+              linq_delivery_id = NULL
+            WHERE mailbox_item_id = 'mailbox-observed'
+          `);
+          await tx.$executeRaw(Prisma.sql`
+            UPDATE hosted_mailbox_item
+            SET
+              ai_usage_denied_at = ${denialAfterStagingAt},
+              consumed_at = NULL
+            WHERE id = 'mailbox-observed'
+          `);
+          await expect(readHostedRuntimeLatencyHealth({
+            now: monitorNow,
+            prisma: tx,
+          })).resolves.toMatchObject({
+            anomalous: true,
+            oldestUnresolvedAgeMs: 2 * 60_000,
+            unresolvedReplyCount: 1,
+          });
+
+          await tx.$executeRaw(Prisma.sql`
+            INSERT INTO hosted_mailbox_item (
+              id,
+              user_id,
+              lane,
+              lane_seq,
+              ai_usage_denied_at,
+              created_at
+            )
+            SELECT
+              'cap-mailbox-' || ordinal,
+              'cap-member-' || ordinal,
+              'conversation',
+              ordinal,
+              ${historicalDeniedAt},
+              ${historicalAcceptedAt}
+            FROM generate_series(1, 20000) AS ordinal
+          `);
+          await tx.$executeRaw(Prisma.sql`
+            INSERT INTO hosted_ingress_latency_trace (
+              user_id,
+              mailbox_item_id,
+              source,
+              accepted_at,
+              assistant_input_staged_at
+            )
+            SELECT
+              'cap-member-' || ordinal,
+              'cap-mailbox-' || ordinal,
+              'linq',
+              ${historicalAcceptedAt},
+              ${new Date(monitorNow.getTime() - 60_000)}
+            FROM generate_series(1, 20000) AS ordinal
+          `);
+          await expect(readHostedRuntimeLatencyHealth({
+            now: monitorNow,
+            prisma: tx,
+          })).resolves.toMatchObject({
+            anomalous: true,
+            scanTruncated: true,
           });
 
           await expect(tryMarkHostedMailboxConversationAiUsageDenied({
@@ -231,6 +325,7 @@ function readRows(prisma: PrismaClient | Prisma.TransactionClient) {
       ai_usage_denied_at AS "aiUsageDeniedAt",
       created_at AS "createdAt"
     FROM hosted_mailbox_item
+    WHERE user_id = 'member-mailbox-window'
     ORDER BY lane_seq ASC
   `);
 }

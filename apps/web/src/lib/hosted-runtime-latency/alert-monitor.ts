@@ -54,8 +54,6 @@ type HostedRuntimeLatencySend = typeof sendHostedResendPlainTextEmail;
 
 export interface HostedRuntimeLatencyHealthRow {
   acceptedAt: Date;
-  aiUsageDeniedAt: Date | null;
-  assistantInputStagedAt: Date | null;
   checkpointPublicationExpectedBy: Date | null;
   consumedAt: Date | null;
   deliveryAcceptedAt: Date | null;
@@ -65,6 +63,7 @@ export interface HostedRuntimeLatencyHealthRow {
   providerStartAt: Date | null;
   runtimeAttemptId: string | null;
   terminalNonReplyCommittedAt: Date | null;
+  usageDenialChronologyInvalid: boolean;
 }
 
 export interface HostedRuntimeLatencyHealth {
@@ -82,8 +81,6 @@ export interface HostedRuntimeLatencyHealth {
 
 interface HostedRuntimeLatencyQueryRow {
   acceptedAt: Date;
-  aiUsageDeniedAt: Date | null;
-  assistantInputStagedAt: Date | null;
   consumedAt: Date | null;
   deliveryAcceptedAt: Date | null;
   linqDeliveryId: string | null;
@@ -91,6 +88,7 @@ interface HostedRuntimeLatencyQueryRow {
   providerRequestOrdinal: number | null;
   providerStartAt: Date | null;
   runtimeAttemptId: string | null;
+  usageDenialChronologyInvalid: boolean;
 }
 
 export type HostedRuntimeLatencyAlertMonitorOutcome =
@@ -218,40 +216,78 @@ export async function readHostedRuntimeLatencyHealth(input: {
     now.getTime() - HOSTED_RUNTIME_LATENCY_UNRESOLVED_WINDOW_MS,
   );
   const rows = await prisma.$queryRaw<HostedRuntimeLatencyQueryRow[]>(Prisma.sql`
+    WITH latency_candidates AS (
+      SELECT
+        CASE
+          WHEN mailbox_item.ai_usage_denied_at IS NULL
+            OR mailbox_item.ai_usage_denied_at < trace.accepted_at
+            OR mailbox_item.ai_usage_denied_at > ${now}
+            OR execution.has_future_evidence
+            OR execution.has_pre_denial_evidence
+            THEN trace.accepted_at
+          ELSE execution.first_evidence_at
+        END AS latency_origin_at,
+        (
+          mailbox_item.ai_usage_denied_at IS NOT NULL
+          AND (
+            mailbox_item.ai_usage_denied_at < trace.accepted_at
+            OR mailbox_item.ai_usage_denied_at > ${now}
+            OR execution.has_future_evidence
+          )
+        ) AS usage_denial_chronology_invalid,
+        mailbox_item.consumed_at,
+        delivery.accepted_at AS delivery_accepted_at,
+        trace.linq_delivery_id,
+        trace.phase_breakdown_json,
+        trace.provider_request_ordinal,
+        trace.provider_start_at,
+        trace.runtime_attempt_id
+      FROM hosted_ingress_latency_trace AS trace
+      JOIN hosted_mailbox_item AS mailbox_item
+        ON mailbox_item.user_id = trace.user_id
+        AND mailbox_item.id = trace.mailbox_item_id
+      LEFT JOIN hosted_linq_delivery AS delivery
+        ON delivery.id = trace.linq_delivery_id
+      LEFT JOIN LATERAL (
+        SELECT
+          MIN(evidence.at) AS first_evidence_at,
+          COALESCE(
+            BOOL_OR(evidence.at <= mailbox_item.ai_usage_denied_at),
+            FALSE
+          ) AS has_pre_denial_evidence,
+          COALESCE(BOOL_OR(evidence.at > ${now}), FALSE) AS has_future_evidence
+        FROM (
+          VALUES
+            (trace.assistant_input_staged_at),
+            (trace.provider_start_at),
+            (delivery.accepted_at),
+            (mailbox_item.consumed_at)
+        ) AS evidence(at)
+        WHERE evidence.at IS NOT NULL
+      ) AS execution ON TRUE
+      WHERE trace.source = 'linq'
+        AND (
+          trace.accepted_at >= ${windowStart}
+          OR trace.assistant_input_staged_at >= ${windowStart}
+          OR trace.provider_start_at >= ${windowStart}
+          OR delivery.accepted_at >= ${windowStart}
+          OR mailbox_item.consumed_at >= ${windowStart}
+        )
+    )
     SELECT
-      trace.accepted_at AS "acceptedAt",
-      mailbox_item.ai_usage_denied_at AS "aiUsageDeniedAt",
-      trace.assistant_input_staged_at AS "assistantInputStagedAt",
-      mailbox_item.consumed_at AS "consumedAt",
-      delivery.accepted_at AS "deliveryAcceptedAt",
-      trace.linq_delivery_id AS "linqDeliveryId",
-      trace.phase_breakdown_json AS "phaseBreakdownJson",
-      trace.provider_request_ordinal AS "providerRequestOrdinal",
-      trace.provider_start_at AS "providerStartAt",
-      trace.runtime_attempt_id AS "runtimeAttemptId"
-    FROM hosted_ingress_latency_trace AS trace
-    JOIN hosted_mailbox_item AS mailbox_item
-      ON mailbox_item.user_id = trace.user_id
-      AND mailbox_item.id = trace.mailbox_item_id
-    LEFT JOIN hosted_linq_delivery AS delivery
-      ON delivery.id = trace.linq_delivery_id
-    WHERE trace.source = 'linq'
-      AND trace.accepted_at >= ${windowStart}
-      AND trace.accepted_at <= ${now}
-      AND (
-        mailbox_item.ai_usage_denied_at IS NULL
-        OR mailbox_item.ai_usage_denied_at < trace.accepted_at
-        OR mailbox_item.ai_usage_denied_at > ${now}
-        OR trace.assistant_input_staged_at IS NOT NULL
-        OR trace.provider_start_at IS NOT NULL
-        OR delivery.accepted_at IS NOT NULL
-        OR mailbox_item.consumed_at IS NOT NULL
-        OR trace.phase_breakdown_json
-          #>> '{assistant,progressUpdateAcceptedAtEpochMs}' IS NOT NULL
-        OR trace.phase_breakdown_json
-          #>> '{assistant,terminalNonReplyCommittedAtEpochMs}' IS NOT NULL
-      )
-    ORDER BY trace.accepted_at DESC
+      latency_origin_at AS "acceptedAt",
+      consumed_at AS "consumedAt",
+      delivery_accepted_at AS "deliveryAcceptedAt",
+      linq_delivery_id AS "linqDeliveryId",
+      phase_breakdown_json AS "phaseBreakdownJson",
+      provider_request_ordinal AS "providerRequestOrdinal",
+      provider_start_at AS "providerStartAt",
+      runtime_attempt_id AS "runtimeAttemptId",
+      usage_denial_chronology_invalid AS "usageDenialChronologyInvalid"
+    FROM latency_candidates
+    WHERE latency_origin_at >= ${windowStart}
+      AND latency_origin_at <= ${now}
+    ORDER BY latency_origin_at DESC
     LIMIT ${HOSTED_RUNTIME_LATENCY_READ_LIMIT + 1}
   `);
   const scanTruncated = rows.length > HOSTED_RUNTIME_LATENCY_READ_LIMIT;
@@ -263,8 +299,6 @@ export async function readHostedRuntimeLatencyHealth(input: {
     now,
     rows: visibleRows.map((row) => ({
       acceptedAt: row.acceptedAt,
-      aiUsageDeniedAt: row.aiUsageDeniedAt,
-      assistantInputStagedAt: row.assistantInputStagedAt,
       checkpointPublicationExpectedBy:
         readHostedRuntimeCheckpointPublicationExpectedBy(row.phaseBreakdownJson),
       consumedAt: row.consumedAt,
@@ -277,6 +311,7 @@ export async function readHostedRuntimeLatencyHealth(input: {
       runtimeAttemptId: row.runtimeAttemptId,
       terminalNonReplyCommittedAt:
         readHostedRuntimeTerminalNonReplyCommittedAt(row.phaseBreakdownJson),
+      usageDenialChronologyInvalid: row.usageDenialChronologyInvalid,
     })),
     scanTruncated,
   });
@@ -289,65 +324,17 @@ export function summarizeHostedRuntimeLatencyRows(input: {
 }): HostedRuntimeLatencyHealth {
   const nowMs = input.now.getTime();
   const completedWindowStartMs = nowMs - HOSTED_RUNTIME_LATENCY_COMPLETED_WINDOW_MS;
-  let invalidChronologyCount = 0;
+  let invalidChronologyCount = input.rows.filter(
+    (row) => row.usageDenialChronologyInvalid,
+  ).length;
   let maxFirstVisibleResponseLatencyMs: number | null = null;
   let oldestUnresolvedAgeMs: number | null = null;
   let recentCompletedReplyCount = 0;
   let recentSlowInitialResponseCount = 0;
   let unresolvedReplyCount = 0;
 
-  const alertableRows: HostedRuntimeLatencyHealthRow[] = [];
-  for (const row of input.rows) {
-    const aiUsageDeniedAtMs = row.aiUsageDeniedAt?.getTime() ?? null;
-    if (aiUsageDeniedAtMs === null) {
-      alertableRows.push(row);
-      continue;
-    }
-    if (
-      aiUsageDeniedAtMs < row.acceptedAt.getTime()
-      || aiUsageDeniedAtMs > nowMs
-    ) {
-      invalidChronologyCount += 1;
-      alertableRows.push(row);
-      continue;
-    }
-    const executionEvidenceMs = [
-      row.assistantInputStagedAt,
-      row.providerStartAt,
-      row.progressUpdateAcceptedAt,
-      row.deliveryAcceptedAt,
-      row.consumedAt,
-      row.terminalNonReplyCommittedAt,
-    ]
-      .filter((value): value is Date => value !== null)
-      .map((value) => value.getTime());
-    if (executionEvidenceMs.length === 0) {
-      continue;
-    }
-    if (executionEvidenceMs.some((value) => value > nowMs)) {
-      invalidChronologyCount += 1;
-      alertableRows.push({
-        ...row,
-        aiUsageDeniedAt: null,
-      });
-      continue;
-    }
-    if (executionEvidenceMs.some((value) => value <= aiUsageDeniedAtMs)) {
-      alertableRows.push({
-        ...row,
-        aiUsageDeniedAt: null,
-      });
-      continue;
-    }
-    alertableRows.push({
-      ...row,
-      acceptedAt: new Date(Math.min(...executionEvidenceMs)),
-      aiUsageDeniedAt: null,
-    });
-  }
-
   const groupedRows = new Map<string, HostedRuntimeLatencyHealthRow[]>();
-  alertableRows.forEach((row, index) => {
+  input.rows.forEach((row, index) => {
     const deliveryId = row.linqDeliveryId?.trim() ?? "";
     const runtimeAttemptId = row.runtimeAttemptId?.trim() ?? "";
     const providerStartAtMs = row.providerStartAt?.getTime() ?? Number.NaN;

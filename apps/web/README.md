@@ -684,9 +684,10 @@ Hosted onboarding extras:
   before the bounded scan and grouping only while execution remains blocked;
   missing or impossible denial chronology remains alertable. The database-timed
   stamp covers only the conversation sequence window observed by the denying
-  fetch or reconciliation. Existing staging, provider, progress, delivery,
-  consumption, or terminal evidence ends suppression; execution that starts
-  after denial is measured from its earliest such milestone. The monitor sends
+  fetch or reconciliation. The query derives one latency origin from ingress,
+  staging, provider, delivery, and consumption before its 24-hour window and
+  row cap; execution that starts after denial is measured from its earliest
+  milestone even when ingress is older than that window. The monitor sends
   no alert for scheduled automation turns, including Flex-tier turns, because
   they do not own a user-ingress reply trace. The monitor sends one email per
   continuous incident, suppresses sends from 11 PM through 7 AM
