@@ -60,7 +60,9 @@ describe("hosted local Linq unknown first-contact fallback e2e", () => {
       scenarioLabel: "Local hosted Linq unknown first-contact fallback e2e",
       streamLogs: streamDevLogs,
       webProcessEnvOverrides: {
+        DEVICE_SYNC_PUBLIC_BASE_URL: `${hostedPublicBaseUrl}/api/device-sync`,
         HOSTED_ONBOARDING_PUBLIC_BASE_URL: hostedPublicBaseUrl,
+        HOSTED_WEB_BASE_URL: hostedPublicBaseUrl,
       },
     });
   }, 300_000);

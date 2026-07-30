@@ -109,6 +109,11 @@ export interface HostedLocalLinqStub {
     matchRequest: ObservedLinqRequestMatcher;
     responseCount?: number;
   }): void;
+  armNextPreAcceptDefinitiveSendFailure(input: {
+    expectedPath: string;
+    matchRequest: ObservedLinqRequestMatcher;
+    responseCount?: number;
+  }): void;
   armNextPreAcceptRetryableSendFailure(input: {
     expectedPath: string;
     matchRequest: ObservedLinqRequestMatcher;
@@ -241,6 +246,7 @@ export async function startHostedLocalLinqStub(input: {
   let attachmentDownloadBaseUrl = "";
   let attachmentDownloadContainerBaseUrl = "";
   let nextPostAcceptLostAcknowledgment: HostedLocalLinqArmedSendFailure | null = null;
+  let nextPreAcceptDefinitiveSendFailure: HostedLocalLinqArmedSendFailure | null = null;
   let nextPreAcceptRetryableSendFailure: HostedLocalLinqArmedSendFailure | null = null;
   let nextRequestDelay: HostedLocalLinqArmedRequestDelay | null = null;
   let postAcceptLostAcknowledgmentAcceptedMessage: HostedLocalLinqAcceptedMessage | null = null;
@@ -345,6 +351,21 @@ export async function startHostedLocalLinqStub(input: {
       if (!isObservedLinqMessagePayload(parsedBody)) {
         writeJsonResponse(response, 400, {
           error: "Expected a Linq send-message payload with a valid text or media part.",
+        });
+        return;
+      }
+
+      if (
+        consumeHostedLocalLinqArmedSendFailure(
+          nextPreAcceptDefinitiveSendFailure,
+          observedRequest,
+        )
+      ) {
+        if (nextPreAcceptDefinitiveSendFailure?.remainingResponses === 0) {
+          nextPreAcceptDefinitiveSendFailure = null;
+        }
+        writeJsonResponse(response, 400, {
+          error: "Synthetic hosted-local definitive Linq send failure.",
         });
         return;
       }
@@ -571,6 +592,25 @@ export async function startHostedLocalLinqStub(input: {
       }
       postAcceptLostAcknowledgmentAcceptedMessage = null;
       nextPostAcceptLostAcknowledgment = {
+        expectedPath,
+        matchRequest,
+        remainingResponses: responseCount,
+      };
+    },
+    armNextPreAcceptDefinitiveSendFailure: ({
+      expectedPath,
+      matchRequest,
+      responseCount = 1,
+    }) => {
+      if (nextPreAcceptDefinitiveSendFailure) {
+        throw new Error("A pre-accept Linq definitive-send control is already armed.");
+      }
+      if (!Number.isSafeInteger(responseCount) || responseCount < 1) {
+        throw new Error(
+          "A pre-accept Linq definitive-send control requires a positive response count.",
+        );
+      }
+      nextPreAcceptDefinitiveSendFailure = {
         expectedPath,
         matchRequest,
         remainingResponses: responseCount,

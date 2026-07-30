@@ -215,7 +215,7 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       userId,
     });
     await requireLinqStub().waitForMatchingSendCount({
-      expectedCount: observedBaseline + 1,
+      expectedCount: observedBaseline + 2,
       expectedPath: replyPath,
       matchRequest: usageNoticeLinkMatcher,
       scenario: requireScenario(),
@@ -237,7 +237,7 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       acceptedTextBaseline + 1,
     );
     expect(requireLinqStub().countObservedSends(replyPath, usageNoticeLinkMatcher)).toBe(
-      observedBaseline + 1,
+      observedBaseline + 2,
     );
     expect(requireLinqStub().countAcceptedSends(replyPath, usageNoticeLinkMatcher)).toBe(
       acceptedBaseline + 1,
@@ -256,10 +256,10 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
     });
     expect(deliveriesAfterAmbiguousSend).toHaveLength(1);
     expect(deliveriesAfterAmbiguousSend[0]).toMatchObject({
-      acceptedAt: null,
-      failedAt: expect.any(Date),
-      failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
-      status: "failed",
+      acceptedAt: expect.any(Date),
+      failedAt: null,
+      failureCode: null,
+      status: "accepted",
       template: "ai_usage_quota",
     });
     expect(deliveriesAfterAmbiguousSend[0]?.idempotencyKey).toEqual(expect.any(String));
@@ -339,7 +339,7 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       acceptedTextBaseline + 1,
     );
     expect(requireLinqStub().countObservedSends(replyPath, usageNoticeLinkMatcher)).toBe(
-      observedBaseline + 1,
+      observedBaseline + 2,
     );
     expect(requireLinqStub().countAcceptedSends(replyPath, usageNoticeLinkMatcher)).toBe(
       acceptedBaseline + 1,
@@ -401,7 +401,7 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       acceptedTextBaseline + 1,
     );
     expect(requireLinqStub().countObservedSends(replyPath, usageNoticeLinkMatcher)).toBe(
-      observedBaseline + 1,
+      observedBaseline + 2,
     );
     expect(requireLinqStub().countAcceptedSends(replyPath, usageNoticeLinkMatcher)).toBe(
       acceptedBaseline + 1,

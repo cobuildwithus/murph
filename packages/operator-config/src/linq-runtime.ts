@@ -373,15 +373,20 @@ export async function sendLinqChatMessage(
   const hasPrimaryMessage =
     split.message.trim().length > 0 || (input.media?.length ?? 0) > 0
   if (!hasPrimaryMessage) {
-    return sendLinqChatRichLink(
+    if (input.nativeReplyRequested === true) {
+      return sendLinqChatMessageParts(
+        {
+          ...input,
+          message: split.linkUrl,
+        },
+        dependencies,
+      )
+    }
+    return sendLinqChatRichLinkWithTextFallback(
       {
         chatId: input.chatId,
         idempotencyKey: input.idempotencyKey,
         linkUrl: split.linkUrl,
-        ...(input.nativeReplyRequested === true
-          ? { nativeReplyRequested: true as const }
-          : {}),
-        replyToMessageId: input.replyToMessageId,
       },
       dependencies,
     )
@@ -396,7 +401,7 @@ export async function sendLinqChatMessage(
   )
   let linkResponse: LinqMessageSendResponse
   try {
-    linkResponse = await sendLinqChatRichLink(
+    linkResponse = await sendLinqChatRichLinkWithTextFallback(
       {
         chatId: input.chatId,
         idempotencyKey: buildLinqRichLinkIdempotencyKey(input.idempotencyKey),
@@ -504,6 +509,45 @@ async function sendLinqChatRichLink(
     idempotencyKey,
     replyToMessageId,
   }, dependencies)
+}
+
+async function sendLinqChatRichLinkWithTextFallback(
+  input: {
+    chatId: string
+    idempotencyKey?: string | null
+    linkUrl: string
+  },
+  dependencies: {
+    env?: NodeJS.ProcessEnv
+    fetchImplementation?: LinqFetch
+    signal?: AbortSignal
+  },
+): Promise<LinqMessageSendResponse> {
+  try {
+    return await sendLinqChatRichLink(input, dependencies)
+  } catch (error) {
+    if (!isDefinitiveLinqRichLinkRejection(error)) {
+      throw error
+    }
+  }
+
+  return sendLinqChatMessageParts(
+    {
+      chatId: input.chatId,
+      idempotencyKey: buildLinqRichLinkFallbackIdempotencyKey(input.idempotencyKey),
+      message: input.linkUrl,
+    },
+    dependencies,
+  )
+}
+
+function isDefinitiveLinqRichLinkRejection(error: unknown): boolean {
+  const status = error instanceof VaultCliError ? error.context?.status : null
+  return error instanceof VaultCliError
+    && error.code === 'LINQ_API_REQUEST_FAILED'
+    && error.context?.failureStage === 'http'
+    && error.context?.retryable === false
+    && (status === 400 || status === 415 || status === 422)
 }
 
 async function sendLinqChatMessageBody(
@@ -937,7 +981,7 @@ export async function createLinqChat(
   const chatId = requireLinqCreatedChatIdForRichLink(result)
   let linkResponse: LinqMessageSendResponse
   try {
-    linkResponse = await sendLinqChatRichLink(
+    linkResponse = await sendLinqChatRichLinkWithTextFallback(
       {
         chatId,
         idempotencyKey: buildLinqRichLinkIdempotencyKey(input.idempotencyKey),
@@ -1918,6 +1962,13 @@ function buildLinqRichLinkMessageBody(input: {
 function buildLinqRichLinkIdempotencyKey(value: string | null | undefined): string | null {
   const idempotencyKey = normalizeNullableString(value)
   return idempotencyKey ? `${idempotencyKey}:link` : null
+}
+
+function buildLinqRichLinkFallbackIdempotencyKey(
+  value: string | null | undefined,
+): string | null {
+  const idempotencyKey = normalizeNullableString(value)
+  return idempotencyKey ? `${idempotencyKey}:fallback` : null
 }
 
 function buildLinqMessageBody(input: {

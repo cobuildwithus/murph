@@ -1,6 +1,6 @@
 # Prepare PR 1110 for merge
 
-Status: active
+Status: completed
 Created: 2026-07-30
 Updated: 2026-07-30
 
@@ -17,6 +17,10 @@ Updated: 2026-07-30
   once the primary provider request has been accepted.
 - Uppercase HTTPS schemes receive the same native-preview behavior as lowercase
   schemes.
+- A retryable or transport-ambiguous link response is retried with the exact
+  same provider idempotency key, while a definitive rich-link shape rejection
+  falls back to the caller's URL as ordinary text.
+- A selected URL-only native reply remains text so it retains its reply target.
 - Focused Web, runtime, operator-config, contract, migration, and type checks
   pass.
 - Required product, preliminary specialist, parent, final ReviewGPT, and
@@ -26,10 +30,11 @@ Updated: 2026-07-30
 ## Scope
 
 - In scope: PR #1110 conflict reconciliation, partial-delivery replay safety,
-  HTTPS parsing consistency, focused proof, PR description refresh, and required
-  merge-readiness gates.
-- Out of scope: broader Linq delivery refactors, new retry owners, unrelated
-  line-health behavior, and unrelated active work on `main`.
+  bounded same-key link reconciliation, definitive-rejection text fallback,
+  selected-reply targeting, HTTPS parsing consistency, focused proof, PR
+  description refresh, and required merge-readiness gates.
+- Out of scope: broader Linq delivery refactors, new asynchronous retry owners,
+  unrelated line-health behavior, and unrelated active work on `main`.
 
 ## Constraints
 
@@ -59,14 +64,15 @@ Updated: 2026-07-30
 
 ## Tasks
 
-1. Merge current `origin/main` and resolve the five known conflict surfaces.
-2. Add failing regression proof for partial-delivery mailbox consumption and
+1. [x] Merge current `origin/main` and resolve the five known conflict surfaces.
+2. [x] Add failing regression proof for partial-delivery mailbox consumption and
    uppercase HTTPS splitting, then implement the smallest owner-level fixes.
-3. Run focused verification and a direct crash/replay state-transition proof.
-4. Run product experience and preliminary specialist review; resolve findings
+3. [x] Run focused verification and direct recovery/replay state-transition proof.
+4. [x] Run product experience and preliminary specialist review; resolve findings
    and perform the parent final review.
-5. Finish the plan, push the final candidate, run final ReviewGPT concurrently
-   with exact-head CI, and execute merge-readiness preflight.
+5. [x] Finish the plan and prepare the verified final candidate. Push, final
+   ReviewGPT, exact-head CI, and the PR-head preflight remain post-plan gates
+   performed against the resulting commit.
 
 ## Decisions
 
@@ -85,6 +91,20 @@ Updated: 2026-07-30
   the merge-readiness audit found two narrow correctness gaps and the requested
   outcome remains cohesive; record the round-cap retrospective before the next
   final-gate run rather than resetting the immutable first-reviewed baseline.
+- Retry only the missing rich-link request with the same provider idempotency
+  key. The Web adapter performs one explicit reconciliation attempt inside the
+  existing provider-time budget; the local operator adapter reuses its existing
+  bounded request retry owner.
+- Treat HTTP 400, 415, and 422 as definitive rich-link shape rejections and send
+  the original URL as ordinary text under a stable `:fallback` suffix. Auth,
+  route, conflict, rate-limit, and server failures do not take this fallback.
+- Keep selected URL-only replies as text in the local operator adapter because
+  its explicit `nativeReplyRequested` authority requires text to carry
+  `reply_to`. Hosted Web's `replyToMessageId` remains inbound context rather
+  than native-reply authority, so ordinary hosted model replies remain flat.
+- Preserve unresolved post-primary ambiguity as the exact typed partial. It
+  synchronously consumes only the answered mailbox rows and never replays the
+  accepted primary text.
 
 ## Verification
 
@@ -113,3 +133,32 @@ Updated: 2026-07-30
   callback. The corrected branch now waits for the existing required writer;
   focused tests prove both pending-write ordering and callback-failure
   propagation before the delivery can settle.
+- The preliminary specialist pass found two product gaps and two proof gaps:
+  missing URL recovery after a failed preview, selected link-only target loss,
+  no full-stack assistant-output callback/replay proof, and no adapter-level
+  uppercase boundary proof. No patch artifact was returned.
+- Resolved the product findings in the existing delivery owners: ambiguous
+  preview responses reconcile with the same key, definitive preview rejection
+  falls back to URL text, and selected URL-only native replies stay text.
+- Added real provider-boundary uppercase tests for both adapters. The hosted
+  adapter preserves the token while the local sanitizer canonicalizes it; both
+  emit a native link part. The live iMessage rendering capture remains an
+  explicitly disclosed evidence gap rather than an inferred result.
+- Added a signed hosted-local assistant-output journey covering recovered lost
+  acknowledgment, all-retries-unresolved typed partial, definitive 400 text
+  fallback, exact mailbox consumption, one model invocation, and a late runtime
+  recheck with no primary replay.
+- Passed 233 operator-config tests, 143 focused Web Linq/transport tests, 10
+  Linq-stub helper tests, Web/operator-config/Cloudflare typechecks, targeted
+  Web ESLint, and `git diff --check`.
+- Assembled the complete runner bundle with the new transport code inside all
+  entrypoint, static-closure, and total-size budgets. The rebuilt
+  `linq-first-contact` scenario passed, including recovered and unresolved
+  acknowledgment paths plus definitive fallback. The two-test
+  `usage-limit-ambiguous-send` scenario and the first-contact line-authority
+  scenario also passed in isolated runs.
+- Parent final review traced the local and hosted retry/fallback branches,
+  selected-reply authority, provider identities, signed callback, mailbox
+  consumption, and late replay boundaries. No unresolved parent finding
+  remains.
+Completed: 2026-07-30

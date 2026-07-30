@@ -660,7 +660,7 @@ describe("createHostedLinqChat", () => {
       await vi.advanceTimersByTimeAsync(5_000);
 
       await expectation;
-      expect(fetchMock).toHaveBeenCalledTimes(stalledRequest);
+      expect(fetchMock).toHaveBeenCalledTimes(stalledRequest === 1 ? 1 : 3);
     },
   );
 });
@@ -963,7 +963,55 @@ describe("sendHostedLinqChatMessage", () => {
     },
   );
 
-  it("preserves the accepted primary identity when the rich-link follow-up fails permanently", async () => {
+  it("reconciles a lost rich-link acknowledgment with the same provider key", async () => {
+    const requestBodies: unknown[] = [];
+    let requestCount = 0;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      requestBodies.push(readJsonRequestBody(init));
+      requestCount += 1;
+      if (requestCount === 2) {
+        return createJsonResponse({}, 503);
+      }
+      return createJsonResponse({
+        chat_id: "chat_123",
+        message: {
+          id: requestCount === 1 ? "msg_text" : "msg_link",
+        },
+      }, 200);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendHostedLinqChatMessage({
+      chatId: "chat_123",
+      idempotencyKey: "payment-message:evt_123",
+      message: "Complete payment here:\nhttps://pay.example.test/checkout/session_123",
+    })).resolves.toMatchObject({
+      messageId: "msg_link",
+      providerMessageIds: ["msg_text", "msg_link"],
+    });
+    expect(requestBodies.slice(1)).toEqual([
+      {
+        message: {
+          idempotency_key: "payment-message:evt_123:link",
+          parts: [{
+            type: "link",
+            value: "https://pay.example.test/checkout/session_123",
+          }],
+        },
+      },
+      {
+        message: {
+          idempotency_key: "payment-message:evt_123:link",
+          parts: [{
+            type: "link",
+            value: "https://pay.example.test/checkout/session_123",
+          }],
+        },
+      },
+    ]);
+  });
+
+  it("falls back to URL text after a definitive rich-link rejection", async () => {
     const requestBodies: unknown[] = [];
     let requestCount = 0;
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
@@ -975,7 +1023,7 @@ describe("sendHostedLinqChatMessage", () => {
       return createJsonResponse({
         chat_id: "chat_123",
         message: {
-          id: "msg_text",
+          id: requestCount === 1 ? "msg_text" : "msg_fallback",
         },
       }, 200);
     });
@@ -986,14 +1034,9 @@ describe("sendHostedLinqChatMessage", () => {
       idempotencyKey: "payment-message:evt_123",
       message: "Complete payment here:\nhttps://pay.example.test/checkout/session_123",
     };
-    await expect(sendHostedLinqChatMessage(input)).rejects.toMatchObject({
-      code: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
-      deliveryMayHaveSucceeded: true,
-      expectedProviderMessageCount: 2,
-      providerMessageId: "msg_text",
-      providerMessageIds: ["msg_text"],
-      providerThreadId: "chat_123",
-      retryable: false,
+    await expect(sendHostedLinqChatMessage(input)).resolves.toMatchObject({
+      messageId: "msg_fallback",
+      providerMessageIds: ["msg_text", "msg_fallback"],
     });
 
     expect(requestBodies.map((body) =>
@@ -1001,7 +1044,17 @@ describe("sendHostedLinqChatMessage", () => {
     )).toEqual([
       "payment-message:evt_123",
       "payment-message:evt_123:link",
+      "payment-message:evt_123:link:fallback",
     ]);
+    expect(requestBodies[2]).toEqual({
+      message: {
+        idempotency_key: "payment-message:evt_123:link:fallback",
+        parts: [{
+          type: "text",
+          value: "https://pay.example.test/checkout/session_123",
+        }],
+      },
+    });
   });
 
   it.each([1, 2])(
@@ -1051,7 +1104,7 @@ describe("sendHostedLinqChatMessage", () => {
       await vi.advanceTimersByTimeAsync(5_000);
 
       await expectation;
-      expect(fetchMock).toHaveBeenCalledTimes(stalledRequest);
+      expect(fetchMock).toHaveBeenCalledTimes(stalledRequest === 1 ? 1 : 3);
     },
   );
 
@@ -1087,6 +1140,34 @@ describe("sendHostedLinqChatMessage", () => {
       },
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves an uppercase HTTPS token at the hosted provider boundary", async () => {
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        void input;
+        void init;
+        return createJsonResponse({
+          chat_id: "chat_123",
+          message: { id: "msg_link" },
+        }, 200);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendHostedLinqChatMessage({
+      chatId: "chat_123",
+      message: "HTTPS://PAY.EXAMPLE.TEST/checkout/session_123",
+    });
+
+    expect(readJsonRequestBody(fetchMock.mock.calls[0]?.[1])).toEqual({
+      message: {
+        parts: [{
+          type: "link",
+          value: "HTTPS://PAY.EXAMPLE.TEST/checkout/session_123",
+        }],
+      },
+    });
   });
 
   it("keeps a reaction-bound group offer in one text message", async () => {

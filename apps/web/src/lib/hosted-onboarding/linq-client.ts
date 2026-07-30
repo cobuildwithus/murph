@@ -33,6 +33,8 @@ import { normalizeNullableString } from "./shared";
 
 const HOSTED_LINQ_MULTI_REQUEST_TIMEOUT_MS =
   Math.floor(LINQ_API_DEFAULT_TIMEOUT_MS / 2);
+const HOSTED_LINQ_RICH_LINK_ATTEMPT_TIMEOUT_MS =
+  Math.floor(HOSTED_LINQ_MULTI_REQUEST_TIMEOUT_MS / 2);
 
 export type HostedLinqSendResult = {
   chatId: string | null;
@@ -83,14 +85,11 @@ export async function createHostedLinqChat(input: {
 
   let linkResult: HostedLinqSendResult;
   try {
-    linkResult = await sendHostedLinqMessageBody({
-      body: buildHostedLinqRichLinkMessageBody({
-        idempotencyKey: buildHostedLinqRichLinkIdempotencyKey(input.idempotencyKey),
-        linkUrl: split.linkUrl,
-      }),
+    linkResult = await sendHostedLinqRichLinkWithTextFallback({
       chatId: result.chatId,
+      idempotencyKey: buildHostedLinqRichLinkIdempotencyKey(input.idempotencyKey),
+      linkUrl: split.linkUrl,
       signal: input.signal,
-      timeoutMs: HOSTED_LINQ_MULTI_REQUEST_TIMEOUT_MS,
     });
   } catch (error) {
     throw createHostedLinqRichLinkPartialDeliveryFailure({
@@ -177,12 +176,10 @@ export async function sendHostedLinqChatMessage(input: {
   }
 
   if (!split.message.trim()) {
-    return sendHostedLinqMessageBody({
-      body: buildHostedLinqRichLinkMessageBody({
-        idempotencyKey: input.idempotencyKey,
-        linkUrl: split.linkUrl,
-      }),
+    return sendHostedLinqRichLinkWithTextFallback({
       chatId: input.chatId,
+      idempotencyKey: input.idempotencyKey,
+      linkUrl: split.linkUrl,
       signal: input.signal,
     });
   }
@@ -194,14 +191,11 @@ export async function sendHostedLinqChatMessage(input: {
   });
   let linkResult: HostedLinqSendResult;
   try {
-    linkResult = await sendHostedLinqMessageBody({
-      body: buildHostedLinqRichLinkMessageBody({
-        idempotencyKey: buildHostedLinqRichLinkIdempotencyKey(input.idempotencyKey),
-        linkUrl: split.linkUrl,
-      }),
+    linkResult = await sendHostedLinqRichLinkWithTextFallback({
       chatId: input.chatId,
+      idempotencyKey: buildHostedLinqRichLinkIdempotencyKey(input.idempotencyKey),
+      linkUrl: split.linkUrl,
       signal: input.signal,
-      timeoutMs: HOSTED_LINQ_MULTI_REQUEST_TIMEOUT_MS,
     });
   } catch (error) {
     throw createHostedLinqRichLinkPartialDeliveryFailure({
@@ -285,6 +279,63 @@ async function sendHostedLinqMessageBody(input: {
       readHostedLinqJsonField(message, "id"),
     ),
   };
+}
+
+async function sendHostedLinqRichLinkWithTextFallback(input: {
+  chatId: string;
+  idempotencyKey?: string | null;
+  linkUrl: string;
+  signal?: AbortSignal;
+}): Promise<HostedLinqSendResult> {
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await sendHostedLinqMessageBody({
+        body: buildHostedLinqRichLinkMessageBody({
+          idempotencyKey: input.idempotencyKey,
+          linkUrl: input.linkUrl,
+        }),
+        chatId: input.chatId,
+        signal: input.signal,
+        timeoutMs: HOSTED_LINQ_RICH_LINK_ATTEMPT_TIMEOUT_MS,
+      });
+    } catch (error) {
+      lastError = error;
+      if (!shouldRetryHostedLinqRichLinkRequest(error, input.signal)) {
+        break;
+      }
+    }
+  }
+
+  if (!isDefinitiveHostedLinqRichLinkRejection(lastError)) {
+    throw lastError;
+  }
+  return sendHostedLinqTextMessage({
+    chatId: input.chatId,
+    idempotencyKey:
+      buildHostedLinqRichLinkFallbackIdempotencyKey(input.idempotencyKey),
+    message: input.linkUrl,
+    signal: input.signal,
+    timeoutMs: HOSTED_LINQ_RICH_LINK_ATTEMPT_TIMEOUT_MS,
+  });
+}
+
+function shouldRetryHostedLinqRichLinkRequest(
+  error: unknown,
+  signal: AbortSignal | undefined,
+): boolean {
+  if (signal?.aborted) {
+    return false;
+  }
+  return !isHostedOnboardingError(error) || error.retryable;
+}
+
+function isDefinitiveHostedLinqRichLinkRejection(error: unknown): boolean {
+  const status = isHostedOnboardingError(error) ? error.details?.status : null;
+  return isHostedOnboardingError(error)
+    && error.details?.failureStage === "http"
+    && !error.retryable
+    && (status === 400 || status === 415 || status === 422);
 }
 
 function collectHostedLinqProviderMessageIds(
@@ -837,6 +888,10 @@ function buildHostedLinqRequestFailedError(input: {
 }) {
   return hostedOnboardingError({
     code: "LINQ_SEND_FAILED",
+    details: {
+      failureStage: "http",
+      status: input.status,
+    },
     message: `Linq ${input.operation} failed with HTTP ${input.status}.`,
     httpStatus: 502,
     retryable: input.retryable,
@@ -962,6 +1017,13 @@ function buildHostedLinqRichLinkIdempotencyKey(
 ): string | null {
   const idempotencyKey = normalizeNullableString(value);
   return idempotencyKey ? `${idempotencyKey}:link` : null;
+}
+
+function buildHostedLinqRichLinkFallbackIdempotencyKey(
+  value: string | null | undefined,
+): string | null {
+  const idempotencyKey = normalizeNullableString(value);
+  return idempotencyKey ? `${idempotencyKey}:fallback` : null;
 }
 
 function buildHostedLinqTextMessageBody(input: {
