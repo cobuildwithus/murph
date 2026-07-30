@@ -10,7 +10,6 @@ import {
   type CodexSubagentTokenUsageSample,
   extractCodexSubagentUsageDrafts,
   hashAssistantProviderStableJson,
-  readCodexV2SubagentActivityThreadIds,
 } from '../src/assistant/providers/helpers.ts'
 
 function tokenUsageEvent(input: {
@@ -67,29 +66,6 @@ function sampleFromEvents(
     lastEvent: events[events.length - 1],
   }
 }
-
-describe('readCodexV2SubagentActivityThreadIds', () => {
-  it('returns only V2 activity receiver ids', () => {
-    expect(readCodexV2SubagentActivityThreadIds({
-      method: 'item/started',
-      params: {
-        item: {
-          agentThreadId: 'thread-child',
-          id: 'spawn-call',
-          kind: 'started',
-          type: 'subAgentActivity',
-        },
-      },
-    })).toEqual(['thread-child'])
-
-    expect(readCodexV2SubagentActivityThreadIds(
-      spawnEndEvent({
-        model: 'gpt-5.6-terra',
-        receiverThreadIds: ['thread-child'],
-      }),
-    )).toEqual([])
-  })
-})
 
 describe('extractCodexSubagentUsageDrafts', () => {
   it('returns no drafts without subagent samples', () => {

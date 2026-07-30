@@ -1398,10 +1398,9 @@ export function readCodexCollabReceiverThreadIds(
   return readCodexCollabToolCallFromEvent(rawEvent)?.receiverThreadIds ?? []
 }
 
-// V2 subagent activity items omit the effective child model. The live runtime
-// resolves it from the child thread only after that child has emitted usage,
-// which avoids racing thread initialization while keeping V1 model-bearing
-// collab items on their direct attribution path.
+// V2 activity identifies the child but omits its model. The live runtime uses
+// these ids to resolve the sticky model only after child usage proves startup
+// is complete; V1 items already carry their effective spawn model.
 export function readCodexV2SubagentActivityThreadIds(
   rawEvent: unknown,
 ): readonly string[] {

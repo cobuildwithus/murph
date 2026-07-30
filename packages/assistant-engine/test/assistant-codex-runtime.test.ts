@@ -17409,7 +17409,7 @@ describe('assistant codex event shaping', () => {
   })
 
   describe('codex subagent thread events', () => {
-    it('tolerates subagent thread events and records their usage as additional drafts', async () => {
+    it('attributes V2 overrides after child usage and keeps V1 parent fallback', async () => {
       const workingDirectory = await createTempDir('assistant-codex-subagent-usage-work-')
       const codexHome = await createTempDir('assistant-codex-subagent-usage-home-')
       const spawnedChildren: MockChildProcess[] = []
@@ -17430,19 +17430,17 @@ describe('assistant codex event shaping', () => {
               threadId: 'thread-subagent-parent',
               turnId: 'turn-subagent-parent',
             })
-            // Parent-thread spawn item announces the child's effective model.
+            // V2 activity omits the model. Once the child has emitted usage,
+            // its sticky model is safe to resolve without racing startup.
             child.stdout.write(jsonLine({
               method: 'item/completed',
               params: {
                 item: {
-                  id: 'collab-spawn-1',
-                  type: 'collabAgentToolCall',
-                  tool: 'spawnAgent',
-                  status: 'completed',
-                  senderThreadId: 'thread-subagent-parent',
-                  receiverThreadIds: ['thread-subagent-child-a'],
-                  prompt: 'crunch the export',
-                  model: 'gpt-5.6-terra-mini',
+                  id: 'spawn-v2-terra',
+                  type: 'subAgentActivity',
+                  kind: 'started',
+                  agentThreadId: 'thread-subagent-child-a',
+                  agentPath: 'root/terra_check',
                 },
                 threadId: 'thread-subagent-parent',
                 turnId: 'turn-subagent-parent',
@@ -17482,6 +17480,20 @@ describe('assistant codex event shaping', () => {
                 },
               },
             }))
+            const childModelLookup = await waitForRpcMethod(
+              child,
+              'thread/resume',
+            )
+            expect(asRecord(childModelLookup.params).threadId).toBe(
+              'thread-subagent-child-a',
+            )
+            child.stdout.write(jsonLine({
+              id: childModelLookup.id,
+              result: {
+                id: 'thread-subagent-child-a',
+                model: 'gpt-5.6-terra',
+              },
+            }))
             child.stdout.write(jsonLine({
               method: 'item/completed',
               params: {
@@ -17517,8 +17529,8 @@ describe('assistant codex event shaping', () => {
                 },
               },
             }))
-            // A second spawned child whose spawn item carries no model stays
-            // model-unattributed but still bills.
+            // A V1 child whose spawn item carries no model inherits the
+            // parent's model and still bills without a lookup.
             child.stdout.write(jsonLine({
               method: 'item/completed',
               params: {
@@ -17576,6 +17588,7 @@ describe('assistant codex event shaping', () => {
           PATH: '/custom/bin',
         },
         modelProvider: 'local-test-provider',
+        model: 'gpt-5.6-sol',
         prompt: 'spawn a subagent and finish',
         sandbox: 'workspace-write',
         workingDirectory,
@@ -17593,8 +17606,8 @@ describe('assistant codex event shaping', () => {
           outputTokens: 1_000,
           providerName: 'local-test-provider',
           reasoningTokens: 120,
-          requestedModel: 'gpt-5.6-terra-mini',
-          servedModel: 'gpt-5.6-terra-mini',
+          requestedModel: 'gpt-5.6-terra',
+          servedModel: 'gpt-5.6-terra',
           totalTokens: 5_000,
         },
       })
@@ -17610,11 +17623,16 @@ describe('assistant codex event shaping', () => {
         usage: {
           inputTokens: 600,
           outputTokens: 100,
-          requestedModel: null,
-          servedModel: null,
+          requestedModel: 'gpt-5.6-sol',
+          servedModel: 'gpt-5.6-sol',
           totalTokens: 700,
         },
       })
+      expect(
+        readWrittenRpcMessages(
+          requireMockChildProcess(spawnedChildren[0] ?? null),
+        ).filter((message) => message.method === 'thread/resume'),
+      ).toHaveLength(1)
     })
 
     it('answers subagent thread server requests with an error without failing the turn', async () => {

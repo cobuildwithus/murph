@@ -180,7 +180,6 @@ const CODEX_RPC_CLIENT_NAME = 'murph'
 const CODEX_RPC_CLIENT_TITLE = 'Murph'
 const CODEX_RPC_CLIENT_VERSION = '1.0.0'
 const CODEX_RPC_DEFAULT_TIMEOUT_MS = 120_000
-const CODEX_SUBAGENT_MODEL_LOOKUP_TIMEOUT_MS = 5_000
 const CODEX_BACKGROUND_WORK_RPC_TIMEOUT_MS = 5_000
 const CODEX_BACKGROUND_WORK_WAIT_TIMEOUT_MS = 120_000
 const CODEX_BACKGROUND_WORK_POLL_INTERVAL_MS = 50
@@ -3162,14 +3161,11 @@ async function runCodexAppServerTurnOnProcess(
   const subagentTokenUsageByThread =
     new Map<string, CodexSubagentTokenUsageSample>()
   const subagentModelByThread = new Map<string, string>()
-  const pendingSubagentModelLookups = new Map<string, Promise<void>>()
+  const attemptedSubagentModelLookupThreadIds = new Set<string>()
   // Thread ids named by this turn's collab tool calls (spawn/sendInput/...),
   // collected live so evidenced subagent threads win buffer slots over
   // stale/unattributed foreign threads when the cap is reached.
   const collabReceiverThreadIds = new Set<string>()
-  // V2 activity events omit the effective model. Resolve it only once both
-  // parent activity evidence and billable child usage exist; an eager resume
-  // can race child initialization and observe the parent's model instead.
   const v2SubagentActivityThreadIds = new Set<string>()
   let rolloutRelativePath: string | null = null
   let providerActionCount = 0
@@ -4895,38 +4891,21 @@ async function runCodexAppServerTurnOnProcess(
   ): Promise<unknown> => codexProcess.sendRequest(method, params)
 
   const scheduleSubagentModelLookup = (threadId: string): void => {
-    if (
-      subagentModelByThread.has(threadId) ||
-      pendingSubagentModelLookups.has(threadId)
-    ) {
+    if (attemptedSubagentModelLookupThreadIds.has(threadId)) {
       return
     }
-
-    const lookup = withCodexRpcTimeout(
-      sendRequest('thread/resume', {
-        excludeTurns: true,
-        threadId,
-      }),
-      CODEX_SUBAGENT_MODEL_LOOKUP_TIMEOUT_MS,
-      'thread/resume',
-    )
-      .then((result) => {
-        const model = normalizeNullableString(
-          asCodexString(asCodexRecord(result)?.model),
-        )
-        if (model) {
-          subagentModelByThread.set(threadId, model)
-        }
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        pendingSubagentModelLookups.delete(threadId)
-      })
-    pendingSubagentModelLookups.set(threadId, lookup)
-  }
-
-  const drainPendingSubagentModelLookups = async (): Promise<void> => {
-    await Promise.allSettled([...pendingSubagentModelLookups.values()])
+    attemptedSubagentModelLookupThreadIds.add(threadId)
+    void sendRequest('thread/resume', {
+      excludeTurns: true,
+      threadId,
+    }).then((result) => {
+      const model = normalizeNullableString(
+        asCodexString(asCodexRecord(result)?.model),
+      )
+      if (model) {
+        subagentModelByThread.set(threadId, model)
+      }
+    }).catch(() => undefined)
   }
 
   const requireLiveTurnIds = (): {
@@ -5147,7 +5126,6 @@ async function runCodexAppServerTurnOnProcess(
 
     lifecycleStage = 'turn_running'
     await turnCompleted
-    await drainPendingSubagentModelLookups()
     clearInterruptCleanupTimer()
     await drainPendingDynamicToolExecutions()
     await drainPendingProgressDeliveries()
