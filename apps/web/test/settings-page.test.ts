@@ -1032,6 +1032,137 @@ test("SettingsPage surfaces and opens the authenticated active Family owner's ow
 
 test.each([
   {
+    beneficiaryMemberId: "member_123",
+    checkoutKind: "success",
+    label: "successful owner-seat return",
+    ownerSurfaceOwnsReturn: true,
+  },
+  {
+    beneficiaryMemberId: "member_123",
+    checkoutKind: "cancel",
+    label: "canceled owner-seat return",
+    ownerSurfaceOwnsReturn: true,
+  },
+  {
+    beneficiaryMemberId: "member_family",
+    checkoutKind: "success",
+    label: "successful active-member return",
+    ownerSurfaceOwnsReturn: false,
+  },
+  {
+    beneficiaryMemberId: "member_family",
+    checkoutKind: "cancel",
+    label: "canceled active-member return",
+    ownerSurfaceOwnsReturn: false,
+  },
+  {
+    beneficiaryMemberId: "member_former",
+    checkoutKind: "success",
+    label: "successful former-member return",
+    ownerSurfaceOwnsReturn: false,
+  },
+  {
+    beneficiaryMemberId: "member_former",
+    checkoutKind: "cancel",
+    label: "canceled former-member return",
+    ownerSurfaceOwnsReturn: false,
+  },
+] as const)(
+  "SettingsPage gives one exact Family surface the $label",
+  async ({
+    beneficiaryMemberId,
+    checkoutKind,
+    ownerSurfaceOwnsReturn,
+  }) => {
+    mocks.getPrisma.mockReturnValue(mocks.prisma);
+    mocks.getHostedPrivySession.mockResolvedValue(null);
+    mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+      authenticated: true,
+      authenticatedMember: {
+        billingStatus: "active",
+        id: "member_123",
+        suspendedAt: null,
+      },
+      linkedAccounts: [],
+      session: {
+        privyUserId: "did:privy:user_123",
+      },
+    });
+    const familyOwner = {
+      billingActive: true,
+      billingStatus: "active",
+      displayName: null,
+      groupId: "hbag_abcdefghijklmnop",
+      invites: [],
+      members: [
+        {
+          isOwner: true,
+          label: null,
+          memberId: "member_123",
+          status: "active",
+        },
+        {
+          isOwner: false,
+          label: "Alex",
+          memberId: "member_family",
+          status: "active",
+        },
+      ],
+      ownerMemberId: "member_123",
+      plans: {},
+      seats: {},
+      suspendedAt: null,
+    };
+    mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(familyOwner);
+    mocks.readHostedActiveUsageCreditPurchaseForPayer.mockResolvedValue(null);
+    mocks.readHostedUsageCreditPurchaseTargetForPayer.mockResolvedValue({
+      beneficiaryMemberId,
+      familyGroupId: familyOwner.groupId,
+      kind: "family",
+    });
+
+    const { default: SettingsPage } = await import(
+      "../app/(dashboard)/settings/page"
+    );
+    renderToStaticMarkup(await SettingsPage({
+      searchParams: Promise.resolve({
+        usageCheckout: checkoutKind,
+        usageFamily: familyOwner.groupId,
+        usageMember: beneficiaryMemberId,
+        usagePurchase: "hucp_abcdefghijklmnop",
+      }),
+    }));
+    const expectedReturn = {
+      kind: checkoutKind,
+      purchaseId: "hucp_abcdefghijklmnop",
+    };
+
+    expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        usageTopUpPurchaseReturn: ownerSurfaceOwnsReturn
+          ? expectedReturn
+          : null,
+        usageTopUpScope: "family",
+        usageTopUpTargetLabel: "you",
+      }),
+      undefined,
+    );
+    expect(mocks.HostedFamilySettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        usageTopUpPurchaseReturn: ownerSurfaceOwnsReturn
+          ? null
+          : expectedReturn,
+        usageTopUpReturnMemberId: ownerSurfaceOwnsReturn
+          ? null
+          : beneficiaryMemberId,
+      }),
+      undefined,
+    );
+  },
+);
+
+test.each([
+  {
     addUsage: ["family", "family"],
     label: "repeated selector",
     member: {

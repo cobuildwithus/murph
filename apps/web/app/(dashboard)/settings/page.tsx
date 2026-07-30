@@ -239,6 +239,10 @@ export default async function SettingsPage({
       familyOwnerUsageTopUpMember.memberId
       ? familyUsageTopUpPurchaseReturn
       : null;
+  const familySettingsUsageTopUpPurchaseReturn =
+    familyOwnerUsageTopUpPurchaseReturn ? null : familyUsageTopUpPurchaseReturn;
+  const familySettingsUsageTopUpReturnMemberId =
+    familyOwnerUsageTopUpPurchaseReturn ? null : familyUsageTopUpReturnMemberId;
   const billingUsageTopUpActivePurchase = familyOwnerUsageTopUpAvailable
     ? familyOwnerUsageTopUpActivePurchase
     : personalUsageTopUpActivePurchase;
@@ -462,8 +466,8 @@ export default async function SettingsPage({
             usageTopUpActivePurchase={familyUsageTopUpActivePurchase}
             usageTopUpContactOptions={usageTopUpContactOptions}
             usageTopUpOffers={familyUsageTopUpOffers}
-            usageTopUpPurchaseReturn={familyUsageTopUpPurchaseReturn}
-            usageTopUpReturnMemberId={familyUsageTopUpReturnMemberId}
+            usageTopUpPurchaseReturn={familySettingsUsageTopUpPurchaseReturn}
+            usageTopUpReturnMemberId={familySettingsUsageTopUpReturnMemberId}
           />
         </section>
       ) : null}
