@@ -55,6 +55,30 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+test("keeps the warmed provider's auth panel unmounted while the dialog is closed", async () => {
+  const rendered = await renderClientComponent(
+    createElement(AuthDialog, {
+      onOpenChange: () => {},
+      open: false,
+      privyRuntime: {
+        attempt: 2,
+        AuthPanel: SharedAuthPanel,
+        kind: "configured",
+        restart: () => {},
+      },
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    expect(rendered.container.textContent).not.toContain("Shared auth panel");
+    expect(mocks.sharedPanelRender).not.toHaveBeenCalled();
+    expect(mocks.standalonePanelRender).not.toHaveBeenCalled();
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("renders the panel supplied by the warm runtime without rendering a standalone provider island", async () => {
   const rendered = await renderClientComponent(
     createElement(AuthDialog, {
