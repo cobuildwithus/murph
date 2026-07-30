@@ -3,6 +3,10 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
+import type {
+  HostedPlanUsageStatus,
+  HostedPlanUsageToolRequest,
+} from '@murphai/hosted-execution/plan-usage'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -16,6 +20,7 @@ import {
   MURPH_FAMILY_PLAN_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
   MURPH_GROUP_TOOL,
+  MURPH_PLAN_USAGE_TOOL,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
   MURPH_CONNECTED_APPS_SEARCH_TOOL,
@@ -40,6 +45,9 @@ import {
 import type {
   AssistantHostedAutomationToolRequest,
 } from '../src/assistant/execution-context.ts'
+import type {
+  AssistantHostedToolContext,
+} from '../src/assistant/hosted-tool-context.ts'
 import {
   buildAssistantSystemPrompt,
 } from '../src/assistant/system-prompt.ts'
@@ -778,6 +786,280 @@ describeRealCodex('real Codex experiment onboarding e2e', () => {
         )
       }
       expect(result.finalMessage).toMatch(/changed|revision|updated/iu)
+    },
+    360_000,
+  )
+})
+
+describeRealCodex('real Codex private top-up history e2e', () => {
+  it(
+    'selects and interprets the expanded history for an explicit top-up question',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-top-up-history-e2e-'),
+      )
+      const requests: HostedPlanUsageToolRequest[] = []
+      const olderTopUps = Array.from({ length: 48 }, (_, index) => ({
+        addedUsd: '1.000000',
+        adjustedUsd: '0.000000',
+        creditedAt: new Date(Date.UTC(2026, 5, index + 1)).toISOString(),
+        remainingUsd: '0.000000',
+        source: 'added_for_you' as const,
+        usedUsd: '1.000000',
+      }))
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'hosted-low-usage',
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildHostedPlanUsageDeveloperInstructions(),
+          dynamicTools: [MURPH_PLAN_USAGE_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          hostedToolContext: buildRealPlanUsageToolContext(async (request) => {
+            requests.push(request)
+            return {
+              accessKind: 'paid',
+              forecast: null,
+              generatedAt: '2026-07-29T20:00:00.000Z',
+              periodEnd: '2026-08-01T00:00:00.000Z',
+              periodKind: 'monthly',
+              periodStart: '2026-07-01T00:00:00.000Z',
+              planCode: 'launch_monthly',
+              planName: 'Pulse',
+              recommendedAction: null,
+              remainingPercent: 9,
+              status: 'active',
+              topUpHistory: {
+                hasMore: true,
+                topUps: [
+                  {
+                    addedUsd: '5.000000',
+                    adjustedUsd: '0.500000',
+                    creditedAt: '2026-07-29T14:23:42.000Z',
+                    remainingUsd: '3.500000',
+                    source: 'purchased_by_you',
+                    usedUsd: '1.000000',
+                  },
+                  {
+                    addedUsd: '10.000000',
+                    adjustedUsd: '0.000000',
+                    creditedAt: '2026-07-27T20:38:45.000Z',
+                    remainingUsd: '0.000000',
+                    source: 'added_for_you',
+                    usedUsd: '10.000000',
+                  },
+                  ...olderTopUps,
+                ],
+                totalCount: 51,
+              },
+              usedPercent: 91,
+            }
+          }),
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'I just bought a usage top-up. Did it post?',
+            'Tell me when the latest one posted, whether I funded it or it was added for me,',
+            'how much was added, used, adjusted, and remains, and whether the returned history is complete.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const skillRead = actions.find((action) =>
+          action.kind === 'command'
+          && action.command.includes('hosted-low-usage/SKILL.md')
+        )
+        const toolCalls = actions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_PLAN_USAGE_TOOL.name
+        )
+
+        expect(skillRead, 'hosted-low-usage skill read').toBeDefined()
+        expect(toolCalls).toHaveLength(1)
+        expect(requests).toEqual([{ includeTopUpHistory: true }])
+        expect(result.finalMessage).toMatch(/July 29|2026-07-29/iu)
+        expect(result.finalMessage).toMatch(/\$5(?:\.00)?/u)
+        expect(result.finalMessage).toMatch(/\$1(?:\.00)?/u)
+        expect(result.finalMessage).toMatch(/\$0\.50|50 cents/iu)
+        expect(result.finalMessage).toMatch(/\$3\.50/u)
+        expect(result.finalMessage).toMatch(
+          /purchased by you|you (?:bought|funded|purchased)/iu,
+        )
+        expect(result.finalMessage).toMatch(/added for you|someone else/iu)
+        expect(result.finalMessage).toMatch(
+          /51|newest 50|older.+not shown|truncat/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
+    'does not infer posting when the expanded history read fails',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-top-up-history-failure-e2e-'),
+      )
+      const requests: HostedPlanUsageToolRequest[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'hosted-low-usage',
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildHostedPlanUsageDeveloperInstructions(),
+          dynamicTools: [MURPH_PLAN_USAGE_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          hostedToolContext: buildRealPlanUsageToolContext(async (request) => {
+            requests.push(request)
+            throw new Error('private top-up backend detail')
+          }),
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt:
+            'Did the usage top-up I just bought post? Do not guess if you cannot verify it.',
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const skillRead = actions.find((action) =>
+          action.kind === 'command'
+          && action.command.includes('hosted-low-usage/SKILL.md')
+        )
+        const toolCalls = actions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_PLAN_USAGE_TOOL.name
+        )
+
+        expect(skillRead, 'hosted-low-usage skill read').toBeDefined()
+        expect(toolCalls).toHaveLength(1)
+        expect(requests).toEqual([{ includeTopUpHistory: true }])
+        expect(result.finalMessage).toMatch(
+          /could not verify|couldn't verify|unable to verify|can't verify/iu,
+        )
+        expect(result.finalMessage).not.toContain(
+          'private top-up backend detail',
+        )
+        expect(result.finalMessage).not.toMatch(
+          /(?:definitely|successfully|confirmed).{0,24}posted/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
+    'keeps ordinary aggregate usage on the compact read',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-plan-usage-compact-e2e-'),
+      )
+      const requests: HostedPlanUsageToolRequest[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'hosted-low-usage',
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildHostedPlanUsageDeveloperInstructions(),
+          dynamicTools: [MURPH_PLAN_USAGE_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          hostedToolContext: buildRealPlanUsageToolContext(async (request) => {
+            requests.push(request)
+            return {
+              accessKind: 'paid',
+              forecast: null,
+              generatedAt: '2026-07-29T20:00:00.000Z',
+              periodEnd: '2026-08-01T00:00:00.000Z',
+              periodKind: 'monthly',
+              periodStart: '2026-07-01T00:00:00.000Z',
+              planCode: 'launch_monthly',
+              planName: 'Pulse',
+              recommendedAction: null,
+              remainingPercent: 25,
+              status: 'active',
+              usedPercent: 75,
+            }
+          }),
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt:
+            'How much overall AI usage do I have left? I am not asking about a purchase or top-up.',
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const toolCalls = actions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_PLAN_USAGE_TOOL.name
+        )
+
+        expect(toolCalls).toHaveLength(1)
+        expect(requests).toEqual([{}])
+        expect(result.finalMessage).toMatch(/25%|25 percent/iu)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
     },
     360_000,
   )
@@ -1805,6 +2087,45 @@ async function materializeExperimentStartVaultCli(input: {
     },
   )
   await chmod(executablePath, 0o700)
+}
+
+function buildRealPlanUsageToolContext(
+  read: (
+    request: HostedPlanUsageToolRequest,
+  ) => Promise<HostedPlanUsageStatus>,
+): AssistantHostedToolContext {
+  return {
+    computerToolsAvailable: false,
+    currentHostedDeliveryContext: () => null,
+    currentHostedMailboxItemIds: () => [],
+    planUsageTool: { read },
+    sendVaultFile: async () => {
+      throw new Error('Vault file sends are unavailable in this test.')
+    },
+    vaultFileSendAvailable: false,
+  }
+}
+
+function buildHostedPlanUsageDeveloperInstructions(): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'linq',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: 'direct',
+    currentLocalDate: '2026-07-29',
+    currentTimeZone: 'America/New_York',
+    hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    turnTrigger: null,
+  })
 }
 
 function buildGroupPointOfViewDeveloperInstructions(input?: {

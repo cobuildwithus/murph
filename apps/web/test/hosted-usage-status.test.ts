@@ -894,6 +894,57 @@ describe("readHostedPersonalAiUsageStatus", () => {
     expect(tx.hostedUsageCreditEntry.count).toHaveBeenCalledOnce();
   });
 
+  it("returns the newest 50 top-ups with exact over-limit metadata", async () => {
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision());
+    const prisma = buildPrisma(null);
+    const entries = Array.from({ length: 50 }, (_, index) => ({
+      amountUsdMicros: 1_000_000n,
+      effectiveAt: new Date(Date.UTC(2026, 6, 29 - index)),
+      grant: { remainingUsdMicros: 1_000_000n },
+      id: `grant_${String(index).padStart(2, "0")}`,
+      purchase: { payerMemberId: "member_history_boundary" },
+    }));
+    prisma.hostedUsageCreditEntry.findMany.mockResolvedValue(entries);
+    prisma.hostedUsageCreditEntry.count.mockResolvedValue(51);
+
+    const result = await readHostedPersonalAiUsageStatus({
+      includeTopUpHistory: true,
+      memberId: "member_history_boundary",
+      now: NOW,
+      prisma: prisma as never,
+      publicBaseUrl: null,
+    });
+
+    expect(prisma.hostedUsageCreditEntry.findMany).toHaveBeenCalledWith({
+      orderBy: [
+        { beneficiarySequence: "desc" },
+        { id: "desc" },
+      ],
+      select: expect.any(Object),
+      take: 50,
+      where: {
+        beneficiaryMemberId: "member_history_boundary",
+        kind: "purchase_grant",
+      },
+    });
+    expect(result).toMatchObject({
+      topUpHistory: {
+        hasMore: true,
+        totalCount: 51,
+      },
+    });
+    if (!("topUpHistory" in result) || !result.topUpHistory) {
+      throw new Error("Expected expanded top-up history.");
+    }
+    expect(result.topUpHistory.topUps).toHaveLength(50);
+    expect(result.topUpHistory.topUps[0]?.creditedAt).toBe(
+      entries[0]?.effectiveAt.toISOString(),
+    );
+    expect(result.topUpHistory.topUps[49]?.creditedAt).toBe(
+      entries[49]?.effectiveAt.toISOString(),
+    );
+  });
+
   it("forecasts exhaustion against overall available capacity", async () => {
     mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
       limitUsdMicros: 10_000_000n,

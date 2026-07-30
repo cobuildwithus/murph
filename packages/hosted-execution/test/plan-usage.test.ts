@@ -89,6 +89,31 @@ describe("hosted plan usage contract", () => {
         totalCount: 2,
       },
     })).toThrow();
+    const fiftyTopUps = Array.from(
+      { length: 50 },
+      () => status.topUpHistory.topUps[0],
+    );
+    expect(parseHostedPlanUsageStatus({
+      ...status,
+      topUpHistory: {
+        hasMore: true,
+        topUps: fiftyTopUps,
+        totalCount: 51,
+      },
+    })).toMatchObject({
+      topUpHistory: {
+        hasMore: true,
+        totalCount: 51,
+      },
+    });
+    expect(() => parseHostedPlanUsageStatus({
+      ...status,
+      topUpHistory: {
+        hasMore: true,
+        topUps: fiftyTopUps.slice(0, 49),
+        totalCount: 51,
+      },
+    })).toThrow();
   });
 
   it("parses the trial display name", () => {
