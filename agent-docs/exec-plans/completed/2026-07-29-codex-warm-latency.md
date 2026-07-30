@@ -1,6 +1,6 @@
 # Codex warm cold-start latency
 
-Status: active
+Status: completed
 Created: 2026-07-29
 Updated: 2026-07-29
 
@@ -101,10 +101,30 @@ Updated: 2026-07-29
 - Production already uses a 20-minute post-conversation warm lease. Extending
   that lease would retain each container's provisioned memory and disk longer,
   so this change leaves the lease and Cloudflare capacity posture unchanged.
+- The preliminary specialist ReviewGPT pass found one missing fail-open
+  regression case for preparation rejection before admission. That focused
+  coverage was added and proves the accepted foreground input still reaches the
+  ordinary assistant phase without an invented cancellation owner.
+- Independent product and workspace-boundary reviews passed after the final
+  reverse-order race remediation. They rechecked launch-identity convergence,
+  synchronous foreground claim, the single pre-provider fallback, exact abort
+  and release cleanup, FIFO ticket order, ready-idle preservation, managed
+  account exclusion, and accepted-reply completion.
+- Canonical remote acceptance passed in 5 minutes 23 seconds on the frozen
+  candidate with every workspace typecheck, build, package coverage lane, Web
+  verification, Cloudflare verification, and the full affected Codex/runtime
+  suites green. A later clean rebase onto current `main` changed only base
+  history; both affected package typechecks passed again. Local umbrella
+  verification separately encountered the shared host's runtime-artifact lock,
+  while the isolated acceptance runner built that same artifact successfully.
+- The parent final review found and removed one unrelated 120-second test
+  timeout relaxation. The resulting patch has no second process owner, new
+  infrastructure, persisted state, keepalive, warm-lease change, ENAM
+  dependency, or direct-identifier leakage.
 - A local production-shaped direct scenario used the installed Codex binary
   with isolated empty workspace and Codex-home directories plus a child
-  environment narrowed to those paths and `PATH`. On the current candidate,
-  process-only initialization became ready in 209 ms, crossed the real
+  environment narrowed to those paths and `PATH`. On the final candidate,
+  process-only initialization became ready in 330 ms, crossed the real
   lifecycle boundary, and shut down without creating a thread, turn, tool, or
   provider request.
 
@@ -114,3 +134,4 @@ Updated: 2026-07-29
   R2 baseline.
 - Use the existing Cloudflare version/deployment path and rollback mechanism;
   do not make the ENAM deploy responsible for activating this change.
+Completed: 2026-07-29
