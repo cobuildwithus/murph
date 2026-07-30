@@ -39,8 +39,8 @@ Last verified: 2026-07-29
 ## Runtime Security Posture
 
 - The database-health cron is a platform operation, not runner provider egress.
-  Its PlanetScale service-token id/token, Linq token, and operator chat id are
-  required Worker-only secrets and must never enter runner env, URLs, logs,
+  Its PlanetScale service-token id/token, Linq token, and two operator chat ids
+  are required Worker-only secrets and must never enter runner env, URLs, logs,
   persisted samples, fixtures with real values, or alert copy. The configured
   PlanetScale organization, database, branch-name, and branch-ID selectors are
   deploy vars, not request input. The dedicated service token is
@@ -54,12 +54,21 @@ Last verified: 2026-07-29
   or logged. Discovery and scrape disable redirects, enforce ten-second
   timeouts and byte caps, and reduce responses to allowlisted connection
   metrics before persistence. Before Linq message egress, the dedicated sender
-  reads the configured direct chat and current line reputation, requires both
-  to be healthy, canonicalizes only the documented phone-number formatting,
+  independently reads each configured direct chat and the current line
+  reputation, requires the selected chat and line to be healthy, canonicalizes
+  only the documented phone-number formatting,
   accepts the current nested reputation status plus the documented deprecated
-  top-level health-status alias, derives its sole external phone recipient in
-  memory, and persists or logs none of that provider response. It then uses Linq's
-  no-`from` auto-selection endpoint so a line that becomes flagged after
+  top-level health-status alias, derives each chat's sole external phone
+  recipient in memory, requires the two resolved recipients to be distinct, and
+  persists or logs none of that provider response. When distinct chat ids
+  resolve to the same external recipient, only the primary operation may enter
+  Linq and the pending page remains unresolved. An unresolved primary identity
+  suppresses secondary provider entry because distinctness cannot be proven;
+  an unresolved secondary may still allow the healthy primary operation.
+  Primary chat or line health does not erase an otherwise unambiguous identity,
+  so a healthy distinct secondary may still enter while the primary is
+  suppressed. It otherwise uses Linq's no-`from` auto-selection endpoint
+  separately for each direct chat so a line that becomes flagged after
   preflight can fail over; no model, runner, request, or stored state can select
   another recipient.
 - Runtime trust boundaries exist for local loopback daemons, hosted web, Cloudflare-hosted execution, provider ingress, billing, device sync, and assistant runtime state. `ARCHITECTURE.md`, this file, and the relevant app/package docs must change together when those boundaries change.

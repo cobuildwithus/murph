@@ -150,11 +150,19 @@ describe('assistant capability-offers prompt contract', () => {
     )
 
     expect(section).toContain('`murph.newsletter`')
-    expect(section).toContain('`prepare` returns authorized current-week facts')
+    expect(section).toContain(
+      '`prepare` returns authorized facts from the seven completed local days',
+    )
     expect(section).toContain('compose only from `result.members`')
     expect(section).not.toContain('`vault-cli group weekly')
     expect(section).toContain('`send` rechecks authorization')
     expect(section).toContain('never returns raw email addresses')
+    expect(section).toContain('never invent a sync or permission cause')
+    expect(section).toContain('the historical cause is unknown')
+    expect(section).toContain(
+      'permission or data availability as current state, never as the cause',
+    )
+    expect(section).not.toContain('direct tool evidence')
     expect(section).toContain('never send the first edition immediately')
     expect(section).toContain('Create the newsletter cron through `murph.automation`')
     expect(section).not.toContain('proactively call `action="post_join_offer"` once')

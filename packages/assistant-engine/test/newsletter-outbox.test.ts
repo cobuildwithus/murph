@@ -4,15 +4,10 @@ import type {
   HostedRuntimeNewsletterToolRequest,
   HostedRuntimeNewsletterToolResponse,
 } from '@murphai/hosted-execution/runtime-control'
-import {
-  parseHostedEmailThreadTarget,
-  serializeHostedEmailThreadTarget,
-} from '@murphai/runtime-state'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createAssistantNewsletterOutboxTool } from '../src/assistant/newsletter-outbox.ts'
 import {
-  createAssistantOutboxIntent,
   listAssistantOutboxIntents,
   saveAssistantOutboxIntent,
 } from '../src/assistant/outbox.ts'
@@ -29,7 +24,6 @@ const OUTBOX_AUTOMATION_AUTHORITY = {
   expectedUpdatedAt: '2026-07-12T11:00:00.000Z',
 }
 const AUTHORIZATION_PROOF = 'a'.repeat(64)
-const CHANGED_AUTHORIZATION_PROOF = 'b'.repeat(64)
 const DELIVERY_KEY =
   'group-newsletter:automation_newsletter:2026-07-12T13:00:00.000Z:group_123'
 const tempRoots: string[] = []
@@ -91,7 +85,13 @@ describe('newsletter durable outbox capability', () => {
   it('allows one prepare and one send, then queues a proof-carrying parent', async () => {
     const vault = await createVault('newsletter-outbox-queue-')
     const request = vi.fn(async () => preparationResponse())
-    const tool = createTool({ request, turnId: 'turn_one', vault })
+    const recordPendingDeliveryIntentId = vi.fn()
+    const tool = createTool({
+      recordPendingDeliveryIntentId,
+      request,
+      turnId: 'turn_one',
+      vault,
+    })
 
     await prepare(tool)
     await expect(send(tool)).resolves.toMatchObject({
@@ -114,10 +114,44 @@ describe('newsletter durable outbox capability', () => {
       newsletterAuthorizationProof: AUTHORIZATION_PROOF,
       status: 'pending',
     })
+    expect(recordPendingDeliveryIntentId).toHaveBeenCalledWith(
+      intents[0]?.intentId,
+    )
     expect(request).toHaveBeenCalledTimes(1)
   })
 
-  it('returns terminal sent after the current proof parent and recipients are durable', async () => {
+  it('reattaches an existing active parent to deterministic cron settlement', async () => {
+    const vault = await createVault('newsletter-outbox-active-parent-')
+    const firstPendingIntent = vi.fn()
+    const firstTool = createTool({
+      recordPendingDeliveryIntentId: firstPendingIntent,
+      request: vi.fn(async () => preparationResponse()),
+      turnId: 'turn_first',
+      vault,
+    })
+    await prepare(firstTool)
+    await send(firstTool)
+
+    const retryPendingIntent = vi.fn()
+    const retryTool = createTool({
+      recordPendingDeliveryIntentId: retryPendingIntent,
+      request: vi.fn(async () => preparationResponse()),
+      turnId: 'turn_retry',
+      vault,
+    })
+    await prepare(retryTool)
+    await expect(send(retryTool)).resolves.toMatchObject({
+      action: 'send',
+      result: { status: 'accepted' },
+    })
+
+    const intents = await listAssistantOutboxIntents(vault)
+    expect(intents).toHaveLength(1)
+    expect(firstPendingIntent).toHaveBeenCalledWith(intents[0]?.intentId)
+    expect(retryPendingIntent).toHaveBeenCalledWith(intents[0]?.intentId)
+  })
+
+  it('returns terminal sent as soon as Web has durably planned recipient fanout', async () => {
     const vault = await createVault('newsletter-outbox-terminal-')
     const firstTool = createTool({
       request: vi.fn(async () => preparationResponse()),
@@ -127,10 +161,10 @@ describe('newsletter durable outbox capability', () => {
     await prepare(firstTool)
     await send(firstTool)
     await markOnlyIntentSent(vault)
-    await createRecipientIntent({ memberId: 'member_one', status: 'sent', vault })
-    await createRecipientIntent({ memberId: 'member_two', status: 'sent', vault })
 
+    const recordPendingDeliveryIntentId = vi.fn()
     const retryTool = createTool({
+      recordPendingDeliveryIntentId,
       request: vi.fn(async () => preparationResponse()),
       turnId: 'turn_retry',
       vault,
@@ -144,11 +178,12 @@ describe('newsletter durable outbox capability', () => {
         status: 'sent',
       },
     })
-    expect(await listAssistantOutboxIntents(vault)).toHaveLength(3)
+    expect(await listAssistantOutboxIntents(vault)).toHaveLength(1)
+    expect(recordPendingDeliveryIntentId).not.toHaveBeenCalled()
   })
 
-  it('does not requeue when duplicate-address fanout produced one sent child', async () => {
-    const vault = await createVault('newsletter-outbox-duplicate-address-')
+  it('does not restart a terminal newsletter parent', async () => {
+    const vault = await createVault('newsletter-outbox-failed-parent-')
     const firstTool = createTool({
       request: vi.fn(async () => preparationResponse()),
       turnId: 'turn_first',
@@ -156,70 +191,7 @@ describe('newsletter durable outbox capability', () => {
     })
     await prepare(firstTool)
     await send(firstTool)
-    await markOnlyIntentSent(vault)
-    await createRecipientIntent({ memberId: 'member_one', status: 'sent', vault })
-
-    const retryTool = createTool({
-      request: vi.fn(async () => preparationResponse()),
-      turnId: 'turn_retry',
-      vault,
-    })
-    await prepare(retryTool)
-    await expect(send(retryTool)).resolves.toEqual({
-      action: 'send',
-      result: {
-        participantCount: 2,
-        skippedNoEmailMemberIds: ['member_no_email'],
-        status: 'sent',
-      },
-    })
-    expect(await listAssistantOutboxIntents(vault)).toHaveLength(2)
-  })
-
-  it('does not replay a recipient with an ambiguous terminal delivery', async () => {
-    const vault = await createVault('newsletter-outbox-ambiguous-')
-    const firstTool = createTool({
-      request: vi.fn(async () => preparationResponse({ participantIds: ['member_one'] })),
-      turnId: 'turn_first',
-      vault,
-    })
-    await prepare(firstTool)
-    await send(firstTool)
-    await markOnlyIntentSent(vault)
-    await createRecipientIntent({
-      errorCode: 'ASSISTANT_DELIVERY_AMBIGUOUS',
-      memberId: 'member_one',
-      status: 'abandoned',
-      vault,
-    })
-
-    const retryTool = createTool({
-      request: vi.fn(async () => preparationResponse({ participantIds: ['member_one'] })),
-      turnId: 'turn_retry',
-      vault,
-    })
-    await prepare(retryTool)
-    await expect(send(retryTool)).resolves.toMatchObject({
-      action: 'send',
-      result: {
-        failedRecipientCount: 1,
-        sentRecipientCount: 0,
-        status: 'partial_failure',
-      },
-    })
-    expect(await listAssistantOutboxIntents(vault)).toHaveLength(2)
-  })
-
-  it('does not restart an exhausted newsletter parent attempt', async () => {
-    const vault = await createVault('newsletter-outbox-exhausted-parent-')
-    const firstTool = createTool({
-      request: vi.fn(async () => preparationResponse()),
-      turnId: 'turn_first',
-      vault,
-    })
-    await prepare(firstTool)
-    await send(firstTool)
-    await markOnlyIntentFailed(vault, 'ASSISTANT_DELIVERY_RETRY_EXHAUSTED')
+    await markOnlyIntentFailed(vault, 'ASSISTANT_NEWSLETTER_FANOUT_REJECTED')
 
     const retryTool = createTool({
       request: vi.fn(async () => preparationResponse()),
@@ -239,155 +211,10 @@ describe('newsletter durable outbox capability', () => {
     })
     expect(await listAssistantOutboxIntents(vault)).toHaveLength(1)
   })
-
-  it('does not replay a recipient that exhausted its automatic retries', async () => {
-    const vault = await createVault('newsletter-outbox-exhausted-recipient-')
-    const firstTool = createTool({
-      request: vi.fn(async () => preparationResponse({ participantIds: ['member_one'] })),
-      turnId: 'turn_first',
-      vault,
-    })
-    await prepare(firstTool)
-    await send(firstTool)
-    await markOnlyIntentSent(vault)
-    await createRecipientIntent({
-      errorCode: 'ASSISTANT_DELIVERY_RETRY_EXHAUSTED',
-      memberId: 'member_one',
-      status: 'failed',
-      vault,
-    })
-
-    const retryTool = createTool({
-      request: vi.fn(async () => preparationResponse({ participantIds: ['member_one'] })),
-      turnId: 'turn_retry',
-      vault,
-    })
-    await prepare(retryTool)
-    await expect(send(retryTool)).resolves.toMatchObject({
-      action: 'send',
-      result: {
-        failedRecipientCount: 1,
-        sentRecipientCount: 0,
-        status: 'partial_failure',
-      },
-    })
-    expect(await listAssistantOutboxIntents(vault)).toHaveLength(2)
-  })
-
-  it('retries a proven pre-provider recipient failure from the sent parent payload', async () => {
-    const vault = await createVault('newsletter-outbox-safe-retry-')
-    const firstTool = createTool({
-      request: vi.fn(async () => preparationResponse({ participantIds: ['member_one'] })),
-      turnId: 'turn_first',
-      vault,
-    })
-    await prepare(firstTool)
-    await send(firstTool, {
-      html: '<p>Original weekly note</p>',
-      subject: 'Original weekly note',
-      text: 'Original weekly note',
-    })
-    await markOnlyIntentSent(vault)
-    await createRecipientIntent({
-      emailHtml: '<p>Original weekly note</p>',
-      errorCode: 'ASSISTANT_EMAIL_GROUP_RECIPIENT_AUTHORITY_SUPERSEDED',
-      message: 'Original weekly note',
-      memberId: 'member_one',
-      status: 'abandoned',
-      vault,
-    })
-
-    const retryTool = createTool({
-      request: vi.fn(async () => preparationResponse({ participantIds: ['member_one'] })),
-      turnId: 'turn_retry',
-      vault,
-    })
-    await prepare(retryTool)
-    await expect(send(retryTool, {
-      html: '<p>Recomposed weekly note</p>',
-      subject: 'Recomposed weekly note',
-      text: 'Recomposed weekly note',
-    })).resolves.toMatchObject({
-      action: 'send',
-      result: { status: 'accepted' },
-    })
-    const intents = await listAssistantOutboxIntents(vault)
-    const parents = intents.filter((intent) =>
-      parseHostedEmailThreadTarget(intent.explicitTarget)?.recipientMemberId === null
-    )
-    expect(parents).toHaveLength(1)
-
-    const memberIntents = intents
-      .filter((intent) =>
-        parseHostedEmailThreadTarget(intent.explicitTarget)?.recipientMemberId
-        === 'member_one'
-      )
-      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
-    expect(memberIntents).toHaveLength(2)
-    const retryIntent = memberIntents[1]
-    expect(retryIntent).toMatchObject({
-      automationAuthority: OUTBOX_AUTOMATION_AUTHORITY,
-      emailHtml: '<p>Original weekly note</p>',
-      message: 'Original weekly note',
-      newsletterAuthorizationProof: AUTHORIZATION_PROOF,
-      status: 'pending',
-      turnId: 'turn_first',
-    })
-    expect(parseHostedEmailThreadTarget(retryIntent?.explicitTarget ?? null))
-      .toMatchObject({
-        recipientMemberId: 'member_one',
-        subject: 'Original weekly note',
-      })
-  })
-
-  it('treats proof changes as terminal without re-planning a sent occurrence', async () => {
-    const vault = await createVault('newsletter-outbox-proof-change-')
-    const firstTool = createTool({
-      request: vi.fn(async () => preparationResponse({ participantIds: ['member_one'] })),
-      turnId: 'turn_first',
-      vault,
-    })
-    await prepare(firstTool)
-    await send(firstTool)
-    await markOnlyIntentSent(vault)
-    await createRecipientIntent({
-      errorCode: 'ASSISTANT_EMAIL_GROUP_RECIPIENT_AUTHORITY_SUPERSEDED',
-      memberId: 'member_one',
-      status: 'abandoned',
-      vault,
-    })
-
-    const retryTool = createTool({
-      request: vi.fn(async () => preparationResponse({
-        authorizationProof: CHANGED_AUTHORIZATION_PROOF,
-        participantIds: ['member_one'],
-      })),
-      turnId: 'turn_retry',
-      vault,
-    })
-    await prepare(retryTool)
-    await expect(send(retryTool, {
-      html: '<p>Changed proof note</p>',
-      subject: 'Changed proof note',
-      text: 'Changed proof note',
-    })).resolves.toMatchObject({
-      action: 'send',
-      result: {
-        failedRecipientCount: 1,
-        sentRecipientCount: 0,
-        status: 'partial_failure',
-      },
-    })
-
-    const intents = await listAssistantOutboxIntents(vault)
-    expect(intents).toHaveLength(2)
-    expect(intents.filter((intent) =>
-      parseHostedEmailThreadTarget(intent.explicitTarget)?.recipientMemberId === null
-    )).toHaveLength(1)
-  })
 })
 
 function createTool(input: {
+  recordPendingDeliveryIntentId?: (intentId: string) => void
   request: (
     request: HostedRuntimeNewsletterToolRequest,
   ) => Promise<HostedRuntimeNewsletterToolResponse>
@@ -398,6 +225,7 @@ function createTool(input: {
     automationAuthority: OUTBOX_AUTOMATION_AUTHORITY,
     authority: AUTHORITY,
     newsletterTool: { request: input.request },
+    recordPendingDeliveryIntentId: input.recordPendingDeliveryIntentId,
     sessionId: 'session_newsletter',
     turnId: input.turnId,
     vault: input.vault,
@@ -485,44 +313,5 @@ async function markOnlyIntentFailed(vault: string, errorCode: string): Promise<v
     nextAttemptAt: null,
     status: 'failed',
     updatedAt: '2026-07-12T13:01:00.000Z',
-  })
-}
-
-async function createRecipientIntent(input: {
-  authorizationProof?: string
-  emailHtml?: string
-  errorCode?: string
-  memberId: string
-  message?: string
-  status: 'abandoned' | 'failed' | 'sent'
-  vault: string
-}): Promise<void> {
-  const created = await createAssistantOutboxIntent({
-    channel: 'email',
-    dedupeToken: `recipient:${input.memberId}`,
-    deliveryIdempotencyKey: DELIVERY_KEY,
-    emailHtml: input.emailHtml ?? '<p>Weekly</p>',
-    explicitTarget: serializeHostedEmailThreadTarget({
-      groupId: 'group_123',
-      recipientMemberId: input.memberId,
-      subject: 'Weekly health note',
-      targetKind: 'group',
-    }),
-    message: input.message ?? 'Weekly',
-    newsletterAuthorizationProof: input.authorizationProof ?? AUTHORIZATION_PROOF,
-    sessionId: 'session_newsletter',
-    threadIsDirect: false,
-    turnId: `turn_recipient_${input.memberId}`,
-    vault: input.vault,
-  })
-  await saveAssistantOutboxIntent(input.vault, {
-    ...created,
-    lastError: input.errorCode
-      ? { code: input.errorCode, message: 'terminal delivery state' }
-      : null,
-    nextAttemptAt: null,
-    sentAt: input.status === 'sent' ? '2026-07-12T13:02:00.000Z' : null,
-    status: input.status,
-    updatedAt: '2026-07-12T13:02:00.000Z',
   })
 }

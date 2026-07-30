@@ -45,11 +45,11 @@ full supported set.
    but do not use them as alternate health-data sources for the edition.
 2. For `group_email`, call `murph.newsletter` with `action="prepare"` and no
    group or route identifier. This returns recipient
-   eligibility, the scheduled `referenceAt`, and `members` containing current-
-   week facts only for currently eligible email recipients. The trusted runtime
-   starts this authority and data work only after the model calls the tool. It
+   eligibility, the scheduled `referenceAt`, and `members` containing
+   seven-completed-day facts only for currently eligible email recipients. The
+   trusted runtime starts this authority and data work only after the model calls the tool. It
    resolves the current eligible participants and exact member/scope grants,
-   then returns current-week facts from a direct bounded Web snapshot. No
+   then returns seven-completed-day facts from a direct bounded Web snapshot. No
    roster, grant snapshot, or shared-data block is preloaded before model
    start. Use only `members`. Never run another group-health read, open raw
    `vault-share/**` or legacy `derived/vault-share/**` files, or fetch private
@@ -60,10 +60,10 @@ full supported set.
 3. Build the featured set only from returned members with at least one
    `weeklyStats` entry. Never use or mention any participant outside `members`
    in the subject, HTML body, or text body. Each email `weeklyStats` entry
-   reports `observedDayCount`, `observedDates`, and `throughDate`; treat those
-   fields as its completed-date coverage.
+   reports `completedDaysAvg`, `observedDayCount`, `observedDates`, and
+   `throughDate`; treat those fields as its completed-date coverage.
 4. Find the week's story before writing. Prefer a close race, clear leader,
-   surprising combination, or broad current-week group pattern.
+   surprising combination, or broad recent group pattern.
 5. Choose the facts that develop that story. Usually include 6–12 useful stats,
    but use more or fewer when the week warrants it. Do not give every person
    the same fields merely because they are available.
@@ -83,12 +83,12 @@ iMessage or Telegram group route.
 For either delivery mode, compare each member and metric only over its sorted
 usable completed dates. Email uses `observedDates`; current chat derives the
 equivalent set from records usable under `group-chat`'s **Shared fact limits**
-and dated from the current local Monday through yesterday. Exclude earlier
-rolling-window dates and today. State the date scope for each average. Declare
-a settled cross-person leader, winner, or crown only when every compared date
-set is identical. When coverage differs, report scoped values or an unranked
-pattern. Never treat unobserved days as zero or imply that a partial week is
-complete.
+and dated within the seven local calendar days before today. Exclude today and
+anything older than that rolling window. State the date scope for each average.
+Declare a settled cross-person leader, winner, or crown only when every compared
+date set is identical. When coverage differs, report scoped values or an
+unranked pattern. Never treat unobserved days as zero or imply that a partial
+week is complete.
 
 After any email `send` result—including sent, partial failure, no recipients,
 unavailable, or failed—do not retry `send` in the same turn. Return the
@@ -106,6 +106,11 @@ eligible email recipients yet and pointing them to
 then stop for that run. If participants can receive the email but the featured
 set is empty, send a short email without health comparisons. Never mention who
 failed to share, who lacks an email, or who had insufficient data.
+Do not invent a cause for empty stats: say only that no usable completed-day
+stats were returned; never attribute the absence to sync or permissions.
+This composition rule does not block a later conversation from reporting
+authorized current permission or data-availability state. Label that state as
+current, and do not present it as the historical cause of an earlier edition.
 
 ## Turn stats into a story
 
@@ -122,7 +127,7 @@ associations and observations without claiming that one metric caused another.
 Give numbers jobs. Each number should establish at least one of:
 
 - a leader or close race;
-- a meaningful current-week group pattern;
+- a meaningful recent group pattern;
 - a surprising contrast;
 - context for the week's central joke or observation.
 
@@ -146,9 +151,11 @@ Never expose dashboard language such as a raw total of active minutes.
   daily or weekly exercise total.
 - Do not use `workout-count` to claim a weekly workout total, rank who completed
   the most workouts, or say someone completed workouts on unobserved days. Its
-  current average covers recorded workout days only and omits zero days.
+  completed-day average covers recorded workout days only and omits zero days.
 - Do not claim a prior-week change, comeback, monthly high, or four-week high.
-  The consented seven-record projection supports current-week averages only.
+  The consented eight-record projection supports the open local date plus the
+  seven completed dates returned for composition; it does not support a
+  complete prior calendar week.
 - For other sources, say "exercise" only when the value represents workouts or
   exercise. Say "movement" only when an explicit semantic owner identifies
   broad movement, and still translate it into hours or a daily average.

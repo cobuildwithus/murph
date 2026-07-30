@@ -324,7 +324,7 @@ fan-out, scheduler, policy engine, result table, or second service.
 
 Connected apps expose exactly three assistant tools: account management, semantic tool search, and execution. `apps/web` owns the Composio API key, durable per-member Tool Router session id, short-lived member-bound connect intents, account verification, server-owned built-in service tool allowlist, server-held OpenWeather custom auth for the allowlisted weather tools, agent-approved calendar-create write allowlist, and branded OAuth completion UX. The hosted runner reaches that authority only through the existing signed `web-control.worker` boundary; Composio credentials, session ids, OAuth state, OpenWeather credentials, and connected-account provider tokens never enter Codex env or prompts. Composio owns provider schemas and raw execution results, while Murph applies a session-level read-only/non-destructive policy, explicit multi-account selection for connected-account tools, accountless execution only for server-allowlisted built-in service tools, one generic result-size bound rather than provider-specific tool or result adapters, direct custom-auth execution only for allowlisted OpenWeather read tools, and a separate direct-execute path only for agent-approved primary-calendar event creation with unsupported write arguments rejected before provider execution and failed or ambiguous provider outcomes marked non-retryable.
 
-Hosted group runtimes execute as synthetic thread-container members, not as any participant's personal account. Turn planning derives that scope from the existing conversation audience and makes it part of the thread contract. Group turns omit personal browser, phone, Family, wearable-connect, and connected-account management authority; connected-app search and execution remain only for server-allowlisted accountless service tools. The web control plane independently rejects personal Family, wearable authorization, and connected-account operations for thread-container members. Group-owned management, sharing/join flows, newsletters, and explicitly room-routed automations remain separate authorities; a personal Settings page never configures a room. One structured automation write creates the single group newsletter and stores its delivery choice as a system-owned tag: current-chat editions use the ordinary bound-route conversation outbox, while email editions alone receive the one-shot prepare/send capability. Email preparation derives the group from the signed runtime member rather than a model-supplied group id and persists the private authorization proof plus HTML on the existing assistant outbox parent; once that parent is sent it is a pruning-protected immutable occurrence manifest, and terminal recipient evidence for that occurrence is retained with it, so safe recipient retries copy its payload and proof instead of creating a second body under the same message identity. Because newsletter email `From` identity is spoofable, group-email replies may converse and read current group context but cannot mutate automations, join policy, group presentation, or other durable room controls; those actions require the authenticated group-chat route.
+Hosted group runtimes execute as synthetic thread-container members, not as any participant's personal account. Turn planning derives that scope from the existing conversation audience and makes it part of the thread contract. Group turns omit personal browser, phone, Family, wearable-connect, and connected-account management authority; connected-app search and execution remain only for server-allowlisted accountless service tools. The web control plane independently rejects personal Family, wearable authorization, and connected-account operations for thread-container members. Group-owned management, sharing/join flows, newsletters, and explicitly room-routed automations remain separate authorities; a personal Settings page never configures a room. One structured automation write creates the single group newsletter and stores its delivery choice as a system-owned tag: current-chat editions use the ordinary bound-route conversation outbox, while email editions alone receive the one-shot prepare/send capability. Email preparation derives the group from the signed runtime member rather than a model-supplied group id and persists the private authorization proof plus HTML on the existing assistant outbox parent. The outbox reports an accepted parent to cron immediately, so even a later provider, validation, or persistence error leaves the occurrence in its existing pending-delivery state while retaining the error on the run record. Web marks that parent sent only after durably persisting recipient fanout, and the existing cron reconciler settles the occurrence from the parent state. Recipient intents use only the generic outbox retry lifecycle, so newsletter retries never recompose the body or create a second recipient budget. Because newsletter email `From` identity is spoofable, group-email replies may converse and read current group context but cannot mutate automations, join policy, group presentation, or other durable room controls; those actions require the authenticated group-chat route.
 
 For retained group-participant activity reporting, an authenticated non-direct
 Linq or Telegram mailbox wake may carry the internal member id already accepted
@@ -793,9 +793,9 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   Trigger asks a SQLite-backed `DatabaseHealthDurableObject` to discover and
   scrape the configured PlanetScale production branch, retain 30 days of
   normalized connection metrics or classified scrape failures, evaluate the
-  branch-local PgBouncer and Postgres connection conditions, and page one
-  preconfigured operator Linq chat. Its SQLite contains only counts, ratios,
-  bounded state maps, error-counter baselines, failure codes, and alert
+  branch-local PgBouncer and Postgres connection conditions, and page two
+  preconfigured direct operator Linq chats. Its SQLite contains only counts,
+  ratios, bounded state maps, error-counter baselines, failure codes, and alert
   admission state. First-incident and non-replayable direct-error alert
   admission shares one synchronous SQLite transaction with sample/baseline
   persistence; an inside-fence direct-error body excludes co-occurring
@@ -806,8 +806,20 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   advances the persisted sample baseline. After the older message is
   acknowledged, the next run atomically promotes that evidence into the one
   pending message slot; provider pacing still applies, and retry never mutates
-  a provider-entered body. Acknowledged Linq entry is the only operation that
-  clears a pending page. SQLite contains no connection URL,
+  a provider-entered body. Before posting, the monitor resolves both direct
+  chats and requires two distinct sole external recipients. Primary recipient
+  identity is a prerequisite for secondary provider entry, so an unresolved
+  primary identity suppresses both operations while an unresolved secondary
+  identity may still allow the primary. Delivery health is independent from
+  identity: a known but unhealthy primary destination does not block a healthy,
+  distinct secondary. If distinct chats resolve to the same recipient, only
+  the primary operation may enter Linq and the page stays pending until
+  configuration is corrected. Otherwise the two
+  direct-chat deliveries settle independently: the primary retains the existing
+  idempotency key, the secondary uses a stable derived key, and a partial
+  failure retains the pending page for a later globally paced replay. Only
+  acknowledged entry to both distinct recipients clears a pending page. SQLite
+  contains no connection URL,
   credential, query, member identifier, phone number, or raw response. This is
   operational monitoring history, never health truth, routing authority, or a
   product control plane.
