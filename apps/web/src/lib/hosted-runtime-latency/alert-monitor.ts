@@ -47,7 +47,7 @@ type HostedRuntimeLatencyMonitorStatus =
 
 type HostedRuntimeLatencyPrismaClient = Pick<
   PrismaClient,
-  "hostedIngressLatencyTrace" | "hostedLinqAlert"
+  "$queryRaw" | "hostedLinqAlert"
 >;
 
 type HostedRuntimeLatencySend = typeof sendHostedResendPlainTextEmail;
@@ -63,6 +63,7 @@ export interface HostedRuntimeLatencyHealthRow {
   providerStartAt: Date | null;
   runtimeAttemptId: string | null;
   terminalNonReplyCommittedAt: Date | null;
+  usageDenialChronologyInvalid: boolean;
 }
 
 export interface HostedRuntimeLatencyHealth {
@@ -76,6 +77,18 @@ export interface HostedRuntimeLatencyHealth {
   thresholdMs: number;
   unresolvedReplyCount: number;
   windowMinutes: number;
+}
+
+interface HostedRuntimeLatencyQueryRow {
+  acceptedAt: Date;
+  consumedAt: Date | null;
+  deliveryAcceptedAt: Date | null;
+  linqDeliveryId: string | null;
+  phaseBreakdownJson: unknown;
+  providerRequestOrdinal: number | null;
+  providerStartAt: Date | null;
+  runtimeAttemptId: string | null;
+  usageDenialChronologyInvalid: boolean;
 }
 
 export type HostedRuntimeLatencyAlertMonitorOutcome =
@@ -195,44 +208,88 @@ export async function runHostedRuntimeLatencyAlertMonitor(input: {
 
 export async function readHostedRuntimeLatencyHealth(input: {
   now?: Date;
-  prisma?: Pick<PrismaClient, "hostedIngressLatencyTrace">;
+  prisma?: Pick<PrismaClient, "$queryRaw">;
 } = {}): Promise<HostedRuntimeLatencyHealth> {
   const now = input.now ?? new Date();
   const prisma = input.prisma ?? getPrisma();
   const windowStart = new Date(
     now.getTime() - HOSTED_RUNTIME_LATENCY_UNRESOLVED_WINDOW_MS,
   );
-  const rows = await prisma.hostedIngressLatencyTrace.findMany({
-    orderBy: {
-      acceptedAt: "desc",
-    },
-    select: {
-      acceptedAt: true,
-      linqDeliveryId: true,
-      linqDelivery: {
-        select: {
-          acceptedAt: true,
-        },
-      },
-      mailboxItem: {
-        select: {
-          consumedAt: true,
-        },
-      },
-      phaseBreakdownJson: true,
-      providerRequestOrdinal: true,
-      providerStartAt: true,
-      runtimeAttemptId: true,
-    },
-    take: HOSTED_RUNTIME_LATENCY_READ_LIMIT + 1,
-    where: {
-      acceptedAt: {
-        gte: windowStart,
-        lte: now,
-      },
-      source: "linq",
-    },
-  });
+  const rows = await prisma.$queryRaw<HostedRuntimeLatencyQueryRow[]>(Prisma.sql`
+    WITH latency_candidates AS (
+      SELECT
+        CASE
+          WHEN mailbox_item.ai_usage_denied_at IS NULL
+            OR mailbox_item.ai_usage_denied_at < trace.accepted_at
+            OR mailbox_item.ai_usage_denied_at > ${now}
+            OR execution.has_future_evidence
+            OR execution.has_pre_denial_evidence
+            THEN trace.accepted_at
+          ELSE execution.first_evidence_at
+        END AS latency_origin_at,
+        (
+          mailbox_item.ai_usage_denied_at IS NOT NULL
+          AND (
+            mailbox_item.ai_usage_denied_at < trace.accepted_at
+            OR mailbox_item.ai_usage_denied_at > ${now}
+            OR execution.has_future_evidence
+          )
+        ) AS usage_denial_chronology_invalid,
+        mailbox_item.consumed_at,
+        delivery.accepted_at AS delivery_accepted_at,
+        trace.linq_delivery_id,
+        trace.phase_breakdown_json,
+        trace.provider_request_ordinal,
+        trace.provider_start_at,
+        trace.runtime_attempt_id
+      FROM hosted_ingress_latency_trace AS trace
+      JOIN hosted_mailbox_item AS mailbox_item
+        ON mailbox_item.user_id = trace.user_id
+        AND mailbox_item.id = trace.mailbox_item_id
+      LEFT JOIN hosted_linq_delivery AS delivery
+        ON delivery.id = trace.linq_delivery_id
+      LEFT JOIN LATERAL (
+        SELECT
+          MIN(evidence.at) AS first_evidence_at,
+          COALESCE(
+            BOOL_OR(evidence.at <= mailbox_item.ai_usage_denied_at),
+            FALSE
+          ) AS has_pre_denial_evidence,
+          COALESCE(BOOL_OR(evidence.at > ${now}), FALSE) AS has_future_evidence
+        FROM (
+          VALUES
+            (trace.assistant_input_staged_at),
+            (trace.provider_start_at),
+            (delivery.accepted_at),
+            (mailbox_item.consumed_at)
+        ) AS evidence(at)
+        WHERE evidence.at IS NOT NULL
+      ) AS execution ON TRUE
+      WHERE trace.source = 'linq'
+        AND (
+          trace.accepted_at >= ${windowStart}
+          OR trace.assistant_input_staged_at >= ${windowStart}
+          OR trace.provider_start_at >= ${windowStart}
+          OR delivery.accepted_at >= ${windowStart}
+          OR mailbox_item.consumed_at >= ${windowStart}
+        )
+    )
+    SELECT
+      latency_origin_at AS "acceptedAt",
+      consumed_at AS "consumedAt",
+      delivery_accepted_at AS "deliveryAcceptedAt",
+      linq_delivery_id AS "linqDeliveryId",
+      phase_breakdown_json AS "phaseBreakdownJson",
+      provider_request_ordinal AS "providerRequestOrdinal",
+      provider_start_at AS "providerStartAt",
+      runtime_attempt_id AS "runtimeAttemptId",
+      usage_denial_chronology_invalid AS "usageDenialChronologyInvalid"
+    FROM latency_candidates
+    WHERE latency_origin_at >= ${windowStart}
+      AND latency_origin_at <= ${now}
+    ORDER BY latency_origin_at DESC
+    LIMIT ${HOSTED_RUNTIME_LATENCY_READ_LIMIT + 1}
+  `);
   const scanTruncated = rows.length > HOSTED_RUNTIME_LATENCY_READ_LIMIT;
   const visibleRows = scanTruncated
     ? rows.slice(0, HOSTED_RUNTIME_LATENCY_READ_LIMIT)
@@ -244,8 +301,8 @@ export async function readHostedRuntimeLatencyHealth(input: {
       acceptedAt: row.acceptedAt,
       checkpointPublicationExpectedBy:
         readHostedRuntimeCheckpointPublicationExpectedBy(row.phaseBreakdownJson),
-      consumedAt: row.mailboxItem.consumedAt,
-      deliveryAcceptedAt: row.linqDelivery?.acceptedAt ?? null,
+      consumedAt: row.consumedAt,
+      deliveryAcceptedAt: row.deliveryAcceptedAt,
       linqDeliveryId: row.linqDeliveryId,
       progressUpdateAcceptedAt:
         readHostedRuntimeProgressUpdateAcceptedAt(row.phaseBreakdownJson),
@@ -254,6 +311,7 @@ export async function readHostedRuntimeLatencyHealth(input: {
       runtimeAttemptId: row.runtimeAttemptId,
       terminalNonReplyCommittedAt:
         readHostedRuntimeTerminalNonReplyCommittedAt(row.phaseBreakdownJson),
+      usageDenialChronologyInvalid: row.usageDenialChronologyInvalid,
     })),
     scanTruncated,
   });
@@ -266,7 +324,9 @@ export function summarizeHostedRuntimeLatencyRows(input: {
 }): HostedRuntimeLatencyHealth {
   const nowMs = input.now.getTime();
   const completedWindowStartMs = nowMs - HOSTED_RUNTIME_LATENCY_COMPLETED_WINDOW_MS;
-  let invalidChronologyCount = 0;
+  let invalidChronologyCount = input.rows.filter(
+    (row) => row.usageDenialChronologyInvalid,
+  ).length;
   let maxFirstVisibleResponseLatencyMs: number | null = null;
   let oldestUnresolvedAgeMs: number | null = null;
   let recentCompletedReplyCount = 0;

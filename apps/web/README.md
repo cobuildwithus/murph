@@ -679,11 +679,22 @@ Hosted onboarding extras:
   update or the final reply. Completed grouped traces count once by their
   shared Linq delivery, and traces for one in-flight provider request count
   once while unresolved. Progress accepted before 30 seconds suppresses that
-  turn; progress at or after the boundary remains alertable. The monitor sends
+  turn; progress at or after the boundary remains alertable. Fresh conversation
+  mailbox rows explicitly stamped by the existing AI usage gate are excluded
+  before the bounded scan and grouping only while execution remains blocked;
+  missing or impossible denial chronology remains alertable. The database-timed
+  stamp covers only the conversation sequence window observed by the denying
+  fetch or reconciliation. The query derives one latency origin from ingress,
+  staging, provider, delivery, and consumption before its 24-hour window and
+  row cap; execution that starts after denial is measured from its earliest
+  milestone even when ingress is older than that window. The monitor sends
   no alert for scheduled automation turns, including Flex-tier turns, because
   they do not own a user-ingress reply trace. The monitor sends one email per
   continuous incident, suppresses sends from 11 PM through 7 AM
   operator-local time, and adds up to ten minutes of stable wake/retry jitter.
+  The existing seven-day trace cleanup retires a trace only when both ingress
+  and latest activity are stale, so recent resumed work remains observable
+  after quiet-hour deferral without extending inactive-trace retention.
   Provider attempts therefore stay at least ten minutes
   apart and spread across more than one five-minute cron tick. A fresh health
   and operator-time recheck before provider admission makes no attempt-state
