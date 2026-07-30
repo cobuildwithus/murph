@@ -325,6 +325,36 @@ export async function readVerifiedAssistantVaultImageBytes(input: {
   return snapshot.bytes
 }
 
+export async function resolveAssistantVaultImageResponseMedia(input: {
+  alt?: string | null
+  ref: string
+  source?: string | null
+  vaultRoot: string
+}): Promise<AssistantVaultImageResponseMedia> {
+  const snapshot = await readAssistantVaultBytesSnapshot({
+    maxBytes: assistantVaultImageMaxBytes,
+    ref: input.ref,
+    vaultRoot: input.vaultRoot,
+  })
+  const contentType = detectAssistantVaultImageContentType(snapshot.bytes)
+  if (!contentType) {
+    throw new VaultCliError(
+      'ASSISTANT_VAULT_IMAGE_TYPE_UNSUPPORTED',
+      'The selected private image is not a supported image file.',
+    )
+  }
+  return {
+    alt: input.alt ?? null,
+    contentType,
+    filename: snapshot.filename,
+    kind: 'vault_image',
+    ref: snapshot.ref,
+    sha256: sha256Hex(snapshot.bytes),
+    sizeBytes: snapshot.bytes.byteLength,
+    source: input.source ?? null,
+  }
+}
+
 export function readAssistantVaultFileMedia(
   intent: AssistantOutboxIntent,
 ): AssistantVaultFileResponseMedia | null {

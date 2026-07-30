@@ -345,7 +345,11 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
   const emailIngressPresent = input.groupEmailIngress === true
     || (input.emailDeliveryContexts?.length ?? 0) > 0;
   return {
-    async request(request) {
+    async request(request, context) {
+      const forwardRequest = (forwardedRequest: HostedRuntimeGroupToolRequest) =>
+        context
+          ? input.groupToolPort.request(forwardedRequest, context)
+          : input.groupToolPort.request(forwardedRequest);
       if (
         emailIngressPresent
         && request.action !== "read_current"
@@ -367,7 +371,7 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
               linqDeliveryContexts: input.linqDeliveryContexts,
               telegramSenderHandles: input.telegramSenderHandles ?? [],
             });
-        return await input.groupToolPort.request({
+        return await forwardRequest({
           ...sharedReadRequest,
           ...senderHandles,
         });
@@ -405,7 +409,7 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
               action: request.action,
               policyCode: request.policyCode,
             };
-        return await input.groupToolPort.request({
+        return await forwardRequest({
           ...referralRequest,
           ...senderHandles,
           ...(request.action !== "cancel_usage_referral"
@@ -422,7 +426,7 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
         && request.action !== "set_chat_avatar"
         && request.action !== "share_contact_card"
       ) {
-        return await input.groupToolPort.request(request);
+        return await forwardRequest(request);
       }
       const linqThread = resolveHostedGroupToolLinqThreadContext(
         input.linqDeliveryContexts,
@@ -430,7 +434,7 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
           ? "imessage_or_sms"
           : "imessage_only",
       );
-      return await input.groupToolPort.request(
+      return await forwardRequest(
         linqThread ? { ...request, linqThread } : request,
       );
     },

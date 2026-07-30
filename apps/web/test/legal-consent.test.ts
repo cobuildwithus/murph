@@ -135,17 +135,22 @@ describe("hosted legal consent registry", () => {
     } as unknown as Parameters<typeof recordHostedLaunchConsentDecline>[0]["prisma"];
     const input = {
       memberId: "member_1",
-      now: new Date("2026-07-30T17:00:00.000Z"),
       prisma,
       sessionId: "session_1",
       source: "homepage-auth-dialog",
     };
 
-    await expect(recordHostedLaunchConsentDecline(input)).resolves.toEqual([
+    await expect(recordHostedLaunchConsentDecline({
+      ...input,
+      now: new Date("2026-07-30T17:00:00.000Z"),
+    })).resolves.toEqual([
       "launch.legal",
       "launch.health-data",
     ]);
-    await expect(recordHostedLaunchConsentDecline(input)).resolves.toEqual([
+    await expect(recordHostedLaunchConsentDecline({
+      ...input,
+      now: new Date("2026-07-30T17:05:00.000Z"),
+    })).resolves.toEqual([
       "launch.legal",
       "launch.health-data",
     ]);
@@ -186,6 +191,10 @@ describe("hosted legal consent registry", () => {
     expect(secondBatch.data.map((event) => event.id)).toEqual(
       firstBatch.data.map((event) => event.id),
     );
+    expect(secondBatch.data.map((event) => event.createdAt)).toEqual([
+      new Date("2026-07-30T17:05:00.000Z"),
+      new Date("2026-07-30T17:05:00.000Z"),
+    ]);
     expect(firstBatch.data.every((event) => !("metadataJson" in event))).toBe(true);
   });
 

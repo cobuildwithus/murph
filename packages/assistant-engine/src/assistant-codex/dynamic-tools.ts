@@ -119,6 +119,9 @@ import type {
 import {
   ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
 } from '../assistant/generated-delivery-files.js'
+import {
+  resolveAssistantVaultImageResponseMedia,
+} from '../assistant/vault-file-send.js'
 import type {
   AssistantAcceptedMessageTargetAuthorizer,
 } from '../assistant/message-target-selection.js'
@@ -2866,15 +2869,31 @@ export async function executeMurphDynamicToolRequest(input: {
     case 'unsupported-dynamic-tool':
       return toolTextResult(false, 'unsupported dynamic tool')
     case 'attach-response-media': {
+      const media = await resolveAttachedResponseMedia({
+        media: input.request.media,
+        vaultRoot: input.vaultRoot ?? null,
+      })
+      if (!media) {
+        return {
+          ...toolTextResult(
+            false,
+            'private response image could not be prepared',
+          ),
+          responseMediaPatch: {
+            media: [],
+            op: 'replace',
+          },
+        }
+      }
       return {
         ...toolTextResult(
           true,
-          input.request.media.length === 0
+          media.length === 0
             ? 'response media cleared'
-            : `${input.request.media.length} response image${input.request.media.length === 1 ? '' : 's'} attached`,
+            : `${media.length} response image${media.length === 1 ? '' : 's'} attached`,
         ),
         responseMediaPatch: {
-          media: input.request.media,
+          media,
           op: 'replace',
         },
       }
@@ -3480,6 +3499,37 @@ export async function executeMurphDynamicToolRequest(input: {
   }
 }
 
+async function resolveAttachedResponseMedia(input: {
+  media: readonly AssistantResponseMedia[]
+  vaultRoot: string | null
+}): Promise<AssistantResponseMedia[] | null> {
+  if (!input.media.some((item) => item.kind === 'vault_image')) {
+    return [...input.media]
+  }
+  const vaultRoot = input.vaultRoot
+  if (!vaultRoot) {
+    return null
+  }
+  try {
+    const media: AssistantResponseMedia[] = []
+    for (const item of input.media) {
+      media.push(
+        item.kind === 'vault_image'
+          ? await resolveAssistantVaultImageResponseMedia({
+              alt: item.alt,
+              ref: item.ref,
+              source: item.source,
+              vaultRoot,
+            })
+          : item,
+      )
+    }
+    return media
+  } catch {
+    return null
+  }
+}
+
 function renderHostedImageGenerationLaunchResult(input: {
   launch: 'already-pending' | 'already-started' | 'started'
   status: 'pending' | 'queued' | null
@@ -4080,9 +4130,10 @@ async function executeGroupTool(input: {
       { action: 'preflight_set_chat_avatar' }
     >
     try {
-      const preflightResult = await groupTool.request({
-        action: 'preflight_set_chat_avatar',
-      })
+      const preflightRequest = { action: 'preflight_set_chat_avatar' } as const
+      const preflightResult = input.abortSignal
+        ? await groupTool.request(preflightRequest, { signal: input.abortSignal })
+        : await groupTool.request(preflightRequest)
       if (preflightResult.action !== 'preflight_set_chat_avatar') {
         return groupAvatarUnavailableToolResult(
           'group_avatar_preflight_unavailable',
@@ -4305,7 +4356,9 @@ async function executeGroupTool(input: {
   }
 
   try {
-    const result = await groupTool.request(request)
+    const result = input.abortSignal
+      ? await groupTool.request(request, { signal: input.abortSignal })
+      : await groupTool.request(request)
     const modelResult = groupToolModelResult(result)
     const payload = generatedAvatarCapture
       ? { ...modelResult, generatedImage: generatedAvatarCapture }

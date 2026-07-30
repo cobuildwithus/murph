@@ -337,6 +337,104 @@ describe('assistant vault-file send', () => {
     })
   })
 
+  it('derives private response metadata from trusted vault bytes', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-vault-image-attach-',
+    )
+    tempRoots.push(parentRoot)
+    const bytes = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+      0x00, 0x00, 0x00, 0x0d,
+    ])
+    const ref = 'raw/captures/progress-card.png'
+    await mkdir(path.join(vaultRoot, 'raw', 'captures'), { recursive: true })
+    await writeFile(path.join(vaultRoot, ...ref.split('/')), bytes)
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: {
+        kind: 'attach-response-media',
+        media: [{
+          alt: 'Experiment progress',
+          contentType: 'image/webp',
+          filename: 'relayed-name.webp',
+          kind: 'vault_image',
+          ref,
+          sha256: 'a'.repeat(64),
+          sizeBytes: 123,
+          source: 'murph.experiment-progress-card',
+        }],
+      },
+      vaultRoot,
+    })
+
+    expect(result.rpcResult).toMatchObject({ success: true })
+    expect(result.responseMediaPatch).toEqual({
+      media: [{
+        alt: 'Experiment progress',
+        contentType: 'image/png',
+        filename: 'progress-card.png',
+        kind: 'vault_image',
+        ref,
+        sha256: createHash('sha256').update(bytes).digest('hex'),
+        sizeBytes: bytes.byteLength,
+        source: 'murph.experiment-progress-card',
+      }],
+      op: 'replace',
+    })
+    const image = result.responseMediaPatch?.media[0]
+    if (!image || image.kind !== 'vault_image') {
+      throw new Error('Expected canonical private response media.')
+    }
+    await expect(readVerifiedAssistantVaultImageBytes({
+      image,
+      vaultRoot,
+    })).resolves.toEqual(bytes)
+  })
+
+  it('clears private response media without forcing a visible fallback', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-vault-image-attach-missing-',
+    )
+    tempRoots.push(parentRoot)
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: {
+        kind: 'attach-response-media',
+        media: [{
+          alt: 'Experiment progress',
+          contentType: 'image/png',
+          filename: 'missing.png',
+          kind: 'vault_image',
+          ref: 'raw/captures/missing.png',
+          sha256: 'a'.repeat(64),
+          sizeBytes: 123,
+          source: 'murph.experiment-progress-card',
+        }],
+      },
+      vaultRoot,
+    })
+
+    expect(result.rpcResult).toMatchObject({
+      contentItems: [{
+        text: 'private response image could not be prepared',
+      }],
+      success: false,
+    })
+    expect(result.finalActionPatch).toBeUndefined()
+    expect(result.responseMediaPatch).toEqual({
+      media: [],
+      op: 'replace',
+    })
+  })
+
   it('leaves ordinary vault-file permissions unchanged', async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
       'murph-vault-file-ordinary-permissions-',
