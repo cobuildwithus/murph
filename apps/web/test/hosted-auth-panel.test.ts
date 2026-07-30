@@ -269,6 +269,69 @@ test("HostedAuthPanel keeps a pre-ready method queued and dismissible until its 
   expect(readAlternateButton("Email")?.disabled).toBe(false);
 });
 
+test("HostedAuthPanel retires Telegram continuation when phone takes over", async () => {
+  let privyReady = false;
+  mocks.usePrivy.mockImplementation(() => ({
+    authenticated: false,
+    logout: vi.fn(),
+    ready: privyReady,
+  }));
+  const renderPanel = () => createElement(HostedAuthPanel, {
+    methods: ["phone", "telegram", "email"],
+  });
+  const rendered = await renderClientComponent(renderPanel(), {
+    requireButton: false,
+  });
+  cleanupRender = rendered.cleanup;
+
+  const readTelegramButton = () =>
+    Array.from(rendered.container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Telegram"),
+    ) as HTMLButtonElement | undefined;
+  const telegramButton = readTelegramButton();
+  expect(telegramButton).toBeTruthy();
+
+  await act(async () => {
+    telegramButton?.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  expect(telegramButton?.textContent).toContain("Connecting...");
+  expect(mocks.loginWithTelegram).not.toHaveBeenCalled();
+
+  privyReady = true;
+  await rendered.rerender(renderPanel());
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
+  expect(telegramButton?.textContent).toContain(
+    "Continue with Telegram",
+  );
+  expect(rendered.container.textContent).toContain(
+    "Telegram is ready. Continue to open sign in.",
+  );
+
+  let phoneStarted = false;
+  await act(async () => {
+    phoneStarted = mocks.hostedPhoneAuthProps?.onAuthStart?.() ?? false;
+  });
+  expect(phoneStarted).toBe(true);
+
+  await act(async () => {
+    mocks.hostedPhoneAuthProps?.onAuthCancel?.();
+    await Promise.resolve();
+  });
+
+  expect(readTelegramButton()?.disabled).toBe(false);
+  expect(readTelegramButton()?.textContent).toBe("Telegram");
+  expect(rendered.container.textContent).not.toContain(
+    "Telegram is ready. Continue to open sign in.",
+  );
+  expect(mocks.loginWithTelegram).not.toHaveBeenCalled();
+});
+
 test("HostedAuthPanel discards queued email when Privy hydrates an existing session", async () => {
   let authenticated = false;
   let ready = false;

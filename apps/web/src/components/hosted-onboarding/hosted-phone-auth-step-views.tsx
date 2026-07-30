@@ -82,6 +82,7 @@ export function HostedPhoneEntryStep({
   phoneFieldLabel,
   phoneFieldDescription,
   phoneInputAutoFocus = false,
+  phoneInputDisabled = false,
   pendingAction,
   phoneCountryOptions,
   phoneNumber,
@@ -95,6 +96,7 @@ export function HostedPhoneEntryStep({
   phoneFieldLabel?: string | null;
   phoneFieldDescription?: string | null;
   phoneInputAutoFocus?: boolean;
+  phoneInputDisabled?: boolean;
   pendingAction: HostedPhoneAuthPendingAction;
   phoneCountryOptions: HostedPhoneCountryOption[];
   phoneNumber: string;
@@ -116,6 +118,7 @@ export function HostedPhoneEntryStep({
         <PhoneNumberInput
           id={phoneInputId}
           autoFocus={phoneInputAutoFocus}
+          disabled={phoneInputDisabled}
           options={phoneCountryOptions}
           selectedCountry={selectedPhoneCountry}
           value={phoneNumber}

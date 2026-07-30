@@ -91,6 +91,12 @@ Updated: 2026-07-29
 - Reuse PR #1154 and its branch; do not open a second PR.
 - Merge `main` into the published branch instead of rewriting its shared
   history.
+- Retire Telegram's trusted-click continuation only after phone successfully
+  claims queued or active ownership; a rejected phone claim leaves the current
+  Telegram selection intact.
+- Give the phone field and country selector native disabled semantics only
+  while another auth method owns the journey. A phone-owned readiness queue
+  keeps both controls editable so editing can cancel the retained send.
 
 ## Verification
 
@@ -109,3 +115,12 @@ Updated: 2026-07-29
   - The delayed explanation appears only while the selected action is still
     waiting for readiness.
   - One homepage provider is warmed and reused without mounting hidden controls.
+- Latest focused proof:
+  - 10 hosted-auth/runtime Vitest files passed (133 tests).
+  - Hosted Web typecheck and scoped ESLint passed.
+  - Frontend design-proof tests passed, with refreshed desktop/mobile catalog
+    captures covering phone waiting, Telegram waiting, and Telegram's trusted
+    continuation.
+  - Preliminary specialist findings for stale Telegram continuation and
+    misleading phone interactivity were resolved with real-panel boundary
+    coverage.

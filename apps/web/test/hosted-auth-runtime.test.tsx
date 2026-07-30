@@ -70,10 +70,9 @@ test("keeps one Privy provider mounted while the dialog opens and remounts only 
 test("reports an unconfigured runtime without mounting Privy", async () => {
   vi.stubEnv("NEXT_PUBLIC_PRIVY_APP_ID", "");
   const rendered = await renderClientComponent(
-    createElement(HostedAuthRuntime, {
-      children: (runtime) =>
-        createElement("p", null, `Runtime: ${runtime.kind}`),
-    }),
+    <HostedAuthRuntime>
+      {(runtime) => <p>Runtime: {runtime.kind}</p>}
+    </HostedAuthRuntime>,
     { requireButton: false },
   );
 
@@ -88,34 +87,28 @@ test("reports an unconfigured runtime without mounting Privy", async () => {
 function RuntimeHarness() {
   const [open, setOpen] = useState(false);
 
-  return createElement(HostedAuthRuntime, {
-    children: (runtime) => {
-      if (runtime.kind !== "configured") {
-        return createElement("p", null, "Runtime unavailable");
-      }
+  return (
+    <HostedAuthRuntime>
+      {(runtime) => {
+        if (runtime.kind !== "configured") {
+          return <p>Runtime unavailable</p>;
+        }
 
-      return createElement(
-        "div",
-        null,
-        createElement(
-          "p",
-          { "data-runtime-attempt": "true" },
-          String(runtime.attempt),
-        ),
-        createElement(
-          "button",
-          { onClick: () => setOpen(true), type: "button" },
-          "Open dialog",
-        ),
-        createElement(
-          "button",
-          { onClick: runtime.restart, type: "button" },
-          "Restart runtime",
-        ),
-        open ? createElement("p", null, "Dialog open") : null,
-      );
-    },
-  });
+        return (
+          <div>
+            <p data-runtime-attempt="true">{runtime.attempt}</p>
+            <button onClick={() => setOpen(true)} type="button">
+              Open dialog
+            </button>
+            <button onClick={runtime.restart} type="button">
+              Restart runtime
+            </button>
+            {open ? <p>Dialog open</p> : null}
+          </div>
+        );
+      }}
+    </HostedAuthRuntime>
+  );
 }
 
 function readRuntimeAttempt(container: HTMLElement): string | null {

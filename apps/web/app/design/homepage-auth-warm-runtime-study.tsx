@@ -41,9 +41,18 @@ export function HomepageAuthWarmRuntimeStudy() {
       </div>
       <div className="rounded-2xl border border-border bg-card p-6" inert>
         <p className="mb-4 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Telegram selected before ready
+        </p>
+        <HomepageAuthFormStudy telegramQueued />
+      </div>
+      <div
+        className="rounded-2xl border border-border bg-card p-6 lg:col-span-2"
+        inert
+      >
+        <p className="mb-4 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
           Telegram ready for its trusted click
         </p>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid max-w-xl grid-cols-2 gap-3">
           <HostedTelegramAuthButtonPresentation
             active
             onClick={() => {}}
@@ -63,17 +72,22 @@ export function HomepageAuthWarmRuntimeStudy() {
 
 function HomepageAuthFormStudy({
   phoneQueued = false,
+  telegramQueued = false,
 }: {
   phoneQueued?: boolean;
+  telegramQueued?: boolean;
 }) {
+  const authWaiting = phoneQueued || telegramQueued;
+
   return (
     <div className="space-y-4">
       <HostedPhoneEntryStep
         intent="auth"
         pendingAction={phoneQueued ? "send-code" : null}
+        phoneInputDisabled={telegramQueued}
         phoneCountryOptions={HOSTED_PHONE_COUNTRY_OPTIONS}
         phoneNumber="415 555 2671"
-        sendCodeDisabled={phoneQueued}
+        sendCodeDisabled={authWaiting}
         selectedPhoneCountry={resolveStudyPhoneCountry()}
         onPhoneCountryChange={() => {}}
         onPhoneNumberChange={() => {}}
@@ -86,18 +100,20 @@ function HomepageAuthFormStudy({
       </div>
       <div className="grid grid-cols-2 gap-3">
         <HostedTelegramAuthButtonPresentation
-          disabled={phoneQueued}
+          active={telegramQueued}
+          disabled={authWaiting}
+          loading={telegramQueued}
           onClick={() => {}}
         />
         <HostedInlineAuthButton
-          disabled={phoneQueued}
+          disabled={authWaiting}
           icon={<EmailIcon className="h-5 w-5" />}
           onClick={() => {}}
         >
           Email
         </HostedInlineAuthButton>
       </div>
-      {phoneQueued ? (
+      {authWaiting ? (
         <HostedPrivyReadinessState
           onRestart={() => {}}
           restartAvailable={false}

@@ -132,6 +132,7 @@ export function HostedAuthPanel({
 
     queuedAuthMethodRef.current = method;
     setQueuedAuthMethod(method);
+    clearTelegramStateForAcceptedPhone(method);
     return true;
   }
 
@@ -151,7 +152,14 @@ export function HostedAuthPanel({
   function beginAuthMethod(method: HostedAuthMethod): boolean {
     if (!completion.beginAuth(method)) return false;
     clearQueuedAuthMethod(method);
+    clearTelegramStateForAcceptedPhone(method);
     return true;
+  }
+
+  function clearTelegramStateForAcceptedPhone(method: HostedAuthMethod) {
+    if (method !== "phone") return;
+    setTelegramActive(false);
+    setTelegramNotice(null);
   }
 
   function cancelAuthMethod(method: HostedAuthMethod) {

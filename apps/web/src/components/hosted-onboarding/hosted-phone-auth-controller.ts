@@ -209,6 +209,7 @@ export function useHostedPhoneAuthController({
     intent,
     phoneFieldDescription: null,
     phoneFieldLabel: null,
+    phoneInputDisabled: interactionGated,
     pendingAction: presentedPendingAction,
     phoneCountryOptions: HOSTED_PHONE_COUNTRY_OPTIONS,
     phoneNumber,
