@@ -8,10 +8,7 @@ import {
   preloadHostedAuthPanelIsland,
   useHostedAuthPanelIslandIdlePreload,
 } from "@/src/components/hosted-onboarding/auth-dialog";
-import {
-  useAuth,
-  useAuthRuntimeIdlePreload,
-} from "@/src/components/hosted-onboarding/auth-dialog-provider";
+import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import { navigateHostedAuthRedirect } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
 import {
   HOSTED_APP_HOME_PATH,
@@ -189,7 +186,6 @@ export function LandingAuthActions({
   const styles = getLandingAuthClasses(context, onDarkSurface);
   const shouldPreload = preloadAuthPanel && !authenticated;
 
-  useAuthRuntimeIdlePreload(shouldPreload && auth.shared);
   useHostedAuthPanelIslandIdlePreload(shouldPreload && !auth.shared);
 
   if (authenticated) {
