@@ -119,6 +119,7 @@ function GroupSponsorshipDialog({
                   </FieldLabel>
                   <Input
                     id="group-sponsor-alias"
+                    className="focus-visible:ring-0"
                     value={publicAlias}
                     onChange={(event) => setPublicAlias(event.target.value)}
                     maxLength={80}
@@ -135,6 +136,7 @@ function GroupSponsorshipDialog({
                   </FieldLabel>
                   <Textarea
                     id="group-sponsor-message"
+                    className="focus-visible:ring-0"
                     value={sponsorMessage}
                     onChange={(event) => setSponsorMessage(event.target.value)}
                     maxLength={280}
@@ -149,6 +151,7 @@ function GroupSponsorshipDialog({
                     </FieldLabel>
                     <Textarea
                       id="group-sponsor-bit"
+                      className="focus-visible:ring-0"
                       value={runningBitRequest}
                       onChange={(event) =>
                         setRunningBitRequest(event.target.value)

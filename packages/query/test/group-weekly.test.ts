@@ -20,7 +20,7 @@ describe("buildSharedGroupWeeklyMembers", () => {
           },
           {
             projectionScopeKey: "steps-days.v0",
-            records: [dailyMetric("2026-07-05", "steps", 5_000, "count")],
+            records: [dailyMetric("2026-07-04", "steps", 5_000, "count")],
           },
           {
             projectionScopeKey: "workout-days.v0",
@@ -99,6 +99,36 @@ describe("buildSharedGroupWeeklyMembers", () => {
       weeklyStat("workout-minutes", 100, ["2026-05-12"], "minutes"),
     );
   });
+
+  it("uses the seven completed days before a Monday run", () => {
+    const records = [
+      workoutDay("2026-07-19", 10),
+      workoutDay("2026-07-20", 20),
+      workoutDay("2026-07-21", 30),
+      workoutDay("2026-07-22", 40),
+      workoutDay("2026-07-23", 50),
+      workoutDay("2026-07-24", 60),
+      workoutDay("2026-07-25", 70),
+      workoutDay("2026-07-26", 80),
+      workoutDay("2026-07-27", 90),
+    ];
+
+    expect(workoutMinutesStat(
+      records,
+      "2026-07-27T16:15:00.000-04:00",
+      "America/New_York",
+    )).toEqual(
+      weeklyStat("workout-minutes", 50, [
+        "2026-07-20",
+        "2026-07-21",
+        "2026-07-22",
+        "2026-07-23",
+        "2026-07-24",
+        "2026-07-25",
+        "2026-07-26",
+      ], "minutes"),
+    );
+  });
 });
 
 function workoutDay(
@@ -166,12 +196,12 @@ function unmarkedWorkoutDay(date: string, workoutMinutes: number) {
 
 function weeklyStat(
   stream: string,
-  currentWeekAvg: number,
+  completedDaysAvg: number,
   observedDates: [string, ...string[]],
   unit: string,
 ) {
   return {
-    currentWeekAvg,
+    completedDaysAvg,
     observedDayCount: observedDates.length,
     observedDates,
     stream,

@@ -1018,6 +1018,248 @@ text(JSON.stringify(result));
     expect(functionCallOutputs.join('\n')).not.toContain('ownerAdvisoryName')
   })
 
+  it('threads exact participant authority through the real group-effect dispatcher', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const messageRef = `ain_${'d'.repeat(32)}`
+    const participant = {
+      assistantInputId: messageRef,
+      senderHandle: '+15550100201',
+      source: 'linq' as const,
+    }
+    const authorizations: unknown[] = []
+    const groupRequests: unknown[] = []
+    const phoneCallStarts: unknown[] = []
+    const previewAuthorityChecks: unknown[] = []
+    const userActionScope = {
+      acceptedInputIds: [messageRef],
+      conversationId: 'conversation_group_effect',
+      conversationScope: 'group' as const,
+      inboundMailboxItemIds: ['mailbox_group_effect'],
+      originSessionId: 'session_group_effect',
+      recipientKey: 'recipient_group_effect',
+    }
+    const hostedToolContext: AssistantHostedToolContext = {
+      computerToolsAvailable: false,
+      currentGroupPhoneCallPreviewAuthority: async (input) => {
+        previewAuthorityChecks.push(input)
+        return input?.confirmationInputId === messageRef
+          ? { assistantInputId: messageRef }
+          : null
+      },
+      currentHostedDeliveryContext: () => null,
+      currentHostedMailboxItemIds: () => [],
+      currentUserActionScope: () => userActionScope,
+      groupTool: {
+        request: async (request) => {
+          groupRequests.push(request)
+          return {
+            action: 'revoke_own_email_share',
+            result: { revokedCount: 1, status: 'revoked' },
+          }
+        },
+      },
+      phoneCalls: {
+        start: async (input) => {
+          phoneCallStarts.push(input)
+          return {
+            phoneCallId: 'hpc_group_effect',
+            status: 'calling',
+          }
+        },
+      },
+      sendVaultFile: async () => {
+        throw new Error('Vault-file sending is unavailable for this turn.')
+      },
+      vaultFileSendAvailable: false,
+    }
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: {
+            action: 'revoke_own_email_share',
+            message_ref: messageRef,
+          },
+          name: 'group',
+          namespace: 'murph',
+        },
+      },
+      {
+        functionCall: {
+          arguments: {
+            allowTransferToUser: false,
+            callerName: 'Murph',
+            goal: 'Confirm the office opening time.',
+            instructions: ['Ask only for the opening time.'],
+            message_ref: messageRef,
+            shareableFacts: {},
+            successCriteria: 'The office states its opening time.',
+            timeZone: 'America/New_York',
+            to: {
+              label: 'The office',
+              phoneNumber: '+12125550123',
+            },
+          },
+          name: 'create_phone_call',
+          namespace: 'murph',
+        },
+      },
+      {
+        functionCall: {
+          arguments: {
+            action: 'revoke_own_email_share',
+            message_ref: `ain_${'f'.repeat(32)}`,
+          },
+          name: 'group',
+          namespace: 'murph',
+        },
+      },
+      { text: 'PARTICIPANT_EFFECTS_OK' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      authorizeAcceptedMessageTarget: async (input) => {
+        authorizations.push(input)
+        if (input.messageRef !== messageRef) {
+          return null
+        }
+        return {
+          participant,
+          targetInputId: messageRef,
+        }
+      },
+      dynamicTools: resolveMurphDynamicTools({
+        groupAvailable: true,
+        messageTargetingAvailable: true,
+        phoneCallsAvailable: true,
+        progressUpdatesAvailable: false,
+      }),
+      hostedToolContext,
+      prompt: 'Revoke email sharing and place the approved group call.',
+    })
+
+    expect(result.finalMessage).toBe('PARTICIPANT_EFFECTS_OK')
+    expect(authorizations).toEqual([
+      {
+        action: 'participant-effect',
+        deliveryContextOrdinal: 0,
+        messageRef,
+      },
+      {
+        action: 'participant-effect',
+        deliveryContextOrdinal: 0,
+        messageRef,
+      },
+      {
+        action: 'participant-effect',
+        deliveryContextOrdinal: 0,
+        messageRef: `ain_${'f'.repeat(32)}`,
+      },
+    ])
+    expect(groupRequests).toEqual([{
+      action: 'revoke_own_email_share',
+      participant,
+    }])
+    expect(previewAuthorityChecks).toEqual([{
+      brief: {
+        allowTransferToUser: false,
+        callerName: 'Murph',
+        goal: 'Confirm the office opening time.',
+        instructions: ['Ask only for the opening time.'],
+        shareableFacts: {},
+        successCriteria: 'The office states its opening time.',
+        timeZone: 'America/New_York',
+        to: {
+          label: 'The office',
+          phoneNumber: '+12125550123',
+        },
+      },
+      confirmationInputId: messageRef,
+    }])
+    expect(phoneCallStarts).toEqual([
+      expect.objectContaining({
+        groupRequester: participant,
+        requestKey: expect.stringMatching(/^phone_call_[a-f0-9]{64}$/u),
+      }),
+    ])
+  })
+
+  it('uses the live-steered delivery ordinal for exact participant authority', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const messageRef = `ain_${'e'.repeat(32)}`
+    const authorizations: unknown[] = []
+    let steered: Promise<void> | null = null
+    scenario.stub.queue(
+      {
+        delayMs: 2_000,
+        text: 'STEER_PARTICIPANT_FIRST_REPLY',
+      },
+      {
+        functionCall: {
+          arguments: {
+            action: 'revoke_own_email_share',
+            message_ref: messageRef,
+          },
+          name: 'group',
+          namespace: 'murph',
+        },
+      },
+      { text: 'STEER_PARTICIPANT_OK' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      authorizeAcceptedMessageTarget: async (input) => {
+        authorizations.push(input)
+        return {
+          participant: {
+            assistantInputId: messageRef,
+            senderHandle: '+15550100202',
+            source: 'linq',
+          },
+          targetInputId: messageRef,
+        }
+      },
+      dynamicTools: resolveMurphDynamicTools({
+        groupAvailable: true,
+        messageTargetingAvailable: true,
+        progressUpdatesAvailable: false,
+      }),
+      hostedToolContext: {
+        ...createScriptedGroupToolContext(async () => ({
+          action: 'revoke_own_email_share',
+          result: { revokedCount: 1, status: 'revoked' },
+        })),
+        currentUserActionScope: () => ({
+          acceptedInputIds: [messageRef],
+          conversationId: 'conversation_live_group_effect',
+          conversationScope: 'group',
+          inboundMailboxItemIds: ['mailbox_live_group_effect'],
+          originSessionId: 'session_live_group_effect',
+          recipientKey: 'recipient_live_group_effect',
+        }),
+      },
+      onLiveTurn: (turn: CodexAppServerLiveTurn) => {
+        steered = delay(500).then(() =>
+          turn.steer({ prompt: 'The group participant now requests revocation.' }))
+      },
+      prompt: 'Wait for the group participant request.',
+    })
+
+    expect(steered).not.toBeNull()
+    await steered
+    expect(result.finalMessage).toBe('STEER_PARTICIPANT_OK')
+    expect(authorizations).toEqual([{
+      action: 'participant-effect',
+      deliveryContextOrdinal: 1,
+      messageRef,
+    }])
+  })
+
   it('captures scripted reaction tool calls from the real app-server protocol', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {

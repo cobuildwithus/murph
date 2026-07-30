@@ -11,6 +11,22 @@ import {
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
 
+const EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG = {
+  'features.apps': false,
+  'features.browser_use': false,
+  'features.enable_mcp_apps': false,
+  'features.multi_agent': false,
+  'features.multi_agent_v2': false,
+  'features.plugins': false,
+  'features.shell_tool': false,
+  'features.standalone_web_search': false,
+  'features.tool_suggest': false,
+  'features.web_search_request': false,
+  'memories.generate_memories': false,
+  'memories.use_memories': false,
+  web_search: 'disabled',
+} as const
+
 const providerMocks = vi.hoisted(() => ({
   executeCodexAssistantTurnAttemptFromInput: vi.fn(),
   resolveCodexAssistantCapabilities: vi.fn(),
@@ -663,21 +679,12 @@ describe('Codex model catalog', () => {
       approvalPolicy: 'never',
       sandbox: 'read-only',
     })
-    expect(providerInput?.codexConfigOverrides).toEqual(
-      expect.arrayContaining([
-        'features.shell_tool=false',
-        'web_search="disabled"',
-        'features.apps=false',
-        'features.browser_use=false',
-        'features.plugins=false',
-        'features.multi_agent=false',
-      ]),
-    )
-    expect(providerInput?.codexConfigOverrides).not.toContain(
+    expect(providerInput?.codexConfigOverrides).toEqual([
       'features.shell_tool=true',
-    )
-    expect(providerInput?.codexConfigOverrides).not.toContain(
       'features.apps=true',
+    ])
+    expect(providerInput?.codexThreadConfig).toEqual(
+      EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG,
     )
     expect(providerInput).toMatchObject({
       dynamicTools: [],
@@ -685,12 +692,13 @@ describe('Codex model catalog', () => {
       environments: [],
       hostedToolContext: null,
       materializeWorkspaceArtifacts: null,
-      processLifetime: 'one-shot',
       progressDelivery: null,
       providerFetch: null,
+      providerThreadEphemeral: true,
       publicInternetFetch: null,
       requireHostedPrivateImageDelivery: false,
     })
+    expect(providerInput).not.toHaveProperty('processLifetime')
     expect(unsafeDynamicTools).not.toEqual([])
     expect(unsafeProgressDelivery.send).not.toHaveBeenCalled()
   })
@@ -807,27 +815,25 @@ describe('Codex model catalog', () => {
       approvalPolicy: 'never',
       sandbox: 'read-only',
     })
-    expect(providerInput?.codexConfigOverrides).toEqual(
-      expect.arrayContaining([
-        'features.shell_tool=false',
-        'web_search="disabled"',
-        'features.apps=false',
-        'features.browser_use=false',
-        'features.plugins=false',
-        'features.multi_agent=false',
-      ]),
+    expect(providerInput?.codexConfigOverrides).toEqual([
+      'features.shell_tool=true',
+      'features.apps=true',
+    ])
+    expect(providerInput?.codexThreadConfig).toEqual(
+      EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG,
     )
     expect(providerInput).toMatchObject({
       dynamicTools: [MURPH_GENERATE_SONG_TOOL],
       environments: [],
       hostedToolContext: null,
       materializeWorkspaceArtifacts: null,
-      processLifetime: 'one-shot',
       progressDelivery: null,
       providerFetch: hostedProviderFetch,
-      publicInternetFetch: null,
+      providerThreadEphemeral: true,
+      publicInternetFetch: fetch,
       requireHostedPrivateImageDelivery: false,
     })
+    expect(providerInput).not.toHaveProperty('processLifetime')
     expect(unsafeProgressDelivery.send).not.toHaveBeenCalled()
   })
 

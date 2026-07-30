@@ -90,6 +90,7 @@ export interface AssistantActiveTurnLiveProviderTurn {
 }
 
 export interface AssistantActiveTurnLiveProviderSteering {
+  closeInputAdmission(): void
   registerLiveProviderTurn(input: AssistantActiveTurnLiveProviderTurn): () => void
 }
 

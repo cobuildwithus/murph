@@ -127,9 +127,8 @@ function GroupUsageFundingStudy() {
           groupName="Sunday sleep crew"
         />
         <p className="mt-3 text-sm leading-6 text-muted-foreground">
-          The amount dialog authorizes one contribution at a time. Murph uses a
-          saved card when available; Stripe collects or verifies the card when
-          needed.
+          The amount dialog authorizes one contribution at a time. Optional
+          fields use a quiet sage border-only focus state.
         </p>
       </div>
       <div
@@ -137,11 +136,12 @@ function GroupUsageFundingStudy() {
         data-design-state="usage-added-follow-up"
       >
         <p className="text-sm text-muted-foreground">
-          After a group payment completes, the confirmation offers Open
-          Messages — there is no deep link back into the group thread, so it
-          opens the Messages app. Personal and Family top-ups keep the Text
-          Murph action: one channel renders a direct link; several channels
-          render inline rows in the same dialog.
+          After a group payment completes, the confirmation makes the added
+          capacity unmistakable, then offers Open Messages. Messages cannot
+          deep-link to the group thread, so the handoff says to choose the
+          group. Personal and Family top-ups keep the Text Murph action: one
+          channel renders a direct link; several channels render inline rows in
+          the same dialog.
         </p>
         <div className="flex flex-wrap gap-2">
           <Button
@@ -180,6 +180,11 @@ function GroupUsageFundingStudy() {
             }}
             deferTerminalRefreshUntilClose
             customizationAllowed
+            frozenSponsorship={{
+              publicAlias: "Sunday sleep crew",
+              runningBitRequest: "Keep the recovery jokes going.",
+              sponsorMessage: "More room for the group.",
+            }}
             initialOpen
             offers={[]}
             payerMemberId={DESIGN_PAYER_MEMBER_ID}

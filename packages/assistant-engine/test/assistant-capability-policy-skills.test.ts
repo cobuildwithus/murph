@@ -65,7 +65,7 @@ describe('assistant capability policy skills', () => {
       'The runtime compares the entire delivered preview with this canonical rendering',
     )
     expect(normalized).toContain(
-      'Set `confirmationMessageRef` to that confirming inbound message\'s visible `ain_...` reference.',
+      'Set `message_ref` to that confirming inbound message\'s visible `ain_...` reference.',
     )
     expect(normalized).toContain(
       'If any term or disclosure changes, deliver the complete revised preview and stop again.',

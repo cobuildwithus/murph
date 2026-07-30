@@ -90,6 +90,7 @@ const REQUIRED_PRODUCTION_DEPLOY_WORKER_ENV_NAMES = [
   "HOSTED_DATABASE_ALERT_PLANETSCALE_DATABASE_NAME",
   "HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION",
   "HOSTED_DATABASE_ALERT_LINQ_CHAT_ID",
+  "HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID",
   "HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN",
   "HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID",
   "LINQ_API_TOKEN",
@@ -100,6 +101,13 @@ const JUNCTION_RUNTIME_REQUIRED_ENV_NAMES = [
   "JUNCTION_CLIENT_USER_ID_SECRET",
   "JUNCTION_ENV",
   "JUNCTION_REGION",
+] as const;
+
+const VENICE_RUNTIME_REQUIRED_ENV_NAMES = [
+  "VENICE_API_KEY",
+  "HOSTED_VENICE_LUNA_MODEL",
+  "HOSTED_VENICE_TERRA_MODEL",
+  "HOSTED_VENICE_SOL_MODEL",
 ] as const;
 
 const PRODUCTION_DEPLOY_URL_INVARIANT_LABELS = [
@@ -270,6 +278,19 @@ export function listHostedDeployEnvironmentInvariantErrors(
       "HOSTED_DATABASE_ALERT_ENABLED must be unset outside production.",
     );
   }
+  const primaryDatabaseAlertChatId = normalizeOptionalString(
+    source.HOSTED_DATABASE_ALERT_LINQ_CHAT_ID,
+  );
+  const secondaryDatabaseAlertChatId = normalizeOptionalString(
+    source.HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID,
+  );
+  if (
+    primaryDatabaseAlertChatId
+    && secondaryDatabaseAlertChatId
+    && primaryDatabaseAlertChatId === secondaryDatabaseAlertChatId
+  ) {
+    errors.push("Database health alert chat IDs must be distinct.");
+  }
 
   const privateMediaCapabilitySecret = normalizeOptionalString(
     source.HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET,
@@ -402,6 +423,19 @@ export function listHostedDeployEnvironmentInvariantErrors(
   ) {
     errors.push(
       `Junction runtime env must set ${JUNCTION_RUNTIME_REQUIRED_ENV_NAMES.join(", ")} together.`,
+    );
+  }
+
+  const missingVeniceEnv = listMissingPartialGroupEnvNames(
+    source,
+    VENICE_RUNTIME_REQUIRED_ENV_NAMES,
+  );
+  if (
+    missingVeniceEnv.length > 0
+    && missingVeniceEnv.length < VENICE_RUNTIME_REQUIRED_ENV_NAMES.length
+  ) {
+    errors.push(
+      `Venice runtime env must set ${VENICE_RUNTIME_REQUIRED_ENV_NAMES.join(", ")} together.`,
     );
   }
 

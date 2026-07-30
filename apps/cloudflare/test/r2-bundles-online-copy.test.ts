@@ -70,9 +70,11 @@ function options(overrides: Partial<R2BundlesOnlineCopyOptions> = {}): R2Bundles
   return {
     apply: false,
     confirmDestination: null,
+    copierExclusive: overrides.apply === true,
     copierStopped: false,
     destination: destinationBucket,
     finalConvergence: false,
+    holdForSourcePutDrain: false,
     immutableKeysAudited: false,
     phase: "source_active",
     source: sourceBucket,
@@ -183,6 +185,73 @@ describe("R2 online immutable copy", () => {
     ])).toThrow("--copier-stopped");
   });
 
+  it("requires an explicit single-copier assertion for apply", () => {
+    expect(() => parseR2BundlesOnlineCopyArgs([
+      "--source", sourceBucket,
+      "--destination", destinationBucket,
+      "--phase", "source_active",
+      "--apply",
+      "--confirm-destination", destinationBucket,
+      "--immutable-keys-audited",
+    ])).toThrow("--copier-exclusive");
+    expect(parseR2BundlesOnlineCopyArgs([
+      "--source", sourceBucket,
+      "--destination", destinationBucket,
+      "--phase", "source_active",
+      "--apply",
+      "--confirm-destination", destinationBucket,
+      "--copier-exclusive",
+      "--hold-for-source-put-drain",
+      "--immutable-keys-audited",
+    ])).toMatchObject({
+      apply: true,
+      copierExclusive: true,
+      holdForSourcePutDrain: true,
+    });
+  });
+
+  it("rejects the process-bound drain hold outside an apply invocation", () => {
+    expect(() => parseR2BundlesOnlineCopyArgs([
+      "--source", sourceBucket,
+      "--destination", destinationBucket,
+      "--phase", "source_active",
+      "--hold-for-source-put-drain",
+    ])).toThrow("--hold-for-source-put-drain requires --apply");
+  });
+
+  it("rejects destination-active apply before issuing any R2 request", async () => {
+    const copyObject = vi.fn();
+    const headObject = vi.fn();
+    const inspectActiveOwners = vi.fn();
+    const inspectInfrastructure = vi.fn();
+    const putMarker = vi.fn();
+    const readInventory = vi.fn();
+
+    await expect(runR2BundlesOnlineCopy(
+      options({
+        apply: true,
+        confirmDestination: destinationBucket,
+        immutableKeysAudited: true,
+        phase: "destination_active",
+      }),
+      environment,
+      {
+        client: { copyObject, headObject, putMarker },
+        inspectActiveOwners,
+        inspectInfrastructure,
+        log: vi.fn(),
+        readInventory,
+      },
+    )).rejects.toThrow("--apply requires --phase source_active");
+
+    expect(inspectInfrastructure).not.toHaveBeenCalled();
+    expect(inspectActiveOwners).not.toHaveBeenCalled();
+    expect(readInventory).not.toHaveBeenCalled();
+    expect(copyObject).not.toHaveBeenCalled();
+    expect(headObject).not.toHaveBeenCalled();
+    expect(putMarker).not.toHaveBeenCalled();
+  });
+
   it("signs the R2 beta destination create-only header with the source ETag", () => {
     const signed = createSignedR2Request({
       accessKeyId: "access",
@@ -277,7 +346,52 @@ describe("R2 online immutable copy", () => {
     expect(harness.calls.filter((call) =>
       call.command === "pnpm" && call.args.includes("lifecycle")
     )).toHaveLength(2);
-    expect(harness.calls.filter((call) => call.command === "murph-prod-psql-ro")).toHaveLength(1);
+    expect(harness.calls.filter((call) => call.command === "murph-prod-psql-ro")).toHaveLength(4);
+  });
+
+  it.each([
+    {
+      label: "transport failure",
+      response: () => {
+        throw new TypeError("ambiguous transport failure");
+      },
+    },
+    {
+      label: "server failure",
+      response: () => new Response(null, { status: 503 }),
+    },
+  ])("never retries CopyObject after an ambiguous $label", async ({ response }) => {
+    const boundaryNamespace = createHostedStorageNamespaceId("member_1");
+    const eligible = entry(
+      `users/${boundaryNamespace}/workspace-snapshots/no-retry.snapshot.enc`,
+      { etag: '"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"', size: 12 },
+    );
+    const harness = createCommandBoundaryRunner({
+      destinationInventory: () => [marker()],
+      sourceInventory: () => [eligible],
+    });
+    const fetchMock = vi.fn(async (
+      _request: RequestInfo | URL,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      if (init?.method !== "PUT") {
+        throw new Error(`Unexpected online-copy fetch method: ${init?.method ?? "GET"}`);
+      }
+      return response();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(runR2BundlesOnlineCopy(
+      options({
+        apply: true,
+        confirmDestination: destinationBucket,
+        immutableKeysAudited: true,
+      }),
+      environment,
+      { log: vi.fn(), runner: harness.runner },
+    )).rejects.toThrow();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("rejects malformed production owner rows before inventory or R2 requests", async () => {
@@ -403,6 +517,442 @@ describe("R2 online immutable copy", () => {
     );
 
     expect(copyObject).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts CopyObject 404 only when a source HEAD proves live deletion", async () => {
+    const boundaryNamespace = createHostedStorageNamespaceId("member_1");
+    const eligible = entry(
+      `users/${boundaryNamespace}/workspace-snapshots/deleted-before-copy.snapshot.enc`,
+      { etag: '"12121212121212121212121212121212"', size: 12 },
+    );
+    let sourceDeleted = false;
+    const harness = createCommandBoundaryRunner({
+      destinationInventory: () => [marker()],
+      sourceInventory: () => sourceDeleted ? [] : [eligible],
+    });
+    const fetchMock = vi.fn(async (
+      request: RequestInfo | URL,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const url = new URL(String(request));
+      if (init?.method === "PUT") {
+        sourceDeleted = true;
+        return new Response(null, { status: 404 });
+      }
+      if (init?.method === "HEAD") {
+        expect(url.pathname).toBe(`/${sourceBucket}/${eligible.key}`);
+        return new Response(null, { status: 404 });
+      }
+      throw new Error(`Unexpected online-copy fetch: ${init?.method ?? "GET"} ${url.href}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const log = vi.fn();
+
+    await runR2BundlesOnlineCopy(
+      options({
+        apply: true,
+        confirmDestination: destinationBucket,
+        immutableKeysAudited: true,
+      }),
+      environment,
+      { log, runner: harness.runner },
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(log).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^Copied or confirmed 0 destination immutable object\(s\); observed 1 planned source object\(s\) /u,
+      ),
+    );
+  });
+
+  it("rejects CopyObject 404 while the planned source object still exists", async () => {
+    const eligible = entry(
+      "users/hsn_0123456789abcdef01234567/workspace-snapshots/ambiguous-404.snapshot.enc",
+      { etag: '"34343434343434343434343434343434"', size: 9 },
+    );
+
+    await expect(runR2BundlesOnlineCopy(
+      options({
+        apply: true,
+        confirmDestination: destinationBucket,
+        immutableKeysAudited: true,
+      }),
+      environment,
+      {
+        client: {
+          copyObject: vi.fn(async () => "source_missing" as const),
+          headObject: vi.fn(async () => ({ etag: eligible.etag, size: eligible.size })),
+          putMarker: vi.fn(async () => "created" as const),
+        },
+        inspectActiveOwners: async () => activeOwners,
+        inspectInfrastructure: async () => undefined,
+        log: vi.fn(),
+        readInventory: async (bucket) => bucket === sourceBucket ? [eligible] : [marker()],
+      },
+    )).rejects.toThrow("planned source object still exists");
+  });
+
+  it("accepts an initially listed immutable object deleted after copy verification", async () => {
+    const eligible = entry(
+      "users/hsn_0123456789abcdef01234567/workspace-snapshots/deleted-after-copy.snapshot.enc",
+      { etag: '"56565656565656565656565656565656"', size: 11 },
+    );
+    let sourceInventoryReads = 0;
+    let destinationInventory = [marker()];
+    const log = vi.fn();
+
+    await runR2BundlesOnlineCopy(
+      options({
+        apply: true,
+        confirmDestination: destinationBucket,
+        immutableKeysAudited: true,
+      }),
+      environment,
+      {
+        client: {
+          copyObject: vi.fn(async () => {
+            destinationInventory = [marker(), eligible];
+            return "copied" as const;
+          }),
+          headObject: vi.fn(async () => ({ etag: eligible.etag, size: eligible.size })),
+          putMarker: vi.fn(async () => "created" as const),
+        },
+        inspectActiveOwners: async () => activeOwners,
+        inspectInfrastructure: async () => undefined,
+        log,
+        readInventory: async (bucket) => {
+          if (bucket === destinationBucket) return destinationInventory;
+          sourceInventoryReads += 1;
+          return sourceInventoryReads === 1 ? [eligible] : [];
+        },
+      },
+    );
+
+    expect(log).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^Copied or confirmed 1 destination immutable object\(s\); observed 0 planned source object\(s\) .* 1 observed source object\(s\) absent/u,
+      ),
+    );
+  });
+
+  it("converges live source churn within one acknowledged invocation", async () => {
+    const first = entry(
+      "users/hsn_0123456789abcdef01234567/workspace-snapshots/first-cycle.snapshot.enc",
+      { etag: '"11111111111111111111111111111111"', size: 11 },
+    );
+    const second = entry(
+      "users/hsn_0123456789abcdef01234567/workspace-snapshots/second-cycle.snapshot.enc",
+      { etag: '"22222222222222222222222222222222"', size: 12 },
+    );
+    let destinationInventory = [marker()];
+    let sourceInventoryReads = 0;
+    const inspectActiveOwners = vi.fn(async () => activeOwners);
+    const copyObject = vi.fn(async ({ entry: planned }: CopyObjectInput) => {
+      destinationInventory = [...destinationInventory, planned];
+      return "copied" as const;
+    });
+    const log = vi.fn();
+
+    await runR2BundlesOnlineCopy(
+      options({
+        apply: true,
+        confirmDestination: destinationBucket,
+        immutableKeysAudited: true,
+      }),
+      environment,
+      {
+        client: {
+          copyObject,
+          headObject: vi.fn(async (_bucket: string, key: string) => {
+            const found = [first, second].find((candidate) => candidate.key === key);
+            return found ? { etag: found.etag, size: found.size } : null;
+          }),
+          putMarker: vi.fn(async () => "created" as const),
+        },
+        inspectActiveOwners,
+        inspectInfrastructure: async () => undefined,
+        log,
+        readInventory: async (bucket) => {
+          if (bucket === destinationBucket) return destinationInventory;
+          sourceInventoryReads += 1;
+          return sourceInventoryReads === 1 ? [first] : [second];
+        },
+      },
+    );
+
+    expect(copyObject.mock.calls.map(([input]) => input.entry.key)).toEqual([
+      first.key,
+      second.key,
+    ]);
+    expect(inspectActiveOwners).toHaveBeenCalledTimes(6);
+    expect(log).toHaveBeenCalledWith(
+      "Online copy cycle 1 observed 1 new immutable source object(s); "
+      + "continuing in the same acknowledged invocation.",
+    );
+    expect(log).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^Copied or confirmed 2 destination immutable object\(s\); .* 1 observed source object\(s\) absent/u,
+      ),
+    );
+  });
+
+  it("holds process provenance through a delayed OC PUT drain", async () => {
+    const first = entry(
+      "users/hsn_0123456789abcdef01234567/workspace-snapshots/before-drain.snapshot.enc",
+      { etag: '"44444444444444444444444444444444"', size: 14 },
+    );
+    const delayed = entry(
+      "users/hsn_0123456789abcdef01234567/workspace-snapshots/delayed-put.snapshot.enc",
+      { etag: '"55555555555555555555555555555555"', size: 15 },
+    );
+    let destinationInventory = [marker()];
+    let sourceInventory = [first];
+    const copyObject = vi.fn(async ({ entry: planned }: CopyObjectInput) => {
+      destinationInventory = [...destinationInventory, planned];
+      if (planned.key === first.key) sourceInventory = [];
+      return "copied" as const;
+    });
+    const waitForSourcePutDrain = vi.fn(async () => {
+      sourceInventory = [delayed];
+    });
+    const log = vi.fn();
+
+    await runR2BundlesOnlineCopy(
+      options({
+        apply: true,
+        confirmDestination: destinationBucket,
+        holdForSourcePutDrain: true,
+        immutableKeysAudited: true,
+      }),
+      environment,
+      {
+        client: {
+          copyObject,
+          headObject: vi.fn(async (_bucket: string, key: string) => {
+            const found = [first, delayed].find((candidate) => candidate.key === key);
+            return found ? { etag: found.etag, size: found.size } : null;
+          }),
+          putMarker: vi.fn(async () => "created" as const),
+        },
+        inspectActiveOwners: async () => activeOwners,
+        inspectInfrastructure: async () => undefined,
+        log,
+        readInventory: async (bucket) => bucket === sourceBucket
+          ? sourceInventory
+          : destinationInventory,
+        waitForSourcePutDrain,
+      },
+    );
+
+    expect(waitForSourcePutDrain).toHaveBeenCalledTimes(1);
+    expect(copyObject.mock.calls.map(([input]) => input.entry.key)).toEqual([
+      first.key,
+      delayed.key,
+    ]);
+    expect(log).toHaveBeenCalledWith(
+      "Online copy reached temporary convergence; retaining source provenance "
+      + "until the operator confirms the OC PUT drain.",
+    );
+    expect(log).toHaveBeenCalledWith(
+      "OC PUT drain confirmed; revalidating source and destination before exit.",
+    );
+  });
+
+  it("retries inventories when canonical ownership changes during the read", async () => {
+    const canonical = entry(
+      "users/hsn_0123456789abcdef01234567/workspace-snapshots/current.snapshot.enc",
+      { etag: '"66666666666666666666666666666666"', size: 16 },
+    );
+    const canonicalOwners = {
+      canonicalSnapshotObjectKeys: new Set([canonical.key]),
+      namespaces: activeOwners.namespaces,
+    };
+    const ownerReads = [
+      activeOwners,
+      canonicalOwners,
+      canonicalOwners,
+      canonicalOwners,
+    ];
+    const inspectActiveOwners = vi.fn(async () => ownerReads.shift() ?? canonicalOwners);
+    const readInventory = vi.fn(async (bucket: string) => bucket === sourceBucket
+      ? [canonical]
+      : [marker(), canonical]);
+    const log = vi.fn();
+
+    await runR2BundlesOnlineCopy(
+      options(),
+      environment,
+      {
+        client: {
+          copyObject: vi.fn(),
+          headObject: vi.fn(),
+          putMarker: vi.fn(),
+        },
+        inspectActiveOwners,
+        inspectInfrastructure: async () => undefined,
+        log,
+        readInventory,
+      },
+    );
+
+    expect(inspectActiveOwners).toHaveBeenCalledTimes(4);
+    expect(readInventory).toHaveBeenCalledTimes(4);
+    expect(log).toHaveBeenCalledWith(
+      "Hosted ownership changed during online-copy inventory read 1; "
+      + "retrying the coherent read in the same invocation.",
+    );
+  });
+
+  it("rejects reuse when destination-only provenance was lost with the prior process", async () => {
+    const destinationOnly = entry(
+      "users/hsn_0123456789abcdef01234567/workspace-snapshots/prior-process.snapshot.enc",
+      { etag: '"33333333333333333333333333333333"', size: 13 },
+    );
+    const copyObject = vi.fn();
+
+    await expect(runR2BundlesOnlineCopy(
+      options({
+        apply: true,
+        confirmDestination: destinationBucket,
+        immutableKeysAudited: true,
+      }),
+      environment,
+      {
+        client: {
+          copyObject,
+          headObject: vi.fn(),
+          putMarker: vi.fn(),
+        },
+        inspectActiveOwners: async () => activeOwners,
+        inspectInfrastructure: async () => undefined,
+        log: vi.fn(),
+        readInventory: async (bucket) => bucket === sourceBucket
+          ? []
+          : [marker(), destinationOnly],
+      },
+    )).rejects.toThrow("destination contains 1 eligible object(s) absent from OC");
+
+    expect(copyObject).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { phase: "source_active", result: "copied" },
+    { phase: "source_active", result: "destination_exists" },
+  ] as const)(
+    "rejects ambiguous $result completion followed by source deletion in $phase",
+    async ({ phase, result }) => {
+      const eligible = entry(
+        "users/hsn_0123456789abcdef01234567/workspace-snapshots/ambiguous-order.snapshot.enc",
+        { etag: '"67676767676767676767676767676767"', size: 12 },
+      );
+      const destinationInventory = [marker(), eligible];
+      let headCalls = 0;
+      const log = vi.fn();
+
+      await expect(runR2BundlesOnlineCopy(
+        options({
+          apply: true,
+          confirmDestination: destinationBucket,
+          immutableKeysAudited: true,
+          phase,
+        }),
+        environment,
+        {
+          client: {
+            copyObject: vi.fn(async () => result),
+            headObject: vi.fn(async () => {
+              headCalls += 1;
+              return headCalls === 1
+                ? { etag: eligible.etag, size: eligible.size }
+                : null;
+            }),
+            putMarker: vi.fn(async () => "created" as const),
+          },
+          inspectActiveOwners: async () => activeOwners,
+          inspectInfrastructure: async () => undefined,
+          log,
+          readInventory: async (bucket) => bucket === sourceBucket
+            ? [eligible]
+            : (headCalls === 0 ? [marker()] : destinationInventory),
+        },
+      )).rejects.toThrow("copy/delete ordering is ambiguous");
+
+      expect(log).not.toHaveBeenCalledWith(expect.stringMatching(/^Copied or confirmed/u));
+    },
+  );
+
+  it("rejects a 404-skipped key created by an overlapping copier", async () => {
+    const eligible = entry(
+      "users/hsn_0123456789abcdef01234567/workspace-snapshots/overlap.snapshot.enc",
+      { etag: '"68686868686868686868686868686868"', size: 12 },
+    );
+    let sourceInventoryReads = 0;
+    let destinationInventoryReads = 0;
+
+    await expect(runR2BundlesOnlineCopy(
+      options({
+        apply: true,
+        confirmDestination: destinationBucket,
+        immutableKeysAudited: true,
+      }),
+      environment,
+      {
+        client: {
+          copyObject: vi.fn(async () => "source_missing" as const),
+          headObject: vi.fn(async () => null),
+          putMarker: vi.fn(async () => "created" as const),
+        },
+        inspectActiveOwners: async () => activeOwners,
+        inspectInfrastructure: async () => undefined,
+        log: vi.fn(),
+        readInventory: async (bucket) => {
+          if (bucket === sourceBucket) {
+            sourceInventoryReads += 1;
+            return sourceInventoryReads === 1 ? [eligible] : [];
+          }
+          destinationInventoryReads += 1;
+          return destinationInventoryReads === 1 ? [marker()] : [marker(), eligible];
+        },
+      },
+    )).rejects.toThrow("skipped after confirmed source deletion later appeared");
+  });
+
+  it("rejects a destination-only object absent from both source inventories", async () => {
+    const eligible = entry(
+      "users/hsn_0123456789abcdef01234567/workspace-snapshots/copied.snapshot.enc",
+      { etag: '"78787878787878787878787878787878"', size: 13 },
+    );
+    const unexpected = entry(
+      "users/hsn_0123456789abcdef01234567/workspace-snapshots/unexpected.snapshot.enc",
+      { etag: '"90909090909090909090909090909090"', size: 14 },
+    );
+    let destinationInventory = [marker()];
+
+    await expect(runR2BundlesOnlineCopy(
+      options({
+        apply: true,
+        confirmDestination: destinationBucket,
+        immutableKeysAudited: true,
+      }),
+      environment,
+      {
+        client: {
+          copyObject: vi.fn(async () => {
+            destinationInventory = [marker(), eligible, unexpected];
+            return "copied" as const;
+          }),
+          headObject: vi.fn(async () => ({ etag: eligible.etag, size: eligible.size })),
+          putMarker: vi.fn(async () => "created" as const),
+        },
+        inspectActiveOwners: async () => activeOwners,
+        inspectInfrastructure: async () => undefined,
+        log: vi.fn(),
+        readInventory: async (bucket) => bucket === sourceBucket
+          ? [eligible]
+          : destinationInventory,
+      },
+    )).rejects.toThrow("never observed in OC by this invocation");
   });
 
   it("fails closed when an immutable source identity changes after CopyObject", async () => {

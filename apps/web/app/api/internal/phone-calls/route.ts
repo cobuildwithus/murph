@@ -22,6 +22,9 @@ export const POST = withJsonError(async (request: Request) => {
   const payload = hostedPhoneCallStartRequestSchema.parse(JSON.parse(rawBody));
   const response = await createHostedPhoneCall({
     brief: payload.brief,
+    ...(payload.groupRequester
+      ? { groupRequester: payload.groupRequester }
+      : {}),
     ...(payload.inboundMailboxItemIds
       ? { inboundMailboxItemIds: payload.inboundMailboxItemIds }
       : {}),
