@@ -25,23 +25,28 @@ Completed: 2026-07-29
   person explicitly opens authentication.
 - An explicit readiness restart remounts the shared provider once and preserves
   the existing bounded recovery behavior.
+- Leaving the homepage unmounts the warm provider rather than carrying Privy as
+  ambient root authentication state.
 
 ## Architecture
 
-- `AuthProvider` remains the one owner of the global auth dialog and gains the
-  lazy runtime loader.
+- `HomepageAuthRuntimeProvider` lives in the homepage subtree and owns the one
+  shared landing-page dialog plus the lazy runtime loader. Navigating away from
+  the homepage unmounts both the warm runtime and its provider.
+- The root `AuthProvider` remains the owner of ordinary app-wide auth handoffs and
+  keeps its existing standalone, intent-mounted Privy island.
 - `HostedAuthRuntime` owns the single mounted `HostedPrivyProvider` and exposes
   the existing within-Privy panel plus its explicit restart operation.
-- Landing CTAs use the shared `AuthProvider` dialog in production. Their existing
-  standalone path remains only for isolated component/catalog renderers that do
-  not have the root provider.
+- Landing CTAs and the homepage mobile nav use the homepage provider's shared
+  dialog. Isolated component/catalog renderers retain their existing standalone
+  fallback when that provider is absent.
 - Direct non-landing `AuthDialog` consumers keep the existing standalone island,
-  so this change does not broaden provider lifetime on invitation, funding, or
-  other routes.
+  so this change does not broaden provider lifetime on invitation, funding,
+  settings, or other routes.
 
 ## Complexity intentionally avoided
 
-- No root-level eager Privy import.
+- No root-level eager Privy import or root-lifetime provider.
 - No hidden auth form, CAPTCHA, focusable control, second provider, readiness
   queue, durable state, service, or provider-session reconciliation.
 - No connection-speed heuristics or additional scheduler; the existing idle
@@ -52,7 +57,9 @@ Completed: 2026-07-29
 - Added focused runtime ownership coverage for closed-to-open reuse and explicit
   restart remounting.
 - Added shared-dialog coverage proving the warmed runtime panel is used without
-  loading a standalone provider island.
+  rendering a standalone provider island.
 - Added homepage integration coverage for idle warmup and click-before-idle.
+- Added a synthetic sections-catalog study documenting the invisible warmup and
+  existing early-click readiness state.
 - Exact-head CI remains the broad verification owner for the stacked pull
   request.
