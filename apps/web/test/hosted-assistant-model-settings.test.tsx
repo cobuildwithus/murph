@@ -191,10 +191,10 @@ test("members can switch the provider without changing Terra, Luna, or Sol", asy
       veniceAvailable: true,
     }),
   );
-  assert.match(view.container.textContent ?? "", /Core replies use OpenAI\./u);
+  assert.match(view.container.textContent ?? "", /New core replies use OpenAI\./u);
   assert.doesNotMatch(
     view.container.textContent ?? "",
-    /Direct inference through OpenAI/u,
+    /No chat history saved\./u,
   );
   await act(async () => {
     findButton(view.container, "Change").click();
@@ -202,11 +202,15 @@ test("members can switch the provider without changing Terra, Luna, or Sol", asy
   assert.match(view.document.body.textContent ?? "", /Choose provider/u);
   assert.match(
     view.document.body.textContent ?? "",
-    /Direct inference through OpenAI/u,
+    /No chat history saved\./u,
   );
   assert.match(
     view.document.body.textContent ?? "",
-    /Privacy-first\. Venice stores no prompts or replies\./u,
+    /Privacy-first inference\./u,
+  );
+  assert.match(
+    view.document.body.textContent ?? "",
+    /Murph uses this provider after you save\./u,
   );
   assert.match(
     view.document.body.textContent ?? "",
@@ -251,11 +255,10 @@ test("members can switch the provider without changing Terra, Luna, or Sol", asy
     },
     url: "/api/settings/assistant-model",
   });
-  assert.match(view.container.textContent ?? "", /Terra through Venice/u);
-  assert.match(view.container.textContent ?? "", /Core replies use Venice\./u);
-  assert.match(
-    view.container.textContent ?? "",
-    /New core replies will use Terra through Venice\. A reply already in progress may finish with your previous choice\./u,
+  assert.match(view.container.textContent ?? "", /New core replies use Venice\./u);
+  assertHiddenSaveAnnouncement(
+    view.container,
+    /Saved\. Terra through Venice is your default\./u,
   );
   assert.ok(isRadioChecked(findModelRadio(
     view.container,
@@ -290,7 +293,7 @@ test("closing the provider dialog leaves the draft unchanged", async () => {
   });
 
   assert.equal(view.document.querySelector('[role="dialog"]'), null);
-  assert.match(view.container.textContent ?? "", /Core replies use OpenAI\./u);
+  assert.match(view.container.textContent ?? "", /New core replies use OpenAI\./u);
   assert.ok(saveButton.disabled);
   expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
 
@@ -331,10 +334,10 @@ test("a model-only save adopts the server's canonical provider", async () => {
     payload: { model: HOSTED_ASSISTANT_LUNA_MODEL },
     url: "/api/settings/assistant-model",
   });
-  assert.match(view.container.textContent ?? "", /Core replies use OpenAI\./u);
-  assert.match(
-    view.container.textContent ?? "",
-    /New core replies will use Luna through OpenAI\./u,
+  assert.match(view.container.textContent ?? "", /New core replies use OpenAI\./u);
+  assertHiddenSaveAnnouncement(
+    view.container,
+    /Saved\. Luna through OpenAI is your default\./u,
   );
 
   view.cleanup();
@@ -360,6 +363,22 @@ test("a provider-only save preserves a dormant Sol preference", async () => {
       veniceAvailable: true,
     }),
   );
+  const announcement = findHiddenSaveAnnouncement(view.container);
+  assert.equal(announcement.textContent, "");
+  assert.match(
+    findModelLabel(
+      view.container,
+      HOSTED_ASSISTANT_TERRA_MODEL,
+    ).textContent ?? "",
+    /Active/u,
+  );
+  assert.doesNotMatch(
+    findModelLabel(
+      view.container,
+      HOSTED_ASSISTANT_TERRA_MODEL,
+    ).textContent ?? "",
+    /Default/u,
+  );
   await act(async () => {
     findButton(view.container, "Change").click();
   });
@@ -382,6 +401,11 @@ test("a provider-only save preserves a dormant Sol preference", async () => {
     url: "/api/settings/assistant-model",
   });
   assert.match(view.container.textContent ?? "", /Sol is still saved/u);
+  assert.equal(findHiddenSaveAnnouncement(view.container), announcement);
+  assert.match(
+    announcement.textContent ?? "",
+    /Saved\. New core replies use Terra through Venice while Edge is paused; Sol remains saved\./u,
+  );
   assert.equal(findButton(view.container, "Save change").disabled, false);
 
   view.cleanup();
@@ -457,13 +481,11 @@ test("a combined provider and model save preserves both choices for retry", asyn
     payload: combinedPayload,
     url: "/api/settings/assistant-model",
   });
-  const statusLine = view.container.querySelector<HTMLElement>(
-    '[aria-live="polite"]',
+  assert.match(view.container.textContent ?? "", /New core replies use Venice\./u);
+  assertHiddenSaveAnnouncement(
+    view.container,
+    /Saved\. Sol through Venice is your default\./u,
   );
-  assert.ok(statusLine);
-  assert.match(statusLine.textContent ?? "", /Sol through Venice/u);
-  assert.match(view.container.textContent ?? "", /Core replies use Venice\./u);
-  assert.equal(statusLine.className.includes("whitespace-nowrap"), false);
   assert.ok(findButton(view.container, "Save change").disabled);
 
   view.cleanup();
@@ -505,9 +527,9 @@ test("non-Edge members can explicitly save Luna as their default model", async (
     payload: { model: HOSTED_ASSISTANT_LUNA_MODEL },
     url: "/api/settings/assistant-model",
   });
-  assert.match(
-    view.container.textContent ?? "",
-    /Future core replies will use GPT-5\.6 Luna\./,
+  assertHiddenSaveAnnouncement(
+    view.container,
+    /Saved\. Luna through OpenAI is your default\./u,
   );
   assert.ok(isRadioChecked(lunaInput));
   assert.ok(findButton(view.container, "Save change").disabled);
@@ -555,7 +577,7 @@ test("Edge members can explicitly save Sol as their default model", async () => 
   assert.ok(isRadioChecked(solInput));
   assert.match(
     findModelLabel(view.container, HOSTED_ASSISTANT_TERRA_MODEL).textContent ?? "",
-    /Current/,
+    /Default/,
   );
   assert.match(
     findModelLabel(view.container, HOSTED_ASSISTANT_SOL_MODEL).textContent ?? "",
@@ -573,9 +595,9 @@ test("Edge members can explicitly save Sol as their default model", async () => 
     payload: { model: HOSTED_ASSISTANT_SOL_MODEL },
     url: "/api/settings/assistant-model",
   });
-  assert.match(
-    view.container.textContent ?? "",
-    /Future core replies will use GPT-5\.6 Sol\./,
+  assertHiddenSaveAnnouncement(
+    view.container,
+    /Saved\. Sol through OpenAI is your default\./u,
   );
   assert.ok(findButton(view.container, "Save change").disabled);
 
@@ -623,9 +645,9 @@ test("a generic save failure keeps the selected model available to retry", async
     await Promise.resolve();
   });
 
-  assert.match(
-    view.container.textContent ?? "",
-    /Future core replies will use GPT-5\.6 Sol\./,
+  assertHiddenSaveAnnouncement(
+    view.container,
+    /Saved\. Sol through OpenAI is your default\./u,
   );
   assert.ok(findButton(view.container, "Save change").disabled);
   expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
@@ -940,9 +962,9 @@ test("the canonical save response removes Sol after an Edge downgrade", async ()
   assert.ok(findModelRadio(view.container, HOSTED_ASSISTANT_SOL_MODEL).disabled);
   assert.ok(findModelRadio(view.container, HOSTED_ASSISTANT_TERRA_MODEL));
   assert.ok(isRadioChecked(lunaInput));
-  assert.match(
-    view.container.textContent ?? "",
-    /Future core replies will use GPT-5\.6 Luna\./,
+  assertHiddenSaveAnnouncement(
+    view.container,
+    /Saved\. Luna through OpenAI is your default\./u,
   );
 
   view.cleanup();
@@ -1028,7 +1050,7 @@ test("members without active personal access see both provider and model control
     markup,
     /Provider and model choices are read-only until personal Murph access is active\./,
   );
-  assert.match(markup, /Core replies use.*OpenAI/su);
+  assert.match(markup, /New core replies use.*OpenAI/su);
   assert.match(markup, /<button[^>]*disabled=""[^>]*>Change<\/button>/u);
   assert.doesNotMatch(markup, /Choose provider/u);
 });
@@ -1042,6 +1064,26 @@ function findModelRadio(
   );
   assert.ok(radio);
   return radio;
+}
+
+function assertHiddenSaveAnnouncement(
+  container: HTMLElement,
+  expected: RegExp,
+): void {
+  const announcement = findHiddenSaveAnnouncement(container);
+  assert.match(announcement.textContent ?? "", expected);
+  assert.equal(
+    container.querySelector('[aria-live="polite"]:not(.sr-only)'),
+    null,
+  );
+}
+
+function findHiddenSaveAnnouncement(container: HTMLElement): HTMLElement {
+  const announcement = container.querySelector<HTMLElement>(
+    '[aria-live="polite"].sr-only',
+  );
+  assert.ok(announcement);
+  return announcement;
 }
 
 function isRadioChecked(radio: HTMLInputElement): boolean {

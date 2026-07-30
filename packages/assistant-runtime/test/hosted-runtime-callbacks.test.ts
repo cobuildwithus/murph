@@ -12861,12 +12861,40 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
-  it("routes hosted email thread deliveries through the shared effects port", async () => {
+  it.each([
+    {
+      currentTarget: "owner@example.test",
+      label: "removes sender-controlled recipients",
+      staleCc: ["attacker-cc@example.test"],
+      staleTo: ["attacker@example.test"],
+    },
+    {
+      currentTarget: "current@example.test",
+      label: "replaces a stale owner address",
+      staleCc: ["previous-cc@example.test"],
+      staleTo: ["previous@example.test"],
+    },
+  ])("$label on a direct serialized email thread at provider entry", async ({
+    currentTarget,
+    staleCc,
+    staleTo,
+  }) => {
+    const lastMessageId = "<message_parent_123@example.test>";
+    const references = ["<message_root_123@example.test>"];
+    const subject = "Hosted subject";
     const hostedEmailThreadTarget = serializeHostedEmailThreadTarget({
-      lastMessageId: "<message_parent_123@example.test>",
-      references: ["<message_root_123@example.test>"],
-      subject: "Hosted subject",
-      to: ["sender@example.test"],
+      cc: staleCc,
+      lastMessageId,
+      references,
+      subject,
+      to: staleTo,
+    });
+    const expectedHostedEmailThreadTarget = serializeHostedEmailThreadTarget({
+      cc: [],
+      lastMessageId,
+      references,
+      subject,
+      to: [currentTarget],
     });
     const effect = createEffect({
       bindingDeliveryKind: "thread",
@@ -12875,9 +12903,11 @@ describe("hosted runtime callbacks", () => {
       explicitTarget: hostedEmailThreadTarget,
       idempotencyKey: "assistant-outbox:intent_123",
       identityId: "assistant@example.com",
-      replyToMessageId: "<message_parent_123@example.test>",
-      subject: "Hosted subject",
+      replyToMessageId: lastMessageId,
+      subject,
+      threadIsDirect: true,
     });
+    const resolveCurrentVerifiedEmailRecipient = vi.fn(async () => currentTarget);
     const sendEmail = vi.fn(async (request: HostedEmailSendRequest) =>
       createDelivery({
         channel: "email",
@@ -12891,8 +12921,8 @@ describe("hosted runtime callbacks", () => {
         // hosted dispatch boundary must not forward it to the email transport.
         identityId: "hid_0123456789abcdef0123456789abcdef",
         message: "hello from hosted",
-        replyToMessageId: "<message_parent_123@example.test>",
-        subject: "Hosted subject",
+        replyToMessageId: lastMessageId,
+        subject,
         target: hostedEmailThreadTarget,
         targetKind: "thread",
       });
@@ -12906,26 +12936,40 @@ describe("hosted runtime callbacks", () => {
       assistantDeliveryEffects: [effect],
       wake: HOSTED_WAKE.wake,
       effectsPort: createHostedRuntimeEffectsPortStub({
+        resolveCurrentVerifiedEmailRecipient,
         sendEmail,
       }),
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
+    expect(resolveCurrentVerifiedEmailRecipient).toHaveBeenCalledWith({
+      signal: null,
+    });
     expect(sendEmail).toHaveBeenCalledWith({
       html: null,
       idempotencyKey: "assistant-outbox:intent_123",
       message: "hello from hosted",
       newsletterAuthorizationProof: null,
       planGroupFanout: true,
-      replyToMessageId: "<message_parent_123@example.test>",
-      subject: "Hosted subject",
-      target: hostedEmailThreadTarget,
+      replyToMessageId: lastMessageId,
+      subject,
+      target: expectedHostedEmailThreadTarget,
       targetKind: "thread",
+    });
+    const providerRequest = sendEmail.mock.calls[0]?.[0];
+    expect(parseHostedEmailThreadTarget(providerRequest?.target)).toMatchObject({
+      cc: [],
+      lastMessageId,
+      references: [...references, lastMessageId],
+      subject,
+      targetKind: "explicit",
+      to: [currentTarget],
     });
     expect(outcomes).toEqual([
       expect.objectContaining({
         deliveryChannel: "email",
         deliveryStatus: "sent",
+        target: expectedHostedEmailThreadTarget,
       }),
     ]);
   });
@@ -12995,12 +13039,32 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
-  it("fails closed before direct email provider entry when verified email is cleared", async () => {
+  it.each([
+    {
+      label: "explicit direct email",
+      target: "previous@example.test",
+      targetKind: "explicit" as const,
+    },
+    {
+      label: "direct serialized email thread",
+      target: serializeHostedEmailThreadTarget({
+        cc: ["attacker-cc@example.test"],
+        lastMessageId: "<message_parent_123@example.test>",
+        references: ["<message_root_123@example.test>"],
+        subject: "Hosted subject",
+        to: ["attacker@example.test"],
+      }),
+      targetKind: "thread" as const,
+    },
+  ])("fails closed before $label provider entry when verified email is cleared", async ({
+    target,
+    targetKind,
+  }) => {
     const effect = createEffect({
-      bindingDeliveryKind: null,
-      bindingDeliveryTarget: null,
+      bindingDeliveryKind: targetKind === "thread" ? "thread" : null,
+      bindingDeliveryTarget: targetKind === "thread" ? target : null,
       channel: "email",
-      explicitTarget: "previous@example.test",
+      explicitTarget: target,
       threadId: null,
       threadIsDirect: true,
     });
@@ -13008,8 +13072,8 @@ describe("hosted runtime callbacks", () => {
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       await dependencies.sendEmail({
         message: "Private meal closeout",
-        target: "previous@example.test",
-        targetKind: "explicit",
+        target,
+        targetKind,
       });
       throw new Error("unreachable without current email authority");
     });
@@ -13056,6 +13120,9 @@ describe("hosted runtime callbacks", () => {
       threadId: "thread_123",
       threadIsDirect: false,
     });
+    const resolveCurrentVerifiedEmailRecipient = vi.fn(
+      async () => "owner@example.test",
+    );
     const sendEmail = vi.fn(async () => ({
       fanoutRecipientMemberIds: ["member_one", "member_two"],
       target: fanoutTarget,
@@ -13083,10 +13150,18 @@ describe("hosted runtime callbacks", () => {
     await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       wake: HOSTED_WAKE.wake,
-      effectsPort: createHostedRuntimeEffectsPortStub({ sendEmail }),
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        resolveCurrentVerifiedEmailRecipient,
+        sendEmail,
+      }),
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
+    expect(resolveCurrentVerifiedEmailRecipient).not.toHaveBeenCalled();
+    expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({
+      target: fanoutTarget,
+      targetKind: "thread",
+    }));
     expect(mocks.createAssistantOutboxIntent).toHaveBeenCalledTimes(2);
     const childInputs = mocks.createAssistantOutboxIntent.mock.calls.map((call) => call[0]);
     expect(childInputs.map((child) => child.dedupeToken)).toEqual([

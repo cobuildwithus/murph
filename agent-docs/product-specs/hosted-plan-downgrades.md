@@ -38,6 +38,13 @@ turn:
   Venice rollout flag is enabled, an active personal member may choose Venice
   instead. The choice changes core assistant inference only; specialized tools
   can continue to use their own managed providers.
+- Settings may state that Murph disables OpenAI response storage because the
+  direct Responses path sends `store: false`, which [disables Responses API
+  storage](https://developers.openai.com/api/docs/guides/migrate-to-responses#4-decide-when-to-use-statefulness).
+  This does not promise zero data retention: OpenAI separately documents
+  [abuse-monitoring, prompt-cache, and endpoint retention
+  controls](https://developers.openai.com/api/docs/guides/your-data#v1responses),
+  and third-party tools remain subject to their own retention policies.
 - Settings may call Venice privacy-first and state that Venice stores no prompts
   or replies, consistent with [Venice's API privacy
   documentation](https://docs.venice.ai/welcome/privacy). This is a
@@ -78,10 +85,17 @@ turn:
   model, and reasoning effort or a synthetic thread-container's resolved room
   model to the runner at the next hosted invocation boundary. If Venice is
   disabled, a stored personal Venice preference resolves to OpenAI without
-  deleting member intent. This is also the activation boundary for changes made
-  through Settings. An already-active invocation can retain that snapshot
-  through its bounded 180-second idle window, so Settings states that an idle
-  run can take up to three minutes to close.
+  deleting member intent. This remains the activation boundary for changes made
+  through Settings. After an effective provider change commits, Settings sends
+  a bounded payloadless Temporal runtime-wake signal. Temporal coalesces
+  duplicate provider wakes and asks the existing Cloudflare adapter to process
+  one even when reconciliation facts are idle. A warm invocation compares its
+  provider snapshot with the live Web-owned preference, checkpoints immediately
+  when they differ, and returns the existing immediate-recheck edge so a fresh
+  invocation adopts the saved provider before the next message. Signal failure
+  does not undo the durable save: the next invocation and the provider-entry
+  revalidation remain correctness backstops. Model-only and reasoning-only
+  changes keep the existing warm-invocation behavior.
 - A confirmed `murph.assistant_configuration` update is different: its
   authoritative full web response becomes an ephemeral target for the next
   separately accepted provider turn, including a follow-up serviced by the
@@ -107,8 +121,10 @@ turn:
   ambiguous input authority fails closed.
   Murph may suggest Luna or an Edge upgrade, but it must not switch model or
   reasoning effort automatically because usage is low or exhausted.
-- Changing the preference does not create a mailbox item, wake, queue, or a
-  second runtime state machine.
+- Changing a preference does not create a mailbox item, queue, or second runtime
+  state machine. An effective provider change from authenticated Settings sends
+  only `runtime_wake_requested`; unchanged, model-only, and reasoning-only saves
+  do not. Existing `runtime_recheck_requested` callers remain facts-only.
 
 Conversation style remains independently available through
 `murph.personalization`, which atomically reads or updates the private member's

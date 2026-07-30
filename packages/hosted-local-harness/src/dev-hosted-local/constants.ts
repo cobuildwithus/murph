@@ -78,6 +78,7 @@ export const HOSTED_WORKER_OPTIONAL_SECRET_NAMES = [
   "HOSTED_AI_USAGE_REPORTING_SECRET",
   "HOSTED_EMAIL_SIGNING_SECRET",
   "LINQ_WEBHOOK_SECRET",
+  "VENICE_API_KEY",
 ] as const;
 
 export const repoRoot = hostedLocalHarnessRepoRoot;

@@ -145,6 +145,7 @@ export function createHostedUserRuntimeWorkflowMachine(
   const state = createInitialWorkflowState(input.userId, input.state);
   let completedIterations = 0;
   let mailboxSignalVersion = 0;
+  let runtimeWakeSignalVersion = 0;
   let latestMailboxSignalVersion: number | null = null;
   let lastMailboxSignalVersionRead =
     state.latestMailboxPointer !== null ? -1 : mailboxSignalVersion;
@@ -172,6 +173,13 @@ export function createHostedUserRuntimeWorkflowMachine(
       return;
     }
 
+    if (signal.kind === "runtime_wake_requested") {
+      state.runtimeWakeRequested = true;
+      state.signalVersion += 1;
+      runtimeWakeSignalVersion += 1;
+      return;
+    }
+
     if (signal.kind === "mailbox_appended") {
       state.signalVersion += 1;
       mailboxSignalVersion += 1;
@@ -191,10 +199,12 @@ export function createHostedUserRuntimeWorkflowMachine(
 
   const executeRuntimeProcessing = async (processingInput: {
     clearMailboxPointerOnAccepted: boolean;
+    clearRuntimeWakeOnAccepted?: boolean;
     processingMode?: HostedRuntimeProcessingMode | null;
   }): Promise<void> => {
     const signalVersionBeforeExecution = state.signalVersion;
     const mailboxVersionBeforeExecution = mailboxSignalVersion;
+    const runtimeWakeVersionBeforeExecution = runtimeWakeSignalVersion;
     let execution: HostedRuntimeEnsureProcessingResponse;
     const orchestrationAttemptId = runtime.uuid();
     state.lastOrchestrationAttemptId = orchestrationAttemptId;
@@ -245,6 +255,12 @@ export function createHostedUserRuntimeWorkflowMachine(
         && processingInput.clearMailboxPointerOnAccepted
       ) {
         clearMailboxPointer(state);
+      }
+      if (
+        processingInput.clearRuntimeWakeOnAccepted
+        && runtimeWakeSignalVersion === runtimeWakeVersionBeforeExecution
+      ) {
+        state.runtimeWakeRequested = false;
       }
       if (mailboxSignalArrivedDuringExecution || signalArrivedDuringExecution) {
         return;
@@ -340,6 +356,7 @@ export function createHostedUserRuntimeWorkflowMachine(
 
       const inboxMediaRetentionWakeAt = facts.workspace?.inboxMediaRetentionWakeAt ?? null;
       if (facts.blocked !== null) {
+        state.runtimeWakeRequested = false;
         if (isDueTimestamp(inboxMediaRetentionWakeAt, runtime.nowMs())) {
           await executeRuntimeProcessing({
             clearMailboxPointerOnAccepted: false,
@@ -377,6 +394,7 @@ export function createHostedUserRuntimeWorkflowMachine(
       ) {
         await executeRuntimeProcessing({
           clearMailboxPointerOnAccepted: hasAnyMailboxLag(facts),
+          clearRuntimeWakeOnAccepted: state.runtimeWakeRequested,
         });
         continue;
       }
@@ -384,6 +402,7 @@ export function createHostedUserRuntimeWorkflowMachine(
       if (hasMailboxLag(facts, "system")) {
         await executeRuntimeProcessing({
           clearMailboxPointerOnAccepted: true,
+          clearRuntimeWakeOnAccepted: state.runtimeWakeRequested,
           processingMode: "system_mailbox",
         });
         continue;
@@ -394,7 +413,16 @@ export function createHostedUserRuntimeWorkflowMachine(
       if (isDueTimestamp(inboxMediaRetentionWakeAt, runtime.nowMs())) {
         await executeRuntimeProcessing({
           clearMailboxPointerOnAccepted: false,
+          clearRuntimeWakeOnAccepted: state.runtimeWakeRequested,
           processingMode: "inbox_media_retention",
+        });
+        continue;
+      }
+
+      if (state.runtimeWakeRequested) {
+        await executeRuntimeProcessing({
+          clearMailboxPointerOnAccepted: false,
+          clearRuntimeWakeOnAccepted: true,
         });
         continue;
       }
@@ -439,6 +467,13 @@ function parseHostedRuntimeWorkflowSignal(value: unknown): HostedRuntimeSignal {
 
   if (kind === "runtime_recheck_requested") {
     assertWorkflowExactKeys(record, "Hosted runtime recheck signal", [
+      "kind",
+    ]);
+    return { kind };
+  }
+
+  if (kind === "runtime_wake_requested") {
+    assertWorkflowExactKeys(record, "Hosted runtime wake signal", [
       "kind",
     ]);
     return { kind };
@@ -565,6 +600,7 @@ function createInitialWorkflowState(
     lastRuntimeStatus: carryForward?.lastRuntimeStatus ?? null,
     latestMailboxPointer: carryForward?.latestMailboxPointer ?? null,
     mailboxSignalCount: carryForward?.mailboxSignalCount ?? 0,
+    runtimeWakeRequested: carryForward?.runtimeWakeRequested ?? false,
     signalVersion: carryForward?.signalVersion ?? 0,
     userId,
   };
