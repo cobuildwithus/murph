@@ -23,14 +23,11 @@ def replace_once(path: str, old: str, new: str) -> None:
     target.write_text(text.replace(old, new, 1))
 
 
-def write_new(path: str, content: str) -> None:
+def write_exact(path: str, content: str) -> None:
     target = ROOT / path
-    if target.exists():
-        if target.read_text() != content:
-            raise RuntimeError(f"{path}: existing content differs")
-        return
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(content)
+    if not target.exists() or target.read_text() != content:
+        target.write_text(content)
 
 
 def patch_crypto_lane() -> None:
@@ -67,6 +64,7 @@ def patch_prisma_schema() -> None:
         "model HostedInferenceConnection {\n"
         "  memberId            String       @id @map(\"member_id\")\n"
         "  protocol            String\n"
+        "  selected            Boolean      @default(false)\n"
         "  configEncrypted     String       @map(\"config_encrypted\")\n"
         "  revision            Int          @default(1)\n"
         "  contextWindowTokens Int          @map(\"context_window_tokens\")\n"
@@ -82,8 +80,20 @@ def patch_prisma_schema() -> None:
         "\n"
         "model HostedProductFeedback {\n",
     )
+    replace_once(
+        "apps/web/prisma/schema.prisma",
+        "model HostedInferenceConnection {\n"
+        "  memberId            String       @id @map(\"member_id\")\n"
+        "  protocol            String\n"
+        "  configEncrypted     String       @map(\"config_encrypted\")\n",
+        "model HostedInferenceConnection {\n"
+        "  memberId            String       @id @map(\"member_id\")\n"
+        "  protocol            String\n"
+        "  selected            Boolean      @default(false)\n"
+        "  configEncrypted     String       @map(\"config_encrypted\")\n",
+    )
 
-    write_new(
+    write_exact(
         "apps/web/prisma/migrations/20260730233000_hosted_inference_connection/migration.sql",
         """BEGIN;
 SET LOCAL lock_timeout = '5s';
@@ -91,6 +101,7 @@ SET LOCAL lock_timeout = '5s';
 CREATE TABLE \"hosted_inference_connection\" (
   \"member_id\" TEXT NOT NULL,
   \"protocol\" TEXT NOT NULL,
+  \"selected\" BOOLEAN NOT NULL DEFAULT false,
   \"config_encrypted\" TEXT NOT NULL,
   \"revision\" INTEGER NOT NULL DEFAULT 1,
   \"context_window_tokens\" INTEGER NOT NULL,
@@ -117,9 +128,44 @@ COMMIT;
     )
 
 
+def patch_architecture_docs() -> None:
+    replace_once(
+        "agent-docs/product-specs/bring-your-own-inference.md",
+        "- compatibility profile; and\n- verification time.\n\n"
+        "Selection reuses `HostedMember.assistantProviderPreference = \"custom\"`. There is\n"
+        "no duplicate selected flag, connection id, provider registry, status machine,\n"
+        "verification queue, retry row, or Cloudflare copy of durable connection state.\n",
+        "- compatibility profile;\n- verification time; and\n- one selection boolean.\n\n"
+        "The selection boolean lives on the singular connection so the existing managed\n"
+        "OpenAI/Venice, model, and reasoning preferences remain dormant and unchanged.\n"
+        "There is no connection id, selected-connection foreign key, provider registry,\n"
+        "status machine, verification queue, retry row, or Cloudflare copy of durable\n"
+        "connection state. Replacing the connection deselects it until the member\n"
+        "explicitly selects the verified replacement.\n",
+    )
+    replace_once(
+        "agent-docs/exec-plans/active/2026-07-30-bring-your-own-inference.md",
+        "- The singular connection is selected through the existing provider preference;\n"
+        "  updating or deleting the connection first returns the member to managed\n"
+        "  inference.\n",
+        "- The singular connection owns one selection boolean so managed provider, model,\n"
+        "  and reasoning preferences remain untouched. Updating the connection deselects\n"
+        "  it before the verified replacement can be selected.\n",
+    )
+    replace_once(
+        "agent-docs/exec-plans/active/2026-07-30-bring-your-own-inference.md",
+        "- `assistantProviderPreference = \"custom\"` is the only selection fact; there is\n"
+        "  no duplicate selected flag or connection registry.\n",
+        "- The singular connection's `selected` boolean is the only custom-selection\n"
+        "  fact. Existing managed provider/model/reasoning preferences remain dormant;\n"
+        "  there is no selected-connection foreign key or connection registry.\n",
+    )
+
+
 def main() -> None:
     patch_crypto_lane()
     patch_prisma_schema()
+    patch_architecture_docs()
 
 
 if __name__ == "__main__":
