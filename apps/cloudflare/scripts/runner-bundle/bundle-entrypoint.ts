@@ -64,7 +64,12 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // closure while remaining within the reviewed total budget. Ratchet the static
 // baseline to that combined measurement and retain the established small-growth
 // tolerances.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_856_451 + 32_768;
+//
+// Total baseline raised 2026-07-30 after the reviewed resident group-email pain
+// fallback moved the Linux CI measurement from 9,888,906B to 9,889,434B without
+// adding a module or forbidden boot input. Keep the established 32KB allowance
+// so the next small authored addition does not immediately fail assembly.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_889_434 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_649_331;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_117_894;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
