@@ -85,6 +85,7 @@ import {
   buildConversationHomeRedirectResponse,
   buildFallbackSignupLinkResponse,
   buildFamilyInviteAcceptedResponse,
+  buildGroupLineRecoveryResponse,
   buildIgnoredLinqWebhookPlan,
   buildQuotaReplyResponse,
   buildSignupLinkResponse,
@@ -92,6 +93,7 @@ import {
   HOSTED_LINQ_INACTIVE_MEMBER_NOTICE_REASON,
   hostedLinqFirstContactContainsBlockedContent,
   isHostedLinqDeliverableFirstContact,
+  isHostedLinqIMessageService,
   resolveHostedOnboardingLinqMessageContext,
 } from "./webhook-provider-linq-shared";
 import {
@@ -104,8 +106,11 @@ import {
 } from "./linq-home-routing";
 import {
   claimHostedLinqProactiveConversationCapacityTx,
+  readHostedLinqIncomingLineState,
 } from "./linq-line-store";
-import { resolveHostedLinqSignupWelcomeDailyLimit } from "./linq-routing-policy";
+import {
+  resolveHostedLinqSignupWelcomeDailyLimit,
+} from "./linq-routing-policy";
 import {
   createHostedEmailLookupKey,
   createHostedEmailLookupKeyReadCandidates,
@@ -117,7 +122,6 @@ import {
 } from "./contact-privacy";
 import { normalizePhoneNumber } from "./phone";
 import {
-  ensureHostedThreadContainerRouteTx,
   refreshHostedThreadContainerDeliveryRouteTx,
 } from "../hosted-routing/thread-container-service";
 import {
@@ -160,7 +164,10 @@ import {
 import {
   observeHostedUsageReferralInboundTx,
 } from "../hosted-growth/usage-referral";
-import type { HostedOnboardingReadClient } from "./shared";
+import {
+  lockHostedMemberRow,
+  type HostedOnboardingReadClient,
+} from "./shared";
 import {
   hasActiveHostedCryptoDomainRootsForUserTx,
 } from "../hosted-crypto/domain-root-store";
@@ -2456,17 +2463,26 @@ type HostedLinqNewGroupAdmissionIgnoreReason =
   | "local-inbound-not-allowlisted"
   | "own-message"
   | "provision-unavailable"
+  | "recipient-line-hard-blocked"
   | "recipient-line-authority-unresolved"
+  | "recipient-line-conflicting"
+  | "recipient-line-degraded-unavailable"
   | "recipient-line-unmanaged"
+  | "recipient-line-not-assigned"
+  | "recipient-line-service-unavailable"
+  | "recipient-line-structurally-unavailable"
   | "sender-contact-unresolved"
   | "sender-identity-unresolved"
   | "sender-inactive";
 
 /**
  * An unbound group can be admitted by either one roster-matched pending setup
- * or the existing active-sender fallback. The recipient must still resolve to
- * an active managed Murph Linq line; the webhook recipient alone is never line
- * authority. Existing routes are handled before this admission path.
+ * or the existing active-sender fallback when the recipient line is
+ * assignable. An AT_RISK or HARD_BLOCKED line retains the stricter recovery
+ * boundary: only its exact active assigned sender may proceed, and a hard
+ * block plans the private backup-number prompt instead of provisioning. The
+ * webhook recipient alone is never line authority. Existing routes are
+ * handled before this admission path.
  */
 async function planHostedLinqGroupChatWebhook(input: {
   affirmativeReaction?: boolean;
@@ -2488,9 +2504,10 @@ async function planHostedLinqGroupChatWebhook(input: {
   const ignored = (
     reason: HostedLinqNewGroupAdmissionIgnoreReason,
     existingMemberMatch: HostedLinqExistingMemberMatch = "none",
+    responseReason = "group-chat",
   ) =>
     logHostedLinqWebhookPlannerDecisionAndReturn(
-      buildIgnoredLinqWebhookPlan("group-chat"),
+      buildIgnoredLinqWebhookPlan(responseReason),
       buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
         existingMemberMatch,
         reason,
@@ -2555,18 +2572,136 @@ async function planHostedLinqGroupChatWebhook(input: {
       activeSenderMemberId = sender.id;
     }
   }
-  if (!activeSenderMemberId && input.rosterUnavailable) {
-    throw hostedOnboardingError({
-      code: "HOSTED_LINQ_PENDING_GROUP_ROSTER_UNAVAILABLE",
-      httpStatus: 502,
-      message:
-        "Linq group roster authority is temporarily unavailable.",
-      retryable: true,
-    });
+  if (
+    !activeSenderMemberId
+    && !input.rosterUnavailable
+    && input.participantMemberIds.length === 0
+  ) {
+    return ignored(
+      inactiveSender ? "sender-inactive" : "sender-identity-unresolved",
+      senderIdentityMatch,
+    );
   }
-  const pendingSetupParticipantMemberIds = activeSenderMemberId
-    ? [...new Set([...input.participantMemberIds, activeSenderMemberId])]
-    : input.participantMemberIds;
+  const lineState = await readHostedLinqIncomingLineState({
+    phoneNumberLookupKeys: input.threadRouteAccountLookupKeys,
+    prisma: input.prisma,
+  });
+
+  if (lineState.kind === "unmanaged") {
+    return ignored(
+      "recipient-line-unmanaged",
+      senderIdentityMatch,
+      "group-chat-line-unavailable",
+    );
+  }
+  if (lineState.kind === "conflicting") {
+    return ignored(
+      "recipient-line-conflicting",
+      senderIdentityMatch,
+      "group-chat-line-unavailable",
+    );
+  }
+  if (lineState.kind === "structurally_unavailable") {
+    return ignored(
+      "recipient-line-structurally-unavailable",
+      senderIdentityMatch,
+      "group-chat-line-unavailable",
+    );
+  }
+  if (lineState.kind === "degraded_unavailable") {
+    return ignored(
+      "recipient-line-degraded-unavailable",
+      senderIdentityMatch,
+      "group-chat-line-unavailable",
+    );
+  }
+  if (
+    (
+      lineState.kind === "at_risk"
+      || lineState.kind === "hard_blocked"
+    )
+    && !isHostedLinqIMessageService(messageEvent.data.service)
+  ) {
+    return ignored(
+      "recipient-line-service-unavailable",
+      senderIdentityMatch,
+      "group-chat-line-unavailable",
+    );
+  }
+  let pendingSetupParticipantMemberIds: readonly string[];
+  if (lineState.kind === "at_risk" || lineState.kind === "hard_blocked") {
+    if (!activeSenderMemberId) {
+      return ignored(
+        inactiveSender ? "sender-inactive" : "sender-identity-unresolved",
+        senderIdentityMatch,
+        "group-chat-line-unavailable",
+      );
+    }
+    await lockHostedMemberRow(input.prisma, activeSenderMemberId);
+    await acquireHostedMemberHomeLinqRouteLockTx({
+      memberId: activeSenderMemberId,
+      prisma: input.prisma,
+    });
+    if (
+      !(await readHostedRuntimeAiAccessDecision({
+        memberId: activeSenderMemberId,
+        prisma: input.prisma,
+      })).allowed
+    ) {
+      return ignored("sender-inactive", senderIdentityMatch);
+    }
+    const senderAuthority = readHostedLinqHomeLineAuthority(
+      await readHostedMemberRoutingState({
+        memberId: activeSenderMemberId,
+        prisma: input.prisma,
+      }),
+    );
+    if (
+      senderAuthority.kind === "none"
+      || senderAuthority.recipientPhone !== incomingRecipientPhone
+    ) {
+      return ignored(
+        "recipient-line-not-assigned",
+        senderIdentityMatch,
+        "group-chat-line-unavailable",
+      );
+    }
+
+    if (lineState.kind === "hard_blocked") {
+      return logHostedLinqWebhookPlannerDecisionAndReturn(
+        buildGroupLineRecoveryResponse({
+          incomingRecipientPhone,
+          memberId: activeSenderMemberId,
+          occurredAt,
+          participantContact: {
+            kind: participantContact.kind,
+            value: participantContact.value,
+          },
+          sourceEventId: input.event.event_id,
+          threadId: summary.chatId,
+        }),
+        buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
+          existingMemberMatch: senderIdentityMatch,
+          reason: "recipient-line-hard-blocked",
+          routeStage: "new-group-line-recovery-planned",
+        }),
+      );
+    }
+    pendingSetupParticipantMemberIds = [activeSenderMemberId];
+  } else {
+    if (!activeSenderMemberId && input.rosterUnavailable) {
+      throw hostedOnboardingError({
+        code: "HOSTED_LINQ_PENDING_GROUP_ROSTER_UNAVAILABLE",
+        httpStatus: 502,
+        message:
+          "Linq group roster authority is temporarily unavailable.",
+        retryable: true,
+      });
+    }
+    pendingSetupParticipantMemberIds = activeSenderMemberId
+      ? [...new Set([...input.participantMemberIds, activeSenderMemberId])]
+      : input.participantMemberIds;
+  }
 
   let createdContainerMemberId: string | null = null;
   let demotedMailboxConsumedAt: Date | null = null;
