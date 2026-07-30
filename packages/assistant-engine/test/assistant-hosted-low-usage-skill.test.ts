@@ -68,6 +68,11 @@ describe('assistant hosted low-usage skill', () => {
 
   it('keeps the first heads-up to one short final segment', async () => {
     const skill = await readLowUsageSkill()
+    const normalizedSkill = skill.replace(/\s+/gu, ' ')
+    const firstHeadsUpSection = skill.slice(
+      skill.indexOf('## Choose the first-heads-up question'),
+      skill.indexOf('## Referral comedy shape'),
+    )
 
     expect(skill).toContain('append exactly one final usage segment')
     expect(skill).toContain('using `---` only on a bubble-supporting channel')
@@ -86,6 +91,24 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain('Never expose the internal delimiter')
     expect(skill).toContain('ignore `usedPercent`, `remainingPercent`, `forecast`')
     expect(skill).toContain('Do not render a link or Markdown link')
+    expect(normalizedSkill).toContain(
+      'In a group, also keep the first heads-up link-free',
+    )
+    expect(normalizedSkill).toContain(
+      'A yes to "want the options?" asks only for an explanation',
+    )
+    expect(firstHeadsUpSection).not.toContain(
+      'https://www.withmurph.ai/groups/fund/',
+    )
+    expect(firstHeadsUpSection).toContain(
+      "we're getting low on Murph time in here",
+    )
+    expect(firstHeadsUpSection).not.toContain(
+      "we're getting low on messages in here",
+    )
+    expect(normalizedSkill).toContain(
+      'Do not frame each text as a unit being spent',
+    )
     expect(skill).toContain('Do not repeat the heads-up')
   })
 
@@ -97,7 +120,7 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain('**Direct paid Pulse or Edge:**')
     expect(skill).toContain('**Family sponsored:**')
     expect(skill).toContain('**Hosted group:**')
-    expect(skill).toContain('Do not promise a link')
+    expect(normalizedSkill).toContain('Do not promise a link')
     expect(skill).toContain('Personal top-ups are unavailable')
     expect(skill).toContain('Family plan owner may')
     expect(skill).toContain('add one-time usage for this active member')
@@ -133,16 +156,42 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain('group ID into a model-composed link')
     expect(skill).toContain('call `murph.group action="read_usage"` once before writing the')
     expect(skill).toContain('`murph.group action="read_usage_referral"` once')
-    expect(skill).toContain('This only offers')
+    expect(normalizedSkill).toContain(
+      "Also call it on a hosted group's first trusted low-usage turn",
+    )
+    expect(skill).toContain('Mentioning an earned route only offers')
     expect(skill).toContain('does not arm one')
-    expect(skill).toContain('include it in the same segment as a plain first-party link')
+    expect(normalizedSkill).toContain(
+      'A returned funding URL is authority for a later requested follow-up, not copy for the first heads-up',
+    )
+    expect(normalizedSkill).toContain(
+      'present all available paths before any link',
+    )
+    expect(normalizedSkill).toContain(
+      'place any funding URL after the sponsored path rather than opening with it',
+    )
+    expect(normalizedSkill).toContain(
+      'Never send it in the first assistant-initiated heads-up',
+    )
+    expect(normalizedSkill).toContain(
+      'sponsoring more Murph time for the room, not buying messages',
+    )
+    expect(normalizedSkill).toContain(
+      'Do not volunteer a message count',
+    )
+    expect(normalizedSkill).not.toContain(
+      'include it in the same segment as a plain first-party link',
+    )
+    expect(normalizedSkill).not.toContain(
+      'sponsor action in approximate messages',
+    )
     expect(skill).toContain("Match the room's energy")
     expect(skill).toContain('without naming or singling out a nonpayer')
     expect(skill).toContain('guilt-trip, call out nonpayers')
     expect(skill).toContain('skip the heads-up entirely')
     expect(skill).toContain('standing no-re-offer rule wins')
     expect(skill).toContain('Never switch it automatically')
-    expect(skill).toContain('If no funding URL is returned')
+    expect(normalizedSkill).toContain('If no funding URL is returned')
     expect(skill).toContain('period end when relevant')
     expect(skill).toContain('remaining percentage when the result includes remainingPercent')
     expect(skill).toContain(
@@ -234,7 +283,7 @@ describe('assistant hosted low-usage skill', () => {
       'After arming that mission, explain the reciprocal setup path',
     )
     expect(normalizedSkill).toContain(
-      'introduce me to your mom and I can bring this group roughly another 50 messages',
+      'introduce me to your mom and I can secure this group some additional Murph time',
     )
     expect(normalizedSkill).toContain('Murph is the butt of the joke')
     expect(normalizedSkill).toContain('Do not reuse the mom line as a template')
