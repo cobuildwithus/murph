@@ -2152,10 +2152,13 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         expect(persistedPayload).toMatchObject({
           notification: {
             instructions: expect.stringContaining(
-              "about 100 more messages on the model this room is using now",
+              "$2.00 of cost-weighted usage credit for this room",
             ),
           },
         });
+        expect(JSON.stringify(persistedPayload)).not.toMatch(
+          /about \d+ more messages/iu,
+        );
         await expect(Promise.all([
           observer.hostedUsageReferral.findUniqueOrThrow({
             select: {

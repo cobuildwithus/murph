@@ -114,14 +114,15 @@ CREATE INDEX "hosted_usage_credit_purchase_sponsorship_period_status_idx"
     "status"
   );
 
-DROP INDEX "hosted_usage_credit_purchase_active_payer_key";
-CREATE UNIQUE INDEX "hosted_usage_credit_purchase_active_payer_key"
+CREATE UNIQUE INDEX "hosted_usage_credit_purchase_active_payer_v2_key"
   ON "hosted_usage_credit_purchase"("payer_member_id")
   WHERE "status" IN ('created', 'checkout_open', 'payment_pending')
     AND (
       "group_sponsorship_authorization_id" IS NULL
       OR "group_sponsorship_charge_ordinal" = 0
     );
+
+DROP INDEX "hosted_usage_credit_purchase_active_payer_key";
 
 CREATE INDEX "hosted_usage_credit_purchase_sponsorship_refill_dispatch_idx"
   ON "hosted_usage_credit_purchase"(

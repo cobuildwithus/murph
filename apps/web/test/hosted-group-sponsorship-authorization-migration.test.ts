@@ -51,6 +51,14 @@ describe("capped group sponsorship database contract", () => {
   });
 
   it("indexes only the existing bounded refill and recovery sweep", () => {
+    const replacementIndexPosition = migrationSql.indexOf(
+      'CREATE UNIQUE INDEX "hosted_usage_credit_purchase_active_payer_v2_key"',
+    );
+    const oldIndexDropPosition = migrationSql.indexOf(
+      'DROP INDEX "hosted_usage_credit_purchase_active_payer_key"',
+    );
+    expect(replacementIndexPosition).toBeGreaterThan(-1);
+    expect(oldIndexDropPosition).toBeGreaterThan(replacementIndexPosition);
     expect(migrationSql).toContain(
       'CREATE INDEX "hosted_usage_credit_purchase_sponsorship_refill_dispatch_idx"',
     );

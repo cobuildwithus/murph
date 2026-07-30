@@ -95,8 +95,15 @@ group's existing capacity owner says more credit is needed.
   deleting unrelated personal, Family, ledger, refund, and reconciliation
   invariants. It also added regression coverage for a bound automatic
   PaymentIntent after pause or cancel.
-- Pending rebase onto current `origin/main`, isolated PostgreSQL migration and
-  concurrency proof, and post-rebase focused verification.
+- Rebased onto current `origin/main`. The post-rebase changed-owner Web suite
+  passes 807 tests; the hosted-execution suite passes 66 tests; the focused
+  assistant suite passes 15 tests with 16 live-only cases skipped; Prisma
+  validation and affected TypeScript lanes pass.
+- A fresh isolated PostgreSQL database accepts all 148 Web migrations through
+  the normal guarded deploy command, and the 21-test usage-credit concurrency
+  suite passes against it. The replacement active-payer index is created
+  before the legacy index is dropped, and the predeploy exception is limited
+  to the proved check/index relaxation.
 - Pending desktop and mobile design-catalog evidence.
 - Pending preliminary specialist pass, final ReviewGPT pass, exact-head CI, and
   PR-head preflight.
