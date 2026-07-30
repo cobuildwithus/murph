@@ -40,7 +40,7 @@ Success criteria:
 ## Verification
 
 - Focused KMS and account-deletion Vitest suites passed on current `origin/main`
-  with 31 tests.
+  with 32 tests.
 - Hosted web typecheck passed.
 - Scoped ESLint passed for the two source files and two focused test files.
 - A read-only production-faithful check proved that the pending receipt's
@@ -48,6 +48,10 @@ Success criteria:
   without decrypting the payload or invoking provider cleanup.
 - The required local product-experience review returned `NO FINDINGS`; no
   rendered proof applies because this change has no frontend presentation.
+- The preliminary ReviewGPT specialist pass returned one accepted low-severity
+  coverage finding. Its test-only patch was inspected, path-scoped, applied,
+  and verified; encrypt now has direct proof that a version resource is rejected
+  before provider I/O.
 
 ## State
 

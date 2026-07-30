@@ -240,6 +240,28 @@ describe("hosted crypto GCP Workload Identity Federation", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("rejects a CryptoKeyVersion as an encrypt parent before provider I/O", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => jsonResponse({
+      ciphertext: "unexpected",
+      name: LOCAL_KMS_KEY_VERSION_NAME,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = createHostedGcpKmsClientFromEnv({
+      HOSTED_CRYPTO_ALLOW_STATIC_GCP_ACCESS_TOKEN_FOR_DEV: "1",
+      HOSTED_CRYPTO_ENV: "dev",
+      HOSTED_CRYPTO_GCP_ACCESS_TOKEN: "ya29.static-token",
+      HOSTED_CRYPTO_GCP_KMS_API_ROOT: "https://kms.example.test/v1",
+      NODE_ENV: "test",
+    });
+
+    await expect(client.encrypt({
+      additionalAuthenticatedData: "domain=control",
+      keyName: LOCAL_KMS_KEY_VERSION_NAME,
+      plaintext: new Uint8Array([1, 2, 3]),
+    })).rejects.toThrow(/must be a CryptoKey resource name/u);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("rejects malformed or mismatched EncryptResponse key version names", async () => {
     const fetchMock = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(jsonResponse({
