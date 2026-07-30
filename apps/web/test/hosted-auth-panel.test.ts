@@ -699,8 +699,9 @@ test("HostedAuthPanel restores phone session recovery after a queued alternate h
   expect(rendered.container.textContent).not.toContain("Connecting...");
 });
 
-test("HostedAuthPanel keeps phone code entry mounted through indeterminate session hydration", async () => {
+test("HostedAuthPanel keeps phone code entry mounted through an indeterminate provider restart", async () => {
   let privyAuthenticated = false;
+  let privyReady = true;
   const privyUser: {
     linkedAccounts?: unknown;
   } | null = null;
@@ -709,7 +710,7 @@ test("HostedAuthPanel keeps phone code entry mounted through indeterminate sessi
   mocks.usePrivy.mockImplementation(() => ({
     authenticated: privyAuthenticated,
     logout: vi.fn(),
-    ready: true,
+    ready: privyReady,
   }));
   mocks.useUser.mockImplementation(() => ({
     user: privyUser,
@@ -737,12 +738,16 @@ test("HostedAuthPanel keeps phone code entry mounted through indeterminate sessi
   });
 
   privyAuthenticated = true;
+  privyReady = false;
 
   await act(async () => {
     rerenderHarness?.();
   });
 
   expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeTruthy();
+  expect(container.textContent).not.toContain(
+    "Secure sign in is checking your existing session.",
+  );
   expect(container.textContent).not.toContain("Continue with email");
 });
 

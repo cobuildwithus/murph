@@ -1,4 +1,4 @@
-import { act, createElement } from "react";
+import { act, createElement, useState } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { renderClientComponent } from "./render-client-component";
@@ -82,6 +82,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -279,6 +280,72 @@ test("HostedAuthPanel gates method actions until an authenticated session snapsh
   }
 });
 
+test("HostedAuthPanel keeps an indeterminate authenticated session gated across a provider restart", async () => {
+  vi.useFakeTimers();
+  mocks.authenticated = true;
+  mocks.privyReady = true;
+  mocks.user = null;
+
+  const renderPanel = () =>
+    createElement(RestartableHostedAuthPanelWithinPrivyHarness);
+  const rendered = await renderClientComponent(renderPanel(), {
+    matchMedia: createDesktopMatchMedia(),
+    requireButton: false,
+  });
+
+  try {
+    expect(rendered.container.textContent).toContain(
+      "Secure sign in is checking your existing session.",
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+
+    mocks.privyReady = false;
+    await act(async () => {
+      readButton(rendered.container, "Restart sign in").dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+    });
+
+    expect(rendered.container.textContent).toContain(
+      "Secure sign in is checking your existing session.",
+    );
+    expect(
+      rendered.container.querySelector('input[name="phone-number"]'),
+    ).toBeNull();
+    expect(
+      Array.from(rendered.container.querySelectorAll("button")).some(
+        (candidate) =>
+          candidate.textContent?.includes("Continue")
+          || candidate.textContent?.includes("Email")
+          || candidate.textContent?.includes("Telegram"),
+      ),
+    ).toBe(false);
+    expect(mocks.completeHostedPrivyAuth).not.toHaveBeenCalled();
+
+    mocks.privyReady = true;
+    mocks.user = {
+      linkedAccounts: [
+        {
+          address: "member@example.com",
+          latest_verified_at: 1741194420,
+          type: "email",
+        },
+      ],
+    };
+    await rendered.rerender(renderPanel());
+
+    expect(rendered.container.textContent).toContain("Continue with email");
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 function HostedAuthPanelWithinPrivyHarness() {
   installDomGlobals();
 
@@ -287,6 +354,19 @@ function HostedAuthPanelWithinPrivyHarness() {
     onCompleted: () => {},
     onRestartPrivy: vi.fn(),
     privyAttempt: 1,
+  });
+}
+
+function RestartableHostedAuthPanelWithinPrivyHarness() {
+  const [privyAttempt, setPrivyAttempt] = useState(1);
+  installDomGlobals();
+
+  return createElement(HostedAuthPanelWithinPrivy, {
+    key: privyAttempt,
+    methods: ["phone", "telegram", "email"] as const,
+    onCompleted: () => {},
+    onRestartPrivy: () => setPrivyAttempt((current) => current + 1),
+    privyAttempt,
   });
 }
 

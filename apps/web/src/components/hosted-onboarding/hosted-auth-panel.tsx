@@ -113,10 +113,12 @@ export function HostedAuthPanel({
   const shouldShowPassiveLegalNotice = showPassiveLegalNotice ?? false;
   const authJourneyActive = completion.activeMethod !== null;
   const selectedAuthMethod = completion.activeMethod ?? queuedAuthMethod;
+  // Privy keeps authenticated/user in a module-level store while a keyed
+  // provider restart resets ready locally. Do not trust that carried session
+  // snapshot until the replacement provider becomes ready.
   const privySessionHydrationPending =
-    ready
-    && authenticated
-    && privySessionState === null
+    authenticated
+    && (!ready || privySessionState === null)
     && !codeSent
     && completion.activeMethod === null
     && completion.completingMethod === null
