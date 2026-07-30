@@ -4137,7 +4137,7 @@ describe('assistant codex runtime', () => {
     )
   })
 
-  it('leaves completed preinitialization idle and ignores later cancellation', async () => {
+  it('keeps a ready resident when mismatched preparation is requested', async () => {
     const workingDirectory = await createTempDir('assistant-codex-preinitialize-ready-work-')
     const codexHome = await createTempDir('assistant-codex-preinitialize-ready-home-')
     const children: MockChildProcess[] = []
@@ -4180,9 +4180,56 @@ describe('assistant codex runtime', () => {
     expect(readWrittenRpcMessages(child).map((message) => message.method))
       .toEqual(['initialize', 'initialized'])
     expect(process.kill).not.toHaveBeenCalled()
+
+    await expect(preinitializeCodexAppServer({
+      codexHome,
+      env: { PATH: '/different/bin' },
+      workingDirectory,
+    })).resolves.toBeNull()
+    expect(children).toHaveLength(1)
+    expect(process.kill).not.toHaveBeenCalled()
   })
 
-  it('binds cancellation to the exact preparation instead of its replacement', async () => {
+  it('keeps an initializing resident when mismatched preparation is requested', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-preinitialize-in-progress-work-',
+    )
+    const codexHome = await createTempDir(
+      'assistant-codex-preinitialize-in-progress-home-',
+    )
+    const children: MockChildProcess[] = []
+    mockProcessGroupSignalsForChildren(children)
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      child.pid = 25_060
+      children.push(child)
+      return child
+    })
+
+    const firstPreparation = await preinitializeCodexAppServer({
+      codexHome,
+      env: { PATH: '/custom/bin-one' },
+      workingDirectory,
+    })
+    await waitForRpcMethod(
+      requireMockChildProcess(children[0] ?? null),
+      'initialize',
+    )
+
+    await expect(preinitializeCodexAppServer({
+      codexHome,
+      env: { PATH: '/custom/bin-two' },
+      workingDirectory,
+    })).resolves.toBeNull()
+    expect(children).toHaveLength(1)
+    expect(process.kill).not.toHaveBeenCalled()
+
+    await expect(firstPreparation?.cancelPending()).resolves.toBeUndefined()
+    expect(children[0]?.signalCode).toBe('SIGTERM')
+  })
+
+  it('binds cancellation to the exact preparation after foreground replacement', async () => {
     const workingDirectory = await createTempDir(
       'assistant-codex-preinitialize-exact-work-',
     )
@@ -4196,14 +4243,6 @@ describe('assistant codex runtime', () => {
       const child = new MockChildProcess()
       child.pid = 25_075 + children.length
       children.push(child)
-      if (children.length === 1) {
-        queueMicrotask(() => {
-          void (async () => {
-            const initialize = await waitForRpcMethod(child, 'initialize')
-            child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-          })()
-        })
-      }
       return child
     })
 
@@ -4213,24 +4252,48 @@ describe('assistant codex runtime', () => {
       workingDirectory,
     })
     const firstChild = requireMockChildProcess(children[0] ?? null)
-    await waitForRpcMethod(firstChild, 'initialized')
+    await waitForRpcMethod(firstChild, 'initialize')
 
-    const secondPreparation = await preinitializeCodexAppServer({
+    const foregroundTurn = executeCodexAppServerTurn({
       codexHome,
       env: { PATH: '/custom/bin-two' },
+      prompt: 'Replace the incompatible pending preparation authoritatively.',
       workingDirectory,
     })
+    await waitForMockCall(codexMocks.spawn, 2)
     const secondChild = requireMockChildProcess(children[1] ?? null)
-    await waitForRpcMethod(secondChild, 'initialize')
-    if (!firstPreparation || !secondPreparation) {
-      throw new Error('Expected both process preparations to be admitted.')
+    if (!firstPreparation) {
+      throw new Error('Expected the first process preparation to be admitted.')
     }
 
     await firstPreparation.cancelPending()
     expect(secondChild.signalCode).toBeNull()
 
-    await secondPreparation.cancelPending()
-    expect(secondChild.signalCode).toBe('SIGTERM')
+    await initializeWarmTurn(
+      secondChild,
+      'thread-foreground-exact-preparation',
+      'turn-foreground-exact-preparation',
+    )
+    secondChild.stdout.write(jsonLine({
+      method: 'item/completed',
+      params: {
+        item: {
+          id: 'assistant-foreground-exact-preparation',
+          message: 'Foreground replacement answer',
+          type: 'assistant_message',
+        },
+      },
+    }))
+    writeCompletedTurn(
+      secondChild,
+      'thread-foreground-exact-preparation',
+      'turn-foreground-exact-preparation',
+    )
+
+    await expect(foregroundTurn).resolves.toMatchObject({
+      finalMessage: 'Foreground replacement answer',
+      sessionId: 'thread-foreground-exact-preparation',
+    })
     expect(children).toHaveLength(2)
   })
 
@@ -4391,144 +4454,6 @@ describe('assistant codex runtime', () => {
     }
     expect(child.exitCode).toBeNull()
     expect(child.signalCode).toBeNull()
-  })
-
-  it('does not publish a replacement when preinitialization aborts during exact teardown', async () => {
-    const workingDirectory = await createTempDir('assistant-codex-preinitialize-abort-work-')
-    const codexHome = await createTempDir('assistant-codex-preinitialize-abort-home-')
-    const children: MockChildProcess[] = []
-    const stopObserved = createDeferred<void>()
-    const releaseStop = createDeferred<void>()
-
-    vi.mocked(process.kill).mockImplementation((pid, signal) => {
-      const child = children.find(
-        (candidate) => pid === -candidate.pid || pid === candidate.pid,
-      )
-      if (
-        child &&
-        signal === 'SIGTERM' &&
-        child.exitCode === null &&
-        child.signalCode === null
-      ) {
-        stopObserved.resolve(undefined)
-        void releaseStop.promise.then(() => {
-          child.emit('exit', null, signal)
-          child.emit('close', null, signal)
-        })
-      }
-      return true
-    })
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-      child.pid = 25_150 + children.length
-      children.push(child)
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-        })()
-      })
-      return child
-    })
-
-    await preinitializeCodexAppServer({
-      codexHome,
-      env: { PATH: '/custom/bin-one' },
-      workingDirectory,
-    })
-    const firstChild = requireMockChildProcess(children[0] ?? null)
-    await waitForRpcMethod(firstChild, 'initialized')
-
-    const controller = new AbortController()
-    const replacement = preinitializeCodexAppServer({
-      codexHome,
-      env: { PATH: '/custom/bin-two' },
-      signal: controller.signal,
-      workingDirectory,
-    })
-    await stopObserved.promise
-    const interruption = new Error('preinitialize replacement interrupted')
-    controller.abort(interruption)
-    releaseStop.resolve(undefined)
-
-    await expect(replacement).rejects.toBe(interruption)
-    expect(children).toHaveLength(1)
-  })
-
-  it('does not publish a replacement behind a completed workspace boundary', async () => {
-    const workingDirectory = await createTempDir(
-      'assistant-codex-preinitialize-boundary-replacement-work-',
-    )
-    const codexHome = await createTempDir(
-      'assistant-codex-preinitialize-boundary-replacement-home-',
-    )
-    const children: MockChildProcess[] = []
-    const firstStopObserved = createDeferred<void>()
-    const releaseFirstStop = createDeferred<void>()
-
-    vi.mocked(process.kill).mockImplementation((pid, signal) => {
-      const child = children.find(
-        (candidate) => pid === -candidate.pid || pid === candidate.pid,
-      )
-      if (
-        !child ||
-        signal !== 'SIGTERM' ||
-        child.exitCode !== null ||
-        child.signalCode !== null
-      ) {
-        return true
-      }
-      if (child === children[0]) {
-        firstStopObserved.resolve(undefined)
-        void releaseFirstStop.promise.then(() => {
-          child.emit('exit', null, signal)
-          child.emit('close', null, signal)
-        })
-      } else {
-        queueMicrotask(() => {
-          child.emit('exit', null, signal)
-          child.emit('close', null, signal)
-        })
-      }
-      return true
-    })
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-      child.pid = 25_175 + children.length
-      children.push(child)
-      if (children.length === 1) {
-        queueMicrotask(() => {
-          void (async () => {
-            const initialize = await waitForRpcMethod(child, 'initialize')
-            child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-          })()
-        })
-      }
-      return child
-    })
-
-    await preinitializeCodexAppServer({
-      codexHome,
-      env: { PATH: '/custom/bin-one' },
-      workingDirectory,
-    })
-    await waitForRpcMethod(
-      requireMockChildProcess(children[0] ?? null),
-      'initialized',
-    )
-
-    const replacement = preinitializeCodexAppServer({
-      codexHome,
-      env: { PATH: '/custom/bin-two' },
-      workingDirectory,
-    })
-    await firstStopObserved.promise
-    const boundary = waitForWarmCodexBackgroundWork()
-    releaseFirstStop.resolve(undefined)
-
-    await expect(Promise.all([replacement, boundary])).resolves.toBeDefined()
-    const replacementChild = requireMockChildProcess(children[1] ?? null)
-    expect(replacementChild.signalCode).toBe('SIGTERM')
   })
 
   it('blocks speculative publication while a workspace boundary tears down the prior process', async () => {

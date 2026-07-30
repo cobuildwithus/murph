@@ -2102,6 +2102,9 @@ export async function preinitializeCodexAppServer(
       if (processInstance.hasInFlightTurn) {
         return null
       }
+      if (processInstance.canClaimForLaunch(processInstance.launchKey)) {
+        return null
+      }
       const processExited =
         processInstance.child.exitCode !== null ||
         processInstance.child.signalCode !== null

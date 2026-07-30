@@ -1022,16 +1022,23 @@ app-server anchored there would hold a dead cwd inode and fail its next
 thread-start config load. Threads receive the current workspace through the
 explicit per-thread `cwd` param instead.
 
-For established hosted conversation work, the same engine-owned slot may begin
-process-only spawn and initialization after restore plus final Codex config/auth
-preparation, while initial mailbox import continues. Readiness is memoized on
-the exact process and does not reserve a turn; a matching foreground turn
-synchronously reserves that object before joining readiness. Preparation sends
-no thread, turn, provider, account, tool, or compaction request, and launches no
-detached child. The preparation call returns a cancellation handle bound to
-that exact process, so invocation release cannot cancel a later replacement.
-Checkpoint and invocation-release boundaries stop and settle pending unclaimed
-preparation, while ready idle processes stay warm.
+For established hosted conversation work, the first fresh auto-reply-enabled
+pre-pass Linq or Telegram input candidate staged after restore and final Codex
+config/auth preparation may begin process-only spawn and initialization while
+the remaining mailbox work continues. Email, self-authored Linq, bootstrap,
+system, maintenance, replay, and active-turn imports do not admit preparation;
+the first staged pre-pass conversation decides for the invocation. Readiness is
+memoized on the exact process and does not reserve a turn; a matching
+foreground turn synchronously reserves that object before joining readiness.
+Preparation sends no thread, turn, provider, account, tool, or compaction
+request, and launches no detached child. Speculative preparation never evicts
+a healthy claimable resident with another launch identity; only authoritative
+foreground acquisition may replace it.
+The preparation call returns a cancellation handle bound to that exact process,
+so invocation release cannot cancel a later replacement. Checkpoint and
+invocation-release boundaries first close and join asynchronous preparation
+admission, then stop and settle pending unclaimed preparation while ready idle
+processes stay warm.
 Exact object identity binds cancellation to the admitted process. The existing
 engine-owned warm-slot transition lock serializes inspect, exact teardown,
 publication or reservation, and workspace-boundary admission. The same owner

@@ -52,24 +52,31 @@ Last verified: 2026-07-29
   App Server initialization handshake; it does not reserve the process for a
   turn. Matching preparation callers join that same promise, while a matching
   foreground turn synchronously reserves the exact process before joining its
-  readiness. The existing engine-owned slot-transition lock serializes inspect,
-  exact teardown, publication or reservation, and workspace-boundary admission;
-  it is not held while initialization readiness runs. The admitting caller
-  receives a cancellation handle bound to that exact process, so a stale caller
-  cannot cancel a later replacement. There is no second lock or readiness
-  owner.
+  readiness. Hosted preparation is a one-shot decision from the first fresh
+  auto-reply-enabled pre-pass conversation candidate: Linq or Telegram may admit
+  it; email, self-authored Linq, bootstrap, system, maintenance, replay, and
+  active-turn imports may not. The existing engine-owned slot-transition lock
+  serializes inspect, exact teardown, publication or reservation, and
+  workspace-boundary admission; it is not held while initialization readiness
+  runs. The admitting caller receives a cancellation handle bound to that exact
+  process, so a stale caller cannot cancel a later replacement. There is no
+  second lock or readiness owner.
 - Every App Server stop path rejects all pending JSON-RPC requests promptly and
-  tears down the exact process object. Preparation failure, timeout, abort, or
-  incompatible replacement must finish that teardown before a fresh process is
-  published. Late completion from the old object cannot mutate the resident
-  slot, and a foreground turn falls back to ordinary fresh startup only after
-  the failed preparation is fully cleared; preparation failure never consumes
-  or silences accepted work.
-- Before snapshot construction, the checkpoint owner cancels and awaits exact
-  teardown of readiness that is still pending and unreserved. A ready idle
-  process remains on the existing warm-process path; a reserved or running
-  process remains on the existing turn-quiescence path. The slot owner marks
-  the full boundary call active: resident preparation declines and warm
+  tears down the exact process object. Speculative preparation never replaces a
+  healthy claimable resident with another launch identity; only authoritative
+  foreground acquisition may do that. Preparation failure, timeout, abort, or
+  unhealthy-process replacement must finish exact teardown before a fresh
+  process is published. Late completion from the old object cannot mutate the
+  resident slot, and a foreground turn falls back to ordinary fresh startup
+  only after failed preparation is fully cleared; preparation failure never
+  consumes or silences accepted work.
+- Before snapshot construction, the checkpoint owner first closes and joins
+  asynchronous preparation admission, then cancels and awaits exact teardown of
+  readiness that is still pending and unreserved. Invocation release performs
+  the same join. A ready idle process remains on the existing warm-process path;
+  a reserved or running process remains on the existing turn-quiescence path.
+  The slot owner marks the full boundary call active: resident preparation
+  declines and warm
   foreground or account acquisition begun while it is active fails busy rather
   than queueing new publication behind it. A caller that already obtained a
   slot-transition ticket retains FIFO priority, so the boundary observes that

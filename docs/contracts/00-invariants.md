@@ -69,13 +69,16 @@ it has been explicitly elevated to a cross-cutting invariant.
   the invocation slot can be reused.
 - `packages/assistant-engine` is the sole resident App Server process owner.
   Process readiness is a memoized property of that exact process and is
-  separate from turn reservation: process-only initialization may start
-  without reserving a turn, and a matching turn synchronously reserves that
-  exact process before joining the same readiness work. The existing
-  engine-owned slot-transition lock serializes inspect, exact teardown,
-  publication or reservation, and workspace-boundary admission; initialization
-  readiness itself runs outside that lock. Do not add a second warm-slot
-  lifecycle, lock owner, startup scheduler, or speculative turn owner.
+  separate from turn reservation: after the first fresh auto-reply-enabled
+  pre-pass Linq or Telegram input candidate is staged, process-only
+  initialization may start without reserving a turn, and a matching turn
+  synchronously reserves that exact process before joining the same readiness
+  work. Email, self-authored Linq, bootstrap, system, maintenance, replay, and
+  active-turn imports do not admit preparation. The existing engine-owned
+  slot-transition lock serializes inspect, exact teardown, publication or
+  reservation, and workspace-boundary admission; initialization readiness itself
+  runs outside that lock. Do not add a second warm-slot lifecycle, lock owner,
+  startup scheduler, or speculative turn owner.
   Initialization alone is not prior-turn reuse: the first foreground turn keeps
   first-turn request and event scoping until one real turn completes.
 - Process-only initialization never starts or resumes a thread, starts a turn,
@@ -85,6 +88,8 @@ it has been explicitly elevated to a cross-cutting invariant.
   process, and leaves accepted work eligible for the ordinary fresh-process
   path. A stale readiness completion from a stopped or replaced process cannot
   publish, clear, reserve, or replace a newer process.
+  Speculative preparation never evicts a healthy claimable resident with another
+  launch identity; only authoritative foreground acquisition may replace it.
 - Prompts, session/thread/turn ids, delivery routes, and invocation-scoped
   automation or device authority are request facts, not App Server launch
   identity or ambient child-process authority. Expose invocation-scoped
@@ -116,8 +121,9 @@ it has been explicitly elevated to a cross-cutting invariant.
   and fails closed. Explicit workspace invocation abort/preemption interrupts
   the wait and synchronously tears down that exact process before workspace or
   invocation ownership is released.
-- Before checkpoint construction, unreserved process initialization that is
-  still pending is cancelled and its exact process is awaited through teardown.
+- Before checkpoint construction, the runtime closes and joins asynchronous
+  preparation admission. Unreserved process initialization that is still
+  pending is then cancelled and its exact process is awaited through teardown.
   Invocation release uses the exact-process handle returned by preparation and
   must not cancel a later replacement admitted by another caller.
   The slot owner marks the full checkpoint boundary active, so new resident

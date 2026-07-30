@@ -590,17 +590,23 @@ Last verified: 2026-07-29
 - Persisted runtime logs, CI logs, uploaded artifacts, and user/provider-facing output must never print raw PHI, health data, vault contents, model prompts, model messages, transcripts, request/response bodies, final provider requests, file text, lab reports, or similarly sensitive payloads. Local one-off diagnostics may inspect concrete payload shape or values when needed to prove root cause, but must stay out of commits, uploaded artifacts, and external surfaces, and must never expose secrets or raw credentials. The static `pnpm logs:guard` check blocks direct logging of variables named `prompt`, `messages`, `input`, `output`, `response`, `body`, `transcript`, `vault`, `finalRequest`, `fileText`, and `labReport` unless the value is passed through an explicit redaction, sanitization, or summarization helper, or reduced to counts/status for persisted or uploaded logs.
 - Device-sync account metadata is internal diagnostic state only. Hosted and local storage writes must sanitize it down to a compact shallow scalar record instead of persisting provider profile payloads, nested JSON blobs, or oversized string fields.
 - The resident Codex App Server is a privileged local adapter, not a sandbox boundary. Normal assistant turns should rely on the bound Murph runtime/tool surface and canonical write ownership in `packages/core`, not a second provider-workspace or canonical-write-guard safety model. The narrow exception is `executeReadOnlyAssistantAsk`: model-invoked commands in that one-shot child are confined by the native `murph-group-read` permission profile. The child reuses the trusted hosted Codex home for minimum auth/config lifecycle, but its thread request passes the named `permissions` override and never a legacy `sandbox` field; the pinned App Server must attest the effective profile, exact runtime roots, empty working directory, empty instruction sources, and approval policy in its thread-start response, and any mismatch fails closed. The profile grants read only to Codex's minimal runtime and exact group workspace roots, denies `.runtime/**`, `.codex/**`, retired vault-share projection roots, and environment files, disables tool network plus project config/instruction discovery, uses approval policy `never`, and gives shell commands an inherit-none environment with no provider credential or hosted secret. The supervising App Server may receive minimum provider auth, but the child's only dynamic tool is the consent-aware lazy `murph.group/read_shared` read. It receives no mutation or delivery tool, route grant, signing material, MCP, web search, memory, plugin, app, or multi-agent authority. A production-like Linux sandbox smoke must prove the effective profile or the feature remains disabled.
-- Hosted process-only App Server initialization may begin only after the
-  workspace restore and final managed Codex configuration and authentication
-  preparation have completed. It uses the final ordinary-process launch
-  identity but issues no thread start or resume, turn start, provider request,
-  account operation, dynamic-tool assembly, compaction, or child launch.
+- Hosted process-only App Server initialization may begin only after workspace
+  restore, final managed Codex config/auth preparation, and staging of the first
+  fresh auto-reply-enabled pre-pass Linq or Telegram input candidate. Email,
+  self-authored Linq, bootstrap, system, maintenance, replay, and active-turn
+  imports cannot admit it. It uses the final ordinary-process launch identity
+  but issues no thread start or resume, turn start, provider request, account
+  operation, dynamic-tool assembly, compaction, or child launch.
   Initialization is not accepted-input, provider-egress, canonical-write, or
   delivery authority; those remain bound to the later admitted foreground turn
   and active runtime write fence.
-- Cancellation, incompatible replacement, auth/config mutation, and checkpoint
-  cancellation of still-pending unreserved initialization must stop the exact
-  owned process and reject its pending RPCs before the boundary proceeds.
+- Speculative preparation must not replace a healthy claimable resident with
+  another launch identity; only authoritative foreground acquisition may do that.
+  Cancellation, auth/config mutation, and checkpoint cancellation of
+  still-pending unreserved initialization must stop the exact owned process and
+  reject its pending RPCs before the boundary proceeds. The runtime closes and
+  joins asynchronous preparation admission before snapshot construction or
+  invocation release.
   Invocation release uses the exact-process handle returned by preparation, so
   a stale invocation cannot cancel a later replacement. The existing
   engine-owned slot-transition lock spans exact teardown through replacement
