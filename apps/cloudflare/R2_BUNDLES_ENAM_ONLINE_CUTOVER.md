@@ -238,12 +238,18 @@ CopyObject has three narrow recovery cases:
    `UND_ERR_CONNECT_TIMEOUT`, proving that the failed connection attempt never
    reached the server.
 2. An initial built-in-fetch `TypeError` whose direct cause code is exactly
-   `ECONNRESET` enters identity reconciliation instead of a blind retry. The
-   reset does not prove whether R2 committed the create-only request, so the
-   copier uses the same strong destination/source HEAD proof and one-second
-   same-key recovery floor described below.
+   `ECONNRESET` enters a five-minute observation window instead of a retry.
+   Cloudflare does not publish a maximum R2 CopyObject execution or late-commit
+   duration, so elapsed time cannot prove that an absent copy is safe to
+   replay. After the observation window, the copier performs strong destination
+   and source HEADs. An exact destination plus exact source proves the original
+   request committed and may continue. An absent destination, missing or
+   changed source, or conflicting destination is terminal and quarantines the
+   destination without another PUT. The window improves the chance of observing
+   a committed original request; correctness never depends on it being a
+   server-side execution bound.
 3. After the terminal response body is fully drained, exactly HTTP `500`
-   enters the same identity reconciliation path. Cloudflare documents `500
+   enters a separate identity reconciliation path. Cloudflare documents `500
    InternalError` as retryable, and R2's direct S3 reads are strongly
    consistent:
    [error codes](https://developers.cloudflare.com/r2/api/error-codes/) and
@@ -289,8 +295,10 @@ validation. That is the source-active copy proof; do not launch a separate
 read-only process afterward because its intentionally fresh provenance must
 distrust clean destination-only churn from the completed process.
 
-Only if the process crashes or a CopyObject result is ambiguous, wait out the
-request bound and run the strict source-active read-only audit:
+Only if the process crashes or a CopyObject result is ambiguous, preserve the
+destination as quarantine evidence. A later strict source-active read-only
+audit is diagnostic only and cannot authorize reuse because Cloudflare does not
+publish a maximum late-commit bound:
 
 Run without `--apply`:
 
