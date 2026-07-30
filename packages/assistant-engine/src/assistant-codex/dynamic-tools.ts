@@ -518,7 +518,7 @@ export const MURPH_PLAN_USAGE_TOOL = {
   namespace: 'murph',
   name: 'plan_usage',
   description:
-    'Read current private hosted plan, AI-usage, recommendation and signed quote for explicit plan, usage, billing or trusted low-usage context. Omit target for recommendation. For exact user-named plan, pass target; act only on matching quote. availablePlans is only the trial list. Read-only; percentages and forecasts cover all available usage without credit-source splits.',
+    'Read current private hosted plan, AI-usage, recommendation, signed quote for explicit plan, usage, billing or trusted low-usage context. Omit target for recommendation. For exact user-named plan, pass target; use only matching quote. availablePlans is only the trial list. Read-only; percentages and forecasts cover all available usage without credit-source splits.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -549,7 +549,7 @@ export const MURPH_SUBSCRIPTION_TOOL = {
   namespace: 'murph',
   name: 'subscription',
   description:
-    'Apply one signed private hosted plan change explicitly confirmed by the current user in this turn. Use only action=change_plan with the exact targetPlanCode and quoteId from a current matching plan_usage quote. Exact replay of the same input and action is idempotent; a different target requires new eligible user input. A scheduled result includes authoritative effectiveAt; keep current and future plans distinct. Only payment_required includes paymentUrl; other results do not prove a payment method.',
+    'Apply one signed private plan change explicitly confirmed by the current user in this turn. Use only action=change_plan with exact targetPlanCode and quoteId from a current matching plan_usage quote. Exact replay of the same input and action is idempotent; a different target requires new eligible user input. A scheduled result includes authoritative effectiveAt; keep current and future plans distinct. Only payment_required includes paymentUrl; other results do not prove a payment method.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
