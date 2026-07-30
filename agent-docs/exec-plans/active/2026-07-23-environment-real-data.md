@@ -23,6 +23,9 @@ Updated: 2026-07-30
   smoking caps a sufficiently covered assessment at E.
 - A member can record one guided voice memo and upload it privately to Murph
   for background transcription/extraction without a form or messaging handoff.
+- Voice guidance adapts to coverage: zero-data members get the full walkthrough,
+  partial profiles get only unknown, non-declined facts, and profiles at 95% or
+  above get one free-form update prompt.
 - Voice audio is application-encrypted while staged, integrity-checked before
   transcription, deleted after the updated vault checkpoint, and covered by a
   24-hour lifecycle backstop.
@@ -105,6 +108,8 @@ Updated: 2026-07-30
 - Voice capture uploads through the authenticated app path, not iMessage,
   Telegram, or a browser share sheet.
 - Recommendation dismissal changes future suggestions, not facts or grade.
+- The capture surface has three product modes rather than percentage-specific
+  screens: first walkthrough, fill gaps, and update.
 
 ## Verification
 
@@ -116,6 +121,9 @@ Updated: 2026-07-30
 - `pnpm --dir apps/web verify` passed: TypeScript, 7,384 tests, lint with zero
   errors, dev smoke, and the production Next build.
 - `pnpm test:frontend-design-proof` passed 10/10.
+- The progressive voice-flow tests passed 14/14 across the 0%, 10%, 30%, 70%,
+  95%, and 100% states. Full Web passed 578 files and 7,559 tests after the
+  adaptive-script change; focused lint and Web typecheck passed.
 - `pnpm test:diff ...` reached an unrelated CLI experiment test timeout; its
   isolated rerun passed in 610 ms.
 - `pnpm verify:acceptance` passed workspace typecheck and every completed

@@ -48,6 +48,7 @@ import {
   EnvironmentVoiceCapture,
   microphoneAccessNotice,
 } from "../app/(dashboard)/environment/environment-voice-capture";
+import type { EnvironmentVoiceScript } from "../app/(dashboard)/environment/environment-voice-script";
 import { renderClientComponent } from "./render-client-component";
 
 test("explains when the browser has blocked microphone permission", () => {
@@ -55,6 +56,42 @@ test("explains when the browser has blocked microphone permission", () => {
     microphoneAccessNotice({ name: "NotAllowedError" }),
     /Microphone access is blocked for this site/,
   );
+});
+
+test("renders a user-specific missing-data script", async () => {
+  const script: EnvironmentVoiceScript = {
+    dialogTitle: "Fill the gaps in your report",
+    flow: "fill-gaps",
+    idleDescription: "One short topic, based on what Murph does not know yet.",
+    idleTitle: "Only the missing details",
+    topics: [
+      {
+        eyebrow: "Sleep",
+        focus: ["Night temperature", "Darkness"],
+        id: "sleep",
+        prompt: "Cover only the details Murph is still missing.",
+        title: "Your remaining sleep details",
+      },
+    ],
+  };
+  const rendered = await renderClientComponent(
+    createElement(EnvironmentVoiceCapture, {
+      script,
+      triggerLabel: "Fill in what's missing",
+    }),
+  );
+
+  try {
+    await clickButton(rendered.window, "Fill in what's missing");
+    const bodyText = rendered.window.document.body.textContent ?? "";
+    assert.match(bodyText, /Fill the gaps in your report/);
+    assert.match(bodyText, /Topic 1 of 1/);
+    assert.match(bodyText, /Night temperature/);
+    assert.match(bodyText, /Darkness/);
+    assert.doesNotMatch(bodyText, /Recovery and devices/);
+  } finally {
+    await rendered.cleanup();
+  }
 });
 
 test("explains microphone failure without handing private audio to another app", async () => {

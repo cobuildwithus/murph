@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { HABITAT_DECLINED_VALUE } from "@murphai/contracts";
 import Image from "next/image";
-import { ArrowRight, Lightbulb, ShieldCheck } from "lucide-react";
+import { ArrowRight, ShieldCheck } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
@@ -20,6 +20,10 @@ import {
   type NextCheckItem,
 } from "./environment-components";
 import { EnvironmentVoiceCapture } from "./environment-voice-capture";
+import {
+  buildEnvironmentVoiceScript,
+  type EnvironmentVoiceScript,
+} from "./environment-voice-script";
 import { selectEnvironmentHabitatValues } from "./habitat-values";
 import {
   INDICATOR_SPRITES,
@@ -253,6 +257,7 @@ function EnvironmentReport({
 }) {
   const nextChecks = buildNextChecks(scene, notes);
   const noteByCategoryId = new Map(notes.map((note) => [note.id, note]));
+  const voiceScript = buildEnvironmentVoiceScript(notes, coverage.coverage);
 
   return (
     <>
@@ -270,13 +275,13 @@ function EnvironmentReport({
         }}
       />
 
-      {grade.letter === null || coverage.coverage < 100 ? (
-        <EnvironmentCaptureCard
-          contactAction={contactAction}
-          known={coverage.known}
-          total={coverage.total}
-        />
-      ) : null}
+      <EnvironmentCaptureCard
+        contactAction={contactAction}
+        coverage={coverage.coverage}
+        known={coverage.known}
+        script={voiceScript}
+        total={coverage.total}
+      />
 
       {contactAction ? (
         <NextChecksStrip items={nextChecks} chatHref={contactAction.href} />
@@ -301,36 +306,60 @@ function EnvironmentReport({
 
 export function EnvironmentCaptureCard({
   contactAction,
+  coverage,
   known,
+  script,
   total,
 }: {
   contactAction: MurphContactOption | null;
+  coverage: number;
   known: number;
+  script: EnvironmentVoiceScript;
   total: number;
 }) {
+  const updating = script.flow === "update";
+  const missing = Math.max(0, total - known);
+  const topicCount = script.topics.length;
+
   return (
     <section className="flex flex-col gap-5 rounded-xl border border-border bg-card px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-      <div className="flex items-start gap-4">
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
-          <Lightbulb className="size-5" aria-hidden="true" />
-        </span>
-        <div>
-          <h2 className="font-serif text-lg font-semibold text-foreground">
-            {known === 0
+      <div className="min-w-0">
+        <h2 className="text-balance font-serif text-lg font-semibold text-foreground">
+          {updating
+            ? "Keep your environment current"
+            : known === 0
               ? "Build your environment report in one take"
-              : known < total / 2
-              ? "A little more context will make this useful"
-              : "Fill the important gaps in one take"}
-          </h2>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            {known === 0
-              ? "Walk through sleep, air, light, recovery and work. Murph turns clear details into the category coverage, grade and next steps below."
-              : `Murph knows ${known} of ${total} core facts. Speak naturally while moving through five short topics; clear facts are saved automatically.`}
-          </p>
-        </div>
+              : coverage < 50
+                ? "Complete the picture"
+                : "Fill the remaining gaps"}
+        </h2>
+        <p className="mt-1 max-w-[68ch] text-pretty text-base text-muted-foreground sm:text-sm">
+          {updating
+            ? "Record anything that changed. You do not need to repeat what Murph already knows."
+            : known === 0
+              ? "Walk through sleep, air, light, recovery and work. Murph saves only the clear details."
+              : `Murph knows ${known} of ${total} core facts. This ${
+                  topicCount === 1
+                    ? "short recording covers the one remaining topic"
+                    : `short recording covers ${topicCount} topics`
+                } and asks only about the ${missing} ${
+                  missing === 1 ? "detail" : "details"
+                } still missing.`}
+        </p>
       </div>
       <div className="flex shrink-0 flex-wrap gap-3">
-        <EnvironmentVoiceCapture compact />
+        <EnvironmentVoiceCapture
+          compact
+          script={script}
+          triggerLabel={
+            updating
+              ? "Update by voice"
+              : known === 0
+                ? "Start walkthrough"
+                : "Fill in what's missing"
+          }
+          triggerVariant={updating ? "outline" : "default"}
+        />
         {contactAction ? (
           <Button
             size="sm"
@@ -344,7 +373,7 @@ export function EnvironmentCaptureCard({
             }
             nativeButton={false}
           >
-            Chat instead
+            {updating ? "Update in chat" : "Chat instead"}
             <ArrowRight className="size-4" aria-hidden="true" />
           </Button>
         ) : null}

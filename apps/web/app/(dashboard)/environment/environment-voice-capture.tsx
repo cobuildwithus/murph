@@ -21,6 +21,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/src/components/ui/dialog";
+
+import {
+  DEFAULT_ENVIRONMENT_VOICE_SCRIPT,
+  type EnvironmentVoiceScript,
+} from "./environment-voice-script";
+
 const MAX_RECORDING_MS = 3 * 60 * 1_000;
 const RECORDING_AUDIO_BITS_PER_SECOND = 64_000;
 const AUDIO_METER_BAR_COUNT = 12;
@@ -29,39 +35,6 @@ const RESTING_AUDIO_LEVELS = Array.from(
   { length: AUDIO_METER_BAR_COUNT },
   () => 0,
 );
-
-const VOICE_TOPICS = [
-  {
-    title: "Your bedroom",
-    eyebrow: "Sleep",
-    prompt:
-      "Describe the temperature, darkness and noise at night. Mention windows, your mattress, overheating, and whether your phone or a TV is near the bed.",
-  },
-  {
-    title: "The air and water",
-    eyebrow: "Air & water",
-    prompt:
-      "Tell Murph how you ventilate, whether there is damp or mold, what you cook on, any smoke indoors, and whether you drink tap, filtered, or bottled water.",
-  },
-  {
-    title: "Light through the day",
-    eyebrow: "Light",
-    prompt:
-      "Describe morning daylight, where you spend the day, and whether your evening light is warm and dim or bright and cool.",
-  },
-  {
-    title: "Recovery and devices",
-    eyebrow: "Optional extras",
-    prompt:
-      "Mention any sauna, cold exposure, red light, scale, blood-pressure cuff or other devices you already use. None of these are required for a good grade.",
-  },
-  {
-    title: "Where you work",
-    eyebrow: "Workspace",
-    prompt:
-      "Describe how long you sit, your screen height, your desk and chair, how often you take breaks, and any wrist, neck or back discomfort.",
-  },
-] as const;
 
 type RecordingState =
   | "idle"
@@ -72,10 +45,14 @@ type RecordingState =
 
 export function EnvironmentVoiceCapture({
   compact = false,
+  script = DEFAULT_ENVIRONMENT_VOICE_SCRIPT,
   triggerLabel = "Tell Murph by voice",
+  triggerVariant = "default",
 }: {
   compact?: boolean;
+  script?: EnvironmentVoiceScript;
   triggerLabel?: string;
+  triggerVariant?: "default" | "outline";
 }) {
   const [open, setOpen] = useState(false);
   const [state, setState] = useState<RecordingState>("idle");
@@ -87,6 +64,7 @@ export function EnvironmentVoiceCapture({
   const [audioLevels, setAudioLevels] = useState(RESTING_AUDIO_LEVELS);
   const [previewPlaying, setPreviewPlaying] = useState(false);
   const [previewElapsedMs, setPreviewElapsedMs] = useState(0);
+  const topicCount = script.topics.length;
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -410,13 +388,15 @@ export function EnvironmentVoiceCapture({
     }
   };
 
-  const topic = VOICE_TOPICS[topicIndex];
+  const activeTopicIndex = Math.min(topicIndex, topicCount - 1);
+  const topic = script.topics[activeTopicIndex] ?? script.topics[0];
   const elapsedLabel = formatElapsed(elapsedMs);
   return (
     <>
       <Button
         type="button"
         size={compact ? "sm" : "lg"}
+        variant={triggerVariant}
         onClick={() => setOpen(true)}
       >
         <Mic data-icon="inline-start" aria-hidden="true" />
@@ -436,20 +416,23 @@ export function EnvironmentVoiceCapture({
           onKeyDown={(event) => {
             if (event.key === "ArrowLeft") {
               event.preventDefault();
-              setTopicIndex((index) => Math.max(0, index - 1));
+              setTopicIndex((index) =>
+                Math.max(0, Math.min(index, topicCount - 1) - 1),
+              );
             }
             if (event.key === "ArrowRight") {
               event.preventDefault();
               setTopicIndex((index) =>
-                Math.min(VOICE_TOPICS.length - 1, index + 1),
+                Math.min(topicCount - 1, index + 1),
               );
             }
           }}
         >
           <DialogHeader className="border-b border-border px-6 py-5 pr-12">
-            <DialogTitle>Walk Murph through your home</DialogTitle>
+            <DialogTitle>{script.dialogTitle}</DialogTitle>
             <DialogDescription className="sr-only">
-              Record one voice memo while moving through five short home topics.
+              Record one voice memo while moving through {topicCount}{" "}
+              {topicCount === 1 ? "topic" : "topics"}.
             </DialogDescription>
           </DialogHeader>
 
@@ -462,11 +445,10 @@ export function EnvironmentVoiceCapture({
                     aria-hidden="true"
                   />
                   <h2 className="text-balance font-serif text-xl font-semibold tracking-[-0.02em] text-foreground lg:mt-5">
-                    Ready when you are
+                    {script.idleTitle}
                   </h2>
                   <p className="mt-2 text-pretty text-base leading-relaxed text-muted-foreground sm:text-sm lg:mt-3">
-                    Preview the topics with the arrows, then record one
-                    continuous memo.
+                    {script.idleDescription}
                   </p>
                   <Button
                     className="mt-4 self-start lg:mt-6"
@@ -494,7 +476,7 @@ export function EnvironmentVoiceCapture({
                   <Button
                     className="mt-6 self-start lg:mt-auto"
                     size="lg"
-                    onClick={() => setOpen(false)}
+                    onClick={() => onOpenChange(false)}
                   >
                     Done
                   </Button>
@@ -663,21 +645,21 @@ export function EnvironmentVoiceCapture({
 
             <section
               aria-labelledby="environment-voice-topic-title"
-              className="flex min-h-[25rem] flex-col px-6 py-6 sm:px-8 sm:py-8 lg:px-10"
+              className="flex min-h-[25rem] min-w-0 flex-col overflow-y-auto px-6 py-6 sm:px-8 sm:py-8 lg:px-10"
             >
               <div className="flex items-center justify-between gap-4">
                 <p className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
-                  Topic {topicIndex + 1} of {VOICE_TOPICS.length}
+                  Topic {activeTopicIndex + 1} of {topicCount}
                 </p>
                 <div className="flex items-center gap-2">
                   <Button
                     type="button"
                     size="icon-lg"
                     variant="outline"
-                    disabled={topicIndex === 0}
+                    disabled={activeTopicIndex === 0}
                     aria-label="Previous topic"
                     aria-keyshortcuts="ArrowLeft"
-                    onClick={() => setTopicIndex((index) => index - 1)}
+                    onClick={() => setTopicIndex(activeTopicIndex - 1)}
                   >
                     <ChevronLeft aria-hidden="true" />
                   </Button>
@@ -685,17 +667,17 @@ export function EnvironmentVoiceCapture({
                     type="button"
                     size="icon-lg"
                     variant="outline"
-                    disabled={topicIndex === VOICE_TOPICS.length - 1}
+                    disabled={activeTopicIndex === topicCount - 1}
                     aria-label="Next topic"
                     aria-keyshortcuts="ArrowRight"
-                    onClick={() => setTopicIndex((index) => index + 1)}
+                    onClick={() => setTopicIndex(activeTopicIndex + 1)}
                   >
                     <ChevronRight aria-hidden="true" />
                   </Button>
                 </div>
               </div>
 
-              <div className="my-auto py-8">
+              <div className="my-auto min-w-0 py-8">
                 <p className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-primary">
                   {topic.eyebrow}
                 </p>
@@ -708,17 +690,35 @@ export function EnvironmentVoiceCapture({
                 <p className="mt-5 max-w-[48ch] text-pretty text-lg leading-relaxed text-foreground sm:mt-6 sm:text-xl">
                   {topic.prompt}
                 </p>
+                {topic.focus ? (
+                  <ul
+                    className="mt-6 grid gap-x-8 gap-y-2 text-base text-muted-foreground sm:grid-cols-2 sm:text-sm"
+                    role="list"
+                  >
+                    {topic.focus.map((item) => (
+                      <li key={item} className="flex min-w-0 items-start gap-2">
+                        <span
+                          className="mt-[0.55em] size-1.5 shrink-0 rounded-full bg-primary"
+                          aria-hidden="true"
+                        />
+                        <span className="min-w-0 text-pretty">{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
               </div>
 
               <div
                 className="flex gap-2"
-                aria-label={`Topic ${topicIndex + 1} of ${VOICE_TOPICS.length}`}
+                aria-label={`Topic ${activeTopicIndex + 1} of ${topicCount}`}
               >
-                {VOICE_TOPICS.map((voiceTopic, index) => (
+                {script.topics.map((voiceTopic, index) => (
                   <span
-                    key={voiceTopic.title}
+                    key={voiceTopic.id}
                     className={`h-1 flex-1 rounded-full ${
-                      index === topicIndex ? "bg-primary" : "bg-secondary"
+                      index === activeTopicIndex
+                        ? "bg-primary"
+                        : "bg-secondary"
                     }`}
                     aria-hidden="true"
                   />
