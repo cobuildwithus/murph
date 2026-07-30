@@ -542,7 +542,16 @@ describe("R2 online immutable copy", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("never retries a connect-timeout-shaped body failure after response headers", async () => {
+  it.each([
+    {
+      failure: undiciConnectTimeout,
+      label: "connect-timeout-shaped",
+    },
+    {
+      failure: connectionReset,
+      label: "connection-reset-shaped",
+    },
+  ])("never retries a $label body failure after response headers", async ({ failure }) => {
     const boundaryNamespace = createHostedStorageNamespaceId("member_1");
     const eligible = entry(
       `users/${boundaryNamespace}/workspace-snapshots/post-response-body-failure.snapshot.enc`,
@@ -561,7 +570,7 @@ describe("R2 online immutable copy", () => {
       }
       return new Response(new ReadableStream({
         start(controller) {
-          controller.error(undiciConnectTimeout());
+          controller.error(failure());
         },
       }), { status: 200 });
     });
@@ -1184,6 +1193,12 @@ describe("R2 online immutable copy", () => {
         throw new TypeError("fetch failed", {
           cause: Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" }),
         });
+      },
+    },
+    {
+      label: "exact connection reset",
+      outcome: () => {
+        throw connectionReset();
       },
     },
     {
