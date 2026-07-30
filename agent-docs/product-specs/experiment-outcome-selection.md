@@ -1,6 +1,6 @@
 # Experiment Outcome Selection
 
-Last verified: 2026-07-16
+Last verified: 2026-07-29
 
 ## Product Boundary
 
@@ -31,10 +31,13 @@ Do not show or start a proposed experiment unless all of these are true:
 
 1. **The result matters to this member.** It connects to something they said
    they want. Available data is not evidence of value.
-2. **Murph can observe it credibly.** There is one primary outcome, it resolves
-   to a canonical metric, and only a small number of supporting signals. A
-   session-captured primary outcome also has exactly one declared matching
-   field with a usable type and range.
+2. **Murph can observe it credibly.** There is one stable primary outcome with
+   a bounded capture and comparison plan, plus only a small number of
+   supporting signals. Canonical metrics receive richer normalization and
+   interpretation, while custom numeric outcomes may declare their own unit,
+   capture route, and reducer. A session-captured custom outcome has exactly
+   one declared matching field. Qualitative outcomes have explicit baseline
+   and follow-up evidence for a structured review.
 3. **The result can plausibly change in the timeframe.** Otherwise lengthen
    the run, narrow the promise, or do not offer it.
 4. **The evidence can distinguish a worthwhile change from noise.** Define a
@@ -127,9 +130,15 @@ proxy.
 
 If the selected Health Commons protocol cannot credibly measure the promised
 result, clarify the mismatch, choose a better same-family protocol, narrow the
-promise, or offer a different option before creating a run. Start must fail
-closed when the primary metric is unsupported or its session-captured field is
-undeclared; do not create the run and hope to repair outcome evidence later.
+promise, or offer a different option before creating a run. Absence from the
+canonical metric catalog does not block a bounded experiment. Start fails
+closed only when the capture plan is incomplete or contradictory, a
+session-captured field is undeclared or ambiguous, or a structured review
+lacks bounded baseline and follow-up evidence. Analysis support is progressive:
+canonical outcomes retain richer interpretation, custom numeric outcomes use
+the declared comparison, and qualitative outcomes close with a review-ready
+evidence receipt rather than a manufactured numeric delta. A completed
+qualitative interpretation is a separate review step.
 
 ## Success Criteria
 

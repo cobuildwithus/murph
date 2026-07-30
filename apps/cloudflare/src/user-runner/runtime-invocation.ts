@@ -7,6 +7,7 @@ import {
 } from "@murphai/hosted-execution/parsers";
 import type {
   HostedAssistantModelOverride,
+  HostedAssistantProviderOverride,
   HostedAssistantReasoningEffortOverride,
 } from "@murphai/hosted-execution/assistant-model";
 import {
@@ -29,6 +30,7 @@ import type { HostedExecutionEnvironment } from "../env.js";
 import {
   hasHostedRunnerModelCredential,
   isHostedRunnerOpenAiProvider,
+  isHostedRunnerVeniceProvider,
 } from "../hosted-env-policy.ts";
 import {
   buildHostedRunnerContainerEnv,
@@ -84,6 +86,7 @@ const HOSTED_RUNNER_NATIVE_PROVIDER_EGRESS_ENV = {
   MAPBOX_ACCESS_TOKEN: "mapbox",
   MURPH_DATA_API_KEY: "murph_data_api",
   OPENAI_API_KEY: "openai",
+  VENICE_API_KEY: "venice",
 } as const;
 const HOSTED_RUNNER_WORKERS_AI_TRANSCRIBE_PROVIDER_KIND = "workers_ai_transcribe";
 
@@ -202,6 +205,8 @@ export class RuntimeInvocationService {
       commandBudget: input.commandBudget,
       hostedAssistantModelOverride:
         workspaceRead.hostedAssistantModelOverride ?? null,
+      hostedAssistantProviderOverride:
+        workspaceRead.hostedAssistantProviderOverride ?? null,
       hostedAssistantReasoningEffortOverride:
         workspaceRead.hostedAssistantReasoningEffortOverride ?? null,
       processingMode: input.input.processingMode ?? null,
@@ -666,6 +671,7 @@ export class RuntimeInvocationService {
   private async prepareWorkspaceRunnerInvocation(input: {
     commandBudget?: RuntimeProcessingCommandBudget;
     hostedAssistantModelOverride: HostedAssistantModelOverride | null;
+    hostedAssistantProviderOverride: HostedAssistantProviderOverride | null;
     hostedAssistantReasoningEffortOverride:
       HostedAssistantReasoningEffortOverride | null;
     processingMode?: HostedWorkspaceInvocationProcessingMode | null;
@@ -685,6 +691,10 @@ export class RuntimeInvocationService {
     const forwardedEnv = buildHostedRunnerContainerEnv(
       this.input.runnerRuntimeEnvSource,
     );
+    if (input.hostedAssistantProviderOverride !== null) {
+      forwardedEnv.HOSTED_ASSISTANT_PROVIDER =
+        input.hostedAssistantProviderOverride;
+    }
     if (input.hostedAssistantModelOverride !== null) {
       forwardedEnv.HOSTED_ASSISTANT_MODEL =
         input.hostedAssistantModelOverride;
@@ -763,7 +773,10 @@ export class RuntimeInvocationService {
     const runnerContainerName = runnerContainerIdentity.runnerContainerName;
     const openAiCredentialBeforeMintKind =
       readHostedProviderCredentialDiagnosticKind(forwardedEnv.OPENAI_API_KEY);
+    const veniceCredentialBeforeMintKind =
+      readHostedProviderCredentialDiagnosticKind(forwardedEnv.VENICE_API_KEY);
     let openAiProviderCredentialMinted = false;
+    let veniceProviderCredentialMinted = false;
     const createProviderCredential = async (providerKind: string) =>
       await createHostedProviderEgressCredential({
         providerKind,
@@ -774,9 +787,12 @@ export class RuntimeInvocationService {
     for (const [envKey, providerKind] of Object.entries(
       HOSTED_RUNNER_NATIVE_PROVIDER_EGRESS_ENV,
     ) as Array<[HostedRunnerNativeProviderCredentialEnvName, string]>) {
+      // OpenAI remains available as a separately scoped managed credential for
+      // provider-specific tools such as image generation even when core
+      // assistant inference runs through Venice.
       if (
-        envKey === "OPENAI_API_KEY" &&
-        !isHostedRunnerOpenAiProvider(forwardedEnv.HOSTED_ASSISTANT_PROVIDER)
+        envKey === "VENICE_API_KEY"
+        && !isHostedRunnerVeniceProvider(forwardedEnv.HOSTED_ASSISTANT_PROVIDER)
       ) {
         continue;
       }
@@ -785,10 +801,15 @@ export class RuntimeInvocationService {
         if (envKey === "OPENAI_API_KEY") {
           openAiProviderCredentialMinted = true;
         }
+        if (envKey === "VENICE_API_KEY") {
+          veniceProviderCredentialMinted = true;
+        }
       }
     }
     const openAiCredentialAfterMintKind =
       readHostedProviderCredentialDiagnosticKind(forwardedEnv.OPENAI_API_KEY);
+    const veniceCredentialAfterMintKind =
+      readHostedProviderCredentialDiagnosticKind(forwardedEnv.VENICE_API_KEY);
     const workersAiTranscribeProviderEgressCredential = await createProviderCredential(
       HOSTED_RUNNER_WORKERS_AI_TRANSCRIBE_PROVIDER_KIND,
     );
@@ -836,6 +857,8 @@ export class RuntimeInvocationService {
           && forwardedEnv.HOSTED_ASSISTANT_PROVIDER.length > 0,
         hostedAssistantOpenAiConfigured:
           isHostedRunnerOpenAiProvider(forwardedEnv.HOSTED_ASSISTANT_PROVIDER),
+        hostedAssistantVeniceConfigured:
+          isHostedRunnerVeniceProvider(forwardedEnv.HOSTED_ASSISTANT_PROVIDER),
         modelCredentialConfigured:
           hasHostedRunnerModelCredential({
             forwardedEnv,
@@ -844,6 +867,9 @@ export class RuntimeInvocationService {
         openAiCredentialAfterMintKind,
         openAiCredentialBeforeMintKind,
         openAiProviderCredentialMinted,
+        veniceCredentialAfterMintKind,
+        veniceCredentialBeforeMintKind,
+        veniceProviderCredentialMinted,
         preparedSnapshotRestorePresent: preparedSnapshotRestore !== null,
         runnerContainerWorkerVersionPresent: runnerContainerName !== input.userId,
         workspaceAttemptId: input.token.attemptId,

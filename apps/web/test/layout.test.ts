@@ -107,6 +107,27 @@ test("footer ownership stays on explicit public surfaces", () => {
     designComponentsSource,
     /requestHostedOnboardingJson|\/api\/legal\/consent\/accept/u,
   );
+  assert.doesNotMatch(
+    designComponentsSource,
+    /Standard, Tiny, And Fallback Bedtime Transition/u,
+  );
+  const experimentStartStudyOptions = designComponentsSource.slice(
+    designComponentsSource.indexOf("const EXPERIMENT_START_CHANNEL_OPTIONS"),
+    designComponentsSource.indexOf("const WHOOP_COMPLETION_SETUP_GUIDE"),
+  );
+  assert.doesNotMatch(
+    experimentStartStudyOptions,
+    /sms:|mailto:|withmurph|MURPH_TELEGRAM/u,
+  );
+  assert.match(designComponentsSource, /protocolTitle="Example Evening Routine"/u);
+  assert.equal(
+    [
+      ...designComponentsSource.matchAll(
+        /href: "#experiment-start-channel-picker-study"/gu,
+      ),
+    ].length,
+    3,
+  );
   assert.match(subprocessorsPageSource, /LegalPolicyPage/u);
   assert.equal(
     existsSync(

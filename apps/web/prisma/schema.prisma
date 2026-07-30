@@ -515,6 +515,7 @@ model HostedMember {
   usageCreditBalanceUsdMicros    BigInt?                         @default(0) @map("usage_credit_balance_usd_micros")
   usageCreditLedgerVersion       BigInt?                         @default(0) @map("usage_credit_ledger_version")
   assistantModelPreference       String?                         @map("assistant_model_preference")
+  assistantProviderPreference    String?                         @map("assistant_provider_preference")
   assistantReasoningEffortPreference String?                     @map("assistant_reasoning_effort_preference")
   assistantPersona               String?                         @map("assistant_persona")
   assistantPersonaCausalSeq      BigInt?                         @map("assistant_persona_causal_seq")
@@ -1368,6 +1369,7 @@ model HostedAccountDeletionCleanup {
   cloudflareCompletedAt DateTime? @map("cloudflare_completed_at")
   stripeCompletedAt     DateTime? @map("stripe_completed_at")
   privyCompletedAt      DateTime? @map("privy_completed_at")
+  runtimeLogsCompletedAt DateTime? @map("runtime_logs_completed_at")
   attemptCount          Int       @default(0) @map("attempt_count")
   nextAttemptAt         DateTime  @map("next_attempt_at")
   lastAttemptedAt       DateTime? @map("last_attempted_at")
@@ -1511,7 +1513,7 @@ model HostedUsageReferral {
   status                  HostedUsageReferralStatus     @default(armed)
   referrerSubjectKey      String?                       @map("referrer_subject_key")
   sourceConversationJson  Json?                         @map("source_conversation_json")
-  targetContainerMemberId String?                       @unique(map: "hosted_usage_referral_target_container_key") @map("target_container_member_id")
+  targetContainerMemberId String?                       @map("target_container_member_id")
   humanMessageCount       Int                           @default(0) @map("human_message_count")
   nonReferrerMessageCount Int                           @default(0) @map("non_referrer_message_count")
   observedEventKeysJson   Json?                         @map("observed_event_keys_json")
@@ -1535,6 +1537,7 @@ model HostedUsageReferral {
   creditEntries           HostedUsageCreditEntry[]
 
   @@index([referrerMemberId, status, armedAt], map: "hosted_usage_referral_referrer_status_armed_idx")
+  @@unique([targetContainerMemberId, policyCode], map: "hosted_usage_referral_target_policy_key")
   @@index([beneficiaryMemberId, rewardedAt], map: "hosted_usage_referral_beneficiary_rewarded_idx")
   @@index([expiresAt, status], map: "hosted_usage_referral_expiry_status_idx")
   @@index([introducedMemberId], map: "hosted_usage_referral_introduced_member_idx")
@@ -1711,7 +1714,7 @@ model HostedThreadContainer {
   owner                      HostedMember        @relation("HostedThreadContainerOwner", fields: [ownerMemberId], references: [id], onDelete: Restrict)
   participants               HostedThreadContainerParticipant[]
   routes                     HostedThreadRoute[]
-  usageReferralTarget        HostedUsageReferral?
+  usageReferralTargets       HostedUsageReferral[]
 
   @@index([ownerMemberId])
   @@map("hosted_thread_container")

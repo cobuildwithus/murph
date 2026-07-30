@@ -27,7 +27,7 @@ const mocks = vi.hoisted(() => {
     drainHostedExecutionOutboxBestEffort: vi.fn(),
     enqueueHostedExecutionOutbox: vi.fn(),
     bindArmedHostedUsageReferralToNewContainerTx: vi.fn(async () => ({
-      referralId: null,
+      referralIds: [],
     })),
     ensureHostedThreadContainerRouteTx: vi.fn(async () => ({
       activationEventId: null,
@@ -91,10 +91,10 @@ const mocks = vi.hoisted(() => {
     provisionActiveHostedDomainRootEnvelopeForUserOnly: vi.fn(async () => ({})),
     observeHostedUsageReferralInboundTx: vi.fn(async (): Promise<{
       isBoundReferralTarget: boolean;
-      qualificationCandidateReferralId: string | null;
+      qualificationCandidateReferralIds: string[];
     }> => ({
       isBoundReferralTarget: false,
-      qualificationCandidateReferralId: null,
+      qualificationCandidateReferralIds: [],
     })),
     reconcileHostedUsageReferralRewardAfterCommit: vi.fn(async () => null),
     readHostedThreadRouteByThreadIdentity: vi.fn(async (): Promise<{
@@ -307,11 +307,11 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       demotedMailboxConsumedAt: null,
     });
     mocks.bindArmedHostedUsageReferralToNewContainerTx.mockResolvedValue({
-      referralId: null,
+      referralIds: [],
     });
     mocks.observeHostedUsageReferralInboundTx.mockResolvedValue({
       isBoundReferralTarget: false,
-      qualificationCandidateReferralId: null,
+      qualificationCandidateReferralIds: [],
     });
     mocks.reconcileHostedUsageReferralRewardAfterCommit.mockResolvedValue(null);
     mocks.readHostedThreadRouteByThreadIdentity.mockResolvedValue(null);
@@ -536,6 +536,8 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       .toHaveBeenCalledExactlyOnceWith({
         occurredAt: new Date("2026-03-26T10:56:40.000Z"),
         ownerMemberId: "member_telegram_owner",
+        targetChannel: "telegram",
+        targetLinqService: null,
         targetContainerMemberId: "member_telegram_group_container",
         tx: prisma,
       });
@@ -570,6 +572,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
               // username keeps the case the room sees; only the separate
               // lookup key is lowercased for identity matching.
               from: "456",
+              senderDisplayName: "Alice",
               senderUsername: "Alice_Example",
               text: "set up our weekly health newsletter",
               threadId: "-100123",
@@ -596,7 +599,10 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     });
     mocks.observeHostedUsageReferralInboundTx.mockResolvedValue({
       isBoundReferralTarget: true,
-      qualificationCandidateReferralId: "usage_referral_1",
+      qualificationCandidateReferralIds: [
+        "usage_referral_1",
+        "usage_referral_2",
+      ],
     });
     const participantUpsert = vi.fn().mockResolvedValue({});
     const prisma = withPrismaTransaction({
@@ -641,11 +647,21 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         senderSubjectKey: createHostedTelegramUserLookupKey("789"),
         tx: prisma,
       });
-    expect(mocks.reconcileHostedUsageReferralRewardAfterCommit)
-      .toHaveBeenCalledExactlyOnceWith({
-        prisma,
-        referralId: "usage_referral_1",
-      });
+    expect(
+      mocks.reconcileHostedUsageReferralRewardAfterCommit,
+    ).toHaveBeenCalledTimes(2);
+    expect(
+      mocks.reconcileHostedUsageReferralRewardAfterCommit,
+    ).toHaveBeenNthCalledWith(1, {
+      prisma,
+      referralId: "usage_referral_1",
+    });
+    expect(
+      mocks.reconcileHostedUsageReferralRewardAfterCommit,
+    ).toHaveBeenNthCalledWith(2, {
+      prisma,
+      referralId: "usage_referral_2",
+    });
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.ensureHostedThreadContainerRouteTx).not.toHaveBeenCalled();
     expect(participantUpsert).not.toHaveBeenCalled();

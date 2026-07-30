@@ -24,6 +24,7 @@ import {
   verifyVercelProductionDeploymentProtection,
 } from "../scripts/resolve-vercel-production-alias-sha";
 import {
+  hostedRuntimeLogProductionMigrationCommand,
   hostedWebProductionLinqLineSyncCommand,
   hostedWebProductionMigrationCommand,
   hostedWebProductionPrismaGenerateCommand,
@@ -108,6 +109,10 @@ describe("hosted web production migration guard", () => {
 
     assert.equal(result, "ran");
     assert.deepEqual(calls, [
+      {
+        command: hostedRuntimeLogProductionMigrationCommand.command,
+        args: ["--dir", "apps/web", "runtime-logs:migrate:deploy"],
+      },
       {
         command: hostedWebProductionMigrationCommand.command,
         args: ["--dir", "apps/web", "prisma:migrate:deploy"],
@@ -279,6 +284,42 @@ describe("hosted web production migration guard", () => {
           '  DROP CONSTRAINT "hosted_usage_credit_entry_amount_direction_valid",',
           '  ADD CONSTRAINT "hosted_usage_credit_entry_amount_direction_valid"',
           '    CHECK ("amount_usd_micros" <> 0) NOT VALID;',
+          'DROP TABLE "hosted_member";',
+        ].join("\n"),
+      );
+
+      const destructiveMigrations =
+        await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir);
+
+      assert.deepEqual(
+        destructiveMigrations.map(({ migrationId: id, reason }) => ({
+          migrationId: id,
+          reason,
+        })),
+        [{
+          migrationId,
+          reason: "DROP TABLE",
+        }],
+      );
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
+  test("limits the composable referral index relaxation to its proved DDL", async () => {
+    const migrationsDir = await mkdtemp(
+      path.join(tmpdir(), "hosted-web-prisma-migrations-"),
+    );
+    const migrationId =
+      "20260729190000_composable_usage_referral_missions";
+
+    try {
+      await writeMigrationSql(
+        migrationsDir,
+        migrationId,
+        [
+          'DROP INDEX "hosted_usage_referral_target_container_key";',
+          'DROP INDEX "hosted_usage_referral_one_armed_per_referrer";',
           'DROP TABLE "hosted_member";',
         ].join("\n"),
       );
