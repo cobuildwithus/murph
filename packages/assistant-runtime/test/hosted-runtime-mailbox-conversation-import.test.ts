@@ -412,7 +412,8 @@ describe("hosted mailbox conversation import adapter", () => {
       onConversationActivityObserved() {
         order.push("activity-callback");
       },
-      onConversationInputStaged() {
+      onConversationInputStaged(channel) {
+        assert.equal(channel, "linq");
         order.push("staged-callback");
       },
       runtime: createRuntime(),
@@ -458,6 +459,63 @@ describe("hosted mailbox conversation import adapter", () => {
       controller.close();
       await importPromise.catch(() => undefined);
     }
+  });
+
+  test("does not offer process preparation for self-authored Linq input", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-self-input-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const decodedWake = createConversationWake({
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: "chat_self_input",
+          from: "redacted-self-sentinel",
+          isFromMe: true,
+          messageId: "msg_self_input",
+          parts: [
+            {
+              type: "text",
+              value: "self-authored message",
+            },
+          ],
+          threadIsDirect: true,
+        },
+        phoneLookupKey: "redacted-self-sentinel",
+      },
+    });
+    let activityCallbackCount = 0;
+    let preparationCallbackCount = 0;
+
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        return {
+          captureId: null,
+          metrics: {
+            nextWakeAt: null,
+            parserProcessed: 0,
+          },
+        };
+      },
+      async prepareWakeContext() {},
+      item: createResolvedConversationMailboxItem({
+        dedupeKey: decodedWake.eventId,
+        id: "mailbox_item_self_input",
+      }),
+      onConversationActivityObserved() {
+        activityCallbackCount += 1;
+      },
+      onConversationInputStaged() {
+        preparationCallbackCount += 1;
+      },
+      runtime: createRuntime(),
+      vaultRoot,
+    });
+
+    assert.equal(outcome.status, "imported");
+    assert.equal(activityCallbackCount, 1);
+    assert.equal(preparationCallbackCount, 0);
   });
 
   test("does not notify active turn input early for durably consumed replay imports", async () => {

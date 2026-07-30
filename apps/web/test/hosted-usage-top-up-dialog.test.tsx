@@ -531,7 +531,7 @@ test("freezes optional sponsorship copy with the selected group offer", async ()
   );
 
   try {
-    assert.match(rendered.container.textContent ?? "", /Make it funny/);
+    assert.match(rendered.container.textContent ?? "", /Add a note/);
     assert.ok(rendered.container.querySelector(".h-auto"));
     await clickRadio(rendered.container, rendered.window, "usage_5_usd");
     assert.equal(
@@ -763,7 +763,7 @@ test(
     );
 
     try {
-      assert.doesNotMatch(rendered.container.textContent ?? "", /Make it funny/);
+      assert.doesNotMatch(rendered.container.textContent ?? "", /Add a note/);
       assert.equal(
         rendered.container.querySelector("#group-sponsor-alias"),
         null,
