@@ -232,6 +232,13 @@ export default async function SettingsPage({
       : null;
   const familyOwnerUsageTopUpAvailable =
     familyOwnerUsageTopUpMember !== null;
+  const familyOwnerUsageTopUpPurchaseReturn =
+    familyOwnerUsageTopUpMember
+    && familyUsageTopUpPurchaseReturn
+    && usageTopUpReturnTarget?.beneficiaryMemberId ===
+      familyOwnerUsageTopUpMember.memberId
+      ? familyUsageTopUpPurchaseReturn
+      : null;
   const billingUsageTopUpActivePurchase = familyOwnerUsageTopUpAvailable
     ? familyOwnerUsageTopUpActivePurchase
     : personalUsageTopUpActivePurchase;
@@ -239,7 +246,7 @@ export default async function SettingsPage({
     ? familyUsageTopUpOffers
     : usageTopUpOffers;
   const billingUsageTopUpPurchaseReturn = familyOwnerUsageTopUpAvailable
-    ? familyUsageTopUpPurchaseReturn
+    ? familyOwnerUsageTopUpPurchaseReturn
     : personalUsageTopUpPurchaseReturn;
   const canStartFamily =
     authenticatedMember != null &&

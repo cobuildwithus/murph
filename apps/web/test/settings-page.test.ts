@@ -1245,9 +1245,24 @@ test("SettingsPage keeps a former Family purchase status-only despite duplicate 
     groupId: "hbag_abcdefghijklmnop",
     invites: [],
     members: [
-      { label: null, memberId: "member_123" },
-      { label: "Alex", memberId: "member_current_a" },
-      { label: "Alex", memberId: "member_current_b" },
+      {
+        isOwner: true,
+        label: null,
+        memberId: "member_123",
+        status: "active",
+      },
+      {
+        isOwner: false,
+        label: "Alex",
+        memberId: "member_current_a",
+        status: "active",
+      },
+      {
+        isOwner: false,
+        label: "Alex",
+        memberId: "member_current_b",
+        status: "active",
+      },
     ],
     ownerMemberId: "member_123",
     plans: {},
@@ -1284,7 +1299,11 @@ test("SettingsPage keeps a former Family purchase status-only despite duplicate 
 
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
     expect.objectContaining({
-      usageTopUpActivePurchase: null,
+      usageTopUpActivePurchase: expect.objectContaining({
+        purchaseId: "hucp_abcdefghijklmnop",
+        retryAllowed: false,
+        targetConflict: true,
+      }),
       usageTopUpOffers: [],
       usageTopUpPurchaseReturn: null,
     }),
