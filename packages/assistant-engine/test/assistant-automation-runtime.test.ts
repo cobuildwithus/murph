@@ -10032,7 +10032,7 @@ describe('assistant auto-reply runtime', () => {
       })
       expect(acceptedB).toMatchObject({
         prompt: expect.stringContaining(
-          'Sender: +15552220000\n\nUnverified owner contact label (display only): \"Actor B\"',
+          'Sender: +15552220000\n\nAddress-book name (display only): \"Actor B\"',
         ),
       })
       expect(acceptedB).toMatchObject({
@@ -10077,7 +10077,7 @@ describe('assistant auto-reply runtime', () => {
       })
       expect(JSON.stringify(acceptedC)).not.toContain('Profile name (display only)')
       expect(JSON.stringify(acceptedC)).not.toContain(
-        'Unverified owner contact label (display only)',
+        'Address-book name (display only)',
       )
 
       const acceptedCLater = await input.activeTurnInput?.({
