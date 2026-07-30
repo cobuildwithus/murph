@@ -70,6 +70,22 @@ const referralCreditEntryConstraintMigrationSql = readFileSync(
   ),
   "utf8",
 );
+const composableUsageReferralMissionsMigrationSql = readFileSync(
+  new URL(
+    "../prisma/migrations/20260729190000_composable_usage_referral_missions/migration.sql",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const armedPolicyIndexMigrationSql =
+  composableUsageReferralMissionsMigrationSql.match(
+    /CREATE UNIQUE INDEX "hosted_usage_referral_one_armed_policy_per_referrer"[\s\S]*?;/,
+  )?.[0];
+if (!armedPolicyIndexMigrationSql) {
+  throw new Error(
+    "Composable usage-referral migration is missing the armed-policy index statement.",
+  );
+}
 const purchaseGrantResynchronizationContractMigrationSql = readFileSync(
   new URL(
     "../prisma/contract-migrations/20260728031000_resynchronize_hosted_usage_credit_purchase_grants/migration.sql",
@@ -313,6 +329,18 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       try {
         await client.query(detachedDirectProofMigrationSql);
         await client.query(referralCreditEntryConstraintMigrationSql);
+        const armedPolicyIndex = await client.query<{ present: boolean }>(`
+          SELECT EXISTS (
+            SELECT 1
+            FROM pg_indexes
+            WHERE schemaname = current_schema()
+              AND indexname =
+                'hosted_usage_referral_one_armed_policy_per_referrer'
+          ) AS "present"
+        `);
+        if (armedPolicyIndex.rows[0]?.present !== true) {
+          await client.query(armedPolicyIndexMigrationSql);
+        }
       } finally {
         await client.end();
       }
