@@ -1,9 +1,11 @@
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
+import type { HostedFamilyBillingRecoveryState } from "@/src/lib/hosted-onboarding/family-plan";
 
 import { JOIN_INVITE_ACTIVATION_PENDING_COPY } from "./join-invite-copy";
 
 export interface JoinInviteStatusRefreshSnapshot {
   fingerprint: string;
+  serverProjectionPending: boolean;
   session: {
     authenticated: boolean;
     matchesInvite: boolean;
@@ -33,9 +35,13 @@ export function shouldGateJoinInviteStatusWithLaunchConsent(
 
 export function buildJoinInviteStatusRefreshSnapshot(
   status: HostedInviteStatusPayload,
+  familyBillingRecovery: HostedFamilyBillingRecoveryState | null = null,
 ): JoinInviteStatusRefreshSnapshot {
   return {
     fingerprint: buildJoinInviteStatusRefreshFingerprint(status),
+    serverProjectionPending:
+      familyBillingRecovery === "checkout"
+      || familyBillingRecovery === "syncing",
     session: {
       authenticated: status.session.authenticated,
       matchesInvite: status.session.matchesInvite,
@@ -50,6 +56,10 @@ export function shouldRefreshJoinInviteStatusFromPayload(input: {
 }): boolean {
   if (isStaleHostedInviteVerifyRefresh(input)) {
     return false;
+  }
+
+  if (input.current.serverProjectionPending) {
+    return true;
   }
 
   return input.current.fingerprint !== buildJoinInviteStatusRefreshFingerprint(input.nextStatus);
