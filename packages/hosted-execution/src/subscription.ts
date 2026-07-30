@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const HOSTED_RUNTIME_SUBSCRIPTION_ACTIONS = [
+  "change_plan",
   "continue_pulse",
   "start_pulse_now",
   "upgrade_edge",
@@ -18,6 +19,31 @@ const hostedRuntimeSubscriptionAmountSchema = z
   .number()
   .int()
   .positive();
+
+export const HOSTED_RUNTIME_DIRECT_BILLING_PLAN_CODES = [
+  "launch_group_monthly",
+  "launch_monthly",
+  "launch_edge_monthly",
+] as const;
+
+const hostedRuntimeDirectBillingPlanCodeSchema = z.enum(
+  HOSTED_RUNTIME_DIRECT_BILLING_PLAN_CODES,
+);
+
+const hostedRuntimeSubscriptionQuoteIdSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(1_024);
+
+const hostedRuntimeGroupPlanTermsSchema = z
+  .object({
+    code: z.literal("launch_group_monthly"),
+    displayName: z.literal("Group"),
+    interval: z.literal("month"),
+    recurringAmountUsdCents: hostedRuntimeSubscriptionAmountSchema,
+  })
+  .strict();
 
 const hostedRuntimePulsePlanTermsSchema = z
   .object({
@@ -51,6 +77,7 @@ const hostedRuntimeNonPaymentResponseStatusSchema = z.enum([
   "completed",
   "no_action_required",
   "pending",
+  "scheduled",
 ]);
 
 const hostedRuntimeHttpsUrlSchema = z
@@ -61,19 +88,60 @@ const hostedRuntimeHttpsUrlSchema = z
   });
 
 export const hostedRuntimeSubscriptionToolRequestSchema = z
-  .object({
-    action: hostedRuntimeSubscriptionActionSchema,
-  })
-  .strict();
+  .union([
+    z.object({
+      action: z.literal("change_plan"),
+      quoteId: hostedRuntimeSubscriptionQuoteIdSchema,
+      targetPlanCode: hostedRuntimeDirectBillingPlanCodeSchema,
+    }).strict(),
+    z.object({
+      action: z.enum([
+        "continue_pulse",
+        "start_pulse_now",
+        "upgrade_edge",
+      ]),
+    }).strict(),
+  ]);
 
 export const hostedRuntimeSubscriptionControlRequestSchema = z
-  .object({
-    action: hostedRuntimeSubscriptionActionSchema,
-    assistantInputId: hostedRuntimeSubscriptionAssistantInputIdSchema,
-  })
-  .strict();
+  .union([
+    z.object({
+      action: z.literal("change_plan"),
+      assistantInputId: hostedRuntimeSubscriptionAssistantInputIdSchema,
+      quoteId: hostedRuntimeSubscriptionQuoteIdSchema,
+      targetPlanCode: hostedRuntimeDirectBillingPlanCodeSchema,
+    }).strict(),
+    z.object({
+      action: z.enum([
+        "continue_pulse",
+        "start_pulse_now",
+        "upgrade_edge",
+      ]),
+      assistantInputId: hostedRuntimeSubscriptionAssistantInputIdSchema,
+    }).strict(),
+  ]);
 
 export const hostedRuntimeSubscriptionToolResponseSchema = z.union([
+  z.object({
+    action: z.literal("change_plan"),
+    effectiveAt: z.string().datetime({ offset: true }).optional(),
+    plan: z.union([
+      hostedRuntimeGroupPlanTermsSchema,
+      hostedRuntimePulsePlanTermsSchema,
+      hostedRuntimeEdgePlanTermsSchema,
+    ]),
+    status: hostedRuntimeNonPaymentResponseStatusSchema,
+  }).strict(),
+  z.object({
+    action: z.literal("change_plan"),
+    paymentUrl: hostedRuntimeHttpsUrlSchema,
+    plan: z.union([
+      hostedRuntimeGroupPlanTermsSchema,
+      hostedRuntimePulsePlanTermsSchema,
+      hostedRuntimeEdgePlanTermsSchema,
+    ]),
+    status: z.literal("payment_required"),
+  }).strict(),
   z.object({
     ...hostedRuntimePulseResponseBase,
     status: hostedRuntimeNonPaymentResponseStatusSchema,
@@ -96,6 +164,9 @@ export const hostedRuntimeSubscriptionToolResponseSchema = z.union([
 
 export type HostedRuntimeSubscriptionAction = z.infer<
   typeof hostedRuntimeSubscriptionActionSchema
+>;
+export type HostedRuntimeDirectBillingPlanCode = z.infer<
+  typeof hostedRuntimeDirectBillingPlanCodeSchema
 >;
 export type HostedRuntimeSubscriptionToolRequest = z.infer<
   typeof hostedRuntimeSubscriptionToolRequestSchema

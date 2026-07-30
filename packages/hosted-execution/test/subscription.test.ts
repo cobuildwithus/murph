@@ -23,17 +23,40 @@ const EDGE_PLAN = {
   recurringAmountUsdCents: 2_000,
 } as const;
 
+const GROUP_PLAN = {
+  code: "launch_group_monthly",
+  displayName: "Group",
+  interval: "month",
+  recurringAmountUsdCents: 350,
+} as const;
+
 describe("hosted runtime subscription contract", () => {
   it("parses each bounded model action without accepting authority fields", () => {
     expect(HOSTED_RUNTIME_SUBSCRIPTION_ACTIONS).toEqual([
+      "change_plan",
       "continue_pulse",
       "start_pulse_now",
       "upgrade_edge",
     ]);
 
-    for (const action of HOSTED_RUNTIME_SUBSCRIPTION_ACTIONS) {
+    for (const action of HOSTED_RUNTIME_SUBSCRIPTION_ACTIONS.filter(
+      (candidate) => candidate !== "change_plan",
+    )) {
       expect(parseHostedRuntimeSubscriptionToolRequest({ action })).toEqual({ action });
     }
+    expect(parseHostedRuntimeSubscriptionToolRequest({
+      action: "change_plan",
+      quoteId: "quote_test_group",
+      targetPlanCode: "launch_group_monthly",
+    })).toEqual({
+      action: "change_plan",
+      quoteId: "quote_test_group",
+      targetPlanCode: "launch_group_monthly",
+    });
+    expect(() => parseHostedRuntimeSubscriptionToolRequest({
+      action: "change_plan",
+      targetPlanCode: "launch_group_monthly",
+    })).toThrow();
 
     expect(() => parseHostedRuntimeSubscriptionToolRequest({
       action: "continue_pulse",
@@ -45,6 +68,15 @@ describe("hosted runtime subscription contract", () => {
   });
 
   it("requires a valid server-injected assistant input id on control requests", () => {
+    expect(parseHostedSubscriptionControlRequest({
+      action: "change_plan",
+      assistantInputId: ASSISTANT_INPUT_ID,
+      quoteId: "quote_test_group",
+      targetPlanCode: "launch_group_monthly",
+    })).toMatchObject({
+      action: "change_plan",
+      targetPlanCode: "launch_group_monthly",
+    });
     expect(parseHostedSubscriptionControlRequest({
       action: "upgrade_edge",
       assistantInputId: ASSISTANT_INPUT_ID,
@@ -68,6 +100,24 @@ describe("hosted runtime subscription contract", () => {
   });
 
   it("parses non-payment results without a URL", () => {
+    expect(parseHostedRuntimeSubscriptionToolResponse({
+      action: "change_plan",
+      effectiveAt: "2026-08-01T00:00:00.000Z",
+      plan: GROUP_PLAN,
+      status: "scheduled",
+    })).toMatchObject({
+      effectiveAt: "2026-08-01T00:00:00.000Z",
+      status: "scheduled",
+    });
+    expect(parseHostedRuntimeSubscriptionToolResponse({
+      action: "change_plan",
+      plan: GROUP_PLAN,
+      status: "completed",
+    })).toMatchObject({
+      action: "change_plan",
+      plan: GROUP_PLAN,
+      status: "completed",
+    });
     expect(parseHostedRuntimeSubscriptionToolResponse({
       action: "continue_pulse",
       plan: PULSE_PLAN,

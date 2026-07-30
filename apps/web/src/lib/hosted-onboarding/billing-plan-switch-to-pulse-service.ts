@@ -5,17 +5,19 @@ import { sha256Hex } from "../primitives";
 import { getPrisma } from "../prisma";
 import { coerceStripeObjectId } from "./billing";
 import {
-  canSwitchHostedBillingPlanToPulse,
+  canScheduleHostedBillingPlanChange,
   HOSTED_STANDARD_CHECKOUT_OFFER,
-  parseHostedBillingPhase,
+  isHostedPulseTrialBillingState,
   parseHostedBillingPlanCode,
   type HostedBillingPlanCode,
 } from "./billing-plans";
+import { assertHostedBillingPlanSelectable } from "./billing-plan-eligibility";
 import { assertHostedMemberOwnActiveBillingAllowed } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
 import {
   lookupHostedMemberStripeBillingRefByStripeSubscriptionScheduleId,
   readHostedMemberStripeBillingRef,
+  withHostedMemberStripeMutationLock,
   writeHostedMemberStripeBillingRefTx,
   type HostedMemberStripeBillingRefSnapshot,
 } from "./hosted-member-billing-store";
@@ -23,33 +25,46 @@ import { readHostedMemberCoreState } from "./hosted-member-store";
 import { isHostedStripeLegacyAiUsageMeteredItem } from "./legacy-usage-price";
 import {
   requireHostedStripeBillingPlanConfig,
+  requireValidatedHostedStripeBillingPlanConfig,
 } from "./runtime";
-import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
+import {
+  hasHostedStripeSubscriptionPaymentMethod,
+} from "./stripe-subscription-payment-method";
 import {
   describeHostedStripeErrorDetails,
   logHostedStripeFailure,
 } from "./stripe-error-log";
 
-const SWITCH_TO_PULSE_SOURCE_PLAN = "launch_edge_monthly" satisfies HostedBillingPlanCode;
-const SWITCH_TO_PULSE_TARGET_PLAN = "launch_monthly" satisfies HostedBillingPlanCode;
-const SWITCH_TO_PULSE_MARKER = "edge_to_pulse_at_period_end";
+const LEGACY_EDGE_TO_PULSE_SOURCE_PLAN =
+  "launch_edge_monthly" satisfies HostedBillingPlanCode;
+const LEGACY_EDGE_TO_PULSE_TARGET_PLAN =
+  "launch_monthly" satisfies HostedBillingPlanCode;
+const LEGACY_EDGE_TO_PULSE_MARKER = "edge_to_pulse_at_period_end";
+const DIRECT_PLAN_SWITCH_MARKER = "direct_plan_at_period_end_v1";
 const STRIPE_TRIAL_METADATA_KEYS = [
   "trialDurationDays",
   "trialPolicyVersion",
   "trialUsageLimitUsdMicros",
 ] as const;
 
-export type HostedBillingPlanSwitchToPulseResult =
+export type HostedBillingPlanSwitchResult =
+  | {
+    billingPlanCode: "launch_group_monthly";
+    status: "payment_method_required";
+  }
   | {
     effectiveAt: string;
-    scheduledBillingPlanCode: "launch_monthly";
+    scheduledBillingPlanCode: HostedBillingPlanCode;
     status: "already_scheduled";
   }
   | {
     effectiveAt: string;
-    scheduledBillingPlanCode: "launch_monthly";
+    scheduledBillingPlanCode: HostedBillingPlanCode;
     status: "scheduled";
   };
+
+export type HostedBillingPlanSwitchToPulseResult =
+  HostedBillingPlanSwitchResult;
 
 interface HostedStripePlanConfig {
   priceId: string;
@@ -58,22 +73,59 @@ interface HostedStripePlanConfig {
 interface HostedSwitchScheduleContext {
   currentPeriodEnd: Date;
   currentPeriodEndUnix: number;
-  edgeConfig: HostedStripePlanConfig;
   memberId: string;
-  pulseConfig: HostedStripePlanConfig;
+  sourceConfig: HostedStripePlanConfig;
+  sourcePlanCode: HostedBillingPlanCode;
   stripeSubscriptionId: string;
+  targetConfig: HostedStripePlanConfig;
+  targetPlanCode: HostedBillingPlanCode;
 }
 
-export async function scheduleHostedBillingPlanSwitchToPulse(input: {
+export async function scheduleHostedBillingPlanSwitch(input: {
+  memberId: string;
+  now?: Date;
+  prisma?: PrismaClient;
+  requiredSourceBillingPhase?: "trial";
+  targetPlanCode: HostedBillingPlanCode;
+}): Promise<HostedBillingPlanSwitchResult> {
+  const prisma = input.prisma ?? getPrisma();
+  const now = input.now ?? new Date();
+
+  return withHostedMemberStripeMutationLock({
+    memberId: input.memberId,
+    prisma,
+    run: (tx) =>
+      scheduleHostedBillingPlanSwitchWithLockedOwner({
+        memberId: input.memberId,
+        now,
+        requiredSourceBillingPhase: input.requiredSourceBillingPhase,
+        targetPlanCode: input.targetPlanCode,
+        tx,
+      }),
+  });
+}
+
+export function scheduleHostedBillingPlanSwitchToPulse(input: {
   memberId: string;
   now?: Date;
   prisma?: PrismaClient;
 }): Promise<HostedBillingPlanSwitchToPulseResult> {
-  const prisma = input.prisma ?? getPrisma();
-  const now = input.now ?? new Date();
+  return scheduleHostedBillingPlanSwitch({
+    ...input,
+    targetPlanCode: LEGACY_EDGE_TO_PULSE_TARGET_PLAN,
+  });
+}
+
+async function scheduleHostedBillingPlanSwitchWithLockedOwner(input: {
+  memberId: string;
+  now: Date;
+  requiredSourceBillingPhase?: "trial";
+  targetPlanCode: HostedBillingPlanCode;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedBillingPlanSwitchResult> {
   const member = await readHostedMemberCoreState({
     memberId: input.memberId,
-    prisma,
+    prisma: input.tx,
   });
 
   if (!member) {
@@ -88,12 +140,29 @@ export async function scheduleHostedBillingPlanSwitchToPulse(input: {
 
   const billingRef = await readHostedMemberStripeBillingRef({
     memberId: input.memberId,
-    prisma,
+    prisma: input.tx,
+  });
+  const sourceIsPulseTrial = isHostedPulseTrialBillingState({
+    currentBillingPhase: billingRef?.currentBillingPhase,
+    currentCheckoutOffer: billingRef?.currentCheckoutOffer,
   });
 
-  assertHostedBillingPlanSwitchToPulseSourceState({
+  if (
+    input.requiredSourceBillingPhase
+    && !sourceIsPulseTrial
+  ) {
+    throw buildHostedBillingPlanSwitchSourceChangedError();
+  }
+
+  assertHostedBillingPlanSwitchSourceState({
     billingRef,
     member,
+    targetPlanCode: input.targetPlanCode,
+  });
+  await assertHostedBillingPlanSelectable({
+    memberId: input.memberId,
+    prisma: input.tx,
+    targetPlanCode: input.targetPlanCode,
   });
 
   const stripeCustomerId = billingRef?.stripeCustomerId ?? null;
@@ -107,14 +176,22 @@ export async function scheduleHostedBillingPlanSwitchToPulse(input: {
     });
   }
 
-  const edgeConfig = requireHostedSwitchPlanConfig(SWITCH_TO_PULSE_SOURCE_PLAN);
-  const pulseConfig = requireHostedSwitchPlanConfig(SWITCH_TO_PULSE_TARGET_PLAN);
-  const stripe = edgeConfig.stripe;
+  const sourcePlanCode = parseHostedBillingPlanCode(
+    billingRef?.currentBillingPlanCode,
+  );
+  if (!sourcePlanCode) {
+    throw buildHostedBillingPlanSwitchSourceChangedError();
+  }
+  const sourceConfig = requireHostedSwitchPlanConfig(sourcePlanCode);
+  const targetConfig = await requireValidatedHostedStripeBillingPlanConfig({
+    billingPlanCode: input.targetPlanCode,
+  });
+  const stripe = sourceConfig.stripe;
   const subscription = await callHostedStripePlanSwitchOperation(
     "subscription.retrieve",
     () =>
       stripe.subscriptions.retrieve(stripeSubscriptionId, {
-        expand: ["items.data.price"],
+        expand: ["customer", "items.data.price"],
       }),
   );
 
@@ -122,27 +199,47 @@ export async function scheduleHostedBillingPlanSwitchToPulse(input: {
     stripeCustomerId,
     subscription,
   });
+  if (
+    sourceIsPulseTrial
+    && subscription.status !== "trialing"
+  ) {
+    throw buildHostedBillingPlanSwitchSourceChangedError();
+  }
   assertHostedStripeSubscriptionScheduleableState({
-    now,
+    allowTrialing: sourceIsPulseTrial,
+    now: input.now,
     subscription,
   });
-  assertHostedStripeCanonicalEdgeSubscriptionItems({
-    edgeConfig,
+  assertHostedStripeCanonicalSourceSubscriptionItems({
+    sourceConfig,
     subscription,
   });
 
+  if (
+    sourceIsPulseTrial
+    && input.targetPlanCode === "launch_group_monthly"
+    && !hasHostedStripeSubscriptionPaymentMethod(subscription)
+  ) {
+    return {
+      billingPlanCode: "launch_group_monthly",
+      status: "payment_method_required",
+    };
+  }
+
   const currentPeriodEnd = requireHostedStripeSubscriptionCurrentPeriodEnd({
-    now,
+    now: input.now,
     subscription,
   });
   const currentPeriodEndUnix = toUnixSeconds(currentPeriodEnd);
   const context: HostedSwitchScheduleContext = {
     currentPeriodEnd,
     currentPeriodEndUnix,
-    edgeConfig,
     memberId: input.memberId,
-    pulseConfig,
+    sourceConfig,
+    sourcePlanCode,
     stripeSubscriptionId,
+    targetConfig,
+    targetPlanCode: input.targetPlanCode,
   };
   const existingScheduleId = coerceStripeObjectId(subscription.schedule);
 
@@ -155,13 +252,13 @@ export async function scheduleHostedBillingPlanSwitchToPulse(input: {
     if (isHostedBillingPlanSwitchToPulseScheduleCompatible(existingSchedule, context)) {
       await persistHostedBillingPlanSwitchToPulsePendingFields({
         context,
-        prisma,
         schedule: existingSchedule,
+        tx: input.tx,
       });
 
       return {
         effectiveAt: currentPeriodEnd.toISOString(),
-        scheduledBillingPlanCode: SWITCH_TO_PULSE_TARGET_PLAN,
+        scheduledBillingPlanCode: input.targetPlanCode,
         status: "already_scheduled",
       };
     }
@@ -183,13 +280,13 @@ export async function scheduleHostedBillingPlanSwitchToPulse(input: {
     });
     await persistHostedBillingPlanSwitchToPulsePendingFields({
       context,
-      prisma,
       schedule: updatedSchedule,
+      tx: input.tx,
     });
 
     return {
       effectiveAt: currentPeriodEnd.toISOString(),
-      scheduledBillingPlanCode: SWITCH_TO_PULSE_TARGET_PLAN,
+      scheduledBillingPlanCode: input.targetPlanCode,
       status: "scheduled",
     };
   }
@@ -211,13 +308,13 @@ export async function scheduleHostedBillingPlanSwitchToPulse(input: {
 
   await persistHostedBillingPlanSwitchToPulsePendingFields({
     context,
-    prisma,
     schedule: updatedSchedule,
+    tx: input.tx,
   });
 
   return {
     effectiveAt: currentPeriodEnd.toISOString(),
-    scheduledBillingPlanCode: SWITCH_TO_PULSE_TARGET_PLAN,
+    scheduledBillingPlanCode: input.targetPlanCode,
     status: "scheduled",
   };
 }
@@ -244,7 +341,7 @@ export async function refreshHostedBillingPlanSwitchToPulsePendingFieldsFromSche
     await writeHostedMemberStripeBillingRefTx({
       memberId: context.memberId,
       scheduledBillingEffectiveAt: context.currentPeriodEnd,
-      scheduledBillingPlanCode: SWITCH_TO_PULSE_TARGET_PLAN,
+      scheduledBillingPlanCode: context.targetPlanCode,
       stripeSubscriptionScheduleId: input.schedule.id,
       tx: input.tx,
     });
@@ -281,32 +378,40 @@ export async function clearHostedBillingPlanSwitchToPulsePendingFieldsForSchedul
   });
 }
 
-function assertHostedBillingPlanSwitchToPulseSourceState(input: {
+function assertHostedBillingPlanSwitchSourceState(input: {
   billingRef: HostedMemberStripeBillingRefSnapshot | null;
   member: {
     billingStatus: unknown;
     suspendedAt?: Date | null;
   };
+  targetPlanCode: HostedBillingPlanCode;
 }): void {
-  if (canSwitchHostedBillingPlanToPulse({
+  if (canScheduleHostedBillingPlanChange({
     billingStatus: input.member.billingStatus,
     currentBillingPhase: input.billingRef?.currentBillingPhase,
     currentBillingPlanCode: input.billingRef?.currentBillingPlanCode,
+    currentCheckoutOffer: input.billingRef?.currentCheckoutOffer,
     stripeCustomerId: input.billingRef?.stripeCustomerId,
     stripeSubscriptionId: input.billingRef?.stripeSubscriptionId,
     suspendedAt: input.member.suspendedAt,
+    targetPlanCode: input.targetPlanCode,
   })) {
     return;
   }
 
-  const hasPaidEdgeSourceState =
-    parseHostedBillingPlanCode(input.billingRef?.currentBillingPlanCode) === SWITCH_TO_PULSE_SOURCE_PLAN &&
-    parseHostedBillingPhase(input.billingRef?.currentBillingPhase) === "paid" &&
-    input.member.billingStatus === "active" &&
-    !(input.member.suspendedAt instanceof Date);
+  const hasPotentialSourceState = canScheduleHostedBillingPlanChange({
+    billingStatus: input.member.billingStatus,
+    currentBillingPhase: input.billingRef?.currentBillingPhase,
+    currentBillingPlanCode: input.billingRef?.currentBillingPlanCode,
+    currentCheckoutOffer: input.billingRef?.currentCheckoutOffer,
+    stripeCustomerId: "present",
+    stripeSubscriptionId: "present",
+    suspendedAt: input.member.suspendedAt,
+    targetPlanCode: input.targetPlanCode,
+  });
 
   if (
-    hasPaidEdgeSourceState &&
+    hasPotentialSourceState &&
     (!input.billingRef?.stripeCustomerId || !input.billingRef?.stripeSubscriptionId)
   ) {
     throw hostedOnboardingError({
@@ -319,7 +424,7 @@ function assertHostedBillingPlanSwitchToPulseSourceState(input: {
   throw hostedOnboardingError({
     code: "HOSTED_BILLING_PLAN_SWITCH_UNSUPPORTED",
     httpStatus: 400,
-    message: "This plan change is not supported.",
+    message: "This scheduled plan change is not supported.",
   });
 }
 
@@ -329,25 +434,34 @@ function buildHostedBillingPlanSwitchContextFromLocalPendingState(input: {
 }): HostedSwitchScheduleContext | null {
   const stripeSubscriptionId = input.billingRef.stripeSubscriptionId;
   const currentPeriodEnd = input.billingRef.scheduledBillingEffectiveAt;
+  const sourcePlanCode = parseHostedBillingPlanCode(
+    input.billingRef.currentBillingPlanCode,
+  );
+  const targetPlanCode = parseHostedBillingPlanCode(
+    input.billingRef.scheduledBillingPlanCode,
+  );
 
   if (
     !stripeSubscriptionId ||
     !currentPeriodEnd ||
-    input.billingRef.scheduledBillingPlanCode !== SWITCH_TO_PULSE_TARGET_PLAN
+    !sourcePlanCode ||
+    !targetPlanCode
   ) {
     return null;
   }
 
-  const edgeConfig = requireHostedSwitchPlanConfig(SWITCH_TO_PULSE_SOURCE_PLAN);
-  const pulseConfig = requireHostedSwitchPlanConfig(SWITCH_TO_PULSE_TARGET_PLAN);
+  const sourceConfig = requireHostedSwitchPlanConfig(sourcePlanCode);
+  const targetConfig = requireHostedSwitchPlanConfig(targetPlanCode);
 
   return {
     currentPeriodEnd,
     currentPeriodEndUnix: toUnixSeconds(currentPeriodEnd),
-    edgeConfig,
     memberId: input.memberId,
-    pulseConfig,
+    sourceConfig,
+    sourcePlanCode,
     stripeSubscriptionId,
+    targetConfig,
+    targetPlanCode,
   };
 }
 
@@ -382,10 +496,14 @@ function assertHostedStripeSubscriptionMatchesCustomer(input: {
 }
 
 function assertHostedStripeSubscriptionScheduleableState(input: {
+  allowTrialing: boolean;
   now: Date;
   subscription: Stripe.Subscription;
 }): void {
-  if (input.subscription.status !== "active") {
+  if (
+    input.subscription.status !== "active"
+    && !(input.allowTrialing && input.subscription.status === "trialing")
+  ) {
     throw buildHostedStripeSubscriptionStateUnsupportedError("status");
   }
 
@@ -428,14 +546,16 @@ function readHostedStripeSubscriptionItemCurrentPeriodEnd(
   return null;
 }
 
-function assertHostedStripeCanonicalEdgeSubscriptionItems(input: {
-  edgeConfig: HostedStripePlanConfig;
+function assertHostedStripeCanonicalSourceSubscriptionItems(input: {
+  sourceConfig: HostedStripePlanConfig;
   subscription: Stripe.Subscription;
 }): void {
   const items = input.subscription.items?.data ?? [];
-  const recurringItems = items.filter((item) => item.price?.id === input.edgeConfig.priceId);
+  const recurringItems = items.filter(
+    (item) => item.price?.id === input.sourceConfig.priceId,
+  );
   const unsupportedItems = items.filter((item) =>
-    item.price?.id !== input.edgeConfig.priceId &&
+    item.price?.id !== input.sourceConfig.priceId &&
     !isHostedStripeLegacyAiUsageMeteredItem(item)
   );
 
@@ -571,7 +691,7 @@ function buildHostedBillingPlanSwitchCurrentPhaseParams(input: {
     end_date: input.context.currentPeriodEndUnix,
     items: [
       {
-        price: input.context.edgeConfig.priceId,
+        price: input.context.sourceConfig.priceId,
         quantity: 1,
       },
     ],
@@ -589,7 +709,7 @@ function buildHostedBillingPlanSwitchFuturePhaseParams(
     },
     items: [
       {
-        price: context.pulseConfig.priceId,
+        price: context.targetConfig.priceId,
         quantity: 1,
       },
     ],
@@ -638,10 +758,10 @@ function buildHostedBillingPlanSwitchScheduleMetadata(
   context: HostedSwitchScheduleContext,
 ): Stripe.MetadataParam {
   return {
-    billingPlanCode: SWITCH_TO_PULSE_TARGET_PLAN,
+    billingPlanCode: context.targetPlanCode,
     checkoutOffer: HOSTED_STANDARD_CHECKOUT_OFFER,
     memberId: context.memberId,
-    murphPlanSwitch: SWITCH_TO_PULSE_MARKER,
+    murphPlanSwitch: resolveHostedBillingPlanSwitchMarker(context),
   };
 }
 
@@ -690,7 +810,7 @@ function isHostedBillingPlanSwitchToPulseScheduleCompatible(
   return currentPhase.start_date < context.currentPeriodEndUnix &&
     currentPhase.end_date === context.currentPeriodEndUnix &&
     hasHostedStripeSchedulePhaseItems(currentPhase, {
-      recurringPriceId: context.edgeConfig.priceId,
+      recurringPriceId: context.sourceConfig.priceId,
     }) &&
     futurePhase.start_date === context.currentPeriodEndUnix &&
     futurePhase.end_date > context.currentPeriodEndUnix &&
@@ -698,7 +818,7 @@ function isHostedBillingPlanSwitchToPulseScheduleCompatible(
     isHostedBillingPlanSwitchScheduleMetadataCompatible(futurePhase.metadata, context) &&
     hasHostedStripeTrialMetadataClears(futurePhase.metadata) &&
     hasHostedStripeSchedulePhaseItems(futurePhase, {
-      recurringPriceId: context.pulseConfig.priceId,
+      recurringPriceId: context.targetConfig.priceId,
     });
 }
 
@@ -706,9 +826,10 @@ function isHostedBillingPlanSwitchScheduleMetadataCompatible(
   metadata: Stripe.Metadata | null,
   context: HostedSwitchScheduleContext,
 ): boolean {
-  return metadata?.murphPlanSwitch === SWITCH_TO_PULSE_MARKER &&
+  return metadata?.murphPlanSwitch ===
+      resolveHostedBillingPlanSwitchMarker(context) &&
     metadata.memberId === context.memberId &&
-    metadata.billingPlanCode === SWITCH_TO_PULSE_TARGET_PLAN;
+    metadata.billingPlanCode === context.targetPlanCode;
 }
 
 function hasHostedStripeSchedulePhaseItems(
@@ -735,42 +856,85 @@ function hasHostedStripeTrialMetadataClears(metadata: Stripe.Metadata | null): b
 
 async function persistHostedBillingPlanSwitchToPulsePendingFields(input: {
   context: HostedSwitchScheduleContext;
-  prisma: PrismaClient;
   schedule: Stripe.SubscriptionSchedule;
+  tx: Prisma.TransactionClient;
 }): Promise<void> {
-  await input.prisma.$transaction(async (tx) => {
-    await writeHostedMemberStripeBillingRefTx({
-      memberId: input.context.memberId,
-      scheduledBillingEffectiveAt: input.context.currentPeriodEnd,
-      scheduledBillingPlanCode: SWITCH_TO_PULSE_TARGET_PLAN,
-      stripeSubscriptionScheduleId: input.schedule.id,
-      tx,
-    });
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  await writeHostedMemberStripeBillingRefTx({
+    memberId: input.context.memberId,
+    scheduledBillingEffectiveAt: input.context.currentPeriodEnd,
+    scheduledBillingPlanCode: input.context.targetPlanCode,
+    stripeSubscriptionScheduleId: input.schedule.id,
+    tx: input.tx,
+  });
 }
 
 function buildHostedBillingPlanSwitchToPulseCreateIdempotencyKey(
   context: HostedSwitchScheduleContext,
 ): string {
-  return `hosted-billing-switch-to-pulse:create:${sha256Hex(JSON.stringify({
+  if (isLegacyEdgeToPulseSwitch(context)) {
+    return `hosted-billing-switch-to-pulse:create:${sha256Hex(JSON.stringify({
+      currentPeriodEnd: context.currentPeriodEndUnix,
+      memberId: context.memberId,
+      stripeSubscriptionId: context.stripeSubscriptionId,
+      targetPlanCode: LEGACY_EDGE_TO_PULSE_TARGET_PLAN,
+    }))}`;
+  }
+
+  return `hosted-billing-switch:create:v1:${sha256Hex(JSON.stringify({
     currentPeriodEnd: context.currentPeriodEndUnix,
     memberId: context.memberId,
+    sourcePlanCode: context.sourcePlanCode,
     stripeSubscriptionId: context.stripeSubscriptionId,
-    targetPlanCode: SWITCH_TO_PULSE_TARGET_PLAN,
+    targetPlanCode: context.targetPlanCode,
   }))}`;
 }
 
 function buildHostedBillingPlanSwitchToPulseUpdateIdempotencyKey(
   context: HostedSwitchScheduleContext,
 ): string {
-  return `hosted-billing-switch-to-pulse:update:${sha256Hex(JSON.stringify({
+  if (isLegacyEdgeToPulseSwitch(context)) {
+    return `hosted-billing-switch-to-pulse:update:${sha256Hex(JSON.stringify({
+      currentPeriodEnd: context.currentPeriodEndUnix,
+      memberId: context.memberId,
+      edgePriceId: context.sourceConfig.priceId,
+      pulsePriceId: context.targetConfig.priceId,
+      stripeSubscriptionId: context.stripeSubscriptionId,
+      targetPlanCode: LEGACY_EDGE_TO_PULSE_TARGET_PLAN,
+    }))}`;
+  }
+
+  return `hosted-billing-switch:update:v1:${sha256Hex(JSON.stringify({
     currentPeriodEnd: context.currentPeriodEndUnix,
     memberId: context.memberId,
-    edgePriceId: context.edgeConfig.priceId,
-    pulsePriceId: context.pulseConfig.priceId,
+    sourcePlanCode: context.sourcePlanCode,
+    sourcePriceId: context.sourceConfig.priceId,
     stripeSubscriptionId: context.stripeSubscriptionId,
-    targetPlanCode: SWITCH_TO_PULSE_TARGET_PLAN,
+    targetPlanCode: context.targetPlanCode,
+    targetPriceId: context.targetConfig.priceId,
   }))}`;
+}
+
+function isLegacyEdgeToPulseSwitch(
+  context: HostedSwitchScheduleContext,
+): boolean {
+  return context.sourcePlanCode === LEGACY_EDGE_TO_PULSE_SOURCE_PLAN
+    && context.targetPlanCode === LEGACY_EDGE_TO_PULSE_TARGET_PLAN;
+}
+
+function resolveHostedBillingPlanSwitchMarker(
+  context: HostedSwitchScheduleContext,
+): string {
+  return isLegacyEdgeToPulseSwitch(context)
+    ? LEGACY_EDGE_TO_PULSE_MARKER
+    : DIRECT_PLAN_SWITCH_MARKER;
+}
+
+function buildHostedBillingPlanSwitchSourceChangedError() {
+  return hostedOnboardingError({
+    code: "HOSTED_BILLING_PLAN_SWITCH_SOURCE_CHANGED",
+    httpStatus: 409,
+    message: "Your billing state changed. Review the latest plan options.",
+  });
 }
 
 function buildHostedStripeSubscriptionStateUnsupportedError(reason: string) {

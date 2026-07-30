@@ -14,7 +14,7 @@ import {
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
-  scheduleHostedMailboxWakeAfterResponse,
+  handoffHostedMailboxWake,
 } from "@/src/lib/hosted-orchestration/mailbox-wake";
 import { readRawBodyBuffer } from "@/src/lib/http";
 
@@ -46,9 +46,10 @@ export const POST = withJsonError(async (request: Request) => {
     request: requestBody,
   });
   if (result.mailboxWake) {
-    scheduleHostedMailboxWakeAfterResponse({
+    await handoffHostedMailboxWake({
       ...result.mailboxWake,
       directWakeSource: "assistant-ask-completion",
+      signal: request.signal,
     });
   }
   return jsonOk(result.response);

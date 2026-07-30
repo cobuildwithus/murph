@@ -49,6 +49,32 @@ function buildEmailDeliveryContext(
 }
 
 describe("createHostedGroupToolWithCurrentTurnContext", () => {
+  it("forwards current-turn cancellation through Assistant Ask requests", async () => {
+    const request = vi.fn().mockResolvedValue({
+      action: "ask_current_sender",
+      result: { status: "accepted" },
+    });
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
+      groupToolPort: { request },
+      linqDeliveryContexts: [],
+    });
+    const signal = new AbortController().signal;
+    const askRequest = {
+      action: "ask_current_sender" as const,
+      origin: {
+        assistantInputId: `ain_${"a".repeat(32)}`,
+        kind: "accepted_input" as const,
+        sessionId: "session_group",
+      },
+    };
+
+    await expect(groupTool.request(askRequest, { signal })).resolves.toEqual({
+      action: "ask_current_sender",
+      result: { status: "accepted" },
+    });
+    expect(request).toHaveBeenCalledExactlyOnceWith(askRequest, { signal });
+  });
+
   it("injects the exact current sender into referral actions", async () => {
     const request = vi.fn().mockResolvedValue({
       action: "arm_usage_referral",

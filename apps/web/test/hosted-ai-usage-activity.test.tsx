@@ -421,9 +421,9 @@ describe("HostedAiUsageActivity", () => {
     assert.match(markup, /Bring someone new to Murph/);
     assert.match(markup, /Completed/);
     assert.match(markup, /\$2\.00/);
-    assert.match(markup, /Purchased credits/);
-    assert.match(markup, /No purchased credits yet/);
-    assert.doesNotMatch(markup, /No usage credits yet/);
+    assert.match(markup, /History/);
+    assert.doesNotMatch(markup, /Purchased credits/);
+    assert.doesNotMatch(markup, /No (?:purchased|usage) credits yet/);
   });
 
   it("renders a single ledger surface and prefilled Murph handoff", async () => {
@@ -473,11 +473,11 @@ describe("HostedAiUsageActivity", () => {
       },
     }));
 
-    assert.match(markup, /<h3[^>]*>Missions<\/h3>/);
-    assert.match(markup, /<h3[^>]*>Purchased credits<\/h3>/);
-    assert.match(markup, /aria-label="Purchased usage credits"/);
+    assert.match(markup, /<h3[^>]*>Referrals<\/h3>/);
+    assert.match(markup, />History</);
+    assert.match(markup, /aria-label="Usage activity history"/);
+    assert.match(markup, /Usage purchase/);
     assert.match(markup, /Purchased by you/);
-    assert.match(markup, /Amounts added, not current balance/);
     assert.doesNotMatch(markup, /bar above/);
     assert.doesNotMatch(markup, /Remaining|\$6\.42/);
     assert.match(markup, /Start an active group/);
@@ -487,23 +487,14 @@ describe("HostedAiUsageActivity", () => {
     const detailOpeningTag = /^<details\b[^>]*>/u.exec(detailMarkup)?.[0];
     assert.ok(detailOpeningTag);
     assert.doesNotMatch(detailOpeningTag, /\sopen(?:=|\s|>)/u);
-    assert.match(
-      detailMarkup,
-      /Start a fresh group and get people talking\./,
-    );
-    assert.match(detailMarkup, /Selected Jul 27, 2026/);
-    assert.match(
-      markup,
-      /aria-label="Details for Start an active group, In progress, selected Jul 27, 2026"/,
-    );
-    assert.match(
-      markup,
-      /aria-label="Details for Start an active group, Checking final activity, selected Jul 28, 2026"/,
-    );
+    assert.doesNotMatch(markup, /Start a fresh group and get people talking\./);
+    assert.doesNotMatch(markup, /Selected Jul 27, 2026/);
+    assert.doesNotMatch(markup, />Details</);
+    assert.doesNotMatch(markup, /Amounts added, not current balance/);
     assert.match(markup, /Ask Murph/);
     assert.match(
       markup,
-      /aria-label="Ask Murph about usage missions in Messages"/,
+      /aria-label="Ask Murph about referrals in Messages"/,
     );
     assert.match(markup, /href="sms:\+15550100001\?body=mission"/);
     assert.doesNotMatch(markup, /<table/);
@@ -539,12 +530,13 @@ describe("HostedAiUsageActivity", () => {
     }));
 
     assert.match(markup, /Completed mission/);
-    assert.match(markup, /<h3[^>]*>Missions<\/h3>/);
-    assert.match(markup, /Purchased credits/);
-    assert.doesNotMatch(markup, /No missions selected/);
+    assert.match(markup, /<h3[^>]*>Referrals<\/h3>/);
+    assert.match(markup, />History</);
+    assert.doesNotMatch(markup, /Purchased credits/);
+    assert.doesNotMatch(markup, /No active referrals/);
     assert.doesNotMatch(
       markup,
-      /aria-label="Ask Murph about usage missions/,
+      /aria-label="Ask Murph about referrals/,
     );
     assert.doesNotMatch(markup, /href="sms:/);
   });
@@ -567,10 +559,11 @@ describe("HostedAiUsageActivity", () => {
       missionContactOption: null,
     }));
 
-    assert.match(markup, /<h3[^>]*>Purchased credits<\/h3>/);
-    assert.match(markup, /aria-label="Purchased usage credits"/);
+    assert.match(markup, /Purchased credits/);
+    assert.match(markup, /aria-label="Usage activity history"/);
+    assert.match(markup, /Usage purchase/);
     assert.match(markup, /Added for you/);
-    assert.doesNotMatch(markup, /<h3[^>]*>Missions<\/h3>/);
+    assert.doesNotMatch(markup, /<h3[^>]*>Referrals<\/h3>/);
     assert.doesNotMatch(markup, /Ask Murph/);
   });
 
@@ -591,10 +584,13 @@ describe("HostedAiUsageActivity", () => {
       },
     }));
 
-    assert.match(markup, /<h3[^>]*>Missions<\/h3>/);
-    assert.match(markup, /No missions selected/);
+    assert.match(markup, /<h3[^>]*>Referrals<\/h3>/);
     assert.match(markup, /Ask Murph/);
-    assert.match(markup, /No purchased credits yet/);
+    assert.match(
+      markup,
+      /Earn usage by inviting friends or adding Murph to a groupchat/,
+    );
+    assert.doesNotMatch(markup, /No purchased credits yet/);
     assert.doesNotMatch(markup, /<details/);
   });
 
@@ -621,9 +617,9 @@ describe("HostedAiUsageActivity", () => {
       missionContactOption: null,
     }));
 
-    assert.match(markup, /<h3[^>]*>Missions<\/h3>/);
-    assert.match(markup, /<h3[^>]*>Purchased credits<\/h3>/);
+    assert.match(markup, /<h3[^>]*>Referrals<\/h3>/);
     assert.match(markup, /Completed mission/);
-    assert.doesNotMatch(markup, /aria-label="Ask Murph about usage missions/);
+    assert.doesNotMatch(markup, /Purchased credits/);
+    assert.doesNotMatch(markup, /aria-label="Ask Murph about referrals/);
   });
 });

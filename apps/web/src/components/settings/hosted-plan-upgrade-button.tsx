@@ -13,7 +13,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/src/components/ui/dialog";
-import { getHostedBillingPlanDefinition } from "@/src/lib/hosted-onboarding/billing-plans";
+import {
+  getHostedBillingPlanDefinition,
+  type HostedBillingPlanCode,
+} from "@/src/lib/hosted-onboarding/billing-plans";
 import type { HostedBillingPlanUpgradeResult } from "@/src/lib/hosted-onboarding/billing-plan-change-service";
 import { cn } from "@/src/lib/utils";
 
@@ -34,10 +37,14 @@ export function UpgradeToEdgeButton(props: {
   block?: boolean;
   children?: ReactNode;
   disabled?: boolean;
+  expectedCurrentPlanCode:
+    | Extract<HostedBillingPlanCode, "launch_group_monthly" | "launch_monthly">;
   onPendingChange?: (pending: boolean) => void;
   presentation?: "banner" | "settings";
 }) {
   const presentation = props.presentation ?? "settings";
+  const expectedCurrentPlanCode =
+    props.expectedCurrentPlanCode ?? "launch_monthly";
   const router = useRouter();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isUpgrading, setIsUpgrading] = useState(false);
@@ -52,6 +59,7 @@ export function UpgradeToEdgeButton(props: {
       const response = await requestHostedOnboardingJson<HostedBillingPlanUpgradeResult>({
         method: "POST",
         payload: {
+          expectedCurrentPlanCode,
           targetPlanCode: "launch_edge_monthly",
         },
         url: "/api/settings/billing/upgrade-plan",

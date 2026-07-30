@@ -9,6 +9,7 @@ describe("readHostedOnboardingEnvironment", () => {
     const environment = readHostedOnboardingEnvironment(createProcessEnv({
       HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://join.example.test",
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: "price_edge_monthly_123",
+      HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_GROUP_MONTHLY: "price_group_monthly_123",
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_monthly_123",
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_5_USD: "price_usage_5_123",
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_10_USD: "price_usage_10_123",
@@ -86,6 +87,7 @@ describe("readHostedOnboardingEnvironment", () => {
     ]);
     expect(environment.stripePriceIdsByPlan).toEqual({
       launch_edge_monthly: "price_edge_monthly_123",
+      launch_group_monthly: "price_group_monthly_123",
       launch_monthly: "price_monthly_123",
     });
     expect(environment.stripeUsageCreditPriceIdsByOffer).toEqual({

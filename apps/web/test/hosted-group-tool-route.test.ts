@@ -12,9 +12,9 @@ import {
 } from "@/src/lib/hosted-groups/group-assistant-ask";
 
 const mocks = vi.hoisted(() => ({
+  handoffHostedMailboxWake: vi.fn(),
   handleTool: vi.fn(),
   requireJsonCallback: vi.fn(),
-  scheduleHostedMailboxWakeAfterResponse: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
@@ -25,8 +25,7 @@ vi.mock("@/src/lib/hosted-groups/group-tool", () => ({
   handleHostedRuntimeGroupTool: mocks.handleTool,
 }));
 vi.mock("@/src/lib/hosted-orchestration/mailbox-wake", () => ({
-  scheduleHostedMailboxWakeAfterResponse:
-    mocks.scheduleHostedMailboxWakeAfterResponse,
+  handoffHostedMailboxWake: mocks.handoffHostedMailboxWake,
 }));
 
 type RouteModule = typeof import(
@@ -44,6 +43,7 @@ describe("hosted group tool route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.handoffHostedMailboxWake.mockResolvedValue(undefined);
     mocks.requireJsonCallback.mockImplementation(async (
       request: Request,
       options: { maxBodyBytes: number },
@@ -161,7 +161,7 @@ describe("hosted group tool route", () => {
       question: "What exercises are scheduled today?",
     };
     mocks.handleTool.mockImplementationOnce(async (input) => {
-      input.scheduleMailboxWake({
+      await input.scheduleMailboxWake({
         expectedUserId: "member-group-runtime",
         mailboxItemId: "aask_req_direct_wake",
       });
@@ -183,10 +183,128 @@ describe("hosted group tool route", () => {
     const response = await route.POST(request);
 
     expect(response.status).toBe(200);
-    expect(mocks.scheduleHostedMailboxWakeAfterResponse).toHaveBeenCalledWith({
+    expect(mocks.handoffHostedMailboxWake).toHaveBeenCalledWith({
       directWakeSource: "assistant-ask-request",
       expectedUserId: "member-group-runtime",
       mailboxItemId: "aask_req_direct_wake",
+      signal: request.signal,
     });
   });
+
+  it("does not acknowledge an accepted Ask when its durable handoff rejects", async () => {
+    mocks.handoffHostedMailboxWake.mockRejectedValueOnce(
+      new Error("Temporal unavailable"),
+    );
+    const originAssistantInputId = `ain_${"a".repeat(32)}`;
+    const body = {
+      action: "ask",
+      groupLabel: "100 Club",
+      originAssistantInputId,
+      originSessionId: "session_private",
+      question: "What exercises are scheduled today?",
+    };
+    mocks.handleTool.mockImplementationOnce(async (input) => {
+      await input.scheduleMailboxWake({
+        expectedUserId: "member-group-runtime",
+        mailboxItemId: "aask_req_direct_wake",
+      });
+      return {
+        action: "ask",
+        requestId: "aask_req_direct_wake",
+        status: "accepted",
+      };
+    });
+    const request = new Request(
+      `https://join.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}`,
+      {
+        body: JSON.stringify(body),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      },
+    );
+
+    const response = await route.POST(request);
+
+    expect(response.status).toBe(500);
+    expect(response.headers.get(HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER))
+      .toBe(createHostedAssistantAskRequestId({
+        memberId: "member_group_runtime",
+        originAssistantInputId,
+      }));
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INTERNAL_ERROR",
+        message: "Internal error.",
+      },
+    });
+  });
+
+  it.each([
+    {
+      body: {
+        action: "ask_member",
+        grantId: "grant_sleep",
+        origin: {
+          assistantInputId: `ain_${"b".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+        question: "How has the grantor been sleeping lately?",
+      },
+      expectedUserId: "member-grantor",
+      mailboxItemId: "aask_req_disclosure_one",
+      responseAction: "ask_member",
+    },
+    {
+      body: {
+        action: "ask_current_sender",
+        origin: {
+          assistantInputId: `ain_${"c".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+      },
+      expectedUserId: "member-sender",
+      mailboxItemId: "aask_req_current_sender",
+      responseAction: "ask_current_sender",
+    },
+  ])(
+    "does not acknowledge an accepted $responseAction when its durable handoff rejects",
+    async ({ body, expectedUserId, mailboxItemId, responseAction }) => {
+      mocks.handoffHostedMailboxWake.mockRejectedValueOnce(
+        new Error("Temporal unavailable"),
+      );
+      mocks.handleTool.mockImplementationOnce(async (input) => {
+        await input.scheduleMailboxWake({ expectedUserId, mailboxItemId });
+        return {
+          action: responseAction,
+          result: { status: "accepted" },
+        };
+      });
+      const request = new Request(
+        `https://join.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}`,
+        {
+          body: JSON.stringify(body),
+          headers: { "content-type": "application/json" },
+          method: "POST",
+        },
+      );
+
+      const response = await route.POST(request);
+
+      expect(response.status).toBe(500);
+      expect(mocks.handoffHostedMailboxWake).toHaveBeenCalledWith({
+        directWakeSource: "assistant-ask-request",
+        expectedUserId,
+        mailboxItemId,
+        signal: request.signal,
+      });
+      await expect(response.json()).resolves.toEqual({
+        error: {
+          code: "INTERNAL_ERROR",
+          message: "Internal error.",
+        },
+      });
+    },
+  );
 });

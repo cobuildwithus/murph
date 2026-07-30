@@ -67,6 +67,49 @@ describe("logoutHostedAppSession", () => {
     });
   });
 
+  it("uses the consent-decline endpoint before best-effort Privy logout", async () => {
+    const logoutPrivy = vi.fn().mockResolvedValue(undefined);
+    mocks.requestHostedOnboardingJson.mockImplementation(async (input: {
+      onSuccessfulResponseHeaders?: () => void;
+    }) => {
+      input.onSuccessfulResponseHeaders?.();
+      return { ok: true };
+    });
+    const { declineHostedLaunchConsent } = await import(
+      "@/src/components/hosted-onboarding/hosted-app-session-client"
+    );
+
+    await declineHostedLaunchConsent({ logoutPrivy });
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+      method: "POST",
+      onSuccessfulResponseError: mocks.reloadCurrentHostedAuthDocument,
+      onSuccessfulResponseHeaders: expect.any(Function),
+      signal: expect.any(AbortSignal),
+      url: "/api/legal/consent/decline",
+    });
+    expect(logoutPrivy).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a successful consent decline terminal when Privy cleanup fails", async () => {
+    const logoutPrivy = vi.fn().mockRejectedValue(new Error("Privy unavailable"));
+    mocks.requestHostedOnboardingJson.mockImplementation(async (input: {
+      onSuccessfulResponseHeaders?: () => void;
+    }) => {
+      input.onSuccessfulResponseHeaders?.();
+      return { ok: true };
+    });
+    const { declineHostedLaunchConsent } = await import(
+      "@/src/components/hosted-onboarding/hosted-app-session-client"
+    );
+
+    await expect(declineHostedLaunchConsent({ logoutPrivy })).resolves.toBeUndefined();
+
+    expect(logoutPrivy).toHaveBeenCalledTimes(1);
+    expect(mocks.publishBrowserVaultSessionInvalidation).toHaveBeenCalledTimes(1);
+    expect(mocks.reloadCurrentHostedAuthDocument).not.toHaveBeenCalled();
+  });
+
   it("does not replay destructive logout when ambient authority changes after a transport failure", async () => {
     const events: string[] = [];
     let ambientMember = "member_A";

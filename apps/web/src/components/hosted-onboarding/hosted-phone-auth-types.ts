@@ -1,4 +1,3 @@
-export type HostedPhoneAuthIntent = "auth" | "link";
 export type HostedPhoneAuthPendingAction = "continue" | "logout" | "send-code" | "verify-code" | null;
 export type HostedAuthenticatedPhoneAuthView =
   | "loading"

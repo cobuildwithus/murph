@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
     preferredScope?: string;
     source?: string;
   } | null,
+  declineHostedLaunchConsent: vi.fn(),
   logoutHostedAppSession: vi.fn(),
   sendCode: vi.fn(),
   usePrivy: vi.fn(),
@@ -79,6 +80,7 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-completion", () => ({
 }));
 
 vi.mock("@/src/components/hosted-onboarding/hosted-app-session-client", () => ({
+  declineHostedLaunchConsent: mocks.declineHostedLaunchConsent,
   logoutHostedAppSession: mocks.logoutHostedAppSession,
 }));
 
@@ -176,6 +178,11 @@ let cleanupRender: (() => Promise<void>) | null = null;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.declineHostedLaunchConsent.mockImplementation(
+    async ({ logoutPrivy }: { logoutPrivy?: () => Promise<void> | void }) => {
+      await logoutPrivy?.();
+    },
+  );
   mocks.logoutHostedAppSession.mockImplementation(
     async ({ logoutPrivy }: { logoutPrivy?: () => Promise<void> | void }) => {
       await logoutPrivy?.();
@@ -1232,7 +1239,7 @@ test("HostedAuthPanel can require launch consent after homepage login completion
   });
 });
 
-test("HostedAuthPanel returns to auth without recording consent when launch consent is declined", async () => {
+test("HostedAuthPanel records the launch decline and returns to auth", async () => {
   const logout = vi.fn().mockResolvedValue(undefined);
   const onViewChange = vi.fn();
   mocks.usePrivy.mockReturnValue({
@@ -1267,9 +1274,10 @@ test("HostedAuthPanel returns to auth without recording consent when launch cons
   });
 
   expect(logout).toHaveBeenCalledTimes(1);
-  expect(mocks.logoutHostedAppSession).toHaveBeenCalledWith({
+  expect(mocks.declineHostedLaunchConsent).toHaveBeenCalledWith({
     logoutPrivy: logout,
   });
+  expect(mocks.logoutHostedAppSession).not.toHaveBeenCalled();
   expect(assign).not.toHaveBeenCalled();
   expect(container.textContent).not.toContain("Hosted legal consent card");
   expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeTruthy();
@@ -1285,7 +1293,7 @@ test("HostedAuthPanel leaves the gate mounted and Decline usable when sign-out f
     logout,
     ready: true,
   });
-  mocks.logoutHostedAppSession.mockRejectedValueOnce(
+  mocks.declineHostedLaunchConsent.mockRejectedValueOnce(
     new Error("Sign-out unavailable."),
   );
 
@@ -1326,7 +1334,7 @@ test("HostedAuthPanel leaves the gate mounted and Decline usable when sign-out f
   });
 
   await vi.waitFor(() => {
-    expect(mocks.logoutHostedAppSession).toHaveBeenCalledTimes(2);
+    expect(mocks.declineHostedLaunchConsent).toHaveBeenCalledTimes(2);
     expect(logout).toHaveBeenCalledTimes(1);
     expect(container.textContent).not.toContain("Hosted legal consent card");
   });
@@ -1467,6 +1475,8 @@ test("HostedAuthPanel phone signup completion pauses on launch consent before re
   });
   expect(onCompleted).toHaveBeenCalledTimes(1);
   expect(assign).not.toHaveBeenCalled();
+  expect(container.textContent).toContain("Hosted legal consent card");
+  expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeNull();
 
   await act(async () => {
     mocks.legalConsentCardProps?.onRequirementChange?.(false);
@@ -1476,7 +1486,7 @@ test("HostedAuthPanel phone signup completion pauses on launch consent before re
   expect(assign).not.toHaveBeenCalled();
 });
 
-test("HostedAuthPanel keeps consent mounted until downstream completion succeeds", async () => {
+test("HostedAuthPanel keeps consent mounted through downstream completion retry", async () => {
   const onCompleted = vi.fn()
     .mockRejectedValueOnce(new Error("Could not finish sign in."))
     .mockResolvedValueOnce(undefined);
@@ -1520,8 +1530,8 @@ test("HostedAuthPanel keeps consent mounted until downstream completion succeeds
   });
 
   expect(onCompleted).toHaveBeenCalledTimes(2);
-  expect(container.textContent).not.toContain("Hosted legal consent card");
-  expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeTruthy();
+  expect(container.textContent).toContain("Hosted legal consent card");
+  expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeNull();
 });
 
 function setInputValue(
@@ -1557,7 +1567,7 @@ test("HostedAuthPanel keeps Decline terminal when a late status result says cons
       redirectUrl: "/home",
     });
   let releaseLogout: (() => void) | null = null;
-  mocks.logoutHostedAppSession.mockImplementationOnce(
+  mocks.declineHostedLaunchConsent.mockImplementationOnce(
     () =>
       new Promise<void>((resolve) => {
         releaseLogout = () => resolve();
@@ -1588,7 +1598,7 @@ test("HostedAuthPanel keeps Decline terminal when a late status result says cons
     declineButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
 
-  expect(mocks.logoutHostedAppSession).toHaveBeenCalledTimes(1);
+  expect(mocks.declineHostedLaunchConsent).toHaveBeenCalledTimes(1);
 
   // The status retry the member started before declining now resolves to a
   // fully granted status while the authoritative logout is still in flight.
@@ -1633,5 +1643,6 @@ test("HostedAuthPanel keeps Decline terminal when a late status result says cons
     joinUrl: "/join/second-invite-code",
     stage: "active",
   });
-  expect(container.textContent).not.toContain("Hosted legal consent card");
+  expect(container.textContent).toContain("Hosted legal consent card");
+  expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeNull();
 });
