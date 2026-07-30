@@ -52,9 +52,12 @@ Last verified: 2026-07-29
   App Server initialization handshake; it does not reserve the process for a
   turn. Matching preparation callers join that same promise, while a matching
   foreground turn synchronously reserves the exact process before joining its
-  readiness. Exact object identity and synchronous state transitions serialize
-  publish, claim, replacement, and teardown without a second slot lock or
-  readiness owner.
+  readiness. The existing engine-owned slot-transition lock serializes inspect,
+  exact teardown, publication or reservation, and workspace-boundary admission;
+  it is not held while initialization readiness runs. The admitting caller
+  receives a cancellation handle bound to that exact process, so a stale caller
+  cannot cancel a later replacement. There is no second lock or readiness
+  owner.
 - Every App Server stop path rejects all pending JSON-RPC requests promptly and
   tears down the exact process object. Preparation failure, timeout, abort, or
   incompatible replacement must finish that teardown before a fresh process is
@@ -65,9 +68,13 @@ Last verified: 2026-07-29
 - Before snapshot construction, the checkpoint owner cancels and awaits exact
   teardown of readiness that is still pending and unreserved. A ready idle
   process remains on the existing warm-process path; a reserved or running
-  process remains on the existing turn-quiescence path. The hosted
-  conversation warm lease remains 20 minutes, and process-only initialization
-  neither extends that lease nor adds keepalive traffic.
+  process remains on the existing turn-quiescence path. The boundary holds the
+  slot-transition lock through that decision and any pending-preinitialization
+  teardown or ready-process reservation, preventing an already-waiting
+  replacement from publishing after the boundary returns. The potentially long
+  background-work wait then runs outside the lock under that reservation. The
+  hosted conversation warm lease remains 20 minutes, and process-only
+  initialization neither extends that lease nor adds keepalive traffic.
 - The production database-health operator alert is an independent Cloudflare
   singleton so the monitored Postgres database cannot take down its own page
   owner. A five-minute Cron Trigger records one normalized PlanetScale sample

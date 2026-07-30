@@ -71,8 +71,11 @@ it has been explicitly elevated to a cross-cutting invariant.
   Process readiness is a memoized property of that exact process and is
   separate from turn reservation: process-only initialization may start
   without reserving a turn, and a matching turn synchronously reserves that
-  exact process before joining the same readiness work. Do not add a second
-  warm-slot lifecycle, startup scheduler, slot lock, or speculative turn owner.
+  exact process before joining the same readiness work. The existing
+  engine-owned slot-transition lock serializes inspect, exact teardown,
+  publication or reservation, and workspace-boundary admission; initialization
+  readiness itself runs outside that lock. Do not add a second warm-slot
+  lifecycle, lock owner, startup scheduler, or speculative turn owner.
   Initialization alone is not prior-turn reuse: the first foreground turn keeps
   first-turn request and event scoping until one real turn completes.
 - Process-only initialization never starts or resumes a thread, starts a turn,
@@ -115,6 +118,13 @@ it has been explicitly elevated to a cross-cutting invariant.
   invocation ownership is released.
 - Before checkpoint construction, unreserved process initialization that is
   still pending is cancelled and its exact process is awaited through teardown.
+  Invocation release uses the exact-process handle returned by preparation and
+  must not cancel a later replacement admitted by another caller.
+  The checkpoint holds the existing slot-transition lock through its exact
+  process check and any pending-preinitialization teardown or ready-process
+  reservation. The potentially long background-work wait runs outside the lock
+  under that reservation, so foreground acquisition fails busy instead of
+  queueing a replacement behind the boundary.
   An already-ready idle resident process remains governed by the ordinary warm
   App Server checkpoint contract; preparation does not create another
   checkpoint owner.

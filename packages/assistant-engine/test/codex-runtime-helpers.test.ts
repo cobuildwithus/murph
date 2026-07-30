@@ -213,7 +213,7 @@ describe('Codex assistant registry helpers', () => {
       PATH: '/usr/bin',
     }
     const signal = new AbortController().signal
-    codexAppServerMocks.preinitializeCodexAppServer.mockResolvedValue(undefined)
+    codexAppServerMocks.preinitializeCodexAppServer.mockResolvedValue(null)
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValue({
       finalMessage: 'ok',
       precedingAgentMessageSegments: [],

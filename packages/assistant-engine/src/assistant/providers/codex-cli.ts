@@ -58,6 +58,7 @@ import type {
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
 import type {
   CodexAppServerImageInput,
+  CodexAppServerPreinitialization,
   CodexAppServerTurnInput,
   CodexAppServerTurnFailureContext,
   CodexAppServerLiveTurn,
@@ -185,8 +186,8 @@ export async function preinitializeCodexAssistantProcess(
   input: CodexAssistantProcessPreparationInput & {
     signal?: AbortSignal | null
   },
-): Promise<void> {
-  await preinitializeCodexAppServer({
+): Promise<CodexAppServerPreinitialization | null> {
+  return await preinitializeCodexAppServer({
     ...resolveCodexAssistantProcessLaunchInput(input),
     signal: input.signal ?? undefined,
   })

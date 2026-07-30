@@ -23,7 +23,6 @@ import type {
   CodexProgressEvent,
 } from './assistant-codex-events.js'
 import {
-  registerCancelPendingWarmCodexPreinitialization,
   registerStopWarmCodexAppServer,
   registerWaitForWarmCodexBackgroundWork,
   type WaitForWarmCodexBackgroundWorkInput,
@@ -506,6 +505,10 @@ export interface CodexAppServerTurnInput {
 export interface CodexAppServerPreinitializeInput
   extends CodexAppServerLaunchInput {
   signal?: AbortSignal | null
+}
+
+export interface CodexAppServerPreinitialization {
+  cancelPending(): Promise<void>
 }
 
 export interface CodexAppServerTurnFailureContext {
@@ -997,6 +1000,10 @@ class CodexAppServerProcess {
 
   get isStopped(): boolean {
     return this.state === 'stopped'
+  }
+
+  get isStoppingOrStopped(): boolean {
+    return this.state === 'stopping' || this.state === 'stopped'
   }
 
   get hasUnclaimedSpeculativeInitialization(): boolean {
@@ -1907,12 +1914,29 @@ function resolveCodexAppServerEndReason(
 }
 
 let warmCodexProcess: CodexAppServerProcess | null = null
+let warmCodexSlotLock: Promise<void> = Promise.resolve()
+
+async function withWarmCodexSlotLock<T>(
+  operation: () => Promise<T>,
+): Promise<T> {
+  const previous = warmCodexSlotLock
+  let release!: () => void
+  warmCodexSlotLock = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  await previous
+  try {
+    return await operation()
+  } finally {
+    release()
+  }
+}
 
 async function getOrStartWarmCodexProcess(
   input: CodexAppServerProcessInput,
 ): Promise<CodexAppServerProcess> {
   const launchKey = input.launchKey
-  while (true) {
+  return await withWarmCodexSlotLock(async () => {
     const previousProcess = warmCodexProcess
     if (previousProcess) {
       if (previousProcess.canClaimForLaunch(launchKey)) {
@@ -1933,9 +1957,6 @@ async function getOrStartWarmCodexProcess(
           ? 'launch-identity-changed'
           : 'process-unhealthy'
       await previousProcess.stop(stopReason)
-      if (warmCodexProcess !== previousProcess) {
-        continue
-      }
     }
 
     const processInstance = new CodexAppServerProcess({
@@ -1946,20 +1967,43 @@ async function getOrStartWarmCodexProcess(
     warmCodexProcess = processInstance
     processInstance.reserveTurn()
     return processInstance
-  }
+  })
 }
 
 async function stopExactUnclaimedWarmCodexProcess(
   processInstance: CodexAppServerProcess,
   reason: string,
 ): Promise<void> {
-  if (
-    warmCodexProcess !== processInstance ||
-    !processInstance.hasUnclaimedSpeculativeInitialization
-  ) {
-    return
+  await withWarmCodexSlotLock(async () => {
+    if (
+      warmCodexProcess !== processInstance ||
+      !processInstance.hasUnclaimedSpeculativeInitialization
+    ) {
+      return
+    }
+    await processInstance.stop(reason)
+  })
+}
+
+function createCodexAppServerPreinitialization(
+  processInstance: CodexAppServerProcess,
+): CodexAppServerPreinitialization {
+  return {
+    async cancelPending(): Promise<void> {
+      try {
+        await stopExactUnclaimedWarmCodexProcess(
+          processInstance,
+          'invocation-release-during-preinitialize',
+        )
+      } catch (error) {
+        // An already-proven exit is sufficient for this optional optimization's
+        // invocation-release boundary. Unproven teardown still fails closed.
+        if (!processInstance.isStopped) {
+          throw error
+        }
+      }
+    },
   }
-  await processInstance.stop(reason)
 }
 
 function readCodexPreinitializeAbortReason(signal: AbortSignal): Error {
@@ -1992,6 +2036,9 @@ function beginCodexPreinitialize(
     },
     () => {
       signal?.removeEventListener('abort', onAbort)
+      if (processInstance.isStoppingOrStopped) {
+        return
+      }
       void stopExactUnclaimedWarmCodexProcess(
         processInstance,
         'preinitialize-failure',
@@ -2002,14 +2049,14 @@ function beginCodexPreinitialize(
 
 export async function preinitializeCodexAppServer(
   input: CodexAppServerPreinitializeInput,
-): Promise<void> {
+): Promise<CodexAppServerPreinitialization | null> {
   const processInput = await prepareCodexAppServerProcessInput(input)
   const signal = input.signal ?? null
   if (signal?.aborted) {
     throw readCodexPreinitializeAbortReason(signal)
   }
 
-  while (true) {
+  return await withWarmCodexSlotLock(async () => {
     if (signal?.aborted) {
       throw readCodexPreinitializeAbortReason(signal)
     }
@@ -2020,10 +2067,10 @@ export async function preinitializeCodexAppServer(
           processInstance.noteSpeculativeInitialization()
           beginCodexPreinitialize(processInstance, signal)
         }
-        return
+        return createCodexAppServerPreinitialization(processInstance)
       }
       if (processInstance.hasInFlightTurn) {
-        return
+        return null
       }
       const processExited =
         processInstance.child.exitCode !== null ||
@@ -2035,9 +2082,6 @@ export async function preinitializeCodexAppServer(
             ? 'launch-identity-changed'
             : 'process-unhealthy',
       )
-      if (warmCodexProcess !== processInstance) {
-        continue
-      }
     }
 
     if (signal?.aborted) {
@@ -2054,69 +2098,56 @@ export async function preinitializeCodexAppServer(
     preparedProcess.noteSpeculativeInitialization()
     warmCodexProcess = preparedProcess
     beginCodexPreinitialize(preparedProcess, signal)
-    return
-  }
+    return createCodexAppServerPreinitialization(preparedProcess)
+  })
 }
 
 export async function stopWarmCodexAppServer(
   reason = 'external-stop',
 ): Promise<void> {
-  const processInstance = warmCodexProcess
-  if (!processInstance) {
-    return
-  }
-  if (processInstance.hasInFlightTurn) {
-    throw processInstance.buildBusyError(
-      'Codex app-server process is serving a turn and cannot be stopped directly.',
-    )
-  }
-  await processInstance.stop(reason)
-}
-
-export async function cancelPendingWarmCodexPreinitialization(): Promise<void> {
-  const processInstance = warmCodexProcess
-  if (!processInstance?.hasUnclaimedSpeculativeInitialization) {
-    return
-  }
-  try {
-    await stopExactUnclaimedWarmCodexProcess(
-      processInstance,
-      'invocation-release-during-preinitialize',
-    )
-  } catch (error) {
-    // An already-proven exit is sufficient for this optional optimization's
-    // invocation-release boundary. Unproven teardown still fails closed.
-    if (!processInstance.isStopped) {
-      throw error
+  await withWarmCodexSlotLock(async () => {
+    const processInstance = warmCodexProcess
+    if (!processInstance) {
+      return
     }
-  }
+    if (processInstance.hasInFlightTurn) {
+      throw processInstance.buildBusyError(
+        'Codex app-server process is serving a turn and cannot be stopped directly.',
+      )
+    }
+    await processInstance.stop(reason)
+  })
 }
 
 export async function waitForWarmCodexBackgroundWork(
   input: WaitForWarmCodexBackgroundWorkInput = {},
 ): Promise<void> {
-  const processInstance = warmCodexProcess
-  if (!processInstance || processInstance.isStopped) {
-    return
-  }
-  if (processInstance.hasUnclaimedSpeculativeInitialization) {
-    await stopExactUnclaimedWarmCodexProcess(
-      processInstance,
-      'workspace-boundary-during-preinitialize',
-    )
-    return
-  }
-  if (processInstance.hasInFlightTurn) {
-    throw processInstance.buildBusyError(
-      'Codex app-server process is serving a turn and cannot cross a workspace boundary.',
-    )
-  }
-  if (!processInstance.isReusableFor(processInstance.launchKey)) {
-    await processInstance.stop('workspace-boundary-process-unhealthy')
+  const processInstance = await withWarmCodexSlotLock(async () => {
+    const processInstance = warmCodexProcess
+    if (!processInstance || processInstance.isStopped) {
+      return null
+    }
+    if (processInstance.hasUnclaimedSpeculativeInitialization) {
+      await processInstance.stop('workspace-boundary-during-preinitialize')
+      return null
+    }
+    if (processInstance.hasInFlightTurn) {
+      throw processInstance.buildBusyError(
+        'Codex app-server process is serving a turn and cannot cross a workspace boundary.',
+      )
+    }
+    if (!processInstance.isReusableFor(processInstance.launchKey)) {
+      await processInstance.stop('workspace-boundary-process-unhealthy')
+      return null
+    }
+
+    processInstance.reserveTurn()
+    return processInstance
+  })
+  if (!processInstance) {
     return
   }
 
-  processInstance.reserveTurn()
   try {
     await processInstance.waitForBackgroundWork(input)
   } finally {
@@ -2124,9 +2155,6 @@ export async function waitForWarmCodexBackgroundWork(
   }
 }
 
-registerCancelPendingWarmCodexPreinitialization(
-  cancelPendingWarmCodexPreinitialization,
-)
 registerStopWarmCodexAppServer(stopWarmCodexAppServer)
 registerWaitForWarmCodexBackgroundWork(waitForWarmCodexBackgroundWork)
 
@@ -2589,15 +2617,15 @@ export async function compactWarmCodexThread(input: {
   signal?: AbortSignal | null
   timeoutMs: number
 }): Promise<CodexWarmThreadCompactionOutcome> {
-  const candidateProcess = warmCodexProcess
-  const reservation = (() => {
-    if (!candidateProcess || !candidateProcess.isReusableFor(candidateProcess.launchKey)) {
-      return candidateProcess?.hasInFlightTurn
+  const reservation = await withWarmCodexSlotLock(async () => {
+    const processInstance = warmCodexProcess
+    if (!processInstance || !processInstance.isReusableFor(processInstance.launchKey)) {
+      return processInstance?.hasInFlightTurn
         ? ({ kind: 'skipped', reason: 'turn_in_flight', threadContextTokensBefore: null } as const)
         : ({ kind: 'skipped', reason: 'no_warm_process', threadContextTokensBefore: null } as const)
     }
 
-    const vitals = candidateProcess.warmThreadTokenUsage
+    const vitals = processInstance.warmThreadTokenUsage
     if (!vitals) {
       return { kind: 'skipped', reason: 'no_thread_vitals', threadContextTokensBefore: null } as const
     }
@@ -2619,7 +2647,7 @@ export async function compactWarmCodexThread(input: {
         threadContextTokensBefore: vitals.lastInputTokens,
       } as const
     }
-    if (candidateProcess.hasUncheckpointedDetachedWork) {
+    if (processInstance.hasUncheckpointedDetachedWork) {
       return {
         kind: 'skipped',
         reason: 'background_work_pending',
@@ -2627,13 +2655,13 @@ export async function compactWarmCodexThread(input: {
       } as const
     }
 
-    candidateProcess.reserveTurn()
+    processInstance.reserveTurn()
     return {
       kind: 'reserved',
-      processInstance: candidateProcess,
+      processInstance,
       vitals,
     } as const
-  })()
+  })
   if (reservation.kind !== 'reserved') {
     return reservation
   }

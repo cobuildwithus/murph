@@ -50,10 +50,8 @@ import {
 } from "@murphai/assistant-engine";
 import {
   prepareHostedCodexAssistantProcess,
+  type HostedCodexAssistantProcessPreparation,
 } from "@murphai/assistant-engine/assistant-runtime";
-import {
-  cancelPendingWarmCodexPreinitialization,
-} from "@murphai/assistant-engine/codex-lifecycle";
 import {
   AssistantActiveTurnInputUnavailableError,
   hasCompleteAssistantAutoReplyDeliveryTerminalEvidence,
@@ -972,7 +970,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   let pauseDetachedAssistantAskBeforeWorkspaceBoundary = async (): Promise<void> => undefined;
   let resumeDetachedAssistantAskAfterWorkspaceBoundary = (): void => undefined;
   let closeDetachedAssistantAskBeforeWorkspaceRelease = async (): Promise<void> => undefined;
-  let codexProcessPreparationAdmitted = false;
+  let codexProcessPreparation:
+    | HostedCodexAssistantProcessPreparation
+    | null = null;
   let latestCheckpointSnapshotCleanForWarmReuse = false;
   const createAbortGuardedCheckpointSnapshot: HostedWorkspaceSnapshotCheckpointBuilder =
     async (snapshotInput, context) => {
@@ -1517,13 +1517,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             runtimeEnv: hostedCodexRuntime.runtimeEnv,
             vaultRoot: restored.vaultRoot,
           });
-          await prepareHostedCodexAssistantProcess({
+          codexProcessPreparation = await prepareHostedCodexAssistantProcess({
             env: turnEnvironment.env,
             signal: runtimeAbortController.signal,
             target: preinitializationTarget,
             workingDirectory: restored.vaultRoot,
           });
-          codexProcessPreparationAdmitted = true;
         } catch {
           // Foreground acquisition falls back to ordinary process startup.
         }
@@ -3979,9 +3978,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     throw error;
   } finally {
     try {
-      if (codexProcessPreparationAdmitted) {
-        await cancelPendingWarmCodexPreinitialization();
-      }
+      await codexProcessPreparation?.cancelPending();
     } finally {
       try {
         await imageGenerationController?.close();

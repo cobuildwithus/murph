@@ -1028,11 +1028,16 @@ preparation, while initial mailbox import continues. Readiness is memoized on
 the exact process and does not reserve a turn; a matching foreground turn
 synchronously reserves that object before joining readiness. Preparation sends
 no thread, turn, provider, account, tool, or compaction request, and launches no
-detached child. Checkpoint and invocation-release boundaries stop and settle
-pending unclaimed preparation, while ready idle processes stay warm.
-Exact object identity and synchronous state transitions replace the former
-warm-slot lock; no second owner, queue, scheduler, keepalive, or longer
-container lease is introduced.
+detached child. The preparation call returns a cancellation handle bound to
+that exact process, so invocation release cannot cancel a later replacement.
+Checkpoint and invocation-release boundaries stop and settle pending unclaimed
+preparation, while ready idle processes stay warm.
+Exact object identity binds cancellation to the admitted process. The existing
+engine-owned warm-slot transition lock serializes inspect, exact teardown,
+publication or reservation, and workspace-boundary admission so replacement
+cannot publish behind a completed checkpoint; process initialization and
+foreground readiness waits remain outside that lock. No second owner, lock,
+queue, scheduler, keepalive, or longer container lease is introduced.
 
 Detached MultiAgent V2 work is a bounded path, not a process-memory queue.
 Before the root reply, Murph retains a durable accepted input, canonical fact,

@@ -27,6 +27,7 @@ export {
   prepareHostedCodexAssistantProcess,
 } from './assistant/codex-runtime.js'
 export type {
+  HostedCodexAssistantProcessPreparation,
   HostedCodexAssistantProcessPreparationInput,
 } from './assistant/codex-runtime.js'
 export * from './assistant/hosted-context-diagnostics.js'

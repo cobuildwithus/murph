@@ -46,21 +46,26 @@ export interface HostedCodexAssistantProcessPreparationInput {
   workingDirectory: string
 }
 
+export interface HostedCodexAssistantProcessPreparation {
+  cancelPending(): Promise<void>
+}
+
 /**
  * Admits the resident process and starts its process-only initialization.
  * The first real turn or workspace boundary joins readiness through the
- * assistant-engine lifecycle owner.
+ * assistant-engine lifecycle owner. A returned handle may cancel only the
+ * still-pending exact process admitted by this call.
  */
 export async function prepareHostedCodexAssistantProcess(
   input: HostedCodexAssistantProcessPreparationInput,
-): Promise<void> {
+): Promise<HostedCodexAssistantProcessPreparation | null> {
   const providerConfig = normalizeAssistantProviderConfig(
     assistantModelTargetToProviderConfigInput(input.target),
   )
   assertCodexAssistantProvider(
     resolveAssistantChatProviderFromConfig(providerConfig),
   )
-  await preinitializeCodexAssistantProcessUnchecked({
+  return await preinitializeCodexAssistantProcessUnchecked({
     codexConfigOverrides: null,
     env: input.env,
     providerConfig,

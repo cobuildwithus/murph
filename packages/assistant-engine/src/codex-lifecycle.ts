@@ -2,9 +2,6 @@ export type StopWarmCodexAppServerImplementation = (
   reason?: string,
 ) => Promise<void>
 
-export type CancelPendingWarmCodexPreinitializationImplementation =
-  () => Promise<void>
-
 export interface WaitForWarmCodexBackgroundWorkInput {
   signal?: AbortSignal | null
 }
@@ -16,18 +13,9 @@ export type WaitForWarmCodexBackgroundWorkImplementation = (
 let stopWarmCodexAppServerImplementation:
   | StopWarmCodexAppServerImplementation
   | undefined
-let cancelPendingWarmCodexPreinitializationImplementation:
-  | CancelPendingWarmCodexPreinitializationImplementation
-  | undefined
 let waitForWarmCodexBackgroundWorkImplementation:
   | WaitForWarmCodexBackgroundWorkImplementation
   | undefined
-
-export function registerCancelPendingWarmCodexPreinitialization(
-  implementation: CancelPendingWarmCodexPreinitializationImplementation,
-): void {
-  cancelPendingWarmCodexPreinitializationImplementation = implementation
-}
 
 export function registerStopWarmCodexAppServer(
   implementation: StopWarmCodexAppServerImplementation,
@@ -39,10 +27,6 @@ export function registerWaitForWarmCodexBackgroundWork(
   implementation: WaitForWarmCodexBackgroundWorkImplementation,
 ): void {
   waitForWarmCodexBackgroundWorkImplementation = implementation
-}
-
-export async function cancelPendingWarmCodexPreinitialization(): Promise<void> {
-  await cancelPendingWarmCodexPreinitializationImplementation?.()
 }
 
 export async function stopWarmCodexAppServer(

@@ -51,6 +51,7 @@ import {
   type RunAssistantAutomationPassInput,
 } from "@murphai/assistant-engine";
 import type {
+  HostedCodexAssistantProcessPreparation,
   HostedCodexAssistantProcessPreparationInput,
 } from "@murphai/assistant-engine/assistant-runtime";
 import {
@@ -147,8 +148,10 @@ const mocks = vi.hoisted(() => ({
   hasCompleteAssistantAutoReplyDeliveryTerminalEvidence:
     vi.fn<HasCompleteAssistantAutoReplyDeliveryTerminalEvidence>(),
   prepareHostedCodexAssistantProcess: vi.fn<
-    (input: HostedCodexAssistantProcessPreparationInput) => Promise<void>
-  >(async () => undefined),
+    (
+      input: HostedCodexAssistantProcessPreparationInput,
+    ) => Promise<HostedCodexAssistantProcessPreparation | null>
+  >(async () => null),
   prepareHostedCodexRuntimeEnvironment: vi.fn(),
   refreshHostedBrowserVaultReplicaFromRuntime: vi.fn(),
   runAssistantAutomationPass: vi.fn(),
@@ -225,18 +228,6 @@ vi.mock("@murphai/assistant-engine/assistant-runtime", async (importOriginal) =>
     ...actual,
     prepareHostedCodexAssistantProcess:
       mocks.prepareHostedCodexAssistantProcess,
-  };
-});
-
-vi.mock("@murphai/assistant-engine/codex-lifecycle", async (importOriginal) => {
-  const actual = await importOriginal<
-    typeof import("@murphai/assistant-engine/codex-lifecycle")
-  >();
-
-  return {
-    ...actual,
-    cancelPendingWarmCodexPreinitialization:
-      mocks.cancelPendingWarmCodexPreinitialization,
   };
 });
 
@@ -880,6 +871,9 @@ describe("hosted workspace runtime entrypoint", () => {
     mocks.prepareHostedCodexAssistantProcess.mockClear();
     mocks.prepareHostedCodexAssistantProcess.mockImplementationOnce(async () => {
       events.push("codex.preinitialize");
+      return {
+        cancelPending: mocks.cancelPendingWarmCodexPreinitialization,
+      };
     });
     mocks.cancelPendingWarmCodexPreinitialization.mockClear();
     mocks.cancelPendingWarmCodexPreinitialization.mockImplementationOnce(async () => {
@@ -986,6 +980,130 @@ describe("hosted workspace runtime entrypoint", () => {
         1,
       );
       assert.equal(result.status, "scheduled");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("falls back to foreground startup when Codex preparation rejects before admission", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const preparationFailure = new Error("Synthetic Codex preparation failure.");
+    const snapshotRef = createWorkspaceSnapshotV2Ref(
+      "snapshot-codex-preinitialization-fallback",
+    );
+    const conversationItem = createMailboxItem({
+      id: "mailbox_item_codex_preinitialization_fallback",
+      laneSeq: "1",
+    });
+    let assistantInputId: string | null = null;
+    let assistantPhaseCalls = 0;
+
+    mocks.prepareHostedCodexAssistantProcess.mockClear();
+    mocks.cancelPendingWarmCodexPreinitialization.mockClear();
+    mocks.prepareHostedCodexAssistantProcess.mockImplementationOnce(async () => {
+      events.push("codex.preinitialize.reject");
+      throw preparationFailure;
+    });
+
+    try {
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_codex_preinitialization_fallback",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            events.push("snapshot");
+            return {
+              snapshotRef: createBundleRef({
+                hash: "8".repeat(64),
+                key: "users/bundles/member-synthetic/codex-preinitialization-fallback.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push("mailbox.import");
+            assistantInputId = await stageAssistantInputEventForMailboxItem({
+              item: item.item,
+              vaultRoot,
+            });
+            return {
+              assistantInputId,
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [conversationItem],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                snapshotRef,
+                version: "0",
+              }),
+            }),
+            workspaceSnapshotPort: {
+              async abortSnapshotSession() {
+                throw new Error("Fallback test should not abort snapshots.");
+              },
+              async completeSnapshotSession() {
+                throw new Error("Fallback test should not complete snapshot sessions.");
+              },
+              async putSnapshotObjectDirect() {
+                throw new Error("Fallback test should not upload snapshot objects directly.");
+              },
+              async restoreWorkspaceSnapshot(input) {
+                await initializeVault({
+                  createdAt: TEST_NOW,
+                  vaultRoot: input.durableRoot,
+                });
+              },
+              async startSnapshotSession() {
+                throw new Error("Fallback test should not start snapshot sessions.");
+              },
+            },
+          }),
+          async runAssistantPhase(input) {
+            assistantPhaseCalls += 1;
+            events.push("assistant.foreground");
+            assert.ok(assistantInputId);
+            assert.deepEqual(
+              input.initialAssistantInputBatch?.assistantInputIds
+                ?? input.initialMailboxImport.importResult.assistantInputIds,
+              [assistantInputId],
+            );
+            return { progressed: false };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 1);
+      assert.ok(
+        events.indexOf("codex.preinitialize.reject")
+          < events.indexOf("mailbox.import"),
+      );
+      assert.ok(
+        events.indexOf("mailbox.import")
+          < events.indexOf("assistant.foreground"),
+      );
+      assert.equal(assistantPhaseCalls, 1);
+      assert.equal(
+        mocks.cancelPendingWarmCodexPreinitialization.mock.calls.length,
+        0,
+      );
+      assert.equal(result.status, "idle");
     } finally {
       await removeTempRoot(vaultRoot);
     }

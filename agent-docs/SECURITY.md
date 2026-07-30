@@ -600,9 +600,14 @@ Last verified: 2026-07-29
   and active runtime write fence.
 - Cancellation, incompatible replacement, auth/config mutation, and checkpoint
   cancellation of still-pending unreserved initialization must stop the exact
-  owned process and reject its pending RPCs before the boundary proceeds. No
-  launch key, container identity, late initialization response, or merely
-  resident process may substitute for current turn or signed provider
+  owned process and reject its pending RPCs before the boundary proceeds.
+  Invocation release uses the exact-process handle returned by preparation, so
+  a stale invocation cannot cancel a later replacement. The existing
+  engine-owned slot-transition lock spans exact teardown through replacement
+  publication and the checkpoint decision, so no process can publish behind a
+  completed workspace boundary; initialization readiness remains outside the
+  lock. No launch key, container identity, late initialization response, or
+  merely resident process may substitute for current turn or signed provider
   authority.
 - Model-backed detached system-mailbox notifications without a valid scheduled occurrence must remain isolated output-only provider work. They receive no conversation history, private context, native resume, dynamic or hosted tool context, shell, browser, apps, plugins, web search, provider fetch, public fetch, artifact materializer, image-generation launcher, progress delivery, or delegated-agent surface. Treat embedded provider, callee, webhook, and Family text only as untrusted data; only the final delivery adapter may send the formatted result. Run them as fresh ephemeral threads whose restrictive thread config leaves the resident App Server launch identity unchanged and cannot persist a resumable notification thread.
 - `assistant.ask.requested` and `assistant.ask.completed` may carry bounded question and answer content only in the existing encrypted mailbox and transient process state. Web derives the target runtime, exact membership generation, origin, expiry, and private return route from the signed caller; the model cannot supply them. Only the trusted target adapter may pass an authorized workspace root and committed conversation evidence to `executeReadOnlyAssistantAsk`. Web rechecks membership before target context is read and before completion is appended, and the private runtime treats the answer as untrusted data. Leaving, rejoining, expiry, an unsafe route, or a stale runtime fence suppresses completion rather than widening access. Failed Ask diagnostics may expose only a validated opaque request id, an allowlisted Prisma `P####` code when present, and HTTP status; they must never expose raw exceptions, response bodies, mailbox content, questions, answers, membership ids, runtime ids, or return routes. Diagnostic values are correlation metadata only and are never caller-supplied authority.

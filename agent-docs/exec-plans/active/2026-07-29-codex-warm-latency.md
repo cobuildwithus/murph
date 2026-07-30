@@ -20,6 +20,10 @@ Updated: 2026-07-29
 - `packages/assistant-engine` remains the only resident App Server process
   owner. The exact process owns one memoized spawn-and-initialize readiness
   promise that is distinct from foreground turn reservation.
+- The existing engine-owned warm-slot transition lock covers only inspect,
+  exact teardown, publication or reservation, and workspace-boundary
+  admission. Initialization readiness runs outside it, preserving the overlap
+  while preventing post-checkpoint replacement publication.
 - After restore and final Codex config/auth preparation, eligible foreground
   runtime work may begin process-only initialization while independent mailbox
   preparation continues. The foreground turn synchronously reserves the exact
@@ -29,6 +33,8 @@ Updated: 2026-07-29
 - Cancellation and replacement cannot leave a pending startup RPC, stale warm
   owner, orphan process, or checkpoint race. Failure is a missed optimization
   and accepted foreground work remains eligible for ordinary fresh startup.
+- Invocation release cancels through a handle bound to the exact admitted
+  process, so a stale invocation cannot tear down a later replacement.
 - A checkpoint cancels and awaits exact teardown of unreserved initialization
   that is still pending; ready idle and reserved/running processes continue to
   follow their existing checkpoint contracts.
@@ -43,7 +49,8 @@ Updated: 2026-07-29
   current user/runner write fence.
 - Add no scheduler, queue, new persisted state owner, broad flag system, or
   keepalive ping loop. Do not add a second warm-slot state machine; derive
-  readiness from the exact process object.
+  readiness from the exact process object and reuse the existing narrow slot
+  transition lock rather than adding another lifecycle owner.
 - Keep the ENAM migration independent and avoid editing its bucket-migration
   surfaces.
 - Avoid reorganizing `RunnerContainer` destroy internals owned by the existing
@@ -73,6 +80,10 @@ Updated: 2026-07-29
   providing a bounded overlap seam without exposing a half-restored Codex home.
 - Existing process shutdown can otherwise leave initialization RPCs pending;
   every stop path must reject pending RPCs before the exact process is cleared.
+- Exact-process handles alone do not serialize a caller already awaiting old
+  process teardown against a workspace checkpoint. The existing slot-transition
+  lock must cover teardown through publication and the checkpoint decision, but
+  must not cover the process-owned initialization wait.
 - App Server initialization is measured work worth attempting to overlap, but
   this plan promises no fixed end-to-end saving. Rollout evidence must measure
   readiness reuse, exposed foreground wait, failure/fallback, and reply
@@ -81,9 +92,11 @@ Updated: 2026-07-29
   that lease would retain each container's provisioned memory and disk longer,
   so this change leaves the lease and Cloudflare capacity posture unchanged.
 - A local production-shaped direct scenario used the installed Codex binary
-  with isolated empty workspace and Codex-home directories. Process-only
-  initialization became ready in 381 ms, crossed the real lifecycle boundary,
-  and shut down without creating a thread, turn, tool, or provider request.
+  with isolated empty workspace and Codex-home directories plus a child
+  environment narrowed to those paths and `PATH`. On the current candidate,
+  process-only initialization became ready in 209 ms, crossed the real
+  lifecycle boundary, and shut down without creating a thread, turn, tool, or
+  provider request.
 
 ## Deployment concerns
 
