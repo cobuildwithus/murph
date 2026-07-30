@@ -136,6 +136,12 @@ ledger, webhook path, or accounting owner. The browser chooses an active member
 row and submits only the existing opaque offer code and request key to that
 row's authenticated same-origin route.
 
+For the active owner's own seat, the Settings AI-usage row exposes that same
+Family-targeted dialog directly, including when usage is exhausted. The stable
+`/settings?addUsage=family#family` handoff opens this visible dialog after
+revalidating the current owner row. Other Family members remain selected from
+their authenticated management surface.
+
 Web authorizes the payer as the current active group owner, resolves the exact
 selected beneficiary from that owner's active roster, rejects suspended or
 synthetic members, and requires the active Family billing projection. The

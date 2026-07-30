@@ -237,10 +237,12 @@ subscription invoice.
 
 ### Presentation
 
-Settings renders one bounded percentage from current-period spend and all
-remaining effective capacity. Buying credit can move that bar backward
-immediately. The presentation does not expose the internal dollar value of the
-plan allowance or the usage-credit balance.
+Settings renders one bounded percentage from counted usage in the current
+display window and all remaining effective capacity. The window starts at the
+allowance-period boundary or, when later, the latest fulfilled purchase grant
+in that period. Buying credit therefore starts a fresh 0%-used display, and
+only later counted usage advances it. The presentation does not expose the
+internal dollar value of the plan allowance or the usage-credit balance.
 
 Settings may separately show a bounded history of immutable purchase grants
 with the original added amount, source, and date. That history does not read or

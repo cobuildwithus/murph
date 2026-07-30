@@ -222,6 +222,36 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, /Resets Aug 1, 2026/);
   });
 
+  test("shows the active Family owner their own Add usage action", async () => {
+    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+      authenticated: true,
+      familyState: "owner",
+      usageStatus: buildUsageStatus({
+        accessKind: "family_sponsored",
+        planName: "Family",
+        remainingPercent: 0,
+        status: "exhausted",
+        usedPercent: 100,
+      }),
+      usageTopUpCheckoutUrl:
+        "/api/settings/billing/family/members/member_owner/usage-credit/checkout",
+      usageTopUpOffers: [{
+        amountLabel: "$5",
+        estimatedMessages: 100,
+        offerCode: "usage_5_usd",
+      }],
+      usageTopUpScope: "family",
+      usageTopUpTargetLabel: "you",
+    }));
+
+    assert.match(markup, />Add usage</);
+    assert.match(markup, /aria-label="Add usage for you"/);
+    assert.match(markup, /Add usage to continue/);
+  });
+
   test("shows exhausted overall usage without inventing a forecast", async () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
@@ -347,6 +377,9 @@ describe("HostedBillingSettings", () => {
       now: "2026-07-10T12:00:00.000Z",
       prisma: {
         hostedAiUsage: {
+          findFirst: vi.fn(async () => null),
+        },
+        hostedUsageCreditEntry: {
           findFirst: vi.fn(async () => null),
         },
       } as never,

@@ -80,10 +80,13 @@ export function HostedBillingSettings(props: {
   usageActivityDetail?: ReactNode;
   usageStatus?: HostedPlanUsageStatus | null;
   usageTopUpActivePurchase?: HostedUsageTopUpActivePurchase | null;
+  usageTopUpCheckoutUrl?: string;
   usageTopUpContactOptions?: readonly MurphContactOption[];
   usageTopUpInitialOpen?: boolean;
   usageTopUpOffers?: readonly HostedUsageTopUpOffer[];
   usageTopUpPurchaseReturn?: HostedUsageTopUpReturn | null;
+  usageTopUpScope?: "family" | "personal";
+  usageTopUpTargetLabel?: string;
 }) {
   if (!props.authenticated) {
     return (
@@ -201,11 +204,14 @@ export function HostedBillingSettings(props: {
         pulseTrialBillingContinuationPending={pulseTrialBillingContinuationPending}
         status={props.usageStatus}
         usageTopUpActivePurchase={props.usageTopUpActivePurchase}
+        usageTopUpCheckoutUrl={props.usageTopUpCheckoutUrl}
         usageTopUpContactOptions={props.usageTopUpContactOptions}
         usageTopUpInitialOpen={props.usageTopUpInitialOpen}
         usageTopUpOffers={usageTopUpOffers}
         payerMemberId={props.payerMemberId}
         usageTopUpPurchaseReturn={props.usageTopUpPurchaseReturn}
+        usageTopUpScope={props.usageTopUpScope}
+        usageTopUpTargetLabel={props.usageTopUpTargetLabel}
       />
       {props.usageActivityDetail}
       <div className="grid items-stretch gap-3 sm:grid-cols-3">
@@ -234,11 +240,14 @@ function PlanUsageBand(props: {
   pulseTrialBillingContinuationPending: boolean;
   status?: HostedPlanUsageStatus | null;
   usageTopUpActivePurchase?: HostedUsageTopUpActivePurchase | null;
+  usageTopUpCheckoutUrl?: string;
   usageTopUpContactOptions?: readonly MurphContactOption[];
   usageTopUpInitialOpen?: boolean;
   usageTopUpOffers: readonly HostedUsageTopUpOffer[];
   payerMemberId?: string | null;
   usageTopUpPurchaseReturn?: HostedUsageTopUpReturn | null;
+  usageTopUpScope?: "family" | "personal";
+  usageTopUpTargetLabel?: string;
 }) {
   const payerMemberId = props.payerMemberId?.trim() || null;
   const inactiveTopUpDialog =
@@ -249,11 +258,14 @@ function PlanUsageBand(props: {
     ) ? (
       <HostedUsageTopUpDialog
         activePurchase={props.usageTopUpActivePurchase}
+        checkoutUrl={props.usageTopUpCheckoutUrl}
         contactOptions={props.usageTopUpContactOptions}
         initialOpen={props.usageTopUpInitialOpen}
         offers={[]}
         payerMemberId={payerMemberId}
         purchaseReturn={props.usageTopUpPurchaseReturn}
+        scope={props.usageTopUpScope}
+        targetLabel={props.usageTopUpTargetLabel}
       />
     ) : null;
 
@@ -310,11 +322,14 @@ function PlanUsageBand(props: {
   const usageTopUpDialog = payerMemberId ? (
     <HostedUsageTopUpDialog
       activePurchase={props.usageTopUpActivePurchase}
+      checkoutUrl={props.usageTopUpCheckoutUrl}
       contactOptions={props.usageTopUpContactOptions}
       initialOpen={props.usageTopUpInitialOpen}
       offers={props.usageTopUpOffers}
       payerMemberId={payerMemberId}
       purchaseReturn={props.usageTopUpPurchaseReturn}
+      scope={props.usageTopUpScope}
+      targetLabel={props.usageTopUpTargetLabel}
       triggerClassName="shrink-0"
       triggerSize="sm"
     />

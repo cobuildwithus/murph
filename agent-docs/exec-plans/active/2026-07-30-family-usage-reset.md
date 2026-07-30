@@ -1,0 +1,117 @@
+# Restore Family usage top-ups and reset the usage meter
+
+Status: active
+Created: 2026-07-30
+Updated: 2026-07-30
+
+## Goal
+
+- Restore the Family owner's authorized Add usage entry point for their own
+  active seat, keep the chooser dollar-first, and make the Settings usage meter
+  begin at 0% used whenever a new purchase grant or monthly allowance
+  replenishment creates a fresh capacity epoch.
+
+## Success criteria
+
+- An active Family owner sees Add usage for every currently eligible active
+  Family member, including the owner's own seat, without exposing that action
+  to sponsored non-owners.
+- The shared personal and Family chooser presents only the fixed `$5`, `$10`,
+  and `$25` credit amounts, with no approximate message-count labels.
+- A fulfilled purchase makes a previously exhausted member's Settings meter read
+  `0% used`; later counted usage advances the percentage from that grant.
+- A monthly allowance reset also starts a fresh `0% used` epoch while unused
+  carryover credit remains available.
+- Settings, Home, assistant reads, admission, and settlement continue to consume
+  the existing Web-owned allowance and credit owners; no balance, wallet, new
+  ledger, or mutable display-only reset state is introduced.
+- Focused billing/projection/component tests, typecheck/lint, design-catalog
+  desktop/mobile proof, exact-head CI, preliminary specialist review, final
+  ReviewGPT, Claude UI review, and parent final review complete.
+
+## Scope
+
+- In scope:
+  - Family Settings eligibility and rendering for owner-funded member credit.
+  - Shared usage-credit dialog copy and choice presentation.
+  - Overall usage-percentage derivation from the latest canonical capacity
+    epoch and its transport/UI coverage.
+  - Existing `/design` catalog study and durable billing/product docs.
+- Out of scope:
+  - New offers, message-count entitlements, shared Family balances, transfers,
+    recurring auto-refill, or direct purchase authority for sponsored members.
+  - Changes to Stripe payment, webhook fulfillment, credit settlement,
+    admission, or runtime-wake ownership.
+
+## Constraints
+
+- Technical constraints:
+  - Derive the display epoch from existing immutable allowance/credit facts.
+    Do not add persisted UI reset state or change immutable usage history.
+  - Preserve beneficiary/payer separation and current Family authorization.
+  - Keep the percentage bounded and make used plus remaining equal 100.
+- Product/process constraints:
+  - Reuse the existing PlanUsageBand, usage-credit dialog, Family member rows,
+    and server-projected offers.
+  - Keep private production evidence out of repository artifacts.
+  - Follow the worktree/PR, design-proof, verification, and ReviewGPT gates.
+
+## Risks and mitigations
+
+1. Risk: A display-only reset could drift from real capacity or make exhausted
+   credit look available.
+   Mitigation: Keep remaining capacity and admission unchanged, derive only the
+   used numerator and anchor it to canonical period/grant facts, and cover grant,
+   reset, partial-use, exhaustion, and carryover cases.
+2. Risk: Broadening the Family CTA could let a non-owner or stale member start
+   a payment.
+   Mitigation: Reuse the server-owned Family target projection and existing
+   same-origin route authorization; change presentation only after proving the
+   projection already carries the authorized owner target.
+3. Risk: Replacing message estimates could accidentally change group funding
+   copy, whose offers intentionally use estimates.
+   Mitigation: Scope dollar-only choices to the personal/Family dialog and keep
+   the separate group sponsorship catalog unchanged.
+
+## Tasks
+
+1. Trace and reproduce the Family owner CTA, dialog display, and percentage
+   projection against code, focused tests, and a privacy-minimized production
+   state check.
+2. Add focused failing tests for the proven regressions and new capacity-epoch
+   rule.
+3. Implement the smallest fixes at the existing projection/component owners and
+   update the real design-catalog study.
+4. Update the current billing/product owner docs where the percentage contract
+   changes.
+5. Run focused proof, browser evidence, required reviews, exact-head CI, parent
+   final review, plan closure, and PR completion.
+
+## Decisions
+
+- The meter is a view over an immutable capacity epoch, not a resettable
+  counter. Its anchor is the later of the current allowance-period start and
+  the latest fulfilled purchase grant. Referral credit does not reset the
+  display window.
+- Group sponsorship remains message-estimate-based and is not changed.
+
+## Verification
+
+- Commands to run:
+  - Focused Vitest files for plan usage, credit projection, Family Settings, and
+    the shared usage-credit dialog.
+  - `pnpm test:frontend-design-proof`
+  - The narrowest truthful hosted-web typecheck/lint or diff-aware lane selected
+    after the touched files are known.
+  - Desktop and mobile `/design?tab=sections` browser proof.
+  - Exact-head GitHub Actions, preliminary `completion-specialists`, final
+    ReviewGPT, and Claude Code UI double-check.
+- Expected outcomes:
+  - All focused and required checks pass; rendered proof shows the Family owner
+    CTA, dollar-only chooser, and reset meter states without private data.
+  - Focused result: 200 tests passed across five relevant files, followed by 32
+    Settings-page tests after the explicit normal-entry regression assertion.
+  - Web typecheck and touched-file ESLint passed.
+  - Local `/design` proof passed at 1440px and 390px: the owner CTA and fresh
+    0%-used state were visible, the page had no horizontal overflow, and the
+    Family picker showed only dollar amounts plus one-time-credit labels.

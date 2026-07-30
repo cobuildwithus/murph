@@ -460,15 +460,25 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                     className="h-24 [&_[data-slot=field-content]]:gap-0.5 [&_[data-slot=field-content]]:justify-center sm:h-28"
                     title={
                       <span className="flex h-8 items-center font-serif text-3xl font-semibold leading-none tabular-nums">
-                        <span className="sr-only">About </span>
-                        <span aria-hidden="true">~</span>
-                        {offer.estimatedMessages}
+                        {props.scope === "group" ? (
+                          <>
+                            <span className="sr-only">About </span>
+                            <span aria-hidden="true">~</span>
+                            {offer.estimatedMessages}
+                          </>
+                        ) : offer.amountLabel}
                       </span>
                     }
                     description={
                       <span className="text-sm font-medium text-muted-foreground">
-                        messages ·{" "}
-                        <span className="tabular-nums">{offer.amountLabel}</span>
+                        {props.scope === "group" ? (
+                          <>
+                            messages ·{" "}
+                            <span className="tabular-nums">
+                              {offer.amountLabel}
+                            </span>
+                          </>
+                        ) : "one-time credit"}
                       </span>
                     }
                   />

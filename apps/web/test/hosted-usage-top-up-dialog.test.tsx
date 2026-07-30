@@ -363,10 +363,9 @@ test("requires an explicit amount choice after opening from the settings deep li
     assert.ok(firstAmountCard);
     assert.equal(firstAmountCard.classList.contains("h-24"), true);
     assert.equal(firstAmountCard.classList.contains("sm:h-28"), true);
-    // Message estimate leads, price stays secondary, and the estimate is always
-    // rendered as approximate.
-    assert.match(firstAmountCard.textContent ?? "", /~100/);
-    assert.match(firstAmountCard.textContent ?? "", /messages · \$5/);
+    assert.match(firstAmountCard.textContent ?? "", /\$5/);
+    assert.match(firstAmountCard.textContent ?? "", /one-time credit/);
+    assert.doesNotMatch(firstAmountCard.textContent ?? "", /messages|~100/);
     assert.equal(
       firstAmountCard.classList.contains(
         "[&_[data-slot=field-content]]:justify-center",
@@ -963,84 +962,10 @@ test("names the exact Family beneficiary in the trigger and dialog", async () =>
       rendered.container.textContent ?? "",
       /Choose a one-time credit amount for Family member\./,
     );
-  } finally {
-    await rendered.cleanup();
-  }
-});
-
-test("composes the Family owner-self deep link through the real usage dialog", async () => {
-  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
-    purchaseId: "hucp_family_owner_self",
-    recovered: true,
-    status: "fulfilled",
-  });
-  const { HostedFamilySelfUsageTopUpHost } = await import(
-    "@/src/components/settings/hosted-family-self-usage-top-up-host"
-  );
-  const rendered = await renderClientComponent(
-    createElement(HostedFamilySelfUsageTopUpHost, {
-      memberId: "member/owner?primary",
-      offers: usageCreditOffers(),
-      payerMemberId: TEST_PAYER_MEMBER_ID,
-      targetLabel: "Morgan",
-    }),
-    {
-      location: {
-        href: "https://example.test/settings?addUsage=family#family",
-      },
-      requireButton: false,
-    },
-  );
-
-  try {
-    assert.ok(rendered.container.querySelector('[role="dialog"]'));
-    assert.equal(
-      rendered.container.querySelector("h2")?.textContent,
-      "Choose an amount for Morgan",
-    );
-    const radioInputs = Array.from(
-      rendered.container.querySelectorAll<HTMLInputElement>('input[type="radio"]'),
-    );
-    assert.equal(
-      rendered.container
-        .querySelector('[role="radiogroup"]')
-        ?.getAttribute("data-value"),
-      "",
-    );
-    assert.equal(radioInputs.every((input) => !input.checked), true);
-    assert.equal(
-      buttonByText(rendered.container, "Choose an amount").disabled,
-      true,
-    );
-    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
-
-    await clickRadio(rendered.container, rendered.window, "usage_1000");
-
-    assert.equal(
-      rendered.container
-        .querySelector('[role="radiogroup"]')
-        ?.getAttribute("data-value"),
-      "usage_1000",
-    );
-    assert.equal(
-      buttonByText(rendered.container, "Add usage · $10").disabled,
-      false,
-    );
-
-    await clickButton(rendered.container, rendered.window, "Add usage · $10");
-
-    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
-      method: "POST",
-      payload: {
-        clientRequestKey: "00000000-0000-4000-8000-000000000001",
-        offerCode: "usage_1000",
-      },
-      signal: expect.any(AbortSignal),
-      url: "/api/settings/billing/family/members/member%2Fowner%3Fprimary/usage-credit/checkout",
-    });
-    assert.equal(
-      rendered.container.querySelector("h2")?.textContent,
-      "Usage added for Morgan",
+    assert.doesNotMatch(
+      rendered.container.querySelector('label[for="usage-top-up-0"]')
+        ?.textContent ?? "",
+      /messages|~100/,
     );
   } finally {
     await rendered.cleanup();

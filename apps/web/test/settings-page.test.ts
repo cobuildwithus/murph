@@ -96,9 +96,13 @@ const mocks = vi.hoisted(() => ({
     pulseTrialBillingContinuationPending?: boolean;
     usageActivityDetail?: React.ReactNode;
     usageStatus?: unknown;
+    usageTopUpActivePurchase?: unknown;
+    usageTopUpCheckoutUrl?: string;
     usageTopUpInitialOpen?: boolean;
     usageTopUpOffers?: readonly unknown[];
     usageTopUpPurchaseReturn?: unknown;
+    usageTopUpScope?: "family" | "personal";
+    usageTopUpTargetLabel?: string;
   }) =>
     React.createElement(
       "div",
@@ -109,8 +113,6 @@ const mocks = vi.hoisted(() => ({
   HostedDataPrivacySettings: vi.fn((props: { authenticated: boolean }) =>
     React.createElement("div", null, `Hosted data privacy settings ${String(props.authenticated)}`)),
   HostedFamilySettings: vi.fn(() => React.createElement("div", null, "Hosted family settings")),
-  HostedFamilySelfUsageTopUpHost: vi.fn(() =>
-    React.createElement("div", null, "Family owner usage top up")),
   HostedPasskeySettings: vi.fn((props: {
     authenticated: boolean;
     secureApprovalStatus: { status: string };
@@ -254,10 +256,6 @@ vi.mock("@/src/components/settings/hosted-data-privacy-settings", () => ({
 
 vi.mock("@/src/components/settings/hosted-family-settings", () => ({
   HostedFamilySettings: mocks.HostedFamilySettings,
-}));
-
-vi.mock("@/src/components/settings/hosted-family-self-usage-top-up-host", () => ({
-  HostedFamilySelfUsageTopUpHost: mocks.HostedFamilySelfUsageTopUpHost,
 }));
 
 vi.mock("@/src/components/settings/hosted-passkey-settings", () => ({
@@ -941,7 +939,7 @@ test("SettingsPage rejects repeated or malformed usage top-up query state", asyn
   );
 });
 
-test("SettingsPage opens only the authenticated active Family owner's own usage picker", async () => {
+test("SettingsPage surfaces and opens the authenticated active Family owner's own usage picker", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
   mocks.getHostedPrivySession.mockResolvedValue(null);
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
@@ -981,39 +979,53 @@ test("SettingsPage opens only the authenticated active Family owner's own usage 
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
   renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({}),
+  }));
+
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      usageTopUpInitialOpen: false,
+      usageTopUpOffers: expect.arrayContaining([
+        expect.objectContaining({ amountLabel: "$5" }),
+      ]),
+      usageTopUpScope: "family",
+      usageTopUpTargetLabel: "you",
+    }),
+    undefined,
+  );
+
+  mocks.HostedBillingSettings.mockClear();
+  renderToStaticMarkup(await SettingsPage({
     searchParams: Promise.resolve({ addUsage: "family" }),
   }));
 
-  expect(mocks.HostedFamilySelfUsageTopUpHost).toHaveBeenCalledWith({
-    activePurchase: null,
-    contactOptions: [{
-      href: "sms:+15550100001?body=Hey%20Murph%2C%20I%20just%20added%20more%20usage.",
-      kind: "text",
-      label: "Messages",
-    }],
-    memberId: "member_123",
-    offers: [
-      {
-        amountLabel: "$5",
-        estimatedMessages: 100,
-        offerCode: "usage_5_usd",
-      },
-      {
-        amountLabel: "$10",
-        estimatedMessages: 200,
-        offerCode: "usage_10_usd",
-      },
-      {
-        amountLabel: "$25",
-        estimatedMessages: 500,
-        offerCode: "usage_25_usd",
-      },
-    ],
-    payerMemberId: "member_123",
-    targetLabel: "you",
-  }, undefined);
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
-    expect.objectContaining({ usageTopUpInitialOpen: false }),
+    expect.objectContaining({
+      usageTopUpActivePurchase: null,
+      usageTopUpCheckoutUrl:
+        "/api/settings/billing/family/members/member_123/usage-credit/checkout",
+      usageTopUpInitialOpen: true,
+      usageTopUpOffers: [
+        {
+          amountLabel: "$5",
+          estimatedMessages: 100,
+          offerCode: "usage_5_usd",
+        },
+        {
+          amountLabel: "$10",
+          estimatedMessages: 200,
+          offerCode: "usage_10_usd",
+        },
+        {
+          amountLabel: "$25",
+          estimatedMessages: 500,
+          offerCode: "usage_25_usd",
+        },
+      ],
+      usageTopUpPurchaseReturn: null,
+      usageTopUpScope: "family",
+      usageTopUpTargetLabel: "you",
+    }),
     undefined,
   );
 });
@@ -1082,7 +1094,6 @@ test.each([
     searchParams: Promise.resolve({ addUsage }),
   }));
 
-  expect(mocks.HostedFamilySelfUsageTopUpHost).not.toHaveBeenCalled();
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
     expect.objectContaining({ usageTopUpInitialOpen: false }),
     undefined,
