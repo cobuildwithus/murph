@@ -119,6 +119,16 @@ owned App Server before it releases the job slot for another invocation. A stop
 failure poisons the container rather than allowing a replacement invocation to
 reuse ambiguous process state.
 
+After restore and final Codex config/auth preparation, only the first fresh
+auto-reply-enabled conversation candidate staged during the pre-pass may decide
+speculative process initialization. Linq and Telegram may admit process-only
+initialization while remaining mailbox projection and bookkeeping continue;
+email, self-authored Linq, bootstrap, system, maintenance, replay, and
+active-turn imports do not. Speculation starts no thread or turn and never
+replaces a healthy claimable resident with another launch identity. Before snapshot
+construction or invocation release, the runtime disables and joins this
+asynchronous admission and cancels its exact pending process handle.
+
 Detached MultiAgent V2 work does not become a process-memory queue. Before the
 root reply, Murph retains a durable accepted input, canonical fact, or raw
 source and gives each child its exact source words, ids, or refs. A loaded skill
