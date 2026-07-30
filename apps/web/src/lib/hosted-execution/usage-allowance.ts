@@ -1344,24 +1344,6 @@ export async function readHostedAiUsageGate(input: {
   });
 }
 
-export async function readHostedGroupUsageCapacityState(input: {
-  memberId: string;
-  now?: Date | string;
-  prisma?: HostedAiUsageAllowanceClient;
-}): Promise<HostedGroupUsageCapacityState | null> {
-  const decision = await readHostedAiUsageGate(input);
-  if (
-    decision.allowanceSource !== "thread_container" ||
-    (!decision.allowed && decision.reason !== "ai_usage_limit_exceeded")
-  ) {
-    return null;
-  }
-  return classifyHostedGroupUsageCapacity({
-    limitUsdMicros: decision.limitUsdMicros,
-    remainingUsdMicros: decision.remainingUsdMicros,
-  });
-}
-
 /**
  * Canonical read projection for low-frequency operator/reporting surfaces.
  * All member decisions run through the ordinary gate owner in one transaction;

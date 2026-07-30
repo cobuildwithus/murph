@@ -1191,15 +1191,23 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
       const groupWorkingDirectory = await mkdtemp(
         path.join(tmpdir(), 'murph-group-usage-options-e2e-'),
       )
+      const sponsoredGroupWorkingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-sponsored-group-usage-e2e-'),
+      )
       let privatePlanUsageReads = 0
       const privateGroupActions: string[] = []
       const groupActions: string[] = []
+      const sponsoredGroupActions: string[] = []
       const fundingUrl =
         'https://www.withmurph.ai/groups/fund/e2e_usage_options'
 
       try {
         const privateSkillsRoot = path.join(privateWorkingDirectory, 'skills')
         const groupSkillsRoot = path.join(groupWorkingDirectory, 'skills')
+        const sponsoredGroupSkillsRoot = path.join(
+          sponsoredGroupWorkingDirectory,
+          'skills',
+        )
         await Promise.all([
           materializeAssistantSkill({
             skillsRoot: privateSkillsRoot,
@@ -1211,6 +1219,14 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
           }),
           materializeAssistantSkill({
             skillsRoot: groupSkillsRoot,
+            slug: 'hosted-low-usage',
+          }),
+          materializeAssistantSkill({
+            skillsRoot: sponsoredGroupSkillsRoot,
+            slug: 'group-chat',
+          }),
+          materializeAssistantSkill({
+            skillsRoot: sponsoredGroupSkillsRoot,
             slug: 'hosted-low-usage',
           }),
         ])
@@ -1347,11 +1363,8 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
                     result: {
                       status: 'ok',
                       usage: {
-                        capacityState: 'healthy',
                         fundingNeeded: true,
                         fundingUrl,
-                        periodEnd: '2026-08-29T00:00:00.000Z',
-                        remainingPercent: 80,
                         sponsorshipStatus: 'not_sponsored',
                       },
                     },
@@ -1418,10 +1431,73 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
         expect(groupResult.finalMessage).toContain(fundingUrl)
         expect(groupResult.finalMessage).toContain('$3.50 of cost-weighted usage credit')
         expect(groupResult.finalMessage).not.toMatch(/(?:^|\n)---(?:\n|$)/u)
+
+        const sponsoredGroupResult = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildHostedUsageOptionsDeveloperInstructions('group'),
+          dynamicTools: [MURPH_GROUP_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: sponsoredGroupSkillsRoot,
+          },
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            groupTool: {
+              request: async (request) => {
+                sponsoredGroupActions.push(request.action)
+                if (request.action !== 'read_usage') {
+                  throw new Error(
+                    `Unexpected sponsored group usage action: ${request.action}`,
+                  )
+                }
+                return {
+                  action: 'read_usage',
+                  result: {
+                    status: 'ok',
+                    usage: {
+                      fundingNeeded: false,
+                      fundingUrl: null,
+                      sponsorshipStatus: 'sponsored',
+                    },
+                  },
+                }
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt:
+            'Is Murph sponsored here? Tell the room only what everyone needs to know.',
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory: sponsoredGroupWorkingDirectory,
+        })
+
+        expect(sponsoredGroupActions).toEqual(['read_usage'])
+        expect(sponsoredGroupResult.finalMessage).toMatch(
+          /Murph is sponsored in (?:this|the) chat/iu,
+        )
+        expect(sponsoredGroupResult.finalMessage).not.toMatch(
+          /(?:\$|charged|maximum|monthly cap|payer|percent|balance|remaining|refill|purchase|funding link|runs? low|deplet)/iu,
+        )
       } finally {
         await removeRealCodexTemporaryPaths([
           privateWorkingDirectory,
           groupWorkingDirectory,
+          sponsoredGroupWorkingDirectory,
           ...config.temporaryPaths,
         ])
       }

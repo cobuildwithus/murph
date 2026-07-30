@@ -415,11 +415,11 @@ Last verified: 2026-07-29
   fulfilled plus nonterminal purchases consume cap headroom. The existing
   minute Stripe sweep performs post-commit provider work, and the verified
   Stripe-event receipt remains the only grant and continuation authority. The
-  beneficiary lock also protects a final current-capacity read immediately
-  before PaymentIntent confirmation. If another contribution has restored
-  healthy capacity since admission, the unconfirmed intent is canceled and the
-  deterministic refill purchase expires silently instead of charging or
-  entering payment recovery.
+  beneficiary-locked admission is the linearization point for need and cap
+  headroom; its deterministic purchase is the durable exact-$5 reservation.
+  The sweep rechecks authorization, period, cap, purchase identity, and runtime
+  access without holding a database transaction across provider I/O or
+  reinterpreting need after admission. Unused granted credit carries forward.
   Safe no-card or authentication-required outcomes terminalize the exact
   purchase, move the authorization to `recovery_required`, and stop later
   admissions without delaying the ordinary reply. Provider ambiguity retains

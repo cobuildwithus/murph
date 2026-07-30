@@ -42,7 +42,6 @@ const mocks = vi.hoisted(() => ({
   readHostedPersonalUsageCreditOfferCodes: vi.fn(),
   readHostedConfiguredUsageCreditOfferCodes: vi.fn(),
   readHostedGroupUsageFundingTargetByJoinCode: vi.fn(),
-  readHostedGroupUsageCapacityState: vi.fn(),
   readHostedAccountGroupStripeBillingRef: vi.fn(),
   resolveHostedFamilyUsageCreditCheckoutTargetTx: vi.fn(),
   readHostedMemberBillingSnapshot: vi.fn(),
@@ -145,17 +144,6 @@ vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
   hasHostedRuntimeActiveAccessForUpdateTx:
     mocks.hasHostedRuntimeActiveAccessForUpdateTx,
 }));
-
-vi.mock("@/src/lib/hosted-execution/usage-allowance", async (importOriginal) => {
-  const original = await importOriginal<
-    typeof import("@/src/lib/hosted-execution/usage-allowance")
-  >();
-  return {
-    ...original,
-    readHostedGroupUsageCapacityState:
-      mocks.readHostedGroupUsageCapacityState,
-  };
-});
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedOnboardingPublicBaseUrl: mocks.requireHostedOnboardingPublicBaseUrl,
@@ -296,7 +284,6 @@ beforeEach(() => {
   ]);
   mocks.ensureHostedMemberStripeCustomer.mockResolvedValue("cus_group_payer");
   mocks.hasHostedRuntimeActiveAccessForUpdateTx.mockResolvedValue(true);
-  mocks.readHostedGroupUsageCapacityState.mockResolvedValue("low");
   mocks.readHostedGroupUsageFundingTargetByJoinCode.mockResolvedValue({
     displayName: "Sunday sleep crew",
     fundingPath: "/groups/fund/group_join_code_1234",
@@ -4351,12 +4338,11 @@ describe("automatic group refill saved-card recovery", () => {
     });
   });
 
-  it("cancels a bound refill when another contribution restored capacity", async () => {
+  it("keeps an already-admitted refill bound after later capacity changes", async () => {
     const fake = createFakePrisma();
     const fixture = installAutomaticGroupRefillFixture(fake, {
       status: "payment_pending",
     });
-    mocks.readHostedGroupUsageCapacityState.mockResolvedValue("healthy");
     const requiresConfirmation = buildSavedCardPaymentIntent({
       amount: 500,
       amountReceived: 0,
@@ -4364,11 +4350,15 @@ describe("automatic group refill saved-card recovery", () => {
       purchaseId: fixture.refill.id,
       status: "requires_confirmation",
     });
-    mocks.stripePaymentIntentRetrieve.mockResolvedValueOnce(requiresConfirmation);
-    mocks.stripePaymentIntentCancel.mockResolvedValueOnce({
-      ...requiresConfirmation,
-      status: "canceled",
+    const succeeded = buildSavedCardPaymentIntent({
+      amount: 500,
+      amountReceived: 500,
+      latestCharge: "ch_refill_after_capacity_change",
+      purchaseId: fixture.refill.id,
+      status: "succeeded",
     });
+    mocks.stripePaymentIntentRetrieve.mockResolvedValueOnce(requiresConfirmation);
+    mocks.stripePaymentIntentConfirm.mockResolvedValueOnce(succeeded);
 
     await expect(tryChargeHostedUsageCreditSavedCard({
       billingAuthority: {
@@ -4383,14 +4373,14 @@ describe("automatic group refill saved-card recovery", () => {
       stripe: mocks.requireHostedStripeApiMode().stripe as never,
     })).resolves.toMatchObject({
       id: fixture.refill.id,
-      status: "expired",
+      status: "payment_pending",
     });
 
-    expect(mocks.stripePaymentIntentConfirm).not.toHaveBeenCalled();
-    expect(mocks.stripePaymentIntentCancel).toHaveBeenCalledTimes(1);
+    expect(mocks.stripePaymentIntentConfirm).toHaveBeenCalledTimes(1);
+    expect(mocks.stripePaymentIntentCancel).not.toHaveBeenCalled();
     expect(fixture.refill).toMatchObject({
-      status: "expired",
-      terminalAt: NOW,
+      status: "payment_pending",
+      terminalAt: null,
     });
   });
 

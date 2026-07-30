@@ -118,12 +118,15 @@ group's existing capacity owner says more credit is needed.
   notice identity purchase-specific, so a cap increase or later failed refill
   cannot be suppressed by an earlier private notice. Focused Web, assistant
   skill, catalog, and design-proof tests pass for this remediation.
-- Parent final review found and closed the post-admission race where another
-  contribution could restore healthy capacity before the minute sweep confirmed
-  an automatic refill. The saved-card owner now re-reads current capacity under
-  the beneficiary lock immediately before confirmation, cancels any unconfirmed
-  intent, and silently expires the unneeded deterministic purchase. Focused
-  saved-card, refill, allowance, typecheck, and broad-CI contract tests pass.
+- Preliminary specialists correctly exposed that the prior post-admission
+  capacity recheck could not provide the documented instant-before-charge
+  guarantee without holding a database transaction across Stripe I/O. That
+  proposed lock expansion was rejected because it would violate the existing
+  provider boundary. The design now uses the beneficiary-locked admission as
+  the single need/cap linearization point and its deterministic purchase as the
+  durable exact-$5 reservation; later provider work rechecks authority and
+  runtime access only. Focused saved-card, refill, allowance, typecheck, and
+  broad-CI contract tests cover that boundary.
 - The prior broad CI failure contained four stale expectations rather than a
   runtime failure: the migration manifest, reviewed Prisma relation surface,
   explicit one-time route arguments, and two new changelog items. Those exact

@@ -2,14 +2,10 @@ import {
   type HostedBillingStatus,
   HostedUsageCreditPurchaseStatus,
   type HostedUsageCreditPurchase,
-  type Prisma,
   type PrismaClient,
 } from "@prisma/client";
 import type Stripe from "stripe";
 
-import {
-  readHostedGroupUsageCapacityState,
-} from "../hosted-execution/usage-allowance";
 import { coerceStripeObjectId } from "./billing";
 import {
   hasHostedAccountGroupAccess,
@@ -373,8 +369,7 @@ async function hasCurrentHostedUsageCreditAutomaticPaymentAuthority(input: {
     return true;
   }
   return input.prisma.$transaction(async (tx) => {
-    await lockHostedMemberRow(tx, automaticSponsorship.beneficiaryMemberId);
-    return hasCurrentHostedGroupSponsorshipPaymentAuthorityTx({
+    return hasHostedGroupSponsorshipPaymentAuthorityTx({
       authority: automaticSponsorship,
       now: input.now,
       payerMemberId: input.payerMemberId,
@@ -382,26 +377,6 @@ async function hasCurrentHostedUsageCreditAutomaticPaymentAuthority(input: {
       tx,
     });
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-}
-
-async function hasCurrentHostedGroupSponsorshipPaymentAuthorityTx(input: {
-  authority: HostedGroupSponsorshipPaymentAuthority;
-  now: Date;
-  payerMemberId: string;
-  purchaseId: string;
-  tx: Prisma.TransactionClient;
-}): Promise<boolean> {
-  if (
-    input.authority.mode === "automatic" &&
-    await readHostedGroupUsageCapacityState({
-      memberId: input.authority.beneficiaryMemberId,
-      now: input.now,
-      prisma: input.tx,
-    }) === "healthy"
-  ) {
-    return false;
-  }
-  return hasHostedGroupSponsorshipPaymentAuthorityTx(input);
 }
 
 async function resolveHostedUsageCreditSavedCard(input: {
@@ -1113,7 +1088,7 @@ async function bindHostedUsageCreditDirectPaymentIntent(input: {
       if (
         billingAuthority.kind === "group" &&
         billingAuthority.automaticSponsorship &&
-        !(await hasCurrentHostedGroupSponsorshipPaymentAuthorityTx({
+        !(await hasHostedGroupSponsorshipPaymentAuthorityTx({
           authority: billingAuthority.automaticSponsorship,
           now: input.now,
           payerMemberId,
