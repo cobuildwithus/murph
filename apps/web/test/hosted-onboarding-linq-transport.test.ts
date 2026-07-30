@@ -3,7 +3,15 @@ import { HostedBillingStatus } from "@prisma/client";
 
 const transportBoundaryMocks = vi.hoisted(() => ({
   acquireHostedLinqChatOwnershipLockTx: vi.fn(),
+  acquireHostedMemberHomeLinqRouteLockTx: vi.fn(),
+  listHostedLinqHealthyProactiveLines: vi.fn(),
+  lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
+  lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
+  readHostedLinqIncomingLineState: vi.fn(),
+  readHostedLinqReceiptCorrelatedRecoveryLineTx: vi.fn(),
+  readHostedMemberRoutingState: vi.fn(),
   readHostedThreadRouteByThreadIdentity: vi.fn(),
+  reserveHostedLinqHealthyProactiveLineTx: vi.fn(),
   shareMurphHostedLinqNativeContactCardToChat: vi.fn().mockResolvedValue({
     status: "sent",
   }),
@@ -45,11 +53,42 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
+  acquireHostedMemberHomeLinqRouteLockTx:
+    transportBoundaryMocks.acquireHostedMemberHomeLinqRouteLockTx,
+  readHostedMemberRoutingState:
+    transportBoundaryMocks.readHostedMemberRoutingState,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
+  lookupHostedMemberByVerifiedEmailAddress:
+    transportBoundaryMocks.lookupHostedMemberByVerifiedEmailAddress,
   readHostedMemberCoreState: vi.fn(async () => null),
   readHostedMemberSnapshot: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
+  lookupHostedMemberIdentityByPhoneNumber:
+    transportBoundaryMocks.lookupHostedMemberIdentityByPhoneNumber,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/linq-home-routing", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/linq-home-routing")
+  >("@/src/lib/hosted-onboarding/linq-home-routing");
+  return {
+    ...actual,
+    reserveHostedLinqHealthyProactiveLineTx:
+      transportBoundaryMocks.reserveHostedLinqHealthyProactiveLineTx,
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/linq-line-store", () => ({
+  listHostedLinqHealthyProactiveLines:
+    transportBoundaryMocks.listHostedLinqHealthyProactiveLines,
+  readHostedLinqIncomingLineState:
+    transportBoundaryMocks.readHostedLinqIncomingLineState,
+  readHostedLinqReceiptCorrelatedRecoveryLineTx:
+    transportBoundaryMocks.readHostedLinqReceiptCorrelatedRecoveryLineTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
@@ -106,6 +145,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async () => {
     }),
     markHostedLinqDeliverySendFailedTx: vi.fn(actual.markHostedLinqDeliverySendFailedTx),
     readHostedLinqDeliveryProviderDispatchIntentTx: vi.fn().mockResolvedValue(null),
+    readHostedLinqDeliveryProviderDispatchIntentsTx: vi.fn().mockResolvedValue([]),
     recordHostedLinqDeliveryAttemptTx: vi.fn(actual.recordHostedLinqDeliveryAttemptTx),
     resolveHostedLinqInviteSignupDispatchEffectIdTx: vi.fn(
       async (input: { effectId: string }) => input.effectId,
@@ -160,6 +200,7 @@ import {
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
   readHostedLinqDeliveryProviderDispatchIntentTx,
+  readHostedLinqDeliveryProviderDispatchIntentsTx,
   recordHostedLinqDeliveryAttemptTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import {
@@ -168,6 +209,12 @@ import {
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
 } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
+import {
+  buildHostedLinqGroupLineRecoveryAttemptEffectId,
+  buildHostedLinqGroupLineRecoveryEffectId,
+  buildHostedLinqGroupLineRecoveryMessage,
+  buildHostedLinqGroupLineRecoverySourceRef,
+} from "@/src/lib/hosted-onboarding/linq-group-line-recovery";
 import {
   createHostedWebhookLinqMessageSideEffect,
   drainHostedLinqSideEffectsDirect,
@@ -200,6 +247,67 @@ describe("hosted Linq webhook transport", () => {
     vi.mocked(readHostedLinqDeliveryProviderDispatchIntentTx).mockResolvedValue(
       null,
     );
+    vi.mocked(readHostedLinqDeliveryProviderDispatchIntentsTx).mockResolvedValue(
+      [],
+    );
+    transportBoundaryMocks.acquireHostedMemberHomeLinqRouteLockTx
+      .mockResolvedValue(undefined);
+    transportBoundaryMocks.lookupHostedMemberIdentityByPhoneNumber
+      .mockResolvedValue({ core: { id: "member-1" } });
+    transportBoundaryMocks.lookupHostedMemberByVerifiedEmailAddress
+      .mockResolvedValue({ core: { id: "member-1" } });
+    transportBoundaryMocks.readHostedMemberRoutingState.mockResolvedValue({
+      linqChatId: null,
+      linqHomeLineAssignedAt: new Date("2026-03-26T12:00:00.000Z"),
+      linqRecipientPhone: "+15550100000",
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+    });
+    const incomingLineLookupKey = createHostedPhoneLookupKey("+15550100000");
+    const backupLineLookupKey = createHostedPhoneLookupKey("+15550100042");
+    if (!incomingLineLookupKey || !backupLineLookupKey) {
+      throw new Error("Expected hosted Linq recovery line lookup keys.");
+    }
+    transportBoundaryMocks.readHostedLinqIncomingLineState.mockResolvedValue({
+      kind: "hard_blocked",
+      phoneNumberLookupKey: incomingLineLookupKey,
+    });
+    transportBoundaryMocks.reserveHostedLinqHealthyProactiveLineTx
+      .mockResolvedValue({
+        kind: "reserved",
+        reservation: {
+          assignedAt: new Date("2026-03-26T12:00:00.000Z"),
+          line: {
+            activeMemberLimit: null,
+            assignmentWeight: 100,
+            maxNewConversationsPerDay: null,
+            phoneNumber: "+15550100042",
+            phoneNumberHint: "+0042",
+            phoneNumberLookupKey: backupLineLookupKey,
+            proactiveConversationCount: null,
+            proactiveConversationDayUtc: null,
+          },
+          proactiveConversationReserved: true,
+        },
+      });
+    transportBoundaryMocks.listHostedLinqHealthyProactiveLines.mockResolvedValue([
+      {
+        activeMemberLimit: null,
+        assignmentWeight: 100,
+        maxNewConversationsPerDay: null,
+        phoneNumber: "+15550100042",
+        phoneNumberHint: "+0042",
+        phoneNumberLookupKey: backupLineLookupKey,
+        proactiveConversationCount: null,
+        proactiveConversationDayUtc: null,
+      },
+    ]);
+    transportBoundaryMocks.readHostedLinqReceiptCorrelatedRecoveryLineTx
+      .mockResolvedValue({
+        phoneNumber: "+15550100042",
+        phoneNumberLookupKey: backupLineLookupKey,
+      });
     vi.mocked(startHostedAiUsageLimitNoticeDispatchTx)
       .mockImplementation(async (input) => {
         await input.prisma.$transaction(async (prisma) => {
@@ -568,8 +676,13 @@ describe("hosted Linq webhook transport", () => {
       id: "hld_persisted_group_reply",
       groupJoinOutreachId: "hgrpjoa-a",
       groupJoinReplyOccurredAt: new Date("2026-03-26T12:00:00.000Z"),
+      lastProviderEventId: null,
+      phoneNumberLookupKey: null,
       providerCorrelated: false,
       sourceRef: effect.effectId,
+      status: "attempted",
+      targetKind: "thread",
+      template: "invite_signup",
     });
     const prisma = createInviteSignupPrismaFixture({
       groupJoinCode: "join-group-a",
@@ -631,8 +744,13 @@ describe("hosted Linq webhook transport", () => {
         id: "hld_persisted_group_reply",
         groupJoinOutreachId: "hgrpjoa-a",
         groupJoinReplyOccurredAt: new Date("2026-03-26T12:00:00.000Z"),
+        lastProviderEventId: null,
+        phoneNumberLookupKey: null,
         providerCorrelated: false,
         sourceRef: persistedSourceRef,
+        status: "attempted",
+        targetKind: "thread",
+        template: "invite_signup",
       });
 
     await expect(
@@ -2094,6 +2212,575 @@ describe("hosted Linq webhook transport", () => {
     });
   });
 
+  it("renders the backup sender and reserves stale-event capacity at dispatch time", async () => {
+    vi.useFakeTimers();
+    const dispatchNow = new Date("2026-03-27T12:00:00.000Z");
+    vi.setSystemTime(dispatchNow);
+    const recoveryPhone = "+15550100042";
+    const memberPhone = "+15551234567";
+    const prisma = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: "member-1" }]),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingRef: null,
+          billingStatus: HostedBillingStatus.active,
+          suspendedAt: null,
+          threadContainer: null,
+        }),
+      },
+    };
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      incomingRecipientPhone: "+15550100000",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      participantContact: {
+        kind: "phone",
+        value: memberPhone,
+      },
+      sourceEventId: "event-group-line-recovery",
+      template: "group_line_recovery",
+      threadId: "chat-group-1",
+    });
+    const expectedMessage = buildHostedLinqGroupLineRecoveryMessage({
+      backupPhoneNumber: recoveryPhone,
+      seed: effect.effectId,
+    });
+    const expectedSourceRef = buildHostedLinqGroupLineRecoverySourceRef({
+      effectId: effect.effectId,
+      sourceEventId: "event-group-line-recovery",
+    });
+
+    try {
+      await expect(
+        drainHostedLinqSideEffectsDirect({
+          prisma: prisma as never,
+          sideEffects: [effect],
+        }),
+      ).resolves.toEqual({ sentCount: 1, skipped: [] });
+
+      expect(claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledWith(
+        expect.objectContaining({
+          idempotencyKey: effect.effectId,
+          phoneNumber: recoveryPhone,
+          prisma,
+          reclaimStalePreProviderAttempt: true,
+          source: "hosted_webhook_side_effect",
+          sourceRef: expectedSourceRef,
+          status: "attempted",
+          targetKind: "participant",
+          template: "group_line_recovery",
+        }),
+      );
+      expect(createHostedLinqChat).toHaveBeenCalledWith({
+        from: recoveryPhone,
+        idempotencyKey: effect.effectId,
+        message: expectedMessage,
+        signal: undefined,
+        to: [memberPhone],
+      });
+      expect(countOccurrences(expectedMessage, recoveryPhone)).toBe(1);
+      expect(transportBoundaryMocks.reserveHostedLinqHealthyProactiveLineTx)
+        .toHaveBeenCalledWith(expect.objectContaining({
+          now: dispatchNow,
+          prisma,
+        }));
+      expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("revalidates a verified email participant before private recovery", async () => {
+    const participantEmail = "member@example.test";
+    const prisma = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: "member-1" }]),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingRef: null,
+          billingStatus: HostedBillingStatus.active,
+          suspendedAt: null,
+          threadContainer: null,
+        }),
+      },
+    };
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      incomingRecipientPhone: "+15550100000",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      participantContact: {
+        kind: "email",
+        value: participantEmail,
+      },
+      sourceEventId: "event-group-line-recovery-email",
+      template: "group_line_recovery",
+      threadId: "chat-group-email",
+    });
+
+    await expect(drainHostedLinqSideEffectsDirect({
+      prisma: prisma as never,
+      sideEffects: [effect],
+    })).resolves.toEqual({ sentCount: 1, skipped: [] });
+
+    expect(
+      transportBoundaryMocks.lookupHostedMemberByVerifiedEmailAddress,
+    ).toHaveBeenCalledWith({
+      address: participantEmail,
+      prisma,
+    });
+    expect(
+      transportBoundaryMocks.lookupHostedMemberIdentityByPhoneNumber,
+    ).not.toHaveBeenCalled();
+    expect(createHostedLinqChat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: [participantEmail],
+      }),
+    );
+  });
+
+  it("keeps one recovery instruction when failure is followed by retry and late delivery", async () => {
+    const incomingPhone = "+15550100000";
+    const backupPhone = "+15550100042";
+    const memberPhone = "+15551234567";
+    const prisma = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: "member-1" }]),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingRef: null,
+          billingStatus: HostedBillingStatus.active,
+          suspendedAt: null,
+          threadContainer: null,
+        }),
+      },
+    };
+    const baseEffect = createHostedWebhookLinqMessageSideEffect({
+      incomingRecipientPhone: incomingPhone,
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      participantContact: {
+        kind: "phone",
+        value: memberPhone,
+      },
+      sourceEventId: "event-group-line-recovery-1",
+      template: "group_line_recovery",
+      threadId: "chat-group-1",
+    });
+    const secondEffect = createHostedWebhookLinqMessageSideEffect({
+      incomingRecipientPhone: incomingPhone,
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:01:00.000Z",
+      participantContact: {
+        kind: "phone",
+        value: memberPhone,
+      },
+      sourceEventId: "event-group-line-recovery-2",
+      template: "group_line_recovery",
+      threadId: "chat-group-1",
+    });
+    const thirdEffect = createHostedWebhookLinqMessageSideEffect({
+      incomingRecipientPhone: incomingPhone,
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:02:00.000Z",
+      participantContact: {
+        kind: "phone",
+        value: memberPhone,
+      },
+      sourceEventId: "event-group-line-recovery-3",
+      template: "group_line_recovery",
+      threadId: "chat-group-1",
+    });
+    const baseEffectId = buildHostedLinqGroupLineRecoveryEffectId({
+      incomingRecipientPhone: incomingPhone,
+      memberId: "member-1",
+      threadId: "chat-group-1",
+    });
+    const secondAttemptEffectId =
+      buildHostedLinqGroupLineRecoveryAttemptEffectId({
+        attempt: 2,
+        effectId: baseEffectId,
+      });
+    const baseLookupKey =
+      createHostedLinqDeliveryIdempotencyLookupKey(baseEffectId);
+    const secondLookupKey =
+      createHostedLinqDeliveryIdempotencyLookupKey(secondAttemptEffectId);
+    const backupLookupKey = createHostedPhoneLookupKey(backupPhone);
+    if (!baseLookupKey || !secondLookupKey || !backupLookupKey) {
+      throw new Error("Expected group-line recovery attempt lookup keys.");
+    }
+    const firstSourceRef = buildHostedLinqGroupLineRecoverySourceRef({
+      effectId: baseEffectId,
+      sourceEventId: "event-group-line-recovery-1",
+    });
+    const secondSourceRef = buildHostedLinqGroupLineRecoverySourceRef({
+      effectId: baseEffectId,
+      sourceEventId: "event-group-line-recovery-2",
+    });
+    const expectedMessage = buildHostedLinqGroupLineRecoveryMessage({
+      backupPhoneNumber: backupPhone,
+      seed: baseEffectId,
+    });
+    const failedBaseIntent = {
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      groupJoinOutreachId: null,
+      groupJoinReplyOccurredAt: null,
+      id: "hld-group-recovery-1",
+      idempotencyLookupKey: baseLookupKey,
+      lastProviderEventId: "hbidx:linq-provider-event:recovery-failed-1",
+      phoneNumberLookupKey: backupLookupKey,
+      providerCorrelated: true,
+      sourceRef: firstSourceRef,
+      status: "failed",
+      targetKind: "participant",
+      template: "group_line_recovery",
+    };
+
+    await expect(drainHostedLinqSideEffectsDirect({
+      prisma: prisma as never,
+      sideEffects: [baseEffect],
+    })).resolves.toEqual({ sentCount: 1, skipped: [] });
+    expect(createHostedLinqChat).toHaveBeenCalledWith({
+      from: backupPhone,
+      idempotencyKey: baseEffectId,
+      message: expectedMessage,
+      signal: undefined,
+      to: [memberPhone],
+    });
+    expect(
+      transportBoundaryMocks.reserveHostedLinqHealthyProactiveLineTx,
+    ).toHaveBeenCalledTimes(1);
+
+    vi.mocked(readHostedLinqDeliveryProviderDispatchIntentsTx)
+      .mockResolvedValue([failedBaseIntent]);
+    await expect(drainHostedLinqSideEffectsDirect({
+      prisma: prisma as never,
+      sideEffects: [baseEffect],
+    })).resolves.toEqual({
+      sentCount: 0,
+      skipped: [{
+        effectId: baseEffect.effectId,
+        reason: "notice_target_unauthorized",
+        template: "group_line_recovery",
+      }],
+    });
+    expect(createHostedLinqChat).toHaveBeenCalledTimes(1);
+    expect(
+      transportBoundaryMocks.reserveHostedLinqHealthyProactiveLineTx,
+    ).toHaveBeenCalledTimes(1);
+
+    await expect(drainHostedLinqSideEffectsDirect({
+      prisma: prisma as never,
+      sideEffects: [secondEffect],
+    })).resolves.toEqual({ sentCount: 1, skipped: [] });
+    expect(createHostedLinqChat).toHaveBeenLastCalledWith({
+      from: backupPhone,
+      idempotencyKey: secondAttemptEffectId,
+      message: expectedMessage,
+      signal: undefined,
+      to: [memberPhone],
+    });
+    expect(claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idempotencyKey: secondAttemptEffectId,
+        sourceRef: secondSourceRef,
+      }),
+    );
+    expect(createHostedLinqChat).toHaveBeenCalledTimes(2);
+    expect(
+      transportBoundaryMocks.reserveHostedLinqHealthyProactiveLineTx,
+    ).toHaveBeenCalledTimes(1);
+    expect(
+      transportBoundaryMocks.readHostedLinqReceiptCorrelatedRecoveryLineTx,
+    ).toHaveBeenCalledWith({
+      expectedFailureReceiptEventId:
+        "hbidx:linq-provider-event:recovery-failed-1",
+      phoneNumberLookupKey: backupLookupKey,
+      prisma,
+    });
+
+    const liveSecondIntent = {
+      ...failedBaseIntent,
+      attemptedAt: new Date("2026-03-26T12:01:00.000Z"),
+      id: "hld-group-recovery-2",
+      idempotencyLookupKey: secondLookupKey,
+      providerCorrelated: false,
+      sourceRef: secondSourceRef,
+      status: "attempted",
+    };
+    vi.mocked(readHostedLinqDeliveryProviderDispatchIntentsTx)
+      .mockResolvedValue([failedBaseIntent, liveSecondIntent]);
+    const retryAt = new Date("2026-03-26T12:16:00.000Z");
+    vi.mocked(claimHostedLinqDeliveryProviderDispatchTx)
+      .mockResolvedValueOnce({
+        claimed: false,
+        id: "hld-group-recovery-2",
+        retryAt,
+      });
+    await expect(drainHostedLinqSideEffectsDirect({
+      prisma: prisma as never,
+      sideEffects: [thirdEffect],
+    })).resolves.toEqual({
+      sentCount: 0,
+      skipped: [{
+        effectId: thirdEffect.effectId,
+        reason: "notice_in_flight",
+        retryAt,
+        template: "group_line_recovery",
+      }],
+    });
+    expect(createHostedLinqChat).toHaveBeenCalledTimes(2);
+    expect(
+      transportBoundaryMocks.reserveHostedLinqHealthyProactiveLineTx,
+    ).toHaveBeenCalledTimes(1);
+
+    vi.mocked(readHostedLinqDeliveryProviderDispatchIntentsTx)
+      .mockResolvedValue([
+        {
+          ...failedBaseIntent,
+          status: "delivered",
+        },
+        {
+          ...liveSecondIntent,
+          providerCorrelated: true,
+          status: "accepted",
+        },
+      ]);
+    await expect(drainHostedLinqSideEffectsDirect({
+      prisma: prisma as never,
+      sideEffects: [thirdEffect],
+    })).resolves.toEqual({
+      sentCount: 0,
+      skipped: [{
+        effectId: thirdEffect.effectId,
+        reason: "notice_already_claimed",
+        template: "group_line_recovery",
+      }],
+    });
+    expect(createHostedLinqChat).toHaveBeenCalledTimes(2);
+    expect(
+      transportBoundaryMocks.reserveHostedLinqHealthyProactiveLineTx,
+    ).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not replace an unhealthy pinned recovery sender", async () => {
+    const incomingPhone = "+15550100000";
+    const backupPhone = "+15550100042";
+    const memberPhone = "+15551234567";
+    const prisma = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: "member-1" }]),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingRef: null,
+          billingStatus: HostedBillingStatus.active,
+          suspendedAt: null,
+          threadContainer: null,
+        }),
+      },
+    };
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      incomingRecipientPhone: incomingPhone,
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:01:00.000Z",
+      participantContact: {
+        kind: "phone",
+        value: memberPhone,
+      },
+      sourceEventId: "event-group-line-recovery-2",
+      template: "group_line_recovery",
+      threadId: "chat-group-1",
+    });
+    const baseEffectId = buildHostedLinqGroupLineRecoveryEffectId({
+      incomingRecipientPhone: incomingPhone,
+      memberId: "member-1",
+      threadId: "chat-group-1",
+    });
+    const baseLookupKey =
+      createHostedLinqDeliveryIdempotencyLookupKey(baseEffectId);
+    const backupLookupKey = createHostedPhoneLookupKey(backupPhone);
+    if (!baseLookupKey || !backupLookupKey) {
+      throw new Error("Expected group-line recovery lookup keys.");
+    }
+    vi.mocked(readHostedLinqDeliveryProviderDispatchIntentsTx)
+      .mockResolvedValue([{
+        attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+        groupJoinOutreachId: null,
+        groupJoinReplyOccurredAt: null,
+        id: "hld-group-recovery-1",
+        idempotencyLookupKey: baseLookupKey,
+        lastProviderEventId: "hbidx:linq-provider-event:recovery-failed-1",
+        phoneNumberLookupKey: backupLookupKey,
+        providerCorrelated: true,
+        sourceRef: buildHostedLinqGroupLineRecoverySourceRef({
+          effectId: baseEffectId,
+          sourceEventId: "event-group-line-recovery-1",
+        }),
+        status: "failed",
+        targetKind: "participant",
+        template: "group_line_recovery",
+      }]);
+    transportBoundaryMocks.readHostedLinqReceiptCorrelatedRecoveryLineTx
+      .mockResolvedValue(null);
+
+    await expect(drainHostedLinqSideEffectsDirect({
+      prisma: prisma as never,
+      sideEffects: [effect],
+    })).resolves.toEqual({
+      sentCount: 0,
+      skipped: [{
+        effectId: effect.effectId,
+        reason: "notice_target_unauthorized",
+        template: "group_line_recovery",
+      }],
+    });
+    expect(transportBoundaryMocks.readHostedLinqReceiptCorrelatedRecoveryLineTx)
+      .toHaveBeenCalledWith({
+        expectedFailureReceiptEventId:
+          "hbidx:linq-provider-event:recovery-failed-1",
+        phoneNumberLookupKey: backupLookupKey,
+        prisma,
+      });
+    expect(transportBoundaryMocks.reserveHostedLinqHealthyProactiveLineTx)
+      .not.toHaveBeenCalled();
+    expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
+    expect(createHostedLinqChat).not.toHaveBeenCalled();
+  });
+
+  it("does not dispatch group-line recovery after transport-time access revocation", async () => {
+    const memberLock = vi.fn().mockResolvedValue([{ id: "member-1" }]);
+    const memberAccessRead = vi.fn().mockResolvedValue({
+      accountGroupMemberships: [],
+      billingRef: null,
+      billingStatus: HostedBillingStatus.not_started,
+      suspendedAt: new Date("2026-03-26T12:00:01.000Z"),
+      threadContainer: null,
+    });
+    const prisma = {
+      $queryRaw: memberLock,
+      hostedMember: {
+        findUnique: memberAccessRead,
+      },
+    };
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      incomingRecipientPhone: "+15550100000",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      participantContact: {
+        kind: "phone",
+        value: "+15551234567",
+      },
+      sourceEventId: "event-group-line-recovery",
+      template: "group_line_recovery",
+      threadId: "chat-group-1",
+    });
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        prisma: prisma as never,
+        sideEffects: [effect],
+      }),
+    ).resolves.toEqual({
+      sentCount: 0,
+      skipped: [{
+        effectId: effect.effectId,
+        reason: "notice_target_unauthorized",
+        template: "group_line_recovery",
+      }],
+    });
+
+    expect(memberLock).toHaveBeenCalled();
+    expect(memberAccessRead).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "member-1" },
+    }));
+    expect(memberLock.mock.invocationCallOrder[0]).toBeLessThan(
+      memberAccessRead.mock.invocationCallOrder[0]!,
+    );
+    expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
+    expect(createHostedLinqChat).not.toHaveBeenCalled();
+    expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      arrange: () => {
+        transportBoundaryMocks.lookupHostedMemberIdentityByPhoneNumber
+          .mockResolvedValue({ core: { id: "member-other" } });
+      },
+      label: "participant identity changes",
+    },
+    {
+      arrange: () => {
+        transportBoundaryMocks.readHostedMemberRoutingState.mockResolvedValue({
+          linqChatId: null,
+          linqHomeLineAssignedAt: new Date("2026-03-26T12:00:00.000Z"),
+          linqRecipientPhone: "+15550100099",
+          pendingLinqChatId: null,
+          pendingLinqParticipantContact: null,
+          pendingLinqRecipientPhone: null,
+        });
+      },
+      label: "assigned line changes",
+    },
+    {
+      arrange: () => {
+        const incomingLineLookupKey =
+          createHostedPhoneLookupKey("+15550100000");
+        if (!incomingLineLookupKey) {
+          throw new Error("Expected incoming recovery line lookup key.");
+        }
+        transportBoundaryMocks.readHostedLinqIncomingLineState
+          .mockResolvedValue({
+            kind: "at_risk",
+            phoneNumberLookupKey: incomingLineLookupKey,
+          });
+      },
+      label: "incoming line is no longer hard-blocked",
+    },
+  ])("does not dispatch group-line recovery when $label", async ({ arrange }) => {
+    const prisma = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: "member-1" }]),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingRef: null,
+          billingStatus: HostedBillingStatus.active,
+          suspendedAt: null,
+          threadContainer: null,
+        }),
+      },
+    };
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      incomingRecipientPhone: "+15550100000",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      participantContact: {
+        kind: "phone",
+        value: "+15551234567",
+      },
+      sourceEventId: "event-group-line-recovery",
+      template: "group_line_recovery",
+      threadId: "chat-group-1",
+    });
+    arrange();
+
+    await expect(drainHostedLinqSideEffectsDirect({
+      prisma: prisma as never,
+      sideEffects: [effect],
+    })).resolves.toEqual({
+      sentCount: 0,
+      skipped: [{
+        effectId: effect.effectId,
+        reason: "notice_target_unauthorized",
+        template: "group_line_recovery",
+      }],
+    });
+    expect(readHostedLinqDeliveryProviderDispatchIntentsTx)
+      .not.toHaveBeenCalled();
+    expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
+    expect(createHostedLinqChat).not.toHaveBeenCalled();
+  });
+
   it("does not release usage-period sent markers when AI usage quota delivery fails", async () => {
     vi.mocked(sendHostedLinqChatMessage).mockRejectedValueOnce(new Error("send failed"));
     const effect = createHostedWebhookLinqMessageSideEffect({
@@ -2799,6 +3486,10 @@ function createInviteSignupPrismaFixture(
       operation: (prisma: typeof transactionClient) => Promise<unknown>,
     ) => operation(transactionClient)),
   };
+}
+
+function countOccurrences(value: string, needle: string): number {
+  return value.split(needle).length - 1;
 }
 
 const HOME_REDIRECT_TEST_KEYRING_ENTRIES = {
