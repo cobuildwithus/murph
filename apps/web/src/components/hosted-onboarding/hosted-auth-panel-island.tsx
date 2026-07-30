@@ -14,7 +14,7 @@ import { HostedPrivyProvider } from "./privy-provider";
 const HOSTED_PRIVY_READY_TIMEOUT_MS = 10_000;
 const HOSTED_PRIVY_RESTART_TIMEOUT_COUNT = 2;
 
-type HostedAuthPanelIslandProps = ComponentProps<typeof HostedAuthPanel>;
+type HostedAuthPanelProps = ComponentProps<typeof HostedAuthPanel>;
 type HostedPrivyReadinessEvent =
   | "hosted_auth_privy_ready_continue_waiting"
   | "hosted_auth_privy_ready_restart"
@@ -80,8 +80,8 @@ export function HostedPrivyReadinessState({
   );
 }
 
-export function HostedAuthPanelIsland(props: HostedAuthPanelIslandProps) {
-  const [providerAttempt, setProviderAttempt] = useState(0);
+export function HostedAuthPanelIsland(props: HostedAuthPanelProps) {
+  const [providerAttempt, setProviderAttempt] = useState(1);
   const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID?.trim();
   const clientId = process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID?.trim() || null;
 
@@ -99,12 +99,29 @@ export function HostedAuthPanelIsland(props: HostedAuthPanelIslandProps) {
       clientId={clientId}
       key={providerAttempt}
     >
-      <HostedPrivyReadyBoundary
+      <HostedAuthPanelWithinPrivy
         {...props}
-        attempt={providerAttempt + 1}
-        onRestart={() => setProviderAttempt((current) => current + 1)}
+        privyAttempt={providerAttempt}
+        onRestartPrivy={() => setProviderAttempt((current) => current + 1)}
       />
     </HostedPrivyProvider>
+  );
+}
+
+export function HostedAuthPanelWithinPrivy({
+  onRestartPrivy,
+  privyAttempt,
+  ...props
+}: HostedAuthPanelProps & {
+  onRestartPrivy: () => void;
+  privyAttempt: number;
+}) {
+  return (
+    <HostedPrivyReadyBoundary
+      {...props}
+      attempt={privyAttempt}
+      onRestart={onRestartPrivy}
+    />
   );
 }
 
@@ -112,7 +129,7 @@ function HostedPrivyReadyBoundary({
   attempt,
   onRestart,
   ...props
-}: HostedAuthPanelIslandProps & {
+}: HostedAuthPanelProps & {
   attempt: number;
   onRestart: () => void;
 }) {
