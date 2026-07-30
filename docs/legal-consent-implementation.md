@@ -1,6 +1,6 @@
 # Legal Consent Implementation
 
-Last verified: 2026-07-28
+Last verified: 2026-07-30
 
 ## Purpose
 
@@ -32,12 +32,20 @@ The hosted consent API routes are:
 
 - `GET /api/legal/consent/status`
 - `POST /api/legal/consent/accept`
+- `POST /api/legal/consent/decline`
 - `POST /api/legal/consent/revoke`
 - `GET /api/device-sync/companion/legal-consent`
 - `POST /api/device-sync/companion/legal-consent`
 
 All routes require authenticated hosted member context. Launch-required consent can be accepted but not revoked through the revoke endpoint. Optional feature scopes can be granted and revoked independently.
-The `POST` accept and revoke routes also enforce hosted mutation-origin checks before writing consent state.
+The `POST` accept, decline, and revoke routes also enforce hosted
+mutation-origin checks before writing consent state. Decline records one
+`declined` event for each currently ungranted launch scope and ends the current
+hosted app session with the coarse `consent_declined` reason. The event ids are
+deterministic for the member, session, and scope, so retrying the same decline
+does not duplicate the audit history. Session termination remains authoritative
+if the scoped event write is temporarily unavailable; the session reason
+preserves the refusal outcome without keeping the person signed in.
 The companion route uses Privy bearer authentication with no cookie fallback
 and accepts only the two launch scopes. It reads and writes the same consent
 tables and current server-side document registry as the browser routes. The
@@ -104,4 +112,8 @@ available while those health-data bridges are paused.
 
 ## Privacy Notes
 
-Consent events store document versions and coarse source labels only. They do not store raw IP addresses, user agents, prompts, health payloads, or legal document text. If future requirements need stronger provenance, add minimized, documented fields rather than storing raw request metadata.
+Consent events store document versions and coarse source labels only. Decline
+events add no request metadata or free-form client input. Consent events do not
+store raw IP addresses, user agents, prompts, health payloads, contact details,
+or legal document text. If future requirements need stronger provenance, add
+minimized, documented fields rather than storing raw request metadata.

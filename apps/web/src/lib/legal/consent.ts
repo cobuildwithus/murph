@@ -1,6 +1,6 @@
 import "server-only";
 
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 
 import {
   type HostedConsentGrant,
@@ -102,7 +102,7 @@ export type HostedConsentDocumentId = typeof HOSTED_CONSENT_DOCUMENTS[number]["i
 export type HostedConsentScope = typeof HOSTED_CONSENT_SCOPES[number]["scope"];
 export type HostedConsentLaunchScope = Extract<HostedConsentScope, `launch.${string}`>;
 export type HostedConsentGrantStatus = "granted" | "revoked";
-export type HostedConsentEventAction = "accepted" | "granted" | "revoked";
+export type HostedConsentEventAction = "accepted" | "declined" | "granted" | "revoked";
 
 const HOSTED_LAUNCH_SCOPES: readonly HostedConsentLaunchScope[] = ["launch.legal", "launch.health-data"];
 
@@ -252,6 +252,54 @@ export async function recordHostedLaunchRequiredConsent(input: {
     scope: input.scope,
     source: input.source,
   });
+}
+
+export async function recordHostedLaunchConsentDecline(input: {
+  memberId: string;
+  now?: Date;
+  prisma: PrismaClient;
+  sessionId: string;
+  source?: string;
+}): Promise<HostedConsentLaunchScope[]> {
+  const source = normalizeConsentSource(input.source);
+  const now = input.now ?? new Date();
+
+  return input.prisma.$transaction(async (tx) => {
+    const grants = await tx.hostedConsentGrant.findMany({
+      orderBy: [{ scope: "asc" }],
+      where: { memberId: input.memberId },
+    });
+    const status = buildHostedConsentStatus({
+      grants: grants.map(projectHostedConsentGrant),
+      now,
+    });
+    const declinedScopes = status.launchScopes
+      .filter((scope) => !scope.granted)
+      .map((scope) => scope.scope);
+
+    if (declinedScopes.length === 0) {
+      return [];
+    }
+
+    await tx.hostedConsentEvent.createMany({
+      data: declinedScopes.map((scope) => ({
+        action: "declined",
+        createdAt: now,
+        documentVersionsJson: buildCurrentHostedConsentDocumentVersions(scope),
+        id: buildHostedConsentDeclineEventId({
+          memberId: input.memberId,
+          scope,
+          sessionId: input.sessionId,
+        }),
+        memberId: input.memberId,
+        scope,
+        source,
+      })),
+      skipDuplicates: true,
+    });
+
+    return declinedScopes;
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
 export async function grantHostedOptionalFeatureConsent(input: {
@@ -738,4 +786,22 @@ function normalizeBoundedString(input: {
 
 function generateHostedConsentEventId(): string {
   return `hbce_${randomBytes(12).toString("base64url")}`;
+}
+
+function buildHostedConsentDeclineEventId(input: {
+  memberId: string;
+  scope: HostedConsentLaunchScope;
+  sessionId: string;
+}): string {
+  const digest = createHash("sha256")
+    .update("murph.hosted-consent-decline.v1")
+    .update("\0")
+    .update(input.memberId)
+    .update("\0")
+    .update(input.sessionId)
+    .update("\0")
+    .update(input.scope)
+    .digest("base64url")
+    .slice(0, 24);
+  return `hbce_${digest}`;
 }
