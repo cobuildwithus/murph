@@ -1479,6 +1479,38 @@ Rollback disables the producer and clears its persisted seed state first; only
 then may operators remove the consumer or Web read after old runtimes and rows
 have drained.
 
+#### Requirement-level shape decision
+
+The first releasable backend boundary is the complete chain from authenticated
+bounded upload through encrypted storage, signed exact-version runtime reads,
+in-memory App Server reconciliation, later-admission authority probes, and
+checkpoint-before-process-stop rollover. Seed ingestion by itself is not a
+releasable increment: it would accept sensitive material without a complete
+authorization consumer. Omitting the later-admission or rollover seams would
+let a warm invocation retain stale managed/external mode or bearer authority
+after connect, disconnect, expiry, or policy loss. Omitting the idle-maintenance
+exclusion would leave compaction as a credential-using path without the
+per-turn resolver.
+
+The reviewed implementation therefore continues as one backend security
+boundary rather than splitting storage/transport from runtime/engine or adding
+a server refresh owner. This choice reuses the existing connection row, signed
+control plane, workspace checkpoint, provider abstraction, and warm App Server
+lifecycle. It adds no refresh daemon, queue, service, database, dependency, or
+second credential store. A per-turn cold process was rejected because it would
+create a second lifecycle, disrupt chained and detached warm-session work, and
+pay cold-start latency on every connected turn while still needing mode
+convergence when the phone changes authority mid-invocation.
+
+The legacy Web device-code POST producer is disabled. Its credential-free
+GET/DELETE connection view, cleanup mailbox shapes, `userCode`, and
+`verificationUrl` remain only for rollback-safe cleanup during the compatibility
+window; they are not an alternate producer. Remove them after the companion
+minimum client is established, no legacy row remains in a connecting or
+disconnecting state, old runners are drained, and the rollback window has
+closed. The default-off upload gate reduces rollout exposure but does not make a
+partial credential path acceptable.
+
 Hosted device-sync webhook freshness is owned by web dirty state, not mailbox
 completion. The route claims the exact provider trace, writes sparse
 audit/signal facts, widens the per-connection dirty row and safe dirty
