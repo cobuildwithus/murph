@@ -2,11 +2,13 @@ import { HostedBillingStatus } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  buildHostedUsageReferralOutstandingWhere,
   buildHostedUsageReferralRewardLabel,
   HOSTED_USAGE_REFERRAL_GROUP_MINIMUM_ACTIVITY_SPAN_MS,
   HOSTED_USAGE_REFERRAL_LATE_EVIDENCE_GRACE_MS,
   bindArmedHostedUsageReferralToNewContainerTx,
   buildHostedUsageReferralCelebrationWake,
+  getHostedUsageReferralPolicyDisplay,
   hostedUsageReferralDestinationMatchesSourceConversation,
   observeHostedUsageReferralInboundTx,
   qualifiesHostedActiveGroupReferral,
@@ -84,6 +86,39 @@ describe("hosted usage referral policy", () => {
     })).toBe(
       "bonus usage on the model your Murph is using now",
     );
+  });
+
+  it("shares display copy and outstanding semantics with read-only projections", () => {
+    expect(getHostedUsageReferralPolicyDisplay("new_person_activation_v1")).toEqual({
+      requirementsLabel:
+        "Bring one new person into a fresh Murph group. Murph handles onboarding, and the mission completes once they join the conversation with their own Murph.",
+      title: "Bring someone new to Murph",
+    });
+    expect(getHostedUsageReferralPolicyDisplay("active_group_v1")).toEqual({
+      requirementsLabel:
+        "Start a fresh group and make it genuinely active, with multiple people actually talking.",
+      title: "Start an active group",
+    });
+
+    const now = new Date("2026-07-29T12:00:00.000Z");
+    expect(buildHostedUsageReferralOutstandingWhere(now)).toEqual([
+      {
+        expiresAt: { gt: now },
+        status: "armed",
+      },
+      {
+        expiresAt: {
+          gt: new Date(
+            now.getTime() - HOSTED_USAGE_REFERRAL_LATE_EVIDENCE_GRACE_MS,
+          ),
+        },
+        status: "target_bound",
+      },
+      {
+        qualifiedAt: { not: null },
+        status: "target_bound",
+      },
+    ]);
   });
 
   it("accepts only the frozen personal source conversation", () => {
@@ -265,12 +300,68 @@ describe("hosted usage referral policy", () => {
     })).toBe(false);
   });
 
-  it("binds only an eligible armed mission owned by the new container creator", async () => {
+  it.each([
+    {
+      expectedReferralId: null,
+      policyCode: "new_person_activation_v1" as const,
+      targetChannel: "telegram" as const,
+      targetLinqService: null,
+      title: "keeps a Linq-armed new-person mission unbound from Telegram",
+    },
+    {
+      expectedReferralId: "referral_1",
+      policyCode: "new_person_activation_v1" as const,
+      targetChannel: "linq" as const,
+      targetLinqService: "iMessage",
+      title: "binds a new-person mission to a new iMessage group",
+    },
+    {
+      expectedReferralId: null,
+      policyCode: "new_person_activation_v1" as const,
+      targetChannel: "linq" as const,
+      targetLinqService: "sms",
+      title: "keeps a new-person mission unbound from a new SMS group",
+    },
+    {
+      expectedReferralId: null,
+      policyCode: "new_person_activation_v1" as const,
+      targetChannel: "linq" as const,
+      targetLinqService: "RCS",
+      title: "keeps a new-person mission unbound from a new RCS group",
+    },
+    {
+      expectedReferralId: null,
+      policyCode: "new_person_activation_v1" as const,
+      targetChannel: "linq" as const,
+      targetLinqService: null,
+      title: "keeps a new-person mission unbound from an unknown Linq service",
+    },
+    {
+      expectedReferralId: "referral_1",
+      policyCode: "active_group_v1" as const,
+      targetChannel: "linq" as const,
+      targetLinqService: "sms",
+      title: "binds an active-group mission to a new SMS group",
+    },
+    {
+      expectedReferralId: "referral_1",
+      policyCode: "active_group_v1" as const,
+      targetChannel: "telegram" as const,
+      targetLinqService: null,
+      title: "binds an active-group mission to a new Telegram group",
+    },
+  ])("$title", async ({
+    expectedReferralId,
+    policyCode,
+    targetChannel,
+    targetLinqService,
+  }) => {
     const occurredAt = new Date("2026-07-26T12:00:00.000Z");
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     const findFirst = vi.fn().mockResolvedValue({
       armedAt: new Date("2026-07-26T11:59:00.000Z"),
       id: "referral_1",
+      policyCode,
     });
     const tx = {
       $executeRaw: vi.fn().mockResolvedValue(1),
@@ -284,9 +375,11 @@ describe("hosted usage referral policy", () => {
       enabled: true,
       occurredAt,
       ownerMemberId: "member_referrer",
+      targetChannel,
+      targetLinqService,
       targetContainerMemberId: "member_target_container",
       tx: tx as never,
-    })).resolves.toEqual({ referralId: "referral_1" });
+    })).resolves.toEqual({ referralId: expectedReferralId });
 
     expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({
       where: {
@@ -296,18 +389,26 @@ describe("hosted usage referral policy", () => {
         status: "armed",
       },
     }));
-    expect(updateMany).toHaveBeenCalledWith({
-      data: {
-        status: "target_bound",
-        targetBoundAt: occurredAt,
-        targetContainerMemberId: "member_target_container",
-      },
-      where: {
-        id: "referral_1",
-        status: "armed",
-        targetContainerMemberId: null,
-      },
-    });
+    if (expectedReferralId) {
+      expect(updateMany).toHaveBeenCalledWith({
+        data: {
+          status: "target_bound",
+          targetBoundAt: occurredAt,
+          targetContainerMemberId: "member_target_container",
+        },
+        where: {
+          id: "referral_1",
+          status: "armed",
+          targetContainerMemberId: null,
+        },
+      });
+    } else {
+      expect(updateMany).not.toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          status: "target_bound",
+        }),
+      }));
+    }
   });
 
   it("dedupes provider events and qualifies after two other speakers carry the majority", async () => {
@@ -539,6 +640,8 @@ describe("hosted usage referral policy", () => {
       enabled: true,
       occurredAt: new Date(expiresAt.getTime() + 1),
       ownerMemberId: "member_referrer",
+      targetChannel: "linq",
+      targetLinqService: "imessage",
       targetContainerMemberId: "member_later_container",
       tx: tx as never,
     })).resolves.toEqual({ referralId: null });
@@ -568,6 +671,8 @@ describe("hosted usage referral policy", () => {
         + 1,
       ),
       ownerMemberId: "member_referrer",
+      targetChannel: "linq",
+      targetLinqService: "imessage",
       targetContainerMemberId: "member_after_grace_container",
       tx: tx as never,
     })).resolves.toEqual({ referralId: null });
