@@ -12,18 +12,18 @@ describe("assistant plan usage call contracts", () => {
 
     expect(contract.length).toBeLessThanOrEqual(380);
     expect(contract).toContain("current private hosted plan");
-    expect(contract).toContain("overall AI-usage projection");
-    expect(contract).toContain(
-      "Call only for an explicit plan, usage, billing request",
-    );
+    expect(contract).toContain("AI-usage");
+    expect(contract).toContain("explicit plan, usage, billing");
     expect(contract).toContain("trusted low-usage context");
-    expect(contract).toContain("This is read-only");
+    expect(contract).toContain("exact user-named plan");
+    expect(contract).toContain("matching quote");
+    expect(contract).toContain("availablePlans is only the trial list");
+    expect(contract).toContain("Read-only");
     expect(contract).toContain(
       "percentages and forecasts cover all available usage",
     );
-    expect(contract).toContain("expose no allowance/credit-source split");
+    expect(contract).toContain("without credit-source splits");
     expect(contract).not.toContain("included/purchased");
-    expect(contract).toContain("a recommendation or quote is not consent");
     expect(contract).not.toContain("included-usage projection");
   });
 
@@ -32,11 +32,18 @@ describe("assistant plan usage call contracts", () => {
 
     expect(contract.length).toBeLessThanOrEqual(520);
     expect(contract).toContain("explicitly confirmed by the current user in this turn");
-    expect(contract).toContain("require a current matching plan_usage quote");
+    expect(contract).toContain("current matching plan_usage quote");
+    expect(MURPH_SUBSCRIPTION_TOOL.inputSchema.properties.action.enum)
+      .toEqual(["change_plan"]);
+    expect(MURPH_SUBSCRIPTION_TOOL.inputSchema.required).toEqual([
+      "action",
+      "targetPlanCode",
+      "quoteId",
+    ]);
     expect(contract).toContain("Exact replay of the same input and action is idempotent");
-    expect(contract).toContain("a different action requires new eligible user input");
+    expect(contract).toContain("a different target requires new eligible user input");
     expect(contract).toContain("Only payment_required includes paymentUrl");
-    expect(contract).toContain("completed, pending, and no_action_required");
+    expect(contract).toContain("other results do not prove a payment method");
   });
 
   it("keeps Family operations and result truth in the call contract", () => {

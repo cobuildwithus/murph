@@ -27,6 +27,7 @@ export function createHostedRuntimeAssistantAskPort(input: {
         description: "Hosted Assistant Ask control",
         fetchImpl: input.fetchImpl,
         path: HOSTED_RUNTIME_ASSISTANT_ASK_CONTROL_PATH,
+        replayOnceOnRetryableFailure: true,
         sensitiveResponseBody: {
           maxBytes: HOSTED_RUNTIME_ASSISTANT_ASK_RESPONSE_MAX_BYTES,
         },

@@ -194,6 +194,82 @@ describe("hosted onboarding stripe billing policy", () => {
     });
   });
 
+  it("clears a pending schedule once Stripe reports its target as current", async () => {
+    const member = makeMemberSnapshot({
+      billingRef: {
+        currentBillingPlanCode: "launch_monthly",
+        memberId: "member_123",
+        scheduledBillingEffectiveAt: new Date("2026-05-12T00:00:00.000Z"),
+        scheduledBillingPlanCode: "launch_group_monthly",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+        stripeSubscriptionScheduleId: "sub_sched_123",
+      },
+    });
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValue(member);
+
+    await writeHostedMemberStripeBillingTx({
+      billingStatus: HostedBillingStatus.active,
+      canonicalBillingStatus: HostedBillingStatus.active,
+      currentBillingPlanCode: "launch_group_monthly",
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-05-12T00:00:00.000Z"),
+        occurredAt: "2026-05-12T00:00:00.000Z",
+        sourceEventId: "evt_group_applied",
+        sourceType: "stripe.customer.subscription.updated",
+      },
+      member,
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+      tx: {} as never,
+    });
+
+    expect(mocks.writeHostedMemberStripeBillingRef).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currentBillingPlanCode: "launch_group_monthly",
+        scheduledBillingEffectiveAt: null,
+        scheduledBillingPlanCode: null,
+        stripeSubscriptionScheduleId: null,
+      }),
+    );
+  });
+
+  it("preserves a pending schedule while Stripe still reports the current plan", async () => {
+    const member = makeMemberSnapshot({
+      billingRef: {
+        currentBillingPlanCode: "launch_monthly",
+        memberId: "member_123",
+        scheduledBillingEffectiveAt: new Date("2026-05-12T00:00:00.000Z"),
+        scheduledBillingPlanCode: "launch_group_monthly",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+        stripeSubscriptionScheduleId: "sub_sched_123",
+      },
+    });
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValue(member);
+
+    await writeHostedMemberStripeBillingTx({
+      billingStatus: HostedBillingStatus.active,
+      canonicalBillingStatus: HostedBillingStatus.active,
+      currentBillingPlanCode: "launch_monthly",
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-05-01T00:00:00.000Z"),
+        occurredAt: "2026-05-01T00:00:00.000Z",
+        sourceEventId: "evt_pulse_still_current",
+        sourceType: "stripe.customer.subscription.updated",
+      },
+      member,
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+      tx: {} as never,
+    });
+
+    const [writeInput] = mocks.writeHostedMemberStripeBillingRef.mock.calls[0] ?? [];
+    expect(writeInput).not.toHaveProperty("scheduledBillingEffectiveAt");
+    expect(writeInput).not.toHaveProperty("scheduledBillingPlanCode");
+    expect(writeInput).not.toHaveProperty("stripeSubscriptionScheduleId");
+  });
+
   it("writes billing progress before applying an intentional reversal suspension", async () => {
     const eventCreatedAt = new Date("2026-04-25T00:00:00.000Z");
     const tx = { __tag: "tx" };

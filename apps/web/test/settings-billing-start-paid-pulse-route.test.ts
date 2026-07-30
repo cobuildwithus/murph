@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
   buildHostedPulseTrialContinuationCookie: vi.fn(),
   getPrisma: vi.fn(),
   requireHostedAppSessionFromRequest: vi.fn(),
-  startHostedPulseTrialPaidPlan: vi.fn(),
+  startHostedTrialPaidPlan: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
@@ -28,7 +28,7 @@ vi.mock("@/src/lib/hosted-onboarding/billing-pulse-trial-continuation", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/billing-start-paid-pulse-service", () => ({
-  startHostedPulseTrialPaidPlan: mocks.startHostedPulseTrialPaidPlan,
+  startHostedTrialPaidPlan: mocks.startHostedTrialPaidPlan,
 }));
 
 type BillingStartPaidPulseRouteModule =
@@ -51,7 +51,7 @@ beforeEach(async () => {
     },
     sessionId: "hws_session_123",
   });
-  mocks.startHostedPulseTrialPaidPlan.mockResolvedValue({
+  mocks.startHostedTrialPaidPlan.mockResolvedValue({
     billingPlanCode: "launch_monthly",
     status: "started",
   });
@@ -76,18 +76,20 @@ test("starts paid Pulse for an authenticated hosted trial member", async () => {
   });
   expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
   expect(mocks.requireHostedAppSessionFromRequest).toHaveBeenCalledWith(expect.any(Request));
-  expect(mocks.startHostedPulseTrialPaidPlan).toHaveBeenCalledWith({
+  expect(mocks.startHostedTrialPaidPlan).toHaveBeenCalledWith({
     memberId: "member_123",
     paymentMethodContinuation: "settings",
     prisma: {
       label: "test-prisma",
     },
+    targetPlanCode: "launch_monthly",
+    timing: "now",
   });
   expect(response.headers.get("set-cookie")).toBeNull();
 });
 
 test("issues a continuation claim before redirecting to payment-method setup", async () => {
-  mocks.startHostedPulseTrialPaidPlan.mockResolvedValueOnce({
+  mocks.startHostedTrialPaidPlan.mockResolvedValueOnce({
     billingPlanCode: "launch_monthly",
     paymentUrl: "https://billing.stripe.test/session_123",
     resumeStartAfterPaymentMethodSetup: true,
@@ -120,7 +122,7 @@ test("issues a continuation claim before redirecting to payment-method setup", a
 });
 
 test("does not issue a continuation claim for hosted-invoice recovery", async () => {
-  mocks.startHostedPulseTrialPaidPlan.mockResolvedValueOnce({
+  mocks.startHostedTrialPaidPlan.mockResolvedValueOnce({
     billingPlanCode: "launch_monthly",
     paymentUrl: "https://invoice.stripe.test/in_123",
     status: "payment_required",
@@ -140,7 +142,39 @@ test("does not issue a continuation claim for hosted-invoice recovery", async ()
   expect(response.headers.get("set-cookie")).toBeNull();
 });
 
-test("rejects a generic request body", async () => {
+test("starts Group after the current trial from an exact request body", async () => {
+  mocks.startHostedTrialPaidPlan.mockResolvedValueOnce({
+    effectiveAt: "2026-05-13T00:00:00.000Z",
+    scheduledBillingPlanCode: "launch_group_monthly",
+    status: "scheduled",
+  });
+
+  const response = await billingStartPaidPulseRoute.POST(
+    new Request("https://join.example.test/api/settings/billing/start-paid-pulse", {
+      body: JSON.stringify({
+        targetPlanCode: "launch_group_monthly",
+        timing: "at_trial_end",
+      }),
+      headers: {
+        "content-type": "application/json",
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    }),
+  );
+
+  expect(response.status).toBe(200);
+  expect(mocks.startHostedTrialPaidPlan).toHaveBeenCalledWith({
+    memberId: "member_123",
+    paymentMethodContinuation: "settings",
+    prisma: { label: "test-prisma" },
+    targetPlanCode: "launch_group_monthly",
+    timing: "at_trial_end",
+  });
+  expect(response.headers.get("set-cookie")).toBeNull();
+});
+
+test("rejects an unsupported trial plan", async () => {
   const response = await billingStartPaidPulseRoute.POST(
     new Request("https://join.example.test/api/settings/billing/start-paid-pulse", {
       body: JSON.stringify({
@@ -156,10 +190,10 @@ test("rejects a generic request body", async () => {
 
   expect(response.status).toBe(400);
   expect(mocks.requireHostedAppSessionFromRequest).not.toHaveBeenCalled();
-  expect(mocks.startHostedPulseTrialPaidPlan).not.toHaveBeenCalled();
+  expect(mocks.startHostedTrialPaidPlan).not.toHaveBeenCalled();
   await expect(response.json()).resolves.toMatchObject({
     error: {
-      code: "HOSTED_PULSE_TRIAL_START_PAID_BODY_UNSUPPORTED",
+      code: "HOSTED_TRIAL_START_PAID_PLAN_INVALID",
     },
   });
 });
@@ -184,7 +218,7 @@ test("rejects cross-origin mutations before reading the body or session", async 
 
   expect(response.status).toBe(403);
   expect(mocks.requireHostedAppSessionFromRequest).not.toHaveBeenCalled();
-  expect(mocks.startHostedPulseTrialPaidPlan).not.toHaveBeenCalled();
+  expect(mocks.startHostedTrialPaidPlan).not.toHaveBeenCalled();
 });
 
 test("rejects suspended hosted members", async () => {
@@ -206,7 +240,7 @@ test("rejects suspended hosted members", async () => {
   );
 
   expect(response.status).toBe(403);
-  expect(mocks.startHostedPulseTrialPaidPlan).not.toHaveBeenCalled();
+  expect(mocks.startHostedTrialPaidPlan).not.toHaveBeenCalled();
   await expect(response.json()).resolves.toMatchObject({
     error: {
       code: "HOSTED_MEMBER_SUSPENDED",

@@ -118,6 +118,7 @@ import { buildWhoopAppleHealthSetupGuide } from "@/src/lib/device-sync/whoop-app
 import { MurphAssistantStylePicker } from "@/src/components/murph/murph-assistant-style-picker";
 import { HostedAiUsageActivity } from "@/src/components/settings/hosted-ai-usage-activity";
 import { HostedFamilyManager } from "@/src/components/settings/hosted-family-settings-actions";
+import { HostedPlanChangeConfirmationContent } from "@/src/components/settings/hosted-plan-change-button";
 import { PulseTrialBillingContinuationView } from "@/src/components/settings/hosted-start-paid-pulse-button";
 import { MurphPersonalitySettingsDialog } from "@/src/components/settings/murph-personality-settings-dialog";
 import {
@@ -1199,6 +1200,58 @@ export function ComponentsContent() {
 
         <Section title="Private experiment results share">
           <ExperimentResultsShareStudy />
+        </Section>
+
+        <Separator />
+
+        <Section title="Hosted plan change">
+          <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+            The real open confirmation content for an immediate upgrade and a
+            plan change at the end of the current billing period.
+          </p>
+          <div className="grid items-start gap-6 lg:grid-cols-2">
+            <div className="space-y-3">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Period-end switch
+              </p>
+              <Dialog>
+                <div
+                  className="space-y-6 rounded-2xl border border-[#c4a882]/25 bg-[#fffcf6] p-6 text-[#2d3436] ring-[#c4a882]/25 md:p-7"
+                  inert
+                >
+                  <HostedPlanChangeConfirmationContent
+                    currentPeriodEnd="2026-08-27T04:00:00.000Z"
+                    errorMessage={null}
+                    onClose={() => undefined}
+                    onConfirm={() => undefined}
+                    pending={false}
+                    mode="schedule"
+                    targetPlanCode="launch_group_monthly"
+                  />
+                </div>
+              </Dialog>
+            </div>
+            <div className="space-y-3">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Immediate upgrade
+              </p>
+              <Dialog>
+                <div
+                  className="space-y-6 rounded-2xl border border-[#c4a882]/25 bg-[#fffcf6] p-6 text-[#2d3436] ring-[#c4a882]/25 md:p-7"
+                  inert
+                >
+                  <HostedPlanChangeConfirmationContent
+                    errorMessage={null}
+                    mode="upgrade"
+                    onClose={() => undefined}
+                    onConfirm={() => undefined}
+                    pending={false}
+                    targetPlanCode="launch_monthly"
+                  />
+                </div>
+              </Dialog>
+            </div>
+          </div>
         </Section>
 
         <Separator />
