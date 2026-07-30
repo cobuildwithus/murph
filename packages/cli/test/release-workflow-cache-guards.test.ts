@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -8,15 +9,71 @@ const workflowsDir = path.join(repoRoot, '.github', 'workflows')
 
 describe('GitHub Actions cache trust-boundary guards', () => {
   it('keeps the private Temporal deployment owner out of the public repository', () => {
-    expect(existsSync(path.join(repoRoot, 'render.yaml'))).toBe(false)
-    expect(
-      existsSync(
-        path.join(
-          workflowsDir,
-          'deploy-render-temporal-worker.yml',
-        ),
+    const findings = listTrackedYamlFiles().flatMap((file) =>
+      findPublicTemporalDeploymentOwnership(
+        file,
+        readFileSync(path.join(repoRoot, file), 'utf8'),
       ),
-    ).toBe(false)
+    )
+
+    expect(findings).toEqual([])
+  })
+
+  it('detects renamed Temporal deploy workflows and alternate Render Blueprints', () => {
+    expect(
+      findPublicTemporalDeploymentOwnership(
+        '.github/workflows/deploy-temporal.yml',
+        [
+          'name: Deploy Temporal',
+          'on: workflow_dispatch',
+          'env:',
+          '  DEPLOY_HOOK: ${{ secrets.RENDER_TEMPORAL_WORKER_DEPLOY_HOOK }}',
+        ].join('\n'),
+      ),
+    ).toEqual([
+      '.github/workflows/deploy-temporal.yml: Render Temporal deploy hook',
+    ])
+
+    expect(
+      findPublicTemporalDeploymentOwnership(
+        'infra/render-temporal.yaml',
+        [
+          'services:',
+          '  - type: worker',
+          '    name: replacement-temporal-worker',
+          '    startCommand: pnpm --dir packages/hosted-orchestrator-temporal temporal:worker:prod',
+        ].join('\n'),
+      ),
+    ).toEqual([
+      'infra/render-temporal.yaml: hosted Temporal worker service',
+    ])
+  })
+
+  it('allows unrelated workflows and service configuration', () => {
+    expect(
+      findPublicTemporalDeploymentOwnership(
+        '.github/workflows/verify.yml',
+        [
+          'name: Verify',
+          'on: pull_request',
+          'jobs:',
+          '  test:',
+          '    runs-on: ubuntu-24.04',
+        ].join('\n'),
+      ),
+    ).toEqual([])
+
+    expect(
+      findPublicTemporalDeploymentOwnership(
+        'infra/render-web.yaml',
+        [
+          'services:',
+          '  - type: web',
+          '    name: murph-web',
+          '    startCommand: pnpm --dir apps/web start',
+        ].join('\n'),
+      ),
+    ).toEqual([])
   })
 
   it('keeps broad caches and privileged triggers out of release, deploy, and PR workflows', () => {
@@ -49,6 +106,53 @@ describe('GitHub Actions cache trust-boundary guards', () => {
     expect(findings).toEqual([])
   })
 })
+
+function listTrackedYamlFiles(): string[] {
+  const output = execFileSync(
+    'git',
+    [
+      'ls-files',
+      '-z',
+      '--',
+      '*.yml',
+      '*.yaml',
+      ':(glob)**/*.yml',
+      ':(glob)**/*.yaml',
+    ],
+    {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    },
+  )
+
+  return [...new Set(output.split('\0').filter(Boolean))]
+    .filter((file) => existsSync(path.join(repoRoot, file)))
+    .sort()
+}
+
+function findPublicTemporalDeploymentOwnership(
+  file: string,
+  contents: string,
+): string[] {
+  const findings: string[] = []
+
+  if (/\bRENDER_TEMPORAL_WORKER_DEPLOY_HOOK\b/u.test(contents)) {
+    findings.push(`${file}: Render Temporal deploy hook`)
+  }
+
+  if (
+    /\bmurph-temporal-worker\b/u.test(contents)
+    || (
+      /^\s*-\s+type:\s*worker\s*$/mu.test(contents)
+      && /\bpackages\/hosted-orchestrator-temporal\b/u.test(contents)
+      && /\btemporal:worker:prod\b/u.test(contents)
+    )
+  ) {
+    findings.push(`${file}: hosted Temporal worker service`)
+  }
+
+  return findings
+}
 
 function isAllowedHostSupportTypeScriptCache(
   file: string,

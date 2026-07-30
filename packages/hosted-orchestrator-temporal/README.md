@@ -45,11 +45,12 @@ confirms the deprecatePatch-window histories have drained. The root
 `hosted-temporal:guard` check fails if that marker or CI package-coverage entry
 is removed early.
 
-The current per-user workflow is a hard cut. It is not replay-compatible with
-histories that recorded the old demand Activity or legacy direct signals. Before
-deploying this package version, stop old workers, terminate old
-`hosted-user-runtime:*` workflows, deploy web and Temporal together, then reseed
-users with `runtime_recheck_requested` or mailbox signals.
+The old demand-Activity migration was a completed one-time hard cut. Its
+incompatible histories were terminated before the current Workflow lineage was
+deployed. Do not repeat that procedure for repository relocation: the current
+public rollback implementation and private production worker preserve the same
+Workflow code and identities, so the source cutover uses rolling replacement
+without terminating or resetting current histories.
 
 ## Local Development
 

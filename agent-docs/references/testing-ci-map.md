@@ -540,9 +540,9 @@ keep the one-second presentation-only deadline and late-result rejection.
 - Repo-level automation still does not run full end-to-end CLI scenario flows; it typechecks/builds the published shell plus the extracted `assistant-cli` and `setup-cli` packages, now includes inbox service/runtime tests plus parser-worker/runtime tests, and the `test:scenario-integrity` lane still covers fixture/scenario-manifest integrity separately.
 - The current fixture/scenario lane still validates manifests and command-surface coverage, not end-to-end package orchestration.
 - Hosted Temporal orchestration has package, route, focused web/Cloudflare
-  coverage, a local Signal-With-Start smoke script, and a root Render
-  Background Worker Blueprint for two worker processes on one Task Queue. The
-  hosted-local E2E
+  coverage and a local Signal-With-Start smoke script. Private Murph Cloud owns
+  the Render Blueprint and verifies its worker against the public hosted-local
+  Temporal scenario before deployment. The hosted-local E2E
   suite now includes `temporal-orchestration`, which starts managed local
   Temporal, signals through web, queries the workflow, and proves the worker
   reaches Cloudflare ensure-processing. The hosted Temporal package has retired
@@ -552,7 +552,8 @@ keep the one-second presentation-only deadline and late-result rejection.
   and CI package-coverage entry to remain present, and the host-support package
   coverage shard runs `packages/hosted-orchestrator-temporal`. The ordinary
   package build also verifies the exact production Workflow bundle byte budget
-  and source graph before host-support CI can admit a Render deploy. Future
+  and source graph; private Murph Cloud CI separately gates Render deployment.
+  Future
   command-ordering edits to `hosted-user-runtime.ts` still require Worker
   Versioning/deployment pinning, `patched()` / `deprecatePatch()`, or a replay
   test against representative captured or synthetic pre-change histories for
