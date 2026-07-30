@@ -656,6 +656,12 @@ export async function executeCodexAppServerTurn(
 ): Promise<CodexAppServerTurnResult> {
   assertCodexAppServerPermissionRequest(input)
   const approvalPolicy = resolveSupportedCodexAppServerApprovalPolicy(input.approvalPolicy)
+  if (
+    input.processLifetime !== 'one-shot' &&
+    warmCodexWorkspaceBoundaryActive
+  ) {
+    throw buildWarmCodexWorkspaceBoundaryBusyError()
+  }
   const processInput = await prepareCodexAppServerProcessInput(input)
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-codex-'))
   const imagePaths = await materializeCodexImagePaths({
@@ -1915,6 +1921,18 @@ function resolveCodexAppServerEndReason(
 
 let warmCodexProcess: CodexAppServerProcess | null = null
 let warmCodexSlotLock: Promise<void> = Promise.resolve()
+let warmCodexWorkspaceBoundaryActive = false
+
+function buildWarmCodexWorkspaceBoundaryBusyError(): VaultCliError {
+  return new VaultCliError(
+    'ASSISTANT_CODEX_APP_SERVER_BUSY',
+    'Codex app-server cannot be claimed while a workspace boundary is active.',
+    {
+      retryable: true,
+      state: 'workspace-boundary',
+    },
+  )
+}
 
 async function withWarmCodexSlotLock<T>(
   operation: () => Promise<T>,
@@ -1935,6 +1953,9 @@ async function withWarmCodexSlotLock<T>(
 async function getOrStartWarmCodexProcess(
   input: CodexAppServerProcessInput,
 ): Promise<CodexAppServerProcess> {
+  if (warmCodexWorkspaceBoundaryActive) {
+    throw buildWarmCodexWorkspaceBoundaryBusyError()
+  }
   const launchKey = input.launchKey
   return await withWarmCodexSlotLock(async () => {
     const previousProcess = warmCodexProcess
@@ -2050,10 +2071,19 @@ function beginCodexPreinitialize(
 export async function preinitializeCodexAppServer(
   input: CodexAppServerPreinitializeInput,
 ): Promise<CodexAppServerPreinitialization | null> {
-  const processInput = await prepareCodexAppServerProcessInput(input)
   const signal = input.signal ?? null
   if (signal?.aborted) {
     throw readCodexPreinitializeAbortReason(signal)
+  }
+  if (warmCodexWorkspaceBoundaryActive) {
+    return null
+  }
+  const processInput = await prepareCodexAppServerProcessInput(input)
+  if (signal?.aborted) {
+    throw readCodexPreinitializeAbortReason(signal)
+  }
+  if (warmCodexWorkspaceBoundaryActive) {
+    return null
   }
 
   return await withWarmCodexSlotLock(async () => {
@@ -2122,36 +2152,44 @@ export async function stopWarmCodexAppServer(
 export async function waitForWarmCodexBackgroundWork(
   input: WaitForWarmCodexBackgroundWorkInput = {},
 ): Promise<void> {
-  const processInstance = await withWarmCodexSlotLock(async () => {
-    const processInstance = warmCodexProcess
-    if (!processInstance || processInstance.isStopped) {
-      return null
-    }
-    if (processInstance.hasUnclaimedSpeculativeInitialization) {
-      await processInstance.stop('workspace-boundary-during-preinitialize')
-      return null
-    }
-    if (processInstance.hasInFlightTurn) {
-      throw processInstance.buildBusyError(
-        'Codex app-server process is serving a turn and cannot cross a workspace boundary.',
-      )
-    }
-    if (!processInstance.isReusableFor(processInstance.launchKey)) {
-      await processInstance.stop('workspace-boundary-process-unhealthy')
-      return null
-    }
-
-    processInstance.reserveTurn()
-    return processInstance
-  })
-  if (!processInstance) {
-    return
+  if (warmCodexWorkspaceBoundaryActive) {
+    throw buildWarmCodexWorkspaceBoundaryBusyError()
   }
-
+  warmCodexWorkspaceBoundaryActive = true
   try {
-    await processInstance.waitForBackgroundWork(input)
+    const processInstance = await withWarmCodexSlotLock(async () => {
+      const processInstance = warmCodexProcess
+      if (!processInstance || processInstance.isStopped) {
+        return null
+      }
+      if (processInstance.hasUnclaimedSpeculativeInitialization) {
+        await processInstance.stop('workspace-boundary-during-preinitialize')
+        return null
+      }
+      if (processInstance.hasInFlightTurn) {
+        throw processInstance.buildBusyError(
+          'Codex app-server process is serving a turn and cannot cross a workspace boundary.',
+        )
+      }
+      if (!processInstance.isReusableFor(processInstance.launchKey)) {
+        await processInstance.stop('workspace-boundary-process-unhealthy')
+        return null
+      }
+
+      processInstance.reserveTurn()
+      return processInstance
+    })
+    if (!processInstance) {
+      return
+    }
+
+    try {
+      await processInstance.waitForBackgroundWork(input)
+    } finally {
+      processInstance.releaseReservation()
+    }
   } finally {
-    processInstance.releaseReservation()
+    warmCodexWorkspaceBoundaryActive = false
   }
 }
 
@@ -2192,6 +2230,9 @@ interface CodexManagedAccountLoginCompletion {
 export async function executeCodexManagedAccountOperation(
   input: CodexManagedAccountOperationInput,
 ): Promise<CodexManagedAccountOperationResult> {
+  if (warmCodexWorkspaceBoundaryActive) {
+    throw buildWarmCodexWorkspaceBoundaryBusyError()
+  }
   const workingDirectory = path.resolve(input.workingDirectory)
   await assertCodexAppServerWorkingDirectory(workingDirectory)
   const env = await resolveCodexChildEnv({

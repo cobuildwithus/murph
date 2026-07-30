@@ -120,11 +120,15 @@ it has been explicitly elevated to a cross-cutting invariant.
   still pending is cancelled and its exact process is awaited through teardown.
   Invocation release uses the exact-process handle returned by preparation and
   must not cancel a later replacement admitted by another caller.
-  The checkpoint holds the existing slot-transition lock through its exact
-  process check and any pending-preinitialization teardown or ready-process
-  reservation. The potentially long background-work wait runs outside the lock
-  under that reservation, so foreground acquisition fails busy instead of
-  queueing a replacement behind the boundary.
+  The slot owner marks the full checkpoint boundary active, so new resident
+  preparation declines and warm foreground or account acquisition begun while
+  it is active fails busy instead of queueing a replacement behind the
+  boundary. A caller that already obtained a slot-transition ticket retains
+  FIFO priority, so the boundary observes that process or fails busy rather
+  than overtaking it. The checkpoint holds the existing slot-transition lock
+  only through its exact-process check and any pending-preinitialization
+  teardown or ready-process reservation. The potentially long background-work
+  wait runs outside the lock under that reservation.
   An already-ready idle resident process remains governed by the ordinary warm
   App Server checkpoint contract; preparation does not create another
   checkpoint owner.

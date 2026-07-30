@@ -4531,6 +4531,158 @@ describe('assistant codex runtime', () => {
     expect(replacementChild.signalCode).toBe('SIGTERM')
   })
 
+  it('blocks speculative publication while a workspace boundary tears down the prior process', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-boundary-first-preinitialize-work-',
+    )
+    const codexHome = await createTempDir(
+      'assistant-codex-boundary-first-preinitialize-home-',
+    )
+    const children: MockChildProcess[] = []
+    const stopObserved = createDeferred<void>()
+    const releaseStop = createDeferred<void>()
+
+    vi.mocked(process.kill).mockImplementation((pid, signal) => {
+      const child = children.find(
+        (candidate) => pid === -candidate.pid || pid === candidate.pid,
+      )
+      if (
+        child &&
+        signal === 'SIGTERM' &&
+        child.exitCode === null &&
+        child.signalCode === null
+      ) {
+        stopObserved.resolve(undefined)
+        void releaseStop.promise.then(() => {
+          child.emit('exit', null, signal)
+          child.emit('close', null, signal)
+        })
+      }
+      return true
+    })
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      child.pid = 25_177 + children.length
+      children.push(child)
+      return child
+    })
+
+    await preinitializeCodexAppServer({
+      codexHome,
+      env: { PATH: '/custom/bin-one' },
+      workingDirectory,
+    })
+
+    const boundary = waitForWarmCodexBackgroundWork()
+    await stopObserved.promise
+    const replacement = preinitializeCodexAppServer({
+      codexHome,
+      env: { PATH: '/custom/bin-two' },
+      workingDirectory,
+    })
+
+    expect(children).toHaveLength(1)
+    releaseStop.resolve(undefined)
+
+    const [replacementResult] = await Promise.all([replacement, boundary])
+    expect(replacementResult).toBeNull()
+    expect(children).toHaveLength(1)
+  })
+
+  it('blocks foreground publication while a workspace boundary tears down the prior process', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-boundary-first-foreground-work-',
+    )
+    const codexHome = await createTempDir(
+      'assistant-codex-boundary-first-foreground-home-',
+    )
+    const children: MockChildProcess[] = []
+    const stopObserved = createDeferred<void>()
+    const releaseStop = createDeferred<void>()
+
+    vi.mocked(process.kill).mockImplementation((pid, signal) => {
+      const child = children.find(
+        (candidate) => pid === -candidate.pid || pid === candidate.pid,
+      )
+      if (
+        child &&
+        signal === 'SIGTERM' &&
+        child.exitCode === null &&
+        child.signalCode === null
+      ) {
+        stopObserved.resolve(undefined)
+        void releaseStop.promise.then(() => {
+          child.emit('exit', null, signal)
+          child.emit('close', null, signal)
+        })
+      }
+      return true
+    })
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      const processNumber = children.length + 1
+      child.pid = 25_178 + children.length
+      children.push(child)
+      if (processNumber === 2) {
+        queueMicrotask(() => {
+          void (async () => {
+            await initializeWarmTurn(
+              child,
+              'thread-boundary-first-foreground',
+              'turn-boundary-first-foreground',
+            )
+            child.stdout.write(jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'assistant-boundary-first-foreground',
+                  message: 'Unexpected replacement answer',
+                  type: 'assistant_message',
+                },
+              },
+            }))
+            writeCompletedTurn(
+              child,
+              'thread-boundary-first-foreground',
+              'turn-boundary-first-foreground',
+            )
+          })()
+        })
+      }
+      return child
+    })
+
+    await preinitializeCodexAppServer({
+      codexHome,
+      env: { PATH: '/custom/bin-one' },
+      workingDirectory,
+    })
+
+    const boundary = waitForWarmCodexBackgroundWork()
+    await stopObserved.promise
+    const turn = executeCodexAppServerTurn({
+      codexHome,
+      env: { PATH: '/custom/bin-two' },
+      prompt: 'Do not publish behind the active workspace boundary.',
+      workingDirectory,
+    })
+
+    expect(children).toHaveLength(1)
+    releaseStop.resolve(undefined)
+
+    const results = await Promise.allSettled([turn, boundary])
+    expect(results[0]).toMatchObject({
+      status: 'rejected',
+      reason: {
+        code: 'ASSISTANT_CODEX_APP_SERVER_BUSY',
+      },
+    })
+    expect(results[1]).toMatchObject({
+      status: 'fulfilled',
+    })
+    expect(children).toHaveLength(1)
+  })
+
   it('keeps a foreground replacement ahead of its queued workspace boundary', async () => {
     const workingDirectory = await createTempDir(
       'assistant-codex-foreground-boundary-replacement-work-',
@@ -4812,6 +4964,16 @@ describe('assistant codex runtime', () => {
 
     const boundary = waitForWarmCodexBackgroundWork()
     await boundaryRequestObserved.promise
+    await expect(waitForWarmCodexBackgroundWork()).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_APP_SERVER_BUSY',
+    })
+    await expect(executeCodexManagedAccountOperation({
+      action: 'disconnect',
+      codexHome,
+      workingDirectory,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_APP_SERVER_BUSY',
+    })
     await expect(executeCodexAppServerTurn({
       ...launchInput,
       prompt: 'Do not cross the active workspace boundary.',

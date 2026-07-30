@@ -68,13 +68,18 @@ Last verified: 2026-07-29
 - Before snapshot construction, the checkpoint owner cancels and awaits exact
   teardown of readiness that is still pending and unreserved. A ready idle
   process remains on the existing warm-process path; a reserved or running
-  process remains on the existing turn-quiescence path. The boundary holds the
-  slot-transition lock through that decision and any pending-preinitialization
-  teardown or ready-process reservation, preventing an already-waiting
-  replacement from publishing after the boundary returns. The potentially long
-  background-work wait then runs outside the lock under that reservation. The
-  hosted conversation warm lease remains 20 minutes, and process-only
-  initialization neither extends that lease nor adds keepalive traffic.
+  process remains on the existing turn-quiescence path. The slot owner marks
+  the full boundary call active: resident preparation declines and warm
+  foreground or account acquisition begun while it is active fails busy rather
+  than queueing new publication behind it. A caller that already obtained a
+  slot-transition ticket retains FIFO priority, so the boundary observes that
+  process or fails busy rather than overtaking it. The boundary holds the
+  slot-transition lock only through the exact-process decision and any
+  pending-preinitialization teardown or ready-process reservation. The
+  potentially long background-work wait then runs outside the lock under that
+  reservation. The hosted conversation warm lease remains 20 minutes, and
+  process-only initialization neither extends that lease nor adds keepalive
+  traffic.
 - The production database-health operator alert is an independent Cloudflare
   singleton so the monitored Postgres database cannot take down its own page
   owner. A five-minute Cron Trigger records one normalized PlanetScale sample

@@ -1034,10 +1034,15 @@ Checkpoint and invocation-release boundaries stop and settle pending unclaimed
 preparation, while ready idle processes stay warm.
 Exact object identity binds cancellation to the admitted process. The existing
 engine-owned warm-slot transition lock serializes inspect, exact teardown,
-publication or reservation, and workspace-boundary admission so replacement
-cannot publish behind a completed checkpoint; process initialization and
-foreground readiness waits remain outside that lock. No second owner, lock,
-queue, scheduler, keepalive, or longer container lease is introduced.
+publication or reservation, and workspace-boundary admission. The same owner
+marks the full boundary call active, so resident preparation declines and warm
+foreground or account acquisition begun while it is active fails busy instead
+of queueing a replacement behind that boundary. A caller that already obtained
+a slot-transition ticket retains FIFO priority, so the boundary observes that
+process or fails busy rather than overtaking it. Process initialization,
+foreground readiness, and the potentially long background-work wait remain
+outside the lock. No second owner, lock, queue, scheduler, keepalive, or longer
+container lease is introduced.
 
 Detached MultiAgent V2 work is a bounded path, not a process-memory queue.
 Before the root reply, Murph retains a durable accepted input, canonical fact,

@@ -23,7 +23,10 @@ Updated: 2026-07-29
 - The existing engine-owned warm-slot transition lock covers only inspect,
   exact teardown, publication or reservation, and workspace-boundary
   admission. Initialization readiness runs outside it, preserving the overlap
-  while preventing post-checkpoint replacement publication.
+  while one owner-local boundary-admission state makes speculative preparation
+  decline and warm foreground/account acquisition fail busy for the full
+  boundary call. A caller that already obtained a slot-transition ticket keeps
+  FIFO priority.
 - After restore and final Codex config/auth preparation, eligible foreground
   runtime work may begin process-only initialization while independent mailbox
   preparation continues. The foreground turn synchronously reserves the exact
@@ -83,7 +86,14 @@ Updated: 2026-07-29
 - Exact-process handles alone do not serialize a caller already awaiting old
   process teardown against a workspace checkpoint. The existing slot-transition
   lock must cover teardown through publication and the checkpoint decision, but
-  must not cover the process-owned initialization wait.
+  must not cover the process-owned initialization wait. The owner must also
+  reject new resident admission for the full boundary call; otherwise a caller
+  queued while pending teardown holds the lock can publish before the boundary
+  caller resumes.
+- Deterministic reverse-order tests reproduced that boundary-first gap before
+  the admission fence: speculative replacement published a new process and
+  foreground replacement completed a turn. The same tests now prove both are
+  rejected while earlier slot tickets keep FIFO priority.
 - App Server initialization is measured work worth attempting to overlap, but
   this plan promises no fixed end-to-end saving. Rollout evidence must measure
   readiness reuse, exposed foreground wait, failure/fallback, and reply
