@@ -780,7 +780,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
       usageCreditLedgerVersion: 4n,
     }));
     const prisma = buildPrisma(null);
-    prisma.hostedUsageCreditEntry.count.mockResolvedValue(3);
+    prisma.hostedUsageCreditEntry.count.mockResolvedValue(2);
     prisma.hostedUsageCreditEntry.findMany.mockResolvedValue([
       {
         amountUsdMicros: 5_000_000n,
@@ -818,7 +818,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
 
     expect(result).toMatchObject({
       topUpHistory: {
-        hasMore: true,
+        hasMore: false,
         topUps: [
           {
             addedUsd: "5.000000",
@@ -837,7 +837,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
             usedUsd: "10.000000",
           },
         ],
-        totalCount: 3,
+        totalCount: 2,
       },
     });
     expect(prisma.hostedUsageCreditEntry.count).toHaveBeenCalledWith({
@@ -865,6 +865,33 @@ describe("readHostedPersonalAiUsageStatus", () => {
         },
       },
     });
+  });
+
+  it("reads aggregate usage and top-up history in one repeatable snapshot", async () => {
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision());
+    const tx = buildPrisma(null);
+    const prisma = {
+      ...buildPrisma(null),
+      $transaction: vi.fn(async (
+        callback: (client: typeof tx) => Promise<unknown>,
+        options: { isolationLevel: string },
+      ) => callback(tx)),
+    };
+
+    await readHostedPersonalAiUsageStatus({
+      includeTopUpHistory: true,
+      memberId: "member_snapshot",
+      now: NOW,
+      prisma: prisma as never,
+      publicBaseUrl: null,
+    });
+
+    expect(prisma.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      { isolationLevel: "RepeatableRead" },
+    );
+    expect(tx.hostedUsageCreditEntry.findMany).toHaveBeenCalledOnce();
+    expect(tx.hostedUsageCreditEntry.count).toHaveBeenCalledOnce();
   });
 
   it("forecasts exhaustion against overall available capacity", async () => {

@@ -81,6 +81,14 @@ describe("hosted plan usage contract", () => {
         hasMore: true,
       },
     })).toThrow();
+    expect(() => parseHostedPlanUsageStatus({
+      ...status,
+      topUpHistory: {
+        ...status.topUpHistory,
+        hasMore: true,
+        totalCount: 2,
+      },
+    })).toThrow();
   });
 
   it("parses the trial display name", () => {

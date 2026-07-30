@@ -16,6 +16,9 @@ import {
   settleHostedUsageCreditForUsageTx,
 } from "@/src/lib/hosted-execution/usage-credits";
 import {
+  readHostedPersonalAiUsageStatus,
+} from "@/src/lib/hosted-execution/usage-status";
+import {
   decodeHostedMailboxStoredPayload,
 } from "@/src/lib/hosted-mailbox/store";
 import {
@@ -745,6 +748,72 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           firstTransaction,
           ...(replayTransaction ? [replayTransaction] : []),
         ]);
+        await cleanupUsageCreditFixture(fixture);
+      }
+    });
+
+    it("keeps top-up history coherent when a grant commits during the read", async () => {
+      const fixture = await createUsageCreditFixture();
+      const historyRowsRead = createDeferred();
+      const releaseHistoryRead = createDeferred();
+      const readingClient = fixture.firstClient.$extends({
+        query: {
+          hostedUsageCreditEntry: {
+            async findMany({ args, query }) {
+              const rows = await query(args);
+              historyRowsRead.resolve();
+              await releaseHistoryRead.promise;
+              return rows;
+            },
+          },
+        },
+      });
+      const statusRead = readHostedPersonalAiUsageStatus({
+        includeTopUpHistory: true,
+        memberId: fixture.beneficiaryMemberId,
+        prisma: readingClient as never,
+        publicBaseUrl: null,
+      });
+
+      try {
+        await Promise.race([historyRowsRead.promise, statusRead]);
+        await fixture.secondClient.$transaction((tx) =>
+          grantHostedUsageCreditForPurchaseTx({
+            paidAt: new Date("2026-07-16T12:01:00.000Z"),
+            purchaseId: fixture.purchaseId,
+            tx,
+          }), transactionOptions);
+        releaseHistoryRead.resolve();
+
+        await expect(statusRead).resolves.toMatchObject({
+          topUpHistory: {
+            hasMore: false,
+            topUps: [],
+            totalCount: 0,
+          },
+        });
+        await expect(readHostedPersonalAiUsageStatus({
+          includeTopUpHistory: true,
+          memberId: fixture.beneficiaryMemberId,
+          prisma: fixture.observer,
+          publicBaseUrl: null,
+        })).resolves.toMatchObject({
+          topUpHistory: {
+            hasMore: false,
+            topUps: [
+              {
+                addedUsd: "5.000000",
+                remainingUsd: "5.000000",
+                source: "purchased_by_you",
+                usedUsd: "0.000000",
+              },
+            ],
+            totalCount: 1,
+          },
+        });
+      } finally {
+        releaseHistoryRead.resolve();
+        await Promise.allSettled([statusRead]);
         await cleanupUsageCreditFixture(fixture);
       }
     });

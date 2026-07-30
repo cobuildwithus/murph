@@ -1,4 +1,4 @@
-import type { Prisma, PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import {
   HOSTED_ADD_USAGE_SETTINGS_URL,
   HOSTED_PLAN_USAGE_TOP_UP_HISTORY_MAX_ROWS,
@@ -42,8 +42,38 @@ export async function readHostedPersonalAiUsageStatus(input: {
   prisma?: HostedPlanUsageClient;
   publicBaseUrl?: string | null;
 }): Promise<HostedPlanUsageStatus> {
-  const now = normalizeUsageStatusDate(input.now ?? new Date());
   const prisma = input.prisma ?? getPrisma();
+  if (
+    input.includeTopUpHistory === true
+    && isHostedPlanUsageRootClient(prisma)
+  ) {
+    return prisma.$transaction(
+      (tx) => readHostedPersonalAiUsageStatusFromSnapshot({
+        ...input,
+        prisma: tx,
+      }),
+      {
+        isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+      },
+    );
+  }
+
+  return readHostedPersonalAiUsageStatusFromSnapshot({
+    ...input,
+    prisma,
+  });
+}
+
+async function readHostedPersonalAiUsageStatusFromSnapshot(input: {
+  includeSubscriptionActionQuote?: boolean;
+  includeTopUpHistory?: boolean;
+  memberId: string;
+  now?: Date | string;
+  prisma: HostedPlanUsageClient;
+  publicBaseUrl?: string | null;
+}): Promise<HostedPlanUsageStatus> {
+  const now = normalizeUsageStatusDate(input.now ?? new Date());
+  const prisma = input.prisma;
   const decision = await readHostedAiUsageGate({
     memberId: input.memberId,
     now,
@@ -76,6 +106,12 @@ export async function readHostedPersonalAiUsageStatus(input: {
       prisma,
     }),
   };
+}
+
+function isHostedPlanUsageRootClient(
+  prisma: HostedPlanUsageClient,
+): prisma is PrismaClient {
+  return "$transaction" in prisma;
 }
 
 export async function projectHostedPersonalAiUsageStatus(input: {
@@ -336,7 +372,7 @@ async function readHostedPlanUsageTopUpHistory(input: {
   }
 
   return {
-    hasMore: totalCount > entries.length,
+    hasMore: totalCount > HOSTED_PLAN_USAGE_TOP_UP_HISTORY_MAX_ROWS,
     topUps: entries.map((entry) => {
       if (!entry.grant || !entry.purchase) {
         throw new TypeError("Hosted purchase grant projection is incomplete.");

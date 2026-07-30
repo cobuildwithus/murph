@@ -84,9 +84,14 @@ const hostedPlanUsageTopUpHistorySchema = z
   })
   .strict()
   .superRefine((value, context) => {
+    const expectedRows = Math.min(
+      value.totalCount,
+      HOSTED_PLAN_USAGE_TOP_UP_HISTORY_MAX_ROWS,
+    );
     if (
-      value.topUps.length > value.totalCount
-      || value.hasMore !== (value.totalCount > value.topUps.length)
+      value.topUps.length !== expectedRows
+      || value.hasMore
+        !== (value.totalCount > HOSTED_PLAN_USAGE_TOP_UP_HISTORY_MAX_ROWS)
     ) {
       context.addIssue({
         code: "custom",
