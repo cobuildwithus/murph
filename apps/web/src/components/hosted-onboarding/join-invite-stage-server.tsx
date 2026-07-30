@@ -150,7 +150,9 @@ export function JoinInviteStageServer({ model }: { model: JoinInvitePageModel })
       && status.messagingSetupRequired ? (
         <JoinInviteMessagingSetupPanel
           authenticated={status.session.authenticated}
+          expectedPrivyUserId={model.expectedPrivyUserId}
           initialTelegramAccount={model.telegramAccountForMessagingSetup}
+          privySessionMatchesAppSession={model.privySessionMatchesAppSession}
         />
       ) : null}
 
@@ -287,16 +289,22 @@ function JoinInviteLaunchLegalConsentPanel({
 
 function JoinInviteMessagingSetupPanel({
   authenticated,
+  expectedPrivyUserId,
   initialTelegramAccount,
+  privySessionMatchesAppSession,
 }: {
   authenticated: boolean;
+  expectedPrivyUserId: string | null;
   initialTelegramAccount: JoinInviteTelegramAccountSeed | null;
+  privySessionMatchesAppSession: boolean;
 }) {
   return (
     <JoinInvitePanelCard>
       <JoinInviteMessagingSetupIsland
         authenticated={authenticated}
+        expectedPrivyUserId={expectedPrivyUserId}
         initialTelegramAccount={initialTelegramAccount}
+        privySessionMatchesAppSession={privySessionMatchesAppSession}
       />
     </JoinInvitePanelCard>
   );

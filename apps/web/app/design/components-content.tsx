@@ -28,6 +28,7 @@ import {
   HostedEmailMurphContactDialog,
   WebmailIcon,
 } from "@/src/components/settings/hosted-email-murph-contact-dialog";
+import { HostedPhoneLinkAction } from "@/src/components/settings/hosted-phone-settings";
 import {
   ASSISTANT_MODEL_CHOICE_CARD_CLASSES,
   AssistantModelArtwork,
@@ -695,7 +696,6 @@ export function ComponentsContent() {
                   code="123456"
                   disableSignup={false}
                   disabled
-                  intent="auth"
                   onCodeChange={() => {}}
                   onResendCode={() => {}}
                   onUseDifferentNumber={() => {}}
@@ -1461,6 +1461,68 @@ export function ComponentsContent() {
                 />
               </div>
             ))}
+          </div>
+        </Section>
+
+        <Separator />
+
+        <Section id="phone-account-linking" title="Phone Account Linking">
+          <p className="text-sm leading-6 text-muted-foreground">
+            The account-management action hands phone verification to the
+            authenticated identity provider, then saves the verified result to
+            Murph. Existing phone accounts use the same surface for replacement.
+          </p>
+          <div className="grid gap-4 sm:grid-cols-2" inert>
+            <div className="space-y-3 rounded-xl border border-border bg-card p-5">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Add phone
+              </p>
+              <HostedPhoneLinkAction
+                isChangeFlow={false}
+                isLinking={false}
+                isSyncing={false}
+                onClick={() => {}}
+              />
+            </div>
+            <div className="space-y-3 rounded-xl border border-border bg-card p-5">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Replace phone
+              </p>
+              <HostedPhoneLinkAction
+                isChangeFlow
+                isLinking={false}
+                isSyncing={false}
+                onClick={() => {}}
+              />
+            </div>
+            <div className="space-y-3 rounded-xl border border-border bg-card p-5">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Provider opening
+              </p>
+              <HostedPhoneLinkAction
+                disabled
+                isChangeFlow={false}
+                isLinking
+                isSyncing={false}
+                onClick={() => {}}
+              />
+            </div>
+            <div className="space-y-3 rounded-xl border border-border bg-card p-5">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Session mismatch
+              </p>
+              <HostedPhoneLinkAction
+                disabled
+                isChangeFlow={false}
+                isLinking={false}
+                isSyncing={false}
+                onClick={() => {}}
+              />
+              <p className="text-sm leading-6 text-muted-foreground">
+                Your sign-in changed. Sign in again using a login method already
+                linked to this Murph account before changing a linked account.
+              </p>
+            </div>
           </div>
         </Section>
 

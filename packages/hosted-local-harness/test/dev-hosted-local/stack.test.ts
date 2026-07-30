@@ -294,6 +294,18 @@ const buildHostedLocalTemporalRuntimeEnv = vi.fn((input: {
 const startHostedLocalTemporalRuntime = vi.fn<
   (input: unknown) => Promise<HostedLocalTemporalRuntime | null>
 >(async () => null);
+const requireHostedLocalTemporalWorkerPackageDir = vi.fn(
+  (source: Readonly<Record<string, string | undefined>>): string => {
+    const packageDir =
+      source.MURPH_DEV_TEMPORAL_WORKER_PACKAGE_DIR?.trim() || null;
+    if (!packageDir) {
+      throw new Error(
+        "Hosted-local Temporal requires an external worker package. Set MURPH_DEV_TEMPORAL_WORKER_PACKAGE_DIR or set MURPH_DEV_TEMPORAL=disabled.",
+      );
+    }
+    return packageDir;
+  },
+);
 
 vi.mock("node:fs/promises", () => ({
   access: vi.fn(async () => {
@@ -464,6 +476,7 @@ vi.mock("../../src/dev-hosted-local/minio.ts", () => ({
 
 vi.mock("../../src/dev-hosted-local/temporal.ts", () => ({
   buildHostedLocalTemporalRuntimeEnv,
+  requireHostedLocalTemporalWorkerPackageDir,
   startHostedLocalTemporalRuntime,
 }));
 
@@ -996,7 +1009,11 @@ describe("hosted local dev stack", () => {
     const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
-      env: process.env,
+      env: {
+        ...process.env,
+        MURPH_DEV_TEMPORAL_WORKER_PACKAGE_DIR:
+          "../murph-cloud/packages/hosted-orchestrator-temporal",
+      },
     });
     await stack.ready;
     await stack.stop();
@@ -1027,6 +1044,36 @@ describe("hosted local dev stack", () => {
     expect(stack.processes.temporalWorker).toBe(temporalWorker);
     expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(4);
     expect(spawnSync.mock.calls.filter(([command]) => command === "pkill")).toEqual([]);
+  });
+
+  it("rejects a missing external Temporal worker before stack side effects", async () => {
+    const configModule = await import("../../src/dev-hosted-local/config.ts");
+    vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
+      ...defaultConfig,
+      temporal: {
+        host: "127.0.0.1",
+        mode: "managed",
+        namespace: "hosted-local-test",
+        port: 7243,
+        taskQueue: "hosted-local-test-queue",
+      },
+    });
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+
+    await expect(startHostedLocalDevStack({
+      env: {},
+    })).rejects.toThrow(
+      "Hosted-local Temporal requires an external worker package. Set MURPH_DEV_TEMPORAL_WORKER_PACKAGE_DIR or set MURPH_DEV_TEMPORAL=disabled.",
+    );
+
+    expect(requireHostedLocalTemporalWorkerPackageDir).toHaveBeenCalledWith({});
+    expect(runCommand).not.toHaveBeenCalled();
+    expect(spawnChildProcess).not.toHaveBeenCalled();
+    expect(spawnStripeListenerWithSecretCapture).not.toHaveBeenCalled();
+    expect(resolveHostedLocalLinqWebhookSetup).not.toHaveBeenCalled();
+    expect(registerHostedLocalLinqWebhookSubscription).not.toHaveBeenCalled();
+    expect(maybeStartHostedLocalMinio).not.toHaveBeenCalled();
+    expect(startHostedLocalTemporalRuntime).not.toHaveBeenCalled();
   });
 
   it("rejects E2E isolation when a stack would overlap interactive dev defaults", async () => {

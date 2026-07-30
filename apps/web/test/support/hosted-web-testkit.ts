@@ -456,8 +456,14 @@ export interface HostedWebTestkitDeps {
   prisma: HostedTestPrismaClient;
 }
 
+type HostedRuntimeTemporalTestClient = HostedRuntimeTemporalSignalClient & {
+  connection?: {
+    close(): Promise<void>;
+  };
+};
+
 export interface HostedWebSignalTestkitDeps extends HostedWebTestkitDeps {
-  temporalSignalClient: HostedRuntimeTemporalSignalClient | null;
+  temporalSignalClient: HostedRuntimeTemporalTestClient | null;
 }
 
 interface HostedTemporalClientModule {
@@ -1505,6 +1511,22 @@ export async function signalHostedRuntimeRecheckRuntimeForTest(input: {
   });
 }
 
+export async function queryHostedRuntimeWorkflowForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  queryName: string;
+  workflowId: string;
+}): Promise<unknown> {
+  return withHostedWebSignalTestkitDeps(input.environment, async (deps) => {
+    const handle = deps.temporalSignalClient?.workflow.getHandle?.(
+      input.workflowId,
+    );
+    if (!handle) {
+      throw new Error("Hosted runtime Temporal query client is not configured.");
+    }
+    return await handle.query(input.queryName);
+  });
+}
+
 export async function signalHostedRuntimeWakeRuntimeForTest(input: {
   environment?: NodeJS.ProcessEnv;
   userId: string;
@@ -1602,7 +1624,11 @@ async function withHostedWebSignalTestkitDeps<T>(
   try {
     return await callback(deps);
   } finally {
-    await deps.prisma.$disconnect();
+    try {
+      await deps.temporalSignalClient?.connection?.close();
+    } finally {
+      await deps.prisma.$disconnect();
+    }
   }
 }
 
