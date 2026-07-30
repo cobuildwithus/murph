@@ -272,26 +272,50 @@ describe("hosted current-sender Assistant Ask authority", () => {
       ["Yes, private Murph, share it here.", false],
       ["Yes, private Murph, share that with everyone.", false],
       ["Yes, do not share anything from my private Murph.", false],
+      [
+        "Yes, I understand, but I do not want my private Murph to share my health data here.",
+        false,
+      ],
+      ["Yes, my private Murph cannot share my health data here.", false],
+      [
+        "Yes, I refuse to let my private Murph share my sleep data here.",
+        false,
+      ],
+      ["Yes, my private Murph should share nothing about my sleep here.", false],
     ] as const) {
       expect(isHostedGroupCurrentSenderDisclosureConfirmation(
         confirmation,
       )).toBe(expected);
     }
+    expect(isHostedGroupCurrentSenderDisclosureConfirmation(
+      `Yes — ask my private Murph about ${"a".repeat(513)} and share the answer here.`,
+    )).toBe(false);
 
-    mocks.readHostedMailboxConversationWakeByAssistantInputId.mockResolvedValue(
-      createSourceWake({ text: "Yes, private Murph, share." }),
-    );
-    mocks.hostedMemberFindUnique.mockResolvedValueOnce({
-      groupPrivateDisclosureIntroAcknowledgedAt: null,
-    });
-    await expect(requestHostedGroupCurrentSenderAssistantAsk({
-      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
-      now: NOW,
-      origin: CURRENT_SENDER_ORIGIN,
-    })).resolves.toEqual({
-      mailboxWake: null,
-      result: { status: "confirmation_required" },
-    });
+    for (const [index, denial] of [
+      "Yes, private Murph, share.",
+      "Yes, I understand, but I do not want my private Murph to share my health data here.",
+      "Yes, my private Murph cannot share my health data here.",
+      "Yes, I refuse to let my private Murph share my sleep data here.",
+      "Yes, my private Murph should share nothing about my sleep here.",
+    ].entries()) {
+      mocks.readHostedMailboxConversationWakeByAssistantInputId.mockResolvedValue(
+        createSourceWake({ text: denial }),
+      );
+      mocks.hostedMemberFindUnique.mockResolvedValueOnce({
+        groupPrivateDisclosureIntroAcknowledgedAt: null,
+      });
+      await expect(requestHostedGroupCurrentSenderAssistantAsk({
+        groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+        now: NOW,
+        origin: {
+          ...CURRENT_SENDER_ORIGIN,
+          assistantInputId: `ain_${index.toString(16).padStart(32, "0")}`,
+        },
+      })).resolves.toEqual({
+        mailboxWake: null,
+        result: { status: "confirmation_required" },
+      });
+    }
     expect(mocks.hostedMemberUpdate).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).not.toHaveBeenCalled();
 

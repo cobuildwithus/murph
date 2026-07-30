@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import {
   conversationRefFromAssistantInputConversation,
+  conversationRefFromBinding,
   isAssistantSessionNotFoundError,
   readAssistantAskOriginSession,
   readAssistantInputEvent,
@@ -155,6 +156,11 @@ export async function executeHostedAssistantAskCompletedWake(input: {
   const expiredBeforeCommit = new Error(
     "Assistant ask completion expired before delivery commit.",
   );
+  let continuationStatus:
+    | "completed"
+    | "expired"
+    | "origin_session_unavailable"
+    | null = null;
   try {
     if (result.outcome === "cannot_answer") {
       await sendAssistantNotification({
@@ -200,16 +206,14 @@ export async function executeHostedAssistantAskCompletedWake(input: {
         turnTrigger: "automation-auto-reply",
       });
     } else if (reviewedDisclosure) {
-      await sendAssistantAskContinuation({
+      const continuation = await sendAssistantAskContinuation({
         ...deliveryInput,
-        actorId: route.participantId,
+        actorId: session.binding.actorId,
         answeredMailboxItemIds: [
           input.sourceMailboxItemId ?? input.wake.eventId,
         ],
         canCommit,
-        conversation: conversationRefFromAssistantInputConversation(
-          origin.conversation!,
-        ),
+        conversation: conversationRefFromBinding(session.binding),
         expectedConversationScope: "group",
         instructions: buildHostedReviewedAssistantAskContinuationInstructions({
           question: input.wake.ask.question,
@@ -222,13 +226,14 @@ export async function executeHostedAssistantAskCompletedWake(input: {
                 reviewedTelegramRouteAuthority,
             }
           : {}),
-        participantId: route.participantId,
+        participantId: session.binding.actorId,
         requestId: input.wake.ask.requestId,
         reviewedAssistantAskCompletionExpiresAt:
           input.wake.ask.expiresAt,
       });
+      continuationStatus = continuation.status;
     } else {
-      await sendAssistantAskContinuation({
+      const continuation = await sendAssistantAskContinuation({
         ...deliveryInput,
         actorId: route.participantId,
         canCommit,
@@ -244,6 +249,7 @@ export async function executeHostedAssistantAskCompletedWake(input: {
         participantId: route.participantId,
         requestId: input.wake.ask.requestId,
       });
+      continuationStatus = continuation.status;
     }
   } catch (error) {
     if (error === expiredBeforeCommit) {
@@ -265,7 +271,11 @@ export async function executeHostedAssistantAskCompletedWake(input: {
   } finally {
     cancellation.dispose();
   }
-  if (result.outcome !== "cannot_answer" && shouldYield?.() === true) {
+  if (
+    result.outcome !== "cannot_answer"
+    && continuationStatus === "expired"
+    && shouldYield?.() === true
+  ) {
     throw new HostedAssistantAskCompletionPreemptedError();
   }
 

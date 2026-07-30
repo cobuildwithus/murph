@@ -388,6 +388,7 @@ describe("hosted assistant ask completion", () => {
       const continuationInput =
         completionMocks.sendAssistantAskContinuation.mock.calls[0]?.[0];
       expect(continuationInput).toMatchObject({
+        actorId: "actor-current-speaker",
         answeredMailboxItemIds: [eventId],
         deliveryIdempotencyKey: buildHostedAssistantAskCompletionDeliveryKey({
           deliveryMode: "reviewed_exact",
@@ -400,12 +401,20 @@ describe("hosted assistant ask completion", () => {
         expectedConversationScope: "group",
         identityId: "identity-reviewed-exact",
         originAssistantInputId: origin.inputId,
+        participantId: "actor-current-speaker",
         requestId: wake.ask.requestId,
         reviewedAssistantAskCompletionExpiresAt:
           "2099-07-15T12:10:00.000Z",
         sessionId: originSession.sessionId,
         threadId: "conversation-reviewed-exact",
         threadIsDirect: false,
+      });
+      expect(continuationInput.conversation).toMatchObject({
+        channel: "linq",
+        directness: "group",
+        identityId: "identity-reviewed-exact",
+        participantId: "actor-current-speaker",
+        threadId: "conversation-reviewed-exact",
       });
       expect(continuationInput.instructions).toContain(answer);
       expect(continuationInput.instructions).toContain(
@@ -484,6 +493,45 @@ describe("hosted assistant ask completion", () => {
       })).rejects.toMatchObject({
         code: "ASSISTANT_ASK_COMPLETION_PREEMPTED",
       });
+    } finally {
+      await rm(vault, { force: true, recursive: true });
+    }
+  });
+
+  it("does not reclassify a completed reviewed continuation as preempted", async () => {
+    const vault = await mkdtemp(
+      path.join(os.tmpdir(), "hosted-assistant-ask-reviewed-committed-"),
+    );
+    let shouldYield = false;
+
+    try {
+      const { origin, session, wake } = await createReviewedExactCompletion({
+        answer: "Reviewed answer.",
+        expiresAt: "2099-07-15T12:10:00.000Z",
+        suffix: "reviewed-committed",
+        vault,
+      });
+      completionMocks.readAssistantInputEvent.mockResolvedValue(origin);
+      completionMocks.readAssistantAskOriginSession.mockResolvedValue(session);
+      completionMocks.sendAssistantAskContinuation.mockImplementation(async () => {
+        shouldYield = true;
+        return {
+          deliveryOutcome: { kind: "queued" },
+          response: "Reviewed answer.",
+          session,
+          status: "completed",
+        };
+      });
+
+      await expect(executeHostedAssistantAskCompletedWake({
+        executionContext: { hosted: null },
+        shouldYield: () => shouldYield,
+        vaultRoot: vault,
+        wake,
+      })).resolves.toMatchObject({
+        mailboxLane: "assistant-ask-completion",
+      });
+      expect(completionMocks.sendAssistantAskContinuation).toHaveBeenCalledTimes(1);
     } finally {
       await rm(vault, { force: true, recursive: true });
     }

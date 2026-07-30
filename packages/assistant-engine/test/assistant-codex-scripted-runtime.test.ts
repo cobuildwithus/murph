@@ -37,6 +37,7 @@ import type {
   AssistantHostedToolContext,
 } from '../src/assistant/hosted-tool-context.ts'
 import { sendAssistantAskContinuationLocal } from '../src/assistant/ask-continuation.ts'
+import { conversationRefFromBinding } from '../src/assistant/conversation-ref.ts'
 import { listAssistantOutboxIntents } from '../src/assistant/outbox.ts'
 import { resolveAssistantSession } from '../src/assistant/store.ts'
 
@@ -191,6 +192,7 @@ describe('real codex app-server with scripted provider', () => {
       sandbox: 'read-only' as const,
     }
     const participantId = 'participant-reviewed-continuation'
+    const laterParticipantId = 'participant-later-speaker'
     const threadId = 'thread-reviewed-continuation'
     const resolved = await resolveAssistantSession({
       actorId: participantId,
@@ -201,19 +203,25 @@ describe('real codex app-server with scripted provider', () => {
       threadIsDirect: false,
       vault: scenario.turnInput.workingDirectory,
     })
+    const currentSpeaker = await resolveAssistantSession({
+      actorId: laterParticipantId,
+      bindingDeliveryTarget: threadId,
+      channel: 'telegram',
+      target,
+      threadId,
+      threadIsDirect: false,
+      vault: scenario.turnInput.workingDirectory,
+    })
+    expect(currentSpeaker.session.sessionId).toBe(resolved.session.sessionId)
+    expect(currentSpeaker.session.binding.actorId).toBe(laterParticipantId)
 
     const result = await sendAssistantAskContinuationLocal({
-      actorId: participantId,
+      actorId: currentSpeaker.session.binding.actorId,
       answeredMailboxItemIds: ['aask_done_reviewed_continuation'],
       bindingDeliveryTarget: threadId,
       canCommit: () => true,
       channel: 'telegram',
-      conversation: {
-        channel: 'telegram',
-        directness: 'group',
-        participantId,
-        threadId,
-      },
+      conversation: conversationRefFromBinding(currentSpeaker.session.binding),
       deliveryIdempotencyKey: 'assistant-ask-reviewed-continuation',
       deliveryReplyToMessageId: 'message-reviewed-continuation',
       deliveryTarget: threadId,
@@ -227,7 +235,7 @@ describe('real codex app-server with scripted provider', () => {
       expectedConversationScope: 'group',
       instructions: 'Reply naturally using only the reviewed private result quoted here.',
       originAssistantInputId: `ain_${'c'.repeat(32)}`,
-      participantId,
+      participantId: currentSpeaker.session.binding.actorId,
       requestId: 'aask_req_reviewed_continuation',
       reviewedAssistantAskCompletionExpiresAt: '2099-01-01T00:00:00.000Z',
       sessionId: resolved.session.sessionId,

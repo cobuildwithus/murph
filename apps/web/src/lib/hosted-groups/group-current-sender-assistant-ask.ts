@@ -44,54 +44,9 @@ const HOSTED_ASSISTANT_ASK_ADVISORY_LOCK_NAMESPACE = "hosted-assistant-ask";
 const HOSTED_ASSISTANT_ASK_OPAQUE_ID_MAX_CODE_POINTS = 256;
 const HOSTED_EXECUTION_ASSISTANT_INPUT_ID_PATTERN = /^ain_[0-9a-f]{32}$/u;
 
-const HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_AFFIRMATIVE_PATTERN =
-  /^(?:yes|yeah|yep|yup|ok|okay|sure|confirm(?:ed)?|approve(?:d)?|go ahead|please do)\b/u;
-const HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_PRIVATE_MURPH_PATTERN =
-  /\bprivate murph\b/u;
-const HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_DISCLOSURE_PATTERN =
-  /\b(?:share|send|post|tell|summari[sz]e|compare)\b/u;
-const HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_DISCLOSURE_GLOBAL_PATTERN =
-  /\b(?:share|send|post|tell|summari[sz]e|compare)\b/gu;
-const HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_DENIAL_PATTERN =
-  /\b(?:(?:do not|don't|dont|never|not)\s+(?:ask|use|share|send|post|tell|summari[sz]e|compare)|no\s+(?:sharing|disclosure)|(?:stop|cancel)\s+(?:this|it|the request|sharing|disclosure))\b/u;
-const HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_BOILERPLATE_TOKENS = new Set([
-  "a",
-  "about",
-  "all",
-  "and",
-  "any",
-  "anything",
-  "answer",
-  "ask",
-  "data",
-  "details",
-  "everyone",
-  "everything",
-  "from",
-  "group",
-  "here",
-  "info",
-  "information",
-  "it",
-  "me",
-  "my",
-  "of",
-  "please",
-  "room",
-  "someone",
-  "something",
-  "summary",
-  "that",
-  "the",
-  "them",
-  "this",
-  "to",
-  "us",
-  "use",
-  "with",
-  "you",
-  "your",
-]);
+const HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_PATTERN =
+  /^(?:yes|yeah|yep|yup|ok|okay|sure|confirm(?:ed)?|approve(?:d)?|go ahead|please do)(?:[\s,:;.!—-]+)ask my private murph (?<subject>.+?) and share (?:the|your) (?:answer|summary) here[.!]?$/u;
+const HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_SUBJECT_MAX_CODE_POINTS = 512;
 
 export const HOSTED_GROUP_CURRENT_SENDER_DISCLOSURE_PERMISSION_TEXT =
   "The owner of this personal Murph authored the exact incoming group question and may authorize one answer to that same group. Answer only when that question clearly asks Murph to share information about the owner. Treat first-person references as the owner, disclose only the owner's information directly requested by the question, and disclose nothing about anyone else. This authorization applies once to this question and grants no future, scheduled, or broader access.";
@@ -494,24 +449,17 @@ export function isHostedGroupCurrentSenderDisclosureConfirmation(
     .replaceAll("’", "'")
     .replace(/\s+/gu, " ")
     .trim();
-  if (
-    normalized.length === 0
-    || !HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_AFFIRMATIVE_PATTERN.test(normalized)
-    || !HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_PRIVATE_MURPH_PATTERN.test(normalized)
-    || !HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_DISCLOSURE_PATTERN.test(normalized)
-    || HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_DENIAL_PATTERN.test(normalized)
-  ) {
+  const subject = HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_PATTERN
+    .exec(normalized)
+    ?.groups?.subject
+    ?.replace(/^about\s+/u, "")
+    .trim();
+  if (!subject) {
     return false;
   }
-  const substantiveTokens = normalized
-    .replace(HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_AFFIRMATIVE_PATTERN, " ")
-    .replace(HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_PRIVATE_MURPH_PATTERN, " ")
-    .replace(HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_DISCLOSURE_GLOBAL_PATTERN, " ")
-    .match(/[\p{L}\p{N}][\p{L}\p{N}'-]*/gu) ?? [];
-  return substantiveTokens.some(
-    (token) =>
-      !HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_BOILERPLATE_TOKENS.has(token),
-  );
+  return [...subject].length
+      <= HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_SUBJECT_MAX_CODE_POINTS
+    && /[\p{L}\p{N}]/u.test(subject);
 }
 
 function createHostedGroupCurrentSenderPermissionDigest(): string {
