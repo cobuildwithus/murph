@@ -64,8 +64,8 @@ Updated: 2026-07-30
 2. [x] Review the complete authority, persistence, and next-turn data path; adapt
    only where current code or invariants require it.
 3. [x] Run focused tests, affected-owner typechecks, and direct prompt/tool proof.
-4. [ ] Run the product-experience lens and resolve accepted findings.
-5. [ ] Commit, push, open the PR, and run the preliminary
+4. [x] Run the product-experience lens and resolve accepted findings.
+5. [x] Commit, push, open the PR, and run the preliminary
    product-experience/prompt/coverage
    specialist pass concurrently with exact-head CI.
 6. [ ] Complete parent review and verification, close this plan, then run final
@@ -78,6 +78,16 @@ Updated: 2026-07-30
   member; do not add a group-settings owner or migration.
 - Keep group provider and reasoning fixed rather than broadening the personal
   configuration contract.
+- Accept the preliminary prompt finding: replace the obsolete blanket group
+  prohibition with one room-scoped model instruction, and name all three
+  selectable models in both prompt and tool description.
+- Accept the preliminary coverage finding to the extent that it exercises the
+  changed contract directly: assemble the production group prompt, prove Sol
+  remains active through the configuration-tool continuation, then resume the
+  same native thread on a separately accepted turn using Terra. Do not add a
+  second monolithic cross-runtime harness because the existing focused runtime
+  and hosted-web tests already prove the invocation-boundary projection and
+  durable room-member preference behavior.
 
 ## Verification
 
@@ -92,10 +102,14 @@ Updated: 2026-07-30
   - Hosted-web preference tests: 23 passed.
   - Assistant configuration tests: 13 passed.
   - Assistant planning tests: 71 passed.
-  - Pinned Codex group model-switch scenario: 1 passed.
+  - Assistant prompt/model-behavior tests: 70 passed.
+  - Pinned Codex group model-switch and same-thread next-turn scenario:
+    1 passed.
+  - Generic hot-runtime next-phase configuration projection scenario: 1 passed.
   - Assistant-engine and hosted-web typechecks: passed.
-  - Complete provider input capture using pinned Terra code mode and
-    `gpt-tokenizer` 3.4.0 `o200k_base`: personal 58,365 bytes / 13,418 tokens
-    at base and head; group 56,669 bytes / 13,022 tokens at base and 57,791
-    bytes / 13,294 tokens at head. The +1,122-byte / +272-token group delta is
-    entirely the generated `additional_tools` item.
+  - Complete provider input capture using pinned Codex App Server and
+    `gpt-tokenizer` 3.4.0 `o200k_base`: personal 120,889 bytes / 26,429 tokens
+    at base and head; group 103,980 bytes / 22,840 tokens at base and 105,271
+    bytes / 23,148 tokens at head. The +1,291-byte / +308-token group delta
+    (+1.242% / +1.349%) is the generated room tool (+1,128 bytes / +275
+    tokens) plus the corrected group guidance (+163 bytes / +33 tokens).

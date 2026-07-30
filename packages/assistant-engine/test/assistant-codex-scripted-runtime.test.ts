@@ -37,6 +37,9 @@ import {
 import type {
   AssistantHostedToolContext,
 } from '../src/assistant/hosted-tool-context.ts'
+import {
+  buildAssistantSystemPrompt,
+} from '../src/assistant/system-prompt.ts'
 
 // Runs the REAL `codex app-server` binary (pinned @openai/codex devDependency,
 // matching CODEX_CLI_VERSION in Dockerfile.cloudflare-hosted-runner-base)
@@ -480,6 +483,31 @@ text(JSON.stringify(result));
     })
     const currentSnapshot = groupSnapshot('gpt-5.6-sol')
     const updatedSnapshot = groupSnapshot('gpt-5.6-terra')
+    const groupDeveloperInstructions = buildAssistantSystemPrompt({
+      assistantCliContract: null,
+      assistantContextSnapshotPrompt: null,
+      assistantHostedDeviceConnectAvailable: false,
+      assistantKnowledgeToolsAvailable: true,
+      assistantStyleSettingsAvailable: true,
+      channel: 'linq',
+      cliAccess: {
+        rawCommand: 'vault-cli',
+        setupCommand: 'murph',
+      },
+      conversationScope: 'group',
+      currentLocalDate: '2026-07-30',
+      currentTimeZone: 'America/New_York',
+      hostedRuntime: true,
+      modelBehaviorProfile: 'gpt5-agentic',
+      onboardingGuidance: false,
+      turnTrigger: null,
+    })
+    expect(groupDeveloperInstructions).toContain(
+      'select Luna, Terra, or Sol for the room',
+    )
+    expect(groupDeveloperInstructions).not.toContain(
+      'Do not use or offer `murph.assistant_configuration` here',
+    )
     scenario.stub.captureProviderRequestDiagnostics()
     scenario.stub.queue(
       {
@@ -499,6 +527,7 @@ text(JSON.stringify(result));
 
     const result = await executeCodexAppServerTurn({
       ...scenario.turnInput,
+      developerInstructions: groupDeveloperInstructions,
       dynamicTools: [MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL],
       hostedToolContext: {
         assistantConfigurationTool: {
@@ -539,6 +568,7 @@ text(JSON.stringify(result));
         },
         vaultFileSendAvailable: false,
       },
+      model: 'gpt-5.6-sol',
       prompt:
         'Use the current group room request to switch this room to Terra, then reply exactly GROUP_MODEL_SWITCH_OK.',
     })
@@ -552,6 +582,8 @@ text(JSON.stringify(result));
       },
     ])
     const summaries = scenario.stub.requestSummariesSinceBaseline()
+    expect(summaries[0]?.model).toBe('gpt-5.6-sol')
+    expect(summaries[1]?.model).toBe('gpt-5.6-sol')
     expect(summaries[0]?.providerRequestDiagnostics).toMatchObject({
       includesAllTools: true,
     })
@@ -562,7 +594,23 @@ text(JSON.stringify(result));
     expect(groupConfigurationOutput).toContain('next_turn')
     expect(groupConfigurationOutput).toContain('updated')
     expect(result.finalMessage).toBe('GROUP_MODEL_SWITCH_OK')
-    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+
+    scenario.stub.queue({ text: 'GROUP_MODEL_NEXT_TURN_OK' })
+    const nextTurn = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      developerInstructions: groupDeveloperInstructions,
+      dynamicTools: [MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL],
+      model: updatedSnapshot.model,
+      prompt: 'Reply exactly GROUP_MODEL_NEXT_TURN_OK.',
+      resumeSessionId: result.sessionId,
+    })
+
+    expect(scenario.stub.requestSummariesSinceBaseline()[2]?.model).toBe(
+      'gpt-5.6-terra',
+    )
+    expect(nextTurn.finalMessage).toBe('GROUP_MODEL_NEXT_TURN_OK')
+    expect(nextTurn.sessionId).toBe(result.sessionId)
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
   })
 
   it('sends flex service tier through real Codex with the patched model catalog', {

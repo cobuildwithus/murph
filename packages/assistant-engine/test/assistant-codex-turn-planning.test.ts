@@ -2617,6 +2617,18 @@ describe('assistant Codex turn planning', () => {
     expect(plan.developerInstructions).toContain(
       'never read or change any participant\'s private Murph settings',
     )
+    expect(plan.developerInstructions).toContain(
+      'select Luna, Terra, or Sol for the room',
+    )
+    expect(plan.developerInstructions).toContain(
+      'Provider and reasoning controls remain unavailable in a group',
+    )
+    expect(plan.developerInstructions).not.toContain(
+      'Do not use or offer `murph.assistant_configuration` here',
+    )
+    expect(plan.developerInstructions).not.toContain(
+      'Model, provider, and reasoning controls remain unavailable in a group',
+    )
     expect(plan.assistantPreferredElevenLabsVoiceId).toBe(
       resolveAssistantVoiceOptionElevenLabsVoiceId('warm'),
     )
@@ -2667,6 +2679,9 @@ describe('assistant Codex turn planning', () => {
     )
     expect(groupAssistantConfigurationTool?.description).toContain(
       'synthetic Murph instance for this room',
+    )
+    expect(groupAssistantConfigurationTool?.description).toContain(
+      'Luna, Terra, or Sol may be selected',
     )
     const groupAssistantConfigurationSchema = JSON.stringify(
       groupAssistantConfigurationTool?.inputSchema,
