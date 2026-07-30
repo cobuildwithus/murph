@@ -57,7 +57,7 @@ describe('assistant running cardio skill', () => {
       'running-cardio and strength-training own programming',
     )
     expect(prompt).toContain(
-      'competition-training a named event or benchmark.',
+      'mobility-posture owns non-pain movement and competition-training owns a named event or benchmark.',
     )
     expect(prompt).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md')
   })
