@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   acceptHostedMemberStripeCheckoutCompletionTx,
+  writeAcceptedHostedMemberPulseTrialBillingTx,
 } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
 import {
   createHostedStripeCheckoutSessionLookupKey,
@@ -47,6 +48,65 @@ describe("hosted member Checkout completion ownership", () => {
         memberId: "member_123",
       },
     }));
+    expect(harness.findUnique).toHaveBeenCalledWith({
+      select: {
+        checkoutAttemptId: true,
+        checkoutIntentHash: true,
+        lastStripeEventCreatedAt: true,
+        stripeCheckoutSessionLookupKey: true,
+        stripeCustomerLookupKey: true,
+        stripeSubscriptionLookupKey: true,
+      },
+      where: {
+        memberId: "member_123",
+      },
+    });
+  });
+
+  it("writes accepted Pulse Trial facts without selecting or projecting encrypted billing fields", async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const preparedCompletion = buildPreparedCompletion(
+      "cus_pulse",
+      "sub_pulse",
+    );
+
+    await expect(writeAcceptedHostedMemberPulseTrialBillingTx({
+      currentCheckoutOffer: "pulse_trial_7d",
+      currentPeriodEnd: new Date("2026-08-05T00:00:00.000Z"),
+      currentPeriodStart: new Date("2026-07-29T00:00:00.000Z"),
+      currentTrialEndsAt: new Date("2026-08-05T00:00:00.000Z"),
+      currentTrialStartedAt: new Date("2026-07-29T00:00:00.000Z"),
+      memberId: "member_123",
+      preparedCompletion,
+      pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+      tx: {
+        hostedMemberBillingRef: {
+          updateMany,
+        },
+      } as never,
+    })).resolves.toBe(true);
+
+    expect(updateMany).toHaveBeenCalledWith({
+      data: {
+        currentBillingPhase: "trial",
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: "pulse_trial_7d",
+        currentPeriodEnd: new Date("2026-08-05T00:00:00.000Z"),
+        currentPeriodStart: new Date("2026-07-29T00:00:00.000Z"),
+        currentTrialEndsAt: new Date("2026-08-05T00:00:00.000Z"),
+        currentTrialStartedAt: new Date("2026-07-29T00:00:00.000Z"),
+        pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+        pulseTrialRedeemedAt: new Date("2026-07-29T00:00:00.000Z"),
+      },
+      where: {
+        memberId: "member_123",
+        pulseTrialRedeemedAt: null,
+        stripeCustomerLookupKey:
+          createHostedStripeCustomerLookupKey("cus_pulse"),
+        stripeSubscriptionLookupKey:
+          createHostedStripeSubscriptionLookupKey("sub_pulse"),
+      },
+    });
   });
 
   it("accepts an in-flight legacy Checkout that has no persisted attempt metadata", async () => {
@@ -276,17 +336,19 @@ async function createBillingRefHarness(input: {
     };
     return state;
   });
+  const findUnique = vi.fn().mockImplementation(async () => state);
   const tx = {
     $queryRaw: vi.fn().mockResolvedValue([]),
     hostedMemberBillingRef: {
       findMany: vi.fn().mockResolvedValue([]),
-      findUnique: vi.fn().mockImplementation(async () => state),
+      findUnique,
       update,
     },
   };
 
   return {
     tx,
+    findUnique,
     update,
   };
 }

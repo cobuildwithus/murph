@@ -22,6 +22,8 @@ const mocks = vi.hoisted(() => ({
   retrieveStripeSubscription: vi.fn(),
   upsertPreparedHostedMemberStripeCheckoutEmailIfFreshUnderLockTx: vi.fn(),
   upsertHostedMemberStripeCheckoutEmailIfFreshTx: vi.fn(),
+  updateHostedMemberCoreState: vi.fn(),
+  writeAcceptedHostedMemberPulseTrialBillingTx: vi.fn(),
   writeHostedMemberStripeBillingRef: vi.fn(),
   writeHostedMemberStripeBillingTx: vi.fn(),
 }));
@@ -57,6 +59,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", async () => {
       mocks.clearHostedMemberStripeCheckoutAttemptForSessionTx,
     readHostedMemberStripeBillingLookupState:
       mocks.readHostedMemberStripeBillingLookupState,
+    writeAcceptedHostedMemberPulseTrialBillingTx:
+      mocks.writeAcceptedHostedMemberPulseTrialBillingTx,
     writeHostedMemberStripeBillingRefTx: mocks.writeHostedMemberStripeBillingRef,
   };
 });
@@ -72,6 +76,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
     readHostedMemberCoreState: mocks.readHostedMemberCoreState,
     readHostedMemberPulseTrialBillingDecisionSnapshot:
       mocks.readHostedMemberPulseTrialBillingDecisionSnapshot,
+    updateHostedMemberCoreState: mocks.updateHostedMemberCoreState,
     upsertPreparedHostedMemberStripeCheckoutEmailIfFreshUnderLockTx:
       mocks.upsertPreparedHostedMemberStripeCheckoutEmailIfFreshUnderLockTx,
     upsertHostedMemberStripeCheckoutEmailIfFreshTx:
@@ -266,6 +271,12 @@ describe("applyStripeCheckoutCompleted", () => {
       },
       verifiedEmail: null,
     });
+    mocks.updateHostedMemberCoreState.mockResolvedValue(
+      makeMemberSnapshot({
+        billingStatus: HostedBillingStatus.active,
+      }).core,
+    );
+    mocks.writeAcceptedHostedMemberPulseTrialBillingTx.mockResolvedValue(true);
     mocks.writeHostedMemberStripeBillingTx.mockResolvedValue(makeMemberSnapshot({
       billingRef: {
         currentBillingPhase: "trial",
@@ -739,18 +750,16 @@ describe("applyStripeCheckoutCompleted", () => {
       welcomeEmailMemberId: "member_123",
     });
 
-    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(expect.objectContaining({
-      billingStatus: HostedBillingStatus.active,
-      canonicalBillingStatus: HostedBillingStatus.active,
-      currentBillingPhase: "trial",
-      currentBillingPlanCode: "launch_monthly",
+    expect(
+      mocks.writeAcceptedHostedMemberPulseTrialBillingTx,
+    ).toHaveBeenCalledWith(expect.objectContaining({
       currentCheckoutOffer: "pulse_trial_7d",
       currentTrialEndsAt: new Date("2025-04-19T00:00:00.000Z"),
       currentTrialStartedAt: new Date("2025-04-12T00:00:00.000Z"),
-      freshnessPolicy: "trial-checkout-entitlement",
+      memberId: "member_123",
       pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
-      pulseTrialRedeemedAt: new Date("2025-04-12T00:00:00.000Z"),
     }));
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
     expect(
       mocks.acceptHostedMemberStripeCheckoutCompletionTx,
     ).toHaveBeenCalledWith(expect.objectContaining({
@@ -812,8 +821,9 @@ describe("applyStripeCheckoutCompleted", () => {
       welcomeEmailMemberId: "member_123",
     });
 
-    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(expect.objectContaining({
-      currentBillingPhase: "trial",
+    expect(
+      mocks.writeAcceptedHostedMemberPulseTrialBillingTx,
+    ).toHaveBeenCalledWith(expect.objectContaining({
       pulseTrialPolicyVersion: "pulse-trial-2026-05-05-v1",
     }));
   });
@@ -835,9 +845,9 @@ describe("applyStripeCheckoutCompleted", () => {
     });
 
     expect(mocks.retrieveStripeSubscription).toHaveBeenCalledWith("sub_123");
-    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(expect.objectContaining({
-      currentBillingPhase: "trial",
-    }));
+    expect(
+      mocks.writeAcceptedHostedMemberPulseTrialBillingTx,
+    ).toHaveBeenCalledOnce();
   });
 
   it.each([
@@ -906,9 +916,9 @@ describe("applyStripeCheckoutCompleted", () => {
       welcomeEmailMemberId: "member_123",
     });
 
-    const [writeInput] = mocks.writeHostedMemberStripeBillingTx.mock.calls[0] ?? [];
+    const [writeInput] =
+      mocks.writeAcceptedHostedMemberPulseTrialBillingTx.mock.calls[0] ?? [];
     expect(writeInput).toEqual(expect.objectContaining({
-      currentBillingPhase: "trial",
       currentCheckoutOffer: "pulse_trial_7d",
       currentPeriodEnd: null,
       currentPeriodStart: null,
@@ -948,9 +958,9 @@ describe("applyStripeCheckoutCompleted", () => {
       welcomeEmailMemberId: "member_123",
     });
 
-    const [writeInput] = mocks.writeHostedMemberStripeBillingTx.mock.calls[0] ?? [];
+    const [writeInput] =
+      mocks.writeAcceptedHostedMemberPulseTrialBillingTx.mock.calls[0] ?? [];
     expect(writeInput).toEqual(expect.objectContaining({
-      currentBillingPhase: "trial",
       currentCheckoutOffer: "pulse_trial_7d",
       currentPeriodEnd: null,
       currentPeriodStart: null,
@@ -1226,7 +1236,9 @@ describe("applyStripeCheckoutCompleted", () => {
           stripeSubscriptionId: "sub_incomplete",
         }),
       );
-    mocks.writeHostedMemberStripeBillingTx.mockResolvedValueOnce(null);
+    mocks.writeAcceptedHostedMemberPulseTrialBillingTx.mockResolvedValueOnce(
+      false,
+    );
 
     await expect(
       applyStripeCheckoutCompleted(

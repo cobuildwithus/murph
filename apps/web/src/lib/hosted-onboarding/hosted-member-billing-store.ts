@@ -658,6 +658,14 @@ export async function acceptHostedMemberStripeCheckoutCompletionTx(input: {
   }
 
   const currentRecord = await input.tx.hostedMemberBillingRef.findUnique({
+    select: {
+      checkoutAttemptId: true,
+      checkoutIntentHash: true,
+      lastStripeEventCreatedAt: true,
+      stripeCheckoutSessionLookupKey: true,
+      stripeCustomerLookupKey: true,
+      stripeSubscriptionLookupKey: true,
+    },
     where: { memberId: input.memberId },
   });
   if (
@@ -754,6 +762,46 @@ export async function acceptHostedMemberStripeCheckoutCompletionTx(input: {
   return {
     kind: alreadyAccepted ? "already_accepted" : "accepted",
   };
+}
+
+export async function writeAcceptedHostedMemberPulseTrialBillingTx(input: {
+  currentCheckoutOffer: string;
+  currentPeriodEnd: Date | null;
+  currentPeriodStart: Date | null;
+  currentTrialEndsAt: Date;
+  currentTrialStartedAt: Date;
+  memberId: string;
+  preparedCompletion: PreparedHostedMemberStripeCheckoutCompletion;
+  pulseTrialPolicyVersion: string;
+  tx: Prisma.TransactionClient;
+}): Promise<boolean> {
+  if (input.preparedCompletion.memberId !== input.memberId) {
+    throw new TypeError("Prepared Stripe Checkout completion has a different owner.");
+  }
+
+  const updated = await input.tx.hostedMemberBillingRef.updateMany({
+    data: {
+      currentBillingPhase: "trial",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: input.currentCheckoutOffer,
+      currentPeriodEnd: input.currentPeriodEnd,
+      currentPeriodStart: input.currentPeriodStart,
+      currentTrialEndsAt: input.currentTrialEndsAt,
+      currentTrialStartedAt: input.currentTrialStartedAt,
+      pulseTrialPolicyVersion: input.pulseTrialPolicyVersion,
+      pulseTrialRedeemedAt: input.currentTrialStartedAt,
+    },
+    where: {
+      memberId: input.memberId,
+      pulseTrialRedeemedAt: null,
+      stripeCustomerLookupKey:
+        input.preparedCompletion.stripeCustomerLookupKey,
+      stripeSubscriptionLookupKey:
+        input.preparedCompletion.stripeSubscriptionLookupKey,
+    },
+  });
+
+  return updated.count === 1;
 }
 
 export async function prepareHostedMemberStripeCheckoutCompletion(input: {

@@ -30,6 +30,7 @@ import {
   type HostedStripeActivatedMemberOutcome,
   type HostedSubscriptionCancellationEmailCandidate,
   prepareHostedStripeCheckoutCompletion,
+  prepareHostedStripeDirectMemberActivationCrypto,
   prepareHostedStripeReversalProviderState,
   type PreparedHostedStripeCheckoutCompletion,
   type PreparedHostedStripeReversalProviderState,
@@ -1246,6 +1247,12 @@ async function prepareHostedStripeEventCryptoDomainRoots(input: {
     || !hostedStripeEventMayActivateDirectMember(input.stripeEvent)
   ) {
     return new Map();
+  }
+  if (input.stripeEvent.type === "checkout.session.completed") {
+    return prepareHostedStripeDirectMemberActivationCrypto({
+      memberId: input.memberId,
+      prisma: input.prisma,
+    });
   }
   return prepareHostedCryptoDomainRootCandidates({
     prisma: input.prisma,

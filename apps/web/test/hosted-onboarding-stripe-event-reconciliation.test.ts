@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => ({
   cleanupHostedStandardCheckoutLoser: vi.fn(),
   materializeHostedGroupSponsorshipIfApplicable: vi.fn(),
   prepareHostedCryptoDomainRootCandidates: vi.fn(),
+  prepareHostedStripeDirectMemberActivationCrypto: vi.fn(),
   prepareHostedFamilyStripeActivationCryptoDomainRoots: vi.fn(),
   prepareHostedLegacySyntheticFamilyCleanupTx: vi.fn(),
   prepareHostedStripeCheckoutCompletion: vi.fn(),
@@ -153,6 +154,8 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-billing-events", () => ({
     mocks.cancelHostedPulseTrialCheckoutLoserSubscription,
   prepareHostedStripeCheckoutCompletion:
     mocks.prepareHostedStripeCheckoutCompletion,
+  prepareHostedStripeDirectMemberActivationCrypto:
+    mocks.prepareHostedStripeDirectMemberActivationCrypto,
   prepareHostedStripeReversalProviderState:
     mocks.prepareHostedStripeReversalProviderState,
 }));
@@ -359,6 +362,9 @@ describe("hosted Stripe event reconciliation", () => {
     );
     mocks.materializeHostedGroupSponsorshipIfApplicable.mockResolvedValue(true);
     mocks.prepareHostedCryptoDomainRootCandidates.mockResolvedValue(new Map());
+    mocks.prepareHostedStripeDirectMemberActivationCrypto.mockResolvedValue(
+      new Map(),
+    );
     mocks.prepareHostedFamilyStripeActivationCryptoDomainRoots.mockResolvedValue(
       new Map(),
     );
@@ -482,7 +488,9 @@ describe("hosted Stripe event reconciliation", () => {
       preparedCryptoDomainRoots,
       expect.any(Map),
     );
-    expect(mocks.prepareHostedCryptoDomainRootCandidates).toHaveBeenCalledWith({
+    expect(
+      mocks.prepareHostedCryptoDomainRootCandidates,
+    ).toHaveBeenCalledWith({
       prisma: prisma.client,
       userId: "member_123",
     });
@@ -558,7 +566,9 @@ describe("hosted Stripe event reconciliation", () => {
     expect(mocks.sendHostedSignupWelcomeEmailForMember).not.toHaveBeenCalled();
     expect(mocks.sendHostedSignupNotificationEmailForMemberBestEffort).not.toHaveBeenCalled();
     expect(mocks.sendHostedSubscriptionCancellationEmailForMember).not.toHaveBeenCalled();
-    expect(mocks.prepareHostedCryptoDomainRootCandidates).not.toHaveBeenCalled();
+    expect(
+      mocks.prepareHostedStripeDirectMemberActivationCrypto,
+    ).not.toHaveBeenCalled();
   });
 
   it("finishes superseded standard Checkout cleanup before completing its receipt", async () => {
@@ -1585,7 +1595,7 @@ describe("hosted Stripe event reconciliation", () => {
       ["control", { domain: "control" }],
     ]);
     mocks.stripe.events.retrieve.mockResolvedValue(event);
-    mocks.prepareHostedCryptoDomainRootCandidates.mockResolvedValueOnce(
+    mocks.prepareHostedStripeDirectMemberActivationCrypto.mockResolvedValueOnce(
       preparedCryptoDomainRoots,
     );
 
@@ -1606,12 +1616,15 @@ describe("hosted Stripe event reconciliation", () => {
 
     expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
     const transactionMock = vi.mocked(prisma.client.$transaction);
-    expect(mocks.prepareHostedCryptoDomainRootCandidates).toHaveBeenCalledWith({
+    expect(
+      mocks.prepareHostedStripeDirectMemberActivationCrypto,
+    ).toHaveBeenCalledWith({
+      memberId: "member_123",
       prisma: prisma.client,
-      userId: "member_123",
     });
     expect(
-      mocks.prepareHostedCryptoDomainRootCandidates.mock.invocationCallOrder[0],
+      mocks.prepareHostedStripeDirectMemberActivationCrypto.mock
+        .invocationCallOrder[0],
     ).toBeLessThan(transactionMock.mock.invocationCallOrder[0] ?? 0);
     expect(transactionMock.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.applyStripeCheckoutCompleted.mock.invocationCallOrder[0] ?? 0);
@@ -2115,7 +2128,9 @@ describe("hosted Stripe event reconciliation", () => {
     ).toBeLessThan(
       vi.mocked(prisma.client.$transaction).mock.invocationCallOrder.at(-1) ?? 0,
     );
-    expect(mocks.prepareHostedCryptoDomainRootCandidates).not.toHaveBeenCalled();
+    expect(
+      mocks.prepareHostedStripeDirectMemberActivationCrypto,
+    ).not.toHaveBeenCalled();
     expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledWith("sub_123");
   });
 
@@ -2167,7 +2182,9 @@ describe("hosted Stripe event reconciliation", () => {
       expect.anything(),
       preparedFamilyCryptoDomainRoots,
     );
-    expect(mocks.prepareHostedCryptoDomainRootCandidates).not.toHaveBeenCalled();
+    expect(
+      mocks.prepareHostedStripeDirectMemberActivationCrypto,
+    ).not.toHaveBeenCalled();
   });
 
   it("prepares Family candidates for a paid invoice still owned by the prior direct billing ref", async () => {
@@ -2219,7 +2236,9 @@ describe("hosted Stripe event reconciliation", () => {
       undefined,
       preparedFamilyCryptoDomainRoots,
     );
-    expect(mocks.prepareHostedCryptoDomainRootCandidates).not.toHaveBeenCalled();
+    expect(
+      mocks.prepareHostedStripeDirectMemberActivationCrypto,
+    ).not.toHaveBeenCalled();
   });
 
   it("prepares the live subscription before the member lock and revalidates its durable owner inside", async () => {
@@ -2287,7 +2306,9 @@ describe("hosted Stripe event reconciliation", () => {
         timeout: 780_000,
       },
     );
-    expect(mocks.prepareHostedCryptoDomainRootCandidates).not.toHaveBeenCalled();
+    expect(
+      mocks.prepareHostedStripeDirectMemberActivationCrypto,
+    ).not.toHaveBeenCalled();
   });
 
   it("fails closed when durable subscription ownership changes under the member lock", async () => {

@@ -30,7 +30,7 @@ const mocks = vi.hoisted(() => {
     findMemberForStripeObject: vi.fn(),
     getHostedInviteStatus: vi.fn(),
     listHostedStripeCheckoutSessionMemberIds: vi.fn(),
-    prepareHostedCryptoDomainRootCandidates: vi.fn(),
+    prepareHostedStripeDirectMemberActivationCrypto: vi.fn(),
     prepareHostedStripeCheckoutCompletion: vi.fn(),
     preparedCryptoDomainRoots: new Map(),
     signalHostedMemberActivationRuntimeWakeBestEffortResult: vi.fn(),
@@ -43,11 +43,6 @@ const mocks = vi.hoisted(() => {
 
   return state;
 });
-
-vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
-  prepareHostedCryptoDomainRootCandidates:
-    mocks.prepareHostedCryptoDomainRootCandidates,
-}));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
   const actual = await vi.importActual<
@@ -108,6 +103,8 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-billing-events", () => ({
     mocks.cancelHostedFamilySponsoredCheckoutSubscription,
   cancelHostedPulseTrialCheckoutLoserSubscription:
     mocks.cancelHostedPulseTrialCheckoutLoserSubscription,
+  prepareHostedStripeDirectMemberActivationCrypto:
+    mocks.prepareHostedStripeDirectMemberActivationCrypto,
   prepareHostedStripeCheckoutCompletion:
     mocks.prepareHostedStripeCheckoutCompletion,
 }));
@@ -141,7 +138,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     mocks.readHostedMemberCoreState.mockResolvedValue(createMemberSnapshot().core);
     mocks.findMemberForStripeObject.mockResolvedValue(createMemberSnapshot());
     mocks.listHostedStripeCheckoutSessionMemberIds.mockResolvedValue(["member_123"]);
-    mocks.prepareHostedCryptoDomainRootCandidates.mockResolvedValue(
+    mocks.prepareHostedStripeDirectMemberActivationCrypto.mockResolvedValue(
       mocks.preparedCryptoDomainRoots,
     );
     mocks.prepareHostedStripeCheckoutCompletion.mockResolvedValue(
@@ -236,7 +233,9 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
         }),
         tx,
       );
-      expect(mocks.prepareHostedCryptoDomainRootCandidates).not.toHaveBeenCalled();
+      expect(
+        mocks.prepareHostedStripeDirectMemberActivationCrypto,
+      ).not.toHaveBeenCalled();
       expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
       expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult).not.toHaveBeenCalled();
       expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort).not.toHaveBeenCalled();
@@ -244,6 +243,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
   );
 
   it("prepares Pulse Trial provider, binding, and activation inputs before opening the checkout transaction", async () => {
+    let cacheWasActiveDuringCryptoPreflight = false;
     const tx = {
       __tag: "tx",
       $queryRaw: vi.fn(async () => []),
@@ -285,6 +285,13 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       memberId: "member_123",
       stripeCheckoutEmail: null,
     };
+    mocks.prepareHostedStripeDirectMemberActivationCrypto.mockImplementationOnce(
+      async () => {
+        cacheWasActiveDuringCryptoPreflight =
+          getHostedDomainRootUnwrapCache() !== undefined;
+        return mocks.preparedCryptoDomainRoots;
+      },
+    );
     mocks.prepareHostedStripeCheckoutCompletion.mockResolvedValueOnce(
       preparedCheckoutCompletion,
     );
@@ -296,16 +303,20 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       sessionId: "cs_pulse_trial",
     });
 
-    expect(mocks.prepareHostedCryptoDomainRootCandidates).toHaveBeenCalledWith({
+    expect(
+      mocks.prepareHostedStripeDirectMemberActivationCrypto,
+    ).toHaveBeenCalledWith({
+      memberId: "member_123",
       prisma,
-      userId: "member_123",
     });
     expect(
-      mocks.prepareHostedCryptoDomainRootCandidates.mock.invocationCallOrder[0],
+      mocks.prepareHostedStripeDirectMemberActivationCrypto.mock
+        .invocationCallOrder[0],
     ).toBeLessThan(prisma.$transaction.mock.invocationCallOrder[0] ?? 0);
     expect(
       mocks.prepareHostedStripeCheckoutCompletion.mock.invocationCallOrder[0],
     ).toBeLessThan(prisma.$transaction.mock.invocationCallOrder[0] ?? 0);
+    expect(cacheWasActiveDuringCryptoPreflight).toBe(true);
     expect(mocks.applyStripeCheckoutCompleted).toHaveBeenCalledWith(
       expect.objectContaining({
         id: "cs_pulse_trial",

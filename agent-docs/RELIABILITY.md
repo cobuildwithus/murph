@@ -158,12 +158,15 @@ Last verified: 2026-07-29
   whether an identity is replaceable. That decision read selects no encrypted
   fields and therefore cannot call KMS. A loser preserves the current identity
   and is canceled after commit; an unexpected policy rejection after acceptance
-  aborts the transaction. Browser and webhook completion retain the preflight
-  domain-root cache through the short transaction, so prepared identifiers can
-  be read without another KMS unwrap while the lock is held. Stripe event
-  reconciliation likewise prepares its canonical provider snapshot before the
-  lock and revalidates the database owner inside it. After Stripe creates a
-  session, Checkout creation
+  aborts the transaction. Before browser or webhook completion takes the member
+  lock, it durably provisions the existing activation domain roots in a separate
+  short transaction and unwraps control and ingress into the request-scoped
+  cache. The locked winner path selects only attempt, lookup-key, freshness, and
+  entitlement scalars, writes the accepted scalar trial facts, and lets
+  activation reuse those cached roots; it does not project a rich billing
+  snapshot or make a KMS request. Stripe event reconciliation likewise prepares
+  its canonical provider snapshot before the lock and revalidates the database
+  owner inside it. After Stripe creates a session, Checkout creation
   re-locks the owner and returns the URL only after binding that reference; if
   suspension or deletion won, it expires the session instead. Account deletion
   suspends first, re-reads all direct attempts and Family billing owners,

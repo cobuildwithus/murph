@@ -6,6 +6,7 @@ import {
   Prisma,
   type HostedMember,
   type HostedMemberIdentity,
+  type PrismaClient,
 } from "@prisma/client";
 import {
   findHostedDomainRootWrap,
@@ -1005,6 +1006,61 @@ test("domain root unwraps are memoized inside the scoped cache and wiped at scop
     userId: "member-test-memo",
   });
   assert.ok(outside.readCount() > outsideFirst);
+});
+
+test("Stripe activation preflight performs KMS unwraps before the member transaction cache is reused", async () => {
+  const { decryptMetrics, tx } =
+    await createHostedWebCryptoTransactionFixture();
+  const {
+    provisionActiveHostedDomainRootEnvelopeForUserOnly,
+    unwrapHostedDomainRootForWeb,
+  } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const { runWithHostedDomainRootUnwrapCache } = await import(
+    "../src/lib/hosted-crypto/domain-root-unwrap-cache"
+  );
+  const { prepareHostedStripeDirectMemberActivationCrypto } = await import(
+    "../src/lib/hosted-onboarding/stripe-billing-events"
+  );
+  const memberId = "member-test-stripe-activation";
+
+  for (const domain of ["control", "device", "ingress", "runtime"] as const) {
+    await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+      domain,
+      prisma: tx.prisma,
+      reason: "test.stripe-activation",
+      userId: memberId,
+    });
+  }
+
+  const prisma = Object.assign(tx.prisma, {
+    $transaction: async <Result>(
+      run: (transaction: Prisma.TransactionClient) => Promise<Result>,
+    ) => run(tx.prisma),
+  });
+  resetLocalKmsDecryptMetrics(decryptMetrics);
+
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    await expect(
+      prepareHostedStripeDirectMemberActivationCrypto({
+        memberId,
+        prisma: prisma as PrismaClient,
+      }),
+    ).resolves.toEqual(new Map());
+    expect(decryptMetrics.calls).toHaveLength(2);
+
+    const callsBeforeMemberTransaction = decryptMetrics.calls.length;
+    await runWithHostedDomainRootUnwrapCache(async () => {
+      for (const domain of ["control", "ingress"] as const) {
+        const root = await unwrapHostedDomainRootForWeb({
+          domain,
+          prisma: tx.prisma,
+          userId: memberId,
+        });
+        root.rootKey.fill(0);
+      }
+    });
+    expect(decryptMetrics.calls).toHaveLength(callsBeforeMemberTransaction);
+  });
 });
 
 test("nested domain root cache scopes reuse the transaction-owned cache", async () => {

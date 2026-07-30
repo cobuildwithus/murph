@@ -5,8 +5,10 @@ import {
 } from "@prisma/client";
 import type Stripe from "stripe";
 
-import type {
-  PreparedHostedCryptoDomainRootCandidates,
+import {
+  provisionHostedCryptoDomainRootsForUser,
+  unwrapHostedDomainRootForWeb,
+  type PreparedHostedCryptoDomainRootCandidates,
 } from "../hosted-crypto/domain-root-store";
 import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import {
@@ -31,7 +33,10 @@ import {
   parseHostedPulseTrialPolicyVersion,
   requireHostedPulseTrialPolicy,
 } from "./billing-plans";
-import { isHostedAccessBlockedBillingStatus } from "./entitlement";
+import {
+  assertHostedMemberNotSuspended,
+  isHostedAccessBlockedBillingStatus,
+} from "./entitlement";
 import { hostedOnboardingError } from "./errors";
 import {
   activateHostedMemberForPositiveSourceTx,
@@ -41,6 +46,7 @@ import {
   clearHostedMemberStripeCheckoutAttemptForSessionTx,
   prepareHostedMemberStripeCheckoutCompletion,
   readHostedMemberStripeBillingLookupState,
+  writeAcceptedHostedMemberPulseTrialBillingTx,
   type PreparedHostedMemberStripeCheckoutCompletion,
 } from "./hosted-member-billing-store";
 import {
@@ -50,6 +56,7 @@ import {
   readHostedMemberBillingSnapshot,
   readHostedMemberCoreState,
   readHostedMemberPulseTrialBillingDecisionSnapshot,
+  updateHostedMemberCoreState,
   upsertHostedMemberStripeCheckoutEmailIfFreshTx,
   upsertPreparedHostedMemberStripeCheckoutEmailIfFreshUnderLockTx,
 } from "./hosted-member-store";
@@ -115,6 +122,28 @@ type HostedStripeActivationOutcome = HostedStripeActivatedMemberOutcome & {
 export type HostedStripeSubscriptionUpdateOutcome = HostedStripeActivationOutcome & {
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
 };
+
+export async function prepareHostedStripeDirectMemberActivationCrypto(input: {
+  memberId: string;
+  prisma: PrismaClient;
+}): Promise<PreparedHostedCryptoDomainRootCandidates> {
+  await provisionHostedCryptoDomainRootsForUser({
+    prisma: input.prisma,
+    reason: "hosted-member.activation",
+    userId: input.memberId,
+  });
+  await Promise.all(
+    (["control", "ingress"] as const).map(async (domain) => {
+      const root = await unwrapHostedDomainRootForWeb({
+        domain,
+        prisma: input.prisma,
+        userId: input.memberId,
+      });
+      root.rootKey.fill(0);
+    }),
+  );
+  return new Map();
+}
 
 export type HostedSubscriptionCancellationEmailCandidate = {
   memberId: string;
@@ -715,29 +744,24 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
 
   const hadActiveBilling =
     currentMember.core.billingStatus === HostedBillingStatus.active;
-  const updatedMember = await writeHostedMemberStripeBillingTx({
-    billingStatus: HostedBillingStatus.active,
-    canonicalBillingStatus: HostedBillingStatus.active,
-    currentBillingPhase: "trial",
-    currentBillingPlanCode: "launch_monthly",
-    currentCheckoutOffer: HOSTED_PULSE_TRIAL_OFFER,
-    ...currentPeriodSnapshot,
-    currentTrialEndsAt,
-    currentTrialStartedAt,
-    dispatchContext: input.dispatchContext,
-    freshnessPolicy: "trial-checkout-entitlement",
-    member: {
-      billingRef: null,
-      core: currentMember.core,
-    },
-    pulseTrialPolicyVersion:
-      parseHostedPulseTrialPolicyVersion(input.session.metadata?.trialPolicyVersion)
-      ?? HOSTED_PULSE_TRIAL_POLICY_VERSION,
-    pulseTrialRedeemedAt: currentTrialStartedAt,
-    tx: input.tx,
-  });
+  assertHostedMemberNotSuspended(currentMember.core);
+  const billingRefUpdated =
+    await writeAcceptedHostedMemberPulseTrialBillingTx({
+      currentCheckoutOffer: HOSTED_PULSE_TRIAL_OFFER,
+      currentPeriodEnd: currentPeriodSnapshot.currentPeriodEnd,
+      currentPeriodStart: currentPeriodSnapshot.currentPeriodStart,
+      currentTrialEndsAt,
+      currentTrialStartedAt,
+      memberId: currentMember.core.id,
+      preparedCompletion,
+      pulseTrialPolicyVersion:
+        parseHostedPulseTrialPolicyVersion(
+          input.session.metadata?.trialPolicyVersion,
+        ) ?? HOSTED_PULSE_TRIAL_POLICY_VERSION,
+      tx: input.tx,
+    });
 
-  if (!updatedMember) {
+  if (!billingRefUpdated) {
     throw hostedOnboardingError({
       code: "HOSTED_BILLING_CHECKOUT_POLICY_CHANGED",
       httpStatus: 409,
@@ -747,13 +771,21 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
     });
   }
 
+  const updatedCore = hadActiveBilling
+    ? currentMember.core
+    : await updateHostedMemberCoreState({
+        billingStatus: HostedBillingStatus.active,
+        memberId: currentMember.core.id,
+        prisma: input.tx,
+      });
+
   if (hadActiveBilling) {
     if (
       input.preparedCheckoutCompletion.stripeCheckoutEmail
     ) {
       await upsertPreparedHostedMemberStripeCheckoutEmailIfFreshUnderLockTx({
         collectedAt: input.dispatchContext.eventCreatedAt,
-        memberId: updatedMember.core.id,
+        memberId: updatedCore.id,
         preparedEmail:
           input.preparedCheckoutCompletion.stripeCheckoutEmail,
         tx: input.tx,
@@ -770,7 +802,7 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
   if (input.preparedCheckoutCompletion.stripeCheckoutEmail) {
     await upsertPreparedHostedMemberStripeCheckoutEmailIfFreshUnderLockTx({
       collectedAt: input.dispatchContext.eventCreatedAt,
-      memberId: updatedMember.core.id,
+      memberId: updatedCore.id,
       preparedEmail:
         input.preparedCheckoutCompletion.stripeCheckoutEmail,
       tx: input.tx,
@@ -779,17 +811,17 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
 
   const activation = await activateHostedMemberForPositiveSourceTx({
     dispatchContext: input.dispatchContext,
-    memberId: updatedMember.core.id,
+    memberId: updatedCore.id,
     preparedCryptoDomainRoots: input.preparedCryptoDomainRoots ?? new Map(),
     prisma: input.tx,
     skipIfBillingAlreadyActive: false,
   });
 
   return {
-    activatedMemberId: activation.activated ? updatedMember.core.id : null,
+    activatedMemberId: activation.activated ? updatedCore.id : null,
     hostedExecutionEventId: activation.hostedExecutionEventId,
     welcomeEmailMemberId: isHostedStripeActivationWelcomeCandidate(activation)
-      ? updatedMember.core.id
+      ? updatedCore.id
       : null,
   };
 }

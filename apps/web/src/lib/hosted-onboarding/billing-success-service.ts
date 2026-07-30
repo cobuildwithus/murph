@@ -1,7 +1,6 @@
 import { type PrismaClient } from "@prisma/client";
 import type Stripe from "stripe";
 
-import { prepareHostedCryptoDomainRootCandidates } from "../hosted-crypto/domain-root-store";
 import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import { getPrisma } from "../prisma";
 import { HOSTED_PULSE_TRIAL_OFFER } from "./billing-plans";
@@ -30,6 +29,7 @@ import {
   applyStripeCheckoutCompleted,
   cancelHostedFamilySponsoredCheckoutSubscription,
   cancelHostedPulseTrialCheckoutLoserSubscription,
+  prepareHostedStripeDirectMemberActivationCrypto,
   prepareHostedStripeCheckoutCompletion,
 } from "./stripe-billing-events";
 import {
@@ -138,9 +138,9 @@ async function applyHostedCheckoutSessionSuccessWithinUnwrapCache(
 ): Promise<HostedCheckoutSessionSuccessOutcome> {
   const preparedCryptoDomainRoots =
     input.session.metadata?.checkoutOffer === HOSTED_PULSE_TRIAL_OFFER
-      ? await prepareHostedCryptoDomainRootCandidates({
+      ? await prepareHostedStripeDirectMemberActivationCrypto({
+          memberId: input.memberId,
           prisma: input.prisma,
-          userId: input.memberId,
         })
       : null;
   const preparedCheckoutCompletion =
