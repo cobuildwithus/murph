@@ -96,6 +96,22 @@ describe('experiment onboarding skill guidance', () => {
     )
   })
 
+  it('uses an observed custom metric as a valid derived-outcome source', async () => {
+    const raw = await readExperimentOnboardingSkill()
+
+    expect(raw).toContain(
+      'a registered metric source or an already observed metric source',
+    )
+    expect(raw).toContain(
+      'including an unregistered custom metric with existing points',
+    )
+    expect(raw).toContain(
+      'Pass that source with `--primary-outcome-source-metric-key`',
+    )
+    expect(raw).toContain('do not refuse an observed custom source')
+    expect(raw).not.toContain('registered reducers')
+  })
+
   it('requires first-session prep to include a compact walkthrough', async () => {
     const raw = await readExperimentOnboardingSkill()
 

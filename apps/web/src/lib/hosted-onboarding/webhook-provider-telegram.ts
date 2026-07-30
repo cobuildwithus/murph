@@ -202,11 +202,10 @@ export async function planHostedOnboardingTelegramWebhook(input: {
               ? "usage-referral-evidence-only"
               : "unlinked-telegram",
           ),
-          ...(observation.qualificationCandidateReferralId
+          ...(observation.qualificationCandidateReferralIds.length > 0
             ? {
-                postCommitUsageReferralIds: [
-                  observation.qualificationCandidateReferralId,
-                ],
+                postCommitUsageReferralIds:
+                  observation.qualificationCandidateReferralIds,
               }
             : {}),
         };
@@ -276,6 +275,8 @@ export async function planHostedOnboardingTelegramWebhook(input: {
           await bindArmedHostedUsageReferralToNewContainerTx({
             occurredAt: new Date(summary.occurredAt),
             ownerMemberId: existingMember.id,
+            targetChannel: "telegram",
+            targetLinqService: null,
             targetContainerMemberId: ensured.containerMemberId,
             tx: input.prisma,
           });
@@ -376,7 +377,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     }),
     tx: input.prisma,
   });
-  let qualificationCandidateReferralId: string | null = null;
+  let qualificationCandidateReferralIds: string[] = [];
   if (!summary.isDirect) {
     const eventKey = createHostedTelegramMessageLookupKey({
       chatId: telegramMessage.threadId,
@@ -386,7 +387,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
       summary.senderTelegramUserId,
     );
     if (eventKey && senderSubjectKey) {
-      qualificationCandidateReferralId = (
+      qualificationCandidateReferralIds = (
         await observeHostedUsageReferralInboundTx({
           containerMemberId: runtimeMemberId,
           eventKey,
@@ -395,14 +396,14 @@ export async function planHostedOnboardingTelegramWebhook(input: {
           senderSubjectKey,
           tx: input.prisma,
         })
-      ).qualificationCandidateReferralId;
+      ).qualificationCandidateReferralIds;
     }
   }
 
   return {
     desiredSideEffects: [],
-    ...(qualificationCandidateReferralId
-      ? { postCommitUsageReferralIds: [qualificationCandidateReferralId] }
+    ...(qualificationCandidateReferralIds.length > 0
+      ? { postCommitUsageReferralIds: qualificationCandidateReferralIds }
       : {}),
     postCommitGroupJoinConfirmationMemberIds: [existingMember.id],
     response: {

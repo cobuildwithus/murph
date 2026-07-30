@@ -59,6 +59,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
         threadIsDirect: false,
       },
       groupToolPort: { request },
+      linqService: "imessage",
       linqDeliveryContexts: [
         buildLinqDeliveryContext({
           directRecipientPhoneNumber: "+15550000001",
@@ -70,7 +71,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     await groupTool.request({
       action: "arm_usage_referral",
       linqSenderHandles: ["forged"],
-      policyCode: "active_group_v1",
+      policyCodes: ["active_group_v1"],
       sourceConversation: {
         channel: "telegram",
         threadId: `hid_${"f".repeat(32)}`,
@@ -81,11 +82,76 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     expect(request).toHaveBeenLastCalledWith({
       action: "arm_usage_referral",
       linqSenderHandles: ["+15550000001"],
-      policyCode: "active_group_v1",
+      policyCodes: ["active_group_v1"],
       sourceConversation: {
         channel: "linq",
+        linqService: "imessage",
         threadId: `hid_${"3".repeat(32)}`,
         threadIsDirect: false,
+      },
+    });
+
+    await groupTool.request({
+      action: "read_usage_referral",
+      sourceConversation: {
+        channel: "telegram",
+        threadId: `hid_${"e".repeat(32)}`,
+        threadIsDirect: true,
+      },
+    });
+
+    expect(request).toHaveBeenLastCalledWith({
+      action: "read_usage_referral",
+      linqSenderHandles: ["+15550000001"],
+      sourceConversation: {
+        channel: "linq",
+        linqService: "imessage",
+        threadId: `hid_${"3".repeat(32)}`,
+        threadIsDirect: false,
+      },
+    });
+
+    await groupTool.request({
+      action: "cancel_usage_referral",
+      linqSenderHandles: ["forged"],
+      policyCode: "new_person_activation_v1",
+    });
+
+    expect(request).toHaveBeenLastCalledWith({
+      action: "cancel_usage_referral",
+      linqSenderHandles: ["+15550000001"],
+      policyCode: "new_person_activation_v1",
+    });
+  });
+
+  it("injects the observed non-iMessage Linq service for fail-closed policy gating", async () => {
+    const request = vi.fn().mockResolvedValue({
+      action: "read_usage_referral",
+      result: { outcome: "read", referral: null, status: "ok" },
+    });
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
+      currentDeliveryRoute: {
+        channel: "linq",
+        deliveryTarget: "raw-direct-thread",
+        identityId: `hid_${"1".repeat(32)}`,
+        participantId: `hid_${"2".repeat(32)}`,
+        threadId: `hid_${"3".repeat(32)}`,
+        threadIsDirect: true,
+      },
+      groupToolPort: { request },
+      linqDeliveryContexts: [],
+      linqService: "sms",
+    });
+
+    await groupTool.request({ action: "read_usage_referral" });
+
+    expect(request).toHaveBeenCalledWith({
+      action: "read_usage_referral",
+      sourceConversation: {
+        channel: "linq",
+        linqService: "sms",
+        threadId: `hid_${"3".repeat(32)}`,
+        threadIsDirect: true,
       },
     });
   });
@@ -133,6 +199,40 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
       action: "read_shared",
       telegramSenderHandles: ["1234567890", "9876543210"],
       projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    });
+  });
+
+  it("injects the Telegram source conversation into referral reads", async () => {
+    const request = vi.fn().mockResolvedValue({
+      action: "read_usage_referral",
+      result: { outcome: "read", referral: null, status: "ok" },
+    });
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
+      currentDeliveryRoute: {
+        channel: "telegram",
+        deliveryTarget: "raw-direct-thread",
+        identityId: `hid_${"4".repeat(32)}`,
+        participantId: `hid_${"5".repeat(32)}`,
+        threadId: `hid_${"6".repeat(32)}`,
+        threadIsDirect: true,
+      },
+      groupToolPort: { request },
+      linqDeliveryContexts: [],
+      telegramSenderHandles: ["1234567890"],
+    });
+
+    await groupTool.request({
+      action: "read_usage_referral",
+    });
+
+    expect(request).toHaveBeenLastCalledWith({
+      action: "read_usage_referral",
+      sourceConversation: {
+        channel: "telegram",
+        threadId: `hid_${"6".repeat(32)}`,
+        threadIsDirect: true,
+      },
+      telegramSenderHandles: ["1234567890"],
     });
   });
 

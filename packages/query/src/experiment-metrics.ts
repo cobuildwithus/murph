@@ -17,9 +17,7 @@ export interface ResolvedExperimentMetricIdentity {
 export function resolveExperimentMetricIdentity(metricKey: string): ResolvedExperimentMetricIdentity {
   const trimmedMetricKey = metricKey.trim();
   const metricSlug = trimmedMetricKey.split(":").at(-1) ?? trimmedMetricKey;
-  const definition = trimmedMetricKey.startsWith("biomarker:")
-    ? resolveMetricDefinitionForBiomarker(trimmedMetricKey) ?? resolveMetricDefinition(metricSlug)
-    : resolveMetricDefinition(trimmedMetricKey);
+  const definition = resolveRegisteredExperimentMetricDefinition(trimmedMetricKey);
 
   return {
     biomarkerKey: definition?.biomarkerKey ?? (trimmedMetricKey.startsWith("biomarker:") ? trimmedMetricKey : null),
@@ -27,6 +25,17 @@ export function resolveExperimentMetricIdentity(metricKey: string): ResolvedExpe
       trimmedMetricKey.startsWith("biomarker:") ? metricSlug : trimmedMetricKey,
     ),
   };
+}
+
+export function isRegisteredExperimentMetricSource(metricKey: string): boolean {
+  return resolveRegisteredExperimentMetricDefinition(metricKey.trim()) !== null;
+}
+
+function resolveRegisteredExperimentMetricDefinition(metricKey: string) {
+  const metricSlug = metricKey.split(":").at(-1) ?? metricKey;
+  return metricKey.startsWith("biomarker:")
+    ? resolveMetricDefinitionForBiomarker(metricKey) ?? resolveMetricDefinition(metricSlug)
+    : resolveMetricDefinition(metricKey);
 }
 
 export function matchesExperimentMetricIdentity(

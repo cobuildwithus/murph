@@ -94,22 +94,34 @@ import type { DeviceSyncCompletionDialogModel } from "@/src/lib/device-sync/conn
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 import { buildWhoopAppleHealthSetupGuide } from "@/src/lib/device-sync/whoop-apple-health-setup-guide";
 import { MurphAssistantStylePicker } from "@/src/components/murph/murph-assistant-style-picker";
+import { HostedAiUsageActivity } from "@/src/components/settings/hosted-ai-usage-activity";
 import { HostedFamilyManager } from "@/src/components/settings/hosted-family-settings-actions";
 import { PulseTrialBillingContinuationView } from "@/src/components/settings/hosted-start-paid-pulse-button";
 import { MurphPersonalitySettingsDialog } from "@/src/components/settings/murph-personality-settings-dialog";
-import { MURPH_TELEGRAM_URL } from "@/src/lib/murph-contact-routing";
 import {
+  DESIGN_AI_USAGE_ACTIVITY,
+  DESIGN_AI_USAGE_DISABLED_HISTORY,
+  DESIGN_AI_USAGE_WAITING_ACTIVITY,
   DESIGN_GROUP_SPONSORSHIP_OFFERS,
   DESIGN_USAGE_OFFERS,
+  DESIGN_USAGE_MISSION_CONTACT_OPTION,
 } from "./group-usage-funding-study";
 import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
 import { HostedAccountDeletionStatus } from "@/src/components/settings/hosted-data-privacy-settings";
 import { GarminHistoricalDataDialog } from "../(dashboard)/connect/connect-page-dialogs";
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  children,
+  id,
+  title,
+}: {
+  children: React.ReactNode;
+  id?: string;
+  title: string;
+}) {
   return (
-    <div className="flex flex-col gap-6">
+    <div id={id} className="flex flex-col gap-6">
       <h2 className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">{title}</h2>
       {children}
     </div>
@@ -148,22 +160,22 @@ function resolveDesignPhoneCountryOption(value: string) {
 const EXPERIMENT_START_CHANNEL_OPTIONS: ExperimentStartContactOption[] = [
   {
     connected: true,
-    description: "Open a ready-to-send text to Murph.",
-    href: "sms:?body=I%20want%20to%20start%20the%20Standard%2C%20Tiny%2C%20And%20Fallback%20Bedtime%20Transition%20experiment.",
+    description: "Preview a prepared Messages draft.",
+    href: "#experiment-start-channel-picker-study",
     kind: "text",
     label: "Messages",
   },
   {
     connected: true,
-    description: "Open @withmurph_bot with the experiment name ready.",
-    href: `${MURPH_TELEGRAM_URL}?text=I%20want%20to%20start%20the%20Standard%2C%20Tiny%2C%20And%20Fallback%20Bedtime%20Transition%20experiment.`,
+    description: "Preview a prepared Telegram draft.",
+    href: "#experiment-start-channel-picker-study",
     kind: "telegram",
     label: "Telegram",
   },
   {
     connected: true,
-    description: "Open a ready-to-send email to Murph.",
-    href: "mailto:murph@mail.withmurph.ai?body=I%20want%20to%20start%20the%20Standard%2C%20Tiny%2C%20And%20Fallback%20Bedtime%20Transition%20experiment.",
+    description: "Preview a prepared email draft.",
+    href: "#experiment-start-channel-picker-study",
     kind: "email",
     label: "Email",
   },
@@ -1068,7 +1080,10 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Experiment Start Channel Picker">
+        <Section
+          id="experiment-start-channel-picker-study"
+          title="Experiment Start Channel Picker"
+        >
           <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="font-serif text-xl font-semibold tracking-normal text-foreground">
@@ -1088,7 +1103,7 @@ export function ComponentsContent() {
             open={channelPickerOpen}
             options={EXPERIMENT_START_CHANNEL_OPTIONS}
             protocolDays={14}
-            protocolTitle="Standard, Tiny, And Fallback Bedtime Transition"
+            protocolTitle="Example Evening Routine"
           />
         </Section>
 
@@ -1139,6 +1154,50 @@ export function ComponentsContent() {
                 <HostedEmailMurphContactDialog
                   murphEmailAddress="murph@mail.withmurph.ai"
                   userEmailAddress={variant.userEmail}
+                />
+              </div>
+            ))}
+          </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Hosted AI usage credits and missions">
+          <p className="text-sm text-muted-foreground">
+            Read-only Settings detail for one-time usage credits and explicit
+            referral missions. The production component keeps a single semantic
+            table tree for desktop and mobile layouts.
+          </p>
+          <div
+            aria-label="Read-only hosted AI usage activity previews"
+            className="flex max-w-3xl flex-col gap-8"
+            data-design-component="hosted-ai-usage-activity-states"
+            inert
+          >
+            {[
+              {
+                activity: DESIGN_AI_USAGE_ACTIVITY,
+                contactOption: DESIGN_USAGE_MISSION_CONTACT_OPTION,
+                label: "Active and completed missions",
+              },
+              {
+                activity: DESIGN_AI_USAGE_WAITING_ACTIVITY,
+                contactOption: DESIGN_USAGE_MISSION_CONTACT_OPTION,
+                label: "Mission selected, waiting for a new group",
+              },
+              {
+                activity: DESIGN_AI_USAGE_DISABLED_HISTORY,
+                contactOption: null,
+                label: "New missions disabled, existing history retained",
+              },
+            ].map((preview) => (
+              <div className="flex flex-col gap-3" key={preview.label}>
+                <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                  {preview.label}
+                </p>
+                <HostedAiUsageActivity
+                  activity={preview.activity}
+                  missionContactOption={preview.contactOption}
                 />
               </div>
             ))}
