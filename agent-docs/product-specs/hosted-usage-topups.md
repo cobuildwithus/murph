@@ -250,6 +250,17 @@ because the member asked for that accounting detail. Ordinary usage reads,
 proactive low-usage warnings, group contexts, Home, and Settings keep the
 aggregate current-capacity presentation above.
 
+The same expansion separately selects the newest purchase whose payer and
+beneficiary are both the callback-bound member. It exposes only the intended
+credit amount, attempt time, and the existing public purchase status. A
+fulfilled status is correlated to that purchase's committed grant and includes
+the matching top-up projection; every other status includes no grant. Thus a
+newer open, pending, reconciling, failed, or expired attempt wins over older
+fulfilled history when the member asks whether a purchase just posted. This
+read happens in the same repeatable snapshot as the aggregate and grant
+history. It performs no Stripe I/O and exposes no member, purchase, ledger, or
+payment-provider identifier.
+
 Purchased capacity must not be called cash, wallet funds, an account balance,
 or refundable dollars. Accounting stays in integer USD micros behind the
 web-owned projection.

@@ -517,7 +517,7 @@ export const MURPH_PLAN_USAGE_TOOL = {
   namespace: 'murph',
   name: 'plan_usage',
   description:
-    'Read the current private hosted plan, overall AI-usage projection, recommendation, and quote. Call only for an explicit plan, usage, billing request, or trusted low-usage context. Set includeTopUpHistory only for an explicit top-up question; it returns beneficiary-scoped added, used, adjusted, and remaining amounts. This is read-only; a recommendation or quote is not consent.',
+    'Read the current private hosted plan, overall AI-usage projection, recommendation, and quote. Call only for an explicit plan, usage, billing request, or trusted low-usage context. Set includeTopUpHistory only for an explicit top-up question; it returns the latest self-purchase status plus beneficiary-scoped posted grants and their added, used, adjusted, and remaining amounts. This is read-only; a recommendation or quote is not consent.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -526,7 +526,7 @@ export const MURPH_PLAN_USAGE_TOOL = {
         type: 'boolean',
         enum: [true],
         description:
-          'Include bounded top-up history only when the current member explicitly asks about usage purchases or credits.',
+          'Include latest self-purchase status and bounded posted top-up history only when the current member explicitly asks about usage purchases or credits.',
       },
     },
   },

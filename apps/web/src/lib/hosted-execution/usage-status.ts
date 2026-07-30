@@ -24,6 +24,9 @@ import { readHostedMemberCoreState } from "../hosted-onboarding/hosted-member-st
 import { sanitizeHostedOnboardingStructuredLogDetails } from "../hosted-onboarding/logging";
 import { readHostedPersonalUsageCreditOfferCodes } from "../hosted-onboarding/personal-usage-credit-eligibility";
 import {
+  projectHostedUsageCreditPublicPurchaseStatus,
+} from "../hosted-onboarding/usage-credit-purchase-status-service";
+import {
   readHostedAiUsageGate,
   type HostedAiUsageGateDecisionWithSource,
 } from "./usage-allowance";
@@ -33,6 +36,10 @@ const USAGE_ACTION_THRESHOLD_PERCENT = 80;
 const USD_MICROS_PER_USD = 1_000_000n;
 
 type HostedPlanUsageClient = PrismaClient | Prisma.TransactionClient;
+type HostedPlanUsageTopUp = HostedPlanUsageTopUpHistory["topUps"][number];
+type HostedPlanUsageSelfTopUp = Omit<HostedPlanUsageTopUp, "source"> & {
+  source: "purchased_by_you";
+};
 
 export async function readHostedPersonalAiUsageStatus(input: {
   includeSubscriptionActionQuote?: boolean;
@@ -313,6 +320,39 @@ async function readHostedPlanUsageTopUpHistory(input: {
   memberId: string;
   prisma: HostedPlanUsageClient;
 }): Promise<HostedPlanUsageTopUpHistory> {
+  const latestSelfPurchase =
+    await input.prisma.hostedUsageCreditPurchase.findFirst({
+      orderBy: [
+        { createdAt: "desc" },
+        { id: "desc" },
+      ],
+      select: {
+        createdAt: true,
+        entries: {
+          select: {
+            amountUsdMicros: true,
+            beneficiaryMemberId: true,
+            effectiveAt: true,
+            grant: {
+              select: {
+                remainingUsdMicros: true,
+              },
+            },
+            id: true,
+          },
+          take: 2,
+          where: {
+            kind: "purchase_grant",
+          },
+        },
+        grantUsdMicros: true,
+        status: true,
+      },
+      where: {
+        beneficiaryMemberId: input.memberId,
+        payerMemberId: input.memberId,
+      },
+    });
   const where = {
     beneficiaryMemberId: input.memberId,
     kind: "purchase_grant" as const,
@@ -341,7 +381,39 @@ async function readHostedPlanUsageTopUpHistory(input: {
     where,
   });
   const totalCount = await input.prisma.hostedUsageCreditEntry.count({ where });
-  const entryIds = entries.map((entry) => entry.id);
+  const latestSelfPurchaseStatus = latestSelfPurchase
+    ? projectHostedUsageCreditPublicPurchaseStatus(latestSelfPurchase)
+    : null;
+  const latestSelfPurchaseGrant = latestSelfPurchase?.entries[0] ?? null;
+  if (
+    latestSelfPurchase
+    && (
+      latestSelfPurchase.grantUsdMicros <= 0n
+      || (
+        latestSelfPurchaseStatus === "fulfilled"
+          ? latestSelfPurchase.entries.length !== 1
+          : latestSelfPurchase.entries.length !== 0
+      )
+      || (
+        latestSelfPurchaseGrant !== null
+        && (
+          latestSelfPurchaseGrant.amountUsdMicros
+            !== latestSelfPurchase.grantUsdMicros
+          || latestSelfPurchaseGrant.beneficiaryMemberId !== input.memberId
+        )
+      )
+    )
+  ) {
+    throw new TypeError(
+      "Hosted personal usage-credit purchase projection is inconsistent.",
+    );
+  }
+  const entryIds = [
+    ...new Set([
+      ...entries.map((entry) => entry.id),
+      ...(latestSelfPurchaseGrant ? [latestSelfPurchaseGrant.id] : []),
+    ]),
+  ];
   const debitRows = entryIds.length > 0
     ? await input.prisma.hostedUsageCreditEntry.groupBy({
         _sum: {
@@ -371,40 +443,104 @@ async function readHostedPlanUsageTopUpHistory(input: {
     );
   }
 
+  const topUps = entries.map((entry) => {
+    if (!entry.purchase) {
+      throw new TypeError("Hosted purchase grant projection is incomplete.");
+    }
+    return projectHostedPlanUsageTopUp({
+      entry,
+      source: entry.purchase.payerMemberId === input.memberId
+        ? "purchased_by_you"
+        : "added_for_you",
+      usedUsdMicros: usedByGrantEntryId.get(entry.id) ?? 0n,
+    });
+  });
+  const latestSelfPurchaseTopUp = latestSelfPurchaseGrant
+    ? projectHostedPlanUsageTopUp({
+        entry: latestSelfPurchaseGrant,
+        source: "purchased_by_you",
+        usedUsdMicros:
+          usedByGrantEntryId.get(latestSelfPurchaseGrant.id) ?? 0n,
+      })
+    : null;
+
   return {
     hasMore: totalCount > HOSTED_PLAN_USAGE_TOP_UP_HISTORY_MAX_ROWS,
-    topUps: entries.map((entry) => {
-      if (!entry.grant || !entry.purchase) {
-        throw new TypeError("Hosted purchase grant projection is incomplete.");
-      }
-      const usedUsdMicros = usedByGrantEntryId.get(entry.id) ?? 0n;
-      const adjustedUsdMicros =
-        entry.amountUsdMicros
-        - entry.grant.remainingUsdMicros
-        - usedUsdMicros;
-      if (
-        entry.amountUsdMicros <= 0n
-        || entry.grant.remainingUsdMicros < 0n
-        || usedUsdMicros < 0n
-        || adjustedUsdMicros < 0n
-      ) {
-        throw new TypeError("Hosted purchase grant amounts are inconsistent.");
-      }
-
-      return {
-        addedUsd: formatHostedPlanUsageUsdMicros(entry.amountUsdMicros),
-        adjustedUsd: formatHostedPlanUsageUsdMicros(adjustedUsdMicros),
-        creditedAt: entry.effectiveAt.toISOString(),
-        remainingUsd: formatHostedPlanUsageUsdMicros(
-          entry.grant.remainingUsdMicros,
-        ),
-        source: entry.purchase.payerMemberId === input.memberId
-          ? "purchased_by_you" as const
-          : "added_for_you" as const,
-        usedUsd: formatHostedPlanUsageUsdMicros(usedUsdMicros),
-      };
-    }),
+    latestSelfPurchase: latestSelfPurchase && latestSelfPurchaseStatus
+      ? latestSelfPurchaseStatus === "fulfilled"
+        ? {
+            amountUsd: formatHostedPlanUsageUsdMicros(
+              latestSelfPurchase.grantUsdMicros,
+            ),
+            attemptedAt: latestSelfPurchase.createdAt.toISOString(),
+            status: latestSelfPurchaseStatus,
+            topUp: requireHostedPlanUsageTopUp(latestSelfPurchaseTopUp),
+          }
+        : {
+            amountUsd: formatHostedPlanUsageUsdMicros(
+              latestSelfPurchase.grantUsdMicros,
+            ),
+            attemptedAt: latestSelfPurchase.createdAt.toISOString(),
+            status: latestSelfPurchaseStatus,
+            topUp: null,
+          }
+      : null,
+    topUps,
     totalCount,
+  };
+}
+
+function requireHostedPlanUsageTopUp(
+  topUp: HostedPlanUsageTopUp | null,
+): HostedPlanUsageSelfTopUp {
+  if (!topUp || topUp.source !== "purchased_by_you") {
+    throw new TypeError(
+      "Hosted fulfilled usage-credit purchase is missing its grant.",
+    );
+  }
+  return {
+    ...topUp,
+    source: topUp.source,
+  };
+}
+
+function projectHostedPlanUsageTopUp(input: {
+  entry: {
+    amountUsdMicros: bigint;
+    effectiveAt: Date;
+    grant: {
+      remainingUsdMicros: bigint;
+    } | null;
+    id: string;
+  };
+  source: "added_for_you" | "purchased_by_you";
+  usedUsdMicros: bigint;
+}): HostedPlanUsageTopUp {
+  if (!input.entry.grant) {
+    throw new TypeError("Hosted purchase grant projection is incomplete.");
+  }
+  const adjustedUsdMicros =
+    input.entry.amountUsdMicros
+    - input.entry.grant.remainingUsdMicros
+    - input.usedUsdMicros;
+  if (
+    input.entry.amountUsdMicros <= 0n
+    || input.entry.grant.remainingUsdMicros < 0n
+    || input.usedUsdMicros < 0n
+    || adjustedUsdMicros < 0n
+  ) {
+    throw new TypeError("Hosted purchase grant amounts are inconsistent.");
+  }
+
+  return {
+    addedUsd: formatHostedPlanUsageUsdMicros(input.entry.amountUsdMicros),
+    adjustedUsd: formatHostedPlanUsageUsdMicros(adjustedUsdMicros),
+    creditedAt: input.entry.effectiveAt.toISOString(),
+    remainingUsd: formatHostedPlanUsageUsdMicros(
+      input.entry.grant.remainingUsdMicros,
+    ),
+    source: input.source,
+    usedUsd: formatHostedPlanUsageUsdMicros(input.usedUsdMicros),
   };
 }
 

@@ -788,6 +788,11 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         await expect(statusRead).resolves.toMatchObject({
           topUpHistory: {
             hasMore: false,
+            latestSelfPurchase: {
+              amountUsd: "5.000000",
+              status: "reconciling",
+              topUp: null,
+            },
             topUps: [],
             totalCount: 0,
           },
@@ -800,6 +805,16 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         })).resolves.toMatchObject({
           topUpHistory: {
             hasMore: false,
+            latestSelfPurchase: {
+              amountUsd: "5.000000",
+              status: "fulfilled",
+              topUp: {
+                addedUsd: "5.000000",
+                remainingUsd: "5.000000",
+                source: "purchased_by_you",
+                usedUsd: "0.000000",
+              },
+            },
             topUps: [
               {
                 addedUsd: "5.000000",

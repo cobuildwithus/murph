@@ -53,6 +53,19 @@ describe("hosted plan usage contract", () => {
       status: "active",
       topUpHistory: {
         hasMore: false,
+        latestSelfPurchase: {
+          amountUsd: "5.000000",
+          attemptedAt: "2026-07-02T12:00:00.000Z",
+          status: "fulfilled",
+          topUp: {
+            addedUsd: "5.000000",
+            adjustedUsd: "0.000000",
+            creditedAt: "2026-07-02T12:00:00.000Z",
+            remainingUsd: "3.750000",
+            source: "purchased_by_you",
+            usedUsd: "1.250000",
+          },
+        },
         topUps: [
           {
             addedUsd: "5.000000",
@@ -97,6 +110,7 @@ describe("hosted plan usage contract", () => {
       ...status,
       topUpHistory: {
         hasMore: true,
+        latestSelfPurchase: status.topUpHistory.latestSelfPurchase,
         topUps: fiftyTopUps,
         totalCount: 51,
       },
@@ -110,8 +124,61 @@ describe("hosted plan usage contract", () => {
       ...status,
       topUpHistory: {
         hasMore: true,
+        latestSelfPurchase: status.topUpHistory.latestSelfPurchase,
         topUps: fiftyTopUps.slice(0, 49),
         totalCount: 51,
+      },
+    })).toThrow();
+    expect(parseHostedPlanUsageStatus({
+      ...status,
+      topUpHistory: {
+        ...status.topUpHistory,
+        latestSelfPurchase: {
+          amountUsd: "25.000000",
+          attemptedAt: "2026-07-03T12:00:00.000Z",
+          status: "payment_pending",
+          topUp: null,
+        },
+      },
+    })).toMatchObject({
+      topUpHistory: {
+        latestSelfPurchase: {
+          status: "payment_pending",
+          topUp: null,
+        },
+      },
+    });
+    expect(() => parseHostedPlanUsageStatus({
+      ...status,
+      topUpHistory: {
+        ...status.topUpHistory,
+        latestSelfPurchase: {
+          ...status.topUpHistory.latestSelfPurchase,
+          status: "payment_pending",
+        },
+      },
+    })).toThrow();
+    expect(() => parseHostedPlanUsageStatus({
+      ...status,
+      topUpHistory: {
+        ...status.topUpHistory,
+        latestSelfPurchase: {
+          ...status.topUpHistory.latestSelfPurchase,
+          topUp: null,
+        },
+      },
+    })).toThrow();
+    expect(() => parseHostedPlanUsageStatus({
+      ...status,
+      topUpHistory: {
+        ...status.topUpHistory,
+        latestSelfPurchase: {
+          ...status.topUpHistory.latestSelfPurchase,
+          topUp: {
+            ...status.topUpHistory.latestSelfPurchase.topUp,
+            source: "added_for_you",
+          },
+        },
       },
     })).toThrow();
   });

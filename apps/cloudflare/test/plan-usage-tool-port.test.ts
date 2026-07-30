@@ -90,6 +90,7 @@ describe("hosted plan usage tool port", () => {
       status: "active",
       topUpHistory: {
         hasMore: false,
+        latestSelfPurchase: null,
         topUps: [],
         totalCount: 0,
       },

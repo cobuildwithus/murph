@@ -927,6 +927,19 @@ text(JSON.stringify(result));
               status: 'active',
               topUpHistory: {
                 hasMore: true,
+                latestSelfPurchase: {
+                  amountUsd: '5.000000',
+                  attemptedAt: '2026-07-29T14:22:00.000Z',
+                  status: 'fulfilled',
+                  topUp: {
+                    addedUsd: '5.000000',
+                    adjustedUsd: '0.500000',
+                    creditedAt: '2026-07-29T14:23:42.000Z',
+                    remainingUsd: '3.500000',
+                    source: 'purchased_by_you',
+                    usedUsd: '1.000000',
+                  },
+                },
                 topUps: [
                   {
                     addedUsd: '5.000000',
@@ -967,6 +980,7 @@ text(JSON.stringify(result));
     ).toEqual(expect.arrayContaining([
       expect.stringContaining('"source":"purchased_by_you"'),
       expect.stringContaining('"source":"added_for_you"'),
+      expect.stringContaining('"status":"fulfilled"'),
       expect.stringContaining('"adjustedUsd":"0.500000"'),
       expect.stringContaining('"creditedAt":"2026-07-29T14:23:42.000Z"'),
       expect.stringContaining('"hasMore":true'),

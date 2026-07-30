@@ -128,10 +128,22 @@ describe('assistant hosted low-usage skill', () => {
       'Use only its beneficiary-scoped `topUpHistory`',
     )
     expect(normalizedSkill).toContain(
+      'questions, answer from `latestSelfPurchase` before looking at older `topUps`',
+    )
+    expect(normalizedSkill).toContain(
+      'Never let an older fulfilled grant override one of those newer statuses',
+    )
+    expect(normalizedSkill).toContain(
+      'A `fulfilled` latest purchase is posted only when its correlated `topUp` is present',
+    )
+    expect(normalizedSkill).toContain(
       '`purchased_by_you` means the current member funded that grant',
     )
     expect(normalizedSkill).toContain(
       '`added_for_you` means someone else funded it for the current member',
+    )
+    expect(normalizedSkill).toContain(
+      'a matching `added_for_you` row proves only that the grant posted',
     )
     expect(normalizedSkill).toContain(
       'Report `usedUsd` as usage debited from that grant',
@@ -143,7 +155,7 @@ describe('assistant hosted low-usage skill', () => {
       'If `hasMore` is true, say the returned rows are only the newest portion',
     )
     expect(normalizedSkill).toContain(
-      'If the expansion is missing or the read fails, say the history could not be verified',
+      'If the expansion is missing or the read fails, say the latest purchase and history could not be verified',
     )
     expect(skill).not.toContain('included-versus-purchased')
     expect(skill).not.toContain('Share only its')

@@ -63,22 +63,52 @@ const hostedPlanUsageUsdSchema = z
   .max(32)
   .regex(/^(?:0|[1-9]\d*)\.\d{6}$/u);
 
+const hostedPlanUsageTopUpSchema = z
+  .object({
+    addedUsd: hostedPlanUsageUsdSchema,
+    adjustedUsd: hostedPlanUsageUsdSchema,
+    creditedAt: z.string().datetime({ offset: true }),
+    remainingUsd: hostedPlanUsageUsdSchema,
+    source: z.enum(["added_for_you", "purchased_by_you"]),
+    usedUsd: hostedPlanUsageUsdSchema,
+  })
+  .strict();
+
+const hostedPlanUsageSelfTopUpSchema = hostedPlanUsageTopUpSchema.extend({
+  source: z.literal("purchased_by_you"),
+});
+
+const hostedPlanUsageLatestSelfPurchaseSchema = z.discriminatedUnion("status", [
+  z
+    .object({
+      amountUsd: hostedPlanUsageUsdSchema,
+      attemptedAt: z.string().datetime({ offset: true }),
+      status: z.literal("fulfilled"),
+      topUp: hostedPlanUsageSelfTopUpSchema,
+    })
+    .strict(),
+  z
+    .object({
+      amountUsd: hostedPlanUsageUsdSchema,
+      attemptedAt: z.string().datetime({ offset: true }),
+      status: z.enum([
+        "checkout_open",
+        "payment_pending",
+        "expired",
+        "payment_failed",
+        "reconciling",
+      ]),
+      topUp: z.null(),
+    })
+    .strict(),
+]);
+
 const hostedPlanUsageTopUpHistorySchema = z
   .object({
     hasMore: z.boolean(),
+    latestSelfPurchase: hostedPlanUsageLatestSelfPurchaseSchema.nullable(),
     topUps: z
-      .array(
-        z
-          .object({
-            addedUsd: hostedPlanUsageUsdSchema,
-            adjustedUsd: hostedPlanUsageUsdSchema,
-            creditedAt: z.string().datetime({ offset: true }),
-            remainingUsd: hostedPlanUsageUsdSchema,
-            source: z.enum(["added_for_you", "purchased_by_you"]),
-            usedUsd: hostedPlanUsageUsdSchema,
-          })
-          .strict(),
-      )
+      .array(hostedPlanUsageTopUpSchema)
       .max(HOSTED_PLAN_USAGE_TOP_UP_HISTORY_MAX_ROWS),
     totalCount: z.number().int().nonnegative(),
   })

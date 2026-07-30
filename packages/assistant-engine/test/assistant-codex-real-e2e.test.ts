@@ -846,6 +846,19 @@ describeRealCodex('real Codex private top-up history e2e', () => {
               status: 'active',
               topUpHistory: {
                 hasMore: true,
+                latestSelfPurchase: {
+                  amountUsd: '5.000000',
+                  attemptedAt: '2026-07-29T14:22:00.000Z',
+                  status: 'fulfilled',
+                  topUp: {
+                    addedUsd: '5.000000',
+                    adjustedUsd: '0.500000',
+                    creditedAt: '2026-07-29T14:23:42.000Z',
+                    remainingUsd: '3.500000',
+                    source: 'purchased_by_you',
+                    usedUsd: '1.000000',
+                  },
+                },
                 topUps: [
                   {
                     addedUsd: '5.000000',
@@ -902,9 +915,108 @@ describeRealCodex('real Codex private top-up history e2e', () => {
         expect(result.finalMessage).toMatch(
           /purchased by you|you (?:bought|funded|purchased)/iu,
         )
+        expect(result.finalMessage).toMatch(/post/iu)
         expect(result.finalMessage).toMatch(/added for you|someone else/iu)
         expect(result.finalMessage).toMatch(
           /51|newest 50|older.+not shown|truncat/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
+    'does not let an older fulfilled grant confirm a newer pending purchase',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-top-up-pending-e2e-'),
+      )
+      const requests: HostedPlanUsageToolRequest[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'hosted-low-usage',
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildHostedPlanUsageDeveloperInstructions(),
+          dynamicTools: [MURPH_PLAN_USAGE_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          hostedToolContext: buildRealPlanUsageToolContext(async (request) => {
+            requests.push(request)
+            return {
+              accessKind: 'paid',
+              forecast: null,
+              generatedAt: '2026-07-29T20:00:00.000Z',
+              periodEnd: '2026-08-01T00:00:00.000Z',
+              periodKind: 'monthly',
+              periodStart: '2026-07-01T00:00:00.000Z',
+              planCode: 'launch_monthly',
+              planName: 'Pulse',
+              recommendedAction: null,
+              remainingPercent: 9,
+              status: 'active',
+              topUpHistory: {
+                hasMore: false,
+                latestSelfPurchase: {
+                  amountUsd: '25.000000',
+                  attemptedAt: '2026-07-29T19:44:00.000Z',
+                  status: 'payment_pending',
+                  topUp: null,
+                },
+                topUps: [
+                  {
+                    addedUsd: '5.000000',
+                    adjustedUsd: '0.000000',
+                    creditedAt: '2026-07-29T14:23:42.000Z',
+                    remainingUsd: '3.500000',
+                    source: 'purchased_by_you',
+                    usedUsd: '1.500000',
+                  },
+                ],
+                totalCount: 1,
+              },
+              usedPercent: 91,
+            }
+          }),
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt:
+            'I just bought the $25 usage top-up. Did it post?',
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const toolCalls = actions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_PLAN_USAGE_TOOL.name
+        )
+
+        expect(toolCalls).toHaveLength(1)
+        expect(requests).toEqual([{ includeTopUpHistory: true }])
+        expect(result.finalMessage).toMatch(/pending|not (?:yet )?(?:posted|verified)/iu)
+        expect(result.finalMessage).toMatch(/\$25(?:\.00)?/u)
+        expect(result.finalMessage).not.toMatch(
+          /\$25(?:\.00)? top-up (?:has )?posted/iu,
         )
       } finally {
         await removeRealCodexTemporaryPaths([

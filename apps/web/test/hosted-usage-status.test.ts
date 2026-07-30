@@ -780,6 +780,20 @@ describe("readHostedPersonalAiUsageStatus", () => {
       usageCreditLedgerVersion: 4n,
     }));
     const prisma = buildPrisma(null);
+    prisma.hostedUsageCreditPurchase.findFirst.mockResolvedValue({
+      createdAt: new Date("2026-07-29T14:22:00.000Z"),
+      entries: [
+        {
+          amountUsdMicros: 5_000_000n,
+          beneficiaryMemberId: "member_top_up_history",
+          effectiveAt: new Date("2026-07-29T14:23:42.000Z"),
+          grant: { remainingUsdMicros: 3_500_000n },
+          id: "grant_self",
+        },
+      ],
+      grantUsdMicros: 5_000_000n,
+      status: "fulfilled",
+    });
     prisma.hostedUsageCreditEntry.count.mockResolvedValue(2);
     prisma.hostedUsageCreditEntry.findMany.mockResolvedValue([
       {
@@ -819,6 +833,19 @@ describe("readHostedPersonalAiUsageStatus", () => {
     expect(result).toMatchObject({
       topUpHistory: {
         hasMore: false,
+        latestSelfPurchase: {
+          amountUsd: "5.000000",
+          attemptedAt: "2026-07-29T14:22:00.000Z",
+          status: "fulfilled",
+          topUp: {
+            addedUsd: "5.000000",
+            adjustedUsd: "0.300000",
+            creditedAt: "2026-07-29T14:23:42.000Z",
+            remainingUsd: "3.500000",
+            source: "purchased_by_you",
+            usedUsd: "1.200000",
+          },
+        },
         topUps: [
           {
             addedUsd: "5.000000",
@@ -838,6 +865,39 @@ describe("readHostedPersonalAiUsageStatus", () => {
           },
         ],
         totalCount: 2,
+      },
+    });
+    expect(JSON.stringify(result)).not.toMatch(/member_|grant_/u);
+    expect(prisma.hostedUsageCreditPurchase.findFirst).toHaveBeenCalledWith({
+      orderBy: [
+        { createdAt: "desc" },
+        { id: "desc" },
+      ],
+      select: {
+        createdAt: true,
+        entries: {
+          select: {
+            amountUsdMicros: true,
+            beneficiaryMemberId: true,
+            effectiveAt: true,
+            grant: {
+              select: {
+                remainingUsdMicros: true,
+              },
+            },
+            id: true,
+          },
+          take: 2,
+          where: {
+            kind: "purchase_grant",
+          },
+        },
+        grantUsdMicros: true,
+        status: true,
+      },
+      where: {
+        beneficiaryMemberId: "member_top_up_history",
+        payerMemberId: "member_top_up_history",
       },
     });
     expect(prisma.hostedUsageCreditEntry.count).toHaveBeenCalledWith({
@@ -867,6 +927,162 @@ describe("readHostedPersonalAiUsageStatus", () => {
     });
   });
 
+  it("does not mistake an older fulfilled grant for a newer pending purchase", async () => {
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision());
+    const prisma = buildPrisma(null);
+    prisma.hostedUsageCreditPurchase.findFirst.mockResolvedValue({
+      createdAt: new Date("2026-07-29T19:44:00.000Z"),
+      entries: [],
+      grantUsdMicros: 25_000_000n,
+      status: "payment_pending",
+    });
+    prisma.hostedUsageCreditEntry.findMany.mockResolvedValue([
+      {
+        amountUsdMicros: 5_000_000n,
+        effectiveAt: new Date("2026-07-29T14:23:42.000Z"),
+        grant: { remainingUsdMicros: 3_500_000n },
+        id: "grant_older",
+        purchase: { payerMemberId: "member_pending_purchase" },
+      },
+    ]);
+    prisma.hostedUsageCreditEntry.count.mockResolvedValue(1);
+
+    await expect(readHostedPersonalAiUsageStatus({
+      includeTopUpHistory: true,
+      memberId: "member_pending_purchase",
+      now: NOW,
+      prisma: prisma as never,
+      publicBaseUrl: null,
+    })).resolves.toMatchObject({
+      topUpHistory: {
+        latestSelfPurchase: {
+          amountUsd: "25.000000",
+          attemptedAt: "2026-07-29T19:44:00.000Z",
+          status: "payment_pending",
+          topUp: null,
+        },
+        topUps: [
+          {
+            addedUsd: "5.000000",
+            source: "purchased_by_you",
+          },
+        ],
+      },
+    });
+  });
+
+  it("returns a failed latest purchase without attaching an older grant", async () => {
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision());
+    const prisma = buildPrisma(null);
+    prisma.hostedUsageCreditPurchase.findFirst.mockResolvedValue({
+      createdAt: new Date("2026-07-29T20:00:00.000Z"),
+      entries: [],
+      grantUsdMicros: 10_000_000n,
+      status: "payment_failed",
+    });
+
+    await expect(readHostedPersonalAiUsageStatus({
+      includeTopUpHistory: true,
+      memberId: "member_failed_purchase",
+      now: NOW,
+      prisma: prisma as never,
+      publicBaseUrl: null,
+    })).resolves.toMatchObject({
+      topUpHistory: {
+        hasMore: false,
+        latestSelfPurchase: {
+          amountUsd: "10.000000",
+          status: "payment_failed",
+          topUp: null,
+        },
+        topUps: [],
+        totalCount: 0,
+      },
+    });
+  });
+
+  it("returns a pending latest purchase even when no top-up has posted", async () => {
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision());
+    const prisma = buildPrisma(null);
+    prisma.hostedUsageCreditPurchase.findFirst.mockResolvedValue({
+      createdAt: new Date("2026-07-29T20:05:00.000Z"),
+      entries: [],
+      grantUsdMicros: 5_000_000n,
+      status: "created",
+    });
+
+    await expect(readHostedPersonalAiUsageStatus({
+      includeTopUpHistory: true,
+      memberId: "member_reconciling_purchase",
+      now: NOW,
+      prisma: prisma as never,
+      publicBaseUrl: null,
+    })).resolves.toMatchObject({
+      topUpHistory: {
+        latestSelfPurchase: {
+          amountUsd: "5.000000",
+          status: "reconciling",
+          topUp: null,
+        },
+        topUps: [],
+      },
+    });
+  });
+
+  it("fails closed when a non-fulfilled purchase already has a grant", async () => {
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision());
+    const prisma = buildPrisma(null);
+    prisma.hostedUsageCreditPurchase.findFirst.mockResolvedValue({
+      createdAt: new Date("2026-07-29T20:05:00.000Z"),
+      entries: [
+        {
+          amountUsdMicros: 5_000_000n,
+          beneficiaryMemberId: "member_inconsistent_purchase",
+          effectiveAt: new Date("2026-07-29T20:05:01.000Z"),
+          grant: { remainingUsdMicros: 5_000_000n },
+          id: "grant_inconsistent",
+        },
+      ],
+      grantUsdMicros: 5_000_000n,
+      status: "payment_pending",
+    });
+
+    await expect(readHostedPersonalAiUsageStatus({
+      includeTopUpHistory: true,
+      memberId: "member_inconsistent_purchase",
+      now: NOW,
+      prisma: prisma as never,
+      publicBaseUrl: null,
+    })).rejects.toThrow(
+      "Hosted personal usage-credit purchase projection is inconsistent.",
+    );
+
+    prisma.hostedUsageCreditPurchase.findFirst.mockResolvedValue({
+      createdAt: new Date("2026-07-29T20:05:00.000Z"),
+      entries: [
+        {
+          amountUsdMicros: 5_000_000n,
+          beneficiaryMemberId: "member_other",
+          effectiveAt: new Date("2026-07-29T20:05:01.000Z"),
+          grant: { remainingUsdMicros: 5_000_000n },
+          id: "grant_wrong_beneficiary",
+        },
+      ],
+      grantUsdMicros: 5_000_000n,
+      status: "fulfilled",
+    });
+
+    await expect(readHostedPersonalAiUsageStatus({
+      includeTopUpHistory: true,
+      memberId: "member_inconsistent_purchase",
+      now: NOW,
+      prisma: prisma as never,
+      publicBaseUrl: null,
+    })).rejects.toThrow(
+      "Hosted personal usage-credit purchase projection is inconsistent.",
+    );
+  });
+
   it("reads aggregate usage and top-up history in one repeatable snapshot", async () => {
     mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision());
     const tx = buildPrisma(null);
@@ -892,6 +1108,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
     );
     expect(tx.hostedUsageCreditEntry.findMany).toHaveBeenCalledOnce();
     expect(tx.hostedUsageCreditEntry.count).toHaveBeenCalledOnce();
+    expect(tx.hostedUsageCreditPurchase.findFirst).toHaveBeenCalledOnce();
   });
 
   it("returns the newest 50 top-ups with exact over-limit metadata", async () => {
@@ -983,6 +1200,9 @@ function buildPrisma(firstUsageAt: Date | null) {
       count: vi.fn(async () => 0),
       findMany: vi.fn(async (): Promise<unknown[]> => []),
       groupBy: vi.fn(async (): Promise<unknown[]> => []),
+    },
+    hostedUsageCreditPurchase: {
+      findFirst: vi.fn(async (): Promise<unknown> => null),
     },
   };
 }

@@ -136,6 +136,19 @@ describe("assistant plan usage tool", () => {
         status: "active" as const,
         topUpHistory: {
           hasMore: false,
+          latestSelfPurchase: {
+            amountUsd: "5.000000",
+            attemptedAt: "2026-07-02T11:59:00.000Z",
+            status: "fulfilled" as const,
+            topUp: {
+              addedUsd: "5.000000",
+              adjustedUsd: "0.000000",
+              creditedAt: "2026-07-02T12:00:00.000Z",
+              remainingUsd: "3.750000",
+              source: "purchased_by_you" as const,
+              usedUsd: "1.250000",
+            },
+          },
           topUps: [
             {
               addedUsd: "5.000000",
@@ -169,6 +182,9 @@ describe("assistant plan usage tool", () => {
     );
     expect(result.rpcResult.contentItems[0]?.text).toContain(
       '"source":"purchased_by_you"',
+    );
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      '"status":"fulfilled"',
     );
   });
 

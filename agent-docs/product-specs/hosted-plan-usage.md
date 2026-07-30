@@ -1,6 +1,6 @@
 # Hosted Plan Usage And Subscription Actions
 
-Last verified: 2026-07-27
+Last verified: 2026-07-29
 Status: Implemented current-state contract
 
 ## Goal
@@ -53,14 +53,21 @@ port exists. The original empty request remains valid and keeps the original
 response shape. The current runtime opts into a nullable
 `subscriptionActionQuote`; Web omits that field for callers that do not request
 it. An optional `includeTopUpHistory: true` request similarly adds only the
-callback-bound member's beneficiary-scoped purchase grants. Each row contains
-the credited timestamp, decimal added, usage-debited, non-usage-adjusted, and
-remaining USD values, plus whether the bound member funded it or someone added
-it for them. The projection exposes no member, purchase, ledger, Stripe, or
-payment identifier. It reports an exact total count, returns at most the newest
-50 grants, and marks truncation with `hasMore`. Web omits this expansion for
-ordinary reads and for `group_not_supported`. Billing truth and mutation
-authority stay in `apps/web`.
+latest self-funded personal purchase attempt and the callback-bound member's
+beneficiary-scoped purchase grants. The attempt exposes its intended credit
+amount, creation time, and existing coarse public lifecycle status. Only a
+fulfilled attempt correlated to its purchase grant includes a posted top-up;
+an open, pending, reconciling, failed, or expired attempt carries no grant, so
+an older fulfilled grant cannot falsely confirm that newer attempt. Each posted
+row contains the credited timestamp, decimal added, usage-debited,
+non-usage-adjusted, and remaining USD values, plus whether the bound member
+funded it or someone added it for them. The projection exposes no member,
+purchase, ledger, Stripe, or payment identifier. It reports an exact total
+grant count, returns at most the newest 50 grants, and marks truncation with
+`hasMore`. Web derives the aggregate, latest attempt, and grants within one
+repeatable-read snapshot and omits this expansion for ordinary reads and for
+`group_not_supported`. Billing truth and mutation authority stay in
+`apps/web`.
 
 `@murphai/hosted-execution/subscription` owns the separate strict action
 contract. Cloudflare carries it through `subscriptionToolPort` over the same
@@ -174,6 +181,14 @@ Assistant policy uses a matching `subscriptionActionQuote` only to disclose
 current terms before seeking an explicit choice. The read-only
 `murph.plan_usage` tool cannot start checkout, upgrade a plan, grant credit, or
 claim that a billing change happened.
+
+For a question about a just-attempted personal top-up, assistant policy checks
+`latestSelfPurchase` before historical grants. `fulfilled` plus its correlated
+top-up is the only posted result. `checkout_open` remains incomplete;
+`payment_pending` and `reconciling` remain unverified; `payment_failed` failed;
+and `expired` expired. A missing latest attempt cannot be inferred from overall
+usage percentage or older grants. Historical `added_for_you` grants remain
+beneficiary history and never reveal or guess the payer.
 
 Family Settings may expose the same fixed-pack dialog beside each active member
 to the current active owner. That owner pays through the Family billing
