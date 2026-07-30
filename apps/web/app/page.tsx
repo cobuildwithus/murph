@@ -23,7 +23,7 @@ import { SignupCtaSection } from "@/src/components/homepage/signup-cta-section";
 import { TogetherSection } from "@/src/components/homepage/together-section";
 import { TrustSection } from "@/src/components/homepage/trust-section";
 import type { HomepageSignupCta } from "@/src/components/homepage/types";
-import { HomepageAuthRuntimeProvider } from "@/src/components/hosted-onboarding/auth-dialog-provider";
+import { HomepageAuthRuntimeProvider } from "@/src/components/hosted-onboarding/homepage-auth-runtime-provider";
 import { fetchHeroContactInfo } from "@/src/lib/hero-contact-info";
 import {
   formatHostedLandingTrialDurationPhrase,

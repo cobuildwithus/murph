@@ -1,82 +1,58 @@
 "use client";
 
-import { usePrivy } from "@privy-io/react-auth";
 import { track } from "@vercel/analytics";
-import { useEffect, useState, type ComponentProps } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ComponentProps,
+} from "react";
 
-import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
 import { Spinner } from "@/src/components/ui/spinner";
 
 import { HostedAuthPanel } from "./hosted-auth-panel";
 import { HostedPrivyProvider } from "./privy-provider";
 
+const HOSTED_PRIVY_SLOW_READY_NOTICE_MS = 1_500;
 const HOSTED_PRIVY_READY_TIMEOUT_MS = 10_000;
 const HOSTED_PRIVY_RESTART_TIMEOUT_COUNT = 2;
 
 type HostedAuthPanelProps = ComponentProps<typeof HostedAuthPanel>;
 type HostedPrivyReadinessEvent =
-  | "hosted_auth_privy_ready_continue_waiting"
   | "hosted_auth_privy_ready_restart"
   | "hosted_auth_privy_ready_timeout";
 
 export function HostedPrivyReadinessState({
-  onKeepWaiting,
   onRestart,
   restartAvailable,
-  timedOut,
 }: {
-  onKeepWaiting: () => void;
   onRestart: () => void;
   restartAvailable: boolean;
-  timedOut: boolean;
 }) {
-  if (!timedOut) {
-    return (
-      <div
-        aria-atomic="true"
-        aria-live="polite"
-        role="status"
-        className="flex items-start gap-3 rounded-xl border border-border bg-muted/30 px-4 py-3"
-      >
-        <Spinner aria-hidden="true" className="mt-0.5 shrink-0" />
-        <div className="min-w-0">
-          <p className="text-sm font-medium text-foreground">
-            Preparing secure sign in
-          </p>
-          <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-            This should take only a moment.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <Alert>
-      <AlertTitle>Sign in is taking longer</AlertTitle>
-      <AlertDescription className="space-y-3">
-        <p>
-          Nothing was submitted. You can keep waiting
-          {restartAvailable ? " or restart secure sign in." : "."}
-        </p>
-        <div className="flex flex-wrap gap-2">
-          <Button onClick={onKeepWaiting} size="sm" type="button">
-            Keep waiting
-          </Button>
-          {restartAvailable ? (
-            <Button
-              onClick={onRestart}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              Restart sign in
-            </Button>
-          ) : null}
-        </div>
-      </AlertDescription>
-    </Alert>
+    <div
+      aria-atomic="true"
+      aria-live="polite"
+      role="status"
+      className="flex flex-wrap items-center gap-x-2 gap-y-1 px-1 text-xs leading-relaxed text-muted-foreground"
+    >
+      <Spinner aria-hidden="true" className="size-3.5 shrink-0" />
+      <span>
+        Your selection is saved while secure sign in finishes loading.
+      </span>
+      {restartAvailable ? (
+        <Button
+          className="h-auto p-0 text-xs"
+          onClick={onRestart}
+          size="xs"
+          type="button"
+          variant="link"
+        >
+          Restart sign in
+        </Button>
+      ) : null}
+    </div>
   );
 }
 
@@ -116,33 +92,57 @@ export function HostedAuthPanelWithinPrivy({
   onRestartPrivy: () => void;
   privyAttempt: number;
 }) {
+  const [authActionActive, setAuthActionActive] = useState(false);
+  const [restartRequested, setRestartRequested] = useState(false);
+
+  function handleRestart() {
+    setRestartRequested(true);
+    onRestartPrivy();
+  }
+
   return (
-    <HostedPrivyReadyBoundary
-      {...props}
-      attempt={privyAttempt}
-      onRestart={onRestartPrivy}
-    />
+    <>
+      {!restartRequested ? (
+        <HostedAuthPanel
+          {...props}
+          onPrivyWaitChange={setAuthActionActive}
+        />
+      ) : null}
+      {!restartRequested && authActionActive ? (
+        <HostedPrivyReadinessFeedback
+          attempt={privyAttempt}
+          onRestart={handleRestart}
+        />
+      ) : null}
+    </>
   );
 }
 
-function HostedPrivyReadyBoundary({
+function HostedPrivyReadinessFeedback({
   attempt,
   onRestart,
-  ...props
-}: HostedAuthPanelProps & {
+}: {
   attempt: number;
   onRestart: () => void;
 }) {
-  const { ready } = usePrivy();
-  const [timedOut, setTimedOut] = useState(false);
+  const [noticeVisible, setNoticeVisible] = useState(false);
   const [timeoutCount, setTimeoutCount] = useState(0);
+  const timeoutCountRef = useRef(0);
 
   useEffect(() => {
-    if (ready || timedOut) return;
+    const timeoutId = window.setTimeout(() => {
+      setNoticeVisible(true);
+    }, HOSTED_PRIVY_SLOW_READY_NOTICE_MS);
+
+    return () => window.clearTimeout(timeoutId);
+  }, []);
+
+  useEffect(() => {
+    if (timeoutCount >= HOSTED_PRIVY_RESTART_TIMEOUT_COUNT) return;
 
     const timeoutId = window.setTimeout(() => {
-      const nextTimeoutCount = timeoutCount + 1;
-      setTimedOut(true);
+      const nextTimeoutCount = timeoutCountRef.current + 1;
+      timeoutCountRef.current = nextTimeoutCount;
       setTimeoutCount(nextTimeoutCount);
       reportHostedPrivyReadiness(
         "hosted_auth_privy_ready_timeout",
@@ -152,22 +152,10 @@ function HostedPrivyReadyBoundary({
     }, HOSTED_PRIVY_READY_TIMEOUT_MS);
 
     return () => window.clearTimeout(timeoutId);
-  }, [attempt, ready, timedOut, timeoutCount]);
+  }, [attempt, timeoutCount]);
 
-  if (ready) {
-    return <HostedAuthPanel {...props} />;
-  }
-
-  return (
+  return noticeVisible ? (
     <HostedPrivyReadinessState
-      onKeepWaiting={() => {
-        reportHostedPrivyReadiness(
-          "hosted_auth_privy_ready_continue_waiting",
-          attempt,
-          timeoutCount,
-        );
-        setTimedOut(false);
-      }}
       onRestart={() => {
         reportHostedPrivyReadiness(
           "hosted_auth_privy_ready_restart",
@@ -179,9 +167,8 @@ function HostedPrivyReadyBoundary({
       restartAvailable={
         timeoutCount >= HOSTED_PRIVY_RESTART_TIMEOUT_COUNT
       }
-      timedOut={timedOut}
     />
-  );
+  ) : null;
 }
 
 function reportHostedPrivyReadiness(

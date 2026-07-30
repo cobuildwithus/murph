@@ -32,6 +32,7 @@ import { TrialBillingBanner } from "@/src/components/home/trial-billing-banner";
 import { ProfileStats } from "@/src/components/overview/profile-stats";
 import { HostedResumableAuthState } from "@/src/components/hosted-onboarding/hosted-auth-panel";
 import { HostedPrivyReadinessState } from "@/src/components/hosted-onboarding/hosted-auth-panel-island";
+import { EmailIcon } from "@/src/components/homepage/email-icon";
 import {
   resolveAuthDialogHeaderPresentation,
 } from "@/src/components/hosted-onboarding/auth-dialog";
@@ -550,37 +551,44 @@ export function ComponentsContent() {
             data-design-homepage-auth-transitions
           >
             <p className="text-sm text-muted-foreground">
-              Secure sign in exposes its methods only after the provider is
-              ready. Account completion then stays on the active production
-              action, carrying consent status directly into the next view.
+              Secure sign in keeps the ordinary methods visible while the
+              provider initializes. A selected method owns the pending state
+              immediately, then account completion stays on that production
+              action through the next view.
             </p>
             <div
               className="grid items-start gap-5 lg:grid-cols-2"
               data-design-homepage-auth-readiness
               inert
             >
-              <DialogPreviewFrame label="Provider initialization">
+              <DialogPreviewFrame label="Queued action delay">
                 <HostedPrivyReadinessState
-                  onKeepWaiting={() => {}}
                   onRestart={() => {}}
                   restartAvailable={false}
-                  timedOut={false}
-                />
-              </DialogPreviewFrame>
-              <DialogPreviewFrame label="First provider delay">
-                <HostedPrivyReadinessState
-                  onKeepWaiting={() => {}}
-                  onRestart={() => {}}
-                  restartAvailable={false}
-                  timedOut
                 />
               </DialogPreviewFrame>
               <DialogPreviewFrame label="Repeated provider delay">
                 <HostedPrivyReadinessState
-                  onKeepWaiting={() => {}}
                   onRestart={() => {}}
                   restartAvailable
-                  timedOut
+                />
+              </DialogPreviewFrame>
+              <DialogPreviewFrame label="Enabled alternate methods">
+                <div className="grid grid-cols-2 gap-3">
+                  <HostedTelegramAuthButtonPresentation onClick={() => {}} />
+                  <HostedInlineAuthButton
+                    icon={<EmailIcon className="size-5" />}
+                    onClick={() => {}}
+                  >
+                    Email
+                  </HostedInlineAuthButton>
+                </div>
+              </DialogPreviewFrame>
+              <DialogPreviewFrame label="Telegram ready handoff">
+                <HostedTelegramAuthButtonPresentation
+                  active
+                  onClick={() => {}}
+                  readyToContinue
                 />
               </DialogPreviewFrame>
             </div>

@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   },
   runtimeModuleLoad: vi.fn(),
   runtimeMount: vi.fn(),
+  runtimeUnmount: vi.fn(),
 }));
 
 vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
@@ -39,6 +40,7 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-runtime", () => {
     }) {
       useEffect(() => {
         mocks.runtimeMount();
+        return () => mocks.runtimeUnmount();
       }, []);
 
       return children({
@@ -67,12 +69,14 @@ vi.mock("next/link", () => ({
 
 afterEach(() => {
   vi.clearAllMocks();
+  vi.useRealTimers();
   mocks.authDialogProps = null;
 });
 
 test("a homepage click before idle opens immediately and starts the shared runtime", async () => {
+  vi.useFakeTimers();
   const { HomepageAuthRuntimeProvider } = await import(
-    "@/src/components/hosted-onboarding/auth-dialog-provider"
+    "@/src/components/hosted-onboarding/homepage-auth-runtime-provider"
   );
   const { LandingAuthActions } = await import("@/app/auth-controls");
   const rendered = await renderClientComponent(
@@ -89,20 +93,10 @@ test("a homepage click before idle opens immediately and starts the shared runti
   );
 
   try {
-    await act(async () => {
+    act(() => {
       rendered.button.dispatchEvent(
         new rendered.window.Event("click", { bubbles: true }),
       );
-    });
-
-    expect(mocks.authDialogProps).toMatchObject({
-      open: true,
-      privyRuntime: { kind: "loading" },
-    });
-
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
     });
 
     expect(mocks.runtimeModuleLoad).toHaveBeenCalledTimes(1);
@@ -111,6 +105,13 @@ test("a homepage click before idle opens immediately and starts the shared runti
       open: true,
       privyRuntime: { kind: "configured" },
     });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_200);
+    });
+
+    expect(mocks.runtimeMount).toHaveBeenCalledTimes(1);
+    expect(mocks.runtimeUnmount).not.toHaveBeenCalled();
   } finally {
     await rendered.cleanup();
   }

@@ -656,9 +656,10 @@ describe("HostedPhoneAuth", () => {
       expect(mocks.sendCode).not.toHaveBeenCalled();
       assert.equal(
         container.querySelector("[data-pending-action]")?.getAttribute("data-pending-action"),
-        "",
+        "send-code",
       );
-      assert.doesNotMatch(container.textContent ?? "", /Sending code\.\.\./);
+      assert.match(container.textContent ?? "", /Sending code\.\.\./);
+      assert.equal(sendCodeButton.disabled, true);
 
       const updatePrivyReady = readyHarnessState.setPrivyReady;
       assert.ok(updatePrivyReady);
@@ -3156,6 +3157,30 @@ describe("HostedPhoneAuth", () => {
     assert.doesNotMatch(phoneEntryMarkup, /Text me a sign-in code/);
     assert.match(codeEntryMarkup, /We texted the latest code to \*\*\* 2671\./);
     assert.match(codeEntryMarkup, />Verify phone</);
+  });
+
+  it("shows queued SMS progress inside the real send-code button", async () => {
+    const { HostedPhoneEntryStep } = await import(
+      "@/src/components/hosted-onboarding/hosted-phone-auth-step-views"
+    );
+    const markup = renderToStaticMarkup(
+      React.createElement(HostedPhoneEntryStep, {
+        intent: "auth",
+        pendingAction: "send-code",
+        phoneCountryOptions: [US_PHONE_COUNTRY],
+        phoneNumber: "4155552671",
+        sendCodeDisabled: true,
+        selectedPhoneCountry: US_PHONE_COUNTRY,
+        onPhoneCountryChange() {},
+        onPhoneNumberChange() {},
+        onSubmitPhoneEntry() {},
+      }),
+    );
+
+    assert.match(markup, /aria-busy="true"/);
+    assert.match(markup, /data-slot="spinner"/);
+    assert.match(markup, /Sending code\.\.\./);
+    assert.match(markup, /disabled=""/);
   });
 
   it("builds the active verification attempt with a masked phone hint", async () => {

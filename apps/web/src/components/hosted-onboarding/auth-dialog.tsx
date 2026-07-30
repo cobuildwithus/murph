@@ -30,10 +30,7 @@ type WindowWithIdleCallback = typeof window & {
 let hostedAuthPanelModule: HostedAuthPanelModule | null = null;
 let hostedAuthPanelLoadPromise: Promise<HostedAuthPanelModule> | null = null;
 
-export type AuthDialogPrivyRuntimeState =
-  | HostedAuthRuntimeState
-  | { kind: "loading" }
-  | { kind: "error"; message: string };
+export type AuthDialogPrivyRuntimeState = HostedAuthRuntimeState;
 
 export const DEFAULT_AUTH_DIALOG_TITLE = "Log in or sign up";
 export const DEFAULT_AUTH_DIALOG_DESCRIPTION =
@@ -218,12 +215,9 @@ export function AuthDialog({
 
   const dismissLocked = panelView !== "auth";
   const consentPresentation = panelView === "consent";
-  const runtimeLoading = privyRuntime?.kind === "loading";
-  const runtimeError = privyRuntime?.kind === "error"
-    ? privyRuntime.message
-    : privyRuntime?.kind === "unconfigured"
-      ? "Sign in is not configured yet."
-      : null;
+  const runtimeError = privyRuntime?.kind === "unconfigured"
+    ? "Sign in is not configured yet."
+    : null;
 
   function handleOpenChange(nextOpen: boolean) {
     if (!nextOpen && dismissLocked) {
@@ -260,9 +254,7 @@ export function AuthDialog({
           panelView={panelView}
           title={title}
         />
-        {runtimeLoading ? (
-          <AuthPanelSkeleton />
-        ) : runtimeError ? (
+        {!open ? null : runtimeError ? (
           <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
             {runtimeError}
           </div>

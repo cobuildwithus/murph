@@ -5,6 +5,7 @@ import { useId, type FormEvent } from "react";
 import { Button } from "@/src/components/ui/button";
 import { Label } from "@/src/components/ui/label";
 import { PhoneNumberInput } from "@/src/components/ui/phone-number-input";
+import { Spinner } from "@/src/components/ui/spinner";
 
 import { HostedUseDifferentNumberButton } from "./hosted-phone-auth-use-different-number-button";
 import { HostedVerificationCodeStep } from "./hosted-verification-code-step";
@@ -31,15 +32,19 @@ export function HostedInviteMaskedPhoneStep({
     <div className="flex flex-col gap-4">
       <HostedInviteMaskedPhoneSummary phoneHint={phoneHint} />
       <Button
+        aria-busy={pendingAction === "send-code"}
         type="button"
         disabled={disabled}
         size="xl"
         className="w-full"
         onClick={onSendCode}
       >
-        {pendingAction === "send-code"
-          ? "Sending code..."
-          : "Send verification code"}
+        {pendingAction === "send-code" ? (
+          <>
+            <Spinner aria-hidden="true" />
+            Sending code...
+          </>
+        ) : "Send verification code"}
       </Button>
       <HostedUseDifferentNumberButton
         disabled={disabled}
@@ -123,14 +128,18 @@ export function HostedPhoneEntryStep({
       </div>
       <div className="flex flex-wrap gap-3">
         <Button
+          aria-busy={pendingAction === "send-code"}
           type="submit"
           disabled={sendCodeDisabled}
           size="xl"
           className="w-full"
         >
-          {pendingAction === "send-code"
-            ? "Sending code..."
-            : "Send verification code"}
+          {pendingAction === "send-code" ? (
+            <>
+              <Spinner aria-hidden="true" />
+              Sending code...
+            </>
+          ) : "Send verification code"}
         </Button>
       </div>
     </form>

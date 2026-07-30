@@ -96,7 +96,7 @@ afterEach(async () => {
 test("warms one shared Privy runtime after homepage idle and reuses it on click", async () => {
   vi.useFakeTimers();
   const { HomepageAuthRuntimeProvider } = await import(
-    "@/src/components/hosted-onboarding/auth-dialog-provider"
+    "@/src/components/hosted-onboarding/homepage-auth-runtime-provider"
   );
   const { LandingAuthActions } = await import("@/app/auth-controls");
   const rendered = await renderClientComponent(
@@ -114,7 +114,6 @@ test("warms one shared Privy runtime after homepage idle and reuses it on click"
   );
   cleanupRender = rendered.cleanup;
 
-  expect(mocks.runtimeModuleLoad).not.toHaveBeenCalled();
   expect(mocks.runtimeMount).not.toHaveBeenCalled();
   expect(mocks.authDialogProps).toMatchObject({ open: false });
   expect(mocks.authDialogProps?.privyRuntime).toBeUndefined();
@@ -149,7 +148,7 @@ test("warms one shared Privy runtime after homepage idle and reuses it on click"
 test("leaves authenticated homepage children on the ordinary root auth owner", async () => {
   vi.useFakeTimers();
   const { HomepageAuthRuntimeProvider } = await import(
-    "@/src/components/hosted-onboarding/auth-dialog-provider"
+    "@/src/components/hosted-onboarding/homepage-auth-runtime-provider"
   );
   const rendered = await renderClientComponent(
     createElement(
@@ -167,7 +166,6 @@ test("leaves authenticated homepage children on the ordinary root auth owner", a
   await flushRuntimeLoad();
 
   expect(rendered.container.textContent).toContain("Authenticated homepage");
-  expect(mocks.runtimeModuleLoad).not.toHaveBeenCalled();
   expect(mocks.runtimeMount).not.toHaveBeenCalled();
   expect(mocks.authDialogProps).toBeNull();
 });

@@ -1,4 +1,9 @@
+import { EmailIcon } from "@/src/components/homepage/email-icon";
 import { HostedPrivyReadinessState } from "@/src/components/hosted-onboarding/hosted-auth-panel-island";
+import { HostedInlineAuthButton } from "@/src/components/hosted-onboarding/hosted-inline-auth-button";
+import { HostedPhoneEntryStep } from "@/src/components/hosted-onboarding/hosted-phone-auth-step-views";
+import { HOSTED_PHONE_COUNTRY_OPTIONS } from "@/src/components/hosted-onboarding/hosted-phone-country-options";
+import { HostedTelegramAuthButtonPresentation } from "@/src/components/hosted-onboarding/hosted-telegram-auth-button";
 
 export function HomepageAuthWarmRuntimeStudy() {
   return (
@@ -17,20 +22,99 @@ export function HomepageAuthWarmRuntimeStudy() {
         <p className="mt-3 text-sm leading-6 text-muted-foreground">
           After the homepage paints, the shared Privy provider may initialize in
           the background. The dialog, authentication controls, and CAPTCHA stay
-          unmounted until someone chooses Log in or Signup.
+          unmounted until someone chooses Log in or Signup. Once open, the
+          ordinary form stays usable even if provider initialization is still
+          finishing.
         </p>
       </div>
       <div className="rounded-2xl border border-border bg-card p-6" inert>
         <p className="mb-4 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-          Early click fallback
+          Provider still initializing
         </p>
-        <HostedPrivyReadinessState
-          onKeepWaiting={() => {}}
-          onRestart={() => {}}
-          restartAvailable={false}
-          timedOut={false}
-        />
+        <HomepageAuthFormStudy />
+      </div>
+      <div className="rounded-2xl border border-border bg-card p-6" inert>
+        <p className="mb-4 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Phone selected before ready
+        </p>
+        <HomepageAuthFormStudy phoneQueued />
+      </div>
+      <div className="rounded-2xl border border-border bg-card p-6" inert>
+        <p className="mb-4 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Telegram ready for its trusted click
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <HostedTelegramAuthButtonPresentation
+            active
+            onClick={() => {}}
+            readyToContinue
+          />
+          <HostedInlineAuthButton
+            icon={<EmailIcon className="h-5 w-5" />}
+            onClick={() => {}}
+          >
+            Email
+          </HostedInlineAuthButton>
+        </div>
       </div>
     </div>
   );
+}
+
+function HomepageAuthFormStudy({
+  phoneQueued = false,
+}: {
+  phoneQueued?: boolean;
+}) {
+  return (
+    <div className="space-y-4">
+      <HostedPhoneEntryStep
+        intent="auth"
+        pendingAction={phoneQueued ? "send-code" : null}
+        phoneCountryOptions={HOSTED_PHONE_COUNTRY_OPTIONS}
+        phoneNumber="415 555 2671"
+        sendCodeDisabled={phoneQueued}
+        selectedPhoneCountry={resolveStudyPhoneCountry()}
+        onPhoneCountryChange={() => {}}
+        onPhoneNumberChange={() => {}}
+        onSubmitPhoneEntry={() => {}}
+      />
+      <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
+        <span className="h-px flex-1 bg-border" />
+        OR
+        <span className="h-px flex-1 bg-border" />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <HostedTelegramAuthButtonPresentation
+          disabled={phoneQueued}
+          onClick={() => {}}
+        />
+        <HostedInlineAuthButton
+          disabled={phoneQueued}
+          icon={<EmailIcon className="h-5 w-5" />}
+          onClick={() => {}}
+        >
+          Email
+        </HostedInlineAuthButton>
+      </div>
+      {phoneQueued ? (
+        <HostedPrivyReadinessState
+          onRestart={() => {}}
+          restartAvailable={false}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function resolveStudyPhoneCountry() {
+  const option =
+    HOSTED_PHONE_COUNTRY_OPTIONS.find((candidate) => candidate.code === "US")
+    ?? HOSTED_PHONE_COUNTRY_OPTIONS[0];
+
+  if (!option) {
+    throw new Error("Phone country options are empty.");
+  }
+
+  return option;
 }
