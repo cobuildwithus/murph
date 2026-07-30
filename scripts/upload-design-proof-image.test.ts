@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DesignProofUploadError,
   discoverRepoRoots,
+  ensureDesignProofVariant,
   loadCloudflareImagesConfig,
   main,
   parseCliArgs,
@@ -29,13 +30,22 @@ const PRIMARY_ACCOUNT_ID = "22222222222222222222222222222222";
 const PRIMARY_TOKEN = "primary-token";
 const PROCESS_TOKEN = "process-token";
 const PUBLIC_URL =
-  "https://imagedelivery.net/account-hash/image-id/public";
-const PNG_BYTES = Buffer.from([
-  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00,
-]);
-const JPEG_BYTES = Buffer.from([0xff, 0xd8, 0xff, 0x00]);
-const WEBP_BYTES = Buffer.from("RIFF\x04\x00\x00\x00WEBP", "binary");
+  "https://imagedelivery.net/account-hash/image-id/designproof";
 const tempDirectories: string[] = [];
+
+function makePng(width = 1440, height = 1000): Buffer {
+  const bytes = Buffer.alloc(24);
+  Buffer.from([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+  ]).copy(bytes);
+  bytes.writeUInt32BE(13, 8);
+  bytes.write("IHDR", 12, "ascii");
+  bytes.writeUInt32BE(width, 16);
+  bytes.writeUInt32BE(height, 20);
+  return bytes;
+}
+
+const PNG_BYTES = makePng();
 
 async function makeTempDirectory(prefix: string): Promise<string> {
   const root = process.env.MURPH_VITEST_TEMP_ROOT;
@@ -45,9 +55,18 @@ async function makeTempDirectory(prefix: string): Promise<string> {
   return directory;
 }
 
-async function writePng(directory: string): Promise<string> {
-  const filePath = path.join(directory, "proof.png");
-  await writeFile(filePath, PNG_BYTES);
+async function writePng(
+  directory: string,
+  {
+    bytes = PNG_BYTES,
+    fileName = "proof.png",
+  }: {
+    bytes?: Buffer;
+    fileName?: string;
+  } = {},
+): Promise<string> {
+  const filePath = path.join(directory, fileName);
+  await writeFile(filePath, bytes);
   return filePath;
 }
 
@@ -264,6 +283,104 @@ describe("design-proof environment loading", () => {
 });
 
 describe("Cloudflare Images design-proof upload", () => {
+  it("creates the dedicated high-resolution variant when it is absent", async () => {
+    const fetchImpl = vi.fn(
+      async (_input: Request | URL | string, init?: RequestInit) => {
+        if (fetchImpl.mock.calls.length === 1) {
+          expect(init?.method).toBe("GET");
+          return Response.json({
+            success: true,
+            result: { variants: {} },
+          });
+        }
+
+        expect(init?.method).toBe("POST");
+        expect(JSON.parse(String(init?.body))).toEqual({
+          id: "designproof",
+          neverRequireSignedURLs: true,
+          options: {
+            fit: "scale-down",
+            height: 2400,
+            metadata: "none",
+            width: 2400,
+          },
+        });
+        return Response.json({
+          success: true,
+          result: {
+            variant: {
+              id: "designproof",
+              neverRequireSignedURLs: true,
+              options: {
+                fit: "scale-down",
+                height: 2400,
+                metadata: "none",
+                width: 2400,
+              },
+            },
+          },
+        });
+      },
+    );
+
+    await expect(
+      ensureDesignProofVariant({
+        accountId: ACCOUNT_ID,
+        apiKey: PRIMARY_TOKEN,
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("accepts only the exact high-resolution variant configuration", async () => {
+    const exactVariant = {
+      id: "designproof",
+      neverRequireSignedURLs: true,
+      options: {
+        fit: "scale-down",
+        height: 2400,
+        metadata: "none",
+        width: 2400,
+      },
+    };
+    const exactFetch = vi.fn(async () =>
+      Response.json({
+        success: true,
+        result: { variants: { designproof: exactVariant } },
+      })
+    );
+    await expect(
+      ensureDesignProofVariant({
+        accountId: ACCOUNT_ID,
+        apiKey: PRIMARY_TOKEN,
+        fetchImpl: exactFetch,
+      }),
+    ).resolves.toBeUndefined();
+    expect(exactFetch).toHaveBeenCalledTimes(1);
+
+    const blurryFetch = vi.fn(async () =>
+      Response.json({
+        success: true,
+        result: {
+          variants: {
+            designproof: {
+              ...exactVariant,
+              options: { ...exactVariant.options, width: 576 },
+            },
+          },
+        },
+      })
+    );
+    await expect(
+      ensureDesignProofVariant({
+        accountId: ACCOUNT_ID,
+        apiKey: PRIMARY_TOKEN,
+        fetchImpl: blurryFetch,
+      }),
+    ).rejects.toThrow("does not match the required high-resolution settings");
+  });
+
   it("uploads with a neutral filename and verifies the public image", async () => {
     const directory = await makeTempDirectory("design-proof-upload-");
     const filePath = await writePng(directory);
@@ -292,7 +409,7 @@ describe("Cloudflare Images design-proof upload", () => {
         expect(String(input)).toBe(PUBLIC_URL);
         expect(init?.method).toBe("GET");
         expect(init?.redirect).toBe("error");
-        return new Response(PNG_BYTES, {
+        return new Response(new Uint8Array(PNG_BYTES), {
           headers: { "content-type": "image/png" },
         });
       },
@@ -338,44 +455,35 @@ describe("Cloudflare Images design-proof upload", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ["JPEG", JPEG_BYTES, "image/jpeg", "jpg"],
-    ["WebP", WEBP_BYTES, "image/webp", "webp"],
-  ])("accepts %s signatures with canonical upload metadata", async (
-    _label,
-    bytes,
-    contentType,
-    extension,
-  ) => {
-    const directory = await makeTempDirectory("design-proof-format-");
-    const filePath = path.join(directory, "proof.bin");
-    await writeFile(filePath, bytes);
-    const fetchImpl = vi.fn(
-      async (_input: Request | URL | string, init?: RequestInit) => {
-        if (fetchImpl.mock.calls.length === 1) {
-          const image = (init?.body as FormData).get("file");
-          expect(image).toBeInstanceOf(File);
-          expect((image as File).name).toBe(`design-proof-1.${extension}`);
-          expect((image as File).type).toBe(contentType);
-          return Response.json({
-            success: true,
-            result: { variants: [PUBLIC_URL] },
-          });
-        }
-        return new Response(PNG_BYTES, {
-          headers: { "content-type": "image/png" },
-        });
-      },
-    );
+  it("rejects undersized or uncropped screenshots before upload", async () => {
+    const directory = await makeTempDirectory("design-proof-dimensions-");
+    const narrowPath = await writePng(directory, {
+      bytes: makePng(576, 396),
+      fileName: "narrow.png",
+    });
+    const oversizedPath = await writePng(directory, {
+      bytes: makePng(1440, 3000),
+      fileName: "oversized.png",
+    });
+    const fetchImpl = vi.fn();
 
     await expect(
       uploadDesignProofImage({
         accountId: ACCOUNT_ID,
         apiKey: PRIMARY_TOKEN,
         fetchImpl,
-        filePath,
+        filePath: narrowPath,
       }),
-    ).resolves.toBe(PUBLIC_URL);
+    ).rejects.toThrow("at least 700px wide");
+    await expect(
+      uploadDesignProofImage({
+        accountId: ACCOUNT_ID,
+        apiKey: PRIMARY_TOKEN,
+        fetchImpl,
+        filePath: oversizedPath,
+      }),
+    ).rejects.toThrow("fit within 2400x2400px");
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("rejects files above the Cloudflare Images input limit", async () => {
@@ -437,7 +545,7 @@ describe("Cloudflare Images design-proof upload", () => {
         fetchImpl: untrustedFetch,
         filePath,
       }),
-    ).rejects.toThrow("did not return a public delivery variant");
+    ).rejects.toThrow("did not return the designproof delivery variant");
 
     const nonImageFetch = vi.fn(async () => {
       if (nonImageFetch.mock.calls.length === 1) {
@@ -468,17 +576,39 @@ describe("design-proof CLI execution", () => {
     await mkdir(repo);
     execFileSync("git", ["init", "-q"], { cwd: repo });
     const desktopPath = path.join(repo, "desktop.png");
-    const mobilePath = path.join(repo, "mobile.webp");
+    const mobilePath = path.join(repo, "mobile.png");
     await Promise.all([
       writeFile(desktopPath, PNG_BYTES),
-      writeFile(mobilePath, WEBP_BYTES),
+      writeFile(mobilePath, makePng(780, 1688)),
     ]);
 
     const events: string[] = [];
+    let variantReady = false;
     let uploadCount = 0;
     const fetchImpl = vi.fn(
       async (input: Request | URL | string, init?: RequestInit) => {
+        if (init?.method === "GET" && String(input).includes("/variants")) {
+          variantReady = true;
+          return Response.json({
+            success: true,
+            result: {
+              variants: {
+                designproof: {
+                  id: "designproof",
+                  neverRequireSignedURLs: true,
+                  options: {
+                    fit: "scale-down",
+                    height: 2400,
+                    metadata: "none",
+                    width: 2400,
+                  },
+                },
+              },
+            },
+          });
+        }
         if (init?.method === "POST") {
+          expect(variantReady).toBe(true);
           uploadCount += 1;
           const image = (init.body as FormData).get("file") as File;
           events.push(`upload:${image.name}:${image.type}`);
@@ -491,7 +621,7 @@ describe("design-proof CLI execution", () => {
           return new Response("provider detail must stay hidden", { status: 503 });
         }
         events.push(`verify:${String(input)}`);
-        return new Response(PNG_BYTES, {
+        return new Response(new Uint8Array(PNG_BYTES), {
           headers: { "content-type": "image/png" },
         });
       },
@@ -517,7 +647,7 @@ describe("design-proof CLI execution", () => {
         "upload:design-proof-1.png:image/png",
         `verify:${PUBLIC_URL}`,
         `stdout:${PUBLIC_URL}`,
-        "upload:design-proof-2.webp:image/webp",
+        "upload:design-proof-2.png:image/png",
       ]);
       expect(stdout).toHaveBeenCalledTimes(1);
     } finally {
@@ -539,9 +669,9 @@ describe("design-proof CLI execution", () => {
 
 describe("design-proof CLI arguments", () => {
   it("accepts multiple files and a positional-only separator", () => {
-    expect(parseCliArgs(["one.png", "two.webp"])).toEqual({
+    expect(parseCliArgs(["one.png", "two.png"])).toEqual({
       help: false,
-      files: ["one.png", "two.webp"],
+      files: ["one.png", "two.png"],
     });
     expect(parseCliArgs(["--", "-proof.png"])).toEqual({
       help: false,

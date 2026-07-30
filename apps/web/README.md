@@ -9,8 +9,10 @@ changes user-facing frontend UI must render the real production component on
 `/design?tab=components`, or the complete composed section or flow on
 `/design?tab=sections`. Include hosted desktop and mobile screenshots captured
 from that catalog surface in the PR so reviewers can judge the UI without
-reconstructing the state locally. The `Frontend design proof` workflow enforces
-the catalog update and PR evidence contract.
+reconstructing the state locally. Capture lossless PNGs at 2x device scale or
+higher, crop to the changed component or section, and verify both local and
+hosted images at native resolution. The `Frontend design proof` workflow
+enforces the catalog update and PR evidence contract.
 
 `apps/web` is the canonical hosted control plane. Hosted product meaning lives
 in Postgres here, not in Cloudflare worker control storage. In particular,
