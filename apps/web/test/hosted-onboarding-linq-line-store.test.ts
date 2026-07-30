@@ -13,6 +13,7 @@ import {
   listHostedLinqAssignableHomeLines,
   listHostedLinqContactCardLines,
   readHostedLinqIncomingLineState,
+  readHostedLinqReceiptCorrelatedRecoveryLineTx,
   upsertHostedLinqLineForPhoneTx,
 } from "@/src/lib/hosted-onboarding/linq-line-store";
 import {
@@ -220,6 +221,141 @@ describe("readHostedLinqIncomingLineState", () => {
       phoneNumberLookupKeys: ["lookup:current"],
       prisma,
     })).resolves.toEqual({ kind: "structurally_unavailable" });
+  });
+});
+
+describe("readHostedLinqReceiptCorrelatedRecoveryLineTx", () => {
+  const expectedFailureReceiptEventId =
+    "hbidx:linq-provider-event:failed-recovery";
+  const phoneNumber = "+15550100042";
+  const phoneNumberLookupKey =
+    createHostedPhoneLookupKey(phoneNumber) ?? "lookup:recovery";
+
+  it("allows the exact warning projection caused by the failed recovery receipt", async () => {
+    const findUnique = vi.fn().mockResolvedValue(
+      buildReceiptCorrelatedRecoveryLineRow(phoneNumber, {
+        healthStatus: "warning",
+        lastReceiptEventId: expectedFailureReceiptEventId,
+      }),
+    );
+    const prisma = {
+      hostedLinqLine: { findUnique },
+    } as never;
+
+    await expect(readHostedLinqReceiptCorrelatedRecoveryLineTx({
+      expectedFailureReceiptEventId,
+      phoneNumberLookupKey,
+      prisma,
+    })).resolves.toEqual({
+      phoneNumber,
+      phoneNumberLookupKey,
+    });
+
+    expect(findUnique).toHaveBeenCalledWith({
+      where: { phoneNumberLookupKey },
+      select: {
+        configuredAt: true,
+        egressPolicy: true,
+        healthStatus: true,
+        lastReceiptEventId: true,
+        phoneNumberEncrypted: true,
+        phoneNumberLookupKey: true,
+        providerStatus: true,
+      },
+    });
+  });
+
+  it("continues to allow a healthy pinned line without requiring a stale receipt match", async () => {
+    const prisma = {
+      hostedLinqLine: {
+        findUnique: vi.fn().mockResolvedValue(
+          buildReceiptCorrelatedRecoveryLineRow(phoneNumber, {
+            healthStatus: "healthy",
+            lastReceiptEventId: "hbidx:linq-provider-event:later-success",
+          }),
+        ),
+      },
+    } as never;
+
+    await expect(readHostedLinqReceiptCorrelatedRecoveryLineTx({
+      expectedFailureReceiptEventId,
+      phoneNumberLookupKey,
+      prisma,
+    })).resolves.toEqual({
+      phoneNumber,
+      phoneNumberLookupKey,
+    });
+  });
+
+  it.each([
+    {
+      label: "a newer receipt replaced the failed recovery receipt",
+      overrides: {
+        healthStatus: "warning",
+        lastReceiptEventId: "hbidx:linq-provider-event:newer-failure",
+      },
+    },
+    {
+      label: "the provider reports the line at risk",
+      overrides: {
+        healthStatus: "warning",
+        lastReceiptEventId: expectedFailureReceiptEventId,
+        providerStatus: "at_risk",
+      },
+    },
+    {
+      label: "the provider hard-blocked the line",
+      overrides: {
+        healthStatus: "warning",
+        lastReceiptEventId: expectedFailureReceiptEventId,
+        providerStatus: "blocked",
+      },
+    },
+    {
+      label: "the line became unhealthy",
+      overrides: {
+        healthStatus: "unhealthy",
+        lastReceiptEventId: expectedFailureReceiptEventId,
+      },
+    },
+    {
+      label: "the line is disabled",
+      overrides: {
+        egressPolicy: "disabled",
+        healthStatus: "warning",
+        lastReceiptEventId: expectedFailureReceiptEventId,
+      },
+    },
+    {
+      label: "the line is no longer configured",
+      overrides: {
+        configuredAt: null,
+        healthStatus: "warning",
+        lastReceiptEventId: expectedFailureReceiptEventId,
+      },
+    },
+    {
+      label: "the line phone cannot be decrypted",
+      overrides: {
+        healthStatus: "warning",
+        lastReceiptEventId: expectedFailureReceiptEventId,
+        phoneNumberEncrypted: "not-an-encrypted-phone-envelope",
+      },
+    },
+  ])("fails closed when $label", async ({ overrides }) => {
+    const prisma = {
+      hostedLinqLine: {
+        findUnique: vi.fn().mockResolvedValue(
+          buildReceiptCorrelatedRecoveryLineRow(phoneNumber, overrides),
+        ),
+      },
+    } as never;
+
+    await expect(readHostedLinqReceiptCorrelatedRecoveryLineTx({
+      expectedFailureReceiptEventId,
+      phoneNumberLookupKey,
+      prisma,
+    })).resolves.toBeNull();
   });
 });
 
@@ -564,6 +700,35 @@ function buildIncomingLineRow(
       overrides.phoneNumberLookupKey
       ?? createHostedPhoneLookupKey(phoneNumber)
       ?? `lookup:${phoneNumber}`,
+    providerStatus: overrides.providerStatus ?? "active",
+  };
+}
+
+function buildReceiptCorrelatedRecoveryLineRow(
+  phoneNumber: string,
+  overrides: Partial<{
+    configuredAt: Date | null;
+    egressPolicy: string;
+    healthStatus: string;
+    lastReceiptEventId: string | null;
+    phoneNumberEncrypted: string | null;
+    providerStatus: string | null;
+  }> = {},
+) {
+  return {
+    configuredAt:
+      overrides.configuredAt === undefined
+        ? new Date("2026-07-29T12:00:00.000Z")
+        : overrides.configuredAt,
+    egressPolicy: overrides.egressPolicy ?? "enabled",
+    healthStatus: overrides.healthStatus ?? "healthy",
+    lastReceiptEventId: overrides.lastReceiptEventId ?? null,
+    phoneNumberEncrypted:
+      overrides.phoneNumberEncrypted === undefined
+        ? encryptHostedLinqLinePhoneNumber(phoneNumber)
+        : overrides.phoneNumberEncrypted,
+    phoneNumberLookupKey:
+      createHostedPhoneLookupKey(phoneNumber) ?? "lookup:recovery",
     providerStatus: overrides.providerStatus ?? "active",
   };
 }

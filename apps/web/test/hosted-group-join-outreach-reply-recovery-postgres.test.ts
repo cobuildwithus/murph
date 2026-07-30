@@ -1,7 +1,7 @@
 import { randomInt, randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
 
-import type { Prisma, PrismaClient } from "@prisma/client";
+import { HostedBillingStatus, type Prisma, type PrismaClient } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
 const providerMocks = vi.hoisted(() => ({
@@ -199,6 +199,9 @@ import {
 import {
   buildHostedLinqInviteSignupEffectId,
 } from "@/src/lib/hosted-onboarding/linq-invite-signup-effect-id";
+import {
+  upsertHostedMemberHomeLinqRecipientPhoneTx,
+} from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import {
   upsertHostedLinqLineForPhoneTx,
 } from "@/src/lib/hosted-onboarding/linq-line-store";
@@ -1892,10 +1895,13 @@ describe.skipIf(!runPostgresProof)(
       );
       const fixture = await createDeletionReplyRaceFixture();
       const recipientPhone = createUniqueTestPhone("+1303");
+      const recoveryLinePhone = createUniqueTestPhone("+1303");
       const participantPhoneLookupKey =
         createHostedPhoneLookupKey(fixture.participantPhone);
       const recipientPhoneLookupKey =
         createHostedPhoneLookupKey(recipientPhone);
+      const recoveryLinePhoneLookupKey =
+        createHostedPhoneLookupKey(recoveryLinePhone);
       const providerMessageId = `linq-buffered-failure-${randomUUID()}`;
       const recoveryProviderMessageId =
         `linq-recovered-group-${randomUUID()}`;
@@ -1934,6 +1940,7 @@ describe.skipIf(!runPostgresProof)(
       if (
         !participantPhoneLookupKey
         || !recipientPhoneLookupKey
+        || !recoveryLinePhoneLookupKey
         || providerEventLookupKeys.length !== 5
       ) {
         throw new Error("Expected terminal-recovery proof lookup keys.");
@@ -1974,6 +1981,13 @@ describe.skipIf(!runPostgresProof)(
           observedAt: new Date("2026-07-27T15:59:00.000Z"),
           phoneNumber: recipientPhone,
           prisma: fixture.deletionPrisma,
+          source: "configured",
+        });
+        await upsertHostedLinqLineForPhoneTx({
+          observedAt: new Date("2026-07-27T15:59:00.000Z"),
+          phoneNumber: recoveryLinePhone,
+          prisma: fixture.deletionPrisma,
+          providerStatus: "ACTIVE",
           source: "configured",
         });
         await fixture.deletionPrisma.hostedLinqDailyState.create({
@@ -2168,13 +2182,330 @@ describe.skipIf(!runPostgresProof)(
         await fixture.deletionPrisma.hostedLinqProviderEvent.deleteMany({
           where: { eventId: { in: providerEventLookupKeys } },
         });
+        await fixture.deletionPrisma.hostedLinqDelivery.deleteMany({
+          where: {
+            phoneNumberLookupKey: {
+              in: [
+                recipientPhoneLookupKey,
+                recoveryLinePhoneLookupKey,
+              ],
+            },
+          },
+        });
         await fixture.deletionPrisma.hostedLinqLine.deleteMany({
-          where: { phoneNumberLookupKey: recipientPhoneLookupKey },
+          where: {
+            phoneNumberLookupKey: {
+              in: [
+                recipientPhoneLookupKey,
+                recoveryLinePhoneLookupKey,
+              ],
+            },
+          },
         });
         await cleanupDeletionReplyRaceFixture(fixture);
         providerMocks.sendHostedLinqChatMessage.mockReset();
         providerMocks.createHostedLinqChat.mockReset();
         vi.unstubAllEnvs();
+      }
+    });
+
+    it("reuses the receipt-correlated recovery sender after a real failure projection", async () => {
+      const fixture = await createGroupLineRecoveryFixture();
+      const firstProviderMessageId =
+        `linq-group-line-recovery-first-${randomUUID()}`;
+      const secondProviderMessageId =
+        `linq-group-line-recovery-second-${randomUUID()}`;
+      const failureEventId =
+        `event-group-line-recovery-failed-${randomUUID()}`;
+      const lateDeliveredEventId =
+        `event-group-line-recovery-late-delivered-${randomUUID()}`;
+      const providerEventLookupKeys = [failureEventId, lateDeliveredEventId]
+        .map(createHostedLinqProviderEventLookupKey)
+        .filter((value): value is string => Boolean(value));
+      providerMocks.createHostedLinqChat
+        .mockReset()
+        .mockResolvedValueOnce({
+          chatId: `chat-group-line-recovery-first-${randomUUID()}`,
+          messageId: firstProviderMessageId,
+        })
+        .mockResolvedValueOnce({
+          chatId: `chat-group-line-recovery-second-${randomUUID()}`,
+          messageId: secondProviderMessageId,
+        });
+
+      try {
+        const firstEffect = fixture.buildEffect(
+          "event-group-line-recovery-intro-1",
+          "2026-07-29T16:00:00.000Z",
+        );
+        const secondEffect = fixture.buildEffect(
+          "event-group-line-recovery-intro-2",
+          "2026-07-29T16:01:00.000Z",
+        );
+        const thirdEffect = fixture.buildEffect(
+          "event-group-line-recovery-intro-3",
+          "2026-07-29T16:03:00.000Z",
+        );
+
+        await expect(drainHostedLinqEffectWithMilestones({
+          effect: firstEffect,
+          prisma: fixture.prisma,
+        })).resolves.toEqual({ sentCount: 1, skipped: [] });
+        const firstProviderCall =
+          providerMocks.createHostedLinqChat.mock.calls[0]?.[0];
+        expect(firstProviderCall).toMatchObject({
+          from: fixture.backupPhone,
+          to: [fixture.participantPhone],
+        });
+        await fixture.prisma.$transaction((tx) =>
+          ingestHostedLinqProviderEventTx({
+            event: buildParsedFailureReceipt({
+              eventId: failureEventId,
+              messageId: firstProviderMessageId,
+              occurredAt: "2026-07-29T16:00:30.000Z",
+              recipientPhone: fixture.backupPhone,
+            }),
+            prisma: tx,
+          })
+        );
+        const failureEventLookupKey =
+          createHostedLinqProviderEventLookupKey(failureEventId);
+        await expect(fixture.prisma.hostedLinqLine.findUnique({
+          select: {
+            healthStatus: true,
+            lastReceiptEventId: true,
+            proactiveConversationCount: true,
+          },
+          where: { phoneNumberLookupKey: fixture.backupPhoneLookupKey },
+        })).resolves.toEqual({
+          healthStatus: "warning",
+          lastReceiptEventId: failureEventLookupKey,
+          proactiveConversationCount: 1,
+        });
+
+        await expect(drainHostedLinqEffectWithMilestones({
+          effect: firstEffect,
+          prisma: fixture.prisma,
+        })).resolves.toEqual({
+          sentCount: 0,
+          skipped: [{
+            effectId: firstEffect.effectId,
+            reason: "notice_target_unauthorized",
+            template: "group_line_recovery",
+          }],
+        });
+        expect(providerMocks.createHostedLinqChat).toHaveBeenCalledTimes(1);
+
+        await expect(drainHostedLinqEffectWithMilestones({
+          effect: secondEffect,
+          prisma: fixture.prisma,
+        })).resolves.toEqual({ sentCount: 1, skipped: [] });
+        const secondProviderCall =
+          providerMocks.createHostedLinqChat.mock.calls[1]?.[0];
+        expect(secondProviderCall).toMatchObject({
+          from: fixture.backupPhone,
+          to: [fixture.participantPhone],
+        });
+        expect(secondProviderCall?.message).toBe(firstProviderCall?.message);
+        expect(secondProviderCall?.idempotencyKey)
+          .not.toBe(firstProviderCall?.idempotencyKey);
+        await expect(fixture.prisma.hostedLinqLine.findUnique({
+          select: { proactiveConversationCount: true },
+          where: { phoneNumberLookupKey: fixture.backupPhoneLookupKey },
+        })).resolves.toEqual({ proactiveConversationCount: 1 });
+        await expect(fixture.prisma.hostedLinqDelivery.findMany({
+          orderBy: { attemptedAt: "asc" },
+          select: {
+            phoneNumberLookupKey: true,
+            sourceRef: true,
+            status: true,
+          },
+          where: {
+            phoneNumberLookupKey: fixture.backupPhoneLookupKey,
+            template: "group_line_recovery",
+          },
+        })).resolves.toEqual([
+          {
+            phoneNumberLookupKey: fixture.backupPhoneLookupKey,
+            sourceRef: expect.any(String),
+            status: "failed",
+          },
+          {
+            phoneNumberLookupKey: fixture.backupPhoneLookupKey,
+            sourceRef: expect.any(String),
+            status: "accepted",
+          },
+        ]);
+
+        await expect(drainHostedLinqEffectWithMilestones({
+          effect: secondEffect,
+          prisma: fixture.prisma,
+        })).resolves.toEqual({
+          sentCount: 0,
+          skipped: [{
+            effectId: secondEffect.effectId,
+            reason: "notice_already_claimed",
+            template: "group_line_recovery",
+          }],
+        });
+        expect(providerMocks.createHostedLinqChat).toHaveBeenCalledTimes(2);
+
+        await fixture.prisma.$transaction((tx) =>
+          ingestHostedLinqProviderEventTx({
+            event: buildParsedDeliveredReceipt({
+              chatId: `chat-group-line-recovery-first-${randomUUID()}`,
+              eventId: lateDeliveredEventId,
+              messageId: firstProviderMessageId,
+              occurredAt: "2026-07-29T16:02:00.000Z",
+              recipientPhone: fixture.backupPhone,
+            }),
+            prisma: tx,
+          })
+        );
+        await expect(fixture.prisma.hostedLinqDelivery.findFirst({
+          select: { status: true },
+          where: {
+            messageLookupKey:
+              createHostedLinqMessageLookupKey(firstProviderMessageId),
+          },
+        })).resolves.toEqual({ status: "delivered" });
+        await expect(drainHostedLinqEffectWithMilestones({
+          effect: thirdEffect,
+          prisma: fixture.prisma,
+        })).resolves.toEqual({
+          sentCount: 0,
+          skipped: [{
+            effectId: thirdEffect.effectId,
+            reason: "notice_already_claimed",
+            template: "group_line_recovery",
+          }],
+        });
+        expect(providerMocks.createHostedLinqChat).toHaveBeenCalledTimes(2);
+      } finally {
+        await cleanupGroupLineRecoveryFixture({
+          fixture,
+          providerEventLookupKeys,
+        });
+        providerMocks.createHostedLinqChat.mockReset();
+      }
+    });
+
+    it("fails a recovery retry closed after a newer line failure or provider block", async () => {
+      const fixture = await createGroupLineRecoveryFixture();
+      const firstProviderMessageId =
+        `linq-group-line-recovery-closed-${randomUUID()}`;
+      const failureEventId =
+        `event-group-line-recovery-closed-failed-${randomUUID()}`;
+      const newerFailureEventId =
+        `event-group-line-recovery-newer-failed-${randomUUID()}`;
+      const blockedEventId =
+        `event-group-line-recovery-provider-blocked-${randomUUID()}`;
+      const providerEventLookupKeys = [
+        failureEventId,
+        newerFailureEventId,
+        blockedEventId,
+      ]
+        .map(createHostedLinqProviderEventLookupKey)
+        .filter((value): value is string => Boolean(value));
+      providerMocks.createHostedLinqChat
+        .mockReset()
+        .mockResolvedValue({
+          chatId: `chat-group-line-recovery-closed-${randomUUID()}`,
+          messageId: firstProviderMessageId,
+        });
+
+      try {
+        const firstEffect = fixture.buildEffect(
+          "event-group-line-recovery-closed-intro-1",
+          "2026-07-29T17:00:00.000Z",
+        );
+        const secondEffect = fixture.buildEffect(
+          "event-group-line-recovery-closed-intro-2",
+          "2026-07-29T17:02:00.000Z",
+        );
+        const thirdEffect = fixture.buildEffect(
+          "event-group-line-recovery-closed-intro-3",
+          "2026-07-29T17:04:00.000Z",
+        );
+
+        await expect(drainHostedLinqEffectWithMilestones({
+          effect: firstEffect,
+          prisma: fixture.prisma,
+        })).resolves.toEqual({ sentCount: 1, skipped: [] });
+        await fixture.prisma.$transaction((tx) =>
+          ingestHostedLinqProviderEventTx({
+            event: buildParsedFailureReceipt({
+              eventId: failureEventId,
+              messageId: firstProviderMessageId,
+              occurredAt: "2026-07-29T17:00:30.000Z",
+              recipientPhone: fixture.backupPhone,
+            }),
+            prisma: tx,
+          })
+        );
+        await fixture.prisma.$transaction((tx) =>
+          ingestHostedLinqProviderEventTx({
+            event: buildParsedFailureReceipt({
+              eventId: newerFailureEventId,
+              messageId: `unrelated-message-${randomUUID()}`,
+              occurredAt: "2026-07-29T17:01:00.000Z",
+              recipientPhone: fixture.backupPhone,
+            }),
+            prisma: tx,
+          })
+        );
+        await expect(drainHostedLinqEffectWithMilestones({
+          effect: secondEffect,
+          prisma: fixture.prisma,
+        })).resolves.toEqual({
+          sentCount: 0,
+          skipped: [{
+            effectId: secondEffect.effectId,
+            reason: "notice_target_unauthorized",
+            template: "group_line_recovery",
+          }],
+        });
+        expect(providerMocks.createHostedLinqChat).toHaveBeenCalledTimes(1);
+
+        await fixture.prisma.$transaction((tx) =>
+          ingestHostedLinqProviderEventTx({
+            event: buildParsedProviderStatusEvent({
+              eventId: blockedEventId,
+              occurredAt: "2026-07-29T17:03:00.000Z",
+              phoneNumber: fixture.backupPhone,
+              providerStatus: "CRITICAL",
+            }),
+            prisma: tx,
+          })
+        );
+        await expect(fixture.prisma.hostedLinqLine.findUnique({
+          select: {
+            healthStatus: true,
+            providerStatus: true,
+          },
+          where: { phoneNumberLookupKey: fixture.backupPhoneLookupKey },
+        })).resolves.toEqual({
+          healthStatus: "unhealthy",
+          providerStatus: "CRITICAL",
+        });
+        await expect(drainHostedLinqEffectWithMilestones({
+          effect: thirdEffect,
+          prisma: fixture.prisma,
+        })).resolves.toEqual({
+          sentCount: 0,
+          skipped: [{
+            effectId: thirdEffect.effectId,
+            reason: "notice_target_unauthorized",
+            template: "group_line_recovery",
+          }],
+        });
+        expect(providerMocks.createHostedLinqChat).toHaveBeenCalledTimes(1);
+      } finally {
+        await cleanupGroupLineRecoveryFixture({
+          fixture,
+          providerEventLookupKeys,
+        });
+        providerMocks.createHostedLinqChat.mockReset();
       }
     });
 
@@ -2254,6 +2585,149 @@ describe.skipIf(!runPostgresProof)(
     });
   },
 );
+
+type GroupLineRecoveryFixture = {
+  backupPhone: string;
+  backupPhoneLookupKey: string;
+  buildEffect: (
+    sourceEventId: string,
+    occurredAt: string,
+  ) => ReturnType<typeof createHostedWebhookLinqMessageSideEffect>;
+  incomingPhoneLookupKey: string;
+  memberId: string;
+  participantPhone: string;
+  prisma: PrismaClient;
+};
+
+async function createGroupLineRecoveryFixture():
+  Promise<GroupLineRecoveryFixture> {
+  const prisma = createPrismaClient({ databaseUrl, poolMax: 2 });
+  const memberId = `hbm_group_line_recovery_${randomUUID()}`;
+  const participantPhone = createUniqueTestPhone("+1202");
+  const incomingPhone = createUniqueTestPhone("+1303");
+  const backupPhone = createUniqueTestPhone("+1303");
+  const participantPhoneLookupKey =
+    createHostedPhoneLookupKey(participantPhone);
+  const incomingPhoneLookupKey = createHostedPhoneLookupKey(incomingPhone);
+  const backupPhoneLookupKey = createHostedPhoneLookupKey(backupPhone);
+  if (
+    !participantPhoneLookupKey
+    || !incomingPhoneLookupKey
+    || !backupPhoneLookupKey
+  ) {
+    throw new Error("Expected group-line recovery fixture lookup keys.");
+  }
+  const assignedAt = new Date("2026-07-29T15:59:00.000Z");
+  const threadId = `chat-group-line-recovery-${randomUUID()}`;
+
+  await prisma.hostedMember.create({
+    data: {
+      billingStatus: HostedBillingStatus.active,
+      id: memberId,
+    },
+  });
+  await prisma.hostedMemberIdentity.create({
+    data: {
+      ...(await buildHostedMemberIdentityPrivateColumns({
+        memberId,
+        phoneNumber: participantPhone,
+        prisma,
+        privyUserId: null,
+        signupPhoneCodeSendAttemptId: null,
+        signupPhoneCodeSendAttemptStartedAt: null,
+        signupPhoneCodeSentAt: null,
+        signupPhoneNumber: null,
+      })),
+      maskedPhoneNumberHint: `*** ${participantPhone.slice(-4)}`,
+      memberId,
+      phoneLookupKey: participantPhoneLookupKey,
+    },
+  });
+  await upsertHostedLinqLineForPhoneTx({
+    observedAt: assignedAt,
+    phoneNumber: incomingPhone,
+    prisma,
+    providerStatus: "CRITICAL",
+    source: "configured",
+  });
+  await upsertHostedLinqLineForPhoneTx({
+    observedAt: assignedAt,
+    phoneNumber: backupPhone,
+    prisma,
+    providerStatus: "ACTIVE",
+    source: "configured",
+  });
+  await prisma.hostedLinqLine.update({
+    data: {
+      assignmentWeight: 2_147_483_647,
+      healthStatus: "healthy",
+      maxNewConversationsPerDay: 10,
+    },
+    where: { phoneNumberLookupKey: backupPhoneLookupKey },
+  });
+  await prisma.$transaction((tx) =>
+    upsertHostedMemberHomeLinqRecipientPhoneTx({
+      homeLineAssignedAt: assignedAt,
+      memberId,
+      prisma: tx,
+      recipientPhone: incomingPhone,
+    })
+  );
+
+  return {
+    backupPhone,
+    backupPhoneLookupKey,
+    buildEffect: (sourceEventId, occurredAt) =>
+      createHostedWebhookLinqMessageSideEffect({
+        incomingRecipientPhone: incomingPhone,
+        memberId,
+        occurredAt,
+        participantContact: {
+          kind: "phone",
+          value: participantPhone,
+        },
+        sourceEventId,
+        template: "group_line_recovery",
+        threadId,
+      }),
+    incomingPhoneLookupKey,
+    memberId,
+    participantPhone,
+    prisma,
+  };
+}
+
+async function cleanupGroupLineRecoveryFixture(input: {
+  fixture: GroupLineRecoveryFixture;
+  providerEventLookupKeys: string[];
+}): Promise<void> {
+  await input.fixture.prisma.hostedLinqAlert.deleteMany({
+    where: { eventId: { in: input.providerEventLookupKeys } },
+  });
+  await input.fixture.prisma.hostedLinqDelivery.deleteMany({
+    where: {
+      phoneNumberLookupKey: input.fixture.backupPhoneLookupKey,
+      template: "group_line_recovery",
+    },
+  });
+  await input.fixture.prisma.hostedLinqProviderEvent.deleteMany({
+    where: { eventId: { in: input.providerEventLookupKeys } },
+  });
+  await input.fixture.prisma.hostedMember.deleteMany({
+    where: { id: input.fixture.memberId },
+  });
+  await input.fixture.prisma.hostedLinqLine.deleteMany({
+    where: {
+      phoneNumberLookupKey: {
+        in: [
+          input.fixture.backupPhoneLookupKey,
+          input.fixture.incomingPhoneLookupKey,
+        ],
+      },
+    },
+  });
+  await input.fixture.prisma.$disconnect();
+}
 
 type OpenerRaceFixture = {
   contenderPrisma: PrismaClient;
@@ -2612,6 +3086,13 @@ async function drainDeletionReplyEffect(input: {
   effect: DeletionReplyRaceFixture["effect"];
   prisma: Prisma.TransactionClient | PrismaClient;
 }) {
+  return drainHostedLinqEffectWithMilestones(input);
+}
+
+async function drainHostedLinqEffectWithMilestones(input: {
+  effect: ReturnType<typeof createHostedWebhookLinqMessageSideEffect>;
+  prisma: Prisma.TransactionClient | PrismaClient;
+}) {
   const scheduledTasks: Array<() => Promise<void>> = [];
   const result = await drainHostedLinqSideEffectsDirect({
     prisma: input.prisma,
@@ -2773,6 +3254,34 @@ function buildParsedFailureReceipt(input: {
   });
   if (!parsed) {
     throw new Error("Expected the terminal failure receipt to parse.");
+  }
+  return parsed;
+}
+
+function buildParsedProviderStatusEvent(input: {
+  eventId: string;
+  occurredAt: string;
+  phoneNumber: string;
+  providerStatus: string;
+}) {
+  const parsed = parseHostedLinqProviderEvent({
+    event: parseHostedLinqWebhookEvent(JSON.stringify({
+      api_version: "v3",
+      created_at: input.occurredAt,
+      data: {
+        changed_at: input.occurredAt,
+        new_reputation: input.providerStatus,
+        phone_number: input.phoneNumber,
+      },
+      event_id: input.eventId,
+      event_type: "phone_number.status_updated",
+      trace_id: `trace-${randomUUID()}`,
+      webhook_version: "2026-02-03",
+    })),
+    rawBody: "{}",
+  });
+  if (!parsed) {
+    throw new Error("Expected the provider status event to parse.");
   }
   return parsed;
 }

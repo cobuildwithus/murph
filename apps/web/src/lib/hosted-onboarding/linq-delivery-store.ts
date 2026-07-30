@@ -322,6 +322,7 @@ export type HostedLinqDeliveryProviderDispatchIntent = {
   id: string;
   groupJoinOutreachId: string | null;
   groupJoinReplyOccurredAt: Date | null;
+  lastProviderEventId: string | null;
   phoneNumberLookupKey: string | null;
   providerCorrelated: boolean;
   sourceRef: string | null;
@@ -364,6 +365,7 @@ export async function readHostedLinqDeliveryProviderDispatchIntentsTx(input: {
       groupJoinReplyOccurredAt: true,
       id: true,
       idempotencyKey: true,
+      lastProviderEventId: true,
       lastReceiptAt: true,
       messageLookupKey: true,
       phoneNumberLookupKey: true,
@@ -381,6 +383,7 @@ export async function readHostedLinqDeliveryProviderDispatchIntentsTx(input: {
           idempotencyLookupKey: delivery.idempotencyKey,
           groupJoinOutreachId: delivery.groupJoinOutreachId,
           groupJoinReplyOccurredAt: delivery.groupJoinReplyOccurredAt,
+          lastProviderEventId: delivery.lastProviderEventId,
           phoneNumberLookupKey: delivery.phoneNumberLookupKey,
           providerCorrelated: isHostedLinqDeliveryProviderCorrelated(delivery),
           sourceRef: delivery.sourceRef,
@@ -410,6 +413,7 @@ export async function readHostedLinqDeliveryProviderDispatchIntentTx(input: {
       groupJoinOutreachId: true,
       groupJoinReplyOccurredAt: true,
       id: true,
+      lastProviderEventId: true,
       lastReceiptAt: true,
       messageLookupKey: true,
       phoneNumberLookupKey: true,
@@ -426,6 +430,7 @@ export async function readHostedLinqDeliveryProviderDispatchIntentTx(input: {
     id: delivery.id,
     groupJoinOutreachId: delivery.groupJoinOutreachId,
     groupJoinReplyOccurredAt: delivery.groupJoinReplyOccurredAt,
+    lastProviderEventId: delivery.lastProviderEventId,
     phoneNumberLookupKey: delivery.phoneNumberLookupKey,
     providerCorrelated: isHostedLinqDeliveryProviderCorrelated(delivery),
     sourceRef: delivery.sourceRef,

@@ -1361,12 +1361,17 @@ Recovery deliveries use a finite five-attempt sequence within the existing
 event for that member, failed line, and group thread. Provider-correlated failed
 receipts are not treated as irrevocably final because a later delivered receipt
 may win ordering. Only a different source event may advance the provider
-attempt key after failure, and it must reuse the same still-healthy sender,
-rendered backup number, deterministic copy, and original proactive-conversation
-capacity reservation. Replay of the exact failed event cannot create another
-provider request. A late success can therefore duplicate only the same
-instruction, never direct the member to a conflicting number or claim another
-capacity slot. Safe structured digests in `sourceRef` preserve source-event
+attempt key after failure, and it must reuse the same pinned sender, rendered
+backup number, deterministic copy, and original proactive-conversation capacity
+reservation. That exact line may be healthy or may retain the `warning`
+projection written by the same failed receipt: its latest receipt event must
+equal the delivery's hashed last-provider-event identity. Any newer receipt,
+provider degradation or hard block, disabled or unconfigured egress, unreadable
+phone envelope, or other unhealthy state fails closed without selecting a
+replacement. Replay of the exact failed event cannot create another provider
+request. A late success can therefore duplicate only the same instruction,
+never direct the member to a conflicting number or claim another capacity slot.
+Safe structured digests in `sourceRef` preserve source-event
 identity without storing raw contacts, group identifiers, or provider event
 identifiers.
 

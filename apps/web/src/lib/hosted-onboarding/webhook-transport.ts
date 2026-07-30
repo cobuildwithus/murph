@@ -116,6 +116,7 @@ import {
 import {
   listHostedLinqHealthyProactiveLines,
   readHostedLinqIncomingLineState,
+  readHostedLinqReceiptCorrelatedRecoveryLineTx,
 } from "./linq-line-store";
 import { lockHostedMemberRow } from "./shared";
 
@@ -1389,6 +1390,7 @@ async function resolveHostedLinqGroupLineRecoveryDispatchIntentTx(input: {
   let persistedIntent: (typeof persistedIntents)[number] | null = null;
   let dispatchSourceRef = sourceRef;
   let currentSourceAlreadyFailed = false;
+  let failedSenderLastProviderEventId: string | null = null;
   let failedSenderLookupKey: string | null = null;
   for (const candidateEffectId of attemptEffectIds) {
     const candidateLookupKey =
@@ -1418,6 +1420,9 @@ async function resolveHostedLinqGroupLineRecoveryDispatchIntentTx(input: {
     }
     if (candidateIntent.providerCorrelated) {
       if (candidateIntent.status === "failed") {
+        if (!candidateIntent.lastProviderEventId) {
+          return { status: "target_unauthorized" };
+        }
         if (
           failedSenderLookupKey
           && failedSenderLookupKey !== candidateIntent.phoneNumberLookupKey
@@ -1425,6 +1430,7 @@ async function resolveHostedLinqGroupLineRecoveryDispatchIntentTx(input: {
           return { status: "target_unauthorized" };
         }
         failedSenderLookupKey = candidateIntent.phoneNumberLookupKey;
+        failedSenderLastProviderEventId = candidateIntent.lastProviderEventId;
         currentSourceAlreadyFailed ||= candidateIntent.sourceRef === sourceRef;
         continue;
       }
@@ -1447,11 +1453,13 @@ async function resolveHostedLinqGroupLineRecoveryDispatchIntentTx(input: {
     ).find((line) =>
       line.phoneNumberLookupKey === persistedIntent.phoneNumberLookupKey
     )?.phoneNumber ?? null;
-  } else if (failedSenderLookupKey) {
+  } else if (failedSenderLookupKey && failedSenderLastProviderEventId) {
     assignedRecipientPhone = (
-      await listHostedLinqHealthyProactiveLines({ prisma: input.prisma })
-    ).find((line) =>
-      line.phoneNumberLookupKey === failedSenderLookupKey
+      await readHostedLinqReceiptCorrelatedRecoveryLineTx({
+        expectedFailureReceiptEventId: failedSenderLastProviderEventId,
+        phoneNumberLookupKey: failedSenderLookupKey,
+        prisma: input.prisma,
+      })
     )?.phoneNumber ?? null;
   } else {
     const reservation = await reserveHostedLinqHealthyProactiveLineTx({

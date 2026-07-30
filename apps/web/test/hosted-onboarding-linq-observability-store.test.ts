@@ -2880,6 +2880,8 @@ describe("hosted Linq observability stores", () => {
         groupJoinReplyOccurredAt: null,
         id: "hld_group_line_recovery",
         idempotencyKey: firstLookupKey,
+        lastProviderEventId:
+          "hbidx:linq-provider-event:recovery-failed-1",
         lastReceiptAt: new Date("2026-03-26T12:01:00.000Z"),
         messageLookupKey: "hbid:linq-message:provider-message-123",
         phoneNumberLookupKey: createHostedPhoneLookupKey("+15550100042"),
@@ -2896,6 +2898,8 @@ describe("hosted Linq observability stores", () => {
     })).resolves.toEqual([
       expect.objectContaining({
         idempotencyLookupKey: firstLookupKey,
+        lastProviderEventId:
+          "hbidx:linq-provider-event:recovery-failed-1",
         providerCorrelated: true,
         sourceRef,
         status: "failed",

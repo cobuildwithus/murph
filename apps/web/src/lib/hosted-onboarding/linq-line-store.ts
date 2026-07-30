@@ -441,6 +441,73 @@ export async function listHostedLinqHealthyProactiveLines(input: {
   return mapHostedLinqAssignableHomeLineRows(rows);
 }
 
+export type HostedLinqReceiptCorrelatedRecoveryLine = {
+  phoneNumber: string;
+  phoneNumberLookupKey: string;
+};
+
+/**
+ * Reuses an already-selected recovery sender without reopening healthy-pool
+ * assignment. A provider failure projects the same line to `warning`; that
+ * warning is eligible only while its latest receipt is the exact failed
+ * recovery receipt the caller observed.
+ */
+export async function readHostedLinqReceiptCorrelatedRecoveryLineTx(input: {
+  expectedFailureReceiptEventId: string;
+  phoneNumberLookupKey: string;
+  prisma: HostedLinqLineClient;
+}): Promise<HostedLinqReceiptCorrelatedRecoveryLine | null> {
+  const expectedFailureReceiptEventId =
+    normalizeNullableString(input.expectedFailureReceiptEventId);
+  const phoneNumberLookupKey = normalizeNullableString(input.phoneNumberLookupKey);
+  if (!expectedFailureReceiptEventId || !phoneNumberLookupKey) {
+    return null;
+  }
+
+  const line = await input.prisma.hostedLinqLine.findUnique({
+    where: { phoneNumberLookupKey },
+    select: {
+      configuredAt: true,
+      egressPolicy: true,
+      healthStatus: true,
+      lastReceiptEventId: true,
+      phoneNumberEncrypted: true,
+      phoneNumberLookupKey: true,
+      providerStatus: true,
+    },
+  });
+  if (
+    !line?.configuredAt
+    || line.egressPolicy !== "enabled"
+    || !line.phoneNumberEncrypted
+    || isHostedLinqProviderStatusHardBlocked(line.providerStatus)
+    || classifyHostedLinqProviderStatus(line.providerStatus) === "degraded"
+    || (
+      line.healthStatus !== "healthy"
+      && !(
+        line.healthStatus === "warning"
+        && line.lastReceiptEventId === expectedFailureReceiptEventId
+      )
+    )
+  ) {
+    return null;
+  }
+
+  try {
+    const phoneNumber = normalizePhoneNumber(
+      decryptHostedLinqLinePhoneNumber(line.phoneNumberEncrypted),
+    );
+    return phoneNumber
+      ? {
+          phoneNumber,
+          phoneNumberLookupKey: line.phoneNumberLookupKey,
+        }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function claimHostedLinqProactiveConversationCapacityTx(input: {
   dayUtc: Date;
   limit: number;

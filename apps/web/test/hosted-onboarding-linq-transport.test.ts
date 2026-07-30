@@ -8,6 +8,7 @@ const transportBoundaryMocks = vi.hoisted(() => ({
   lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   readHostedLinqIncomingLineState: vi.fn(),
+  readHostedLinqReceiptCorrelatedRecoveryLineTx: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
   readHostedThreadRouteByThreadIdentity: vi.fn(),
   reserveHostedLinqHealthyProactiveLineTx: vi.fn(),
@@ -86,6 +87,8 @@ vi.mock("@/src/lib/hosted-onboarding/linq-line-store", () => ({
     transportBoundaryMocks.listHostedLinqHealthyProactiveLines,
   readHostedLinqIncomingLineState:
     transportBoundaryMocks.readHostedLinqIncomingLineState,
+  readHostedLinqReceiptCorrelatedRecoveryLineTx:
+    transportBoundaryMocks.readHostedLinqReceiptCorrelatedRecoveryLineTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
@@ -300,6 +303,11 @@ describe("hosted Linq webhook transport", () => {
         proactiveConversationDayUtc: null,
       },
     ]);
+    transportBoundaryMocks.readHostedLinqReceiptCorrelatedRecoveryLineTx
+      .mockResolvedValue({
+        phoneNumber: "+15550100042",
+        phoneNumberLookupKey: backupLineLookupKey,
+      });
     vi.mocked(startHostedAiUsageLimitNoticeDispatchTx)
       .mockImplementation(async (input) => {
         await input.prisma.$transaction(async (prisma) => {
@@ -668,6 +676,7 @@ describe("hosted Linq webhook transport", () => {
       id: "hld_persisted_group_reply",
       groupJoinOutreachId: "hgrpjoa-a",
       groupJoinReplyOccurredAt: new Date("2026-03-26T12:00:00.000Z"),
+      lastProviderEventId: null,
       phoneNumberLookupKey: null,
       providerCorrelated: false,
       sourceRef: effect.effectId,
@@ -735,6 +744,7 @@ describe("hosted Linq webhook transport", () => {
         id: "hld_persisted_group_reply",
         groupJoinOutreachId: "hgrpjoa-a",
         groupJoinReplyOccurredAt: new Date("2026-03-26T12:00:00.000Z"),
+        lastProviderEventId: null,
         phoneNumberLookupKey: null,
         providerCorrelated: false,
         sourceRef: persistedSourceRef,
@@ -2369,6 +2379,7 @@ describe("hosted Linq webhook transport", () => {
       groupJoinReplyOccurredAt: null,
       id: "hld-group-recovery-1",
       idempotencyLookupKey: baseLookupKey,
+      lastProviderEventId: "hbidx:linq-provider-event:recovery-failed-1",
       phoneNumberLookupKey: backupLookupKey,
       providerCorrelated: true,
       sourceRef: firstSourceRef,
@@ -2431,6 +2442,14 @@ describe("hosted Linq webhook transport", () => {
     expect(
       transportBoundaryMocks.reserveHostedLinqHealthyProactiveLineTx,
     ).toHaveBeenCalledTimes(1);
+    expect(
+      transportBoundaryMocks.readHostedLinqReceiptCorrelatedRecoveryLineTx,
+    ).toHaveBeenCalledWith({
+      expectedFailureReceiptEventId:
+        "hbidx:linq-provider-event:recovery-failed-1",
+      phoneNumberLookupKey: backupLookupKey,
+      prisma,
+    });
 
     const liveSecondIntent = {
       ...failedBaseIntent,
@@ -2542,6 +2561,7 @@ describe("hosted Linq webhook transport", () => {
         groupJoinReplyOccurredAt: null,
         id: "hld-group-recovery-1",
         idempotencyLookupKey: baseLookupKey,
+        lastProviderEventId: "hbidx:linq-provider-event:recovery-failed-1",
         phoneNumberLookupKey: backupLookupKey,
         providerCorrelated: true,
         sourceRef: buildHostedLinqGroupLineRecoverySourceRef({
@@ -2552,8 +2572,8 @@ describe("hosted Linq webhook transport", () => {
         targetKind: "participant",
         template: "group_line_recovery",
       }]);
-    transportBoundaryMocks.listHostedLinqHealthyProactiveLines
-      .mockResolvedValue([]);
+    transportBoundaryMocks.readHostedLinqReceiptCorrelatedRecoveryLineTx
+      .mockResolvedValue(null);
 
     await expect(drainHostedLinqSideEffectsDirect({
       prisma: prisma as never,
@@ -2566,8 +2586,13 @@ describe("hosted Linq webhook transport", () => {
         template: "group_line_recovery",
       }],
     });
-    expect(transportBoundaryMocks.listHostedLinqHealthyProactiveLines)
-      .toHaveBeenCalledWith({ prisma });
+    expect(transportBoundaryMocks.readHostedLinqReceiptCorrelatedRecoveryLineTx)
+      .toHaveBeenCalledWith({
+        expectedFailureReceiptEventId:
+          "hbidx:linq-provider-event:recovery-failed-1",
+        phoneNumberLookupKey: backupLookupKey,
+        prisma,
+      });
     expect(transportBoundaryMocks.reserveHostedLinqHealthyProactiveLineTx)
       .not.toHaveBeenCalled();
     expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
