@@ -1,6 +1,6 @@
 # Private Image Delivery V2
 
-Status: active
+Status: completed
 Updated: 2026-07-30
 
 ## Why
@@ -57,3 +57,22 @@ failed before delivery even though the vault image itself was unchanged.
 Runner-only change. If merged, deploy the Cloudflare runner with immediate
 container rollout and verify the expected runner source and bundle
 fingerprints. No Vercel, Temporal, or database deployment is required.
+
+## Outcome
+
+- Private response-image metadata is now derived from the selected vault bytes
+  before response media is committed, while provider entry keeps the existing
+  second read-and-verify fence.
+- Missing or invalid private media returns a tool failure and clears the media
+  batch without adding a forced reply or runtime-authored message.
+- The existing detached launch, acknowledgement, foreground priority, and
+  completion wake remain unchanged.
+- Focused owner tests pass 26/26, all three affected package typechecks pass,
+  runner bundle assembly passes, and docs/privacy/diff checks pass.
+- The preliminary specialist review found one coverage issue. The hosted proof
+  now ends the stale-metadata wake-and-deliver journey before a separate
+  saved-image reuse test begins.
+- Direct hosted-local retries were blocked before the selected assertion by
+  setup and current-main activation timeouts. Exact-head GitHub Actions remains
+  the canonical hosted journey proof.
+Completed: 2026-07-30
