@@ -1119,7 +1119,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     })).resolves.toBeNull()
   })
 
-  it('updates an existing owned onboarding follow-up without changing route, status, or schedule', async () => {
+  it('bounds an existing owned onboarding follow-up without changing route or status', async () => {
     const vaultRoot = await createVaultRoot()
     const existingRoute = {
       channel: 'linq' as const,
@@ -1171,8 +1171,10 @@ describe('applyMurphManagedAutomations core integration', () => {
       instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
       route: existingRoute,
       schedule: {
-        kind: 'dailyLocal',
-        localTime: '08:00',
+        at: expect.stringMatching(
+          /^2026-06-24T(?:13:[3-5]\d|14:[0-2]\d):00\.000Z$/u,
+        ),
+        kind: 'at',
       },
       slug: 'finish-onboarding-followup',
       status: 'paused',
@@ -1259,8 +1261,10 @@ describe('applyMurphManagedAutomations core integration', () => {
       instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
       route: defaultRoute,
       schedule: {
-        everyMs: 90_000,
-        kind: 'every',
+        at: expect.stringMatching(
+          /^2026-06-24T(?:13:[3-5]\d|14:[0-2]\d):00\.000Z$/u,
+        ),
+        kind: 'at',
       },
       status: 'active',
       summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
