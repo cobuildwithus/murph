@@ -533,7 +533,7 @@ test("freezes optional sponsorship copy with the selected group offer", async ()
   );
 
   try {
-    assert.match(rendered.container.textContent ?? "", /Add a note/);
+    assert.match(rendered.container.textContent ?? "", /Add a fun note/);
     assert.ok(rendered.container.querySelector(".h-auto"));
     await clickRadio(rendered.container, rendered.window, "usage_5_usd");
     assert.equal(
@@ -626,6 +626,21 @@ test("keeps the private monthly maximum out of the public sponsorship moment", a
   );
 
   try {
+    const dialogText = rendered.container.textContent ?? "";
+    assert.match(
+      dialogText,
+      /Murph adds \$5 only when this chat needs it, up to your monthly maximum\./u,
+    );
+    assert.doesNotMatch(dialogText, /required first \$5 activation purchase/u);
+    assert.match(dialogText, /Add a fun note/u);
+    const amountLabels =
+      rendered.container.querySelectorAll("span.font-serif.text-2xl");
+    assert.equal(amountLabels.length, 3);
+    for (const amountLabel of amountLabels) {
+      assert.equal(amountLabel.classList.contains("font-serif"), true);
+      assert.equal(amountLabel.classList.contains("text-2xl"), true);
+    }
+
     await clickRadio(rendered.container, rendered.window, "2000");
     assert.equal(
       rendered.container.querySelector("#group-sponsor-bit"),
@@ -842,7 +857,10 @@ test(
     );
 
     try {
-      assert.doesNotMatch(rendered.container.textContent ?? "", /Add a note/);
+      assert.doesNotMatch(
+        rendered.container.textContent ?? "",
+        /Add a fun note/,
+      );
       assert.equal(
         rendered.container.querySelector("#group-sponsor-alias"),
         null,

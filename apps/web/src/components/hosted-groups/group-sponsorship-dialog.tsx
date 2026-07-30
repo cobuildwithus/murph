@@ -144,10 +144,6 @@ function GroupSponsorshipDialog({
                 disabled={disabled || recoveringFrozenPurchase}
               >
                 <FieldLegend>Monthly maximum</FieldLegend>
-                <FieldDescription>
-                  Murph may make ordinary $5 usage-credit purchases only when
-                  this chat needs them, up to the maximum you authorize.
-                </FieldDescription>
                 <RadioGroup
                   value={String(selectedMonthlyCapMinor)}
                   onValueChange={(value) => {
@@ -164,7 +160,11 @@ function GroupSponsorshipDialog({
                       id={`group-sponsorship-cap-${option.monthlyCapMinor}`}
                       value={String(option.monthlyCapMinor)}
                       disabled={disabled || recoveringFrozenPurchase}
-                      title={option.amountLabel}
+                      title={
+                        <span className="font-serif text-2xl font-semibold leading-none tracking-tight">
+                          {option.amountLabel}
+                        </span>
+                      }
                       description="per month"
                     />
                   ))}
@@ -182,7 +182,7 @@ function GroupSponsorshipDialog({
                 />
               }
             >
-              Add a note (optional)
+              Add a fun note
               <ChevronDownIcon data-icon="inline-end" aria-hidden="true" />
             </CollapsibleTrigger>
             <CollapsibleContent className="h-auto">

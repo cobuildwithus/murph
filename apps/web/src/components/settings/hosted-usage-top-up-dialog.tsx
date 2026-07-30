@@ -282,7 +282,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                 ? "There isn’t a usage-credit offer available for this account right now."
                 : props.scope === "group"
                   ? groupPaymentMode === "monthly"
-                    ? "Choose the most Murph may spend each month. The required first $5 activation purchase is fixed by the server, and later $5 refills happen only when the group needs them."
+                    ? "Murph adds $5 only when this chat needs it, up to your monthly maximum."
                     : "Choose one explicit contribution of cost-weighted usage credit for this chat."
                   : familyTarget
                     ? `Choose a one-time credit amount for ${familyTarget}. We’ll use your saved card when available. Stripe will ask when card details or verification are needed.`
