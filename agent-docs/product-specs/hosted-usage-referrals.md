@@ -10,17 +10,18 @@ must call that same boundary; it does not justify speculative channel code.
 ## Product behavior
 
 When trusted usage context says a personal or group Murph is running low, Murph
-may offer the exact current sender an earned-continuity mission. When the current
+may offer the exact current sender earned-continuity missions. When the current
 sender explicitly asks how to get more usage or what options exist, Murph treats
 that as an all-options request: it checks referral availability even when current
-usage is healthy and presents any returned earned path beside the separately
+usage is healthy and presents any returned earned paths beside the separately
 authorized plan, top-up, or group-funding path. The sender does not need to know
 the feature name or explicitly ask for a mission. Murph makes at most one
 pre-action referral-availability read per user turn and reuses that result
 throughout the answer. The only extra read is the authoritative recovery
 required after an arm or cancellation commits but its refreshed snapshot is
-unavailable. Describing a mission is not consent. Murph arms one only after
-that person explicitly chooses one exact server-returned policy.
+unavailable. Describing missions is not consent. Murph arms each mission only
+after that person explicitly chooses its exact server-returned policy. Different
+policies are independent and may be active at the same time.
 
 | Policy | Qualification | Reward |
 | --- | --- | --- |
@@ -56,8 +57,14 @@ Unhinged band. It receives no raw transcript or room history and therefore
 cannot claim a callback; it keeps any edge aimed at Murph rather than an absent
 person.
 
-The referrer's latest unbound mission supersedes their older unbound mission.
-An already-bound target continues qualifying. Earned rewards are final.
+One fresh group binds every eligible unbound policy the creator has armed, and
+each mission then qualifies independently against the same admitted messages.
+One explicit arm request commits the sender's exact selected policy set or none
+of it. A policy already active for the same reward destination is idempotent.
+One policy can be armed for only one destination at a time; a read in another
+destination suppresses that policy without exposing where it is armed. A
+previously bound instance does not prevent arming the same policy for a future
+group. Earned rewards are final.
 
 The new-person mission deliberately reuses normal Murph onboarding instead of
 creating a referral-specific claim or activation system. After arming, Murph
@@ -81,17 +88,21 @@ the browser never chooses the referrer, destination, target, policy, or reward.
 ```text
 armed -> target_bound -> rewarded
    \         \-------> expired | disqualified
-    \---------------> superseded | canceled | expired
+    \---------------> canceled | expired
 ```
+
+`superseded` remains a legacy terminal status for rows created by the original
+one-at-a-time contract. New arming never emits it.
 
 Arming freezes the referrer, beneficiary, policy code and version, reward,
 seven-day window, and—only for a personal destination—the blinded source
 conversation. The current Linq transport service is trusted runtime context,
 not persisted referral state. The referrer's next newly created thread
-container binds only when its durable owner is that exact referrer and creation
-happened after arming. The new-person policy additionally requires an exact
-Linq iMessage target container; SMS, RCS, and Telegram containers leave it
-armed for a later eligible group. Existing rooms cannot bind.
+container binds every compatible policy that referrer has armed when its
+durable owner is that exact referrer and creation happened after arming. The
+new-person policy additionally requires an exact Linq iMessage target
+container; SMS, RCS, and Telegram containers leave it armed for a later
+eligible group. Existing rooms cannot bind.
 
 The hosted runtime injects current Linq or Telegram sender handles from accepted
 input context. The model cannot provide identity, beneficiary, route, target,
@@ -101,7 +112,10 @@ provider-scoped current sender resolves to an active personal member.
 
 No hidden watermark is created by low-usage copy. `read_usage_referral` reads
 availability; `arm_usage_referral` and `cancel_usage_referral` require fresh
-user-sourced input. Cancellation applies only while the mission is unbound.
+user-sourced input. Arming accepts one exact selected set of returned policies
+and commits every missing row in one transaction. Cancellation names one exact
+policy and applies only while that mission is unbound; every other mission is
+left unchanged.
 
 ## Portable ingress evidence
 
@@ -160,12 +174,11 @@ remaining-capacity projection.
 The beneficiary member row remains the single serialization boundary for
 positive grants, debits, adjustments, the bounded balance/version projection,
 current-period unblock reconciliation, and referral-cap commitments. Arming
-locks the frozen beneficiary, plus the old beneficiary when replacing an
-unbound mission in another conversation, in stable member-id order. It admits
-the mission only when recent rewards, nonexpired armed commitments, and bound
-commitments still inside their late-evidence grace fit both caps. Referral
-observation never acquires that lock. It records evidence and `qualifiedAt`
-atomically in the ingress transaction.
+locks the frozen beneficiary and admits the mission only when recent rewards,
+nonexpired armed commitments, and bound commitments still inside their
+late-evidence grace fit both caps. Referral observation never acquires that
+lock. It records evidence and `qualifiedAt` atomically in the ingress
+transaction.
 Once that pre-expiry qualification fence commits, later wall-clock expiry or
 newly armed commitments cannot disqualify it. Post-commit reconciliation locks
 the referrer and beneficiary, revalidates the frozen evidence, and issues
@@ -224,13 +237,15 @@ Provider timing references:
 
 ## Abuse bounds
 
-- One unbound armed mission per referrer.
-- At most three bound nonterminal missions per referrer.
+- At most one unbound armed instance of a policy per referrer across reward
+  destinations.
+- At most three nonterminal missions per referrer across armed and bound state.
 - At most $10.50 in rolling-30-day rewards plus outstanding commitments per
   referrer.
 - At most $20 in rolling-30-day rewards plus outstanding commitments per
   beneficiary.
-- One target container binds once.
+- A target container may advance multiple different policies, but at most one
+  instance of each policy; each referral row binds only once.
 - One introduced member can produce one rewarded acquisition referral.
 - The referrer cannot qualify their own activation mission.
 - Every policy and amount comes from the versioned server catalog.
@@ -279,6 +294,13 @@ Referral production is fail-closed unless Web reads the exact value
    personal and one group `read_usage_referral` request, one fresh-group bind,
    one replayed reward, one recovery-cron retry, the source celebration, and
    the next usage debit.
+
+The composable-mission rollout changes the runtime wire contract from singular
+`active` to plural `activeMissions` and requires `policyCode` on cancellation.
+For that rollout, first disable `HOSTED_USAGE_REFERRALS_ENABLED`, deploy Web
+and the Cloudflare/hosted runtime plus assistant packages, verify one plural
+read and one exact-policy cancellation, and only then re-enable the gate. Do
+not expose a mixed-version Web/runtime pair.
 
 Before the first durable referral grant, rollback by disabling the gate while
 keeping the compatible Web consumer deployed; runtime code may then roll back

@@ -3622,11 +3622,20 @@ exit 1
 
   it('verifies the live release manifest and publish set', () => {
     const summary = JSON.parse(
-      execFileSync('node', ['scripts/verify-release-target.mjs', '--json'], {
-        cwd: repoRoot,
-        encoding: 'utf8',
-        env: withoutNodeV8Coverage(),
-      }),
+      execFileSync(
+        'node',
+        [
+          'scripts/verify-release-target.mjs',
+          '--expect-version',
+          cliPackageJson.version ?? 'UNCONFIRMED',
+          '--json',
+        ],
+        {
+          cwd: repoRoot,
+          encoding: 'utf8',
+          env: withoutNodeV8Coverage(),
+        },
+      ),
     ) as {
       packages: Array<{
         bundledExternalDependencies?: string[]
