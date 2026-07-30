@@ -228,6 +228,8 @@ export function JoinInviteMessagingSetupIsland({
   } = usePrivy();
   const { user } = useUser();
   const [reauthPending, setReauthPending] = useState(false);
+  const clientIdentityPending =
+    !privyReady || (privyAuthenticated && user === null);
   const clientSessionMatchesAppSession =
     authenticated
     && privyReady
@@ -251,7 +253,7 @@ export function JoinInviteMessagingSetupIsland({
     }
   }
 
-  if (!privyReady) {
+  if (clientIdentityPending) {
     return <HostedIdentitySessionLoading />;
   }
 
@@ -267,12 +269,7 @@ export function JoinInviteMessagingSetupIsland({
 
   return (
     <div className="space-y-5">
-      <HostedPhoneSettings
-        authenticated={authenticated}
-        expectedPrivyUserId={expectedPrivyUserId}
-        onLinked={refresh}
-        privySessionMatchesAppSession={privySessionMatchesAppSession}
-      />
+      <HostedPhoneSettings onLinked={refresh} />
 
       <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
         <span className="h-px flex-1 bg-border" />

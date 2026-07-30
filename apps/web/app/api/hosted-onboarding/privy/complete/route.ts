@@ -17,7 +17,10 @@ import {
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { getHostedInviteStatus } from "@/src/lib/hosted-onboarding/invite-service";
 import { requirePrivyCompletionSession } from "@/src/lib/hosted-onboarding/request-auth";
-import { issueHostedAppSession } from "@/src/lib/hosted-onboarding/app-session";
+import {
+  getHostedAppSessionFromRequest,
+  issueHostedAppSession,
+} from "@/src/lib/hosted-onboarding/app-session";
 import { resolveHostedSignupTimeZone } from "@/src/lib/hosted-onboarding/time-zone-hint";
 import {
   readHostedConsentStatus,
@@ -34,7 +37,21 @@ export const POST = withJsonError(async (request: Request) => {
 
   try {
     assertHostedOnboardingMutationOrigin(request);
-    const auth = await requirePrivyCompletionSession(request);
+    const [auth, existingAppSession] = await Promise.all([
+      requirePrivyCompletionSession(request),
+      getHostedAppSessionFromRequest(request),
+    ]);
+    if (
+      existingAppSession
+      && existingAppSession.privyUserId !== auth.identity.userId
+    ) {
+      throw hostedOnboardingError({
+        code: "PRIVY_SESSION_MEMBER_MISMATCH",
+        message:
+          "This Privy login does not match your current Murph session. Sign out and sign back in.",
+        httpStatus: 409,
+      });
+    }
     const body = await readOptionalJsonObject(request);
     const authMethod = resolveHostedPrivyCompletionAuthMethod({
       body,

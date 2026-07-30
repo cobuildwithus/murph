@@ -27,7 +27,6 @@ const mocks = vi.hoisted(() => ({
   linkPhone: vi.fn(),
   refreshUser: vi.fn(),
   useLinkAccount: vi.fn(),
-  usePrivy: vi.fn(),
   updateAccountCallbacks: null as UpdateAccountCallbacks | null,
   updatePhone: vi.fn(),
   useUpdateAccount: vi.fn(),
@@ -36,7 +35,6 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@privy-io/react-auth", () => ({
   useLinkAccount: mocks.useLinkAccount,
-  usePrivy: mocks.usePrivy,
   useUpdateAccount: mocks.useUpdateAccount,
   useUser: mocks.useUser,
 }));
@@ -52,10 +50,6 @@ describe("HostedPhoneSettings", () => {
     vi.clearAllMocks();
     mocks.linkAccountCallbacks = null;
     mocks.updateAccountCallbacks = null;
-    mocks.usePrivy.mockReturnValue({
-      authenticated: true,
-      ready: true,
-    });
     mocks.useUser.mockReturnValue({
       refreshUser: mocks.refreshUser,
       user: {
@@ -100,11 +94,7 @@ describe("HostedPhoneSettings", () => {
     const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
 
     const { cleanup, container } = await renderClientComponent(
-      createElement(HostedPhoneSettings, {
-        authenticated: true,
-        expectedPrivyUserId: "privy-user-a",
-        privySessionMatchesAppSession: true,
-      }),
+      createElement(HostedPhoneSettings, {}),
     );
     cleanupRender = cleanup;
 
@@ -119,10 +109,7 @@ describe("HostedPhoneSettings", () => {
     const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
     const { cleanup, container } = await renderClientComponent(
       createElement(HostedPhoneSettings, {
-        authenticated: true,
-        expectedPrivyUserId: "privy-user-a",
         onLinked,
-        privySessionMatchesAppSession: true,
       }),
     );
     cleanupRender = cleanup;
@@ -183,11 +170,7 @@ describe("HostedPhoneSettings", () => {
     });
     const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
     const { cleanup, container } = await renderClientComponent(
-      createElement(HostedPhoneSettings, {
-        authenticated: true,
-        expectedPrivyUserId: "privy-user-a",
-        privySessionMatchesAppSession: true,
-      }),
+      createElement(HostedPhoneSettings, {}),
     );
     cleanupRender = cleanup;
 
@@ -219,52 +202,6 @@ describe("HostedPhoneSettings", () => {
     });
   });
 
-  it("blocks provider mutation when the client Privy user differs from the app session", async () => {
-    mocks.useUser.mockReturnValue({
-      refreshUser: mocks.refreshUser,
-      user: {
-        id: "privy-user-b",
-        linkedAccounts: [],
-      },
-    });
-    const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
-
-    const { cleanup, container } = await renderClientComponent(
-      createElement(HostedPhoneSettings, {
-        authenticated: true,
-        expectedPrivyUserId: "privy-user-a",
-        privySessionMatchesAppSession: true,
-      }),
-    );
-    cleanupRender = cleanup;
-
-    const verifyButton = findButton(container, "Verify phone");
-    expect(verifyButton?.disabled).toBe(true);
-    expect(container.textContent).toContain(
-      "Your sign-in changed. Refresh this page before linking a phone.",
-    );
-    expect(mocks.linkPhone).not.toHaveBeenCalled();
-    expect(mocks.finalizeHostedPhoneLink).not.toHaveBeenCalled();
-  });
-
-  it("blocks provider mutation when the server could not prove the Privy session match", async () => {
-    const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
-
-    const { cleanup, container } = await renderClientComponent(
-      createElement(HostedPhoneSettings, {
-        authenticated: true,
-        expectedPrivyUserId: "privy-user-a",
-        privySessionMatchesAppSession: false,
-      }),
-    );
-    cleanupRender = cleanup;
-
-    expect(findButton(container, "Verify phone")?.disabled).toBe(true);
-    expect(mocks.linkPhone).not.toHaveBeenCalled();
-    expect(mocks.updatePhone).not.toHaveBeenCalled();
-    expect(mocks.finalizeHostedPhoneLink).not.toHaveBeenCalled();
-  });
-
   it.each([
     "linked_to_another_user",
     "account_transfer_required",
@@ -272,11 +209,7 @@ describe("HostedPhoneSettings", () => {
     const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
 
     const { cleanup, container } = await renderClientComponent(
-      createElement(HostedPhoneSettings, {
-        authenticated: true,
-        expectedPrivyUserId: "privy-user-a",
-        privySessionMatchesAppSession: true,
-      }),
+      createElement(HostedPhoneSettings, {}),
     );
     cleanupRender = cleanup;
 
@@ -310,11 +243,7 @@ describe("HostedPhoneSettings", () => {
 
     const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
     const { cleanup, container } = await renderClientComponent(
-      createElement(HostedPhoneSettings, {
-        authenticated: true,
-        expectedPrivyUserId: "privy-user-a",
-        privySessionMatchesAppSession: true,
-      }),
+      createElement(HostedPhoneSettings, {}),
     );
     cleanupRender = cleanup;
 

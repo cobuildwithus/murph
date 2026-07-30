@@ -1498,6 +1498,15 @@ export function ComponentsContent() {
               </p>
               <HostedIdentitySessionLoading />
             </div>
+            <div className="space-y-3 rounded-xl border border-border bg-card p-5">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Recovery failed
+              </p>
+              <HostedIdentitySessionMismatch
+                errorMessage="Sign out did not finish. Try again."
+                onSignInAgain={() => {}}
+              />
+            </div>
           </div>
         </Section>
 

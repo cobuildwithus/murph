@@ -652,10 +652,13 @@ test("JoinInviteMessagingSetupIsland shows Privy phone linking and Telegram conn
   expect(container.querySelector('[data-connect-telegram="true"]')).toBeTruthy();
   expect(container.textContent).toContain("OR");
   expect(mocks.hostedPhoneSettingsProps).toMatchObject({
-    authenticated: true,
-    expectedPrivyUserId: "privy-user-a",
-    privySessionMatchesAppSession: true,
+    onLinked: expect.any(Function),
   });
+  expect(mocks.hostedPhoneSettingsProps).not.toHaveProperty("authenticated");
+  expect(mocks.hostedPhoneSettingsProps).not.toHaveProperty("expectedPrivyUserId");
+  expect(mocks.hostedPhoneSettingsProps).not.toHaveProperty(
+    "privySessionMatchesAppSession",
+  );
   await cleanup();
 });
 
@@ -736,6 +739,49 @@ test("JoinInviteMessagingSetupIsland waits for the Privy client before mounting 
   expect(container.querySelector('[data-hosted-phone-settings="true"]')).toBeNull();
   expect(container.querySelector('[data-connect-telegram="true"]')).toBeNull();
   await cleanup();
+});
+
+test("JoinInviteMessagingSetupIsland keeps warm-session hydration pending until the concrete client identity resolves", async () => {
+  mocks.useUser.mockReturnValue({
+    refreshUser: vi.fn(),
+    user: null,
+  });
+  const renderIsland = () => createElement(JoinInviteMessagingSetupIsland, {
+    authenticated: true,
+    expectedPrivyUserId: "privy-user-a",
+    initialTelegramAccount: null,
+    privySessionMatchesAppSession: true,
+  });
+  const rendered = await renderClientComponent(renderIsland(), { requireButton: false });
+
+  expect(rendered.container.textContent).toContain("Preparing secure account linking");
+  expect(rendered.container.textContent).not.toContain("Sign in again");
+  expect(rendered.container.querySelector('[data-hosted-phone-settings="true"]')).toBeNull();
+  expect(rendered.container.querySelector('[data-connect-telegram="true"]')).toBeNull();
+
+  mocks.useUser.mockReturnValue({
+    refreshUser: vi.fn(),
+    user: {
+      id: "privy-user-a",
+    },
+  });
+  await rendered.rerender(renderIsland());
+
+  expect(rendered.container.querySelector('[data-hosted-phone-settings="true"]')).toBeTruthy();
+  expect(rendered.container.querySelector('[data-connect-telegram="true"]')).toBeTruthy();
+
+  mocks.useUser.mockReturnValue({
+    refreshUser: vi.fn(),
+    user: {
+      id: "privy-user-b",
+    },
+  });
+  await rendered.rerender(renderIsland());
+
+  expect(rendered.container.textContent).toContain("Your sign-in changed.");
+  expect(rendered.container.querySelector('[data-hosted-phone-settings="true"]')).toBeNull();
+  expect(rendered.container.querySelector('[data-connect-telegram="true"]')).toBeNull();
+  await rendered.cleanup();
 });
 
 test("JoinInvitePhoneVerificationIsland uses email auth for invite email verification", async () => {
