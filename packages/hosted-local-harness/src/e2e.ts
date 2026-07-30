@@ -51,6 +51,7 @@ export type HostedLocalE2eScenarioName =
   | "junction-wearable-fixture"
   | "mailbox-platform-env"
   | "linq-first-contact"
+  | "linq-group-ios-app-download"
   | "linq-group-route-drift"
   | "linq-home-line-reroute-retry"
   | "linq-unknown-first-contact-fallback"
@@ -183,6 +184,12 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     aliases: ["linq-delivery"],
     file: "apps/cloudflare/test/hosted-local-linq-first-contact-e2e.test.ts",
     name: "linq-first-contact",
+  },
+  {
+    file:
+      "apps/cloudflare/test/hosted-local-linq-group-ios-app-download-e2e.test.ts",
+    manualOnly: true,
+    name: "linq-group-ios-app-download",
   },
   {
     file: "apps/cloudflare/test/hosted-local-linq-group-route-drift-e2e.test.ts",
