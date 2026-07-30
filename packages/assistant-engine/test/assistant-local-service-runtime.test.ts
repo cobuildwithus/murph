@@ -1625,7 +1625,7 @@ test('sendAssistantMessageLocal fails closed before reply delivery when second-p
     delivery: null,
     deliveryDeferred: false,
     deliveryError: {
-      code: 'ASSISTANT_DELIVERY_FAILED',
+      code: 'ASSISTANT_MESSAGE_TARGET_UNAVAILABLE',
       message: 'The selected message is not available for this action.',
     },
     deliveryIntentId: null,
@@ -1726,7 +1726,7 @@ test('sendAssistantMessageLocal fails closed before reaction delivery when secon
     delivery: null,
     deliveryDeferred: false,
     deliveryError: {
-      code: 'ASSISTANT_DELIVERY_FAILED',
+      code: 'ASSISTANT_MESSAGE_TARGET_UNAVAILABLE',
       message: 'The selected message is not available for this action.',
     },
     deliveryIntentId: null,

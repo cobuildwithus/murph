@@ -12466,6 +12466,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const events: string[] = [];
     const fetchRequests: HostedMailboxFetchRequest[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
     const imported: string[] = [];
     const mailboxItems: HostedMailboxItem[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
@@ -12496,7 +12497,10 @@ describe("hosted workspace runtime entrypoint", () => {
           async importItem(item) {
             if (item.item.lane === "system") {
               events.push(`import:${item.item.lane}:${item.item.laneSeq}`);
-              throw new Error("Synthetic system import failure.");
+              if (!imported.includes("conversation:2")) {
+                throw new Error("Synthetic system import failure.");
+              }
+              return { status: "imported" };
             }
             imported.push(`${item.item.lane}:${item.item.laneSeq}`);
             events.push(`import:${item.item.lane}:${item.item.laneSeq}`);
@@ -12509,6 +12513,7 @@ describe("hosted workspace runtime entrypoint", () => {
             };
           },
           platform: createPlatform({
+            logRequests,
             mailboxPort: createMailboxPort({
               events,
               fetchRequests,
@@ -12538,6 +12543,25 @@ describe("hosted workspace runtime entrypoint", () => {
             await waitUntil(() => {
               assert.ok(imported.includes("conversation:1"));
             });
+            runtimeWakeSignal.notify();
+            await waitUntil(() => {
+              assert.ok(
+                logRequests
+                  .flatMap((request) => request.entries)
+                  .some((entry) =>
+                    entry.errorCode === "foreground_mailbox_import_failed"
+                  ),
+              );
+            });
+            mailboxItems.push(createMailboxItem({
+              id: "mailbox_item_entrypoint_foreground_system_failure_conversation_002",
+              laneSeq: "2",
+              occurredAt: "2026-04-27T00:00:02.000Z",
+            }));
+            runtimeWakeSignal.notify();
+            await waitUntil(() => {
+              assert.ok(imported.includes("conversation:2"));
+            });
 
             return {
               checkpointReason: "canonical_runtime_commit",
@@ -12548,15 +12572,19 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
 
-      assert.deepEqual(imported, ["conversation:1"]);
-      assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, "1");
+      assert.deepEqual(imported, ["conversation:1", "conversation:2"]);
+      assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, "2");
       assert.equal(
         checkpointRequests[0]?.redactedStatus?.hostedMailboxConversationImportedSeq,
-        "1",
+        "2",
       );
       assert.ok(
         requireEventIndex(events, "import:conversation:1")
         < requireEventIndex(events, "import:system:1"),
+      );
+      assert.ok(
+        requireEventIndex(events, "import:system:1")
+        < requireEventIndex(events, "import:conversation:2"),
       );
     } finally {
       await removeTempRoot(vaultRoot);

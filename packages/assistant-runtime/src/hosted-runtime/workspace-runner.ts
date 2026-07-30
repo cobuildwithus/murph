@@ -1390,6 +1390,7 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
       });
       const foregroundConversationImportItem =
         input.input.foregroundImportItem ?? input.input.importItem;
+      let systemImportStarted = false;
       try {
         const handleForegroundImportResult = async (
           result: HostedMailboxImportCheckpointResult,
@@ -1453,6 +1454,7 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
           continue;
         }
 
+        systemImportStarted = true;
         const systemImportSignal =
           composeHostedForegroundMailboxImportSignal(
             outerSignal,
@@ -1489,15 +1491,19 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
         if (outerSignal?.aborted || inFlightImportController.signal.aborted) {
           break;
         }
-        requeueRuntimeWakeNotification({
-          notification,
-          runtimeWakeSignal,
-        });
+        if (!systemImportStarted) {
+          requeueRuntimeWakeNotification({
+            notification,
+            runtimeWakeSignal,
+          });
+        }
         await writeHostedForegroundMailboxImportFailureRuntimeLog({
           error,
           input: input.input,
         });
-        break;
+        if (!systemImportStarted) {
+          break;
+        }
       } finally {
         resolveActiveWake();
         if (activeWakeCompletion === currentWakeCompletion) {
