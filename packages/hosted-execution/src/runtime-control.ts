@@ -1340,6 +1340,7 @@ export type HostedRuntimeGroupToolRequest =
     }
   | ({
       action: "read_usage_referral";
+      participant?: HostedExecutionAcceptedGroupMessageParticipant | null;
     } & HostedRuntimeGroupToolSenderContext
       & HostedRuntimeUsageReferralSourceContext)
   | ({

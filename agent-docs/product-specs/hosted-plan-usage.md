@@ -1,6 +1,6 @@
 # Hosted Plan Usage And Subscription Actions
 
-Last verified: 2026-07-27
+Last verified: 2026-07-30
 Status: Implemented current-state contract
 
 ## Goal
@@ -390,15 +390,24 @@ inventing a billing menu:
   private Settings handoff; a sponsored non-owner is told that the Family
   owner must make the change, while Family Edge has no higher current tier; and
 - a hosted group gets a proactive first heads-up: on the first trusted
-  low-usage turn the assistant calls `murph.group action="read_usage"` once and
-  may include the returned state, the integer percent of the current period's
-  usage remaining, and the first-party funding URL in the heads-up segment,
-  matching the room's tone; a `healthy` read suppresses the heads-up entirely.
-  Playful payer nomination is allowed, but who actually paid, purchase status,
-  and amounts stay private, and the assistant never promises a URL the read
-  did not return. For a group without an owner-created join code, the funding
-  URL carries a signed funding-only locator that grants no enrollment or
-  sharing, so the URL is normally present without any write.
+  low-usage turn the assistant calls `murph.group action="read_usage"` once.
+  The segment stays conversational, link-free, and route-neutral: it calls the
+  shared capacity "Murph time," says Murph may pause for the room, and asks
+  whether they want Murph to check the options without naming or counting any
+  path. It never frames each text as a unit being purchased or spent. A
+  `healthy` read suppresses the heads-up entirely. After someone asks for the
+  options, asks for more Murph time, asks how to keep the room going, or accepts
+  the quick path, the assistant reads the options for that responding sender,
+  using the exact accepted request-bearing message as participant authority
+  rather than inferring one sender from the whole grouped turn. It refreshes
+  current usage as needed, presents every returned earned and sponsored path,
+  and places the funding URL after the sponsored path instead of leading with
+  it. Playful payer
+  nomination is allowed, but who actually paid, purchase status, and amounts
+  stay private, and the assistant never promises a URL the read did not return.
+  For a group without an owner-created join code, the funding URL carries a
+  signed funding-only locator that grants no enrollment
+  or sharing, so the URL is normally present without any write.
 
 For an explicit Family member-usage management request, the assistant first
 calls `murph.family_plan action="read_status"`. It may provide
@@ -428,14 +437,20 @@ or payer identity.
 
 Group low usage follows the same next-turn context path as personal usage: it
 never creates a standalone message, and the prompt asks Murph to finish the
-current request before mentioning the low capacity casually. A deterministic
-group exhaustion notice may use only the exact originating external-thread
-target after Web re-authorizes its persisted thread authority; no personal-home
-fallback is valid for an accepted group conversation. At delivery time Web
-rechecks the exhausted state and may append the group's funding link, using
-the owner join code when one exists or the signed funding-only locator when
-none does. The notice does not name a payer, claim that payment occurred, or
-add a separate scheduler or money-prompt lifecycle.
+current request before mentioning the low capacity casually as "Murph time"
+and without a link. After someone asks for options, asks for more Murph time,
+or asks how to keep the room going, a current read may supply the funding link
+as part of the sponsored path; the assistant does not lead with it. Message
+counts stay out of unsolicited and general-options copy; Murph gives the exact
+server-returned approximate count only when someone asks how much a path adds
+or a post-action confirmation requires it. A deterministic group exhaustion
+notice may use only the exact originating external-thread target after Web
+re-authorizes its persisted thread authority; no personal-home fallback is
+valid for an accepted group conversation. At delivery time Web rechecks the exhausted state and may append
+the group's funding link, using the owner join code when one exists or the
+signed funding-only locator when none does. The notice does not name a payer,
+claim that payment occurred, or add a separate scheduler or money-prompt
+lifecycle.
 
 ## Non-Goals
 

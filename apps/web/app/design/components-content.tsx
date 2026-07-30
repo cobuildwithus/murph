@@ -39,7 +39,10 @@ import { HealthDomainCard } from "@/src/components/overview/health-domain-card";
 import { ActiveExperimentBanner } from "@/src/components/overview/active-experiment-banner";
 import { TrialBillingBanner } from "@/src/components/home/trial-billing-banner";
 import { ProfileStats } from "@/src/components/overview/profile-stats";
-import { HostedResumableAuthState } from "@/src/components/hosted-onboarding/hosted-auth-panel";
+import {
+  HostedAuthPanelAlternateMethods,
+  HostedResumableAuthState,
+} from "@/src/components/hosted-onboarding/hosted-auth-panel";
 import { HostedPrivyReadinessState } from "@/src/components/hosted-onboarding/hosted-auth-panel-island";
 import { EmailIcon } from "@/src/components/homepage/email-icon";
 import {
@@ -564,12 +567,15 @@ export function ComponentsContent() {
           <div
             className="flex flex-col gap-6"
             data-design-homepage-auth-transitions
+            id="homepage-auth-transitions"
           >
             <p className="text-sm text-muted-foreground">
               Secure sign in keeps the ordinary methods visible while the
               provider initializes. A selected method owns the pending state
-              immediately, then account completion stays on that production
-              action through the next view.
+              immediately. If hydration discovers an existing session before
+              submission, method actions pause until its linked account is
+              known, then recovery takes priority. Otherwise account completion
+              stays on that production action through the next view.
             </p>
             <div
               className="grid items-start gap-5 lg:grid-cols-2"
@@ -605,6 +611,63 @@ export function ComponentsContent() {
                   onClick={() => {}}
                   readyToContinue
                 />
+              </DialogPreviewFrame>
+            </div>
+            <div
+              className="grid items-start gap-5 lg:grid-cols-2"
+              id="homepage-auth-hydrated-session-recovery"
+              inert
+            >
+              <DialogPreviewFrame label="Session identity hydration">
+                <HostedPrivyReadinessState
+                  message="Secure sign in is checking your existing session."
+                  onRestart={() => {}}
+                  restartAvailable={false}
+                />
+              </DialogPreviewFrame>
+              <DialogPreviewFrame label="Hydrated email session recovery">
+                <div className="space-y-4">
+                  <HostedResumableAuthState
+                    auth={{ identityLabel: "member@example.com", method: "email" }}
+                    disabled={false}
+                    onContinue={() => {}}
+                    onSignOut={() => {}}
+                    pending={false}
+                  />
+                  <HostedAuthPanelAlternateMethods>
+                    <HostedTelegramAuthButtonPresentation onClick={() => {}} />
+                    <HostedInlineAuthButton
+                      icon={<EmailIcon className="size-5" />}
+                      onClick={() => {}}
+                    >
+                      Email
+                    </HostedInlineAuthButton>
+                  </HostedAuthPanelAlternateMethods>
+                </div>
+              </DialogPreviewFrame>
+              <DialogPreviewFrame label="Hydrated phone session recovery">
+                <div className="space-y-4">
+                  <HostedAuthenticatedPhoneAuthState
+                    body=""
+                    description=""
+                    disabled={false}
+                    onContinue={() => {}}
+                    onUseDifferentNumber={() => {}}
+                    pendingAction={null}
+                    secondaryActionSize="lg"
+                    title=""
+                    view="manual-resume"
+                  />
+                  <HostedAuthPanelAlternateMethods>
+                    <HostedTelegramAuthButtonPresentation onClick={() => {}} />
+                    <HostedInlineAuthButton
+                      icon={<EmailIcon className="size-5" />}
+                      onClick={() => {}}
+                    >
+                      Email
+                    </HostedInlineAuthButton>
+                  </HostedAuthPanelAlternateMethods>
+                </div>
               </DialogPreviewFrame>
             </div>
             <div className="grid items-start gap-5 lg:grid-cols-2" inert>

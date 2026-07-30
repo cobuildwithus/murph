@@ -377,8 +377,15 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
         || request.action === "arm_usage_referral"
         || request.action === "cancel_usage_referral"
       ) {
+        const participant = request.action === "read_usage_referral"
+          ? request.participant
+          : null;
         const senderHandles = emailIngressPresent
           ? {}
+          : participant?.source === "linq"
+          ? { linqSenderHandles: [participant.senderHandle] }
+          : participant?.source === "telegram"
+          ? { telegramSenderHandles: [participant.senderHandle] }
           : resolveHostedGroupToolSenderHandles({
               linqDeliveryContexts: input.linqDeliveryContexts,
               telegramSenderHandles: input.telegramSenderHandles ?? [],
