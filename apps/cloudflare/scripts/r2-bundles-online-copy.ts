@@ -1032,9 +1032,9 @@ function createOnlineCopyClient(environment: MigrationEnvironment): OnlineCopyCl
         key: input.entry.key,
         method: "PUT",
       });
+      await response.arrayBuffer();
       if (response.status === 412) return "destination_exists";
       if (response.status === 404) {
-        await response.body?.cancel();
         return "source_missing";
       }
       if (!response.ok) {

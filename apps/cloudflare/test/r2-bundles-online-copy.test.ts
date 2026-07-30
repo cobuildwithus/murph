@@ -295,6 +295,7 @@ describe("R2 online immutable copy", () => {
       destinationInventory: () => destinationInventory,
       sourceInventory: () => [eligible],
     });
+    const destinationExistsResponse = new Response("<Error />", { status: 412 });
     const fetchMock = vi.fn(async (
       request: RequestInfo | URL,
       init?: RequestInit,
@@ -313,7 +314,7 @@ describe("R2 online immutable copy", () => {
           "cf-copy-destination-if-none-match",
         );
         destinationInventory = [marker(), eligible];
-        return new Response(null, { status: 412 });
+        return destinationExistsResponse;
       }
       if (init?.method === "HEAD") {
         expect(init.redirect).toBe("error");
@@ -347,6 +348,7 @@ describe("R2 online immutable copy", () => {
     );
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(destinationExistsResponse.bodyUsed).toBe(true);
     expect(harness.calls.some((call) =>
       call.command === "aws" && call.args[0] === "--version"
     )).toBe(true);
@@ -464,6 +466,44 @@ describe("R2 online immutable copy", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("never retries a connect-timeout-shaped body failure after response headers", async () => {
+    const boundaryNamespace = createHostedStorageNamespaceId("member_1");
+    const eligible = entry(
+      `users/${boundaryNamespace}/workspace-snapshots/post-response-body-failure.snapshot.enc`,
+      { etag: '"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"', size: 12 },
+    );
+    const harness = createCommandBoundaryRunner({
+      destinationInventory: () => [marker()],
+      sourceInventory: () => [eligible],
+    });
+    const fetchMock = vi.fn(async (
+      _request: RequestInfo | URL,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      if (init?.method !== "PUT") {
+        throw new Error(`Unexpected online-copy fetch method: ${init?.method ?? "GET"}`);
+      }
+      return new Response(new ReadableStream({
+        start(controller) {
+          controller.error(undiciConnectTimeout());
+        },
+      }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(runR2BundlesOnlineCopy(
+      options({
+        apply: true,
+        confirmDestination: destinationBucket,
+        immutableKeysAudited: true,
+      }),
+      environment,
+      { log: vi.fn(), runner: harness.runner },
+    )).rejects.toThrow();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("retries once only for Undici's exact pre-connect timeout", async () => {
     const boundaryNamespace = createHostedStorageNamespaceId("member_1");
     const eligible = entry(
@@ -476,6 +516,7 @@ describe("R2 online immutable copy", () => {
       sourceInventory: () => [eligible],
     });
     let putAttempts = 0;
+    const copySuccessResponse = new Response("<CopyObjectResult />", { status: 200 });
     const fetchMock = vi.fn(async (
       request: RequestInfo | URL,
       init?: RequestInit,
@@ -488,7 +529,7 @@ describe("R2 online immutable copy", () => {
           throw undiciConnectTimeout();
         }
         destinationInventory = [marker(), eligible];
-        return new Response(null, { status: 200 });
+        return copySuccessResponse;
       }
       if (init?.method === "HEAD") {
         expect(init.redirect).toBe("error");
@@ -520,6 +561,7 @@ describe("R2 online immutable copy", () => {
 
     expect(putAttempts).toBe(2);
     expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(copySuccessResponse.bodyUsed).toBe(true);
   });
 
   it("rejects malformed production owner rows before inventory or R2 requests", async () => {

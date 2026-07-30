@@ -61,6 +61,10 @@ Updated: 2026-07-29
 - Disable automatic redirects on every signed R2 fetch. ReviewGPT identified
   that a redirect followed by a connect timeout could otherwise make an
   already-started fetch operation look pre-request.
+- Consume each terminal CopyObject response body before classification so the
+  long-running copier releases/reuses Undici connections. Body consumption is
+  deliberately outside the retry wrapper, so a post-response body failure
+  remains one-shot.
 
 ## Verification
 
@@ -68,5 +72,5 @@ Updated: 2026-07-29
   ReviewGPT preliminary/final gates, and required PR CI.
 - Expected outcomes: exact pre-connect timeout retries once; all ambiguous
   failures make one PUT attempt; no production resource is mutated.
-- Current focused result: 36 online-copy tests and Cloudflare typecheck pass
-  after the redirect remediation.
+- Current focused result: 37 online-copy tests and Cloudflare typecheck pass
+  after the redirect and response-drain remediations.
