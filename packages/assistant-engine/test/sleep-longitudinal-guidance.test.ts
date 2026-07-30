@@ -346,8 +346,21 @@ describe('experiment start and support mechanics', () => {
     )
     expect(resolution).toContain('Never replace it with a')
     expect(resolution).toContain('`starterCandidate`')
-    expect(resolution).toMatch(
-      /If\s+there is no unique exact match, ask one clarification and do not plan or\s+start\./u,
+    const nameFirstRule = resolution.slice(
+      resolution.indexOf('- A public Murph start draft names the experiment'),
+      resolution.indexOf('- For that name-first draft'),
+    )
+    expect(nameFirstRule).toMatch(
+      /direct public Start sentence names one experiment and there are zero current\s+exact title or alias matches/u,
+    )
+    expect(nameFirstRule).toMatch(
+      /named experiment is not currently\s+available, say that no run was created, and offer currently runnable\s+alternatives in the same reply/u,
+    )
+    expect(nameFirstRule).toMatch(
+      /Do not ask a clarification merely to\s+rediscover that unavailable title, expose a raw key or revision, or direct\s+the user to refresh or reopen it/u,
+    )
+    expect(nameFirstRule).toMatch(
+      /multiple exact matches or the\s+text is genuinely ambiguous, ask one clarification and do not plan or start/u,
     )
     expect(resolution).toContain('use the exact shown page')
     expect(resolution).toContain('Do not surface')
@@ -368,6 +381,41 @@ describe('experiment start and support mechanics', () => {
     expect(resolution).toContain('do not retry without the revision flags')
     expect(resolution).toContain('ask them to refresh or reopen it')
     expect(resolution).toMatch(/do not silently start (?:from )?current protocol content/u)
+    const unavailableStartRule = resolution.slice(
+      resolution.indexOf('- If a selected key no longer resolves'),
+      resolution.indexOf('- If activation or editing for a known planned or paused experiment'),
+    )
+    expect(unavailableStartRule).toMatch(
+      /lookup, dry run, or real start\s+and no experiment was persisted/u,
+    )
+    expect(unavailableStartRule).toMatch(
+      /protocol is no\s+longer available and no run was created/u,
+    )
+    expect(unavailableStartRule).toMatch(
+      /Keep this response limited to the unavailable protocol, the\s+fact that nothing was created, and the alternative/u,
+    )
+    expect(unavailableStartRule).not.toMatch(/existing run|saved run|abandon/u)
+    expect(unavailableStartRule).toMatch(
+      /Never tell the user to\s+refresh or reopen a page that is no longer public/u,
+    )
+
+    const persistedRunRule = resolution.slice(
+      resolution.indexOf('- If activation or editing for a known planned or paused experiment'),
+      resolution.indexOf('- For protocol discovery that did not begin'),
+    )
+    expect(persistedRunRule).toMatch(
+      /saved run cannot now be\s+activated, leave the record unchanged/u,
+    )
+    expect(persistedRunRule).toMatch(
+      /start it as a distinct\s+experiment with its own id and protocol lineage/u,
+    )
+    expect(persistedRunRule).toMatch(
+      /never edit the old\s+run's\s+`commonsProtocolRef`,\s+`protocolRef`, effective snapshot, `runPlan`, or\s+`analysisPlan` to turn it into the alternative, including after its status\s+changes/u,
+    )
+    expect(persistedRunRule).toMatch(
+      /Mark the old run `abandoned`\s+only after the user separately\s+and\s+explicitly agrees/u,
+    )
+    expect(persistedRunRule).not.toMatch(/no run was created/u)
   })
 
   it('uses typed session fields and lifecycle-owned finite support only with consent', async () => {

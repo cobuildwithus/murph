@@ -1981,6 +1981,11 @@ function buildHostedRuntimeAssistantMilestonePhaseBreakdown(input: {
       return { schemaVersion: 1, assistant: { linqTypingRequestStartedAtEpochMs: atEpochMs } };
     case "linq_typing_accepted":
       return { schemaVersion: 1, assistant: { linqTypingAcceptedAtEpochMs: atEpochMs } };
+    case "progress_update_accepted":
+      return {
+        schemaVersion: 1,
+        assistant: { progressUpdateAcceptedAtEpochMs: atEpochMs },
+      };
     case "first_codex_output_observed":
       return { schemaVersion: 1, assistant: { firstCodexOutputObservedAtEpochMs: atEpochMs } };
     case "first_codex_text_observed":
