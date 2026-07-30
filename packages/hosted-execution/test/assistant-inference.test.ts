@@ -7,6 +7,8 @@ import {
   buildHostedCustomInferenceModelAlias,
   isHostedInferenceAuthKind,
   isHostedInferenceProtocol,
+  normalizeHostedInferenceEndpointUrl,
+  normalizeHostedInferenceModel,
   parseHostedAssistantCustomInferenceOverride,
   requireHostedInferenceContextWindowTokens,
 } from "../src/assistant-inference.ts";
@@ -31,6 +33,44 @@ test("custom inference aliases are revision-derived and opaque", () => {
     () => buildHostedCustomInferenceModelAlias(0),
     /positive integer/u,
   );
+});
+
+test("custom inference endpoint policy accepts exact public HTTPS operations", () => {
+  assert.equal(normalizeHostedInferenceEndpointUrl({
+    protocol: "responses",
+    value: "https://inference.example.com/v1/responses",
+  }), "https://inference.example.com/v1/responses");
+  assert.equal(normalizeHostedInferenceEndpointUrl({
+    protocol: "chat_completions",
+    value:
+      "https://azure.example.com/openai/deployments/glm/chat/completions?api-version=2026-07-01",
+  }),
+  "https://azure.example.com/openai/deployments/glm/chat/completions?api-version=2026-07-01");
+});
+
+test("custom inference endpoint policy rejects unsafe destinations and shapes", () => {
+  for (const value of [
+    "http://inference.example.com/v1/responses",
+    "https://127.0.0.1/v1/responses",
+    "https://[::1]/v1/responses",
+    "https://model.local/v1/responses",
+    "https://web-control.worker/v1/responses",
+    "https://withmurph.ai/v1/responses",
+    "https://inference.example.com:8443/v1/responses",
+    "https://inference.example.com/v1/chat/completions",
+    "https://inference.example.com/v1/responses?token=secret",
+  ]) {
+    assert.throws(
+      () => normalizeHostedInferenceEndpointUrl({ protocol: "responses", value }),
+      /Hosted inference endpointUrl/u,
+      value,
+    );
+  }
+});
+
+test("custom inference model ids are bounded and control-free", () => {
+  assert.equal(normalizeHostedInferenceModel("glm-5.2"), "glm-5.2");
+  assert.throws(() => normalizeHostedInferenceModel("glm\n5.2"), /model/u);
 });
 
 test("custom inference override parser preserves bounded non-secret facts", () => {
