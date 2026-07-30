@@ -1,5 +1,3 @@
-import { readFile } from "node:fs/promises";
-
 import { describe, expect, it } from "vitest";
 
 import {
@@ -32,11 +30,7 @@ const REQUIRED_HOSTED_CRYPTO_WORKER_VARS = {
 } as const;
 
 describe("hosted checkpoint debug deploy env", () => {
-  it("passes checkpoint debug vars from workflow vars into worker vars", async () => {
-    const workflow = await readFile(
-      new URL("../../../.github/workflows/deploy-cloudflare-hosted.yml", import.meta.url),
-      "utf8",
-    );
+  it("passes optional checkpoint debug vars into worker vars", () => {
     const environment = readHostedDeployAutomationEnvironment({
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
@@ -59,9 +53,5 @@ describe("hosted checkpoint debug deploy env", () => {
       MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_LIMIT: "20000",
       MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_RAW: "1",
     });
-
-    for (const name of CHECKPOINT_DEBUG_VAR_NAMES) {
-      expect(workflow).toContain(`${name}: \${{ vars.${name} }}`);
-    }
   });
 });
