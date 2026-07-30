@@ -161,7 +161,10 @@ describe('assistant hosted low-usage skill', () => {
       'In a hosted group, wait until someone engages with the link-free heads-up',
     )
     expect(normalizedSkill).toContain(
-      "read the options for that responding sender",
+      "pass that response's exact opaque accepted `message_ref`",
+    )
+    expect(normalizedSkill).toContain(
+      "Never infer the responder from the whole grouped turn",
     )
     expect(normalizedSkill).toContain(
       'Keep this first mention link-free and route-neutral',

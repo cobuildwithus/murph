@@ -101,8 +101,9 @@ change happened.
   only an assistant-initiated low-usage heads-up. In a private chat, also call
   it on a trusted low-usage turn when an earned-continuity option would fit the
   moment. In a hosted group, wait until someone engages with the link-free
-  heads-up, then read the options for that responding sender. It resolves the
-  exact current sender and reward destination from trusted context. Reuse that
+  heads-up, then pass that response's exact opaque accepted `message_ref` so
+  the read resolves the responding sender and reward destination from trusted
+  context. Never infer the responder from the whole grouped turn. Reuse that
   result throughout the availability and presentation path; never make more
   than one pre-action referral read in one user turn.
   The applied-but-snapshot-unavailable recovery rules below are the only

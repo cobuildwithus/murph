@@ -388,9 +388,11 @@ inventing a billing menu:
   `healthy` read suppresses the heads-up entirely. After someone asks for the
   options, asks for more Murph time, asks how to keep the room going, or accepts
   the quick path, the assistant reads the options for that responding sender,
-  refreshes current usage as needed, presents every returned earned and
-  sponsored path, and places the funding URL after the sponsored path instead
-  of leading with it. Playful payer
+  using the exact accepted request-bearing message as participant authority
+  rather than inferring one sender from the whole grouped turn. It refreshes
+  current usage as needed, presents every returned earned and sponsored path,
+  and places the funding URL after the sponsored path instead of leading with
+  it. Playful payer
   nomination is allowed, but who actually paid, purchase status, and amounts
   stay private, and the assistant never promises a URL the read did not return.
   For a group without an owner-created join code, the funding URL carries a
