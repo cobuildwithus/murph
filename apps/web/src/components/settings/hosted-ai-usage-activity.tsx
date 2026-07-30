@@ -28,6 +28,10 @@ export function HostedAiUsageActivity(props: {
   );
   const hasHistory =
     historicalMissions.length > 0 || props.activity.credits.length > 0;
+  const showReferralEmptyState =
+    canStartMissions &&
+    currentMissions.length === 0 &&
+    !hasHistory;
 
   if (!hasMissionSurface && !hasHistory) {
     return null;
@@ -68,6 +72,17 @@ export function HostedAiUsageActivity(props: {
                 <MissionRow key={mission.id} mission={mission} />
               ))}
             </ul>
+          ) : null}
+          {showReferralEmptyState ? (
+            <div className="grid gap-2 border-t border-border/70 py-5 sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-8">
+              <p className="text-sm font-medium text-foreground">
+                No active referrals
+              </p>
+              <p className="max-w-xl text-sm leading-6 text-muted-foreground">
+                Ask Murph to start one in a new group. Get the group talking,
+                and the reward is added automatically.
+              </p>
+            </div>
           ) : null}
         </section>
       ) : null}

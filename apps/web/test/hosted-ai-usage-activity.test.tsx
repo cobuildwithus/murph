@@ -586,7 +586,9 @@ describe("HostedAiUsageActivity", () => {
 
     assert.match(markup, /<h3[^>]*>Referrals<\/h3>/);
     assert.match(markup, /Ask Murph/);
-    assert.doesNotMatch(markup, /No active referrals/);
+    assert.match(markup, /No active referrals/);
+    assert.match(markup, /Ask Murph to start one in a new group/);
+    assert.match(markup, /the reward is added automatically/);
     assert.doesNotMatch(markup, /No purchased credits yet/);
     assert.doesNotMatch(markup, /<details/);
   });
