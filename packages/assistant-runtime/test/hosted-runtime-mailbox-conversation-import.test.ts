@@ -261,6 +261,18 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.match(event.sourceRef.dedupeKey ?? "", HASHED_IDENTIFIER_PATTERN);
     assert.match(event.sourceRef.eventId ?? "", HASHED_IDENTIFIER_PATTERN);
     assert.match(event.sourceRef.itemId ?? "", HASHED_IDENTIFIER_PATTERN);
+    assert.notEqual(event.sourceRef.itemId, item.item.id);
+    const hydratedInputs = await createHostedAssistantInputSource({
+      pendingInputRefreshMode: "none",
+      selectedInputIds: [event.inputId],
+      vaultRoot,
+    }).listInputCandidates({
+      sourceId: "linq",
+    });
+    assert.equal(
+      hydratedInputs.inputs[0]?.event.hostedMailboxItemId,
+      item.item.id,
+    );
     assert.match(event.conversation?.accountId ?? "", HASHED_IDENTIFIER_PATTERN);
     assert.match(event.conversation?.actorId ?? "", HASHED_IDENTIFIER_PATTERN);
     assert.match(event.conversation?.threadId ?? "", HASHED_IDENTIFIER_PATTERN);
@@ -1767,7 +1779,7 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(candidates.inputs[0]?.event.groupReactionContext, undefined);
   });
 
-  test("uses Telegram sender for group actor scoping and prompt attribution", async () => {
+  test("uses Telegram sender for blinded actor identity and prompt attribution", async () => {
     const parentRoot = await mkdtemp(
       path.join(tmpdir(), "murph-hosted-input-telegram-group-"),
     );
@@ -1786,6 +1798,7 @@ describe("hosted mailbox conversation import adapter", () => {
           from: "1234567890",
           messageId: "tg_group_identity",
           schema: "murph.hosted-telegram-message.v1",
+          senderDisplayName: "Alice Example",
           senderUsername: "alice_example",
           text: "hello group",
           threadId: "chat_group_telegram",
@@ -1835,6 +1848,12 @@ describe("hosted mailbox conversation import adapter", () => {
         ? event.sourceMetadata.senderHandle
         : null,
       "1234567890",
+    );
+    assert.equal(
+      event.sourceMetadata?.kind === "telegram"
+        ? event.sourceMetadata.senderDisplayName
+        : null,
+      "Alice Example",
     );
     assert.equal(
       event.sourceMetadata?.kind === "telegram"
@@ -1896,6 +1915,10 @@ describe("hosted mailbox conversation import adapter", () => {
       false,
     );
     assert.equal(
+      Object.hasOwn(event.sourceMetadata ?? {}, "senderDisplayName"),
+      false,
+    );
+    assert.equal(
       Object.hasOwn(event.sourceMetadata ?? {}, "senderUsername"),
       false,
     );
@@ -1909,6 +1932,12 @@ describe("hosted mailbox conversation import adapter", () => {
     const contactLookupKey = "hbidx:phone:v1:participant";
     const groupReactionContext =
       "Participant +15551110000 added a like reaction on: first message\nParticipant +15552220000 added a laugh reaction on: second message";
+    const groupRunningBit = {
+      expiresAt: "2026-07-28T12:00:00.000Z",
+      publicAlias: "Fiscal Department",
+      requestedBit: "Treat me like the exhausted CFO.",
+      schema: "murph.group-sponsorship-bit.v1" as const,
+    };
     const decodedWake = createConversationWake({
       message: {
         accountLookupKey,
@@ -1953,6 +1982,7 @@ describe("hosted mailbox conversation import adapter", () => {
           dedupeKey: decodedWake.eventId,
           id: "mailbox_item_linq_group_identity_001",
         }),
+        groupRunningBit,
         usageRunningLow: true,
       },
       runtime: createRuntime(),
@@ -2029,6 +2059,10 @@ describe("hosted mailbox conversation import adapter", () => {
       groupReactionContext,
     );
     assert.equal(candidates.inputs[0]?.event.usageRunningLow, true);
+    assert.deepEqual(
+      candidates.inputs[0]?.event.groupRunningBit,
+      groupRunningBit,
+    );
   });
 
   test("does not project participant-addition context for a route-authorized direct chat", async () => {
@@ -2073,10 +2107,18 @@ describe("hosted mailbox conversation import adapter", () => {
         };
       },
       async prepareWakeContext() {},
-      item: createResolvedConversationMailboxItem({
-        dedupeKey: decodedWake.eventId,
-        id: "mailbox_item_linq_direct_identity_001",
-      }),
+      item: {
+        ...createResolvedConversationMailboxItem({
+          dedupeKey: decodedWake.eventId,
+          id: "mailbox_item_linq_direct_identity_001",
+        }),
+        groupRunningBit: {
+          expiresAt: "2026-07-28T12:00:00.000Z",
+          publicAlias: "Fiscal Department",
+          requestedBit: "Treat me like the exhausted CFO.",
+          schema: "murph.group-sponsorship-bit.v1",
+        },
+      },
       runtime: createRuntime(),
       vaultRoot,
     });
@@ -2110,6 +2152,68 @@ describe("hosted mailbox conversation import adapter", () => {
     const candidates = await source.listInputCandidates({ sourceId: "linq" });
     assert.equal(candidates.inputs[0]?.event.groupParticipantAdded, undefined);
     assert.equal(candidates.inputs[0]?.event.groupReactionContext, undefined);
+    assert.equal(candidates.inputs[0]?.event.groupRunningBit, undefined);
+  });
+
+  test("projects trusted Linq correction metadata separately from replacement text", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-linq-edit-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const decodedWake = createConversationWake({
+      eventId: "evt_synthetic_linq_edit_001",
+      message: {
+        channel: "linq",
+        contactKind: "phone",
+        contactLookupKey: "hbidx:phone:v1:edit-contact",
+        linqMessage: {
+          chatId: "chat_edit",
+          editedSourceInputId: "ain_11111111111111111111111111111111",
+          editedTextPartIndex: 0,
+          from: "+15551110000",
+          isFromMe: false,
+          messageId: "msg_edit",
+          parts: [{ type: "text", value: "corrected wording" }],
+          replyToMessageId: "msg_edit",
+          threadIsDirect: true,
+        },
+        phoneLookupKey: "hbidx:phone:v1:edit-contact",
+      },
+    });
+
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        return {
+          captureId: "cap_synthetic_linq_edit_001",
+          metrics: { nextWakeAt: null, parserProcessed: 0 },
+        };
+      },
+      async prepareWakeContext() {},
+      item: createResolvedConversationMailboxItem({
+        dedupeKey: decodedWake.eventId,
+        id: "mailbox_item_linq_edit_001",
+      }),
+      runtime: createRuntime(),
+      vaultRoot,
+    });
+
+    assert.equal(outcome.status, "imported");
+    const event = (await listAssistantInputEvents({ vault: vaultRoot })).events[0];
+    assert.ok(event);
+    assert.equal(event.content.text, "corrected wording");
+    assert.equal(event.sourceMetadata?.kind, "linq");
+    assert.equal(
+      event.sourceMetadata?.kind === "linq"
+        ? event.sourceMetadata.editedSourceInputId
+        : undefined,
+      "ain_11111111111111111111111111111111",
+    );
+    assert.equal(
+      event.sourceMetadata?.kind === "linq"
+        ? event.sourceMetadata.editedTextPartIndex
+        : undefined,
+      0,
+    );
   });
 
   test("records hosted attachment evidence after successful inbox projection", async () => {

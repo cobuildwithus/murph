@@ -576,20 +576,23 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
   }
 
   const resourceCategory = normalizeNullableString(input.webhook.resourceCategory);
+  const dirtyResources = buildHostedWebhookDirtyResources({
+    jobs: input.webhook.jobs ?? [],
+    provider: input.account.provider,
+  });
   await persistHostedDeviceSyncWebhookAccepted({
     acceptedAt: input.now,
     acceptanceMode: input.webhook.acceptanceMode,
     connectionId: input.account.id,
     expectedConnectedAt: input.account.connectedAt,
-    dirtyResources: buildHostedWebhookDirtyResources({
-      jobs: input.webhook.jobs ?? [],
-      provider: input.account.provider,
-    }),
+    dirtyResources,
     eventType: input.webhook.eventType,
     occurredAt: input.webhook.occurredAt ?? input.now,
     provider: input.account.provider,
     resourceCategory,
-    sourceProviderSlug: input.webhook.sourceProviderSlug ?? null,
+    sourceProviderSlug: normalizeJunctionProviderSlug(
+      input.webhook.dataSourceProviderSlug,
+    ),
     store: input.store,
     claimToken: input.claimToken,
     traceId,
@@ -1037,7 +1040,7 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
   occurredAt: string;
   provider: string;
   resourceCategory?: string | null;
-  sourceProviderSlug?: string | null;
+  sourceProviderSlug: string | null;
   store: PrismaDeviceSyncControlPlaneStore;
   claimToken: string;
   traceId: string | null;
@@ -1165,6 +1168,7 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
         traceId: input.traceId,
         eventType: input.eventType,
         resourceCategory: input.resourceCategory ?? null,
+        sourceProviderSlug: input.sourceProviderSlug,
         createdAt: input.acceptedAt,
         tx,
       });

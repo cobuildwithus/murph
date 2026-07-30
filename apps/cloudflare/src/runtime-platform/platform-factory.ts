@@ -21,11 +21,14 @@ import { createHostedWebDeviceSyncPort } from "./device-sync-port.ts";
 import { createCloudflareEffectsPort } from "./effects-port.ts";
 import { createHostedRuntimeFamilyPlanToolPort } from "./family-plan-tool-port.ts";
 import { createHostedRuntimeGroupToolPort } from "./group-tool-port.ts";
+import { createHostedRuntimeIMessageContactToolPort } from "./imessage-contact-tool-port.ts";
 import { createHostedRuntimeLabsToolPort } from "./labs-tool-port.ts";
 import { createHostedRuntimeNewsletterToolPort } from "./newsletter-tool-port.ts";
 import { createHostedRuntimePlanUsageToolPort } from "./plan-usage-tool-port.ts";
+import {
+  createCloudflarePrivateImageUrlPublisher,
+} from "./private-image-url-publisher.ts";
 import { createHostedRuntimeSubscriptionToolPort } from "./subscription-tool-port.ts";
-import { createCloudflareGeneratedImageUploader } from "./generated-image-uploader.ts";
 import { createHostedRuntimeIssueExportPort } from "./issue-export-port.ts";
 import { createHostedWebRuntimeLatencyTracePort } from "./latency-trace-port.ts";
 import { createHostedWebRuntimeLogPort } from "./log-port.ts";
@@ -48,6 +51,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
   boundUserId: string;
   commitTimeoutMs?: number | null;
   fetchImpl?: typeof fetch;
+  privateMediaDeliveryOrigin?: string | null;
   preparedSnapshotRestore?: HostedWorkspaceSnapshotPreparedRestore | null;
   providerFetchBaseUrlSource?: Readonly<Record<string, unknown>> | null;
   providerFetchBaseUrls?: readonly string[] | null;
@@ -104,6 +108,12 @@ export function buildHostedExecutionRuntimePlatform(input: {
     }),
     ...(input.workspaceCheckpointBridge
       ? {
+          privateImageUrlPublisher: createCloudflarePrivateImageUrlPublisher({
+            fetchImpl: trustedInternalFetchImpl,
+            privateMediaDeliveryOrigin: input.privateMediaDeliveryOrigin,
+            timeoutMs,
+            workspaceCheckpointBridge: input.workspaceCheckpointBridge,
+          }),
           workspaceSnapshotPort: createCloudflareWorkspaceSnapshotPort({
             boundUserId: input.boundUserId,
             fetchImpl: trustedInternalFetchImpl,
@@ -115,11 +125,6 @@ export function buildHostedExecutionRuntimePlatform(input: {
       : {}),
     ...(input.workspaceCheckpointBridge
       ? {
-          generatedImageUploader: createCloudflareGeneratedImageUploader({
-            fetchImpl: trustedInternalFetchImpl,
-            timeoutMs,
-            workspaceCheckpointBridge: input.workspaceCheckpointBridge,
-          }),
           providerFetch: createCloudflareHostedProviderFetch(
             input.boundUserId,
             baseFetchImpl,
@@ -229,6 +234,12 @@ export function buildHostedExecutionRuntimePlatform(input: {
     ...(transport
       ? {
           issueExportPort: createHostedRuntimeIssueExportPort({
+            boundUserId: input.boundUserId,
+            fetchImpl,
+            timeoutMs,
+            transport,
+          }),
+          imessageContactToolPort: createHostedRuntimeIMessageContactToolPort({
             boundUserId: input.boundUserId,
             fetchImpl,
             timeoutMs,

@@ -52,21 +52,27 @@ test("homepage demo copy avoids causal, clearance, and dosing claims", () => {
   }
 });
 
-// The hero demo is now a single group challenge: Murph keeps score off shared
-// wearable baselines and never interprets an individual's health data, so the
-// guard is that its copy stays on scorekeeping rather than health readouts.
-test("hero demo keeps score instead of interpreting health data", () => {
+test("hero demo states patterns and observations instead of causes", () => {
   const hero = readHomepageSource("hero-clocks-in.tsx");
 
   assert.match(
     hero,
-    /Baselines are set from everyone's wearables\. I keep score, standings drop daily/u,
+    /The clearest pattern is less deep sleep after afternoon espresso/u,
+  );
+  assert.match(hero, /HRV was highest on sauna nights/u);
+  assert.match(
+    hero,
+    /Garmin shows no unusual change in your recent training load/u,
   );
   assert.match(
     hero,
-    /Standings, day 5 of 7\. Maya is one sunrise walk from taking the lead/u,
+    /Recovery score 87, above your recent baseline\. Today looks like a strong training day\./u,
   );
-  assert.match(hero, /This week's wins just landed in everyone's inbox\./u);
+  assert.match(
+    hero,
+    /Your last B12 was 312, just above the low end\. I pulled the trend and drafted a question for your next visit\./u,
+  );
+  assert.match(hero, /Reordered\. I also queued a lipid recheck for November\./u);
 });
 
 test("persona demos frame experiments as patterns still being tested", () => {

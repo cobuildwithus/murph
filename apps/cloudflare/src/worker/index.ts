@@ -6,6 +6,10 @@ import type {
   WorkerEnvironmentSource,
 } from "../worker-routes/shared.ts";
 import {
+  resolveHostedR2CutoverContext,
+  withHostedR2CutoverBucket,
+} from "../r2-cutover.ts";
+import {
   mapWorkerRouteError,
 } from "./errors.ts";
 import {
@@ -23,6 +27,27 @@ export const handleWorkerFetch = createWorkerFetchHandler({
   publicRoutes: workerPublicRoutes,
 });
 
+const DATABASE_HEALTH_SINGLETON_NAME = "production";
+
+export function handleDatabaseHealthScheduled(
+  controller: ScheduledController,
+  env: WorkerEnvironmentSource,
+  ctx: WorkerExecutionContext,
+): void {
+  if (env.HOSTED_DATABASE_ALERT_ENABLED !== "1") {
+    return;
+  }
+  const namespace = env.DATABASE_HEALTH_MONITOR;
+  if (!namespace) {
+    throw new Error("DATABASE_HEALTH_MONITOR binding is required.");
+  }
+  ctx.waitUntil(
+    namespace.getByName(DATABASE_HEALTH_SINGLETON_NAME).runScheduledCheck({
+      scheduledAtMs: controller.scheduledTime,
+    }),
+  );
+}
+
 export default {
   async fetch(
     request: Request,
@@ -30,7 +55,12 @@ export default {
     ctx?: WorkerExecutionContext,
   ): Promise<Response> {
     try {
-      return await handleWorkerFetch(request, env, ctx);
+      const cutoverContext = resolveHostedR2CutoverContext(env);
+      return await handleWorkerFetch(
+        request,
+        withHostedR2CutoverBucket(env, cutoverContext),
+        ctx,
+      );
     } catch (error) {
       return mapWorkerRouteError(request, error);
     }
@@ -40,6 +70,18 @@ export default {
     env: WorkerEnvironmentSource,
     ctx?: { waitUntil(promise: Promise<unknown>): void },
   ): Promise<void> {
-    await handleHostedEmailIngress(message, env, ctx);
+    const cutoverContext = resolveHostedR2CutoverContext(env);
+    await handleHostedEmailIngress(
+      message,
+      withHostedR2CutoverBucket(env, cutoverContext),
+      ctx,
+    );
+  },
+  scheduled(
+    controller: ScheduledController,
+    env: WorkerEnvironmentSource,
+    ctx: WorkerExecutionContext,
+  ): void {
+    handleDatabaseHealthScheduled(controller, env, ctx);
   },
 };

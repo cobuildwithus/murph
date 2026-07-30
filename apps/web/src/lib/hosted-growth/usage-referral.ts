@@ -80,7 +80,7 @@ export const HOSTED_USAGE_REFERRAL_GROUP_MINIMUM_ACTIVITY_SPAN_MS =
 export const HOSTED_USAGE_REFERRAL_REFERRER_30D_CAP_USD_MICROS = 10_500_000n;
 export const HOSTED_USAGE_REFERRAL_BENEFICIARY_30D_CAP_USD_MICROS = 20_000_000n;
 
-const HOSTED_USAGE_REFERRAL_MAX_BOUND_PER_REFERRER = 3;
+const HOSTED_USAGE_REFERRAL_MAX_IN_PROGRESS_PER_REFERRER = 3;
 const HOSTED_USAGE_REFERRAL_EVENT_KEYS_MAX = 32;
 const HOSTED_USAGE_REFERRAL_SPEAKER_KEYS_MAX = 16;
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1_000;
@@ -91,7 +91,6 @@ const EXPECTED_REFERRAL_UNAVAILABLE_ERRORS = new Set([
   "too_many_referrals_in_progress",
   "usage_referral_not_available",
 ]);
-type HostedUsageReferralClient = PrismaClient | Prisma.TransactionClient;
 
 type HostedUsageReferralPolicyDefinition = {
   code: HostedUsageReferralPolicyCode;
@@ -101,6 +100,7 @@ type HostedUsageReferralPolicyDefinition = {
   };
   requirementsLabel: string;
   rewardUsdMicros: bigint;
+  title: string;
 };
 
 const POLICIES = {
@@ -111,8 +111,9 @@ const POLICIES = {
       terra: 100,
     },
     requirementsLabel:
-      "Start a fresh group with one new person, help them get their own Murph set up, then have them say hi in that group.",
+      "Bring one new person into a fresh Murph group. Murph handles onboarding, and the mission completes once they join the conversation with their own Murph.",
     rewardUsdMicros: HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
+    title: "Bring someone new to Murph",
   },
   active_group_v1: {
     code: "active_group_v1",
@@ -123,11 +124,27 @@ const POLICIES = {
     requirementsLabel:
       "Start a fresh group and make it genuinely active, with multiple people actually talking.",
     rewardUsdMicros: HOSTED_USAGE_REFERRAL_GROUP_REWARD_USD_MICROS,
+    title: "Start an active group",
   },
 } as const satisfies Record<
   HostedUsageReferralPolicyCode,
   HostedUsageReferralPolicyDefinition
 >;
+
+export interface HostedUsageReferralPolicyDisplay {
+  requirementsLabel: string;
+  title: string;
+}
+
+export function getHostedUsageReferralPolicyDisplay(
+  policyCode: HostedUsageReferralPolicyCode,
+): HostedUsageReferralPolicyDisplay {
+  const policy = POLICIES[policyCode];
+  return {
+    requirementsLabel: policy.requirementsLabel,
+    title: policy.title,
+  };
+}
 
 interface HostedUsageReferralActor {
   beneficiaryMemberId: string;
@@ -181,6 +198,12 @@ function outstandingHostedUsageReferralCommitmentWhere(
   ];
 }
 
+export function buildHostedUsageReferralOutstandingWhere(
+  now: Date,
+): Prisma.HostedUsageReferralWhereInput[] {
+  return outstandingHostedUsageReferralCommitmentWhere(now);
+}
+
 interface HostedUsageReferralLockedRow {
   armedAt: Date;
   beneficiaryMemberId: string;
@@ -215,11 +238,11 @@ const CLEARED_REFERRAL_EVIDENCE = {
 
 export interface HostedUsageReferralObservationResult {
   isBoundReferralTarget: boolean;
-  qualificationCandidateReferralId: string | null;
+  qualificationCandidateReferralIds: string[];
 }
 
 export interface HostedUsageReferralBindResult {
-  referralId: string | null;
+  referralIds: string[];
 }
 
 export function isHostedUsageReferralEnabled(
@@ -288,13 +311,23 @@ export async function handleHostedUsageReferralGroupTool(input: {
         "usage_referral_not_available",
       );
     }
+    const requestSourceConversation =
+      input.request.action === "cancel_usage_referral"
+        ? null
+        : readHostedUsageReferralSourceConversation(
+            input.request.sourceConversation ?? null,
+          );
 
     if (input.request.action === "read_usage_referral") {
       return {
         action: input.request.action,
         result: {
           outcome: "read",
-          referral: await readHostedUsageReferralSnapshot({ actor, prisma }),
+          referral: await readHostedUsageReferralSnapshot({
+            actor,
+            prisma,
+            sourceConversation: requestSourceConversation,
+          }),
           status: "ok",
         },
       };
@@ -302,7 +335,8 @@ export async function handleHostedUsageReferralGroupTool(input: {
 
     if (input.request.action === "cancel_usage_referral") {
       const now = new Date();
-      const cancellation = await prisma.$transaction(async (tx) => {
+      const policyCode = input.request.policyCode;
+      const canceled = await prisma.$transaction(async (tx) => {
         await acquireHostedUsageReferralReferrerLockTx({
           referrerMemberId: actor.referrerMemberId,
           tx,
@@ -316,7 +350,9 @@ export async function handleHostedUsageReferralGroupTool(input: {
           orderBy: [{ armedAt: "desc" }, { id: "desc" }],
           select: { id: true },
           where: {
+            beneficiaryMemberId: actor.beneficiaryMemberId,
             expiresAt: { gt: now },
+            policyCode,
             referrerMemberId: actor.referrerMemberId,
             status: "armed",
           },
@@ -333,39 +369,44 @@ export async function handleHostedUsageReferralGroupTool(input: {
             },
           });
         }
-        return {
-          canceled: current !== null,
-          referral: await readHostedUsageReferralSnapshot({
-            actor,
-            now,
-            prisma: tx,
-          }),
-        };
+        return current !== null;
       }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
-      if (!cancellation.canceled) {
+      if (!canceled) {
         return unavailableToolResponse(
           input.request.action,
           "no_unbound_usage_referral",
         );
       }
-      return {
+      return await buildCommittedUsageReferralMutationResponse({
         action: input.request.action,
-        result: {
-          outcome: "canceled",
-          referral: cancellation.referral,
-          status: "ok",
-        },
-      };
+        actor,
+        now,
+        prisma,
+      });
     }
 
-    const policy = POLICIES[input.request.policyCode];
+    const policies = input.request.policyCodes.map((policyCode) =>
+      POLICIES[policyCode]
+    );
+    if (
+      policies.some((policy) =>
+        !isHostedUsageReferralPolicyAvailableForConversation({
+          channel: requestSourceConversation?.channel ?? null,
+          linqService: requestSourceConversation?.linqService ?? null,
+          policyCode: policy.code,
+        })
+      )
+    ) {
+      return unavailableToolResponse(
+        input.request.action,
+        "usage_referral_not_available",
+      );
+    }
     const personalSource =
       actor.beneficiaryMemberId === actor.referrerMemberId;
     const sourceConversation = personalSource
-      ? readHostedUsageReferralSourceConversation(
-          input.request.sourceConversation ?? null,
-        )
+      ? requestSourceConversation
       : null;
     if (
       personalSource
@@ -376,12 +417,7 @@ export async function handleHostedUsageReferralGroupTool(input: {
         "usage_referral_not_available",
       );
     }
-    const availablePolicyCodes =
-      await readHostedUsageReferralAvailablePolicyCodes({
-        actor,
-        prisma,
-      });
-    if (!availablePolicyCodes.includes(policy.code)) {
+    if (!(await hasHostedUsageReferralSourceAccess({ actor, prisma }))) {
       return unavailableToolResponse(
         input.request.action,
         "usage_referral_not_available",
@@ -389,7 +425,7 @@ export async function handleHostedUsageReferralGroupTool(input: {
     }
 
     const now = new Date();
-    const referral = await prisma.$transaction(async (tx) => {
+    await prisma.$transaction(async (tx) => {
       await acquireHostedUsageReferralReferrerLockTx({
         referrerMemberId: actor.referrerMemberId,
         tx,
@@ -399,95 +435,121 @@ export async function handleHostedUsageReferralGroupTool(input: {
         referrerMemberId: actor.referrerMemberId,
         tx,
       });
-      const boundCount = await tx.hostedUsageReferral.count({
+      const existing = await tx.hostedUsageReferral.findMany({
+        select: { policyCode: true },
+        where: {
+          beneficiaryMemberId: actor.beneficiaryMemberId,
+          expiresAt: { gt: now },
+          policyCode: { in: policies.map(({ code }) => code) },
+          referrerMemberId: actor.referrerMemberId,
+          status: { in: [...ACTIVE_REFERRAL_STATUSES] },
+        },
+      });
+      const existingPolicyCodes = new Set(
+        existing.map(({ policyCode }) => policyCode),
+      );
+      const missingPolicies = policies.filter(
+        ({ code }) => !existingPolicyCodes.has(code),
+      );
+      if (missingPolicies.length === 0) {
+        return;
+      }
+      const conflictingArmed = await tx.hostedUsageReferral.findFirst({
+        select: { id: true },
+        where: {
+          policyCode: { in: missingPolicies.map(({ code }) => code) },
+          referrerMemberId: actor.referrerMemberId,
+          status: "armed",
+        },
+      });
+      if (conflictingArmed) {
+        throw new TypeError("usage_referral_not_available");
+      }
+
+      const inProgressCount = await tx.hostedUsageReferral.count({
         where: {
           referrerMemberId: actor.referrerMemberId,
           OR: outstandingHostedUsageReferralCommitmentWhere(now),
-          status: "target_bound",
+          status: { in: [...ACTIVE_REFERRAL_STATUSES] },
         },
       });
-      if (boundCount >= HOSTED_USAGE_REFERRAL_MAX_BOUND_PER_REFERRER) {
+      if (
+        inProgressCount + missingPolicies.length
+        > HOSTED_USAGE_REFERRAL_MAX_IN_PROGRESS_PER_REFERRER
+      ) {
+        if (
+          missingPolicies.length > 1
+          && inProgressCount + 1
+            <= HOSTED_USAGE_REFERRAL_MAX_IN_PROGRESS_PER_REFERRER
+        ) {
+          throw new TypeError("usage_referral_selection_requires_one");
+        }
         throw new TypeError("too_many_referrals_in_progress");
       }
 
-      const currentArmed = await tx.hostedUsageReferral.findFirst({
-        orderBy: [{ armedAt: "desc" }, { id: "desc" }],
-        select: {
-          beneficiaryMemberId: true,
-        },
-        where: {
-          expiresAt: { gt: now },
-          referrerMemberId: actor.referrerMemberId,
-          status: "armed",
-        },
-      });
-      const affectedBeneficiaryMemberIds = [
-        ...new Set([
-          actor.beneficiaryMemberId,
-          ...(currentArmed
-            ? [currentArmed.beneficiaryMemberId]
-            : []),
-        ]),
-      ].sort();
-      for (const beneficiaryMemberId of affectedBeneficiaryMemberIds) {
-        await lockHostedUsageCreditBeneficiaryTx({
-          beneficiaryMemberId,
-          tx,
-        });
-      }
-      await tx.hostedUsageReferral.updateMany({
-        where: {
-          referrerMemberId: actor.referrerMemberId,
-          status: "armed",
-        },
-        data: {
-          ...CLEARED_REFERRAL_EVIDENCE,
-          sourceConversationJson: Prisma.DbNull,
-          status: "superseded",
-          terminalAt: now,
-          terminalReason: "newer_referral_armed",
-        },
+      await lockHostedUsageCreditBeneficiaryTx({
+        beneficiaryMemberId: actor.beneficiaryMemberId,
+        tx,
       });
       await assertHostedUsageReferralRewardCapacityTx({
         beneficiaryMemberId: actor.beneficiaryMemberId,
+        individualRewardUsdMicros: missingPolicies.map(
+          ({ rewardUsdMicros }) => rewardUsdMicros,
+        ),
         now,
         referrerMemberId: actor.referrerMemberId,
-        rewardUsdMicros: policy.rewardUsdMicros,
+        rewardUsdMicros: missingPolicies.reduce(
+          (total, { rewardUsdMicros }) => total + rewardUsdMicros,
+          0n,
+        ),
         tx,
       });
 
-      await tx.hostedUsageReferral.create({
-        data: {
-          armedAt: now,
-          beneficiaryMemberId: actor.beneficiaryMemberId,
-          expiresAt: new Date(now.getTime() + HOSTED_USAGE_REFERRAL_INTENT_TTL_MS),
-          id: generateHostedRandomPrefixedId("hur"),
-          policyCode: policy.code,
-          policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
-          referrerMemberId: actor.referrerMemberId,
-          referrerSubjectKey: actor.referrerSubjectKey,
-          rewardUsdMicros: policy.rewardUsdMicros,
-          ...(sourceConversation
-            ? {
-                sourceConversationJson: {
-                  channel: sourceConversation.channel,
-                  threadId: sourceConversation.threadId,
-                  threadIsDirect: sourceConversation.threadIsDirect,
-                },
-              }
-            : {}),
-          status: "armed",
-        },
-      });
-
-      return readHostedUsageReferralSnapshot({ actor, now, prisma: tx });
+      for (const policy of missingPolicies) {
+        await tx.hostedUsageReferral.create({
+          data: {
+            armedAt: now,
+            beneficiaryMemberId: actor.beneficiaryMemberId,
+            expiresAt: new Date(
+              now.getTime() + HOSTED_USAGE_REFERRAL_INTENT_TTL_MS,
+            ),
+            id: generateHostedRandomPrefixedId("hur"),
+            policyCode: policy.code,
+            policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
+            referrerMemberId: actor.referrerMemberId,
+            referrerSubjectKey: actor.referrerSubjectKey,
+            rewardUsdMicros: policy.rewardUsdMicros,
+            ...(sourceConversation
+              ? {
+                  sourceConversationJson: {
+                    channel: sourceConversation.channel,
+                    threadId: sourceConversation.threadId,
+                    threadIsDirect: sourceConversation.threadIsDirect,
+                  },
+                }
+              : {}),
+            status: "armed",
+          },
+        });
+      }
     }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-
-    return {
+    return await buildCommittedUsageReferralMutationResponse({
       action: input.request.action,
-      result: { outcome: "armed", referral, status: "ok" },
-    };
+      actor,
+      now,
+      prisma,
+      sourceConversation: requestSourceConversation,
+    });
   } catch (error) {
+    if (
+      error instanceof Error
+      && error.message === "usage_referral_selection_requires_one"
+    ) {
+      return unavailableToolResponse(
+        input.request.action,
+        "usage_referral_selection_requires_one",
+      );
+    }
     if (
       error instanceof Error
       && EXPECTED_REFERRAL_UNAVAILABLE_ERRORS.has(error.message)
@@ -501,19 +563,62 @@ export async function handleHostedUsageReferralGroupTool(input: {
   }
 }
 
+async function buildCommittedUsageReferralMutationResponse(input: {
+  action: "arm_usage_referral" | "cancel_usage_referral";
+  actor: HostedUsageReferralActor;
+  now: Date;
+  prisma: PrismaClient;
+  sourceConversation?: HostedRuntimeUsageReferralSourceConversation | null;
+}): Promise<HostedRuntimeGroupToolResponse> {
+  const { action, actor, now, prisma, sourceConversation } = input;
+  try {
+    const referral = await readHostedUsageReferralSnapshot({
+      actor,
+      now,
+      prisma,
+      sourceConversation,
+    });
+    return {
+      action,
+      result: {
+        outcome:
+          action === "arm_usage_referral" ? "armed" : "canceled",
+        referral,
+        status: "ok",
+      },
+    };
+  } catch (error) {
+    console.error(
+      "Hosted usage referral snapshot refresh failed after committed mutation.",
+      {
+        action,
+        errorName: error instanceof Error ? error.name : typeof error,
+      },
+    );
+    return unavailableToolResponse(
+      action,
+      action === "arm_usage_referral"
+        ? "usage_referral_arm_applied_snapshot_unavailable"
+        : "usage_referral_cancel_applied_snapshot_unavailable",
+    );
+  }
+}
+
 export async function bindArmedHostedUsageReferralToNewContainerTx(input: {
   enabled?: boolean;
   occurredAt: Date;
   ownerMemberId: string;
+  targetChannel: HostedRuntimeUsageReferralSourceConversation["channel"];
+  targetLinqService: string | null;
   targetContainerMemberId: string;
   tx: Prisma.TransactionClient;
 }): Promise<HostedUsageReferralBindResult> {
   if (!(input.enabled ?? isHostedUsageReferralEnabled())) {
-    return { referralId: null };
+    return { referralIds: [] };
   }
 
   if (input.ownerMemberId === input.targetContainerMemberId) {
-    return { referralId: null };
+    return { referralIds: [] };
   }
 
   await acquireHostedUsageReferralReferrerLockTx({
@@ -526,9 +631,9 @@ export async function bindArmedHostedUsageReferralToNewContainerTx(input: {
     tx: input.tx,
   });
 
-  const referral = await input.tx.hostedUsageReferral.findFirst({
+  const referrals = await input.tx.hostedUsageReferral.findMany({
     orderBy: [{ armedAt: "desc" }, { id: "desc" }],
-    select: { armedAt: true, id: true },
+    select: { id: true, policyCode: true },
     where: {
       armedAt: { lte: input.occurredAt },
       expiresAt: { gt: input.occurredAt },
@@ -536,13 +641,22 @@ export async function bindArmedHostedUsageReferralToNewContainerTx(input: {
       status: "armed",
     },
   });
-  if (!referral) {
-    return { referralId: null };
+  const referralIds = referrals
+    .filter((referral) =>
+      isHostedUsageReferralPolicyAvailableForConversation({
+        channel: input.targetChannel,
+        linqService: input.targetLinqService,
+        policyCode: referral.policyCode,
+      })
+    )
+    .map(({ id }) => id);
+  if (referralIds.length === 0) {
+    return { referralIds: [] };
   }
 
   const updated = await input.tx.hostedUsageReferral.updateMany({
     where: {
-      id: referral.id,
+      id: { in: referralIds },
       status: "armed",
       targetContainerMemberId: null,
     },
@@ -552,8 +666,13 @@ export async function bindArmedHostedUsageReferralToNewContainerTx(input: {
       targetContainerMemberId: input.targetContainerMemberId,
     },
   });
+  if (updated.count !== referralIds.length) {
+    throw new TypeError(
+      "Hosted usage referral binding lost serialized mission rows.",
+    );
+  }
 
-  return { referralId: updated.count === 1 ? referral.id : null };
+  return { referralIds };
 }
 
 export async function observeHostedUsageReferralInboundTx(input: {
@@ -568,39 +687,103 @@ export async function observeHostedUsageReferralInboundTx(input: {
   if (!(input.enabled ?? isHostedUsageReferralEnabled())) {
     return {
       isBoundReferralTarget: false,
-      qualificationCandidateReferralId: null,
+      qualificationCandidateReferralIds: [],
     };
   }
 
-  const discovered = await input.tx.hostedUsageReferral.findUnique({
-    where: { targetContainerMemberId: input.containerMemberId },
+  const discovered = await input.tx.hostedUsageReferral.findMany({
+    orderBy: { id: "asc" },
+    where: {
+      status: "target_bound",
+      targetContainerMemberId: input.containerMemberId,
+    },
     select: {
       id: true,
       referrerMemberId: true,
-      status: true,
     },
   });
-  if (
-    !discovered
-    || discovered.status !== "target_bound"
-    || !discovered.referrerMemberId
-  ) {
+  const referralIds = discovered
+    .filter(({ referrerMemberId }) => referrerMemberId !== null)
+    .map(({ id }) => id);
+  if (referralIds.length === 0) {
     return {
       isBoundReferralTarget: false,
-      qualificationCandidateReferralId: null,
+      qualificationCandidateReferralIds: [],
     };
   }
 
-  await acquireHostedUsageReferralReferrerLockTx({
-    referrerMemberId: discovered.referrerMemberId,
-    tx: input.tx,
-  });
-  await acquireHostedUsageReferralLockTx({
-    referralId: discovered.id,
-    tx: input.tx,
-  });
+  const referrerMemberIds = [
+    ...new Set(
+      discovered.flatMap(({ referrerMemberId }) =>
+        referrerMemberId ? [referrerMemberId] : []
+      ),
+    ),
+  ].sort();
+  for (const referrerMemberId of referrerMemberIds) {
+    await acquireHostedUsageReferralReferrerLockTx({
+      referrerMemberId,
+      tx: input.tx,
+    });
+  }
+  for (const referralId of [...referralIds].sort()) {
+    await acquireHostedUsageReferralLockTx({
+      referralId,
+      tx: input.tx,
+    });
+  }
+
+  const eventKey = input.eventKey.trim();
+  const senderSubjectKey = input.senderSubjectKey.trim();
+  const senderMemberId = input.senderMemberId
+    ?? (
+      eventKey && senderSubjectKey
+        ? await resolveHostedUsageReferralSubjectMemberIdTx({
+            senderSubjectKey,
+            tx: input.tx,
+          })
+        : null
+    );
+  const qualificationCandidateReferralIds: string[] = [];
+  let isBoundReferralTarget = false;
+  for (const referralId of referralIds) {
+    const observation =
+      await observeHostedUsageReferralInboundForReferralTx({
+        eventKey,
+        occurredAt: input.occurredAt,
+        referralId,
+        senderMemberId,
+        senderSubjectKey,
+        tx: input.tx,
+      });
+    isBoundReferralTarget ||= observation.isBoundReferralTarget;
+    if (observation.qualificationCandidateReferralId) {
+      qualificationCandidateReferralIds.push(
+        observation.qualificationCandidateReferralId,
+      );
+    }
+  }
+
+  return {
+    isBoundReferralTarget,
+    qualificationCandidateReferralIds: [
+      ...new Set(qualificationCandidateReferralIds),
+    ],
+  };
+}
+
+async function observeHostedUsageReferralInboundForReferralTx(input: {
+  eventKey: string;
+  occurredAt: Date;
+  referralId: string;
+  senderMemberId: string | null;
+  senderSubjectKey: string;
+  tx: Prisma.TransactionClient;
+}): Promise<{
+  isBoundReferralTarget: boolean;
+  qualificationCandidateReferralId: string | null;
+}> {
   const referral = await readHostedUsageReferralLockedRowTx({
-    referralId: discovered.id,
+    referralId: input.referralId,
     tx: input.tx,
   });
   if (
@@ -634,8 +817,7 @@ export async function observeHostedUsageReferralInboundTx(input: {
     };
   }
 
-  const eventKey = input.eventKey.trim();
-  const senderSubjectKey = input.senderSubjectKey.trim();
+  const { eventKey, senderSubjectKey } = input;
   if (!eventKey || !senderSubjectKey) {
     return {
       isBoundReferralTarget: true,
@@ -657,11 +839,7 @@ export async function observeHostedUsageReferralInboundTx(input: {
     eventKeys.shift();
   }
 
-  const senderMemberId = input.senderMemberId
-    ?? await resolveHostedUsageReferralSubjectMemberIdTx({
-      senderSubjectKey,
-      tx: input.tx,
-    });
+  const senderMemberId = input.senderMemberId;
   const isReferrer = senderMemberId === referral.referrerMemberId
     || senderSubjectKey === referral.referrerSubjectKey;
   const nonReferrerSpeakerKeys = readBoundedStringArray(
@@ -694,7 +872,6 @@ export async function observeHostedUsageReferralInboundTx(input: {
       now: input.occurredAt,
       referral,
       senderMemberId,
-      senderSubjectKey,
       tx: input.tx,
     });
     if (!introducedMemberId) {
@@ -945,24 +1122,13 @@ async function appendHostedUsageReferralCelebration(input: {
     });
     return null;
   }
-  const [destination, destinationModel, preferences] = await Promise.all([
-    resolveHostedAssistantNotificationDestination({
-      ...(sourceConversation
-        ? { directChannel: sourceConversation.channel }
-        : {}),
-      memberId: input.beneficiaryMemberId,
-      prisma: input.prisma,
-    }),
-    readHostedUsageReferralDestinationModel({
-      beneficiaryMemberId: referral.beneficiaryMemberId,
-      destinationKind: personalSource ? "personal" : "group",
-      prisma: input.prisma,
-    }),
-    readHostedMemberAssistantPreferences({
-      memberId: input.beneficiaryMemberId,
-      prisma: input.prisma,
-    }),
-  ]);
+  const destination = await resolveHostedAssistantNotificationDestination({
+    ...(sourceConversation
+      ? { directChannel: sourceConversation.channel }
+      : {}),
+    memberId: input.beneficiaryMemberId,
+    prisma: input.prisma,
+  });
   if (
     !destination
     || (
@@ -980,8 +1146,17 @@ async function appendHostedUsageReferralCelebration(input: {
     return null;
   }
 
-  const policy = POLICIES[referral.policyCode];
   const destinationKind = personalSource ? "personal" : "group";
+  const destinationModel = await readHostedUsageReferralDestinationModel({
+    beneficiaryMemberId: referral.beneficiaryMemberId,
+    destinationKind,
+    prisma: input.prisma,
+  });
+  const preferences = await readHostedMemberAssistantPreferences({
+    memberId: input.beneficiaryMemberId,
+    prisma: input.prisma,
+  });
+  const policy = POLICIES[referral.policyCode];
   const effectiveStyle = resolveAssistantEffectiveStyle({
     ...(preferences.persona ? { persona: preferences.persona } : {}),
     personality: {
@@ -1157,8 +1332,23 @@ function readHostedUsageReferralSourceConversation(
   ) {
     return null;
   }
+  const linqService = source.linqService;
+  if (
+    linqService !== undefined
+    && (
+      source.channel !== "linq"
+      || (
+        linqService !== "imessage"
+        && linqService !== "rcs"
+        && linqService !== "sms"
+      )
+    )
+  ) {
+    return null;
+  }
   return {
     channel: source.channel,
+    ...(linqService === undefined ? {} : { linqService }),
     threadId: source.threadId,
     threadIsDirect: source.threadIsDirect,
   };
@@ -1207,22 +1397,20 @@ async function referralStillQualifiesTx(input: {
     return false;
   }
 
-  const [member, activation] = await Promise.all([
-    input.tx.hostedMember.findUnique({
-      select: { createdAt: true },
-      where: { id: input.referral.introducedMemberId },
-    }),
-    input.tx.hostedMailboxItem.findFirst({
-      select: { id: true },
-      where: {
-        kind: "member.activated",
-        occurredAt: {
-          gte: input.referral.armedAt,
-        },
-        userId: input.referral.introducedMemberId,
+  const member = await input.tx.hostedMember.findUnique({
+    select: { createdAt: true },
+    where: { id: input.referral.introducedMemberId },
+  });
+  const activation = await input.tx.hostedMailboxItem.findFirst({
+    select: { id: true },
+    where: {
+      kind: "member.activated",
+      occurredAt: {
+        gte: input.referral.armedAt,
       },
-    }),
-  ]);
+      userId: input.referral.introducedMemberId,
+    },
+  });
   return member !== null
     && member.createdAt >= input.referral.armedAt
     && activation !== null
@@ -1233,14 +1421,9 @@ async function resolveNewlyActivatedIntroducedMemberTx(input: {
   now: Date;
   referral: HostedUsageReferralLockedRow;
   senderMemberId: string | null;
-  senderSubjectKey: string;
   tx: Prisma.TransactionClient;
 }): Promise<string | null> {
-  const memberId = input.senderMemberId
-    ?? await resolveHostedUsageReferralSubjectMemberIdTx({
-      senderSubjectKey: input.senderSubjectKey,
-      tx: input.tx,
-    });
+  const memberId = input.senderMemberId;
   if (
     !memberId
     || memberId === input.referral.referrerMemberId
@@ -1249,24 +1432,22 @@ async function resolveNewlyActivatedIntroducedMemberTx(input: {
     return null;
   }
 
-  const [member, activation] = await Promise.all([
-    input.tx.hostedMember.findUnique({
-      where: { id: memberId },
-      select: { createdAt: true, suspendedAt: true },
-    }),
-    input.tx.hostedMailboxItem.findFirst({
-      orderBy: [{ occurredAt: "asc" }, { id: "asc" }],
-      select: { id: true },
-      where: {
-        kind: "member.activated",
-        occurredAt: {
-          gte: input.referral.armedAt,
-          lte: input.now,
-        },
-        userId: memberId,
+  const member = await input.tx.hostedMember.findUnique({
+    where: { id: memberId },
+    select: { createdAt: true, suspendedAt: true },
+  });
+  const activation = await input.tx.hostedMailboxItem.findFirst({
+    orderBy: [{ occurredAt: "asc" }, { id: "asc" }],
+    select: { id: true },
+    where: {
+      kind: "member.activated",
+      occurredAt: {
+        gte: input.referral.armedAt,
+        lte: input.now,
       },
-    }),
-  ]);
+      userId: memberId,
+    },
+  });
   if (
     !member
     || member.suspendedAt
@@ -1317,7 +1498,7 @@ async function resolveHostedUsageReferralSubjectMemberIdTx(input: {
 async function resolveHostedUsageReferralActor(input: {
   linqSenderHandles: readonly string[];
   memberId: string;
-  prisma: HostedUsageReferralClient;
+  prisma: PrismaClient;
   telegramSenderHandles: readonly string[];
 }): Promise<HostedUsageReferralActor | null> {
   const container = await input.prisma.hostedThreadContainer.findUnique({
@@ -1365,7 +1546,7 @@ async function resolveHostedUsageReferralActor(input: {
 
 async function resolveHostedUsageReferralSourceMember(input: {
   linqSenderHandles: readonly string[];
-  prisma: HostedUsageReferralClient;
+  prisma: PrismaClient;
   telegramSenderHandles: readonly string[];
 }): Promise<{ memberId: string; subjectKey: string } | null> {
   if (
@@ -1406,7 +1587,7 @@ async function resolveHostedUsageReferralSourceMember(input: {
 
 async function hasHostedUsageReferralSourceAccess(input: {
   actor: HostedUsageReferralActor;
-  prisma: HostedUsageReferralClient;
+  prisma: PrismaClient;
 }): Promise<boolean> {
   if (input.actor.beneficiaryMemberId !== input.actor.referrerMemberId) {
     const status = await readHostedGroupUsageStatus({
@@ -1424,42 +1605,37 @@ async function hasHostedUsageReferralSourceAccess(input: {
 }
 
 async function readHostedUsageReferralAvailablePolicyCodes(input: {
+  activePolicyCodes: readonly HostedUsageReferralPolicyCode[];
   actor: HostedUsageReferralActor;
+  hasSourceAccess?: boolean;
   now?: Date;
-  prisma: HostedUsageReferralClient;
+  prisma: PrismaClient;
 }): Promise<HostedUsageReferralPolicyCode[]> {
-  if (!(await hasHostedUsageReferralSourceAccess(input))) {
+  const hasSourceAccess = input.hasSourceAccess
+    ?? await hasHostedUsageReferralSourceAccess(input);
+  if (!hasSourceAccess) {
     return [];
   }
 
   const now = input.now ?? new Date();
   const since = new Date(now.getTime() - THIRTY_DAYS_MS);
-  const [
-    boundCount,
-    currentArmed,
-    referrerCommitments,
-    beneficiaryCommitments,
-  ] = await Promise.all([
-    input.prisma.hostedUsageReferral.count({
-      where: {
-        referrerMemberId: input.actor.referrerMemberId,
-        OR: outstandingHostedUsageReferralCommitmentWhere(now),
-        status: "target_bound",
-      },
-    }),
-    input.prisma.hostedUsageReferral.findFirst({
-      orderBy: [{ armedAt: "desc" }, { id: "desc" }],
-      select: {
-        beneficiaryMemberId: true,
-        rewardUsdMicros: true,
-      },
-      where: {
-        expiresAt: { gt: now },
-        referrerMemberId: input.actor.referrerMemberId,
-        status: "armed",
-      },
-    }),
-    input.prisma.hostedUsageReferral.aggregate({
+  // Keep these root-client operations sequential so one referral request
+  // never fans out into several simultaneous pool checkouts.
+  const inProgressCount = await input.prisma.hostedUsageReferral.count({
+    where: {
+      referrerMemberId: input.actor.referrerMemberId,
+      OR: outstandingHostedUsageReferralCommitmentWhere(now),
+      status: { in: [...ACTIVE_REFERRAL_STATUSES] },
+    },
+  });
+  if (
+    inProgressCount
+    >= HOSTED_USAGE_REFERRAL_MAX_IN_PROGRESS_PER_REFERRER
+  ) {
+    return [];
+  }
+  const referrerCommitments =
+    await input.prisma.hostedUsageReferral.aggregate({
       where: {
         referrerMemberId: input.actor.referrerMemberId,
         OR: [
@@ -1468,8 +1644,9 @@ async function readHostedUsageReferralAvailablePolicyCodes(input: {
         ],
       },
       _sum: { rewardUsdMicros: true },
-    }),
-    input.prisma.hostedUsageReferral.aggregate({
+    });
+  const beneficiaryCommitments =
+    await input.prisma.hostedUsageReferral.aggregate({
       where: {
         beneficiaryMemberId: input.actor.beneficiaryMemberId,
         OR: [
@@ -1478,106 +1655,128 @@ async function readHostedUsageReferralAvailablePolicyCodes(input: {
         ],
       },
       _sum: { rewardUsdMicros: true },
-    }),
-  ]);
-  if (boundCount >= HOSTED_USAGE_REFERRAL_MAX_BOUND_PER_REFERRER) {
-    return [];
-  }
+    });
 
-  const replaceableArmedReward = currentArmed?.rewardUsdMicros ?? 0n;
+  const activePolicyCodes = new Set(input.activePolicyCodes);
   const referrerRewardTotal =
-    (referrerCommitments._sum.rewardUsdMicros ?? 0n)
-    - replaceableArmedReward;
+    referrerCommitments._sum.rewardUsdMicros ?? 0n;
   const beneficiaryRewardTotal =
-    (beneficiaryCommitments._sum.rewardUsdMicros ?? 0n)
-    - (
-      currentArmed?.beneficiaryMemberId === input.actor.beneficiaryMemberId
-        ? replaceableArmedReward
-        : 0n
-    );
+    beneficiaryCommitments._sum.rewardUsdMicros ?? 0n;
   return HOSTED_USAGE_REFERRAL_POLICY_CODES.filter((code) => {
     const reward = POLICIES[code].rewardUsdMicros;
-    return referrerRewardTotal + reward
+    return !activePolicyCodes.has(code)
+      && referrerRewardTotal + reward
       <= HOSTED_USAGE_REFERRAL_REFERRER_30D_CAP_USD_MICROS
       && beneficiaryRewardTotal + reward
       <= HOSTED_USAGE_REFERRAL_BENEFICIARY_30D_CAP_USD_MICROS;
   });
 }
 
+/**
+ * Root-client projection only. Personal usage status owns its own interactive
+ * transaction, so callers must build this snapshot outside referral mutation
+ * transactions and after their locks have been released. The referral-owned
+ * reads remain sequential so this response projection does not amplify pool
+ * demand under concurrent traffic.
+ */
 async function readHostedUsageReferralSnapshot(input: {
   actor: HostedUsageReferralActor;
   now?: Date;
-  prisma: HostedUsageReferralClient;
+  prisma: PrismaClient;
+  sourceConversation?: HostedRuntimeUsageReferralSourceConversation | null;
 }): Promise<HostedRuntimeUsageReferralSnapshot> {
   const now = input.now ?? new Date();
   const destinationKind =
     input.actor.beneficiaryMemberId === input.actor.referrerMemberId
       ? "personal"
       : "group";
-  const [
-    active,
-    availablePolicyCodes,
-    personalUsage,
-    destinationModel,
-  ] = await Promise.all([
-    input.prisma.hostedUsageReferral.findFirst({
-      orderBy: [{ armedAt: "desc" }, { id: "desc" }],
+  const active = await input.prisma.hostedUsageReferral.findMany({
+    orderBy: [{ armedAt: "desc" }, { id: "desc" }],
+    where: {
+      beneficiaryMemberId: input.actor.beneficiaryMemberId,
+      referrerMemberId: input.actor.referrerMemberId,
+      expiresAt: { gt: now },
+      status: { in: [...ACTIVE_REFERRAL_STATUSES] },
+    },
+    select: {
+      expiresAt: true,
+      policyCode: true,
+      status: true,
+    },
+  });
+  const globallyArmedPolicies =
+    await input.prisma.hostedUsageReferral.findMany({
       where: {
-        beneficiaryMemberId: input.actor.beneficiaryMemberId,
         expiresAt: { gt: now },
         referrerMemberId: input.actor.referrerMemberId,
-        status: { in: [...ACTIVE_REFERRAL_STATUSES] },
+        status: "armed",
       },
-      select: {
-        beneficiaryMemberId: true,
-        expiresAt: true,
-        policyCode: true,
-        status: true,
-      },
-    }),
-    readHostedUsageReferralAvailablePolicyCodes({
-      ...input,
-      now,
-    }),
+      select: { policyCode: true },
+    });
+  const personalUsage =
     input.actor.beneficiaryMemberId === input.actor.referrerMemberId
-      ? readHostedPersonalAiUsageStatus({
+      ? await readHostedPersonalAiUsageStatus({
           memberId: input.actor.beneficiaryMemberId,
           prisma: input.prisma,
         })
-      : Promise.resolve(null),
-    readHostedUsageReferralDestinationModel({
-      beneficiaryMemberId: input.actor.beneficiaryMemberId,
-      destinationKind,
-      prisma: input.prisma,
-    }),
-  ]);
+      : null;
+  const destinationModel = await readHostedUsageReferralDestinationModel({
+    beneficiaryMemberId: input.actor.beneficiaryMemberId,
+    destinationKind,
+    prisma: input.prisma,
+  });
+  const hasSourceAccess = personalUsage === null
+    ? await hasHostedUsageReferralSourceAccess(input)
+    : personalUsage.status !== "unavailable";
+  const activePolicyCodes = [
+    ...new Set([
+      ...active.map(({ policyCode }) => policyCode),
+      ...globallyArmedPolicies.map(({ policyCode }) => policyCode),
+    ]),
+  ];
+  const availablePolicyCodes = await readHostedUsageReferralAvailablePolicyCodes({
+    ...input,
+    activePolicyCodes,
+    hasSourceAccess,
+    now,
+  });
 
   return {
-    active: active
-      ? {
-          destinationKind:
-            active.beneficiaryMemberId === input.actor.referrerMemberId
-              ? "personal"
-              : "group",
-          expiresAt: active.expiresAt.toISOString(),
-          policyCode: active.policyCode,
-          rewardLabel: buildHostedUsageReferralRewardLabel({
+    activeMissions: HOSTED_USAGE_REFERRAL_POLICY_CODES.flatMap((policyCode) => {
+      const mission = active.find((candidate) =>
+        candidate.policyCode === policyCode
+      );
+      return mission
+        ? [{
             destinationKind,
-            model: destinationModel,
-            policyCode: active.policyCode,
-          }),
-          state: active.status === "armed" ? "armed" : "target_bound",
-        }
-      : null,
-    availablePolicies: availablePolicyCodes.map((code) => ({
-          code,
-          requirementsLabel: POLICIES[code].requirementsLabel,
-          rewardLabel: buildHostedUsageReferralRewardLabel({
-            destinationKind,
-            model: destinationModel,
-            policyCode: code,
-          }),
-        })),
+            expiresAt: mission.expiresAt.toISOString(),
+            policyCode: mission.policyCode,
+            rewardLabel: buildHostedUsageReferralRewardLabel({
+              destinationKind,
+              model: destinationModel,
+              policyCode: mission.policyCode,
+            }),
+            state: mission.status === "armed" ? "armed" : "target_bound",
+          }]
+        : [];
+    }),
+    availablePolicies: availablePolicyCodes
+      .filter((policyCode) =>
+        isHostedUsageReferralPolicyAvailableForConversation({
+          channel: input.sourceConversation?.channel ?? null,
+          linqService: input.sourceConversation?.linqService ?? null,
+          policyCode,
+        })
+      )
+      .map((code) => ({
+        code,
+        requirementsLabel: POLICIES[code].requirementsLabel,
+        rewardLabel: buildHostedUsageReferralRewardLabel({
+          destinationKind,
+          model: destinationModel,
+          policyCode: code,
+        }),
+      })),
     trialCreditNotice:
       personalUsage !== null
       && personalUsage.status !== "unavailable"
@@ -1587,10 +1786,22 @@ async function readHostedUsageReferralSnapshot(input: {
   };
 }
 
+function isHostedUsageReferralPolicyAvailableForConversation(input: {
+  channel: HostedRuntimeUsageReferralSourceConversation["channel"] | null;
+  linqService: string | null;
+  policyCode: HostedUsageReferralPolicyCode;
+}): boolean {
+  return input.policyCode !== "new_person_activation_v1"
+    || (
+      input.channel === "linq"
+      && input.linqService?.trim().toLowerCase() === "imessage"
+    );
+}
+
 async function readHostedUsageReferralDestinationModel(input: {
   beneficiaryMemberId: string;
   destinationKind: "group" | "personal";
-  prisma: HostedUsageReferralClient;
+  prisma: PrismaClient;
 }): Promise<HostedAssistantProductModel> {
   if (input.destinationKind === "group") {
     return HOSTED_ASSISTANT_SOL_MODEL;
@@ -1604,45 +1815,60 @@ async function readHostedUsageReferralDestinationModel(input: {
 
 async function assertHostedUsageReferralRewardCapacityTx(input: {
   beneficiaryMemberId: string;
+  individualRewardUsdMicros: readonly bigint[];
   now: Date;
   referrerMemberId: string;
   rewardUsdMicros: bigint;
   tx: Prisma.TransactionClient;
 }): Promise<void> {
   const since = new Date(input.now.getTime() - THIRTY_DAYS_MS);
-  const [referrerCommitments, beneficiaryCommitments] = await Promise.all([
-    input.tx.hostedUsageReferral.aggregate({
-      where: {
-        referrerMemberId: input.referrerMemberId,
-        OR: [
-          { rewardedAt: { gte: since } },
-          ...outstandingHostedUsageReferralCommitmentWhere(input.now),
-        ],
-      },
-      _sum: { rewardUsdMicros: true },
-    }),
-    input.tx.hostedUsageReferral.aggregate({
-      where: {
-        beneficiaryMemberId: input.beneficiaryMemberId,
-        OR: [
-          { rewardedAt: { gte: since } },
-          ...outstandingHostedUsageReferralCommitmentWhere(input.now),
-        ],
-      },
-      _sum: { rewardUsdMicros: true },
-    }),
-  ]);
+  const referrerCommitments = await input.tx.hostedUsageReferral.aggregate({
+    where: {
+      referrerMemberId: input.referrerMemberId,
+      OR: [
+        { rewardedAt: { gte: since } },
+        ...outstandingHostedUsageReferralCommitmentWhere(input.now),
+      ],
+    },
+    _sum: { rewardUsdMicros: true },
+  });
+  const beneficiaryCommitments = await input.tx.hostedUsageReferral.aggregate({
+    where: {
+      beneficiaryMemberId: input.beneficiaryMemberId,
+      OR: [
+        { rewardedAt: { gte: since } },
+        ...outstandingHostedUsageReferralCommitmentWhere(input.now),
+      ],
+    },
+    _sum: { rewardUsdMicros: true },
+  });
 
+  const referrerRewardTotal =
+    referrerCommitments._sum.rewardUsdMicros ?? 0n;
+  const beneficiaryRewardTotal =
+    beneficiaryCommitments._sum.rewardUsdMicros ?? 0n;
+  const referrerCapacityExceeded =
+    referrerRewardTotal + input.rewardUsdMicros
+      > HOSTED_USAGE_REFERRAL_REFERRER_30D_CAP_USD_MICROS;
+  const beneficiaryCapacityExceeded =
+    beneficiaryRewardTotal + input.rewardUsdMicros
+      > HOSTED_USAGE_REFERRAL_BENEFICIARY_30D_CAP_USD_MICROS;
   if (
-    (referrerCommitments._sum.rewardUsdMicros ?? 0n) + input.rewardUsdMicros
-      > HOSTED_USAGE_REFERRAL_REFERRER_30D_CAP_USD_MICROS
+    (referrerCapacityExceeded || beneficiaryCapacityExceeded)
+    && input.individualRewardUsdMicros.length > 1
+    && input.individualRewardUsdMicros.some((rewardUsdMicros) =>
+      referrerRewardTotal + rewardUsdMicros
+        <= HOSTED_USAGE_REFERRAL_REFERRER_30D_CAP_USD_MICROS
+      && beneficiaryRewardTotal + rewardUsdMicros
+        <= HOSTED_USAGE_REFERRAL_BENEFICIARY_30D_CAP_USD_MICROS
+    )
   ) {
+    throw new TypeError("usage_referral_selection_requires_one");
+  }
+  if (referrerCapacityExceeded) {
     throw new TypeError("referrer_reward_cap_reached");
   }
-  if (
-    (beneficiaryCommitments._sum.rewardUsdMicros ?? 0n) + input.rewardUsdMicros
-      > HOSTED_USAGE_REFERRAL_BENEFICIARY_30D_CAP_USD_MICROS
-  ) {
+  if (beneficiaryCapacityExceeded) {
     throw new TypeError("destination_reward_cap_reached");
   }
 }

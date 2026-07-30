@@ -54,6 +54,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
   HostedMember: [
     "id String @id",
     'assistantModelPreference String? @map("assistant_model_preference")',
+    'assistantProviderPreference String? @map("assistant_provider_preference")',
     'assistantPersona String? @map("assistant_persona")',
     'assistantPersonaCausalSeq BigInt? @map("assistant_persona_causal_seq")',
     'assistantReasoningEffortPreference String? @map("assistant_reasoning_effort_preference")',
@@ -71,6 +72,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'assistantVoiceCausalSeq BigInt? @map("assistant_voice_causal_seq")',
     'billingStatus HostedBillingStatus @default(not_started) @map("billing_status")',
     "codexAuthConnection HostedCodexAuthConnection?",
+    'groupSponsorshipMomentsCreated HostedGroupSponsorshipMoment[] @relation("HostedGroupSponsorshipMomentCreator")',
     "linqContactCardShares HostedLinqContactCardShare[]",
     "mealPhotoCaptureEnrollments HostedMealPhotoCaptureEnrollment[]",
     'pendingActivationTimeZone String? @map("pending_activation_time_zone")',
@@ -136,6 +138,8 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
   ],
   HostedMemberBillingRef: [
     'memberId String @unique @map("member_id")',
+    'stripeCheckoutSessionLookupKey String? @unique @map("stripe_checkout_session_lookup_key")',
+    'stripeCheckoutSessionIdEncrypted String? @map("stripe_checkout_session_id_encrypted")',
     'stripeCustomerLookupKey String? @unique @map("stripe_customer_lookup_key")',
     'stripeCustomerIdEncrypted String? @map("stripe_customer_id_encrypted")',
     'stripeSubscriptionLookupKey String? @unique @map("stripe_subscription_lookup_key")',
@@ -154,6 +158,9 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'pulseTrialPolicyVersion String? @map("pulse_trial_policy_version")',
     'currentTrialStartedAt DateTime? @map("current_trial_started_at")',
     'currentTrialEndsAt DateTime? @map("current_trial_ends_at")',
+    'checkoutAttemptId String? @map("checkout_attempt_id")',
+    'checkoutIntentHash String? @map("checkout_intent_hash")',
+    'checkoutCreatedAt DateTime? @map("checkout_created_at")',
     'createdAt DateTime @default(now()) @map("created_at")',
     'updatedAt DateTime @updatedAt @map("updated_at")',
   ],
@@ -637,6 +644,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedMemberAssistantProviderPreferenceMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260729043000_hosted_member_assistant_provider_preference/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const hostedMemberAssistantPersonalityMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260710130000_hosted_member_assistant_personality/migration.sql",
@@ -791,9 +805,23 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedGroupJoinOutreachMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260724190000_hosted_group_join_outreach/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const hostedObservabilityRetentionMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260725120000_hosted_observability_retention/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const deviceSyncSignalSourceProviderMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260725193000_device_sync_signal_source_provider/migration.sql",
         import.meta.url,
       ),
       "utf8",
@@ -819,6 +847,29 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedUsageReferralCreditEntryConstraintMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260728030000_hosted_usage_referral_credit_entry_constraints/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hostedUsageReferralProjectionContractMigrationSql = readFileSync(
+      new URL(
+        "../prisma/contract-migrations/20260728031000_resynchronize_hosted_usage_credit_purchase_grants/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hostedUsageReferralProductSpec = readFileSync(
+      new URL(
+        "../../../agent-docs/product-specs/hosted-usage-referrals.md",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const normalizedHostedUsageReferralProductSpec =
+      hostedUsageReferralProductSpec.replace(/\s+/gu, " ");
     const hostedThreadContainerUsageDefaultMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260726180000_hosted_thread_container_usage_default/migration.sql",
@@ -948,9 +999,11 @@ describe("hosted Prisma baseline migration", () => {
       "20260723230000_hosted_member_assistant_unhinged",
       "20260724160000_hosted_account_exit_reason",
       "20260724180000_device_connection_source_last_data_at",
+      "20260724190000_hosted_group_join_outreach",
       "20260725120000_hosted_observability_retention",
       "20260725120000_hosted_thread_delivery_route",
       "20260725190000_hosted_mailbox_content_retention",
+      "20260725193000_device_sync_signal_source_provider",
       "20260725230000_hosted_paid_usage_legacy_period_cutover",
       "20260726115900_hosted_usage_referral_entry_kind",
       "20260726120000_hosted_growth_aggregate",
@@ -961,9 +1014,25 @@ describe("hosted Prisma baseline migration", () => {
       "20260726180000_hosted_thread_container_usage_default",
       "20260727040000_relax_hosted_usage_credit_detached_direct_proof",
       "20260727120000_hosted_member_checkout_session",
+      "20260727190000_hosted_group_sponsorship_moment",
+      "20260727200000_hosted_member_checkout_attempt",
+      "20260728030000_hosted_invite_instant_start_admission",
+      "20260728030000_hosted_usage_referral_credit_entry_constraints",
       "20260728050000_rearm_hosted_mailbox_content_retention",
+      "20260728190000_hosted_mailbox_source_message",
+      "20260729010000_hosted_account_cleanup_runtime_logs",
+      "20260729043000_hosted_member_assistant_provider_preference",
+      "20260729170000_hosted_thread_route_account_lookup_key",
+      "20260729180000_linq_provider_health_projection",
+      "20260729190000_composable_usage_referral_missions",
       "migration_lock.toml",
     ]);
+    expect(deviceSyncSignalSourceProviderMigrationSql).toContain(
+      'ADD COLUMN "source_provider_slug" TEXT',
+    );
+    expect(deviceSyncSignalSourceProviderMigrationSql).toContain(
+      'CREATE INDEX "device_sync_signal_user_source_idx"',
+    );
     expect(hostedUsageReferralEntryKindMigrationSql.trim()).toBe(
       [
         'ALTER TYPE "HostedUsageCreditEntryKind"',
@@ -984,7 +1053,7 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedUsageReferralRewardsMigrationSql).toContain(
       'ADD COLUMN "referral_id" TEXT',
     );
-    expect(hostedUsageReferralCreditEntryContractMigrationSql).toContain(
+    expect(hostedUsageReferralCreditEntryConstraintMigrationSql).toContain(
       '("purchase_id" IS NOT NULL) <> ("referral_id" IS NOT NULL)',
     );
     expect(hostedUsageReferralRewardsMigrationSql).not.toContain(
@@ -993,16 +1062,16 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedUsageReferralRewardsMigrationSql).not.toContain(
       'ADD CONSTRAINT "hosted_usage_credit_entry_amount_direction_valid"',
     );
-    expect(hostedUsageReferralCreditEntryContractMigrationSql).toContain(
-      'DROP CONSTRAINT "hosted_usage_credit_entry_amount_direction_valid"',
+    expect(hostedUsageReferralCreditEntryConstraintMigrationSql).toContain(
+      'DROP CONSTRAINT IF EXISTS "hosted_usage_credit_entry_amount_direction_valid"',
     );
-    expect(hostedUsageReferralCreditEntryContractMigrationSql).toContain(
+    expect(hostedUsageReferralCreditEntryConstraintMigrationSql).toContain(
       'ADD CONSTRAINT "hosted_usage_credit_entry_amount_direction_valid"',
     );
-    expect(hostedUsageReferralCreditEntryContractMigrationSql).toContain(
+    expect(hostedUsageReferralCreditEntryConstraintMigrationSql).toContain(
       ') NOT VALID',
     );
-    expect(hostedUsageReferralCreditEntryContractMigrationSql).toContain(
+    expect(hostedUsageReferralCreditEntryConstraintMigrationSql).toContain(
       'VALIDATE CONSTRAINT "hosted_usage_credit_entry_source_shape_valid"',
     );
     expect(hostedUsageReferralRewardsMigrationSql).toContain(
@@ -1030,12 +1099,45 @@ describe("hosted Prisma baseline migration", () => {
         "WHERE entry.\"kind\" = 'purchase_grant';",
       ].join("\n"),
     );
-    expect(hostedUsageReferralCreditEntryContractMigrationSql).toContain(
+    expect(hostedUsageReferralProjectionContractMigrationSql).toContain(
       'ON CONFLICT ("entry_id") DO UPDATE',
     );
-    expect(hostedUsageReferralCreditEntryContractMigrationSql).toContain(
+    expect(hostedUsageReferralProjectionContractMigrationSql).toContain(
       '"remaining_usd_micros" = EXCLUDED."remaining_usd_micros"',
     );
+    expect(hostedUsageReferralProjectionContractMigrationSql).toContain(
+      'SELECT COUNT(*) AS "lockedBeneficiaryCount"',
+    );
+    expect(hostedUsageReferralProjectionContractMigrationSql).toContain(
+      'ORDER BY member."id"\n  FOR UPDATE',
+    );
+    expect(hostedUsageReferralProjectionContractMigrationSql).toContain(
+      'IS DISTINCT FROM purchase."remaining_credit_usd_micros"',
+    );
+    expect(hostedUsageReferralProjectionContractMigrationSql).not.toContain(
+      'ALTER TABLE "hosted_usage_credit_entry"',
+    );
+    expect(hostedUsageReferralCreditEntryContractMigrationSql).toContain(
+      'ALTER TABLE "hosted_usage_credit_entry"',
+    );
+    expect(hostedUsageReferralProductSpec).not.toContain(
+      "20260726123000_allow_hosted_usage_referral_credit_entries",
+    );
+    expect(normalizedHostedUsageReferralProductSpec.indexOf(
+      "20260728030000_hosted_usage_referral_credit_entry_constraints",
+    )).toBeLessThan(normalizedHostedUsageReferralProductSpec.indexOf(
+      "previous Vercel function window to drain",
+    ));
+    expect(normalizedHostedUsageReferralProductSpec.indexOf(
+      "previous Vercel function window to drain",
+    )).toBeLessThan(normalizedHostedUsageReferralProductSpec.indexOf(
+      "20260728031000_resynchronize_hosted_usage_credit_purchase_grants",
+    ));
+    expect(normalizedHostedUsageReferralProductSpec.indexOf(
+      "20260728031000_resynchronize_hosted_usage_credit_purchase_grants",
+    )).toBeLessThan(normalizedHostedUsageReferralProductSpec.indexOf(
+      "Enable `HOSTED_USAGE_REFERRALS_ENABLED=1`",
+    ));
     expect(hostedUsageReferralRewardsMigrationSql).not.toContain(
       "hosted_usage_credit_allocation",
     );
@@ -1350,6 +1452,42 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedGroupJoinOfferMigrationSql).not.toContain(
       'ALTER TABLE "hosted_group"',
     );
+    expect(hostedGroupJoinOutreachMigrationSql).toContain(
+      'CREATE TABLE "hosted_group_join_outreach"',
+    );
+    expect(hostedGroupJoinOutreachMigrationSql).toContain(
+      '"participant_phone_lookup_key" TEXT NOT NULL',
+    );
+    expect(hostedGroupJoinOutreachMigrationSql).toContain(
+      '"participant_phone_encrypted" TEXT NOT NULL',
+    );
+    expect(hostedGroupJoinOutreachMigrationSql).toContain(
+      'hosted_group_join_outreach_offer_participant_key',
+    );
+    expect(hostedGroupJoinOutreachMigrationSql).toContain(
+      'REFERENCES "hosted_group_join_offer"("id")',
+    );
+    expect(hostedGroupJoinOutreachMigrationSql).toContain(
+      'ADD COLUMN "group_join_outreach_id" TEXT',
+    );
+    expect(hostedGroupJoinOutreachMigrationSql).toContain(
+      'ADD COLUMN "group_join_reply_occurred_at" TIMESTAMP(3)',
+    );
+    expect(hostedGroupJoinOutreachMigrationSql).toContain(
+      'ADD COLUMN "group_join_offer_handled_at" TIMESTAMP(3)',
+    );
+    expect(hostedGroupJoinOutreachMigrationSql).toContain(
+      'REFERENCES "hosted_group_join_outreach"("id")',
+    );
+    expect(hostedGroupJoinOutreachMigrationSql).toContain(
+      'hosted_linq_delivery_group_join_outreach_status_idx',
+    );
+    expect(hostedGroupJoinOutreachMigrationSql).not.toContain(
+      '"participant_phone_number"',
+    );
+    expect(hostedGroupJoinOutreachMigrationSql).not.toContain(
+      'REFERENCES "hosted_linq_line"("phone_number_lookup_key")',
+    );
     for (const sql of [
       'CREATE TABLE "hosted_group_disclosure_permission"',
       '"permission_text_encrypted" TEXT NOT NULL',
@@ -1499,6 +1637,18 @@ describe("hosted Prisma baseline migration", () => {
       "NOT NULL",
     );
     expect(hostedMemberAssistantModelPreferenceMigrationSql).not.toContain(
+      "DEFAULT",
+    );
+    expect(hostedMemberAssistantProviderPreferenceMigrationSql).toContain(
+      'ALTER TABLE "hosted_member"',
+    );
+    expect(hostedMemberAssistantProviderPreferenceMigrationSql).toContain(
+      'ADD COLUMN "assistant_provider_preference" TEXT',
+    );
+    expect(hostedMemberAssistantProviderPreferenceMigrationSql).not.toContain(
+      "NOT NULL",
+    );
+    expect(hostedMemberAssistantProviderPreferenceMigrationSql).not.toContain(
       "DEFAULT",
     );
     expect(hostedLinqObservabilityMigrationSql).toContain('"skipped_at" TIMESTAMP(3)');
@@ -2108,6 +2258,59 @@ describe("hosted Prisma baseline migration", () => {
   });
 
 
+  it("keeps legacy Linq delivery health blocking until the post-drain lane", () => {
+    const schema = readFileSync(
+      new URL("../prisma/schema.prisma", import.meta.url),
+      "utf8",
+    );
+    const predeploySql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260729180000_linq_provider_health_projection/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const postDrainSql = readFileSync(
+      new URL(
+        "../prisma/contract-migrations/20260729183000_rebuild_linq_delivery_health_after_drain/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+
+    expect(predeploySql).toContain(
+      'ADD COLUMN "provider_service_updated_at" TIMESTAMP(3)',
+    );
+    expect(predeploySql).toContain(
+      'ADD COLUMN "provider_reputation_updated_at" TIMESTAMP(3)',
+    );
+    expect(predeploySql).not.toMatch(
+      /UPDATE "hosted_linq_line"\s+SET "health_status"/u,
+    );
+    expect(postDrainSql).toMatch(
+      /UPDATE "hosted_linq_line"\s+SET "health_status" = CASE/u,
+    );
+    expect(postDrainSql).toContain(
+      'WHEN "consecutive_failures" > 0',
+    );
+    expect(postDrainSql.indexOf(
+      '"provider_service_status" = UPPER("provider_status")',
+    )).toBeLessThan(postDrainSql.indexOf(
+      'SET "health_status" = CASE',
+    ));
+    expect(postDrainSql.indexOf(
+      '"provider_reputation_status" = UPPER("provider_status")',
+    )).toBeLessThan(postDrainSql.indexOf(
+      'SET "health_status" = CASE',
+    ));
+    expect(schema).toContain(
+      'providerServiceUpdatedAt   DateTime? @map("provider_service_updated_at")',
+    );
+    expect(schema).toContain(
+      'providerReputationUpdatedAt DateTime? @map("provider_reputation_updated_at")',
+    );
+  });
+
   it("keeps hosted-member data on the reviewed scalar schema contract", () => {
     const schema = readFileSync(
       new URL("../prisma/schema.prisma", import.meta.url),
@@ -2138,6 +2341,36 @@ describe("hosted Prisma baseline migration", () => {
         `${modelName} must stay scalar-only. Add a typed column or a dedicated owner table instead of a catch-all Json blob.`,
       ).toEqual([]);
     }
+  });
+
+  it("adds only nullable Checkout-attempt columns and their lookup index", () => {
+    const migrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260727200000_hosted_member_checkout_attempt/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+
+    expect(migrationSql).toContain(
+      'ADD COLUMN "checkout_attempt_id" TEXT',
+    );
+    expect(migrationSql).toContain(
+      'ADD COLUMN "checkout_created_at" TIMESTAMP(3)',
+    );
+    expect(migrationSql).toContain(
+      'ADD COLUMN "checkout_intent_hash" TEXT',
+    );
+    expect(migrationSql).toContain(
+      'ADD COLUMN "stripe_checkout_session_id_encrypted" TEXT',
+    );
+    expect(migrationSql).toContain(
+      'ADD COLUMN "stripe_checkout_session_lookup_key" TEXT',
+    );
+    expect(migrationSql).not.toContain("NOT NULL");
+    expect(migrationSql).toMatch(
+      /CREATE UNIQUE INDEX\s+"hosted_member_billing_ref_stripe_checkout_session_lookup_key_key"/u,
+    );
   });
 });
 

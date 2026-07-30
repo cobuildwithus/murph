@@ -73,7 +73,7 @@ const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   resolveDeliveryTransportIdempotent() {
     return false
   },
-  supportedResponseMediaKinds: ['image', 'voice_memo'],
+  supportedResponseMediaKinds: ['image', 'vault_image', 'voice_memo'],
   targetRequiredMessage:
     'Telegram delivery requires an explicit target or a stored delivery binding.',
   async startTypingIndicator({ candidate, dependencies }) {
@@ -495,7 +495,7 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
       deliveryTarget: input.deliveryTarget ?? null,
     })
   },
-  supportedResponseMediaKinds: ['image', 'voice_memo', 'vault_file'],
+  supportedResponseMediaKinds: ['image', 'vault_image', 'voice_memo', 'vault_file'],
   targetRequiredMessage:
     'iMessage delivery requires an explicit chat id or a stored thread binding.',
   async startTypingIndicator({ candidate, dependencies, replyToMessageId }) {
@@ -1019,8 +1019,8 @@ function hasImageMedia(
 
 function isImageMedia(
   media: AssistantResponseMedia,
-): media is Extract<AssistantResponseMedia, { kind: 'image' }> {
-  return media.kind === 'image'
+): media is Extract<AssistantResponseMedia, { kind: 'image' | 'vault_image' }> {
+  return media.kind === 'image' || media.kind === 'vault_image'
 }
 
 function isVoiceMemoMedia(

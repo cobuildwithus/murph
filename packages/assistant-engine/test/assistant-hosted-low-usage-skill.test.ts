@@ -17,7 +17,7 @@ async function readLowUsageSkill(): Promise<string> {
 }
 
 describe('assistant hosted low-usage skill', () => {
-  it('registers the trusted low-usage and follow-up trigger', () => {
+  it('registers low-usage, explicit options, and follow-up triggers', () => {
     const skill = ASSISTANT_SKILLS.find(
       (candidate) => candidate.slug === 'hosted-low-usage',
     )
@@ -25,8 +25,44 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill?.triggerHint).toContain('trusted hosted turn context')
     expect(skill?.triggerHint).toContain('Family-sponsored Murph')
     expect(skill?.triggerHint).toContain('hosted group conversation')
+    expect(skill?.triggerHint).toContain(
+      'available ways to add or earn more usage',
+    )
     expect(buildAssistantSkillFileRef('hosted-low-usage')).toBe(
       '$MURPH_ASSISTANT_SKILLS_ROOT/hosted-low-usage/SKILL.md',
+    )
+  })
+
+  it('treats broad get-more-usage questions as all-options requests', async () => {
+    const skill = await readLowUsageSkill()
+    const normalizedSkill = skill.replace(/\s+/gu, ' ')
+
+    expect(normalizedSkill).toContain(
+      'adding usage, or ways to get or earn more usage',
+    )
+    expect(normalizedSkill).toContain(
+      'how to get more usage, what options exist, how to earn usage, or about a mission',
+    )
+    expect(normalizedSkill).toContain(
+      'Do this even when current usage is `healthy`',
+    )
+    expect(normalizedSkill).toContain(
+      'never make more than one pre-action referral read in one user turn',
+    )
+    expect(normalizedSkill).toContain(
+      'The applied-but-snapshot-unavailable recovery rules below are the only exception',
+    )
+    expect(normalizedSkill).toContain(
+      'Do not answer with only the paid or funding path or make the sender ask again',
+    )
+    expect(normalizedSkill).toContain(
+      "use this turn's `read_usage_referral` result",
+    )
+    expect(normalizedSkill).toContain(
+      'If there is no current-turn result, including on a later follow-up, call it once',
+    )
+    expect(normalizedSkill).not.toContain(
+      'When the current sender asks about the earned option, call `read_usage_referral` again',
     )
   })
 
@@ -85,15 +121,24 @@ describe('assistant hosted low-usage skill', () => {
       'a less capable model that uses less AI usage',
     )
     expect(skill).toContain('`owner: true`, `billingActive: true`')
-    expect(skill).toContain('matches exactly one `members` row')
-    expect(skill).toContain('navigation to Settings > Family')
+    expect(skill).toContain('matches')
+    expect(skill).toContain('exactly one `members` row')
+    expect(skill).toContain(
+      '`https://www.withmurph.ai/settings?addUsage=family#family`',
+    )
+    expect(skill).toContain(
+      '`https://www.withmurph.ai/settings?addUsage=true#subscription`',
+    )
+    expect(skill).toContain('Never put a member ID or')
+    expect(skill).toContain('group ID into a model-composed link')
     expect(skill).toContain('call `murph.group action="read_usage"` once before writing the')
     expect(skill).toContain('`murph.group action="read_usage_referral"` once')
     expect(skill).toContain('This only offers')
     expect(skill).toContain('does not arm one')
     expect(skill).toContain('include it in the same segment as a plain first-party link')
     expect(skill).toContain("Match the room's energy")
-    expect(skill).toContain('nominating someone to cover it')
+    expect(skill).toContain('without naming or singling out a nonpayer')
+    expect(skill).toContain('guilt-trip, call out nonpayers')
     expect(skill).toContain('skip the heads-up entirely')
     expect(skill).toContain('standing no-re-offer rule wins')
     expect(skill).toContain('Never switch it automatically')
@@ -123,13 +168,47 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain(
       'A recommendation or low-usage warning is not consent',
     )
-    expect(skill).toContain('Merely describing a referral mission is not consent')
-    expect(skill).toContain('one exact current sender chooses one exact returned policy')
+    expect(skill).toContain('Merely describing referral missions is not consent')
+    expect(skill).toContain('an explicit "both" is consent')
+    expect(skill).toContain('Different policies are independent')
+    expect(skill).toContain('one-mission limit')
+    expect(normalizedSkill).toContain('one compact message')
+    expect(normalizedSkill).toContain(
+      'Call `arm_usage_referral` once with the exact selected `policyCodes` set',
+    )
+    expect(skill).toContain('Never split one selection across multiple calls')
+    expect(skill).toContain('usage_referral_selection_requires_one')
+    expect(normalizedSkill).toContain(
+      'no new mission from that request committed',
+    )
+    expect(normalizedSkill).toContain('invent operational limitations')
+    expect(normalizedSkill).toContain('still `armed` when the group is created')
+    expect(normalizedSkill).toContain('language respectful and person-first')
+    expect(normalizedSkill).toContain('use dehumanizing labels')
+    expect(normalizedSkill).not.toContain(
+      'names every exact option just presented',
+    )
+    expect(normalizedSkill).toContain(
+      'Canceling one policy never cancels or replaces another',
+    )
     expect(normalizedSkill).toContain('Treat returned message counts as approximate')
     expect(normalizedSkill).toContain('Never reveal qualification counters')
     expect(normalizedSkill).toContain(
       'state the returned `expiresAt` as the mission\'s public occurrence deadline',
     )
+    expect(normalizedSkill).toContain(
+      '`usage_referral_arm_applied_snapshot_unavailable`, the arm committed',
+    )
+    expect(normalizedSkill).toContain(
+      'Do not arm it again or claim that commit failed',
+    )
+    expect(normalizedSkill).toContain(
+      'that recovery read is authoritative for current state',
+    )
+    expect(normalizedSkill).toContain(
+      '`usage_referral_cancel_applied_snapshot_unavailable`, the cancellation committed',
+    )
+    expect(normalizedSkill).toContain('including a mission armed after the cancellation')
     expect(normalizedSkill).toContain(
       'private anti-gaming thresholds, or late-arrival grace rules',
     )
@@ -140,6 +219,21 @@ describe('assistant hosted low-usage skill', () => {
       'Start a fresh group and make it genuinely active, with multiple people actually talking.',
     )
     expect(normalizedSkill).toContain(
+      'Give the referrer only the group-opening goal',
+    )
+    expect(normalizedSkill).toContain(
+      'The ordinary first-reply group setup flow owns the rest',
+    )
+    expect(normalizedSkill).toContain(
+      'asks them to come back and say hi in the group once setup is done',
+    )
+    expect(normalizedSkill).toContain(
+      'confirm the handoff in one short sentence',
+    )
+    expect(normalizedSkill).not.toContain(
+      'After arming that mission, explain the reciprocal setup path',
+    )
+    expect(normalizedSkill).toContain(
       'introduce me to your mom and I can bring this group roughly another 50 messages',
     )
     expect(normalizedSkill).toContain('Murph is the butt of the joke')
@@ -148,13 +242,12 @@ describe('assistant hosted low-usage skill', () => {
     expect(normalizedSkill).toContain('Do not say "sign up your mom"')
     expect(skill).toContain('require a matching current quote')
     expect(skill).toContain('A bare yes after multiple options is ambiguous')
-    expect(skill).toContain(
-      'Never choose an amount, start Checkout, or claim usage was added',
-    )
+    expect(skill).toContain('Never choose an amount, start')
+    expect(skill).toContain('Checkout, or claim usage was added')
     expect(skill).toContain(
       'never reveal who paid, amounts, or',
     )
-    expect(skill).toContain('never claim usage was added when it was not')
+    expect(skill).toContain('never claim messages were sponsored when they were not')
     expect(skill).toContain('standing objective')
     expect(skill).toContain('deferral rules below still outrank this objective')
   })
@@ -166,14 +259,14 @@ describe('assistant hosted low-usage skill', () => {
       result: {
         outcome: 'armed',
         referral: {
-          active: {
+          activeMissions: [{
             destinationKind: 'personal',
             expiresAt: '2026-08-03T18:00:00.000Z',
             policyCode: 'active_group_v1',
             rewardLabel:
               'about 140 more messages on the model your Murph is using now',
             state: 'armed',
-          },
+          }],
         },
         status: 'ok',
       },
@@ -195,6 +288,186 @@ describe('assistant hosted low-usage skill', () => {
     )
     expect(JSON.stringify(armedToolResult)).not.toContain(
       'minimumActivitySpan',
+    )
+  })
+
+  it.each([
+    {
+      label: 'an arm followed by no active mission',
+      toolResults: [
+        {
+          action: 'arm_usage_referral',
+          result: {
+            referral: null,
+            status: 'unavailable',
+            unavailableReason:
+              'usage_referral_arm_applied_snapshot_unavailable',
+          },
+        },
+        {
+          action: 'read_usage_referral',
+          result: {
+            outcome: 'read',
+            referral: {
+              activeMissions: [],
+              availablePolicies: [],
+              trialCreditNotice: null,
+            },
+            status: 'ok',
+          },
+        },
+      ],
+    },
+    {
+      label: 'an arm followed by multiple active missions',
+      toolResults: [
+        {
+          action: 'arm_usage_referral',
+          result: {
+            referral: null,
+            status: 'unavailable',
+            unavailableReason:
+              'usage_referral_arm_applied_snapshot_unavailable',
+          },
+        },
+        {
+          action: 'read_usage_referral',
+          result: {
+            outcome: 'read',
+            referral: {
+              activeMissions: [
+                {
+                  destinationKind: 'personal',
+                  expiresAt: '2026-08-03T18:00:00.000Z',
+                  policyCode: 'new_person_activation_v1',
+                  rewardLabel:
+                    'about 100 more messages on the model your Murph is using now',
+                  state: 'armed',
+                },
+                {
+                  destinationKind: 'personal',
+                  expiresAt: '2026-08-04T18:00:00.000Z',
+                  policyCode: 'active_group_v1',
+                  rewardLabel:
+                    'about 140 more messages on the model your Murph is using now',
+                  state: 'armed',
+                },
+              ],
+              availablePolicies: [],
+              trialCreditNotice: null,
+            },
+            status: 'ok',
+          },
+        },
+      ],
+    },
+    {
+      label: 'a cancel followed by a newly armed mission',
+      toolResults: [
+        {
+          action: 'cancel_usage_referral',
+          result: {
+            referral: null,
+            status: 'unavailable',
+            unavailableReason:
+              'usage_referral_cancel_applied_snapshot_unavailable',
+          },
+        },
+        {
+          action: 'read_usage_referral',
+          result: {
+            outcome: 'read',
+            referral: {
+              activeMissions: [{
+                destinationKind: 'personal',
+                expiresAt: '2026-08-05T18:00:00.000Z',
+                policyCode: 'new_person_activation_v1',
+                rewardLabel:
+                  'about 100 more messages on the model your Murph is using now',
+                state: 'armed',
+              }],
+              availablePolicies: [],
+              trialCreditNotice: null,
+            },
+            status: 'ok',
+          },
+        },
+      ],
+    },
+  ])('makes the recovery read authoritative for $label', async ({
+    toolResults,
+  }) => {
+    const skill = await readLowUsageSkill()
+    const assembledContext = [
+      skill,
+      ...toolResults.flatMap((toolResult) => [
+        '<tool_result>',
+        JSON.stringify(toolResult),
+        '</tool_result>',
+      ]),
+    ].join('\n')
+    const normalizedContext = assembledContext.replace(/\s+/gu, ' ')
+    const mutationAction = toolResults[0]?.action
+
+    expect(toolResults.filter(({ action }) => action === mutationAction))
+      .toHaveLength(1)
+    expect(toolResults.at(-1)?.action).toBe('read_usage_referral')
+    expect(normalizedContext).toContain(
+      'that recovery read is authoritative for current state',
+    )
+    expect(normalizedContext).toContain('or claim that commit failed')
+  })
+
+  it.each([
+    {
+      mutationAction: 'arm_usage_referral',
+      unavailableReason:
+        'usage_referral_arm_applied_snapshot_unavailable',
+    },
+    {
+      mutationAction: 'cancel_usage_referral',
+      unavailableReason:
+        'usage_referral_cancel_applied_snapshot_unavailable',
+    },
+  ])('keeps one pre-action read and one required recovery read after $mutationAction', async ({
+    mutationAction,
+    unavailableReason,
+  }) => {
+    const skill = await readLowUsageSkill()
+    const toolActions = [
+      'read_usage_referral',
+      mutationAction,
+      'read_usage_referral',
+    ]
+    const assembledContext = [
+      skill,
+      '<tool_result>',
+      JSON.stringify({
+        action: mutationAction,
+        result: {
+          referral: null,
+          status: 'unavailable',
+          unavailableReason,
+        },
+      }),
+      '</tool_result>',
+    ].join('\n')
+    const normalizedContext = assembledContext.replace(/\s+/gu, ' ')
+
+    expect(toolActions.filter((action) =>
+      action === 'read_usage_referral'
+    )).toHaveLength(2)
+    expect(toolActions.filter((action) =>
+      action === mutationAction
+    )).toHaveLength(1)
+    expect(normalizedContext).toContain(
+      'never make more than one pre-action referral read in one user turn',
+    )
+    expect(normalizedContext).toContain(
+      'only exception and require one authoritative post-mutation read',
+    )
+    expect(normalizedContext).toContain(
+      'Immediately call `read_usage_referral`',
     )
   })
 })

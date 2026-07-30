@@ -51,6 +51,8 @@ export {
 const HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEY_SET =
   new Set<string>(HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEYS);
 const HOSTED_WORKSPACE_CHECKPOINT_MAILBOX_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const HOSTED_RUNTIME_LOG_MEMBER_FOREIGN_KEY =
+  "hosted_runtime_log_user_id_fkey";
 
 export type HostedWorkspaceStoreClient = PrismaClient | Prisma.TransactionClient;
 export type HostedWorkspaceMutationTx = Prisma.TransactionClient;
@@ -835,64 +837,8 @@ export function readHostedWorkspaceBrowserVaultSourceStateHash(
     ?? null;
 }
 
-export async function recordHostedRuntimeLog(input: {
-  at?: Date | string | null;
-  attemptId?: string | null;
-  checkpointVersion?: bigint | number | string | null;
-  component: HostedRuntimeLogComponent | string;
-  errorCode?: string | null;
-  eventCode: HostedRuntimeLogEventCode | string;
-  id?: string | null;
-  leaseGeneration?: bigint | number | string | null;
-  level: HostedRuntimeLogLevel | string;
-  mailboxLane?: HostedMailboxLane | string | null;
-  mailboxSeqEnd?: bigint | number | string | null;
-  mailboxSeqStart?: bigint | number | string | null;
-  outboxIntentRef?: string | null;
-  phase: HostedRuntimeLogPhase | string;
-  prisma?: HostedWorkspaceStoreClient;
-  redacted?: HostedRuntimeRedactedJson | null;
-  userId: string;
-  workspaceVersion?: bigint | number | string | null;
-}): Promise<HostedRuntimeLogRecord> {
-  const prisma = input.prisma ?? getPrisma();
-
-  return recordHostedRuntimeLogTx({
-    ...input,
-    tx: prisma,
-  });
-}
-
-export async function recordHostedRuntimeLogTx(input: {
-  at?: Date | string | null;
-  attemptId?: string | null;
-  checkpointVersion?: bigint | number | string | null;
-  component: HostedRuntimeLogComponent | string;
-  errorCode?: string | null;
-  eventCode: HostedRuntimeLogEventCode | string;
-  id?: string | null;
-  leaseGeneration?: bigint | number | string | null;
-  level: HostedRuntimeLogLevel | string;
-  mailboxLane?: HostedMailboxLane | string | null;
-  mailboxSeqEnd?: bigint | number | string | null;
-  mailboxSeqStart?: bigint | number | string | null;
-  outboxIntentRef?: string | null;
-  phase: HostedRuntimeLogPhase | string;
-  redacted?: HostedRuntimeRedactedJson | null;
-  tx: HostedWorkspaceStoreClient;
-  userId: string;
-  workspaceVersion?: bigint | number | string | null;
-}): Promise<HostedRuntimeLogRecord> {
-  const row = await input.tx.hostedRuntimeLog.create({
-    data: buildHostedRuntimeLogCreateData(input),
-  });
-
-  return projectHostedRuntimeLog(row);
-}
-
 /**
- * Normalizes one runtime log entry into its row shape. Shared by the single-row
- * and bulk writers so both validate identically.
+ * Normalizes one runtime log entry into the legacy primary row shape.
  */
 function buildHostedRuntimeLogCreateData(
   input: HostedRuntimeLogEntryInput & { userId: string },
@@ -986,11 +932,53 @@ export async function recordHostedRuntimeLogs(input: {
     return 0;
   }
 
-  const result = await prisma.hostedRuntimeLog.createMany({
-    data: rows,
-  });
+  try {
+    const result = await prisma.hostedRuntimeLog.createMany({
+      data: rows,
+    });
 
-  return result.count;
+    return result.count;
+  } catch (error) {
+    // A runtime can finish draining a best-effort diagnostic batch after
+    // account deletion committed. The member row is authoritative; diagnostics
+    // must neither recreate it nor turn this expected race into a retrying 500.
+    if (isMissingHostedRuntimeLogMember(error)) {
+      return 0;
+    }
+    throw error;
+  }
+}
+
+function isMissingHostedRuntimeLogMember(error: unknown): boolean {
+  if (
+    !(error instanceof Prisma.PrismaClientKnownRequestError)
+    || error.code !== "P2003"
+  ) {
+    return false;
+  }
+
+  const directConstraint = error.meta?.constraint;
+  if (directConstraint === HOSTED_RUNTIME_LOG_MEMBER_FOREIGN_KEY) {
+    return true;
+  }
+
+  const driverAdapterError = error.meta?.driverAdapterError;
+  if (!isUnknownRecord(driverAdapterError)) {
+    return false;
+  }
+  const cause = driverAdapterError.cause;
+  if (!isUnknownRecord(cause)) {
+    return false;
+  }
+  const constraint = cause.constraint;
+  return (
+    isUnknownRecord(constraint)
+    && constraint.index === HOSTED_RUNTIME_LOG_MEMBER_FOREIGN_KEY
+  );
+}
+
+function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 export async function listHostedRuntimeLogs(input: {

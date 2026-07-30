@@ -365,6 +365,11 @@ const assistantInputTelegramSourceMetadataSchema = z
     replyContext: safeNullableAssistantInputMetadataTextSchema(
       'sourceMetadata.replyContext',
     ),
+    // Presentation-only speaker label from trusted ingress or a current
+    // server-owned membership lookup. It never supplies participant authority.
+    senderDisplayName: safeAssistantInputMetadataTextSchema(
+      'sourceMetadata.senderDisplayName',
+    ).nullable().optional(),
     // Group (thread-container) inbound only: the sending participant's handle,
     // so the assistant can attribute messages and detect being addressed.
     senderHandle: privateAssistantInputRouteScalarSchema(
@@ -380,6 +385,11 @@ const assistantInputTelegramSourceMetadataSchema = z
 const assistantInputLinqSourceMetadataSchema = z
   .object({
     affirmativeReaction: z.literal(true).optional(),
+    editedSourceInputId: z
+      .string()
+      .regex(/^ain_[0-9a-f]{32}$/u)
+      .optional(),
+    editedTextPartIndex: z.number().int().min(0).max(2_147_483_647).optional(),
     externalThreadRouteAuthorityPresent: z.boolean().optional(),
     kind: z.literal('linq'),
     partCount: z.number().int().min(0).max(64),
@@ -392,6 +402,12 @@ const assistantInputLinqSourceMetadataSchema = z
     replyToMessageId: safeNullableAssistantInputTokenSchema(
       'sourceMetadata.replyToMessageId',
     ),
+    // Legacy presentation-only speaker-label compatibility. Automatic profile
+    // and owner-contact resolution stays turn-local and is never persisted in
+    // source metadata. This value never supplies participant authority.
+    senderDisplayName: safeAssistantInputMetadataTextSchema(
+      'sourceMetadata.senderDisplayName',
+    ).nullable().optional(),
     // Group (thread-container) inbound only: the sending participant's handle,
     // so the assistant can attribute messages and detect being addressed.
     senderHandle: privateAssistantInputRouteScalarSchema(

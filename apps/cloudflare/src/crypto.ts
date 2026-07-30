@@ -12,6 +12,7 @@ export interface EncryptedR2ObjectBodyLike {
   customMetadata?: Record<string, string>;
   key?: string;
   size?: number;
+  uploaded?: Date;
 }
 
 export type R2PutValueLike =
@@ -56,6 +57,8 @@ function describeHostedStorageEnvelopeLabel(scope: HostedStorageScope): string {
       return "Hosted email raw message envelope";
     case "meal-photo":
       return "Hosted meal photo envelope";
+    case "private-media":
+      return "Hosted private media envelope";
     case "runner-secrets":
       return "Hosted runner secrets envelope";
   }

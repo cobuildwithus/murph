@@ -13,7 +13,23 @@ import {
   readHostedIngressLatencyDashboard,
   type HostedIngressLatencyDashboardInput,
 } from "@/src/lib/hosted-runtime-latency/store";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const runtimeLogMocks = vi.hoisted(() => ({
+  isHostedRuntimeLogDatabaseConfigured: vi.fn(),
+  listHostedRuntimeTurnTimingLogs: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-runtime-log/database", () => ({
+  isHostedRuntimeLogDatabaseConfigured:
+    runtimeLogMocks.isHostedRuntimeLogDatabaseConfigured,
+}));
+
+vi.mock("@/src/lib/hosted-runtime-log/store", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/src/lib/hosted-runtime-log/store")>()),
+  listHostedRuntimeTurnTimingLogs:
+    runtimeLogMocks.listHostedRuntimeTurnTimingLogs,
+}));
 
 type LatencyDashboardPrisma = NonNullable<HostedIngressLatencyDashboardInput["prisma"]>;
 type LatencyWritePrisma = NonNullable<
@@ -39,6 +55,12 @@ type LatencyDashboardRow = {
 };
 
 describe("hosted runtime latency dashboard store", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    runtimeLogMocks.isHostedRuntimeLogDatabaseConfigured.mockReturnValue(false);
+    runtimeLogMocks.listHostedRuntimeTurnTimingLogs.mockResolvedValue([]);
+  });
+
   it("counts missing staged rows independently of provider start", async () => {
     const prisma = createLatencyDashboardPrisma([
       {
@@ -661,7 +683,10 @@ describe("hosted runtime latency dashboard store", () => {
     })[0]!;
     const prisma = createLatencyDashboardPrisma(
       [row],
-      Array.from({ length: 100_001 }, () => timingLog),
+      Array.from({ length: 100_001 }, (_, index) => ({
+        ...timingLog,
+        id: `${timingLog.id}_${index}`,
+      })),
     );
 
     const dashboard = await readHostedIngressLatencyDashboard({
@@ -673,7 +698,7 @@ describe("hosted runtime latency dashboard store", () => {
     });
 
     expect(prisma.hostedRuntimeLog.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      orderBy: { at: "desc" },
+      orderBy: [{ at: "desc" }, { id: "desc" }],
       where: expect.objectContaining({
         AND: [
           {
@@ -706,6 +731,82 @@ describe("hosted runtime latency dashboard store", () => {
     expect(dashboard.replyLatencyMs.providerRequest.count).toBe(0);
     expect(dashboard.replyLatencyMs.providerResultToReplyIntent.count).toBe(0);
     expect(dashboard.replyLatencyMs.replyIntentToLinqAttempted.count).toBe(0);
+  });
+
+  it("reads reply timing from the isolated database after cutover", async () => {
+    const row = createLinkedDashboardRow({
+      acceptedAt: "2026-05-27T12:00:00.000Z",
+      attemptedAt: "2026-05-27T12:00:05.000Z",
+      deliveryId: "delivery_isolated",
+      intentId: "intent_isolated",
+      providerStartAt: "2026-05-27T12:00:01.000Z",
+      runtimeAttemptId: "attempt_isolated",
+    });
+    runtimeLogMocks.isHostedRuntimeLogDatabaseConfigured.mockReturnValue(true);
+    runtimeLogMocks.listHostedRuntimeTurnTimingLogs.mockResolvedValue(
+      createTurnTimingLogRows({
+        deliveryIntentId: "intent_isolated",
+        providerRequestElapsedMs: 2_000,
+        runtimeAttemptId: "attempt_isolated",
+        sinceProviderResultMs: 1_000,
+      }),
+    );
+
+    const dashboard = await readHostedIngressLatencyDashboard({
+      inFlightGraceMs: 0,
+      now: instant("2026-05-27T12:05:00.000Z"),
+      prisma: createLatencyDashboardPrisma([row]),
+      source: "linq",
+      windowHours: 1,
+    });
+
+    expect(dashboard.replyTraceQuality.timingLogTruncated).toBe(false);
+    expect(dashboard.replyLatencyMs.providerRequest).toEqual({
+      count: 1,
+      p50: 2_000,
+      p95: 2_000,
+    });
+    expect(runtimeLogMocks.listHostedRuntimeTurnTimingLogs).toHaveBeenCalledOnce();
+  });
+
+  it("suppresses biased reply timing when the isolated read is unavailable", async () => {
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const row = createLinkedDashboardRow({
+      acceptedAt: "2026-05-27T12:00:00.000Z",
+      attemptedAt: "2026-05-27T12:00:05.000Z",
+      deliveryId: "delivery_unavailable",
+      intentId: "intent_unavailable",
+      providerStartAt: "2026-05-27T12:00:01.000Z",
+      runtimeAttemptId: "attempt_unavailable",
+    });
+    const legacyTiming = createTurnTimingLogRows({
+      deliveryIntentId: "intent_unavailable",
+      providerRequestElapsedMs: 2_000,
+      runtimeAttemptId: "attempt_unavailable",
+      sinceProviderResultMs: 1_000,
+    });
+    runtimeLogMocks.isHostedRuntimeLogDatabaseConfigured.mockReturnValue(true);
+    runtimeLogMocks.listHostedRuntimeTurnTimingLogs.mockRejectedValueOnce(
+      new Error("isolated database unavailable"),
+    );
+
+    const dashboard = await readHostedIngressLatencyDashboard({
+      inFlightGraceMs: 0,
+      now: instant("2026-05-27T12:05:00.000Z"),
+      prisma: createLatencyDashboardPrisma([row], legacyTiming),
+      source: "linq",
+      windowHours: 1,
+    });
+
+    expect(dashboard.replyTraceQuality.timingLogTruncated).toBe(true);
+    expect(dashboard.replyLatencyMs.providerRequest.count).toBe(0);
+    expect(consoleWarn).toHaveBeenCalledWith(
+      "Hosted latency isolated timing-log read failed.",
+      expect.objectContaining({
+        errorCode: "HOSTED_RUNTIME_LATENCY_TIMING_LOG_READ_FAILED",
+      }),
+    );
+    consoleWarn.mockRestore();
   });
 
   it("converges when accepted-delivery linking wins trace creation", async () => {
@@ -1021,7 +1122,7 @@ describe("hosted runtime latency dashboard store", () => {
     expect(trace?.providerRequestOrdinal).toBeNull();
   });
 
-  it("stores exact assistant milestones only on the staged runtime attempt", async () => {
+  it("transfers terminal refresh ownership to the recovery attempt", async () => {
     const prisma = createLatencyWritePrisma({
       mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-02T19:12:20.000Z")),
     });
@@ -1035,6 +1136,19 @@ describe("hosted runtime latency dashboard store", () => {
       runtimeAttemptId: "attempt_assistant_milestone_1",
       source: "linq",
     });
+    await expect(recordHostedIngressAssistantInputStaged({
+      assistantInputId: "input_assistant_milestone_1",
+      at: instant("2026-06-02T19:12:21.125Z"),
+      authenticatedUserId: "member_latency_1",
+      mailboxItemId: "mailbox_latency_1",
+      prisma,
+      runtimeAttemptId: "attempt_terminal_recovery_2",
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 1,
+      recorded: false,
+      unmatchedCount: 0,
+    });
     await expect(recordHostedIngressAssistantMilestone({
       assistantInputIds: ["input_assistant_milestone_1"],
       at: instant("2026-06-02T19:12:21.250Z"),
@@ -1042,6 +1156,65 @@ describe("hosted runtime latency dashboard store", () => {
       milestone: "linq_typing_accepted",
       prisma,
       runtimeAttemptId: "attempt_assistant_milestone_1",
+      runtimeLeaseGeneration: "1",
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 1,
+      recorded: true,
+      unmatchedCount: 0,
+    });
+    await expect(recordHostedIngressAssistantMilestone({
+      assistantInputIds: ["input_assistant_milestone_1"],
+      at: instant("2026-06-02T19:12:21.300Z"),
+      authenticatedUserId: "member_latency_1",
+      milestone: "progress_update_accepted",
+      prisma,
+      runtimeAttemptId: "attempt_assistant_milestone_1",
+      runtimeLeaseGeneration: "1",
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 1,
+      recorded: true,
+      unmatchedCount: 0,
+    });
+    await expect(recordHostedIngressAssistantMilestone({
+      assistantInputIds: ["input_assistant_milestone_1"],
+      at: instant("2026-06-02T19:12:21.200Z"),
+      authenticatedUserId: "member_latency_1",
+      milestone: "progress_update_accepted",
+      prisma,
+      runtimeAttemptId: "attempt_assistant_milestone_1",
+      runtimeLeaseGeneration: "1",
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 1,
+      recorded: true,
+      unmatchedCount: 0,
+    });
+    await expect(recordHostedIngressAssistantMilestone({
+      assistantInputIds: ["input_assistant_milestone_1"],
+      at: instant("2026-06-02T19:12:21.375Z"),
+      authenticatedUserId: "member_latency_1",
+      checkpointPublicationExpectedBy: instant("2026-06-02T19:20:00.000Z"),
+      milestone: "terminal_non_reply_committed",
+      prisma,
+      runtimeAttemptId: "attempt_terminal_recovery_2",
+      runtimeLeaseGeneration: "2",
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 1,
+      recorded: true,
+      unmatchedCount: 0,
+    });
+    await expect(recordHostedIngressAssistantMilestone({
+      assistantInputIds: ["input_assistant_milestone_1"],
+      at: instant("2026-06-02T19:12:21.750Z"),
+      authenticatedUserId: "member_latency_1",
+      checkpointPublicationExpectedBy: instant("2026-06-02T19:30:00.000Z"),
+      milestone: "terminal_non_reply_committed",
+      prisma,
+      runtimeAttemptId: "attempt_terminal_recovery_2",
+      runtimeLeaseGeneration: "2",
       source: "linq",
     })).resolves.toEqual({
       matchedCount: 1,
@@ -1052,9 +1225,79 @@ describe("hosted runtime latency dashboard store", () => {
       assistantInputIds: ["input_assistant_milestone_1"],
       at: instant("2026-06-02T19:12:21.500Z"),
       authenticatedUserId: "member_latency_1",
+      checkpointPublicationExpectedBy: instant("2026-06-02T19:25:00.000Z"),
+      milestone: "terminal_non_reply_committed",
+      prisma,
+      runtimeAttemptId: "attempt_terminal_recovery_2",
+      runtimeLeaseGeneration: "2",
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 1,
+      recorded: true,
+      unmatchedCount: 0,
+    });
+    await expect(recordHostedIngressAssistantMilestone({
+      assistantInputIds: ["input_assistant_milestone_1"],
+      at: instant("2026-06-02T19:12:21.900Z"),
+      authenticatedUserId: "member_latency_1",
+      checkpointPublicationExpectedBy: instant("2026-06-02T19:55:00.000Z"),
+      milestone: "terminal_non_reply_committed",
+      prisma,
+      runtimeAttemptId: "attempt_assistant_milestone_1",
+      runtimeLeaseGeneration: "1",
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 1,
+      recorded: true,
+      unmatchedCount: 0,
+    });
+    await expect(recordHostedIngressRuntimeMilestone({
+      at: instant("2026-06-02T19:50:00.000Z"),
+      authenticatedUserId: "member_latency_1",
+      milestone: "checkpoint_publication_expected_by",
+      prisma,
+      runtimeAttemptId: "attempt_assistant_milestone_1",
+      runtimeLeaseGeneration: "1",
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 0,
+      recorded: false,
+      unmatchedCount: 0,
+    });
+    await expect(recordHostedIngressRuntimeMilestone({
+      at: instant("2026-06-02T19:40:00.000Z"),
+      authenticatedUserId: "member_latency_1",
+      milestone: "checkpoint_publication_expected_by",
+      prisma,
+      runtimeAttemptId: "attempt_terminal_recovery_2",
+      runtimeLeaseGeneration: "2",
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 1,
+      recorded: true,
+      unmatchedCount: 0,
+    });
+    await expect(recordHostedIngressRuntimeMilestone({
+      at: instant("2026-06-02T19:35:00.000Z"),
+      authenticatedUserId: "member_latency_1",
+      milestone: "checkpoint_publication_expected_by",
+      prisma,
+      runtimeAttemptId: "attempt_terminal_recovery_2",
+      runtimeLeaseGeneration: "2",
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 1,
+      recorded: true,
+      unmatchedCount: 0,
+    });
+    await expect(recordHostedIngressAssistantMilestone({
+      assistantInputIds: ["input_assistant_milestone_1"],
+      at: instant("2026-06-02T19:12:22.000Z"),
+      authenticatedUserId: "member_latency_1",
       milestone: "first_codex_output_observed",
       prisma,
       runtimeAttemptId: "attempt_other_2",
+      runtimeLeaseGeneration: "3",
       source: "linq",
     })).resolves.toEqual({
       matchedCount: 0,
@@ -1065,8 +1308,160 @@ describe("hosted runtime latency dashboard store", () => {
     expect(prisma.readTrace()?.phaseBreakdownJson).toEqual({
       assistant: {
         linqTypingAcceptedAtEpochMs: Date.parse("2026-06-02T19:12:21.250Z"),
+        progressUpdateAcceptedAtEpochMs:
+          Date.parse("2026-06-02T19:12:21.200Z"),
+        checkpointPublicationExpectedByEpochMs:
+          Date.parse("2026-06-02T19:40:00.000Z"),
+        terminalNonReplyCommittedAtEpochMs:
+          Date.parse("2026-06-02T19:12:21.750Z"),
+        runtimeLeaseGeneration: "2",
       },
       schemaVersion: 1,
+    });
+    expect(prisma.readTrace()?.runtimeAttemptId).toBe(
+      "attempt_terminal_recovery_2",
+    );
+  });
+
+  it("retains a current attempt reset deadline that arrives before terminal projection", async () => {
+    const prisma = createLatencyWritePrisma({
+      mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-02T19:12:20.000Z")),
+    });
+
+    await recordHostedIngressAssistantInputStaged({
+      assistantInputId: "input_current_deadline_first_1",
+      at: instant("2026-06-02T19:12:21.000Z"),
+      authenticatedUserId: "member_latency_1",
+      mailboxItemId: "mailbox_latency_1",
+      prisma,
+      runtimeAttemptId: "attempt_current_deadline_first_1",
+      source: "linq",
+    });
+
+    await expect(recordHostedIngressRuntimeMilestone({
+      at: instant("2026-06-02T19:40:00.000Z"),
+      authenticatedUserId: "member_latency_1",
+      milestone: "checkpoint_publication_expected_by",
+      prisma,
+      runtimeAttemptId: "attempt_cross_deadline_first_2",
+      runtimeLeaseGeneration: "2",
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 0,
+      recorded: false,
+      unmatchedCount: 0,
+    });
+    await expect(recordHostedIngressRuntimeMilestone({
+      at: instant("2026-06-02T19:30:00.000Z"),
+      authenticatedUserId: "member_latency_1",
+      milestone: "checkpoint_publication_expected_by",
+      prisma,
+      runtimeAttemptId: "attempt_current_deadline_first_1",
+      runtimeLeaseGeneration: "1",
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 1,
+      recorded: true,
+      unmatchedCount: 0,
+    });
+    await expect(recordHostedIngressAssistantMilestone({
+      assistantInputIds: ["input_current_deadline_first_1"],
+      at: instant("2026-06-02T19:12:21.500Z"),
+      authenticatedUserId: "member_latency_1",
+      checkpointPublicationExpectedBy: instant("2026-06-02T19:20:00.000Z"),
+      milestone: "terminal_non_reply_committed",
+      prisma,
+      runtimeAttemptId: "attempt_current_deadline_first_1",
+      runtimeLeaseGeneration: "1",
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 1,
+      recorded: true,
+      unmatchedCount: 0,
+    });
+
+    expect(prisma.readTrace()).toMatchObject({
+      phaseBreakdownJson: {
+        assistant: {
+          checkpointPublicationExpectedByEpochMs:
+            Date.parse("2026-06-02T19:30:00.000Z"),
+          runtimeLeaseGeneration: "1",
+          terminalNonReplyCommittedAtEpochMs:
+            Date.parse("2026-06-02T19:12:21.500Z"),
+        },
+        schemaVersion: 1,
+      },
+      runtimeAttemptId: "attempt_current_deadline_first_1",
+    });
+  });
+
+  it("converges a newer recovery deadline that arrives before its terminal replay", async () => {
+    const prisma = createLatencyWritePrisma({
+      mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-02T19:12:20.000Z")),
+    });
+
+    await recordHostedIngressAssistantInputStaged({
+      assistantInputId: "input_deadline_first_1",
+      at: instant("2026-06-02T19:12:21.000Z"),
+      authenticatedUserId: "member_latency_1",
+      mailboxItemId: "mailbox_latency_1",
+      prisma,
+      runtimeAttemptId: "attempt_deadline_first_1",
+      source: "linq",
+    });
+    await recordHostedIngressAssistantMilestone({
+      assistantInputIds: ["input_deadline_first_1"],
+      at: instant("2026-06-02T19:12:21.250Z"),
+      authenticatedUserId: "member_latency_1",
+      checkpointPublicationExpectedBy: instant("2026-06-02T19:20:00.000Z"),
+      milestone: "terminal_non_reply_committed",
+      prisma,
+      runtimeAttemptId: "attempt_deadline_first_1",
+      runtimeLeaseGeneration: "1",
+      source: "linq",
+    });
+
+    await expect(recordHostedIngressRuntimeMilestone({
+      at: instant("2026-06-02T19:40:00.000Z"),
+      authenticatedUserId: "member_latency_1",
+      milestone: "checkpoint_publication_expected_by",
+      prisma,
+      runtimeAttemptId: "attempt_deadline_first_2",
+      runtimeLeaseGeneration: "2",
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 1,
+      recorded: true,
+      unmatchedCount: 0,
+    });
+    await expect(recordHostedIngressAssistantMilestone({
+      assistantInputIds: ["input_deadline_first_1"],
+      at: instant("2026-06-02T19:12:21.500Z"),
+      authenticatedUserId: "member_latency_1",
+      checkpointPublicationExpectedBy: instant("2026-06-02T19:30:00.000Z"),
+      milestone: "terminal_non_reply_committed",
+      prisma,
+      runtimeAttemptId: "attempt_deadline_first_2",
+      runtimeLeaseGeneration: "2",
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 1,
+      recorded: true,
+      unmatchedCount: 0,
+    });
+
+    expect(prisma.readTrace()).toMatchObject({
+      phaseBreakdownJson: {
+        assistant: {
+          checkpointPublicationExpectedByEpochMs:
+            Date.parse("2026-06-02T19:40:00.000Z"),
+          runtimeLeaseGeneration: "2",
+          terminalNonReplyCommittedAtEpochMs:
+            Date.parse("2026-06-02T19:12:21.500Z"),
+        },
+        schemaVersion: 1,
+      },
+      runtimeAttemptId: "attempt_deadline_first_2",
     });
   });
 
@@ -1174,6 +1569,7 @@ describe("hosted runtime latency dashboard store", () => {
       milestone: "first_codex_output_observed",
       prisma: prisma as unknown as LatencyWritePrisma,
       runtimeAttemptId: "attempt_serial_1",
+      runtimeLeaseGeneration: "1",
       source: "linq",
     })).resolves.toEqual({ matchedCount: 2, recorded: true, unmatchedCount: 0 });
     expect(maxActiveTransactions).toBe(1);
@@ -1233,6 +1629,7 @@ describe("hosted runtime latency dashboard store", () => {
       milestone: "first_codex_output_observed",
       prisma: prisma as unknown as LatencyWritePrisma,
       runtimeAttemptId: "attempt_mixed_1",
+      runtimeLeaseGeneration: "1",
       source: "linq",
     })).resolves.toEqual({ matchedCount: 1, recorded: true, unmatchedCount: 1 });
     expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
@@ -1290,6 +1687,7 @@ describe("hosted runtime latency dashboard store", () => {
       milestone: "runner_job_accepted",
       prisma,
       runtimeAttemptId: "attempt_latency_1",
+      runtimeLeaseGeneration: "1",
       source: "linq",
     });
 
@@ -1319,6 +1717,7 @@ describe("hosted runtime latency dashboard store", () => {
       milestone: "mailbox_import_done",
       prisma,
       runtimeAttemptId: "attempt_latency_1",
+      runtimeLeaseGeneration: "1",
       source: "linq",
     });
 
@@ -1757,7 +2156,12 @@ describe("hosted runtime latency dashboard store", () => {
 
 function createLatencyDashboardPrisma(
   rows: LatencyDashboardRow[],
-  timingLogRows: readonly { attemptId: string | null; redactedJson: unknown }[] = [],
+  timingLogRows: readonly {
+    at: Date;
+    attemptId: string | null;
+    id: string;
+    redactedJson: unknown;
+  }[] = [],
 ): LatencyDashboardPrisma {
   return {
     hostedIngressLatencyTrace: {
@@ -1819,10 +2223,17 @@ function createTurnTimingLogRows(input: {
   providerRequestOrdinal?: number;
   runtimeAttemptId: string;
   sinceProviderResultMs: number;
-}): Array<{ attemptId: string; redactedJson: Record<string, unknown> }> {
+}): Array<{
+  at: Date;
+  attemptId: string;
+  id: string;
+  redactedJson: Record<string, unknown>;
+}> {
   return [
     {
+      at: instant("2026-05-27T12:00:02.000Z"),
       attemptId: input.runtimeAttemptId,
+      id: `timing_${input.runtimeAttemptId}_${input.deliveryIntentId}_${input.providerRequestOrdinal ?? 0}`,
       redactedJson: {
         deliveryIntentPresent: true,
         deliveryOutcomeKind: "queued",

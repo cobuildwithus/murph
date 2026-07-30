@@ -1166,6 +1166,278 @@ test("renders current saved daily snapshots without consulting changed live rows
   );
 });
 
+test("projects custom metric outcomes with their declared reducer", () => {
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      entities: [
+        experimentEntity({
+          analysisPlan: {
+            primaryOutcome: {
+              key: "biomarker:repetition-capacity",
+              kind: "metric",
+              label: "Repetition capacity",
+              statistic: "latest",
+            },
+          },
+          id: "exp_custom_metric",
+          runPlan: {
+            baselineStart: "2026-04-01",
+            baselineEnd: "2026-04-02",
+            interventionStart: "2026-04-03",
+            interventionEnd: "2026-04-04",
+          },
+          slug: "custom-metric-run",
+        }),
+      ],
+      metricRows: [
+        metricRow({
+          biomarkerKey: "biomarker:repetition-capacity",
+          date: "2026-04-01",
+          metricKey: "repetition-capacity",
+          unit: "repetitions",
+          value: 8,
+        }),
+        metricRow({
+          biomarkerKey: "biomarker:repetition-capacity",
+          date: "2026-04-02",
+          metricKey: "repetition-capacity",
+          unit: "repetitions",
+          value: 10,
+        }),
+        metricRow({
+          biomarkerKey: "biomarker:repetition-capacity",
+          date: "2026-04-03",
+          metricKey: "repetition-capacity",
+          unit: "repetitions",
+          value: 11,
+        }),
+        metricRow({
+          biomarkerKey: "biomarker:repetition-capacity",
+          date: "2026-04-04",
+          metricKey: "repetition-capacity",
+          unit: "repetitions",
+          value: 12,
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "custom-metric-run");
+  const metric = result?.biomarkers[0];
+
+  assert.equal(metric?.label, "Repetition capacity");
+  assert.equal(metric?.statistic, "latest");
+  assert.equal(metric?.sourceMetric?.metricKey, "repetition-capacity");
+  assert.equal(metric?.baseline.mean, 10);
+  assert.equal(metric?.intervention.mean, 12);
+  assert.equal(metric?.deltaAbs, 2);
+});
+
+test("projects saved structured reviews without an empty metric result", () => {
+  const base = savedOutcome({
+    id: "exp_structured_review",
+    schemaVersion: "murph.experiment-outcome.v2",
+    slug: "structured-review-run",
+  });
+  const outcome: ExperimentOutcome = {
+    ...base,
+    metricResults: [],
+    structuredReview: {
+      baseline: {
+        kinds: ["document"],
+        recordIds: ["evt_movement_baseline"],
+      },
+      followup: {
+        kinds: ["document"],
+        recordIds: ["evt_movement_followup"],
+      },
+      key: "biomarker:movement-quality-review",
+      kind: "structured_review",
+      label: "Movement quality",
+      status: "ready_for_review",
+    },
+  };
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      entities: [
+        experimentEntity({
+          analysisPlan: {
+            primaryOutcome: {
+              key: "biomarker:movement-quality-review",
+              kind: "structured_review",
+              label: "Movement quality",
+            },
+          },
+          endedOn: "2026-04-06",
+          id: "exp_structured_review",
+          outcomeRef: {
+            generatedAt: outcome.generatedAt,
+            outcomeId: outcome.outcomeId,
+          },
+          slug: "structured-review-run",
+          status: "completed",
+        }),
+      ],
+      experimentOutcomes: [outcome],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "structured-review-run");
+
+  assert.equal(result?.savedOutcomeStatus, "available");
+  assert.equal(result?.outcome?.primaryBiomarkerKey, "biomarker:movement-quality-review");
+  assert.equal(result?.outcome?.status, "ready_for_review");
+  assert.deepEqual(result?.biomarkers, []);
+  assert.equal(result?.persistedOutcome?.structuredReview?.label, "Movement quality");
+});
+
+test("browser structured-review readiness requires accessible evidence records", () => {
+  const slug = "structured-review-live";
+  const outcomeKey = "biomarker:movement-quality-review";
+  const analysisPlan = {
+    primaryOutcome: {
+      key: outcomeKey,
+      kind: "structured_review",
+      label: "Movement quality",
+    },
+    measurementAnchors: [
+      {
+        biomarkerKeys: [outcomeKey],
+        kind: "document",
+        observedOn: "2026-04-01",
+        recordId: "evt_review_baseline",
+        role: "baseline",
+      },
+      {
+        biomarkerKeys: [outcomeKey],
+        kind: "document",
+        observedOn: "2026-04-14",
+        recordId: "evt_review_followup",
+        role: "followup",
+      },
+    ],
+  };
+  const experiment = experimentEntity({
+    analysisPlan,
+    endedOn: "2026-04-14",
+    id: "exp_structured_review_live",
+    runPlan: {
+      interventionEnd: "2026-04-14",
+      interventionStart: "2026-04-01",
+    },
+    slug,
+    status: "completed",
+  });
+  const missingEvidenceClient = createBrowserVaultQueryClient(
+    createReplica({
+      entities: [experiment],
+      generatedAt: "2026-04-15T12:00:00.000Z",
+    }),
+  );
+  const completeEvidenceClient = createBrowserVaultQueryClient(
+    createReplica({
+      entities: [
+        experiment,
+        structuredReviewEvidenceEntity({
+          date: "2026-04-01",
+          id: "evt_review_baseline",
+          slug,
+        }),
+        structuredReviewEvidenceEntity({
+          date: "2026-04-14",
+          id: "evt_review_followup",
+          slug,
+        }),
+      ],
+      generatedAt: "2026-04-15T12:00:00.000Z",
+    }),
+  );
+
+  assert.equal(
+    selectBrowserVaultExperimentResults(missingEvidenceClient, slug)
+      ?.progress?.dataCoverage.status,
+    "insufficient",
+  );
+  assert.equal(
+    selectBrowserVaultExperimentResults(completeEvidenceClient, slug)
+      ?.progress?.dataCoverage.status,
+    "ready_for_review",
+  );
+});
+
+test("browser structured-review readiness uses evidence record dates over anchor claims", () => {
+  const outcomeKey = "biomarker:movement-quality-review";
+  for (const [variant, claimedObservedOn] of [
+    ["omitted", undefined],
+    ["incorrectly-early", "2026-04-02"],
+  ] as const) {
+    const slug = `structured-review-future-${variant}`;
+    const experiment = experimentEntity({
+      analysisPlan: {
+        primaryOutcome: {
+          key: outcomeKey,
+          kind: "structured_review",
+          label: "Movement quality",
+        },
+        measurementAnchors: [
+          {
+            biomarkerKeys: [outcomeKey],
+            kind: "document",
+            observedOn: "2026-04-01",
+            recordId: `evt_browser_baseline_${variant}`,
+            role: "baseline",
+          },
+          {
+            biomarkerKeys: [outcomeKey],
+            kind: "document",
+            recordId: `evt_browser_future_followup_${variant}`,
+            role: "followup",
+            ...(claimedObservedOn === undefined
+              ? {}
+              : { observedOn: claimedObservedOn }),
+          },
+        ],
+      },
+      endedOn: "2026-04-20",
+      id: `exp_structured_review_future_${variant}`,
+      runPlan: {
+        interventionEnd: "2026-04-14",
+        interventionStart: "2026-04-01",
+      },
+      slug,
+      status: "completed",
+    });
+    const client = createBrowserVaultQueryClient(
+      createReplica({
+        entities: [
+          experiment,
+          structuredReviewEvidenceEntity({
+            date: "2026-04-01",
+            id: `evt_browser_baseline_${variant}`,
+            slug,
+          }),
+          structuredReviewEvidenceEntity({
+            date: "2026-04-20",
+            id: `evt_browser_future_followup_${variant}`,
+            slug,
+          }),
+        ],
+        generatedAt: "2026-04-21T12:00:00.000Z",
+      }),
+    );
+
+    const beforeEvidence = selectBrowserVaultExperimentResults(client, slug, {
+      asOf: "2026-04-14",
+    });
+    const afterEvidence = selectBrowserVaultExperimentResults(client, slug, {
+      asOf: "2026-04-20",
+    });
+
+    assert.equal(beforeEvidence?.progress?.dataCoverage.status, "partial");
+    assert.equal(afterEvidence?.progress?.dataCoverage.status, "ready_for_review");
+  }
+});
+
 test("keeps multi-metric legacy summaries saved while pairing each metric with current bounded points", () => {
   const outcome = savedOutcome();
   const primaryMetric = outcome.metricResults[0];
@@ -2263,6 +2535,88 @@ test("counts browser cycling adherence from provider ride activity sessions", ()
 
   assert.equal(result?.progress?.adherence.completedSessions, 1);
   assert.equal(result?.progress?.adherence.loggedSessions, 1);
+});
+
+test("browser progress uses the protocol snapshot's accepted activity kinds", () => {
+  const slug = "zone-2-block";
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-06-09T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: "exp_zone_2_block",
+          slug,
+          commonsProtocolRef: {
+            key: "protocol_variant:aerobic-base-training/zone-2-aerobic-base-block",
+            pageRevisionId: "sha256:page",
+            runSpecRevisionId: "sha256:run",
+            testPlanId: "zone2-aerobic-base-readout",
+          },
+          effectiveProtocolSnapshot: {
+            effectiveSpecHash: `sha256:${"4".repeat(64)}`,
+            doseSignature: "3x/week easy cardio, 35-60 min",
+            modality: "sustainable easy aerobic volume",
+            activitySessionEvidence: {
+              activityKinds: ["walking", "cycling", "rowing", "elliptical"],
+              minimumDurationMinutes: 35,
+            },
+            targetSessions: 12,
+            minimumUsefulSessions: 9,
+          },
+          runPlan: {
+            baselineStart: "2026-05-25",
+            baselineEnd: "2026-05-31",
+            interventionStart: "2026-06-01",
+            interventionEnd: "2026-06-28",
+            modality: "Cycling",
+            targetSessions: 12,
+            minimumUsefulSessions: 9,
+          },
+        }),
+        activitySessionEvent({
+          activityType: "Walking",
+          date: "2026-06-01",
+          durationMinutes: 40,
+          id: "evt_zone_2_walk",
+        }),
+        activitySessionEvent({
+          activityType: "Elliptical",
+          date: "2026-06-02",
+          durationMinutes: 45,
+          id: "evt_zone_2_elliptical",
+        }),
+        activitySessionEvent({
+          activityType: "Rowing",
+          date: "2026-06-03",
+          durationMinutes: 35,
+          id: "evt_zone_2_row",
+        }),
+        activitySessionEvent({
+          activityType: "Cycling",
+          date: "2026-06-04",
+          durationMinutes: 20,
+          id: "evt_zone_2_short_ride",
+        }),
+        activitySessionEvent({
+          activityType: "Running",
+          date: "2026-06-05",
+          durationMinutes: 50,
+          id: "evt_zone_2_run",
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, { slug });
+
+  assert.equal(result?.progress?.adherence.completedSessions, 3);
+  assert.deepEqual(result?.adherence?.targets[0]?.evidence, {
+    eventKind: "activity_session",
+    activityKinds: ["walking", "cycling", "rowing", "elliptical"],
+    kind: "linkedEventCount",
+    minimumDurationMinutes: 35,
+    missing: "missed_after_grace",
+  });
 });
 
 test("counts browser generic workout modality from any activity sessions", () => {
@@ -4056,6 +4410,8 @@ function savedOutcome(input: {
 
 function experimentEntity(input: {
   analysisPlan?: Record<string, unknown>;
+  commonsProtocolRef?: Record<string, unknown>;
+  effectiveProtocolSnapshot?: Record<string, unknown>;
   endedOn?: string;
   expectedSignalDescriptions?: unknown[];
   id?: string;
@@ -4076,12 +4432,15 @@ function experimentEntity(input: {
         primaryBiomarkerKey: "biomarker:resting-heart-rate",
         desiredDirection: "decrease",
       },
-      commonsProtocolRef: {
+      commonsProtocolRef: input.commonsProtocolRef ?? {
         key: "protocol:finnish-sauna",
         pageRevisionId: "sha256:page",
         runSpecRevisionId: "sha256:run",
         testPlanId: "rhr-21d",
       },
+      ...(input.effectiveProtocolSnapshot
+        ? { effectiveProtocolSnapshot: input.effectiveProtocolSnapshot }
+        : {}),
       expectedSignalDescriptions: input.expectedSignalDescriptions,
       ...(input.endedOn ? { endedOn: input.endedOn } : {}),
       experimentId: id,
@@ -4157,9 +4516,36 @@ function sessionEvent(
   };
 }
 
+function structuredReviewEvidenceEntity(input: {
+  date: string;
+  id: string;
+  slug: string;
+}): BrowserVaultEntity {
+  return {
+    attributes: {
+      experimentSlug: input.slug,
+    },
+    bodyPreview: null,
+    date: input.date,
+    experimentSlug: input.slug,
+    family: "event",
+    id: input.id,
+    kind: "document",
+    links: [],
+    lookupIds: [input.id],
+    occurredAt: `${input.date}T12:00:00.000Z`,
+    recordClass: "ledger",
+    status: null,
+    stream: null,
+    tags: [],
+    title: "Structured review evidence",
+  };
+}
+
 function activitySessionEvent(input: {
   activityType: string;
   date: string;
+  durationMinutes?: number;
   id: string;
   occurredAt?: string;
   source?: string;
@@ -4169,6 +4555,9 @@ function activitySessionEvent(input: {
   return {
     attributes: {
       activityType: input.activityType,
+      ...(input.durationMinutes === undefined
+        ? {}
+        : { durationMinutes: input.durationMinutes }),
       ...(input.source === undefined ? {} : { source: input.source }),
       sportName: input.sportName ?? input.activityType,
     },

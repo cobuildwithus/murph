@@ -988,6 +988,89 @@ describe("hosted device-sync wakes", () => {
     });
   });
 
+  it("preserves the sole Junction source on webhook receipt signals", async () => {
+    const connection = buildHostedConnection({ provider: "junction" });
+    mocks.getConnectionForUser.mockResolvedValue(connection);
+
+    await handleHostedDeviceSyncWebhookAccepted({
+      account: {
+        connectedAt: connection.connectedAt,
+        id: connection.id,
+        provider: connection.provider,
+      },
+      claimToken: "claim-token",
+      now: "2026-03-26T12:00:00.000Z",
+      store: new PrismaDeviceSyncControlPlaneStore({
+        prisma: getPrisma(),
+      }),
+      traceId: "trace_123",
+      webhook: {
+        acceptanceMode: "level_dirty_hint",
+        dataSourceProviderSlug: "health-connect",
+        eventType: "daily.data.sleep.updated",
+        jobs: [{
+          kind: "resource",
+          payload: {
+            resource: "sleep",
+            resourceCategory: "summary",
+            sourceProviderSlug: "health-connect",
+          },
+        }],
+        occurredAt: "2026-03-26T11:59:00.000Z",
+        resourceCategory: "summary",
+      },
+    });
+
+    expect(mocks.createSignal).toHaveBeenCalledWith(expect.objectContaining({
+      connectionId: "dsc_123",
+      createdAt: "2026-03-26T12:00:00.000Z",
+      eventType: "daily.data.sleep.updated",
+      kind: "webhook_hint",
+      occurredAt: "2026-03-26T11:59:00.000Z",
+      provider: "junction",
+      resourceCategory: "summary",
+      sourceProviderSlug: "health_connect",
+      traceId: "trace_123",
+      userId: "user-123",
+    }));
+  });
+
+  it("omits source attribution for a data-less historical completion", async () => {
+    const connection = buildHostedConnection({ provider: "junction" });
+    mocks.getConnectionForUser.mockResolvedValue(connection);
+
+    await handleHostedDeviceSyncWebhookAccepted({
+      account: {
+        connectedAt: connection.connectedAt,
+        id: connection.id,
+        provider: connection.provider,
+      },
+      claimToken: "claim-token",
+      now: "2026-03-26T12:00:00.000Z",
+      store: new PrismaDeviceSyncControlPlaneStore({
+        prisma: getPrisma(),
+      }),
+      traceId: "trace_123",
+      webhook: {
+        acceptanceMode: "level_dirty_hint",
+        dataSourceProviderSlug: null,
+        eventType: "historical.data.sleep.created",
+        jobs: [{
+          kind: "resource",
+          payload: {
+            resource: "sleep",
+            sourceProviderSlug: "health-connect",
+          },
+        }],
+        occurredAt: "2026-03-26T11:59:00.000Z",
+      },
+    });
+
+    expect(mocks.createSignal).toHaveBeenCalledWith(expect.objectContaining({
+      sourceProviderSlug: null,
+    }));
+  });
+
   it("stages companion metadata inside encrypted dirty state without copying health data into the wake", async () => {
     const connection = buildHostedConnection({
       displayName: "Apple Health",
@@ -2835,6 +2918,7 @@ describe("hosted device-sync wakes", () => {
         eventType: "sleep.updated",
         occurredAt: "2026-03-26T11:59:00.000Z",
         resourceCategory: "daily_sleep",
+        sourceProviderSlug: null,
         traceId: "trace_123",
         userId: "user-123",
         provider: "oura",

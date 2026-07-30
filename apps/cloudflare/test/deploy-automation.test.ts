@@ -71,7 +71,6 @@ const LEGACY_HOSTED_ASSISTANT_PROVIDER_SECRET_NAMES = [
   "OPENROUTER_API_KEY",
   "PERPLEXITY_API_KEY",
   "TOGETHER_API_KEY",
-  "VENICE_API_KEY",
   "VLLM_API_KEY",
   // XAI_API_KEY left this list when xAI became a real intercepted provider
   // (x_search); it is now an optional worker secret.
@@ -88,21 +87,45 @@ const REMOVED_HOSTED_ASSISTANT_VAR_NAMES = [
 ] as const;
 
 const REQUIRED_HOSTED_CRYPTO_WORKER_VARS = {
+  CF_PUBLIC_BASE_URL: "https://murph-hosted.cobuildwithus.workers.dev",
+  CF_BUNDLES_ENAM_BUCKET: "hosted-bundles-enam",
+  CF_BUNDLES_ENAM_PREVIEW_BUCKET: "hosted-bundles-enam-preview",
   HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION:
     "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1",
   HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
     "-----BEGIN PUBLIC KEY-----\\n...\\n-----END PUBLIC KEY-----",
   HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cloudflare-automation:v1",
   HOSTED_CRYPTO_ENV: "production",
+  HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_ID: "branch-test",
+  HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_NAME: "main",
+  HOSTED_DATABASE_ALERT_PLANETSCALE_DATABASE_NAME: "database-test",
+  HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION: "org-test",
+  HOSTED_R2_CUTOVER_PHASE: "source_active",
   HOSTED_R2_PRESIGN_ACCOUNT_ID: "r2-account-test",
   HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-bundles",
+  HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "hosted-bundles-enam",
 } as const;
 const REQUIRED_R2_PRESIGN_WORKER_SECRETS = {
+  HOSTED_DATABASE_ALERT_LINQ_CHAT_ID: "chat-test",
+  HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID: "chat-secondary-test",
+  HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN: "metrics-token-test",
+  HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID: "metrics-token-id-test",
   HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "r2-access-fixture",
   HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "r2-signing-fixture",
+  LINQ_API_TOKEN: "linq-token-test",
+} as const;
+const REQUIRED_PRIVATE_IMAGE_WORKER_SECRET = {
+  HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET: "images-signing-fixture",
 } as const;
 const VALID_TEST_SSH_ED25519_PUBLIC_KEY =
   "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB";
+
+function expectedRequiredHostedCryptoWorkerVars(): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(REQUIRED_HOSTED_CRYPTO_WORKER_VARS)
+      .filter(([name]) => !name.startsWith("CF_BUNDLES_")),
+  );
+}
 
 function findRunCommandsWithGitHubInputInterpolation(
   workflow: string,
@@ -263,6 +286,11 @@ describe("hosted deploy automation helpers", () => {
       placement: {
         mode: string;
       };
+      r2_buckets: Array<{
+        binding: string;
+        bucket_name: string;
+        preview_bucket_name: string;
+      }>;
       send_email?: Array<{
         allowed_sender_addresses?: string[];
         name: string;
@@ -271,6 +299,9 @@ describe("hosted deploy automation helpers", () => {
       secrets?: { required?: string[] };
       version_metadata?: {
         binding: string;
+      };
+      triggers: {
+        crons: string[];
       };
     };
 
@@ -302,6 +333,10 @@ describe("hosted deploy automation helpers", () => {
         name: "USER_RUNNER",
       },
       {
+        class_name: "DatabaseHealthDurableObject",
+        name: "DATABASE_HEALTH_MONITOR",
+      },
+      {
         class_name: "RunnerContainer",
         name: "RUNNER_CONTAINER",
       },
@@ -323,9 +358,30 @@ describe("hosted deploy automation helpers", () => {
         new_sqlite_classes: ["DeploySmokeRunnerContainer"],
         tag: "v3",
       },
+      {
+        new_sqlite_classes: ["DatabaseHealthDurableObject"],
+        tag: "v4",
+      },
     ]);
+    expect(config).toMatchObject({
+      triggers: {
+        crons: ["*/5 * * * *"],
+      },
+    });
     expect(config.compatibility_flags).toEqual(["nodejs_compat"]);
     expect(config.placement).toEqual({ mode: "smart" });
+    expect(config.r2_buckets).toEqual([
+      {
+        binding: "BUNDLES",
+        bucket_name: "hosted-bundles",
+        preview_bucket_name: "hosted-bundles-preview",
+      },
+      {
+        binding: "BUNDLES_ENAM",
+        bucket_name: "hosted-bundles-enam",
+        preview_bucket_name: "hosted-bundles-enam-preview",
+      },
+    ]);
     expect(config).not.toHaveProperty("queues");
     expect(config.version_metadata).toEqual({ binding: "CF_VERSION_METADATA" });
     expect(config.observability).toEqual({
@@ -382,6 +438,7 @@ describe("hosted deploy automation helpers", () => {
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-staging",
       CF_WORKER_NAME: "hosted-worker-staging",
       ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+      HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-bundles-staging",
       HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "preview",
     });
 
@@ -429,10 +486,14 @@ describe("hosted deploy automation helpers", () => {
 
   it("keeps the checked-in wrangler scaffold aligned with generated container sizing and durable object config", async () => {
     const environment = readHostedDeployAutomationEnvironment({
-      CF_BUNDLES_BUCKET: "hosted-bundles",
-      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+      CF_BUNDLES_BUCKET: "murph-hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "murph-hosted-bundles-preview",
       CF_WORKER_NAME: "murph-hosted",
       ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+      CF_BUNDLES_ENAM_BUCKET: "murph-hosted-bundles-enam",
+      CF_BUNDLES_ENAM_PREVIEW_BUCKET: "murph-hosted-bundles-preview-enam",
+      HOSTED_R2_PRESIGN_BUCKET_NAME: "murph-hosted-bundles",
+      HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "murph-hosted-bundles-enam",
     });
     const generatedConfig = buildHostedWranglerDeployConfig(environment) as {
       containers: Array<{
@@ -459,8 +520,16 @@ describe("hosted deploy automation helpers", () => {
       placement: {
         mode: string;
       };
+      r2_buckets: Array<{
+        binding: string;
+        bucket_name: string;
+        preview_bucket_name: string;
+      }>;
       version_metadata?: {
         binding: string;
+      };
+      triggers: {
+        crons: string[];
       };
     };
     const checkedInConfig = parseJsoncObject(
@@ -490,8 +559,16 @@ describe("hosted deploy automation helpers", () => {
       placement: {
         mode: string;
       };
+      r2_buckets: Array<{
+        binding: string;
+        bucket_name: string;
+        preview_bucket_name: string;
+      }>;
       version_metadata?: {
         binding: string;
+      };
+      triggers: {
+        crons: string[];
       };
     };
 
@@ -517,9 +594,11 @@ describe("hosted deploy automation helpers", () => {
     expect(checkedInConfig.durable_objects.bindings).toEqual(generatedConfig.durable_objects.bindings);
     expect(checkedInConfig.migrations).toEqual(generatedConfig.migrations);
     expect(checkedInConfig.placement).toEqual(generatedConfig.placement);
+    expect(checkedInConfig.r2_buckets).toEqual(generatedConfig.r2_buckets);
     expect(checkedInConfig).not.toHaveProperty("queues");
     expect(generatedConfig).not.toHaveProperty("queues");
     expect(checkedInConfig.version_metadata).toEqual(generatedConfig.version_metadata);
+    expect(checkedInConfig.triggers).toEqual(generatedConfig.triggers);
   });
 
   it("keeps the checked-in wrangler scaffold vars aligned with default-rendered deploy vars", async () => {
@@ -528,10 +607,14 @@ describe("hosted deploy automation helpers", () => {
     // value. Required vars are exempt: the scaffold holds placeholders and
     // deploys supply them from the GitHub environment.
     const environment = readHostedDeployAutomationEnvironment({
-      CF_BUNDLES_BUCKET: "hosted-bundles",
-      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+      CF_BUNDLES_BUCKET: "murph-hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "murph-hosted-bundles-preview",
       CF_WORKER_NAME: "murph-hosted",
       ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+      CF_BUNDLES_ENAM_BUCKET: "murph-hosted-bundles-enam",
+      CF_BUNDLES_ENAM_PREVIEW_BUCKET: "murph-hosted-bundles-preview-enam",
+      HOSTED_R2_PRESIGN_BUCKET_NAME: "murph-hosted-bundles",
+      HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "murph-hosted-bundles-enam",
     });
     const generatedConfig = buildHostedWranglerDeployConfig(environment) as {
       vars: Record<string, string>;
@@ -578,6 +661,8 @@ describe("hosted deploy automation helpers", () => {
           - production`);
 
     for (const expectedLine of [
+      "CF_BUNDLES_ENAM_BUCKET: ${{ vars.CF_BUNDLES_ENAM_BUCKET }}",
+      "CF_BUNDLES_ENAM_PREVIEW_BUCKET: ${{ vars.CF_BUNDLES_ENAM_PREVIEW_BUCKET }}",
       "CF_CONTAINER_INSTANCE_TYPE: ${{ vars.CF_CONTAINER_INSTANCE_TYPE || '{\"vcpu\":2,\"memory_mib\":6144,\"disk_mb\":6000}' }}",
       "CF_CONTAINER_MAX_INSTANCES: ${{ vars.CF_CONTAINER_MAX_INSTANCES || '1000' }}",
       "CF_CONTAINER_SSH_KEY_NAME: ${{ vars.CF_CONTAINER_SSH_KEY_NAME }}",
@@ -586,6 +671,8 @@ describe("hosted deploy automation helpers", () => {
       "HOSTED_EXECUTION_CONTAINER_ROLLOUT: ${{ inputs.container_rollout }}",
       "HOSTED_EXECUTION_DEPLOY_CONTEXT: ${{ inputs.environment }}",
       "HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: ${{ inputs.environment }}",
+      "HOSTED_R2_CUTOVER_PHASE: ${{ vars.HOSTED_R2_CUTOVER_PHASE }}",
+      "HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: ${{ vars.HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME || vars.CF_BUNDLES_ENAM_BUCKET }}",
       "HOSTED_EXECUTION_RUNNER_ENV_PROFILES: ${{ vars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES || 'exa,hosted-email,linq,mapbox,telegram' }}",
       "HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: ${{ vars.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS }}",
       "HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS: ${{ vars.HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS }}",
@@ -796,9 +883,15 @@ describe("hosted deploy automation helpers", () => {
     ]).toHaveLength(3);
     expect(workflow).not.toContain("services:");
     expect(workflow).toContain('          )"\n          if [[ -z "${latest_log}" ]]; then');
+    const workflowSecretName = (name: string): string =>
+      name === "HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET"
+        ? "CLOUDFLARE_IMAGES_SIGNING_KEY"
+        : name;
     for (const name of HOSTED_WORKER_REQUIRED_SECRET_NAMES) {
       expect(workflowEnvBindings.get(name)).toBeUndefined();
-      expect(workflow).toContain(`${name}: \${{ secrets.${name} }}`);
+      expect(workflow).toContain(
+        `${name}: \${{ secrets.${workflowSecretName(name)} }}`,
+      );
     }
     const renderWorkerSecretsStep = workflow.slice(
       renderWorkerSecretsStepIndex,
@@ -809,7 +902,9 @@ describe("hosted deploy automation helpers", () => {
       workflow.indexOf("\n      - name:", deployWorkerStepIndex + 1),
     );
     for (const name of HOSTED_WORKER_REQUIRED_SECRET_NAMES) {
-      expect(deployWorkerStep).toContain(`${name}: \${{ secrets.${name} }}`);
+      expect(deployWorkerStep).toContain(
+        `${name}: \${{ secrets.${workflowSecretName(name)} }}`,
+      );
     }
     const validateDeployEnvStep = workflow.slice(
       validateDeployEnvStepIndex,
@@ -818,8 +913,13 @@ describe("hosted deploy automation helpers", () => {
     expect(validateDeployEnvStep).toContain(
       "HOSTED_EXECUTION_CONTAINER_ROLLOUT: ${{ inputs.container_rollout }}",
     );
+    expect(validateDeployEnvStep).toContain(
+      "CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}",
+    );
     for (const name of HOSTED_WORKER_REQUIRED_SECRET_NAMES) {
-      expect(validateDeployEnvStep).toContain(`${name}: \${{ secrets.${name} }}`);
+      expect(validateDeployEnvStep).toContain(
+        `${name}: \${{ secrets.${workflowSecretName(name)} }}`,
+      );
     }
     for (const name of HOSTED_WORKER_REQUIRED_VAR_NAMES) {
       expect(workflowEnvBindings.get(name)).toBe("vars");
@@ -880,7 +980,7 @@ describe("hosted deploy automation helpers", () => {
     });
 
     expect(environment.workerVars).toEqual({
-      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+      ...expectedRequiredHostedCryptoWorkerVars(),
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "exa,hosted-email,linq,mapbox,telegram",
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1200000",
       HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "production",
@@ -1033,6 +1133,7 @@ describe("hosted deploy automation helpers", () => {
     );
 
     expect(buildHostedWorkerSecretsPayload({
+      ...REQUIRED_PRIVATE_IMAGE_WORKER_SECRET,
       AGENTMAIL_API_KEY: "agentmail-secret",
       GARMIN_API_BASE_URL: "https://apis.garmin.com/wellness-api/rest",
       GARMIN_CLIENT_ID: "garmin-client-id",
@@ -1059,7 +1160,9 @@ describe("hosted deploy automation helpers", () => {
       WHATSAPP_PHONE_NUMBER_ID: "removed-whatsapp-phone-number-id",
       WHATSAPP_VERIFY_TOKEN: "removed-whatsapp-verify-token",
       OPENAI_API_KEY: "openai-key",
+      VENICE_API_KEY: "venice-key",
     })).toEqual({
+      ...REQUIRED_PRIVATE_IMAGE_WORKER_SECRET,
       HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
@@ -1076,11 +1179,13 @@ describe("hosted deploy automation helpers", () => {
       STRAVA_CLIENT_SECRET: "strava-client-secret",
       TELEGRAM_BOT_TOKEN: "bot-token",
       OPENAI_API_KEY: "openai-key",
+      VENICE_API_KEY: "venice-key",
     });
   });
 
   it("omits legacy direct Garmin env from worker secret payloads", () => {
     const payload = buildHostedWorkerSecretsPayload({
+      ...REQUIRED_PRIVATE_IMAGE_WORKER_SECRET,
       GARMIN_CLIENT_ID: "garmin-client-id",
       GARMIN_CLIENT_SECRET: "garmin-client-secret",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
@@ -1099,6 +1204,7 @@ describe("hosted deploy automation helpers", () => {
 
   it("keeps only known hosted assistant provider env names in deploy automation", () => {
     const providerSecretsPayload = buildHostedWorkerSecretsPayload({
+      ...REQUIRED_PRIVATE_IMAGE_WORKER_SECRET,
       HOSTED_ASSISTANT_BASE_URL: "https://legacy-provider.example.test/v1",
       HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
       HOSTED_ASSISTANT_PROVIDER: "openai",
@@ -1121,6 +1227,7 @@ describe("hosted deploy automation helpers", () => {
     expect(providerSecretsPayload.HOSTED_ASSISTANT_PROVIDER_NAME).toBeUndefined();
 
     const platformSecretsPayload = buildHostedWorkerSecretsPayload({
+      ...REQUIRED_PRIVATE_IMAGE_WORKER_SECRET,
       HOSTED_ASSISTANT_BASE_URL: "https://legacy-provider.example.test/v1",
       HOSTED_ASSISTANT_PROVIDER_NAME: "legacy-provider",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
@@ -1139,6 +1246,7 @@ describe("hosted deploy automation helpers", () => {
     expect(platformSecretsPayload.HOSTED_ASSISTANT_PROVIDER_NAME).toBeUndefined();
 
     expect(buildHostedWorkerSecretsPayload({
+      ...REQUIRED_PRIVATE_IMAGE_WORKER_SECRET,
       HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_ENTERPRISE_API_KEY",
       HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
       HOSTED_ASSISTANT_PROVIDER: "openai",
@@ -1182,6 +1290,32 @@ describe("hosted deploy automation helpers", () => {
         HB_CF_WORKER_NAME: "hosted-worker",
       }),
     ).toThrowError(/CF_BUNDLES_BUCKET must be configured\./u);
+  });
+
+  it("rejects invalid or transposed fixed-role cutover configuration", () => {
+    expect(() => readHostedDeployAutomationEnvironment({
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+      CF_WORKER_NAME: "hosted-worker",
+      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+      HOSTED_R2_CUTOVER_PHASE: "dual_write",
+    })).toThrow("source_active or destination_active");
+
+    expect(() => readHostedDeployAutomationEnvironment({
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+      CF_WORKER_NAME: "hosted-worker",
+      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+      HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-bundles-enam",
+    })).toThrow("HOSTED_R2_PRESIGN_BUCKET_NAME must match CF_BUNDLES_BUCKET");
+
+    expect(() => readHostedDeployAutomationEnvironment({
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+      CF_WORKER_NAME: "hosted-worker",
+      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+      HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "hosted-bundles",
+    })).toThrow("HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME must match CF_BUNDLES_ENAM_BUCKET");
   });
 
   it("defaults generated deploy paths to the cloudflare app directory", () => {

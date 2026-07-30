@@ -269,6 +269,48 @@ test("HomepageEmailAuthButton expands, sends a code, verifies it, and reports th
   });
 });
 
+test("HostedEmailAuthButton keeps account completion on the verify button", async () => {
+  const renderButton = (completionPending: boolean) =>
+    createElement(HostedEmailAuthButton, {
+      active: true,
+      completionPending,
+      inline: true,
+      onAuthenticated: mocks.onAuthenticated,
+    });
+  const rendered = await renderClientComponent(renderButton(false), {
+    requireButton: false,
+  });
+  cleanupRender = rendered.cleanup;
+
+  const emailInput = rendered.container.querySelector(
+    'input[id="homepage-email-address"]',
+  ) as HTMLInputElement | null;
+  const emailForm = rendered.container.querySelector("form");
+
+  await act(async () => {
+    if (emailInput) {
+      setInputValue(rendered.window, emailInput, "user@example.com");
+    }
+    emailForm?.dispatchEvent(
+      new rendered.window.Event("submit", {
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
+
+  await rendered.rerender(renderButton(true));
+
+  const verifyButton = Array.from(
+    rendered.container.querySelectorAll("button"),
+  ).find((candidate) => candidate.textContent?.includes("Finishing..."));
+
+  expect(verifyButton).toBeTruthy();
+  expect(verifyButton?.disabled).toBe(true);
+  expect(verifyButton?.getAttribute("aria-busy")).toBe("true");
+  expect(verifyButton?.querySelector('[data-slot="spinner"]')).toBeTruthy();
+});
+
 test("HomepageEmailAuthButton uses no-signup mode for login code sends and resends", async () => {
   const { button, cleanup, container, window } = await renderClientComponent(
     createElement(HomepageEmailLoginButtonHarness),

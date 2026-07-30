@@ -10,6 +10,7 @@ import {
 import {
   type HostedLinqWebhookEvent,
   type HostedLinqMessageReceivedEvent,
+  requireHostedLinqMessageEditedEvent,
   requireHostedLinqMessageReceivedEvent,
   resolveHostedLinqRecipientPhoneNumber,
 } from "./linq";
@@ -18,10 +19,19 @@ import {
   sanitizeHostedOnboardingPersistedErrorMessage,
 } from "./http";
 import { toHostedOnboardingLogIdSuffix } from "./logging";
+import {
+  parseHostedLinqChatHealthStatus,
+  parseHostedLinqLineReputationStatus,
+  parseHostedLinqLineServiceStatus,
+  type HostedLinqChatHealthStatus,
+  type HostedLinqLineReputationStatus,
+  type HostedLinqLineServiceStatus,
+} from "./linq-provider-status";
 import { normalizePhoneNumber } from "./phone";
 import { normalizeNullableString, sha256Hex } from "../primitives";
 
 export const HOSTED_LINQ_PROVIDER_EVENT_TYPES = [
+  "message.edited",
   "message.received",
   "message.sent",
   "message.delivered",
@@ -37,6 +47,24 @@ export type HostedLinqProviderEventType = typeof HOSTED_LINQ_PROVIDER_EVENT_TYPE
 export type HostedLinqProviderEventPhoneRole = "line" | "participant" | "unknown";
 type HostedLinqProviderWebhookEvent = HostedLinqWebhookEvent & {
   event_type: HostedLinqProviderEventType;
+};
+
+export type HostedLinqProviderHealthEvent = {
+  chat: {
+    chatId: string;
+    isGroup: boolean | null;
+    linePhoneNumber: string | null;
+    providerStatus: HostedLinqChatHealthStatus;
+    providerUpdatedAt: Date;
+    service: string | null;
+  } | null;
+  line: {
+    eventId: string;
+    phoneNumber: string;
+    providerUpdatedAt: Date;
+    reputationStatus: HostedLinqLineReputationStatus | null;
+    serviceStatus: HostedLinqLineServiceStatus | null;
+  } | null;
 };
 
 export type ParsedHostedLinqProviderEvent = {
@@ -62,6 +90,7 @@ export type ParsedHostedLinqProviderEvent = {
   phoneNumberLookupKey: string | null;
   phoneNumberRole: HostedLinqProviderEventPhoneRole;
   providerCreatedAt: Date;
+  providerHealth?: HostedLinqProviderHealthEvent;
   providerReason: string | null;
   providerStatus: string | null;
   reactionCustomEmoji: string | null;
@@ -102,6 +131,75 @@ const GENERIC_PARTICIPANT_PHONE_PATHS = [
   ["recipient_handle", "handle"],
 ] as const;
 
+export function parseHostedLinqProviderHealthEvent(
+  event: HostedLinqWebhookEvent,
+): HostedLinqProviderHealthEvent {
+  const data = readRecord(event.data);
+  const chat = readRecord(data?.chat);
+  const chatHealth = readRecord(chat?.health_status);
+  const chatStatus = parseHostedLinqChatHealthStatus(chatHealth?.status);
+  const chatId = normalizeNullableString(
+    readStringAtPath(chat, ["id"])
+      ?? readStringAtPath(data, ["chat_id"]),
+  );
+  const chatUpdatedAt = parseProviderDate(
+    readStringAtPath(chatHealth, ["updated_at"]),
+  ) ?? parseProviderDate(event.created_at);
+  const linePhoneNumber = normalizePhoneNumber(
+    readStringAtPath(chat, ["owner_handle", "handle"])
+      ?? readStringAtPath(data, ["phone_number"]),
+  );
+
+  const lineServiceStatus = event.event_type === "phone_number.status_updated"
+    ? parseHostedLinqLineServiceStatus(
+        readProviderStatusValue(data?.new_status),
+      )
+    : null;
+  const lineReputationStatus =
+    event.event_type === "phone_number.status_updated"
+      ? parseHostedLinqLineReputationStatus(
+          readProviderStatusValue(data?.new_reputation)
+            ?? readProviderStatusValue(data?.new_health_status),
+        )
+      : null;
+  const linePhone = event.event_type === "phone_number.status_updated"
+    ? normalizePhoneNumber(readStringAtPath(data, ["phone_number"]))
+    : null;
+  const lineUpdatedAt = parseProviderDate(
+    readStringAtPath(data, ["changed_at"]),
+  ) ?? parseProviderDate(readStringAtPath(data, ["updated_at"]))
+    ?? parseProviderDate(event.created_at);
+
+  return {
+    chat: chatStatus && chatId && chatUpdatedAt
+      ? {
+          chatId,
+          isGroup: typeof chat?.is_group === "boolean"
+            ? chat.is_group
+            : null,
+          linePhoneNumber,
+          providerStatus: chatStatus,
+          providerUpdatedAt: chatUpdatedAt,
+          service: normalizeNullableString(
+            readStringAtPath(chat, ["service"]),
+          ),
+        }
+      : null,
+    line:
+      event.event_type === "phone_number.status_updated"
+      && linePhone
+      && lineUpdatedAt
+        ? {
+            eventId: event.event_id,
+            phoneNumber: linePhone,
+            providerUpdatedAt: lineUpdatedAt,
+            reputationStatus: lineReputationStatus,
+            serviceStatus: lineServiceStatus,
+          }
+        : null,
+  };
+}
+
 const HOSTED_LINQ_PROVIDER_TIMESTAMP_TIMEZONE_PATTERN = /(?:[zZ]|[+-]\d\d(?::?\d\d)?)$/u;
 
 export function parseHostedLinqProviderEvent(input: {
@@ -115,6 +213,13 @@ export function parseHostedLinqProviderEvent(input: {
 
   if (event.event_type === "message.received") {
     return parseHostedLinqMessageReceivedProviderEvent({
+      event,
+      rawBody: input.rawBody,
+    });
+  }
+
+  if (event.event_type === "message.edited") {
+    return parseHostedLinqMessageEditedProviderEvent({
       event,
       rawBody: input.rawBody,
     });
@@ -137,6 +242,43 @@ export function parseHostedLinqProviderEvent(input: {
   return parseGenericHostedLinqProviderEvent({
     event,
     rawBody: input.rawBody,
+  });
+}
+
+function parseHostedLinqMessageEditedProviderEvent(input: {
+  event: HostedLinqProviderWebhookEvent;
+  rawBody?: string | null;
+}): ParsedHostedLinqProviderEvent {
+  const editEvent = requireHostedLinqMessageEditedEvent(input.event);
+  const lineHandle = editEvent.data.chat.owner_handle ?? null;
+  const linePhoneNumber = normalizePhoneNumber(lineHandle?.handle);
+
+  return buildParsedProviderEvent({
+    chatId: editEvent.data.chat.id,
+    deliveryStatus: null,
+    direction: editEvent.data.direction,
+    event: input.event,
+    extraction: {
+      chatIdPresent: true,
+      extractionStrategy: "message.edited-normalized",
+      messageIdPresent: true,
+      partIndexPresent: true,
+      phoneNumberRole: linePhoneNumber ? "line" : "unknown",
+      servicePresent: Boolean(lineHandle?.service),
+    },
+    failureCode: null,
+    failureReason: null,
+    messageId: editEvent.data.id,
+    phoneNumber: linePhoneNumber,
+    phoneNumberRole: linePhoneNumber ? "line" : "unknown",
+    providerCreatedAt: new Date(editEvent.data.edited_at),
+    providerReason: null,
+    providerStatus: null,
+    rawBody: input.rawBody,
+    reactionCustomEmoji: null,
+    reactionFromHandle: null,
+    reactionType: null,
+    service: normalizeNullableString(lineHandle?.service),
   });
 }
 
@@ -429,20 +571,15 @@ function parseGenericHostedLinqProviderEvent(input: {
     ["sender_handle", "service"],
     ["line", "service"],
   ] as const);
-  const providerStatus = chooseMostSevereProviderStatus(readStringsAtPaths(data, [
-    ["new_reputation"],
-    ["new_reputation", "status"],
-    ["new_health_status"],
-    ["new_health_status", "status"],
+  const providerStatus = readFirstStringAtPaths(data, [
     ["new_status"],
+    ["new_status", "status"],
     ["status"],
     ["phone_number", "status"],
     ["line", "status"],
     ["state"],
-  ] as const));
+  ] as const);
   const providerReason = readFirstStringAtPaths(data, [
-    ["new_reputation", "doc_url"],
-    ["new_health_status", "doc_url"],
     ["reason"],
     ["status_reason"],
     ["statusReason"],
@@ -583,6 +720,7 @@ function buildParsedProviderEvent(input: {
     phoneNumberLookupKey,
     phoneNumberRole: input.phoneNumberRole,
     providerCreatedAt,
+    providerHealth: parseHostedLinqProviderHealthEvent(input.event),
     providerReason: normalizeProviderFreeText(input.providerReason),
     providerStatus: normalizeSafeProviderToken(input.providerStatus),
     reactionCustomEmoji: normalizeSafeProviderToken(input.reactionCustomEmoji),
@@ -643,20 +781,6 @@ function readFirstStringAtPaths(
   }
 
   return null;
-}
-
-function readStringsAtPaths(
-  record: Record<string, unknown> | null,
-  paths: ReadonlyArray<readonly string[]>,
-): string[] {
-  const values: string[] = [];
-  for (const path of paths) {
-    const value = readStringAtPath(record, path);
-    if (value) {
-      values.push(value);
-    }
-  }
-  return values;
 }
 
 function readStringAtPath(record: Record<string, unknown> | null, path: readonly string[]): string | null {
@@ -752,35 +876,10 @@ function normalizeProviderFreeText(value: string | null): string | null {
   return sanitizeHostedOnboardingPersistedErrorMessage(normalizeNullableString(value));
 }
 
-function chooseMostSevereProviderStatus(values: readonly string[]): string | null {
-  let selected: string | null = null;
-  let selectedRank = -1;
-  for (const value of values) {
-    const normalized = normalizeSafeProviderToken(value);
-    if (!normalized) {
-      continue;
-    }
-    const rank = rankHostedLinqProviderStatus(normalized);
-    if (rank > selectedRank) {
-      selected = normalized;
-      selectedRank = rank;
-    }
-  }
-  return selected;
-}
-
-function rankHostedLinqProviderStatus(value: string): number {
-  const normalized = value.trim().toLowerCase();
-  if (/critical|flagged|blocked|disabled|suspended|banned/u.test(normalized)) {
-    return 4;
-  }
-  if (/at_risk|at-risk|degraded|warning|limited|throttled/u.test(normalized)) {
-    return 3;
-  }
-  if (["active", "healthy", "ok", "ready"].includes(normalized)) {
-    return 2;
-  }
-  return 1;
+function readProviderStatusValue(value: unknown): string | null {
+  return typeof value === "string"
+    ? normalizeNullableString(value)
+    : readStringAtPath(readRecord(value), ["status"]);
 }
 
 function buildPayloadHash(rawBody: string | null | undefined, event: HostedLinqWebhookEvent): string | null {

@@ -411,6 +411,11 @@ describe("runHostedWorkerDeployment", () => {
             source,
             { deployWorker: true },
             {
+              readR2BucketInfo: async (bucketName) => ({
+                defaultStorageClass: "Standard",
+                location: bucketName.includes("enam") ? "ENAM" : "OC",
+                name: bucketName,
+              }),
               resolveHostnameAddresses: async (hostname) =>
                 hostname === privateHostname ? ["10.1.2.3"] : ["8.8.8.8"],
             },

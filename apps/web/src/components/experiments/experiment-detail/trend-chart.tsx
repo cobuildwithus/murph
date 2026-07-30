@@ -61,7 +61,7 @@ export interface TrendChartPoint {
 
 export function TrendChart({ data, className, signal }: TrendChartProps) {
   const chartData = data.windowComparison
-    ? materializeWindowAverageTrend(data)
+    ? materializeWindowSummaryTrend(data)
     : data;
   const hasHistory = chartData.history.length > 0;
   const [showHistory, setShowHistory] = useState(false);
@@ -73,9 +73,14 @@ export function TrendChart({ data, className, signal }: TrendChartProps) {
   const metricValue = signal?.value ?? formatChartValue(data.currentValue);
   const metricUnit = signal?.unit ?? data.unit;
   const delta = signal?.delta ?? data.delta;
-  const accessibleLabel = data.windowComparison
-    ? `${data.label}: baseline window average ${formatChartValue(data.baselineAvg)} ${data.unit}; experiment window average ${formatChartValue(data.currentValue)} ${data.unit}.`
-    : `${data.label}: daily baseline and experiment measurements${data.unit ? ` in ${data.unit}` : ""}.`;
+  const statisticLabel = data.statistic
+    ? formatTrendStatisticLabel(data.statistic)
+    : null;
+  const accessibleLabel = statisticLabel
+    ? `${data.label}: baseline ${statisticLabel} ${formatValueWithUnit(data.baselineAvg, data.unit)}; experiment ${statisticLabel} ${formatValueWithUnit(data.currentValue, data.unit)}.`
+    : data.windowComparison
+      ? `${data.label}: baseline window average ${formatValueWithUnit(data.baselineAvg, data.unit)}; experiment window average ${formatValueWithUnit(data.currentValue, data.unit)}.`
+      : `${data.label}: daily baseline and experiment measurements${data.unit ? ` in ${data.unit}` : ""}.`;
 
   return (
     <div
@@ -105,7 +110,7 @@ export function TrendChart({ data, className, signal }: TrendChartProps) {
         </div>
         {data.windowComparison ? (
           <span className="rounded-full bg-muted/50 px-2.5 py-1 font-mono text-[9px] uppercase tracking-widest text-muted-foreground">
-            Window averages
+            Window statistic: {statisticLabel ?? "average"}
           </span>
         ) : (
           <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
@@ -253,11 +258,12 @@ export function TrendChart({ data, className, signal }: TrendChartProps) {
       ) : (
         <div className="flex justify-between gap-4 text-[10px] text-muted-foreground">
           <span>
-            {formatChartValue(data.baselineAvg)} {data.unit} baseline average
+            {formatValueWithUnit(data.baselineAvg, data.unit)} baseline{" "}
+            {statisticLabel ?? "average"}
           </span>
           <span className="text-right">
-            {formatChartValue(data.currentValue)} {data.unit}{" "}
-            {data.currentValueLabel ?? "latest"}
+            {formatValueWithUnit(data.currentValue, data.unit)}{" "}
+            {statisticLabel ?? data.currentValueLabel ?? "latest"}
           </span>
         </div>
       )}
@@ -294,14 +300,14 @@ function WindowComparisonFooter({ data }: { data: TrendData }) {
     <div className="grid grid-cols-2 gap-4 border-t border-border/70 pt-3">
       <WindowLabel
         coverage={baselineCoverage}
-        label="Baseline average"
+        label={`Baseline ${data.statistic ? formatTrendStatisticLabel(data.statistic) : "average"}`}
         unit={data.unit}
         value={data.baselineAvg}
       />
       <WindowLabel
         align="right"
         coverage={interventionCoverage}
-        label="Experiment average"
+        label={`Experiment ${data.statistic ? formatTrendStatisticLabel(data.statistic) : "average"}`}
         unit={data.unit}
         value={data.currentValue}
       />
@@ -309,7 +315,7 @@ function WindowComparisonFooter({ data }: { data: TrendData }) {
   );
 }
 
-function materializeWindowAverageTrend(data: TrendData): TrendData {
+function materializeWindowSummaryTrend(data: TrendData): TrendData {
   const comparison = data.windowComparison;
   if (!comparison) return data;
 
@@ -362,7 +368,7 @@ function WindowLabel({
         {label}
       </span>
       <span className="text-xs font-medium tabular-nums text-foreground">
-        {formatChartValue(value)} {unit}
+        {formatValueWithUnit(value, unit)}
       </span>
       <span className="text-[10px] text-muted-foreground">{coverage}</span>
     </div>
@@ -380,6 +386,31 @@ function formatChartValue(value: number): string {
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 2,
   }).format(value);
+}
+
+function formatValueWithUnit(value: number, unit: string): string {
+  return [formatChartValue(value), unit].filter(Boolean).join(" ");
+}
+
+function formatTrendStatisticLabel(
+  statistic: NonNullable<TrendData["statistic"]>,
+): string {
+  switch (statistic) {
+    case "count":
+      return "count";
+    case "latest":
+      return "latest";
+    case "max":
+      return "maximum";
+    case "mean":
+      return "average";
+    case "median":
+      return "median";
+    case "min":
+      return "minimum";
+    case "sum":
+      return "total";
+  }
 }
 
 export function buildTrendChartPoints(data: TrendData, showHistory: boolean): TrendChartPoint[] {

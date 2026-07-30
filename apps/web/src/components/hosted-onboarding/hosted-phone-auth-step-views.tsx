@@ -139,6 +139,7 @@ export function HostedPhoneEntryStep({
 
 export function HostedCodeEntryStep({
   verificationPhoneNumberHint,
+  autoFocus = true,
   code,
   disableSignup = false,
   disabled,
@@ -152,6 +153,7 @@ export function HostedCodeEntryStep({
   onVerifyCode,
 }: {
   verificationPhoneNumberHint: string;
+  autoFocus?: boolean;
   code: string;
   disableSignup?: boolean;
   disabled: boolean;
@@ -166,6 +168,7 @@ export function HostedCodeEntryStep({
 }) {
   return (
     <HostedVerificationCodeStep
+      autoFocus={autoFocus}
       code={code}
       size={size}
       description={resolveHostedPhoneCodeEntryDescription({
@@ -187,7 +190,7 @@ export function HostedCodeEntryStep({
       primaryActionPendingLabel={
         intent === "link"
           ? "Saving phone..."
-          : "Finishing setup..."
+          : "Finishing..."
       }
       secondaryAction={
         <HostedUseDifferentNumberButton

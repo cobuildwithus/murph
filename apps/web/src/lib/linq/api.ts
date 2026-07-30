@@ -5,7 +5,7 @@ export class LinqApiTimeoutError extends Error {
   }
 }
 
-const DEFAULT_LINQ_API_TIMEOUT_MS = 10_000;
+export const LINQ_API_DEFAULT_TIMEOUT_MS = 10_000;
 
 type LinqApiRequestInput = {
   apiBaseUrl: string;
@@ -51,7 +51,7 @@ async function runLinqApiRequest<T>(
 ): Promise<T> {
   const { didTimeout, signal, clearTimeout } = createTimedAbortSignal({
     signal: input.signal,
-    timeoutMs: input.timeoutMs ?? DEFAULT_LINQ_API_TIMEOUT_MS,
+    timeoutMs: input.timeoutMs ?? LINQ_API_DEFAULT_TIMEOUT_MS,
   });
 
   try {

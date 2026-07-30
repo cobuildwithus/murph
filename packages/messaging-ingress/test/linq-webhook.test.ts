@@ -10,7 +10,9 @@ import {
   type LinqWebhookEvent,
   minimizeLinqMessageReceivedEvent,
   minimizeLinqWebhookEvent,
+  parseLinqMessageEditedEvent,
   parseLinqMessageReceivedEvent,
+  parseLinqParticipantChangedEvent,
   parseLinqWebhookEvent,
   readLinqRecipientLineHandle,
   readLinqWebhookHeader,
@@ -604,6 +606,83 @@ test("parseLinqMessageReceivedEvent exposes summaries and minimizers", () => {
     partner_id: null,
     trace_id: null,
   });
+});
+
+test("parseLinqParticipantChangedEvent normalizes full and deprecated participant handles", () => {
+  const added = parseLinqParticipantChangedEvent({
+    api_version: "v3",
+    created_at: "2026-07-29T01:00:00.000Z",
+    event_id: "evt_participant_added",
+    event_type: "participant.added",
+    data: {
+      added_at: "2026-07-29T00:59:59.000Z",
+      chat_id: "chat_group",
+      participant: {
+        handle: "+15551234567",
+        id: "handle_participant",
+        joined_at: "2026-07-29T00:59:59.000Z",
+        service: "iMessage",
+        status: "active",
+      },
+    },
+  });
+  const removed = parseLinqParticipantChangedEvent({
+    api_version: "v3",
+    created_at: "2026-07-29T01:05:00.000Z",
+    event_id: "evt_participant_removed",
+    event_type: "participant.removed",
+    data: {
+      chat_id: "chat_group",
+      handle: "person@example.test",
+      removed_at: "2026-07-29T01:04:59.000Z",
+      service: "SMS",
+    },
+  });
+
+  assert.deepEqual(added.data, {
+    added_at: "2026-07-29T00:59:59.000Z",
+    chat_id: "chat_group",
+    participant: {
+      handle: "+15551234567",
+      id: "handle_participant",
+      is_me: undefined,
+      joined_at: "2026-07-29T00:59:59.000Z",
+      left_at: undefined,
+      service: "iMessage",
+      status: "active",
+    },
+  });
+  assert.deepEqual(removed.data, {
+    chat_id: "chat_group",
+    participant: {
+      handle: "person@example.test",
+      service: "SMS",
+    },
+    removed_at: "2026-07-29T01:04:59.000Z",
+  });
+});
+
+test("parseLinqParticipantChangedEvent rejects missing or conflicting event shapes", () => {
+  assert.throws(
+    () => parseLinqParticipantChangedEvent({
+      api_version: "v3",
+      created_at: "2026-07-29T01:00:00.000Z",
+      event_id: "evt_missing_participant",
+      event_type: "participant.added",
+      data: { chat_id: "chat_group" },
+    }),
+    /participant or deprecated handle is required/u,
+  );
+  assert.throws(
+    () => parseLinqParticipantChangedEvent({
+      api_version: "v3",
+      created_at: "2026-07-29T01:00:00.000Z",
+      event_id: "evt_wrong_type",
+      event_type: "message.received",
+      data: {},
+    }),
+    /participant change payload/u,
+  );
 });
 
 test("minimizeLinqMessageReceivedEvent sanitizes allowlisted message fields", () => {
@@ -1518,8 +1597,103 @@ test("parseLinqMessageReceivedEvent rejects invalid timestamps", () => {
   );
 });
 
+test("parseLinqMessageEditedEvent validates the v2026 replacement contract", () => {
+  const event = parseLinqMessageEditedEvent(buildMessageEditedWebhook());
+
+  assert.equal(event.event_type, "message.edited");
+  assert.equal(event.data.chat.id, "chat_edit");
+  assert.equal(event.data.direction, "inbound");
+  assert.equal(event.data.id, "msg_edit");
+  assert.deepEqual(event.data.part, {
+    index: 1,
+    text: "corrected text",
+  });
+  assert.equal(event.data.sender_handle.handle, "+15551234567");
+});
+
+test("minimizeLinqWebhookEvent keeps edit correlation but drops replacement text", () => {
+  const minimized = minimizeLinqWebhookEvent(buildMessageEditedWebhook());
+
+  assert.equal(JSON.stringify(minimized).includes("corrected text"), false);
+  assert.deepEqual((minimized.data as Record<string, unknown>).part, {
+    index: 1,
+  });
+});
+
+test.each([
+  {
+    mutate(event: LinqWebhookEvent) {
+      event.webhook_version = "2025-01-01";
+    },
+    pattern: /webhook_version/u,
+  },
+  {
+    mutate(event: LinqWebhookEvent) {
+      (event.data as { part: { index: number } }).part.index = -1;
+    },
+    pattern: /non-negative int32/u,
+  },
+  {
+    mutate(event: LinqWebhookEvent) {
+      (event.data as { part: { text: string } }).part.text = "";
+    },
+    pattern: /1-10000 characters/u,
+  },
+  {
+    mutate(event: LinqWebhookEvent) {
+      (event.data as { part: { text: string } }).part.text = "x".repeat(10_001);
+    },
+    pattern: /1-10000 characters/u,
+  },
+  {
+    mutate(event: LinqWebhookEvent) {
+      (event.data as { edited_at: string }).edited_at = "2026-07-28T18:00:01";
+    },
+    pattern: /must include a timezone/u,
+  },
+])("parseLinqMessageEditedEvent rejects malformed edit payloads", ({ mutate, pattern }) => {
+  const event = buildMessageEditedWebhook();
+  mutate(event);
+  assert.throws(() => parseLinqMessageEditedEvent(event), pattern);
+});
+
 function signLinqWebhook(secret: string, payload: string, timestamp: string): string {
   return `sha256=${createHmac("sha256", secret).update(`${timestamp}.${payload}`).digest("hex")}`;
+}
+
+function buildMessageEditedWebhook(): LinqWebhookEvent {
+  return {
+    api_version: "v3",
+    created_at: "2026-07-28T18:00:02.000Z",
+    webhook_version: "2026-02-03",
+    data: {
+      chat: {
+        id: "chat_edit",
+        is_group: false,
+        owner_handle: {
+          handle: "+15557654321",
+          id: "handle_owner_edit",
+          is_me: true,
+          service: "iMessage",
+        },
+      },
+      direction: "inbound",
+      edited_at: "2026-07-28T18:00:01.000Z",
+      id: "msg_edit",
+      part: {
+        index: 1,
+        text: "corrected text",
+      },
+      sender_handle: {
+        handle: "+15551234567",
+        id: "handle_sender_edit",
+        is_me: false,
+        service: "iMessage",
+      },
+    },
+    event_id: "evt_edit",
+    event_type: "message.edited",
+  };
 }
 
 function buildV2026MessageReceivedWebhook(input: {

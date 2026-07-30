@@ -37,6 +37,9 @@ import {
   readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.ts'
+import {
+  MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+} from '../src/assistant/onboarding-goal-checkin-automation.ts'
 
 type CodexAssistantTarget = Extract<
   AssistantSession['target'],
@@ -2219,6 +2222,38 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
 
   vi.clearAllMocks()
 
+  await sendAssistantNotificationLocal({
+    executionContext: {
+      hosted: null,
+    },
+    instructions: 'Offer one low-pressure health direction choice.',
+    scheduledInvocationAuthority: {
+      automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+      occurrenceAt: '2026-07-12T13:00:00.000Z',
+    },
+    scheduledOccurrenceAt: '2026-07-12T13:00:00.000Z',
+    serviceTier: 'flex',
+    vault: '/vaults/skip',
+  })
+
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
+    expect.objectContaining({
+      profile: {
+        nativeResumePolicy: 'disabled',
+        promptProfile: 'conversation',
+        threadScope: 'isolated-thread',
+        toolProfile: 'provider-turn',
+      },
+    }),
+  )
+  expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
+    expect.objectContaining({
+      providerResumeStateAction: 'preserve-existing',
+    }),
+  )
+
+  vi.clearAllMocks()
+
   const maintenanceProviderStartHook = vi.fn()
   const maintenanceResult = await sendAssistantNotificationLocal({
     executionContext: {
@@ -2619,6 +2654,165 @@ test('sendAssistantNotificationLocal exposes newsletter tools only with schedule
   expect(observedHostedToolContexts[1]?.newsletterTool).not.toBeNull()
 })
 
+test.each([
+  {
+    providerFailure: 'none' as const,
+    providerResponse:
+      '```json\n{"kind":"skip","privateSummary":"Newsletter queued."}\n```',
+  },
+  {
+    providerFailure: 'malformed-decision' as const,
+    providerResponse: 'not a notification decision',
+  },
+  {
+    providerFailure: 'terminal' as const,
+    providerResponse:
+      '```json\n{"kind":"skip","privateSummary":"Newsletter queued."}\n```',
+  },
+])(
+  'sendAssistantNotificationLocal propagates an accepted newsletter parent through $providerFailure',
+  async ({ providerFailure, providerResponse }) => {
+    const vault = await mkdtemp(path.join(
+      tmpdir(),
+      'assistant-notification-newsletter-pending-',
+    ))
+    try {
+      const providerError = new Error(
+        'provider failed after durable newsletter acceptance',
+      )
+      const providerResult = createProviderResult({
+        response: providerResponse,
+      })
+      const newsletterTool = {
+        request: vi.fn(async () => ({
+          action: 'prepare' as const,
+          result: {
+            authorizationProof: 'a'.repeat(64),
+            groupId: 'group_notification_newsletter',
+            missingEmailParticipants: [],
+            participants: [{
+              authorizedShares: [],
+              hasEmail: true,
+              memberId: 'member_notification_newsletter_recipient',
+            }],
+            status: 'ok' as const,
+          },
+        })),
+      }
+      const { sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
+        onExecuteCodexTurnWithRecovery: async (providerInput) => {
+          const hostedToolContext = providerInput.hostedToolContext
+          expect(hostedToolContext?.newsletterTool).not.toBeNull()
+          const executeNewsletterRequest = async (argumentsValue: unknown) => {
+            const request = readMurphDynamicToolRequest({
+              method: 'item/tool/call',
+              params: {
+                arguments: argumentsValue,
+                namespace: 'murph',
+                tool: 'newsletter',
+              },
+            })
+            if (!request || request.kind !== 'newsletter') {
+              throw new Error('Expected a parsed newsletter request.')
+            }
+            const result = await executeMurphDynamicToolRequest({
+              env: {},
+              fetchImpl: fetch,
+              hostedToolContext,
+              nextUsageOrdinal: () => 1,
+              progressDelivery: null,
+              request,
+              vaultRoot: vault,
+            })
+            expect(result.rpcResult.success).toBe(true)
+          }
+
+          await executeNewsletterRequest({ action: 'prepare' })
+          await executeNewsletterRequest({
+            action: 'send',
+            html: '<p>Weekly note</p>',
+            subject: 'Family Weekly',
+            text: 'Weekly note',
+          })
+          if (providerFailure === 'terminal') {
+            return {
+              acceptedNoReplyDeliveryContextOrdinals: [],
+              additionalUsages: [],
+              assistantContractFingerprint:
+                providerResult.assistantContractFingerprint,
+              attemptCount: 1,
+              codexContinuation: providerResult.codexContinuation,
+              codexRolloutRelativePath: null,
+              codexThreadId: null,
+              error: providerError,
+              kind: 'failed_terminal',
+              providerRequestOutcome: 'failed',
+              providerTurnId: null,
+              rawEvents: [],
+              reactions: [],
+              route: providerResult.route,
+              session: providerResult.session,
+              usage: null,
+              usageAttribution: null,
+            }
+          }
+          return {
+            kind: 'succeeded',
+            providerTurn: providerResult,
+          }
+        },
+        providerResult,
+        turnId: `turn-notification-newsletter-pending-${providerFailure}`,
+      })
+      const pendingIntentIds: string[] = []
+      const notification = sendAssistantNotificationLocal({
+        executionContext: {
+          hosted: {
+            memberId: 'member-notification-newsletter-pending',
+            newsletterTool,
+            userEnvKeys: [],
+          },
+        },
+        instructions: 'Send the scheduled group email newsletter.',
+        onNewsletterPendingDeliveryIntentId: (intentId) => {
+          pendingIntentIds.push(intentId)
+        },
+        scheduledAutomationAuthority: {
+          automationId: 'automation_newsletter',
+          occurrenceAt: '2026-07-20T13:00:00.000Z',
+        },
+        scheduledOccurrenceAt: '2026-07-20T13:00:00.000Z',
+        vault,
+      })
+
+      if (providerFailure === 'none') {
+        await expect(notification).resolves.toMatchObject({
+          postTurnDeliveryExpectations: {
+            newsletterPendingDeliveryIntentId:
+              expect.stringMatching(/^outbox_/u),
+            newsletterSendResult: {
+              participantCount: 1,
+              skippedNoEmailMemberIds: [],
+              status: 'accepted',
+            },
+          },
+        })
+      } else if (providerFailure === 'terminal') {
+        await expect(notification).rejects.toBe(providerError)
+      } else {
+        await expect(notification).rejects.toThrow()
+      }
+
+      expect(pendingIntentIds).toEqual([
+        expect.stringMatching(/^outbox_/u),
+      ])
+      expect(newsletterTool.request).toHaveBeenCalledOnce()
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  },
+)
+
 test('sendAssistantNotificationLocal keeps scheduled group reads and offers model-triggered', async () => {
   const providerResult = createProviderResult({
     response: '```json\n{"kind":"skip","privateSummary":"Challenge update complete."}\n```',
@@ -2880,6 +3074,167 @@ test('sendAssistantNotificationLocal releases typing after accepted delivery', a
       providerStop: false,
     },
   )
+})
+
+test('sendAssistantNotificationLocal accepts a sponsor-song response', async () => {
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'Celebrate the group contribution.',
+      text: 'A brief commercial break: fiscal leadership has arrived.',
+    }),
+  })
+  const observedProviderInputs: NotificationTurnProviderInput[] = []
+  const { deliverMessage, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      onExecuteCodexTurnWithRecovery: async (providerInput) => {
+        observedProviderInputs.push(providerInput)
+        return {
+          kind: 'succeeded',
+          providerTurn: providerResult,
+        }
+      },
+      providerResult,
+      turnId: 'turn-group-sponsorship-text',
+    })
+
+  await expect(sendAssistantNotificationLocal({
+    instructions: 'Create a brief group sponsorship thank-you.',
+    notificationPromptProfile: 'creative-response',
+    responsePolicy: { kind: 'require_send' },
+    vault: '/vaults/group-sponsorship-text',
+  })).resolves.toMatchObject({
+    deliveryOutcome: {
+      kind: 'sent',
+      media: [],
+    },
+  })
+
+  expect(observedProviderInputs[0]).toMatchObject({
+    allowFinishWithoutReply: false,
+    hostedToolContext: null,
+    profile: {
+      nativeResumePolicy: 'disabled',
+      promptProfile: 'creative-notification',
+      threadScope: 'isolated-thread',
+      toolProfile: 'provider-turn',
+    },
+  })
+  expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
+    media: [],
+  }))
+})
+
+test('sendAssistantNotificationLocal accepts a text fallback when song generation fails', async () => {
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'Audio was unavailable; use text.',
+      text: 'The group fuel gauge lives to fight another day.',
+    }),
+  })
+  const { deliverMessage, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-group-sponsorship-media-failed',
+    })
+
+  await expect(sendAssistantNotificationLocal({
+    instructions: 'Create a brief group sponsorship thank-you.',
+    notificationPromptProfile: 'creative-response',
+    responsePolicy: { kind: 'require_send' },
+    vault: '/vaults/group-sponsorship-media-failed',
+  })).resolves.toMatchObject({
+    deliveryOutcome: {
+      kind: 'sent',
+      media: [],
+    },
+  })
+  expect(deliverMessage).toHaveBeenCalledOnce()
+})
+
+test('sendAssistantNotificationLocal delivers one successful sponsor song', async () => {
+  const song = {
+    filename: 'group-thanks.mp3',
+    kind: 'voice_memo' as const,
+    transcript: 'Thanks for keeping the group going.',
+    transport: {
+      attachmentId: 'attachment-group-thanks',
+      kind: 'linq_attachment' as const,
+    },
+  }
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'Celebrate the group contribution.',
+      text: 'This challenge is now fiscally solvent.',
+    }),
+    responseMedia: [song],
+    session: createAssistantSession({
+      binding: {
+        actorId: 'actor-group-sponsorship',
+        channel: 'linq',
+        conversationKey: null,
+        delivery: {
+          kind: 'thread',
+          target: 'thread-group-sponsorship',
+        },
+        identityId: 'identity-group-sponsorship',
+        threadId: 'thread-group-sponsorship',
+        threadIsDirect: false,
+      },
+    }),
+  })
+  const { deliverMessage, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-group-sponsorship-media-succeeded',
+    })
+
+  await expect(sendAssistantNotificationLocal({
+    instructions: 'Create a brief group sponsorship thank-you.',
+    notificationPromptProfile: 'creative-response',
+    responsePolicy: { kind: 'require_send' },
+    vault: '/vaults/group-sponsorship-media-succeeded',
+  })).resolves.toMatchObject({
+    deliveryOutcome: { kind: 'sent' },
+  })
+  expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
+    media: [song],
+  }))
+})
+
+test('sendAssistantNotificationLocal keeps creative response-media failures on the normal notification error path', async () => {
+  const providerResult = createProviderResult({
+    response: 'not a notification decision',
+    responseMedia: [{
+      filename: 'group-thanks.mp3',
+      kind: 'voice_memo',
+      transcript: 'Thanks for keeping the group going.',
+      transport: {
+        attachmentId: 'attachment-group-thanks',
+        kind: 'linq_attachment',
+      },
+    }],
+  })
+  const { deliverMessage, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-group-sponsorship-invalid-output',
+    })
+
+  await expect(sendAssistantNotificationLocal({
+    instructions: 'Create a brief group sponsorship thank-you.',
+    notificationPromptProfile: 'creative-response',
+    responsePolicy: { kind: 'require_send' },
+    vault: '/vaults/group-sponsorship-invalid-output',
+  })).rejects.toMatchObject({
+    code: 'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+    details: expect.objectContaining({
+      assistantNotificationProviderNonReplayableWork: false,
+    }),
+  })
+  expect(deliverMessage).not.toHaveBeenCalled()
 })
 
 test('sendAssistantNotificationLocal does not checkpoint a new output-only direct session', async () => {
@@ -4417,9 +4772,13 @@ async function loadNotificationTurnHarness(input: {
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
   }))
-  vi.doMock('../src/assistant/turns.js', () => ({
-    createAssistantTurnId: () => input.turnId,
-  }))
+  vi.doMock('../src/assistant/turns.js', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../src/assistant/turns.js')>()
+    return {
+      ...actual,
+      createAssistantTurnId: () => input.turnId,
+    }
+  })
   vi.doMock('../src/assistant/channel-typing.js', () => ({
     assistantDeliveryOutcomeSupersedesTypingIndicator: (kind: string | null) =>
       kind === 'sent' || kind === 'queued',

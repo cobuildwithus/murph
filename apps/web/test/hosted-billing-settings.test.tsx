@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   routerReplace: vi.fn(),
 }));
 
+const TEST_PAYER_MEMBER_ID = "hbm_billing_settings_payer";
+
 function buildUsageStatus(
   overrides: Partial<HostedPlanUsageAvailableStatus> = {},
 ): HostedPlanUsageAvailableStatus {
@@ -141,6 +143,7 @@ describe("HostedBillingSettings", () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       canUpgradeToEdge: true,
       currentBillingPlanCode: "launch_monthly",
@@ -160,6 +163,7 @@ describe("HostedBillingSettings", () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       currentBillingPhase: "trial",
       currentBillingPlanCode: "launch_monthly",
@@ -205,6 +209,7 @@ describe("HostedBillingSettings", () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       usageStatus: buildUsageStatus({ accessKind, planCode, planName }),
     }));
@@ -217,6 +222,7 @@ describe("HostedBillingSettings", () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       usageStatus: buildUsageStatus({
         remainingPercent: 0,
@@ -235,6 +241,7 @@ describe("HostedBillingSettings", () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       billingStatus: "active",
       currentBillingPhase: "paid",
@@ -257,6 +264,57 @@ describe("HostedBillingSettings", () => {
     assert.doesNotMatch(markup, /usage credit remaining/);
     assert.doesNotMatch(markup, /Add usage to continue/);
     assert.doesNotMatch(markup, /pauses new usage/);
+  });
+
+  test("places usage activity after the overall usage bar and before plan choices", async () => {
+    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+      authenticated: true,
+      billingStatus: "active",
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_monthly",
+      usageActivityDetail: createElement(
+        "section",
+        { "data-testid": "usage-activity-detail" },
+        "Credits & missions",
+      ),
+      usageStatus: buildUsageStatus(),
+    }));
+
+    const usageBarIndex = markup.indexOf("35% used");
+    const usageActivityIndex = markup.indexOf("Credits &amp; missions");
+    const planChoiceIndex = markup.indexOf("Choose Edge");
+
+    assert.ok(usageBarIndex >= 0);
+    assert.ok(usageActivityIndex > usageBarIndex);
+    assert.ok(planChoiceIndex > usageActivityIndex);
+  });
+
+  test("keeps historical activity visible when no overall usage bar is available", async () => {
+    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+      authenticated: true,
+      currentBillingPlanCode: "launch_monthly",
+      usageActivityDetail: createElement(
+        "section",
+        null,
+        "Historical usage activity",
+      ),
+      usageStatus: {
+        generatedAt: "2026-07-10T12:00:00.000Z",
+        reason: "group_not_supported",
+        recommendedAction: null,
+        status: "unavailable",
+      },
+    }));
+
+    assert.doesNotMatch(markup, /aria-label="Pulse AI usage"/);
+    assert.match(markup, /Historical usage activity/);
+    assert.ok(markup.indexOf("Historical usage activity") < markup.indexOf("Choose Edge"));
   });
 
   test("renders overall capacity from the production usage projection", async () => {
@@ -296,6 +354,7 @@ describe("HostedBillingSettings", () => {
     assert.equal(usageStatus.remainingPercent, 24);
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       billingStatus: "active",
       currentBillingPhase: "paid",
@@ -320,6 +379,7 @@ describe("HostedBillingSettings", () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       billingStatus: "active",
       currentBillingPhase: "paid",
@@ -363,6 +423,7 @@ describe("HostedBillingSettings", () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       usageStatus: buildUsageStatus(),
       usageTopUpInitialOpen: true,
@@ -381,6 +442,7 @@ describe("HostedBillingSettings", () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       usageStatus: buildUsageStatus(),
       usageTopUpActivePurchase: null,
@@ -409,6 +471,7 @@ describe("HostedBillingSettings", () => {
       status: "fulfilled" as const,
     };
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       usageStatus: buildUsageStatus({
         remainingPercent: 45,
@@ -435,6 +498,7 @@ describe("HostedBillingSettings", () => {
 
     const withoutContactMarkup = renderToStaticMarkup(
       createElement(HostedBillingSettings, {
+        payerMemberId: TEST_PAYER_MEMBER_ID,
         authenticated: true,
         usageStatus: buildUsageStatus(),
         usageTopUpActivePurchase: fulfilledPurchase,
@@ -450,6 +514,7 @@ describe("HostedBillingSettings", () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       billingStatus: "active",
       currentBillingPhase: "paid",
@@ -473,6 +538,7 @@ describe("HostedBillingSettings", () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const unavailableMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       usageStatus: {
         generatedAt: "2026-07-10T12:00:00.000Z",
@@ -482,6 +548,7 @@ describe("HostedBillingSettings", () => {
       },
     }));
     const noForecastMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       usageStatus: buildUsageStatus(),
     }));
@@ -494,6 +561,7 @@ describe("HostedBillingSettings", () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const conversionMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       canStartPaidPulse: true,
       usageStatus: {
@@ -508,6 +576,7 @@ describe("HostedBillingSettings", () => {
       },
     }));
     const groupMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       canStartPaidPulse: true,
       usageStatus: {
@@ -518,6 +587,7 @@ describe("HostedBillingSettings", () => {
       },
     }));
     const actionFreeConversionMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       canStartPaidPulse: true,
       usageStatus: {
@@ -555,21 +625,25 @@ describe("HostedBillingSettings", () => {
     });
 
     const eligibleStartMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       canStartPaidPulse: true,
       usageStatus: startAction,
     }));
     const ineligibleStartMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       canStartPaidPulse: false,
       usageStatus: startAction,
     }));
     const eligibleUpgradeMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       canUpgradeToEdge: true,
       usageStatus: upgradeAction,
     }));
     const ineligibleUpgradeMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       canUpgradeToEdge: false,
       usageStatus: upgradeAction,
@@ -585,6 +659,7 @@ describe("HostedBillingSettings", () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       canStartPaidPulse: true,
       canUpgradeToEdge: false,
@@ -610,6 +685,7 @@ describe("HostedBillingSettings", () => {
     });
 
     const availableMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       canStartPaidPulse: true,
       currentBillingPhase: "trial",
@@ -619,6 +695,7 @@ describe("HostedBillingSettings", () => {
       usageStatus,
     }));
     const unavailableMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       canStartPaidPulse: true,
       pulseTrialBillingContinuationPending: true,
@@ -639,6 +716,7 @@ describe("HostedBillingSettings", () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       canStartPaidPulse: false,
       canUpgradeToEdge: false,
@@ -656,6 +734,7 @@ describe("HostedBillingSettings", () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       familyState: "owner",
       currentBillingPlanCode: "launch_monthly",
@@ -670,6 +749,7 @@ describe("HostedBillingSettings", () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       canSwitchToPulse: true,
       canUpgradeToEdge: true,
@@ -688,6 +768,7 @@ describe("HostedBillingSettings", () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       familyState: "sponsored",
       currentBillingPlanCode: "launch_monthly",
@@ -702,6 +783,7 @@ describe("HostedBillingSettings", () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       canStartFamily: true,
       familyState: "none",
@@ -713,10 +795,44 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, /From \$7\/person/);
   });
 
+  test("posts the Join recovery Family action and keeps syncing feedback visible", async () => {
+    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+      alreadyActive: false,
+      url: null,
+    });
+    const { HostedFamilyStartButton } = await import(
+      "@/src/components/settings/hosted-family-start-button"
+    );
+    const rendered = await renderClientComponent(
+      createElement(HostedFamilyStartButton, {
+        block: true,
+        label: "Restart Family",
+      }),
+    );
+
+    await act(async () => {
+      rendered.button.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+    });
+
+    assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0], {
+      method: "POST",
+      url: "/api/settings/billing/family/checkout",
+    });
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Your Family plan is syncing with Stripe\. Refresh in a moment\./,
+    );
+
+    await rendered.cleanup();
+  });
+
   test("shows the switch-to-Pulse action on the Pulse card for Edge members", async () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       canSwitchToPulse: true,
       canUpgradeToEdge: false,
@@ -735,6 +851,7 @@ describe("HostedBillingSettings", () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       canSwitchToPulse: true,
       currentBillingPhase: "paid",

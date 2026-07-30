@@ -109,8 +109,10 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup.match(/Illustrative examples\./g)).toHaveLength(2);
   expect(sectionsMarkup).toContain("Biomarker preparing state");
   expect(sectionsMarkup).toContain("Biomarker index");
-  expect(sectionsMarkup).toContain("Group usage funding and top-up follow-up");
-  expect(sectionsMarkup).toContain("Overall AI usage and fulfilled top-up");
+  expect(sectionsMarkup).toContain(
+    "Sponsor more messages: group funding, recovery, and fulfilled receipt",
+  );
+  expect(sectionsMarkup).toContain("Overall AI usage, credits, and missions");
   expect(sectionsMarkup).toContain("Biomarker result detail");
   expect(sectionsMarkup).toContain("Biomarker reference context");
   expect(sectionsMarkup).toContain("Boundary result detail");
@@ -121,7 +123,7 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain('data-design-study="group-usage-funding"');
   expect(sectionsMarkup).toContain("Sunday sleep crew");
   expect(sectionsMarkup).toContain("Keep Murph going");
-  expect(sectionsMarkup).toContain("Add messages");
+  expect(sectionsMarkup).toContain("Sponsor this chat");
   expect(sectionsMarkup).toContain('data-design-state="usage-added-follow-up"');
   expect(sectionsMarkup).toContain("Preview group usage added");
   expect(sectionsMarkup).toContain("Preview usage added with Text Murph");
@@ -158,7 +160,7 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(componentsMarkup).toContain('data-design-component="group-usage-funding"');
   expect(componentsMarkup).toContain("Sunday sleep crew");
   expect(componentsMarkup).toContain("Keep Murph going");
-  expect(componentsMarkup).toContain("Add messages");
+  expect(componentsMarkup).toContain("Sponsor this chat");
   expect(componentsMarkup).toMatch(
     /data-slot="radio-group-item"[^>]*class="[^"]*sr-only/u,
   );

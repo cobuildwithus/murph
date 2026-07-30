@@ -23,7 +23,7 @@ import {
   normalizeHostedOpaqueInput,
 } from "../hosted-onboarding/contact-privacy";
 import {
-  readActiveHostedMemberAccess,
+  readHostedRuntimeAiAccessDecision,
 } from "../hosted-onboarding/member-access";
 import {
   hostedOnboardingError,
@@ -45,6 +45,7 @@ import {
   HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
   isHostedThreadDeliveryRouteChannel,
   openHostedThreadDeliveryRoute,
+  projectHostedThreadDeliveryRouteAccountLookupKey,
   sealHostedThreadDeliveryRoute,
   type HostedThreadDeliveryRouteChannel,
   type HostedThreadDeliveryRouteV1,
@@ -230,6 +231,8 @@ export async function refreshHostedThreadContainerDeliveryRouteTx(input: {
       route: deliveryRoute,
     });
     await updateHostedThreadRouteRowTx({
+      accountLookupKey:
+        projectHostedThreadDeliveryRouteAccountLookupKey(deliveryRoute),
       authorityChanged,
       channel: input.route.channel,
       deliveryRouteEncrypted,
@@ -273,10 +276,10 @@ export async function ensureHostedThreadContainerRouteTx(input: {
     });
   }
   assertHostedMemberNotSuspended(owner);
-  if (!(await readActiveHostedMemberAccess({
+  if (!(await readHostedRuntimeAiAccessDecision({
     memberId: input.ownerMemberId,
     prisma: input.prisma,
-  }))) {
+  })).allowed) {
     throw hostedOnboardingError({
       code: "HOSTED_THREAD_CONTAINER_OWNER_ACTIVE_ACCESS_REQUIRED",
       httpStatus: 403,
@@ -426,6 +429,8 @@ export async function ensureHostedThreadContainerRouteTx(input: {
         route: deliveryRoute,
       });
       await updateHostedThreadRouteRowTx({
+        accountLookupKey:
+          projectHostedThreadDeliveryRouteAccountLookupKey(deliveryRoute),
         authorityChanged,
         channel: input.channel,
         deliveryRouteEncrypted,
@@ -493,6 +498,8 @@ export async function ensureHostedThreadContainerRouteTx(input: {
     route: deliveryRoute,
   });
   await createHostedThreadRouteRowTx({
+    accountLookupKey:
+      projectHostedThreadDeliveryRouteAccountLookupKey(deliveryRoute),
     channel: input.channel,
     containerMemberId,
     deliveryRouteEncrypted,
@@ -572,6 +579,7 @@ async function tryOpenHostedThreadContainerDeliveryRoute(input: {
 }
 
 async function createHostedThreadRouteRowTx(input: {
+  accountLookupKey: string;
   channel: HostedThreadDeliveryRouteChannel;
   containerMemberId: string;
   deliveryRouteEncrypted: string;
@@ -582,6 +590,7 @@ async function createHostedThreadRouteRowTx(input: {
   try {
     await input.prisma.hostedThreadRoute.create({
       data: {
+        accountLookupKey: input.accountLookupKey,
         channel: input.channel,
         containerMemberId: input.containerMemberId,
         deliveryRouteEncrypted: input.deliveryRouteEncrypted,
@@ -604,6 +613,7 @@ async function createHostedThreadRouteRowTx(input: {
 }
 
 async function updateHostedThreadRouteRowTx(input: {
+  accountLookupKey: string;
   authorityChanged: boolean;
   channel: HostedThreadDeliveryRouteChannel;
   deliveryRouteEncrypted: string;
@@ -615,6 +625,7 @@ async function updateHostedThreadRouteRowTx(input: {
   try {
     await input.prisma.hostedThreadRoute.update({
       data: {
+        accountLookupKey: input.accountLookupKey,
         // Reaction context is optional and account-bound through the route's
         // lookup key. Drop it when that authority key rotates rather than
         // carrying ciphertext into a different AAD binding.

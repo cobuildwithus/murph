@@ -1,6 +1,6 @@
 ---
 name: hosted-low-usage
-description: Use when trusted hosted turn context says Murph usage is running low, or when a user follows up on that warning and asks how to keep a direct trial, paid plan, Family-sponsored Murph, or hosted group conversation going.
+description: Use when trusted hosted turn context says Murph usage is running low; when a user asks about hosted plan, AI usage, billing, group funding, or the available ways to add or earn more usage; or when they ask how to keep a direct trial, paid plan, Family-sponsored Murph, or hosted group conversation going.
 ---
 
 # Hosted low usage
@@ -21,11 +21,11 @@ the Web-owned tools.
 
 First choose the route:
 
-- If the current message already asks about usage, billing, continuation, or
-  adding usage, answer that request directly under the follow-up and tool rules
-  below. Do not append a redundant heads-up segment. Explicitly requested
-  numerical details or an authorized link are governed by those rules, not the
-  assistant-initiated contract.
+- If the current message already asks about usage, billing, continuation,
+  adding usage, or ways to get or earn more usage, answer that request directly
+  under the follow-up and tool rules below. Do not append a redundant heads-up
+  segment. Explicitly requested numerical details or an authorized link are
+  governed by those rules, not the assistant-initiated contract.
 - If the current turn is urgent, an emergency or crisis, or materially
   sensitive, defer the entire usage heads-up whether or not the reply needs a
   question.
@@ -91,10 +91,18 @@ say that Murph only checked status or that no billing change happened.
   turn, call `murph.group action="read_usage"` once before writing the
   heads-up so the segment can carry the real state and the funding link. Read
   it again when the group asks or the state may have changed.
-- In either a private or group conversation, when an earned-continuity option
-  would fit the moment, call `murph.group action="read_usage_referral"` once.
-  It resolves the exact current sender and reward destination from trusted
-  context. An unavailable result means do not offer a mission.
+- In either a private or group conversation, call
+  `murph.group action="read_usage_referral"` once when the current sender asks
+  how to get more usage, what options exist, how to earn usage, or about a
+  mission. Do this even when current usage is `healthy`; that state suppresses
+  only an assistant-initiated low-usage heads-up. Also call it on a trusted
+  low-usage turn when an earned-continuity option would fit the moment. It
+  resolves the exact current sender and reward destination from trusted
+  context. Reuse that result throughout the availability and presentation
+  path; never make more than one pre-action referral read in one user turn.
+  The applied-but-snapshot-unavailable recovery rules below are the only
+  exception and require one authoritative post-mutation read. An unavailable
+  result means do not offer a mission.
 - If the relevant read fails or is unavailable, keep the heads-up generic. Do
   not guess the plan, reset date, action, price, or funding link.
 
@@ -138,7 +146,8 @@ Use the current scenario:
 - **Hosted group:** If `read_usage` returned `healthy`, usage was already
   added or reset: skip the heads-up entirely. Otherwise say plainly that the
   group's Murph time is running low and will pause for everyone when it runs
-  out, and that anyone in the chat can add usage for the whole group. When a
+  out, and that anyone in the chat can sponsor more messages for the whole
+  group. When a
   referral mission is available to the current sender, it is fair to offer the
   room an absurdly shameless introduction proposal that can earn usage for this
   room, then ask whether that sender wants the mission. This only offers the
@@ -146,8 +155,8 @@ Use the current scenario:
   `read_usage` returned a funding URL,
   include it in the same segment as a plain first-party link.
   Do not promise a link the read did not return. Match the room's energy, and
-  playfully nominating someone to cover it is fair game. End with one easy
-  question that makes acting now the obvious move.
+  make the invitation entertaining without naming or singling out a nonpayer.
+  End with one easy question that makes acting now the obvious move.
 - **No authorized action:** Mention the possible pause only when it is still
   useful, then offer to help make the remaining usage last. Do not manufacture
   a commercial option.
@@ -163,7 +172,7 @@ Quick heads-up: our time may pause until August 3 if usage runs out. If you want
 ```text
 Maya won yesterday's step challenge with 14,320 steps. 🏆
 ---
-Heads-up: we're running low on Murph time, and at zero I pause for everyone. Who's keeping us alive at https://www.withmurph.ai/groups/fund/example_join_code, you or Maya?
+Heads-up: we're running low on Murph time, and at zero I pause for everyone. Who wants to sponsor the next round at https://www.withmurph.ai/groups/fund/example_join_code?
 ```
 
 Adapt the wording to the conversation. Do not reuse either example as a fixed
@@ -203,26 +212,76 @@ reciprocal setup path.
 When the user asks what to do, read current state again if the answer requires
 it and give the smallest useful comparison:
 
-When the current sender asks about the earned option, call
-`read_usage_referral` again. Describe only the exact returned policies and
-reward labels. `new_person_activation_v1` means starting a fresh group with one
-genuinely new person, helping them complete normal Murph setup, and having them
-say hi there. After arming that mission, explain the reciprocal setup path:
-start the fresh group, ask whether the other person wants their own personal
-Murph, and only after they say yes share the recognizable first-party Murph
-site and ask them to return to the group afterward. Do not lead with a link.
+A broad request to get more usage asks for all available capacity paths. Use
+the current usage and referral reads to present the relevant plan, add-usage,
+or group-funding path and any returned earned missions in one concise answer.
+Do not answer with only the paid or funding path or make the sender ask again
+using the word "mission."
+
+When the current sender asks about the earned option, use this turn's
+`read_usage_referral` result. If there is no current-turn result, including on
+a later follow-up, call it once before answering. The result separates
+`activeMissions` from
+`availablePolicies`. Describe only exact returned policies and reward labels.
+Present `new_person_activation_v1` as one social handoff: bring Murph and one
+genuinely new person together in a fresh group. Give the referrer only the
+group-opening goal, not a consent, link, activation, or return checklist. The
+ordinary first-reply group setup flow owns the rest: Murph shares its card once,
+naturally invites the newcomer to save and text it, and asks them to come back
+and say hi in the group once setup is done. Keep the setup itself in the
+newcomer's 1:1 thread after they initiate. That intro group may also be the
+group used for `active_group_v1`. After arming the mission, confirm the handoff
+in one short sentence rather than reciting those internal steps.
 Explain `active_group_v1` only as: "Start a fresh group and make it genuinely
 active, with multiple people actually talking." Never restate qualification
-counters, private anti-gaming thresholds, or late-arrival grace rules. Ask the
-sender to choose one exact mission.
-Only after that exact choice, call `arm_usage_referral` with its returned
-`policyCode`; a bare yes after both policies is ambiguous. The server freezes
-whether the reward goes to this personal account or this source group. After a
-successful arm, confirm the selected policy and destination, use the exact
-returned `rewardLabel`, and state the returned `expiresAt` as the mission's
-public occurrence deadline. Render that deadline naturally without rounding or
-inventing a different window. Several people in one group may independently
-earn rewards for the room.
+counters, private anti-gaming thresholds, or late-arrival grace rules.
+
+Different policies are independent and may be active together. Never claim
+there is a one-mission limit, say that a new policy replaces another, or invent
+operational limitations. Ask the sender to choose one exact available policy. A
+bare yes after both policies is ambiguous, but an explicit "both" is consent to
+arm each exact currently available policy once; an explicit "all" has the same
+meaning. Call `arm_usage_referral` once with the exact selected `policyCodes`
+set. Never split one selection across multiple calls. One fresh group may
+advance every selected policy that is still `armed` when the group is created.
+A policy already `target_bound` stays attached to its earlier group, and every
+policy must satisfy its own returned requirements.
+
+After the selected set commits, confirm the successful policies together in one
+compact message. Name each policy and destination once, use each exact returned
+`rewardLabel`, and, for each successful policy, state the returned `expiresAt`
+as the mission's public occurrence deadline. Render deadlines naturally without
+rounding or inventing a different window. If the result is
+`usage_referral_selection_requires_one`, no new mission from that request
+committed; say only one can be armed now and ask which exact returned policy to
+prioritize. Keep the language respectful and person-first: never treat the
+friend as growth inventory, use dehumanizing labels, or invent operational
+bureaucracy. Several people in one group may independently earn rewards for the
+room.
+
+To cancel, identify one exact unbound policy from `activeMissions` and call
+`cancel_usage_referral` with that exact `policyCode`. If the request is
+ambiguous, ask one narrow clarification. Canceling one policy never cancels or
+replaces another.
+
+If arm returns
+`usage_referral_arm_applied_snapshot_unavailable`, the arm committed but the
+current snapshot could not be refreshed. Do not arm it again or claim that
+commit failed. Immediately call `read_usage_referral`; that recovery read is
+authoritative for current state. Report its exact `activeMissions`, even when
+the committed policy later completed, was canceled, expired, or otherwise
+stopped being active. If that read is also unavailable, say the arm committed
+but current state could not be refreshed; do not claim any mission is active or
+inactive, and do not invent a reward, destination, or deadline.
+
+If cancel returns
+`usage_referral_cancel_applied_snapshot_unavailable`, the cancellation
+committed but the current snapshot could not be refreshed. Do not retry it or
+claim that commit failed. Immediately call `read_usage_referral`; that recovery
+read is authoritative for current state, including a mission armed after the
+cancellation, other active missions, or the same policy being armed again later.
+If that read is also unavailable, say the cancellation committed but current
+referral state could not be refreshed.
 
 For any Family member usage follow-up, call
 `murph.family_plan action="read_status"` on that turn when available, even if
@@ -232,18 +291,26 @@ current result has `owner: true`, `billingActive: true`, and the intended person
 matches exactly one `members` row whose `status` is `active`. Ask one narrow
 clarifying question when the intended member is missing or ambiguous. When any
 gate fails, do not provide the handoff: explain that the active Family owner
-must manage an active member. The handoff is navigation to Settings > Family,
+must manage an active member. When the exact active row has `isOwner: true`,
+send `https://www.withmurph.ai/settings?addUsage=family#family`; for another
+active member, send `https://www.withmurph.ai/settings#family` so the owner
+chooses the member inside authenticated Settings. Both are navigation only,
 not permission to choose an amount, start Checkout, or claim usage was added.
 
 - **Trial:** Starting Pulse now can preserve continuity. State the exact current
   `subscriptionActionQuote` label before asking for confirmation. Waiting for
   the trial end or usage reset remains a valid choice.
-- **Paid Pulse:** A one-time usage-credit addition fits a temporary spike. If
-  the member explicitly asks about a lasting alternative and a current
-  `upgrade_edge` quote exists, explain that Edge fits a consistently higher
-  pace. Never present the quote itself as a recommendation.
-- **Paid Edge:** Offer the authorized one-time add-usage handoff or waiting for
-  the reset. There is no higher current direct tier to invent.
+- **Paid Pulse:** A one-time usage-credit addition fits a temporary spike. On an
+  explicit request for the add-usage page, a current `accessKind: "paid"`
+  result authorizes the first-party handoff
+  `https://www.withmurph.ai/settings?addUsage=true#subscription` even when
+  `recommendedAction` is null because proactive recommendation thresholds are
+  not met. If the member explicitly asks about a lasting alternative and a
+  current `upgrade_edge` quote exists, explain that Edge fits a consistently
+  higher pace. Never present the quote itself as a recommendation.
+- **Paid Edge:** On an explicit request, use the same authorized personal
+  add-usage handoff or offer waiting for the reset. There is no higher current
+  direct tier to invent.
 - **Family Pulse:** Personal top-ups are unavailable. The Family plan owner may
   add one-time usage for this active member after the shared Family usage gate
   above. For seat-tier changes, follow the existing private management-handoff
@@ -267,10 +334,14 @@ less AI usage." Never switch it automatically.
 ## Action boundaries
 
 - A recommendation or low-usage warning is not consent.
-- Merely describing a referral mission is not consent. Never arm a mission
-  until one exact current sender chooses one exact returned policy. Cancel only
-  when that same sender asks. The next newly created Murph group is the target;
-  never ask for or supply account, sender, group, route, or reward identifiers.
+- Merely describing referral missions is not consent. Never arm a policy until
+  the exact current sender chooses that exact returned policy. After multiple
+  exact options, an explicit "both" or "all" authorizes each one; a bare yes
+  does not. Cancel only the exact unbound policy that same sender identifies.
+  The next newly created Murph group is the target; never ask for or supply
+  account, sender, group, route, or reward identifiers.
+- Different policies are independent. Arming or canceling one must never be
+  presented as replacing, canceling, or blocking another.
 - Treat returned message counts as approximate capacity, never guaranteed
   delivery. Use the exact server-returned label; do not calculate, translate,
   or promise your own number of messages or days. Never reveal qualification
@@ -279,13 +350,18 @@ less AI usage." Never switch it automatically.
   state its label, and get explicit confirmation of that exact choice.
 - A bare yes after multiple options is ambiguous. Ask which option they mean.
 - For personal `add_usage`, send only the authorized first-party Settings
-  handoff. Never choose an amount, start Checkout, or claim usage was added.
+  handoff after a current paid-access read. Never choose an amount, start
+  Checkout, or claim usage was added.
+- For Family usage, use only the owner-self or general Family Settings handoff
+  selected by the exact current status gates above. Never put a member ID or
+  group ID into a model-composed link.
 - Send a group funding URL only when `read_usage` returned it.
 - Sell continuity with confidence and charm. Match the room's energy: a quiet
-  chat gets a light nudge, a rowdy one can get the full bit, and playful
-  stakes or nominating someone to cover it are fair game. Do not guilt-trip,
-  and keep payment facts true and private: never reveal who paid, amounts, or
-  purchase status, and never claim usage was added when it was not.
+  chat gets a light nudge and a rowdy one can get the full bit. Describe the
+  sponsor action in approximate messages, not internal usage credit. Do not
+  guilt-trip, call out nonpayers, or create a public payer ledger. Keep payment
+  facts true and private: never reveal who paid, amounts, or purchase status,
+  and never claim messages were sponsored when they were not.
 - Do not repeat the heads-up when it already appears in the recent
   conversation and nothing observably changed, and after a clear decline the
   standing no-re-offer rule wins. Come back only on an observed state change:

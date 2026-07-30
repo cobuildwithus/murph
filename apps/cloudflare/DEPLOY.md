@@ -27,6 +27,38 @@ Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budg
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
+## Database Health Alert Rollout
+
+Before deploying the Worker version that introduces
+`DatabaseHealthDurableObject`, configure the production GitHub environment:
+
+- var `HOSTED_DATABASE_ALERT_ENABLED=1` (leave it unset outside production);
+- vars `HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION`,
+  `HOSTED_DATABASE_ALERT_PLANETSCALE_DATABASE_NAME`,
+  `HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_NAME`, and
+  `HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_ID`;
+- secrets `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID` and
+  `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN` for a dedicated PlanetScale
+  token with only the organization-level `read_metrics_endpoints` permission;
+- secrets `HOSTED_DATABASE_ALERT_LINQ_CHAT_ID` and
+  `HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID` for two separate existing
+  direct operator chats whose sole external recipients are different; and
+- the already-required `LINQ_API_TOKEN`.
+
+Deploy Cloudflare only; no Web or database migration is involved. Wrangler
+migration `v4` creates the SQLite Durable Object namespace and the generated
+config installs the five-minute cron. After deployment, confirm one scheduled
+invocation records an `ok` sample without a Linq send under healthy metrics.
+Then use the test-only fake-provider coverage for threshold and delivery proof;
+do not induce a production database failure or mutate a real counter for smoke.
+Confirm Workers Observability contains no configuration or collection failure
+codes. Rollback may leave the unused v4 namespace and samples in place; an older
+Worker does not schedule or address it, and no Web compatibility window exists.
+After the two-recipient Worker has admitted a pending page, do not roll back to
+the former single-recipient implementation: it can clear that page after only
+the primary provider operation. The two-recipient Worker is the rollback floor
+until alerts are disabled or the pending page has cleared.
+
 ## Device-Sync Wake Epoch Rollout
 
 Connection-scoped `device-sync.wake` items bind their authority to the
@@ -354,7 +386,7 @@ Before the first deploy:
 2. Apply `apps/cloudflare/r2-bundles-lifecycle.json` to the real bundles buckets, or run the normal worker deploy path, which reapplies it before deploying the Worker.
 3. Decide the public Worker URL, either `*.workers.dev` or a custom domain.
 
-The checked-in lifecycle file contains two narrow backstops. Raw hosted-email blobs and their encrypted recovery refs under `hosted-email/messages/` become deletion-eligible after 24 hours. Encrypted automatic meal-photo staging under `hosted-meal-photos/images/` becomes deletion-eligible after 31 days, one day beyond canonical mailbox recovery retention; successful imports still delete those objects immediately after checkpoint. R2 deletes eligible objects asynchronously. Raw email cleanup is lifecycle-backed plus account-deletion cleanup, and meal-photo staging is post-checkpoint deleted plus lifecycle- and account-deletion-backed; the rest of the encrypted objects in `BUNDLES` remain owner-cleaned or durable by design.
+The checked-in lifecycle file contains three narrow backstops. Raw hosted-email blobs and their encrypted recovery refs under `hosted-email/messages/` become deletion-eligible after 24 hours. Application-encrypted Linq avatar-ingress objects under `hosted-private-media/images/` also become deletion-eligible after 24 hours. Retries reuse the deterministic object and cap capability expiry at that object's original lifecycle boundary; at or after the boundary, the mutation-locked `UserRunner` replaces the same deterministic key before returning another bounded capability. Account deletion synchronously deletes the member prefix. Encrypted automatic meal-photo staging under `hosted-meal-photos/images/` becomes deletion-eligible after 31 days, one day beyond canonical mailbox recovery retention; successful imports still delete those objects immediately after checkpoint. R2 deletes eligible objects asynchronously. The rest of the encrypted objects in `BUNDLES` remain owner-cleaned or durable by design.
 
 ## Required GitHub Environment Vars
 
@@ -368,10 +400,16 @@ Set these in the selected GitHub environment as vars:
 - `HOSTED_WEB_PRODUCTION_BASE_URL`
 - `HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG`
 - `HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME`
+- `HOSTED_DATABASE_ALERT_ENABLED=1` (production only; it must be unset for
+  preview and development)
+- `HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_ID`
+- `HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_NAME`
+- `HOSTED_DATABASE_ALERT_PLANETSCALE_DATABASE_NAME`
+- `HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION`
 - `HOSTED_R2_PRESIGN_ACCOUNT_ID`
 - `HOSTED_R2_PRESIGN_BUCKET_NAME`
 
-`CF_PUBLIC_BASE_URL` is required for the standard deploy-and-smoke flow because smoke targets the public Worker URL after deploy. Runner internal-host requests use Cloudflare Container outbound interception instead of a public Worker callback route.
+`CF_PUBLIC_BASE_URL` is a required non-secret Worker variable as well as the standard deploy-and-smoke target. Private-media capability creation uses that exact deployment origin, and hosted Web validates capabilities against its matching `HOSTED_EXECUTION_CONTROL_URL` origin. Production preflight pins both sides to `https://murph-hosted.cobuildwithus.workers.dev`; preview uses its isolated staging Worker origin and must reject production-origin capabilities. Change the production pin and deploy invariant together before moving the production origin. Runner internal-host requests use Cloudflare Container outbound interception instead of a public Worker callback route.
 `HOSTED_R2_PRESIGN_ACCOUNT_ID` must match `CLOUDFLARE_ACCOUNT_ID`, and `HOSTED_R2_PRESIGN_BUCKET_NAME` must match `CF_BUNDLES_BUCKET`; direct-R2 workspace snapshots upload and restore through presigned URLs and are verified through the Worker R2 binding. Local S3-compatible endpoint flags are hosted-local only and must not be set for deploys.
 For production deploys, `HOSTED_WEB_BASE_URL` must exactly match the normalized
 origin in `HOSTED_WEB_PRODUCTION_BASE_URL`; production preflight also rejects
@@ -396,18 +434,47 @@ The Worker also enforces that fingerprint contract on the normal user path. Befo
 
 The production smoke also runs one real `gpt-5.6-terra` model turn inside the deployed runner container (`HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN=true`, set by the deploy workflow's `live_model_turn` input, default on). The container runs a single non-interactive `codex exec` in a scratch workspace with the injected-credential placeholder; the Worker egress intercept authorizes exactly one deploy-smoke fenced `POST /v1/responses` request for `gpt-5.6-terra` and injects the real Worker-owned `OPENAI_API_KEY`, so the smoke proves the rollout target's OpenAI auth, account availability, quota, request compatibility, and network path without the raw key ever entering the container. The container accepts the smoke only when Codex JSONL reports the final agent output as exactly `OK`. Cost posture: exactly one bounded model turn per production deploy; the flag is never set in per-PR CI or hosted-local E2E, so those paths are byte-for-byte unchanged.
 
+## Venice Provider Activation
+
+Venice is an optional core-inference provider, not a replacement for the fleet
+default or specialized tool providers. Configure the selected GitHub
+Environment with these four values as one group:
+
+- secret `VENICE_API_KEY`
+- vars `HOSTED_VENICE_LUNA_MODEL`, `HOSTED_VENICE_TERRA_MODEL`, and
+  `HOSTED_VENICE_SOL_MODEL`
+
+Deploy preflight rejects a partial group. Keep the hosted Web
+`HOSTED_VENICE_ENABLED` flag off while applying the nullable member migration
+and deploying the compatible Web reader. Then deploy Cloudflare and the runner
+with `container_rollout=immediate`, require the exact runner fingerprint, and
+exercise a controlled core turn that reaches Venice through the Worker
+intercept without exposing the key to the container. Only after that proof
+should Web enable the flag and redeploy so Settings can offer Venice.
+
+Rollback in the opposite exposure order: disable the Web flag and redeploy Web
+first, verify new workspace reads omit the Venice override, and only then
+remove the Venice secret/mappings or roll Cloudflare back. The nullable stored
+preference may remain; while the flag is off it resolves to OpenAI.
+
 ## Required GitHub Environment Secrets
 
 Set these in the selected GitHub environment as secrets:
 
 - `CLOUDFLARE_API_TOKEN`
 - `CLOUDFLARE_ACCOUNT_ID`
+- `CLOUDFLARE_IMAGES_SIGNING_KEY`
 - `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK`
+- `HOSTED_DATABASE_ALERT_LINQ_CHAT_ID`
+- `HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID`
+- `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN`
+- `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID`
 - `HOSTED_LOG_FINGERPRINT_SECRET`
 - `HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET`
 - `HOSTED_R2_PRESIGN_ACCESS_KEY_ID`
 - `HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY`
 - `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`
+- `LINQ_API_TOKEN`
 - `MURPH_DATA_API_KEY`
 - `OPENAI_API_KEY`
 
@@ -418,11 +485,43 @@ hosted Web; the Worker and runner carry only the normalized semantic
 request/response. Deploy the compatible Web route and credential first, then
 Cloudflare/runtime. Roll back Cloudflare/runtime first so deploy skew fails
 closed as Labs unavailable instead of calling a removed Web route.
+
+For the first OpenAI/Venice provider-choice release, keep
+`HOSTED_VENICE_ENABLED` disabled until both Web and Cloudflare/runtime are
+deployed. A new runtime accepts the preceding provider-less assistant
+configuration response as OpenAI, so either deploy order preserves ordinary
+replies while the flag is closed. Deploy Web before enabling Venice, deploy
+Cloudflare/runtime immediately afterward with `container_rollout=immediate`,
+then enable the Web flag only after managed-container smoke reports the new
+runner fingerprint. Roll back by disabling the Web flag first.
 The Cloudflare automation private JWK is only used to unwrap the `cloudflare-automation-secret` recipient on signed ingress/runtime domain-root envelopes returned by hosted web.
 `OPENAI_API_KEY` is required by the standard Worker deploy preflight because the hosted assistant provider path expects Worker-owned OpenAI egress interception. The runner container still receives only an injected-credential placeholder; the raw key stays in the Worker.
 `HOSTED_LOG_FINGERPRINT_SECRET` is required so prompt-cache diagnostics can persist stable, Worker-owned request fingerprints without logging prompts, messages, request bodies, headers, or raw identifiers. It must stay out of hosted runtime env.
 `MURPH_DATA_API_KEY` is required so the Worker can authorize the internal `murph-data-api.worker` product label lookup endpoints (`/api/foods` and `/api/supplements`) without exposing the key to the runner. Hosted web must have `MURPH_LABELS_DB_URL` before serving either route; `MURPH_SUPPLEMENT_DB_URL` is not a runtime fallback.
-Hosted generated-image uploads additionally need optional Worker-owned Cloudflare Images config: `CLOUDFLARE_IMAGES_ACCOUNT_ID`, Worker secret `CLOUDFLARE_IMAGES_API_KEY`, and optional `CLOUDFLARE_IMAGES_VARIANT`. Cloudflare credentials are never forwarded into the runner. Without those values the generation call itself still runs and is billed; the subsequent upload fails with a clear `Generated image upload is not configured` error, so configure Images before enabling image generation in production. The runner cannot see Worker env, so a pre-generation availability check would need a worker-to-container capability field; add that plumbing only if unconfigured-deploy spend shows up in traces.
+Hosted message images do not use Cloudflare Images. The runner stores generated bytes as canonical vault captures and final delivery uses Linq attachments or Telegram multipart upload. Linq group avatars remain available through the narrow `results.worker/private-image-urls` boundary: the Worker passes only validated bytes and MIME type to the existing per-user `UserRunner`, which serializes the write-fence check and deterministic application-encrypted R2 staging with account deletion, then returns an opaque at-most-one-day capability on the current deployment's exact `CF_PUBLIC_BASE_URL` origin for the immediate avatar mutation. Hosted Web accepts that capability only when its origin matches `HOSTED_EXECUTION_CONTROL_URL`; production and preview therefore reject one another's capabilities while the isolated preview Worker, R2 bucket, secret, and Web boundary complete the same journey. The capability hides the member id, R2 key, storage namespace, and image hash; the public GET route decrypts and verifies the object and responds with `private, no-store`. A retry reuses the deterministic object only while its original lifecycle window remains and cannot extend capability validity past that boundary; at or after the boundary, the mutation-locked `UserRunner` replaces the same key before returning another capability. Account deletion makes the existing bounded Cloudflare cleanup attempt before acknowledging completion and synchronously sweeps the member prefix when that attempt succeeds; its encrypted receipt and retention cron retain retry ownership on timeout or provider failure. The R2 lifecycle makes any remaining object eligible for asynchronous deletion after 24 hours rather than guaranteeing physical deletion by that age. Neither cleanup path relies on Linq fetch timing. `HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET` is Worker-only, must contain at least 32 characters, and must not enter runner env. During this cutover, the workflow maps the existing GitHub environment secret named `CLOUDFLARE_IMAGES_SIGNING_KEY` into that new Worker variable so no secret value is copied or exposed; rename the GitHub secret in a later coordinated deploy. The legacy `results.worker/generated-images` route remains a `410 Gone` rolling-deploy tombstone.
+
+For the private-media cutover, deploy hosted Web and Cloudflare/runner as a
+tandem change, with Web first and Cloudflare immediately afterward using
+`container_rollout=immediate`. Web temporarily accepts both legacy avatar
+shapes emitted by versions in the rollback window: the previous signed Images
+URL and the exact queryless
+`https://imagedelivery.net/<account>/<image>/public` variant. It rejects other
+queryless variants, extra path segments, query parameters on the public variant,
+and non-Images origins. The new Worker creates only encrypted R2 capabilities.
+Verify the generated-image Linq attachment smoke, an R2-backed group-avatar
+mutation, both legacy parser fixtures, the private-media GET response headers,
+and the `410` tombstone. The Web deploy also switches the
+explicit results-card flow to authenticated same-origin POST and tombstone both
+legacy card GET routes. The two deployments are wire-compatible during the
+brief window for either legacy avatar URL shape; an old generated-image runner
+against the new Worker receives `410` and falls back to text, while a new
+runner no longer calls the image-upload route. Once a
+new runner persists a `vault_image` outbox descriptor, that reader-capable
+runner bundle is the rollback floor; use a forward fix rather than rolling
+containers below it. Keep both legacy avatar inputs only until every legacy
+producer and rollback candidate has drained; remove them in a later coordinated
+Web-first change. Do not roll hosted Web back to the data-bearing card URL
+implementation.
 
 ## Optional Vars
 
@@ -482,11 +581,16 @@ Hosted crypto authority metadata:
 
 Hosted assistant config:
 
-- `HOSTED_ASSISTANT_PROVIDER`
+- `HOSTED_ASSISTANT_PROVIDER`; keep the fleet default `openai`. A per-member
+  Venice selection arrives through the signed workspace projection rather than
+  this deploy default.
 - `HOSTED_ASSISTANT_MODEL`; worker deploy preflight requires an explicit allowance-priced direct OpenAI model slug. Supported slugs are `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`. Production deploys require `HOSTED_ASSISTANT_REASONING_EFFORT=low`.
 - `HOSTED_ASSISTANT_APPROVAL_POLICY`
 - `HOSTED_ASSISTANT_REASONING_EFFORT`
 - `HOSTED_ASSISTANT_SANDBOX`
+- Optional all-or-none Venice model mappings: `HOSTED_VENICE_LUNA_MODEL`,
+  `HOSTED_VENICE_TERRA_MODEL`, and `HOSTED_VENICE_SOL_MODEL`, paired with the
+  `VENICE_API_KEY` GitHub Environment secret.
 
 When changing hosted assistant model pricing or allowance enforcement, deploy the
 Cloudflare Worker/runner model config before or atomically with the hosted web
@@ -570,7 +674,11 @@ When hosted email sender identity is configured, deploy automation renders one n
 
 Hosted assistant provider and channel secrets:
 
-- `EXA_API_KEY`, `LINQ_API_TOKEN`, `MAPBOX_ACCESS_TOKEN`, and `TELEGRAM_BOT_TOKEN` when those hosted runtime integrations are enabled. These are Worker-owned intercept credentials, not raw child-container env. Exa egress is limited to `POST /search`.
+- `EXA_API_KEY`, `MAPBOX_ACCESS_TOKEN`, and `TELEGRAM_BOT_TOKEN` when those
+  hosted runtime integrations are enabled. `LINQ_API_TOKEN` is no longer
+  optional because the independent database-health page owner uses it. These
+  are Worker-owned credentials, not raw child-container env. Exa egress is
+  limited to `POST /search`.
 
 Hosted usage-reporting secrets:
 
@@ -601,7 +709,6 @@ Opt-in execution integrations:
 - `JUNCTION_API_KEY`
 - `JUNCTION_CLIENT_USER_ID_SECRET`
 - `JUNCTION_WEBHOOK_SECRET`
-- `LINQ_API_TOKEN`
 - `LINQ_WEBHOOK_SECRET`
 - `MAPBOX_ACCESS_TOKEN`
 - `OURA_CLIENT_ID`
@@ -725,10 +832,6 @@ export HOSTED_ASSISTANT_REASONING_EFFORT=low
 # HOSTED_LOG_FINGERPRINT_SECRET,
 # HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET,
 # HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK, MURPH_DATA_API_KEY, OPENAI_API_KEY.
-# Optional hosted generated-image upload support also uses
-# CLOUDFLARE_IMAGES_ACCOUNT_ID, CLOUDFLARE_IMAGES_API_KEY, and optionally
-# CLOUDFLARE_IMAGES_VARIANT.
-
 pnpm --dir apps/cloudflare deploy:preflight
 pnpm --dir apps/cloudflare deploy:artifacts
 ```
@@ -833,6 +936,19 @@ That command:
 
 The gradual container rollout keeps the production `RunnerContainer` `rollout_active_grace_period` at 300 seconds and rolls runner instances through `10`, `25`, `50`, then `100` percent. The isolated `DeploySmokeRunnerContainer` uses zero active grace and a single 100 percent step: it carries no user work, and smoke probes must not defer the image replacement they are trying to verify. The manual workflow exposes a `container_rollout` input; its production default is currently `immediate` because selector-scoped vault-share deliveries are unsafe under gradual runner rollout. Selecting `immediate` passes Wrangler's `--containers-rollout=immediate` flag and can interrupt active runner containers.
 During gradual rollout, Worker code and runner container state may disagree for the rollout window. A newly deployed Worker version can handle provider egress or internal-host traffic from an already-running warm runner process whose bundle, process env, or provider-credential shape was created before the deploy. Treat this as expected rollout behavior, not proof that traffic is reaching an old Worker version. Any PR that changes a Worker/container contract, runner env shape, hosted provider credential, internal host route, parser/toolchain path, or bundle-owned runtime assumption must document the compatibility window in its PR description and final `DEPLOYMENT CONCERNS:` handoff: whether old containers can safely talk to new Worker code, whether new containers can safely talk to old web/control-plane code, whether `container_rollout=immediate` is required, and which deploy-smoke or Workers Observability checks prove the fleet has converged.
+
+The accepted group-message participant rollout is Web-first. Deploy the Web
+release that accepts both new exact `groupRequester` / `participant` evidence
+and the legacy mailbox / self-opt-out fallbacks before deploying the Worker and
+runner that send only the new fields. Roll back Worker/runner first. After
+managed-container smoke proves the new runner fingerprint and all warm old
+runners have drained, the legacy Web-only fields may be removed in a separate
+contracting release. This order also covers optional group-speaker provenance:
+old runners may leave owner-contact labels unnamed when new Web emits the
+additive source field, but conversation and exact participant authorization
+remain available. After convergence, smoke one profile-name label, one
+unverified owner-contact label, and one participant-scoped action selected by
+an opaque accepted-message ref.
 
 The scheduled Linq authority release has a Web-first hard gate. Deploy and
 verify Web's concrete-target/directness response before deploying Cloudflare

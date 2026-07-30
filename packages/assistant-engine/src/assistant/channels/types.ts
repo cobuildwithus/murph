@@ -12,10 +12,14 @@ import {
   type AssistantMessageReaction,
   type AssistantResponseMedia,
   type AssistantResponseMediaKind,
+  type AssistantVaultImageResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type { ConversationRef } from '../conversation-ref.js'
 
-type AssistantImageResponseMedia = Extract<AssistantResponseMedia, { kind: 'image' }>
+type AssistantImageResponseMedia = Extract<
+  AssistantResponseMedia,
+  { kind: 'image' | 'vault_image' }
+>
 type AssistantVaultFileResponseMedia = Extract<
   AssistantResponseMedia,
   { kind: 'vault_file' }
@@ -35,6 +39,9 @@ export interface TelegramRuntimeDependencies {
   authorityBoundTarget?: string | null
   env?: NodeJS.ProcessEnv
   fetchImplementation?: TelegramFetchImplementation
+  loadVaultImage?: (
+    media: AssistantVaultImageResponseMedia,
+  ) => Promise<Uint8Array>
   maxDeliveryAttempts?: number
   signal?: AbortSignal
 }
@@ -55,6 +62,9 @@ export interface LinqRuntimeDependencies {
   env?: NodeJS.ProcessEnv
   fetchImplementation?: LinqFetch
   publicFetchImplementation?: LinqFetch
+  loadVaultImage?: (
+    media: AssistantVaultImageResponseMedia,
+  ) => Promise<Uint8Array>
   loadVaultFile?: (
     media: AssistantVaultFileResponseMedia,
   ) => Promise<Uint8Array>
@@ -140,6 +150,7 @@ export interface AssistantChannelDependencies {
   >
   telegramVoiceMemoRuntime?: TelegramRuntimeDependencies
   sendLinq?: (input: {
+    acceptedAssistantInputIds?: readonly string[] | null
     answeredMailboxItemIds?: readonly string[] | null
     directRecipientPhoneNumber?: string | null
     fromPhoneNumber?: string | null

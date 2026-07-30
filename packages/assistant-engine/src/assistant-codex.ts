@@ -33,6 +33,7 @@ import {
   extractCodexErrorMessage,
   extractCodexCompletedFinalAgentMessageTextFromNormalized,
   extractCodexProgressEventFromNormalized,
+  isCodexCompletedFinalAgentMessageItemFromNormalized,
   isCodexCompletedUserMessageItemFromNormalized,
   type CodexStructuredErrorInfo,
   extractCodexStatusEventFromStderrLine,
@@ -125,7 +126,6 @@ import {
   type CodexAppServerImageInput,
 } from './assistant-codex/images.js'
 import type {
-  AssistantHostedGeneratedImageUploader,
   AssistantWorkspaceArtifactMaterializer,
 } from './assistant/execution-context.js'
 import type {
@@ -238,7 +238,6 @@ type CodexAppServerPreparedTurnInput = CodexAppServerTurnInput & {
   codexCommand: string
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
-  hostedGeneratedImageUploader: AssistantHostedGeneratedImageUploader | null
   imagePaths: readonly string[]
   launchKey: string
   publicInternetFetch: typeof fetch | null
@@ -446,6 +445,7 @@ export interface CodexAppServerTurnInput {
   model?: string | null
   modelProvider?: string | null
   outputSchema?: Readonly<Record<string, unknown>> | null
+  onFirstAssistantResponseCompleted?: (() => void) | null
   onLiveTurn?: ((turn: CodexAppServerLiveTurn) => void | (() => void)) | null
   onProgress?: ((event: CodexProgressEvent) => void) | null
   onFinishWithoutReplyAccepted?: ((
@@ -456,7 +456,6 @@ export interface CodexAppServerTurnInput {
   }) => Promise<void> | void) | null
   onProviderRequestStarted?: ((event: AssistantProviderRequestStartedEvent) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
-  hostedGeneratedImageUploader?: AssistantHostedGeneratedImageUploader | null
   groupConversation?: boolean | null
   groupRoomModelMaintenanceAuthorized?: boolean | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
@@ -481,7 +480,7 @@ export interface CodexAppServerTurnInput {
   hostedToolContext?: AssistantHostedToolContext | null
   providerRequestOrdinal?: number | null
   publicInternetFetch?: typeof fetch | null
-  requireHostedGeneratedImageUploader?: boolean | null
+  requireHostedPrivateImageDelivery?: boolean | null
   vaultRoot?: string | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
   askGrokRuntime?: AskGrokToolRuntime | null
@@ -669,7 +668,6 @@ export async function executeCodexAppServerTurn(
     codexCommand,
     env: childEnv,
     fetchImpl: input.fetchImpl ?? fetch,
-    hostedGeneratedImageUploader: input.hostedGeneratedImageUploader ?? null,
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
     imagePaths,
     launchKey,
@@ -2795,6 +2793,7 @@ async function runCodexAppServerTurnOnProcess(
   // the final reply rather than a preceding duplicate.
   const precedingAgentMessageSegments: CodexAppServerResponseSegment[] = []
   let completedFinalAgentMessage: string | null = null
+  let firstAssistantResponseCompleted = false
   let trailingSteerCandidate: CodexAppServerResponseSegment | null = null
   let completedUserMessageOrdinal = -1
   let lastEventError: string | null = null
@@ -3924,11 +3923,10 @@ async function runCodexAppServerTurnOnProcess(
           codexHome: input.codexHome ?? input.env.CODEX_HOME ?? null,
           env: input.env,
           fetchImpl: input.fetchImpl,
-          hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
           hostedToolContext,
           materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
           currentResponseMedia: responseMedia,
-          deliveryContextOrdinal: dynamicToolDeliveryContextOrdinal,
+          deliveryContextOrdinal: dynamicToolRequestDeliveryContextOrdinal,
           nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
           productFeedbackRecorder: input.productFeedbackRecorder ?? null,
           progressDelivery:
@@ -3937,8 +3935,8 @@ async function runCodexAppServerTurnOnProcess(
               : null,
           publicFetchImpl: input.publicInternetFetch ?? null,
           request: dynamicToolRequest,
-          requireHostedGeneratedImageUploader:
-            input.requireHostedGeneratedImageUploader ?? false,
+          requireHostedPrivateImageDelivery:
+            input.requireHostedPrivateImageDelivery ?? false,
           vaultRoot: input.vaultRoot ?? null,
           voiceMemoRuntime:
             dynamicToolRequest.kind === 'generate-voice-memo' ||
@@ -4165,7 +4163,15 @@ async function runCodexAppServerTurnOnProcess(
         // Transport diagnostics are metadata-only and must not block turns.
       }
     }
-    const providerActionKey = extractCodexProviderActionKey(normalizedEvent)
+    const transportDiagnosticSource =
+      readCodexTransportDiagnosticSource(message, method)
+    if (transportDiagnosticSource?.willRetry === true) {
+      input.productFeedbackRecorder?.discardProductFeedback()
+    }
+    const providerActionKey = extractCodexProviderActionKey(
+      normalizedEvent,
+      message,
+    )
     if (providerActionKey && !providerActionItemIds.has(providerActionKey)) {
       providerActionItemIds.add(providerActionKey)
       providerActionCount += 1
@@ -4224,9 +4230,19 @@ async function runCodexAppServerTurnOnProcess(
 
     const completedFinalAgentMessageText =
       extractCodexCompletedFinalAgentMessageTextFromNormalized(normalizedEvent)
-    if (completedFinalAgentMessageText !== null && !suppressDeliveryContext) {
+    const completedFinalAgentResponse =
+      isCodexCompletedFinalAgentMessageItemFromNormalized(normalizedEvent) &&
+      (
+        completedFinalAgentMessageText !== null ||
+        responseMedia.length > 0
+      )
+    if (completedFinalAgentResponse && !suppressDeliveryContext) {
       promoteTrailingSteerCandidate()
-      completedFinalAgentMessage = completedFinalAgentMessageText
+      completedFinalAgentMessage = completedFinalAgentMessageText ?? ''
+      if (!firstAssistantResponseCompleted) {
+        firstAssistantResponseCompleted = true
+        input.onFirstAssistantResponseCompleted?.()
+      }
     } else if (isCodexCompletedUserMessageItemFromNormalized(normalizedEvent)) {
       if (completedFinalAgentMessage !== null) {
         const completedResponseDeliveryContextOrdinal = Math.max(
@@ -5089,7 +5105,6 @@ function isSerializedDynamicToolRequest(
     request.kind === 'assistant-style' ||
     request.kind === 'personalization' ||
     request.kind === 'subscription' ||
-    request.kind === 'submit-product-feedback' ||
     request.kind === 'react-to-message' ||
     request.kind === 'select-reply-target' ||
     isComputerDynamicToolRequest(request)
@@ -5332,12 +5347,19 @@ function normalizeCodexRolloutRelativePath(
 
 function extractCodexProviderActionKey(
   normalizedEvent: CodexNormalizedEvent,
+  rawEvent: CodexRpcMessage,
 ): string | null {
   if (normalizedEvent.kind === 'status_item') {
     if (
       normalizedEvent.itemType !== 'command.execution' &&
       normalizedEvent.itemType !== 'dynamic.tool.call' &&
       normalizedEvent.itemType !== 'file.change'
+    ) {
+      return null
+    }
+    if (
+      normalizedEvent.itemType === 'dynamic.tool.call' &&
+      isCodexProductFeedbackDynamicToolEvent(rawEvent)
     ) {
       return null
     }
@@ -5358,6 +5380,25 @@ function extractCodexProviderActionKey(
   return (
     normalizedEvent.itemId ??
     providerActionFallbackKeyFromNormalized(normalizedEvent)
+  )
+}
+
+function isCodexProductFeedbackDynamicToolEvent(
+  event: CodexRpcMessage,
+): boolean {
+  const params = readCodexRecordField(event, 'params')
+  const data = readCodexRecordField(event, 'data')
+  const item =
+    readCodexRecordField(event, 'item') ??
+    readCodexRecordField(params, 'item') ??
+    readCodexRecordField(data, 'item')
+  const itemType = readCodexStringField(item, 'type')
+    ?.replaceAll(/[._-]/gu, '')
+    .toLowerCase()
+  return (
+    itemType === 'dynamictoolcall' &&
+    readCodexStringField(item, 'namespace') === 'murph' &&
+    readCodexStringField(item, 'tool') === 'submit_product_feedback'
   )
 }
 

@@ -5,8 +5,12 @@ import path from 'node:path'
 import { Cli } from 'incur'
 import { test } from 'vitest'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
-import { registerExperimentCommands } from '../src/commands/experiment.js'
+import {
+  buildEffectiveSnapshotFromCommonsProtocol,
+  registerExperimentCommands,
+} from '../src/commands/experiment.js'
 import { registerJournalCommands } from '../src/commands/journal.js'
+import { registerMeasurementCommands } from '../src/commands/measurement.js'
 import { registerProtocolCommands } from '../src/commands/protocol.js'
 import { registerReadCommands } from '../src/commands/read.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
@@ -43,6 +47,7 @@ function createSliceCli(input: { config?: boolean } = {}) {
   registerVaultCommands(cli, services, createIntegratedInboxServices())
   registerExperimentCommands(cli, services)
   registerJournalCommands(cli, services)
+  registerMeasurementCommands(cli)
   registerProtocolCommands(cli, services)
   registerReadCommands(cli, services)
 
@@ -87,6 +92,29 @@ function requireRecord(value: unknown, label: string): Record<string, unknown> {
   assert.ok(value && !Array.isArray(value), `${label} must be a non-array object`)
   return value as Record<string, unknown>
 }
+
+test('Health Commons snapshot construction preserves protocol activity evidence', () => {
+  const baseProtocol = loadGeneratedHealthCommonsProtocolRunSpecs().protocols.find(
+    (entry) =>
+      entry.key ===
+      'protocol_variant:dry-sauna/murph-finnish-standard-3x-week',
+  )
+  assert.ok(baseProtocol?.protocol)
+  const activitySessionEvidence = {
+    activityKinds: ['walking', 'cycling', 'rowing', 'elliptical'],
+    minimumDurationMinutes: 35,
+  }
+
+  const snapshot = buildEffectiveSnapshotFromCommonsProtocol({
+    ...baseProtocol,
+    protocol: {
+      ...baseProtocol.protocol,
+      activitySessionEvidence,
+    },
+  })
+
+  assert.deepEqual(snapshot.activitySessionEvidence, activitySessionEvidence)
+})
 
 async function rewriteVaultMetadataWithFormatVersion(
   vaultRoot: string,
@@ -210,7 +238,15 @@ test('experiment start schema exposes typed fields while protocol import-json ke
   )
   assert.match(
     experimentStartSchema.options.properties.primaryBiomarkerKey.description ?? '',
-    /Required for --custom starts.*biomarker:<metric-slug>/u,
+    /Legacy primary biomarker identity/u,
+  )
+  assert.match(
+    experimentStartSchema.options.properties.primaryOutcomeKey.description ?? '',
+    /Required for new custom runs.*biomarker:<outcome-slug>/u,
+  )
+  assert.match(
+    experimentStartSchema.options.properties.primaryOutcomeSourceMetricKey.description ?? '',
+    /Registered metric source or already observed metric source/u,
   )
   assert.equal('setupAnswer' in experimentStartSchema.options.properties, true)
   assert.equal('onboardingCompletedAt' in experimentStartSchema.options.properties, true)
@@ -394,7 +430,7 @@ test.sequential('experiment start requires an explicit protocol or custom fallba
   }
 })
 
-test.sequential('custom experiment start explains the required primary metric before writing', async () => {
+test.sequential('custom experiment start explains the required primary outcome before writing', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-start-metric-'))
 
   try {
@@ -416,11 +452,11 @@ test.sequential('custom experiment start explains the required primary metric be
     assert.equal(result.ok, false)
     assert.match(
       result.error.message ?? '',
-      /Custom experiment starts require --primary-biomarker-key biomarker:<metric-slug>/u,
+      /Custom experiment starts require --primary-outcome-key biomarker:<outcome-slug>/u,
     )
     assert.match(
       result.error.message ?? '',
-      /no protocol\/test-plan default primary metric/u,
+      /no protocol\/test-plan default primary outcome/u,
     )
 
     const shownAfterFailure = await runSliceCli([
@@ -431,6 +467,336 @@ test.sequential('custom experiment start explains the required primary metric be
       vaultRoot,
     ])
     assert.equal(shownAfterFailure.ok, false)
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('custom experiment start persists one first-class primary outcome', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-primary-outcome-'))
+
+  try {
+    await runSliceCli(['init', '--vault', vaultRoot])
+    const started = await runSliceCli([
+      'experiment',
+      'start',
+      'repetition-benchmark',
+      '--custom',
+      '--no-public-protocol',
+      '--title',
+      'Repetition Benchmark',
+      '--intervention-start',
+      '2026-05-01',
+      '--primary-outcome-key',
+      'biomarker:repetition-benchmark',
+      '--primary-outcome-kind',
+      'metric',
+      '--primary-outcome-label',
+      'Repetition benchmark',
+      '--comparison-statistic',
+      'latest',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(
+      started.ok,
+      true,
+      started.ok ? undefined : started.error.message,
+    )
+
+    const shown = await runSliceCli<{
+      entity: {
+        data: Record<string, unknown>
+      }
+    }>([
+      'experiment',
+      'show',
+      'repetition-benchmark',
+      '--vault',
+      vaultRoot,
+    ])
+    const analysisPlan = requireRecord(
+      requireData(shown).entity.data.analysisPlan,
+      'analysisPlan',
+    )
+    assert.equal(analysisPlan.primaryBiomarkerKey, undefined)
+    assert.deepEqual(analysisPlan.primaryOutcome, {
+      kind: 'metric',
+      key: 'biomarker:repetition-benchmark',
+      label: 'Repetition benchmark',
+      statistic: 'latest',
+    })
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('experiment start rejects competing primary outcome sources', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-outcome-conflict-'))
+
+  try {
+    await runSliceCli(['init', '--vault', vaultRoot])
+    const result = await runSliceCli([
+      'experiment',
+      'start',
+      'outcome-conflict',
+      '--custom',
+      '--no-public-protocol',
+      '--title',
+      'Outcome Conflict',
+      '--intervention-start',
+      '2026-05-01',
+      '--primary-outcome-key',
+      'biomarker:first-outcome',
+      '--primary-biomarker-key',
+      'biomarker:legacy-outcome',
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(result.ok, false)
+    assert.match(
+      result.error.message ?? '',
+      /either --primary-outcome-key or the legacy --primary-biomarker-key/u,
+    )
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('active structured reviews require bounded before-and-after evidence', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-structured-review-'))
+
+  try {
+    await runSliceCli(['init', '--vault', vaultRoot])
+    const incomplete = await runSliceCli([
+      'experiment',
+      'start',
+      'movement-review-incomplete',
+      '--custom',
+      '--no-public-protocol',
+      '--title',
+      'Movement Review',
+      '--intervention-start',
+      '2026-05-01',
+      '--primary-outcome-key',
+      'biomarker:movement-review',
+      '--primary-outcome-kind',
+      'structured_review',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(incomplete.ok, false)
+    assert.match(
+      incomplete.error.message ?? '',
+      /bounded baseline and follow-up evidence/u,
+    )
+
+    const started = await runSliceCli([
+      'experiment',
+      'start',
+      'movement-review',
+      '--custom',
+      '--no-public-protocol',
+      '--title',
+      'Movement Review',
+      '--intervention-start',
+      '2026-05-01',
+      '--primary-outcome-key',
+      'biomarker:movement-review',
+      '--primary-outcome-kind',
+      'structured_review',
+      '--primary-outcome-label',
+      'Movement review',
+      '--planned-measurement',
+      'role=baseline,kind=photo,window=2026-05-01..2026-05-01,biomarkerKeys=biomarker:movement-review',
+      '--planned-measurement',
+      'role=followup,kind=photo,window=2026-05-28..2026-05-28,biomarkerKeys=biomarker:movement-review',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(
+      started.ok,
+      true,
+      started.ok ? undefined : started.error.message,
+    )
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('custom session outcomes require their declared capture field', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-session-outcome-'))
+
+  try {
+    await runSliceCli(['init', '--vault', vaultRoot])
+    const missingField = await runSliceCli([
+      'experiment',
+      'start',
+      'session-benchmark-incomplete',
+      '--custom',
+      '--no-public-protocol',
+      '--title',
+      'Session Benchmark',
+      '--intervention-start',
+      '2026-05-01',
+      '--primary-outcome-key',
+      'biomarker:session-benchmark',
+      '--primary-outcome-kind',
+      'metric',
+      '--primary-outcome-session-field',
+      'benchmark_score',
+      '--primary-outcome-unit',
+      'points',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(missingField.ok, false)
+    assert.match(
+      missingField.error.message ?? '',
+      /requires --session-field benchmark_score/u,
+    )
+
+    const started = await runSliceCli([
+      'experiment',
+      'start',
+      'session-benchmark',
+      '--custom',
+      '--no-public-protocol',
+      '--title',
+      'Session Benchmark',
+      '--intervention-start',
+      '2026-05-01',
+      '--session-field',
+      'benchmark_score',
+      '--primary-outcome-key',
+      'biomarker:session-benchmark',
+      '--primary-outcome-kind',
+      'metric',
+      '--primary-outcome-session-field',
+      'benchmark_score',
+      '--primary-outcome-unit',
+      'points',
+      '--comparison-statistic',
+      'max',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(
+      started.ok,
+      true,
+      started.ok ? undefined : started.error.message,
+    )
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('derived outcomes require an existing deterministic metric source', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-derived-outcome-'))
+
+  try {
+    await runSliceCli(['init', '--vault', vaultRoot])
+    const unknownSource = await runSliceCli([
+      'experiment',
+      'start',
+      'derived-outcome-missing-source',
+      '--custom',
+      '--no-public-protocol',
+      '--title',
+      'Derived Outcome',
+      '--intervention-start',
+      '2026-05-01',
+      '--primary-outcome-key',
+      'biomarker:derived-outcome',
+      '--primary-outcome-kind',
+      'metric',
+      '--primary-outcome-source-metric-key',
+      'mistyped-daily-score',
+      '--comparison-statistic',
+      'mean',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(unknownSource.ok, false)
+    assert.match(
+      unknownSource.error.message ?? '',
+      /has no registered metric producer or existing metric points/u,
+    )
+
+    const measurement = await runSliceCli([
+      'measurement',
+      'add',
+      '--metric',
+      'custom-daily-score',
+      '--value',
+      '7',
+      '--unit',
+      'points',
+      '--occurred-at',
+      '2026-04-30T08:00:00.000Z',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(
+      measurement.ok,
+      true,
+      measurement.ok ? undefined : measurement.error.message,
+    )
+
+    const observedCustomSource = await runSliceCli([
+      'experiment',
+      'start',
+      'derived-outcome-observed-source',
+      '--custom',
+      '--no-public-protocol',
+      '--title',
+      'Derived Outcome',
+      '--intervention-start',
+      '2026-05-01',
+      '--primary-outcome-key',
+      'biomarker:derived-outcome',
+      '--primary-outcome-kind',
+      'metric',
+      '--primary-outcome-source-metric-key',
+      'custom-daily-score',
+      '--comparison-statistic',
+      'mean',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(
+      observedCustomSource.ok,
+      true,
+      observedCustomSource.ok ? undefined : observedCustomSource.error.message,
+    )
+
+    const registeredSource = await runSliceCli([
+      'experiment',
+      'start',
+      'derived-outcome-registered-source',
+      '--custom',
+      '--no-public-protocol',
+      '--title',
+      'Derived Outcome',
+      '--intervention-start',
+      '2026-05-01',
+      '--primary-outcome-key',
+      'biomarker:derived-outcome',
+      '--primary-outcome-kind',
+      'metric',
+      '--primary-outcome-source-metric-key',
+      'resting-heart-rate',
+      '--comparison-statistic',
+      'mean',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(
+      registeredSource.ok,
+      true,
+      registeredSource.ok ? undefined : registeredSource.error.message,
+    )
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
@@ -1478,8 +1844,8 @@ test.sequential('experiment start uses typed protocol defaults and supports dry-
 
 test.sequential('Health Commons active starts require completed non-blocking safety screens', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-safety-gate-'))
-  const bedtimeProtocol =
-    'protocol_variant:bedtime-transition/standard-tiny-fallback-transition'
+  const screenedProtocol =
+    'protocol_variant:cognitive-offload-before-bed/five-minute-tomorrow-list'
   const completedAt = '2026-04-30T15:00:00.000Z'
 
   try {
@@ -1490,7 +1856,7 @@ test.sequential('Health Commons active starts require completed non-blocking saf
       'start',
       'bedtime-missing-screen-dry-run',
       '--from-protocol',
-      bedtimeProtocol,
+      screenedProtocol,
       '--intervention-start',
       '2026-05-01',
       '--dry-run',
@@ -1505,7 +1871,7 @@ test.sequential('Health Commons active starts require completed non-blocking saf
       'start',
       'bedtime-missing-screen',
       '--from-protocol',
-      bedtimeProtocol,
+      screenedProtocol,
       '--intervention-start',
       '2026-05-01',
       '--vault',
@@ -1528,7 +1894,7 @@ test.sequential('Health Commons active starts require completed non-blocking saf
       'start',
       'bedtime-dangerous-sleepiness',
       '--from-protocol',
-      bedtimeProtocol,
+      screenedProtocol,
       '--intervention-start',
       '2026-05-01',
       '--onboarding-completed-at',
@@ -1562,8 +1928,8 @@ test.sequential('Health Commons active starts require completed non-blocking saf
 
 test.sequential('Health Commons safety screening validates recorded question ids and dispositions', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-safety-answers-'))
-  const bedtimeProtocol =
-    'protocol_variant:bedtime-transition/standard-tiny-fallback-transition'
+  const screenedProtocol =
+    'protocol_variant:cognitive-offload-before-bed/five-minute-tomorrow-list'
   const completedAt = '2026-04-30T15:00:00.000Z'
 
   try {
@@ -1573,13 +1939,13 @@ test.sequential('Health Commons safety screening validates recorded question ids
       'start',
       'bedtime-missing-disposition',
       '--from-protocol',
-      bedtimeProtocol,
+      screenedProtocol,
       '--intervention-start',
       '2026-05-01',
       '--onboarding-completed-at',
       completedAt,
       '--positive-question-id',
-      'external_schedule_constraint',
+      'severe_writing_activation_risk',
       '--vault',
       vaultRoot,
     ])
@@ -1591,7 +1957,7 @@ test.sequential('Health Commons safety screening validates recorded question ids
       'start',
       'bedtime-unknown-question',
       '--from-protocol',
-      bedtimeProtocol,
+      screenedProtocol,
       '--intervention-start',
       '2026-05-01',
       '--onboarding-completed-at',
@@ -1664,8 +2030,8 @@ test.sequential('Health Commons safety screening enforces negative-answer dispos
 
 test.sequential('Health Commons safety screening gates reactivation and preserves lineage', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-reactivation-'))
-  const bedtimeProtocol =
-    'protocol_variant:bedtime-transition/standard-tiny-fallback-transition'
+  const screenedProtocol =
+    'protocol_variant:cognitive-offload-before-bed/five-minute-tomorrow-list'
   const completedAt = '2026-04-30T15:00:00.000Z'
 
   try {
@@ -1675,7 +2041,7 @@ test.sequential('Health Commons safety screening gates reactivation and preserve
       'start',
       'bedtime-planned',
       '--from-protocol',
-      bedtimeProtocol,
+      screenedProtocol,
       '--status',
       'planned',
       '--intervention-start',

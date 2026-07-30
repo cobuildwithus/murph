@@ -33,6 +33,7 @@ export const COMPANION_DEVICE_SYNC_PROVIDER = "junction";
 
 const COMPANION_METADATA_STRING_MAX_LENGTH = 200;
 const COMPANION_SDK_VERSION_MAX_ENTRIES = 10;
+export type CompanionPlatform = "ios" | "android";
 const COMPANION_HEALTH_METADATA_JUNCTION_SOURCE_PROVIDER =
   normalizeJunctionProviderSlug(JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER);
 
@@ -96,6 +97,7 @@ const COMPANION_AUTH_DIAGNOSTIC_ALLOWED_KEYS = new Set([
   "errorKind",
   "httpStatus",
   "method",
+  "platform",
   "providerErrorCode",
   "retryable",
   "stage",
@@ -148,7 +150,7 @@ interface CompanionAuthDiagnosticLog {
   errorKind: string;
   httpStatus: number | null;
   method: string;
-  platform: "ios";
+  platform: CompanionPlatform;
   provider: "privy";
   providerErrorCode: string | null;
   retryable: boolean;
@@ -178,9 +180,11 @@ export function validateCompanionSignInRequestBody(
     throw companionRequestInvalid("connectionIntent must be connect or resume when provided.");
   }
 
-  const platform = readOptionalBoundedString(body, "platform");
-  if (platform !== null && platform !== "ios") {
-    throw companionRequestInvalid("platform must be ios when provided.");
+  const platform = readOptionalCompanionPlatform(body);
+  if (platform === "android" && connectionIntent === undefined) {
+    throw companionRequestInvalid(
+      "Android companion requests must provide connectionIntent.",
+    );
   }
   readOptionalBoundedString(body, "appInstallationId");
   readOptionalBoundedString(body, "appVersion");
@@ -206,6 +210,23 @@ export function validateCompanionSignInRequestBody(
   }
 
   return connectionIntent ?? null;
+}
+
+export function readCompanionStatusSourceProviderSlug(requestUrl: string): string | null {
+  const value = new URL(requestUrl).searchParams.get("sourceProviderSlug");
+  if (value === null) {
+    return null;
+  }
+  if (value.length > COMPANION_METADATA_STRING_MAX_LENGTH) {
+    throw companionRequestInvalid("sourceProviderSlug must be a short provider slug.");
+  }
+
+  const normalized = normalizeJunctionProviderSlug(value);
+  if (!normalized) {
+    throw companionRequestInvalid("sourceProviderSlug must be a valid provider slug.");
+  }
+
+  return normalized;
 }
 
 export function parseCompanionHrvRmssdObservationRequestBody(
@@ -402,7 +423,7 @@ export function validateCompanionAuthDiagnosticRequestBody(
     errorKind,
     httpStatus,
     method,
-    platform: "ios",
+    platform: readOptionalCompanionPlatform(body) ?? "ios",
     provider: "privy",
     providerErrorCode: readOptionalProviderErrorCode(body),
     retryable: readRequiredBoolean(body, "retryable"),
@@ -466,24 +487,62 @@ export interface CompanionDeviceSyncStatusResponse {
  */
 export async function readCompanionDeviceSyncStatus(input: {
   memberId: string;
+  sourceProviderSlug?: string | null;
   store: PrismaDeviceSyncControlPlaneStore;
 }): Promise<CompanionDeviceSyncStatusResponse> {
+  const sourceProviderSlug = input.sourceProviderSlug
+    ? normalizeJunctionProviderSlug(input.sourceProviderSlug)
+    : null;
   const connections = (await input.store.listConnectionsForUser(input.memberId)).filter(
     (connection) =>
       connection.provider === COMPANION_DEVICE_SYNC_PROVIDER
-      && connection.status !== "disconnected",
+      && (
+        sourceProviderSlug === null
+          ? connection.status !== "disconnected"
+          : connection.status === "active"
+      ),
   );
 
   const resources: Record<string, CompanionDeviceSyncResourceStatus> = {};
+  const sourceReceiptCutoffs = new Map<string, string | null>();
 
   for (const connection of connections) {
     const sources = await input.store.listConnectionSources(connection.id);
+
+    if (sourceProviderSlug !== null) {
+      const matchingSources = sources.filter(
+        (source) =>
+          normalizeJunctionProviderSlug(source.sourceProviderSlug) === sourceProviderSlug,
+      );
+      const hasConnectedSource = matchingSources.some(
+        (source) => source.status === "connected",
+      );
+      const negativeStateCutoff = hasConnectedSource
+        ? null
+        : matchingSources.reduce<string | null>(
+            (latest, source) => maxIsoTimestamp(latest, source.lastSeenAt),
+            null,
+          );
+
+      // lastSeenAt belongs to source projection/lifecycle observation, unlike
+      // generic updatedAt, which receipt bookkeeping also advances. A negative
+      // projection therefore invalidates older receipts without letting a
+      // newly accepted webhook invalidate itself while projection lags. No
+      // matching row is valid during the first-webhook path.
+      sourceReceiptCutoffs.set(connection.id, negativeStateCutoff);
+    }
 
     for (const source of sources) {
       // Only currently connected sources contribute "waiting for first data"
       // resource keys; stale availability on disconnected/errored sources
       // would otherwise advertise resources that cannot arrive.
       if (source.status !== "connected") {
+        continue;
+      }
+      if (
+        sourceProviderSlug !== null
+        && normalizeJunctionProviderSlug(source.sourceProviderSlug) !== sourceProviderSlug
+      ) {
         continue;
       }
 
@@ -511,9 +570,25 @@ export async function readCompanionDeviceSyncStatus(input: {
     const signals = await input.store.listRecentConnectionWebhookSignals({
       userId: input.memberId,
       connectionIds: connections.map((connection) => connection.id),
+      ...(sourceProviderSlug ? { sourceProviderSlug } : {}),
     });
 
     for (const signal of signals) {
+      if (sourceProviderSlug !== null) {
+        const connectionId = signal.connectionId;
+        if (!connectionId || !sourceReceiptCutoffs.has(connectionId)) {
+          continue;
+        }
+
+        const cutoff = sourceReceiptCutoffs.get(connectionId) ?? null;
+        if (
+          cutoff
+          && Date.parse(signal.createdAt) <= Date.parse(cutoff)
+        ) {
+          continue;
+        }
+      }
+
       const resource = signal.eventType
         ? readJunctionWebhookResourceName(signal.eventType)
         : null;
@@ -563,6 +638,23 @@ function readOptionalBoundedString(
   }
 
   return value;
+}
+
+function readOptionalCompanionPlatform(
+  body: Record<string, unknown>,
+): CompanionPlatform | null {
+  const platform = readOptionalBoundedString(body, "platform");
+  if (platform === null) {
+    return null;
+  }
+  if (!isCompanionPlatform(platform)) {
+    throw companionRequestInvalid("platform must be ios or android when provided.");
+  }
+  return platform;
+}
+
+function isCompanionPlatform(value: string): value is CompanionPlatform {
+  return value === "ios" || value === "android";
 }
 
 function readRequiredEnum(

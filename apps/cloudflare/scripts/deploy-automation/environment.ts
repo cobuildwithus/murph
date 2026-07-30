@@ -59,6 +59,8 @@ const SSH_ED25519_PUBLIC_KEY_LENGTH = 32;
 export interface HostedDeployAutomationEnvironment {
   allowedRunnerSecretKeys: string | null;
   bundlesBucketName: string;
+  bundlesEnamBucketName: string;
+  bundlesEnamPreviewBucketName: string;
   bundlesPreviewBucketName: string;
   compatibilityDate: string;
   containerInstanceType: HostedContainerInstanceType;
@@ -111,16 +113,34 @@ export function readHostedDeployAutomationEnvironment(
   source: EnvSource = process.env,
 ): HostedDeployAutomationEnvironment {
   const bundlesBucketName = requireConfiguredString(source.CF_BUNDLES_BUCKET, "CF_BUNDLES_BUCKET");
+  const bundlesEnamBucketName = requireConfiguredString(
+    source.CF_BUNDLES_ENAM_BUCKET,
+    "CF_BUNDLES_ENAM_BUCKET",
+  );
+  const bundlesEnamPreviewBucketName = requireConfiguredString(
+    source.CF_BUNDLES_ENAM_PREVIEW_BUCKET,
+    "CF_BUNDLES_ENAM_PREVIEW_BUCKET",
+  );
   const bundlesPreviewBucketName = requireConfiguredString(
     source.CF_BUNDLES_PREVIEW_BUCKET,
     "CF_BUNDLES_PREVIEW_BUCKET",
   );
   const workerName = requireConfiguredString(source.CF_WORKER_NAME, "CF_WORKER_NAME");
   const timeouts = readHostedDeployAutomationTimeouts(source);
+  const workerVars = readHostedWorkerVars(source);
+  assertHostedR2FixedRoleConfiguration({
+    bundlesBucketName,
+    bundlesEnamBucketName,
+    bundlesEnamPreviewBucketName,
+    bundlesPreviewBucketName,
+    workerVars,
+  });
 
   return {
     allowedRunnerSecretKeys: normalizeOptionalString(source.CF_ALLOWED_RUNNER_SECRET_KEYS),
     bundlesBucketName,
+    bundlesEnamBucketName,
+    bundlesEnamPreviewBucketName,
     bundlesPreviewBucketName,
     compatibilityDate: normalizeOptionalString(source.CF_COMPATIBILITY_DATE) ?? "2026-03-27",
     containerInstanceType: normalizeContainerInstanceType(
@@ -165,8 +185,39 @@ export function readHostedDeployAutomationEnvironment(
     ),
     webControlTimeoutMs: timeouts.webControlTimeoutMs,
     workerName,
-    workerVars: readHostedWorkerVars(source),
+    workerVars,
   };
+}
+
+function assertHostedR2FixedRoleConfiguration(input: {
+  bundlesBucketName: string;
+  bundlesEnamBucketName: string;
+  bundlesEnamPreviewBucketName: string;
+  bundlesPreviewBucketName: string;
+  workerVars: Readonly<Record<string, string>>;
+}): void {
+  if (input.bundlesBucketName === input.bundlesEnamBucketName) {
+    throw new TypeError("CF_BUNDLES_BUCKET and CF_BUNDLES_ENAM_BUCKET must be distinct.");
+  }
+  if (input.bundlesPreviewBucketName === input.bundlesEnamPreviewBucketName) {
+    throw new TypeError(
+      "CF_BUNDLES_PREVIEW_BUCKET and CF_BUNDLES_ENAM_PREVIEW_BUCKET must be distinct.",
+    );
+  }
+  const phase = input.workerVars.HOSTED_R2_CUTOVER_PHASE;
+  if (phase !== "source_active" && phase !== "destination_active") {
+    throw new TypeError("HOSTED_R2_CUTOVER_PHASE must be source_active or destination_active.");
+  }
+  if (input.workerVars.HOSTED_R2_PRESIGN_BUCKET_NAME !== input.bundlesBucketName) {
+    throw new TypeError(
+      "HOSTED_R2_PRESIGN_BUCKET_NAME must match CF_BUNDLES_BUCKET while roles are fixed.",
+    );
+  }
+  if (input.workerVars.HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME !== input.bundlesEnamBucketName) {
+    throw new TypeError(
+      "HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME must match CF_BUNDLES_ENAM_BUCKET while roles are fixed.",
+    );
+  }
 }
 
 function readHostedWorkerVars(source: EnvSource): Record<string, string> {

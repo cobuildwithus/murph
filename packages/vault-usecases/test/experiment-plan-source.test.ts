@@ -4,6 +4,10 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'vitest'
 
+import { importDeviceBatch, upsertProtocol } from '@murphai/core'
+import { loadGeneratedHealthCommonsProtocolRunSpecs } from '@murphai/health-commons/runtime'
+
+import { buildEffectiveProtocolSnapshotFromPrivateProtocol } from '../src/usecases/experiment-journal-vault.ts'
 import { createIntegratedVaultServices } from '../src/vault-services.ts'
 
 function baseExperimentPlanPayload() {
@@ -108,6 +112,43 @@ test('Health Commons protocol-backed experiment plans require commonsProtocolRef
     }),
     /commonsProtocolRef/u,
   )
+})
+
+test('withdrawn Health Commons protocols fail plan and start without creating a run', async () => {
+  await withInitializedVault(async ({ services, vault }) => {
+    const payload = {
+      ...baseExperimentPlanPayload(),
+      source: { kind: 'health_commons_protocol' },
+      commonsProtocolRef: {
+        key: 'protocol_variant:bedtime-transition/standard-tiny-fallback-transition',
+        pageRevisionId: `sha256:${'5'.repeat(64)}`,
+        runSpecRevisionId: `sha256:${'6'.repeat(64)}`,
+      },
+      effectiveProtocolSnapshot: {
+        effectiveSpecHash: `sha256:${'7'.repeat(64)}`,
+        doseSignature: 'Use the standard, tiny, or fallback bedtime transition',
+      },
+    }
+
+    for (const attempt of [
+      () => services.core.planExperiment({ vault, requestId: null, payload }),
+      () => services.core.startExperiment({ vault, requestId: null, payload }),
+    ]) {
+      await assert.rejects(
+        attempt(),
+        /no longer available to start.*currently runnable protocol/u,
+      )
+    }
+
+    await assert.rejects(
+      services.query.showExperiment({
+        vault,
+        requestId: null,
+        lookup: 'sleep-reset',
+      }),
+      /No experiment found/u,
+    )
+  })
 })
 
 test('custom experiment plans can be planned once explicitly marked custom', async () => {
@@ -230,6 +271,208 @@ test('custom experiment starts still persist calendar-ful synthesized adherence 
         },
       },
     ])
+  })
+})
+
+test('Health Commons protocol starts persist snapshot activity evidence in the adherence target', async () => {
+  await withInitializedVault(async ({ services, vault }) => {
+    const protocol = loadGeneratedHealthCommonsProtocolRunSpecs().protocols.find(
+      (entry) =>
+        entry.key ===
+        'protocol_variant:dry-sauna/murph-finnish-standard-3x-week',
+    )
+    assert.ok(protocol?.protocol)
+    const activitySessionEvidence = {
+      activityKinds: ['walking', 'cycling', 'rowing', 'elliptical'],
+      minimumDurationMinutes: 35,
+    }
+
+    await services.core.startExperiment({
+      vault,
+      requestId: null,
+      payload: {
+        source: { kind: 'health_commons_protocol' },
+        experiment: {
+          slug: 'multi-activity-cardio',
+          title: 'Multi-activity cardio',
+          startedOn: '2026-06-01',
+          status: 'active',
+        },
+        commonsProtocolRef: {
+          key: protocol.key,
+          pageRevisionId: protocol.revision.pageRevisionId,
+          runSpecRevisionId: protocol.revision.runSpecRevisionId,
+        },
+        effectiveProtocolSnapshot: {
+          effectiveSpecHash: protocol.revision.runSpecRevisionId,
+          doseSignature: 'Three 35-minute easy cardio sessions each week',
+          modality: 'cycling',
+          activitySessionEvidence,
+          targetSessions: 12,
+          minimumUsefulSessions: 9,
+        },
+        runPlan: {
+          modality: 'Cycling',
+          targetSessions: 12,
+          minimumUsefulSessions: 9,
+          interventionStart: '2026-06-01',
+          interventionEnd: '2026-06-28',
+          schedule: {
+            kind: 'dailyLocal',
+            localTime: '07:00',
+            timeZone: 'UTC',
+          },
+        },
+        analysisPlan: {
+          primaryBiomarkerKey: 'biomarker:resting-heart-rate',
+        },
+        onboarding: {
+          completedAt: '2026-05-31T12:00:00.000Z',
+        },
+      },
+    })
+
+    await importDeviceBatch({
+      vaultRoot: vault,
+      provider: 'junction',
+      accountId: 'multi-activity-cardio-test',
+      importedAt: '2026-06-03T12:00:00.000Z',
+      events: [
+        {
+          kind: 'activity_session',
+          occurredAt: '2026-06-01T07:00:00.000Z',
+          recordedAt: '2026-06-01T08:00:00.000Z',
+          title: 'Rowing',
+          externalRef: {
+            system: 'junction',
+            resourceType: 'test-workouts',
+            resourceId: 'qualifying-row',
+            facet: 'session',
+          },
+          fields: {
+            activityType: 'rowing',
+            durationMinutes: 40,
+            workout: {
+              sourceApp: 'test',
+              sourceWorkoutId: 'qualifying-row',
+              startedAt: '2026-06-01T07:00:00.000Z',
+              endedAt: '2026-06-01T07:40:00.000Z',
+              exercises: [],
+            },
+          },
+        },
+        {
+          kind: 'activity_session',
+          occurredAt: '2026-06-02T07:00:00.000Z',
+          recordedAt: '2026-06-02T08:00:00.000Z',
+          title: 'Short walk',
+          externalRef: {
+            system: 'junction',
+            resourceType: 'test-workouts',
+            resourceId: 'short-walk',
+            facet: 'session',
+          },
+          fields: {
+            activityType: 'walking',
+            durationMinutes: 20,
+            workout: {
+              sourceApp: 'test',
+              sourceWorkoutId: 'short-walk',
+              startedAt: '2026-06-02T07:00:00.000Z',
+              endedAt: '2026-06-02T07:20:00.000Z',
+              exercises: [],
+            },
+          },
+        },
+      ],
+    })
+
+    const shown = await services.query.showExperiment({
+      vault,
+      requestId: null,
+      lookup: 'multi-activity-cardio',
+    })
+    const data = requireRecord(shown.entity.data, 'experiment data')
+    const snapshot = requireRecord(
+      data.effectiveProtocolSnapshot,
+      'effectiveProtocolSnapshot',
+    )
+    const snapshotEvidence = requireRecord(
+      snapshot.activitySessionEvidence,
+      'effectiveProtocolSnapshot.activitySessionEvidence',
+    )
+    const runPlan = requireRecord(data.runPlan, 'runPlan')
+    assert.ok(Array.isArray(runPlan.adherenceTargets))
+    assert.equal(runPlan.adherenceTargets.length, 1)
+    const adherenceTarget = requireRecord(
+      runPlan.adherenceTargets[0],
+      'runPlan.adherenceTargets[0]',
+    )
+    const targetEvidence = requireRecord(
+      adherenceTarget.evidence,
+      'runPlan.adherenceTargets[0].evidence',
+    )
+
+    assert.deepEqual(snapshotEvidence, activitySessionEvidence)
+    assert.deepEqual(targetEvidence, {
+      kind: 'linkedEventCount',
+      eventKind: 'activity_session',
+      activityKinds: ['walking', 'cycling', 'rowing', 'elliptical'],
+      minimumDurationMinutes: 35,
+      missing: 'missed_after_grace',
+    })
+
+    const progress = await services.query.showExperimentProgress({
+      vault,
+      requestId: null,
+      lookup: 'multi-activity-cardio',
+      asOf: '2026-06-03',
+    })
+    assert.equal(progress.progress.adherence.completedSessions, 1)
+    assert.deepEqual(progress.progress.adherence.evidence, {
+      eventKind: 'activity_session',
+      activityKinds: ['walking', 'cycling', 'rowing', 'elliptical'],
+      minimumDurationMinutes: 35,
+    })
+  })
+})
+
+test('private protocol snapshot construction preserves activity evidence', async () => {
+  await withInitializedVault(async ({ vault }) => {
+    const activitySessionEvidence = {
+      activityKinds: ['walking', 'cycling', 'rowing', 'elliptical'],
+      minimumDurationMinutes: 35,
+    }
+    const protocol = await upsertProtocol({
+      vaultRoot: vault,
+      slug: 'private-multi-activity-cardio',
+      title: 'Private multi-activity cardio',
+      frontmatter: {
+        commonsProtocolRef: {
+          key: 'protocol_variant:aerobic-base-training/zone-2-aerobic-base-block',
+          pageRevisionId: `sha256:${'1'.repeat(64)}`,
+          runSpecRevisionId: `sha256:${'2'.repeat(64)}`,
+        },
+        lineage: {
+          sourceKind: 'health_commons_protocol',
+        },
+        diff: [],
+        effectiveSpec: {
+          doseSignature: 'Three 35-minute easy cardio sessions each week',
+          modality: 'cycling',
+          activitySessionEvidence,
+          targetSessions: 12,
+          minimumUsefulSessions: 9,
+        },
+        personalization: {},
+      },
+    })
+
+    const snapshot = buildEffectiveProtocolSnapshotFromPrivateProtocol(
+      protocol.record.entity,
+    )
+
+    assert.deepEqual(snapshot.activitySessionEvidence, activitySessionEvidence)
   })
 })
 

@@ -288,6 +288,7 @@ export class PrismaDeviceSyncControlPlaneStore
   async listRecentConnectionWebhookSignals(input: {
     userId: string;
     connectionIds: readonly string[];
+    sourceProviderSlug?: string | null;
     limit?: number;
   }): Promise<HostedSignalRecord[]> {
     return this.signals.listRecentConnectionWebhookSignals(input);

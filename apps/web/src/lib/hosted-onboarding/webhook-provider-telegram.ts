@@ -18,6 +18,9 @@ import {
   observeHostedUsageReferralInboundTx,
 } from "../hosted-growth/usage-referral";
 import {
+  observeHostedThreadContainerParticipantAccessTx,
+} from "../hosted-groups/thread-container-participant-access";
+import {
   isHostedMemberSuspended,
 } from "./entitlement";
 import {
@@ -30,7 +33,7 @@ import {
   resolveHostedFamilyInviteTokenForInbound,
   resolveHostedFamilyChatNotificationRouteTx,
 } from "./family-plan";
-import { readActiveHostedMemberAccess } from "./member-access";
+import { readHostedRuntimeAiAccessDecision } from "./member-access";
 import {
   buildHostedTelegramMessagePayload,
   buildHostedTelegramWebhookEventId,
@@ -199,11 +202,10 @@ export async function planHostedOnboardingTelegramWebhook(input: {
               ? "usage-referral-evidence-only"
               : "unlinked-telegram",
           ),
-          ...(observation.qualificationCandidateReferralId
+          ...(observation.qualificationCandidateReferralIds.length > 0
             ? {
-                postCommitUsageReferralIds: [
-                  observation.qualificationCandidateReferralId,
-                ],
+                postCommitUsageReferralIds:
+                  observation.qualificationCandidateReferralIds,
               }
             : {}),
         };
@@ -242,10 +244,12 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     });
   }
 
-  if (!await readActiveHostedMemberAccess({
+  const accessNow = new Date();
+  if (!(await readHostedRuntimeAiAccessDecision({
     memberId: existingMember.id,
+    now: accessNow,
     prisma: input.prisma,
-  })) {
+  })).allowed) {
     return buildIgnoredTelegramWebhookPlan("inactive-member");
   }
 
@@ -271,6 +275,8 @@ export async function planHostedOnboardingTelegramWebhook(input: {
           await bindArmedHostedUsageReferralToNewContainerTx({
             occurredAt: new Date(summary.occurredAt),
             ownerMemberId: existingMember.id,
+            targetChannel: "telegram",
+            targetLinqService: null,
             targetContainerMemberId: ensured.containerMemberId,
             tx: input.prisma,
           });
@@ -306,6 +312,34 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     if (runtimeMemberId === existingMember.id && threadRoute) {
       runtimeMemberId = threadRoute.containerMemberId;
     }
+    const senderHandleLookupKey = createHostedTelegramUserLookupKey(
+      summary.senderTelegramUserId,
+    );
+    if (!senderHandleLookupKey) {
+      return buildIgnoredTelegramWebhookPlan(
+        "group-chat-provision-unavailable",
+      );
+    }
+    await observeHostedThreadContainerParticipantAccessTx({
+      containerMemberId: runtimeMemberId,
+      handleLookupKey: senderHandleLookupKey,
+      now: accessNow,
+      observedAt: new Date(summary.occurredAt),
+      participantMemberId: existingMember.id,
+      prisma: input.prisma,
+    });
+    // The exact linked sender's durable observation may be what grants an
+    // existing container access after its original owner becomes inactive.
+    // Re-read the canonical decision against that same persisted relationship.
+    if (!(await readHostedRuntimeAiAccessDecision({
+      memberId: runtimeMemberId,
+      now: accessNow,
+      prisma: input.prisma,
+    })).allowed) {
+      return buildIgnoredTelegramWebhookPlan(
+        "group-chat-provision-unavailable",
+      );
+    }
   }
   // Group inbound carries the sending participant so the assistant can tell
   // participants apart and bind shared-data reads to the right membership. The
@@ -317,6 +351,9 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     : {
         ...telegramMessage,
         from: summary.senderTelegramUserId,
+        ...(summary.senderTelegramDisplayName
+          ? { senderDisplayName: summary.senderTelegramDisplayName }
+          : {}),
         ...(summary.senderTelegramDisplayUsername
           ? { senderUsername: summary.senderTelegramDisplayUsername }
           : {}),
@@ -340,7 +377,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     }),
     tx: input.prisma,
   });
-  let qualificationCandidateReferralId: string | null = null;
+  let qualificationCandidateReferralIds: string[] = [];
   if (!summary.isDirect) {
     const eventKey = createHostedTelegramMessageLookupKey({
       chatId: telegramMessage.threadId,
@@ -350,7 +387,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
       summary.senderTelegramUserId,
     );
     if (eventKey && senderSubjectKey) {
-      qualificationCandidateReferralId = (
+      qualificationCandidateReferralIds = (
         await observeHostedUsageReferralInboundTx({
           containerMemberId: runtimeMemberId,
           eventKey,
@@ -359,14 +396,14 @@ export async function planHostedOnboardingTelegramWebhook(input: {
           senderSubjectKey,
           tx: input.prisma,
         })
-      ).qualificationCandidateReferralId;
+      ).qualificationCandidateReferralIds;
     }
   }
 
   return {
     desiredSideEffects: [],
-    ...(qualificationCandidateReferralId
-      ? { postCommitUsageReferralIds: [qualificationCandidateReferralId] }
+    ...(qualificationCandidateReferralIds.length > 0
+      ? { postCommitUsageReferralIds: qualificationCandidateReferralIds }
       : {}),
     postCommitGroupJoinConfirmationMemberIds: [existingMember.id],
     response: {

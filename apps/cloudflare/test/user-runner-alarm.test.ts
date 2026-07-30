@@ -35,6 +35,7 @@ import type {
 import {
   createHostedBundleStore,
 } from "../src/bundle-store.ts";
+import { resolveHostedR2CutoverContext } from "../src/r2-cutover.ts";
 import {
   hostedArtifactUserPrefix,
   hostedBrowserVaultReplicaUserPrefix,
@@ -4205,7 +4206,9 @@ describe("HostedUserRunner execution coordination", () => {
 
   it("deletes runner state and clears alarms for hosted user deletion", async () => {
     const destroyInstance = vi.fn(async () => {});
+    const bucket = new ListableMemoryEncryptedR2Bucket();
     const { alarms, runner, sql } = createRunnerHarness({
+      bucket,
       destroyInstance,
     });
     await runner.bindUser(TEST_USER_ID);
@@ -4219,8 +4222,8 @@ describe("HostedUserRunner execution coordination", () => {
       ok: true,
       r2: {
         deletedObjectCount: 0,
-        skippedUserScopedPrefixes: true,
-        supported: false,
+        skippedUserScopedPrefixes: false,
+        supported: true,
       },
       userId: TEST_USER_ID,
     });
@@ -4312,6 +4315,43 @@ describe("HostedUserRunner execution coordination", () => {
     expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
   });
 
+  it("reports the destination-active bridge and deletes both fixed-role buckets", async () => {
+    const sourceBucket = new ListableMemoryEncryptedR2Bucket();
+    const destinationBucket = new ListableMemoryEncryptedR2Bucket();
+    const bundlePrefix = await hostedBundleUserPrefix({ userId: TEST_USER_ID });
+    const sourceKey = `${bundlePrefix}source.bundle.json`;
+    const destinationKey = `${bundlePrefix}destination.bundle.json`;
+    await sourceBucket.put(sourceKey, "source-data");
+    await destinationBucket.put(destinationKey, "destination-data");
+    const { runner, sql } = createRunnerHarness({
+      bucket: sourceBucket,
+      destinationBucket,
+      r2CutoverPhase: "destination_active",
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.runnerStatus()).resolves.toMatchObject({
+      r2Cutover: {
+        coexisting: true,
+        phase: "destination_active",
+        protocolVersion: "r2-oc-enam-v1",
+      },
+    });
+    await expect(runner.deleteHostedUserData(TEST_USER_ID)).resolves.toMatchObject({
+      ok: true,
+      r2: {
+        deletedObjectCount: 2,
+        skippedUserScopedPrefixes: false,
+        supported: true,
+      },
+      userId: TEST_USER_ID,
+    });
+
+    expect(sourceBucket.objects.has(sourceKey)).toBe(false);
+    expect(destinationBucket.objects.has(destinationKey)).toBe(false);
+    expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
+  });
+
   it("does not sweep R2 when active runner container teardown fails during user deletion", async () => {
     const bucket = new ListableMemoryEncryptedR2Bucket();
     const bundleKey = `${await hostedBundleUserPrefix({ userId: TEST_USER_ID })}bundle.bundle.json`;
@@ -4352,6 +4392,97 @@ describe("HostedUserRunner execution coordination", () => {
        FROM runner_meta
        WHERE singleton = 1`,
     ).toArray()).toEqual([{ active_attempt_id: null, user_id: TEST_USER_ID }]);
+  });
+
+  it("lets deletion sweep private media whose staging already owns the user mutation lock", async () => {
+    const bucket = new PausedPutListableMemoryEncryptedR2Bucket();
+    const destroyInstance = vi.fn(async () => {});
+    const { runner, sql } = createRunnerHarness({
+      bucket,
+      destroyInstance,
+      runnerRuntimeEnvSource: {
+        ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+        HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET:
+          "private-media-capability-secret-fixture",
+      },
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = writeRuntimeFenceForTest(sql);
+
+    const publish = runner.publishHostedPrivateMedia({
+      attemptId: token.attemptId,
+      bytes: new Uint8Array([
+        0x89, 0x50, 0x4e, 0x47,
+        0x0d, 0x0a, 0x1a, 0x0a,
+      ]),
+      contentType: "image/png",
+      generation: String(token.generation),
+      userId: TEST_USER_ID,
+    });
+    await bucket.putStarted.promise;
+
+    let deletionSettled = false;
+    const deletion = runner.deleteHostedUserData(TEST_USER_ID).finally(() => {
+      deletionSettled = true;
+    });
+    await Promise.resolve();
+    expect(deletionSettled).toBe(false);
+    expect(destroyInstance).not.toHaveBeenCalled();
+
+    bucket.releasePut.resolve(undefined);
+    await expect(publish).resolves.toMatchObject({ ok: true });
+    await expect(deletion).resolves.toMatchObject({ ok: true });
+
+    expect(destroyInstance).toHaveBeenCalledOnce();
+    expect(bucket.objects.size).toBe(0);
+  });
+
+  it("rejects private media staging queued behind completed user deletion", async () => {
+    const bucket = new ListableMemoryEncryptedR2Bucket();
+    const destroyStarted = createDeferred<void>();
+    const releaseDestroy = createDeferred<void>();
+    const destroyInstance = vi.fn(async () => {
+      destroyStarted.resolve(undefined);
+      await releaseDestroy.promise;
+    });
+    const { runner, sql } = createRunnerHarness({
+      bucket,
+      destroyInstance,
+      runnerRuntimeEnvSource: {
+        ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+        HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET:
+          "private-media-capability-secret-fixture",
+      },
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = writeRuntimeFenceForTest(sql);
+
+    const deletion = runner.deleteHostedUserData(TEST_USER_ID);
+    await destroyStarted.promise;
+    let publishSettled = false;
+    const publish = runner.publishHostedPrivateMedia({
+      attemptId: token.attemptId,
+      bytes: new Uint8Array([
+        0x89, 0x50, 0x4e, 0x47,
+        0x0d, 0x0a, 0x1a, 0x0a,
+      ]),
+      contentType: "image/png",
+      generation: String(token.generation),
+      userId: TEST_USER_ID,
+    }).finally(() => {
+      publishSettled = true;
+    });
+    await Promise.resolve();
+    expect(publishSettled).toBe(false);
+
+    releaseDestroy.resolve(undefined);
+    await expect(deletion).resolves.toMatchObject({ ok: true });
+    await expect(publish).resolves.toEqual({
+      ok: false,
+      reason: "write-fence-rejected",
+    });
+
+    expect(bucket.objects.size).toBe(0);
   });
 
   it("replaces an active owner's upload session after its workspace version advances", async () => {
@@ -5031,6 +5162,7 @@ function createRunnerHarness(input: {
   alarmDeleteError?: Error;
   abortWorkspaceInvocation?: HostedExecutionContainerStubLike["abortWorkspaceInvocation"];
   bucket?: MemoryEncryptedR2Bucket;
+  destinationBucket?: MemoryEncryptedR2Bucket;
   destroyInstance?: HostedExecutionContainerStubLike["destroyInstance"];
   ensureReadyForProcessing?: HostedExecutionContainerStubLike["ensureReadyForProcessing"] | null;
   ensureProcessing?: HostedExecutionContainerStubLike["ensureProcessing"];
@@ -5044,6 +5176,7 @@ function createRunnerHarness(input: {
   readActiveRuntimeUserFence?: HostedExecutionContainerStubLike["readActiveRuntimeUserFence"];
   ownerReleaseResponse?: () => Promise<Response> | Response;
   runtimeLogResponse?: () => Promise<Response> | Response;
+  r2CutoverPhase?: "destination_active" | "source_active";
   runnerRuntimeEnvSource?: Readonly<Record<string, unknown>>;
   runnerContainerNamespace?: HostedExecutionContainerNamespaceLike | null;
   wakeRuntime?: HostedExecutionContainerStubLike["wakeRuntime"];
@@ -5173,6 +5306,15 @@ function createRunnerHarness(input: {
     ownerReleaseResponse: input.ownerReleaseResponse,
   });
 
+  const sourceBucket = input.bucket ?? new MemoryEncryptedR2Bucket();
+  const r2CutoverContext = input.destinationBucket
+    ? resolveHostedR2CutoverContext({
+        BUNDLES: sourceBucket,
+        BUNDLES_ENAM: input.destinationBucket,
+        HOSTED_R2_CUTOVER_PHASE:
+          input.r2CutoverPhase ?? "destination_active",
+      })
+    : null;
   const runner = new HostedUserRunnerWithTestControls(
     durable.state,
     readHostedExecutionEnvironment(createHostedExecutionTestEnv({
@@ -5180,11 +5322,12 @@ function createRunnerHarness(input: {
       HOSTED_EXECUTION_RETRY_DELAY_MS: "5000",
       HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "35000",
     })),
-    input.bucket ?? new MemoryEncryptedR2Bucket(),
+    r2CutoverContext?.bucket ?? sourceBucket,
     input.runnerRuntimeEnvSource ?? TEST_RUNNER_RUNTIME_ENV_SOURCE,
     input.runnerContainerNamespace === undefined
       ? namespace
       : input.runnerContainerNamespace,
+    r2CutoverContext,
   );
 
   return {
@@ -5243,6 +5386,22 @@ class ListableMemoryEncryptedR2Bucket extends MemoryEncryptedR2Bucket {
       objects: pageKeys.map((key) => ({ key })),
       truncated,
     };
+  }
+}
+
+class PausedPutListableMemoryEncryptedR2Bucket
+  extends ListableMemoryEncryptedR2Bucket {
+  readonly putStarted = createDeferred<void>();
+  readonly releasePut = createDeferred<void>();
+  private pauseNextPut = true;
+
+  override async put(key: string, value: string): Promise<void> {
+    if (this.pauseNextPut) {
+      this.pauseNextPut = false;
+      this.putStarted.resolve(undefined);
+      await this.releasePut.promise;
+    }
+    await super.put(key, value);
   }
 }
 

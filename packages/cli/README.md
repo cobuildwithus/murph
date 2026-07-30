@@ -194,6 +194,11 @@ bash scripts/release.sh 0.1.0-rc.1 --dry-run
 
 The release flow bumps the five public packages in the manifest to one shared version, updates `packages/cli/CHANGELOG.md`, writes `packages/cli/release-notes/v<version>.md`, and then creates a repository tag so `.github/workflows/release.yml` can pack and publish the public tarballs in dependency order. Workspace-private runtime packages remain in the monorepo and are bundled into the public tarballs when a public package still depends on them at runtime.
 
+Release `1.3.0` intentionally includes the breaking removal of the
+`@murphai/contracts` progress-card URL codec. Do not restore that public
+health-data URL representation as a compatibility shim; private attachment
+media is the supported path.
+
 npm trusted publishing is configured per package on npm, not once per repository. Because this monorepo still publishes a small set of `@murphai/*` packages, maintainers should bootstrap those package-level trust bindings before relying on tag-driven release publication:
 
 ```bash

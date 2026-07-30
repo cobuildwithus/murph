@@ -461,19 +461,19 @@ export async function acceptHostedGroupDisclosurePermissionReactionTx(input: {
     return { kind: "accepted" };
   }
 
-  const [groupGrantHistoryCount, memberGrantHistoryCount] = await Promise.all([
-    input.tx.hostedGroupDisclosureGrant.count({
+  const groupGrantHistoryCount =
+    await input.tx.hostedGroupDisclosureGrant.count({
       where: {
         membership: { groupId: permission.group.id },
         permission: { groupId: permission.group.id },
       },
-    }),
-    input.tx.hostedGroupDisclosureGrant.count({
+    });
+  const memberGrantHistoryCount =
+    await input.tx.hostedGroupDisclosureGrant.count({
       where: {
         membership: { memberId: input.memberId },
       },
-    }),
-  ]);
+    });
   if (
     groupGrantHistoryCount >= HOSTED_RUNTIME_GROUP_DISCLOSURE_HISTORY_MAX
     || memberGrantHistoryCount >= HOSTED_RUNTIME_GROUP_DISCLOSURE_HISTORY_MAX

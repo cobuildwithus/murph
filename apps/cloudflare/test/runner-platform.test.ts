@@ -122,7 +122,6 @@ import {
   buildHostedRunnerContainerEnv,
 } from "../src/runner-env.ts";
 import {
-  HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH,
 } from "../src/runner-effects-contract.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import {
@@ -3982,78 +3981,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.method).toBe("GET");
   });
 
-  it("routes generated image uploads through the write-fenced effects port", async () => {
-    const fetchMock = vi.fn(async () =>
-      new Response(JSON.stringify({
-        media: {
-          alt: "Generated image",
-          kind: "image",
-          source: "gpt-image-2",
-          url: "https://imagedelivery.net/account/image/public",
-        },
-      }), {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        status: 200,
-      }));
-    const platform = buildHostedExecutionRuntimePlatform({
-      boundUserId: "member_123",
-      fetchImpl: fetchMock as typeof fetch,
-      workspaceCheckpointBridge: {
-        readCurrentLease: () => ({
-          attemptId: "runtime_write_123",
-          leaseGeneration: "7",
-          userId: "member_123",
-          workspaceVersion: "6",
-        }),
-      },
-    });
-
-    await expect(platform.generatedImageUploader?.uploadGeneratedImage({
-      alt: "Generated image",
-      bytes: new Uint8Array([
-        0x89, 0x50, 0x4e, 0x47,
-        0x0d, 0x0a, 0x1a, 0x0a,
-      ]),
-      contentType: "image/png",
-      filename: "generated.png",
-      metadata: {
-        model: "gpt-image-2",
-        promptHash: "hash_123",
-        schema: "murph.generated-image.v1",
-      },
-      source: "gpt-image-2",
-    })).resolves.toEqual({
-      alt: "Generated image",
-      kind: "image",
-      source: "gpt-image-2",
-      url: "https://imagedelivery.net/account/image/public",
-    });
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const request = requireFetchRequest(fetchMock.mock.calls[0], "generated image upload");
-    expect(request.url).toBe(
-      `http://results.worker${HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH}`,
-    );
-    expect(request.headers.get("x-hosted-runtime-attempt-id")).toBe("runtime_write_123");
-    expect(request.headers.get("x-hosted-runtime-lease-generation")).toBe("7");
-    expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("6");
-    expect(request.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
-    expect(request.method).toBe("POST");
-    await expect(request.json()).resolves.toMatchObject({
-      alt: "Generated image",
-      contentType: "image/png",
-      filename: "generated.png",
-      metadata: {
-        model: "gpt-image-2",
-        promptHash: "hash_123",
-        schema: "murph.generated-image.v1",
-      },
-      source: "gpt-image-2",
-    });
-  });
-
   it("attaches web-control ports and routes them through internal virtual hosts", async () => {
     const fetchMock = vi.fn(async (requestInput: RequestInfo | URL) => {
       const request = requestInput instanceof Request ? requestInput : new Request(requestInput);
@@ -4580,6 +4507,53 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       .toMatch(/^[A-Za-z0-9\-_]+$/u);
   });
 
+  it("carries reviewed Assistant Ask proof through external route authority", async () => {
+    const authority = {
+      channel: "telegram" as const,
+      containerMemberId: "member_123",
+      threadId: "telegram_group_123",
+    };
+    const assistantAskCompletion = {
+      answeredMailboxItemIds: ["aask_done_telegram_provider_entry"],
+      assistantAskCompletionExpiresAt: "2026-07-27T18:00:00.000Z",
+      assistantAskFallback: false,
+      idempotencyKey:
+        "assistant-ask-reviewed-completion:aask_done_telegram_provider_entry",
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      await expect(request.json()).resolves.toEqual({
+        assistantAskCompletion,
+        authority,
+      });
+      return new Response(JSON.stringify({
+        assistantAskFallbackRequired: true,
+        authorized: true,
+      }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      });
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+    const assertExternalThreadRouteAuthority =
+      platform.effectsPort.assertExternalThreadRouteAuthority;
+    if (!assertExternalThreadRouteAuthority) {
+      throw new Error("Expected external thread route authority effect.");
+    }
+
+    await expect(assertExternalThreadRouteAuthority(authority, {
+      assistantAskCompletion,
+    })).resolves.toEqual({ assistantAskFallbackRequired: true });
+  });
+
   it("resolves the current verified-email recipient through direct web-control", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
@@ -4645,9 +4619,21 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           : {}),
         ok: true,
         ...(body.authorityCheckOnly === false
-          ? { providerDispatchClaimed: true }
+          ? {
+              deliveryPosture: "cautious",
+              providerDispatchClaimed: true,
+            }
           : {}),
-        threadIsDirect: responseCount === 1 ? false : "false",
+        ...(responseCount === 1
+          ? {}
+          : {
+              targetOverride: {
+                conversationThreadId: "hid_current_chat",
+                target: "chat_current",
+                targetKind: "thread",
+              },
+            }),
+        threadIsDirect: responseCount === 1 ? false : true,
       }), {
         headers: { "content-type": "application/json; charset=utf-8" },
         status: 200,
@@ -4674,6 +4660,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       target: "chat_123",
       targetKind: "thread",
     })).resolves.toEqual({
+      deliveryPosture: "cautious",
       providerDispatchClaimed: true,
       threadIsDirect: false,
     });
@@ -4683,7 +4670,15 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       authorityCheckOnly: true,
       target: "chat_456",
       targetKind: "thread",
-    })).resolves.toEqual({ assistantAskFallbackRequired: true });
+    })).resolves.toEqual({
+      assistantAskFallbackRequired: true,
+      targetOverride: {
+        conversationThreadId: "hid_current_chat",
+        target: "chat_current",
+        targetKind: "thread",
+      },
+      threadIsDirect: true,
+    });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     for (const [index, call] of fetchMock.mock.calls.entries()) {
@@ -4693,6 +4688,43 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
       expect(request.headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
     }
+  });
+
+  it("strictly parses typed Linq health blocks from web-control", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({
+        deliveryBlockCode: "chat_opted_out",
+        deliveryPosture: "unknown-posture",
+        ok: true,
+        threadIsDirect: true,
+      }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      })
+    );
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+    const assertLinqRecentInboundEngagement =
+      platform.effectsPort.assertLinqRecentInboundEngagement;
+    if (!assertLinqRecentInboundEngagement) {
+      throw new Error("Expected hosted Linq egress authority assertion effect.");
+    }
+
+    await expect(assertLinqRecentInboundEngagement({
+      authorityCheckOnly: true,
+      target: "chat_blocked",
+      targetKind: "thread",
+    })).resolves.toEqual({
+      deliveryBlockCode: "chat_opted_out",
+      threadIsDirect: true,
+    });
   });
 
   it("write-fences Linq delivery outcomes through direct web-control", async () => {

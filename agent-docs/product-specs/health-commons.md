@@ -1,6 +1,6 @@
 # Health Commons
 
-Last verified: 2026-07-21
+Last verified: 2026-07-29
 
 ## Current State
 
@@ -37,6 +37,7 @@ The storage primitive is a typed wiki page plus generated projections. Product/d
 
 Protocol pages must include lineage, attribution, a performable protocol block, safety, and at least one test plan. Claims must cite source pages unless they are explicitly labeled as community outcomes.
 Protocol pages may also include an optional compact `experimentOnboarding` block that stores only protocol-specific onboarding deltas, such as start intent, safety-screen questions, setup slots, selected test plan, first-session guidance, adaptation policy, and tracking/support hints. Generic vault-read behavior, plan timing, adherence targets, readable logging labels, and stable session log ids come from assistant instructions plus canonical `testPlans`, `protocol.logFields`, `protocol.sessionFieldIds`, `protocol`, and `safety` fields; only stable extra confounder log ids belong in `trackingHints.confounderFields`, while prose confounder guidance stays in `trackingHints.confounders` or `notes`.
+When multiple sensed activities can satisfy one protocol session, declare them under `protocol.activitySessionEvidence`; experiment start copies that typed evidence into the immutable effective snapshot, and adherence readers interpret the snapshot instead of inferring accepted activities from protocol names or global activity categories.
 Protocol and source pages may also include an optional `media` array for small public presentation assets such as header imagery. Keep those assets lightweight and repo-local, and do not use `media` as a substitute for research artifact manifests, PDFs, or other large external files.
 
 ## Biomarker Reference Guidance
@@ -119,12 +120,41 @@ rules.
 
 ## Publishing And Start Identity
 
-The public Start handoff is an exact-selection boundary, not a request to run whichever version happens to be current later.
+The public Start handoff stays human-readable while the private run remains
+bound to an exact runnable revision.
 
-- A runnable protocol Start draft carries a structured `Protocol reference` with the protocol `key`, `pageRevisionId`, and `runSpecRevisionId` shown on that page.
-- The draft is user-editable channel input and therefore untrusted data. The assistant resolves the key through the generated Health Commons runtime and applies normal safety and onboarding rules.
-- Both revision ids are compare-and-swap expectations on dry-run and real start calls. A mismatch stops creation and asks the member to refresh or reopen the protocol. The assistant must not drop either expectation or substitute newly resolved hashes.
-- A successful protocol-backed run stores the actual current key and revisions that satisfied those expectations. Draft, deprecated, hidden, or otherwise non-runnable protocols expose neither a runnable artifact nor a Start action.
+- A runnable protocol Start draft names the experiment in one plain-language
+  sentence. It does not expose the protocol key, revision field names, or raw
+  SHA-256 values.
+- The draft is user-editable channel input and therefore untrusted data. The
+  assistant resolves the name or alias through the generated Health Commons
+  protocol discovery surface, requires one unique exact title or alias match
+  before planning, and applies normal safety and onboarding rules. That exact
+  match is authoritative; a `starterCandidate`, canonical starter, or
+  same-family variant cannot replace it without explicit user agreement.
+  Missing or ambiguous matches require clarification rather than a silent
+  guess.
+- After exact resolution, the assistant passes that page's current
+  `pageRevisionId` and `runSpecRevisionId` as compare-and-swap expectations on
+  both dry-run and real start calls. If the runnable contract changes before
+  creation, the assistant reopens the changed setup with the member rather than
+  silently starting a different plan.
+- Legacy structured `Protocol reference` blocks remain accepted as untrusted
+  input. Their supplied revision pair stays authoritative compare-and-swap data
+  and must not be replaced with newly resolved hashes.
+- A successful protocol-backed run stores the actual key and revisions that
+  satisfied creation. Draft, deprecated, hidden, or otherwise non-runnable
+  protocols expose neither a runnable artifact nor a Start action.
+- Withdrawing a formerly runnable protocol also revokes future activation and
+  reactivation authority for private planned or paused runs linked to it. Those
+  records remain unchanged; the write owner reports that the protocol is no
+  longer available, and the assistant offers a currently runnable alternative
+  as a distinct experiment with a new id and lineage. The withdrawn run's
+  protocol references, effective snapshot, run plan, and analysis plan are
+  never rewritten to represent that alternative, including after the old run
+  reaches a terminal status. The old run becomes `abandoned` only after
+  separate explicit member agreement. A missing public page is not presented
+  as a refreshable revision mismatch.
 
 ## Protocol Summary Copy
 

@@ -1,6 +1,16 @@
 #!/usr/bin/env node
 
 import { spawn, spawnSync } from "node:child_process";
+import { createHash, randomBytes } from "node:crypto";
+import {
+  closeSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -12,8 +22,16 @@ const BLACKSMITH_WORKFLOW = ".github/workflows/crabbox-bounded.yml";
 const BLACKSMITH_JOB = "hydrate";
 const DEFAULT_CRABBOX_PROFILE = "murph-verification";
 const CRABBOX_IDLE_TIMEOUT = "10m";
-const CRABBOX_TTL = "45m";
 const TRUSTED_CRABBOX_ENTRYPOINT = "/usr/local/bin/murph-crabbox-verify";
+const SSH_PROVIDER = "ssh";
+const SSH_TARGET = "macos";
+const SSH_WORK_ROOT = "/Users/Shared/murph-crabbox";
+const SSH_RUN_ROOT = `${SSH_WORK_ROOT}/runs`;
+const SSH_VERIFICATION_ENTRYPOINT =
+  "scripts/crabbox/run-ssh-locked-verification.sh";
+const STATIC_GIT_SNAPSHOT_DIRECTORY = ".murph-static-git-snapshot";
+const SNAPSHOT_ORIGIN = "https://github.com/cobuildwithus/murph.git";
+const WORKSPACE_ARTIFACT_LOCK = "scripts/run-with-workspace-artifact-lock.mjs";
 const SAFE_CRABBOX_CLI_ENVIRONMENT_NAMES = [
   "HOME",
   "LANG",
@@ -27,7 +45,7 @@ const SAFE_CRABBOX_CLI_ENVIRONMENT_NAMES = [
   "XDG_CACHE_HOME",
   "XDG_CONFIG_HOME",
 ];
-const VALID_EXECUTORS = new Set(["auto", "local", "crabbox"]);
+const VALID_EXECUTORS = new Set(["auto", "local", "ssh", "crabbox"]);
 const SUPPORTED_VERIFICATION_COMMANDS = new Set([
   "test:diff",
   "verify:acceptance",
@@ -69,11 +87,11 @@ function assertSafeBlacksmithRoutingInputs(env) {
 
 export function resolveVerificationExecutor({
   env = process.env,
-  isCrabboxAvailable = detectCrabboxStack,
+  isExecutorAvailable = detectExecutorStack,
 } = {}) {
   const requestedExecutor = (env.MURPH_VERIFY_EXECUTOR ?? "auto").trim();
   if (!VALID_EXECUTORS.has(requestedExecutor)) {
-    throw new Error("MURPH_VERIFY_EXECUTOR must be auto, local, or crabbox.");
+    throw new Error("MURPH_VERIFY_EXECUTOR must be auto, local, ssh, or crabbox.");
   }
 
   const requiresVercelDevelopmentEnvironment = readBooleanFlag(
@@ -86,9 +104,9 @@ export function resolveVerificationExecutor({
   }
 
   if (requiresVercelDevelopmentEnvironment) {
-    if (requestedExecutor === "crabbox") {
+    if (requestedExecutor === "crabbox" || requestedExecutor === "ssh") {
       throw new Error(
-        "MURPH_VERIFY_REQUIRES_VERCEL_ENV=1 cannot be combined with MURPH_VERIFY_EXECUTOR=crabbox; the default Crabbox verification lane never forwards Vercel development credentials.",
+        `MURPH_VERIFY_REQUIRES_VERCEL_ENV=1 cannot be combined with MURPH_VERIFY_EXECUTOR=${requestedExecutor}; remote verification never forwards Vercel development credentials.`,
       );
     }
     return { executor: "local", reason: "vercel-development-env" };
@@ -102,14 +120,21 @@ export function resolveVerificationExecutor({
     return { executor: "local", reason: "auto" };
   }
 
-  assertSafeBlacksmithRoutingInputs(env);
-  if (!isCrabboxAvailable()) {
+  if (requestedExecutor === "crabbox") {
+    assertSafeBlacksmithRoutingInputs(env);
+  } else {
+    readSshRoutingInputs(env);
+  }
+  if (!isExecutorAvailable(requestedExecutor)) {
+    const requiredStack = requestedExecutor === "crabbox"
+      ? "Crabbox and Blacksmith CLIs are"
+      : "Crabbox CLI is";
     throw new Error(
-      "MURPH_VERIFY_EXECUTOR=crabbox was requested, but the Crabbox and Blacksmith CLIs are unavailable.",
+      `MURPH_VERIFY_EXECUTOR=${requestedExecutor} was requested, but the ${requiredStack} unavailable.`,
     );
   }
 
-  return { executor: "crabbox", reason: "explicit" };
+  return { executor: requestedExecutor, reason: "explicit" };
 }
 
 export function buildLocalInvocation(request) {
@@ -140,8 +165,6 @@ export function buildCrabboxInvocation(request) {
     BLACKSMITH_JOB,
     "--idle-timeout",
     CRABBOX_IDLE_TIMEOUT,
-    "--ttl",
-    CRABBOX_TTL,
     "--label",
     `murph ${request.verificationCommand}`,
     "--timing-json",
@@ -157,27 +180,128 @@ export function buildCrabboxInvocation(request) {
   return { args, command: "crabbox" };
 }
 
+export function buildSshInvocation(request, routing, repoRoot) {
+  const identity = buildSshWorktreeIdentity(repoRoot);
+  return {
+    args: [
+      "run",
+      "--provider",
+      SSH_PROVIDER,
+      "--target",
+      SSH_TARGET,
+      "--static-host",
+      routing.host,
+      "--static-user",
+      routing.user,
+      "--static-port",
+      routing.port,
+      "--static-work-root",
+      identity.workRoot,
+      "--full-resync",
+      "--preflight",
+      "--preflight-tools",
+      "git,node,corepack,pnpm",
+      "--label",
+      `murph ${request.verificationCommand}`,
+      "--timing-json",
+      "--",
+      "/bin/sh",
+      SSH_VERIFICATION_ENTRYPOINT,
+      request.verificationCommand,
+      ...request.commandArgs,
+    ],
+    command: "crabbox",
+    environment: {
+      CRABBOX_STATIC_ID: identity.staticId,
+    },
+  };
+}
+
+export function buildSshWorktreeIdentity(
+  repoRoot,
+  runToken = randomBytes(8).toString("hex"),
+) {
+  if (!/^[a-f0-9]{16}$/u.test(runToken)) {
+    throw new Error("Static SSH verification run token must be 16 lowercase hex characters.");
+  }
+  const digest = createHash("sha256")
+    .update(path.resolve(repoRoot))
+    .digest("hex")
+    .slice(0, 16);
+  return {
+    staticId: `static_murph_${digest}`,
+    workRoot: `${SSH_RUN_ROOT}/${digest}-${runToken}`,
+  };
+}
+
+export function buildLockedRemoteDispatcherInvocation({ request, argv }) {
+  return {
+    args: [
+      WORKSPACE_ARTIFACT_LOCK,
+      `remote ${request.verificationCommand}`,
+      "--",
+      "node",
+      "scripts/verification-dispatch.mjs",
+      ...argv,
+    ],
+    command: "node",
+  };
+}
+
 export async function runVerification(argv, env = process.env) {
   const request = parseVerificationRequest(argv);
   const resolution = resolveVerificationExecutor({ env });
-  const invocation = resolution.executor === "crabbox"
+  const isRemote = resolution.executor === "crabbox" ||
+    resolution.executor === "ssh";
+
+  if (isRemote && env.MURPH_WORKSPACE_ARTIFACT_LOCK_HELD !== "1") {
+    process.stderr.write(
+      `[verification-dispatch] command=${request.verificationCommand} executor=${resolution.executor} reason=${resolution.reason} state=waiting-for-workspace-lock\n`,
+    );
+    return await runChild(
+      buildLockedRemoteDispatcherInvocation({ request, argv }),
+      env,
+    );
+  }
+
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const remoteInvocation = resolution.executor === "crabbox"
     ? buildCrabboxInvocation(request)
-    : buildLocalInvocation(request);
+    : resolution.executor === "ssh"
+      ? buildSshInvocation(request, readSshRoutingInputs(env), repoRoot)
+      : null;
+  const invocation = remoteInvocation ?? buildLocalInvocation(request);
 
   process.stderr.write(
     `[verification-dispatch] command=${request.verificationCommand} executor=${resolution.executor} reason=${resolution.reason}\n`,
   );
 
-  const childEnvironment = resolution.executor === "crabbox"
-    ? buildCrabboxCliEnvironment(env)
+  const childEnvironment = remoteInvocation
+    ? {
+        ...buildCrabboxCliEnvironment(env),
+        ...(remoteInvocation.environment ?? {}),
+      }
     : env;
-  if (resolution.executor === "crabbox") {
-    assertSafeBlacksmithSync(
-      path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
+  if (!remoteInvocation) {
+    return await runChild(invocation, childEnvironment);
+  }
+
+  const candidate = createRemoteCandidateSnapshot(
+    repoRoot,
+    childEnvironment,
+    { includeStaticGitMetadata: resolution.executor === "ssh" },
+  );
+  process.stderr.write(
+    `[verification-dispatch] candidate-tree=${candidate.tree}\n`,
+  );
+  try {
+    return await runChild(
+      { ...invocation, cwd: candidate.root },
       childEnvironment,
     );
+  } finally {
+    candidate.dispose();
   }
-  return await runChild(invocation, childEnvironment);
 }
 
 export function buildCrabboxCliEnvironment(env) {
@@ -198,12 +322,401 @@ export function buildCrabboxCliEnvironment(env) {
   return childEnvironment;
 }
 
-export function findSensitiveBlacksmithSyncPaths(paths) {
-  return paths.filter(isSensitiveBlacksmithSyncPath);
+export function findSensitiveRemoteSyncPaths(paths) {
+  return paths.filter(isSensitiveRemoteSyncPath);
 }
 
-export function assertSafeBlacksmithSync(repoRoot, environment = process.env) {
-  const unsafeStates = findUnsafeBlacksmithWorktreeStates(
+export function createRemoteCandidateSnapshot(
+  repoRoot,
+  environment = process.env,
+  { includeStaticGitMetadata = false } = {},
+) {
+  const snapshotRoot = mkdtempSync(
+    path.join(os.tmpdir(), "murph-remote-candidate-"),
+  );
+  try {
+    // This mutable-checkout pass is a fail-fast operator guard. The frozen
+    // candidate below is the authority admitted for remote execution.
+    assertSafeRemoteSync(repoRoot, environment);
+    const candidateCommit = createCandidateCommit(repoRoot, environment);
+    const baseCommit = candidateCommit
+      ? readGitValue(
+          repoRoot,
+          ["rev-parse", `${candidateCommit}^1`],
+          environment,
+          "candidate base commit",
+        )
+      : readGitValue(
+          repoRoot,
+          ["rev-parse", "HEAD"],
+          environment,
+          "clean candidate base commit",
+        );
+    const candidateTree = readGitValue(
+      repoRoot,
+      ["rev-parse", `${candidateCommit ?? baseCommit}^{tree}`],
+      environment,
+      "candidate tree",
+    );
+    const baseTree = readGitValue(
+      repoRoot,
+      ["rev-parse", `${baseCommit}^{tree}`],
+      environment,
+      "candidate base tree",
+    );
+    const baseSensitivePaths = findSensitiveRemoteSyncPaths(
+      listGitPaths(
+        repoRoot,
+        ["ls-tree", "-r", "-z", "--name-only", baseTree],
+        environment,
+      ),
+    );
+    if (baseSensitivePaths.length > 0) {
+      throw new Error(renderSensitiveRemoteSyncError(baseSensitivePaths));
+    }
+    const indexTree = candidateCommit
+      ? readGitValue(
+          repoRoot,
+          ["rev-parse", `${candidateCommit}^2^{tree}`],
+          environment,
+          "candidate index tree",
+        )
+      : candidateTree;
+    const sensitivePaths = findSensitiveRemoteSyncPaths(
+      listGitPaths(
+        repoRoot,
+        ["ls-tree", "-r", "-z", "--name-only", candidateTree],
+        environment,
+      ),
+    );
+    if (sensitivePaths.length > 0) {
+      throw new Error(renderSensitiveRemoteSyncError(sensitivePaths));
+    }
+    assertCandidateAdditionsMatchIndex(
+      repoRoot,
+      { baseCommit, candidateTree, indexTree },
+      environment,
+    );
+
+    runCheckedCommand(
+      "git",
+      ["init", "--quiet", snapshotRoot],
+      { cwd: repoRoot, env: environment },
+      "initialize the remote verification candidate repository",
+    );
+    runCheckedCommand(
+      "git",
+      [
+        "-C",
+        snapshotRoot,
+        "fetch",
+        "--quiet",
+        "--depth=1",
+        pathToFileURL(repoRoot).href,
+        baseCommit,
+      ],
+      { cwd: repoRoot, env: environment },
+      "fetch the remote verification candidate base commit",
+    );
+    runCheckedCommand(
+      "git",
+      ["checkout", "--quiet", "--detach", "FETCH_HEAD"],
+      { cwd: snapshotRoot, env: environment },
+      "check out the remote verification candidate base commit",
+    );
+    const materializedBase = readGitValue(
+      snapshotRoot,
+      ["rev-parse", "HEAD"],
+      environment,
+      "materialized base commit",
+    );
+    if (materializedBase !== baseCommit) {
+      throw new Error(
+        "Remote verification candidate materialization did not preserve the captured base.",
+      );
+    }
+    runCheckedCommand(
+      "git",
+      ["rm", "--quiet", "-r", "--force", "--ignore-unmatch", "."],
+      { cwd: snapshotRoot, env: environment },
+      "clear the candidate worktree before materializing its frozen tree",
+    );
+
+    const candidateIndexPath = path.join(
+      snapshotRoot,
+      ".git",
+      "candidate-index",
+    );
+    const candidateIndexEnvironment = {
+      ...environment,
+      GIT_INDEX_FILE: candidateIndexPath,
+    };
+    runCheckedCommand(
+      "git",
+      ["read-tree", candidateTree],
+      { cwd: repoRoot, env: candidateIndexEnvironment },
+      "read the frozen remote verification candidate tree",
+    );
+    runCheckedCommand(
+      "git",
+      [
+        "checkout-index",
+        "--all",
+        "--force",
+        `--prefix=${snapshotRoot}${path.sep}`,
+      ],
+      { cwd: repoRoot, env: candidateIndexEnvironment },
+      "materialize the frozen remote verification candidate tree",
+    );
+    rmSync(candidateIndexPath, { force: true });
+
+    runCheckedCommand(
+      "git",
+      ["add", "--all", "--force"],
+      { cwd: snapshotRoot, env: environment },
+      "index the remote verification candidate",
+    );
+    const materializedTree = readGitValue(
+      snapshotRoot,
+      ["write-tree"],
+      environment,
+      "materialized candidate tree",
+    );
+    if (materializedTree !== candidateTree) {
+      throw new Error(
+        "Remote verification candidate materialization changed the admitted Git tree.",
+      );
+    }
+    assertSafeRemoteSync(snapshotRoot, environment);
+    runCheckedCommand(
+      "git",
+      ["remote", "add", "origin", SNAPSHOT_ORIGIN],
+      { cwd: snapshotRoot, env: environment },
+      "bind the remote verification candidate to its public origin",
+    );
+    if (includeStaticGitMetadata) {
+      writeStaticGitSnapshotMetadata(
+        { baseTree, candidateTree, snapshotRoot },
+        environment,
+      );
+    }
+
+    let disposed = false;
+    return {
+      dispose() {
+        if (disposed) {
+          return;
+        }
+        disposed = true;
+        rmSync(snapshotRoot, { force: true, recursive: true });
+      },
+      root: snapshotRoot,
+      tree: candidateTree,
+    };
+  } catch (error) {
+    rmSync(snapshotRoot, { force: true, recursive: true });
+    throw error;
+  }
+}
+
+export function writeStaticGitSnapshotMetadata(
+  { baseTree, candidateTree, snapshotRoot },
+  environment = process.env,
+) {
+  const metadataRoot = path.join(
+    snapshotRoot,
+    STATIC_GIT_SNAPSHOT_DIRECTORY,
+  );
+  mkdirSync(metadataRoot, { mode: 0o700 });
+
+  const syntheticBaseCommit = createSyntheticBaseCommit(
+    snapshotRoot,
+    baseTree,
+    environment,
+  );
+  const candidateObjectIds = new Set(
+    [...readGitTreeEntries(snapshotRoot, candidateTree, environment).values()]
+      .map(readTreeEntryObjectId),
+  );
+  const missingBaseObjectIds = [
+    ...readGitTreeEntries(snapshotRoot, baseTree, environment).values(),
+  ]
+    .map(readTreeEntryObjectId)
+    .filter((objectId) => !candidateObjectIds.has(objectId));
+  const packedObjectIds = [
+    syntheticBaseCommit,
+    baseTree,
+    ...readGitTreeObjectIds(snapshotRoot, baseTree, environment),
+    ...missingBaseObjectIds,
+  ];
+
+  writeFileSync(
+    path.join(metadataRoot, "base-commit"),
+    `${syntheticBaseCommit}\n`,
+    { encoding: "utf8", mode: 0o600 },
+  );
+  writeFileSync(
+    path.join(metadataRoot, "base-tree"),
+    `${baseTree}\n`,
+    { encoding: "utf8", mode: 0o600 },
+  );
+  writeFileSync(
+    path.join(metadataRoot, "candidate-tree"),
+    `${candidateTree}\n`,
+    { encoding: "utf8", mode: 0o600 },
+  );
+  writeGitTreeManifest(
+    snapshotRoot,
+    candidateTree,
+    path.join(metadataRoot, "candidate-index"),
+    environment,
+  );
+  writeFileSync(
+    path.join(metadataRoot, "candidate-paths"),
+    Buffer.from(
+      `${listGitPaths(
+        snapshotRoot,
+        ["ls-tree", "-r", "-z", "--name-only", candidateTree],
+        environment,
+      ).join("\0")}\0`,
+      "utf8",
+    ),
+    { mode: 0o600 },
+  );
+  writeGitObjectPack(
+    snapshotRoot,
+    path.join(metadataRoot, "objects.pack"),
+    [...new Set(packedObjectIds)],
+    environment,
+  );
+}
+
+function writeGitTreeManifest(
+  repoRoot,
+  treeish,
+  manifestPath,
+  environment,
+) {
+  const manifestDescriptor = openSync(manifestPath, "w", 0o600);
+  try {
+    const result = spawnSync(
+      "git",
+      ["ls-tree", "-r", "-z", "--full-tree", treeish],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: environment,
+        maxBuffer: 16 * 1024 * 1024,
+        stdio: ["ignore", manifestDescriptor, "pipe"],
+      },
+    );
+    if (result.status !== 0) {
+      throw new Error(
+        "Unable to write the static verification candidate index.",
+      );
+    }
+  } finally {
+    closeSync(manifestDescriptor);
+  }
+}
+
+function createSyntheticBaseCommit(repoRoot, baseTree, environment) {
+  const result = spawnSync("git", ["commit-tree", baseTree], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: {
+      ...environment,
+      GIT_AUTHOR_DATE: "2000-01-01T00:00:00Z",
+      GIT_AUTHOR_EMAIL: "verification@localhost",
+      GIT_AUTHOR_NAME: "Murph Verification",
+      GIT_COMMITTER_DATE: "2000-01-01T00:00:00Z",
+      GIT_COMMITTER_EMAIL: "verification@localhost",
+      GIT_COMMITTER_NAME: "Murph Verification",
+    },
+    input: "Murph static verification base\n",
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  if (result.status !== 0 || !/^[a-f0-9]{40}\n?$/u.test(result.stdout)) {
+    throw new Error(
+      "Unable to create the static verification base commit.",
+    );
+  }
+  return result.stdout.trim();
+}
+
+function readGitTreeObjectIds(repoRoot, treeish, environment) {
+  const result = spawnSync(
+    "git",
+    ["ls-tree", "-r", "-t", "-z", "--full-tree", treeish],
+    {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: environment,
+      maxBuffer: 16 * 1024 * 1024,
+    },
+  );
+  if (result.status !== 0) {
+    throw new Error(
+      "Unable to inspect static verification base tree objects.",
+    );
+  }
+  const objectIds = [];
+  for (const record of result.stdout.split("\0")) {
+    if (!record) {
+      continue;
+    }
+    const separator = record.indexOf("\t");
+    const header = separator < 0 ? "" : record.slice(0, separator);
+    const match = /^[0-7]{6} tree ([a-f0-9]{40})$/u.exec(header);
+    if (match) {
+      objectIds.push(match[1]);
+    }
+  }
+  return objectIds;
+}
+
+function readTreeEntryObjectId(entry) {
+  const match = /^[0-7]{6} (?:blob|commit) ([a-f0-9]{40})$/u.exec(entry);
+  if (!match) {
+    throw new Error(
+      "Unable to parse a static verification Git tree entry.",
+    );
+  }
+  return match[1];
+}
+
+function writeGitObjectPack(repoRoot, packPath, objectIds, environment) {
+  const packDescriptor = openSync(packPath, "w", 0o600);
+  try {
+    const result = spawnSync(
+      "git",
+      [
+        "pack-objects",
+        "--stdout",
+        "--no-reuse-delta",
+        "--no-reuse-object",
+      ],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: environment,
+        input: `${objectIds.join("\n")}\n`,
+        maxBuffer: 16 * 1024 * 1024,
+        stdio: ["pipe", packDescriptor, "pipe"],
+      },
+    );
+    if (result.status !== 0) {
+      throw new Error(
+        "Unable to pack the static verification Git base.",
+      );
+    }
+  } finally {
+    closeSync(packDescriptor);
+  }
+}
+
+export function assertSafeRemoteSync(repoRoot, environment = process.env) {
+  const unsafeStates = findUnsafeRemoteWorktreeStates(
     readGitWorktreeStates(repoRoot, environment),
   );
   if (unsafeStates.length > 0) {
@@ -215,7 +728,7 @@ export function assertSafeBlacksmithSync(repoRoot, environment = process.env) {
       .map(([reason, count]) => `${reason}=${count}`)
       .join(", ");
     throw new Error(
-      `Blacksmith Testbox sync refused ${unsafeStates.length} unauthorized Git state${unsafeStates.length === 1 ? "" : "s"} (${summary}). Fully stage intentional new source or resolve the working-tree state before remote verification.`,
+      `Remote verification sync refused ${unsafeStates.length} unauthorized Git state${unsafeStates.length === 1 ? "" : "s"} (${summary}). Fully stage intentional new source or resolve the working-tree state before remote verification.`,
     );
   }
 
@@ -224,22 +737,13 @@ export function assertSafeBlacksmithSync(repoRoot, environment = process.env) {
     ["ls-files", "--cached", "-z"],
     environment,
   );
-  const sensitivePaths = findSensitiveBlacksmithSyncPaths(cachedPaths);
+  const sensitivePaths = findSensitiveRemoteSyncPaths(cachedPaths);
   if (sensitivePaths.length > 0) {
-    const renderedPaths = sensitivePaths
-      .slice(0, 10)
-      .map((filePath) => JSON.stringify(filePath))
-      .join(", ");
-    const remainder = sensitivePaths.length > 10
-      ? ` and ${sensitivePaths.length - 10} more`
-      : "";
-    throw new Error(
-      `Blacksmith Testbox sync refused sensitive managed paths: ${renderedPaths}${remainder}. Ignore or remove them before remote verification.`,
-    );
+    throw new Error(renderSensitiveRemoteSyncError(sensitivePaths));
   }
 }
 
-export function findUnsafeBlacksmithWorktreeStates(entries) {
+export function findUnsafeRemoteWorktreeStates(entries) {
   const unmergedStates = new Set(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]);
   const validIndexStatuses = new Set([" ", "M", "A", "D", "R", "C", "T"]);
   const validWorktreeStatuses = new Set([" ", "M", "D", "T"]);
@@ -276,19 +780,19 @@ export function parseGitStatusPorcelainV1Z(output) {
   let offset = 0;
   while (offset < output.length) {
     if (offset + 3 > output.length || output[offset + 2] !== " ") {
-      throw new Error("Unable to parse the Blacksmith Testbox Git status boundary.");
+      throw new Error("Unable to parse the remote verification Git status boundary.");
     }
     const indexStatus = output[offset];
     const worktreeStatus = output[offset + 1];
     const pathEnd = output.indexOf("\0", offset + 3);
     if (pathEnd === -1) {
-      throw new Error("Unable to parse the Blacksmith Testbox Git status boundary.");
+      throw new Error("Unable to parse the remote verification Git status boundary.");
     }
     offset = pathEnd + 1;
     if (indexStatus === "R" || indexStatus === "C") {
       const originalPathEnd = output.indexOf("\0", offset);
       if (originalPathEnd === -1) {
-        throw new Error("Unable to parse the Blacksmith Testbox Git status boundary.");
+        throw new Error("Unable to parse the remote verification Git status boundary.");
       }
       offset = originalPathEnd + 1;
     }
@@ -309,7 +813,7 @@ function readGitWorktreeStates(repoRoot, environment) {
     },
   );
   if (result.status !== 0) {
-    throw new Error("Unable to inspect the Blacksmith Testbox sync set with git status.");
+    throw new Error("Unable to inspect the remote verification sync set with git status.");
   }
   return parseGitStatusPorcelainV1Z(result.stdout);
 }
@@ -322,12 +826,192 @@ function listGitPaths(repoRoot, args, environment) {
     maxBuffer: 16 * 1024 * 1024,
   });
   if (result.status !== 0) {
-    throw new Error("Unable to inspect the Blacksmith Testbox sync set with git ls-files.");
+    throw new Error("Unable to inspect the remote verification sync set with git ls-files.");
   }
   return result.stdout.split("\0").filter(Boolean);
 }
 
-function isSensitiveBlacksmithSyncPath(filePath) {
+function assertCandidateAdditionsMatchIndex(
+  repoRoot,
+  { baseCommit, candidateTree, indexTree },
+  environment,
+) {
+  const baseEntries = readGitTreeEntries(repoRoot, baseCommit, environment);
+  const candidateEntries = readGitTreeEntries(
+    repoRoot,
+    candidateTree,
+    environment,
+  );
+  const indexEntries = readGitTreeEntries(repoRoot, indexTree, environment);
+  const renamedTargets = readRenamedIndexTargets(
+    repoRoot,
+    baseCommit,
+    indexTree,
+    environment,
+  );
+  const partiallyStagedAdditions = [];
+
+  for (const [filePath, candidateEntry] of candidateEntries) {
+    if (baseEntries.has(filePath)) {
+      continue;
+    }
+    if (
+      indexEntries.get(filePath) === candidateEntry ||
+      renamedTargets.has(filePath)
+    ) {
+      continue;
+    }
+    partiallyStagedAdditions.push(filePath);
+  }
+
+  if (partiallyStagedAdditions.length > 0) {
+    throw new Error(
+      "Remote verification candidate capture found a new path whose current contents were not fully staged.",
+    );
+  }
+}
+
+function readGitTreeEntries(repoRoot, treeish, environment) {
+  const result = spawnSync(
+    "git",
+    ["ls-tree", "-r", "-z", "--full-tree", treeish],
+    {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: environment,
+      maxBuffer: 16 * 1024 * 1024,
+    },
+  );
+  if (result.status !== 0) {
+    throw new Error("Unable to inspect the frozen remote verification Git tree.");
+  }
+
+  const entries = new Map();
+  for (const record of result.stdout.split("\0")) {
+    if (!record) {
+      continue;
+    }
+    const separator = record.indexOf("\t");
+    if (separator < 0) {
+      throw new Error("Unable to parse the frozen remote verification Git tree.");
+    }
+    entries.set(record.slice(separator + 1), record.slice(0, separator));
+  }
+  return entries;
+}
+
+function readRenamedIndexTargets(
+  repoRoot,
+  baseCommit,
+  indexTree,
+  environment,
+) {
+  const result = spawnSync(
+    "git",
+    [
+      "diff-tree",
+      "--no-commit-id",
+      "--name-status",
+      "-r",
+      "-M",
+      "-z",
+      baseCommit,
+      indexTree,
+    ],
+    {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: environment,
+      maxBuffer: 16 * 1024 * 1024,
+    },
+  );
+  if (result.status !== 0) {
+    throw new Error("Unable to inspect frozen remote verification renames.");
+  }
+
+  const fields = result.stdout.split("\0");
+  const renamedTargets = new Set();
+  for (let index = 0; index < fields.length;) {
+    const status = fields[index++];
+    if (!status) {
+      break;
+    }
+    if (status.startsWith("R")) {
+      index += 1;
+      const target = fields[index++];
+      if (!target) {
+        throw new Error("Unable to parse frozen remote verification renames.");
+      }
+      renamedTargets.add(target);
+      continue;
+    }
+    if (status.startsWith("C")) {
+      index += 2;
+      continue;
+    }
+    index += 1;
+  }
+  return renamedTargets;
+}
+
+function createCandidateCommit(repoRoot, environment) {
+  const result = spawnSync(
+    "git",
+    ["stash", "create", "murph remote verification candidate"],
+    {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: environment,
+      maxBuffer: 16 * 1024 * 1024,
+    },
+  );
+  if (result.status !== 0) {
+    throw new Error("Unable to create the remote verification candidate.");
+  }
+  const candidateCommit = result.stdout.trim();
+  return candidateCommit || null;
+}
+
+function readGitValue(repoRoot, args, environment, description) {
+  const result = spawnSync("git", args, {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: environment,
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  if (result.status !== 0) {
+    throw new Error(`Unable to inspect the remote verification ${description}.`);
+  }
+  const value = result.stdout.trim();
+  if (!value) {
+    throw new Error(`Remote verification ${description} was empty.`);
+  }
+  return value;
+}
+
+function runCheckedCommand(command, args, options, description) {
+  const result = spawnSync(command, args, {
+    ...options,
+    encoding: "utf8",
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  if (result.status !== 0) {
+    throw new Error(`Unable to ${description}.`);
+  }
+}
+
+function renderSensitiveRemoteSyncError(sensitivePaths) {
+  const renderedPaths = sensitivePaths
+    .slice(0, 10)
+    .map((filePath) => JSON.stringify(filePath))
+    .join(", ");
+  const remainder = sensitivePaths.length > 10
+    ? ` and ${sensitivePaths.length - 10} more`
+    : "";
+  return `Remote verification sync refused sensitive managed paths: ${renderedPaths}${remainder}. Ignore or remove them before remote verification.`;
+}
+
+function isSensitiveRemoteSyncPath(filePath) {
   const normalized = filePath.replaceAll("\\", "/");
   const segments = normalized.split("/");
   const basename = segments.at(-1) ?? "";
@@ -365,10 +1049,12 @@ function isSensitiveBlacksmithSyncPath(filePath) {
     normalized.startsWith("source-artifacts/");
 }
 
-function detectCrabboxStack() {
+function detectExecutorStack(executor) {
   const environment = buildCrabboxCliEnvironment(process.env);
-  return isCommandAvailable("crabbox", environment) &&
-    isCommandAvailable("blacksmith", environment);
+  if (!isCommandAvailable("crabbox", environment)) {
+    return false;
+  }
+  return executor !== "crabbox" || isCommandAvailable("blacksmith", environment);
 }
 
 function isCommandAvailable(command, environment) {
@@ -390,6 +1076,55 @@ function readOptionalValue(value, name) {
   return normalized;
 }
 
+export function readSshRoutingInputs(environment) {
+  const host = readOptionalValue(
+    environment.MURPH_VERIFY_SSH_HOST,
+    "MURPH_VERIFY_SSH_HOST",
+  );
+  if (!host) {
+    throw new Error(
+      "MURPH_VERIFY_EXECUTOR=ssh requires MURPH_VERIFY_SSH_HOST to name a dedicated resolvable host.",
+    );
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,252}$/u.test(host)) {
+    throw new Error(
+      "MURPH_VERIFY_SSH_HOST must be a safe resolvable SSH host containing only letters, digits, dots, underscores, and hyphens.",
+    );
+  }
+  const user = readOptionalValue(
+    environment.MURPH_VERIFY_SSH_USER,
+    "MURPH_VERIFY_SSH_USER",
+  );
+  if (!user) {
+    throw new Error(
+      "MURPH_VERIFY_EXECUTOR=ssh requires MURPH_VERIFY_SSH_USER to name the dedicated worker account.",
+    );
+  }
+  if (!/^[A-Za-z0-9_][A-Za-z0-9._-]{0,252}$/u.test(user)) {
+    throw new Error(
+      "MURPH_VERIFY_SSH_USER must be a safe SSH user containing only letters, digits, dots, underscores, and hyphens.",
+    );
+  }
+  const port = readOptionalValue(
+    environment.MURPH_VERIFY_SSH_PORT,
+    "MURPH_VERIFY_SSH_PORT",
+  );
+  if (!port) {
+    throw new Error(
+      "MURPH_VERIFY_EXECUTOR=ssh requires MURPH_VERIFY_SSH_PORT to name the dedicated worker SSH port.",
+    );
+  }
+  if (
+    !/^[1-9][0-9]{0,4}$/u.test(port) ||
+    Number.parseInt(port, 10) > 65_535
+  ) {
+    throw new Error(
+      "MURPH_VERIFY_SSH_PORT must be an integer from 1 through 65535.",
+    );
+  }
+  return { host, port, user };
+}
+
 function readBooleanFlag(value, name) {
   if (value === undefined || value === "" || value === "0") {
     return false;
@@ -404,6 +1139,7 @@ function runChild(invocation, env) {
   return new Promise((resolve, reject) => {
     const useDetachedProcessGroup = process.platform !== "win32";
     const child = spawn(invocation.command, invocation.args, {
+      cwd: invocation.cwd,
       detached: useDetachedProcessGroup,
       env,
       stdio: "inherit",
@@ -415,12 +1151,17 @@ function runChild(invocation, env) {
     const onSigterm = () => {
       signalChild(child, useDetachedProcessGroup, "SIGTERM");
     };
+    const onSighup = () => {
+      signalChild(child, useDetachedProcessGroup, "SIGHUP");
+    };
     process.once("SIGINT", onSigint);
     process.once("SIGTERM", onSigterm);
+    process.once("SIGHUP", onSighup);
 
     const cleanup = () => {
       process.off("SIGINT", onSigint);
       process.off("SIGTERM", onSigterm);
+      process.off("SIGHUP", onSighup);
     };
 
     child.once("error", (error) => {
@@ -431,6 +1172,10 @@ function runChild(invocation, env) {
       cleanup();
       if (signal === "SIGINT") {
         resolve(130);
+        return;
+      }
+      if (signal === "SIGHUP") {
+        resolve(129);
         return;
       }
       if (signal) {

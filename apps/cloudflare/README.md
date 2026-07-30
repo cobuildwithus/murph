@@ -71,7 +71,15 @@ The usage-record callback may also transport one bounded Linq group delivery
 target captured from the accepted mailbox input. The target includes the
 existing thread-route authority and is advisory to web-owned accounting; the
 Worker does not resolve, persist, or authorize an alternate recipient.
-The runner container also uses Cloudflare HTTPS outbound interception for hosted provider egress. OpenAI, Exa, Mapbox, Linq, Telegram, hosted data API, and Workers AI transcription real credentials stay in Worker env. Native child-process integrations for OpenAI, Exa, Mapbox, `murph_data_api`, and `workers_ai_transcribe` receive a runner-scoped signed Murph provider credential in the provider's native credential slot; the Worker verifies that credential as `provider + user + runner`, asks UserRunner whether the same runner currently has an active runtime for that user/provider, then injects the real Worker-owned credential only into the upstream request. Runtime-controlled provider calls may instead carry exact write-fence headers or a provider-egress token; there is no tokenless active-user-fence provider authorization path. Delivery providers (Linq and Telegram) and ElevenLabs continue to require exact write-fence headers or a provider-egress token, because those effects must stay behind recipient binding, journaling, and idempotency. The Worker constrains Exa to `POST /search`, constrains Linq to the runtime route matrix (`GET /phone_numbers`, `GET /attachments/:id`, `POST /attachments`, `POST /chats`, `POST /chats/:id/messages`, `POST /chats/:id/voicememo`, `POST /chats/:id/typing`, `DELETE /chats/:id/typing`, `POST /chats/:id/read`, `POST /messages/:id/reactions`, `DELETE /messages/:id`), constrains Mapbox to read-only GET allowlisted path families, and strips runtime authority headers before upstream provider egress leaves Cloudflare. Runtime code does not call Linq's contact-card provider endpoint directly; first-contact native contact-card sharing stays web-owned. Hosted generated-image turns call OpenAI through the runner-scoped provider credential path and then upload validated image bytes through the write-fenced `results.worker/generated-images` effect, where Cloudflare Images credentials stay Worker-owned. Runner container names identify the runner for server-side validation; `ctx.containerId` is not provider-egress authorization. Unknown egress currently passes through during migration and logs only sanitized method/host/path metadata. Adding a new hosted provider API, method, or runtime tool that calls an intercepted provider is not complete until this egress boundary and its regression tests allow the exact upstream operation.
+The runner container also uses Cloudflare HTTPS outbound interception for hosted provider egress. OpenAI, Exa, Mapbox, Linq, Telegram, hosted data API, and Workers AI transcription real credentials stay in Worker env. Native child-process integrations for OpenAI, Exa, Mapbox, `murph_data_api`, and `workers_ai_transcribe` receive a runner-scoped signed Murph provider credential in the provider's native credential slot; the Worker verifies that credential as `provider + user + runner`, asks UserRunner whether the same runner currently has an active runtime for that user/provider, then injects the real Worker-owned credential only into the upstream request. Runtime-controlled provider calls may instead carry exact write-fence headers or a provider-egress token; there is no tokenless active-user-fence provider authorization path. Delivery providers (Linq and Telegram) and ElevenLabs continue to require exact write-fence headers or a provider-egress token, because those effects must stay behind recipient binding, journaling, and idempotency. The Worker constrains Exa to `POST /search`, constrains Linq to the runtime route matrix (`GET /phone_numbers`, `GET /attachments/:id`, `POST /attachments`, `POST /chats`, `POST /chats/:id/messages`, `POST /chats/:id/voicememo`, `POST /chats/:id/typing`, `DELETE /chats/:id/typing`, `POST /chats/:id/read`, `POST /messages/:id/reactions`, `DELETE /messages/:id`), constrains Mapbox to read-only GET allowlisted path families, and strips runtime authority headers before upstream provider egress leaves Cloudflare. Runtime code does not call Linq's contact-card provider endpoint directly; first-contact native contact-card sharing stays web-owned. Hosted generated-image turns call OpenAI through the runner-scoped provider credential path, persist the validated bytes as a canonical vault capture, and return private `vault_image` media. Final message delivery reloads and hash-verifies those bytes, then uses Linq's attachment upload or Telegram multipart `sendPhoto`. Linq group-avatar mutation is the narrow URL-only exception: after preflight, the write-fenced Worker route stores one deterministic application-encrypted R2 object and returns an opaque at-most-one-day capability on Murph's fixed Worker origin directly to the runtime provider boundary. The capability reveals no member id, R2 key, storage namespace, or image hash; the public Worker route decrypts and verifies the object and returns `private, no-store`. Retries reuse the deterministic object only while its original 24-hour lifecycle window remains, and each capability expiry is capped at that object's lifecycle boundary. At or after the boundary, the mutation-locked `UserRunner` replaces the same deterministic key before returning a newly bounded capability; the R2 lifecycle and account deletion still own cleanup without relying on Linq fetch acceptance. The URL is not response media or model-visible state. The legacy write-fenced `results.worker/generated-images` route returns `410 Gone` so older warm runners fall back to text instead of creating public objects. Runner container names identify the runner for server-side validation; `ctx.containerId` is not provider-egress authorization. Unknown egress currently passes through during migration and logs only sanitized method/host/path metadata. Adding a new hosted provider API, method, or runtime tool that calls an intercepted provider is not complete until this egress boundary and its regression tests allow the exact upstream operation.
+Venice joins that same Worker-owned credential boundary for core inference.
+The Worker permits only `POST /api/v1/responses` and
+`POST /api/v1/responses/compact`, accepts only canonical Luna/Terra/Sol request
+models, and replaces the model with its fixed operator mapping while disabling
+Venice's added system prompt, web search, and web scraping at the final egress
+boundary. Specialized
+tools such as generated images continue to use their own managed providers even
+when Venice owns the core assistant turn.
 The container supervisor sets `CODEX_CA_CERTIFICATE`, `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, and `CURL_CA_BUNDLE` to Cloudflare's runtime interception CA path, and direct invocation builds the runtime config from an explicit frozen supervisor env, preserves those CA bundle pointers plus Cloudflare-managed proxy env needed by hosted-local Containers egress interception, and still blocks operator-only process-control env plus user-supplied proxy overrides.
 
 Root `pnpm dev` starts the same local Cloudflare container path and uses the image-owned `codex app-server` runtime with direct OpenAI configuration routed through the Worker intercept. There is no host Codex bridge for normal hosted-local execution: `MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN` and `MURPH_DEV_CODEX_APP_SERVER_PROXY_URL` are rejected by the Cloudflare runner env policy. Generated local env files are treated as secret material and must provide `HOSTED_ASSISTANT_PROVIDER=openai` plus the Worker-owned `OPENAI_API_KEY` secret; the raw key is not copied into direct runtime env.
@@ -87,6 +95,7 @@ Root `pnpm dev` starts the same local Cloudflare container path and uses the ima
 - Hosted raw email payloads now live under the encrypted, root-independent `hosted-email/messages/{storageNamespaceId}/` prefix. Raw blobs and their encrypted recovery refs carry an R2 lifecycle backstop under `hosted-email/messages/` that makes them deletion-eligible after 24 hours, while account-deletion cleanup removes the same user prefix directly. Normal worker deploys reapply that checked-in lifecycle rule before `wrangler deploy`. Removed pre-launch root-derived raw-email paths are unsupported under the greenfield hard cut; the same lifecycle prefix bounds any transient leftovers.
 - Account deletion removes user-scoped R2 objects and destroys the warm container before deleting Durable Object state. It clears the alarm and calls Durable Object storage `deleteAll()` after the SQL owner check; already-absent SQL state is idempotent success, while missing `deleteAll` support or any R2/container/state failure remains incomplete so web's durable cleanup receipt retries it. The response carries explicit `deleteAllCompleted` evidence; web must treat a legacy response without that field as pending. Deploy this Worker before the receipt-producing web release and do not roll Cloudflare below this capability while those receipts can run.
 - Other encrypted execution blobs remain owner-cleaned or durable by design, including workspace snapshots, legacy artifact blobs, and runner-secrets blobs. Hosted device-sync runtime authority stays in `apps/web` behind narrow signed callbacks.
+- The OC-to-ENAM online copier treats approved immutable keys as immutable identities, not permanent-retention promises. A CopyObject `404` is accepted only when a strongly consistent source HEAD proves that the planned object was deleted, and the skipped key must remain absent from the final destination inventory. A successful or precondition-failed copy followed by a missing source is an ambiguous copy/delete ordering and fails closed. CopyObject is never retried after a transport or server outcome because that outcome may still commit; apply requires the runbook's explicit single-copier assertion, must never overlap, and is prohibited after destination activation. One source-active apply process retains the source keys it observes, brackets R2 inventories with equal active-owner snapshots, and performs internal convergence cycles. Production cutover holds that exact process at temporary convergence until the operator supplies the existing source-PUT-drained assertion; timing-only rehearsals omit the hold. A fresh process has no provenance and strictly rejects every destination-only eligible object. Every object present in the final OC inventory must still exist identically in ENAM. The online copier never overwrites or deletes an object in either bucket.
 - Runtime domain-root material comes from a signed web callback as ingress/runtime
   envelopes only. Cloudflare verifies the GCP KMS authority signature and unwraps
   only its configured P-256 automation recipient; it does not receive GCP KMS
@@ -97,6 +106,8 @@ Root `pnpm dev` starts the same local Cloudflare container path and uses the ima
 Bindings:
 
 - `USER_RUNNER`
+- `DATABASE_HEALTH_MONITOR`, one environment-scoped SQLite Durable Object for
+  production database metric history and alert admission
 - `RUNNER_CONTAINER`
 - `BUNDLES`
 - `CF_VERSION_METADATA` version metadata binding, used by deploy smoke to prove the requested Worker version actually handled the request
@@ -105,11 +116,17 @@ Bindings:
 Required worker secrets:
 
 - `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK`
+- `HOSTED_DATABASE_ALERT_LINQ_CHAT_ID`
+- `HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID`
+- `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN`
+- `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID`
 - `HOSTED_LOG_FINGERPRINT_SECRET`
+- `HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET`
 - `HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET`
 - `HOSTED_R2_PRESIGN_ACCESS_KEY_ID`
 - `HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY`
 - `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`
+- `LINQ_API_TOKEN`
 - `MURPH_DATA_API_KEY`
 - `OPENAI_API_KEY`
 
@@ -122,6 +139,7 @@ fallback.
 
 Required worker vars:
 
+- `HOSTED_DATABASE_ALERT_ENABLED=1` in production only
 - `HOSTED_WEB_BASE_URL`
 - `HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG`
 - `HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME`
@@ -129,6 +147,10 @@ Required worker vars:
 - `HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM`
 - `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID`
 - `HOSTED_CRYPTO_ENV`
+- `HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_ID`
+- `HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_NAME`
+- `HOSTED_DATABASE_ALERT_PLANETSCALE_DATABASE_NAME`
+- `HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION`
 - `HOSTED_R2_PRESIGN_ACCOUNT_ID`
 - `HOSTED_R2_PRESIGN_BUCKET_NAME`
 
@@ -141,6 +163,53 @@ production origin or when callback origins use HTTP, localhost, Docker bridge,
 loopback, preview/development, or private-network hosts. The GitHub workflow
 runs that preflight before artifact preparation; the local `deploy:worker`
 path also runs it inside the apply step before artifact validation and upload.
+
+### Production database-health monitor
+
+The Worker cron `*/5 * * * *` calls the singleton
+`DatabaseHealthDurableObject`. It uses PlanetScale's documented
+[HTTP service discovery](https://planetscale.com/docs/postgres/monitoring/prometheus-postgres)
+and [Postgres metric names](https://planetscale.com/docs/postgres/monitoring/prometheus-metrics-postgres)
+to retain 30 days of:
+
+- PgBouncer oldest-client wait and waiting-client count;
+- the most saturated primary pod's current PgBouncer-to-Postgres connections
+  against `max_connections`, plus server-pool state counts;
+- primary Postgres connection states and total utilization; and
+- per-region direct-port 5432 connection-error counters and positive deltas.
+
+Discovery selects exactly one target by organization, database name, and branch
+name. The configured branch ID then filters the selected Prometheus payload's
+metric series. Both selectors are required because one organization can have
+several production branches with the same branch name while discovery does not
+publish branch IDs.
+
+The direct-port signal is named a migration admission failure because production
+application traffic is required to use transaction-mode PgBouncer on 6432 and
+the direct endpoint is migration-only. Adding another direct production client
+requires splitting that signal first.
+
+Unsafe samples open one incident. Two consecutive collection failures open the
+fallback monitoring incident. The object writes Linq provider-attempt admission
+before egress, never attempts more than once per 30 minutes across all incidents,
+and reuses the exact body plus idempotency key after an ambiguous send. The
+message reports actual collection time rather than the scheduled Cron slot.
+Before each message POST it requires the configured direct
+[Linq chat health](https://docs.linqapp.com/guides/chats/chat-health/) and its
+current [line reputation](https://docs.linqapp.com/guides/phone-numbers/phone-reputation/)
+to be `HEALTHY`. It derives that chat's sole external phone recipient in memory,
+never persists or logs it, and requires the two resolved recipients to differ
+before the secondary operation can enter Linq. If primary identity cannot be
+resolved, neither operation posts; if only the secondary is unavailable, the
+healthy primary can still post. If the primary identity is known but its chat
+or line health is unsafe or indeterminate, a healthy distinct secondary can
+still post. A duplicate resolved recipient allows the primary operation only
+and leaves the alert pending. Distinct healthy recipients are sent through
+Linq's no-`from` auto-selection endpoint so a newly flagged line can fail over.
+Unhealthy or indeterminate delivery health suppresses that destination's POST
+and leaves the alert pending for the next paced attempt. This path does not
+share state or fallback behavior with the Resend-only hosted reply-latency
+monitor.
 
 Defaulted worker vars:
 
@@ -174,7 +243,12 @@ Optional execution vars and secrets:
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID` for callback key rotation metadata on the required signed hosted-web path
 - `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` and `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` for execution-time secret forwarding
 - `HOSTED_ASSISTANT_PROVIDER=openai` for Codex hosted assistant execution through the Worker egress intercept. The standard deploy preflight requires Worker-owned `OPENAI_API_KEY` plus `HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET`; hosted Codex receives only a signed Murph provider credential, never the real OpenAI key. Host Codex bridge/proxy env is not accepted
-- `CLOUDFLARE_IMAGES_ACCOUNT_ID`, Worker secret `CLOUDFLARE_IMAGES_API_KEY`, and optional `CLOUDFLARE_IMAGES_VARIANT` enable hosted generated-image uploads through Cloudflare Images. These values stay Worker-owned and are not accepted as runner env overrides.
+- Optional Venice core inference is configured only as the all-or-none group
+  `VENICE_API_KEY`, `HOSTED_VENICE_LUNA_MODEL`,
+  `HOSTED_VENICE_TERRA_MODEL`, and `HOSTED_VENICE_SOL_MODEL`. The fleet default
+  remains `HOSTED_ASSISTANT_PROVIDER=openai`; Web projects the per-member
+  Venice override for an invocation only after its separate rollout flag is
+  enabled. The runner receives only a signed Venice credential.
 - `HOSTED_R2_PRESIGN_ENDPOINT` can override the default account-scoped R2 S3 endpoint for direct snapshot URL generation. Production deploys must leave it as the account-scoped R2 HTTPS origin. Hosted-local dev, worker-only, and E2E profiles start a MinIO sidecar and inject local S3-compatible endpoints behind the local-only `HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT=1` guard; those local endpoint flags are not deploy vars.
 - `HOSTED_AI_USAGE_REPORTING_SECRET` is an optional Worker-owned platform
   secret. It must not be forwarded into the hosted runtime env; usage
@@ -235,7 +309,7 @@ migrates legacy persisted active-invocation identity into the current write
 fence so dormant objects retain commit authority; it does not restore retired
 wake, backoff, or deadline state. Live runner side effects validate the
 runtime-kind write fence by attempt, generation, and user identity. Hosted
-OpenAI provider egress validates the signed Murph provider
+OpenAI and Venice provider egress paths validate the signed Murph provider
 credential's user and runner against UserRunner's current active runtime state.
 Workspace version remains a checkpoint/restore freshness guard, not generic
 side-effect authority.

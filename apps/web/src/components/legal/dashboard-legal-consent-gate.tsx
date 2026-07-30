@@ -51,7 +51,7 @@ export function DashboardLegalConsentGate({
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         <HostedLegalConsentCard
-          acceptedPendingLabel="Refreshing your dashboard"
+          acceptedPendingLabel="Refreshing..."
           acceptScope={acceptScope}
           initialStatus={initialStatus}
           launchDescription={description}

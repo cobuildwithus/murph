@@ -7,6 +7,8 @@ import type {
 } from "@murphai/assistant-runtime/hosted-email";
 import {
   HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH,
+  HOSTED_RUNTIME_LINQ_DELIVERY_BLOCK_CODES,
+  HOSTED_RUNTIME_LINQ_DELIVERY_POSTURES,
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
   HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
@@ -177,7 +179,12 @@ export function createCloudflareEffectsPort(input: {
       ? {
           async assertExternalThreadRouteAuthority(authority, context) {
             const payload = await fetchHostedWebControlPlaneJson({
-              body: authority,
+              body: context?.assistantAskCompletion
+                ? {
+                    assistantAskCompletion: context.assistantAskCompletion,
+                    authority,
+                  }
+                : authority,
               boundUserId: input.boundUserId,
               description: "Hosted external thread route authority assertion",
               fetchImpl: input.fetchImpl,
@@ -190,16 +197,26 @@ export function createCloudflareEffectsPort(input: {
               timeoutMs: input.timeoutMs,
               transport: webControlTransport,
             });
+            const assistantAskFallbackRequired =
+              (payload as { assistantAskFallbackRequired?: unknown } | null)
+                ?.assistantAskFallbackRequired;
             if (
               !payload
               || typeof payload !== "object"
               || Array.isArray(payload)
               || (payload as { authorized?: unknown }).authorized !== true
+              || (
+                assistantAskFallbackRequired !== undefined
+                && typeof assistantAskFallbackRequired !== "boolean"
+              )
             ) {
               throw new TypeError(
                 "Hosted external thread route authority response is invalid.",
               );
             }
+            return typeof assistantAskFallbackRequired === "boolean"
+              ? { assistantAskFallbackRequired }
+              : undefined;
           },
           async resolveCurrentVerifiedEmailRecipient(context) {
             const payload = await fetchHostedWebControlPlaneJson({
@@ -310,12 +327,30 @@ function parseHostedRuntimeLinqRecentInboundEngagementResult(
   const result: HostedRuntimeLinqRecentInboundEngagementResult = {};
   const response = value as {
     assistantAskFallbackRequired?: unknown;
+    deliveryBlockCode?: unknown;
+    deliveryPosture?: unknown;
     providerDispatchClaimed?: unknown;
     targetOverride?: unknown;
     threadIsDirect?: unknown;
   };
   if (typeof response.assistantAskFallbackRequired === "boolean") {
     result.assistantAskFallbackRequired = response.assistantAskFallbackRequired;
+  }
+  if (
+    typeof response.deliveryBlockCode === "string"
+    && (HOSTED_RUNTIME_LINQ_DELIVERY_BLOCK_CODES as readonly string[])
+      .includes(response.deliveryBlockCode)
+  ) {
+    result.deliveryBlockCode = response.deliveryBlockCode as
+      (typeof HOSTED_RUNTIME_LINQ_DELIVERY_BLOCK_CODES)[number];
+  }
+  if (
+    typeof response.deliveryPosture === "string"
+    && (HOSTED_RUNTIME_LINQ_DELIVERY_POSTURES as readonly string[])
+      .includes(response.deliveryPosture)
+  ) {
+    result.deliveryPosture = response.deliveryPosture as
+      (typeof HOSTED_RUNTIME_LINQ_DELIVERY_POSTURES)[number];
   }
   if (typeof response.providerDispatchClaimed === "boolean") {
     result.providerDispatchClaimed = response.providerDispatchClaimed;
@@ -336,7 +371,12 @@ function parseHostedRuntimeLinqRecentInboundEngagementResult(
   const target = readOptionalStringField(targetOverride, "target");
   const targetKind = readOptionalStringField(targetOverride, "targetKind");
   if (target && targetKind === "thread") {
+    const conversationThreadId = readOptionalStringField(
+      targetOverride,
+      "conversationThreadId",
+    );
     result.targetOverride = {
+      ...(conversationThreadId ? { conversationThreadId } : {}),
       target,
       targetKind,
     };

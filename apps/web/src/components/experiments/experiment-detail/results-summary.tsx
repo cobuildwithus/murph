@@ -38,7 +38,7 @@ export function ResultsSummary({
             Before and during the experiment
           </h3>
           <p className="text-sm/6 text-muted-foreground">
-            Daily measurements and window averages, where available.
+            Daily measurements and declared window summaries, where available.
           </p>
         </div>
         {outcomeConfidence ? (

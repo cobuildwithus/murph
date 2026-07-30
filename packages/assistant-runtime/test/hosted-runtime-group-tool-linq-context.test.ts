@@ -13,6 +13,11 @@ const ROUTE_AUTHORITY = {
   threadId: "chat_group_1",
 };
 const PRIVATE_ASSISTANT_INPUT_ID = `ain_${"3".repeat(32)}`;
+const EXACT_GROUP_PARTICIPANT = {
+  assistantInputId: `ain_${"4".repeat(32)}`,
+  senderHandle: "+15550000002",
+  source: "linq" as const,
+};
 
 function buildLinqDeliveryContext(
   overrides: Partial<HostedAssistantLinqDeliveryContext>,
@@ -54,6 +59,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
         threadIsDirect: false,
       },
       groupToolPort: { request },
+      linqService: "imessage",
       linqDeliveryContexts: [
         buildLinqDeliveryContext({
           directRecipientPhoneNumber: "+15550000001",
@@ -65,7 +71,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     await groupTool.request({
       action: "arm_usage_referral",
       linqSenderHandles: ["forged"],
-      policyCode: "active_group_v1",
+      policyCodes: ["active_group_v1"],
       sourceConversation: {
         channel: "telegram",
         threadId: `hid_${"f".repeat(32)}`,
@@ -76,11 +82,76 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     expect(request).toHaveBeenLastCalledWith({
       action: "arm_usage_referral",
       linqSenderHandles: ["+15550000001"],
-      policyCode: "active_group_v1",
+      policyCodes: ["active_group_v1"],
       sourceConversation: {
         channel: "linq",
+        linqService: "imessage",
         threadId: `hid_${"3".repeat(32)}`,
         threadIsDirect: false,
+      },
+    });
+
+    await groupTool.request({
+      action: "read_usage_referral",
+      sourceConversation: {
+        channel: "telegram",
+        threadId: `hid_${"e".repeat(32)}`,
+        threadIsDirect: true,
+      },
+    });
+
+    expect(request).toHaveBeenLastCalledWith({
+      action: "read_usage_referral",
+      linqSenderHandles: ["+15550000001"],
+      sourceConversation: {
+        channel: "linq",
+        linqService: "imessage",
+        threadId: `hid_${"3".repeat(32)}`,
+        threadIsDirect: false,
+      },
+    });
+
+    await groupTool.request({
+      action: "cancel_usage_referral",
+      linqSenderHandles: ["forged"],
+      policyCode: "new_person_activation_v1",
+    });
+
+    expect(request).toHaveBeenLastCalledWith({
+      action: "cancel_usage_referral",
+      linqSenderHandles: ["+15550000001"],
+      policyCode: "new_person_activation_v1",
+    });
+  });
+
+  it("injects the observed non-iMessage Linq service for fail-closed policy gating", async () => {
+    const request = vi.fn().mockResolvedValue({
+      action: "read_usage_referral",
+      result: { outcome: "read", referral: null, status: "ok" },
+    });
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
+      currentDeliveryRoute: {
+        channel: "linq",
+        deliveryTarget: "raw-direct-thread",
+        identityId: `hid_${"1".repeat(32)}`,
+        participantId: `hid_${"2".repeat(32)}`,
+        threadId: `hid_${"3".repeat(32)}`,
+        threadIsDirect: true,
+      },
+      groupToolPort: { request },
+      linqDeliveryContexts: [],
+      linqService: "sms",
+    });
+
+    await groupTool.request({ action: "read_usage_referral" });
+
+    expect(request).toHaveBeenCalledWith({
+      action: "read_usage_referral",
+      sourceConversation: {
+        channel: "linq",
+        linqService: "sms",
+        threadId: `hid_${"3".repeat(32)}`,
+        threadIsDirect: true,
       },
     });
   });
@@ -128,6 +199,40 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
       action: "read_shared",
       telegramSenderHandles: ["1234567890", "9876543210"],
       projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    });
+  });
+
+  it("injects the Telegram source conversation into referral reads", async () => {
+    const request = vi.fn().mockResolvedValue({
+      action: "read_usage_referral",
+      result: { outcome: "read", referral: null, status: "ok" },
+    });
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
+      currentDeliveryRoute: {
+        channel: "telegram",
+        deliveryTarget: "raw-direct-thread",
+        identityId: `hid_${"4".repeat(32)}`,
+        participantId: `hid_${"5".repeat(32)}`,
+        threadId: `hid_${"6".repeat(32)}`,
+        threadIsDirect: true,
+      },
+      groupToolPort: { request },
+      linqDeliveryContexts: [],
+      telegramSenderHandles: ["1234567890"],
+    });
+
+    await groupTool.request({
+      action: "read_usage_referral",
+    });
+
+    expect(request).toHaveBeenLastCalledWith({
+      action: "read_usage_referral",
+      sourceConversation: {
+        channel: "telegram",
+        threadId: `hid_${"6".repeat(32)}`,
+        threadIsDirect: true,
+      },
+      telegramSenderHandles: ["1234567890"],
     });
   });
 
@@ -256,11 +361,13 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
 
     await groupTool.request({
       action: "set_chat_avatar",
-      groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+      groupChatIconUrl:
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
     });
     expect(request).toHaveBeenLastCalledWith({
       action: "set_chat_avatar",
-      groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+      groupChatIconUrl:
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
       linqThread: {
         authority: ROUTE_AUTHORITY,
         chatId: "chat_group_1",
@@ -314,6 +421,9 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
 
     await groupTool.request({ action: "read_current" });
     expect(request).toHaveBeenLastCalledWith({ action: "read_current" });
+
+    await groupTool.request({ action: "read_chat_name" });
+    expect(request).toHaveBeenLastCalledWith({ action: "read_chat_name" });
 
     await groupTool.request({ action: "read_usage" });
     expect(request).toHaveBeenLastCalledWith({ action: "read_usage" });
@@ -588,11 +698,13 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
 
     await groupTool.request({
       action: "set_chat_avatar",
-      groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+      groupChatIconUrl:
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
     });
     expect(request).toHaveBeenLastCalledWith({
       action: "set_chat_avatar",
-      groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+      groupChatIconUrl:
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
     });
 
     await groupTool.request({ action: "preflight_set_chat_avatar" });
@@ -617,22 +729,25 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
 
   });
 
-  it("does not use unauthenticated email From as newsletter opt-out authority", async () => {
-    const request = vi.fn().mockResolvedValue({
-      action: "revoke_own_email_share",
-      result: {
-        status: "unavailable",
-        unavailableReason: "sender_unavailable",
-      },
-    });
+  it("does not let unauthenticated email ingress carry exact participant effects", async () => {
+    const request = vi.fn();
     const groupTool = createHostedGroupToolWithCurrentTurnContext({
       emailDeliveryContexts: [buildEmailDeliveryContext({})],
       groupToolPort: { request },
       linqDeliveryContexts: [],
     });
 
-    await groupTool.request({ action: "revoke_own_email_share" });
-    expect(request).toHaveBeenLastCalledWith({ action: "revoke_own_email_share" });
+    await expect(groupTool.request({
+      action: "revoke_own_email_share",
+      participant: EXACT_GROUP_PARTICIPANT,
+    })).resolves.toEqual({
+      action: "revoke_own_email_share",
+      result: {
+        status: "unavailable",
+        unavailableReason: "authenticated_sender_required",
+      },
+    });
+    expect(request).not.toHaveBeenCalled();
 
     await groupTool.request({ action: "read_current" });
     expect(request).toHaveBeenLastCalledWith({ action: "read_current" });
@@ -684,6 +799,14 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
 
     for (const actionRequest of [
       {
+        action: "ask_current_sender" as const,
+        origin: {
+          assistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
+          kind: "accepted_input" as const,
+          sessionId: "session_group",
+        },
+      },
+      {
         action: "ask_member" as const,
         grantId: "hdg_calendar",
         origin: {
@@ -706,6 +829,16 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
         unavailableReason: "authenticated_sender_required",
       });
     }
+    expect(request).not.toHaveBeenCalled();
+
+    await expect(groupTool.request({ action: "read_chat_name" })).resolves.toEqual({
+      action: "read_chat_name",
+      result: {
+        displayName: null,
+        status: "unavailable",
+        unavailableReason: "authenticated_sender_required",
+      },
+    });
     expect(request).not.toHaveBeenCalled();
 
     await expect(groupTool.request({ action: "create_join_link" })).resolves.toEqual({
@@ -743,15 +876,17 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     });
     expect(request).not.toHaveBeenCalled();
 
-    request.mockResolvedValueOnce({
+    await expect(groupTool.request({
+      action: "revoke_own_email_share",
+      participant: EXACT_GROUP_PARTICIPANT,
+    })).resolves.toEqual({
       action: "revoke_own_email_share",
       result: {
         status: "unavailable",
-        unavailableReason: "sender_unavailable",
+        unavailableReason: "authenticated_sender_required",
       },
     });
-    await groupTool.request({ action: "revoke_own_email_share" });
-    expect(request).toHaveBeenLastCalledWith({ action: "revoke_own_email_share" });
+    expect(request).not.toHaveBeenCalled();
 
     request.mockResolvedValueOnce({
       action: "read_shared",
@@ -791,7 +926,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     expect(request).not.toHaveBeenCalled();
   });
 
-  it("injects the current group chat sender into newsletter opt-out", async () => {
+  it("passes exact accepted-message participant evidence through without whole-turn inference", async () => {
     const request = vi.fn().mockResolvedValue({
       action: "revoke_own_email_share",
       result: { revokedCount: 1, status: "revoked" },
@@ -803,42 +938,20 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
           directRecipientPhoneNumber: "+15550000001",
           routeAuthority: ROUTE_AUTHORITY,
         }),
-      ],
-    });
-
-    await groupTool.request({ action: "revoke_own_email_share" });
-    expect(request).toHaveBeenLastCalledWith({
-      action: "revoke_own_email_share",
-      selfOptOut: {
-        senderHandle: "+15550000001",
-        source: "linq",
-      },
-    });
-  });
-
-  it("keeps newsletter opt-out independent of read_shared route attribution", async () => {
-    const request = vi.fn().mockResolvedValue({
-      action: "revoke_own_email_share",
-      result: { revokedCount: 1, status: "revoked" },
-    });
-    const groupTool = createHostedGroupToolWithCurrentTurnContext({
-      groupToolPort: { request },
-      linqDeliveryContexts: [
         buildLinqDeliveryContext({
-          directRecipientPhoneNumber: "+15550000001",
-          routeAuthority: null,
-          service: null,
+          directRecipientPhoneNumber: "+15550000003",
+          routeAuthority: ROUTE_AUTHORITY,
         }),
       ],
     });
 
-    await groupTool.request({ action: "revoke_own_email_share" });
+    await groupTool.request({
+      action: "revoke_own_email_share",
+      participant: EXACT_GROUP_PARTICIPANT,
+    });
     expect(request).toHaveBeenLastCalledWith({
       action: "revoke_own_email_share",
-      selfOptOut: {
-        senderHandle: "+15550000001",
-        source: "linq",
-      },
+      participant: EXACT_GROUP_PARTICIPANT,
     });
   });
 
@@ -899,24 +1012,4 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     });
   });
 
-  it("fails closed when newsletter opt-out has ambiguous current senders", async () => {
-    const request = vi.fn().mockResolvedValue({
-      action: "revoke_own_email_share",
-      result: {
-        status: "unavailable",
-        unavailableReason: "sender_unavailable",
-      },
-    });
-    const groupTool = createHostedGroupToolWithCurrentTurnContext({
-      emailDeliveryContexts: [
-        buildEmailDeliveryContext({ senderHandle: "one@example.test" }),
-        buildEmailDeliveryContext({ senderHandle: "two@example.test" }),
-      ],
-      groupToolPort: { request },
-      linqDeliveryContexts: [],
-    });
-
-    await groupTool.request({ action: "revoke_own_email_share" });
-    expect(request).toHaveBeenLastCalledWith({ action: "revoke_own_email_share" });
-  });
 });

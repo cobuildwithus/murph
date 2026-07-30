@@ -1,4 +1,8 @@
-import { readFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -43,6 +47,11 @@ const lifecycleOutput = (bucketName: string) => `Listing lifecycle rules for buc
 name:     delete-hosted-email-raw-messages-after-24h
 enabled:  Yes
 prefix:   hosted-email/messages/
+action:   Expire objects after 1 days
+
+name:     delete-hosted-private-media-after-24h
+enabled:  Yes
+prefix:   hosted-private-media/images/
 action:   Expire objects after 1 days
 
 name:     delete-hosted-meal-photos-after-31d
@@ -601,6 +610,12 @@ describe("R2 lifecycle parsing", () => {
         id: "delete-hosted-meal-photos-after-31d",
         prefix: "hosted-meal-photos/images/",
       },
+      {
+        days: 1,
+        enabled: true,
+        id: "delete-hosted-private-media-after-24h",
+        prefix: "hosted-private-media/images/",
+      },
     ]);
   });
 
@@ -608,12 +623,290 @@ describe("R2 lifecycle parsing", () => {
     expect(parseWranglerLifecycleList(
       lifecycleOutput(SOURCE_BUCKET),
       SOURCE_BUCKET,
-    )).toHaveLength(2);
+    )).toHaveLength(3);
     expect(() => parseWranglerLifecycleList(
       lifecycleOutput(SOURCE_BUCKET).replace("enabled:  Yes", "enabled:  Maybe"),
       SOURCE_BUCKET,
     )).toThrow("unrecognized");
   });
+});
+
+interface RunbookCopyProofScenario {
+  destinationBody?: Buffer;
+  destinationChecksumCrc32?: string;
+  destinationMetadataSha256?: string;
+  expectedSha256Input?: string;
+  finalHeadMutation?: "destination" | "source";
+  sourceBody?: Buffer;
+  sourceChecksumSha256?: string;
+  sourceMetadataSha256?: string;
+}
+
+interface RunbookCopyProofResult {
+  destinationHeadReads: number;
+  exitCode: number;
+  sourceHeadReads: number;
+  stderr: string;
+  stdout: string;
+}
+
+const RUNBOOK_COPY_PROOF_MARKER =
+  "Enter the private object key and the canonical reference's lowercase";
+const FAKE_AWS_FUNCTION = [
+  "aws() {",
+  '  [[ "$1" == "s3api" ]] || return 22',
+  '  local operation="$2"',
+  '  local output="${!#}"',
+  '  local bucket=""',
+  '  local if_match=""',
+  '  while (( $# > 0 )); do',
+  '    case "$1" in',
+  '      --bucket) bucket="$2"; shift 2 ;;',
+  '      --if-match) if_match="$2"; shift 2 ;;',
+  '      *) shift ;;',
+  "    esac",
+  "  done",
+  '  local kind=""',
+  '  if [[ "$bucket" == "$PREVIEW_SOURCE_BUCKET" ]]; then',
+  '    kind="source"',
+  '  elif [[ "$bucket" == "$PREVIEW_DESTINATION_BUCKET" ]]; then',
+  '    kind="destination"',
+  "  else",
+  "    return 23",
+  "  fi",
+  '  if [[ "$operation" == "head-object" ]]; then',
+  '    local count_path="$RUNBOOK_PROOF_FIXTURE_ROOT/${kind}.head-count"',
+  '    local count="$(( $(cat "$count_path") + 1 ))"',
+  '    printf "%s" "$count" > "$count_path"',
+  '    local head_path="$RUNBOOK_PROOF_FIXTURE_ROOT/${kind}.head.json"',
+  '    if (( count > 1 )) && [[ "${RUNBOOK_PROOF_MUTATE_FINAL:-}" == "$kind" ]]; then',
+  '      head_path="$RUNBOOK_PROOF_FIXTURE_ROOT/${kind}.final-head.json"',
+  "    fi",
+  '    cat "$head_path"',
+  "    return",
+  "  fi",
+  '  if [[ "$operation" == "get-object" ]]; then',
+  '    [[ "${AWS_RESPONSE_CHECKSUM_VALIDATION:-}" == "WHEN_REQUIRED" ]] || return 27',
+  '    [[ "$if_match" == \'"0123456789abcdef0123456789abcdef"\' ]] || return 25',
+  '    cp "$RUNBOOK_PROOF_FIXTURE_ROOT/${kind}.body" "$output"',
+  "    return",
+  "  fi",
+  "  return 26",
+  "}",
+].join("\n");
+
+function extractRunbookCopyProof(runbook: string): string {
+  const markerIndex = runbook.indexOf(RUNBOOK_COPY_PROOF_MARKER);
+  if (markerIndex < 0) throw new Error("Runbook copy-proof marker is missing.");
+  const start = runbook.indexOf("```bash\n", markerIndex);
+  const end = start < 0 ? -1 : runbook.indexOf("\n```", start + 8);
+  if (start < 0 || end < 0) {
+    throw new Error("Runbook copy-proof block is missing.");
+  }
+  return runbook.slice(start + 8, end);
+}
+
+async function runRunbookCopyProof(
+  scenario: RunbookCopyProofScenario = {},
+): Promise<RunbookCopyProofResult> {
+  const root = await mkdtemp(path.join(tmpdir(), "murph-r2-copy-proof-"));
+  try {
+    const runbook = await readFile(
+      new URL("../R2_BUNDLES_ENAM_MIGRATION.md", import.meta.url),
+      "utf8",
+    );
+    const canonicalBody = Buffer.from("canonical encrypted snapshot fixture");
+    const expectedSha256 = createHash("sha256")
+      .update(canonicalBody)
+      .digest("hex");
+    const sourceHead = {
+      ChecksumCRC32: "AAAAAA==",
+      ChecksumSHA256: scenario.sourceChecksumSha256
+        ?? Buffer.from(expectedSha256, "hex").toString("base64"),
+      ChecksumType: "FULL_OBJECT",
+      ContentLength: canonicalBody.byteLength,
+      ETag: '"0123456789abcdef0123456789abcdef"',
+      Metadata: {
+        encryptedsha256: scenario.sourceMetadataSha256 ?? expectedSha256,
+      },
+    };
+    const destinationHead = {
+      ...sourceHead,
+      ChecksumCRC32: scenario.destinationChecksumCrc32 ?? sourceHead.ChecksumCRC32,
+      ChecksumSHA256: Buffer.alloc(32, 7).toString("base64"),
+      Metadata: {
+        encryptedsha256: scenario.destinationMetadataSha256 ?? expectedSha256,
+      },
+    };
+    const mutatedSourceHead = {
+      ...sourceHead,
+      ETag: '"ffffffffffffffffffffffffffffffff"',
+    };
+    const mutatedDestinationHead = {
+      ...destinationHead,
+      ChecksumSHA256: Buffer.alloc(32, 8).toString("base64"),
+    };
+    await Promise.all([
+      writeFile(
+        path.join(root, "proof.sh"),
+        `${FAKE_AWS_FUNCTION}\n${extractRunbookCopyProof(runbook)}`,
+      ),
+      writeFile(path.join(root, "source.head.json"), JSON.stringify(sourceHead)),
+      writeFile(
+        path.join(root, "destination.head.json"),
+        JSON.stringify(destinationHead),
+      ),
+      writeFile(
+        path.join(root, "source.final-head.json"),
+        JSON.stringify(mutatedSourceHead),
+      ),
+      writeFile(
+        path.join(root, "destination.final-head.json"),
+        JSON.stringify(mutatedDestinationHead),
+      ),
+      writeFile(
+        path.join(root, "source.body"),
+        scenario.sourceBody ?? canonicalBody,
+      ),
+      writeFile(
+        path.join(root, "destination.body"),
+        scenario.destinationBody ?? canonicalBody,
+      ),
+      writeFile(path.join(root, "source.head-count"), "0"),
+      writeFile(path.join(root, "destination.head-count"), "0"),
+    ]);
+
+    const result = await new Promise<{
+      exitCode: number;
+      stderr: string;
+      stdout: string;
+    }>(
+      (resolve, reject) => {
+        const child = spawn("bash", [path.join(root, "proof.sh")], {
+          env: {
+            CLOUDFLARE_ACCOUNT_ID: "fixture-account",
+            PATH: process.env.PATH,
+            PREVIEW_DESTINATION_BUCKET: "destination-bucket",
+            PREVIEW_SOURCE_BUCKET: "source-bucket",
+            R2_MIGRATION_ACCESS_KEY_ID: "fixture-access-key",
+            R2_MIGRATION_SECRET_ACCESS_KEY: "fixture-secret-key",
+            RUNBOOK_PROOF_FIXTURE_ROOT: root,
+            TMPDIR: root,
+            ...(scenario.finalHeadMutation
+              ? { RUNBOOK_PROOF_MUTATE_FINAL: scenario.finalHeadMutation }
+              : {}),
+          },
+          stdio: ["pipe", "pipe", "pipe"],
+        });
+        let stderr = "";
+        let stdout = "";
+        child.stderr.setEncoding("utf8");
+        child.stderr.on("data", (chunk: string) => {
+          stderr += chunk;
+        });
+        child.stdout.setEncoding("utf8");
+        child.stdout.on("data", (chunk: string) => {
+          stdout += chunk;
+        });
+        child.once("error", reject);
+        child.once("close", (code) => resolve({
+          exitCode: code ?? -1,
+          stderr,
+          stdout,
+        }));
+        child.stdin.on("error", () => undefined);
+        child.stdin.end(
+          `private-key\n${scenario.expectedSha256Input ?? expectedSha256}\n`,
+        );
+      },
+    );
+    return {
+      ...result,
+      destinationHeadReads: Number(
+        await readFile(path.join(root, "destination.head-count"), "utf8"),
+      ),
+      sourceHeadReads: Number(
+        await readFile(path.join(root, "source.head-count"), "utf8"),
+      ),
+    };
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+}
+
+function tamperedBody(): Buffer {
+  const body = Buffer.from("canonical encrypted snapshot fixture");
+  body[0] = body[0] ^ 1;
+  return body;
+}
+
+describe("R2 migration runbook copy proof", () => {
+  it(
+    "executes the canonical proof while ignoring only the destination SHA-256",
+    async () => {
+      const result = await runRunbookCopyProof();
+
+      expect(result).toMatchObject({
+        destinationHeadReads: 2,
+        exitCode: 0,
+        sourceHeadReads: 2,
+        stderr: "",
+        stdout: "",
+      });
+    },
+  );
+
+  const failureScenarios: Array<{
+    label: string;
+    scenario: RunbookCopyProofScenario;
+  }> = [
+    {
+      label: "uppercase canonical digest input",
+      scenario: { expectedSha256Input: "A".repeat(64) },
+    },
+    {
+      label: "short canonical digest input",
+      scenario: { expectedSha256Input: "a".repeat(63) },
+    },
+    {
+      label: "source checksum",
+      scenario: { sourceChecksumSha256: Buffer.alloc(32, 9).toString("base64") },
+    },
+    {
+      label: "canonical metadata digest",
+      scenario: {
+        destinationMetadataSha256: "b".repeat(64),
+        sourceMetadataSha256: "b".repeat(64),
+      },
+    },
+    {
+      label: "copied metadata parity",
+      scenario: { destinationMetadataSha256: "b".repeat(64) },
+    },
+    { label: "source body digest", scenario: { sourceBody: tamperedBody() } },
+    {
+      label: "destination body digest",
+      scenario: { destinationBody: tamperedBody() },
+    },
+    {
+      label: "another copied checksum",
+      scenario: { destinationChecksumCrc32: "BBBBBB==" },
+    },
+    { label: "source final HEAD", scenario: { finalHeadMutation: "source" } },
+    {
+      label: "destination final HEAD",
+      scenario: { finalHeadMutation: "destination" },
+    },
+  ];
+
+  it.each(failureScenarios)(
+    "fails closed when the $label disagrees",
+    async ({ scenario }) => {
+      const result = await runRunbookCopyProof(scenario);
+
+      expect(result.exitCode).not.toBe(0);
+    },
+  );
 });
 
 describe("R2 inventory verification", () => {
@@ -749,6 +1042,7 @@ describe("R2 migration orchestration", () => {
     for (const copy of copies) {
       expect(copy.args).toContain("--copy-source");
       expect(copy.args).toContain("--copy-source-if-match");
+      expect(copy.args).not.toContain("--checksum-algorithm");
       expect(copy.args).toContain("--key");
       expect(copy.args.slice(
         copy.args.indexOf("--metadata-directive"),
@@ -971,6 +1265,7 @@ describe("R2 migration orchestration", () => {
 
   it.each([
     ["raw email", "hosted-email/messages/transient-email"],
+    ["private media", "hosted-private-media/images/transient-media"],
     ["staged meal photo", "hosted-meal-photos/images/transient-photo"],
   ])("refuses to start while a staged %s object remains", async (_label, key) => {
     const staged = inventoryEntry({ key });

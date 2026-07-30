@@ -338,7 +338,7 @@ describe("hosted billing launch plan Stripe configuration", () => {
     ]);
   });
 
-  it("binds Stripe checkout idempotency to the checkout offer and trial policy", () => {
+  it("binds a durable Checkout attempt to the complete trial policy", () => {
     const standard = deriveHostedBillingCheckoutOfferBindingKey({
       checkoutOffer: "standard",
     });
@@ -360,4 +360,5 @@ describe("hosted billing launch plan Stripe configuration", () => {
       trialUsageLimitUsdMicros: 5_000_000n,
     })).not.toBe(trial);
   });
+
 });

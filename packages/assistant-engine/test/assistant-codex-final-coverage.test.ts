@@ -8,7 +8,24 @@ import {
 } from '@murphai/hosted-execution/env'
 import {
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
+  MURPH_MEMBER_READ_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
+
+const EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG = {
+  'features.apps': false,
+  'features.browser_use': false,
+  'features.enable_mcp_apps': false,
+  'features.multi_agent': false,
+  'features.multi_agent_v2': false,
+  'features.plugins': false,
+  'features.shell_tool': false,
+  'features.standalone_web_search': false,
+  'features.tool_suggest': false,
+  'features.web_search_request': false,
+  'memories.generate_memories': false,
+  'memories.use_memories': false,
+  web_search: 'disabled',
+} as const
 
 const providerMocks = vi.hoisted(() => ({
   executeCodexAssistantTurnAttemptFromInput: vi.fn(),
@@ -121,9 +138,13 @@ import {
   MURPH_GROUP_ROOM_MODEL_TOOL,
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.ts'
+import { MURPH_GENERATE_SONG_TOOL } from '../src/assistant-codex/dynamic-tools/generate-song.ts'
 import {
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
 } from '../src/assistant/managed-automations.ts'
+import {
+  MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+} from '../src/assistant/onboarding-goal-checkin-automation.ts'
 import type { AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.ts'
 import type {
   AssistantProviderTurnAttemptResult,
@@ -577,7 +598,6 @@ describe('Codex model catalog', () => {
         source: 'system' as const,
       })),
     }
-
     providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
       supportedUserMessageContentTypes: ['text'],
       supportsReasoningEffort: true,
@@ -589,10 +609,6 @@ describe('Codex model catalog', () => {
       activeTurnSteering: null,
       executionContext: {
         hosted: {
-          generatedImageUploader: {
-            uploadGeneratedImage: vi.fn(),
-          },
-          generatedImageUploaderRequired: true,
           materializeWorkspaceArtifacts: vi.fn(),
           memberId: 'member-system-notification',
           providerFetch: fetch,
@@ -663,36 +679,161 @@ describe('Codex model catalog', () => {
       approvalPolicy: 'never',
       sandbox: 'read-only',
     })
-    expect(providerInput?.codexConfigOverrides).toEqual(
-      expect.arrayContaining([
-        'features.shell_tool=false',
-        'web_search="disabled"',
-        'features.apps=false',
-        'features.browser_use=false',
-        'features.plugins=false',
-        'features.multi_agent=false',
-      ]),
-    )
-    expect(providerInput?.codexConfigOverrides).not.toContain(
+    expect(providerInput?.codexConfigOverrides).toEqual([
       'features.shell_tool=true',
-    )
-    expect(providerInput?.codexConfigOverrides).not.toContain(
       'features.apps=true',
+    ])
+    expect(providerInput?.codexThreadConfig).toEqual(
+      EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG,
     )
     expect(providerInput).toMatchObject({
       dynamicTools: [],
       groupConversation: false,
       environments: [],
-      generatedImageUploader: null,
       hostedToolContext: null,
       materializeWorkspaceArtifacts: null,
-      processLifetime: 'one-shot',
       progressDelivery: null,
       providerFetch: null,
+      providerThreadEphemeral: true,
       publicInternetFetch: null,
-      requireGeneratedImageUploader: false,
+      requireHostedPrivateImageDelivery: false,
     })
+    expect(providerInput).not.toHaveProperty('processLifetime')
     expect(unsafeDynamicTools).not.toEqual([])
+    expect(unsafeProgressDelivery.send).not.toHaveBeenCalled()
+  })
+
+  it('keeps only song generation while denying native creative-notification capabilities', async () => {
+    const route = createRoute()
+    const session = createAssistantSession({
+      providerOptions: route.providerOptions,
+    })
+    const input = {
+      codexConfigOverrides: [
+        'features.shell_tool=true',
+        'features.apps=true',
+      ],
+      prompt: 'Generate one sponsor song from untrusted creative material.',
+      vault: '/vaults/test',
+    } satisfies Parameters<typeof executeCodexTurnWithRecovery>[0]['input']
+    const unsafeProgressDelivery = {
+      send: vi.fn(async () => ({
+        kind: 'sent' as const,
+        source: 'system' as const,
+      })),
+    }
+    const hostedProviderFetch = vi.fn<typeof fetch>(async () =>
+      new Response(null, { status: 204 })
+    )
+
+    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportedUserMessageContentTypes: ['text'],
+      supportsReasoningEffort: true,
+    })
+    providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
+      createProviderAttemptResult(),
+    )
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
+      activeTurnSteering: null,
+      executionContext: {
+        hosted: {
+          materializeWorkspaceArtifacts: vi.fn(),
+          memberId: 'member-creative-notification',
+          providerFetch: hostedProviderFetch,
+          publicInternetFetch: fetch,
+          userEnvKeys: [],
+        },
+      },
+      hostedToolContext: {
+        automationTool: { request: vi.fn() },
+        computerToolsAvailable: true,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: vi.fn(),
+        vaultFileSendAvailable: true,
+      },
+      input,
+      profile: {
+        promptProfile: 'creative-notification',
+        toolProfile: 'provider-turn',
+        threadScope: 'isolated-thread',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-07-20',
+        currentTimeZone: 'UTC',
+      },
+      route,
+      sharedPlan: createSharedPlan(),
+      progressDelivery: unsafeProgressDelivery,
+      turnId: 'turn-creative-notification',
+    } satisfies AssistantCodexTurnExecutionPlan)
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
+      attemptCount: 1,
+      route,
+      routePlan: {
+        assistantContractFingerprint:
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        assistantCliContract: null,
+        cliEnv: {},
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        } satisfies AssistantCodexContinuation,
+        developerInstructions: null,
+        diagnosticsPolicy: {
+          environment: 'hosted',
+          privateIssueCaptureEnabled: false,
+          surface: 'linq',
+        },
+        dynamicTools: [MURPH_GENERATE_SONG_TOOL],
+        environments: [{ PRIVATE_ENVIRONMENT: 'must-not-pass' }],
+        onboardingGuidanceInjected: false,
+        planningDiagnostics: createRoutePlanningDiagnostics(),
+        promptCacheMetadata: null,
+        resume: null,
+        sessionContext: undefined,
+        systemPrompt: 'Creative notification system prompt.',
+        turnContextPrompt: null,
+        voiceMemoDeliveryChannel: 'linq',
+        workingDirectory: '/work',
+      } satisfies AssistantRouteTurnPlan,
+      session,
+    } satisfies AssistantCodexAttemptPlan)
+
+    const outcome = await executeCodexTurnWithRecovery({
+      input,
+      plan: createSharedPlan(),
+      resolvedSession: session,
+      route,
+      turnCreatedAt: '2026-07-20T00:00:00.000Z',
+      turnId: 'turn-creative-notification',
+    })
+
+    expect(outcome.kind).toBe('succeeded')
+    const providerInput =
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
+    expect(providerInput?.providerConfig).toMatchObject({
+      approvalPolicy: 'never',
+      sandbox: 'read-only',
+    })
+    expect(providerInput?.codexConfigOverrides).toEqual([
+      'features.shell_tool=true',
+      'features.apps=true',
+    ])
+    expect(providerInput?.codexThreadConfig).toEqual(
+      EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG,
+    )
+    expect(providerInput).toMatchObject({
+      dynamicTools: [MURPH_GENERATE_SONG_TOOL],
+      environments: [],
+      hostedToolContext: null,
+      materializeWorkspaceArtifacts: null,
+      progressDelivery: null,
+      providerFetch: hostedProviderFetch,
+      providerThreadEphemeral: true,
+      publicInternetFetch: fetch,
+      requireHostedPrivateImageDelivery: false,
+    })
+    expect(providerInput).not.toHaveProperty('processLifetime')
     expect(unsafeProgressDelivery.send).not.toHaveBeenCalled()
   })
 
@@ -794,6 +935,153 @@ describe('Codex model catalog', () => {
       providerThreadEphemeral: true,
       runtimeWorkspaceRoots: ['/vaults/group'],
     }))
+  })
+
+  it('keeps onboarding goal check-ins on a vault-readable but mutation-denied turn', async () => {
+    const route = createRoute()
+    const session = createAssistantSession({
+      providerOptions: route.providerOptions,
+    })
+    const input = {
+      prompt: 'Review current goals without changing them.',
+      scheduledInvocationAuthority: {
+        automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+        occurrenceAt: '2026-07-25T08:00:00.000Z',
+      },
+      vault: '/vaults/member',
+    }
+    const hostedProviderFetch = vi.fn<typeof fetch>(async () =>
+      new Response(null, { status: 204 })
+    )
+    const unsafeProgressDelivery = {
+      send: vi.fn(async () => ({
+        kind: 'sent' as const,
+        source: 'system' as const,
+      })),
+    }
+
+    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportedUserMessageContentTypes: ['text'],
+      supportsReasoningEffort: true,
+    })
+    providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
+      createProviderAttemptResult(),
+    )
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
+      activeTurnSteering: null,
+      executionContext: {
+        hosted: {
+          materializeWorkspaceArtifacts: vi.fn(),
+          memberId: 'member-goal-checkin',
+          providerFetch: hostedProviderFetch,
+          publicInternetFetch: fetch,
+          userEnvKeys: [],
+        },
+      },
+      hostedToolContext: {
+        automationTool: { request: vi.fn() },
+        computerToolsAvailable: true,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: vi.fn(),
+        vaultFileSendAvailable: true,
+      },
+      input,
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-07-25',
+        currentTimeZone: 'America/New_York',
+      },
+      route,
+      sharedPlan: createSharedPlan(),
+      progressDelivery: unsafeProgressDelivery,
+      turnId: 'turn-onboarding-goal-checkin',
+    } satisfies AssistantCodexTurnExecutionPlan)
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
+      attemptCount: 1,
+      route,
+      routePlan: {
+        assistantContractFingerprint:
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        assistantCliContract: 'Murph CLI Contract: read current vault state.',
+        cliEnv: {},
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        } satisfies AssistantCodexContinuation,
+        developerInstructions: 'Immutable read-only goal check-in policy.',
+        diagnosticsPolicy: {
+          environment: 'hosted',
+          privateIssueCaptureEnabled: false,
+          surface: 'linq',
+        },
+        dynamicTools: [MURPH_GENERATE_SONG_TOOL],
+        environments: [{ PRIVATE_ENVIRONMENT: 'must-not-pass' }],
+        onboardingGuidanceInjected: false,
+        planningDiagnostics: createRoutePlanningDiagnostics(),
+        promptCacheMetadata: null,
+        resume: null,
+        sessionContext: {
+          binding: session.binding,
+        },
+        systemPrompt: 'Ordinary Murph prompt plus immutable read-only policy.',
+        turnContextPrompt: null,
+        workingDirectory: '/vaults/member',
+      } satisfies AssistantRouteTurnPlan,
+      session,
+    } satisfies AssistantCodexAttemptPlan)
+
+    const outcome = await executeCodexTurnWithRecovery({
+      input,
+      plan: createSharedPlan(),
+      resolvedSession: session,
+      route,
+      turnCreatedAt: '2026-07-25T08:00:00.000Z',
+      turnId: 'turn-onboarding-goal-checkin',
+    })
+
+    expect(outcome.kind).toBe('succeeded')
+    const providerInput =
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
+    expect(providerInput?.providerConfig).toMatchObject({
+      approvalPolicy: 'never',
+      sandbox: 'read-only',
+    })
+    expect(providerInput?.codexConfigOverrides).toEqual(
+      expect.arrayContaining([
+        'memories.generate_memories=false',
+        'web_search="disabled"',
+        'features.apps=false',
+        'features.browser_use=false',
+        'features.plugins=false',
+        'features.multi_agent=false',
+      ]),
+    )
+    expect(providerInput?.codexConfigOverrides).not.toContain(
+      'features.shell_tool=false',
+    )
+    expect(providerInput).toMatchObject({
+      dynamicTools: [],
+      environments: [],
+      hostedToolContext: null,
+      materializeWorkspaceArtifacts: null,
+      permissions: MURPH_MEMBER_READ_PERMISSION_PROFILE,
+      processLifetime: 'one-shot',
+      progressDelivery: null,
+      providerFetch: null,
+      providerThreadEphemeral: true,
+      publicInternetFetch: null,
+      requireHostedPrivateImageDelivery: false,
+      resume: null,
+      runtimeWorkspaceRoots: ['/vaults/member'],
+      sessionContext: {
+        binding: session.binding,
+      },
+    })
+    expect(unsafeProgressDelivery.send).not.toHaveBeenCalled()
   })
 
   it('keeps group-email replies but removes ambient filesystem execution', async () => {

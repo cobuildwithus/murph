@@ -14,6 +14,9 @@ import {
 const requesterMocks = vi.hoisted(() => ({
   hasHostedMemberActivationProof: vi.fn(),
   lookupHostedGroupParticipantMemberByHandle: vi.fn(),
+  hostedGroupMemberFindMany: vi.fn(),
+  lookupHostedGroupParticipantMemberByProviderEvidence: vi.fn(),
+  readHostedMailboxConversationWakeByAssistantInputId: vi.fn(),
   readHostedMailboxWakeByItemId: vi.fn(),
   resolveHostedMemberRoutingByTelegramUserId: vi.fn(),
 }));
@@ -24,6 +27,8 @@ vi.mock("@/src/lib/hosted-mailbox/store", async () => {
   >("@/src/lib/hosted-mailbox/store");
   return {
     ...actual,
+    readHostedMailboxConversationWakeByAssistantInputId:
+      requesterMocks.readHostedMailboxConversationWakeByAssistantInputId,
     readHostedMailboxWakeByItemId:
       requesterMocks.readHostedMailboxWakeByItemId,
   };
@@ -37,6 +42,8 @@ vi.mock("@/src/lib/hosted-groups/participant-member", async () => {
     ...actual,
     lookupHostedGroupParticipantMemberByHandle:
       requesterMocks.lookupHostedGroupParticipantMemberByHandle,
+    lookupHostedGroupParticipantMemberByProviderEvidence:
+      requesterMocks.lookupHostedGroupParticipantMemberByProviderEvidence,
   };
 });
 
@@ -75,26 +82,268 @@ const TELEGRAM_ROUTE_AUTHORITY = {
   threadId: "telegram-group-thread",
 } satisfies HostedExecutionExternalThreadRouteAuthority;
 
+const LINQ_REQUESTER = {
+  assistantInputId: `ain_${"1".repeat(32)}`,
+  senderHandle: "+12125550123",
+  source: "linq" as const,
+};
+
+const TELEGRAM_REQUESTER = {
+  assistantInputId: `ain_${"2".repeat(32)}`,
+  senderHandle: "telegram-user-123",
+  source: "telegram" as const,
+};
+
+function createPrisma() {
+  return {
+    hostedGroupMember: {
+      findMany: requesterMocks.hostedGroupMemberFindMany,
+    },
+  };
+}
+
+function allowCurrentMembership(memberId: string) {
+  requesterMocks.hostedGroupMemberFindMany.mockResolvedValue([
+    {
+      member: { suspendedAt: null },
+      memberId,
+    },
+  ]);
+}
+
 describe("group phone-call requester activation", () => {
   beforeEach(() => {
     requesterMocks.hasHostedMemberActivationProof.mockReset();
+    requesterMocks.hostedGroupMemberFindMany.mockReset();
     requesterMocks.lookupHostedGroupParticipantMemberByHandle.mockReset();
+    requesterMocks.lookupHostedGroupParticipantMemberByProviderEvidence.mockReset();
+    requesterMocks.readHostedMailboxConversationWakeByAssistantInputId.mockReset();
     requesterMocks.readHostedMailboxWakeByItemId.mockReset();
     requesterMocks.resolveHostedMemberRoutingByTelegramUserId.mockReset();
   });
 
-  it("rejects missing mailbox provenance", async () => {
+  it.each([
+    [
+      "missing requester",
+      null,
+      LINQ_ROUTE_AUTHORITY,
+      "HOSTED_GROUP_PHONE_CALL_REQUESTER_PROVENANCE_REQUIRED",
+    ],
+    [
+      "provider mismatch",
+      TELEGRAM_REQUESTER,
+      LINQ_ROUTE_AUTHORITY,
+      "HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED",
+    ],
+    [
+      "malformed accepted input ref",
+      { ...LINQ_REQUESTER, assistantInputId: "provider-message-id" },
+      LINQ_ROUTE_AUTHORITY,
+      "HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED",
+    ],
+    [
+      "missing sender evidence",
+      { ...LINQ_REQUESTER, senderHandle: "   " },
+      LINQ_ROUTE_AUTHORITY,
+      "HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED",
+    ],
+  ] as const)("rejects %s before member resolution", async (
+    _case,
+    groupRequester,
+    routeAuthority,
+    expectedCode,
+  ) => {
     await expect(assertHostedGroupPhoneCallRequesterHasOwnMurph({
-      inboundMailboxItemIds: [],
+      groupRequester,
       prisma: {} as never,
+      routeAuthority,
+    })).rejects.toMatchObject({
+      code: expectedCode,
+    });
+    expect(
+      requesterMocks.lookupHostedGroupParticipantMemberByProviderEvidence,
+    ).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["Linq", LINQ_REQUESTER, LINQ_ROUTE_AUTHORITY, "member_linq_requester"],
+    [
+      "Telegram",
+      TELEGRAM_REQUESTER,
+      TELEGRAM_ROUTE_AUTHORITY,
+      "member_telegram_requester",
+    ],
+  ] as const)("accepts an activated %s participant selected by exact provider evidence", async (
+    provider,
+    groupRequester,
+    routeAuthority,
+    memberId,
+  ) => {
+    requesterMocks.readHostedMailboxConversationWakeByAssistantInputId
+      .mockResolvedValue(provider === "Linq"
+        ? buildLinqGroupWake({
+            eventId: groupRequester.assistantInputId,
+            from: groupRequester.senderHandle,
+          })
+        : buildTelegramGroupWake({
+            eventId: groupRequester.assistantInputId,
+            from: groupRequester.senderHandle,
+          }));
+    requesterMocks.lookupHostedGroupParticipantMemberByProviderEvidence
+      .mockResolvedValue({ core: { id: memberId } });
+    allowCurrentMembership(memberId);
+    requesterMocks.hasHostedMemberActivationProof.mockResolvedValue(true);
+    const prisma = createPrisma();
+
+    await expect(assertHostedGroupPhoneCallRequesterHasOwnMurph({
+      groupRequester,
+      prisma: prisma as never,
+      routeAuthority,
+    })).resolves.toBeUndefined();
+
+    expect(
+      requesterMocks.readHostedMailboxConversationWakeByAssistantInputId,
+    ).toHaveBeenCalledWith({
+      assistantInputId: groupRequester.assistantInputId,
+      memberId: routeAuthority.containerMemberId,
+      prisma,
+    });
+    expect(
+      requesterMocks.lookupHostedGroupParticipantMemberByProviderEvidence,
+    ).toHaveBeenCalledWith({
+      participant: groupRequester,
+      prisma,
+    });
+    expect(requesterMocks.hostedGroupMemberFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        take: 2,
+        where: expect.objectContaining({
+          memberId,
+        }),
+      }),
+    );
+    expect(requesterMocks.hasHostedMemberActivationProof).toHaveBeenCalledWith({
+      memberId,
+      prisma,
+    });
+  });
+
+  it("normalizes trusted sender evidence without changing the accepted message identity", async () => {
+    requesterMocks.readHostedMailboxConversationWakeByAssistantInputId
+      .mockResolvedValue(buildLinqGroupWake({
+        eventId: LINQ_REQUESTER.assistantInputId,
+        from: LINQ_REQUESTER.senderHandle,
+      }));
+    requesterMocks.lookupHostedGroupParticipantMemberByProviderEvidence
+      .mockResolvedValue({ core: { id: "member_linq_requester" } });
+    allowCurrentMembership("member_linq_requester");
+    requesterMocks.hasHostedMemberActivationProof.mockResolvedValue(true);
+    const prisma = createPrisma();
+
+    await assertHostedGroupPhoneCallRequesterHasOwnMurph({
+      groupRequester: {
+        ...LINQ_REQUESTER,
+        senderHandle: "  +12125550123  ",
+      },
+      prisma: prisma as never,
+      routeAuthority: LINQ_ROUTE_AUTHORITY,
+    });
+
+    expect(
+      requesterMocks.lookupHostedGroupParticipantMemberByProviderEvidence,
+    ).toHaveBeenCalledWith({
+      participant: LINQ_REQUESTER,
+      prisma,
+    });
+  });
+
+  it("rejects an unresolvable provider sender", async () => {
+    requesterMocks.readHostedMailboxConversationWakeByAssistantInputId
+      .mockResolvedValue(buildLinqGroupWake({
+        eventId: LINQ_REQUESTER.assistantInputId,
+        from: LINQ_REQUESTER.senderHandle,
+      }));
+    requesterMocks.lookupHostedGroupParticipantMemberByProviderEvidence
+      .mockResolvedValue(null);
+    const prisma = createPrisma();
+
+    await expect(assertHostedGroupPhoneCallRequesterHasOwnMurph({
+      groupRequester: LINQ_REQUESTER,
+      prisma: prisma as never,
       routeAuthority: LINQ_ROUTE_AUTHORITY,
     })).rejects.toMatchObject({
       code: "HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED",
     });
-    expect(requesterMocks.readHostedMailboxWakeByItemId).not.toHaveBeenCalled();
+    expect(requesterMocks.hasHostedMemberActivationProof).not.toHaveBeenCalled();
   });
 
-  it("accepts an activated Linq participant derived from the trusted mailbox wake", async () => {
+  it("rejects a resolved sender without durable Murph activation", async () => {
+    requesterMocks.readHostedMailboxConversationWakeByAssistantInputId
+      .mockResolvedValue(buildTelegramGroupWake({
+        eventId: TELEGRAM_REQUESTER.assistantInputId,
+        from: TELEGRAM_REQUESTER.senderHandle,
+      }));
+    requesterMocks.lookupHostedGroupParticipantMemberByProviderEvidence
+      .mockResolvedValue({ core: { id: "member_unactivated" } });
+    allowCurrentMembership("member_unactivated");
+    requesterMocks.hasHostedMemberActivationProof.mockResolvedValue(false);
+    const prisma = createPrisma();
+
+    await expect(assertHostedGroupPhoneCallRequesterHasOwnMurph({
+      groupRequester: TELEGRAM_REQUESTER,
+      prisma: prisma as never,
+      routeAuthority: TELEGRAM_ROUTE_AUTHORITY,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED",
+    });
+  });
+
+  it("rejects an exact selected message from a different callback room", async () => {
+    requesterMocks.readHostedMailboxConversationWakeByAssistantInputId
+      .mockResolvedValue(buildLinqGroupWake({
+        eventId: LINQ_REQUESTER.assistantInputId,
+        from: LINQ_REQUESTER.senderHandle,
+      }));
+    const prisma = createPrisma();
+
+    await expect(assertHostedGroupPhoneCallRequesterHasOwnMurph({
+      groupRequester: LINQ_REQUESTER,
+      prisma: prisma as never,
+      routeAuthority: {
+        ...LINQ_ROUTE_AUTHORITY,
+        threadId: "another-linq-group-thread",
+      },
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED",
+    });
+    expect(
+      requesterMocks.lookupHostedGroupParticipantMemberByProviderEvidence,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("rejects an exact sender who is no longer a current group member", async () => {
+    requesterMocks.readHostedMailboxConversationWakeByAssistantInputId
+      .mockResolvedValue(buildTelegramGroupWake({
+        eventId: TELEGRAM_REQUESTER.assistantInputId,
+        from: TELEGRAM_REQUESTER.senderHandle,
+      }));
+    requesterMocks.lookupHostedGroupParticipantMemberByProviderEvidence
+      .mockResolvedValue({ core: { id: "member_departed" } });
+    requesterMocks.hostedGroupMemberFindMany.mockResolvedValue([]);
+    requesterMocks.hasHostedMemberActivationProof.mockResolvedValue(true);
+    const prisma = createPrisma();
+
+    await expect(assertHostedGroupPhoneCallRequesterHasOwnMurph({
+      groupRequester: TELEGRAM_REQUESTER,
+      prisma: prisma as never,
+      routeAuthority: TELEGRAM_ROUTE_AUTHORITY,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED",
+    });
+    expect(requesterMocks.hasHostedMemberActivationProof).not.toHaveBeenCalled();
+  });
+
+  it("accepts an activated legacy Linq requester from a trusted mailbox wake", async () => {
     requesterMocks.readHostedMailboxWakeByItemId.mockResolvedValue(
       buildLinqGroupWake({
         eventId: "mailbox_linq",
@@ -104,27 +353,19 @@ describe("group phone-call requester activation", () => {
     requesterMocks.lookupHostedGroupParticipantMemberByHandle.mockResolvedValue({
       core: { id: "member_linq_requester" },
     });
+    allowCurrentMembership("member_linq_requester");
     requesterMocks.hasHostedMemberActivationProof.mockResolvedValue(true);
+    const prisma = createPrisma();
 
     await expect(assertHostedGroupPhoneCallRequesterHasOwnMurph({
+      groupRequester: null,
       inboundMailboxItemIds: ["mailbox_linq"],
-      prisma: {} as never,
+      prisma: prisma as never,
       routeAuthority: LINQ_ROUTE_AUTHORITY,
     })).resolves.toBeUndefined();
-
-    expect(
-      requesterMocks.lookupHostedGroupParticipantMemberByHandle,
-    ).toHaveBeenCalledWith({
-      handle: "+12125550123",
-      prisma: {},
-    });
-    expect(requesterMocks.hasHostedMemberActivationProof).toHaveBeenCalledWith({
-      memberId: "member_linq_requester",
-      prisma: {},
-    });
   });
 
-  it("accepts an activated Telegram participant through the canonical Telegram binding", async () => {
+  it("accepts an activated legacy Telegram requester from a trusted mailbox wake", async () => {
     requesterMocks.readHostedMailboxWakeByItemId.mockResolvedValue(
       buildTelegramGroupWake({
         eventId: "mailbox_telegram",
@@ -137,27 +378,19 @@ describe("group phone-call requester activation", () => {
       },
       status: "found",
     });
+    allowCurrentMembership("member_telegram_requester");
     requesterMocks.hasHostedMemberActivationProof.mockResolvedValue(true);
+    const prisma = createPrisma();
 
     await expect(assertHostedGroupPhoneCallRequesterHasOwnMurph({
+      groupRequester: null,
       inboundMailboxItemIds: ["mailbox_telegram"],
-      prisma: {} as never,
+      prisma: prisma as never,
       routeAuthority: TELEGRAM_ROUTE_AUTHORITY,
     })).resolves.toBeUndefined();
-
-    expect(
-      requesterMocks.resolveHostedMemberRoutingByTelegramUserId,
-    ).toHaveBeenCalledWith({
-      prisma: {},
-      telegramUserId: "telegram-user-123",
-    });
-    expect(requesterMocks.hasHostedMemberActivationProof).toHaveBeenCalledWith({
-      memberId: "member_telegram_requester",
-      prisma: {},
-    });
   });
 
-  it("rejects mailbox evidence from a different group route", async () => {
+  it("rejects legacy mailbox evidence from a different group route", async () => {
     requesterMocks.readHostedMailboxWakeByItemId.mockResolvedValue(
       buildLinqGroupWake({
         eventId: "mailbox_wrong_route",
@@ -166,6 +399,7 @@ describe("group phone-call requester activation", () => {
     );
 
     await expect(assertHostedGroupPhoneCallRequesterHasOwnMurph({
+      groupRequester: null,
       inboundMailboxItemIds: ["mailbox_wrong_route"],
       prisma: {} as never,
       routeAuthority: {
@@ -173,7 +407,7 @@ describe("group phone-call requester activation", () => {
         threadId: "another-group-thread",
       },
     })).rejects.toMatchObject({
-      code: "HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED",
+      code: "HOSTED_GROUP_PHONE_CALL_REQUESTER_PROVENANCE_REQUIRED",
     });
     expect(
       requesterMocks.lookupHostedGroupParticipantMemberByHandle,
@@ -196,33 +430,9 @@ describe("group phone-call requester activation", () => {
       prisma: {} as never,
       routeAuthority: LINQ_ROUTE_AUTHORITY,
     })).rejects.toMatchObject({
-      code: "HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED",
+      code: "HOSTED_GROUP_PHONE_CALL_REQUESTER_PROVENANCE_REQUIRED",
     });
     expect(requesterMocks.hasHostedMemberActivationProof).not.toHaveBeenCalled();
-  });
-
-  it("rejects a resolved requester without Murph activation proof", async () => {
-    requesterMocks.readHostedMailboxWakeByItemId.mockResolvedValue(
-      buildTelegramGroupWake({
-        eventId: "mailbox_unactivated",
-        from: "telegram-user-123",
-      }),
-    );
-    requesterMocks.resolveHostedMemberRoutingByTelegramUserId.mockResolvedValue({
-      lookup: {
-        core: { id: "member_unactivated" },
-      },
-      status: "found",
-    });
-    requesterMocks.hasHostedMemberActivationProof.mockResolvedValue(false);
-
-    await expect(assertHostedGroupPhoneCallRequesterHasOwnMurph({
-      inboundMailboxItemIds: ["mailbox_unactivated"],
-      prisma: {} as never,
-      routeAuthority: TELEGRAM_ROUTE_AUTHORITY,
-    })).rejects.toMatchObject({
-      code: "HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED",
-    });
   });
 
   it("rejects mailbox evidence that resolves to more than one requester", async () => {
@@ -249,13 +459,41 @@ describe("group phone-call requester activation", () => {
     );
 
     await expect(assertHostedGroupPhoneCallRequesterHasOwnMurph({
+      groupRequester: null,
       inboundMailboxItemIds: ["mailbox_one", "mailbox_two"],
       prisma: {} as never,
       routeAuthority: LINQ_ROUTE_AUTHORITY,
     })).rejects.toMatchObject({
-      code: "HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED",
+      code: "HOSTED_GROUP_PHONE_CALL_REQUESTER_PROVENANCE_REQUIRED",
     });
     expect(requesterMocks.hasHostedMemberActivationProof).not.toHaveBeenCalled();
+  });
+
+  it("rejects a resolved legacy requester without Murph activation", async () => {
+    requesterMocks.readHostedMailboxWakeByItemId.mockResolvedValue(
+      buildTelegramGroupWake({
+        eventId: "mailbox_unactivated",
+        from: "telegram-user-123",
+      }),
+    );
+    requesterMocks.resolveHostedMemberRoutingByTelegramUserId.mockResolvedValue({
+      lookup: {
+        core: { id: "member_unactivated" },
+      },
+      status: "found",
+    });
+    allowCurrentMembership("member_unactivated");
+    requesterMocks.hasHostedMemberActivationProof.mockResolvedValue(false);
+    const prisma = createPrisma();
+
+    await expect(assertHostedGroupPhoneCallRequesterHasOwnMurph({
+      groupRequester: null,
+      inboundMailboxItemIds: ["mailbox_unactivated"],
+      prisma: prisma as never,
+      routeAuthority: TELEGRAM_ROUTE_AUTHORITY,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED",
+    });
   });
 });
 

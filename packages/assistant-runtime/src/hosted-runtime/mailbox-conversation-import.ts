@@ -9,6 +9,7 @@ import {
   isHostedEmailConversationMessageWake,
   isHostedLinqConversationMessageWake,
   isHostedTelegramConversationMessageWake,
+  readHostedExecutionConversationMessageText,
   readHostedLinqConversationMessageAccountLookupKey,
 } from "@murphai/hosted-execution";
 import {
@@ -894,6 +895,9 @@ async function stageHostedConversationAssistantInputEvent(input: {
   const linqWake = isHostedLinqConversationMessageWake(input.wake)
     ? input.wake
     : null;
+  const telegramWake = isHostedTelegramConversationMessageWake(input.wake)
+    ? input.wake
+    : null;
   const groupContextAuthorized = linqWake
     && linqWake.message.routeAuthority !== null
     && linqWake.message.routeAuthority !== undefined
@@ -903,6 +907,12 @@ async function stageHostedConversationAssistantInputEvent(input: {
   const groupReactionContext = groupContextAuthorized
     ? linqWake?.message.groupReactionContext
     : undefined;
+  const groupRunningBitAuthorized =
+    groupContextAuthorized ||
+    Boolean(
+      telegramWake?.message.routeAuthority &&
+      telegramWake.message.telegramMessage.threadIsDirect === false,
+    );
   const event = await upsertAssistantInputEvent({
     event: createHostedConversationAssistantInputEvent({
       item: input.item,
@@ -913,6 +923,9 @@ async function stageHostedConversationAssistantInputEvent(input: {
   await recordHostedMailboxAssistantInputItem({
     ...(groupParticipantAdded ? { groupParticipantAdded } : {}),
     ...(groupReactionContext ? { groupReactionContext } : {}),
+    ...(groupRunningBitAuthorized && input.item.groupRunningBit
+      ? { groupRunningBit: input.item.groupRunningBit }
+      : {}),
     ...(input.item.usageRunningLow === true
       ? { usageRunningLow: true as const }
       : {}),
@@ -1193,13 +1206,12 @@ function createHostedConversationAssistantInputContent(
 function createHostedConversationAssistantInputText(
   wake: HostedExecutionConversationMessageWake,
 ): string {
+  const authoredText = normalizeHostedAssistantInputText(
+    readHostedExecutionConversationMessageText(wake.message) ?? "",
+  );
   if (isHostedLinqConversationMessageWake(wake)) {
-    const textParts = wake.message.linqMessage.parts
-      .filter((part) => part.type === "text")
-      .map((part) => part.value);
-    const text = normalizeHostedAssistantInputText(textParts.join("\n"));
-    if (text) {
-      return text;
+    if (authoredText) {
+      return authoredText;
     }
     const attachmentCount = wake.message.linqMessage.parts.filter((part) =>
       part.type === "media" || part.type === "voice_memo"
@@ -1210,11 +1222,8 @@ function createHostedConversationAssistantInputText(
   }
 
   if (isHostedTelegramConversationMessageWake(wake)) {
-    const text = normalizeHostedAssistantInputText(
-      wake.message.telegramMessage.text ?? "",
-    );
-    if (text) {
-      return text;
+    if (authoredText) {
+      return authoredText;
     }
     const attachmentCount = wake.message.telegramMessage.attachments?.length ?? 0;
     return attachmentCount > 0
@@ -1411,9 +1420,10 @@ function createHostedConversationAssistantInputConversation(
         identifierBlind,
         "telegram:bot",
       ),
-      // Blind the same sender value stored for the prompt so group actor
-      // scoping matches Linq: initial batching splits on actor change and
-      // admission stops at a foreign participant.
+      // Blind the same sender value stored for per-message prompt attribution
+      // and direct-conversation identity. Authenticated group-room batching may
+      // span actor changes; participant effects re-resolve the exact accepted
+      // message instead of treating this turn-wide actor as authority.
       actorId: hashNullableHostedAssistantConversationIdentifier(
         identifierBlind,
         readHostedTelegramGroupSenderHandle(wake),
@@ -1551,6 +1561,18 @@ function createHostedConversationAssistantInputSourceMetadata(
       ...(wake.message.linqMessage.affirmativeReaction === true
         ? { affirmativeReaction: true }
         : {}),
+      ...(wake.message.linqMessage.editedTextPartIndex === undefined
+        ? {}
+        : {
+            editedTextPartIndex:
+              wake.message.linqMessage.editedTextPartIndex,
+          }),
+      ...(wake.message.linqMessage.editedSourceInputId === undefined
+        ? {}
+        : {
+            editedSourceInputId:
+              wake.message.linqMessage.editedSourceInputId,
+          }),
       externalThreadRouteAuthorityPresent,
       kind: "linq",
       partCount: wake.message.linqMessage.parts.length,
@@ -1601,7 +1623,11 @@ function createHostedConversationAssistantInputSourceMetadata(
   );
   const externalThreadRouteAuthorityPresent = wake.message.routeAuthority !== undefined
     && wake.message.routeAuthority !== null;
-  if (!mediaGroupId && !replyContext && !externalThreadRouteAuthorityPresent) {
+  if (
+    !mediaGroupId
+    && !replyContext
+    && !externalThreadRouteAuthorityPresent
+  ) {
     return null;
   }
   // Thread-container (group) inbound carries the sending participant so the
@@ -1609,6 +1635,7 @@ function createHostedConversationAssistantInputSourceMetadata(
   // authoritative sender so direct threads and unattributable group inbound
   // keep the exact record shape an older runner can still read.
   const senderHandle = readHostedTelegramGroupSenderHandle(wake);
+  const senderDisplayName = readHostedTelegramGroupSenderDisplayName(wake);
 
   return {
     ...(externalThreadRouteAuthorityPresent
@@ -1619,11 +1646,36 @@ function createHostedConversationAssistantInputSourceMetadata(
     replyContext,
     ...(senderHandle
       ? {
+          ...(senderDisplayName ? { senderDisplayName } : {}),
           senderHandle,
           senderUsername: readHostedTelegramGroupSenderUsername(wake),
         }
       : {}),
   };
+}
+
+/**
+ * Display-only Telegram name. Bound to the same route-authorized group gate as
+ * the sender handle and never used for matching or participant authority.
+ */
+function readHostedTelegramGroupSenderDisplayName(
+  wake: HostedExecutionConversationMessageWake,
+): string | null {
+  if (
+    !isHostedTelegramConversationMessageWake(wake)
+    || !readHostedTelegramGroupSenderHandle(wake)
+  ) {
+    return null;
+  }
+  const normalized = normalizeHostedAssistantInputMetadataText(
+    wake.message.telegramMessage.senderDisplayName ?? "",
+  )
+    ?.replace(/[\u0000-\u001f\u007f-\u009f]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  return normalized
+    ? Array.from(normalized).slice(0, 120).join("")
+    : null;
 }
 
 /**

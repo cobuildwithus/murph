@@ -46,6 +46,7 @@ import {
   readAssistantOutboxIntent,
   readAssistantVaultFileMedia,
   readVerifiedAssistantVaultFileBytes,
+  readVerifiedAssistantVaultImageBytes,
   sendTelegramMessage,
   readAssistantOutboxIntentMirrorState,
   resetAssistantOutboxPreparedDispatchById,
@@ -67,6 +68,7 @@ import type {
   AssistantDeliveryError,
   AssistantOutboxIntent,
   AssistantResponseMedia,
+  AssistantVaultImageResponseMedia,
 } from "@murphai/operator-config/assistant-cli-contracts";
 import {
   setTelegramMessageReaction,
@@ -76,6 +78,7 @@ import {
 } from "@murphai/operator-config/assistant-cli-contracts";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import {
+  createAssistantDeliveryBlockedError,
   createAssistantDeliveryTerminalError,
 } from "@murphai/operator-config/assistant/delivery-failure";
 
@@ -113,6 +116,10 @@ import {
   requireHostedProviderFetch,
   requireHostedProviderFetchDependencies,
 } from "./provider-fetch.ts";
+import {
+  recordHostedAssistantMilestonesBestEffort,
+  type HostedAssistantMilestoneTraceContext,
+} from "./assistant-latency-trace.ts";
 
 const HOSTED_MAX_BACKGROUND_DELIVERY_EFFECTS = 1;
 // Bounds due approval reconciliation so a backlog cannot stall delivery with
@@ -685,6 +692,9 @@ async function preflightHostedAssistantDispatch(input: {
   const targetKind = input.payload.explicitTarget
     ? "explicit"
     : input.payload.bindingDeliveryKind;
+  if (input.payload.channel === "telegram") {
+    return { action: "continue" };
+  }
   if (!target || !targetKind || input.payload.channel !== "linq") {
     throw new VaultCliError(
       "ASSISTANT_ASK_COMPLETION_ROUTE_UNAVAILABLE",
@@ -734,7 +744,7 @@ async function preflightHostedAssistantDispatch(input: {
 function isHostedReviewedAssistantAskCompletionIntent(
   intent: AssistantOutboxIntent,
 ): boolean {
-  return intent.channel === "linq"
+  return (intent.channel === "linq" || intent.channel === "telegram")
     && intent.operation === null
     && intent.deliveryIdempotencyKey?.startsWith(
       HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
@@ -1661,6 +1671,7 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
     "assertLinqRecentInboundEngagement" | "recordLinqDeliveryOutcome" | "sendEmail"
   > | null;
   forwardedEnv?: Readonly<Record<string, string>>;
+  latencyTrace?: Omit<HostedAssistantMilestoneTraceContext, "assistantInputIds"> | null;
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   platformEnv?: Readonly<Record<string, string>>;
@@ -1700,6 +1711,24 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
       effectsPort: input.effectsPort ?? null,
       linqEnv,
       linqDeliveryContexts,
+      onProviderAccepted: ({
+        acceptedAssistantInputIds,
+        acceptedAt,
+      }) => {
+        recordHostedAssistantMilestonesBestEffort({
+          context:
+            input.latencyTrace && acceptedAssistantInputIds.length > 0
+              ? {
+                  ...input.latencyTrace,
+                  assistantInputIds: acceptedAssistantInputIds,
+                }
+              : null,
+          milestones: [{
+            at: acceptedAt.toISOString(),
+            milestone: "progress_update_accepted",
+          }],
+        });
+      },
       providerFetch: input.providerFetch ?? null,
       publicInternetFetch: input.publicInternetFetch ?? null,
       signal: input.signal ?? null,
@@ -2267,11 +2296,16 @@ async function assertHostedDeliveryCanEnterProvider(input: {
 
 async function assertHostedTelegramThreadRouteAuthorityAtProviderEntry(input: {
   assistantDeliveryEffect: HostedAssistantDeliveryEffect;
+  delivery?: {
+    media: readonly AssistantResponseMedia[];
+    message: string;
+  };
   effectsPort: HostedRuntimeEffectsPort;
   intent: AssistantOutboxIntent | null;
   signal: AbortSignal | null;
   target: string | null;
   userId: string;
+  vaultRoot: string;
 }): Promise<string | null> {
   const payload = input.assistantDeliveryEffect.payload;
   if (
@@ -2281,9 +2315,14 @@ async function assertHostedTelegramThreadRouteAuthorityAtProviderEntry(input: {
     return null;
   }
 
+  const reviewedCompletion = input.intent
+    && isHostedReviewedAssistantAskCompletionIntent(input.intent)
+    ? input.intent
+    : null;
   const authority = input.intent?.externalThreadRouteAuthority ?? null;
   if (
     !authority
+    && !reviewedCompletion
     && (
       payload.threadIsDirect === true
       || !input.intent?.automationAuthority
@@ -2292,10 +2331,13 @@ async function assertHostedTelegramThreadRouteAuthorityAtProviderEntry(input: {
     return null;
   }
   if (!authority) {
+    if (!input.intent?.automationAuthority && !reviewedCompletion) {
+      return null;
+    }
     throw new VaultCliError(
       "ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_UNAVAILABLE",
       "Hosted group delivery requires live thread route authority before provider work.",
-      { retryable: true },
+      { retryable: reviewedCompletion === null },
     );
   }
 
@@ -2319,7 +2361,64 @@ async function assertHostedTelegramThreadRouteAuthorityAtProviderEntry(input: {
       { retryable: true },
     );
   }
-  await assertAuthority(authority, { signal: input.signal });
+  if (
+    reviewedCompletion
+    && (
+      !input.delivery
+      || input.delivery.media.length !== 0
+      || payload.media.length !== 0
+    )
+  ) {
+    throw new VaultCliError(
+      "ASSISTANT_ASK_COMPLETION_TRANSPORT_INVALID",
+      "Reviewed Assistant Ask completion must use the text-only Telegram transport.",
+      { retryable: false },
+    );
+  }
+  const completionExpiresAt = reviewedCompletion
+    ? await prepareHostedReviewedAssistantAskProviderEntry({
+        intentId: reviewedCompletion.intentId,
+        media: input.delivery?.media ?? [],
+        message: input.delivery?.message ?? "",
+        now: new Date(),
+        vaultRoot: input.vaultRoot,
+      })
+    : null;
+  const completionIdempotencyKey =
+    reviewedCompletion?.deliveryIdempotencyKey ?? null;
+  const assertion = await assertAuthority(authority, {
+    ...(reviewedCompletion && completionExpiresAt && completionIdempotencyKey
+      ? {
+          assistantAskCompletion: {
+            answeredMailboxItemIds: reviewedCompletion.answeredMailboxItemIds,
+            assistantAskCompletionExpiresAt: completionExpiresAt,
+            assistantAskFallback:
+              isHostedReviewedAssistantAskFallbackPayload(reviewedCompletion),
+            idempotencyKey: completionIdempotencyKey,
+          },
+        }
+      : {}),
+    signal: input.signal,
+  });
+  if (assertion?.assistantAskFallbackRequired === true) {
+    if (!reviewedCompletion) {
+      throw new VaultCliError(
+        "ASSISTANT_ASK_COMPLETION_AUTHORITY_INVALID",
+        "Assistant Ask fallback authority requires a reviewed completion.",
+        { retryable: false },
+      );
+    }
+    await persistHostedAssistantAskFallbackSupersession({
+      intentId: reviewedCompletion.intentId,
+      now: new Date(),
+      vaultRoot: input.vaultRoot,
+    });
+    throw new VaultCliError(
+      "ASSISTANT_ASK_COMPLETION_FALLBACK_RETRY",
+      "Reviewed Assistant Ask completion changed to its safe fallback before provider delivery.",
+      { retryable: true },
+    );
+  }
   return target;
 }
 
@@ -2741,11 +2840,16 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           const authorityBoundTarget =
             await assertHostedTelegramThreadRouteAuthorityAtProviderEntry({
               assistantDeliveryEffect: input.assistantDeliveryEffect,
+              delivery: {
+                media: [],
+                message: request.message,
+              },
               effectsPort: input.effectsPort,
               intent: mirrorState.intent,
               signal: input.signal,
               target: request.target,
               userId: input.userId,
+              vaultRoot: input.vaultRoot,
             });
           const dependencies = requireHostedProviderFetchDependencies({
             ...(authorityBoundTarget ? { authorityBoundTarget } : {}),
@@ -2759,15 +2863,24 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           return result;
         },
         sendTelegramImage: async (request) => {
+          const verifiedVaultImages = await preloadHostedAssistantVaultImages({
+            media: request.media,
+            vaultRoot: input.vaultRoot,
+          });
           await assertHostedDeliveryCanEnterProvider(input);
           const authorityBoundTarget =
             await assertHostedTelegramThreadRouteAuthorityAtProviderEntry({
               assistantDeliveryEffect: input.assistantDeliveryEffect,
+              delivery: {
+                media: request.media,
+                message: request.message,
+              },
               effectsPort: input.effectsPort,
               intent: mirrorState.intent,
               signal: request.signal ?? input.signal,
               target: request.target,
               userId: input.userId,
+              vaultRoot: input.vaultRoot,
             });
           const dependencies = requireHostedProviderFetchDependencies({
             ...(authorityBoundTarget ? { authorityBoundTarget } : {}),
@@ -2775,6 +2888,24 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             fetchImplementation: input.providerFetch,
             ...(request.signal ?? input.signal
               ? { signal: request.signal ?? input.signal ?? undefined }
+              : {}),
+            ...(verifiedVaultImages.size > 0
+              ? {
+                  loadVaultImage: async (
+                    media: AssistantVaultImageResponseMedia,
+                  ) => {
+                    const bytes = verifiedVaultImages.get(
+                      buildHostedVaultImageMediaIdentity(media),
+                    );
+                    if (!bytes) {
+                      throw new VaultCliError(
+                        "ASSISTANT_VAULT_IMAGE_IDENTITY_CONFLICT",
+                        "The prepared private image no longer matches the outbox media.",
+                      );
+                    }
+                    return bytes;
+                  },
+                }
               : {}),
           }, "Hosted assistant Telegram image delivery");
           providerDispatchEntered = true;
@@ -2798,6 +2929,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
               signal: input.signal,
               target: request.target,
               userId: input.userId,
+              vaultRoot: input.vaultRoot,
             });
           const dependencies = requireHostedProviderFetchDependencies({
             ...(authorityBoundTarget ? { authorityBoundTarget } : {}),
@@ -2829,6 +2961,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
                 signal: input.signal,
                 target,
                 userId: input.userId,
+                vaultRoot: input.vaultRoot,
               });
             },
             onTelegramVoiceMemoDispatchEntered: () => {
@@ -3330,6 +3463,10 @@ function createHostedAssistantLinqSendDependency(input: {
   intentId?: string | null;
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   linqEnv: NodeJS.ProcessEnv;
+  onProviderAccepted?: (input: {
+    acceptedAssistantInputIds: readonly string[];
+    acceptedAt: Date;
+  }) => void;
   onProviderDispatchEntered?: () => void;
   providerFetch: typeof fetch | null;
   publicInternetFetch?: typeof fetch | null;
@@ -3419,6 +3556,10 @@ function createHostedAssistantLinqSendDependency(input: {
       actionApprovalPort: input.actionApprovalPort ?? null,
       expectedDedupeKey: input.expectedDedupeKey ?? null,
       intentId: input.intentId ?? null,
+      media: request.media ?? [],
+      vaultRoot: input.vaultRoot ?? null,
+    });
+    const verifiedVaultImages = await preloadHostedAssistantVaultImages({
       media: request.media ?? [],
       vaultRoot: input.vaultRoot ?? null,
     });
@@ -3522,6 +3663,22 @@ function createHostedAssistantLinqSendDependency(input: {
               },
             }
           : {}),
+        ...(verifiedVaultImages.size > 0
+          ? {
+              loadVaultImage: async (media) => {
+                const bytes = verifiedVaultImages.get(
+                  buildHostedVaultImageMediaIdentity(media),
+                );
+                if (!bytes) {
+                  throw new VaultCliError(
+                    "ASSISTANT_VAULT_IMAGE_IDENTITY_CONFLICT",
+                    "The prepared private image no longer matches the outbox media.",
+                  );
+                }
+                return bytes;
+              },
+            }
+          : {}),
       });
     } catch (error) {
       if (!attemptedAt) {
@@ -3553,10 +3710,15 @@ function createHostedAssistantLinqSendDependency(input: {
       });
       throw error;
     }
+    const acceptedAt = new Date();
+    input.onProviderAccepted?.({
+      acceptedAssistantInputIds: request.acceptedAssistantInputIds ?? [],
+      acceptedAt,
+    });
     await recordHostedAssistantLinqDeliveryOutcomeOrQueueBestEffort({
       effectsPort: input.effectsPort ?? null,
       outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
-        acceptedAt: new Date(),
+        acceptedAt,
         attemptedAt: requireHostedLinqProviderAttemptedAt(attemptedAt),
         answeredMailboxItemIds: request.answeredMailboxItemIds ?? [],
         deliveryContext,
@@ -3648,6 +3810,36 @@ async function prepareHostedReviewedAssistantAskProviderEntry(input: {
     );
   }
   return expiresAt;
+}
+
+async function preloadHostedAssistantVaultImages(input: {
+  media: readonly AssistantResponseMedia[];
+  vaultRoot: string | null;
+}): Promise<Map<string, Uint8Array>> {
+  const vaultImages = input.media.filter(
+    (media): media is Extract<AssistantResponseMedia, { kind: "vault_image" }> =>
+      media.kind === "vault_image",
+  );
+  if (vaultImages.length === 0) {
+    return new Map();
+  }
+  if (!input.vaultRoot) {
+    throw createAssistantDeliveryTerminalError(
+      "ASSISTANT_VAULT_IMAGE_ROOT_UNAVAILABLE",
+      "Private image delivery requires the owning vault.",
+    );
+  }
+  const verified = new Map<string, Uint8Array>();
+  for (const image of vaultImages) {
+    verified.set(
+      buildHostedVaultImageMediaIdentity(image),
+      await readVerifiedAssistantVaultImageBytes({
+        image,
+        vaultRoot: input.vaultRoot,
+      }),
+    );
+  }
+  return verified;
 }
 
 async function preloadApprovedHostedAssistantVaultFiles(input: {
@@ -3744,6 +3936,22 @@ async function preloadApprovedHostedAssistantVaultFiles(input: {
   });
   return new Map([
     [buildHostedVaultFileMediaIdentity(persistedFile), bytes],
+  ]);
+}
+
+function buildHostedVaultImageMediaIdentity(input: {
+  contentType: string;
+  filename: string;
+  ref: string;
+  sha256: string;
+  sizeBytes: number;
+}): string {
+  return JSON.stringify([
+    input.ref,
+    input.sha256,
+    input.filename,
+    input.contentType,
+    input.sizeBytes,
   ]);
 }
 
@@ -4236,6 +4444,29 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
     throw error;
   }
   const normalized = normalizeHostedAssistantLinqEngagementResult(result);
+  if (input.authorityCheckOnly !== true && normalized.deliveryBlockCode) {
+    const code = `ASSISTANT_LINQ_EGRESS_${
+      normalized.deliveryBlockCode.toUpperCase()
+    }`;
+    if (normalized.deliveryBlockCode === "chat_opted_out") {
+      throw createAssistantDeliveryTerminalError(
+        code,
+        "Hosted Linq delivery is blocked because this chat opted out.",
+      );
+    }
+    throw createAssistantDeliveryBlockedError(
+      code,
+      "Hosted Linq delivery is blocked by current line or chat health.",
+      {
+        blockKind: normalized.deliveryBlockCode,
+        resume: normalized.deliveryBlockCode === "operator_disabled"
+          ? "manual_ops"
+          : normalized.deliveryBlockCode === "chat_critical"
+            ? "recipient_inbound"
+            : "line_health_change",
+      },
+    );
+  }
   if (
     input.authorityCheckOnly !== true
     && normalized.assistantAskFallbackRequired !== true
@@ -4285,6 +4516,12 @@ function normalizeHostedAssistantLinqEngagementResult(
   if (typeof result?.assistantAskFallbackRequired === "boolean") {
     normalized.assistantAskFallbackRequired =
       result.assistantAskFallbackRequired;
+  }
+  if (result?.deliveryBlockCode) {
+    normalized.deliveryBlockCode = result.deliveryBlockCode;
+  }
+  if (result?.deliveryPosture) {
+    normalized.deliveryPosture = result.deliveryPosture;
   }
   if (typeof result?.providerDispatchClaimed === "boolean") {
     normalized.providerDispatchClaimed = result.providerDispatchClaimed;

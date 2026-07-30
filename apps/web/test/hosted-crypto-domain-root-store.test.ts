@@ -20,7 +20,14 @@ import {
   decryptHostedWebNullableStrings,
   encryptHostedWebNullableString,
 } from "../src/lib/hosted-web/encryption";
-import { readHostedMemberVerifiedEmailSnapshots } from "../src/lib/hosted-onboarding/hosted-member-store";
+import {
+  readHostedMemberAssistantNotificationState,
+  readHostedMemberVerifiedEmailSnapshots,
+} from "../src/lib/hosted-onboarding/hosted-member-store";
+import {
+  buildHostedMemberIdentityPrivateColumns,
+  buildHostedMemberRoutingPrivateColumns,
+} from "../src/lib/hosted-onboarding/member-private-codecs";
 import {
   openHostedUserSecureBoxStrings,
   sealHostedUserSecureBoxStrings,
@@ -788,6 +795,93 @@ test("batch private-field decrypt deduplicates roots and fails closed on missing
   expect(decryptMetrics.calls).toHaveLength(0);
 });
 
+test("assistant notification state keeps private-field envelope reads serial on a transaction client", async () => {
+  const { tx } = await createHostedWebCryptoTransactionFixture();
+  const memberId = "member-notification-transaction";
+  const { provisionActiveHostedDomainRootEnvelopeForUserOnly } = await import(
+    "../src/lib/hosted-crypto/domain-root-store"
+  );
+  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+    domain: "control",
+    prisma: tx.prisma,
+    reason: "test.notification-transaction",
+    userId: memberId,
+  });
+  const identity = await buildHostedMemberIdentityPrivateColumns({
+    memberId,
+    phoneNumber: "+12125550123",
+    prisma: tx.prisma,
+    privyUserId: "did:privy:notification-transaction",
+    signupPhoneCodeSendAttemptId: null,
+    signupPhoneCodeSendAttemptStartedAt: null,
+    signupPhoneCodeSentAt: null,
+    signupPhoneNumber: null,
+  });
+  const routing = await buildHostedMemberRoutingPrivateColumns({
+    linqChatId: "linq-chat-notification-transaction",
+    linqRecipientPhone: "+12125550123",
+    memberId,
+    pendingLinqChatId: null,
+    pendingLinqParticipantContact: null,
+    pendingLinqRecipientPhone: null,
+    prisma: tx.prisma,
+    telegramThreadId: "telegram-thread-notification-transaction",
+    telegramUserId: "telegram-user-notification-transaction",
+  });
+  const envelopeFindMany = createBatchEnvelopeFindMany(tx);
+  const queryGuard = createSingleTransactionQueryGuard();
+  const baseQueryRaw = tx.prisma.$queryRaw.bind(tx.prisma);
+  const prisma = Object.assign(tx.prisma, {
+    $queryRaw: (...args: Parameters<Prisma.TransactionClient["$queryRaw"]>) =>
+      queryGuard.run(() => baseQueryRaw(...args)),
+    hostedMember: {
+      findUnique: () => queryGuard.run(async () => ({
+        identity: {
+          memberId,
+          phoneLookupKey: "phone-lookup-notification-transaction",
+          phoneNumberEncrypted: identity.phoneNumberEncrypted,
+        },
+        routing: {
+          ...routing,
+          linqChatLookupKey: "linq-chat-lookup-notification-transaction",
+          linqHomeLineAssignedAt: new Date("2026-07-28T12:00:00.000Z"),
+          linqParticipantContactKind: "phone",
+          linqParticipantContactLookupKey: "phone-lookup-notification-transaction",
+          linqRecipientPhoneLookupKey: "phone-lookup-notification-transaction",
+          memberId,
+          pendingLinqChatLookupKey: null,
+          pendingLinqParticipantContactKind: null,
+          pendingLinqParticipantContactLookupKey: null,
+          pendingLinqParticipantContactObservedAt: null,
+          pendingLinqRecipientPhoneLookupKey: null,
+          replyAliasLookupKey: null,
+          telegramUserLookupKey: "telegram-user-lookup-notification-transaction",
+        },
+      })),
+    },
+    hostedUserCryptoEnvelope: {
+      findMany: (input: Parameters<typeof envelopeFindMany>[0]) =>
+        queryGuard.run(() => envelopeFindMany(input)),
+    },
+  });
+
+  await expect(readHostedMemberAssistantNotificationState({
+    memberId,
+    prisma,
+  })).resolves.toMatchObject({
+    identity: {
+      phoneNumber: "+12125550123",
+    },
+    routing: {
+      linqChatId: "linq-chat-notification-transaction",
+      telegramThreadId: "telegram-thread-notification-transaction",
+      telegramUserId: "telegram-user-notification-transaction",
+    },
+  });
+  expect(queryGuard.peak()).toBe(1);
+  expect(envelopeFindMany).toHaveBeenCalledOnce();
+});
+
 test("batch private-field decrypt zeroizes successful roots when a bounded KMS chunk fails", async () => {
   const { decryptMetrics, tx } = await createHostedWebCryptoTransactionFixture();
   const memberIds = Array.from({ length: 5 }, (_, index) => `member-batch-failure-${index + 1}`);
@@ -911,6 +1005,188 @@ test("domain root unwraps are memoized inside the scoped cache and wiped at scop
     userId: "member-test-memo",
   });
   assert.ok(outside.readCount() > outsideFirst);
+});
+
+test("Stripe activation preflight keeps activation proof false and reuses KMS roots for private projection", async () => {
+  const { decryptMetrics, tx } =
+    await createHostedWebCryptoTransactionFixture();
+  const {
+    hasActiveHostedCryptoDomainRootsForUserTx,
+    provisionActiveHostedDomainRootEnvelopeForUserOnly,
+  } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const { runWithHostedDomainRootUnwrapCache } = await import(
+    "../src/lib/hosted-crypto/domain-root-unwrap-cache"
+  );
+  const { hasHostedMemberActivationProof } = await import(
+    "../src/lib/hosted-onboarding/member-activation"
+  );
+  const { activateHostedMemberForPositiveSourceTx } = await import(
+    "../src/lib/hosted-onboarding/member-activation"
+  );
+  const mailboxStore = await import(
+    "../src/lib/hosted-mailbox/store"
+  );
+  const { prepareHostedStripeDirectMemberActivationCrypto } = await import(
+    "../src/lib/hosted-onboarding/stripe-billing-events"
+  );
+  const memberId = "member-test-stripe-activation";
+
+  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+    domain: "control",
+    prisma: tx.prisma,
+    reason: "test.stripe-activation",
+    userId: memberId,
+  });
+  const privateColumns = await buildHostedMemberIdentityPrivateColumns({
+    memberId,
+    phoneNumber: null,
+    prisma: tx.prisma,
+    privyUserId: "did:privy:stripe-activation",
+    signupPhoneCodeSendAttemptId: null,
+    signupPhoneCodeSendAttemptStartedAt: null,
+    signupPhoneCodeSentAt: null,
+    signupPhoneNumber: null,
+  });
+  const identity = buildHostedMemberIdentityRecord({
+    memberId,
+    ...privateColumns,
+  });
+  const now = new Date("2026-07-29T12:00:00.000Z");
+  vi.spyOn(
+    mailboxStore,
+    "readHostedMailboxItemByDedupeKey",
+  ).mockResolvedValue(null);
+  vi.spyOn(
+    mailboxStore,
+    "appendHostedMailboxEnvelopeTx",
+  ).mockImplementation(async ({ envelope }) => ({
+    item: {
+      dedupeKey: envelope.eventId,
+      id: `mailbox-${envelope.eventId}`,
+    },
+  }) as never);
+
+  const prisma = Object.assign(tx.prisma, {
+    $transaction: async <Result>(
+      run: (transaction: Prisma.TransactionClient) => Promise<Result>,
+    ) => run(tx.prisma),
+    hostedMember: {
+      findUnique: async () => ({
+        billingStatus: HostedBillingStatus.active,
+        createdAt: now,
+        id: memberId,
+        pendingActivationTimeZone: null,
+        suspendedAt: null,
+        updatedAt: now,
+      }),
+    },
+    hostedMemberEmailAuthorization: {
+      findUnique: async () => null,
+    },
+    hostedMemberIdentity: {
+      findUnique: async () => identity,
+    },
+    hostedMailboxItem: {
+      findFirst: async () => null,
+    },
+    hostedMemberRouting: {
+      findUnique: async () => null,
+    },
+  });
+  resetLocalKmsDecryptMetrics(decryptMetrics);
+
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    const prepared = await prepareHostedStripeDirectMemberActivationCrypto({
+      memberId,
+      prisma,
+    });
+    expect([...prepared.keys()].sort()).toEqual(["device", "runtime"]);
+    expect(decryptMetrics.calls).toHaveLength(2);
+    await expect(hasActiveHostedCryptoDomainRootsForUserTx({
+      tx: prisma,
+      userId: memberId,
+    })).resolves.toBe(false);
+    await expect(hasHostedMemberActivationProof({
+      memberId,
+      prisma,
+    })).resolves.toBe(false);
+
+    const callsBeforeMemberTransaction = decryptMetrics.calls.length;
+    await expect(activateHostedMemberForPositiveSourceTx({
+      dispatchContext: {
+        eventCreatedAt: now,
+        occurredAt: now.toISOString(),
+        sourceEventId: "checkout.session:stripe-activation",
+        sourceType: "stripe.checkout.session.completed",
+      },
+      memberId,
+      preparedCryptoDomainRoots: prepared,
+      prisma,
+      skipIfBillingAlreadyActive: false,
+      suppressSignupWelcome: true,
+    })).resolves.toMatchObject({
+      activated: true,
+      memberId,
+    });
+    expect(decryptMetrics.calls).toHaveLength(callsBeforeMemberTransaction);
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenCalledOnce();
+    await expect(hasHostedMemberActivationProof({
+      memberId,
+      prisma,
+    })).resolves.toBe(true);
+  });
+});
+
+test("Stripe activation preflight failure cannot create complete-root activation proof", async () => {
+  const { decryptMetrics, tx } =
+    await createHostedWebCryptoTransactionFixture();
+  const {
+    provisionActiveHostedDomainRootEnvelopeForUserOnly,
+  } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const { runWithHostedDomainRootUnwrapCache } = await import(
+    "../src/lib/hosted-crypto/domain-root-unwrap-cache"
+  );
+  const { hasHostedMemberActivationProof } = await import(
+    "../src/lib/hosted-onboarding/member-activation"
+  );
+  const { prepareHostedStripeDirectMemberActivationCrypto } = await import(
+    "../src/lib/hosted-onboarding/stripe-billing-events"
+  );
+  const memberId = "member-test-stripe-activation-failure";
+
+  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+    domain: "control",
+    prisma: tx.prisma,
+    reason: "test.stripe-activation-failure",
+    userId: memberId,
+  });
+  const prisma = Object.assign(tx.prisma, {
+    $transaction: async <Result>(
+      run: (transaction: Prisma.TransactionClient) => Promise<Result>,
+    ) => run(tx.prisma),
+    hostedMailboxItem: {
+      findFirst: async () => null,
+    },
+  });
+  resetLocalKmsDecryptMetrics(decryptMetrics, { failAtCall: 1 });
+
+  await expect(runWithHostedDomainRootUnwrapCache(() =>
+    prepareHostedStripeDirectMemberActivationCrypto({
+      memberId,
+      prisma,
+    })
+  )).rejects.toThrow("Test KMS decrypt failure.");
+
+  expect(
+    tx.persistedEnvelopes
+      .filter((envelope) => envelope.userId === memberId)
+      .map((envelope) => envelope.domain)
+      .sort(),
+  ).toEqual(["control", "ingress"]);
+  await expect(hasHostedMemberActivationProof({
+    memberId,
+    prisma,
+  })).resolves.toBe(false);
 });
 
 test("nested domain root cache scopes reuse the transaction-owned cache", async () => {
@@ -1418,6 +1694,31 @@ function createBatchEnvelopeFindMany(tx: HostedCryptoTestTransaction) {
   });
 }
 
+function createSingleTransactionQueryGuard(): {
+  peak: () => number;
+  run: <Result>(operation: () => Promise<Result>) => Promise<Result>;
+} {
+  let active = 0;
+  let peak = 0;
+
+  return {
+    peak: () => peak,
+    run: async <Result>(operation: () => Promise<Result>) => {
+      if (active !== 0) {
+        throw new Error("Concurrent transaction query started.");
+      }
+      active += 1;
+      peak = Math.max(peak, active);
+      try {
+        await Promise.resolve();
+        return await operation();
+      } finally {
+        active -= 1;
+      }
+    },
+  };
+}
+
 function buildBatchEnvelopeRows(tx: HostedCryptoTestTransaction) {
   return tx.persistedEnvelopes.map((envelope) => ({
     domain: envelope.domain,
@@ -1456,7 +1757,7 @@ type HostedCryptoTestTransaction = {
 function createCapturingTransaction(): HostedCryptoTestTransaction {
   const persistedEnvelopes: HostedDomainRootKeyEnvelopeV1[] = [];
   const inactiveEnvelopeKeys = new Set<string>();
-  const tx = {
+  const rawClient = {
     $executeRaw: async (...args: Parameters<Prisma.TransactionClient["$executeRaw"]>) => {
       capturePersistedEnvelope(args, persistedEnvelopes);
       return 1;
@@ -1511,7 +1812,42 @@ function createCapturingTransaction(): HostedCryptoTestTransaction {
         : []) as T;
     },
   };
-  // Narrow test double: domain-root-store only uses Prisma raw query helpers here.
+  // Narrow test double: domain-root-store uses raw helpers for point reads and
+  // the attached model delegate for batched envelope reads.
+  const prisma = rawClient as Prisma.TransactionClient;
+  Object.defineProperty(prisma, "hostedUserCryptoEnvelope", {
+    configurable: true,
+    value: {
+      findMany: async (input: {
+        where?: {
+          OR?: Array<{ domain: string; rootKeyId: string; userId: string }>;
+        };
+      }) => {
+        const requestedKeys = new Set((input.where?.OR ?? []).map((reference) =>
+          `${reference.userId}|${reference.domain}|${reference.rootKeyId}`
+        ));
+        return persistedEnvelopes
+          .filter((envelope) =>
+            requestedKeys.has(
+              `${envelope.userId}|${envelope.domain}|${envelope.rootKeyId}`,
+            )
+          )
+          .filter((envelope) =>
+            !inactiveEnvelopeKeys.has(createEnvelopeStatusKey(envelope))
+          )
+          .map((envelope) => ({
+            domain: envelope.domain,
+            id: `row-${envelope.userId}-${envelope.domain}`,
+            rootKeyId: envelope.rootKeyId,
+            signedEnvelopeJson: envelope,
+            status: "active" as const,
+            updatedAt: new Date(envelope.updatedAt),
+            userId: envelope.userId,
+          }));
+      },
+    },
+    writable: true,
+  });
   return {
     markEnvelopeActive(input) {
       inactiveEnvelopeKeys.delete(createEnvelopeStatusKey(input));
@@ -1520,7 +1856,7 @@ function createCapturingTransaction(): HostedCryptoTestTransaction {
       inactiveEnvelopeKeys.add(createEnvelopeStatusKey(input));
     },
     persistedEnvelopes,
-    prisma: tx as Prisma.TransactionClient,
+    prisma,
   };
 }
 
@@ -1665,6 +2001,7 @@ function createHostedMemberIdentityServiceTransaction(): HostedCryptoTestTransac
             ? null
             : BigInt(input.data.assistantHumorCausalSeq),
         assistantModelPreference: null,
+        assistantProviderPreference: null,
         assistantReasoningEffortPreference: null,
         assistantPush: null,
         assistantPushCausalSeq:

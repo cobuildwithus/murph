@@ -1,7 +1,5 @@
 "use client";
 
-import type { HostedAuthCompletionResult } from "./hosted-auth-completion";
-
 import {
   HostedPhoneAuthFlow,
   HostedPhoneAuthScaffold,
@@ -12,37 +10,47 @@ import type { HostedPhoneAuthIntent, HostedPhoneLinkPayload } from "./hosted-pho
 
 interface HostedPhoneAuthProps {
   disableSignup?: boolean;
+  inviteCode?: string | null;
   intent?: HostedPhoneAuthIntent;
-  onAuthCompleted?: (result: HostedAuthCompletionResult) => Promise<void> | void;
+  interactionGated?: boolean;
+  onAuthCancel?: () => void;
+  onAuthStart?: () => boolean;
+  onAuthenticated?: (input: { authMethod: "phone" }) => Promise<void> | void;
   onCodeSent?: () => void;
   onLinked?: (payload: HostedPhoneLinkPayload) => Promise<void> | void;
   onSignOut?: () => Promise<void> | void;
   phoneFieldLabel?: string | null;
   phoneInputAutoFocus?: boolean;
   renderCaptcha?: boolean;
-  sendCodeGated?: boolean;
   size?: "default" | "compact";
   suppressAuthenticatedSessionIssue?: boolean;
 }
 
 export function HostedPhoneAuth({
   disableSignup = false,
+  inviteCode,
   intent = "auth",
-  onAuthCompleted,
+  interactionGated = false,
+  onAuthCancel,
+  onAuthStart,
+  onAuthenticated,
   onCodeSent,
   onLinked,
   onSignOut,
   phoneFieldLabel,
   phoneInputAutoFocus = false,
   renderCaptcha = true,
-  sendCodeGated = false,
   size,
   suppressAuthenticatedSessionIssue = false,
 }: HostedPhoneAuthProps) {
   const controller = useHostedPhoneAuthController({
     disableSignup,
+    inviteCode,
     intent,
-    onAuthCompleted,
+    interactionGated,
+    onAuthCancel,
+    onAuthStart,
+    onAuthenticated,
     onCodeSent,
     onLinked,
     onSignOut,
@@ -67,7 +75,6 @@ export function HostedPhoneAuth({
         {...controller.sharedFlowProps}
         phoneFieldLabel={phoneFieldLabel ?? controller.sharedFlowProps.phoneFieldLabel}
         phoneInputAutoFocus={phoneInputAutoFocus}
-        sendCodeDisabled={controller.sharedFlowProps.sendCodeDisabled || sendCodeGated}
         size={size}
       />
     </HostedPhoneAuthScaffold>

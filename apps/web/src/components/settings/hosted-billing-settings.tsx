@@ -16,7 +16,7 @@ import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 import { cn } from "@/src/lib/utils";
 
 import { BillingPortalButton } from "./billing-portal-button";
-import { HostedFamilyStartButton } from "./hosted-family-settings-actions";
+import { HostedFamilyStartButton } from "./hosted-family-start-button";
 import { HostedSettingsSessionState } from "./hosted-settings-session-state";
 import { StartPaidPulseButton } from "./hosted-start-paid-pulse-button";
 import { SwitchToPulseButton } from "./hosted-plan-switch-to-pulse-button";
@@ -73,9 +73,11 @@ export function HostedBillingSettings(props: {
   currentCheckoutOffer?: unknown;
   currentPeriodEnd?: Date | null;
   familyState?: "none" | "owner" | "sponsored";
+  payerMemberId?: string | null;
   scheduledBillingEffectiveAt?: Date | null;
   scheduledBillingPlanCode?: unknown;
   pulseTrialBillingContinuationPending?: boolean;
+  usageActivityDetail?: ReactNode;
   usageStatus?: HostedPlanUsageStatus | null;
   usageTopUpActivePurchase?: HostedUsageTopUpActivePurchase | null;
   usageTopUpContactOptions?: readonly MurphContactOption[];
@@ -202,8 +204,10 @@ export function HostedBillingSettings(props: {
         usageTopUpContactOptions={props.usageTopUpContactOptions}
         usageTopUpInitialOpen={props.usageTopUpInitialOpen}
         usageTopUpOffers={usageTopUpOffers}
+        payerMemberId={props.payerMemberId}
         usageTopUpPurchaseReturn={props.usageTopUpPurchaseReturn}
       />
+      {props.usageActivityDetail}
       <div className="grid items-stretch gap-3 sm:grid-cols-3">
         {cards.map((card) => (
           <PlanCard key={card.key} card={card} />
@@ -233,17 +237,22 @@ function PlanUsageBand(props: {
   usageTopUpContactOptions?: readonly MurphContactOption[];
   usageTopUpInitialOpen?: boolean;
   usageTopUpOffers: readonly HostedUsageTopUpOffer[];
+  payerMemberId?: string | null;
   usageTopUpPurchaseReturn?: HostedUsageTopUpReturn | null;
 }) {
+  const payerMemberId = props.payerMemberId?.trim() || null;
   const inactiveTopUpDialog =
-    props.usageTopUpActivePurchase ||
-    props.usageTopUpInitialOpen ||
-    props.usageTopUpPurchaseReturn ? (
+    payerMemberId && (
+      props.usageTopUpActivePurchase ||
+      props.usageTopUpInitialOpen ||
+      props.usageTopUpPurchaseReturn
+    ) ? (
       <HostedUsageTopUpDialog
         activePurchase={props.usageTopUpActivePurchase}
         contactOptions={props.usageTopUpContactOptions}
         initialOpen={props.usageTopUpInitialOpen}
         offers={[]}
+        payerMemberId={payerMemberId}
         purchaseReturn={props.usageTopUpPurchaseReturn}
       />
     ) : null;
@@ -300,15 +309,16 @@ function PlanUsageBand(props: {
   const forecast = status.forecast
     ? `At your recent pace, usage may run out in about ${status.forecast.estimatedDaysRemaining} ${status.forecast.estimatedDaysRemaining === 1 ? "day" : "days"}.`
     : null;
-  const usageTopUpDialog = (
+  const usageTopUpDialog = payerMemberId ? (
     <HostedUsageTopUpDialog
       activePurchase={props.usageTopUpActivePurchase}
       contactOptions={props.usageTopUpContactOptions}
       initialOpen={props.usageTopUpInitialOpen}
       offers={props.usageTopUpOffers}
+      payerMemberId={payerMemberId}
       purchaseReturn={props.usageTopUpPurchaseReturn}
     />
-  );
+  ) : null;
 
   return (
     <div

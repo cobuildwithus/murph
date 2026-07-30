@@ -135,6 +135,10 @@ current monthly price. An eligible direct paid Pulse or Edge member may receive
 Edge upgrade remains on the plan card. Family and group contexts do not receive
 a top-up recommendation.
 
+An explicit request for the personal top-up page is not a recommendation. After
+a current `paid` read, the assistant may provide
+`/settings?addUsage=true#subscription` even below the proactive threshold.
+
 An opted-in `subscriptionActionQuote` answers a different question: what are
 the current terms for the exact start-now or upgrade choice the member asked
 about? Web resolves that quote even below the usage threshold and without a
@@ -388,13 +392,17 @@ inventing a billing menu:
 
 For an explicit Family member-usage management request, the assistant first
 calls `murph.family_plan action="read_status"`. It may provide
-`/settings#family` only when that current private result has `owner: true`,
-`billingActive: true`, and the intended person matches exactly one active
-member row. The handoff is browser navigation only: the assistant does not
-choose an amount, create Checkout, or claim payment or usage completion. It
-asks one narrow clarification for a missing or ambiguous member and provides no
-handoff when any authority gate fails. `murph.plan_usage` and the personal
-subscription handoff are not substitutes for this Family gate.
+a private Family Settings handoff only when that current result has
+`owner: true`, `billingActive: true`, and the intended person matches exactly
+one active member row. For the active owner's own row, it may provide the stable
+`/settings?addUsage=family#family` link; Settings resolves the target from the
+authenticated current Family and receives no model-composed identifiers. For
+another active member, it provides `/settings#family` so the owner selects that
+member inside Settings. The handoff is browser navigation only: the assistant
+does not choose an amount, create Checkout, or claim payment or usage
+completion. It asks one narrow clarification for a missing or ambiguous member
+and provides no handoff when any authority gate fails. `murph.plan_usage` and
+the personal subscription handoff are not substitutes for this Family gate.
 
 ## Group Usage
 

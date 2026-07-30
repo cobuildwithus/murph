@@ -1,7 +1,9 @@
 import {
-  buildOverviewWeeklyStatDetailsFromDailySampleSummaries,
-  type OverviewWeeklySampleSummary,
-} from "./overview-weekly-stats.ts";
+  addDaysToIsoDate,
+  toLocalDayKey,
+} from "@murphai/contracts";
+
+import type { OverviewWeeklySampleSummary } from "./overview-weekly-stats.ts";
 
 interface SharedGroupWeeklyMemberInput {
   displayName: string | null;
@@ -50,7 +52,7 @@ interface SharedGroupHeartRateZoneDayData {
 }
 
 export interface SharedGroupWeeklyStat {
-  currentWeekAvg: number;
+  completedDaysAvg: number;
   observedDayCount: number;
   observedDates: string[];
   stream: string;
@@ -65,9 +67,8 @@ export interface SharedGroupWeeklyMember {
 }
 
 /**
- * Pure current-calendar-week summary over the bounded consented group projection.
- * The projection currently retains seven records per scope, so this reader does not
- * claim a complete prior-week comparison.
+ * Pure seven-completed-day summary over the bounded consented group projection.
+ * The current local day stays open and is never included.
  */
 export function buildSharedGroupWeeklyMembers(input: {
   members: readonly SharedGroupWeeklyMemberInput[];
@@ -77,29 +78,73 @@ export function buildSharedGroupWeeklyMembers(input: {
   return input.members.map((member) => ({
     displayName: member.displayName,
     memberId: member.memberId,
-    weeklyStats: buildOverviewWeeklyStatDetailsFromDailySampleSummaries(
+    weeklyStats: buildCompletedDayStats(
       readDailySampleSummaries(member),
       input.timeZone,
       input.referenceAt,
-      { includeCurrentDay: false },
-    ).flatMap((stat) => {
-      if (stat.currentWeekAvg === null) {
-        return [];
-      }
-      const observedDates = stat.currentWeekObservedDates;
-      const throughDate = observedDates.at(-1);
-      return throughDate
-        ? [{
-            currentWeekAvg: stat.currentWeekAvg,
-            observedDayCount: observedDates.length,
-            observedDates,
-            stream: stat.stream,
-            throughDate,
-            unit: stat.unit,
-          }]
-        : [];
-    }),
+    ),
   }));
+}
+
+function buildCompletedDayStats(
+  summaries: readonly OverviewWeeklySampleSummary[],
+  timeZone: string,
+  referenceAt: Date | string,
+): SharedGroupWeeklyStat[] {
+  const today = toLocalDayKey(referenceAt, timeZone);
+  const from = addDaysToIsoDate(today, -7);
+  const grouped = new Map<string, {
+    numericSampleCount: number;
+    observedDates: Set<string>;
+    stream: string;
+    sumValue: number;
+    unit: string | null;
+  }>();
+
+  for (const summary of summaries) {
+    if (
+      summary.date < from
+      || summary.date >= today
+      || summary.sumValue === null
+      || summary.numericSampleCount <= 0
+    ) {
+      continue;
+    }
+    const key = `${summary.stream}:${summary.unit ?? ""}`;
+    const existing = grouped.get(key);
+    if (existing) {
+      existing.numericSampleCount += summary.numericSampleCount;
+      existing.observedDates.add(summary.date);
+      existing.sumValue += summary.sumValue;
+      continue;
+    }
+    grouped.set(key, {
+      numericSampleCount: summary.numericSampleCount,
+      observedDates: new Set([summary.date]),
+      stream: summary.stream,
+      sumValue: summary.sumValue,
+      unit: summary.unit,
+    });
+  }
+
+  return [...grouped.values()]
+    .map((stat) => {
+      const observedDates = [...stat.observedDates]
+        .sort((left, right) => left.localeCompare(right));
+      return {
+        completedDaysAvg: stat.sumValue / stat.numericSampleCount,
+        observedDayCount: observedDates.length,
+        observedDates,
+        stream: stat.stream,
+        throughDate: observedDates.at(-1) ?? from,
+        unit: stat.unit,
+      };
+    })
+    .sort((left, right) =>
+      left.stream === right.stream
+        ? (left.unit ?? "").localeCompare(right.unit ?? "")
+        : left.stream.localeCompare(right.stream)
+    );
 }
 
 function readDailySampleSummaries(

@@ -7,7 +7,7 @@ import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption"
 import { createHostedEmailLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 
 import {
-  ensureHostedMemberForPhoneTx,
+  ensureHostedMemberForPhoneResolutionTx,
   reconcileHostedPrivyIdentityOnMember,
 } from "@/src/lib/hosted-onboarding/member-identity-service";
 import type { HostedPrivyIdentity } from "@/src/lib/hosted-onboarding/privy";
@@ -120,12 +120,14 @@ describe("hosted-onboarding member-identity-service", () => {
     }));
   });
 
-  it("can persist a provider-verified phone identity while ensuring a phone member", async () => {
+  it("reports creation while persisting a provider-verified phone identity", async () => {
     const createdMember = makeMember({
       id: "member_created",
     });
+    const participantContactLock = vi.fn().mockResolvedValue(0);
     const identityCreateMany = vi.fn(async () => ({ count: 1 }));
     const prisma = asRootPrisma({
+      $executeRaw: participantContactLock,
       hostedMember: {
         create: vi.fn().mockResolvedValue(createdMember),
         delete: vi.fn(),
@@ -137,11 +139,14 @@ describe("hosted-onboarding member-identity-service", () => {
       },
     });
 
-    await expect(ensureHostedMemberForPhoneTx({
+    await expect(ensureHostedMemberForPhoneResolutionTx({
       phoneNumber: "+1 555 123 4567",
       phoneNumberVerifiedAt: NOW,
       prisma: prisma as never,
-    })).resolves.toEqual(createdMember);
+    })).resolves.toEqual({
+      created: true,
+      member: createdMember,
+    });
 
     expect(identityCreateMany).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -151,6 +156,9 @@ describe("hosted-onboarding member-identity-service", () => {
       }),
       skipDuplicates: true,
     });
+    expect(participantContactLock).toHaveBeenCalledTimes(1);
+    expect(participantContactLock.mock.invocationCallOrder[0])
+      .toBeLessThan(identityCreateMany.mock.invocationCallOrder[0] ?? 0);
   });
 
   it("blocks a suspended member before reconciling any identity fields", async () => {
@@ -544,9 +552,14 @@ function requireHostedEmailLookupKey(value: string): string {
 }
 
 function asRootPrisma<T extends object>(tx: T): T & {
+  $executeRaw: ReturnType<typeof vi.fn>;
   $transaction: ReturnType<typeof vi.fn>;
 } {
+  const executeRaw = (
+    tx as T & { $executeRaw?: ReturnType<typeof vi.fn> }
+  ).$executeRaw ?? vi.fn().mockResolvedValue(0);
   const innerTx = {
+    $executeRaw: executeRaw,
     hostedAccountDeletionCleanup: {
       findFirst: vi.fn().mockResolvedValue(null),
     },
@@ -554,6 +567,7 @@ function asRootPrisma<T extends object>(tx: T): T & {
   };
   return {
     ...innerTx,
+    $executeRaw: executeRaw,
     $transaction: vi.fn(
       async (callback: (transaction: T) => Promise<unknown>) =>
         callback(innerTx as T),

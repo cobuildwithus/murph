@@ -716,6 +716,7 @@ test("buildHostedWebSecurityHeaders adds production-only HSTS alongside the CSP 
     "Permissions-Policy",
     "Strict-Transport-Security",
   ]);
+  assert.equal(productionHeaderValues.get("Referrer-Policy"), "strict-origin");
   assert.equal(productionHeaderValues.get("Cross-Origin-Opener-Policy"), "same-origin-allow-popups");
   assert.equal(productionHeaderValues.get("Origin-Agent-Cluster"), "?1");
   assert.equal(productionHeaderValues.get("X-DNS-Prefetch-Control"), "off");
@@ -738,6 +739,7 @@ test("buildHostedWebSecurityHeaders adds production-only HSTS alongside the CSP 
     "X-Frame-Options",
     "Permissions-Policy",
   ]);
+  assert.equal(testHeaderValues.get("Referrer-Policy"), "strict-origin");
   assert.equal(testHeaderValues.get("Cross-Origin-Opener-Policy"), "same-origin-allow-popups");
   assert.equal(testHeaderValues.get("Origin-Agent-Cluster"), "?1");
   assert.equal(testHeaderValues.get("X-DNS-Prefetch-Control"), "off");
@@ -761,6 +763,13 @@ test("next.config serves global security headers and stricter Murph Safe referre
       "X-Frame-Options",
       "Permissions-Policy",
     ],
+  );
+  assert.deepEqual(
+    routes[0]?.headers.find((header) => header.key === "Referrer-Policy"),
+    {
+      key: "Referrer-Policy",
+      value: "strict-origin",
+    },
   );
   assert.equal(routes[1]?.source, "/search/:path*");
   assert.deepEqual(routes[1]?.headers, [

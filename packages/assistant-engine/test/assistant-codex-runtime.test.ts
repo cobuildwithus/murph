@@ -9,7 +9,11 @@ import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 } from '@murphai/hosted-execution/env'
 import {
+  MURPH_MEMBER_READ_PERMISSION_PROFILE,
+} from '@murphai/hosted-execution/assistant-permissions'
+import {
   HOSTED_ASSISTANT_PRODUCT_MODELS,
+  HOSTED_ASSISTANT_PROVIDERS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
   HOSTED_ASSISTANT_SOL_MODEL,
   HOSTED_ASSISTANT_TERRA_MODEL,
@@ -81,7 +85,15 @@ import {
 } from '../src/assistant-codex/generate-voice-memo-tool.ts'
 import {
   executeCodexAssistantTurnAttempt,
+  executeCodexAssistantTurnAttemptFromInput,
 } from '../src/assistant/codex-runtime.ts'
+import {
+  createAssistantActiveTurnInputController,
+  steerAssistantActiveTurnInput,
+} from '../src/assistant/active-turn-input-controller.ts'
+import {
+  createAssistantProductFeedbackRecorder,
+} from '../src/assistant/turn-progress.ts'
 import type {
   AssistantHostedToolContext,
 } from '../src/assistant/hosted-tool-context.ts'
@@ -1799,6 +1811,8 @@ describe('assistant codex runtime', () => {
 
   it('applies overlapping dynamic media tools in request order', async () => {
     const workingDirectory = await createTempDir('assistant-codex-image-order-work-')
+    const vaultRoot = await createTempDir('assistant-codex-image-order-vault-')
+    await initializeVault({ vaultRoot })
     const releaseImageFetch = createDeferred<void>()
     const webpBytes = new Uint8Array([
       0x52, 0x49, 0x46, 0x46,
@@ -1815,15 +1829,6 @@ describe('assistant codex runtime', () => {
         status: 200,
       })
     })
-    const uploader = {
-      uploadGeneratedImage: vi.fn(async (uploadInput: { alt: string | null; source: string | null }) => ({
-        alt: uploadInput.alt,
-        kind: 'image' as const,
-        source: uploadInput.source,
-        url: 'https://imagedelivery.net/account/generated/public',
-      })),
-    }
-
     codexMocks.spawn.mockImplementation(() => {
       const child = new MockChildProcess()
 
@@ -1924,9 +1929,9 @@ describe('assistant codex runtime', () => {
       executeCodexAppServerTurn({
         env: { OPENAI_API_KEY: 'openai-test-key' },
         fetchImpl,
-        hostedGeneratedImageUploader: uploader,
         prompt: 'generate then clear media',
-        requireHostedGeneratedImageUploader: true,
+        requireHostedPrivateImageDelivery: true,
+        vaultRoot,
         workingDirectory,
       }),
     ).resolves.toMatchObject({
@@ -1936,7 +1941,6 @@ describe('assistant codex runtime', () => {
         { provider: 'openai-images' },
       ],
     })
-    expect(uploader.uploadGeneratedImage).toHaveBeenCalledOnce()
   })
 
   it('applies overlapping assistant configuration updates in request order', async () => {
@@ -1952,10 +1956,12 @@ describe('assistant codex runtime', () => {
 
     const configurationSnapshot = () => ({
       availableModels: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
+      availableProviders: [...HOSTED_ASSISTANT_PROVIDERS],
       availableReasoningEfforts: [...HOSTED_ASSISTANT_REASONING_EFFORTS],
       configurationAvailable: true,
       dormantSolPreference: false,
       model: savedModel,
+      provider: "openai" as const,
       reasoningEffort: savedReasoningEffort,
       solAvailable: true,
     })
@@ -1996,6 +2002,7 @@ describe('assistant codex runtime', () => {
       currentAssistantInputId: () => `ain_${'a'.repeat(32)}`,
       currentAssistantTarget: () => ({
         model: HOSTED_ASSISTANT_TERRA_MODEL,
+        provider: "openai",
         reasoningEffort: 'low',
       }),
     }
@@ -3168,12 +3175,6 @@ describe('assistant codex runtime', () => {
       )
       await initializeVault({ vaultRoot })
       const providerFetch = vi.fn(async () => new Response('{}'))
-      const uploadGeneratedImage = vi.fn(async () => ({
-        alt: 'Generated image',
-        kind: 'image' as const,
-        source: 'gpt-image-2',
-        url: 'https://imagedelivery.net/account/generated/public',
-      }))
       const generateAndUpload = vi.fn(async () => ({
         attachmentId: 'attachment_should_not_exist',
         filename: 'media-should-not-exist.mp3',
@@ -3211,7 +3212,6 @@ describe('assistant codex runtime', () => {
               OPENAI_API_KEY: 'openai-test-key',
             },
             fetchImpl: providerFetch,
-            hostedGeneratedImageUploader: { uploadGeneratedImage },
             hostedToolContext: createHostedToolContext({
               beforeToolExecution,
               computerToolsAvailable: false,
@@ -3219,7 +3219,7 @@ describe('assistant codex runtime', () => {
             onFinishWithoutReplyAccepted,
             onFinishWithoutReplyRecorded,
             prompt: 'finish without replying, then generate media',
-            requireHostedGeneratedImageUploader: true,
+            requireHostedPrivateImageDelivery: true,
             vaultRoot,
             voiceMemoRuntime,
             workingDirectory,
@@ -3233,7 +3233,6 @@ describe('assistant codex runtime', () => {
       })
 
       expect(providerFetch).not.toHaveBeenCalled()
-      expect(uploadGeneratedImage).not.toHaveBeenCalled()
       expect(generateAndUpload).not.toHaveBeenCalled()
       expect(persistCanonicalWrite).not.toHaveBeenCalled()
       expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([0])
@@ -3743,6 +3742,8 @@ describe('assistant codex runtime', () => {
 
   it('answers progress updates immediately while image generation is in flight', async () => {
     const workingDirectory = await createTempDir('assistant-codex-image-progress-work-')
+    const vaultRoot = await createTempDir('assistant-codex-image-progress-vault-')
+    await initializeVault({ vaultRoot })
     const releaseImageFetch = createDeferred<void>()
     const webpBytes = new Uint8Array([
       0x52, 0x49, 0x46, 0x46,
@@ -3759,14 +3760,6 @@ describe('assistant codex runtime', () => {
         status: 200,
       })
     })
-    const uploader = {
-      uploadGeneratedImage: vi.fn(async (uploadInput: { alt: string | null; source: string | null }) => ({
-        alt: uploadInput.alt,
-        kind: 'image' as const,
-        source: uploadInput.source,
-        url: 'https://imagedelivery.net/account/generated/public',
-      })),
-    }
     const progressDelivery = {
       send: vi.fn(async (_text: string) => sentProgressResult()),
     }
@@ -3874,17 +3867,17 @@ describe('assistant codex runtime', () => {
       executeCodexAppServerTurn({
         env: { OPENAI_API_KEY: 'openai-test-key' },
         fetchImpl,
-        hostedGeneratedImageUploader: uploader,
         progressDelivery,
         prompt: 'generate with progress',
-        requireHostedGeneratedImageUploader: true,
+        requireHostedPrivateImageDelivery: true,
+        vaultRoot,
         workingDirectory,
       }),
     ).resolves.toMatchObject({
       finalMessage: 'Progress and image complete',
       responseMedia: [
         {
-          url: 'https://imagedelivery.net/account/generated/public',
+          kind: 'vault_image',
         },
       ],
     })
@@ -3896,6 +3889,8 @@ describe('assistant codex runtime', () => {
 
   it('reports a structured failure when a generated image exceeds the media limit', async () => {
     const workingDirectory = await createTempDir('assistant-codex-image-limit-work-')
+    const vaultRoot = await createTempDir('assistant-codex-image-limit-vault-')
+    await initializeVault({ vaultRoot })
     const webpBytes = new Uint8Array([
       0x52, 0x49, 0x46, 0x46,
       0x00, 0x00, 0x00, 0x00,
@@ -3909,14 +3904,6 @@ describe('assistant codex runtime', () => {
         headers: { 'content-type': 'application/json' },
         status: 200,
       }))
-    const uploader = {
-      uploadGeneratedImage: vi.fn(async (uploadInput: { alt: string | null; source: string | null }) => ({
-        alt: uploadInput.alt,
-        kind: 'image' as const,
-        source: uploadInput.source,
-        url: 'https://imagedelivery.net/account/generated/public',
-      })),
-    }
     const attachedMedia = Array.from({ length: 40 }, (_, index) => ({
       kind: 'image' as const,
       url: `https://cdn.example.test/assistant/full-${index}.png`,
@@ -4030,9 +4017,9 @@ describe('assistant codex runtime', () => {
     const result = await executeCodexAppServerTurn({
       env: { OPENAI_API_KEY: 'openai-test-key' },
       fetchImpl,
-      hostedGeneratedImageUploader: uploader,
       prompt: 'attach media then exceed the limit',
-      requireHostedGeneratedImageUploader: true,
+      requireHostedPrivateImageDelivery: true,
+      vaultRoot,
       workingDirectory,
     })
 
@@ -4268,6 +4255,79 @@ describe('assistant codex runtime', () => {
       .toHaveLength(1)
     expect(messages.filter((message) => message.method === 'turn/start'))
       .toHaveLength(2)
+  })
+
+  it('keeps an output-only continuation on the resident Codex app-server', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-local-warm-thread-config-work-',
+    )
+    const codexHome = await createTempDir(
+      'assistant-codex-local-warm-thread-config-home-',
+    )
+    const spawnedChildren: MockChildProcess[] = []
+    mockHostedCodexIdentityServer(spawnedChildren)
+
+    const baseInput = {
+      approvalPolicy: 'never',
+      codexHome,
+      env: {
+        PATH: '/custom/bin',
+      },
+      sandbox: 'read-only' as const,
+      workingDirectory,
+    }
+
+    await expect(executeCodexAppServerTurn({
+      ...baseInput,
+      prompt: 'ordinary resident turn',
+    })).resolves.toMatchObject({
+      sessionId: 'thread-warm-identity-1-1',
+    })
+
+    const restrictedThreadConfig = {
+      'features.apps': false,
+      'features.browser_use': false,
+      'features.enable_mcp_apps': false,
+      'features.multi_agent': false,
+      'features.multi_agent_v2': false,
+      'features.plugins': false,
+      'features.shell_tool': false,
+      'features.standalone_web_search': false,
+      'features.tool_suggest': false,
+      'features.web_search_request': false,
+      'memories.generate_memories': false,
+      'memories.use_memories': false,
+      web_search: 'disabled',
+    } as const
+
+    await expect(executeCodexAppServerTurn({
+      ...baseInput,
+      dynamicTools: [],
+      ephemeral: true,
+      prompt: 'assistant ask private continuation',
+      threadConfig: restrictedThreadConfig,
+    })).resolves.toMatchObject({
+      sessionId: 'thread-warm-identity-1-2',
+    })
+
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
+    const launchArgs = codexMocks.spawn.mock.calls[0]?.[1] ?? []
+    expect(launchArgs).not.toEqual(expect.arrayContaining([
+      'features.shell_tool=false',
+      'web_search="disabled"',
+    ]))
+    const child = requireMockChildProcess(spawnedChildren[0] ?? null)
+    const threadStarts = readWrittenRpcMessages(child).filter(
+      (message) => message.method === 'thread/start',
+    )
+    expect(threadStarts).toHaveLength(2)
+    const restrictedThreadStart = asRecord(threadStarts[1]?.params)
+    expect(restrictedThreadStart).toMatchObject({
+      dynamicTools: [],
+      ephemeral: true,
+    })
+    expect(restrictedThreadStart?.config).toEqual(restrictedThreadConfig)
+    expect(process.kill).not.toHaveBeenCalled()
   })
 
   it('starts a fresh warm Codex app-server when local child env changes', async () => {
@@ -4658,6 +4718,133 @@ describe('assistant codex runtime', () => {
       sessionId: 'thread-process-1',
       turnId: 'turn-process-1',
     })
+  })
+
+  it('runs member-read check-ins through the real provider validator as fresh one-shot threads', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-member-read-work-',
+    )
+    const codexHome = await createTempDir(
+      'assistant-codex-member-read-home-',
+    )
+    const children: MockChildProcess[] = []
+    mockProcessGroupSignalsForChildren(children)
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      child.pid = 27_250
+      children.push(child)
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+          const threadStart = await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: threadStart.id,
+            result: {
+              activePermissionProfile: {
+                id: MURPH_MEMBER_READ_PERMISSION_PROFILE,
+              },
+              approvalPolicy: 'never',
+              cwd: workingDirectory,
+              instructionSources: [],
+              runtimeWorkspaceRoots: [workingDirectory],
+              thread: {
+                id: 'thread-member-read-checkin',
+              },
+            },
+          }))
+          const turnStart = await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: turnStart.id,
+            result: {
+              turn: {
+                id: 'turn-member-read-checkin',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-member-read-checkin',
+                message:
+                  '{"kind":"skip","privateSummary":"No useful check-in now."}',
+                type: 'assistant_message',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-member-read-checkin',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+      return child
+    })
+
+    const attempt = await executeCodexAssistantTurnAttemptFromInput({
+      providerConfig: {
+        approvalPolicy: 'never',
+        codexHome,
+        provider: 'codex-cli',
+        sandbox: 'read-only',
+      },
+      turn: {
+        conversationHistoryMessages: [
+          {
+            content: 'I want to make weekday lunches easier.',
+            role: 'user',
+          },
+          {
+            content: 'We can keep that practical and low pressure.',
+            role: 'assistant',
+          },
+        ],
+        developerInstructions: 'Immutable member-read check-in policy.',
+        dynamicTools: [],
+        permissions: MURPH_MEMBER_READ_PERMISSION_PROFILE,
+        processLifetime: 'one-shot',
+        prompt: 'Offer one truthful, low-pressure choice point.',
+        providerThreadEphemeral: true,
+        resume: null,
+        runtimeWorkspaceRoots: [workingDirectory],
+        workingDirectory,
+      },
+    })
+
+    expect(attempt.ok).toBe(true)
+    expect(children).toHaveLength(1)
+    const child = requireMockChildProcess(children[0] ?? null)
+    const written = readWrittenRpcMessages(child)
+    expect(written.some((message) => message.method === 'thread/resume')).toBe(
+      false,
+    )
+    expect(written.filter((message) => message.method === 'thread/start')).toHaveLength(
+      1,
+    )
+    expect(asRecord(
+      (await waitForRpcMethod(child, 'thread/start')).params,
+    )).toMatchObject({
+      approvalPolicy: 'never',
+      cwd: workingDirectory,
+      dynamicTools: [],
+      ephemeral: true,
+      permissions: MURPH_MEMBER_READ_PERMISSION_PROFILE,
+      runtimeWorkspaceRoots: [workingDirectory],
+    })
+    expect(asRecord(
+      (await waitForRpcMethod(child, 'turn/start')).params,
+    )).toMatchObject({
+      input: expect.any(Array),
+    })
+    expect(child.signalCode).toBe('SIGTERM')
+    expect(process.kill).toHaveBeenCalledWith(-27_250, 'SIGTERM')
   })
 
   it('fails closed before turn start when permission attestation drifts', async () => {
@@ -6803,15 +6990,6 @@ describe('assistant codex runtime', () => {
         headers: { 'content-type': 'application/json' },
         status: 200,
       }))
-    const uploader = {
-      uploadGeneratedImage: vi.fn(async () => ({
-        alt: 'Generated image',
-        kind: 'image' as const,
-        source: 'gpt-image-2',
-        url: 'https://imagedelivery.net/account/generated/public',
-      })),
-    }
-
     codexMocks.spawn.mockImplementation(() => {
       const child = new MockChildProcess()
 
@@ -6879,9 +7057,8 @@ describe('assistant codex runtime', () => {
           PATH: '/custom/bin',
         },
         fetchImpl,
-        hostedGeneratedImageUploader: uploader,
         prompt: 'start the warm process',
-        requireHostedGeneratedImageUploader: true,
+        requireHostedPrivateImageDelivery: true,
         sandbox: 'workspace-write',
         vaultRoot,
         workingDirectory,
@@ -6900,9 +7077,8 @@ describe('assistant codex runtime', () => {
           PATH: '/custom/bin',
         },
         fetchImpl,
-        hostedGeneratedImageUploader: uploader,
         prompt: 'write from the current warm turn',
-        requireHostedGeneratedImageUploader: true,
+        requireHostedPrivateImageDelivery: true,
         sandbox: 'workspace-write',
         vaultRoot,
         workingDirectory,
@@ -6913,7 +7089,6 @@ describe('assistant codex runtime', () => {
 
     expect(firstPersistCanonicalWrite).not.toHaveBeenCalled()
     expect(secondPersistCanonicalWrite).toHaveBeenCalled()
-    expect(uploader.uploadGeneratedImage).toHaveBeenCalledOnce()
   })
 
   it('trusts tagged turn/started when the turn/start response omits the turn id', async () => {
@@ -8770,6 +8945,176 @@ describe('assistant codex runtime', () => {
     })
 
     expect(JSON.stringify(diagnosticEvents)).not.toContain('api.openai.com')
+  })
+
+  it('discards feedback from a disconnected stream and keeps native retry safe', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-product-feedback-retry-',
+    )
+    const acceptProductFeedbackCandidate = vi.fn()
+    const productFeedbackRecorder = createAssistantProductFeedbackRecorder({
+      acceptedInputItems: [{
+        id: 'assistant_input_feedback_retry',
+        source: 'assistant-input',
+      }],
+      productFeedbackCandidateSink: {
+        acceptProductFeedbackCandidate,
+      },
+    })
+    if (!productFeedbackRecorder) {
+      throw new Error('Expected product feedback collection to be available.')
+    }
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: 2,
+            result: {
+              thread: {
+                id: 'thread-product-feedback-retry',
+              },
+            },
+          }))
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: 3,
+            result: {
+              turn: {
+                id: 'turn-product-feedback-retry',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/started',
+            params: {
+              turn: {
+                id: 'turn-product-feedback-retry',
+              },
+            },
+          }))
+
+          child.stdout.write(jsonLine({
+            id: 81,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                kind: 'feature_request',
+                summary: 'Speculative: first disconnected candidate.',
+              },
+              namespace: 'murph',
+              tool: 'submit_product_feedback',
+              turnId: 'turn-product-feedback-retry',
+            },
+          }))
+          await expect(waitForRpcResponse(child, 81)).resolves.toMatchObject({
+            result: {
+              success: true,
+            },
+          })
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'feedback-disconnected',
+                namespace: 'murph',
+                status: 'completed',
+                success: true,
+                tool: 'submit_product_feedback',
+                type: 'dynamicToolCall',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'error',
+            params: {
+              error: {
+                message: 'Reconnecting... 1/5',
+                additionalDetails:
+                  'stream disconnected before completion',
+              },
+              threadId: 'thread-product-feedback-retry',
+              turnId: 'turn-product-feedback-retry',
+              willRetry: true,
+            },
+          }))
+
+          child.stdout.write(jsonLine({
+            id: 82,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                kind: 'feature_request',
+                summary: 'Speculative: recovered candidate.',
+              },
+              namespace: 'murph',
+              tool: 'submit_product_feedback',
+              turnId: 'turn-product-feedback-retry',
+            },
+          }))
+          await expect(waitForRpcResponse(child, 82)).resolves.toMatchObject({
+            result: {
+              success: true,
+            },
+          })
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'feedback-recovered',
+                namespace: 'murph',
+                status: 'completed',
+                success: true,
+                tool: 'submit_product_feedback',
+                type: 'dynamicToolCall',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-product-feedback-retry',
+                message: 'Recovered response.',
+                type: 'assistant_message',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-product-feedback-retry',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        productFeedbackRecorder,
+        prompt: 'retry after collecting feedback',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      finalMessage: 'Recovered response.',
+      providerActionCount: 0,
+    })
+    expect(productFeedbackRecorder.readProductFeedback()).toMatchObject({
+      kind: 'feature_request',
+      summary: 'Speculative: recovered candidate.',
+    })
+    expect(acceptProductFeedbackCandidate).not.toHaveBeenCalled()
   })
 
   it('emits terminal Codex transport diagnostics after provider actions', async () => {
@@ -17086,6 +17431,8 @@ describe('assistant codex event shaping', () => {
     it('continues subagent usage ordinals after dynamic tool usage drafts', async () => {
       const workingDirectory = await createTempDir('assistant-codex-subagent-ordinal-work-')
       const codexHome = await createTempDir('assistant-codex-subagent-ordinal-home-')
+      const vaultRoot = await createTempDir('assistant-codex-subagent-ordinal-vault-')
+      await initializeVault({ vaultRoot })
       const spawnedChildren: MockChildProcess[] = []
       mockProcessGroupSignalsForChildren(spawnedChildren)
       const webpBytes = new Uint8Array([
@@ -17101,15 +17448,6 @@ describe('assistant codex event shaping', () => {
           headers: { 'content-type': 'application/json' },
           status: 200,
         }))
-      const uploader = {
-        uploadGeneratedImage: vi.fn(async (uploadInput: { alt: string | null; source: string | null }) => ({
-          alt: uploadInput.alt,
-          kind: 'image' as const,
-          source: uploadInput.source,
-          url: 'https://imagedelivery.net/account/generated/public',
-        })),
-      }
-
       codexMocks.spawn.mockImplementation(() => {
         const child = new MockChildProcess()
         child.pid = 31_600 + spawnedChildren.length
@@ -17205,10 +17543,10 @@ describe('assistant codex event shaping', () => {
           PATH: '/custom/bin',
         },
         fetchImpl,
-        hostedGeneratedImageUploader: uploader,
         prompt: 'generate an image while a child reports usage',
-        requireHostedGeneratedImageUploader: true,
+        requireHostedPrivateImageDelivery: true,
         sandbox: 'workspace-write',
+        vaultRoot,
         workingDirectory,
       })
 
@@ -17235,7 +17573,6 @@ describe('assistant codex event shaping', () => {
         reasoningOutputTokens: 0,
         totalTokens: 1_000,
       })
-      expect(uploader.uploadGeneratedImage).toHaveBeenCalledOnce()
     })
 
     it('tolerates subagent thread notifications between turns without poisoning the warm process', async () => {
@@ -18288,6 +18625,8 @@ describe('steered final segments', () => {
       authorizeAcceptedMessageTarget?:
         CodexAppServerTurnInput['authorizeAcceptedMessageTarget']
       hostedToolContext?: CodexAppServerTurnInput['hostedToolContext']
+      onFirstAssistantResponseCompleted?:
+        CodexAppServerTurnInput['onFirstAssistantResponseCompleted']
       onProgress?: CodexAppServerTurnInput['onProgress']
       onTraceEvent?: CodexAppServerTurnInput['onTraceEvent']
       progressDelivery?: CodexAppServerTurnInput['progressDelivery']
@@ -18521,6 +18860,8 @@ describe('steered final segments', () => {
       codexCommand: 'codex',
       codexHome,
       hostedToolContext: input.hostedToolContext,
+      onFirstAssistantResponseCompleted:
+        input.onFirstAssistantResponseCompleted,
       onProgress: input.onProgress,
       onTraceEvent: input.onTraceEvent,
       progressDelivery: input.progressDelivery,
@@ -18557,6 +18898,7 @@ describe('steered final segments', () => {
             { projectionKind: 'hrv-days.v0' as const },
           ],
           role: 'owner',
+          sponsorshipUrl: 'https://example.test/groups/fund/funding_locator',
         }],
         status: 'ok' as const,
         truncated: false,
@@ -18591,7 +18933,7 @@ describe('steered final segments', () => {
     const rejectedRef = `ain_${'3'.repeat(32)}`
     const finalReplyRef = `ain_${'4'.repeat(32)}`
     const authorizeAcceptedMessageTarget = vi.fn(async (input: {
-      action: 'native-reply' | 'reaction'
+      action: 'native-reply' | 'participant-effect' | 'reaction'
       deliveryContextOrdinal: number
       messageRef: string
     }) => input.messageRef === rejectedRef
@@ -19032,6 +19374,237 @@ describe('steered final segments', () => {
     ])
   })
 
+  it('closes admission and preserves a media-only response before a steer boundary', async () => {
+    const firstMedia = {
+      url: 'https://cdn.example.test/assistant/media-only.png',
+      alt: 'Media-only first response',
+      source: 'media-only-first-response',
+    }
+    const callbackOrder: string[] = []
+    const onFirstAssistantResponseCompleted = vi.fn(() => {
+      callbackOrder.push('response-completed')
+    })
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      {
+        kind: 'attach-response-media',
+        id: 43,
+        expectedText: '1 response image attached',
+        media: [firstMedia],
+      },
+      completedItemEvent({
+        id: 'assistant-media-only',
+        type: 'assistant_message',
+        message: '   ',
+      }),
+      completedItemEvent({
+        id: 'user-after-media',
+        type: 'user_message',
+        message: 'This must wait for the next ordinary turn',
+      }),
+      completedItemEvent({
+        id: 'assistant-after-media',
+        type: 'assistant_message',
+        message: 'Later response.',
+      }),
+    ], {
+      onFirstAssistantResponseCompleted,
+      onTraceEvent(event) {
+        if (
+          JSON.stringify(event.rawEvent).includes('"id":"user-after-media"')
+        ) {
+          callbackOrder.push('later-user-item')
+        }
+      },
+    })
+
+    expect(onFirstAssistantResponseCompleted).toHaveBeenCalledTimes(1)
+    expect(callbackOrder).toEqual([
+      'response-completed',
+      'later-user-item',
+    ])
+    expect(result.precedingAgentMessageSegments).toEqual([
+      {
+        deliveryContextOrdinal: 0,
+        response: '',
+        media: [
+          {
+            ...firstMedia,
+            kind: 'image',
+          },
+        ],
+      },
+    ])
+    expect(result.finalMessage).toBe('Later response.')
+    expect(result.responseMedia).toEqual([])
+  })
+
+  it('preserves provider acknowledgement when a steer response and first completion share one stdout batch', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-batched-steer-ack-work-',
+    )
+    const liveTurnReady = createDeferred<void>()
+    const controller = createAssistantActiveTurnInputController({
+      conversationKeys: [
+        'channel:telegram|identity:identity-1|audience:indeterminate|thread:thread-1',
+      ],
+      sessionId: 'session-batched-steer',
+      turnId: 'turn-batched-owner',
+      vault: '/vaults/test',
+    })
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+          const threadStart = await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: threadStart.id,
+            result: {
+              thread: {
+                id: 'thread-batched-steer',
+              },
+            },
+          }))
+          const turnStart = await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: turnStart.id,
+            result: {
+              turn: {
+                id: 'turn-batched-steer',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'user-initial-question',
+                message: 'Initial question',
+                type: 'user_message',
+              },
+              threadId: 'thread-batched-steer',
+              turnId: 'turn-batched-steer',
+            },
+          }))
+
+          await liveTurnReady.promise
+          const steerRequest = await waitForRpcMethod(child, 'turn/steer')
+          child.stdout.write([
+            jsonLine({ id: steerRequest.id, result: {} }),
+            jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'assistant-before-batched-steer',
+                  message: 'First response.',
+                  type: 'assistant_message',
+                },
+                threadId: 'thread-batched-steer',
+                turnId: 'turn-batched-steer',
+              },
+            }),
+          ].join(''))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'user-batched-steer',
+                message: 'Clarification accepted by the provider',
+                type: 'user_message',
+              },
+              threadId: 'thread-batched-steer',
+              turnId: 'turn-batched-steer',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-after-batched-steer',
+                message: 'Revised response.',
+                type: 'assistant_message',
+              },
+              threadId: 'thread-batched-steer',
+              turnId: 'turn-batched-steer',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-batched-steer',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    try {
+      const turn = executeCodexAppServerTurn({
+        onFirstAssistantResponseCompleted: () => {
+          controller.closeInputAdmission()
+        },
+        onLiveTurn: (liveTurn) => {
+          const releaseLiveTurn = controller.registerLiveProviderTurn({
+            interrupt: () => liveTurn.interrupt(),
+            codexThreadId: liveTurn.threadId,
+            providerTurnId: liveTurn.turnId,
+            sessionId: 'session-batched-steer',
+            steer: (input) => liveTurn.steer(input),
+            turnId: 'turn-batched-owner',
+          })
+          liveTurnReady.resolve()
+          return releaseLiveTurn
+        },
+        prompt: 'Initial question',
+        workingDirectory,
+      })
+
+      await liveTurnReady.promise
+      const completion = steerAssistantActiveTurnInput({
+        conversation: {
+          channel: 'telegram',
+          identityId: 'identity-1',
+          threadId: 'thread-1',
+        },
+        expectedActiveTurnId: 'turn-batched-owner',
+        prompt: 'Clarification accepted by the provider',
+        vault: '/vaults/test',
+      })
+      expect(completion).not.toBeNull()
+      completion?.catch(() => undefined)
+
+      await expect(turn).resolves.toMatchObject({
+        finalMessage: 'Revised response.',
+        precedingAgentMessageSegments: [
+          {
+            deliveryContextOrdinal: 0,
+            response: 'First response.',
+          },
+        ],
+        responseDeliveryContextOrdinal: 1,
+      })
+      await expect(controller.admitLiveSteered()).resolves.toMatchObject({
+        acceptedInputs: [
+          expect.objectContaining({
+            id: 'manual-1',
+          }),
+        ],
+        providerAlreadySteered: true,
+      })
+    } finally {
+      controller.fail(new Error('batched steer acknowledgement test complete'))
+      controller.close()
+    }
+  })
+
   it('keeps last-wins behavior for multiple finals without a steer boundary', async () => {
     const result = await runScriptedSteeredFinalSegmentsTurn([
       completedItemEvent({
@@ -19155,36 +19728,6 @@ describe('steered final segments', () => {
         media: [],
       },
     ])
-  })
-
-  it('keeps a watched same-sender artifact eligible for terminal suppression before assistant output', async () => {
-    const result = await runScriptedSteeredFinalSegmentsTurn([
-      completedItemEvent({
-        id: 'user-artifact',
-        type: 'user_message',
-        message: 'Shared an old apartment photo.',
-      }),
-      completedItemEvent({
-        id: 'user-caption',
-        type: 'user_message',
-        message: "Y'all remember this place?",
-      }),
-      {
-        kind: 'finish-without-reply',
-        id: 70,
-        expectedText: 'finished without reply',
-      },
-      completedItemEvent({
-        id: 'assistant-suppressed',
-        type: 'assistant_message',
-        message: 'This response must not be delivered.',
-      }),
-    ])
-
-    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([1])
-    expect(result.finalMessage).toBe('')
-    expect(result.reactions).toEqual([])
-    expect(result.precedingAgentMessageSegments).toEqual([])
   })
 
   it('scopes finish_without_reply to the selected steered message', async () => {

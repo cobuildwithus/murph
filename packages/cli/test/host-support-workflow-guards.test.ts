@@ -35,6 +35,11 @@ describe('host support workflow guards', () => {
 
   it('keeps the release gate split into parallel shards instead of one long release:check job', () => {
     const workflow = readFileSync(hostSupportWorkflowPath, 'utf8')
+    const buildTypecheckJob = getJob(
+      workflow,
+      'release-build-typecheck-linux',
+      'release-package-coverage-linux',
+    )
 
     expect(workflow).toContain('name: Release build/typecheck (ubuntu)')
     expect(workflow).toContain('name: Release package coverage (${{ matrix.shard }})')
@@ -43,6 +48,15 @@ describe('host support workflow guards', () => {
     expect(workflow).toContain('name: Release checks (ubuntu)')
     expect(workflow).toContain('pnpm build:workspace:clean')
     expect(workflow).toContain('pnpm typecheck')
+    expect(buildTypecheckJob).toContain(
+      'pnpm --dir packages/messaging-ingress verify:package-boundary:prepared',
+    )
+    expect(buildTypecheckJob).toContain(
+      'pnpm --dir packages/inboxd verify:package-boundary:prepared',
+    )
+    expect(buildTypecheckJob).toContain(
+      'pnpm --dir packages/hosted-local-harness verify:package-boundary:prepared',
+    )
     expect(workflow).toContain('pnpm no-js')
     expect(workflow).toContain('bash scripts/doc-gardening.sh --fail-on-issues')
     expect(workflow).toContain('pnpm test:apps')
@@ -61,6 +75,11 @@ describe('host support workflow guards', () => {
 
   it('keeps every package coverage owner assigned to a release shard', () => {
     const workflow = readFileSync(hostSupportWorkflowPath, 'utf8')
+    const packageCoverageJob = getJob(
+      workflow,
+      'release-package-coverage-linux',
+      'release-app-verification-linux',
+    )
     const packageDirs = [
       'packages/assistant-cli',
       'packages/assistant-engine',
@@ -70,6 +89,8 @@ describe('host support workflow guards', () => {
       'packages/contracts',
       'packages/core',
       'packages/device-syncd',
+      'packages/exercise-library',
+      'packages/health-metrics',
       'packages/cli',
       'packages/gateway-core',
       'packages/hosted-execution',
@@ -87,7 +108,7 @@ describe('host support workflow guards', () => {
     ]
 
     for (const packageDir of packageDirs) {
-      expect(workflow).toContain(packageDir)
+      expect(packageCoverageJob).toContain(packageDir)
     }
   })
 

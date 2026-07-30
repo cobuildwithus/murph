@@ -15,6 +15,7 @@ import {
   advanceHostedMailboxConsumedSeqByLane,
   appendHostedMailboxEnvelopeTx,
   appendHostedMailboxEnvelopeWithIdentityTx,
+  appendHostedMailboxEnvelopeWithSourceMessageTx,
   appendHostedMealPhotoMailboxEnvelopeTx,
   appendHostedMailboxItemTx,
   claimHostedMailboxConversationSubscriptionAction,
@@ -760,27 +761,7 @@ describe("appendHostedMailboxItemTx", () => {
       }),
     });
     expect(hostedMailboxPayload.create).not.toHaveBeenCalled();
-    expect(tx.hostedRuntimeLog.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        component: "mailbox",
-        eventCode: "mailbox.appended",
-        level: "info",
-        mailboxLane: "conversation",
-        mailboxSeqEnd: 1n,
-        mailboxSeqStart: 1n,
-        phase: "import",
-        redactedJson: expect.objectContaining({
-          bytes: payloadBytes,
-          dedupeKeyPresent: true,
-          duplicate: false,
-          inserted: true,
-          kind: "conversation.message",
-          schema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
-          storage: "inline",
-        }),
-        userId: "member_mailbox_1",
-      }),
-    });
+    expect(tx.hostedRuntimeLog.create).not.toHaveBeenCalled();
   });
 
   it("ignores caller-supplied payload metadata when selecting storage and inserting metadata", async () => {
@@ -951,6 +932,7 @@ describe("appendHostedMailboxItemTx", () => {
   });
 
   it("returns the first item for duplicate dedupe keys without rewriting payload storage", async () => {
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const existing = buildHostedMailboxItemRow({
       dedupeKey: "dedupe_existing_1",
       kind: "conversation.message",
@@ -993,40 +975,23 @@ describe("appendHostedMailboxItemTx", () => {
     );
     expect(executeRawMock.mock.calls[0]?.[2]).toBe("dedupe_existing_1");
     expect(tx.$queryRaw).not.toHaveBeenCalled();
-    expect(tx.hostedRuntimeLog.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        component: "mailbox",
-        eventCode: "mailbox.dedupe_conflict",
-        level: "warn",
-        mailboxLane: "conversation",
-        mailboxSeqEnd: 1n,
-        mailboxSeqStart: 1n,
-        phase: "import",
-        redactedJson: expect.objectContaining({
-          existingKind: "conversation.message",
-          requestedKind: "member.activated",
-        }),
-        userId: "member_mailbox_1",
-      }),
+    expect(tx.hostedRuntimeLog.create).not.toHaveBeenCalled();
+    expect(consoleWarn).toHaveBeenCalledWith("Hosted mailbox dedupe conflict.", {
+      component: "mailbox",
+      eventCode: "mailbox.dedupe_conflict",
+      existingBytes: 64,
+      existingHasHash: false,
+      existingKind: "conversation.message",
+      existingLane: "conversation",
+      existingSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+      requestedBytes: expect.any(Number),
+      requestedHasHash: true,
+      requestedKind: "member.activated",
+      requestedLane: "system",
+      requestedSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
     });
-    expect(tx.hostedRuntimeLog.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        component: "mailbox",
-        eventCode: "mailbox.appended",
-        level: "info",
-        mailboxLane: "conversation",
-        mailboxSeqEnd: 1n,
-        mailboxSeqStart: 1n,
-        phase: "import",
-        redactedJson: expect.objectContaining({
-          duplicate: true,
-          inserted: false,
-          kind: "conversation.message",
-          storage: "inline",
-        }),
-        userId: "member_mailbox_1",
-      }),
-    });
+    expect(JSON.stringify(consoleWarn.mock.calls)).not.toContain("dedupe_existing_1");
+    consoleWarn.mockRestore();
     expect(hostedMailboxItem.create).not.toHaveBeenCalled();
     expect(hostedMailboxPayload.create).not.toHaveBeenCalled();
   });
@@ -1138,6 +1103,53 @@ describe("appendHostedMailboxItemTx", () => {
 });
 
 describe("appendHostedMailboxEnvelopeTx", () => {
+  it("indexes accepted Linq input without an extra source-lock query", async () => {
+    let insertedRow: HostedMailboxItemRow | null = null;
+    const hostedMailboxItem = createHostedMailboxItemDelegate({
+      create: vi.fn<HostedMailboxCreate>(async (args) => {
+        insertedRow = buildHostedMailboxItemRow(args.data);
+        return insertedRow;
+      }),
+      findUnique: vi.fn<HostedMailboxFindUnique>(async () => insertedRow),
+    });
+    const tx = createHostedMailboxTx({
+      hostedMailboxItem,
+      hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
+    });
+    const grouped = buildHostedGroupLinqEnvelope("member_mailbox_1");
+    const envelope = {
+      ...grouped,
+      message: {
+        ...grouped.message,
+        linqMessage: {
+          ...grouped.message.linqMessage,
+          threadIsDirect: true,
+        },
+        routeAuthority: undefined,
+        senderMemberId: undefined,
+      },
+    };
+
+    await expect(appendHostedMailboxEnvelopeWithSourceMessageTx({
+      envelope,
+      sourceMessageLookupKey: "hbidx:linq-message:v2:current",
+      tx,
+    })).resolves.toMatchObject({
+      inserted: true,
+    });
+
+    expect(hostedMailboxItem.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        sourceMessageLookupKey: "hbidx:linq-message:v2:current",
+      }),
+    });
+    const executeRawMock = vi.mocked(tx.$executeRaw);
+    expect(executeRawMock).toHaveBeenCalledTimes(3);
+    expect(
+      executeRawMock.mock.calls.map(readHostedMailboxRawSql).join("\n"),
+    ).not.toContain("mailbox-source-message");
+  });
+
   it("uses an explicit request identity and expiry without changing ordinary appends", async () => {
     let insertedRow: HostedMailboxItemRow | null = null;
     const hostedMailboxItem = createHostedMailboxItemDelegate({
@@ -2850,6 +2862,7 @@ interface HostedMailboxCreateArgs {
     payloadInlineCiphertext: string | null;
     payloadRef: string | null;
     payloadSchema: string;
+    sourceMessageLookupKey: string | null;
     userId: string;
   };
 }
@@ -2906,6 +2919,7 @@ function buildHostedMailboxItemRow(
     payloadInlineCiphertext: "cipher_inline_1",
     payloadRef: null,
     payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+    sourceMessageLookupKey: null,
     updatedAt: FIXED_NOW,
     userId: "member_mailbox_1",
     ...overrides,
@@ -3010,18 +3024,19 @@ function createHostedMailboxTx(input: {
             id: String(values[0]),
             userId: String(values[1]),
             assistantInputLookupKey: values[2] as string | null,
-            causalSeq: values[3] as bigint,
-            lane: String(values[4]),
-            laneSeq: values[5] as bigint,
-            dedupeKey: String(values[6]),
-            kind: String(values[7]),
-            occurredAt: values[8] as Date,
-            payloadSchema: String(values[9]),
-            payloadInlineCiphertext: values[10] as string | null,
-            payloadRef: values[11] as string | null,
-            payloadBytes: values[12] as number,
-            payloadHash: values[13] as string | null,
-            expiresAt: values[14] as Date | null,
+            sourceMessageLookupKey: values[3] as string | null,
+            causalSeq: values[4] as bigint,
+            lane: String(values[5]),
+            laneSeq: values[6] as bigint,
+            dedupeKey: String(values[7]),
+            kind: String(values[8]),
+            occurredAt: values[9] as Date,
+            payloadSchema: String(values[10]),
+            payloadInlineCiphertext: values[11] as string | null,
+            payloadRef: values[12] as string | null,
+            payloadBytes: values[13] as number,
+            payloadHash: values[14] as string | null,
+            expiresAt: values[15] as Date | null,
           },
         });
         return [row];

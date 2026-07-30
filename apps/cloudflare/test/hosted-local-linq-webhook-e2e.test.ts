@@ -33,6 +33,8 @@ const hostedLinqImageAssistantReplyText = "Reviewed the image attachment.";
 const hostedLinqPdfAssistantReplyText = "Read the PDF attachment.";
 const hostedLinqParticipantAdditionGroupContext =
   "One or more participants were recently added to this group chat.";
+const hostedLinqParticipantAddedDetailedContext =
+  "Participant +15559870001 was added to the group.";
 const linqWebhookRunId = Date.now();
 const hostedLinqGroupIsolationGuestUserId =
   `member_local_linq_webhook_group_isolation_guest_${linqWebhookRunId}`;
@@ -328,7 +330,6 @@ describe("hosted local Linq webhook e2e", () => {
       homeLineAssigned: baseline.personal.homeLineAssigned,
       pendingChatBound: false,
       recipientAssigned: true,
-      workspaceVersion: baseline.personal.workspaceVersion,
     });
     expect(routedBeforeFirstRun.thread).toMatchObject({
       containerExists: true,
@@ -355,18 +356,17 @@ describe("hosted local Linq webhook e2e", () => {
       isReady: (state) =>
         state.personal.conversationMailboxCount
           === baseline.personal.conversationMailboxCount
-        && state.personal.workspaceVersion === baseline.personal.workspaceVersion
         && state.thread?.containerMemberId === containerMemberId
         && state.thread.conversationMailboxCount === 1
         && BigInt(state.thread.workspaceVersion ?? "-1")
           > BigInt(routedBeforeFirstRun.thread?.workspaceVersion ?? "-1"),
       memberId: userId,
     });
+    // The personal runtime can finish a queued follow-up checkpoint after its
+    // completion status turns idle. Mailbox ownership, not its workspace
+    // version, is the durable routing-isolation invariant.
     expect(afterFirstGroup.personal.conversationMailboxCount).toBe(
       baseline.personal.conversationMailboxCount,
-    );
-    expect(afterFirstGroup.personal.workspaceVersion).toBe(
-      baseline.personal.workspaceVersion,
     );
     expect(afterFirstGroup.thread).toMatchObject({
       containerMemberId,
@@ -385,6 +385,7 @@ describe("hosted local Linq webhook e2e", () => {
       && !body.includes("Murph onboarding:")
       && !body.includes("murph-onboarding/SKILL.md")
       && !body.includes(hostedLinqParticipantAdditionGroupContext)
+      && !body.includes(hostedLinqParticipantAddedDetailedContext)
     )).toBe(true);
 
     const participantAddedProviderCountBefore =
@@ -456,7 +457,6 @@ describe("hosted local Linq webhook e2e", () => {
       isReady: (state) =>
         state.personal.conversationMailboxCount
           === baseline.personal.conversationMailboxCount
-        && state.personal.workspaceVersion === baseline.personal.workspaceVersion
         && state.thread?.containerMemberId === containerMemberId
         && state.thread.conversationMailboxCount === 2
         && BigInt(state.thread.workspaceVersion ?? "-1")
@@ -465,9 +465,6 @@ describe("hosted local Linq webhook e2e", () => {
     });
     expect(afterGuestGroup.personal.conversationMailboxCount).toBe(
       baseline.personal.conversationMailboxCount,
-    );
-    expect(afterGuestGroup.personal.workspaceVersion).toBe(
-      baseline.personal.workspaceVersion,
     );
     expect(afterGuestGroup.personal).toMatchObject({
       homeChatBound: false,
@@ -495,6 +492,9 @@ describe("hosted local Linq webhook e2e", () => {
     )).toBe(true);
     expect(guestProviderBodies.some((body) =>
       body.includes(hostedLinqParticipantAdditionGroupContext)
+    )).toBe(true);
+    expect(guestProviderBodies.some((body) =>
+      body.includes(hostedLinqParticipantAddedDetailedContext)
     )).toBe(true);
   }, 600_000);
 

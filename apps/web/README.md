@@ -162,6 +162,12 @@ The experiment detail routes compose two narrow data sources:
 
 Private measurements and conclusions never enter the server-rendered route payload. Public protocol prose, citations, and commons revisions are never copied into private run state.
 
+For a runnable public protocol, Start opens the member's connected channel with
+one human-readable sentence naming the experiment. The draft does not expose
+Health Commons keys or revision hashes. Murph resolves that name through the
+generated protocol discovery surface, then the protocol-backed run owner stores
+the exact key and revisions used at creation.
+
 ## Saved biomarker reference context
 
 Saved lab-result pages keep the imported source flag and per-result laboratory
@@ -182,6 +188,8 @@ The `/settings` Data & privacy export uses that same in-browser browser-vault re
 
 - Garmin connect plus Oura, Strava, and WHOOP OAuth start/callback flows
 - Oura, Strava, and WHOOP webhook intake
+- native iOS/Android companion sign-in plus backend-confirmed, source-scoped
+  Apple Health and Health Connect status
 - hosted Linq and Telegram webhook ingress plus sparse routing state
 - per-user device connection ownership mapping plus token audit history
 - hosted member core, identity, routing, billing, email-authorization, and legal-consent slices
@@ -236,8 +244,14 @@ retention/deletion, and security practices.
 The hosted Prisma schema keeps ownership sharp and nested:
 
 - `HostedMember` is the core member row plus activation/billing status. Its
-  nullable assistant tone, voice, Humor, Push, and Detail columns are only the
-  authenticated Settings display/write projection; canonical assistant
+  nullable assistant provider/model/reasoning fields are the Web-owned
+  execution preference; OpenAI is the default, and the nullable Venice override
+  is projected only while `HOSTED_VENICE_ENABLED` is enabled. Settings and the
+  input-bound assistant-configuration tool share the same transaction, rollout
+  gate, and canonical response so a model-only save cannot preserve a stale
+  provider in the client. Its nullable
+  assistant tone, voice, Humor, Push, and Detail columns are only the
+  authenticated Settings display/write projection; canonical personality
   preferences remain in `bank/preferences.json`. Settings writes strict sparse
   deltas through the hosted mailbox instead of treating these columns as a
   canonical snapshot. Hosted conversation set/reset uses the signed,
@@ -492,9 +506,12 @@ Rollout gates:
 
 - `HOSTED_USAGE_REFERRALS_ENABLED=1` enables referral arming, fresh-group
   binding, and qualification observation. Every other value fails closed. Do
-  not enable it until the additive migration is live, the previous Vercel
-  function window has drained, and contract migration
-  `20260726123000_allow_hosted_usage_referral_credit_entries` has applied.
+  not enable it until normal migration
+  `20260728030000_hosted_usage_referral_credit_entry_constraints` is live, the
+  previous Vercel function window has drained, and projection-only contract
+  migration
+  `20260728031000_resynchronize_hosted_usage_credit_purchase_grants` has
+  applied.
 
 Required when hosted computer-use is enabled:
 
@@ -625,8 +642,10 @@ Hosted onboarding extras:
 - `HOSTED_ONBOARDING_INVITE_TTL_HOURS`
 - `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS`
 - `HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS` for local `pnpm dev` or hosted-local runs only. Set this in local env when a development tunnel shares real Linq credentials so non-allowlisted inbound senders are accepted and ignored before mailbox append or assistant wake. Do not set it in production.
-- `HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER` as an advisory
-  balancing target; assignments remain available when every line reaches it
+- `HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER` only while an
+  older rollback build may still populate the deprecated
+  `HostedLinqLine.activeMemberLimit` column; current weighted assignment does
+  not read it
 - `RETELL_API_KEY`, `RETELL_FROM_NUMBER`, `RETELL_AGENT_ID`,
   `RETELL_AGENT_DATA_STORAGE_SETTING=basic_attributes_only`, and optional
   `RETELL_AGENT_VERSION` enable hosted Retell phone calls, signed `ask_murph`
@@ -643,25 +662,33 @@ Hosted onboarding extras:
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY`
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_5_USD`
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_10_USD`
+- `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_20_USD`
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_25_USD`
 - `HOSTED_ONBOARDING_STRIPE_FAMILY_PORTAL_CONFIGURATION_ID` optionally selects a dedicated Family Billing Portal configuration.
 - `STRIPE_SECRET_KEY`
 - `STRIPE_WEBHOOK_SECRET`
 - `LINQ_API_TOKEN`
 - `LINQ_API_BASE_URL`
-- `HOSTED_RUNTIME_LATENCY_ALERT_LINQ_CHAT_ID` and
-  `HOSTED_RUNTIME_LATENCY_ALERT_TIME_ZONE` together enable the five-minute
-  production reply-latency monitor. Configure one opaque existing Linq chat ID
-  for a dedicated operator thread and one valid IANA time zone; do not put a
-  phone number in either value. The participant should reply once before
-  relying on the thread for alerts. The monitor uses the fixed 30-second
-  product boundary, sends one alert per continuous incident, suppresses sends
-  from 11 PM through 7 AM operator-local time, and adds up to ten minutes of
-  stable wake/retry jitter. Provider attempts therefore stay at least ten
-  minutes apart and spread across more than one five-minute cron tick. A
-  fresh health and operator-time recheck before provider admission makes no
-  attempt-state change when latency recovered or quiet hours began. Only the
-  exact row-version compare-and-swap immediately before Linq advances the
+- `HOSTED_RUNTIME_LATENCY_ALERT_TIME_ZONE` enables the five-minute production
+  reply-latency monitor when the shared Resend operational-alert transport is
+  fully configured through `RESEND_API_KEY`, `HOSTED_LINQ_ALERT_EMAIL_FROM`,
+  and `HOSTED_LINQ_ALERT_EMAILS`. The historical Linq-prefixed email names are
+  shared operational configuration; the latency path never sends through or
+  falls back to Linq/iMessage. The monitor uses the fixed 30-second product
+  boundary for the first accepted user-visible response: either a progress
+  update or the final reply. Completed grouped traces count once by their
+  shared Linq delivery, and traces for one in-flight provider request count
+  once while unresolved. Progress accepted before 30 seconds suppresses that
+  turn; progress at or after the boundary remains alertable. The monitor sends
+  no alert for scheduled automation turns, including Flex-tier turns, because
+  they do not own a user-ingress reply trace. The monitor sends one email per
+  continuous incident, suppresses sends from 11 PM through 7 AM
+  operator-local time, and adds up to ten minutes of stable wake/retry jitter.
+  Provider attempts therefore stay at least ten minutes
+  apart and spread across more than one five-minute cron tick. A fresh health
+  and operator-time recheck before provider admission makes no attempt-state
+  change when latency recovered or quiet hours began. Only the exact
+  row-version compare-and-swap immediately before Resend advances the
   provider-attempt boundary; a stale evaluation cannot win after another
   incident cycles the singleton back to the same visible status. A known-unsent
   first deferral therefore builds fresh evidence in the morning, while a blocked
@@ -670,7 +697,8 @@ Hosted onboarding extras:
   four-minute send lease instead of claiming recovery while the outcome is
   unknown; the first healthy scan after the call settles, fails, or the lease
   expires clears the incident. Persisted evidence remains aggregate
-  counts/timings in the existing operational-alert row.
+  counts/timings plus sanitized provider failure status in the existing
+  operational-alert row.
 - `HOSTED_EXECUTION_CONTROL_URL`
 - `HOSTED_EXECUTION_CONTROL_TIMEOUT_MS`
 
@@ -719,7 +747,7 @@ Hosted AI usage metering:
 - Usage credit is separate from the included-allowance period. A beneficiary-serialized transaction consumes included capacity first, then purchase/referral grant entries with remaining capacity in FIFO order, while `HostedMember` carries the bounded balance/version hot-path projection. Unused credit carries across allowance periods and does not create subscription entitlement. Stripe refunds and disputes may reverse only purchase-backed entries; earned referral grants are final.
 - Web derives one read-only member plan-usage projection from that same allowance resolver and usage ledger for Settings and `murph.plan_usage`. It persists no forecast and performs no Stripe read. `recommendedAction` is thresholded and may return `add_usage` only for eligible direct paid Pulse and Edge members; the authenticated Settings surface exposes the fixed $5, $10, and $25 catalog. An opted-in `subscriptionActionQuote` returns current terms for an explicit subscription request even below the threshold; it is not a recommendation or consent. Callers that send the original empty request receive the original response shape with that field omitted.
 - Usage-credit payment accepts the existing personal self-target, an authenticated active Family owner selecting one exact active unsuspended Family membership, or the existing hosted-group funding target. Family admission re-binds the opaque path selector to the authenticated owner, their active unsuspended group, the exact active member, and that group's canonical `HostedAccountGroupBillingRef` customer. Every flow accepts only a server-owned offer code and single-use request key, re-fetches the configured active one-time Price to verify its exact single-currency amount and shape, and keeps the browser from choosing an arbitrary amount, Price, Customer, payer, beneficiary, grant, or Checkout URL.
-- Personal and Family funding use Stripe `mode=payment` Checkout with Adaptive Pricing disabled. Current-policy group funding first selects one canonical card attached to the authenticated payer's Customer. It creates an unconfirmed PaymentIntent, then rechecks active payer and still-created purchase state while durably binding that exact intent under the payer lock before off-session confirmation; a deletion or terminal-state race cancels the unbound intent and never confirms it. Ambiguous responses remain bound to that exact intent and frozen offer, the browser preserves the original amount/request key for recovery, and authentication or card failure may open Checkout only after verified cancellation. The payer-owned cancel path also resolves a sessionless direct attempt from Settings or a target-conflict surface. Group Checkout saves the entered card for a later explicit contribution. Murph stores no raw card data and never charges from amount selection alone.
+- Personal, Family, and group funding use Stripe `mode=payment` Checkout with Adaptive Pricing disabled. Current-policy personal and Family purchases resolve the exact Murph billing Subscription whose Customer matches the frozen purchase, then use its attached explicit default card or inherited attached Customer default. Missing, stale, terminal, customer-mismatched, unattached, or legacy Source-only exact-subscription state stays in Checkout, and unrelated Subscriptions never participate. Group funding has no required billing Subscription and may use the attached Customer default or sole attached card only when no legacy Customer default Source exists. Stripe's redisplay setting controls Checkout presentation rather than whether the existing subscription card can fund the payer's explicit top-up. The service creates an unconfirmed PaymentIntent, then rechecks active payer, still-created purchase state, and the current exact personal or Family billing Customer, Subscription, canonical status, suspension state, and last accepted Stripe-event time while durably binding that intent under the payer lock before off-session confirmation. A billing-reference change, deletion, or terminal-state race cancels the unbound intent and never confirms it; after bind, recovery remains tied to that exact intent rather than retargeting. Ambiguous responses remain bound to that exact intent and frozen offer, the browser preserves the original amount/request key for recovery, and authentication or card failure may open Checkout only after verified cancellation. The payer-owned cancel path also resolves a sessionless direct attempt from Settings or a target-conflict surface. Current-policy Checkout asks the payer whether to save the selected method so Stripe may present it in later Checkout flows. Murph stores no raw card data and never charges from amount selection alone.
 - A browser return or synchronous PaymentIntent response never grants credit. The existing verified Stripe event receipt owner re-fetches Checkout and line-item facts when present plus the exact PaymentIntent and Charge, then commits at most one purchase grant. After a new grant commits, the same durable Stripe-event retry lane requests the normal runtime recheck so preserved blocked input can resume.
 - The purchase schema freezes payer and beneficiary separately. Personal, Family-member, and hosted-group purchases converge on the same append-only beneficiary ledger, Stripe verification, refund/dispute adjustments, status/expire routes, and webhook-only grant path. Family top-ups reuse the active group billing customer; they do not create a personal customer, Family wallet, second ledger, or second credit projection. One payer-wide nonterminal purchase is the ambiguity fence: a conflicting Family target receives no payable URL or retry action, and former-member recovery remains payable only when Settings can show an owner-recognizable frozen beneficiary.
 - Conversational usage referrals reserve their fixed server-catalog reward
@@ -805,6 +833,7 @@ To complete either flow without moving real money:
    - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY=price_...`
    - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_5_USD=price_...`
    - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_10_USD=price_...`
+   - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_20_USD=price_...`
    - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_25_USD=price_...`
 2. Install and log in to the Stripe CLI once with `stripe login`.
 3. Run root `pnpm dev` without `MURPH_DEV_SKIP_STRIPE_LISTEN=1`; the dev
@@ -963,18 +992,17 @@ alias proofs, elapsed drain, and post-drain verification as rollout evidence.
 - Enable Vercel OIDC so the app-local hosted-execution auth adapter can present
   workload identity to Cloudflare on dispatch and status requests.
 - Set `CRON_SECRET` for the hosted cron routes under `/api/internal/**/cron`.
-- To receive reply-latency texts, set
-  `HOSTED_RUNTIME_LATENCY_ALERT_LINQ_CHAT_ID` to a pre-established dedicated
-  operator chat, set `HOSTED_RUNTIME_LATENCY_ALERT_TIME_ZONE` to the operator's
-  IANA time zone, and verify that line can exchange a normal reply before
-  treating the alert path as live. With both values absent the channel stays
-  disabled; exactly one value or an invalid non-empty time zone fails the cron
-  visibly.
+- To receive reply-latency emails, configure `RESEND_API_KEY`,
+  `HOSTED_LINQ_ALERT_EMAIL_FROM`, and `HOSTED_LINQ_ALERT_EMAILS`, then set
+  `HOSTED_RUNTIME_LATENCY_ALERT_TIME_ZONE` to the operator's IANA time zone.
+  The time zone is the monitor opt-in: without it the monitor stays disabled;
+  with it, incomplete Resend email config or an invalid time zone fails the
+  cron visibly. The latency path has no Linq/iMessage fallback.
 - Configure the hosted public-origin envs and `HOSTED_WEB_CALLBACK_SIGNING_*`
   values exactly as described above.
-- Set `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS` and, if needed,
-  `HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER` as an advisory
-  balancing target rather than a hard admission limit.
+- Set `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS`. Keep
+  `HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER` only for an
+  older rollback build; current weighted assignment does not read it.
 - Set `DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET` to the same value used by the
   trusted auth edge that signs browser assertions for lower-level device-sync
   bridge routes.
@@ -1056,6 +1084,55 @@ deploy, then add validating constraints or clean up the old shape only after
 the replacement deployment is live and the prior production function window
 has drained.
 
+The Linq provider-health rollout follows the same boundary. Predeploy adds the
+independent service/reputation columns and their per-dimension ordering
+metadata, but does not rewrite legacy `hosted_linq_line.health_status` while an
+old Web build can still use that column for provider blocks. After the
+replacement build is live and the standard prior-function drain and alias
+proofs pass, contract migration
+`20260729183000_rebuild_linq_delivery_health_after_drain` first preserves any
+final legacy provider update written during the rollout window, then
+reconstructs that column from Murph-observed delivery evidence. Independent
+`FLAGGED` and `CRITICAL` provider fields continue to block through the existing
+egress policy. Successful application establishes the first production Web
+revision containing this migration as the rollback floor: do not move the Web
+alias to a pre-migration revision afterward. Incident recovery is a forward
+redeploy of that revision or a later compatible Web revision. Cloudflare may
+roll back independently because final provider authorization remains Web-owned.
+`hosted-linq-provider-health-contract-migration-postgres.test.ts` executes the
+exact SQL transition, while `production-migration-guard.test.ts` pins the
+production-alias proof, drain, second alias proof, and migration-owner order.
+
+The Linq weighted-capacity rollout follows that rule. Predeploy adds nullable
+`HostedThreadRoute.accountLookupKey` and its index; old application code remains
+compatible if the build fails after migration. Once the replacement build is
+live, a count-and-decrypt dry run may begin. Before applying, prove the
+production alias points at the replacement build, wait the configured
+`HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` prior-function interval, and prove
+the alias again. Then repeat bounded projection batches until readiness:
+
+```bash
+NODE_OPTIONS=--conditions=react-server \
+  vercel env run --environment=production -- \
+  pnpm --dir apps/web linq:backfill-thread-route-accounts -- --batch-size 50
+
+NODE_OPTIONS=--conditions=react-server \
+  vercel env run --environment=production -- \
+  pnpm --dir apps/web linq:backfill-thread-route-accounts -- --apply --batch-size 50
+
+NODE_OPTIONS=--conditions=react-server \
+  vercel env run --environment=production -- \
+  pnpm --dir apps/web linq:backfill-thread-route-accounts -- --check
+```
+
+The command decrypts only through the existing thread-delivery-route owner,
+emits aggregate counts only, and updates rows with an optimistic authority
+check. Do not run `--apply` before the final alias proof and prior-function
+drain, do not treat a dry-run as readiness, and do not drop the legacy
+`HostedLinqLine.activeMemberLimit` column in the same rollout. The complete
+assignment and deployment contract is in
+`docs/hosted-linq-db-home-lines-migration.md`.
+
 The exact
 `20260727040000_relax_hosted_usage_credit_detached_direct_proof` migration is a
 narrow predeploy exception to that default. It replaces only the two existing
@@ -1067,6 +1144,21 @@ before the application serves is necessary because the new application can
 create that sessionless fulfilled shape. The migration guard permits only its
 proved constraint drop/add operations and still rejects any additional
 incompatible DDL.
+
+The exact
+`20260728030000_hosted_usage_referral_credit_entry_constraints` migration is a
+second narrow predeploy exception. It atomically replaces only the two existing
+credit-entry checks with the referral-aware amount and source branches. Its
+first explicit transaction uses the repository's five-second lock bound and
+adds both replacements `NOT VALID`, so the unavoidable `ACCESS EXCLUSIVE`
+metadata lock performs no retained-row scan and rejects new invalid writes as
+soon as it commits. A second transaction validates retained rows under the less
+disruptive PostgreSQL validation lock, which permits ordinary ledger reads and
+writes. The migration guard permits only those proved constraint drop/add
+operations. The former combined contract migration is superseded; post-drain
+contract migration
+`20260728031000_resynchronize_hosted_usage_credit_purchase_grants` now performs
+only the idempotent purchase-projection resynchronization.
 
 Production `DATABASE_URL` must use PlanetScale's transaction-mode PgBouncer
 endpoint (normally port `6432`); `DIRECT_DATABASE_URL` remains the direct

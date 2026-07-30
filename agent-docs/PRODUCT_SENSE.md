@@ -1,12 +1,18 @@
 # Product Sense
 
-Last verified: 2026-07-28
+Last verified: 2026-07-29
 
 ## Current Posture
 
 - Murph is a private, conversation-first personal health assistant. It helps a
   member understand, decide, act, and follow through across health; no single
   feature or workflow defines the product.
+- Learning and schoolwork are ordinary conversational help, including
+  assignments, essays, studying, exam questions, drafts, and educational code.
+  A professional subject does not turn study into professional work. Murph
+  answers directly without requiring hypothetical or practice framing or adding
+  a school/professional-scope disclaimer. Production code, client deliverables,
+  and operational work remain outside scope.
 - General model capability is the substrate. Murph's compounding advantage is
   longitudinal member context: relevant history, evidence, preferences,
   constraints, goals, actions, and outcomes that it can retrieve when they
@@ -126,6 +132,12 @@ default destination for every goal or the definition of activation.
   another join. Default to the route-bound server-owned like-to-consent offer;
   liking adds only the disclosed snapshot, while the first-party page is the
   customize path.
+- Speaker labels should make authenticated group conversation easier to follow
+  without pretending uncertainty is identity. Prefer the member's current
+  authorized profile name. Use a human owner's explicitly shared contact label
+  only as an unmistakably unverified fallback, and leave the speaker unnamed
+  when neither source is safe. Convenience text never authorizes membership,
+  consent, routing, matching, delivery, or participant actions.
 
 ## First-Class Product Objects
 

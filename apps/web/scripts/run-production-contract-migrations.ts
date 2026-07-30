@@ -28,6 +28,7 @@ const CONTRACT_MIGRATION_LOCK_TIMEOUT = "5s";
 const CONTRACT_MIGRATION_STATEMENT_TIMEOUT = "30s";
 const SUPERSEDED_CONTRACT_MIGRATION_IDS = new Set([
   "20260720233000_hosted_group_usage_funding_invariants",
+  "20260726123000_allow_hosted_usage_referral_credit_entries",
 ]);
 
 export interface HostedWebContractMigration {
