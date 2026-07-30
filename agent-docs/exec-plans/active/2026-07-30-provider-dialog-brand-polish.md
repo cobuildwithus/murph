@@ -55,3 +55,11 @@ Updated: 2026-07-30
 - Desktop and mobile dialog screenshots with interaction and keyboard checks.
 - Required product-experience review, preliminary ReviewGPT specialist pass,
   parent final review, and exact-head PR CI/review gate.
+
+## Review notes
+
+- The first preliminary specialist attempt was invalid because the guarded
+  audit bundle omitted the applicable current product specification.
+- The full audit packager now scans current product specifications, with
+  focused package-level proof that the provider-choice specification is
+  present. The corrected exact head must retry the same preliminary pass.

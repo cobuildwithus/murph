@@ -3298,6 +3298,9 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       expect(leanEntries).not.toContain('docs/assets/readme-hero.jpg')
 
       expect(fullEntries).toContain('.crabbox.yaml')
+      expect(fullEntries).toContain(
+        'agent-docs/product-specs/hosted-plan-downgrades.md',
+      )
       expect(fullEntries).toContain('packages/cli/test/release-script-coverage-audit.test.ts')
       expect(fullEntries).toContain('apps/web/test/device-sync-http.test.ts')
       expect(fullEntries).toContain('docs/device-sync-hosted-control-plane.md')
