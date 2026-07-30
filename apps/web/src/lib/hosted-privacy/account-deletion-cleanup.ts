@@ -7,6 +7,7 @@ import type {
 } from "@prisma/client";
 
 import { getHostedWebCryptoConfig } from "../hosted-crypto/env";
+import { normalizeGcpKmsCryptoKeyName } from "../hosted-crypto/gcp-kms";
 import {
   deleteHostedRunnerUserDataBestEffort,
   type HostedRunnerUserDataDeletionBestEffortResult,
@@ -130,7 +131,7 @@ export async function prepareHostedAccountDeletionCleanup(input: {
     cloudflareCompletedAt: null,
     environment: cryptoConfig.env,
     id,
-    kmsKeyName: encrypted.keyName,
+    kmsKeyName: normalizeGcpKmsCryptoKeyName(encrypted.keyName),
     nextAttemptAt: input.now,
     payloadCiphertext: encrypted.ciphertext,
     privyCompletedAt: privyUserId === null ? input.now : null,
@@ -418,7 +419,7 @@ async function decryptCleanupPayload(
       id: cleanup.id,
     }),
     ciphertext: cleanup.payloadCiphertext,
-    keyName: cleanup.kmsKeyName,
+    keyName: normalizeGcpKmsCryptoKeyName(cleanup.kmsKeyName),
     signal,
   });
   return parseCleanupPayload(

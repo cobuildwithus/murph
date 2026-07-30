@@ -26,6 +26,7 @@ import { GroupJoinStudy } from "./group-join-study";
 import { GrowthScorecardStudy } from "./growth-scorecard-study";
 import { HomeLoadStateStudy } from "./home-load-state-study";
 import { HomeOnboardingStepsStudy } from "./home-onboarding-steps-study";
+import { JoinFamilyBillingRecoveryStudy } from "./join-family-billing-recovery-study";
 import { PersonaOnboardingStudy } from "./persona-onboarding-study";
 import { PulseTrialBillingContinuationStudy } from "./pulse-trial-billing-continuation-study";
 import { SettingsAuthRequiredStudy } from "./settings-auth-required-study";
@@ -113,8 +114,8 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Settings model provider and model choice">
-        <div data-design-section="settings-model-provider-choice" inert>
+      <StudySection title="Settings model choice and compact provider control">
+        <div data-design-section="settings-compact-provider-control" inert>
           <HostedAssistantModelSettings
             canUpgradeToEdge={false}
             configurationAvailable
@@ -177,6 +178,12 @@ export function SectionsContent() {
 
       <StudySection title="Family plan invite acceptance">
         <FamilyInviteJoinStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Family billing recovery on Join">
+        <JoinFamilyBillingRecoveryStudy />
       </StudySection>
 
       <Separator />

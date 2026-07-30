@@ -11,6 +11,10 @@ const LOCAL_KMS_IV_BYTES = 12;
 const LOCAL_KMS_KEY_BYTES = 32;
 const DEFAULT_STS_TOKEN_URI = "https://sts.googleapis.com/v1/token";
 const DEFAULT_IAM_CREDENTIALS_API_ROOT = "https://iamcredentials.googleapis.com/v1";
+const GCP_KMS_CRYPTO_KEY_NAME_PATTERN =
+  /^projects\/[A-Za-z0-9][A-Za-z0-9._:-]*\/locations\/[A-Za-z0-9_-]+\/keyRings\/[A-Za-z0-9_-]+\/cryptoKeys\/[A-Za-z0-9_-]+$/u;
+const GCP_KMS_CRYPTO_KEY_VERSION_NAME_PATTERN =
+  /^(projects\/[A-Za-z0-9][A-Za-z0-9._:-]*\/locations\/[A-Za-z0-9_-]+\/keyRings\/[A-Za-z0-9_-]+\/cryptoKeys\/[A-Za-z0-9_-]+)\/cryptoKeyVersions\/[1-9][0-9]*$/u;
 // One deadline owns the complete token + KMS operation. Callers may abort
 // earlier. Provider failures are fail-closed and are never retried here.
 export const HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS = 10_000;
@@ -176,7 +180,7 @@ class HostedLocalGcpKmsClient implements HostedGcpKmsClient {
   ) {}
 
   async encrypt(input: GcpKmsEncryptInput): Promise<{ ciphertext: string; keyName: string }> {
-    const keyName = requireKmsResourceName(input.keyName, "Local KMS Encrypt keyName");
+    const keyName = requireKmsCryptoKeyName(input.keyName, "Local KMS Encrypt keyName");
     const iv = crypto.getRandomValues(new Uint8Array(LOCAL_KMS_IV_BYTES));
     const key = await this.importWrapKey(["encrypt"]);
     const ciphertext = new Uint8Array(
@@ -203,7 +207,7 @@ class HostedLocalGcpKmsClient implements HostedGcpKmsClient {
   }
 
   async decrypt(input: GcpKmsDecryptInput): Promise<{ plaintext: Uint8Array }> {
-    const keyName = requireKmsResourceName(input.keyName, "Local KMS Decrypt keyName");
+    const keyName = normalizeKmsCryptoKeyName(input.keyName, "Local KMS Decrypt keyName");
     if (!input.ciphertext.startsWith(LOCAL_KMS_CIPHERTEXT_PREFIX)) {
       throw new TypeError("Local KMS ciphertext must use the local-kms-v1 envelope.");
     }
@@ -311,29 +315,40 @@ class HostedGcpKmsJsonClient implements HostedGcpKmsClient {
   }
 
   async encrypt(input: GcpKmsEncryptInput): Promise<{ ciphertext: string; keyName: string }> {
+    const keyName = requireKmsCryptoKeyName(input.keyName, "GCP KMS Encrypt keyName");
     const response = await this.call<GcpEncryptResponse>({
       body: {
         additionalAuthenticatedData: encodeBase64(utf8(input.additionalAuthenticatedData)),
         plaintext: encodeBase64(input.plaintext),
       },
       operation: "cloudkms/encrypt",
-      resource: `${requireKmsResourceName(input.keyName, "GCP KMS Encrypt keyName")}:encrypt`,
+      resource: `${keyName}:encrypt`,
       signal: input.signal,
     });
+    const responseKeyName = requireKmsCryptoKeyVersionParentName(
+      response.name,
+      "GCP KMS Encrypt name",
+    );
+    if (responseKeyName !== keyName) {
+      throw new Error(
+        "GCP KMS Encrypt response key version did not match the requested CryptoKey.",
+      );
+    }
     return {
       ciphertext: requireNonEmptyString(response.ciphertext, "GCP KMS Encrypt ciphertext"),
-      keyName: requireNonEmptyString(response.name ?? input.keyName, "GCP KMS Encrypt name"),
+      keyName,
     };
   }
 
   async decrypt(input: GcpKmsDecryptInput): Promise<{ plaintext: Uint8Array }> {
+    const keyName = normalizeKmsCryptoKeyName(input.keyName, "GCP KMS Decrypt keyName");
     const response = await this.call<GcpDecryptResponse>({
       body: {
         additionalAuthenticatedData: encodeBase64(utf8(input.additionalAuthenticatedData)),
         ciphertext: requireNonEmptyString(input.ciphertext, "GCP KMS Decrypt ciphertext"),
       },
       operation: "cloudkms/decrypt",
-      resource: `${requireKmsResourceName(input.keyName, "GCP KMS Decrypt keyName")}:decrypt`,
+      resource: `${keyName}:decrypt`,
       signal: input.signal,
     });
     return {
@@ -706,6 +721,41 @@ function getGoogleCloudErrorReason(parsed: unknown, response: Response): string 
 
 async function sha256(value: Uint8Array): Promise<Uint8Array> {
   return new Uint8Array(await crypto.subtle.digest("SHA-256", toArrayBuffer(value)));
+}
+
+export function normalizeGcpKmsCryptoKeyName(value: string): string {
+  return normalizeKmsCryptoKeyName(value, "GCP KMS keyName");
+}
+
+function normalizeKmsCryptoKeyName(value: string, label: string): string {
+  const trimmed = requireNonEmptyString(value, label);
+  if (GCP_KMS_CRYPTO_KEY_NAME_PATTERN.test(trimmed)) {
+    return trimmed;
+  }
+  const versionMatch = GCP_KMS_CRYPTO_KEY_VERSION_NAME_PATTERN.exec(trimmed);
+  if (versionMatch) {
+    return versionMatch[1]!;
+  }
+  throw new TypeError(
+    `${label} must be a CryptoKey or CryptoKeyVersion resource name.`,
+  );
+}
+
+function requireKmsCryptoKeyName(value: string, label: string): string {
+  const trimmed = requireNonEmptyString(value, label);
+  if (!GCP_KMS_CRYPTO_KEY_NAME_PATTERN.test(trimmed)) {
+    throw new TypeError(`${label} must be a CryptoKey resource name.`);
+  }
+  return trimmed;
+}
+
+function requireKmsCryptoKeyVersionParentName(value: unknown, label: string): string {
+  const trimmed = requireNonEmptyString(value, label);
+  const versionMatch = GCP_KMS_CRYPTO_KEY_VERSION_NAME_PATTERN.exec(trimmed);
+  if (!versionMatch) {
+    throw new TypeError(`${label} must be a CryptoKeyVersion resource name.`);
+  }
+  return versionMatch[1]!;
 }
 
 function requireKmsResourceName(value: string, label: string): string {
