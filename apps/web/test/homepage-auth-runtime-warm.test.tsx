@@ -93,62 +93,15 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 
-test("does not warm Privy in the background on non-homepage routes", async () => {
-  vi.useFakeTimers();
-  const { AuthProvider } = await import(
-    "@/src/components/hosted-onboarding/auth-dialog-provider"
-  );
-  const { LandingAuthActions } = await import("@/app/auth-controls");
-  const rendered = await renderClientComponent(
-    createElement(
-      AuthProvider,
-      { authenticated: false },
-      createElement(LandingAuthActions, {
-        authLabel: "Get started",
-        authenticated: false,
-        context: "hero",
-        preloadAuthPanel: true,
-      }),
-    ),
-    {
-      location: {
-        hash: "",
-        href: "https://example.test/clubs",
-        origin: "https://example.test",
-        pathname: "/clubs",
-        search: "",
-      },
-    },
-  );
-  cleanupRender = rendered.cleanup;
-
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(1_200);
-  });
-  await flushRuntimeLoad();
-
-  expect(mocks.runtimeModuleLoad).not.toHaveBeenCalled();
-  expect(mocks.runtimeMount).not.toHaveBeenCalled();
-
-  await act(async () => {
-    rendered.button.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
-
-  expect(mocks.authDialogProps).toMatchObject({ open: true });
-  expect(mocks.authDialogProps?.privyRuntime).toBeUndefined();
-});
-
 test("warms one shared Privy runtime after homepage idle and reuses it on click", async () => {
   vi.useFakeTimers();
-  const { AuthProvider } = await import(
+  const { HomepageAuthRuntimeProvider } = await import(
     "@/src/components/hosted-onboarding/auth-dialog-provider"
   );
   const { LandingAuthActions } = await import("@/app/auth-controls");
   const rendered = await renderClientComponent(
     createElement(
-      AuthProvider,
+      HomepageAuthRuntimeProvider,
       { authenticated: false },
       createElement(LandingAuthActions, {
         authLabel: "Get started",
