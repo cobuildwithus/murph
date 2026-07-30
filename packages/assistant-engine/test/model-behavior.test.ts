@@ -1292,7 +1292,7 @@ describe('assistant local PDF evidence guidance', () => {
       'It is not a TestFlight invitation; do not search for another listing or claim the public app cannot be verified.',
     )
     expect(prompt).toContain(
-      'Apple Watch/iPhone/Apple Health: after opening Murph, sign in and connect Apple Health.',
+      'Apple Watch/iPhone/Apple Health and WHOOP relay handoffs: apply the app-link rule above, then after opening Murph, sign in and connect Apple Health.',
     )
     expect(prompt).toContain('Apple Health relay:')
     expect(prompt).toContain('WHOOP limits third-party access')
@@ -1378,7 +1378,7 @@ describe('assistant local PDF evidence guidance', () => {
     expect(prompt).toContain('Murph iOS app:')
     expect(prompt).toContain('Apple Health relay:')
     expect(prompt).toContain(
-      'Apple Watch/iPhone/Apple Health: after opening Murph, sign in and connect Apple Health.',
+      'Apple Watch/iPhone/Apple Health and WHOOP relay handoffs: apply the app-link rule above, then after opening Murph, sign in and connect Apple Health.',
     )
     expect(prompt).toContain('No documented WHOOP settings deeplink; never invent one')
     expect(prompt).toContain('WHOOP limits third-party access')
@@ -2526,7 +2526,7 @@ describe('assistant conversation scope', () => {
       'https://apps.apple.com/us/app/murph-ai/id6786145859',
     )
     expect(prompt).toContain(
-      'When someone asks how to get, download, or install the Murph iPhone/iOS app, answer directly with this listing.',
+      'App-link rule: when someone asks how to get, download, or install the Murph iPhone/iOS app, answer directly with this listing.',
     )
     expect(prompt).toContain(
       'In a group, this is ordinary public product information, not a personal account, settings, authorization, or wearable-connect link.',
@@ -2535,7 +2535,10 @@ describe('assistant conversation scope', () => {
       'Do not send personal settings, wearable-connect, OAuth, billing, account, or browser-handoff links from this room.',
     )
     expect(prompt).toContain(
-      'Separately, the canonical public Murph iOS App Store listing named in this prompt may be shared when someone asks how to get or install the app',
+      'Separately, the canonical public Murph iOS App Store listing named in this prompt may be shared when the app-link rule above applies',
+    )
+    expect(prompt).not.toContain(
+      'when someone asks how to get or install the app',
     )
     expect(prompt).toContain(
       'is the requested canonical public Murph iOS App Store listing',

@@ -1348,17 +1348,17 @@ function buildAssistantIosAppDownloadGuidanceText(
   conversationScope: AssistantConversationScope
 ): string {
   const groupBoundary = conversationScope === "group"
-    ? "\n- In a group, this is ordinary public product information, not a personal account, settings, authorization, or wearable-connect link. Share it when asked; it does not configure the room or authorize Apple Health. Keep personal sign-in and health-source setup in the person's private Murph conversation or in the app."
+    ? "\n- In a group, this is ordinary public product information, not a personal account, settings, authorization, or wearable-connect link. Share it when this app-link rule applies; it does not configure the room or authorize Apple Health. Keep personal sign-in and health-source setup in the person's private Murph conversation or in the app."
     : "";
   return `Murph iOS app:
 - Canonical public App Store listing: ${MURPH_IOS_APP_STORE_URL}
-- When someone asks how to get, download, or install the Murph iPhone/iOS app, answer directly with this listing. It is not a TestFlight invitation; do not search for another listing or claim the public app cannot be verified.${groupBoundary}
+- App-link rule: when someone asks how to get, download, or install the Murph iPhone/iOS app, answer directly with this listing. It is not a TestFlight invitation; do not search for another listing or claim the public app cannot be verified.${groupBoundary}
 - In user-facing messages, put the URL alone on the final line with no text after it.`;
 }
 
 function buildAssistantAppleHealthRelayGuidanceText(): string {
   return `Apple Health relay:
-- Apple Watch/iPhone/Apple Health: after opening Murph, sign in and connect Apple Health.
+- Apple Watch/iPhone/Apple Health and WHOOP relay handoffs: apply the app-link rule above, then after opening Murph, sign in and connect Apple Health.
 - WHOOP limits third-party access. Direct sync omits steps; Apple Health may relay them. Do not infer/request missing steps.
 - WHOOP: More > App Settings > Integrations > Apple Health > Connect > Turn On All (or chosen categories) > Allow; then connect Apple Health in Murph.
 - No documented WHOOP settings deeplink; never invent one.`;
@@ -1369,7 +1369,7 @@ function buildAssistantToolTruthfulnessText(): string {
 }
 
 function buildAssistantGroupToolTruthfulnessText(): string {
-  return "Never claim you searched, read, wrote, logged, updated, or inspected something unless a real group-authorized command or runtime action happened. Never invent or guess join, share, enrollment, or authorization URLs. Do not send personal settings, wearable-connect, OAuth, billing, account, or browser-handoff links from this room. Separately, the canonical public Murph iOS App Store listing named in this prompt may be shared when someone asks how to get or install the app; it is public download information, not a personal account or wearable-connect link. Two narrow group-owned exceptions are allowed: a clearly labeled per-person enrollment link explicitly provided by its owning workflow, and a same-turn first-party group funding URL returned by `murph.group action=\"read_usage\"` on a trusted low-usage turn or after the group asks about usage or adding more. Describe a per-person enrollment link as changing only that participant's account, never the room settings. Never describe the group funding link as a personal billing or account-management page.";
+  return "Never claim you searched, read, wrote, logged, updated, or inspected something unless a real group-authorized command or runtime action happened. Never invent or guess join, share, enrollment, or authorization URLs. Do not send personal settings, wearable-connect, OAuth, billing, account, or browser-handoff links from this room. Separately, the canonical public Murph iOS App Store listing named in this prompt may be shared when the app-link rule above applies; it is public download information, not a personal account or wearable-connect link. Two narrow group-owned exceptions are allowed: a clearly labeled per-person enrollment link explicitly provided by its owning workflow, and a same-turn first-party group funding URL returned by `murph.group action=\"read_usage\"` on a trusted low-usage turn or after the group asks about usage or adding more. Describe a per-person enrollment link as changing only that participant's account, never the room settings. Never describe the group funding link as a personal billing or account-management page.";
 }
 
 function buildAssistantMaintenanceExecutionGuidanceText(
