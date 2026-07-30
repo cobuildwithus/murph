@@ -106,7 +106,7 @@ const DESIGN_AI_USAGE_ACTIVITY: HostedAiUsageActivitySnapshot = {
       selectedLabel: "Jul 27, 2026",
       status: "in_progress",
       statusLabel: "In progress",
-      timingLabel: "Ends Aug 3, 2026, 12:00:00 PM UTC",
+      timingLabel: "Ends Aug 3 at 12:00 PM UTC",
       title: "Start an active group",
     },
     {
@@ -118,8 +118,7 @@ const DESIGN_AI_USAGE_ACTIVITY: HostedAiUsageActivitySnapshot = {
       selectedLabel: "Jul 20, 2026",
       status: "checking_final_activity",
       statusLabel: "Checking final activity",
-      timingLabel:
-        "Action closed Jul 27, 2026, 12:00:00 PM UTC; checking delayed activity",
+      timingLabel: "Closed Jul 27 at 12:00 PM UTC",
       title: "Start an active group",
     },
     {
@@ -131,7 +130,7 @@ const DESIGN_AI_USAGE_ACTIVITY: HostedAiUsageActivitySnapshot = {
       selectedLabel: "Jul 10, 2026",
       status: "completed",
       statusLabel: "Completed",
-      timingLabel: "Earned Jul 16, 2026",
+      timingLabel: "Earned Jul 16",
       title: "Bring someone new to Murph",
     },
   ],
@@ -150,10 +149,16 @@ const DESIGN_AI_USAGE_WAITING_ACTIVITY: HostedAiUsageActivitySnapshot = {
       selectedLabel: "Jul 29, 2026",
       status: "waiting_for_group",
       statusLabel: "Waiting for a new group",
-      timingLabel: "Start a new group by Aug 5, 2026, 12:00:00 PM UTC",
+      timingLabel: "Start by Aug 5 at 12:00 PM UTC",
       title: "Start an active group",
     },
   ],
+  missionsEnabled: true,
+};
+
+const DESIGN_AI_USAGE_EMPTY_ACTIVITY: HostedAiUsageActivitySnapshot = {
+  credits: [],
+  missions: [],
   missionsEnabled: true,
 };
 
@@ -176,7 +181,7 @@ const DESIGN_AI_USAGE_DISABLED_HISTORY: HostedAiUsageActivitySnapshot = {
       selectedLabel: "Jul 10, 2026",
       status: "completed",
       statusLabel: "Completed",
-      timingLabel: "Earned Jul 16, 2026",
+      timingLabel: "Earned Jul 16",
       title: "Bring someone new to Murph",
     },
   ],
@@ -503,6 +508,7 @@ function PersonalUsageCreditState(props: {
 export {
   DESIGN_AI_USAGE_ACTIVITY,
   DESIGN_AI_USAGE_DISABLED_HISTORY,
+  DESIGN_AI_USAGE_EMPTY_ACTIVITY,
   DESIGN_AI_USAGE_WAITING_ACTIVITY,
   DESIGN_GROUP_SPONSORSHIP_OFFERS,
   DESIGN_USAGE_OFFERS,
