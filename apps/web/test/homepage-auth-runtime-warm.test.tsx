@@ -146,6 +146,32 @@ test("warms one shared Privy runtime after homepage idle and reuses it on click"
   });
 });
 
+test("leaves authenticated homepage children on the ordinary root auth owner", async () => {
+  vi.useFakeTimers();
+  const { HomepageAuthRuntimeProvider } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog-provider"
+  );
+  const rendered = await renderClientComponent(
+    createElement(
+      HomepageAuthRuntimeProvider,
+      { authenticated: true },
+      createElement("p", null, "Authenticated homepage"),
+    ),
+    { location: bareHomepageLocation(), requireButton: false },
+  );
+  cleanupRender = rendered.cleanup;
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2_500);
+  });
+  await flushRuntimeLoad();
+
+  expect(rendered.container.textContent).toContain("Authenticated homepage");
+  expect(mocks.runtimeModuleLoad).not.toHaveBeenCalled();
+  expect(mocks.runtimeMount).not.toHaveBeenCalled();
+  expect(mocks.authDialogProps).toBeNull();
+});
+
 async function flushRuntimeLoad() {
   await act(async () => {
     await Promise.resolve();
