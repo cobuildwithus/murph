@@ -628,6 +628,11 @@ test("hosted channel activity does not use ambient fetch when provider fetch is 
 });
 
 test("hosted progress delivery dependencies use the hosted Linq provider effect", async () => {
+  const latencyTraceRecord = vi.fn(async (_request: HostedRuntimeLatencyTraceRequest) => ({
+    matchedCount: 1,
+    recorded: true,
+    unmatchedCount: 0,
+  }));
   const providerFetch = vi.fn<typeof fetch>(async () =>
     Response.json({
       ok: true,
@@ -650,6 +655,13 @@ test("hosted progress delivery dependencies use the hosted Linq provider effect"
       LINQ_API_TOKEN: "platform-linq-token",
       TELEGRAM_API_BASE_URL: "https://api.telegram.example",
     },
+    latencyTrace: {
+      latencyTracePort: {
+        record: latencyTraceRecord,
+      },
+      runtimeAttemptId: "attempt_progress_trace_1",
+      source: "linq",
+    },
     platformEnv: {
       TELEGRAM_BOT_TOKEN: "platform-telegram-token",
     },
@@ -661,6 +673,7 @@ test("hosted progress delivery dependencies use the hosted Linq provider effect"
   });
 
   await delivery.sendLinq?.({
+    acceptedAssistantInputIds: ["input_progress_trace_1"],
     directRecipientPhoneNumber: "+15550000001",
     fromPhoneNumber: "+15550000002",
     homeRouteFallbackAllowed: false,
@@ -692,6 +705,9 @@ test("hosted progress delivery dependencies use the hosted Linq provider effect"
     subject: "Murph update",
     target: "email-thread",
     targetKind: "thread",
+  });
+  await vi.waitFor(() => {
+    expect(latencyTraceRecord).toHaveBeenCalledTimes(1);
   });
 
   assert.equal(delivery.signal, signal);
@@ -742,6 +758,58 @@ test("hosted progress delivery dependencies use the hosted Linq provider effect"
     target: "email-thread",
     targetKind: "thread",
   });
+  expect(latencyTraceRecord).toHaveBeenCalledWith({
+    event: expect.objectContaining({
+      assistantInputIds: ["input_progress_trace_1"],
+      milestone: "progress_update_accepted",
+      runtimeAttemptId: "attempt_progress_trace_1",
+      source: "linq",
+      type: "assistant_milestone",
+    }),
+  });
+  expect(JSON.stringify(latencyTraceRecord.mock.calls)).not.toContain(
+    "Checking the current thread.",
+  );
+});
+
+test("hosted progress delivery traces only accepted Linq sends", async () => {
+  const latencyTraceRecord = vi.fn(async (_request: HostedRuntimeLatencyTraceRequest) => ({
+    matchedCount: 1,
+    recorded: true,
+    unmatchedCount: 0,
+  }));
+  mocks.sendHostedProviderLinqMessage.mockRejectedValueOnce(
+    new Error("provider unavailable"),
+  );
+  const delivery = createHostedAssistantProgressDeliveryDependencies({
+    effectsPort: {
+      async assertLinqRecentInboundEngagement(request) {
+        return buildClaimedLinqEngagementResult(request);
+      },
+      sendEmail: mocks.sendEmail,
+    },
+    forwardedEnv: {
+      LINQ_API_TOKEN: "platform-linq-token",
+    },
+    latencyTrace: {
+      latencyTracePort: {
+        record: latencyTraceRecord,
+      },
+      runtimeAttemptId: "attempt_progress_failed_1",
+      source: "linq",
+    },
+    providerFetch: vi.fn<typeof fetch>(),
+  });
+
+  await expect(delivery.sendLinq?.({
+    acceptedAssistantInputIds: ["input_progress_failed_1"],
+    message: "Still checking.",
+    target: "linq-thread",
+    targetKind: "thread",
+  })).rejects.toThrow("provider unavailable");
+  await Promise.resolve();
+
+  expect(latencyTraceRecord).not.toHaveBeenCalled();
 });
 
 test("hosted progress email delivery rejects participant targets", async () => {

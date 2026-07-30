@@ -25,6 +25,8 @@ import { FamilyInviteJoinStudy } from "./family-invite-join-study";
 import { GroupJoinStudy } from "./group-join-study";
 import { GrowthScorecardStudy } from "./growth-scorecard-study";
 import { HomeLoadStateStudy } from "./home-load-state-study";
+import { HomeOnboardingStepsStudy } from "./home-onboarding-steps-study";
+import { JoinFamilyBillingRecoveryStudy } from "./join-family-billing-recovery-study";
 import { PersonaOnboardingStudy } from "./persona-onboarding-study";
 import { PulseTrialBillingContinuationStudy } from "./pulse-trial-billing-continuation-study";
 import { SettingsAuthRequiredStudy } from "./settings-auth-required-study";
@@ -180,6 +182,12 @@ export function SectionsContent() {
 
       <Separator />
 
+      <StudySection title="Family billing recovery on Join">
+        <JoinFamilyBillingRecoveryStudy />
+      </StudySection>
+
+      <Separator />
+
       <StudySection title="Connect source card actions">
         <ConnectSourceCardStudy />
       </StudySection>
@@ -212,6 +220,12 @@ export function SectionsContent() {
 
       <StudySection title="Home partial-load recovery">
         <HomeLoadStateStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Home onboarding steps">
+        <HomeOnboardingStepsStudy />
       </StudySection>
 
       <Separator />

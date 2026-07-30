@@ -51,10 +51,120 @@ describe("hosted runtime latency health", () => {
     expect(HOSTED_RUNTIME_REPLY_LATENCY_ALERT_THRESHOLD_MS).toBe(30_000);
     expect(health).toMatchObject({
       anomalous: true,
-      maxCompletedReplyLatencyMs: 30_000,
+      maxFirstVisibleResponseLatencyMs: 30_000,
       oldestUnresolvedAgeMs: 30_000,
       recentCompletedReplyCount: 2,
-      recentSlowReplyCount: 1,
+      recentSlowInitialResponseCount: 1,
+      unresolvedReplyCount: 1,
+    });
+  });
+
+  it("counts one completed reply for grouped traces sharing a delivery", () => {
+    const health = summarizeHostedRuntimeLatencyRows({
+      now,
+      rows: [
+        latencyRow({
+          acceptedAt: "2026-07-26T15:58:00.000Z",
+          deliveryAcceptedAt: "2026-07-26T15:59:00.000Z",
+          linqDeliveryId: "delivery_grouped_1",
+        }),
+        latencyRow({
+          acceptedAt: "2026-07-26T15:58:00.500Z",
+          deliveryAcceptedAt: "2026-07-26T15:59:00.000Z",
+          linqDeliveryId: "delivery_grouped_1",
+        }),
+      ],
+    });
+
+    expect(health).toMatchObject({
+      maxFirstVisibleResponseLatencyMs: 60_000,
+      recentCompletedReplyCount: 1,
+      recentSlowInitialResponseCount: 1,
+    });
+  });
+
+  it("counts one unresolved turn for traces sharing a provider request", () => {
+    const rows = [
+      "2026-07-26T15:58:00.000Z",
+      "2026-07-26T15:58:00.500Z",
+    ].map((acceptedAt) =>
+      latencyRow({
+        acceptedAt,
+        providerRequestOrdinal: 0,
+        providerStartAt: "2026-07-26T15:58:05.000Z",
+        runtimeAttemptId: "attempt_grouped_unresolved_1",
+      })
+    );
+
+    const health = summarizeHostedRuntimeLatencyRows({ now, rows });
+
+    expect(health).toMatchObject({
+      oldestUnresolvedAgeMs: 2 * 60_000,
+      unresolvedReplyCount: 1,
+    });
+  });
+
+  it("uses timely progress as the first visible response for completed and unresolved turns", () => {
+    const health = summarizeHostedRuntimeLatencyRows({
+      now,
+      rows: [
+        latencyRow({
+          acceptedAt: "2026-07-26T15:58:00.000Z",
+          deliveryAcceptedAt: "2026-07-26T15:59:40.000Z",
+          linqDeliveryId: "delivery_progress_1",
+          progressUpdateAcceptedAt: "2026-07-26T15:58:29.999Z",
+        }),
+        latencyRow({
+          acceptedAt: "2026-07-26T15:59:00.000Z",
+          progressUpdateAcceptedAt: "2026-07-26T15:59:10.000Z",
+          providerRequestOrdinal: 0,
+          providerStartAt: "2026-07-26T15:59:05.000Z",
+          runtimeAttemptId: "attempt_progress_1",
+        }),
+        latencyRow({
+          acceptedAt: "2026-07-26T15:59:00.500Z",
+          progressUpdateAcceptedAt: "2026-07-26T15:59:10.000Z",
+          providerRequestOrdinal: 0,
+          providerStartAt: "2026-07-26T15:59:05.000Z",
+          runtimeAttemptId: "attempt_progress_1",
+        }),
+      ],
+    });
+
+    expect(health).toMatchObject({
+      anomalous: false,
+      maxFirstVisibleResponseLatencyMs: null,
+      recentCompletedReplyCount: 1,
+      recentSlowInitialResponseCount: 0,
+      unresolvedReplyCount: 0,
+    });
+  });
+
+  it("keeps turns alertable when progress arrives at or after 30 seconds", () => {
+    const health = summarizeHostedRuntimeLatencyRows({
+      now,
+      rows: [
+        latencyRow({
+          acceptedAt: "2026-07-26T15:58:00.000Z",
+          deliveryAcceptedAt: "2026-07-26T15:59:40.000Z",
+          linqDeliveryId: "delivery_late_progress_1",
+          progressUpdateAcceptedAt: "2026-07-26T15:58:30.000Z",
+        }),
+        latencyRow({
+          acceptedAt: "2026-07-26T15:59:00.000Z",
+          progressUpdateAcceptedAt: "2026-07-26T15:59:40.000Z",
+          providerRequestOrdinal: 0,
+          providerStartAt: "2026-07-26T15:59:05.000Z",
+          runtimeAttemptId: "attempt_late_progress_1",
+        }),
+      ],
+    });
+
+    expect(health).toMatchObject({
+      anomalous: true,
+      maxFirstVisibleResponseLatencyMs: 30_000,
+      recentCompletedReplyCount: 1,
+      recentSlowInitialResponseCount: 1,
       unresolvedReplyCount: 1,
     });
   });
@@ -262,7 +372,9 @@ describe("hosted runtime latency alert monitor", () => {
         /^murph\/runtime-latency\/[0-9a-f-]+\/alert$/u,
       ),
       subject: "Hosted runtime reply latency",
-      text: expect.stringContaining("1 completed reply at or above 30 seconds"),
+      text: expect.stringContaining(
+        "1 completed reply with no progress or final response within 30 seconds",
+      ),
       to: ["operator@example.test"],
     }));
     const sentMessage = sendAlert.mock.calls[0]?.[0].text;
@@ -1143,6 +1255,11 @@ function latencyRow(input: {
   checkpointPublicationExpectedBy?: string | null;
   consumedAt?: string | null;
   deliveryAcceptedAt?: string | null;
+  linqDeliveryId?: string | null;
+  progressUpdateAcceptedAt?: string | null;
+  providerRequestOrdinal?: number | null;
+  providerStartAt?: string | null;
+  runtimeAttemptId?: string | null;
   terminalNonReplyCommittedAt?: string | null;
 }): HostedRuntimeLatencyHealthRow {
   return {
@@ -1154,6 +1271,15 @@ function latencyRow(input: {
     deliveryAcceptedAt: input.deliveryAcceptedAt
       ? instant(input.deliveryAcceptedAt)
       : null,
+    linqDeliveryId: input.linqDeliveryId ?? null,
+    progressUpdateAcceptedAt: input.progressUpdateAcceptedAt
+      ? instant(input.progressUpdateAcceptedAt)
+      : null,
+    providerRequestOrdinal: input.providerRequestOrdinal ?? null,
+    providerStartAt: input.providerStartAt
+      ? instant(input.providerStartAt)
+      : null,
+    runtimeAttemptId: input.runtimeAttemptId ?? null,
     terminalNonReplyCommittedAt: input.terminalNonReplyCommittedAt
       ? instant(input.terminalNonReplyCommittedAt)
       : null,
@@ -1175,6 +1301,7 @@ function createMonitorPrismaFixture(
     traceReadEffects.shift()?.();
     return selectedRows.map((row) => ({
       acceptedAt: row.acceptedAt,
+      linqDeliveryId: row.linqDeliveryId,
       linqDelivery: row.deliveryAcceptedAt
       ? { acceptedAt: row.deliveryAcceptedAt }
       : null,
@@ -1182,7 +1309,9 @@ function createMonitorPrismaFixture(
         consumedAt: row.consumedAt,
       },
       phaseBreakdownJson:
-        row.terminalNonReplyCommittedAt || row.checkpointPublicationExpectedBy
+        row.terminalNonReplyCommittedAt
+        || row.checkpointPublicationExpectedBy
+        || row.progressUpdateAcceptedAt
         ? {
             assistant: {
               ...(row.terminalNonReplyCommittedAt
@@ -1197,10 +1326,19 @@ function createMonitorPrismaFixture(
                       row.checkpointPublicationExpectedBy.getTime(),
                   }
                 : {}),
+              ...(row.progressUpdateAcceptedAt
+                ? {
+                    progressUpdateAcceptedAtEpochMs:
+                      row.progressUpdateAcceptedAt.getTime(),
+                  }
+                : {}),
             },
             schemaVersion: 1,
           }
         : null,
+      providerRequestOrdinal: row.providerRequestOrdinal,
+      providerStartAt: row.providerStartAt,
+      runtimeAttemptId: row.runtimeAttemptId,
     }));
   });
   const alertUpsert = vi.fn(async (args: AlertUpsertArgs) => {

@@ -1343,6 +1343,12 @@ describe('monorepo release flow coverage audit', () => {
       'Every non-obvious affected surface is also disclosed',
     )
     expect(prDeepReviewPrompt).toContain(
+      'applicable frontend and product-experience lenses own rendered proof',
+    )
+    expect(prDeepReviewPrompt).not.toContain(
+      'routed local product-experience review',
+    )
+    expect(prDeepReviewPrompt).toContain(
       'Disclosure does not make\nan unsafe or needless change acceptable',
     )
     expect(prDeepReviewPrompt).toContain(
@@ -1359,6 +1365,15 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(completionSpecialistsPrompt).toContain(
       '`review-gpt-pr-context/rendered-evidence.txt`',
+    )
+    expect(completionSpecialistsPrompt).toContain(
+      '`agent-docs/prompts/product-experience-review.md`',
+    )
+    expect(completionSpecialistsPrompt).toContain(
+      'Product experience lens: applicable|not applicable',
+    )
+    expect(completionSpecialistsPrompt).toContain(
+      'Product purpose verdict:',
     )
     expect(completionSpecialistsPrompt).toContain('`reviewgpt-coverage.patch`')
     expect(completionSpecialistsPrompt).toContain('`SPECIALIST_OUTCOME: PASS`')
@@ -1520,8 +1535,8 @@ describe('monorepo release flow coverage audit', () => {
     expect(completionSpecialistsPrompt).toMatch(coverageAdmissionRule)
     expect(prReviewGptLoop).toMatch(coverageAdmissionRule)
     expect(completionWorkflow).toMatch(coverageAdmissionRule)
-    expect(completionSpecialistsPrompt).toContain(
-      'push\nit through required exact-head CI',
+    expect(completionSpecialistsPrompt).toMatch(
+      /push\s+it through required exact-head CI/u,
     )
     expect(verificationAndRuntime).toContain('### Ten-minute local admission fallback')
     expect(verificationAndRuntime).toContain('### Required post-landing trust-root proof')
@@ -1535,7 +1550,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(completionWorkflow).toContain('not complete until the PR branch has no merge conflicts')
     expect(completionWorkflow).toContain('fetch the latest `main`')
     expect(completionWorkflow).toContain(
-      'pass replaces the three former local `prompt-review`, `frontend-review`, and',
+      'pass replaces the four former local `product-experience-review`,',
     )
     expect(completionWorkflow).toContain(
       'never combine this final gate with local `deep-review`',
@@ -1557,6 +1572,15 @@ describe('monorepo release flow coverage audit', () => {
     expect(completionWorkflow).toContain('If none exist,')
     expect(completionWorkflow).toContain('## Preliminary Specialist Applicability')
     expect(completionWorkflow).toContain('`reviewgpt-coverage.patch`')
+    expect(completionWorkflow).toContain(
+      'the parent must reapply `agent-docs/prompts/product-experience-review.md` to that corrected pushed head',
+    )
+    expect(completionWorkflow).toContain(
+      'This is a bounded parent revalidation, not another subagent or ReviewGPT invocation.',
+    )
+    expect(prReviewGptLoop).toContain(
+      'This is parent-owned corrected-head\nrevalidation, not another subagent or ReviewGPT invocation.',
+    )
 
     const completionAuditPrompts = [
       'prompt-review.md',
@@ -1578,6 +1602,12 @@ describe('monorepo release flow coverage audit', () => {
     expect(completionAuditPrompts[0]).toContain('upgrading-to-gpt-5p6-sol.md')
     expect(completionAuditPrompts[1]).toContain('render and inspect')
     expect(completionAuditPrompts[1]).toContain('desktop and mobile viewports')
+    expect(completionAuditPrompts[2]).toContain(
+      'inside the preliminary `completion-specialists`',
+    )
+    expect(completionAuditPrompts[2]).not.toContain(
+      'Do not use `review:gpt`',
+    )
     expect(completionAuditPrompts[3]).toContain('Optional patch artifact:')
     expect(completionAuditPrompts[3]).toContain('`reviewgpt-coverage.patch`')
     expect(completionAuditPrompts[3]).toMatch(coverageAdmissionRule)
@@ -1597,7 +1627,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'research-init.mjs'))).toBe(false)
   })
 
-  it('keeps product-experience decisions separate from rendered frontend review', () => {
+  it('keeps product-experience decisions distinct inside the unified specialist review', () => {
     const prDeepReview = readFileSync(
       path.join(repoRoot, 'scripts', 'chatgpt-review-presets', 'pr-deep-review.md'),
       'utf8',
@@ -1647,13 +1677,14 @@ describe('monorepo release flow coverage audit', () => {
     expect(completionSpecialists).toContain(
       'rendered fidelity to the declared',
     )
+    expect(completionSpecialists).toContain('# Product-experience lens')
+    expect(completionSpecialists).toContain(
+      '`agent-docs/prompts/product-experience-review.md`',
+    )
     expect(completionSpecialists).not.toMatch(/product\s+alignment/u)
     expect(productExperienceReview).toContain('irreducible user purpose')
     expect(productExperienceReview).toContain(
-      'audit for changed user-facing product decisions',
-    )
-    expect(productExperienceReview).not.toContain(
-      'audit for materially changed user-facing behavior',
+      'Product-experience lens for the preliminary unified ReviewGPT completion pass',
     )
     expect(productExperienceReview).toMatch(
       /extra concept, screen, click, field, choice, setting,\s+confirmation, interruption, and block of explanatory text/u,
@@ -1665,7 +1696,7 @@ describe('monorepo release flow coverage audit', () => {
       'Defer component and token implementation',
     )
     expect(frontendReview).toMatch(
-      /do not\s+duplicate subjective product-taste findings or decide the copy, state selection,\s+action count, or whether an element exists/u,
+      /do not duplicate subjective product-taste findings or\s+decide the copy, state selection, action count, or whether an element exists/u,
     )
     expect(frontendReview).toContain(
       'visual treatment that obscures or conflicts with the declared hierarchy',
@@ -1685,7 +1716,7 @@ describe('monorepo release flow coverage audit', () => {
       'asynchronous continuation or wake ownership;',
     )
     expect(completionWorkflow).toContain(
-      '| Any product-owned dimension, including one changed through a prompt | Run local `product-experience-review` |',
+      '| Any product-owned dimension, including one changed through a prompt | Run the product-experience lens in the preliminary specialist ReviewGPT pass |',
     )
     expect(completionWorkflow).toContain(
       '| Prompt-primary change with no product-owned dimension | No product-decision review | Run the preliminary prompt lens only |',
@@ -1697,14 +1728,17 @@ describe('monorepo release flow coverage audit', () => {
       '| Implementation-only presentation with no product-owned dimension | No product-decision review |',
     )
     expect(completionWorkflow).toContain(
-      'An\nexemption never waives an applicable preliminary lens or local specialist.',
+      'An\nexemption never waives an applicable preliminary lens.',
     )
     expect(completionWorkflow).not.toContain('explicit credit exhaustion uses `frontend-review`')
     expect(completionWorkflow).toContain(
       'Semantic copy—including CTA, helper, onboarding,',
     )
     expect(completionWorkflow).toMatch(
-      /a prompt that changes a product-owned dimension also runs local\s+`product-experience-review`/u,
+      /a prompt that changes a product-owned dimension also activates the\s+product-experience lens in the same preliminary pass/u,
+    )
+    expect(agentWorkflowRouting).not.toContain(
+      'runs local `product-experience-review`',
     )
     expect(agentWorkflowRouting).toContain(
       'Any change to semantic user-facing copy; user-visible action purpose, count, or priority;',
@@ -2870,6 +2904,11 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       writeHarnessFile(harnessRoot, 'apps/demo/source.ts', 'export const value = 0\n')
       writeHarnessFile(
         harnessRoot,
+        'agent-docs/prompts/product-experience-review.md',
+        'product-experience lens\n',
+      )
+      writeHarnessFile(
+        harnessRoot,
         'agent-docs/prompts/prompt-review.md',
         'prompt lens\n',
       )
@@ -3007,6 +3046,7 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
           'agent-docs/FRONTEND.md',
           'PRODUCT.md',
           'DESIGN.md',
+          'agent-docs/prompts/product-experience-review.md',
           'agent-docs/prompts/prompt-review.md',
           'agent-docs/prompts/frontend-review.md',
           '.crabbox.yaml',
@@ -3622,11 +3662,20 @@ exit 1
 
   it('verifies the live release manifest and publish set', () => {
     const summary = JSON.parse(
-      execFileSync('node', ['scripts/verify-release-target.mjs', '--json'], {
-        cwd: repoRoot,
-        encoding: 'utf8',
-        env: withoutNodeV8Coverage(),
-      }),
+      execFileSync(
+        'node',
+        [
+          'scripts/verify-release-target.mjs',
+          '--expect-version',
+          cliPackageJson.version ?? 'UNCONFIRMED',
+          '--json',
+        ],
+        {
+          cwd: repoRoot,
+          encoding: 'utf8',
+          env: withoutNodeV8Coverage(),
+        },
+      ),
     ) as {
       packages: Array<{
         bundledExternalDependencies?: string[]

@@ -18,6 +18,8 @@ const mocks = vi.hoisted(() => ({
   navigateHostedAuthRedirect: vi.fn(),
 }));
 
+type MockHostedAuthPanelView = "auth" | "auth-active" | "consent";
+
 vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel-island", () => {
   mocks.hostedAuthPanelIslandModuleLoad();
 
@@ -30,7 +32,7 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel-island", () => {
         joinUrl: string;
         stage: "active" | "blocked" | "checkout";
       }) => Promise<void> | void;
-      onViewChange?: (view: "auth" | "consent" | "finishing") => void;
+      onViewChange?: (view: MockHostedAuthPanelView) => void;
       requireLaunchConsentOnCompletion?: boolean;
       showPassiveLegalNotice?: boolean;
     }) {
@@ -93,17 +95,25 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel-island", () => {
           "button",
           {
             type: "button",
-            onClick: () => props.onViewChange?.("consent"),
+            onClick: () => props.onViewChange?.("auth-active"),
           },
-          "Show consent",
+          "Start auth journey",
         ),
         createElement(
           "button",
           {
             type: "button",
-            onClick: () => props.onViewChange?.("finishing"),
+            onClick: () => props.onViewChange?.("auth"),
           },
-          "Show finishing",
+          "Release auth journey",
+        ),
+        createElement(
+          "button",
+          {
+            type: "button",
+            onClick: () => props.onViewChange?.("consent"),
+          },
+          "Show consent",
         ),
       );
     },
@@ -144,19 +154,63 @@ async function flushHostedAuthPanelIsland() {
 }
 
 const DialogOpenContext = createContext(false);
+const DialogOpenChangeContext =
+  createContext<((open: boolean) => void) | null>(null);
 
 vi.mock("@/src/components/ui/dialog", () => ({
-  Dialog(props: { children: ReactNode; open?: boolean }) {
+  Dialog(props: {
+    children: ReactNode;
+    onOpenChange?: (open: boolean) => void;
+    open?: boolean;
+  }) {
     return createElement(
       DialogOpenContext.Provider,
       { value: Boolean(props.open) },
-      props.children,
+      createElement(
+        DialogOpenChangeContext.Provider,
+        { value: props.onOpenChange ?? null },
+        props.children,
+      ),
     );
   },
-  DialogContent(props: { children: ReactNode }) {
+  DialogContent(props: { children: ReactNode; showCloseButton?: boolean }) {
     const open = useContext(DialogOpenContext);
+    const onOpenChange = useContext(DialogOpenChangeContext);
     return open
-      ? createElement("div", { "data-dialog-content": "shown" }, props.children)
+      ? createElement(
+          "div",
+          { "data-dialog-content": "shown" },
+          props.children,
+          props.showCloseButton !== false
+            ? createElement(
+                "button",
+                {
+                  "data-dialog-dismiss": "close",
+                  type: "button",
+                  onClick: () => onOpenChange?.(false),
+                },
+                "Close",
+              )
+            : null,
+          createElement(
+            "button",
+            {
+              "data-dialog-dismiss": "backdrop",
+              type: "button",
+              onClick: () => onOpenChange?.(false),
+            },
+            "Backdrop dismiss",
+          ),
+          createElement(
+            "button",
+            {
+              "data-dialog-dismiss": "escape",
+              type: "button",
+              onClick: () => onOpenChange?.(false),
+            },
+            "Escape dismiss",
+          ),
+        )
       : null;
   },
   DialogDescription(props: HTMLAttributes<HTMLParagraphElement>) {
@@ -236,7 +290,7 @@ test("LandingAuthActions opens the unified homepage auth flow", async () => {
   expect(window.document.body.textContent).toContain("Log in or sign up");
 });
 
-test("LandingAuthActions gives consent and finishing views matching dialog titles", async () => {
+test("LandingAuthActions gives the consent view a matching dialog title", async () => {
   const { button, cleanup, container, window } = await renderClientComponent(
     createElement(LandingAuthActions, {
       authenticated: false,
@@ -269,16 +323,68 @@ test("LandingAuthActions gives consent and finishing views matching dialog title
       (candidate) => candidate.textContent?.trim() === "Close",
     ),
   ).toBe(false);
+});
 
-  const finishingButton = Array.from(container.querySelectorAll("button")).find(
-    (candidate) => candidate.textContent === "Show finishing",
+test("LandingAuthActions blocks dialog dismissal while auth completion owns the journey", async () => {
+  const { button, cleanup, container, window } = await renderClientComponent(
+    createElement(LandingAuthActions, {
+      authenticated: false,
+      context: "hero",
+      authLabel: "See what works for your body",
+    }),
+  );
+  cleanupRender = cleanup;
+
+  await act(async () => {
+    button.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+  await flushHostedAuthPanelIsland();
+
+  const startJourneyButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent === "Start auth journey",
   );
   await act(async () => {
-    finishingButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+    startJourneyButton?.dispatchEvent(
+      new window.Event("click", { bubbles: true }),
+    );
   });
 
-  expect(container.textContent).toContain("Setting things up");
-  expect(container.textContent).toContain("Murph is preparing your account.");
+  const dialogHeader = container.querySelector("[data-dialog-content] > div");
+  expect(dialogHeader?.className).toContain("pr-10");
+  expect(dialogHeader?.className).not.toContain("sr-only");
+  expect(container.textContent).toContain("Log in or sign up");
+  expect(container.textContent).toContain(
+    "Murph helps you build healthier habits that fit your life.",
+  );
+  expect(
+    container.querySelector('[data-dialog-dismiss="close"]'),
+  ).toBeNull();
+  expect(container.querySelector("[data-dialog-content='shown']")).toBeTruthy();
+
+  for (const dismissal of ["backdrop", "escape"]) {
+    await act(async () => {
+      container
+        .querySelector(`[data-dialog-dismiss="${dismissal}"]`)
+        ?.dispatchEvent(new window.Event("click", { bubbles: true }));
+    });
+    expect(container.querySelector("[data-dialog-content='shown']")).toBeTruthy();
+  }
+
+  const releaseJourneyButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent === "Release auth journey",
+  );
+  await act(async () => {
+    releaseJourneyButton?.dispatchEvent(
+      new window.Event("click", { bubbles: true }),
+    );
+  });
+
+  const closeButton = container.querySelector('[data-dialog-dismiss="close"]');
+  expect(closeButton).toBeTruthy();
+  await act(async () => {
+    closeButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+  expect(container.querySelector("[data-dialog-content='shown']")).toBeNull();
 });
 
 test("LandingAuthActions sends completed homepage signups through the initial-visit home dialog", async () => {

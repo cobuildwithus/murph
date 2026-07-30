@@ -4619,7 +4619,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           : {}),
         ok: true,
         ...(body.authorityCheckOnly === false
-          ? { providerDispatchClaimed: true }
+          ? {
+              deliveryPosture: "cautious",
+              providerDispatchClaimed: true,
+            }
           : {}),
         ...(responseCount === 1
           ? {}
@@ -4657,6 +4660,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       target: "chat_123",
       targetKind: "thread",
     })).resolves.toEqual({
+      deliveryPosture: "cautious",
       providerDispatchClaimed: true,
       threadIsDirect: false,
     });
@@ -4684,6 +4688,43 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
       expect(request.headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
     }
+  });
+
+  it("strictly parses typed Linq health blocks from web-control", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({
+        deliveryBlockCode: "chat_opted_out",
+        deliveryPosture: "unknown-posture",
+        ok: true,
+        threadIsDirect: true,
+      }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      })
+    );
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+    const assertLinqRecentInboundEngagement =
+      platform.effectsPort.assertLinqRecentInboundEngagement;
+    if (!assertLinqRecentInboundEngagement) {
+      throw new Error("Expected hosted Linq egress authority assertion effect.");
+    }
+
+    await expect(assertLinqRecentInboundEngagement({
+      authorityCheckOnly: true,
+      target: "chat_blocked",
+      targetKind: "thread",
+    })).resolves.toEqual({
+      deliveryBlockCode: "chat_opted_out",
+      threadIsDirect: true,
+    });
   });
 
   it("write-fences Linq delivery outcomes through direct web-control", async () => {

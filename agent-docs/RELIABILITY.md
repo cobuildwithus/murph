@@ -186,12 +186,40 @@ Last verified: 2026-07-29
   report convergence before the receipt itself is deleted.
 - Every direct subscription Checkout attempt is an encrypted member-owned row;
   Family retains its single encrypted session in the existing billing attempt
-  owner. After Stripe creates a session, Checkout creation re-locks the owner
-  and returns the URL only after binding that reference; if suspension or
-  deletion won, it expires the session instead. Account deletion suspends
-  first, re-reads all direct attempts and Family billing owners, expires every
-  open session, absorbs an expiry/completion race by canceling the resulting
-  subscription, and only then prepares the final customer-cleanup receipt.
+  owner. A first-time direct subscription Checkout never pre-creates a
+  standalone Customer: subscription-mode Checkout creates it only when the
+  owned Session completes, and completion binds the Customer and Subscription
+  together. Direct Checkout completion prepares its live provider snapshot,
+  encrypted billing identifiers, and email before taking the member lock; the
+  transaction only revalidates durable ownership, accepts the existing attempt,
+  and writes the prepared values. Pulse Session metadata resolves only the
+  member ID: after taking that lock, completion rereads the authoritative
+  redemption, phase, status, and subscription lookup key before deciding
+  whether an identity is replaceable. That decision read selects no encrypted
+  fields and therefore cannot call KMS. A loser preserves the current identity
+  and is canceled after commit; an unexpected policy rejection after acceptance
+  aborts the transaction. Before browser or webhook completion takes the member
+  lock, it durably provisions only control and ingress through their existing
+  short transactions, unwraps both into the request-scoped cache, and prepares
+  ephemeral device and runtime candidates. Complete root presence is also
+  activation proof for group participant projection, phone-call authority, and
+  activation recovery, so those final candidates become durable only inside the
+  accepted winner transaction. The locked winner path selects only attempt,
+  lookup-key, freshness, and entitlement scalars, writes the accepted scalar
+  trial facts, and lets private-field batch projection reuse the concrete root
+  keys already in the scoped cache; it does not project a rich billing snapshot
+  or make a KMS request. Stripe event reconciliation likewise prepares its
+  canonical provider snapshot before the lock and revalidates the database
+  owner inside it. After Stripe creates a session, Checkout creation
+  re-locks the owner and returns the URL only after binding that reference; if
+  suspension or deletion won, it expires the session instead. Account deletion
+  suspends first, re-reads all direct attempts and Family billing owners,
+  expires every open session, absorbs an expiry/completion race by canceling
+  the resulting subscription, and only then prepares the final
+  customer-cleanup receipt.
+  Pulse Trial loser cleanup validates exact provider targets before one short
+  member-owner revalidation transaction and cancels them only after that
+  transaction releases; no Stripe request is made while that lock is held.
 - Participant-derived hosted-group access is bounded by the shared seven-day
   observation lease. Provider rosters larger than the reconciliation cap cannot
   leave a participant authoritative forever: stale relationships age out.
@@ -462,6 +490,11 @@ Last verified: 2026-07-29
   not silently complete the event.
 - Subscription refund and dispute reversals keep event freshness, the billing
   cursor, unpaid status, and suspension in the same locked billing owner.
+  Subscription, latest-invoice, and invoice-payment evidence is prepared before
+  that owner lock. The transaction re-resolves the reversal owner and checks
+  that the prepared Subscription is still the member's current durable
+  identity before applying only the database transition; it never waits on a
+  Stripe request.
   Exact replay may repeat that atomic transition, but an already-suspended
   snapshot cannot substitute for event freshness: a distinct newer reversal
   must advance the cursor so an older restore cannot reactivate the member.

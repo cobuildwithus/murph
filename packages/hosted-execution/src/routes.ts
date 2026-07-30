@@ -60,6 +60,27 @@ export const HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH =
   "/api/internal/hosted-runtime/linq-egress/engagement";
 export const HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH =
   "/api/internal/hosted-runtime/linq-egress/delivery";
+
+export const HOSTED_RUNTIME_LINQ_DELIVERY_POSTURES = [
+  "cautious",
+  "recover",
+] as const;
+export type HostedRuntimeLinqDeliveryPosture =
+  typeof HOSTED_RUNTIME_LINQ_DELIVERY_POSTURES[number];
+
+export const HOSTED_RUNTIME_LINQ_DELIVERY_BLOCK_CODES = [
+  "operator_disabled",
+  "line_flagged",
+  "line_critical",
+  "line_at_risk_new_conversation",
+  "chat_critical",
+  "chat_opted_out",
+  "delivery_unhealthy",
+  "delivery_warning_new_conversation",
+] as const;
+export type HostedRuntimeLinqDeliveryBlockCode =
+  typeof HOSTED_RUNTIME_LINQ_DELIVERY_BLOCK_CODES[number];
+
 export const HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH =
   "/api/internal/hosted-runtime/email-egress/recipient";
 export const HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH =
