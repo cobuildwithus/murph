@@ -638,7 +638,22 @@ describe("R2 online immutable copy", () => {
       `users/${boundaryNamespace}/workspace-snapshots/http500-committed.snapshot.enc`,
       { etag: '"01010101010101010101010101010101"', size: 12 },
     );
-    const firstResponse = new Response("<Error />", { status: 500 });
+    let firstResponseBodyCancelled = false;
+    let closeFirstResponseBody!: () => void;
+    const firstResponse = new Response(new ReadableStream({
+      start(controller) {
+        closeFirstResponseBody = () => {
+          if (!firstResponseBodyCancelled) controller.close();
+        };
+      },
+      cancel() {
+        firstResponseBodyCancelled = true;
+      },
+    }), { status: 500 });
+    let markFirstPutObserved!: () => void;
+    const firstPutObserved = new Promise<void>((resolve) => {
+      markFirstPutObserved = resolve;
+    });
     let putAttempts = 0;
     const headPaths: string[] = [];
     const fixture = createProductionCopyFixture(
@@ -648,6 +663,7 @@ describe("R2 online immutable copy", () => {
         if (init?.method === "PUT") {
           putAttempts += 1;
           state.destinationInventory = [marker(), eligible];
+          markFirstPutObserved();
           return firstResponse;
         }
         if (init?.method === "HEAD") {
@@ -658,10 +674,18 @@ describe("R2 online immutable copy", () => {
       },
     );
 
-    await fixture.run();
+    const runPromise = fixture.run();
+    await Promise.race([firstPutObserved, runPromise]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const firstResponseBodyUsedBeforeDrain = firstResponse.bodyUsed;
+    const headPathsBeforeBodyDrain = [...headPaths];
+    closeFirstResponseBody();
+    await runPromise;
 
     expect(putAttempts).toBe(1);
-    expect(firstResponse.bodyUsed).toBe(true);
+    expect(firstResponseBodyUsedBeforeDrain).toBe(true);
+    expect(firstResponseBodyCancelled).toBe(false);
+    expect(headPathsBeforeBodyDrain).toEqual([]);
     expect(headPaths).toEqual([
       `/${destinationBucket}/${eligible.key}`,
       `/${sourceBucket}/${eligible.key}`,
@@ -679,6 +703,7 @@ describe("R2 online immutable copy", () => {
     const firstResponse = new Response("<Error />", { status: 500 });
     const recoveryResponse = new Response("<CopyObjectResult />", { status: 200 });
     const copyHeaders: Record<string, string | null>[] = [];
+    const copyPaths: string[] = [];
     let putAttempts = 0;
     const fixture = createProductionCopyFixture(
       eligible,
@@ -687,6 +712,7 @@ describe("R2 online immutable copy", () => {
         if (init?.method === "PUT") {
           putAttempts += 1;
           copyHeaders.push(criticalCopyHeaders(init));
+          copyPaths.push(url.pathname);
           if (putAttempts === 1) return firstResponse;
           state.destinationInventory = [marker(), eligible];
           return recoveryResponse;
@@ -707,6 +733,10 @@ describe("R2 online immutable copy", () => {
     await fixture.run();
 
     expect(putAttempts).toBe(2);
+    expect(copyPaths).toEqual([
+      `/${destinationBucket}/${eligible.key}`,
+      `/${destinationBucket}/${eligible.key}`,
+    ]);
     expect(copyHeaders).toHaveLength(2);
     expect(copyHeaders[1]).toEqual(copyHeaders[0]);
     expect(firstResponse.bodyUsed).toBe(true);
