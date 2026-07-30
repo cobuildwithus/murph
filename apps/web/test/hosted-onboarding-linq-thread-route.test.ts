@@ -5189,9 +5189,7 @@ describe("Linq group chat auto-provision", () => {
       reason: "wake-appended-thread-route",
     });
     expect(prismaModule.getPrisma).toHaveBeenCalledTimes(2);
-    expect(linqClient.getHostedLinqChatHandles).toHaveBeenCalledWith({
-      chatId: "chat_group_123",
-    });
+    expect(linqClient.getHostedLinqChatHandles).not.toHaveBeenCalled();
     expect(linqClient.getHostedLinqChatSummary).toHaveBeenCalledWith({
       chatId: "chat_group_123",
       timeoutMs: 1_500,
@@ -5320,6 +5318,8 @@ describe("Linq group chat auto-provision", () => {
       .mockReturnValue(buildLinqMessageReceivedEvent({}) as never);
     mockSenderLookup(senderCore);
     mockSuccessfulGroupProvision({ prisma, senderCore });
+    vi.mocked(linqClient.getHostedLinqChatSummary)
+      .mockRejectedValue(new Error("linq unavailable"));
     vi.mocked(linqClient.getHostedLinqChatHandles).mockImplementation(async () => {
       expect(transactionOpen).toBe(false);
       throw new Error("linq unavailable");

@@ -143,8 +143,7 @@ Updated: 2026-07-29
    room-context initialization before first reply, and run focused verification.
 8. [x] Complete preliminary specialist review and resolve its accepted coverage
    and prompt-contract findings.
-9. [ ] Complete parent final review, exact-head CI, and final ReviewGPT before
-   marking the PR ready.
+9. [ ] Complete exact-head CI and final ReviewGPT before marking the PR ready.
 
 ## Decisions
 
@@ -201,6 +200,12 @@ Updated: 2026-07-29
   line/chat health (#1118), and participant display names (#1133); their shared
   hot files remain a reconciliation concern, not a reason for a second setup
   architecture.
+- Parent final review found that successful new-group admission fetched the
+  canonical Linq roster and then fetched the same chat again during post-commit
+  participant reconciliation. The canonical handles now remain request-local
+  and flow into the existing reconciliation owner, preserving the provider
+  outage fallback while keeping the successful hot path to one provider call.
+  All 92 Linq thread-route tests and the Web typecheck pass.
 - Exact-head CI is running from the reconciled remediation branch. Preliminary
-  specialist review is complete; parent final review, final ReviewGPT, and final
+  specialist and parent final reviews are complete; final ReviewGPT and final
   merge proof remain.
