@@ -39,7 +39,10 @@ import { HealthDomainCard } from "@/src/components/overview/health-domain-card";
 import { ActiveExperimentBanner } from "@/src/components/overview/active-experiment-banner";
 import { TrialBillingBanner } from "@/src/components/home/trial-billing-banner";
 import { ProfileStats } from "@/src/components/overview/profile-stats";
-import { HostedResumableAuthState } from "@/src/components/hosted-onboarding/hosted-auth-panel";
+import {
+  HostedAuthPanelAlternateMethods,
+  HostedResumableAuthState,
+} from "@/src/components/hosted-onboarding/hosted-auth-panel";
 import { HostedPrivyReadinessState } from "@/src/components/hosted-onboarding/hosted-auth-panel-island";
 import { EmailIcon } from "@/src/components/homepage/email-icon";
 import {
@@ -147,17 +150,9 @@ function Section({
   );
 }
 
-function DialogPreviewFrame({
-  children,
-  id,
-  label,
-}: {
-  children: React.ReactNode;
-  id?: string;
-  label: string;
-}) {
+function DialogPreviewFrame({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex scroll-mt-24 flex-col gap-3" id={id}>
+    <div className="flex flex-col gap-3">
       <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">{label}</p>
       <div className="max-w-md rounded-2xl bg-[#FAF8F4] p-6 shadow-[0_1px_2px_rgba(26,31,22,0.04)] ring-1 ring-[#1A1F16]/[0.06] md:p-7">
         <DialogPreviewHeader />
@@ -616,17 +611,55 @@ export function ComponentsContent() {
                   readyToContinue
                 />
               </DialogPreviewFrame>
-              <DialogPreviewFrame
-                id="homepage-auth-hydrated-session-recovery"
-                label="Hydrated email session recovery"
-              >
-                <HostedResumableAuthState
-                  auth={{ identityLabel: "member@example.com", method: "email" }}
-                  disabled={false}
-                  onContinue={() => {}}
-                  onSignOut={() => {}}
-                  pending={false}
-                />
+            </div>
+            <div
+              className="grid items-start gap-5 lg:grid-cols-2"
+              id="homepage-auth-hydrated-session-recovery"
+              inert
+            >
+              <DialogPreviewFrame label="Hydrated email session recovery">
+                <div className="space-y-4">
+                  <HostedResumableAuthState
+                    auth={{ identityLabel: "member@example.com", method: "email" }}
+                    disabled={false}
+                    onContinue={() => {}}
+                    onSignOut={() => {}}
+                    pending={false}
+                  />
+                  <HostedAuthPanelAlternateMethods>
+                    <HostedTelegramAuthButtonPresentation onClick={() => {}} />
+                    <HostedInlineAuthButton
+                      icon={<EmailIcon className="size-5" />}
+                      onClick={() => {}}
+                    >
+                      Email
+                    </HostedInlineAuthButton>
+                  </HostedAuthPanelAlternateMethods>
+                </div>
+              </DialogPreviewFrame>
+              <DialogPreviewFrame label="Hydrated phone session recovery">
+                <div className="space-y-4">
+                  <HostedAuthenticatedPhoneAuthState
+                    body=""
+                    description=""
+                    disabled={false}
+                    onContinue={() => {}}
+                    onUseDifferentNumber={() => {}}
+                    pendingAction={null}
+                    secondaryActionSize="lg"
+                    title=""
+                    view="manual-resume"
+                  />
+                  <HostedAuthPanelAlternateMethods>
+                    <HostedTelegramAuthButtonPresentation onClick={() => {}} />
+                    <HostedInlineAuthButton
+                      icon={<EmailIcon className="size-5" />}
+                      onClick={() => {}}
+                    >
+                      Email
+                    </HostedInlineAuthButton>
+                  </HostedAuthPanelAlternateMethods>
+                </div>
               </DialogPreviewFrame>
             </div>
             <div className="grid items-start gap-5 lg:grid-cols-2" inert>

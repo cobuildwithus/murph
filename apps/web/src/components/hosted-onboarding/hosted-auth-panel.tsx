@@ -1,7 +1,7 @@
 "use client";
 
 import { usePrivy, useUser } from "@privy-io/react-auth";
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { PhoneIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
@@ -349,83 +349,65 @@ export function HostedAuthPanel({
       ) : null}
 
       {showAlternateMethods ? (
-        <>
-          <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
-            <span className="h-px flex-1 bg-border" />
-            OR
-            <span className="h-px flex-1 bg-border" />
-          </div>
-          <div className="grid grid-cols-2 gap-3 [&>*]:!order-none">
-            {includesTelegram ? (
-              <HostedTelegramAuthButton
-                active={telegramActive}
-                completionPending={completion.completingMethod === "telegram"}
+        <HostedAuthPanelAlternateMethods
+          telegramNotice={telegramActive ? telegramNotice : null}
+        >
+          {includesTelegram ? (
+            <HostedTelegramAuthButton
+              active={telegramActive}
+              completionPending={completion.completingMethod === "telegram"}
+              disabled={
+                selectedAuthMethod !== null
+                && selectedAuthMethod !== "telegram"
+              }
+              onAuthCancel={() => cancelAuthMethod("telegram")}
+              onAuthQueue={() => queueAuthMethod("telegram")}
+              onAuthQueueCancel={() => clearQueuedAuthMethod("telegram")}
+              onAuthStart={() => beginAuthMethod("telegram")}
+              onAuthenticated={completion.completeAuth}
+              onActivate={() => {
+                setPrimaryMethod("phone");
+                setTelegramActive(true);
+              }}
+              onNoticeChange={setTelegramNotice}
+            />
+          ) : null}
+          {canSwap ? (
+            primaryMethod === "phone" ? (
+              <HostedEmailAuthButton
+                active={false}
                 disabled={
                   selectedAuthMethod !== null
-                  && selectedAuthMethod !== "telegram"
+                  && selectedAuthMethod !== "email"
                 }
-                onAuthCancel={() => cancelAuthMethod("telegram")}
-                onAuthQueue={() => queueAuthMethod("telegram")}
-                onAuthQueueCancel={() => clearQueuedAuthMethod("telegram")}
-                onAuthStart={() => beginAuthMethod("telegram")}
+                onAuthCancel={() => cancelAuthMethod("email")}
+                onAuthQueue={() => queueAuthMethod("email")}
+                onAuthQueueCancel={() => clearQueuedAuthMethod("email")}
+                onAuthStart={() => beginAuthMethod("email")}
                 onAuthenticated={completion.completeAuth}
                 onActivate={() => {
-                  setPrimaryMethod("phone");
-                  setTelegramActive(true);
+                  setPrimaryMethod("email");
+                  setTelegramActive(false);
+                  setTelegramNotice(null);
                 }}
-                onNoticeChange={setTelegramNotice}
+                onCodeEntryChange={setCodeSent}
               />
-            ) : null}
-            {canSwap ? (
-              primaryMethod === "phone" ? (
-                <HostedEmailAuthButton
-                  active={false}
-                  disabled={
-                    selectedAuthMethod !== null
-                    && selectedAuthMethod !== "email"
-                  }
-                  onAuthCancel={() => cancelAuthMethod("email")}
-                  onAuthQueue={() => queueAuthMethod("email")}
-                  onAuthQueueCancel={() => clearQueuedAuthMethod("email")}
-                  onAuthStart={() => beginAuthMethod("email")}
-                  onAuthenticated={completion.completeAuth}
-                  onActivate={() => {
-                    setPrimaryMethod("email");
-                    setTelegramActive(false);
-                    setTelegramNotice(null);
-                  }}
-                  onCodeEntryChange={setCodeSent}
-                />
-              ) : (
-                <HostedInlineAuthButton
-                  active={false}
-                  disabled={selectedAuthMethod !== null}
-                  icon={<PhoneIcon className="h-5 w-5" />}
-                  onClick={() => {
-                    setPrimaryMethod("phone");
-                    setTelegramActive(false);
-                    setTelegramNotice(null);
-                  }}
-                >
-                  Phone
-                </HostedInlineAuthButton>
-              )
-            ) : null}
-          </div>
-          {telegramActive && telegramNotice ? (
-            <p
-              role="status"
-              className={cn(
-                "px-1 text-xs leading-relaxed",
-                telegramNotice.tone === "cancel"
-                  ? "text-muted-foreground"
-                  : "text-destructive/90",
-              )}
-            >
-              {telegramNotice.message}
-            </p>
+            ) : (
+              <HostedInlineAuthButton
+                active={false}
+                disabled={selectedAuthMethod !== null}
+                icon={<PhoneIcon className="h-5 w-5" />}
+                onClick={() => {
+                  setPrimaryMethod("phone");
+                  setTelegramActive(false);
+                  setTelegramNotice(null);
+                }}
+              >
+                Phone
+              </HostedInlineAuthButton>
+            )
           ) : null}
-        </>
+        </HostedAuthPanelAlternateMethods>
       ) : null}
 
       {completion.errorMessage ? (
@@ -437,6 +419,40 @@ export function HostedAuthPanel({
 
       {shouldShowPassiveLegalNotice ? <HostedAuthLegalNotice /> : null}
     </div>
+  );
+}
+
+export function HostedAuthPanelAlternateMethods({
+  children,
+  telegramNotice = null,
+}: {
+  children: ReactNode;
+  telegramNotice?: TelegramAuthNotice | null;
+}) {
+  return (
+    <>
+      <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
+        <span className="h-px flex-1 bg-border" />
+        OR
+        <span className="h-px flex-1 bg-border" />
+      </div>
+      <div className="grid grid-cols-2 gap-3 [&>*]:!order-none">
+        {children}
+      </div>
+      {telegramNotice ? (
+        <p
+          role="status"
+          className={cn(
+            "px-1 text-xs leading-relaxed",
+            telegramNotice.tone === "cancel"
+              ? "text-muted-foreground"
+              : "text-destructive/90",
+          )}
+        >
+          {telegramNotice.message}
+        </p>
+      ) : null}
+    </>
   );
 }
 

@@ -73,6 +73,11 @@ Updated: 2026-07-30
 - Existing queued phone, email, and Telegram ownership remains unchanged; the
   correction applies only while the panel has no code, queue, active/completing
   journey, or pending completion.
+- The first preliminary specialist pass returned `INVALID` because the
+  screenshots showed only the isolated email recovery leaf. The evidence now
+  composes the production recovery leaf and shared alternate-method wrapper for
+  both email and idle phone recovery; this is an evidence correction, not an
+  additional auth-state owner.
 
 ## Verification
 
@@ -85,9 +90,9 @@ Updated: 2026-07-30
   dependency, persisted state, secret, or private identifier appears.
 - Red proof: the selected-but-unsubmitted regression failed because mocked
   `sendCode` received the hydrated email address.
-- Current green proof: 8 focused auth files / 143 tests, web typecheck, scoped
+- Current green proof: 10 focused auth/runtime files / 135 tests, web typecheck, scoped
   ESLint, frontend-design-proof unit checks, diff check, and privacy/secret/cast
   scans pass.
-- Rendered proof: desktop and mobile catalog captures show the synthetic
-  hydrated email recovery state; no production data or provider side effect is
-  used.
+- Rendered proof: desktop and mobile catalog captures show production-faithful
+  hydrated email and idle phone recovery compositions with enabled Telegram
+  and Email alternatives; no production data or provider side effect is used.
