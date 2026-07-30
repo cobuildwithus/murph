@@ -262,9 +262,9 @@ export function AuthDialog({
         />
         {runtimeLoading ? (
           <AuthPanelSkeleton />
-        ) : runtimeError || loadError ? (
+        ) : runtimeError ? (
           <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
-            {runtimeError ?? loadError}
+            {runtimeError}
           </div>
         ) : privyRuntime?.kind === "configured" ? (
           <privyRuntime.AuthPanel
@@ -272,6 +272,10 @@ export function AuthDialog({
             onRestartPrivy={privyRuntime.restart}
             privyAttempt={privyRuntime.attempt}
           />
+        ) : loadError ? (
+          <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
+            {loadError}
+          </div>
         ) : AuthPanelModule ? (
           <AuthPanelModule.HostedAuthPanelIsland {...authPanelProps} />
         ) : open ? (
