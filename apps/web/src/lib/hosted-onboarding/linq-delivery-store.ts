@@ -22,7 +22,11 @@ import {
   parseHostedLinqInviteSignupEffectId,
 } from "./linq-invite-signup-effect-id";
 import {
+  buildHostedLinqGroupLineRecoveryAttemptEffectId,
+  buildHostedLinqGroupLineRecoveryEffectId,
   HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE,
+  HOSTED_LINQ_GROUP_LINE_RECOVERY_MAX_ATTEMPTS,
+  isHostedLinqGroupLineRecoverySourceRefForEffect,
   parseHostedLinqGroupLineRecoverySourceRef,
 } from "./linq-group-line-recovery";
 import {
@@ -438,6 +442,58 @@ export async function readHostedLinqDeliveryProviderDispatchIntentTx(input: {
     targetKind: delivery.targetKind,
     template: delivery.template,
   };
+}
+
+/**
+ * A completed private recovery delivery is the existing durable proof that a
+ * member was told to move this exact group from one Murph line to another.
+ * Bound the proof to setup time so an old recovery cannot authorize a later
+ * "next group" setup for an unrelated retry.
+ */
+export async function hasHostedLinqGroupLineRecoveryAuthorityTx(input: {
+  memberId: string;
+  occurredAt: Date;
+  originalRecipientPhone: string;
+  pendingGroupSetupId: string;
+  prisma: HostedLinqDeliveryClient;
+  recoveredRecipientPhoneLookupKey: string;
+  setupArmedAt: Date;
+  threadId: string;
+}): Promise<boolean> {
+  const effectId = buildHostedLinqGroupLineRecoveryEffectId({
+    incomingRecipientPhone: input.originalRecipientPhone,
+    memberId: input.memberId,
+    pendingGroupSetupId: input.pendingGroupSetupId,
+    threadId: input.threadId,
+  });
+  const attemptEffectIds = Array.from(
+    { length: HOSTED_LINQ_GROUP_LINE_RECOVERY_MAX_ATTEMPTS },
+    (_, index) => buildHostedLinqGroupLineRecoveryAttemptEffectId({
+      attempt: index + 1,
+      effectId,
+    }),
+  );
+  const persistedIntents =
+    await readHostedLinqDeliveryProviderDispatchIntentsTx({
+      idempotencyKeys: attemptEffectIds,
+      prisma: input.prisma,
+    });
+
+  return persistedIntents.some((intent) =>
+    intent.attemptedAt >= input.setupArmedAt
+    && intent.attemptedAt <= input.occurredAt
+    && intent.phoneNumberLookupKey
+      === input.recoveredRecipientPhoneLookupKey
+    && intent.providerCorrelated
+    && intent.status !== "failed"
+    && intent.status !== "skipped"
+    && intent.targetKind === "participant"
+    && intent.template === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE
+    && isHostedLinqGroupLineRecoverySourceRefForEffect({
+      candidate: intent.sourceRef,
+      effectId,
+    })
+  );
 }
 
 async function claimHostedLinqDeliveryProviderDispatchWithIdTx(

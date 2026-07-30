@@ -295,6 +295,7 @@ export async function claimHostedPendingGroupSetupForParticipantsTx(input: {
   occurredAt: Date;
   participantMemberIds: readonly string[];
   recipientPhoneLookupKeys: readonly string[];
+  requiredCandidateId?: string | null;
   senderMemberId?: string | null;
   tx: Prisma.TransactionClient;
 }): Promise<HostedPendingGroupSetupClaimResult> {
@@ -315,6 +316,7 @@ export async function claimHostedPendingGroupSetupForParticipantsTx(input: {
     input.occurredAt,
     "pending group setup event time",
   );
+  const requiredCandidateId = normalizeNullableString(input.requiredCandidateId);
   if (!(await hasActiveHostedLinqManagedLine({
     phoneNumberLookupKeys: recipientPhoneLookupKeys,
     prisma: input.tx,
@@ -328,6 +330,7 @@ export async function claimHostedPendingGroupSetupForParticipantsTx(input: {
       occurredAt,
       ownerMemberIds: participantMemberIds,
       recipientPhoneLookupKeys,
+      requiredCandidateId,
       tx: input.tx,
     });
     const candidates = await filterCurrentlyEligibleCandidateRows({
@@ -367,6 +370,13 @@ export async function claimHostedPendingGroupSetupForParticipantsTx(input: {
         AND "armed_at" <= ${occurredAt}
         AND "expires_at" > ${occurredAt}
         AND "expires_at" > ${now}
+        AND EXISTS (
+          SELECT 1
+          FROM "hosted_member_routing" AS routing
+          WHERE routing."member_id" = "hosted_pending_group_setup"."owner_member_id"
+            AND routing."linq_recipient_phone_lookup_key"
+              = "hosted_pending_group_setup"."recipient_phone_lookup_key"
+        )
       FOR UPDATE
     `);
     const claimed = claimedRows[0];
@@ -411,8 +421,12 @@ async function readCandidateRowsTx(input: {
   occurredAt: Date;
   ownerMemberIds: readonly string[];
   recipientPhoneLookupKeys: readonly string[];
+  requiredCandidateId: string | null;
   tx: Prisma.TransactionClient;
 }): Promise<HostedPendingGroupSetupRow[]> {
+  const requiredCandidateSql = input.requiredCandidateId
+    ? Prisma.sql`AND setup."id" = ${input.requiredCandidateId}`
+    : Prisma.sql``;
   return await input.tx.$queryRaw<HostedPendingGroupSetupRow[]>(Prisma.sql`
     SELECT
       setup."id",
@@ -436,6 +450,7 @@ async function readCandidateRowsTx(input: {
       AND setup."expires_at" > ${input.occurredAt}
       AND setup."expires_at" > ${input.now}
       AND owner."suspended_at" IS NULL
+      ${requiredCandidateSql}
     ORDER BY setup."owner_member_id" ASC
   `);
 }

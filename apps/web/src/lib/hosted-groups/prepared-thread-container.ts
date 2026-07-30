@@ -58,6 +58,7 @@ export async function ensureHostedPreparedLinqThreadContainerRouteTx(input: {
   occurredAt: Date;
   participantMemberIds: readonly string[];
   recipientPhoneLookupKeys: readonly string[];
+  requiredPendingSetupCandidateId?: string | null;
   senderMemberId?: string | null;
   threadId: string;
   tx: Prisma.TransactionClient;
@@ -66,6 +67,7 @@ export async function ensureHostedPreparedLinqThreadContainerRouteTx(input: {
     occurredAt: input.occurredAt,
     participantMemberIds: input.participantMemberIds,
     recipientPhoneLookupKeys: input.recipientPhoneLookupKeys,
+    requiredCandidateId: input.requiredPendingSetupCandidateId,
     senderMemberId: input.senderMemberId,
     tx: input.tx,
   });

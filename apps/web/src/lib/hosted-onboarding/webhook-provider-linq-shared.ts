@@ -214,6 +214,7 @@ export function buildGroupLineRecoveryResponse(input: {
   memberId: string;
   occurredAt: string;
   participantContact: Pick<HostedLinqParticipantContact, "kind" | "value">;
+  pendingGroupSetupId?: string | null;
   sourceEventId: string;
   threadId: string;
 }): HostedOnboardingLinqDirectPlan {
@@ -224,6 +225,9 @@ export function buildGroupLineRecoveryResponse(input: {
         memberId: input.memberId,
         occurredAt: input.occurredAt,
         participantContact: input.participantContact,
+        ...(input.pendingGroupSetupId
+          ? { pendingGroupSetupId: input.pendingGroupSetupId }
+          : {}),
         sourceEventId: input.sourceEventId,
         threadId: input.threadId,
         template: "group_line_recovery",

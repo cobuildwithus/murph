@@ -109,6 +109,9 @@ import {
   readHostedLinqIncomingLineState,
 } from "./linq-line-store";
 import {
+  hasHostedLinqGroupLineRecoveryAuthorityTx,
+} from "./linq-delivery-store";
+import {
   resolveHostedLinqSignupWelcomeDailyLimit,
 } from "./linq-routing-policy";
 import {
@@ -127,6 +130,9 @@ import {
 import {
   ensureHostedPreparedLinqThreadContainerRouteTx,
 } from "../hosted-groups/prepared-thread-container";
+import {
+  readHostedPendingGroupSetup,
+} from "../hosted-groups/pending-group-setup";
 import type {
   HostedLinqFirstContactAdmissionDecision,
   HostedLinqFirstContactAdmissionRequest,
@@ -2615,6 +2621,13 @@ async function planHostedLinqGroupChatWebhook(input: {
       "group-chat-line-unavailable",
     );
   }
+  if (!("phoneNumberLookupKey" in lineState)) {
+    return ignored(
+      "recipient-line-authority-unresolved",
+      senderIdentityMatch,
+      "group-chat-line-unavailable",
+    );
+  }
   if (
     (
       lineState.kind === "at_risk"
@@ -2629,6 +2642,9 @@ async function planHostedLinqGroupChatWebhook(input: {
     );
   }
   let pendingSetupParticipantMemberIds: readonly string[];
+  let pendingSetupRecipientPhoneLookupKeys =
+    input.threadRouteAccountLookupKeys;
+  let requiredPendingSetupCandidateId: string | null = null;
   if (lineState.kind === "at_risk" || lineState.kind === "hard_blocked") {
     if (!activeSenderMemberId) {
       return ignored(
@@ -2668,6 +2684,16 @@ async function planHostedLinqGroupChatWebhook(input: {
     }
 
     if (lineState.kind === "hard_blocked") {
+      const pendingSetup = await readHostedPendingGroupSetup({
+        ownerMemberId: activeSenderMemberId,
+        prisma: input.prisma,
+      });
+      const pendingGroupSetupId = pendingSetup
+        && pendingSetup.armedAt <= new Date(occurredAt)
+        && pendingSetup.recipientPhoneLookupKey
+          === lineState.phoneNumberLookupKey
+        ? pendingSetup.id
+        : null;
       return logHostedLinqWebhookPlannerDecisionAndReturn(
         buildGroupLineRecoveryResponse({
           incomingRecipientPhone,
@@ -2677,6 +2703,7 @@ async function planHostedLinqGroupChatWebhook(input: {
             kind: participantContact.kind,
             value: participantContact.value,
           },
+          pendingGroupSetupId,
           sourceEventId: input.event.event_id,
           threadId: summary.chatId,
         }),
@@ -2698,9 +2725,29 @@ async function planHostedLinqGroupChatWebhook(input: {
         retryable: true,
       });
     }
-    pendingSetupParticipantMemberIds = activeSenderMemberId
-      ? [...new Set([...input.participantMemberIds, activeSenderMemberId])]
-      : input.participantMemberIds;
+    const recoveredPendingSetup = activeSenderMemberId
+      ? await resolveHostedLinqRecoveredPendingGroupSetup({
+          memberId: activeSenderMemberId,
+          occurredAt: new Date(occurredAt),
+          recoveredRecipientPhoneLookupKey: lineState.phoneNumberLookupKey,
+          threadId: summary.chatId,
+          tx: input.prisma,
+        })
+      : null;
+    if (recoveredPendingSetup && activeSenderMemberId) {
+      pendingSetupParticipantMemberIds = [activeSenderMemberId];
+      pendingSetupRecipientPhoneLookupKeys = [
+        ...new Set([
+          ...input.threadRouteAccountLookupKeys,
+          recoveredPendingSetup.recipientPhoneLookupKey,
+        ]),
+      ];
+      requiredPendingSetupCandidateId = recoveredPendingSetup.id;
+    } else {
+      pendingSetupParticipantMemberIds = activeSenderMemberId
+        ? [...new Set([...input.participantMemberIds, activeSenderMemberId])]
+        : input.participantMemberIds;
+    }
   }
 
   let createdContainerMemberId: string | null = null;
@@ -2715,7 +2762,8 @@ async function planHostedLinqGroupChatWebhook(input: {
       mailboxDedupeKey: input.event.event_id,
       occurredAt: new Date(occurredAt),
       participantMemberIds: pendingSetupParticipantMemberIds,
-      recipientPhoneLookupKeys: input.threadRouteAccountLookupKeys,
+      recipientPhoneLookupKeys: pendingSetupRecipientPhoneLookupKeys,
+      requiredPendingSetupCandidateId,
       senderMemberId: activeSenderMemberId,
       threadId: summary.chatId,
       tx: input.prisma,
@@ -3509,6 +3557,67 @@ function isLocalHostedDomainRootAuthorityMismatch(error: unknown): boolean {
     && error instanceof Error
     && error.message === "Hosted domain root envelope authority signature verification failed."
   );
+}
+
+async function resolveHostedLinqRecoveredPendingGroupSetup(input: {
+  memberId: string;
+  occurredAt: Date;
+  recoveredRecipientPhoneLookupKey: string;
+  threadId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<{
+  id: string;
+  recipientPhoneLookupKey: string;
+} | null> {
+  const setup = await readHostedPendingGroupSetup({
+    ownerMemberId: input.memberId,
+    prisma: input.tx,
+  });
+  if (!setup || setup.armedAt > input.occurredAt) {
+    return null;
+  }
+
+  const authority = readHostedLinqHomeLineAuthority(
+    await readHostedMemberRoutingState({
+      memberId: input.memberId,
+      prisma: input.tx,
+    }),
+  );
+  if (authority.kind === "none") {
+    return null;
+  }
+  const originalRecipientPhone = normalizePhoneNumber(
+    authority.recipientPhone,
+  );
+  if (!originalRecipientPhone) {
+    return null;
+  }
+  const originalRecipientPhoneLookupKeys =
+    createHostedPhoneLookupKeyReadCandidates(originalRecipientPhone);
+  if (
+    !originalRecipientPhoneLookupKeys.includes(setup.recipientPhoneLookupKey)
+    || originalRecipientPhoneLookupKeys.includes(
+      input.recoveredRecipientPhoneLookupKey,
+    )
+    || !(await hasHostedLinqGroupLineRecoveryAuthorityTx({
+      memberId: input.memberId,
+      occurredAt: input.occurredAt,
+      originalRecipientPhone,
+      pendingGroupSetupId: setup.id,
+      prisma: input.tx,
+      recoveredRecipientPhoneLookupKey:
+        input.recoveredRecipientPhoneLookupKey,
+      setupArmedAt: setup.armedAt,
+      threadId: input.threadId,
+    }))
+  ) {
+    return null;
+  }
+
+  return {
+    id: setup.id,
+    recipientPhoneLookupKey: setup.recipientPhoneLookupKey,
+  };
 }
 
 function isHostedLinqGroupChat(messageEvent: HostedLinqMessageReceivedEvent): boolean {

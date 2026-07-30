@@ -149,6 +149,10 @@ default destination for every goal or the definition of activation.
   private settings, health facts, memories, or contacts into the room. The
   setup applies only when the route is new; an existing group never changes
   owner or configuration because someone prepared another group.
+  If Murph requires that member to replace a hard-blocked group line, the
+  still-live setup follows only the exact persisted recovery instruction for
+  that same member and thread. It remains one-use and cannot authorize another
+  group or a later setup.
 - Speaker labels should make authenticated group conversation easier to follow
   without pretending uncertainty is identity. Prefer the member's current
   authorized profile name. Use a human owner's explicitly shared contact label

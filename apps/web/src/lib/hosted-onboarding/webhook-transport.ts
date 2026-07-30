@@ -326,6 +326,7 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
       memberId: string;
       occurredAt: string;
       participantContact: HostedLinqGroupLineRecoveryParticipantContact;
+      pendingGroupSetupId?: string | null;
       sourceEventId: string;
       template: typeof HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE;
       threadId: string;
@@ -382,6 +383,7 @@ function buildHostedWebhookLinqMessageEffectId(
     return buildHostedLinqGroupLineRecoveryEffectId({
       incomingRecipientPhone: input.incomingRecipientPhone,
       memberId: input.memberId,
+      pendingGroupSetupId: input.pendingGroupSetupId,
       threadId: input.threadId,
     });
   }

@@ -16,6 +16,16 @@ import {
   consumeHostedPendingGroupSetupClaimTx,
   readHostedPendingGroupSetup,
 } from "@/src/lib/hosted-groups/pending-group-setup";
+import {
+  hasHostedLinqGroupLineRecoveryAuthorityTx,
+} from "@/src/lib/hosted-onboarding/linq-delivery-store";
+import {
+  buildHostedLinqGroupLineRecoveryEffectId,
+  buildHostedLinqGroupLineRecoverySourceRef,
+} from "@/src/lib/hosted-onboarding/linq-group-line-recovery";
+import {
+  createHostedLinqDeliveryIdempotencyLookupKey,
+} from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -317,6 +327,184 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         });
         await client.hostedLinqLine.deleteMany({
           where: { phoneNumberLookupKey: recipientPhoneLookupKey },
+        });
+        await client.$disconnect();
+      }
+    });
+
+    it("claims the exact setup once through its persisted replacement-line authority", async () => {
+      const fixtureId = randomUUID();
+      const ownerMemberId = `member_pending_group_recovery_${fixtureId}`;
+      const originalRecipientPhoneLookupKey =
+        `pending-group-recovery-original:${fixtureId}`;
+      const recoveredRecipientPhoneLookupKey =
+        `pending-group-recovery-target:${fixtureId}`;
+      const originalRecipientPhone = "+15550100000";
+      const threadId = `chat-pending-group-recovery-${fixtureId}`;
+      const deliveryId = `hld_pending_group_recovery_${fixtureId}`;
+      const client = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const armedAt = new Date("2026-07-29T18:00:00.000Z");
+      const recoveryAttemptedAt = new Date("2026-07-29T18:01:00.000Z");
+      const retryOccurredAt = new Date("2026-07-29T18:02:00.000Z");
+
+      try {
+        await client.hostedLinqLine.createMany({
+          data: [
+            {
+              configuredAt: armedAt,
+              healthStatus: "unhealthy",
+              phoneNumberEncrypted: "test-only-encrypted-original-line",
+              phoneNumberHint: "0000",
+              phoneNumberLookupKey: originalRecipientPhoneLookupKey,
+            },
+            {
+              configuredAt: armedAt,
+              healthStatus: "healthy",
+              phoneNumberEncrypted: "test-only-encrypted-recovered-line",
+              phoneNumberHint: "0042",
+              phoneNumberLookupKey: recoveredRecipientPhoneLookupKey,
+            },
+          ],
+        });
+        await client.hostedMember.create({
+          data: {
+            billingStatus: HostedBillingStatus.active,
+            id: ownerMemberId,
+            routing: {
+              create: {
+                linqRecipientPhoneLookupKey:
+                  originalRecipientPhoneLookupKey,
+              },
+            },
+          },
+        });
+        const setup = await client.$transaction((tx) =>
+          armHostedPendingGroupSetupTx({
+            now: armedAt,
+            ownerMemberId,
+            setup: {
+              roomContextMarkdown: "Preserve this recovered room context.",
+              style: {
+                personality: { humor: 2 },
+                tone: "casual",
+              },
+            },
+            tx,
+          })
+        );
+        const recoveryEffectId = buildHostedLinqGroupLineRecoveryEffectId({
+          incomingRecipientPhone: originalRecipientPhone,
+          memberId: ownerMemberId,
+          pendingGroupSetupId: setup.id,
+          threadId,
+        });
+        const recoveryIdempotencyLookupKey =
+          createHostedLinqDeliveryIdempotencyLookupKey(recoveryEffectId);
+        if (!recoveryIdempotencyLookupKey) {
+          throw new Error("Expected a recovery delivery lookup key.");
+        }
+        await client.hostedLinqDelivery.create({
+          data: {
+            acceptedAt: new Date(recoveryAttemptedAt.getTime() + 1_000),
+            attemptedAt: recoveryAttemptedAt,
+            id: deliveryId,
+            idempotencyKey: recoveryIdempotencyLookupKey,
+            messageLookupKey:
+              `hbid:linq-message:pending-group-recovery-${fixtureId}`,
+            phoneNumberLookupKey: recoveredRecipientPhoneLookupKey,
+            source: "hosted_webhook_side_effect",
+            sourceRef: buildHostedLinqGroupLineRecoverySourceRef({
+              effectId: recoveryEffectId,
+              sourceEventId: `event-pending-group-recovery-${fixtureId}`,
+            }),
+            status: "accepted",
+            targetKind: "participant",
+            template: "group_line_recovery",
+          },
+        });
+
+        await expect(hasHostedLinqGroupLineRecoveryAuthorityTx({
+          memberId: ownerMemberId,
+          occurredAt: retryOccurredAt,
+          originalRecipientPhone,
+          pendingGroupSetupId: setup.id,
+          prisma: client,
+          recoveredRecipientPhoneLookupKey,
+          setupArmedAt: setup.armedAt,
+          threadId,
+        })).resolves.toBe(true);
+
+        const claimed = await client.$transaction(async (tx) => {
+          const result =
+            await claimHostedPendingGroupSetupForParticipantsTx({
+              now: retryOccurredAt,
+              occurredAt: retryOccurredAt,
+              participantMemberIds: [ownerMemberId],
+              recipientPhoneLookupKeys: [
+                recoveredRecipientPhoneLookupKey,
+                originalRecipientPhoneLookupKey,
+              ],
+              requiredCandidateId: setup.id,
+              senderMemberId: ownerMemberId,
+              tx,
+            });
+          if (result.kind === "claimed") {
+            await consumeHostedPendingGroupSetupClaimTx({
+              id: result.setup.id,
+              ownerMemberId: result.setup.ownerMemberId,
+              tx,
+            });
+          }
+          return result;
+        });
+        expect(claimed).toMatchObject({
+          kind: "claimed",
+          setup: {
+            id: setup.id,
+            ownerMemberId,
+            setup: {
+              roomContextMarkdown:
+                "Preserve this recovered room context.",
+              style: {
+                personality: { humor: 2 },
+                tone: "casual",
+              },
+            },
+          },
+        });
+        await expect(client.$transaction((tx) =>
+          claimHostedPendingGroupSetupForParticipantsTx({
+            now: retryOccurredAt,
+            occurredAt: retryOccurredAt,
+            participantMemberIds: [ownerMemberId],
+            recipientPhoneLookupKeys: [
+              recoveredRecipientPhoneLookupKey,
+              originalRecipientPhoneLookupKey,
+            ],
+            requiredCandidateId: setup.id,
+            senderMemberId: ownerMemberId,
+            tx,
+          })
+        )).resolves.toEqual({
+          kind: "none",
+          reason: "no_candidates",
+        });
+      } finally {
+        await client.hostedLinqDelivery.deleteMany({
+          where: { id: deliveryId },
+        });
+        await client.hostedMember.deleteMany({
+          where: { id: ownerMemberId },
+        });
+        await client.hostedLinqLine.deleteMany({
+          where: {
+            phoneNumberLookupKey: {
+              in: [
+                originalRecipientPhoneLookupKey,
+                recoveredRecipientPhoneLookupKey,
+              ],
+            },
+          },
         });
         await client.$disconnect();
       }
