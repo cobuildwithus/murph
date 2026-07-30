@@ -274,6 +274,11 @@ describe('real codex app-server with scripted provider', () => {
         }),
       }),
     ]))
+    expect(
+      scenario.stub
+        .requestSummariesSinceBaseline()
+        .map((summary) => summary.model),
+    ).toContain('gpt-5.6-terra')
     expect(JSON.stringify(result.additionalUsages)).not.toContain(childPrompt)
   })
 

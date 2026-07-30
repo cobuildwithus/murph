@@ -120,6 +120,7 @@ import {
   extractCodexSubagentUsageDrafts,
   isAssistantCodexTokenUsageEventType,
   readCodexCollabReceiverThreadIds,
+  readCodexV2SubagentActivityThreadIds,
 } from './assistant/providers/helpers.js'
 import {
   materializeCodexImagePaths,
@@ -3166,6 +3167,10 @@ async function runCodexAppServerTurnOnProcess(
   // collected live so evidenced subagent threads win buffer slots over
   // stale/unattributed foreign threads when the cap is reached.
   const collabReceiverThreadIds = new Set<string>()
+  // V2 activity events omit the effective model. Resolve it only once both
+  // parent activity evidence and billable child usage exist; an eager resume
+  // can race child initialization and observe the parent's model instead.
+  const v2SubagentActivityThreadIds = new Set<string>()
   let rolloutRelativePath: string | null = null
   let providerActionCount = 0
   const providerActionItemIds = new Set<string>()
@@ -4465,7 +4470,15 @@ async function runCodexAppServerTurnOnProcess(
     }
     for (const receiverThreadId of readCodexCollabReceiverThreadIds(message)) {
       collabReceiverThreadIds.add(receiverThreadId)
-      scheduleSubagentModelLookup(receiverThreadId)
+    }
+    for (
+      const receiverThreadId of
+      readCodexV2SubagentActivityThreadIds(message)
+    ) {
+      v2SubagentActivityThreadIds.add(receiverThreadId)
+      if (subagentTokenUsageByThread.has(receiverThreadId)) {
+        scheduleSubagentModelLookup(receiverThreadId)
+      }
     }
     lastEventError = extractCodexErrorMessage(message) ?? lastEventError
     lastEventErrorInfo = extractCodexErrorInfo(message) ?? lastEventErrorInfo
@@ -4676,6 +4689,9 @@ async function runCodexAppServerTurnOnProcess(
     const sample = subagentTokenUsageByThread.get(threadId)
     if (sample) {
       sample.lastEvent = message
+      if (v2SubagentActivityThreadIds.has(threadId)) {
+        scheduleSubagentModelLookup(threadId)
+      }
       return
     }
     if (subagentTokenUsageByThread.size >= MAX_CODEX_SUBAGENT_USAGE_THREADS) {
@@ -4696,6 +4712,9 @@ async function runCodexAppServerTurnOnProcess(
       firstEvent: message,
       lastEvent: message,
     })
+    if (v2SubagentActivityThreadIds.has(threadId)) {
+      scheduleSubagentModelLookup(threadId)
+    }
   }
 
   const handleStaleParentTurnMessage = (message: CodexRpcMessage): void => {

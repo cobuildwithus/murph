@@ -1398,7 +1398,21 @@ export function readCodexCollabReceiverThreadIds(
   return readCodexCollabToolCallFromEvent(rawEvent)?.receiverThreadIds ?? []
 }
 
+// V2 subagent activity items omit the effective child model. The live runtime
+// resolves it from the child thread only after that child has emitted usage,
+// which avoids racing thread initialization while keeping V1 model-bearing
+// collab items on their direct attribution path.
+export function readCodexV2SubagentActivityThreadIds(
+  rawEvent: unknown,
+): readonly string[] {
+  const collabToolCall = readCodexCollabToolCallFromEvent(rawEvent)
+  return collabToolCall?.isV2SubagentActivity
+    ? collabToolCall.receiverThreadIds
+    : []
+}
+
 function readCodexCollabToolCallFromEvent(rawEvent: unknown): {
+  isV2SubagentActivity: boolean
   receiverThreadIds: string[]
   spawnModel: string | null
   v2SpawnCallId: string | null
@@ -1433,6 +1447,7 @@ function readCodexCollabToolCallFromEvent(rawEvent: unknown): {
     const activityId = readAssistantProviderString(item.id)
     return agentThreadId
       ? {
+          isV2SubagentActivity: true,
           receiverThreadIds: [agentThreadId],
           spawnModel: null,
           v2SpawnCallId:
@@ -1460,6 +1475,7 @@ function readCodexCollabToolCallFromEvent(rawEvent: unknown): {
   const tool = readAssistantProviderString(item.tool)
   const isSpawnTool = tool === 'spawnAgent' || tool === 'spawn_agent'
   return {
+    isV2SubagentActivity: false,
     receiverThreadIds,
     spawnModel: isSpawnTool
       ? readAssistantProviderString(item.model) ?? null
