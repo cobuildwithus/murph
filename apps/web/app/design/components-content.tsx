@@ -911,9 +911,7 @@ export function ComponentsContent() {
             <div className="grid gap-4">
               <EnvironmentVoiceRefreshNotice
                 state={{
-                  baselineDataVersion: "data-v1",
                   baselineValues: "{}",
-                  baselineWorkspaceVersion: "workspace-v1",
                   status: "processing",
                 }}
                 onCheckAgain={() => {}}

@@ -98,9 +98,7 @@ export function EnvironmentProgressStudy() {
       <StudyState label="After upload · Processing on the open report">
         <EnvironmentVoiceRefreshNotice
           state={{
-            baselineDataVersion: "data-v1",
             baselineValues: "{}",
-            baselineWorkspaceVersion: "workspace-v1",
             status: "processing",
           }}
           onCheckAgain={() => {}}
