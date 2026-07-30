@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useState, type ReactNode, type SyntheticEvent } from "react";
 import type {
   HostedPlanUsageAvailableStatus,
   HostedPlanUsageStatus,
@@ -211,6 +211,17 @@ const DESIGN_UNAVAILABLE_USAGE_STATUS: HostedPlanUsageStatus = {
   generatedAt: "2026-07-22T12:00:00.000Z",
   reason: "group_not_supported",
   recommendedAction: null,
+  status: "unavailable",
+};
+
+const DESIGN_TRIAL_CONVERSION_USAGE_STATUS: HostedPlanUsageStatus = {
+  generatedAt: "2026-07-22T12:00:00.000Z",
+  reason: "trial_conversion_pending",
+  recommendedAction: {
+    kind: "start_pulse",
+    label: "Start Pulse",
+    url: "/settings#subscription",
+  },
   status: "unavailable",
 };
 
@@ -428,17 +439,19 @@ function PersonalUsageCreditOwnerStudy() {
     >
       <p className="text-sm text-muted-foreground">
         Static owner-layout preview keeps plan allowance and purchased credit
-        combined in one usage bar at the top, then adds the read-only credit
-        and mission history below.
+        combined in one usage bar at the top. Current referrals stay visible
+        below it, while completed referrals and purchase history remain on
+        demand.
       </p>
       <div
         className="flex flex-col gap-3"
         data-design-state="usage-credits-and-missions"
       >
         <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-          Overall usage with credits and missions
+          Overall usage with active referrals and history
         </p>
         <PersonalUsageCreditState
+          allowHistoryInteraction
           label="Overall usage active"
           state="active-with-credit"
           usageStatus={DESIGN_PERSONAL_USAGE_STATUS}
@@ -464,6 +477,12 @@ function PersonalUsageCreditOwnerStudy() {
         label="All available usage exhausted"
         state="exhausted-without-credit"
         usageStatus={DESIGN_EXHAUSTED_USAGE_STATUS}
+      />
+      <PersonalUsageCreditState
+        canStartPaidPulse
+        label="Pulse trial ended"
+        state="trial-conversion"
+        usageStatus={DESIGN_TRIAL_CONVERSION_USAGE_STATUS}
       />
       <div
         className="flex flex-col gap-3"
@@ -505,6 +524,8 @@ function PersonalUsageCreditOwnerStudy() {
 }
 
 function PersonalUsageCreditState(props: {
+  allowHistoryInteraction?: boolean;
+  canStartPaidPulse?: boolean;
   label: string;
   state: string;
   usageActivityDetail?: ReactNode;
@@ -518,10 +539,22 @@ function PersonalUsageCreditState(props: {
       <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
         {props.label}
       </p>
-      <div inert>
+      <div
+        data-design-interaction={
+          props.allowHistoryInteraction ? "history-only" : undefined
+        }
+        inert={props.allowHistoryInteraction ? undefined : true}
+        onClickCapture={
+          props.allowHistoryInteraction ? blockNonHistoryPreviewAction : undefined
+        }
+        onSubmitCapture={
+          props.allowHistoryInteraction ? blockNonHistoryPreviewAction : undefined
+        }
+      >
         <HostedBillingSettings
           authenticated
           billingStatus="active"
+          canStartPaidPulse={props.canStartPaidPulse}
           currentBillingPhase="paid"
           currentBillingPlanCode="launch_monthly"
           payerMemberId={DESIGN_PAYER_MEMBER_ID}
@@ -532,6 +565,19 @@ function PersonalUsageCreditState(props: {
       </div>
     </div>
   );
+}
+
+function blockNonHistoryPreviewAction(event: SyntheticEvent<HTMLDivElement>) {
+  const target = event.target;
+  if (
+    target instanceof Element &&
+    target.closest("[data-hosted-ai-usage-activity] details")
+  ) {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopPropagation();
 }
 
 export {
