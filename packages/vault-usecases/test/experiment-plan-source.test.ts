@@ -114,6 +114,43 @@ test('Health Commons protocol-backed experiment plans require commonsProtocolRef
   )
 })
 
+test('withdrawn Health Commons protocols fail plan and start without creating a run', async () => {
+  await withInitializedVault(async ({ services, vault }) => {
+    const payload = {
+      ...baseExperimentPlanPayload(),
+      source: { kind: 'health_commons_protocol' },
+      commonsProtocolRef: {
+        key: 'protocol_variant:bedtime-transition/standard-tiny-fallback-transition',
+        pageRevisionId: `sha256:${'5'.repeat(64)}`,
+        runSpecRevisionId: `sha256:${'6'.repeat(64)}`,
+      },
+      effectiveProtocolSnapshot: {
+        effectiveSpecHash: `sha256:${'7'.repeat(64)}`,
+        doseSignature: 'Use the standard, tiny, or fallback bedtime transition',
+      },
+    }
+
+    for (const attempt of [
+      () => services.core.planExperiment({ vault, requestId: null, payload }),
+      () => services.core.startExperiment({ vault, requestId: null, payload }),
+    ]) {
+      await assert.rejects(
+        attempt(),
+        /no longer available to start.*currently runnable protocol/u,
+      )
+    }
+
+    await assert.rejects(
+      services.query.showExperiment({
+        vault,
+        requestId: null,
+        lookup: 'sleep-reset',
+      }),
+      /No experiment found/u,
+    )
+  })
+})
+
 test('custom experiment plans can be planned once explicitly marked custom', async () => {
   const services = createIntegratedVaultServices()
 

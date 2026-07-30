@@ -249,6 +249,47 @@ test.each(
 );
 
 test.each(["planned", "paused"] as const)(
+  "%s withdrawn experiment accepts semantically identical protected inputs",
+  async (status) => {
+    await withWithdrawnExperiment(status, async ({
+      vaultRoot,
+      experimentId,
+      experimentPath,
+    }) => {
+      const beforeDocument = parseFrontmatterDocument(
+        await fs.readFile(experimentPath, "utf8"),
+      );
+      const result = await updateExperimentRecord({
+        vault: vaultRoot,
+        lookup: experimentId,
+        commonsProtocolRef: WITHDRAWN_BEDTIME_PROTOCOL_REF,
+        protocolRef: WITHDRAWN_PRIVATE_PROTOCOL_REF,
+        effectiveProtocolSnapshot: WITHDRAWN_BEDTIME_SNAPSHOT,
+        runPlan: WITHDRAWN_RUN_PLAN,
+        analysisPlan: WITHDRAWN_ANALYSIS_PLAN,
+      });
+      const afterDocument = parseFrontmatterDocument(
+        await fs.readFile(experimentPath, "utf8"),
+      );
+
+      assert.equal(result.status, status);
+      for (const field of [
+        "commonsProtocolRef",
+        "protocolRef",
+        "effectiveProtocolSnapshot",
+        "runPlan",
+        "analysisPlan",
+      ] as const) {
+        assert.deepEqual(
+          afterDocument.attributes[field],
+          beforeDocument.attributes[field],
+        );
+      }
+    });
+  },
+);
+
+test.each(["planned", "paused"] as const)(
   "%s withdrawn experiment allows abandonment without rewriting its saved plan",
   async (status) => {
     await withWithdrawnExperiment(status, async ({

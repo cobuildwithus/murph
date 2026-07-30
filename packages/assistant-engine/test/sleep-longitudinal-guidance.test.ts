@@ -368,24 +368,41 @@ describe('experiment start and support mechanics', () => {
     expect(resolution).toContain('do not retry without the revision flags')
     expect(resolution).toContain('ask them to refresh or reopen it')
     expect(resolution).toMatch(/do not silently start (?:from )?current protocol content/u)
-    expect(resolution).toMatch(
-      /treat it as withdrawn or\s+unavailable rather than as a refreshable revision mismatch/u,
+    const unavailableStartRule = resolution.slice(
+      resolution.indexOf('- If a selected key no longer resolves'),
+      resolution.indexOf('- If activation or editing for a known planned or paused experiment'),
     )
-    expect(resolution).toMatch(
-      /leave any planned or paused record\s+unchanged/u,
+    expect(unavailableStartRule).toMatch(
+      /lookup, dry run, or real start\s+and no experiment was persisted/u,
     )
-    expect(resolution).toMatch(
-      /start it as a distinct experiment with its own id and\s+protocol lineage/u,
+    expect(unavailableStartRule).toMatch(
+      /protocol is no\s+longer available and no run was created/u,
     )
-    expect(resolution).toMatch(
-      /never edit the old run's `commonsProtocolRef`,\s+`protocolRef`, effective snapshot, `runPlan`, or `analysisPlan`/u,
+    expect(unavailableStartRule).toMatch(
+      /Keep this response limited to the unavailable protocol, the\s+fact that nothing was created, and the alternative/u,
     )
-    expect(resolution).toMatch(
-      /Mark the old run `abandoned` only after the user\s+separately and explicitly agrees/u,
+    expect(unavailableStartRule).not.toMatch(/existing run|saved run|abandon/u)
+    expect(unavailableStartRule).toMatch(
+      /Never tell the user to\s+refresh or reopen a page that is no longer public/u,
     )
-    expect(resolution).toMatch(
-      /Never tell them to refresh\s+or reopen a\s+page that is no longer public/u,
+
+    const persistedRunRule = resolution.slice(
+      resolution.indexOf('- If activation or editing for a known planned or paused experiment'),
+      resolution.indexOf('- For protocol discovery that did not begin'),
     )
+    expect(persistedRunRule).toMatch(
+      /saved run cannot now be\s+activated, leave the record unchanged/u,
+    )
+    expect(persistedRunRule).toMatch(
+      /start it as a distinct\s+experiment with its own id and protocol lineage/u,
+    )
+    expect(persistedRunRule).toMatch(
+      /never edit the old\s+run's\s+`commonsProtocolRef`,\s+`protocolRef`, effective snapshot, `runPlan`, or\s+`analysisPlan`/u,
+    )
+    expect(persistedRunRule).toMatch(
+      /Mark the old run `abandoned`\s+only after the user separately and explicitly agrees/u,
+    )
+    expect(persistedRunRule).not.toMatch(/no run was created/u)
   })
 
   it('uses typed session fields and lifecycle-owned finite support only with consent', async () => {

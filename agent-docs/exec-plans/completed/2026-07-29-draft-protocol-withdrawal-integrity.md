@@ -1,6 +1,6 @@
 # Withdrawn protocol lineage integrity follow-up
 
-Status: active
+Status: completed
 Created: 2026-07-29
 Updated: 2026-07-29
 
@@ -91,6 +91,9 @@ Updated: 2026-07-29
 - Permit abandonment only as a separate status-only decision.
 - Apply the withdrawal-specific guard before the generic non-planned lineage
   rule so a paused run receives the same truthful recovery contract.
+- Distinguish a withdrawn fresh start, where no experiment exists, from a
+  withdrawn saved run. Only the saved-run branch discusses preservation or
+  abandonment.
 
 ## Verification
 
@@ -106,9 +109,29 @@ Updated: 2026-07-29
   - The synthetic channel picker is compact, inert, and contains no withdrawn
     title or internal protocol data.
 - Current focused evidence:
-  - Vault lineage suite: 27 tests passed.
+  - Vault plan and lineage suites: 40 tests passed.
   - Vault, assistant engine, and Web typechecks passed.
   - Assistant instruction suite: 16 tests passed.
-  - Web presentation suites: 9 tests passed.
+  - Web presentation suites: 10 tests passed.
   - Web lint passed with unrelated existing warnings only.
   - Documentation drift and whitespace checks passed.
+  - Product-experience review passed before the preliminary specialist pass
+    and again after remediation, with no findings. The remaining evidence gap
+    is that focused prompt and service tests do not exercise a live assistant
+    conversation through both withdrawal branches.
+  - Preliminary specialist ReviewGPT returned four accepted findings. The
+    fresh-start and saved-run instructions are now distinct, and its exact
+    owned coverage patch was inspected, confirmed tests-only, checked with
+    `git apply --check`, then applied to the three focused test files. The
+    added coverage proves service-level plan/start rejection without a write,
+    semantic no-op acceptance, and real-versus-synthetic Telegram link
+    behavior.
+  - Parent final review inspected the complete branch patch, the write-lock
+    call paths, the applied specialist coverage, the design-catalog boundary,
+    and the open-PR overlap. It found no remaining correctness, privacy,
+    security, architecture, or duplication issue.
+  - Candidate exact-head CI passed repository hygiene, frontend design proof,
+    viewport overflow, the host-support matrix, Cloudflare hosted E2E, and the
+    Vercel deployment status. Final-head CI and ReviewGPT will run after this
+    plan is archived in the final scoped commit.
+Completed: 2026-07-29
