@@ -16,6 +16,7 @@ import {
   HOSTED_ASSISTANT_LUNA_MODEL,
   HOSTED_ASSISTANT_MODEL_OVERRIDES,
   HOSTED_ASSISTANT_PRODUCT_MODELS,
+  HOSTED_ASSISTANT_PROVIDERS,
   HOSTED_ASSISTANT_REASONING_EFFORT_OVERRIDES,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
   HOSTED_ASSISTANT_SOL_MODEL,
@@ -382,6 +383,12 @@ describe("hosted runtime control contracts", () => {
         reasoningEffort,
       })).toEqual({ action: "update", reasoningEffort });
     }
+    for (const provider of HOSTED_ASSISTANT_PROVIDERS) {
+      expect(parseHostedRuntimeAssistantConfigurationToolRequest({
+        action: "update",
+        provider,
+      })).toEqual({ action: "update", provider });
+    }
     expect(parseHostedRuntimeAssistantConfigurationToolRequest({
       action: "update",
       model: HOSTED_ASSISTANT_LUNA_MODEL,
@@ -394,7 +401,7 @@ describe("hosted runtime control contracts", () => {
 
     expect(() => parseHostedRuntimeAssistantConfigurationToolRequest({
       action: "update",
-    })).toThrow(/requires a model or reasoning effort/u);
+    })).toThrow(/requires a model, provider, or reasoning effort/u);
     expect(() => parseHostedRuntimeAssistantConfigurationToolRequest({
       action: "read",
       model: HOSTED_ASSISTANT_LUNA_MODEL,
@@ -405,6 +412,15 @@ describe("hosted runtime control contracts", () => {
     })).toThrow(/not supported/u);
 
     const assistantInputId = `ain_${"c".repeat(32)}`;
+    expect(parseHostedRuntimeAssistantConfigurationControlRequest({
+      action: "update",
+      assistantInputId,
+      provider: "venice",
+    })).toEqual({
+      action: "update",
+      assistantInputId,
+      provider: "venice",
+    });
     expect(parseHostedRuntimeAssistantConfigurationControlRequest({
       action: "update",
       assistantInputId,
@@ -482,10 +498,12 @@ describe("hosted runtime control contracts", () => {
 
     const snapshot = {
       availableModels: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
+      availableProviders: ["openai", "venice"] as const,
       availableReasoningEfforts: [...HOSTED_ASSISTANT_REASONING_EFFORTS],
       configurationAvailable: true,
       dormantSolPreference: false,
       model: HOSTED_ASSISTANT_TERRA_MODEL,
+      provider: "openai" as const,
       reasoningEffort: "low" as const,
       solAvailable: false,
     };
@@ -496,6 +514,29 @@ describe("hosted runtime control contracts", () => {
       action: "read",
       result: snapshot,
     });
+    const {
+      availableProviders: _legacyAvailableProviders,
+      provider: _legacyProvider,
+      ...legacySnapshot
+    } = snapshot;
+    expect(parseHostedRuntimeAssistantConfigurationToolResponse({
+      action: "read",
+      result: legacySnapshot,
+    })).toEqual({
+      action: "read",
+      result: {
+        ...legacySnapshot,
+        availableProviders: ["openai"],
+        provider: "openai",
+      },
+    });
+    expect(() => parseHostedRuntimeAssistantConfigurationToolResponse({
+      action: "read",
+      result: {
+        ...snapshot,
+        provider: undefined,
+      },
+    })).toThrow(/provider is not supported/u);
     expect(parseHostedRuntimeAssistantConfigurationToolResponse({
       action: "update",
       result: {

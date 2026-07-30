@@ -153,6 +153,16 @@ const SLUG_PATTERN = "^[a-z0-9]+(?:-[a-z0-9]+)*$";
 const UNIT_PATTERN = "^[A-Za-z0-9._/%-]+$";
 const GENERIC_CONTRACT_ID_REGEX = new RegExp(GENERIC_CONTRACT_ID_PATTERN);
 const EXPERIMENT_SIGNAL_DIRECTIONS = ["increase", "decrease", "stabilize"] as const;
+export const EXPERIMENT_OUTCOME_STATISTICS = [
+  "latest",
+  "count",
+  "mean",
+  "median",
+  "min",
+  "max",
+  "sum",
+] as const;
+export type ExperimentOutcomeStatistic = (typeof EXPERIMENT_OUTCOME_STATISTICS)[number];
 const EXPERIMENT_CHECKIN_CADENCES = ["none", "daily", "every_3_days", "weekly"] as const;
 const EXPERIMENT_NOTIFICATION_STYLES = [
   "skip_by_default",
@@ -2199,6 +2209,8 @@ export const experimentMeasurementKindSchema = z.enum([
   "lab_panel",
   "wearable_summary",
   "manual_measurement",
+  "text",
+  "photo",
   "document",
 ]);
 
@@ -2249,9 +2261,50 @@ export const experimentPlannedMeasurementSchema = z
 
 export const experimentPlannedMeasurementsSchema = z.array(experimentPlannedMeasurementSchema).max(50);
 
+export const experimentMetricOutcomeCaptureSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("measurement"),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("session_field"),
+      fieldId: healthCommonsStableIdSchema,
+      unit: patternedString(UNIT_PATTERN).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("derived_metric"),
+      sourceMetricKey: patternedString(SLUG_PATTERN),
+    })
+    .strict(),
+]);
+
+export const experimentPrimaryOutcomeSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("metric"),
+      key: healthCommonsKeySchema,
+      label: boundedString(1, 160).optional(),
+      statistic: z.enum(EXPERIMENT_OUTCOME_STATISTICS).optional(),
+      capture: experimentMetricOutcomeCaptureSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("structured_review"),
+      key: healthCommonsKeySchema,
+      label: boundedString(1, 160).optional(),
+    })
+    .strict(),
+]);
+
 export const experimentAnalysisPlanSchema = z
   .object({
     primaryBiomarkerKey: healthCommonsKeySchema.optional(),
+    primaryOutcome: experimentPrimaryOutcomeSchema.optional(),
     secondaryBiomarkerKeys: uniqueArray(healthCommonsKeySchema, { uniqueItems: true }).optional(),
     desiredDirection: z.enum(EXPERIMENT_SIGNAL_DIRECTIONS).optional(),
     expectedDirections: experimentExpectedDirectionsSchema.optional(),
@@ -2261,6 +2314,40 @@ export const experimentAnalysisPlanSchema = z
   })
   .strict()
   .superRefine((analysisPlan, context) => {
+    if (analysisPlan.primaryOutcome !== undefined && analysisPlan.primaryBiomarkerKey !== undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Use primaryOutcome for new records or primaryBiomarkerKey for legacy records, not both.",
+        path: ["primaryBiomarkerKey"],
+      });
+    }
+
+    if (analysisPlan.primaryOutcome?.kind === "structured_review") {
+      const outcomeKey = analysisPlan.primaryOutcome.key;
+      const baselineRecordIds = new Set(
+        (analysisPlan.measurementAnchors ?? [])
+          .filter(
+            (anchor) =>
+              anchor.role === "baseline" &&
+              anchor.biomarkerKeys.includes(outcomeKey),
+          )
+          .map((anchor) => anchor.recordId),
+      );
+      for (const [index, anchor] of (analysisPlan.measurementAnchors ?? []).entries()) {
+        if (
+          anchor.role === "followup" &&
+          anchor.biomarkerKeys.includes(outcomeKey) &&
+          baselineRecordIds.has(anchor.recordId)
+        ) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Structured review baseline and follow-up evidence must use distinct records.",
+            path: ["measurementAnchors", index, "recordId"],
+          });
+        }
+      }
+    }
+
     const seen = new Set<string>();
     for (const [index, entry] of (analysisPlan.expectedDirections ?? []).entries()) {
       if (seen.has(entry.biomarkerKey)) {
@@ -2374,6 +2461,7 @@ export const experimentMetricResultSchema = z
     interventionMean: z.number().nullable(),
     label: boundedString(1, 160),
     movedAsExpected: z.boolean().nullable(),
+    statistic: z.enum(EXPERIMENT_OUTCOME_STATISTICS).optional(),
     unit: patternedString(UNIT_PATTERN).nullable(),
     baseline: experimentMetricPeriodSummarySchema.optional(),
     intervention: experimentMetricPeriodSummarySchema.optional(),
@@ -2394,6 +2482,59 @@ export const experimentOutcomeMetricResultSchema = experimentMetricResultSchema
     points: z.array(experimentOutcomeMetricPointSchema).max(366).optional(),
   })
   .strict();
+
+const experimentStructuredReviewEvidenceSchema = z
+  .object({
+    kinds: uniqueArray(experimentMeasurementKindSchema, {
+      maxItems: 4,
+      uniqueItems: true,
+    }),
+    recordIds: uniqueArray(experimentMeasurementAnchorRecordIdSchema, {
+      maxItems: 50,
+      uniqueItems: true,
+    }),
+  })
+  .strict();
+
+export const experimentStructuredReviewResultSchema = z
+  .object({
+    kind: z.literal("structured_review"),
+    key: healthCommonsKeySchema,
+    label: boundedString(1, 160),
+    status: z.enum(["missing", "baseline_only", "followup_only", "ready_for_review"]),
+    baseline: experimentStructuredReviewEvidenceSchema,
+    followup: experimentStructuredReviewEvidenceSchema,
+  })
+  .strict()
+  .superRefine((result, context) => {
+    const expectedStatus =
+      result.baseline.recordIds.length > 0 && result.followup.recordIds.length > 0
+        ? "ready_for_review"
+        : result.baseline.recordIds.length > 0
+          ? "baseline_only"
+          : result.followup.recordIds.length > 0
+            ? "followup_only"
+            : "missing";
+    if (result.status !== expectedStatus) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Structured review status must match its baseline and follow-up evidence.",
+        path: ["status"],
+      });
+    }
+
+    const baselineIds = new Set(result.baseline.recordIds);
+    const duplicateIndex = result.followup.recordIds.findIndex((recordId) =>
+      baselineIds.has(recordId)
+    );
+    if (duplicateIndex >= 0) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Structured review baseline and follow-up evidence must use distinct records.",
+        path: ["followup", "recordIds", duplicateIndex],
+      });
+    }
+  });
 
 export const experimentProgressMetricSignalSchema = z
   .object({
@@ -2552,6 +2693,7 @@ export const experimentOutcomeSchema = z
     commonsProtocolRef: commonsProtocolRefSchema.nullable(),
     effectiveProtocolSnapshot: effectiveProtocolSnapshotSchema.nullable().optional(),
     metricResults: z.array(experimentOutcomeMetricResultSchema).max(50),
+    structuredReview: experimentStructuredReviewResultSchema.optional(),
     protocolRef: protocolRefSchema.nullable().optional(),
     windows: experimentWindowSummarySchema,
   })
@@ -2562,6 +2704,17 @@ export const experimentOutcomeSchema = z
         code: z.ZodIssueCode.custom,
         message: "Experiment outcome schema must match schemaVersion.",
         path: ["schema"],
+      });
+    }
+
+    if (
+      outcome.schemaVersion === LEGACY_EXPERIMENT_OUTCOME_SCHEMA_VERSION &&
+      outcome.structuredReview !== undefined
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Legacy experiment outcomes cannot contain a structured review result.",
+        path: ["structuredReview"],
       });
     }
 
@@ -2604,6 +2757,7 @@ export const experimentOutcomeSchema = z
         metricIndex,
         phase: "baseline",
         points: baselinePoints,
+        statistic: metric.statistic ?? "mean",
         unit: metric.baseline?.unit ?? metric.unit,
       });
       validateExperimentOutcomeMetricPointWindow({
@@ -2613,15 +2767,19 @@ export const experimentOutcomeSchema = z
         metricIndex,
         phase: "intervention",
         points: interventionPoints,
+        statistic: metric.statistic ?? "mean",
         unit: metric.intervention?.unit ?? metric.unit,
       });
       validateExperimentOutcomeMetricDelta({
         baselineMean,
+        baselineUnit: metric.baseline?.unit ?? metric.unit,
         context,
         deltaAbs: metric.deltaAbs,
         deltaPct: metric.deltaPct,
         interventionMean,
+        interventionUnit: metric.intervention?.unit ?? metric.unit,
         metricIndex,
+        statistic: metric.statistic ?? "mean",
       });
     }
   });
@@ -2644,6 +2802,51 @@ function validateExperimentOutcomeMetricPointDates(input: {
   }
 }
 
+export function summarizeExperimentOutcomeValues(
+  points: readonly { date: string; value: number }[],
+  statistic: ExperimentOutcomeStatistic = "mean",
+): number | null {
+  const finitePoints = points.filter((point) => Number.isFinite(point.value));
+  if (finitePoints.length === 0) {
+    return null;
+  }
+
+  const values = finitePoints.map((point) => point.value);
+  let summary: number;
+  switch (statistic) {
+    case "count":
+      summary = values.reduce((sum, value) => sum + value, 0);
+      break;
+    case "latest":
+      summary = [...finitePoints]
+        .sort((left, right) => left.date.localeCompare(right.date))
+        .at(-1)!.value;
+      break;
+    case "median": {
+      const sorted = [...values].sort((left, right) => left - right);
+      const midpoint = Math.floor(sorted.length / 2);
+      summary = sorted.length % 2 === 0
+        ? (sorted[midpoint - 1]! + sorted[midpoint]!) / 2
+        : sorted[midpoint]!;
+      break;
+    }
+    case "min":
+      summary = Math.min(...values);
+      break;
+    case "max":
+      summary = Math.max(...values);
+      break;
+    case "sum":
+      summary = values.reduce((sum, value) => sum + value, 0);
+      break;
+    case "mean":
+      summary = values.reduce((sum, value) => sum + value, 0) / values.length;
+      break;
+  }
+
+  return Math.round(summary * 100) / 100;
+}
+
 function validateExperimentOutcomeMetricPointWindow(input: {
   context: z.RefinementCtx;
   daysWithData: number;
@@ -2651,6 +2854,7 @@ function validateExperimentOutcomeMetricPointWindow(input: {
   metricIndex: number;
   phase: "baseline" | "intervention";
   points: Array<z.infer<typeof experimentOutcomeMetricPointSchema>>;
+  statistic: ExperimentOutcomeStatistic;
   unit: string | null;
 }): void {
   if (input.points.length !== input.daysWithData) {
@@ -2661,19 +2865,20 @@ function validateExperimentOutcomeMetricPointWindow(input: {
     });
   }
 
-  const mean = input.points.length > 0
-    ? Math.round(
-        (input.points.reduce((sum, point) => sum + point.value, 0) / input.points.length) * 100,
-      ) / 100
-    : null;
-  if (mean !== input.mean) {
+  const summary = summarizeExperimentOutcomeValues(input.points, input.statistic);
+  const pointUnits = new Set(input.points.map((point) => point.unit));
+  const incompatibleUnits = input.statistic !== "count" && pointUnits.size > 1;
+  if (summary !== input.mean && !(incompatibleUnits && input.mean === null)) {
     input.context.addIssue({
       code: z.ZodIssueCode.custom,
-      message: `Experiment outcome ${input.phase} point mean must match the saved summary.`,
+      message: `Experiment outcome ${input.phase} point summary must match the saved summary.`,
       path: ["metricResults", input.metricIndex, "points"],
     });
   }
-  if (input.points.some((point) => point.unit !== input.unit)) {
+  if (
+    !(incompatibleUnits && input.unit === null) &&
+    input.points.some((point) => point.unit !== input.unit)
+  ) {
     input.context.addIssue({
       code: z.ZodIssueCode.custom,
       message: `Experiment outcome ${input.phase} point units must match the saved summary.`,
@@ -2684,16 +2889,25 @@ function validateExperimentOutcomeMetricPointWindow(input: {
 
 function validateExperimentOutcomeMetricDelta(input: {
   baselineMean: number | null;
+  baselineUnit: string | null;
   context: z.RefinementCtx;
   deltaAbs: number | null;
   deltaPct: number | null;
   interventionMean: number | null;
+  interventionUnit: string | null;
   metricIndex: number;
+  statistic: ExperimentOutcomeStatistic;
 }): void {
-  const deltaAbs = input.baselineMean !== null && input.interventionMean !== null
+  const unitsCompatible =
+    input.statistic === "count" ||
+    input.baselineUnit === input.interventionUnit;
+  const deltaAbs = unitsCompatible &&
+      input.baselineMean !== null &&
+      input.interventionMean !== null
     ? Math.round((input.interventionMean - input.baselineMean) * 100) / 100
     : null;
-  const deltaPct = input.baselineMean !== null &&
+  const deltaPct = unitsCompatible &&
+      input.baselineMean !== null &&
       input.interventionMean !== null &&
       input.baselineMean !== 0
     ? Math.round(
@@ -3365,6 +3579,8 @@ export type ExperimentMeasurementRole = z.infer<typeof experimentMeasurementRole
 export type ExperimentMeasurementKind = z.infer<typeof experimentMeasurementKindSchema>;
 export type ExperimentMeasurementAnchor = z.infer<typeof experimentMeasurementAnchorSchema>;
 export type ExperimentPlannedMeasurement = z.infer<typeof experimentPlannedMeasurementSchema>;
+export type ExperimentMetricOutcomeCapture = z.infer<typeof experimentMetricOutcomeCaptureSchema>;
+export type ExperimentPrimaryOutcome = z.infer<typeof experimentPrimaryOutcomeSchema>;
 export type ExperimentAnalysisPlan = z.infer<typeof experimentAnalysisPlanSchema>;
 export type ExperimentOnboardingSafety = z.infer<typeof experimentOnboardingSafetySchema>;
 export type ExperimentOnboardingCapture = z.infer<typeof experimentOnboardingCaptureSchema>;
@@ -3373,6 +3589,9 @@ export type ExperimentOutcomeTracking = z.infer<typeof experimentOutcomeTracking
 export type ExperimentOutcomeRef = z.infer<typeof experimentOutcomeRefSchema>;
 export type ExperimentMetricPeriodSummary = z.infer<typeof experimentMetricPeriodSummarySchema>;
 export type ExperimentMetricResult = z.infer<typeof experimentMetricResultSchema>;
+export type ExperimentStructuredReviewResult = z.infer<
+  typeof experimentStructuredReviewResultSchema
+>;
 export type ExperimentOutcomeMetricPoint = z.infer<typeof experimentOutcomeMetricPointSchema>;
 export type ExperimentOutcomeMetricResult = z.infer<typeof experimentOutcomeMetricResultSchema>;
 export type ExperimentProgressMetricSignal = z.infer<typeof experimentProgressMetricSignalSchema>;

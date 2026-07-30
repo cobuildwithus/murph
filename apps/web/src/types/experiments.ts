@@ -1,4 +1,6 @@
 import type {
+  ExperimentOutcomeStatistic,
+  ExperimentStructuredReviewResult,
   HealthCommonsExperimentOnboarding,
   HealthCommonsMeasurementMethodTier,
 } from "@murphai/contracts";
@@ -83,7 +85,15 @@ export interface TrendData {
   expectedRange?: { day: number; low: number; high: number }[];
   baselineAvg: number;
   currentValue: number;
-  currentValueLabel?: "experiment average" | "latest";
+  currentValueLabel?:
+    | "count"
+    | "experiment average"
+    | "latest"
+    | "maximum"
+    | "median"
+    | "minimum"
+    | "total";
+  statistic?: ExperimentOutcomeStatistic;
   delta: string;
   windowComparison?: {
     baselineDaysWithData: number;
@@ -359,6 +369,8 @@ export interface ExperimentRunProjection {
   sessionContext?: ExperimentRunContextEntry[];
   nextStep?: ExperimentNextStep;
   outcomeStatus: "available" | "not_expected" | "pending" | "unavailable";
+  outcomeKind?: "metric" | "structured_review" | null;
+  structuredReviewStatus?: ExperimentStructuredReviewResult["status"];
   outcomeConfidence?: "low" | "medium" | "high";
   summary?: string;
   summaryDetail?: string;

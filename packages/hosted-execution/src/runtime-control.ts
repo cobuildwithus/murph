@@ -16,6 +16,8 @@ import type {
 import type {
   HostedAssistantModelOverride,
   HostedAssistantProductModel,
+  HostedAssistantProvider,
+  HostedAssistantProviderOverride,
   HostedAssistantReasoningEffort,
   HostedAssistantReasoningEffortOverride,
 } from "./assistant-model.ts";
@@ -1019,6 +1021,11 @@ export interface HostedRuntimeGroupToolSenderContext {
 
 export interface HostedRuntimeUsageReferralSourceConversation {
   channel: "linq" | "telegram";
+  /**
+   * Ephemeral provider service observed by the Linq runtime. It is used only
+   * to gate service-specific referral behavior and is never persisted.
+   */
+  linqService?: "imessage" | "rcs" | "sms";
   threadId: string;
   threadIsDirect: boolean;
 }
@@ -1328,7 +1335,10 @@ export type HostedRuntimeGroupToolRequest =
        */
       linqSenderHandles: readonly string[];
     }
-  | ({ action: "read_usage_referral" } & HostedRuntimeGroupToolSenderContext)
+  | ({
+      action: "read_usage_referral";
+    } & HostedRuntimeGroupToolSenderContext
+      & HostedRuntimeUsageReferralSourceContext)
   | ({
       action: "arm_usage_referral";
       policyCode: HostedUsageReferralPolicyCode;
@@ -1781,10 +1791,17 @@ export type HostedRuntimeAssistantConfigurationToolRequest =
 export type HostedRuntimeAssistantConfigurationChanges =
   | {
       model: HostedAssistantProductModel;
+      provider?: HostedAssistantProvider;
       reasoningEffort?: HostedAssistantReasoningEffort;
     }
   | {
       model?: never;
+      provider: HostedAssistantProvider;
+      reasoningEffort?: HostedAssistantReasoningEffort;
+    }
+  | {
+      model?: never;
+      provider?: never;
       reasoningEffort: HostedAssistantReasoningEffort;
     };
 
@@ -1799,10 +1816,12 @@ export type HostedRuntimeAssistantConfigurationControlRequest =
 
 export interface HostedRuntimeAssistantConfigurationSnapshot {
   availableModels: HostedAssistantProductModel[];
+  availableProviders: HostedAssistantProvider[];
   availableReasoningEfforts: HostedAssistantReasoningEffort[];
   configurationAvailable: boolean;
   dormantSolPreference: boolean;
   model: HostedAssistantProductModel;
+  provider: HostedAssistantProvider;
   reasoningEffort: HostedAssistantReasoningEffort;
   solAvailable: boolean;
 }
@@ -2499,6 +2518,7 @@ export interface HostedWorkspaceState {
 export interface HostedWorkspaceReadResponse {
   fetchedAt: string;
   hostedAssistantModelOverride?: HostedAssistantModelOverride;
+  hostedAssistantProviderOverride?: HostedAssistantProviderOverride;
   hostedAssistantReasoningEffortOverride?: HostedAssistantReasoningEffortOverride;
   workspace: HostedWorkspaceState | null;
 }
