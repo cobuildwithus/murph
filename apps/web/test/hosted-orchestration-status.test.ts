@@ -383,6 +383,7 @@ function buildWorkflowStatus() {
       mailboxItemId: "mailbox_status_1",
     },
     mailboxSignalCount: 2,
+    runtimeWakeRequested: false,
     signalVersion: 4,
     userId: MEMBER_ID,
   };

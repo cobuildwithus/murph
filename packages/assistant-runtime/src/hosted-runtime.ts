@@ -2975,6 +2975,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         signal?: AbortSignal;
         systemMailboxAdmission: "all" | "pre_checkpoint_safe";
       }): Promise<boolean> => {
+        if (assistantProviderHandoffRequested) {
+          return false;
+        }
         const shouldContinue = input.shouldContinue ?? (() => true);
         const runtimeStateDirtyBeforeMailboxImport = runtimeStateDirty;
         let invocationLocalAssistantInputBatch:
@@ -3195,12 +3198,29 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       };
       const runPreCheckpointConversationWake = async (
         latencySeed: HostedRuntimeWakeLatencySeed | null,
-        options: {
+        wakeOptions: {
           shouldContinue?: () => boolean;
           signal?: AbortSignal;
         } = {},
       ): Promise<boolean> => {
         await flushImageGenerationWork();
+        if (
+          latencySeed !== null
+          && !assistantProviderHandoffRequested
+          && !runtimeAbortController.signal.aborted
+          && options.shutdownSignal?.aborted !== true
+        ) {
+          try {
+            if (await resolveInvocationAssistantProviderAuthority() === "handoff") {
+              markIdleCheckpointTimerAfterDirtyWork();
+              return false;
+            }
+          } catch {
+            // A runtime wake is only a handoff hint. The provider-entry gate
+            // remains the fail-closed authority when the live read is
+            // temporarily unavailable.
+          }
+        }
         const ran = await runForegroundMailboxWakeIfWork({
           latencySeed,
           requestIdKind: "checkpoint-interrupt",
@@ -3217,8 +3237,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 && hostedRuntimeWakeIsDue(committedWorkspace?.nextWakeAt ?? null)
               )
             ),
-          shouldContinue: options.shouldContinue,
-          signal: options.signal,
+          shouldContinue: wakeOptions.shouldContinue,
+          signal: wakeOptions.signal,
           systemMailboxAdmission: "pre_checkpoint_safe",
         });
         if (ran) {
@@ -3832,7 +3852,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           idleMaintenance.nextWakeReason === "inbox_media_retention"
           && idleMaintenance.nextWakeAt !== null;
         const immediateRecheckCandidate =
-          immediateDefaultWakeWasNotPresented
+          assistantProviderHandoffRequested
+          || immediateDefaultWakeWasNotPresented
           || immediateRetentionContinuationProduced;
         const checkpointReturnWake = selectEarliestHostedRuntimeWake([
           {
@@ -3847,12 +3868,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           },
         ]);
         const immediateRecheckRequested =
-          immediateRecheckCandidate
-          && !isHostedRuntimeFutureMailboxContinuation({
-            nextWakeAt: checkpointReturnWake.nextWakeAt,
-            nextWakeReason: checkpointReturnWake.nextWakeReason,
-            redactedStatus,
-          });
+          assistantProviderHandoffRequested
+          || (
+            immediateRecheckCandidate
+            && !isHostedRuntimeFutureMailboxContinuation({
+              nextWakeAt: checkpointReturnWake.nextWakeAt,
+              nextWakeReason: checkpointReturnWake.nextWakeReason,
+              redactedStatus,
+            })
+          );
         const checkpointReturnWakePresent = Object.hasOwn(committedWorkspace ?? {}, "nextWakeAt")
           || pendingWake.nextWakeAt !== null
           || committedWorkspace?.inboxMediaRetentionWakeAt !== null;

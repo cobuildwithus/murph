@@ -2948,6 +2948,46 @@ describe('Codex assistant registry helpers', () => {
     ).toBe(false)
   })
 
+  it('forwards the selected hosted provider credential to the Codex process', async () => {
+    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
+      finalMessage: 'Completed hosted Venice turn.',
+      precedingAgentMessageSegments: [],
+      responseDeliveryContextOrdinal: 0,
+      transcriptMessage: 'Completed hosted Venice turn.',
+      jsonEvents: [],
+      providerActionCount: 0,
+      sessionId: 'hosted-venice-thread',
+      stderr: '',
+      stdout: '',
+      threadId: 'hosted-venice-thread',
+      turnId: 'turn-hosted-venice',
+    })
+
+    const attempt = await executeCodexAssistantTurnAttempt({
+      env: {
+        [HOSTED_RUNTIME_PROCESS_ENV_MARKER]: '1',
+        HOSTED_ASSISTANT_PROVIDER: 'venice',
+        PATH: '/usr/bin',
+        VENICE_API_KEY: 'signed-venice-egress-credential',
+      },
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+        model: 'venice-model',
+        modelProvider: 'venice',
+      }),
+      userPrompt: 'Run hosted Venice turn.',
+      workingDirectory: '/tmp/provider-tests',
+    })
+
+    expect(attempt.ok).toBe(true)
+    expect(
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]?.env,
+    ).toMatchObject({
+      HOSTED_ASSISTANT_PROVIDER: 'venice',
+      VENICE_API_KEY: 'signed-venice-egress-credential',
+    })
+  })
+
   it('appends turn-local memory isolation after provider overrides', async () => {
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
       finalMessage: 'Completed turn-local override.',

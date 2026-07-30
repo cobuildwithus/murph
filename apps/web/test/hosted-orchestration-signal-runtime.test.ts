@@ -74,6 +74,7 @@ import {
   signalHostedRetentionRuntimeRecheck,
   signalHostedRuntimeRecheckRuntime,
   signalHostedRuntimeMaintenanceRuntime,
+  signalHostedRuntimeWakeRuntime,
 } from "@/src/lib/hosted-orchestration/signal-runtime";
 
 describe("hosted runtime Temporal signaling", () => {
@@ -336,6 +337,31 @@ describe("hosted runtime Temporal signaling", () => {
       expect.objectContaining({
         signalArgs: [{
           kind: "runtime_recheck_requested",
+        }],
+        workflowId: "hosted-user-runtime:member_123",
+      }),
+    );
+    expect(mocks.withAbortSignal).toHaveBeenCalledWith(
+      abortSignal,
+      expect.any(Function),
+    );
+  });
+
+  it("signals runtime wakes only after active access without upserting workspace", async () => {
+    const abortSignal = new AbortController().signal;
+    await signalHostedRuntimeWakeRuntime({
+      abortSignal,
+      client: buildClient(),
+      userId: "member_123",
+    });
+
+    expectHostedRuntimeActiveAccessRead(mocks.hostedMemberFindUnique, "member_123");
+    expect(mocks.ensureHostedWorkspace).not.toHaveBeenCalled();
+    expect(mocks.signalWithStart).toHaveBeenCalledWith(
+      HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
+      expect.objectContaining({
+        signalArgs: [{
+          kind: "runtime_wake_requested",
         }],
         workflowId: "hosted-user-runtime:member_123",
       }),

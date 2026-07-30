@@ -3,6 +3,7 @@ import { createHmac } from "node:crypto";
 import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
+import type { HostedRunnerStatusResponse } from "@murphai/hosted-execution/runtime-control";
 
 import {
   buildHostedLinqInboundEvent,
@@ -35,11 +36,27 @@ export interface HostedLocalEgressScenario {
   countProviderRequests(pathname?: string): number;
   listProviderRequests(pathname?: string): HostedLocalAssistantProviderStubRequest[];
   seedActiveMemberAndChat(): Promise<void>;
+  startInboundTurn(input: {
+    eventSuffix: string;
+    expectedReplyText: string;
+    text: string;
+  }): Promise<{
+    completion: Promise<HostedRunnerStatusResponse>;
+    send: Promise<ObservedLinqRequest>;
+  }>;
   sendInboundTurn(input: {
     eventSuffix: string;
     expectedReplyText: string;
     text: string;
   }): Promise<ObservedLinqRequest>;
+  sendInboundTurnUntilReply(input: {
+    eventSuffix: string;
+    expectedReplyText: string;
+    text: string;
+  }): Promise<{
+    completion: Promise<HostedRunnerStatusResponse>;
+    send: ObservedLinqRequest;
+  }>;
   stop(): Promise<void>;
 }
 
@@ -101,6 +118,68 @@ export async function startHostedLocalLinqEgressScenario(input: {
     }
     return scenario;
   };
+  const startInboundTurn = async (turnInput: {
+    eventSuffix: string;
+    expectedReplyText: string;
+    text: string;
+  }): Promise<{
+    completion: Promise<HostedRunnerStatusResponse>;
+    send: Promise<ObservedLinqRequest>;
+  }> => {
+    const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
+    const expectedReplyMatcher = (request: ObservedLinqRequest): boolean =>
+      linqStub.readObservedMessageText(request) === turnInput.expectedReplyText;
+    const baselineCount = linqStub.countObservedSends(
+      replyPath,
+      expectedReplyMatcher,
+    );
+    requireScenario().queueAssistantResponses([turnInput.expectedReplyText], {
+      matchInputContains: turnInput.text,
+    });
+    const webhookResponse = await postSignedLinqWebhook({
+      event: buildHostedLinqInboundEvent(userId, chatId, {
+        eventId: `evt_${turnInput.eventSuffix}_${userId}`,
+        messageId: `msg_${turnInput.eventSuffix}_${userId}`,
+        text: turnInput.text,
+      }),
+      scenario: requireScenario(),
+    });
+    if (webhookResponse.status !== 202) {
+      throw new Error(`Expected Linq webhook append to return 202, got ${webhookResponse.status}: ${await webhookResponse.text()}`);
+    }
+    await requireScenario().waitForLatestPendingWake(userId);
+    const completion = requireScenario().waitForHostedCompletion(userId);
+    return {
+      completion,
+      send: linqStub.waitForAdditionalSend({
+        baselineCount,
+        expectedPath: replyPath,
+        matchRequest: expectedReplyMatcher,
+        scenario: requireScenario(),
+        userId,
+      }).then((send) => {
+        const observedText = linqStub.readObservedMessageText(send);
+        if (observedText !== turnInput.expectedReplyText) {
+          throw new Error(`Expected Linq reply ${JSON.stringify(turnInput.expectedReplyText)}, got ${JSON.stringify(observedText)}.`);
+        }
+        return send;
+      }),
+    };
+  };
+  const sendInboundTurnUntilReply = async (turnInput: {
+    eventSuffix: string;
+    expectedReplyText: string;
+    text: string;
+  }): Promise<{
+    completion: Promise<HostedRunnerStatusResponse>;
+    send: ObservedLinqRequest;
+  }> => {
+    const turn = await startInboundTurn(turnInput);
+    return {
+      completion: turn.completion,
+      send: await turn.send,
+    };
+  };
 
   return {
     chatId,
@@ -133,44 +212,13 @@ export async function startHostedLocalLinqEgressScenario(input: {
         recipientPhone: buildLinqRecipientPhoneNumber(userId),
       });
     },
+    startInboundTurn,
     sendInboundTurn: async (turnInput) => {
-      const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
-      const expectedReplyMatcher = (request: ObservedLinqRequest): boolean =>
-        linqStub.readObservedMessageText(request) === turnInput.expectedReplyText;
-      const baselineCount = linqStub.countObservedSends(
-        replyPath,
-        expectedReplyMatcher,
-      );
-      requireScenario().queueAssistantResponses([turnInput.expectedReplyText], {
-        matchInputContains: turnInput.text,
-      });
-      const webhookResponse = await postSignedLinqWebhook({
-        event: buildHostedLinqInboundEvent(userId, chatId, {
-          eventId: `evt_${turnInput.eventSuffix}_${userId}`,
-          messageId: `msg_${turnInput.eventSuffix}_${userId}`,
-          text: turnInput.text,
-        }),
-        scenario: requireScenario(),
-      });
-      if (webhookResponse.status !== 202) {
-        throw new Error(`Expected Linq webhook append to return 202, got ${webhookResponse.status}: ${await webhookResponse.text()}`);
-      }
-      await requireScenario().waitForLatestPendingWake(userId);
-      const completionPromise = requireScenario().waitForHostedCompletion(userId);
-      const send = await linqStub.waitForAdditionalSend({
-        baselineCount,
-        expectedPath: replyPath,
-        matchRequest: expectedReplyMatcher,
-        scenario: requireScenario(),
-        userId,
-      });
-      await completionPromise;
-      const observedText = linqStub.readObservedMessageText(send);
-      if (observedText !== turnInput.expectedReplyText) {
-        throw new Error(`Expected Linq reply ${JSON.stringify(turnInput.expectedReplyText)}, got ${JSON.stringify(observedText)}.`);
-      }
-      return send;
+      const turn = await sendInboundTurnUntilReply(turnInput);
+      await turn.completion;
+      return turn.send;
     },
+    sendInboundTurnUntilReply,
     stop: async () => {
       const cleanup = await Promise.allSettled([
         requireScenario().stop(),

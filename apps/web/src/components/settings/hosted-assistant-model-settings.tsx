@@ -170,7 +170,7 @@ export function AssistantProviderSummary({
           </>
         ) : (
           <>
-            Core replies use{" "}
+            New core replies use{" "}
             <span className="font-medium text-foreground">
               {currentProviderName}
             </span>
@@ -182,7 +182,7 @@ export function AssistantProviderSummary({
         aria-label={
           hasPendingChange
             ? `Change model provider. Core replies will switch to ${draftProviderName} after Save.`
-            : `Change model provider. Core replies currently use ${currentProviderName}.`
+            : `Change model provider. New core replies use ${currentProviderName}.`
         }
         className="text-muted-foreground"
         disabled={disabled}
@@ -313,8 +313,9 @@ function HostedAssistantModelSettingsForm(
   const [isSaving, setIsSaving] = useState(false);
   const [status, setStatus] = useState<{
     message: string;
-    tone: "destructive" | "neutral" | "success";
+    tone: "destructive" | "neutral";
   } | null>(null);
+  const [saveAnnouncement, setSaveAnnouncement] = useState<string | null>(null);
   const controlsDisabled = isSaving || !props.configurationAvailable;
   const hasChanges =
     draftModel !== currentModel
@@ -324,6 +325,7 @@ function HostedAssistantModelSettingsForm(
   async function saveModel() {
     setIsSaving(true);
     setStatus(null);
+    setSaveAnnouncement(null);
 
     try {
       const modelChanged = draftModel !== currentModel;
@@ -365,12 +367,11 @@ function HostedAssistantModelSettingsForm(
       setDraftProvider(provider);
       setDormantSolPreference(response.dormantSolPreference);
       setSolAvailable(response.solAvailable);
-      setStatus({
-        message: veniceAvailable
-          ? `Saved. New core replies will use ${readProductModelName(response.model)} through ${readProviderName(provider)}. A reply already in progress may finish with your previous choice.`
-          : `Saved. Future core replies will use ${readModelName(response.model)}. An active conversation may take up to three minutes to switch.`,
-        tone: "success",
-      });
+      setSaveAnnouncement(
+        response.dormantSolPreference
+          ? `Saved. New core replies use ${readProductModelName(response.model)} through ${readProviderName(provider)} while Edge is paused; Sol remains saved.`
+          : `Saved. ${readProductModelName(response.model)} through ${readProviderName(provider)} is your default.`,
+      );
     } catch (error) {
       const solNoLongerAvailable =
         error instanceof HostedOnboardingApiError &&
@@ -459,6 +460,7 @@ function HostedAssistantModelSettingsForm(
             const current = option.model === currentModel;
             const badge = readModelOptionBadge({
               current,
+              dormantSolPreference,
               model: option.model,
               selected,
               unavailable,
@@ -528,9 +530,16 @@ function HostedAssistantModelSettingsForm(
           {isSaving ? <Spinner aria-hidden="true" /> : null}
           {isSaving ? "Saving…" : "Save change"}
         </Button>
+        {status ? (
+          <SettingsStatusLine
+            message={status.message}
+            tone={status.tone}
+          />
+        ) : null}
         <SettingsStatusLine
-          message={status?.message ?? null}
-          tone={status?.tone ?? "neutral"}
+          className="sr-only min-h-0"
+          message={saveAnnouncement}
+          tone="neutral"
         />
       </div>
     </form>
@@ -539,12 +548,17 @@ function HostedAssistantModelSettingsForm(
 
 function readModelOptionBadge(input: {
   current: boolean;
+  dormantSolPreference: boolean;
   model: HostedAssistantProductModel;
   selected: boolean;
   unavailable: boolean;
 }): React.ReactNode {
   if (input.current) {
-    return <ModelOptionBadge>Current</ModelOptionBadge>;
+    return (
+      <ModelOptionBadge>
+        {input.dormantSolPreference ? "Active" : "Default"}
+      </ModelOptionBadge>
+    );
   }
 
   if (input.selected) {
