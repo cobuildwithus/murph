@@ -1,6 +1,11 @@
 "use client";
 
-import { useState, type ReactNode, type SyntheticEvent } from "react";
+import {
+  useEffect,
+  useState,
+  type ReactNode,
+  type SyntheticEvent,
+} from "react";
 import type {
   HostedPlanUsageAvailableStatus,
   HostedPlanUsageStatus,
@@ -246,6 +251,21 @@ const DESIGN_FULFILLED_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
 
 function GroupUsageFundingStudy() {
   const endpoint = "/api/design/group-sponsorship-management";
+  const [activationPreviewOpen, setActivationPreviewOpen] = useState(false);
+
+  useEffect(() => {
+    function syncActivationPreview() {
+      setActivationPreviewOpen(
+        window.location.hash === "#group-usage-funding",
+      );
+    }
+
+    syncActivationPreview();
+    window.addEventListener("hashchange", syncActivationPreview);
+    return () =>
+      window.removeEventListener("hashchange", syncActivationPreview);
+  }, []);
+
   const oneTimeContribution = (
     <div className="space-y-4">
       <p className="text-center text-sm text-muted-foreground">
@@ -311,9 +331,10 @@ function GroupUsageFundingStudy() {
           action={(
             <div inert>
               <GroupSponsorshipDialog
+                key={activationPreviewOpen ? "open" : "closed"}
                 checkoutUrl="/api/design/usage-credit-preview"
                 customizationAllowed
-                initialOpen
+                initialOpen={activationPreviewOpen}
                 mode="monthly"
                 monthlyCapMinor={1_000}
                 monthlyCapOptions={DESIGN_GROUP_MONTHLY_CAPS}
