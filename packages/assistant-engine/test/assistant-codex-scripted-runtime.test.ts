@@ -1013,9 +1013,10 @@ text(JSON.stringify(result));
     const functionCallOutputs = scenario.stub.requestSummariesSinceBaseline()
       .flatMap((summary) => summary.functionCallOutputs ?? [])
     expect(functionCallOutputs).toEqual(expect.arrayContaining([
-      expect.stringContaining('"unverifiedOwnerContactLabel":"Alex R."'),
+      expect.stringContaining('"displayName":"Alex R."'),
     ]))
     expect(functionCallOutputs.join('\n')).not.toContain('ownerAdvisoryName')
+    expect(functionCallOutputs.join('\n')).not.toContain('unverifiedOwnerContactLabel')
   })
 
   it('threads exact participant authority through the real group-effect dispatcher', {

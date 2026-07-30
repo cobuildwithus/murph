@@ -7,6 +7,7 @@ import {
 import {
   ensureHostedLinqLineForProviderEventTx,
   projectHostedLinqLineForProviderEventTx,
+  upsertHostedLinqLineForPhoneTx,
 } from "./linq-line-store";
 import {
   createHostedLinqProviderEventLookupKey,
@@ -15,6 +16,10 @@ import {
   markHostedLinqOnboardingLinkNoticeSent,
   releaseHostedLinqOnboardingLinkNoticeClaim,
 } from "./linq-daily-state";
+import {
+  projectHostedLinqChatHealthTx,
+  projectHostedLinqLineProviderStateTx,
+} from "./linq-provider-health-store";
 import type { ParsedHostedLinqProviderEvent } from "./linq-provider-events";
 import { toHostedOnboardingLogIdSuffix } from "./logging";
 import { sha256Hex } from "../primitives";
@@ -34,11 +39,27 @@ export async function ingestHostedLinqProviderEventTx(input: {
   >;
 }> {
   const receivedAt = input.receivedAt ?? new Date();
+  const health = input.event.providerHealth ?? {
+    chat: null,
+    line: null,
+  };
   const eventLookupKey = createHostedLinqProviderEventLookupKey(input.event.eventId);
-  const lineLookupKey = await ensureHostedLinqLineForProviderEventTx({
+  let lineLookupKey = await ensureHostedLinqLineForProviderEventTx({
     event: input.event,
     prisma: input.prisma,
   });
+  const healthLinePhoneNumber = health.line?.phoneNumber
+    ?? health.chat?.linePhoneNumber
+    ?? null;
+  if (!lineLookupKey && healthLinePhoneNumber) {
+    const line = await upsertHostedLinqLineForPhoneTx({
+      observedAt: receivedAt,
+      phoneNumber: healthLinePhoneNumber,
+      prisma: input.prisma,
+      source: "webhook",
+    });
+    lineLookupKey = line.phoneNumberLookupKey;
+  }
   const created = await input.prisma.hostedLinqProviderEvent.createMany({
     data: {
       apiVersion: input.event.apiVersion,
@@ -61,7 +82,11 @@ export async function ingestHostedLinqProviderEventTx(input: {
       phoneNumberRole: input.event.phoneNumberRole,
       providerCreatedAt: input.event.providerCreatedAt,
       providerReason: input.event.providerReason,
+      providerReputationStatus: health.line?.reputationStatus ?? null,
+      providerServiceStatus: health.line?.serviceStatus ?? null,
       providerStatus: input.event.providerStatus,
+      chatHealthStatus: health.chat?.providerStatus ?? null,
+      chatHealthUpdatedAt: health.chat?.providerUpdatedAt ?? null,
       receivedAt,
       service: input.event.service,
       traceIdSuffix: input.event.traceIdSuffix,
@@ -121,13 +146,41 @@ export async function ingestHostedLinqProviderEventTx(input: {
     ?? deliveryReceipt.phoneNumberLookupKey
     ?? outboundEchoDelivery?.phoneNumberLookupKey
     ?? null;
-  // Delivery/line projections are monotonic derived state. The provider-event
-  // ledger remains the duplicate gate for event-scoped alerting below.
-  if (!staleDeliveryReceipt && !outboundEchoDelivery?.runtimeOwned) {
+  // Delivery projections remain Murph-observed state. Linq's line service and
+  // reputation snapshot is projected independently below.
+  if (
+    input.event.eventType !== "phone_number.status_updated"
+    && !staleDeliveryReceipt
+    && !outboundEchoDelivery?.runtimeOwned
+  ) {
     await projectHostedLinqLineForProviderEventTx({
       event: input.event,
       lineLookupKey: projectionLineLookupKey,
       prisma: input.prisma,
+    });
+  }
+
+  if (health.line && projectionLineLookupKey) {
+    await projectHostedLinqLineProviderStateTx({
+      eventId: health.line.eventId,
+      observedAt: receivedAt,
+      phoneNumberLookupKey: projectionLineLookupKey,
+      prisma: input.prisma,
+      providerUpdatedAt: health.line.providerUpdatedAt,
+      reputationStatus: health.line.reputationStatus,
+      serviceStatus: health.line.serviceStatus,
+    });
+  }
+  if (health.chat) {
+    await projectHostedLinqChatHealthTx({
+      chatId: health.chat.chatId,
+      isGroup: health.chat.isGroup,
+      observedAt: receivedAt,
+      phoneNumberLookupKey: projectionLineLookupKey,
+      prisma: input.prisma,
+      providerStatus: health.chat.providerStatus,
+      providerUpdatedAt: health.chat.providerUpdatedAt,
+      service: health.chat.service,
     });
   }
 
@@ -252,7 +305,7 @@ function buildHostedLinqAlertSubject(
 
 function buildHostedLinqAlertDetailsJson(event: ParsedHostedLinqProviderEvent): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify({
-    actionTaken: "recorded_only_no_routing_failover",
+    actionTaken: "health_projection_updated_egress_policy_evaluated_at_send",
     deliveryStatus: event.deliveryStatus,
     eventIdSuffix: toHostedOnboardingLogIdSuffix(event.eventId),
     eventType: event.eventType,
@@ -262,6 +315,8 @@ function buildHostedLinqAlertDetailsJson(event: ParsedHostedLinqProviderEvent): 
     phoneNumberRole: event.phoneNumberRole,
     providerCreatedAt: event.providerCreatedAt.toISOString(),
     providerReason: event.providerReason,
+    providerReputationStatus: event.providerHealth?.line?.reputationStatus ?? null,
+    providerServiceStatus: event.providerHealth?.line?.serviceStatus ?? null,
     providerStatus: event.providerStatus,
     service: event.service,
   })) as Prisma.InputJsonValue;
