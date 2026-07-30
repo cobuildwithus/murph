@@ -50,9 +50,9 @@ Updated: 2026-07-30
 - Reuse the current `web-control.worker` internal provider-fetch route and
   signed Web callback instead of adding another token, Durable Object, queue, or
   credential store.
-- The singular connection is selected through the existing provider preference;
-  updating or deleting the connection first returns the member to managed
-  inference.
+- The singular connection owns one selection boolean so managed provider, model,
+  and reasoning preferences remain untouched. Updating the connection deselects
+  it before the verified replacement can be selected.
 - Unsupported tools, images, streams, endpoints, and deploy versions fail
   explicitly. No compatibility path may silently reduce Murph's capabilities.
 
@@ -92,8 +92,9 @@ Updated: 2026-07-30
 ## Decisions
 
 - The durable product object is one `HostedInferenceConnection` keyed by member.
-- `assistantProviderPreference = "custom"` is the only selection fact; there is
-  no duplicate selected flag or connection registry.
+- The singular connection's `selected` boolean is the only custom-selection
+  fact. Existing managed provider/model/reasoning preferences remain dormant;
+  there is no selected-connection foreign key or connection registry.
 - Connection create/update verifies the candidate before replacing the current
   row. A failed probe leaves the prior row untouched.
 - The fixed Codex provider uses the existing internal Web-control origin and the

@@ -65,12 +65,16 @@ keyed by `memberId` and stores:
 - monotonic revision;
 - configured context-window size;
 - image-support declaration;
-- compatibility profile; and
-- verification time.
+- compatibility profile;
+- verification time; and
+- one selection boolean.
 
-Selection reuses `HostedMember.assistantProviderPreference = "custom"`. There is
-no duplicate selected flag, connection id, provider registry, status machine,
-verification queue, retry row, or Cloudflare copy of durable connection state.
+The selection boolean lives on the singular connection so the existing managed
+OpenAI/Venice, model, and reasoning preferences remain dormant and unchanged.
+There is no connection id, selected-connection foreign key, provider registry,
+status machine, verification queue, retry row, or Cloudflare copy of durable
+connection state. Replacing the connection deselects it until the member
+explicitly selects the verified replacement.
 
 A runtime-relevant connection edit increments the revision. The revision-derived
 internal model alias participates in custom-provider thread compatibility, so an

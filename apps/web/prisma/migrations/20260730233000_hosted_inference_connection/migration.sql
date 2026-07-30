@@ -4,6 +4,7 @@ SET LOCAL lock_timeout = '5s';
 CREATE TABLE "hosted_inference_connection" (
   "member_id" TEXT NOT NULL,
   "protocol" TEXT NOT NULL,
+  "selected" BOOLEAN NOT NULL DEFAULT false,
   "config_encrypted" TEXT NOT NULL,
   "revision" INTEGER NOT NULL DEFAULT 1,
   "context_window_tokens" INTEGER NOT NULL,
