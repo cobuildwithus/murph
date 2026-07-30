@@ -398,7 +398,9 @@ for (const width of [768, 1280] as const) {
       '[aria-label="Pulse AI usage"]',
     );
     const trigger = card.locator("button").filter({ hasText: "Add usage" });
-    const historyPreview = study.locator('[data-design-interaction="history-only"]');
+    const historyPreview = study.locator(
+      '[data-design-interaction="guidance-with-history"]',
+    );
     const referralDetailsPreview = study.locator(
       '[data-design-interaction="referral-details"]',
     );
@@ -412,7 +414,14 @@ for (const width of [768, 1280] as const) {
       study.locator('[data-design-state="trial-conversion"] [inert]'),
     ).toHaveCount(1);
     await expect(activeState.locator("[inert]")).toHaveCount(1);
+    await expect(activeState.getByText("Reward pending", { exact: true })).toBeVisible();
     await expect(historyPreview).toHaveCount(1);
+    await expect(
+      historyPreview.getByText(
+        "Earn usage by inviting friends or adding Murph to a groupchat",
+      ),
+    ).toBeVisible();
+    await expect(historyPreview.getByText("Ask Murph", { exact: true })).toBeVisible();
     expect(
       await historyPreview.evaluate((element) =>
         element.hasAttribute("inert"),
@@ -432,7 +441,7 @@ for (const width of [768, 1280] as const) {
       historyPreview.locator(
         'a, button, input, select, textarea, summary, [tabindex]:not([tabindex="-1"])',
       ),
-    ).toHaveCount(1);
+    ).toHaveCount(2);
 
     const referralDetails = referralDetailsPreview.locator("details");
     const referralDetailsSummary = referralDetails.locator("summary");

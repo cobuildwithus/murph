@@ -122,6 +122,18 @@ const DESIGN_AI_USAGE_ACTIVITY: HostedAiUsageActivitySnapshot = {
       title: "Start an active group",
     },
     {
+      destinationLabel: "the group",
+      id: "design-mission-reward-pending",
+      requirementsLabel:
+        "Start a fresh group and make it genuinely active, with multiple people actually talking.",
+      rewardLabel: "$3.50",
+      selectedLabel: "Jul 18, 2026",
+      status: "reward_pending",
+      statusLabel: "Reward pending",
+      timingLabel: "Qualified Jul 25",
+      title: "Start an active group",
+    },
+    {
       destinationLabel: "your Murph",
       id: "design-mission-new-person",
       requirementsLabel:
@@ -462,12 +474,12 @@ function PersonalUsageCreditOwnerStudy() {
         </section>
         <section className="flex flex-col gap-3">
           <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-            History interaction
+            Guidance with history interaction
           </p>
-          <div data-design-interaction="history-only">
+          <div data-design-interaction="guidance-with-history">
             <HostedAiUsageActivity
               activity={DESIGN_AI_USAGE_HISTORY_INTERACTION}
-              missionContactOption={null}
+              missionContactOption={DESIGN_USAGE_MISSION_CONTACT_OPTION}
             />
           </div>
         </section>
