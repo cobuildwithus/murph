@@ -163,7 +163,12 @@ required exact-head CI surface evaluates it. Never pipe a downloaded artifact
 directly into `git apply`, and never treat the attachment as landed code.
 
 Resolve accepted product-experience, prompt, and frontend findings in the
-parent, rerun focused proof, and push the resulting candidate. Do not rerun the
+parent, rerun focused proof, and push the resulting candidate. If accepted
+product-experience remediation materially changed a product-owned dimension,
+the parent must reapply `agent-docs/prompts/product-experience-review.md` to that
+corrected pushed head and updated direct journey evidence, then record a
+refreshed product purpose verdict. This is parent-owned corrected-head
+revalidation, not another subagent or ReviewGPT invocation. Do not rerun the
 preliminary pass for those substantive corrections. Complete parent final
 review and final verification, then close any active plan and push the final
 task head. Only after that may an eligible final ReviewGPT round-one baseline be

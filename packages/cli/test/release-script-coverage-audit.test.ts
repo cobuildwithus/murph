@@ -1566,6 +1566,15 @@ describe('monorepo release flow coverage audit', () => {
     expect(completionWorkflow).toContain('If none exist,')
     expect(completionWorkflow).toContain('## Preliminary Specialist Applicability')
     expect(completionWorkflow).toContain('`reviewgpt-coverage.patch`')
+    expect(completionWorkflow).toContain(
+      'the parent must reapply `agent-docs/prompts/product-experience-review.md` to that corrected pushed head',
+    )
+    expect(completionWorkflow).toContain(
+      'This is a bounded parent revalidation, not another subagent or ReviewGPT invocation.',
+    )
+    expect(prReviewGptLoop).toContain(
+      'This is parent-owned corrected-head\nrevalidation, not another subagent or ReviewGPT invocation.',
+    )
 
     const completionAuditPrompts = [
       'prompt-review.md',

@@ -37,10 +37,13 @@ Done:
   coverage for the route and ZIP contents.
 - Passed shell syntax, diff hygiene, focused Vitest, CLI typecheck, and agent
   docs drift checks.
+- ReviewGPT completed the exact-head preliminary pass with one accepted medium
+  finding: materially journey-changing product remediation still needs a
+  refreshed purpose verdict.
 
 Now:
-- Review the complete diff, publish the exact candidate, and run the preliminary
-  ReviewGPT specialist pass.
+- Add the bounded parent-owned corrected-head product revalidation required by
+  the accepted finding, without adding another subagent or ReviewGPT run.
 
 Next:
 - Resolve any findings, complete parent final review, close this plan, and prove
