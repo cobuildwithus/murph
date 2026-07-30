@@ -164,6 +164,7 @@ export function AuthDialog({
     ? "Review how Murph uses health data before continuing."
     : description;
   const dismissLocked = panelView !== "auth";
+  const consentPresentation = panelView === "consent";
 
   function handleOpenChange(nextOpen: boolean) {
     if (!nextOpen && dismissLocked) {
@@ -181,14 +182,14 @@ export function AuthDialog({
       <DialogContent
         className={cn(
           "max-w-md gap-6 p-6 md:p-7",
-          panelView === "consent" ? "rounded-2xl" : null,
+          consentPresentation ? "rounded-2xl" : null,
         )}
         showCloseButton={!dismissLocked}
       >
         <DialogHeader
           className={cn({
-            "pr-10": panelView === "auth",
-            "sr-only": panelView !== "auth",
+            "pr-10": !consentPresentation,
+            "sr-only": consentPresentation,
           })}
         >
           <DialogTitle className="text-xl font-bold tracking-tight text-foreground">

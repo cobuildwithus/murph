@@ -349,6 +349,13 @@ test("LandingAuthActions blocks dialog dismissal while auth completion owns the 
     );
   });
 
+  const dialogHeader = container.querySelector("[data-dialog-content] > div");
+  expect(dialogHeader?.className).toContain("pr-10");
+  expect(dialogHeader?.className).not.toContain("sr-only");
+  expect(container.textContent).toContain("Log in or sign up");
+  expect(container.textContent).toContain(
+    "Murph helps you build healthier habits that fit your life.",
+  );
   expect(
     container.querySelector('[data-dialog-dismiss="close"]'),
   ).toBeNull();
