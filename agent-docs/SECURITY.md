@@ -99,6 +99,13 @@ Last verified: 2026-07-30
   only the two Responses POST paths, canonical product model ids, a bounded
   20 MiB request body, and fixed operator model mappings; it disables Venice's
   added system prompt, web search, and web scraping at the final egress rewrite.
+  Settings may describe Venice as privacy-first and state that Venice stores no
+  prompts or replies, matching [Venice's API privacy
+  documentation](https://docs.venice.ai/welcome/privacy). Treat that as a
+  Venice-layer provider disclosure only. Murph validates the configured model
+  id but does not query or lock Venice's model-level privacy badge, so the
+  setting must not promise E2EE, TEE, or broader upstream retention or training
+  behavior.
   Provider choice never grants delivery, vault, billing, or identity authority.
 - An accepted-message `Message ref` is an opaque selector, not authority. Render only the existing `AssistantInputEvent.inputId` when at least one exact-message action is eligible and the accepted input is positively identified route-authorized Linq iMessage or Telegram; conversation source and reply-target channel must also agree. Linq SMS, RCS, and unknown service types expose no ref and are ineligible. `murph.select_reply_target`, `murph.react_to_message`, `revoke_own_email_share`, and group phone-call requester selection must require an exact active root invocation, use the same resolver, bind the ref to the current delivery-context ordinal, reload the stored event, and recheck route, conversation, direct/group audience, account, provider target or sender evidence, and action-specific capability before execution. Participant-specific group effects accept no canonical member id: the runtime forwards only the exact accepted input id plus trusted provider source/sender evidence, and Web resolves the canonical member and revalidates current room membership or share authority. Missing or unattributed sender evidence fails that participant effect without suppressing the normal conversational reply. The dispatcher must reject descendant, stale-turn, or foreign-thread tool requests before consulting accepted-message authority, and descendant shell env carries no targeting authority. Invented, stale, cross-turn, cross-thread, cross-room, wrong-sender, descendant, or unsupported refs fail closed. Provider message ids must stay out of prompts, tool arguments/results, model history, diagnostics, and model-visible errors; only the local delivery owner may resolve one immediately before the effect.
 - `murph.group action="read_chat_name"` is a read-only, Web-owned provider
