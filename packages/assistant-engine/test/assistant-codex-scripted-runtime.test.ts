@@ -872,6 +872,99 @@ text(JSON.stringify(result));
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
 
+  it('carries an explicit top-up question through the real private tool loop', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const planUsageRequests: unknown[] = []
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: { includeTopUpHistory: true },
+          name: 'plan_usage',
+          namespace: 'murph',
+        },
+      },
+      {
+        text:
+          'Your latest $5.00 top-up posted. You have used $1.25 of it and have $3.75 remaining. An earlier $10.00 top-up added for you has been fully used.',
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: resolveMurphDynamicTools({
+        planUsageAvailable: true,
+        progressUpdatesAvailable: false,
+      }),
+      hostedToolContext: {
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        planUsageTool: {
+          read: async (request) => {
+            planUsageRequests.push(request)
+            return {
+              accessKind: 'paid',
+              forecast: null,
+              generatedAt: '2026-07-29T20:00:00.000Z',
+              periodEnd: '2026-08-01T00:00:00.000Z',
+              periodKind: 'monthly',
+              periodStart: '2026-07-01T00:00:00.000Z',
+              planCode: 'launch_monthly',
+              planName: 'Pulse',
+              recommendedAction: null,
+              remainingPercent: 9,
+              status: 'active',
+              topUpHistory: {
+                hasMore: false,
+                topUps: [
+                  {
+                    addedUsd: '5.000000',
+                    adjustedUsd: '0.000000',
+                    creditedAt: '2026-07-29T14:23:42.000Z',
+                    remainingUsd: '3.750000',
+                    source: 'purchased_by_you',
+                    usedUsd: '1.250000',
+                  },
+                  {
+                    addedUsd: '10.000000',
+                    adjustedUsd: '0.000000',
+                    creditedAt: '2026-07-27T20:38:45.000Z',
+                    remainingUsd: '0.000000',
+                    source: 'added_for_you',
+                    usedUsd: '10.000000',
+                  },
+                ],
+                totalCount: 2,
+              },
+              usedPercent: 91,
+            }
+          },
+        },
+        sendVaultFile: async () => {
+          throw new Error('Vault-file sending is unavailable for this turn.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Did my latest usage top-up post, and how much is left?',
+    })
+
+    expect(planUsageRequests).toEqual([{ includeTopUpHistory: true }])
+    expect(
+      scenario.stub.requestSummariesSinceBaseline()
+        .flatMap((summary) => summary.functionCallOutputs ?? []),
+    ).toEqual(expect.arrayContaining([
+      expect.stringContaining('"source":"purchased_by_you"'),
+      expect.stringContaining('"source":"added_for_you"'),
+      expect.stringContaining('"totalCount":2'),
+    ]))
+    expect(result.finalMessage).toBe(
+      'Your latest $5.00 top-up posted. You have used $1.25 of it and have $3.75 remaining. An earlier $10.00 top-up added for you has been fully used.',
+    )
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
+
   it.each([
     {
       contactCardFails: false,
