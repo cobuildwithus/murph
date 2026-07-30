@@ -193,15 +193,15 @@ must exactly match the `read_shared` member used for first-person references;
 display names, handles, and member order are never identity fallbacks. The
 paired mailbox rows are the only durable operation state, and the answer remains
 untrusted data when the private runtime composes its follow-up. A joined-group
-Ask request and its legacy private completion are safe to admit through the
-runtime's narrow pre-checkpoint system prefix because the detached read has no
-resident write or delivery authority and the completion can only use the
-existing output-only delivery surfaces. One shared import policy applies decoded
-adapter validation to every import in that pre-checkpoint pass, including
-follow-up imports and foreground reruns, so consented-member requests and
-reviewed completions remain on the ordinary checkpoint path. This starts the
-separate read or private continuation without publishing the routine idle
-snapshot early. Each joined-group completion that predates pending personal
+Ask request and every accepted-input completion are safe to admit through the
+runtime's narrow pre-checkpoint system prefix: the detached read has no resident
+write or delivery authority, and every completion can use only the existing
+output-only continuation or fixed fallback surface. Consented-member requests
+still wait for the ordinary checkpoint boundary before starting private work,
+but a completed reviewed answer no longer waits for a routine idle snapshot.
+The existing causal cutoff, session binding, deterministic outbox key, and
+provider-entry authority recheck own ordering and replay safety without a
+second checkpoint gate. Each joined-group completion that predates pending personal
 input owns one foreground-causal assistant pass and queues its response through
 the ordinary idempotent outbox. A progressed safe causal pass re-enters that
 same bounded pass loop so another already-imported safe item cannot fall back to
@@ -308,14 +308,18 @@ or general agent registry.
 
 For a consented member or one-time current-sender target, the private read-only
 child receives the exact permission context and produces a candidate from the
-member workspace. One
-separate fresh-context outgoing reviewer then receives only that immutable
+member workspace. One separate fresh-context outgoing reviewer receives only that immutable
 permission, the question, and the candidate; it has no member workspace,
 history, application tools, network, or delivery authority and returns only `allow` or
 `deny`. There is no incoming reviewer and no rewrite loop. An allowed answer is
-placed on the bound group completion and delivered as the exact reviewed bytes
-without another model turn. Denial or a candidate-declared cannot-answer yields
-fixed non-disclosing copy. Invalid review output, provider failure, or stale
+placed on the bound group completion as untrusted data. For accepted-input
+requests, the caller group Murph runs one isolated output-only continuation with
+the existing room history, resolves references such as “that”, and writes the
+actual user-facing reply using only private facts present in the reviewed
+answer. The final outbox intent retains the completion id, expiry, and route
+proof for provider-entry revalidation. Denial or a candidate-declared
+cannot-answer yields fixed non-disclosing copy without another model turn.
+Invalid review output, provider failure, or stale
 authority discloses nothing and follows the existing retry, expiry, or terminal
 lifecycle. A denied candidate never becomes durable operation state. This adds no
 fan-out, scheduler, policy engine, result table, or second service.

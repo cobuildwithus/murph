@@ -1264,7 +1264,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     )).resolves.toMatchObject({ status: "imported" });
   });
 
-  it("admits only joined-group completions on the dirty-window fast path", async () => {
+  it("admits every accepted-input completion on the dirty-window fast path", async () => {
     const vaultRoot = await createVaultRoot();
     const { platform } = createRuntimePlatform();
     const reviewedWake = buildHostedExecutionAssistantAskCompletedWake({
@@ -1298,11 +1298,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
 
     await expect(reviewedOptions.importItem(
       createAssistantAskMailboxImportItem(reviewedWake),
-      { assistantAskCompletionKind: "joined_group" },
-    )).resolves.toEqual({
-      reasonCode: "assistant_ask.completion_not_admitted",
-      status: "deferred",
-    });
+    )).resolves.toMatchObject({ status: "imported" });
 
     const joinedWake = createAssistantAskCompletedWake();
     const joinedOptions = createBridgeOptions({
@@ -1315,7 +1311,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
     await expect(joinedOptions.importItem(
       createAssistantAskMailboxImportItem(joinedWake),
-      { assistantAskCompletionKind: "joined_group" },
     )).resolves.toMatchObject({ status: "imported" });
   });
 });

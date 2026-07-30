@@ -303,6 +303,77 @@ describe('assistant Codex turn planning', () => {
     }
   })
 
+  it('keeps group ask continuation planning audience-neutral', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'CLI bootstrap must stay unavailable.',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(
+      'Private context must stay unavailable.',
+    )
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const vault = await mkdtemp(
+      path.join(os.tmpdir(), 'assistant-ask-group-continuation-plan-'),
+    )
+
+    try {
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: {
+          hosted: {
+            dynamicContextPrompts: ['Hosted tool guidance must stay unavailable.'],
+            memberId: 'member-ask-group-continuation',
+            userEnvKeys: [],
+          },
+        },
+        input: {
+          ...createMessageInput(),
+          deliverResponse: true,
+          prompt: '<untrusted_group_answer>quoted data</untrusted_group_answer>',
+          vault,
+        },
+        preferenceContext: {
+          assistantPersona: 'navy-seal',
+          assistantPersonality: {
+            detail: 10,
+            humor: 10,
+            push: 10,
+          },
+          assistantTone: 'casual',
+          assistantVoice: 'drill-sergeant',
+        },
+        profile: {
+          promptProfile: 'assistant-ask-continuation',
+          threadScope: 'isolated-thread',
+          toolProfile: 'output-only-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-07-15',
+          currentTimeZone: 'America/New_York',
+        },
+        route: createRoute(),
+        session: createSession(),
+        sharedPlan: createSharedPlan({}, {
+          channel: 'telegram',
+          effectiveThreadIsDirect: false,
+          threadId: 'group-thread',
+          threadIsDirect: false,
+        }),
+      })
+
+      expect(plan.dynamicTools).toEqual([])
+      expect(plan.systemPrompt).toContain('existing Murph conversation')
+      expect(plan.systemPrompt).not.toContain('existing private Murph conversation')
+      expect(plan.systemPrompt).not.toContain('original member')
+      expect(plan.systemPrompt).not.toContain('committed private conversation history')
+      expect(plan.turnContextPrompt).toBeNull()
+      expect(planningMocks.readAssistantCliSurfaceBootstrapContext).not.toHaveBeenCalled()
+      expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
   it('plans detached system notifications with no history, private context, or tools', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'PRIVATE_CLI_CONTRACT',

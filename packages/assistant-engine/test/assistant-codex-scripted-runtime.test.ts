@@ -12,6 +12,9 @@ import {
 import type {
   HostedRuntimeAssistantConfigurationSnapshot,
 } from '@murphai/hosted-execution/runtime-control'
+import {
+  createDefaultLocalAssistantModelTarget,
+} from '@murphai/operator-config/assistant-backend'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
 
 import {
@@ -37,6 +40,10 @@ import {
 import type {
   AssistantHostedToolContext,
 } from '../src/assistant/hosted-tool-context.ts'
+import { sendAssistantAskContinuationLocal } from '../src/assistant/ask-continuation.ts'
+import { conversationRefFromBinding } from '../src/assistant/conversation-ref.ts'
+import { listAssistantOutboxIntents } from '../src/assistant/outbox.ts'
+import { resolveAssistantSession } from '../src/assistant/store.ts'
 import {
   buildAssistantSystemPrompt,
 } from '../src/assistant/system-prompt.ts'
@@ -172,6 +179,112 @@ describe('real codex app-server with scripted provider', () => {
     expect(result.turnId).toEqual(expect.any(String))
     expect(result.sessionId).toEqual(expect.any(String))
     expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
+  })
+
+  it('composes a reviewed group continuation through the real provider and queues one reply', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    scenario.stub.captureProviderRequestDiagnostics()
+    scenario.stub.queue({
+      text: 'First reviewed fact.\n---\nSecond reviewed fact.',
+    })
+    const target = {
+      ...createDefaultLocalAssistantModelTarget(),
+      codexCommand: scenario.turnInput.codexCommand,
+      codexHome: scenario.turnInput.codexHome,
+      model: scenario.turnInput.model,
+      modelProvider: null,
+      reasoningEffort: 'low' as const,
+      sandbox: 'read-only' as const,
+    }
+    const participantId = 'participant-reviewed-continuation'
+    const laterParticipantId = 'participant-later-speaker'
+    const threadId = 'thread-reviewed-continuation'
+    const resolved = await resolveAssistantSession({
+      actorId: participantId,
+      bindingDeliveryTarget: threadId,
+      channel: 'telegram',
+      target,
+      threadId,
+      threadIsDirect: false,
+      vault: scenario.turnInput.workingDirectory,
+    })
+    const currentSpeaker = await resolveAssistantSession({
+      actorId: laterParticipantId,
+      bindingDeliveryTarget: threadId,
+      channel: 'telegram',
+      target,
+      threadId,
+      threadIsDirect: false,
+      vault: scenario.turnInput.workingDirectory,
+    })
+    expect(currentSpeaker.session.sessionId).toBe(resolved.session.sessionId)
+    expect(currentSpeaker.session.binding.actorId).toBe(laterParticipantId)
+
+    const result = await sendAssistantAskContinuationLocal({
+      actorId: currentSpeaker.session.binding.actorId,
+      answeredMailboxItemIds: ['aask_done_reviewed_continuation'],
+      bindingDeliveryTarget: threadId,
+      canCommit: () => true,
+      channel: 'telegram',
+      conversation: conversationRefFromBinding(currentSpeaker.session.binding),
+      deliveryIdempotencyKey: 'assistant-ask-reviewed-continuation',
+      deliveryReplyToMessageId: 'message-reviewed-continuation',
+      deliveryTarget: threadId,
+      executionContext: {
+        hosted: {
+          defaultTarget: target,
+          memberId: 'member-reviewed-continuation',
+          userEnvKeys: [],
+        },
+      },
+      expectedConversationScope: 'group',
+      instructions: 'Reply naturally using only the reviewed private result quoted here.',
+      originAssistantInputId: `ain_${'c'.repeat(32)}`,
+      participantId: currentSpeaker.session.binding.actorId,
+      requestId: 'aask_req_reviewed_continuation',
+      reviewedAssistantAskCompletionExpiresAt: '2099-01-01T00:00:00.000Z',
+      sessionId: resolved.session.sessionId,
+      threadId,
+      threadIsDirect: false,
+      turnEnvironment: {
+        currentWorkingDirectory: scenario.turnInput.workingDirectory,
+        env: scenario.turnInput.env,
+      },
+      vault: scenario.turnInput.workingDirectory,
+      workingDirectory: scenario.turnInput.workingDirectory,
+    })
+
+    expect(result).toMatchObject({
+      response: 'First reviewed fact.\n---\nSecond reviewed fact.',
+      status: 'completed',
+    })
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
+    expect(scenario.stub.requestSummariesSinceBaseline()).toEqual([
+      expect.objectContaining({
+        providerRequestDiagnostics: expect.objectContaining({
+          includesAutomation: false,
+          includesGroup: false,
+          includesReadShared: false,
+          includesToolSearch: false,
+        }),
+      }),
+    ])
+    expect(await listAssistantOutboxIntents(
+      scenario.turnInput.workingDirectory,
+    )).toEqual([
+      expect.objectContaining({
+        answeredMailboxItemIds: ['aask_done_reviewed_continuation'],
+        deliveryIdempotencyKey: 'assistant-ask-reviewed-continuation',
+        message: 'First reviewed fact.\n\nSecond reviewed fact.',
+        reviewedAssistantAskCompletionExpiresAt:
+          '2099-01-01T00:00:00.000Z',
+        status: 'pending',
+        threadId,
+        threadIsDirect: false,
+      }),
+    ])
   })
 
   it('defers broad Murph schemas through native Codex code-mode discovery', {
