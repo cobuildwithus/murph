@@ -1,6 +1,6 @@
 # PR ReviewGPT Completion Loops
 
-Last verified: 2026-07-29
+Last verified: 2026-07-30
 
 This document owns two distinct managed-browser ReviewGPT stages for PR-lane
 completion:
@@ -9,15 +9,16 @@ completion:
    product-experience, prompt, frontend, and coverage lenses. It replaces those
    four former local audit subagents and may return one bounded coverage patch
    artifact.
-2. The later `pr-review` loop is the final cross-cutting gate for eligible work
+2. The separate `pr-review` loop is the final cross-cutting gate for eligible work
    and replaces local `deep-review`.
 
 Both stages use the managed Eragon, Phlebas, Hercules, and Mountain browser
 lanes. They
 never share round state: the preliminary pass does not create or advance the
-final gate's immutable first-reviewed-head baseline. Final round 1 starts only
-after preliminary findings are resolved, parent final review and verification
-are complete, and the resulting head is pushed.
+final gate's immutable first-reviewed-head baseline. After focused local proof
+and the parent's candidate review, both stages may start concurrently against
+the same exact pushed candidate head. Their findings are resolved together
+before the parent's final review and completion.
 
 Never combine local `deep-review` with the final ReviewGPT gate for the same
 completed change, including when the change is complex, sensitive, or the user
@@ -88,8 +89,10 @@ proof and current exact-head CI status, and list the redacted rendered-evidence
 files for every applicable frontend state and viewport. CI may still be
 `pending`; the preliminary pass runs concurrently with it.
 
-Do not add `ReviewGPT first-reviewed head` to the PR body yet. The preliminary
-pass does not consume the final gate's baseline.
+Do not add `ReviewGPT first-reviewed head` merely for the preliminary pass. When
+final round 1 starts concurrently, add it before launching both jobs and set it
+to their shared exact pushed head. The preliminary pass still does not consume
+or advance the final gate's baseline.
 
 Run the preliminary preset with exact-head packaging:
 
@@ -163,16 +166,17 @@ required exact-head CI surface evaluates it. Never pipe a downloaded artifact
 directly into `git apply`, and never treat the attachment as landed code.
 
 Resolve accepted product-experience, prompt, and frontend findings in the
-parent, rerun focused proof, and push the resulting candidate. If accepted
+parent, rerun focused proof, and push the resulting candidate. If final round 1
+ran concurrently, preserve its first-reviewed-head baseline and verify the
+combined behavior-bearing remediation in a final correction-delta round. If accepted
 product-experience remediation materially changed a product-owned dimension,
 the parent must reapply `agent-docs/prompts/product-experience-review.md` to that
 corrected pushed head and updated direct journey evidence, then record a
 refreshed product purpose verdict. This is parent-owned corrected-head
 revalidation, not another subagent or ReviewGPT invocation. Do not rerun the
 preliminary pass for those substantive corrections. Complete parent final
-review and final verification, then close any active plan and push the final
-task head. Only after that may an eligible final ReviewGPT round-one baseline be
-recorded.
+review and final verification only after findings from both stages are
+resolved, then close any active plan and push the final task head.
 
 ## Final Gate: When It Runs
 
@@ -181,11 +185,12 @@ Run the loop when all of the following hold:
 1. The task used the worktree/PR lane and a PR is open.
 2. The routed work is final-ReviewGPT-eligible rather than docs/process-only,
    prompt-primary, or trivial copy-only.
-3. The preliminary specialist pass has completed when any of its lenses applied,
-   every accepted finding is resolved, and any coverage patch disposition is
-   recorded.
-4. Parent final review, final verification, plan closure, and the resulting
-   scoped commit are complete and pushed.
+3. Focused local proof and the parent's candidate review are complete, and the
+   exact pushed candidate is stable enough for a full-patch audit.
+4. The preliminary specialist pass starts against the same exact head when any
+   of its lenses apply. It may still be running; completion still requires its
+   substantive result, resolved findings, and recorded coverage-patch
+   disposition.
 5. The user has not explicitly opted out of the final gate in the current task.
 
 The review target is the pushed PR head. Run the loop from a clean checkout or
@@ -212,8 +217,10 @@ remediation. Base movement, generated churn, and file moves may explain counts,
 but they do not erase or reset the first-reviewed baseline.
 
 Fire each round as soon as the head it reviews is pushed. Do not wait for PR CI
-to go green first. CI and the review round run in parallel; green CI on the
-final head remains a separate merge-readiness gate.
+to go green first. Final round 1 may run in parallel with both CI and the
+preliminary specialist pass on the same head; use separate managed browser
+lanes for concurrent ReviewGPT jobs. Green CI on the final head and resolved
+results from both ReviewGPT stages remain separate merge-readiness gates.
 
 Skip the final gate for docs/process-only PRs, prompt-primary PRs, trivial
 copy-only changes, other low-risk changes that satisfy
@@ -503,6 +510,10 @@ the touched surface, push it, and use the ordinary review-loop rules.
 - The preliminary specialist pass and final gate both require a clean exact-head
   worktree/PR lane. Current-checkout fast-path work cannot use this document as
   a substitute for its routed local proof.
+- When both stages run concurrently, package the same exact pushed head, use
+  separate managed browser lanes, keep their response files and markers
+  distinct, and preserve the final round-one baseline if specialist remediation
+  creates a later correction round.
 - Do not run local Codex `deep-review` for a completed change that uses this PR
   gate. An explicit request for deep review or a final bug hunt is fulfilled by
   this cross-cutting ReviewGPT review and does not create a second pass.
