@@ -1149,7 +1149,6 @@ async function appendHostedUsageReferralCelebration(input: {
   const destinationKind = personalSource ? "personal" : "group";
   const destinationModel = await readHostedUsageReferralDestinationModel({
     beneficiaryMemberId: referral.beneficiaryMemberId,
-    destinationKind,
     prisma: input.prisma,
   });
   const preferences = await readHostedMemberAssistantPreferences({
@@ -1722,7 +1721,6 @@ async function readHostedUsageReferralSnapshot(input: {
       : null;
   const destinationModel = await readHostedUsageReferralDestinationModel({
     beneficiaryMemberId: input.actor.beneficiaryMemberId,
-    destinationKind,
     prisma: input.prisma,
   });
   const hasSourceAccess = personalUsage === null
@@ -1800,12 +1798,8 @@ function isHostedUsageReferralPolicyAvailableForConversation(input: {
 
 async function readHostedUsageReferralDestinationModel(input: {
   beneficiaryMemberId: string;
-  destinationKind: "group" | "personal";
   prisma: PrismaClient;
 }): Promise<HostedAssistantProductModel> {
-  if (input.destinationKind === "group") {
-    return HOSTED_ASSISTANT_SOL_MODEL;
-  }
   const resolution = await readHostedMemberAssistantModelPreference({
     memberId: input.beneficiaryMemberId,
     prisma: input.prisma,

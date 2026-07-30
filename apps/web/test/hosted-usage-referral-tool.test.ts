@@ -3,8 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   readActiveHostedMemberAccess: vi.fn(),
   readHostedAiUsageGate: vi.fn(),
+  readHostedGroupUsageStatus: vi.fn(),
   readHostedMemberAssistantModelPreference: vi.fn(),
   readHostedPersonalAiUsageStatus: vi.fn(),
+  resolveHostedMemberRoutingByTelegramUserId: vi.fn(),
   useRealUsageStatus: false,
 }));
 
@@ -14,6 +16,15 @@ vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
   readHostedAiUsageGate: mocks.readHostedAiUsageGate,
+}));
+
+vi.mock("@/src/lib/hosted-groups/group-usage-funding", () => ({
+  readHostedGroupUsageStatus: mocks.readHostedGroupUsageStatus,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
+  resolveHostedMemberRoutingByTelegramUserId:
+    mocks.resolveHostedMemberRoutingByTelegramUserId,
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-status", async (importOriginal) => {
@@ -70,6 +81,11 @@ const TELEGRAM_PERSONAL_SOURCE = {
   threadId: `hid_${"2".repeat(32)}`,
   threadIsDirect: true,
 };
+const TELEGRAM_GROUP_SOURCE = {
+  channel: "telegram" as const,
+  threadId: `hid_${"3".repeat(32)}`,
+  threadIsDirect: false,
+};
 
 const ACTIVE_PERSONAL_USAGE_STATUS = {
   accessKind: "paid",
@@ -106,6 +122,13 @@ describe("hosted usage referral tool", () => {
     });
     mocks.readHostedMemberAssistantModelPreference.mockResolvedValue({
       model: "gpt-5.6-terra",
+    });
+    mocks.readHostedGroupUsageStatus.mockResolvedValue({ status: "active" });
+    mocks.resolveHostedMemberRoutingByTelegramUserId.mockResolvedValue({
+      lookup: {
+        core: { id: "member_referrer" },
+      },
+      status: "found",
     });
     mocks.readHostedPersonalAiUsageStatus.mockResolvedValue(
       ACTIVE_PERSONAL_USAGE_STATUS,
@@ -214,6 +237,59 @@ describe("hosted usage referral tool", () => {
       },
     });
   });
+
+  it.each([
+    {
+      label: "about 70 more messages on the model this room is using now",
+      model: "gpt-5.6-sol",
+    },
+    {
+      label: "about 140 more messages on the model this room is using now",
+      model: "gpt-5.6-terra",
+    },
+    {
+      label: "bonus usage on the model this room is using now",
+      model: "gpt-5.6-luna",
+    },
+  ] as const)(
+    "projects the room's $model referral reward capacity",
+    async ({ label, model }) => {
+      mocks.readHostedMemberAssistantModelPreference.mockResolvedValue({
+        model,
+      });
+      const { prisma } = buildPrisma({
+        containerMemberId: "member_group",
+      });
+
+      await expect(handleHostedUsageReferralGroupTool({
+        enabled: true,
+        memberId: "member_group",
+        prisma: prisma as never,
+        request: {
+          action: "read_usage_referral",
+          sourceConversation: TELEGRAM_GROUP_SOURCE,
+          telegramSenderHandles: ["123456789"],
+        },
+      })).resolves.toMatchObject({
+        result: {
+          referral: {
+            availablePolicies: [{
+              code: "active_group_v1",
+              rewardLabel: label,
+            }],
+          },
+          status: "ok",
+        },
+      });
+
+      expect(
+        mocks.readHostedMemberAssistantModelPreference,
+      ).toHaveBeenCalledWith({
+        memberId: "member_group",
+        prisma,
+      });
+    },
+  );
 
   it("offers only the provider-neutral mission from Telegram", async () => {
     const { prisma } = buildPrisma();
@@ -841,6 +917,7 @@ describe("hosted usage referral tool", () => {
 
 function buildPrisma(input: {
   beneficiaryRewardTotal?: bigint;
+  containerMemberId?: string;
   inProgressCount?: number;
   referrerRewardTotal?: bigint;
 } = {}): {
@@ -1067,7 +1144,13 @@ function buildPrisma(input: {
       }))),
     },
     hostedThreadContainer: {
-      findUnique: vi.fn(async () => runQuery(() => null)),
+      findUnique: vi.fn(async (query: {
+        where: { memberId: string };
+      }) => runQuery(() =>
+        query.where.memberId === input.containerMemberId
+          ? { memberId: input.containerMemberId }
+          : null
+      )),
     },
     hostedUsageReferral: referralDelegate,
   };

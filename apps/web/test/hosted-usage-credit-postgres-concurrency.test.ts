@@ -1981,11 +1981,23 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       const celebrationDedupeKey =
         `assistant.notification.requested:usage-referral-reward:${referralId}`;
 
+      setHostedSecureBoxStringTestCodecForTests({
+        decrypt(input) {
+          return input.value;
+        },
+        encrypt(input) {
+          return input.value;
+        },
+      });
       try {
         await observer.hostedMember.createMany({
           data: [
             { billingStatus: "active", id: referrerMemberId },
-            { billingStatus: "active", id: sourceContainerMemberId },
+            {
+              assistantModelPreference: "gpt-5.6-terra",
+              billingStatus: "active",
+              id: sourceContainerMemberId,
+            },
             { billingStatus: "not_started", id: targetContainerMemberId },
             { billingStatus: "active", id: introducedMemberId },
           ],
@@ -2110,6 +2122,35 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             laneSeq: expect.any(String),
           },
         });
+        const mailboxItem = await observer.hostedMailboxItem.findUniqueOrThrow({
+          include: { payload: true },
+          where: {
+            userId_dedupeKey: {
+              dedupeKey: celebrationDedupeKey,
+              userId: sourceContainerMemberId,
+            },
+          },
+        });
+        const persistedPayload = await decodeHostedMailboxStoredPayload({
+          dedupeKey: mailboxItem.dedupeKey,
+          kind: mailboxItem.kind,
+          lane: mailboxItem.lane,
+          laneSeq: mailboxItem.laneSeq,
+          mailboxItemId: mailboxItem.id,
+          occurredAt: mailboxItem.occurredAt.toISOString(),
+          payloadCiphertext: mailboxItem.payload?.payloadCiphertext,
+          payloadInlineCiphertext: mailboxItem.payloadInlineCiphertext,
+          payloadSchema: mailboxItem.payloadSchema,
+          prisma: observer,
+          userId: sourceContainerMemberId,
+        });
+        expect(persistedPayload).toMatchObject({
+          notification: {
+            instructions: expect.stringContaining(
+              "about 100 more messages on the model this room is using now",
+            ),
+          },
+        });
         await expect(Promise.all([
           observer.hostedUsageReferral.findUniqueOrThrow({
             select: {
@@ -2147,6 +2188,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           }],
         ]);
       } finally {
+        setHostedSecureBoxStringTestCodecForTests(null);
         await observer.hostedMailboxPayload.deleteMany({
           where: {
             userId: { in: [sourceContainerMemberId, introducedMemberId] },

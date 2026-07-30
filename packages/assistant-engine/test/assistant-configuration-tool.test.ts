@@ -66,9 +66,6 @@ describe("assistant configuration tool", () => {
     if (!request) {
       throw new Error("Expected an assistant configuration dynamic tool request.");
     }
-    const savedForNextTurn = createGroupSavedConfiguration(
-      HOSTED_ASSISTANT_SOL_MODEL,
-    );
     const updatedSaved = {
       ...createGroupSavedConfiguration(HOSTED_ASSISTANT_TERRA_MODEL),
       appliesAt: "next_turn" as const,
@@ -76,9 +73,10 @@ describe("assistant configuration tool", () => {
       status: "updated" as const,
     };
     const assistantConfigurationTool = {
-      request: vi.fn()
-        .mockResolvedValueOnce({ action: "read", result: savedForNextTurn })
-        .mockResolvedValueOnce({ action: "update", result: updatedSaved }),
+      request: vi.fn().mockResolvedValue({
+        action: "update",
+        result: updatedSaved,
+      }),
     };
 
     const result = await executeMurphDynamicToolRequest({
@@ -96,10 +94,8 @@ describe("assistant configuration tool", () => {
       request,
     });
 
-    expect(assistantConfigurationTool.request).toHaveBeenNthCalledWith(1, {
-      action: "read",
-    });
-    expect(assistantConfigurationTool.request).toHaveBeenNthCalledWith(2, {
+    expect(assistantConfigurationTool.request).toHaveBeenCalledOnce();
+    expect(assistantConfigurationTool.request).toHaveBeenCalledWith({
       action: "update",
       assistantInputId: `ain_${"g".repeat(32)}`,
       model: HOSTED_ASSISTANT_TERRA_MODEL,
@@ -268,10 +264,6 @@ describe("assistant configuration tool", () => {
       throw new Error("Expected an assistant configuration dynamic tool request.");
     }
 
-    const savedForNextTurn = createSavedConfiguration({
-      model: HOSTED_ASSISTANT_TERRA_MODEL,
-      reasoningEffort: "low",
-    });
     const updatedSaved = {
       ...createSavedConfiguration({
         model: HOSTED_ASSISTANT_LUNA_MODEL,
@@ -282,9 +274,10 @@ describe("assistant configuration tool", () => {
       status: "updated" as const,
     };
     const assistantConfigurationTool = {
-      request: vi.fn()
-        .mockResolvedValueOnce({ action: "read", result: savedForNextTurn })
-        .mockResolvedValueOnce({ action: "update", result: updatedSaved }),
+      request: vi.fn().mockResolvedValue({
+        action: "update",
+        result: updatedSaved,
+      }),
     };
     const result = await executeMurphDynamicToolRequest({
       env: {},
@@ -300,10 +293,8 @@ describe("assistant configuration tool", () => {
       request,
     });
 
-    expect(assistantConfigurationTool.request).toHaveBeenNthCalledWith(1, {
-      action: "read",
-    });
-    expect(assistantConfigurationTool.request).toHaveBeenNthCalledWith(2, {
+    expect(assistantConfigurationTool.request).toHaveBeenCalledOnce();
+    expect(assistantConfigurationTool.request).toHaveBeenCalledWith({
       action: "update",
       assistantInputId: `ain_${"a".repeat(32)}`,
       model: HOSTED_ASSISTANT_LUNA_MODEL,
@@ -345,9 +336,10 @@ describe("assistant configuration tool", () => {
       status: "unchanged" as const,
     };
     const assistantConfigurationTool = {
-      request: vi.fn()
-        .mockResolvedValueOnce({ action: "read", result: savedForNextTurn })
-        .mockResolvedValueOnce({ action: "update", result: unchangedSaved }),
+      request: vi.fn().mockResolvedValue({
+        action: "update",
+        result: unchangedSaved,
+      }),
     };
 
     const result = await executeMurphDynamicToolRequest({
@@ -364,10 +356,8 @@ describe("assistant configuration tool", () => {
       request,
     });
 
-    expect(assistantConfigurationTool.request).toHaveBeenNthCalledWith(1, {
-      action: "read",
-    });
-    expect(assistantConfigurationTool.request).toHaveBeenNthCalledWith(2, {
+    expect(assistantConfigurationTool.request).toHaveBeenCalledOnce();
+    expect(assistantConfigurationTool.request).toHaveBeenCalledWith({
       action: "update",
       assistantInputId: `ain_${"d".repeat(32)}`,
       reasoningEffort: "low",
@@ -405,11 +395,6 @@ describe("assistant configuration tool", () => {
       throw new Error("Expected an assistant configuration dynamic tool request.");
     }
 
-    const savedForNextTurn = createSavedConfiguration({
-      model: HOSTED_ASSISTANT_TERRA_MODEL,
-      provider: "openai",
-      reasoningEffort: "low",
-    });
     const updatedSaved = {
       ...createSavedConfiguration({
         model: HOSTED_ASSISTANT_TERRA_MODEL,
@@ -421,9 +406,10 @@ describe("assistant configuration tool", () => {
       status: "updated" as const,
     };
     const assistantConfigurationTool = {
-      request: vi.fn()
-        .mockResolvedValueOnce({ action: "read", result: savedForNextTurn })
-        .mockResolvedValueOnce({ action: "update", result: updatedSaved }),
+      request: vi.fn().mockResolvedValue({
+        action: "update",
+        result: updatedSaved,
+      }),
     };
 
     const result = await executeMurphDynamicToolRequest({
@@ -440,10 +426,8 @@ describe("assistant configuration tool", () => {
       request,
     });
 
-    expect(assistantConfigurationTool.request).toHaveBeenNthCalledWith(1, {
-      action: "read",
-    });
-    expect(assistantConfigurationTool.request).toHaveBeenNthCalledWith(2, {
+    expect(assistantConfigurationTool.request).toHaveBeenCalledOnce();
+    expect(assistantConfigurationTool.request).toHaveBeenCalledWith({
       action: "update",
       assistantInputId: `ain_${"f".repeat(32)}`,
       provider: "venice",
@@ -458,7 +442,7 @@ describe("assistant configuration tool", () => {
     });
   });
 
-  it("returns the Edge upgrade requirement without sending a direct mutation", async () => {
+  it("returns the authoritative Edge upgrade requirement from the update", async () => {
     const request = readMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
@@ -473,17 +457,20 @@ describe("assistant configuration tool", () => {
     if (!request) {
       throw new Error("Expected an assistant configuration dynamic tool request.");
     }
-    const savedForNextTurn = {
+    const upgradeRequired = {
       ...createSavedConfiguration({
         model: HOSTED_ASSISTANT_TERRA_MODEL,
         reasoningEffort: "low",
       }),
+      appliesAt: "next_turn" as const,
+      requiredPlan: "edge" as const,
       solAvailable: false,
+      status: "upgrade_required" as const,
     };
     const assistantConfigurationTool = {
       request: vi.fn(async () => ({
-        action: "read" as const,
-        result: savedForNextTurn,
+        action: "update" as const,
+        result: upgradeRequired,
       })),
     };
 
@@ -503,7 +490,9 @@ describe("assistant configuration tool", () => {
 
     expect(assistantConfigurationTool.request).toHaveBeenCalledOnce();
     expect(assistantConfigurationTool.request).toHaveBeenCalledWith({
-      action: "read",
+      action: "update",
+      assistantInputId: `ain_${"e".repeat(32)}`,
+      model: HOSTED_ASSISTANT_SOL_MODEL,
     });
     expect(readToolPayload(result)).toEqual({
       currentTurn: {
@@ -511,12 +500,7 @@ describe("assistant configuration tool", () => {
         provider: "openai",
         reasoningEffort: "low",
       },
-      savedForNextTurn: {
-        ...savedForNextTurn,
-        appliesAt: "next_turn",
-        requiredPlan: "edge",
-        status: "upgrade_required",
-      },
+      savedForNextTurn: upgradeRequired,
     });
   });
 
@@ -535,10 +519,6 @@ describe("assistant configuration tool", () => {
     if (!request) {
       throw new Error("Expected an assistant configuration dynamic tool request.");
     }
-    const currentSaved = createSavedConfiguration({
-      model: HOSTED_ASSISTANT_LUNA_MODEL,
-      reasoningEffort: "low",
-    });
     const updatedSaved = {
       ...createSavedConfiguration({
         model: HOSTED_ASSISTANT_LUNA_MODEL,
@@ -549,9 +529,10 @@ describe("assistant configuration tool", () => {
       status: "updated" as const,
     };
     const assistantConfigurationTool = {
-      request: vi.fn()
-        .mockResolvedValueOnce({ action: "read", result: currentSaved })
-        .mockResolvedValueOnce({ action: "update", result: updatedSaved }),
+      request: vi.fn().mockResolvedValue({
+        action: "update",
+        result: updatedSaved,
+      }),
     };
     const result = await executeMurphDynamicToolRequest({
       env: {},
@@ -567,10 +548,8 @@ describe("assistant configuration tool", () => {
       request,
     });
 
-    expect(assistantConfigurationTool.request).toHaveBeenNthCalledWith(1, {
-      action: "read",
-    });
-    expect(assistantConfigurationTool.request).toHaveBeenNthCalledWith(2, {
+    expect(assistantConfigurationTool.request).toHaveBeenCalledOnce();
+    expect(assistantConfigurationTool.request).toHaveBeenCalledWith({
       action: "update",
       assistantInputId: `ain_${"b".repeat(32)}`,
       reasoningEffort: "medium",
@@ -600,25 +579,22 @@ describe("assistant configuration tool", () => {
     if (!request) {
       throw new Error("Expected an assistant configuration dynamic tool request.");
     }
-    const currentSaved = {
+    const updatedSaved = {
       ...createSavedConfiguration({
         model: HOSTED_ASSISTANT_TERRA_MODEL,
         reasoningEffort: "low",
       }),
-      dormantSolPreference: true,
-      solAvailable: false,
-    };
-    const updatedSaved = {
-      ...currentSaved,
       appliesAt: "next_turn" as const,
-      dormantSolPreference: false,
       requiredPlan: null,
+      solAvailable: false,
+      dormantSolPreference: false,
       status: "updated" as const,
     };
     const assistantConfigurationTool = {
-      request: vi.fn()
-        .mockResolvedValueOnce({ action: "read", result: currentSaved })
-        .mockResolvedValueOnce({ action: "update", result: updatedSaved }),
+      request: vi.fn().mockResolvedValue({
+        action: "update",
+        result: updatedSaved,
+      }),
     };
     const result = await executeMurphDynamicToolRequest({
       env: {},
@@ -635,7 +611,8 @@ describe("assistant configuration tool", () => {
     });
 
     expect(result.rpcResult).toMatchObject({ success: true });
-    expect(assistantConfigurationTool.request).toHaveBeenNthCalledWith(2, expect.objectContaining({
+    expect(assistantConfigurationTool.request).toHaveBeenCalledOnce();
+    expect(assistantConfigurationTool.request).toHaveBeenCalledWith(expect.objectContaining({
       action: "update",
       assistantInputId: `ain_${"c".repeat(32)}`,
       model: HOSTED_ASSISTANT_TERRA_MODEL,

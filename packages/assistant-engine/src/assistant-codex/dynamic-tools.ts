@@ -42,7 +42,6 @@ import {
   HOSTED_ASSISTANT_PRODUCT_MODELS,
   HOSTED_ASSISTANT_PROVIDERS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
-  HOSTED_ASSISTANT_SOL_MODEL,
 } from '@murphai/hosted-execution/assistant-model'
 import {
   hostedRuntimeSubscriptionToolRequestSchema,
@@ -3696,68 +3695,10 @@ async function executeAssistantConfigurationTool(input: {
       )
     }
 
-    const readResult = await assistantConfigurationTool.request({ action: 'read' })
-    if (readResult.action !== 'read') {
-      throw new TypeError('Assistant configuration read returned an update response.')
-    }
-    const savedForNextTurn = readResult.result
-    const requestedForNextTurn = {
-      model: input.request.model ?? savedForNextTurn.model,
-      provider: input.request.provider ?? savedForNextTurn.provider,
-      reasoningEffort:
-        input.request.reasoningEffort ?? savedForNextTurn.reasoningEffort,
-    }
-    if (!savedForNextTurn.configurationAvailable) {
-      return toolTextResult(true, safeToolPayloadText({
-        currentTurn,
-        savedForNextTurn: {
-          ...savedForNextTurn,
-          appliesAt: 'next_turn',
-          requiredPlan: null,
-          status: 'unavailable',
-        },
-      }))
-    }
-    if (
-      requestedForNextTurn.model === HOSTED_ASSISTANT_SOL_MODEL &&
-      !savedForNextTurn.solAvailable
-    ) {
-      return toolTextResult(true, safeToolPayloadText({
-        currentTurn,
-        savedForNextTurn: {
-          ...savedForNextTurn,
-          appliesAt: 'next_turn',
-          requiredPlan: 'edge',
-          status: 'upgrade_required',
-        },
-      }))
-    }
-    const result = input.request.model !== undefined
-      ? await assistantConfigurationTool.request({
-          action: 'update',
-          assistantInputId,
-          model: requestedForNextTurn.model,
-          ...(input.request.provider === undefined
-            ? {}
-            : { provider: requestedForNextTurn.provider }),
-          ...(input.request.reasoningEffort === undefined
-            ? {}
-            : { reasoningEffort: requestedForNextTurn.reasoningEffort }),
-        })
-      : input.request.provider !== undefined
-        ? await assistantConfigurationTool.request({
-            action: 'update',
-            assistantInputId,
-            provider: requestedForNextTurn.provider,
-            ...(input.request.reasoningEffort === undefined
-              ? {}
-              : { reasoningEffort: requestedForNextTurn.reasoningEffort }),
-          })
-        : await assistantConfigurationTool.request({
-            action: 'update',
-            assistantInputId,
-            reasoningEffort: requestedForNextTurn.reasoningEffort,
-          })
+    const result = await assistantConfigurationTool.request({
+      ...input.request,
+      assistantInputId,
+    })
     if (result.action !== 'update') {
       throw new TypeError('Assistant configuration update returned a read response.')
     }

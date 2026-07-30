@@ -574,7 +574,6 @@ text(JSON.stringify(result));
     })
 
     expect(configurationRequests).toEqual([
-      { action: 'read' },
       {
         action: 'update',
         assistantInputId,
