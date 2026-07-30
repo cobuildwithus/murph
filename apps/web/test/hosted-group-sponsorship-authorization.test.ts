@@ -997,6 +997,7 @@ describe("hosted capped group sponsorship authorization", () => {
     let authorization = buildAuthorization();
     let purchase = {
       beneficiaryMemberId: "member_group_runtime",
+      cashAmountMinor: 500,
       groupSponsorshipAuthorizationId: authorization.id,
       groupSponsorshipChargeOrdinal: 1,
       groupSponsorshipPeriodStartedAt: PERIOD_START,
@@ -1017,6 +1018,7 @@ describe("hosted capped group sponsorship authorization", () => {
         }),
       },
       hostedUsageCreditPurchase: {
+        aggregate: vi.fn(async () => ({ _sum: { cashAmountMinor: 0 } })),
         findFirst: vi.fn(async () => purchase),
         findUnique: vi.fn(async () => purchase),
         updateMany: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
@@ -1059,5 +1061,101 @@ describe("hosted capped group sponsorship authorization", () => {
     expect(authorization.status).toBe(
       HostedGroupSponsorshipAuthorizationStatus.recovery_required,
     );
+  });
+
+  it("does not recover a failed refill above a cap reduced to fulfilled spend", async () => {
+    let authorization = buildAuthorization({
+      recoveryStartedAt: NOW,
+      status: HostedGroupSponsorshipAuthorizationStatus.recovery_required,
+    });
+    const purchase = {
+      beneficiaryMemberId: authorization.beneficiaryMemberId,
+      cashAmountMinor: 500,
+      groupSponsorshipAuthorizationId: authorization.id,
+      groupSponsorshipChargeOrdinal: 1,
+      groupSponsorshipPeriodStartedAt: PERIOD_START,
+      id: "hucp_refill_failed_cap",
+      payerMemberId: authorization.payerMemberId,
+      reconciliationVersion: 1n,
+      status: HostedUsageCreditPurchaseStatus.payment_failed,
+      stripeCheckoutSessionLookupKey: null,
+      stripePaymentIntentLookupKey: null,
+    };
+    const aggregate = vi.fn(async ({ where }: {
+      where: {
+        status: HostedUsageCreditPurchaseStatus | {
+          in: readonly HostedUsageCreditPurchaseStatus[];
+        };
+      };
+    }) => ({
+      _sum: {
+        cashAmountMinor:
+          where.status === HostedUsageCreditPurchaseStatus.fulfilled ||
+              (
+                typeof where.status !== "string" &&
+                where.status.in.includes(
+                  HostedUsageCreditPurchaseStatus.fulfilled,
+                )
+              )
+            ? 500
+            : 0,
+      },
+    }));
+    const updatePurchase = vi.fn(async () => ({ count: 1 }));
+    const tx = {
+      hostedGroupSponsorshipAuthorization: {
+        findFirst: vi.fn(async () => authorization),
+        findUnique: vi.fn(async () => authorization),
+        updateMany: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          authorization = { ...authorization, ...data };
+          return { count: 1 };
+        }),
+      },
+      hostedUsageCreditPurchase: {
+        aggregate,
+        findFirst: vi.fn(async () => purchase),
+        updateMany: updatePurchase,
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (run: (client: typeof tx) => unknown) => run(tx)),
+    };
+
+    await expect(manageHostedGroupSponsorshipAuthorization({
+      action: {
+        action: "change_cap",
+        authorizationId: authorization.id,
+        confirmed: true,
+        monthlyCapMinor: 500,
+      },
+      beneficiaryMemberId: authorization.beneficiaryMemberId,
+      now: NOW,
+      payerMemberId: authorization.payerMemberId,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      chargedThisPeriodMinor: 500,
+      monthlyCapMinor: 500,
+      pendingThisPeriodMinor: 0,
+    });
+
+    await expect(prepareHostedGroupSponsorshipRecoveryTx({
+      authorizationId: authorization.id,
+      beneficiaryMemberId: authorization.beneficiaryMemberId,
+      capacityState: "low",
+      checkoutExpiresAt: new Date("2026-08-01T13:30:00.000Z"),
+      now: new Date("2026-08-01T12:30:00.000Z"),
+      payerMemberId: authorization.payerMemberId,
+      tx: tx as never,
+    })).resolves.toEqual({ kind: "reactivated" });
+
+    expect(authorization).toMatchObject({
+      monthlyCapMinor: 500,
+      recoveryStartedAt: null,
+      status: HostedGroupSponsorshipAuthorizationStatus.active,
+    });
+    expect(purchase.status).toBe(
+      HostedUsageCreditPurchaseStatus.payment_failed,
+    );
+    expect(updatePurchase).not.toHaveBeenCalled();
   });
 });

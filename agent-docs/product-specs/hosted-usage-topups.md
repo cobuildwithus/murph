@@ -165,7 +165,11 @@ never calls Stripe or waits for payment. The bounded Web billing sweep performs
 saved-card work after commit. Stripe event reconciliation is the only authority
 that grants the $5 through the existing append-only credit ledger and reopens
 pending group work. Failed or authentication-required payment moves the
-authorization to private recovery and blocks later automatic charges.
+authorization to private recovery and blocks later automatic charges. A
+same-period recovery may reset that exact failed purchase only while its $5
+charge still fits under the current cap. If the payer has since reduced the cap
+to fulfilled spend, recovery leaves the failed purchase as immutable history
+and returns the authorization to active-at-cap without starting Stripe.
 
 Periods roll forward lazily from the successful activation anchor with
 calendar-month and end-of-month semantics. The cap resets, but unused credit

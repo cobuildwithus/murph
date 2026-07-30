@@ -762,14 +762,17 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   existing minute Stripe sweep dispatches admitted purchases post-commit; ambiguous
   provider outcomes retain the deterministic purchase, while safe card or
   authentication failure marks the authorization recovery-required and privately
-  notifies only the payer. Period rollover is lazy and activation-anchored,
-  including end-of-month behavior. Cap increases require explicit payer
-  confirmation; a decrease below already committed charges is deferred to the
-  next period. Only the activation purchase may own a public sponsorship moment;
-  refills are silent. Group projections expose only sponsored versus
-  unsponsored, never payer, cap, charges, balance, percentages, message counts,
-  or refill events. Only verified Stripe-event reconciliation can grant
-  purchased credit; a browser return or synchronous PaymentIntent response
+  notifies only the payer. Same-period payer recovery reuses the failed purchase
+  only while its exact $5 still fits under the current cap; otherwise it leaves
+  that history failed and reactivates at cap without provider work. Period
+  rollover is lazy and activation-anchored, including end-of-month behavior.
+  Cap increases require explicit payer confirmation; a decrease below already
+  committed charges is deferred to the next period. Only the activation
+  purchase may own a public sponsorship moment; refills are silent. Group
+  projections expose only sponsored versus unsponsored, never payer, cap,
+  charges, balance, percentages, message counts, or refill events. Only
+  verified Stripe-event reconciliation can grant purchased credit; a browser
+  return or synchronous PaymentIntent response
   cannot. Conversational referrals instead require explicit arming by
   one trusted current sender, reserve both rolling caps under the beneficiary
   serialization boundary, bind only to that referrer's next newly created

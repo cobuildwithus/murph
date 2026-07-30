@@ -573,9 +573,9 @@ export async function manageHostedGroupSponsorshipAuthorization(input: {
     }
 
     if (input.action.action === "recover") {
-      // Recovery is payment-backed. The authenticated route resets the exact
-      // failed purchase and runs the existing saved-card/Checkout continuation;
-      // only Stripe-event reconciliation may reactivate the authorization.
+      // The authenticated recovery route either resumes without a charge when
+      // no charge is admissible or reuses the exact failed purchase. Only
+      // Stripe-event reconciliation may reactivate a payment-backed recovery.
       throw invalidManagementState();
     }
 
@@ -697,10 +697,7 @@ export async function prepareHostedGroupSponsorshipRecoveryTx(input: {
   ) {
     throw recoveryUnavailable();
   }
-
-  // Explicit recovery should not create an unnecessary charge if another
-  // contribution restored capacity while the sponsorship was blocked.
-  if (input.capacityState === "healthy") {
+  const reactivateWithoutCharge = async () => {
     authorization = await updateAuthorizationStateTx({
       authorization,
       data: {
@@ -713,7 +710,13 @@ export async function prepareHostedGroupSponsorshipRecoveryTx(input: {
     if (authorization.status !== HostedGroupSponsorshipAuthorizationStatus.active) {
       throw recoveryUnavailable();
     }
-    return { kind: "reactivated" };
+    return { kind: "reactivated" } as const;
+  };
+
+  // Explicit recovery should not create an unnecessary charge if another
+  // contribution restored capacity while the sponsorship was blocked.
+  if (input.capacityState === "healthy") {
+    return reactivateWithoutCharge();
   }
 
   const failed = await input.tx.hostedUsageCreditPurchase.findFirst({
@@ -732,6 +735,16 @@ export async function prepareHostedGroupSponsorshipRecoveryTx(input: {
       failed.stripePaymentIntentLookupKey
     ) {
       throw recoveryUnavailable();
+    }
+    const committedMinor = await readHostedGroupSponsorshipCommittedMinorTx({
+      authorization,
+      tx: input.tx,
+    });
+    if (
+      committedMinor + failed.cashAmountMinor >
+      authorization.monthlyCapMinor
+    ) {
+      return reactivateWithoutCharge();
     }
     const reset = await input.tx.hostedUsageCreditPurchase.updateMany({
       data: {

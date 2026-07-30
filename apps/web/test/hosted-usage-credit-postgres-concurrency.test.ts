@@ -35,6 +35,7 @@ import {
 import {
   admitHostedGroupSponsorshipRefillTx,
   hasHostedGroupSponsorshipPaymentAuthorityTx,
+  prepareHostedGroupSponsorshipRecoveryTx,
 } from "@/src/lib/hosted-groups/group-sponsorship-authorization";
 import {
   createHostedExternalThreadIdentityLookupKey,
@@ -2988,6 +2989,188 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         })).resolves.toBe(1);
       } finally {
         releaseBeneficiary.resolve();
+        await observer.hostedUsageCreditPurchase.deleteMany({
+          where: { groupSponsorshipAuthorizationId: authorizationId },
+        }).catch(() => undefined);
+        await observer.hostedGroupSponsorshipAuthorization.deleteMany({
+          where: { id: authorizationId },
+        }).catch(() => undefined);
+        await observer.hostedMember.deleteMany({
+          where: { id: { in: [beneficiaryMemberId, payerMemberId] } },
+        }).catch(() => undefined);
+        await Promise.all([
+          firstClient.$disconnect(),
+          secondClient.$disconnect(),
+          observer.$disconnect(),
+        ]);
+      }
+    });
+
+    it("serializes a cap reduction before same-period failed-refill recovery", async () => {
+      const fixtureId = randomUUID();
+      const beneficiaryMemberId = `member_group_recovery_beneficiary_${fixtureId}`;
+      const payerMemberId = `member_group_recovery_payer_${fixtureId}`;
+      const authorizationId = `hgsa_group_recovery_${fixtureId}`;
+      const activationPurchaseId = `hucp_group_recovery_activation_${fixtureId}`;
+      const failedPurchaseId = `hucp_group_recovery_failed_${fixtureId}`;
+      const periodStartedAt = new Date("2026-07-30T12:00:00.000Z");
+      const periodEndsAt = new Date("2026-08-30T12:00:00.000Z");
+      const now = new Date("2026-08-01T12:00:00.000Z");
+      const recoveryAt = new Date("2026-08-01T12:30:00.000Z");
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const firstClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const secondClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const capLockAcquired = createDeferred<number>();
+      const applyCapReduction = createDeferred();
+      const recoveryStarted = createDeferred<number>();
+
+      try {
+        await observer.hostedMember.createMany({
+          data: [
+            { billingStatus: "active", id: beneficiaryMemberId },
+            { billingStatus: "active", id: payerMemberId },
+          ],
+        });
+        await observer.hostedGroupSponsorshipAuthorization.create({
+          data: {
+            anchorDay: 30,
+            anchorEndOfMonth: false,
+            beneficiaryMemberId,
+            id: authorizationId,
+            monthlyCapMinor: 1_000,
+            payerMemberId,
+            periodEndsAt,
+            periodStartedAt,
+            recoveryStartedAt: now,
+            status:
+              HostedGroupSponsorshipAuthorizationStatus.recovery_required,
+          },
+        });
+        const purchaseBase = {
+          beneficiaryMemberId,
+          cashAmountMinor: 500,
+          cashCurrency: "usd",
+          checkoutCancelUrl: "https://example.test/groups/fund/cancel",
+          checkoutExpiresAt: periodEndsAt,
+          checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v4",
+          checkoutSuccessUrl: "https://example.test/groups/fund/return",
+          grantUsdMicros: 5_000_000n,
+          groupSponsorshipAuthorizationId: authorizationId,
+          groupSponsorshipPeriodStartedAt: periodStartedAt,
+          offerCode: "usage_5_usd",
+          payerMemberId,
+          stripeCustomerIdEncrypted: `encrypted-customer:${fixtureId}`,
+          stripeCustomerLookupKey: `customer-lookup:${fixtureId}`,
+          stripeLiveMode: false,
+          stripePriceIdEncrypted: `encrypted-price:${fixtureId}`,
+          stripePriceLookupKey: `price-lookup:${fixtureId}`,
+        } as const;
+        await observer.hostedUsageCreditPurchase.createMany({
+          data: [
+            {
+              ...purchaseBase,
+              clientRequestKey: `activation:${fixtureId}`,
+              groupSponsorshipChargeOrdinal: 0,
+              id: activationPurchaseId,
+              lastReconciledAt: periodStartedAt,
+              paidAt: periodStartedAt,
+              remainingCreditUsdMicros: 5_000_000n,
+              status: HostedUsageCreditPurchaseStatus.fulfilled,
+              terminalAt: periodStartedAt,
+            },
+            {
+              ...purchaseBase,
+              clientRequestKey: `refill:${fixtureId}`,
+              groupSponsorshipChargeOrdinal: 1,
+              id: failedPurchaseId,
+              lastReconciledAt: now,
+              reconciliationVersion: 1n,
+              status: HostedUsageCreditPurchaseStatus.payment_failed,
+              terminalAt: now,
+            },
+          ],
+        });
+
+        const capReduction = firstClient.$transaction(async (tx) => {
+          await tx.$queryRaw`
+            SELECT id
+            FROM hosted_member
+            WHERE id = ${beneficiaryMemberId}
+            FOR UPDATE
+          `;
+          capLockAcquired.resolve(await readBackendPid(tx));
+          await applyCapReduction.promise;
+          return tx.hostedGroupSponsorshipAuthorization.updateMany({
+            data: {
+              monthlyCapMinor: 500,
+              updatedAt: recoveryAt,
+            },
+            where: {
+              id: authorizationId,
+              status:
+                HostedGroupSponsorshipAuthorizationStatus.recovery_required,
+            },
+          });
+        }, transactionOptions);
+        await capLockAcquired.promise;
+
+        const recovery = secondClient.$transaction(async (tx) => {
+          const pid = await readBackendPid(tx);
+          recoveryStarted.resolve(pid);
+          await tx.$queryRaw`
+            SELECT id
+            FROM hosted_member
+            WHERE id = ${beneficiaryMemberId}
+            FOR UPDATE
+          `;
+          return prepareHostedGroupSponsorshipRecoveryTx({
+            authorizationId,
+            beneficiaryMemberId,
+            capacityState: "low",
+            checkoutExpiresAt: new Date("2026-08-01T13:30:00.000Z"),
+            now: recoveryAt,
+            payerMemberId,
+            tx,
+          });
+        }, transactionOptions);
+        await waitForBlockedBackend({
+          observer,
+          pid: await recoveryStarted.promise,
+        });
+        applyCapReduction.resolve();
+
+        await expect(Promise.all([capReduction, recovery])).resolves.toEqual([
+          { count: 1 },
+          { kind: "reactivated" },
+        ]);
+        await expect(
+          observer.hostedGroupSponsorshipAuthorization.findUniqueOrThrow({
+            select: {
+              monthlyCapMinor: true,
+              recoveryStartedAt: true,
+              status: true,
+            },
+            where: { id: authorizationId },
+          }),
+        ).resolves.toEqual({
+          monthlyCapMinor: 500,
+          recoveryStartedAt: null,
+          status: HostedGroupSponsorshipAuthorizationStatus.active,
+        });
+        await expect(
+          observer.hostedUsageCreditPurchase.findUniqueOrThrow({
+            select: {
+              reconciliationVersion: true,
+              status: true,
+            },
+            where: { id: failedPurchaseId },
+          }),
+        ).resolves.toEqual({
+          reconciliationVersion: 1n,
+          status: HostedUsageCreditPurchaseStatus.payment_failed,
+        });
+      } finally {
+        applyCapReduction.resolve();
         await observer.hostedUsageCreditPurchase.deleteMany({
           where: { groupSponsorshipAuthorizationId: authorizationId },
         }).catch(() => undefined);

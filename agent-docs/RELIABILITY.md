@@ -422,12 +422,14 @@ Last verified: 2026-07-29
   reinterpreting need after admission. Unused granted credit carries forward.
   Safe no-card or authentication-required outcomes terminalize the exact
   purchase, move the authorization to `recovery_required`, and stop later
-  admissions without delaying the ordinary reply. Provider ambiguity retains
-  the same purchase for bounded retry/reconciliation. Lazy month rollover never
-  expires ledger credit, never clears recovery, and applies a deferred cap
-  decrease only at the next anchored boundary. Activation owns the sole public
-  sponsorship moment; refill fulfillment is silent and private notices are
-  period-deduped.
+  admissions without delaying the ordinary reply. Payer recovery reuses that
+  failed purchase only if its exact $5 still fits under the current cap; a cap
+  reduced to fulfilled spend leaves the failure immutable and reactivates
+  without provider work. Provider ambiguity retains the same purchase for
+  bounded retry/reconciliation. Lazy month rollover never expires ledger
+  credit, never clears recovery, and applies a deferred cap decrease only at
+  the next anchored boundary. Activation owns the sole public sponsorship
+  moment; refill fulfillment is silent and private notices are period-deduped.
 - The Vercel predeploy migration replaces the detached-payer checks before the
   saved-card producer can serve traffic. That replacement is backward
   compatible with the old application, retains the PaymentIntent/Charge and
