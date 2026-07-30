@@ -66,6 +66,7 @@ describe("ensureHostedPreparedLinqThreadContainerRouteTx", () => {
     await expect(ensureHostedPreparedLinqThreadContainerRouteTx({
       accountLookupKey: "hplk_line",
       fallbackOwnerMemberId: "member_first_sender",
+      linqService: "iMessage",
       mailboxDedupeKey: "event_group",
       occurredAt: new Date("2026-07-29T18:01:00.000Z"),
       participantMemberIds: ["member_prepared_owner", "member_first_sender"],
@@ -96,6 +97,8 @@ describe("ensureHostedPreparedLinqThreadContainerRouteTx", () => {
     expect(mocks.bindUsageReferral).toHaveBeenCalledWith({
       occurredAt: new Date("2026-07-29T18:01:00.000Z"),
       ownerMemberId: "member_prepared_owner",
+      targetChannel: "linq",
+      targetLinqService: "iMessage",
       targetContainerMemberId: "member_group_container",
       tx,
     });
@@ -116,6 +119,7 @@ describe("ensureHostedPreparedLinqThreadContainerRouteTx", () => {
     await expect(ensureHostedPreparedLinqThreadContainerRouteTx({
       accountLookupKey: "hplk_line",
       fallbackOwnerMemberId: "member_first_sender",
+      linqService: "iMessage",
       mailboxDedupeKey: "event_group",
       occurredAt: new Date("2026-07-29T18:01:00.000Z"),
       participantMemberIds: ["member_prepared_owner", "member_first_sender"],
@@ -140,6 +144,7 @@ describe("ensureHostedPreparedLinqThreadContainerRouteTx", () => {
     await expect(ensureHostedPreparedLinqThreadContainerRouteTx({
       accountLookupKey: "hplk_line",
       fallbackOwnerMemberId: "member_first_sender",
+      linqService: "iMessage",
       mailboxDedupeKey: "event_group",
       occurredAt: new Date("2026-07-29T18:01:00.000Z"),
       participantMemberIds: ["member_prepared_owner", "member_first_sender"],
@@ -167,6 +172,7 @@ describe("ensureHostedPreparedLinqThreadContainerRouteTx", () => {
     await expect(ensureHostedPreparedLinqThreadContainerRouteTx({
       accountLookupKey: "hplk_line",
       fallbackOwnerMemberId: "member_first_sender",
+      linqService: "iMessage",
       mailboxDedupeKey: "event_group",
       occurredAt: new Date("2026-07-29T18:01:00.000Z"),
       participantMemberIds: ["member_prepared_owner"],
@@ -196,6 +202,7 @@ describe("ensureHostedPreparedLinqThreadContainerRouteTx", () => {
     await expect(ensureHostedPreparedLinqThreadContainerRouteTx({
       accountLookupKey: "hplk_unknown_line",
       fallbackOwnerMemberId: "member_first_sender",
+      linqService: "iMessage",
       mailboxDedupeKey: "event_group",
       occurredAt: new Date("2026-07-29T18:01:00.000Z"),
       participantMemberIds: ["member_first_sender"],

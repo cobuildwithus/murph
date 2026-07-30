@@ -266,6 +266,57 @@ describe("HostedBillingSettings", () => {
     assert.doesNotMatch(markup, /pauses new usage/);
   });
 
+  test("places usage activity after the overall usage bar and before plan choices", async () => {
+    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+      authenticated: true,
+      billingStatus: "active",
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_monthly",
+      usageActivityDetail: createElement(
+        "section",
+        { "data-testid": "usage-activity-detail" },
+        "Credits & missions",
+      ),
+      usageStatus: buildUsageStatus(),
+    }));
+
+    const usageBarIndex = markup.indexOf("35% used");
+    const usageActivityIndex = markup.indexOf("Credits &amp; missions");
+    const planChoiceIndex = markup.indexOf("Choose Edge");
+
+    assert.ok(usageBarIndex >= 0);
+    assert.ok(usageActivityIndex > usageBarIndex);
+    assert.ok(planChoiceIndex > usageActivityIndex);
+  });
+
+  test("keeps historical activity visible when no overall usage bar is available", async () => {
+    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+      authenticated: true,
+      currentBillingPlanCode: "launch_monthly",
+      usageActivityDetail: createElement(
+        "section",
+        null,
+        "Historical usage activity",
+      ),
+      usageStatus: {
+        generatedAt: "2026-07-10T12:00:00.000Z",
+        reason: "group_not_supported",
+        recommendedAction: null,
+        status: "unavailable",
+      },
+    }));
+
+    assert.doesNotMatch(markup, /aria-label="Pulse AI usage"/);
+    assert.match(markup, /Historical usage activity/);
+    assert.ok(markup.indexOf("Historical usage activity") < markup.indexOf("Choose Edge"));
+  });
+
   test("renders overall capacity from the production usage projection", async () => {
     const {
       projectHostedPersonalAiUsageStatus,

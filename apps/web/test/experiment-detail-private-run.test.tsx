@@ -1126,7 +1126,337 @@ describe("experiment detail private-run composition", () => {
     expect(markup).toContain("flex min-w-0 flex-col gap-4");
     expect(markup).not.toContain("md:grid-cols-2");
     expect(markup).not.toContain("xl:grid-cols-2");
-    expect(markup).toContain("Daily measurements and window averages, where available.");
+    expect(markup).toContain("Daily measurements and declared window summaries, where available.");
+  });
+
+  it("renders a saved structured review without a false empty-metrics state", async () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    expect(protocol).not.toBeNull();
+
+    const base = createSavedOutcome({
+      id: "exp_structured_review",
+      schemaVersion: "murph.experiment-outcome.v2",
+      slug: "structured-review-run",
+      title: "Movement quality review",
+    });
+    const outcome: ExperimentOutcome = {
+      ...base,
+      metricResults: [],
+      structuredReview: {
+        baseline: {
+          kinds: ["document"],
+          recordIds: ["evt_movement_baseline"],
+        },
+        followup: {
+          kinds: ["document"],
+          recordIds: ["evt_movement_followup"],
+        },
+        key: "biomarker:movement-quality-review",
+        kind: "structured_review",
+        label: "Movement quality",
+        status: "ready_for_review",
+      },
+    };
+    const privateRun = resolveBrowserVaultExperimentRunById({
+      client: await createClient({
+        experimentOutcomes: [outcome],
+        generatedAt: "2026-04-20T08:00:00.000Z",
+        trackedExperiments: [{
+          frontmatter: createExperimentFrontmatter({
+            analysisPlan: {
+              primaryOutcome: {
+                key: "biomarker:movement-quality-review",
+                kind: "structured_review",
+                label: "Movement quality",
+              },
+            },
+            id: "exp_structured_review",
+            outcomeRef: {
+              generatedAt: outcome.generatedAt,
+              outcomeId: outcome.outcomeId,
+            },
+            runPlan: {
+              interventionEnd: "2026-04-06",
+              interventionStart: "2026-04-01",
+            },
+            slug: "structured-review-run",
+            startedOn: "2026-04-01",
+            status: "completed",
+            title: "Movement quality review",
+          }),
+          id: "exp_structured_review",
+          slug: "structured-review-run",
+          startedOn: "2026-04-01",
+          status: "completed",
+          summary: "Structured review fixture.",
+          tags: [],
+          title: "Movement quality review",
+        }],
+      }),
+      experimentId: "exp_structured_review",
+    });
+
+    expect(privateRun).toEqual(expect.objectContaining({
+      outcomeKind: "structured_review",
+      outcomeStatus: "available",
+      structuredReviewStatus: "ready_for_review",
+      signals: [],
+      trends: [],
+    }));
+
+    const markup = renderToStaticMarkup(
+      <ResultsTab
+        experiment={composeExperimentDetail({ protocol: protocol!, privateRun })}
+        privateRunError={null}
+        privateRunStatus="ready"
+      />,
+    );
+
+    expect(markup).toContain(outcome.conclusion.headline);
+    expect(markup).toContain("Evidence ready for review");
+    expect(markup).not.toContain("Saved result");
+    expect(markup).not.toContain("does not include comparable metric windows to chart");
+    expect(markup).not.toContain("there isn&#x27;t enough data for a clear comparison");
+  });
+
+  it("keeps incomplete structured-review states recoverable in the browser UI", async () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    expect(protocol).not.toBeNull();
+
+    const states = [
+      {
+        baselineRecordIds: [],
+        followupRecordIds: [],
+        status: "missing",
+      },
+      {
+        baselineRecordIds: ["evt_review_baseline"],
+        followupRecordIds: [],
+        status: "baseline_only",
+      },
+      {
+        baselineRecordIds: [],
+        followupRecordIds: ["evt_review_followup"],
+        status: "followup_only",
+      },
+    ] as const;
+
+    for (const state of states) {
+      const id = `exp_structured_${state.status}`;
+      const base = createSavedOutcome({
+        id,
+        schemaVersion: "murph.experiment-outcome.v2",
+        slug: `structured-${state.status}`,
+        title: "Movement quality review",
+      });
+      const outcome: ExperimentOutcome = {
+        ...base,
+        conclusion: {
+          caveats: ["Compare the available evidence directly."],
+          headline: "The review still needs evidence.",
+          plainLanguage:
+            "Add the missing baseline or follow-up evidence before reviewing the result.",
+        },
+        metricResults: state.status === "baseline_only"
+          ? base.metricResults
+          : [],
+        structuredReview: {
+          baseline: {
+            kinds: state.baselineRecordIds.length > 0 ? ["document"] : [],
+            recordIds: [...state.baselineRecordIds],
+          },
+          followup: {
+            kinds: state.followupRecordIds.length > 0 ? ["document"] : [],
+            recordIds: [...state.followupRecordIds],
+          },
+          key: "biomarker:movement-quality-review",
+          kind: "structured_review",
+          label: "Movement quality",
+          status: state.status,
+        },
+      };
+      const privateRun = resolveBrowserVaultExperimentRunById({
+        client: await createClient({
+          experimentOutcomes: [outcome],
+          generatedAt: "2026-04-20T08:00:00.000Z",
+          trackedExperiments: [{
+            frontmatter: createExperimentFrontmatter({
+              analysisPlan: {
+                primaryOutcome: {
+                  key: "biomarker:movement-quality-review",
+                  kind: "structured_review",
+                  label: "Movement quality",
+                },
+              },
+              id,
+              outcomeRef: {
+                generatedAt: outcome.generatedAt,
+                outcomeId: outcome.outcomeId,
+              },
+              runPlan: {
+                interventionEnd: "2026-04-06",
+                interventionStart: "2026-04-01",
+              },
+              slug: `structured-${state.status}`,
+              startedOn: "2026-04-01",
+              status: "completed",
+              title: "Movement quality review",
+            }),
+            id,
+            slug: `structured-${state.status}`,
+            startedOn: "2026-04-01",
+            status: "completed",
+            summary: "Structured review fixture.",
+            tags: [],
+            title: "Movement quality review",
+          }],
+        }),
+        experimentId: id,
+      });
+
+      expect(privateRun?.structuredReviewStatus).toBe(state.status);
+      const markup = renderToStaticMarkup(
+        <ResultsTab
+          experiment={composeExperimentDetail({ protocol: protocol!, privateRun })}
+          privateRunError={null}
+          privateRunStatus="ready"
+        />,
+      );
+
+      expect(markup).toContain(outcome.conclusion.headline);
+      expect(markup).toContain(outcome.conclusion.plainLanguage);
+      expect(markup).not.toContain("Evidence ready for review");
+      expect(markup).not.toContain("Saved result");
+      expect(markup).not.toContain("does not include comparable metric windows to chart");
+      if (state.status === "baseline_only") {
+        expect(privateRun?.trends).toHaveLength(1);
+        expect(markup).toContain('data-slot="chart"');
+        expect(markup).toContain("Resting heart rate");
+      }
+    }
+  });
+
+  it("labels saved maximum and count comparisons with their declared reducers", async () => {
+    const cases = [
+      {
+        baseline: 7,
+        current: 9,
+        expectedLabel: "maximum",
+        key: "response-score",
+        label: "Response score",
+        statistic: "max",
+        unit: "points",
+      },
+      {
+        baseline: 3,
+        current: 5,
+        expectedLabel: "count",
+        key: "symptom-free-days",
+        label: "Symptom-free days",
+        statistic: "count",
+        unit: "count",
+      },
+    ] as const;
+
+    for (const item of cases) {
+      const id = `exp_${item.key}`;
+      const base = createSavedOutcome({
+        id,
+        schemaVersion: "murph.experiment-outcome.v2",
+        slug: item.key,
+        title: item.label,
+      });
+      const baseMetric = base.metricResults[0]!;
+      const outcome: ExperimentOutcome = {
+        ...base,
+        metricResults: [{
+          ...baseMetric,
+          baseline: {
+            daysWithData: 3,
+            mean: item.baseline,
+            totalDays: 3,
+            unit: item.unit,
+          },
+          baselineMean: item.baseline,
+          biomarkerKey: `biomarker:${item.key}`,
+          deltaAbs: item.current - item.baseline,
+          deltaPct:
+            Math.round(
+              ((item.current - item.baseline) / Math.abs(item.baseline)) * 10_000,
+            ) / 100,
+          intervention: {
+            daysWithData: 3,
+            mean: item.current,
+            totalDays: 3,
+            unit: item.unit,
+          },
+          interventionMean: item.current,
+          label: item.label,
+          statistic: item.statistic,
+          unit: item.unit,
+        }],
+      };
+      const privateRun = resolveBrowserVaultExperimentRunById({
+        client: await createClient({
+          experimentOutcomes: [outcome],
+          generatedAt: "2026-04-20T08:00:00.000Z",
+          trackedExperiments: [{
+            frontmatter: createExperimentFrontmatter({
+              analysisPlan: {
+                primaryOutcome: {
+                  capture: { kind: "measurement" },
+                  key: `biomarker:${item.key}`,
+                  kind: "metric",
+                  label: item.label,
+                  statistic: item.statistic,
+                },
+              },
+              id,
+              outcomeRef: {
+                generatedAt: outcome.generatedAt,
+                outcomeId: outcome.outcomeId,
+              },
+              runPlan: {
+                baselineEnd: "2026-04-03",
+                baselineStart: "2026-04-01",
+                interventionEnd: "2026-04-06",
+                interventionStart: "2026-04-04",
+              },
+              slug: item.key,
+              startedOn: "2026-04-01",
+              status: "completed",
+              title: item.label,
+            }),
+            id,
+            slug: item.key,
+            startedOn: "2026-04-01",
+            status: "completed",
+            summary: "Reducer result fixture.",
+            tags: [],
+            title: item.label,
+          }],
+        }),
+        experimentId: id,
+      });
+      const trend = privateRun?.trends[0];
+
+      expect(trend?.statistic).toBe(item.statistic);
+      expect(trend?.unit).toBe(item.statistic === "count" ? "" : item.unit);
+      const markup = renderToStaticMarkup(<TrendChart data={trend!} />);
+
+      expect(markup).toContain(`Window statistic: ${item.expectedLabel}`);
+      expect(markup).toContain(`Baseline ${item.expectedLabel}`);
+      expect(markup).toContain(`Experiment ${item.expectedLabel}`);
+      expect(markup).toContain(
+        `aria-label="${item.label}: baseline ${item.expectedLabel} ${item.baseline}${item.statistic === "count" ? "" : ` ${item.unit}`}; experiment ${item.expectedLabel} ${item.current}${item.statistic === "count" ? "" : ` ${item.unit}`}."`,
+      );
+      expect(markup).not.toContain("Window averages");
+      if (item.statistic === "count") {
+        expect(markup).not.toContain("count count");
+        expect(markup).not.toContain(`${item.baseline} count`);
+        expect(markup).not.toContain(`${item.current} count`);
+      }
+    }
   });
 
   it("keeps daily trend dates stable outside UTC", () => {
@@ -1253,8 +1583,8 @@ describe("experiment detail private-run composition", () => {
           { day: 9, value: 59 },
           { day: 10, value: 58 },
         ],
-        currentValueLabel: "experiment average",
         expectedRange: undefined,
+        statistic: "mean",
       }),
     ]);
 
@@ -1267,7 +1597,7 @@ describe("experiment detail private-run composition", () => {
     expect(trendMarkup).not.toContain("latest");
     expect(trendMarkup).toContain('role="region"');
     expect(trendMarkup).toContain(
-      'aria-label="Resting Heart Rate: daily baseline and experiment measurements in bpm."',
+      'aria-label="Resting Heart Rate: baseline average 62 bpm; experiment average 59 bpm."',
     );
   });
 

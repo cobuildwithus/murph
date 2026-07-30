@@ -53,6 +53,7 @@ export async function ensureHostedPreparedLinqThreadContainerRouteTx(input: {
   accountLookupKey: string;
   accountLookupKeys?: readonly string[];
   fallbackOwnerMemberId?: string | null;
+  linqService: string | null;
   mailboxDedupeKey: string;
   occurredAt: Date;
   participantMemberIds: readonly string[];
@@ -133,6 +134,8 @@ export async function ensureHostedPreparedLinqThreadContainerRouteTx(input: {
     await bindArmedHostedUsageReferralToNewContainerTx({
       occurredAt: input.occurredAt,
       ownerMemberId,
+      targetChannel: "linq",
+      targetLinqService: input.linqService,
       targetContainerMemberId: ensure.containerMemberId,
       tx: input.tx,
     });

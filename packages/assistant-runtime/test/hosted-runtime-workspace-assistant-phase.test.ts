@@ -3979,6 +3979,186 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
   });
 
+  it("carries persisted direct Linq service through the real operation scope to referral tools", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-referral-service-"));
+    const vaultRoot = path.join(parentRoot, "vault");
+    const referralRequests: HostedRuntimeGroupToolRequest[] = [];
+    const groupToolPort: NonNullable<
+      HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["groupToolPort"]
+    > = {
+      async request(request) {
+        referralRequests.push(request);
+        if (request.action === "read_usage_referral") {
+          return {
+            action: request.action,
+            result: {
+              referral: null,
+              status: "unavailable" as const,
+              unavailableReason: "synthetic_web_unavailable",
+            },
+          };
+        }
+        if (request.action === "arm_usage_referral") {
+          return {
+            action: request.action,
+            result: {
+              referral: null,
+              status: "unavailable" as const,
+              unavailableReason: "synthetic_web_unavailable",
+            },
+          };
+        }
+        throw new Error(`Unexpected group tool request: ${request.action}`);
+      },
+    };
+    const serviceCases = [
+      { expected: "imessage", observed: "iMessage" },
+      { expected: "sms", observed: "SMS" },
+      { expected: "rcs", observed: "RCS" },
+      { expected: null, observed: null },
+    ] as const;
+
+    try {
+      await initializeVault({
+        createdAt: "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      });
+      const persistedInputs = await Promise.all(serviceCases.map(async (serviceCase, index) =>
+        await upsertAssistantInputEvent({
+          event: {
+            content: {
+              text: `direct referral service ${index}`,
+              transcriptText: `direct referral service ${index}`,
+              userMessageContent: [{
+                text: `direct referral service ${index}`,
+                type: "text" as const,
+              }],
+            },
+            conversation: {
+              accountId: `hid_${"1".repeat(32)}`,
+              actorId: `hid_${"2".repeat(32)}`,
+              actorIsSelf: false,
+              source: "linq",
+              threadId: `hid_${"3".repeat(32)}`,
+              threadIsDirect: true,
+            },
+            occurredAt: `2026-04-27T00:00:0${index}.000Z`,
+            receivedAt: `2026-04-27T00:00:0${index}.500Z`,
+            replyTarget: {
+              channel: "linq",
+              messageId: `message_direct_referral_${index}`,
+              threadId: "chat_direct_referral",
+            },
+            sourceMetadata: {
+              externalThreadRouteAuthorityPresent: false,
+              kind: "linq" as const,
+              partCount: 0,
+              reactionEligible: false,
+              replyToMessageId: null,
+              senderHandle: "+15555550123",
+              service: serviceCase.observed,
+            },
+            sourceRef: {
+              dedupeKey: `dedupe_direct_referral_${index}`,
+              eventId: `event_direct_referral_${index}`,
+              itemId: `mailbox_item_direct_referral_${index}`,
+              kind: "hosted-mailbox" as const,
+              lane: "conversation" as const,
+              laneSeq: String(index),
+              payloadSchema: "murph.hosted-mailbox-payload.v1",
+              payloadSource: "inline" as const,
+              source: "hosted-mailbox" as const,
+              wakeSchema: "murph.hosted-execution-wake.v1",
+            },
+          },
+          vault: vaultRoot,
+        })
+      ));
+      const assistantAutomation = await vi.importActual<
+        typeof import("@murphai/assistant-engine/assistant-automation")
+      >("@murphai/assistant-engine/assistant-automation");
+      mocks.readAssistantInputEvent.mockImplementation(
+        assistantAutomation.readAssistantInputEvent,
+      );
+
+      await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        assistantInputIds: persistedInputs.map((persisted) => persisted.inputId),
+        importedCount: persistedInputs.length,
+        runtimeGroupToolPort: groupToolPort,
+        vaultRoot,
+      }));
+
+      const laneInput = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+      const operationScope = laneInput?.operationScope as
+        | AssistantAutomationOperationScope
+        | undefined;
+      if (!laneInput?.executionContext || !operationScope) {
+        throw new Error("Expected hosted automation operation scope.");
+      }
+
+      for (const [index, persisted] of persistedInputs.entries()) {
+        const requestCountBefore = referralRequests.length;
+        await operationScope.runAutoReplyGroup({
+          executionContext: laneInput.executionContext,
+          inputIds: [persisted.inputId],
+          operation: async (executionContext) => {
+            const groupTool = executionContext.hosted?.groupTool;
+            if (!groupTool) {
+              throw new Error("Expected operation-scoped group tool.");
+            }
+            await groupTool.request({ action: "read_usage_referral" });
+            await groupTool.request({
+              action: "arm_usage_referral",
+              policyCode: "new_person_activation_v1",
+            });
+          },
+          turnEnvironment: null,
+        });
+
+        const expectedService = serviceCases[index]?.expected ?? null;
+        const expectedSourceConversation = {
+          channel: "linq" as const,
+          ...(expectedService ? { linqService: expectedService } : {}),
+          threadId: expect.stringMatching(/^hid_[a-f0-9]{32}$/u),
+          threadIsDirect: true,
+        };
+        expect(referralRequests.slice(requestCountBefore)).toEqual([
+          {
+            action: "read_usage_referral",
+            sourceConversation: expectedSourceConversation,
+          },
+          {
+            action: "arm_usage_referral",
+            policyCode: "new_person_activation_v1",
+            sourceConversation: expectedSourceConversation,
+          },
+        ]);
+      }
+
+      const requestCountBeforeMixed = referralRequests.length;
+      await operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: persistedInputs.slice(0, 2).map((persisted) => persisted.inputId),
+        operation: async (executionContext) => {
+          await executionContext.hosted?.groupTool?.request({
+            action: "read_usage_referral",
+          });
+        },
+        turnEnvironment: null,
+      });
+      expect(referralRequests.slice(requestCountBeforeMixed)).toEqual([{
+        action: "read_usage_referral",
+        sourceConversation: {
+          channel: "linq",
+          threadId: expect.stringMatching(/^hid_[a-f0-9]{32}$/u),
+          threadIsDirect: true,
+        },
+      }]);
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true });
+    }
+  });
+
   it("scopes automation and group mutation authority to each durable accepted input", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-automation-tool-"));
     const vaultRoot = path.join(parentRoot, "vault");

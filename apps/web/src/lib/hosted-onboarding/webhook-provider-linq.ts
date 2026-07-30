@@ -2543,6 +2543,7 @@ async function planHostedLinqGroupChatWebhook(input: {
       accountLookupKey,
       accountLookupKeys: input.threadRouteAccountLookupKeys,
       fallbackOwnerMemberId: activeSenderMemberId,
+      linqService: messageEvent.data.service ?? null,
       mailboxDedupeKey: input.event.event_id,
       occurredAt: new Date(occurredAt),
       participantMemberIds: pendingSetupParticipantMemberIds,
