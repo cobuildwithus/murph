@@ -386,6 +386,46 @@ describe("readHostedAiUsageActivity", () => {
 });
 
 describe("HostedAiUsageActivity", () => {
+  it("keeps earned mission credit visible while purchase history stays explicitly scoped", async () => {
+    const now = new Date("2026-07-29T12:00:00.000Z");
+    mocks.creditFindMany.mockResolvedValue([]);
+    mocks.missionFindMany.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      {
+        armedAt: new Date("2026-07-10T12:00:00.000Z"),
+        beneficiaryMemberId: "member_123",
+        expiresAt: new Date("2026-07-17T12:00:00.000Z"),
+        id: "hur_completed_without_purchase",
+        policyCode: "new_person_activation_v1",
+        qualifiedAt: new Date("2026-07-16T11:00:00.000Z"),
+        rewardedAt: new Date("2026-07-16T12:00:00.000Z"),
+        rewardUsdMicros: 2_000_000n,
+        status: "rewarded",
+      },
+    ]);
+
+    const { readHostedAiUsageActivity } = await import(
+      "@/src/lib/hosted-execution/usage-activity"
+    );
+    const activity = await readHostedAiUsageActivity({
+      memberId: "member_123",
+      now,
+    });
+    const { HostedAiUsageActivity } = await import(
+      "@/src/components/settings/hosted-ai-usage-activity"
+    );
+    const markup = renderToStaticMarkup(createElement(HostedAiUsageActivity, {
+      activity,
+      missionContactOption: null,
+    }));
+
+    assert.match(markup, /Bring someone new to Murph/);
+    assert.match(markup, /Completed/);
+    assert.match(markup, /\$2\.00/);
+    assert.match(markup, /Purchased credits/);
+    assert.match(markup, /No purchased credits yet/);
+    assert.doesNotMatch(markup, /No usage credits yet/);
+  });
+
   it("renders a single ledger surface and prefilled Murph handoff", async () => {
     const { HostedAiUsageActivity } = await import(
       "@/src/components/settings/hosted-ai-usage-activity"
@@ -434,7 +474,8 @@ describe("HostedAiUsageActivity", () => {
     }));
 
     assert.match(markup, /<h3[^>]*>Missions<\/h3>/);
-    assert.match(markup, /<h3[^>]*>Credit history<\/h3>/);
+    assert.match(markup, /<h3[^>]*>Purchased credits<\/h3>/);
+    assert.match(markup, /aria-label="Purchased usage credits"/);
     assert.match(markup, /Purchased by you/);
     assert.match(markup, /Amounts added, not current balance/);
     assert.doesNotMatch(markup, /bar above/);
@@ -499,7 +540,7 @@ describe("HostedAiUsageActivity", () => {
 
     assert.match(markup, /Completed mission/);
     assert.match(markup, /<h3[^>]*>Missions<\/h3>/);
-    assert.match(markup, /Credit history/);
+    assert.match(markup, /Purchased credits/);
     assert.doesNotMatch(markup, /No missions selected/);
     assert.doesNotMatch(
       markup,
@@ -508,7 +549,7 @@ describe("HostedAiUsageActivity", () => {
     assert.doesNotMatch(markup, /href="sms:/);
   });
 
-  it("renders email-only credit history without a mission invitation", async () => {
+  it("renders email-only purchased credits without a mission invitation", async () => {
     const { HostedAiUsageActivity } = await import(
       "@/src/components/settings/hosted-ai-usage-activity"
     );
@@ -526,7 +567,8 @@ describe("HostedAiUsageActivity", () => {
       missionContactOption: null,
     }));
 
-    assert.match(markup, /<h3[^>]*>Credit history<\/h3>/);
+    assert.match(markup, /<h3[^>]*>Purchased credits<\/h3>/);
+    assert.match(markup, /aria-label="Purchased usage credits"/);
     assert.match(markup, /Added for you/);
     assert.doesNotMatch(markup, /<h3[^>]*>Missions<\/h3>/);
     assert.doesNotMatch(markup, /Ask Murph/);
@@ -552,7 +594,7 @@ describe("HostedAiUsageActivity", () => {
     assert.match(markup, /<h3[^>]*>Missions<\/h3>/);
     assert.match(markup, /No missions selected/);
     assert.match(markup, /Ask Murph/);
-    assert.match(markup, /No usage credits yet/);
+    assert.match(markup, /No purchased credits yet/);
     assert.doesNotMatch(markup, /<details/);
   });
 
@@ -580,7 +622,7 @@ describe("HostedAiUsageActivity", () => {
     }));
 
     assert.match(markup, /<h3[^>]*>Missions<\/h3>/);
-    assert.match(markup, /<h3[^>]*>Credit history<\/h3>/);
+    assert.match(markup, /<h3[^>]*>Purchased credits<\/h3>/);
     assert.match(markup, /Completed mission/);
     assert.doesNotMatch(markup, /aria-label="Ask Murph about usage missions/);
   });

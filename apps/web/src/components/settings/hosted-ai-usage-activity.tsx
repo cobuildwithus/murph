@@ -111,7 +111,7 @@ export function HostedAiUsageActivity(props: {
       >
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
           <h3 className="font-serif text-lg font-semibold tracking-tight text-foreground">
-            Credit history
+            Purchased credits
           </h3>
           <p className="text-xs text-muted-foreground">
             Amounts added, not current balance.
@@ -120,11 +120,11 @@ export function HostedAiUsageActivity(props: {
 
         {props.activity.credits.length === 0 ? (
           <p className="pt-4 text-sm text-muted-foreground">
-            No usage credits yet.
+            No purchased credits yet.
           </p>
         ) : (
           <ul
-            aria-label="Recent usage credits"
+            aria-label="Purchased usage credits"
             className="mt-4 divide-y divide-border/70 border-t border-border/70"
           >
             {props.activity.credits.map((credit) => (
