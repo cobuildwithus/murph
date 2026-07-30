@@ -87,13 +87,17 @@ say that Murph only checked status or that no billing change happened.
   purchase post?" questions, answer from `latestSelfPurchase` before looking at
   older `topUps`.
   A `fulfilled` latest purchase is posted only when its correlated `topUp` is
-  present. `checkout_open` means checkout is still open; `payment_pending` or
-  `reconciling` means posting is not verified yet; `payment_failed` means it
-  failed; and `expired` means it expired. Never let an older fulfilled grant
-  override one of those newer statuses. If `latestSelfPurchase` is null, say a
-  latest attempt could not be confirmed, even when older grants exist.
-  `attemptedAt` is the purchase-attempt time; `creditedAt` is the time a
-  fulfilled grant posted.
+  present. `checkout_open` means posting is not verified: checkout may still be
+  open, or a submitted payment may be awaiting confirmation. If the member
+  says they paid or completed checkout, do not contradict them, claim checkout
+  was incomplete, or tell them to resume it; say the top-up is not confirmed
+  yet and offer to check again shortly. `payment_pending` or `reconciling` also
+  means posting is not verified yet; `payment_failed` means it failed; and
+  `expired` means it expired. Never let an older fulfilled grant override one
+  of those newer statuses. If `latestSelfPurchase` is null, say a latest
+  attempt could not be confirmed, even when older grants exist. `attemptedAt`
+  is the purchase-attempt time; `creditedAt` is the time a fulfilled grant
+  posted.
 
   In posted grant rows, `purchased_by_you` means the current member funded that
   grant; `added_for_you` means someone else funded it for the current member.

@@ -256,9 +256,13 @@ credit amount, attempt time, and the existing public purchase status. A
 fulfilled status is correlated to that purchase's committed grant and includes
 the matching top-up projection; every other status includes no grant. Thus a
 newer open, pending, reconciling, failed, or expired attempt wins over older
-fulfilled history when the member asks whether a purchase just posted. This
-read happens in the same repeatable snapshot as the aggregate and grant
-history. It performs no Stripe I/O and exposes no member, purchase, ledger, or
+fulfilled history when the member asks whether a purchase just posted.
+`checkout_open` alone does not prove checkout was unfinished: immediately after
+a successful return, it can also mean a submitted payment is awaiting its
+fulfillment webhook. Conversation policy therefore calls that state unverified
+and does not contradict a member who says they completed payment. This read
+happens in the same repeatable snapshot as the aggregate and grant history. It
+performs no Stripe I/O and exposes no member, purchase, ledger, or
 payment-provider identifier.
 
 Purchased capacity must not be called cash, wallet funds, an account balance,

@@ -931,7 +931,7 @@ describeRealCodex('real Codex private top-up history e2e', () => {
   )
 
   it(
-    'does not let an older fulfilled grant confirm a newer pending purchase',
+    'does not call a completed checkout unfinished while its grant is pending',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -979,7 +979,7 @@ describeRealCodex('real Codex private top-up history e2e', () => {
                 latestSelfPurchase: {
                   amountUsd: '25.000000',
                   attemptedAt: '2026-07-29T19:44:00.000Z',
-                  status: 'payment_pending',
+                  status: 'checkout_open',
                   topUp: null,
                 },
                 topUps: [
@@ -1000,7 +1000,7 @@ describeRealCodex('real Codex private top-up history e2e', () => {
           model: config.model,
           modelProvider: config.modelProvider,
           prompt:
-            'I just bought the $25 usage top-up. Did it post?',
+            'I completed checkout and paid for the $25 usage top-up. Did it post?',
           reasoningEffort: 'low',
           sandbox: 'workspace-write',
           workingDirectory,
@@ -1013,10 +1013,12 @@ describeRealCodex('real Codex private top-up history e2e', () => {
 
         expect(toolCalls).toHaveLength(1)
         expect(requests).toEqual([{ includeTopUpHistory: true }])
-        expect(result.finalMessage).toMatch(/pending|not (?:yet )?(?:posted|verified)/iu)
+        expect(result.finalMessage).toMatch(
+          /awaiting confirmation|confirming|not (?:yet )?(?:posted|verified|confirmed)/iu,
+        )
         expect(result.finalMessage).toMatch(/\$25(?:\.00)?/u)
         expect(result.finalMessage).not.toMatch(
-          /\$25(?:\.00)? top-up (?:has )?posted/iu,
+          /checkout (?:is|was|remains) (?:still )?(?:open|incomplete)|resume checkout/iu,
         )
       } finally {
         await removeRealCodexTemporaryPaths([

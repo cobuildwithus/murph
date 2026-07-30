@@ -184,11 +184,14 @@ claim that a billing change happened.
 
 For a question about a just-attempted personal top-up, assistant policy checks
 `latestSelfPurchase` before historical grants. `fulfilled` plus its correlated
-top-up is the only posted result. `checkout_open` remains incomplete;
-`payment_pending` and `reconciling` remain unverified; `payment_failed` failed;
-and `expired` expired. A missing latest attempt cannot be inferred from overall
-usage percentage or older grants. Historical `added_for_you` grants remain
-beneficiary history and never reveal or guess the payer.
+top-up is the only posted result. `checkout_open` remains unverified because
+checkout may still be open or a submitted payment may be awaiting its webhook;
+the assistant never contradicts a member who says they completed payment.
+`payment_pending` and `reconciling` also remain unverified;
+`payment_failed` failed; and `expired` expired. A missing latest attempt cannot
+be inferred from overall usage percentage or older grants. Historical
+`added_for_you` grants remain beneficiary history and never reveal or guess the
+payer.
 
 Family Settings may expose the same fixed-pack dialog beside each active member
 to the current active owner. That owner pays through the Family billing

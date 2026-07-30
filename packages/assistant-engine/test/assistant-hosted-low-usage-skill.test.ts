@@ -137,6 +137,12 @@ describe('assistant hosted low-usage skill', () => {
       'A `fulfilled` latest purchase is posted only when its correlated `topUp` is present',
     )
     expect(normalizedSkill).toContain(
+      '`checkout_open` means posting is not verified: checkout may still be open, or a submitted payment may be awaiting confirmation',
+    )
+    expect(normalizedSkill).toContain(
+      'do not contradict them, claim checkout was incomplete, or tell them to resume it',
+    )
+    expect(normalizedSkill).toContain(
       '`purchased_by_you` means the current member funded that grant',
     )
     expect(normalizedSkill).toContain(
