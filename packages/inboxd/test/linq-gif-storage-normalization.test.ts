@@ -274,7 +274,7 @@ test("Linq animated GIFs become compact left-to-right WebP filmstrips", async ()
   const vaultRoot = await makeTempDirectory("murph-linq-gif-storyboard");
   await initializeVault({ vaultRoot, createdAt: "2026-07-29T11:59:00.000Z" });
 
-  const delaysMs = [40, 40, 40, 5_000, 40, 40, 40];
+  const delaysMs = [40, 40, 40, 5_000, 40, 1_000, 40];
   const gifBytes = await createAnimatedGifBytes({
     delaysMs,
     frameCount: delaysMs.length,
@@ -364,7 +364,7 @@ test("Linq animated GIFs become compact left-to-right WebP filmstrips", async ()
     assert.equal(metadata.pages ?? 1, 1);
     assert.equal(metadata.hasAlpha, false);
 
-    const expectedSampledColors = [0, 1, 2, 3, 4, 6].map(
+    const expectedSampledColors = [0, 1, 2, 3, 5, 6].map(
       (page) => ANIMATED_GIF_FRAME_COLORS[page],
     );
     for (const [index, expectedColor] of expectedSampledColors.entries()) {

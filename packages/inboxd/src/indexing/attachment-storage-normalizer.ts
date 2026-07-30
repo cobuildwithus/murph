@@ -223,14 +223,24 @@ function selectStoryboardPages(
   const selectedPages = new Set([0, pageCount - 1]);
   for (let index = 1; index < frameCount - 1; index += 1) {
     const targetTimeMs = (index * totalDurationMs) / (frameCount - 1);
-    const targetPage = findPageAtTime(frameDelaysMs, targetTimeMs);
-    selectedPages.add(
-      findNearestUnselectedPage({
-        pageCount,
-        selectedPages,
-        targetPage,
-      }),
+    selectedPages.add(findPageAtTime(frameDelaysMs, targetTimeMs));
+  }
+
+  const ordinalPageSet = new Set(ordinalPages);
+  const remainingPages = frameDelaysMs
+    .map((delayMs, page) => ({ delayMs, page }))
+    .filter(({ page }) => !selectedPages.has(page))
+    .sort((left, right) =>
+      right.delayMs - left.delayMs ||
+      Number(ordinalPageSet.has(right.page)) -
+        Number(ordinalPageSet.has(left.page)) ||
+      left.page - right.page
     );
+  for (const { page } of remainingPages) {
+    if (selectedPages.size === frameCount) {
+      break;
+    }
+    selectedPages.add(page);
   }
 
   return [...selectedPages].sort((left, right) => left - right);
@@ -248,26 +258,6 @@ function findPageAtTime(
     }
   }
   return frameDelaysMs.length - 1;
-}
-
-function findNearestUnselectedPage(input: {
-  pageCount: number;
-  selectedPages: ReadonlySet<number>;
-  targetPage: number;
-}): number {
-  for (let distance = 0; distance < input.pageCount; distance += 1) {
-    const before = input.targetPage - distance;
-    if (before >= 0 && !input.selectedPages.has(before)) {
-      return before;
-    }
-
-    const after = input.targetPage + distance;
-    if (after < input.pageCount && !input.selectedPages.has(after)) {
-      return after;
-    }
-  }
-
-  throw new RangeError("Animated image did not yield enough storyboard pages.");
 }
 
 function normalizePageCount(value: number | undefined): number {
