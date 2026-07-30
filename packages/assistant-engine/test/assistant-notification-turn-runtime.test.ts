@@ -2654,6 +2654,165 @@ test('sendAssistantNotificationLocal exposes newsletter tools only with schedule
   expect(observedHostedToolContexts[1]?.newsletterTool).not.toBeNull()
 })
 
+test.each([
+  {
+    providerFailure: 'none' as const,
+    providerResponse:
+      '```json\n{"kind":"skip","privateSummary":"Newsletter queued."}\n```',
+  },
+  {
+    providerFailure: 'malformed-decision' as const,
+    providerResponse: 'not a notification decision',
+  },
+  {
+    providerFailure: 'terminal' as const,
+    providerResponse:
+      '```json\n{"kind":"skip","privateSummary":"Newsletter queued."}\n```',
+  },
+])(
+  'sendAssistantNotificationLocal propagates an accepted newsletter parent through $providerFailure',
+  async ({ providerFailure, providerResponse }) => {
+    const vault = await mkdtemp(path.join(
+      tmpdir(),
+      'assistant-notification-newsletter-pending-',
+    ))
+    try {
+      const providerError = new Error(
+        'provider failed after durable newsletter acceptance',
+      )
+      const providerResult = createProviderResult({
+        response: providerResponse,
+      })
+      const newsletterTool = {
+        request: vi.fn(async () => ({
+          action: 'prepare' as const,
+          result: {
+            authorizationProof: 'a'.repeat(64),
+            groupId: 'group_notification_newsletter',
+            missingEmailParticipants: [],
+            participants: [{
+              authorizedShares: [],
+              hasEmail: true,
+              memberId: 'member_notification_newsletter_recipient',
+            }],
+            status: 'ok' as const,
+          },
+        })),
+      }
+      const { sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
+        onExecuteCodexTurnWithRecovery: async (providerInput) => {
+          const hostedToolContext = providerInput.hostedToolContext
+          expect(hostedToolContext?.newsletterTool).not.toBeNull()
+          const executeNewsletterRequest = async (argumentsValue: unknown) => {
+            const request = readMurphDynamicToolRequest({
+              method: 'item/tool/call',
+              params: {
+                arguments: argumentsValue,
+                namespace: 'murph',
+                tool: 'newsletter',
+              },
+            })
+            if (!request || request.kind !== 'newsletter') {
+              throw new Error('Expected a parsed newsletter request.')
+            }
+            const result = await executeMurphDynamicToolRequest({
+              env: {},
+              fetchImpl: fetch,
+              hostedToolContext,
+              nextUsageOrdinal: () => 1,
+              progressDelivery: null,
+              request,
+              vaultRoot: vault,
+            })
+            expect(result.rpcResult.success).toBe(true)
+          }
+
+          await executeNewsletterRequest({ action: 'prepare' })
+          await executeNewsletterRequest({
+            action: 'send',
+            html: '<p>Weekly note</p>',
+            subject: 'Family Weekly',
+            text: 'Weekly note',
+          })
+          if (providerFailure === 'terminal') {
+            return {
+              acceptedNoReplyDeliveryContextOrdinals: [],
+              additionalUsages: [],
+              assistantContractFingerprint:
+                providerResult.assistantContractFingerprint,
+              attemptCount: 1,
+              codexContinuation: providerResult.codexContinuation,
+              codexRolloutRelativePath: null,
+              codexThreadId: null,
+              error: providerError,
+              kind: 'failed_terminal',
+              providerRequestOutcome: 'failed',
+              providerTurnId: null,
+              rawEvents: [],
+              reactions: [],
+              route: providerResult.route,
+              session: providerResult.session,
+              usage: null,
+              usageAttribution: null,
+            }
+          }
+          return {
+            kind: 'succeeded',
+            providerTurn: providerResult,
+          }
+        },
+        providerResult,
+        turnId: `turn-notification-newsletter-pending-${providerFailure}`,
+      })
+      const pendingIntentIds: string[] = []
+      const notification = sendAssistantNotificationLocal({
+        executionContext: {
+          hosted: {
+            memberId: 'member-notification-newsletter-pending',
+            newsletterTool,
+            userEnvKeys: [],
+          },
+        },
+        instructions: 'Send the scheduled group email newsletter.',
+        onNewsletterPendingDeliveryIntentId: (intentId) => {
+          pendingIntentIds.push(intentId)
+        },
+        scheduledAutomationAuthority: {
+          automationId: 'automation_newsletter',
+          occurrenceAt: '2026-07-20T13:00:00.000Z',
+        },
+        scheduledOccurrenceAt: '2026-07-20T13:00:00.000Z',
+        vault,
+      })
+
+      if (providerFailure === 'none') {
+        await expect(notification).resolves.toMatchObject({
+          postTurnDeliveryExpectations: {
+            newsletterPendingDeliveryIntentId:
+              expect.stringMatching(/^outbox_/u),
+            newsletterSendResult: {
+              participantCount: 1,
+              skippedNoEmailMemberIds: [],
+              status: 'accepted',
+            },
+          },
+        })
+      } else if (providerFailure === 'terminal') {
+        await expect(notification).rejects.toBe(providerError)
+      } else {
+        await expect(notification).rejects.toThrow()
+      }
+
+      expect(pendingIntentIds).toEqual([
+        expect.stringMatching(/^outbox_/u),
+      ])
+      expect(newsletterTool.request).toHaveBeenCalledOnce()
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  },
+)
+
 test('sendAssistantNotificationLocal keeps scheduled group reads and offers model-triggered', async () => {
   const providerResult = createProviderResult({
     response: '```json\n{"kind":"skip","privateSummary":"Challenge update complete."}\n```',
@@ -4613,9 +4772,13 @@ async function loadNotificationTurnHarness(input: {
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
   }))
-  vi.doMock('../src/assistant/turns.js', () => ({
-    createAssistantTurnId: () => input.turnId,
-  }))
+  vi.doMock('../src/assistant/turns.js', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../src/assistant/turns.js')>()
+    return {
+      ...actual,
+      createAssistantTurnId: () => input.turnId,
+    }
+  })
   vi.doMock('../src/assistant/channel-typing.js', () => ({
     assistantDeliveryOutcomeSupersedesTypingIndicator: (kind: string | null) =>
       kind === 'sent' || kind === 'queued',

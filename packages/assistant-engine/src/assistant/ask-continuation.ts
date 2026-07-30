@@ -53,21 +53,6 @@ import { resolveAssistantConversationScope } from './conversation-policy.js'
 
 const ASSISTANT_ASK_CONTINUATION_RECEIPT_PROMPT =
   'assistant.ask.completed private continuation'
-export const ASSISTANT_ASK_CONTINUATION_CODEX_CONFIG_OVERRIDES = [
-  'memories.use_memories=false',
-  'memories.generate_memories=false',
-  'features.shell_tool=false',
-  'web_search="disabled"',
-  'features.web_search_request=false',
-  'features.standalone_web_search=false',
-  'features.apps=false',
-  'features.enable_mcp_apps=false',
-  'features.browser_use=false',
-  'features.plugins=false',
-  'features.multi_agent=false',
-  'features.multi_agent_v2=false',
-  'features.tool_suggest=false',
-] as const
 
 export const ASSISTANT_ASK_CONTINUATION_TURN_PROFILE: Required<
   AssistantCodexTurnThreadScopeProfile
@@ -151,7 +136,6 @@ export function buildAssistantAskContinuationMessageInput(
     approvalPolicy: 'never',
     bindingDeliveryTarget: input.bindingDeliveryTarget,
     channel: input.channel,
-    codexConfigOverrides: ASSISTANT_ASK_CONTINUATION_CODEX_CONFIG_OVERRIDES,
     conversation: input.conversation,
     deliverResponse: true,
     deliveryDispatchMode: 'queue-only',
