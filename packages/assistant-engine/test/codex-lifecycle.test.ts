@@ -56,26 +56,22 @@ describe('Codex lifecycle facade', () => {
     })
   })
 
-  it(
-    'registers the existing implementation when assistant Codex loads',
-    async () => {
-      const registerStopWarmCodexAppServer = vi.fn()
-      const registerWaitForWarmCodexBackgroundWork = vi.fn()
-      vi.doMock('../src/codex-lifecycle.ts', () => ({
-        registerStopWarmCodexAppServer,
-        registerWaitForWarmCodexBackgroundWork,
-      }))
+  it('registers the existing implementation when assistant Codex loads', async () => {
+    const registerStopWarmCodexAppServer = vi.fn()
+    const registerWaitForWarmCodexBackgroundWork = vi.fn()
+    vi.doMock('../src/codex-lifecycle.ts', () => ({
+      registerStopWarmCodexAppServer,
+      registerWaitForWarmCodexBackgroundWork,
+    }))
 
-      const {
-        stopWarmCodexAppServer,
-        waitForWarmCodexBackgroundWork,
-      } = await import('../src/assistant-codex.ts')
+    const {
+      stopWarmCodexAppServer,
+      waitForWarmCodexBackgroundWork,
+    } = await import('../src/assistant-codex.ts')
 
-      expect(registerStopWarmCodexAppServer)
-        .toHaveBeenCalledExactlyOnceWith(stopWarmCodexAppServer)
-      expect(registerWaitForWarmCodexBackgroundWork)
-        .toHaveBeenCalledExactlyOnceWith(waitForWarmCodexBackgroundWork)
-    },
-    120_000,
-  )
+    expect(registerStopWarmCodexAppServer)
+      .toHaveBeenCalledExactlyOnceWith(stopWarmCodexAppServer)
+    expect(registerWaitForWarmCodexBackgroundWork)
+      .toHaveBeenCalledExactlyOnceWith(waitForWarmCodexBackgroundWork)
+  })
 })
