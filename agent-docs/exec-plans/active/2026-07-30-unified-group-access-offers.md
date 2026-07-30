@@ -83,3 +83,21 @@ Updated: 2026-07-30
 - Expected outcomes: the route matrix and unsupported-effect matrix pass,
   package types remain sound, durable docs stay indexed, CI is green, and all
   accepted audit findings are resolved.
+- Focused local proof before and after reconciling with `origin/main`:
+  - `pnpm --dir packages/assistant-engine typecheck`
+  - focused assistant-engine Vitest files: 125 tests passed
+  - `pnpm --dir packages/assistant-runtime typecheck`
+  - focused assistant-runtime Vitest files: 287 tests passed
+  - `pnpm docs:drift`
+  - `git diff --check`
+- Complete initial provider-input measurement used the pinned Codex App Server,
+  the repository's scripted Responses endpoint, model `gpt-5.6-terra` with low
+  reasoning in code mode, identical synthetic direct/group Linq turns, and the
+  `o200k_harmony` tokenizer. It counted the serialized `input`, `tool_choice`,
+  `parallel_tool_calls`, `include`, and `text` fields after normalizing local
+  paths, and excluded transport/cache/account metadata identically on both
+  heads.
+  - Direct: 108,141 bytes / 23,503 tokens on base; 108,510 bytes / 23,566
+    tokens on the candidate; delta +369 bytes (+0.34%) / +63 tokens (+0.27%).
+  - Group: 94,850 bytes / 20,634 tokens on base; 95,219 bytes / 20,697 tokens
+    on the candidate; delta +369 bytes (+0.39%) / +63 tokens (+0.31%).
