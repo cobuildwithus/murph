@@ -1125,10 +1125,13 @@ structural tombstones have a separate bounded pruning window.
 Assistant image media has an explicit public/private type boundary. `image`
 contains an intentionally public fetchable URL, while `vault_image` contains a
 normalized vault ref plus hash, size, filename, and allowlisted image MIME
-metadata for Murph-owned private bytes. The typed descriptor survives outbox
-persistence and restart, but the bytes are resolved only at the final provider
-boundary. Signed or short-lived URLs are delivery capabilities, not valid
-private-media storage representations.
+metadata for Murph-owned private bytes. Because a model relays that descriptor,
+the attachment boundary reloads the selected vault ref and derives canonical
+byte metadata before accepting response media. The trusted descriptor survives
+outbox persistence and restart, and final delivery reloads the bytes again to
+prove they have not changed before provider dispatch. Signed or short-lived
+URLs are delivery capabilities, not valid private-media storage
+representations.
 
 Provider-native thread continuity is not a delivery ledger. Preserve a resumable Codex thread even when `finish_without_reply` or delivery-context filtering means its internal history differs slightly from the durable semantic transcript, and preserve it after authenticated private reads. Runtime-owned capability URLs belong only to the ephemeral delivery response: do not put them in the durable assistant transcript, fresh-thread replay, stale-resume fallback, or provider-native turn. Do not clear or abandon provider continuity as a privacy or delivery-reconciliation mechanism; enforce privacy at authority, output, logging, and snapshot boundaries instead.
 Hosted group-email assistant replies use the assistant outbox as their single durability owner. The parent effect resolves authorized group members and creates privacy-blind, member-scoped child intents before it is considered sent; the no-send parent planner remains replay-safe through bounded response-body and partial child-intent persistence failures until that durable expansion completes, and stable per-member dedupe fills only missing children after a restart. Each child resolves only that member's current authorized address at delivery time. A deleted group or child whose recipient authority has changed before the provider call is durably abandoned with a typed authority-superseded reason, and transient failures proven to occur before provider entry remain retryable across the runner response boundary, while a lost internal response or liveness failure after the recipient-scoped provider request starts is terminal ambiguity. Successful siblings remain durable when another recipient fails, and an ambiguous child send is recorded terminally instead of replaying the whole group. Production Worker config embeds the prepared runner bundle and source fingerprints. Every warm or cold runner must report those exact fingerprints before a user workspace invocation is admitted, so a stale warm shell is replaced and a stale cold shell fails closed even before post-deploy smoke completes.
