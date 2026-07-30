@@ -61,10 +61,21 @@ bounded by the exact request and final route authority.
 - `pnpm docs:drift`, Prisma generation, and `git diff --check` pass.
 - Product-experience review returned no findings after the provider-shaped
   answered-path proof was added.
+- Preliminary specialist ReviewGPT found three prompt/confirmation edge cases:
+  private-only continuation wording, ambiguous deictic private subjects, and a
+  document-wide negation matcher. The remediation keeps continuation wording
+  audience-neutral, fails closed when the private subject itself is ambiguous,
+  and requires a substantive self-contained confirmation while accepting
+  ordinary negative predicates such as "sleep is not improving."
+- Parent final review removed the remaining stale private-continuation and
+  exact-forward terminology. The final focused rerun passes Web 8/8,
+  assistant-engine 86/86, hosted-execution 4/4, assistant-runtime 303/303, and
+  the two direct provider/delivery proof cases.
 - Deterministic first-provider request captures at the exact base and head,
   using identical paths and the pinned Terra code-mode target, are byte-for-byte
   identical: individual 23,356 tokens / 107,355 bytes; group 18,378 tokens /
   84,334 bytes.
 
-Status: active
+Status: completed
 Updated: 2026-07-29
+Completed: 2026-07-29

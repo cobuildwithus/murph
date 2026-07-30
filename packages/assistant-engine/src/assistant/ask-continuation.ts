@@ -55,7 +55,7 @@ import {
 } from './conversation-policy.js'
 
 const ASSISTANT_ASK_CONTINUATION_RECEIPT_PROMPT =
-  'assistant.ask.completed private continuation'
+  'assistant.ask.completed continuation'
 
 export const ASSISTANT_ASK_CONTINUATION_TURN_PROFILE: Required<
   AssistantCodexTurnThreadScopeProfile

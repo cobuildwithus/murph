@@ -50,8 +50,48 @@ const HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_PRIVATE_MURPH_PATTERN =
   /\bprivate murph\b/u;
 const HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_DISCLOSURE_PATTERN =
   /\b(?:share|send|post|tell|summari[sz]e|compare)\b/u;
-const HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_NEGATION_PATTERN =
-  /\b(?:no|not|never|do not|don't|dont|stop|cancel)\b/u;
+const HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_DISCLOSURE_GLOBAL_PATTERN =
+  /\b(?:share|send|post|tell|summari[sz]e|compare)\b/gu;
+const HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_DENIAL_PATTERN =
+  /\b(?:(?:do not|don't|dont|never|not)\s+(?:ask|use|share|send|post|tell|summari[sz]e|compare)|no\s+(?:sharing|disclosure)|(?:stop|cancel)\s+(?:this|it|the request|sharing|disclosure))\b/u;
+const HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_BOILERPLATE_TOKENS = new Set([
+  "a",
+  "about",
+  "all",
+  "and",
+  "any",
+  "anything",
+  "answer",
+  "ask",
+  "data",
+  "details",
+  "everyone",
+  "everything",
+  "from",
+  "group",
+  "here",
+  "info",
+  "information",
+  "it",
+  "me",
+  "my",
+  "of",
+  "please",
+  "room",
+  "someone",
+  "something",
+  "summary",
+  "that",
+  "the",
+  "them",
+  "this",
+  "to",
+  "us",
+  "use",
+  "with",
+  "you",
+  "your",
+]);
 
 export const HOSTED_GROUP_CURRENT_SENDER_DISCLOSURE_PERMISSION_TEXT =
   "The owner of this personal Murph authored the exact incoming group question and may authorize one answer to that same group. Answer only when that question clearly asks Murph to share information about the owner. Treat first-person references as the owner, disclose only the owner's information directly requested by the question, and disclose nothing about anyone else. This authorization applies once to this question and grants no future, scheduled, or broader access.";
@@ -454,11 +494,24 @@ export function isHostedGroupCurrentSenderDisclosureConfirmation(
     .replaceAll("’", "'")
     .replace(/\s+/gu, " ")
     .trim();
-  return normalized.length > 0
-    && HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_AFFIRMATIVE_PATTERN.test(normalized)
-    && HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_PRIVATE_MURPH_PATTERN.test(normalized)
-    && HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_DISCLOSURE_PATTERN.test(normalized)
-    && !HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_NEGATION_PATTERN.test(normalized);
+  if (
+    normalized.length === 0
+    || !HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_AFFIRMATIVE_PATTERN.test(normalized)
+    || !HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_PRIVATE_MURPH_PATTERN.test(normalized)
+    || !HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_DISCLOSURE_PATTERN.test(normalized)
+    || HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_DENIAL_PATTERN.test(normalized)
+  ) {
+    return false;
+  }
+  const substantiveTokens = normalized
+    .replace(HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_AFFIRMATIVE_PATTERN, " ")
+    .replace(HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_PRIVATE_MURPH_PATTERN, " ")
+    .replace(HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_DISCLOSURE_GLOBAL_PATTERN, " ")
+    .match(/[\p{L}\p{N}][\p{L}\p{N}'-]*/gu) ?? [];
+  return substantiveTokens.some(
+    (token) =>
+      !HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_BOILERPLATE_TOKENS.has(token),
+  );
 }
 
 function createHostedGroupCurrentSenderPermissionDigest(): string {

@@ -158,7 +158,8 @@ group.
 - Web revalidates the exact group, personal runtime, membership generation,
   grant generation, permission digest, origin, expiry, and runtime fence at
   admission, immediately before the personal read, and immediately before
-  completion append. Reviewed exact delivery atomically carries that completion
+  completion append. Reviewed completion delivery atomically carries that
+  completion
   mailbox id, deterministic delivery key, and authority expiry into the
   existing outbox. Before expiry the final Linq egress transaction repeats the
   paired request and grant authority check before claiming provider dispatch.
