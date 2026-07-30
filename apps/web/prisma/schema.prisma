@@ -977,6 +977,7 @@ model HostedMailboxItem {
   payloadBytes            Int?                  @map("payload_bytes")
   payloadHash             String?               @map("payload_hash")
   consumedAt              DateTime?             @map("consumed_at")
+  aiUsageDeniedAt         DateTime?             @map("ai_usage_denied_at")
   expiresAt               DateTime?             @map("expires_at")
   contentRetiredAt        DateTime?             @map("content_retired_at")
   retentionDisposition    String?               @map("retention_disposition")
