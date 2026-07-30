@@ -81,7 +81,6 @@ vi.mock("next/link", () => ({
 let cleanupRender: (() => Promise<void>) | null = null;
 
 beforeEach(() => {
-  vi.resetModules();
   vi.clearAllMocks();
   mocks.authDialogProps = null;
 });
@@ -92,99 +91,6 @@ afterEach(async () => {
     cleanupRender = null;
   }
   vi.useRealTimers();
-});
-
-test("warms one shared Privy runtime after homepage idle and reuses it on click", async () => {
-  vi.useFakeTimers();
-  const { AuthProvider } = await import(
-    "@/src/components/hosted-onboarding/auth-dialog-provider"
-  );
-  const { LandingAuthActions } = await import("@/app/auth-controls");
-  const rendered = await renderClientComponent(
-    createElement(
-      AuthProvider,
-      { authenticated: false },
-      createElement(LandingAuthActions, {
-        authLabel: "Get started",
-        authenticated: false,
-        context: "hero",
-        preloadAuthPanel: true,
-      }),
-    ),
-    { location: homepageLocation() },
-  );
-  cleanupRender = rendered.cleanup;
-
-  expect(mocks.runtimeModuleLoad).not.toHaveBeenCalled();
-  expect(mocks.runtimeMount).not.toHaveBeenCalled();
-  expect(mocks.authDialogProps).toMatchObject({ open: false });
-  expect(mocks.authDialogProps?.privyRuntime).toBeUndefined();
-
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(1_200);
-  });
-  await flushRuntimeLoad();
-
-  expect(mocks.runtimeModuleLoad).toHaveBeenCalledTimes(1);
-  expect(mocks.runtimeMount).toHaveBeenCalledTimes(1);
-  expect(mocks.panelPreload).not.toHaveBeenCalled();
-  expect(mocks.authDialogProps).toMatchObject({
-    open: false,
-    privyRuntime: { kind: "configured" },
-  });
-
-  await act(async () => {
-    rendered.button.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
-
-  expect(mocks.runtimeMount).toHaveBeenCalledTimes(1);
-  expect(mocks.runtimeUnmount).not.toHaveBeenCalled();
-  expect(mocks.authDialogProps).toMatchObject({
-    open: true,
-    privyRuntime: { kind: "configured" },
-  });
-});
-
-test("a click before idle opens immediately and starts the same shared runtime", async () => {
-  const { AuthProvider } = await import(
-    "@/src/components/hosted-onboarding/auth-dialog-provider"
-  );
-  const { LandingAuthActions } = await import("@/app/auth-controls");
-  const rendered = await renderClientComponent(
-    createElement(
-      AuthProvider,
-      { authenticated: false },
-      createElement(LandingAuthActions, {
-        authLabel: "Get started",
-        authenticated: false,
-        context: "hero",
-      }),
-    ),
-    { location: homepageLocation() },
-  );
-  cleanupRender = rendered.cleanup;
-
-  await act(async () => {
-    rendered.button.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
-
-  expect(mocks.authDialogProps).toMatchObject({
-    open: true,
-    privyRuntime: { kind: "loading" },
-  });
-
-  await flushRuntimeLoad();
-
-  expect(mocks.runtimeModuleLoad).toHaveBeenCalledTimes(1);
-  expect(mocks.runtimeMount).toHaveBeenCalledTimes(1);
-  expect(mocks.authDialogProps).toMatchObject({
-    open: true,
-    privyRuntime: { kind: "configured" },
-  });
 });
 
 test("does not warm Privy in the background on non-homepage routes", async () => {
@@ -234,6 +140,59 @@ test("does not warm Privy in the background on non-homepage routes", async () =>
   expect(mocks.authDialogProps?.privyRuntime).toBeUndefined();
 });
 
+test("warms one shared Privy runtime after homepage idle and reuses it on click", async () => {
+  vi.useFakeTimers();
+  const { AuthProvider } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog-provider"
+  );
+  const { LandingAuthActions } = await import("@/app/auth-controls");
+  const rendered = await renderClientComponent(
+    createElement(
+      AuthProvider,
+      { authenticated: false },
+      createElement(LandingAuthActions, {
+        authLabel: "Get started",
+        authenticated: false,
+        context: "hero",
+        preloadAuthPanel: true,
+      }),
+    ),
+    { location: bareHomepageLocation() },
+  );
+  cleanupRender = rendered.cleanup;
+
+  expect(mocks.runtimeModuleLoad).not.toHaveBeenCalled();
+  expect(mocks.runtimeMount).not.toHaveBeenCalled();
+  expect(mocks.authDialogProps).toMatchObject({ open: false });
+  expect(mocks.authDialogProps?.privyRuntime).toBeUndefined();
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1_200);
+  });
+  await flushRuntimeLoad();
+
+  expect(mocks.runtimeModuleLoad).toHaveBeenCalledTimes(1);
+  expect(mocks.runtimeMount).toHaveBeenCalledTimes(1);
+  expect(mocks.panelPreload).not.toHaveBeenCalled();
+  expect(mocks.authDialogProps).toMatchObject({
+    open: false,
+    privyRuntime: { kind: "configured" },
+  });
+
+  await act(async () => {
+    rendered.button.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  expect(mocks.runtimeMount).toHaveBeenCalledTimes(1);
+  expect(mocks.runtimeUnmount).not.toHaveBeenCalled();
+  expect(mocks.authDialogProps).toMatchObject({
+    open: true,
+    privyRuntime: { kind: "configured" },
+  });
+});
+
 async function flushRuntimeLoad() {
   await act(async () => {
     await Promise.resolve();
@@ -241,7 +200,7 @@ async function flushRuntimeLoad() {
   });
 }
 
-function homepageLocation() {
+function bareHomepageLocation() {
   return {
     hash: "",
     href: "https://example.test/",
