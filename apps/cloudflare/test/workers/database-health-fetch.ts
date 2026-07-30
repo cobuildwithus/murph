@@ -1,5 +1,29 @@
 import { buildMetricsBody } from "../helpers/database-health.ts";
 
+interface RecordedDatabaseHealthMessageRequest {
+  idempotencyKey: string;
+  messageParts: Array<{
+    type: string;
+    value: string;
+  }>;
+  recipient: string;
+}
+
+const recordedDatabaseHealthMessageRequests:
+  RecordedDatabaseHealthMessageRequest[] = [];
+
+export function readDatabaseHealthMessageRequests():
+  RecordedDatabaseHealthMessageRequest[] {
+  return recordedDatabaseHealthMessageRequests.map((request) => ({
+    ...request,
+    messageParts: request.messageParts.map((part) => ({ ...part })),
+  }));
+}
+
+export function resetDatabaseHealthMessageRequests(): void {
+  recordedDatabaseHealthMessageRequests.length = 0;
+}
+
 export async function handleDatabaseHealthEgress(
   input: RequestInfo | URL,
   init?: RequestInit,
@@ -67,9 +91,16 @@ export async function handleDatabaseHealthEgress(
   if (
     method === "GET"
     && url.origin === "https://api.linqapp.com"
-    && url.pathname === "/api/partner/v3/chats/chat_worker_test"
+    && (
+      url.pathname === "/api/partner/v3/chats/chat_worker_test"
+      || url.pathname
+        === "/api/partner/v3/chats/chat_worker_secondary_test"
+    )
     && headers.get("authorization") === "Bearer linq-token"
   ) {
+    const recipient = url.pathname.endsWith("chat_worker_secondary_test")
+      ? "+12025550124"
+      : "+12025550123";
     return Response.json({
       handles: [
         {
@@ -79,7 +110,7 @@ export async function handleDatabaseHealthEgress(
           status: "active",
         },
         {
-          handle: "+12025550123",
+          handle: recipient,
           is_me: false,
           service: "iMessage",
           status: "active",
@@ -94,29 +125,32 @@ export async function handleDatabaseHealthEgress(
     && url.origin === "https://api.linqapp.com"
     && url.pathname === "/api/partner/v3/messages"
     && headers.get("authorization") === "Bearer linq-token"
-    && isValidDatabaseHealthMessageRequest({
+  ) {
+    const messageRequest = readValidDatabaseHealthMessageRequest({
       body: init?.body,
       headers,
-    })
-  ) {
-    return new Response(null, { status: 202 });
+    });
+    if (messageRequest) {
+      recordedDatabaseHealthMessageRequests.push(messageRequest);
+      return new Response(null, { status: 202 });
+    }
   }
   return new Response("Unexpected database health egress.", { status: 400 });
 }
 
-function isValidDatabaseHealthMessageRequest(input: {
+function readValidDatabaseHealthMessageRequest(input: {
   body: BodyInit | null | undefined;
   headers: Headers;
-}): boolean {
+}): RecordedDatabaseHealthMessageRequest | null {
   const idempotencyKey = input.headers.get("idempotency-key");
   if (typeof input.body !== "string") {
-    return false;
+    return null;
   }
   let value: unknown;
   try {
     value = JSON.parse(input.body);
   } catch {
-    return false;
+    return null;
   }
   if (
     !isObjectRecord(value)
@@ -130,12 +164,24 @@ function isValidDatabaseHealthMessageRequest(input: {
     || !value.message.parts[0].value.includes("PgBouncer wait 8s")
     || !Array.isArray(value.to)
     || value.to.length !== 1
-    || value.to[0] !== "+12025550123"
+    || (
+      value.to[0] !== "+12025550123"
+      && value.to[0] !== "+12025550124"
+    )
     || "from" in value
+    || typeof idempotencyKey !== "string"
+    || idempotencyKey.length === 0
   ) {
-    return false;
+    return null;
   }
-  return typeof idempotencyKey === "string" && idempotencyKey.length > 0;
+  return {
+    idempotencyKey,
+    messageParts: [{
+      type: value.message.parts[0].type,
+      value: value.message.parts[0].value,
+    }],
+    recipient: value.to[0],
+  };
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {

@@ -1,9 +1,12 @@
 import {
+  experimentAnalysisPlanSchema,
   experimentAdherenceTargetsSchema,
   experimentOutcomeRefSchema,
   experimentRunScheduleIntentSchema,
+  summarizeExperimentOutcomeValues,
   type ExperimentAdherenceTarget,
   type ExperimentOutcome,
+  type ExperimentOutcomeStatistic,
   type ExperimentRunScheduleIntent,
 } from "@murphai/contracts";
 
@@ -21,9 +24,17 @@ import {
   type ExperimentAdherenceObservation,
 } from "../experiment-adherence.ts";
 import {
+  resolveExperimentMetricOutcome,
+  resolveExperimentPrimaryOutcome,
+  summarizeExperimentOutcomeEvidencePlan,
+  type ResolvedExperimentMetricOutcome,
+} from "../experiment-outcomes.ts";
+import {
+  metricWindowUnitsAreCompatible,
   resolveMetricDefinition,
   resolveMetricDefinitionForBiomarker,
   selectMetricWindowComparison,
+  unitsEquivalent,
   type MetricWindowSummary,
 } from "../metrics/index.ts";
 import type {
@@ -75,6 +86,7 @@ export type BrowserVaultExperimentCoverageStatus =
 export type BrowserVaultExperimentOutcomeStatus =
   | "not_ready"
   | "sparse_data"
+  | "ready_for_review"
   | "enough_data";
 
 export type BrowserVaultExperimentSavedOutcomeStatus =
@@ -200,6 +212,7 @@ export interface BrowserVaultExperimentBiomarkerResult {
   movedAsExpected: boolean | null;
   points: BrowserVaultExperimentMetricPoint[];
   sourceMetric: BrowserVaultExperimentMetricSource | null;
+  statistic: ExperimentOutcomeStatistic;
   status: BrowserVaultExperimentBiomarkerStatus;
   statusReason: string;
   unit: string | null;
@@ -319,6 +332,7 @@ interface BrowserVaultExperimentRunContext {
   adherenceTargets: ExperimentAdherenceTarget[];
   asOf: string;
   diagnostics: BrowserVaultExperimentResultDiagnostic[];
+  evidenceObservedOnByRecordId: ReadonlyMap<string, string | null>;
   evidenceThrough: string;
   entity: BrowserVaultEntity;
   events: BrowserVaultEntity[];
@@ -570,6 +584,9 @@ function buildRunContext(
     asOf: effectiveAsOf,
     diagnostics,
     entity,
+    evidenceObservedOnByRecordId: collectBrowserEvidenceObservedOn(
+      client.replica.entities,
+    ),
     evidenceThrough,
     events,
     eventTimeZone: runTimeZone,
@@ -579,6 +596,19 @@ function buildRunContext(
     run,
     unsupportedExplicitAdherenceTargets: parsedAdherenceTargets.unsupportedExplicit,
   };
+}
+
+function collectBrowserEvidenceObservedOn(
+  entities: readonly BrowserVaultEntity[],
+): Map<string, string | null> {
+  const observedOnByRecordId = new Map<string, string | null>();
+  for (const entity of entities) {
+    const observedOn = entity.date ?? extractDate(entity.occurredAt);
+    for (const recordId of [entity.id, ...entity.lookupIds]) {
+      observedOnByRecordId.set(recordId, observedOn);
+    }
+  }
+  return observedOnByRecordId;
 }
 
 function projectBrowserAdherenceTarget(
@@ -674,11 +704,18 @@ function buildPersistedOutcomeResult(
   outcome: ExperimentOutcome,
 ): BrowserVaultExperimentOutcomeResult {
   const primary = outcome.metricResults[0] ?? null;
+  const structuredReview = outcome.structuredReview;
 
   return {
     confidence: outcome.confidence,
-    primaryBiomarkerKey: primary?.biomarkerKey ?? null,
-    status: primary?.completeness === "good" ? "enough_data" : "sparse_data",
+    primaryBiomarkerKey:
+      structuredReview?.key ?? primary?.biomarkerKey ?? null,
+    status:
+      structuredReview?.status === "ready_for_review"
+        ? "ready_for_review"
+        : primary?.completeness === "good"
+          ? "enough_data"
+          : "sparse_data",
   };
 }
 
@@ -743,6 +780,7 @@ function buildPersistedOutcomeBiomarkers(
             )
           : [],
       sourceMetric,
+      statistic: metric.statistic ?? "mean",
       status: "available",
       statusReason: "Saved experiment analysis is available.",
       unit: metric.unit,
@@ -953,8 +991,9 @@ function buildBiomarkerResult(
   metricWindow: MetricWindowContext,
   biomarkerKey: string,
 ): BrowserVaultExperimentBiomarkerResult {
-  const sourceMetric = resolveBiomarkerMetricSource(biomarkerKey);
-  const label = humanizeBiomarkerKey(biomarkerKey);
+  const outcome = resolveBrowserMetricOutcome(context.entity.attributes, biomarkerKey);
+  const sourceMetric = resolveBiomarkerMetricSource(biomarkerKey, outcome.metricKey);
+  const label = outcome.label;
   const expectedEffect = buildExpectedEffect(context, biomarkerKey);
 
   if (!sourceMetric) {
@@ -969,6 +1008,7 @@ function buildBiomarkerResult(
       expectedEffect,
       label,
       sourceMetric: null,
+      statistic: outcome.statistic,
       status: "unsupported_source",
       statusReason: "No supported browser metric source is mapped for this biomarker.",
       window: metricWindow,
@@ -982,6 +1022,7 @@ function buildBiomarkerResult(
     expectedEffect,
     label,
     sourceMetric,
+    statistic: outcome.statistic,
   });
   if (anchoredResult) {
     return anchoredResult;
@@ -989,7 +1030,10 @@ function buildBiomarkerResult(
 
   const metricRows = collectMetricRows(client, sourceMetric, metricWindow);
   const metricSeriesPoints = metricRows.map(browserMetricRowToSeriesPoint);
-  const points = metricRowsToExperimentPoints(metricRows, sourceMetric, metricWindow);
+  const points = aggregateBrowserOutcomePointsByDate(
+    metricRowsToExperimentPoints(metricRows, sourceMetric, metricWindow),
+    outcome.statistic,
+  );
   const comparison = selectMetricWindowComparison({
     baselineWindow: {
       end: metricWindow.windows.baselineEnd,
@@ -1003,7 +1047,7 @@ function buildBiomarkerResult(
     },
     metricKey: sourceMetric.metricKey,
     points: metricSeriesPoints,
-    statistic: "mean",
+    statistic: outcome.statistic,
   });
   const baseline = experimentWindowSummaryFromMetricWindow(comparison.baseline);
   const intervention = experimentWindowSummaryFromMetricWindow(comparison.comparison);
@@ -1011,11 +1055,13 @@ function buildBiomarkerResult(
   const deltaPct = comparison.deltaPercent !== null ? round(comparison.deltaPercent) : null;
   const windowUnavailable =
     metricWindow.baselineDates.length === 0 && metricWindow.interventionDates.length === 0;
-  const status = resolveBiomarkerStatus({
-    points,
-    sourceMetric,
-    windowUnavailable,
-  });
+  const status = comparison.status === "unsupported"
+    ? "unavailable"
+    : resolveBiomarkerStatus({
+        points,
+        sourceMetric,
+        windowUnavailable,
+      });
   const unit = comparison.unit;
   const statusReason = buildBiomarkerStatusReason(status, label);
 
@@ -1040,10 +1086,12 @@ function buildBiomarkerResult(
   return {
     baseline,
     biomarkerKey,
-    completeness: classifyMetricCompleteness(
-      baseline.daysWithData,
-      intervention.daysWithData,
-    ),
+    completeness: comparison.status !== "unsupported"
+      ? classifyMetricCompleteness(
+          baseline.daysWithData,
+          intervention.daysWithData,
+        )
+      : "insufficient",
     deltaAbs,
     deltaPct,
     expectedEffect,
@@ -1052,6 +1100,7 @@ function buildBiomarkerResult(
     movedAsExpected: movedAsExpected(deltaAbs, expectedEffect.direction),
     points,
     sourceMetric,
+    statistic: outcome.statistic,
     status,
     statusReason,
     unit,
@@ -1073,6 +1122,7 @@ function buildAnchoredBiomarkerResult(input: {
   expectedEffect: BrowserVaultExperimentExpectedEffect;
   label: string;
   sourceMetric: BrowserVaultExperimentMetricSource;
+  statistic: ExperimentOutcomeStatistic;
 }): BrowserVaultExperimentBiomarkerResult | null {
   if (
     !hasCompletePointMeasurementPlanForBiomarker(
@@ -1105,15 +1155,21 @@ function buildAnchoredBiomarkerResult(input: {
     followupAnchors,
     input.context.evidenceThrough,
   );
-  const baselinePoints = metricRowsToAnchoredExperimentPoints(
-    baselineRows,
-    input.sourceMetric,
-    "baseline",
+  const baselinePoints = aggregateBrowserOutcomePointsByDate(
+    metricRowsToAnchoredExperimentPoints(
+      baselineRows,
+      input.sourceMetric,
+      "baseline",
+    ),
+    input.statistic,
   );
-  const interventionPoints = metricRowsToAnchoredExperimentPoints(
-    followupRows,
-    input.sourceMetric,
-    "intervention",
+  const interventionPoints = aggregateBrowserOutcomePointsByDate(
+    metricRowsToAnchoredExperimentPoints(
+      followupRows,
+      input.sourceMetric,
+      "intervention",
+    ),
+    input.statistic,
   );
   const plannedFollowupWindow = readPlannedMeasurementWindow(
     input.context.entity.attributes,
@@ -1124,17 +1180,36 @@ function buildAnchoredBiomarkerResult(input: {
     baselinePoints,
     baselineAnchors.length,
     null,
+    input.statistic,
   );
   const intervention = summarizeAnchoredMetricWindow(
     interventionPoints,
     followupAnchors.length || plannedFollowupWindow.totalDays,
     plannedFollowupWindow,
+    input.statistic,
   );
+  const windowsSummarizable =
+    (baseline.daysWithData === 0 || baseline.mean !== null) &&
+    (intervention.daysWithData === 0 || intervention.mean !== null);
+  const unitsCompatible =
+    windowsSummarizable &&
+    metricWindowUnitsAreCompatible({
+      left: {
+        unit: baseline.unit,
+        value: baseline.mean,
+      },
+      right: {
+        unit: intervention.unit,
+        value: intervention.mean,
+      },
+      statistic: input.statistic,
+    });
   const deltaAbs =
-    baseline.mean !== null && intervention.mean !== null
+    unitsCompatible && baseline.mean !== null && intervention.mean !== null
       ? round(intervention.mean - baseline.mean)
       : null;
   const deltaPct =
+    unitsCompatible &&
     baseline.mean !== null &&
     intervention.mean !== null &&
     baseline.mean !== 0
@@ -1146,7 +1221,7 @@ function buildAnchoredBiomarkerResult(input: {
     sourceMetric: input.sourceMetric,
     windowUnavailable: baselineAnchors.length === 0 && followupAnchors.length === 0,
   });
-  const unit = intervention.unit ?? baseline.unit;
+  const unit = unitsCompatible ? intervention.unit ?? baseline.unit : null;
 
   if (status === "no_data") {
     input.context.diagnostics.push({
@@ -1169,11 +1244,13 @@ function buildAnchoredBiomarkerResult(input: {
   return {
     baseline,
     biomarkerKey: input.biomarkerKey,
-    completeness: classifyMetricCompleteness(
-      baseline.daysWithData,
-      intervention.daysWithData,
-      { pointMeasurement: true },
-    ),
+    completeness: unitsCompatible
+      ? classifyMetricCompleteness(
+          baseline.daysWithData,
+          intervention.daysWithData,
+          { pointMeasurement: true },
+        )
+      : "insufficient",
     deltaAbs,
     deltaPct,
     expectedEffect: input.expectedEffect,
@@ -1182,6 +1259,7 @@ function buildAnchoredBiomarkerResult(input: {
     movedAsExpected: movedAsExpected(deltaAbs, input.expectedEffect.direction),
     points,
     sourceMetric: input.sourceMetric,
+    statistic: input.statistic,
     status,
     statusReason: buildBiomarkerStatusReason(status, input.label),
     unit,
@@ -1193,14 +1271,12 @@ function collectMetricRows(
   sourceMetric: BrowserVaultExperimentMetricSource,
   metricWindow: MetricWindowContext,
 ): BrowserVaultMetricRowWithValue[] {
-  const byDate = new Map<string, BrowserVaultMetricRowWithValue>();
-  for (const row of client.metrics.series({ metricKey: sourceMetric.metricKey })) {
-    const phase = resolveMetricPointPhase(row.date, metricWindow);
-    if (phase && hasNumericMetricValue(row)) {
-      byDate.set(row.date, row);
-    }
-  }
-  return [...byDate.values()].sort(compareMetricRowsAsc);
+  return client.metrics.series({ metricKey: sourceMetric.metricKey })
+    .filter((row): row is BrowserVaultMetricRowWithValue =>
+      resolveMetricPointPhase(row.date, metricWindow) !== null &&
+      hasNumericMetricValue(row)
+    )
+    .sort(compareMetricRowsAsc);
 }
 
 function collectAnchoredMetricRows(
@@ -1256,19 +1332,76 @@ function metricRowsToAnchoredExperimentPoints(
   }));
 }
 
+function aggregateBrowserOutcomePointsByDate(
+  points: readonly BrowserVaultExperimentMetricPoint[],
+  statistic: ExperimentOutcomeStatistic,
+): BrowserVaultExperimentMetricPoint[] {
+  const groups = new Map<string, BrowserVaultExperimentMetricPoint[]>();
+  for (const point of points) {
+    const key = `${point.phase}\u0000${point.date}`;
+    const rows = groups.get(key) ?? [];
+    rows.push(point);
+    groups.set(key, rows);
+  }
+
+  return [...groups.values()].flatMap((rows) => {
+    const sorted = rows.slice().sort((left, right) =>
+      left.date.localeCompare(right.date)
+    );
+    const latest = sorted.at(-1);
+    if (!latest) {
+      return [];
+    }
+    const units = uniqueStrings(sorted.flatMap((point) => point.unit ? [point.unit] : []));
+    if (
+      statistic !== "count" &&
+      units.length > 1 &&
+      !units.every((unit) => unitsEquivalent(units[0] ?? null, unit))
+    ) {
+      return sorted;
+    }
+    const reductionPoints = statistic === "count"
+      ? sorted.map((point) => ({ date: point.date, value: 1 }))
+      : sorted;
+    const value = summarizeExperimentOutcomeValues(reductionPoints, statistic);
+    if (value === null) {
+      return [];
+    }
+    return [{
+      ...latest,
+      unit: statistic === "count" ? "count" : latest.unit,
+      value,
+    }];
+  }).sort((left, right) => {
+    if (left.date !== right.date) {
+      return left.date.localeCompare(right.date);
+    }
+    return left.phase.localeCompare(right.phase);
+  });
+}
+
 function summarizeAnchoredMetricWindow(
   points: readonly BrowserVaultExperimentMetricPoint[],
   totalDays: number,
   fallbackWindow: { end: string | null; start: string | null; totalDays: number } | null,
+  statistic: ExperimentOutcomeStatistic,
 ): BrowserVaultExperimentMetricWindowSummary {
-  const values = points.map((point) => point.value);
-  const unit = points[0]?.unit ?? null;
+  const units = uniqueStrings(points.flatMap((point) => point.unit ? [point.unit] : []));
+  const compatible =
+    statistic === "count" ||
+    units.length < 2 ||
+    units.every((unit) => unitsEquivalent(units[0] ?? null, unit));
+  const unit = statistic === "count"
+    ? "count"
+    : compatible
+      ? points.at(-1)?.unit ?? null
+      : null;
   const dates = points.map((point) => point.date).sort((left, right) => left.localeCompare(right));
 
   return {
     daysWithData: points.length,
     end: dates.at(-1) ?? fallbackWindow?.end ?? null,
-    mean: values.length > 0 ? round(values.reduce((sum, value) => sum + value, 0) / values.length) : null,
+    mean: compatible ? summarizeExperimentOutcomeValues(points, statistic) : null,
     start: dates[0] ?? fallbackWindow?.start ?? null,
     totalDays,
     unit,
@@ -1345,6 +1478,7 @@ function emptyBiomarkerResult(input: {
   expectedEffect: BrowserVaultExperimentExpectedEffect;
   label: string;
   sourceMetric: BrowserVaultExperimentMetricSource | null;
+  statistic: ExperimentOutcomeStatistic;
   status: BrowserVaultExperimentBiomarkerStatus;
   statusReason: string;
   window: MetricWindowContext;
@@ -1374,6 +1508,7 @@ function emptyBiomarkerResult(input: {
     movedAsExpected: null,
     points: [],
     sourceMetric: input.sourceMetric,
+    statistic: input.statistic,
     status: input.status,
     statusReason: input.statusReason,
     unit: null,
@@ -1758,8 +1893,31 @@ function buildProgressResult(
         progressSchedule,
       );
   const primary = biomarkers[0] ?? null;
-  const primaryBaselineDays = primary?.baseline.daysWithData ?? 0;
-  const primaryInterventionDays = primary?.intervention.daysWithData ?? 0;
+  const primaryOutcome = resolveExperimentPrimaryOutcome(
+    readExperimentAnalysisPlan(context.entity.attributes),
+  );
+  const structuredEvidence = primaryOutcome?.kind === "structured_review"
+    ? summarizeExperimentOutcomeEvidencePlan(
+        readExperimentAnalysisPlan(context.entity.attributes),
+        primaryOutcome.key,
+        {
+          evidenceObservedOnByRecordId: context.evidenceObservedOnByRecordId,
+          observedThrough: context.evidenceThrough,
+        },
+      )
+    : null;
+  const primaryBaselineDays =
+    structuredEvidence?.baseline.observedCount ?? primary?.baseline.daysWithData ?? 0;
+  const primaryInterventionDays =
+    structuredEvidence?.followup.observedCount ?? primary?.intervention.daysWithData ?? 0;
+  const coverageStatus = structuredEvidence
+    ? structuredEvidence.reviewReady &&
+        (context.run.phase === "review_due" || context.run.phase === "completed")
+      ? "ready_for_review"
+      : primaryBaselineDays + primaryInterventionDays > 0
+        ? "partial"
+        : "insufficient"
+    : classifyCoverageStatus(context, primary);
 
   return {
     adherence: {
@@ -1786,9 +1944,9 @@ function buildProgressResult(
     dataCoverage: {
       baselineDaysAvailable: primaryBaselineDays,
       interventionDaysAvailable: primaryInterventionDays,
-      primaryBiomarkerKey: primary?.biomarkerKey ?? null,
+      primaryBiomarkerKey: primaryOutcome?.key ?? primary?.biomarkerKey ?? null,
       primaryMetricDaysAvailable: primaryBaselineDays + primaryInterventionDays,
-      status: classifyCoverageStatus(context, primary),
+      status: coverageStatus,
     },
     setupReadiness: buildBrowserSetupReadiness(context),
     analysisReadiness: buildBrowserAnalysisReadiness(context),
@@ -1814,7 +1972,7 @@ function buildBrowserSetupReadiness(
     blockingReasons.push("missing_run_plan");
   }
   if (
-    !hasCompleteBrowserPrimaryPointMeasurementWindow(context) &&
+    !hasBrowserAnalysisMetricWindow(context) &&
     (!context.run.windows.baselineStart || !context.run.windows.baselineEnd)
   ) {
     blockingReasons.push("missing_baseline_window");
@@ -1830,12 +1988,13 @@ function buildBrowserAnalysisReadiness(
   context: BrowserVaultExperimentRunContext,
 ): BrowserVaultExperimentProgressResult["analysisReadiness"] {
   const blockingReasons: string[] = [];
-  const analysisPlan = readRecord(context.entity.attributes.analysisPlan);
+  const analysisPlan = readExperimentAnalysisPlan(context.entity.attributes);
+  const primaryOutcome = resolveExperimentPrimaryOutcome(analysisPlan);
 
   if (!analysisPlan) {
     blockingReasons.push("missing_analysis_plan");
   }
-  if (!readString(analysisPlan?.primaryBiomarkerKey)) {
+  if (!primaryOutcome) {
     blockingReasons.push("missing_primary_biomarker");
   }
   if (!hasBrowserAnalysisMetricWindow(context)) {
@@ -1846,9 +2005,17 @@ function buildBrowserAnalysisReadiness(
 }
 
 function hasBrowserAnalysisMetricWindow(context: BrowserVaultExperimentRunContext): boolean {
-  const primaryBiomarkerKey = readString(readRecord(context.entity.attributes.analysisPlan)?.primaryBiomarkerKey);
-  if (!primaryBiomarkerKey) {
+  const analysisPlan = readExperimentAnalysisPlan(context.entity.attributes);
+  const primaryOutcome = resolveExperimentPrimaryOutcome(analysisPlan);
+  if (!primaryOutcome) {
     return false;
+  }
+
+  if (primaryOutcome.kind === "structured_review") {
+    return summarizeExperimentOutcomeEvidencePlan(
+      analysisPlan,
+      primaryOutcome.key,
+    ).completePlan;
   }
 
   if (hasCompleteBrowserPrimaryPointMeasurementWindow(context)) {
@@ -1866,9 +2033,9 @@ function hasBrowserAnalysisMetricWindow(context: BrowserVaultExperimentRunContex
 function hasCompleteBrowserPrimaryPointMeasurementWindow(
   context: BrowserVaultExperimentRunContext,
 ): boolean {
-  const primaryBiomarkerKey = readString(
-    readRecord(context.entity.attributes.analysisPlan)?.primaryBiomarkerKey,
-  );
+  const primaryBiomarkerKey = resolveExperimentPrimaryOutcome(
+    readExperimentAnalysisPlan(context.entity.attributes),
+  )?.key;
   return Boolean(
     primaryBiomarkerKey &&
       hasCompletePointMeasurementPlanForBiomarker(
@@ -1879,10 +2046,11 @@ function hasCompleteBrowserPrimaryPointMeasurementWindow(
 }
 
 function collectBiomarkerKeys(attributes: JsonRecord): string[] {
-  const analysisPlan = readRecord(attributes.analysisPlan);
+  const analysisPlan = readExperimentAnalysisPlan(attributes);
+  const primaryOutcome = resolveExperimentPrimaryOutcome(analysisPlan);
   const keys = [
-    readString(analysisPlan?.primaryBiomarkerKey),
-    ...readStringArray(analysisPlan?.secondaryBiomarkerKeys),
+    primaryOutcome?.kind === "metric" ? primaryOutcome.key : null,
+    ...(analysisPlan?.secondaryBiomarkerKeys ?? []),
   ];
 
   for (const effect of readExpectedEffectInputs(attributes)) {
@@ -1890,6 +2058,24 @@ function collectBiomarkerKeys(attributes: JsonRecord): string[] {
   }
 
   return uniqueStrings(keys);
+}
+
+function resolveBrowserMetricOutcome(
+  attributes: JsonRecord,
+  biomarkerKey: string,
+): ResolvedExperimentMetricOutcome {
+  const analysisPlan = readExperimentAnalysisPlan(attributes);
+  const primaryOutcome = resolveExperimentPrimaryOutcome(analysisPlan);
+  return primaryOutcome?.kind === "metric" && primaryOutcome.key === biomarkerKey
+    ? primaryOutcome
+    : resolveExperimentMetricOutcome(biomarkerKey);
+}
+
+function readExperimentAnalysisPlan(
+  attributes: JsonRecord,
+) {
+  const parsed = experimentAnalysisPlanSchema.safeParse(attributes.analysisPlan);
+  return parsed.success ? parsed.data : undefined;
 }
 
 function hasCompletePointMeasurementPlanForBiomarker(
@@ -1961,6 +2147,7 @@ function readPlannedMeasurementWindow(
 
 function resolveBiomarkerMetricSource(
   biomarkerKey: string,
+  resolvedMetricKey?: string,
 ): BrowserVaultExperimentMetricSource | null {
   const normalized = biomarkerKey.trim().toLowerCase();
   const slug = normalized.split(":").at(-1) ?? normalized;
@@ -1974,7 +2161,9 @@ function resolveBiomarkerMetricSource(
   );
   const metricDefinition = biomarkerDefinition ?? resolveMetricDefinition(slug);
 
-  return metricDefinition ? { metricKey: metricDefinition.key } : null;
+  return {
+    metricKey: resolvedMetricKey ?? metricDefinition?.key ?? slug,
+  };
 }
 
 function readExpectedEffectInputs(attributes: JsonRecord): BrowserVaultExperimentExpectedEffectInput[] {
@@ -2100,7 +2289,11 @@ function readAnalysisPlanExpectedDirection(
     return explicitDirection;
   }
 
-  if (readString(analysisPlan?.primaryBiomarkerKey) !== biomarkerKey) {
+  if (
+    resolveExperimentPrimaryOutcome(
+      readExperimentAnalysisPlan(attributes),
+    )?.key !== biomarkerKey
+  ) {
     return null;
   }
 

@@ -21,6 +21,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG,
 } from '../src/assistant/group-newsletter-automation.js'
+import {
+  createAssistantNewsletterOutboxTool,
+} from '../src/assistant/newsletter-outbox.js'
+import * as assistantDiagnostics from '../src/assistant/diagnostics.js'
+import * as assistantOutboxReceiptRepair from '../src/assistant/outbox/receipt-repair.js'
 
 type MockAutomationRecord = {
   activeUntil?: string | null
@@ -125,7 +130,10 @@ vi.mock('../src/assistant-service.ts', () => ({
   sendAssistantMessageLocal: cronMocks.sendAssistantMessageLocal,
 }))
 
-vi.mock('../src/assistant/channel-adapters.ts', () => ({
+vi.mock('../src/assistant/channel-adapters.ts', async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import('../src/assistant/channel-adapters.ts')
+  >()),
   getAssistantChannelAdapter: cronMocks.getAssistantChannelAdapter,
 }))
 
@@ -208,6 +216,7 @@ import {
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import {
   dispatchAssistantOutboxIntent,
+  listAssistantOutboxIntents,
   markAssistantOutboxIntentMirrorTerminalById,
   markAssistantOutboxIntentSentById,
   readAssistantOutboxIntent,
@@ -4087,7 +4096,12 @@ describe('assistant cron runtime orchestration', () => {
 
   it.each([
     {
+      expectedRunError: null,
+      expectedRunOutcome: 'no_op',
+      expectedRunReason: 'no_delivery',
+      expectedRunStatus: 'succeeded',
       label: 'partial newsletter delivery',
+      newsletterPendingDeliveryIntentId: null,
       newsletterSendResult: {
         failedRecipientCount: 1,
         participantCount: 3,
@@ -4095,16 +4109,61 @@ describe('assistant cron runtime orchestration', () => {
         skippedNoEmailMemberIds: [],
         status: 'partial_failure' as const,
       },
+      throwsAfterAcceptance: false,
     },
     {
+      expectedRunError: null,
+      expectedRunOutcome: 'no_op',
+      expectedRunReason: 'no_delivery',
+      expectedRunStatus: 'succeeded',
       label: 'newsletter with no recipients',
+      newsletterPendingDeliveryIntentId: null,
       newsletterSendResult: {
         participantCount: 0,
         skippedNoEmailMemberIds: ['member_without_email'],
         status: 'no_recipients' as const,
       },
+      throwsAfterAcceptance: false,
     },
-  ])('succeeds a scheduled newsletter occurrence after $label', async ({ newsletterSendResult }) => {
+    {
+      expectedRunError: null,
+      expectedRunOutcome: 'delivery_pending',
+      expectedRunReason: 'delivery_pending',
+      expectedRunStatus: 'skipped',
+      label: 'durable newsletter fanout is pending',
+      newsletterPendingDeliveryIntentId: 'outbox-newsletter-parent',
+      newsletterSendResult: {
+        participantCount: 3,
+        skippedNoEmailMemberIds: [],
+        status: 'accepted' as const,
+      },
+      throwsAfterAcceptance: false,
+    },
+    {
+      expectedRunError: 'notification failed after durable newsletter acceptance',
+      expectedRunOutcome: 'delivery_pending',
+      expectedRunReason:
+        'delivery_pending_after_ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+      expectedRunStatus: 'skipped',
+      label: 'durable newsletter acceptance precedes a notification error',
+      newsletterPendingDeliveryIntentId:
+        'outbox-newsletter-parent-after-error',
+      newsletterSendResult: {
+        participantCount: 3,
+        skippedNoEmailMemberIds: [],
+        status: 'accepted' as const,
+      },
+      throwsAfterAcceptance: true,
+    },
+  ])('settles a scheduled newsletter occurrence when $label', async ({
+    expectedRunError,
+    expectedRunOutcome,
+    expectedRunReason,
+    expectedRunStatus,
+    newsletterPendingDeliveryIntentId,
+    newsletterSendResult,
+    throwsAfterAcceptance,
+  }) => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-07-12T13:00:00.000Z'))
     try {
@@ -4170,19 +4229,248 @@ describe('assistant cron runtime orchestration', () => {
         },
         paths,
       })
-      cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
-        decision: {
-          kind: 'send_message',
-          privateSummary: 'Newsletter handled.',
-          text: 'Newsletter handled.',
-        },
-        postTurnDeliveryExpectations: {
-          newsletterSendResult,
-        },
-        response: 'Newsletter handled.',
-        session: {
-          sessionId: 'session-newsletter-send-succeeded',
-        },
+      if (throwsAfterAcceptance) {
+        cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async (
+          notificationInput: {
+            onNewsletterPendingDeliveryIntentId?: (intentId: string) => void
+          },
+        ) => {
+          if (!newsletterPendingDeliveryIntentId) {
+            throw new Error('Expected a pending newsletter parent id.')
+          }
+          notificationInput.onNewsletterPendingDeliveryIntentId?.(
+            newsletterPendingDeliveryIntentId,
+          )
+          throw new VaultCliError(
+            'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+            expectedRunError ?? 'notification failed',
+          )
+        })
+      } else {
+        cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
+          decision: {
+            kind: 'send_message',
+            privateSummary: 'Newsletter handled.',
+            text: 'Newsletter handled.',
+          },
+          postTurnDeliveryExpectations: {
+            ...(newsletterPendingDeliveryIntentId
+              ? { newsletterPendingDeliveryIntentId }
+              : {}),
+            newsletterSendResult,
+          },
+          response: 'Newsletter handled.',
+          session: {
+            sessionId: 'session-newsletter-send-succeeded',
+          },
+        })
+      }
+
+      const result = await executeClaimedAssistantCronJob({
+        job: claimed,
+        paths,
+        trigger: 'scheduled',
+        vault: vaultRoot,
+      })
+
+      expect(result.run.status).toBe(expectedRunStatus)
+      expect(result.run.outcome).toBe(expectedRunOutcome)
+      expect(result.run.reason).toBe(expectedRunReason)
+      expect(result.run.error).toBe(expectedRunError)
+      const currentStore = await readAssistantCronCanonicalRuntimeStore(paths)
+      const current = currentStore.jobs.find((record) => record.jobId === source.automationId)
+      expect(current?.state.pendingOccurrenceAt).toBe(
+        newsletterPendingDeliveryIntentId
+          ? '2026-07-12T13:00:00.000Z'
+          : null,
+      )
+      expect(current?.state.pendingDeliveryIntentId ?? null).toBe(
+        newsletterPendingDeliveryIntentId,
+      )
+      expect(current?.state.consecutiveFailures).toBe(0)
+      expect(current?.state.lastFailedAt).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it.each([
+    {
+      expectedLastFailedAt: null,
+      expectedLastSucceededAt: null,
+      label: 'pending',
+      status: 'pending' as const,
+    },
+    {
+      expectedLastFailedAt: null,
+      expectedLastSucceededAt: '2026-07-12T13:00:05.000Z',
+      label: 'sent',
+      status: 'sent' as const,
+    },
+    {
+      expectedLastFailedAt: '2026-07-12T13:00:05.000Z',
+      expectedLastSucceededAt: null,
+      label: 'failed',
+      status: 'failed' as const,
+    },
+  ])('recovers a durable $label newsletter parent before provider admission', async ({
+    expectedLastFailedAt,
+    expectedLastSucceededAt,
+    status,
+  }) => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-12T13:00:10.000Z'))
+    try {
+      const { vaultRoot } = await createRuntimeContext(
+        `assistant-cron-runtime-newsletter-restart-${status}-`,
+      )
+      const occurrenceAt = '2026-07-12T13:00:00.000Z'
+      const automationId = `automation-newsletter-restart-${status}`
+      const { claimed, paths, source } =
+        await createClaimedNewsletterCronJob({
+          automationId,
+          occurrenceAt,
+          vaultRoot,
+        })
+      const intent = buildTestNewsletterParentIntent({
+        automationId,
+        expectedUpdatedAt: source.updatedAt,
+        intentId: `outbox-newsletter-restart-${status}`,
+        occurrenceAt,
+      })
+      await saveAssistantOutboxIntent(vaultRoot, intent)
+      if (status === 'sent') {
+        await markAssistantOutboxIntentSentById({
+          delivery: {
+            channel: 'email',
+            idempotencyKey: intent.deliveryIdempotencyKey,
+            messageLength: intent.message.length,
+            providerMessageId: 'email-newsletter-restart',
+            providerThreadId: null,
+            sentAt: '2026-07-12T13:00:05.000Z',
+            target: intent.explicitTarget ?? 'group',
+            targetKind: 'explicit',
+          },
+          intentId: intent.intentId,
+          vault: vaultRoot,
+        })
+      } else if (status === 'failed') {
+        await markAssistantOutboxIntentMirrorTerminalById({
+          error: new Error('newsletter fanout failed'),
+          failedAt: new Date('2026-07-12T13:00:05.000Z'),
+          intentId: intent.intentId,
+          status: 'failed',
+          vault: vaultRoot,
+        })
+      }
+
+      const result = await executeClaimedAssistantCronJob({
+        job: claimed,
+        paths,
+        trigger: 'scheduled',
+        vault: vaultRoot,
+      })
+
+      expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+      expect(result.run).toMatchObject({
+        outcome: 'delivery_pending',
+        reason: 'delivery_pending',
+      })
+      let current = (
+        await readAssistantCronCanonicalRuntimeStore(paths)
+      ).jobs.find((record) => record.jobId === source.automationId)
+      expect(current?.state.pendingDeliveryIntentId).toBe(intent.intentId)
+      expect(current?.state.pendingOccurrenceAt).toBe(occurrenceAt)
+
+      if (status !== 'pending') {
+        await expect(
+          repairPendingAssistantCronDeliveries({
+            now: new Date('2026-07-12T13:00:10.000Z'),
+            vault: vaultRoot,
+          }),
+        ).resolves.toEqual({ checked: 1, reconciled: 1 })
+        current = (
+          await readAssistantCronCanonicalRuntimeStore(paths)
+        ).jobs.find((record) => record.jobId === source.automationId)
+        expect(current?.state.pendingDeliveryIntentId).toBeUndefined()
+        expect(current?.state.pendingOccurrenceAt).toBeNull()
+        expect(current?.state.lastFailedAt).toBe(expectedLastFailedAt)
+        expect(current?.state.lastSucceededAt).toBe(expectedLastSucceededAt)
+      }
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it.each([
+    'outbox receipt repair',
+    'outbox diagnostic persistence',
+  ])('recovers a parent persisted before %s fails without a callback', async (
+    failureStage,
+  ) => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-12T13:00:00.000Z'))
+    try {
+      const { vaultRoot } = await createRuntimeContext(
+        'assistant-cron-runtime-newsletter-post-write-failure-',
+      )
+      const occurrenceAt = '2026-07-12T13:00:00.000Z'
+      const automationId = `automation-newsletter-${failureStage.replaceAll(' ', '-')}`
+      const { claimed, paths, source } =
+        await createClaimedNewsletterCronJob({
+          automationId,
+          occurrenceAt,
+          vaultRoot,
+        })
+      const failure = new Error(
+        `${failureStage} failed after the durable write`,
+      )
+      if (failureStage === 'outbox receipt repair') {
+        vi.spyOn(
+          assistantOutboxReceiptRepair,
+          'repairAssistantOutboxReceiptForIntent',
+        ).mockRejectedValueOnce(failure)
+      } else {
+        vi.spyOn(
+          assistantDiagnostics,
+          'recordAssistantDiagnosticEvent',
+        ).mockRejectedValueOnce(failure)
+      }
+      cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async () => {
+        const tool = createAssistantNewsletterOutboxTool({
+          automationAuthority: {
+            automationId,
+            expectedUpdatedAt: source.updatedAt,
+          },
+          authority: { automationId, occurrenceAt },
+          newsletterTool: {
+            request: async () => ({
+              action: 'prepare',
+              result: {
+                authorizationProof: 'a'.repeat(64),
+                groupId: 'group_1',
+                missingEmailParticipants: [],
+                participants: [{
+                  authorizedShares: [],
+                  hasEmail: true,
+                  memberId: 'member_1',
+                }],
+                status: 'ok',
+              },
+            }),
+          },
+          sessionId: 'session_newsletter_post_write_failure',
+          turnId: 'turn_newsletter_post_write_failure',
+          vault: vaultRoot,
+        })
+        await tool.request({ action: 'prepare' })
+        await tool.request({
+          action: 'send',
+          html: '<p>Weekly</p>',
+          subject: 'Weekly',
+          text: 'Weekly',
+        })
+        throw new Error('Expected the injected post-write failure.')
       })
 
       const result = await executeClaimedAssistantCronJob({
@@ -4192,12 +4480,19 @@ describe('assistant cron runtime orchestration', () => {
         vault: vaultRoot,
       })
 
-      expect(result.run.status).toBe('succeeded')
-      const currentStore = await readAssistantCronCanonicalRuntimeStore(paths)
-      const current = currentStore.jobs.find((record) => record.jobId === source.automationId)
-      expect(current?.state.pendingOccurrenceAt).toBeNull()
-      expect(current?.state.consecutiveFailures).toBe(0)
-      expect(current?.state.lastFailedAt).toBeNull()
+      expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+      expect(result.run).toMatchObject({
+        error: failure.message,
+        outcome: 'delivery_pending',
+        reason: 'delivery_pending_after_error',
+      })
+      const intents = await listAssistantOutboxIntents(vaultRoot)
+      expect(intents).toHaveLength(1)
+      const current = (
+        await readAssistantCronCanonicalRuntimeStore(paths)
+      ).jobs.find((record) => record.jobId === source.automationId)
+      expect(current?.state.pendingDeliveryIntentId).toBe(intents[0]?.intentId)
+      expect(current?.state.pendingOccurrenceAt).toBe(occurrenceAt)
     } finally {
       vi.useRealTimers()
     }
@@ -10393,6 +10688,104 @@ function addOvernightMemoryConsolidationAutomation(vaultRoot: string): void {
     ],
     title: 'Overnight memory consolidation',
     updatedAt: '2026-04-08T08:00:00.000Z',
+  })
+}
+
+async function createClaimedNewsletterCronJob(input: {
+  automationId: string
+  occurrenceAt: string
+  vaultRoot: string
+}) {
+  getVaultAutomationStore(input.vaultRoot).push({
+    automationId: input.automationId,
+    continuityPolicy: 'fresh',
+    createdAt: '2026-07-06T10:00:00.000Z',
+    instructions: 'Compose and send the group health newsletter.',
+    route: {
+      channel: 'linq',
+      deliverySource: null,
+      deliveryTarget: 'group-chat-1',
+      identityId: null,
+      participantId: null,
+      threadId: 'group-chat-1',
+    },
+    schedule: {
+      kind: 'cron',
+      expression: '0 13 * * 0',
+    },
+    slug: 'group-health-newsletter',
+    status: 'active',
+    summary: null,
+    tags: ['assistant', 'scheduled'],
+    title: 'Group Health Newsletter',
+    updatedAt: '2026-07-06T10:00:00.000Z',
+  })
+  const source = (await listCanonicalAssistantCronRecords(input.vaultRoot))[0]
+  if (!source || source.kind !== 'automation') {
+    throw new Error('Expected newsletter automation source.')
+  }
+  const paths = resolveAssistantStatePaths(input.vaultRoot)
+  const baseRuntimeState = resolveCanonicalRuntimeState(
+    source,
+    await readAssistantCronCanonicalRuntimeStore(paths),
+  )
+  const runtimeState = {
+    ...baseRuntimeState,
+    state: {
+      ...baseRuntimeState.state,
+      pendingOccurrenceAt: input.occurrenceAt,
+    },
+  }
+  await writeAssistantCronCanonicalRuntimeStore(paths, {
+    jobs: [runtimeState],
+    version: 1,
+  })
+  const claimed = await claimResolvedAssistantCronJob({
+    job: {
+      kind: 'canonical',
+      source,
+      runtimeState,
+      job: projectCanonicalAssistantCronJob({
+        source,
+        runtimeState,
+      }),
+    },
+    paths,
+  })
+  return { claimed, paths, source }
+}
+
+function buildTestNewsletterParentIntent(input: {
+  automationId: string
+  expectedUpdatedAt: string
+  intentId: string
+  occurrenceAt: string
+}): AssistantOutboxIntent {
+  return assistantOutboxIntentSchema.parse({
+    ...buildTestLinqOutboxIntent({
+      createdAt: input.occurrenceAt,
+      intentId: input.intentId,
+      message: 'Open this email in an HTML-capable mail client.',
+    }),
+    automationAuthority: {
+      automationId: input.automationId,
+      expectedUpdatedAt: input.expectedUpdatedAt,
+    },
+    channel: 'email',
+    deliveryIdempotencyKey: [
+      'group-newsletter',
+      input.automationId,
+      input.occurrenceAt,
+      'group_1',
+    ].join(':'),
+    emailHtml: '<p>Weekly</p>',
+    explicitTarget: serializeHostedEmailThreadTarget({
+      groupId: 'group_1',
+      subject: 'Weekly',
+      targetKind: 'group',
+    }),
+    newsletterAuthorizationProof: 'a'.repeat(64),
+    threadIsDirect: false,
   })
 }
 
