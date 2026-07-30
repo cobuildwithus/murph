@@ -71,7 +71,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     await groupTool.request({
       action: "arm_usage_referral",
       linqSenderHandles: ["forged"],
-      policyCode: "active_group_v1",
+      policyCodes: ["active_group_v1"],
       sourceConversation: {
         channel: "telegram",
         threadId: `hid_${"f".repeat(32)}`,
@@ -82,7 +82,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     expect(request).toHaveBeenLastCalledWith({
       action: "arm_usage_referral",
       linqSenderHandles: ["+15550000001"],
-      policyCode: "active_group_v1",
+      policyCodes: ["active_group_v1"],
       sourceConversation: {
         channel: "linq",
         linqService: "imessage",
@@ -109,6 +109,18 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
         threadId: `hid_${"3".repeat(32)}`,
         threadIsDirect: false,
       },
+    });
+
+    await groupTool.request({
+      action: "cancel_usage_referral",
+      linqSenderHandles: ["forged"],
+      policyCode: "new_person_activation_v1",
+    });
+
+    expect(request).toHaveBeenLastCalledWith({
+      action: "cancel_usage_referral",
+      linqSenderHandles: ["+15550000001"],
+      policyCode: "new_person_activation_v1",
     });
   });
 

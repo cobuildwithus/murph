@@ -112,6 +112,13 @@ const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
     "20260728030000_hosted_usage_referral_credit_entry_constraints",
     new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
   ],
+  [
+    "20260729190000_composable_usage_referral_missions",
+    // The replacement indexes are created first. Dropping the old indexes
+    // only relaxes cardinality, so both the old and new application remain
+    // valid throughout the Vercel deploy window.
+    new Set(["DROP INDEX"]),
+  ],
 ]);
 
 const incompatiblePredeploySqlPatterns = [
