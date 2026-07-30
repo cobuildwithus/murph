@@ -35,6 +35,9 @@ import type {
 import { parseHostedEmailThreadTarget } from "@murphai/runtime-state";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
+import {
+  formatHostedExecutionSafeLogErrorDetails,
+} from "../hosted-execution/logging";
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
 import { advanceHostedMailboxLaneConsumedSeq } from "./lane-counter-store";
@@ -137,6 +140,46 @@ export interface FetchHostedRuntimeMailboxProjectionResult {
   consumedSeqByLane: HostedMailboxLaneConsumed[];
   items: HostedMailboxItemRecord[];
   maxSeqByLane: HostedMailboxLaneHighWater[];
+}
+
+export async function tryMarkHostedMailboxConversationAiUsageDenied(input: {
+  afterConversationLaneSeq: bigint;
+  at?: Date | string;
+  prisma?: HostedMailboxStoreClient;
+  userId: string;
+}): Promise<boolean> {
+  try {
+    if (input.afterConversationLaneSeq < 0n) {
+      throw new TypeError("Hosted mailbox conversation replay floor is invalid.");
+    }
+    const prisma = input.prisma ?? getPrisma();
+    const marked = await prisma.hostedMailboxItem.updateMany({
+      data: {
+        aiUsageDeniedAt: normalizeHostedMailboxDate(
+          input.at ?? new Date(),
+          "Hosted mailbox AI usage denied at",
+        ),
+      },
+      where: {
+        aiUsageDeniedAt: null,
+        consumedAt: null,
+        lane: "conversation",
+        laneSeq: {
+          gt: input.afterConversationLaneSeq,
+        },
+        userId: requireNonEmptyString(input.userId, "Hosted mailbox userId"),
+      },
+    });
+
+    return marked.count > 0;
+  } catch (error) {
+    console.warn("Hosted mailbox usage-denial mark failed.", {
+      ...formatHostedExecutionSafeLogErrorDetails(error, {
+        code: "HOSTED_MAILBOX_USAGE_DENIAL_MARK_FAILED",
+      }),
+    });
+    return false;
+  }
 }
 
 interface HostedRuntimeMailboxProjectionRow {

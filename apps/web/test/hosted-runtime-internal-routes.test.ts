@@ -39,6 +39,7 @@ const mocks = vi.hoisted(() => ({
   recordHostedIngressAssistantMilestone: vi.fn(),
   recordHostedIngressProviderStarted: vi.fn(),
   recordHostedIngressRuntimeMilestone: vi.fn(),
+  tryMarkHostedMailboxConversationAiUsageDenied: vi.fn(),
   recordHostedRuntimeLogs: vi.fn(),
   requireHostedCloudflareCallbackJsonRequest: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
@@ -60,6 +61,8 @@ vi.mock("@/src/lib/hosted-mailbox/store", async (importOriginal) => ({
   readHostedMailboxConsumedSeqByLane: mocks.readHostedMailboxConsumedSeqByLane,
   readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
   readHostedMailboxMaxSeqByLane: mocks.readHostedMailboxMaxSeqByLane,
+  tryMarkHostedMailboxConversationAiUsageDenied:
+    mocks.tryMarkHostedMailboxConversationAiUsageDenied,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
@@ -251,6 +254,7 @@ describe("hosted runtime internal web routes", () => {
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
       status: "allowed",
     });
+    mocks.tryMarkHostedMailboxConversationAiUsageDenied.mockResolvedValue(false);
     mocks.signalHostedRuntimeRecheckRuntime.mockResolvedValue({
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_routes_1",
@@ -1117,6 +1121,9 @@ describe("hosted runtime internal web routes", () => {
       conversationUsageStatus: "low",
       items: [expect.objectContaining({ id: "mailbox_item_low" })],
     });
+    expect(
+      mocks.tryMarkHostedMailboxConversationAiUsageDenied,
+    ).not.toHaveBeenCalled();
   });
 
   it("rejects conversation mailbox items when the AI usage gate denies runtime consumption", async () => {
@@ -1173,6 +1180,14 @@ describe("hosted runtime internal web routes", () => {
     expect(response.status).toBe(403);
     expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
       mode: "read_first",
+      userId: "member_routes_1",
+    });
+    expect(
+      mocks.tryMarkHostedMailboxConversationAiUsageDenied,
+    ).toHaveBeenCalledWith({
+      afterConversationLaneSeq: 11n,
+      at: expect.any(Date),
+      prisma: expect.objectContaining({ kind: "prisma" }),
       userId: "member_routes_1",
     });
   });

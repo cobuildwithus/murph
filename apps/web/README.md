@@ -679,7 +679,10 @@ Hosted onboarding extras:
   update or the final reply. Completed grouped traces count once by their
   shared Linq delivery, and traces for one in-flight provider request count
   once while unresolved. Progress accepted before 30 seconds suppresses that
-  turn; progress at or after the boundary remains alertable. The monitor sends
+  turn; progress at or after the boundary remains alertable. Fresh conversation
+  mailbox rows explicitly stamped by the existing AI usage gate are excluded
+  before grouping, including a later reply after usage resumes; missing or
+  impossible denial chronology remains alertable. The monitor sends
   no alert for scheduled automation turns, including Flex-tier turns, because
   they do not own a user-ingress reply trace. The monitor sends one email per
   continuous incident, suppresses sends from 11 PM through 7 AM

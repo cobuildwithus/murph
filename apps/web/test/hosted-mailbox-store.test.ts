@@ -40,6 +40,7 @@ import {
   readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
   readHostedMailboxWakeAfterDedupeLockTx,
   resolveHostedMailboxRuntimeFetchLaneCursors,
+  tryMarkHostedMailboxConversationAiUsageDenied,
   type HostedMailboxItemRow,
   type HostedMailboxPayloadRow,
 } from "@/src/lib/hosted-mailbox/store";
@@ -691,6 +692,58 @@ describe("readHostedMailboxConversationWakeByAssistantInputId", () => {
     expect(findMany).toHaveBeenCalledWith(
       expect.objectContaining({ take: 2 }),
     );
+  });
+});
+
+describe("tryMarkHostedMailboxConversationAiUsageDenied", () => {
+  it("marks only fresh unconsumed conversation rows once", async () => {
+    const updateMany = vi.fn(async () => ({ count: 2 }));
+
+    await expect(tryMarkHostedMailboxConversationAiUsageDenied({
+      afterConversationLaneSeq: 11n,
+      at: FIXED_NOW,
+      prisma: {
+        hostedMailboxItem: { updateMany },
+      } as never,
+      userId: "member_mailbox_1",
+    })).resolves.toBe(true);
+
+    expect(updateMany).toHaveBeenCalledWith({
+      data: {
+        aiUsageDeniedAt: FIXED_NOW,
+      },
+      where: {
+        aiUsageDeniedAt: null,
+        consumedAt: null,
+        lane: "conversation",
+        laneSeq: {
+          gt: 11n,
+        },
+        userId: "member_mailbox_1",
+      },
+    });
+  });
+
+  it("keeps a failed observability mark non-fatal", async () => {
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const updateMany = vi.fn(async () => {
+      throw new Error("database unavailable");
+    });
+
+    await expect(tryMarkHostedMailboxConversationAiUsageDenied({
+      afterConversationLaneSeq: 0n,
+      prisma: {
+        hostedMailboxItem: { updateMany },
+      } as never,
+      userId: "member_mailbox_1",
+    })).resolves.toBe(false);
+    expect(consoleWarn).toHaveBeenCalledWith(
+      "Hosted mailbox usage-denial mark failed.",
+      expect.objectContaining({
+        errorCode: "HOSTED_MAILBOX_USAGE_DENIAL_MARK_FAILED",
+      }),
+    );
+    consoleWarn.mockRestore();
   });
 });
 

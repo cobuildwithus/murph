@@ -104,6 +104,76 @@ describe("hosted runtime latency health", () => {
     });
   });
 
+  it("excludes usage-denied traces before unresolved and completed grouping", () => {
+    const health = summarizeHostedRuntimeLatencyRows({
+      now,
+      rows: [
+        latencyRow({
+          acceptedAt: "2026-07-26T15:58:00.000Z",
+          aiUsageDeniedAt: "2026-07-26T15:58:01.000Z",
+        }),
+        latencyRow({
+          acceptedAt: "2026-07-26T15:58:10.000Z",
+          aiUsageDeniedAt: "2026-07-26T15:58:11.000Z",
+          deliveryAcceptedAt: "2026-07-26T15:59:00.000Z",
+          linqDeliveryId: "delivery_usage_denied_1",
+        }),
+      ],
+    });
+
+    expect(health).toMatchObject({
+      anomalous: false,
+      invalidChronologyCount: 0,
+      recentCompletedReplyCount: 0,
+      recentSlowInitialResponseCount: 0,
+      unresolvedReplyCount: 0,
+    });
+  });
+
+  it("keeps unblocked rows in a shared delivery alertable", () => {
+    const health = summarizeHostedRuntimeLatencyRows({
+      now,
+      rows: [
+        latencyRow({
+          acceptedAt: "2026-07-26T15:58:00.000Z",
+          aiUsageDeniedAt: "2026-07-26T15:58:01.000Z",
+          deliveryAcceptedAt: "2026-07-26T15:59:00.000Z",
+          linqDeliveryId: "delivery_mixed_usage_gate_1",
+        }),
+        latencyRow({
+          acceptedAt: "2026-07-26T15:58:20.000Z",
+          deliveryAcceptedAt: "2026-07-26T15:59:00.000Z",
+          linqDeliveryId: "delivery_mixed_usage_gate_1",
+        }),
+      ],
+    });
+
+    expect(health).toMatchObject({
+      anomalous: true,
+      maxFirstVisibleResponseLatencyMs: 40_000,
+      recentCompletedReplyCount: 1,
+      recentSlowInitialResponseCount: 1,
+    });
+  });
+
+  it("keeps impossible usage-denial chronology alertable", () => {
+    const health = summarizeHostedRuntimeLatencyRows({
+      now,
+      rows: [
+        latencyRow({
+          acceptedAt: "2026-07-26T15:58:00.000Z",
+          aiUsageDeniedAt: "2026-07-26T15:57:59.000Z",
+        }),
+      ],
+    });
+
+    expect(health).toMatchObject({
+      anomalous: true,
+      invalidChronologyCount: 1,
+      unresolvedReplyCount: 1,
+    });
+  });
+
   it("uses timely progress as the first visible response for completed and unresolved turns", () => {
     const health = summarizeHostedRuntimeLatencyRows({
       now,
@@ -309,6 +379,26 @@ describe("hosted runtime latency health", () => {
 });
 
 describe("hosted runtime latency alert monitor", () => {
+  it("derives usage denial from the stored mailbox item", async () => {
+    const fixture = createMonitorPrismaFixture([
+      latencyRow({
+        acceptedAt: "2026-07-26T15:58:00.000Z",
+        aiUsageDeniedAt: "2026-07-26T15:58:01.000Z",
+      }),
+    ]);
+
+    const result = await runHostedRuntimeLatencyAlertMonitor({
+      env: {},
+      now,
+      prisma: fixture.prisma,
+    });
+
+    expect(result.health).toMatchObject({
+      anomalous: false,
+      unresolvedReplyCount: 0,
+    });
+  });
+
   it("derives terminal non-replies from the stored latency phase breakdown", async () => {
     const fixture = createMonitorPrismaFixture([
       latencyRow({
@@ -1252,6 +1342,7 @@ describe("hosted runtime latency alert monitor", () => {
 
 function latencyRow(input: {
   acceptedAt: string;
+  aiUsageDeniedAt?: string | null;
   checkpointPublicationExpectedBy?: string | null;
   consumedAt?: string | null;
   deliveryAcceptedAt?: string | null;
@@ -1264,6 +1355,9 @@ function latencyRow(input: {
 }): HostedRuntimeLatencyHealthRow {
   return {
     acceptedAt: instant(input.acceptedAt),
+    aiUsageDeniedAt: input.aiUsageDeniedAt
+      ? instant(input.aiUsageDeniedAt)
+      : null,
     checkpointPublicationExpectedBy: input.checkpointPublicationExpectedBy
       ? instant(input.checkpointPublicationExpectedBy)
       : null,
@@ -1306,6 +1400,7 @@ function createMonitorPrismaFixture(
       ? { acceptedAt: row.deliveryAcceptedAt }
       : null,
       mailboxItem: {
+        aiUsageDeniedAt: row.aiUsageDeniedAt,
         consumedAt: row.consumedAt,
       },
       phaseBreakdownJson:

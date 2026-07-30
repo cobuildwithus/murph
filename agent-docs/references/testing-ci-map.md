@@ -309,6 +309,8 @@ not enter evidence; and attachment-only input fails closed before provider work.
   invariant visible without replacing the two aggregate required checks.
 - `apps/web/test/hosted-runtime-latency-alert-{monitor,cron}.test.ts` locks the
   same exact 30-second boundary for completed and still-unresolved Linq traces,
+  excludes chronologically valid AI usage-denied traces before grouping while
+  keeping mixed unblocked rows and impossible denial chronology alertable,
   excludes explicit committed terminal non-replies during bounded checkpoint
   grace, reopens them when durable consumption does not arrive, keeps normal
   checkpointed suppression healthy and impossible marker chronology alertable,

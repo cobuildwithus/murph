@@ -54,6 +54,7 @@ type HostedRuntimeLatencySend = typeof sendHostedResendPlainTextEmail;
 
 export interface HostedRuntimeLatencyHealthRow {
   acceptedAt: Date;
+  aiUsageDeniedAt: Date | null;
   checkpointPublicationExpectedBy: Date | null;
   consumedAt: Date | null;
   deliveryAcceptedAt: Date | null;
@@ -216,6 +217,7 @@ export async function readHostedRuntimeLatencyHealth(input: {
       },
       mailboxItem: {
         select: {
+          aiUsageDeniedAt: true,
           consumedAt: true,
         },
       },
@@ -242,6 +244,7 @@ export async function readHostedRuntimeLatencyHealth(input: {
     now,
     rows: visibleRows.map((row) => ({
       acceptedAt: row.acceptedAt,
+      aiUsageDeniedAt: row.mailboxItem.aiUsageDeniedAt,
       checkpointPublicationExpectedBy:
         readHostedRuntimeCheckpointPublicationExpectedBy(row.phaseBreakdownJson),
       consumedAt: row.mailboxItem.consumedAt,
@@ -273,8 +276,23 @@ export function summarizeHostedRuntimeLatencyRows(input: {
   let recentSlowInitialResponseCount = 0;
   let unresolvedReplyCount = 0;
 
+  const alertableRows = input.rows.filter((row) => {
+    const aiUsageDeniedAtMs = row.aiUsageDeniedAt?.getTime() ?? null;
+    if (aiUsageDeniedAtMs === null) {
+      return true;
+    }
+    if (
+      aiUsageDeniedAtMs < row.acceptedAt.getTime()
+      || aiUsageDeniedAtMs > nowMs
+    ) {
+      invalidChronologyCount += 1;
+      return true;
+    }
+    return false;
+  });
+
   const groupedRows = new Map<string, HostedRuntimeLatencyHealthRow[]>();
-  input.rows.forEach((row, index) => {
+  alertableRows.forEach((row, index) => {
     const deliveryId = row.linqDeliveryId?.trim() ?? "";
     const runtimeAttemptId = row.runtimeAttemptId?.trim() ?? "";
     const providerStartAtMs = row.providerStartAt?.getTime() ?? Number.NaN;
