@@ -25,6 +25,7 @@ export function chooseHostedLinqHomeLine(input: {
   newAssignmentsByRecipientPhone: ReadonlyMap<string, number>;
   plannedMessagesByRecipientPhone: ReadonlyMap<string, number>;
   preferredRecipientPhone: string | null;
+  recentMessageEffectsByLineLookupKey: ReadonlyMap<string, number>;
 }): HostedLinqAssignableHomeLine | null {
   const preferredRecipientPhone = normalizePhoneNumber(input.preferredRecipientPhone);
   const dailyCandidates = input.lines.filter((line) =>
@@ -52,10 +53,33 @@ export function chooseHostedLinqHomeLine(input: {
     }
   }
 
+  const allCandidatesAtOrAbovePlanningTarget =
+    candidatesUnderPlanningTarget.length === 0;
+
   return [...candidates].sort((left, right) => {
-    const leftPlanned = input.plannedMessagesByRecipientPhone.get(left.phoneNumber) ?? 0;
-    const rightPlanned = input.plannedMessagesByRecipientPhone.get(right.phoneNumber) ?? 0;
-    if (leftPlanned !== rightPlanned) {
+    const leftPlanned =
+      input.plannedMessagesByRecipientPhone.get(left.phoneNumber) ?? 0;
+    const rightPlanned =
+      input.plannedMessagesByRecipientPhone.get(right.phoneNumber) ?? 0;
+
+    // When every line is already above the advisory target, preserve the
+    // weighted-planning contract by falling back to the least-planned line.
+    if (
+      allCandidatesAtOrAbovePlanningTarget
+      && leftPlanned !== rightPlanned
+    ) {
+      return leftPlanned - rightPlanned;
+    }
+
+    const leftRecent =
+      input.recentMessageEffectsByLineLookupKey.get(left.phoneNumberLookupKey) ?? 0;
+    const rightRecent =
+      input.recentMessageEffectsByLineLookupKey.get(right.phoneNumberLookupKey) ?? 0;
+    if (leftRecent !== rightRecent) {
+      return leftRecent - rightRecent;
+    }
+
+    if (!allCandidatesAtOrAbovePlanningTarget && leftPlanned !== rightPlanned) {
       return leftPlanned - rightPlanned;
     }
 
@@ -78,6 +102,7 @@ export function chooseHostedLinqSignupWelcomeLine(input: {
   newAssignmentsByRecipientPhone: ReadonlyMap<string, number>;
   plannedMessagesByRecipientPhone: ReadonlyMap<string, number>;
   preferredRecipientPhone: string | null;
+  recentMessageEffectsByLineLookupKey: ReadonlyMap<string, number>;
 }): HostedLinqAssignableHomeLine | null {
   const selected = chooseHostedLinqHomeLine({
     ...input,
