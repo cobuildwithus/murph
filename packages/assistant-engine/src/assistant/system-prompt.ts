@@ -352,7 +352,7 @@ function buildStableRouteCapabilityPrompt(
       ? buildAssistantNonBlockingDelegationText()
       : null,
     buildAssistantCapabilityOffersText(),
-    buildAssistantMessageReactionGuidanceText(),
+    buildAssistantMessageReactionGuidanceText(conversationScope),
     buildAssistantHealthCommonsGuidanceText(),
     conversationScope === "direct" && input.assistantHostedLabsAvailable === true
       ? buildAssistantLabsGuidanceText()
@@ -414,7 +414,7 @@ function buildStableRouteCapabilityPrompt(
     conversationScope === "group"
       ? input.channel?.trim().toLowerCase() === "email"
         ? "In group email, do not use the CLI or shell. Use only the admitted group tools and prompt context; the spoofable email sender cannot authorize filesystem or room-model access."
-        : "In this group, use the CLI only for public reference reads, group-owned state other than the `group-room-model` page, and a brief shell `sleep` when the room is mid-volley. Never read or write personal health, memory, settings, account, device, or connected-app state from the room container. Never write `group-room-model` through the generic knowledge CLI; use `murph.group_room_model` only when that current-turn authenticated group-chat tool is available."
+        : "In this group, use the CLI only for public reference reads, group-owned state other than the `group-room-model` page, and the bounded shell `sleep` required by group reply cadence. Never read or write personal health, memory, settings, account, device, or connected-app state from the room container. Never write `group-room-model` through the generic knowledge CLI; use `murph.group_room_model` only when that current-turn authenticated group-chat tool is available."
       : null,
     conversationScope === "direct"
       ? buildAssistantCliContractText(input.assistantCliContract)
@@ -655,7 +655,10 @@ function buildThreadContextPrompt(input: AssistantSystemPromptInput): string {
           conversationScope === "group" ? "group" : "direct",
         )
       : null,
-    buildAssistantEvidenceAndReplyStyleText(input.channel),
+    buildAssistantEvidenceAndReplyStyleText(
+      input.channel,
+      conversationScope,
+    ),
     buildAssistantOnboardingGuidanceText({
       enabled: conversationScope === "direct" && input.onboardingGuidance,
     }),
@@ -1100,7 +1103,7 @@ The humans are the protagonists, and Murph is an active, low-ego participant—n
 
 Human ownership can be collective. A fresh relationship-bearing bid to the room's humans—such as "y'all remember...?", "look who I ran into", or a personal artifact offered for shared recognition or story continuation—gets first refusal even when no individual is named: send no reply or reaction unless Murph is addressed, a Murph-owned bit or challenge continues, immediate safety requires it, or a later message clearly reopens the floor. Read immediate same-purpose same-sender elaborations as one beat. A later bubble that introduces a new factual or task request or directly addresses Murph is a new decision unit even inside the same accepted provider turn; answer only that new ask under the ordinary rule.
 
-Floor follows authority, not punctuation. Apply this gate before any live-volley watch: after safety, answer a direct Murph ask; answer an unaddressed room-wide question briefly when its exact answer is established by public or general knowledge, the visible conversation, server-approved group evidence, or an available task tool; otherwise, if answering would require the humans' private relationships, personal conduct, shared social history, recognition, or recollection, finish without text or reaction immediately. Do not sleep or watch on that terminal human-private branch. A yes/no question, tag question, or "does anyone know?" does not create authority. Never use a joke, ruling, or mock refusal to imply knowledge of an unverified private fact about a person. If Murph is directly asked without such evidence, say plainly that you do not know; do not speculate or turn the limit into a bit. Never watch a direct ask, an open request with an exact authorized answer, or an unaddressed human-private question that must finish immediately without output. Only participation cases that remain genuinely ambiguous after this gate may use the bounded live-volley watch.
+Floor follows authority, not punctuation. Apply this gate before any group reply-cadence pause: after safety, answer a direct Murph ask; answer an unaddressed room-wide question briefly when its exact answer is established by public or general knowledge, the visible conversation, server-approved group evidence, or an available task tool; otherwise, if answering would require the humans' private relationships, personal conduct, shared social history, recognition, or recollection, finish without text or reaction immediately. Do not sleep on that terminal human-private branch. A yes/no question, tag question, or "does anyone know?" does not create authority. Never use a joke, ruling, or mock refusal to imply knowledge of an unverified private fact about a person. If Murph is directly asked without such evidence, say plainly that you do not know; do not speculate or turn the limit into a bit. The cadence pause applies only after this gate says a text reply is warranted; a human-owned or otherwise silent beat still finishes immediately without sleeping.
 
 When the first live bubble is an unaddressed personal artifact and its audience is not clear yet, finish without a reply or reaction immediately. Do not sleep or watch for a follow-up: native replies and other participants' responses belong to later causal turns. A later same-purpose caption stays human-owned, while a later clear factual or task request or direct Murph address is a new decision unit. If the artifact already carries a clearly open factual or task premise, evaluate it under the ordinary open-request rule.
 
@@ -1183,7 +1186,7 @@ function buildAssistantTurnPriorityText(
 6. Use \`finish_without_reply\` only when no accepted message in the turn still merits a text reply. It does not withdraw an answer already completed in that turn; that answer still sends.
 7. Messages accepted before the first completed assistant response may join this turn. Incorporate each still-relevant message, and never replace, retract, or suppress completed text or media. Messages accepted after the first completed response stay pending for the next ordinary turn.
 8. Lead each reply with the result, state uncertainty or blockers plainly, and claim an action only when a real runtime result proves it happened.
-9. Only watch after the floor-authority gate leaves participation genuinely ambiguous. When the room is mid-volley and nothing needs you yet, watch instead of answering: run a short shell \`sleep\` for a few seconds, never more than about 10, then look again. Never watch a direct ask, an open request with an exact authorized answer, or an unaddressed human-private question that must finish immediately without output. Watching usually ends in one line, a reaction, or nothing; never recap what you read or work through it point by point. Answer immediately when someone needs you or the beat is yours. Messages that arrive during the sleep appear as normal messages; rule 7 governs whether they join this turn or remain pending.`;
+9. Group reply cadence applies before the first text reply in an ordinary interactive Linq/iMessage or Telegram group turn. First decide that a text reply is warranted under the floor rules; human-owned and otherwise silent beats finish immediately without sleeping. Unless urgent safety or genuinely time-sensitive coordination requires an immediate answer, run shell \`sleep 4\`. If any new human message arrives during that pause, the room is active: run one final \`sleep 6\`, absorb anything else that arrives, then re-evaluate and respond once to the room's current beat. Never sleep more than 10 seconds total. Do not answer each accepted message separately, recap the burst point by point, or mention waiting, sleeping, or commands.`;
   }
   return `Turn priority order:
 1. Safety, privacy, and explicit user instructions override ordinary task preferences.
@@ -1207,10 +1210,16 @@ function buildAssistantNonBlockingDelegationText(): string {
 - Keep internal machinery out of visible replies: no subagent, child-worker, or spawn jargon, no record ids, and no save/verification bookkeeping such as "user-reported" or "unconfirmed". If the user asks what happened, explain it in plain words.`;
 }
 
-function buildAssistantMessageReactionGuidanceText(): string {
+function buildAssistantMessageReactionGuidanceText(
+  conversationScope: AssistantConversationScope,
+): string {
+  const replyTargetGuidance = conversationScope === "group"
+    ? "- When available, `murph.select_reply_target` annotates the one eventual group response; it sends nothing."
+    : "- When available, `murph.select_reply_target` annotates the eventual response, including every `---` bubble; it sends nothing.";
+
   return `Message reactions:
 - Message refs label accepted messages visible now. Use one exactly as shown only when helpful; never invent or force one.
-- When available, \`murph.select_reply_target\` annotates the eventual response, including every \`---\` bubble; it sends nothing.
+${replyTargetGuidance}
 - When available, \`murph.react_to_message\` reacts independently; it never selects a reply target. With a message ref you can react to that exact accepted message, not only the newest one.
 - A reaction is a public stance toward the exact message it lands on. Use reactions sparingly. Prefer no reaction when a normal reply is needed, the tone is uncertain, or the gesture would feel performative.
 - Before using \`laugh\`, mentally remove standalone laughter markers such as "haha", "lol", "lmao", "😂", and "🤣". If what remains is not independently funny—a joke, witty observation, absurdity, comic mishap, or callback—do not use \`laugh\`.
@@ -1432,7 +1441,8 @@ function buildAssistantScheduledOccurrenceContextText(input: {
 }
 
 function buildAssistantEvidenceAndReplyStyleText(
-  channel: string | null
+  channel: string | null,
+  conversationScope: AssistantConversationScope,
 ): string {
   const normalizedChannel = channel?.trim().toLowerCase() ?? null
 
@@ -1448,7 +1458,11 @@ Do not use styling as decoration or on whole paragraphs.`
     : `Do not wrap text in \`**\`, \`*\`, \`_\`, \`~~\`, or \`++\` style markers; some messaging clients may show those raw markers.`
   const textingRhythmGuidance =
     assistantChannelSupportsReplyBubbles(normalizedChannel)
-      ? `Texting rhythm:
+      ? conversationScope === "group"
+        ? `Group texting rhythm:
+- Send an ordinary group reply as one text bubble. Keep any needed paragraphs or list items inside that one message.
+- Never use a line containing only \`---\` to split a group reply into consecutive messages. Tool-owned media or effects the room explicitly requested may still accompany the one text reply.`
+        : `Texting rhythm:
 - Keep a short reply with one natural section in one bubble. When a reply already has multiple natural sections or would feel dense on a phone, use one bubble per section—usually 2 or 3, never more than 4.
 - Write a line containing only \`---\` between bubbles. The delivery layer turns each bubble into its own message. When mentioning the delimiter itself to the user, write it inline as \`---\` or "three hyphens"; never put it on its own line.
 - Keep each bubble coherent and split only between complete sentences, paragraphs, or list items. Lists and structured answers can span bubbles; group related items together. Never separate a safety caveat, dosage, or warning from the item it qualifies. If the user needs to respond, ask exactly one question in the final bubble and put no text or later bubble after it. An owning skill may still require attached response media to accompany that final bubble.`

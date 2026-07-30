@@ -18,7 +18,7 @@ describe('assistant group-chat style guidance', () => {
     const normalized = await readNormalizedGroupChatSkill()
 
     expect(normalized).toContain(
-      'Default to one assistant-authored response per turn.',
+      'When sending ordinary interactive group text, use one assistant-authored bubble.',
     )
     expect(normalized).toContain(
       'Tool-owned effects the group explicitly requests, such as a contact card plus a song, may accompany it.',
@@ -102,7 +102,7 @@ describe('assistant group-chat style guidance', () => {
       'Before treating a room-wide question as open, ask who can truthfully supply the answer.',
     )
     expect(normalized).toContain(
-      'Apply this gate before any live-volley watch.',
+      'Apply this gate before any group reply-cadence pause.',
     )
     expect(normalized).toContain(
       "private relationships, personal conduct, shared social history, recognition, or recollection",
@@ -114,7 +114,7 @@ describe('assistant group-chat style guidance', () => {
       'If the exact answer is established by public or general knowledge, the visible conversation, server-approved group evidence, or an available task tool, the request can be open.',
     )
     expect(normalized).toContain(
-      'use `finish_without_reply` immediately: do not reply, react, sleep, or watch',
+      'use `finish_without_reply` immediately: do not reply, react, or sleep even when a joke is available.',
     )
     expect(normalized).toContain(
       'A comic abstention still interrupts the humans; it is not silence.',
@@ -312,7 +312,7 @@ describe('assistant group-chat style guidance', () => {
       'Never skimp on asked-for substance: when someone directly asks a question whose complete answer genuinely needs a few paragraphs, give that answer, as tight as accuracy allows.',
     )
     expect(normalized).toContain(
-      'What the ceiling kills is volunteered length — frameworks, multi-topic essays, background beyond the question, detail nobody asked for — and it covers the whole turn, including every `---` bubble.',
+      'What the ceiling kills is volunteered length — frameworks, multi-topic essays, background beyond the question, detail nobody asked for — and it covers the whole reply.',
     )
     expect(normalized).toContain(
       'For open-ended setup, planning, or brainstorm asks, depth arrives incrementally: headline first, one decision per message, more on request',
@@ -374,7 +374,7 @@ describe('assistant group-chat style guidance', () => {
       'When you are simply adding to the room rather than answering one message, stay flat.',
     )
     expect(normalized).toContain(
-      'The selection applies to the whole response, including every `---` bubble.',
+      'The selection applies to the one whole response.',
     )
     expect(normalized).toContain(
       'Reactions and reply selection remain independent; neither action implies the other.',
@@ -384,43 +384,43 @@ describe('assistant group-chat style guidance', () => {
     )
   })
 
-  it('allows natural bubbles inside one group response without companion follow-ups', async () => {
+  it('keeps an ordinary interactive group response in one bubble', async () => {
     const normalized = await readNormalizedGroupChatSkill()
 
     expect(normalized).toContain(
-      'Default to one assistant-authored response per turn.',
+      'When sending ordinary interactive group text, use one assistant-authored bubble.',
     )
     expect(normalized).toContain(
-      'Natural `---` bubbles inside that response are allowed.',
+      'Never use `---` to split it into consecutive messages.',
     )
     expect(normalized).toContain(
       'Never send a separate unrequested status or permission-card companion follow-up',
     )
-    expect(normalized).not.toContain('Exactly one message per turn.')
+    expect(normalized).not.toContain(
+      'Natural `---` bubbles inside that response are allowed.',
+    )
   })
 
-  it('watches a live volley instead of buffering a reply to it', async () => {
+  it('pauses once or twice before an ordinary interactive group reply', async () => {
     const normalized = await readNormalizedGroupChatSkill()
 
     expect(normalized).toContain(
-      'When people are talking to each other and nothing needs you yet, watch instead of answering: run a short shell `sleep` for a few seconds, never more than about 10, then look again and run the ladder against the room as it now stands.',
+      'Unless urgent safety or genuinely time-sensitive coordination requires an immediate answer, run shell `sleep 4`.',
     )
     expect(normalized).toContain(
-      'A direct ask, an open request with an exact authorized answer, and an unaddressed human-private question are already resolved and must not watch.',
-    )
-    // Waiting must never become an excuse to override the ladder's silence,
-    // closed-room, and not-for-you rules.
-    expect(normalized).toContain(
-      'Waiting never overrides the ladder',
+      'If any new human message arrives during that pause, the room is active. Run one final `sleep 6`, absorb anything else that arrives, then run the ladder again against the room\'s current beat.',
     )
     expect(normalized).toContain(
-      'a wait that ends in no message is a correct outcome.',
+      'Never sleep more than 10 seconds total.',
     )
     expect(normalized).toContain(
-      'Do not wait when someone needs an answer now',
+      'The refreshed ladder may still end in a text reply, one reaction, or no response.',
     )
     expect(normalized).toContain(
-      'Once the floor is open, timing matters: a fast, specific interjection can be better precisely because it lands in the moment.',
+      'Human-owned and otherwise silent beats never sleep.',
+    )
+    expect(normalized).toContain(
+      'Do not answer each accepted message separately. Respond once to the current beat, never recap the burst point by point',
     )
     expect(normalized).toContain(
       'never mention waiting, sleeping, or commands.',
@@ -431,7 +431,7 @@ describe('assistant group-chat style guidance', () => {
     const normalized = await readNormalizedGroupChatSkill()
 
     expect(normalized).toContain(
-      'After watching, say one thing or nothing.',
+      'After the cadence pause, say one thing or nothing.',
     )
     expect(normalized).toContain(
       'You are answering a moment, not a backlog: never recap what you read, never work through it point by point, and never write a message whose only job is coverage.',
@@ -485,30 +485,18 @@ describe('assistant group-chat style guidance', () => {
     }
   })
 
-  it('names the inbound timestamp as the signal for what the room is doing', async () => {
+  it('uses the bounded reply cadence instead of timestamp heuristics', async () => {
     const normalized = await readNormalizedGroupChatSkill()
 
-    // buildAssistantAutoReplyContextLines emits ONE `Occurred at:` per turn —
-    // a single time, or a first-to-last range when inputs were grouped. The
-    // guidance must describe that contract and never claim a per-message
-    // timestamp, which the prompt builder does not render.
     expect(normalized).toContain(
-      'Every turn opens with an `Occurred at:` time — a single timestamp, or a first-to-last range when several messages arrived together — and earlier turns keep theirs above in this conversation.',
+      'If the ladder selects a text reply in an ordinary interactive Linq/iMessage or Telegram group turn, apply this cadence before the first text reply:',
+    )
+    expect(normalized).toContain(
+      'If any new human message arrives during that pause, the room is active.',
     )
     expect(normalized).not.toContain('Each inbound message carries an')
-    expect(normalized).toContain(
-      'times a few seconds apart, or a range whose whole span is only a few seconds, mean the room is live and mid-volley.',
-    )
-    // A wide grouped range cannot expose the gap immediately before the newest
-    // message, so it must not be read as evidence either way.
-    expect(normalized).toContain(
-      'A wide range hides the gap that matters, so treat it as ambiguous.',
-    )
-    // A cold thread or a compacted one may not expose earlier times; the safe
-    // default is to answer rather than sit on a reply.
-    expect(normalized).toContain(
-      'When the times are missing or ambiguous, do not wait.',
-    )
+    expect(normalized).not.toContain('A wide range hides the gap that matters')
+    expect(normalized).not.toContain('When the times are missing or ambiguous')
   })
 
   it('carries the catching-up, live-room, and share-of-voice rhythms', async () => {

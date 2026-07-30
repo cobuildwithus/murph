@@ -108,15 +108,15 @@ open. If the answer depends on private relationships, personal conduct, shared
 social history, recognition, or recollection, the humans own it. Grammatical
 question form does not transfer the floor to Murph.
 
-Apply this authority gate before any live-volley watch. An open factual or task
-request is eligible when its exact answer is established by public or general
-knowledge, the visible conversation, server-approved group evidence, or an
-available task tool. That exact authority wins even when the subject is a
+Apply this authority gate before any group reply-cadence pause. An open factual
+or task request is eligible when its exact answer is established by public or
+general knowledge, the visible conversation, server-approved group evidence, or
+an available task tool. That exact authority wins even when the subject is a
 person's conduct or recollection. Without it, an unaddressed human-private beat
-finishes immediately without text, reaction, sleep, or watch. A direct Murph ask
-gets one plain uncertainty sentence, never speculation or a comic performance
-of not knowing. Only participation cases left genuinely ambiguous after the
-gate may use the ordinary bounded live-volley watch.
+finishes immediately without text, reaction, or sleep. A direct Murph ask gets
+one plain uncertainty sentence, never speculation or a comic performance of
+not knowing. The cadence pause applies only after the floor decision says a text
+reply is warranted.
 
 This is not an addressed-only rule. Genuinely open factual or task requests
 remain available when no human has claimed them and Murph has the authority
@@ -129,6 +129,34 @@ that message merely to remain visible. A later message may reopen the floor.
 Immediate safety still overrides ordinary floor etiquette. Alarm words alone do
 not: the current evidence, image, context, and obvious play frame determine
 whether intervention is actually needed.
+
+## Reply cadence
+
+An ordinary interactive Linq/iMessage or Telegram group reply uses the existing
+live-turn steering primitive as conversational pacing:
+
+1. Before the first text reply, Murph runs `sleep 4`.
+2. If a new human message arrives during that pause, Murph runs one final
+   `sleep 6`, absorbs anything else that arrives, and re-evaluates the room's
+   current beat.
+3. Murph then responds once or stays silent. It never answers each accepted
+   message separately, recaps the burst point by point, or mentions the pause.
+
+Urgent safety and genuinely time-sensitive coordination skip the pause. Total
+cadence sleep never exceeds 10 seconds. Human-owned and otherwise silent beats
+remain immediate no-replies and do not sleep.
+
+Ordinary interactive group text uses one outbound bubble. Murph keeps any needed
+paragraphs or list items in that message and does not use `---` to split it into
+consecutive replies. Explicitly requested tool-owned media or effects may still
+accompany the text, and scheduled editions keep their existing one-message
+contract.
+
+This is prompt policy over the current active-turn admission and steering path.
+It adds no database state, queue, timer owner, scheduler, webhook debounce,
+typing subscription, delivery policy, or new tool. Runtime enforcement is a
+later option only if production evidence shows the model repeatedly ignores the
+prompt contract.
 
 ## Room relationship and tapering
 
@@ -414,9 +442,15 @@ Regression coverage should represent both restraint and initiative:
 29. a room-wide person-related question whose exact answer is already established
     in the visible conversation or server-approved group evidence -> answer
     briefly; the same question without that authority finishes immediately
-    without text, reaction, sleep, or watch.
+    without text, reaction, or sleep;
+30. one direct group question with no intervening message -> one reply after
+    about four seconds;
+31. a new human message during the first pause -> one final six-second pause and
+    one reply to the room's current beat, never one reply per accepted message;
+32. an ordinary interactive group answer that needs several paragraphs -> one
+    text bubble with no `---` split.
 
-Items 11 through 29 are judgment calls that a string assertion cannot settle;
+Items 11 through 32 are judgment calls that a string assertion cannot settle;
 they belong in transcript-level model evals rather than skill-text pins.
 
 Product research should observe ordinary rooms rather than teach people an exact
