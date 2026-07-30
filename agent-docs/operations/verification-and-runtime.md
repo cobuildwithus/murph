@@ -575,10 +575,11 @@ the advisory budget.
 - The private `cobuildwithus/murph-cloud` repository owns the hosted Temporal
   worker's Render Blueprint, deployment workflow, production configuration, and
   integration check. This public repository retains the released contracts,
-  hosted-local harness, and temporary rollback implementation, but it must not
-  define or trigger the production Render deployment. Murph Cloud verifies the
-  private worker against the public hosted-local Temporal scenario before a
-  protected `main` deployment.
+  hosted-local harness, and architecture guardrails only; it must not contain
+  the worker implementation or define or trigger the production Render
+  deployment. Rollback uses previously deployed private worker and Cloudflare
+  versions. Murph Cloud verifies the private worker against the public
+  hosted-local Temporal scenario before a protected `main` deployment.
 - Repo-level checks execute canonical write/read paths in `core`, `importers`, `inboxd`, `parsers`, and `query`, build the shared `hosted-execution` and `runtime-state` packages, and build the CLI package through the same TypeScript workspace toolchain used for local development.
 - Existing supplement-label databases receive the payload constraint as `NOT VALID`, which enforces new writes without blocking the retained pre-repair corpus. The exact guarded July 2026 repair validates it after correcting the known legacy rows; fresh tables create it as valid. `apps/web/README.md` owns the restore sequence and importer rollback floor.
 - Shared `hosted-execution` helpers own the hosted control-plane auth/env/route/client seam plus phone-call start contracts between `apps/web` and `apps/cloudflare`, while `runtime-state` owns `.runtime` taxonomy/path resolution plus JSON/SQLite versioning defaults for query search, inboxd, device-syncd, and the CLI inbox/device layers.

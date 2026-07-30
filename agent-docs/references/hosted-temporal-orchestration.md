@@ -26,9 +26,9 @@ The final ownership split is:
 The public Murph repository owns the released orchestration contracts,
 hosted-local harness, and architecture guardrails. The private
 `cobuildwithus/murph-cloud` repository owns the production Temporal worker,
-Render Blueprint, deploy workflow, and operational runbook. The public
-implementation remains only as a temporary rollback reference during the
-source cutover and must not own a second production deployment path.
+Render Blueprint, deploy workflow, operational runbook, and rollback through
+previously deployed private versions. Public Murph contains no worker
+implementation or second production deployment path.
 
 Temporal decides when to ask Cloudflare to process based on web-owned
 reconciliation facts and pointer-only signals. Cloudflare starts or wakes the
