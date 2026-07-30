@@ -65,13 +65,11 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // baseline to that combined measurement and retain the established small-growth
 // tolerances.
 //
-// Explicit group-room model configuration adds one scope-specific tool schema
-// and its prompt/execution guards to existing runner chunks without adding a
-// forbidden boot input. The 2026-07-30 Linux CI assembly measured 9,889,994B
-// total and the corresponding macOS assembly measured 9,926,114B. Ratchet the
-// packaged baseline to the larger platform measurement and retain the
-// established 32KB allowance for small reviewed additions.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_926_114 + 32_768;
+// Linq group-line recovery adds authored code to the existing runner chunks
+// without adding a forbidden boot input. The 2026-07-30 assemblies measured
+// 9,889,299B on Linux and 9,936,771B on macOS. Ratchet the total baseline to the
+// higher cross-platform measurement and retain the established 32KB allowance.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_936_771 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_649_331;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_117_894;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;

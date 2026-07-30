@@ -1,6 +1,6 @@
 # Hosted Plan Downgrades
 
-Last verified: 2026-07-26
+Last verified: 2026-07-30
 
 ## Goal
 
@@ -38,6 +38,13 @@ turn:
   Venice rollout flag is enabled, an active personal member may choose Venice
   instead. The choice changes core assistant inference only; specialized tools
   can continue to use their own managed providers.
+- Settings may call Venice privacy-first and state that Venice stores no prompts
+  or replies, consistent with [Venice's API privacy
+  documentation](https://docs.venice.ai/welcome/privacy). This is a
+  Venice-layer disclosure, not a Murph-enforced privacy mode: Murph does not
+  inspect or lock the operator-mapped model's privacy badge, and the setting
+  must not imply E2EE, TEE, or a broader upstream retention or training
+  guarantee.
 - Luna and Terra are available to every active personal member. Terra remains
   the default when no personal model override is stored.
 - Synthetic thread-container runtimes use Sol by default from the existing
