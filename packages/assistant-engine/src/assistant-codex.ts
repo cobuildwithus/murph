@@ -2808,6 +2808,11 @@ async function runCodexAppServerTurnOnProcess(
     deliveryContextOrdinal: number
     patch: MurphDynamicToolFinalActionPatch
   }> = []
+  // Successful vault-file ownership can carry an earlier reply requirement
+  // into a later context. Track genuine obligation origins independently so
+  // finalization neither invents a recovery there nor drops same-context
+  // obligations when the ownership patch replaces their final-action patch.
+  const replyRequiredObligationOrdinals = new Set<number>()
   const acceptedNoReplyDeliveryContextOrdinals: number[] = []
   let noReplySettlementStarted = false
   let reactionPatches: Array<{
@@ -3660,42 +3665,19 @@ async function runCodexAppServerTurnOnProcess(
       responseMedia.length > 0 ? deliveryContextOrdinal : null
   }
 
-  const resolveReplyRequiredPatchThrough = (
+  const listReplyRequiredObligationOrdinalsThrough = (
     deliveryContextOrdinal: number,
-  ): (typeof finalActionPatches)[number] | null => {
-    let latestReplyRequired: (typeof finalActionPatches)[number] | null = null
-    let latestRecoveryOrigin: (typeof finalActionPatches)[number] | null = null
-    for (const entry of finalActionPatches) {
-      if (
-        entry.patch.kind !== 'reply-required' ||
-        entry.deliveryContextOrdinal > deliveryContextOrdinal
-      ) {
-        continue
-      }
-      if (
-        latestReplyRequired === null ||
-        entry.deliveryContextOrdinal >= latestReplyRequired.deliveryContextOrdinal
-      ) {
-        latestReplyRequired = entry
-      }
-      if (
-        entry.patch.owner !== 'vault-file' &&
-        (
-          latestRecoveryOrigin === null ||
-          entry.deliveryContextOrdinal >=
-            latestRecoveryOrigin.deliveryContextOrdinal
-        )
-      ) {
-        latestRecoveryOrigin = entry
-      }
-    }
-    return latestRecoveryOrigin ?? latestReplyRequired
-  }
+  ): number[] =>
+    [...replyRequiredObligationOrdinals]
+      .filter((ordinal) => ordinal <= deliveryContextOrdinal)
+      .sort((left, right) => left - right)
 
-  const hasReplyRequiredPatchThrough = (
+  const hasReplyRequiredObligationThrough = (
     deliveryContextOrdinal: number,
   ): boolean =>
-    resolveReplyRequiredPatchThrough(deliveryContextOrdinal) !== null
+    [...replyRequiredObligationOrdinals].some(
+      (ordinal) => ordinal <= deliveryContextOrdinal,
+    )
 
   const canApplyNoReplyPatch = (deliveryContextOrdinal: number): boolean => {
     const trailingSteerCandidateOrdinal =
@@ -3703,7 +3685,7 @@ async function runCodexAppServerTurnOnProcess(
     const responseSegment = findResponseSegmentForDeliveryContext(
       deliveryContextOrdinal,
     )
-    if (hasReplyRequiredPatchThrough(deliveryContextOrdinal)) {
+    if (hasReplyRequiredObligationThrough(deliveryContextOrdinal)) {
       return false
     }
     if (
@@ -3747,6 +3729,7 @@ async function runCodexAppServerTurnOnProcess(
   ): Promise<boolean> => {
     const existingPatch = resolveFinalActionPatch(deliveryContextOrdinal)
     if (patch.kind === 'reply-required') {
+      replyRequiredObligationOrdinals.add(deliveryContextOrdinal)
       finalActionPatches = [
         ...finalActionPatches.filter(
           (action) => action.deliveryContextOrdinal !== deliveryContextOrdinal,
@@ -3757,7 +3740,7 @@ async function runCodexAppServerTurnOnProcess(
     }
     if (patch.owner === 'vault-file') {
       const replyRequired =
-        hasReplyRequiredPatchThrough(deliveryContextOrdinal)
+        hasReplyRequiredObligationThrough(deliveryContextOrdinal)
       finalActionPatches = [
         ...finalActionPatches.filter(
           (action) => action.deliveryContextOrdinal !== deliveryContextOrdinal,
@@ -5090,9 +5073,12 @@ async function runCodexAppServerTurnOnProcess(
   ) {
     materializeLiveResponseMedia()
   }
-  const latestReplyRequiredPatch = resolveReplyRequiredPatchThrough(
-    latestDeliveryContextOrdinal,
-  )
+  const replyRequiredRecoveryOrdinals =
+    listReplyRequiredObligationOrdinalsThrough(
+      latestDeliveryContextOrdinal,
+    )
+  const latestReplyRequiredRecoveryOrdinal =
+    replyRequiredRecoveryOrdinals.at(-1) ?? null
   const latestFinalActionPatch = resolveFinalActionPatch(
     latestDeliveryContextOrdinal,
   )
@@ -5108,10 +5094,10 @@ async function runCodexAppServerTurnOnProcess(
     finalTrailingSteerCandidate !== null &&
     trailingSteerCandidateFinalActionPatch?.kind === 'none'
   const trailingSteerCandidateMasksRequiredRecovery =
-    latestReplyRequiredPatch !== null &&
+    latestReplyRequiredRecoveryOrdinal !== null &&
     finalTrailingSteerCandidate !== null &&
     finalTrailingSteerCandidate.deliveryContextOrdinal <
-      latestReplyRequiredPatch.deliveryContextOrdinal &&
+      latestReplyRequiredRecoveryOrdinal &&
     normalizeNullableString(extractedFinalMessage) === null
   const shouldPromoteTrailingSteerCandidate =
     finalTrailingSteerCandidate !== null &&
@@ -5140,10 +5126,10 @@ async function runCodexAppServerTurnOnProcess(
         latestDeliveryContextOrdinal
       : null
   const requiredRecoveryDeliveryContextOrdinal =
-    latestReplyRequiredPatch !== null &&
+    latestReplyRequiredRecoveryOrdinal !== null &&
       selectedFinalMessageDeliveryContextOrdinal !==
-        latestReplyRequiredPatch.deliveryContextOrdinal
-      ? latestReplyRequiredPatch.deliveryContextOrdinal
+        latestReplyRequiredRecoveryOrdinal
+      ? latestReplyRequiredRecoveryOrdinal
       : null
   let finalResponseMedia =
     latestFinalActionPatch?.kind === 'none'
@@ -5180,18 +5166,32 @@ async function runCodexAppServerTurnOnProcess(
         finalResponseMediaDeliveryContextOrdinal
     }
   }
+  const finalDeliveryContextOrdinal =
+    laterFinalDeliveryContextOrdinal !== null
+      ? laterFinalDeliveryContextOrdinal
+      : requiredRecoveryDeliveryContextOrdinal !== null
+        ? requiredRecoveryDeliveryContextOrdinal
+        : latestFinalActionPatch?.kind === 'none'
+          ? latestDeliveryContextOrdinal
+          : suppressTrailingSteerCandidateForEarlierNoReply
+            ? latestDeliveryContextOrdinal
+            : finalTrailingSteerCandidate?.deliveryContextOrdinal ??
+              latestDeliveryContextOrdinal
+  const precedingRecoveryOrdinals =
+    replyRequiredRecoveryOrdinals.filter(
+      (ordinal) => ordinal < finalDeliveryContextOrdinal,
+    )
   const synthesizedRecoveryMessage =
     "An attachment couldn't be included in this reply."
-  if (
-    laterFinalDeliveryContextOrdinal !== null &&
-    requiredRecoveryDeliveryContextOrdinal !== null
+  for (
+    const recoveryDeliveryContextOrdinal of precedingRecoveryOrdinals
   ) {
     const recoveryTarget = resolveReplyTargetPatch(
-      requiredRecoveryDeliveryContextOrdinal,
+      recoveryDeliveryContextOrdinal,
     )?.targetInputId ?? null
     const recoveryResponseMedia =
       finalResponseMediaDeliveryContextOrdinal ===
-        requiredRecoveryDeliveryContextOrdinal
+        recoveryDeliveryContextOrdinal
         ? finalResponseMedia
         : []
     if (recoveryResponseMedia.length > 0) {
@@ -5200,7 +5200,7 @@ async function runCodexAppServerTurnOnProcess(
     const promotedRecoverySegment =
       precedingAgentMessageSegments.find((segment) =>
         segment.deliveryContextOrdinal ===
-          requiredRecoveryDeliveryContextOrdinal
+          recoveryDeliveryContextOrdinal
       )
     if (promotedRecoverySegment) {
       if (normalizeNullableString(promotedRecoverySegment.response) === null) {
@@ -5218,7 +5218,7 @@ async function runCodexAppServerTurnOnProcess(
       }
     } else {
       const recoverySegment: CodexAppServerResponseSegment = {
-        deliveryContextOrdinal: requiredRecoveryDeliveryContextOrdinal,
+        deliveryContextOrdinal: recoveryDeliveryContextOrdinal,
         media: [...recoveryResponseMedia],
         requiredBeforeFinal: true,
         response: synthesizedRecoveryMessage,
@@ -5227,7 +5227,7 @@ async function runCodexAppServerTurnOnProcess(
       const laterSegmentIndex = precedingAgentMessageSegments.findIndex(
         (segment) =>
           segment.deliveryContextOrdinal >
-            requiredRecoveryDeliveryContextOrdinal,
+            recoveryDeliveryContextOrdinal,
       )
       if (laterSegmentIndex < 0) {
         precedingAgentMessageSegments.push(recoverySegment)
@@ -5239,77 +5239,71 @@ async function runCodexAppServerTurnOnProcess(
         )
       }
     }
-    if (
-      finalResponseMedia.length > 0 &&
-      finalResponseMediaDeliveryContextOrdinal !== null &&
-      finalResponseMediaDeliveryContextOrdinal >
-        requiredRecoveryDeliveryContextOrdinal &&
-      finalResponseMediaDeliveryContextOrdinal <
-        laterFinalDeliveryContextOrdinal
-    ) {
-      const mediaTarget = resolveReplyTargetPatch(
-        finalResponseMediaDeliveryContextOrdinal,
-      )?.targetInputId ?? null
-      const promotedMediaSegment =
-        precedingAgentMessageSegments.find((segment) =>
-          segment.deliveryContextOrdinal ===
-            finalResponseMediaDeliveryContextOrdinal
-        )
-      if (promotedMediaSegment) {
-        promotedMediaSegment.media = normalizeAssistantResponseMediaList([
-          ...promotedMediaSegment.media,
-          ...finalResponseMedia,
-        ])
-        if (mediaTarget) {
-          promotedMediaSegment.targetInputId = mediaTarget
-        }
-      } else {
-        const mediaSegment: CodexAppServerResponseSegment = {
-          deliveryContextOrdinal: finalResponseMediaDeliveryContextOrdinal,
-          media: [...finalResponseMedia],
-          requiredBeforeFinal: true,
-          response: '',
-          ...(mediaTarget ? { targetInputId: mediaTarget } : {}),
-        }
-        const laterSegmentIndex = precedingAgentMessageSegments.findIndex(
-          (segment) =>
-            segment.deliveryContextOrdinal >
-              finalResponseMediaDeliveryContextOrdinal,
-        )
-        if (laterSegmentIndex < 0) {
-          precedingAgentMessageSegments.push(mediaSegment)
-        } else {
-          precedingAgentMessageSegments.splice(
-            laterSegmentIndex,
-            0,
-            mediaSegment,
-          )
-        }
+  }
+  const earliestPrecedingRecoveryOrdinal =
+    precedingRecoveryOrdinals.at(0) ?? null
+  if (
+    earliestPrecedingRecoveryOrdinal !== null &&
+    finalResponseMedia.length > 0 &&
+    finalResponseMediaDeliveryContextOrdinal !== null &&
+    finalResponseMediaDeliveryContextOrdinal >
+      earliestPrecedingRecoveryOrdinal &&
+    finalResponseMediaDeliveryContextOrdinal <
+      finalDeliveryContextOrdinal
+  ) {
+    const mediaTarget = resolveReplyTargetPatch(
+      finalResponseMediaDeliveryContextOrdinal,
+    )?.targetInputId ?? null
+    const promotedMediaSegment =
+      precedingAgentMessageSegments.find((segment) =>
+        segment.deliveryContextOrdinal ===
+          finalResponseMediaDeliveryContextOrdinal
+      )
+    if (promotedMediaSegment) {
+      promotedMediaSegment.media = normalizeAssistantResponseMediaList([
+        ...promotedMediaSegment.media,
+        ...finalResponseMedia,
+      ])
+      if (mediaTarget) {
+        promotedMediaSegment.targetInputId = mediaTarget
       }
-      finalResponseMedia = []
+    } else {
+      const mediaSegment: CodexAppServerResponseSegment = {
+        deliveryContextOrdinal: finalResponseMediaDeliveryContextOrdinal,
+        media: [...finalResponseMedia],
+        requiredBeforeFinal: true,
+        response: '',
+        ...(mediaTarget ? { targetInputId: mediaTarget } : {}),
+      }
+      const laterSegmentIndex = precedingAgentMessageSegments.findIndex(
+        (segment) =>
+          segment.deliveryContextOrdinal >
+            finalResponseMediaDeliveryContextOrdinal,
+      )
+      if (laterSegmentIndex < 0) {
+        precedingAgentMessageSegments.push(mediaSegment)
+      } else {
+        precedingAgentMessageSegments.splice(
+          laterSegmentIndex,
+          0,
+          mediaSegment,
+        )
+      }
     }
+    finalResponseMedia = []
+  }
+  if (earliestPrecedingRecoveryOrdinal !== null) {
     for (const segment of precedingAgentMessageSegments) {
       if (
         segment.deliveryContextOrdinal >=
-          requiredRecoveryDeliveryContextOrdinal &&
+          earliestPrecedingRecoveryOrdinal &&
         segment.deliveryContextOrdinal <
-          laterFinalDeliveryContextOrdinal
+          finalDeliveryContextOrdinal
       ) {
         segment.requiredBeforeFinal = true
       }
     }
   }
-  const finalDeliveryContextOrdinal =
-    laterFinalDeliveryContextOrdinal !== null
-      ? laterFinalDeliveryContextOrdinal
-      : requiredRecoveryDeliveryContextOrdinal !== null
-        ? requiredRecoveryDeliveryContextOrdinal
-        : latestFinalActionPatch?.kind === 'none'
-          ? latestDeliveryContextOrdinal
-          : suppressTrailingSteerCandidateForEarlierNoReply
-            ? latestDeliveryContextOrdinal
-            : finalTrailingSteerCandidate?.deliveryContextOrdinal ??
-              latestDeliveryContextOrdinal
   const finalActionPatch = resolveFinalActionPatch(finalDeliveryContextOrdinal)
   const requiredUserVisibleOutput = hasRequiredUserVisibleOutput()
   const noReplySelected =

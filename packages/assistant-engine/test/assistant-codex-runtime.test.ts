@@ -20343,6 +20343,183 @@ describe('steered final segments', () => {
     )
   })
 
+  it('synthesizes the earlier of two steered private-media recovery obligations', async () => {
+    const firstReplyRef = `ain_${'3'.repeat(32)}`
+    const secondReplyRef = `ain_${'4'.repeat(32)}`
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-before-first-private-media-recovery',
+        message: 'Send the first image.',
+        type: 'user_message',
+      }),
+      {
+        expectedText: 'selection recorded',
+        id: 10431,
+        kind: 'select-reply-target',
+        messageRef: firstReplyRef,
+      },
+      {
+        expectedSuccess: false,
+        expectedText:
+          'private response image could not be prepared; do not retry, regenerate it, or call finish_without_reply; explain that the image is unavailable in the final reply now',
+        id: 10432,
+        kind: 'attach-response-media',
+        media: [{
+          alt: 'Unavailable first private image',
+          contentType: 'image/png',
+          filename: 'missing-first-private-image.png',
+          kind: 'vault_image',
+          ref: 'raw/captures/missing-first-private-image.png',
+          sha256: 'a'.repeat(64),
+          sizeBytes: 123,
+          source: 'missing-first-private-image',
+        }],
+      },
+      completedItemEvent({
+        id: 'user-before-second-private-media-recovery',
+        message: 'Send the second image instead.',
+        type: 'user_message',
+      }),
+      {
+        expectedText: 'selection recorded',
+        id: 10433,
+        kind: 'select-reply-target',
+        messageRef: secondReplyRef,
+      },
+      {
+        expectedSuccess: false,
+        expectedText:
+          'private response image could not be prepared; do not retry, regenerate it, or call finish_without_reply; explain that the image is unavailable in the final reply now',
+        id: 10434,
+        kind: 'attach-response-media',
+        media: [{
+          alt: 'Unavailable second private image',
+          contentType: 'image/png',
+          filename: 'missing-second-private-image.png',
+          kind: 'vault_image',
+          ref: 'raw/captures/missing-second-private-image.png',
+          sha256: 'b'.repeat(64),
+          sizeBytes: 456,
+          source: 'missing-second-private-image',
+        }],
+      },
+      completedItemEvent({
+        id: 'assistant-second-private-media-recovery',
+        message: 'The second image is unavailable.',
+        type: 'assistant_message',
+      }),
+    ], {
+      authorizeAcceptedMessageTarget: async (input) => ({
+        targetInputId: input.messageRef,
+      }),
+    })
+
+    expect(result.finalAction).toBeNull()
+    expect(result.finalMessage).toBe('The second image is unavailable.')
+    expect(result.precedingAgentMessageSegments).toEqual([{
+      deliveryContextOrdinal: 0,
+      media: [],
+      requiredBeforeFinal: true,
+      response: "An attachment couldn't be included in this reply.",
+      targetInputId: firstReplyRef,
+    }])
+    expect(result.responseDeliveryContextOrdinal).toBe(1)
+    expect(result.responseMedia).toEqual([])
+    expect(result.targetInputId).toBe(secondReplyRef)
+    expect(result.transcriptMessage).toBe('The second image is unavailable.')
+  })
+
+  it('keeps model-authored earlier recovery required across a second private-media obligation', async () => {
+    const firstReplyRef = `ain_${'5'.repeat(32)}`
+    const secondReplyRef = `ain_${'6'.repeat(32)}`
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-before-authored-private-media-recovery',
+        message: 'Send the first image.',
+        type: 'user_message',
+      }),
+      {
+        expectedText: 'selection recorded',
+        id: 10435,
+        kind: 'select-reply-target',
+        messageRef: firstReplyRef,
+      },
+      {
+        expectedSuccess: false,
+        expectedText:
+          'private response image could not be prepared; do not retry, regenerate it, or call finish_without_reply; explain that the image is unavailable in the final reply now',
+        id: 10436,
+        kind: 'attach-response-media',
+        media: [{
+          alt: 'Unavailable authored private image',
+          contentType: 'image/png',
+          filename: 'missing-authored-private-image.png',
+          kind: 'vault_image',
+          ref: 'raw/captures/missing-authored-private-image.png',
+          sha256: 'c'.repeat(64),
+          sizeBytes: 123,
+          source: 'missing-authored-private-image',
+        }],
+      },
+      completedItemEvent({
+        id: 'assistant-authored-private-media-recovery',
+        message: 'The first image is unavailable.',
+        type: 'assistant_message',
+      }),
+      completedItemEvent({
+        id: 'user-before-later-private-media-recovery',
+        message: 'Try the second image.',
+        type: 'user_message',
+      }),
+      {
+        expectedText: 'selection recorded',
+        id: 10437,
+        kind: 'select-reply-target',
+        messageRef: secondReplyRef,
+      },
+      {
+        expectedSuccess: false,
+        expectedText:
+          'private response image could not be prepared; do not retry, regenerate it, or call finish_without_reply; explain that the image is unavailable in the final reply now',
+        id: 10438,
+        kind: 'attach-response-media',
+        media: [{
+          alt: 'Unavailable later private image',
+          contentType: 'image/png',
+          filename: 'missing-later-private-image.png',
+          kind: 'vault_image',
+          ref: 'raw/captures/missing-later-private-image.png',
+          sha256: 'd'.repeat(64),
+          sizeBytes: 456,
+          source: 'missing-later-private-image',
+        }],
+      },
+      completedItemEvent({
+        id: 'assistant-later-private-media-recovery',
+        message: 'The second image is unavailable.',
+        type: 'assistant_message',
+      }),
+    ], {
+      authorizeAcceptedMessageTarget: async (input) => ({
+        targetInputId: input.messageRef,
+      }),
+    })
+
+    expect(result.finalAction).toBeNull()
+    expect(result.finalMessage).toBe('The second image is unavailable.')
+    expect(result.precedingAgentMessageSegments).toEqual([{
+      deliveryContextOrdinal: 0,
+      media: [],
+      requiredBeforeFinal: true,
+      response: 'The first image is unavailable.',
+      targetInputId: firstReplyRef,
+    }])
+    expect(result.responseDeliveryContextOrdinal).toBe(1)
+    expect(result.responseMedia).toEqual([])
+    expect(result.targetInputId).toBe(secondReplyRef)
+    expect(result.transcriptMessage).toBe('The second image is unavailable.')
+  })
+
   it('keeps an earlier completed answer separate from blank required recovery', async () => {
     const replyRef = `ain_${'8'.repeat(32)}`
     const result = await runScriptedSteeredFinalSegmentsTurn([
@@ -21028,6 +21205,108 @@ describe('steered final segments', () => {
     expect(result.finalMessage).toBe('The image is unavailable.')
     expect(result.targetInputId).toBe(replyRef)
     expect(result.responseMedia).toEqual([])
+  })
+
+  it('does not turn later vault-file ownership into another recovery obligation', async () => {
+    const recoveryReplyRef = `ain_${'7'.repeat(32)}`
+    const vaultFileReplyRef = `ain_${'8'.repeat(32)}`
+    const finalReplyRef = `ain_${'9'.repeat(32)}`
+    const sendVaultFile = vi.fn(async () => ({
+      filename: 'report.pdf',
+      status: 'approved' as const,
+    }))
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-before-vault-carried-recovery',
+        message: 'Send the requested image.',
+        type: 'user_message',
+      }),
+      {
+        expectedText: 'selection recorded',
+        id: 1141,
+        kind: 'select-reply-target',
+        messageRef: recoveryReplyRef,
+      },
+      {
+        expectedSuccess: false,
+        expectedText:
+          'private response image could not be prepared; do not retry, regenerate it, or call finish_without_reply; explain that the image is unavailable in the final reply now',
+        id: 1142,
+        kind: 'attach-response-media',
+        media: [{
+          alt: 'Unavailable image before vault-file approval',
+          contentType: 'image/png',
+          filename: 'missing-before-vault-file.png',
+          kind: 'vault_image',
+          ref: 'raw/captures/missing-before-vault-file.png',
+          sha256: 'e'.repeat(64),
+          sizeBytes: 123,
+          source: 'missing-before-vault-file',
+        }],
+      },
+      completedItemEvent({
+        id: 'user-owning-vault-file-approval',
+        message: 'Send the report too.',
+        type: 'user_message',
+      }),
+      {
+        expectedText: 'selection recorded',
+        id: 1143,
+        kind: 'select-reply-target',
+        messageRef: vaultFileReplyRef,
+      },
+      {
+        expectedText: JSON.stringify({
+          filename: 'report.pdf',
+          note:
+            "Approval succeeded. The runtime owns delivery of the existing attachment intent. If another tool result already requires a visible reply, send only that result's recovery text without mentioning this file, approval, or delivery; otherwise call finish_without_reply. Do not attach the file or send a companion acknowledgment.",
+          status: 'approved',
+        }),
+        id: 1144,
+        kind: 'send-vault-file',
+        ref: `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/report.pdf`,
+      },
+      completedItemEvent({
+        id: 'user-owning-final-after-vault-file',
+        message: 'Answer one final question.',
+        type: 'user_message',
+      }),
+      {
+        expectedText: 'selection recorded',
+        id: 1145,
+        kind: 'select-reply-target',
+        messageRef: finalReplyRef,
+      },
+      completedItemEvent({
+        id: 'assistant-after-vault-carried-recovery',
+        message: 'Here is the final answer.',
+        type: 'assistant_message',
+      }),
+    ], {
+      authorizeAcceptedMessageTarget: async (input) => ({
+        targetInputId: input.messageRef,
+      }),
+      hostedToolContext: createHostedToolContext({
+        computerToolsAvailable: false,
+        sendVaultFile,
+        vaultFileSendAvailable: true,
+      }),
+    })
+
+    expect(sendVaultFile).toHaveBeenCalledOnce()
+    expect(result.finalAction).toBeNull()
+    expect(result.finalMessage).toBe('Here is the final answer.')
+    expect(result.precedingAgentMessageSegments).toEqual([{
+      deliveryContextOrdinal: 0,
+      media: [],
+      requiredBeforeFinal: true,
+      response: "An attachment couldn't be included in this reply.",
+      targetInputId: recoveryReplyRef,
+    }])
+    expect(result.responseDeliveryContextOrdinal).toBe(2)
+    expect(result.responseMedia).toEqual([])
+    expect(result.targetInputId).toBe(finalReplyRef)
+    expect(result.transcriptMessage).toBe('Here is the final answer.')
   })
 
   it('keeps a reply obligation after a same-turn vault-file failure later succeeds', async () => {

@@ -1095,7 +1095,12 @@ context remains the final segment on its own context and target, while the
 recovery becomes an earlier response segment. A model-authored recovery
 promoted from the obligation's context retains its original target and becomes
 required before that later final; when no such text exists, finalization uses
-the neutral recovery sentence instead. Output already selected for an
+the neutral recovery sentence instead. Independent failures captured at
+different delivery contexts remain separate obligations: finalization
+materializes each one in ordinal order with its own text, media, and target
+before any later final. A successful vault-file ownership patch that merely
+carries an earlier requirement does not create another obligation. Output
+already selected for an
 intervening delivery context becomes another marked predecessor with its own
 target rather than being folded into the latest final. For that explicitly
 marked sequence, the normalized final sequence base is

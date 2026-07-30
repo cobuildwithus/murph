@@ -1273,7 +1273,10 @@ Private-media recovery ordering is explicit rather than generic segment
 ordering. The normalized final sequence base is
 `<base>:required-before-final`; every required predecessor adds
 `:segment:<ordinal>` before any bubble suffix and retains its original route
-and native reply target. Every new member also persists its exact predecessor
+and native reply target. Independent reply-required failures from distinct
+steered contexts each materialize as their own ordinal-local recovery; a
+vault-file ownership marker carrying an earlier failure does not create a
+second recovery. Every new member also persists its exact predecessor
 intent id, with an explicit root on the first required member. The shared
 assistant-engine resolver follows that chain by session and stable base across
 delivery boundaries and idempotent retries whose runtime turn ids differ.

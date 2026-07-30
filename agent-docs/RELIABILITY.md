@@ -560,7 +560,11 @@ Last verified: 2026-07-29
   the recovery is an earlier segment. A model-authored recovery promoted from
   the requirement's context retains its original target and is marked required
   before that later final; absent such text, the neutral recovery sentence is
-  used. Output already selected for an intervening delivery context becomes
+  used. Independent failures on distinct delivery contexts remain independent
+  obligations and are materialized in ordinal order with their own text,
+  media, and targets. A successful vault-file ownership patch that only
+  carries an earlier requirement does not create another obligation. Output
+  already selected for an intervening delivery context becomes
   another marked predecessor with its own target rather than inheriting the
   latest final target. The explicitly marked final sequence base is
   `<base>:required-before-final`; required predecessors add
