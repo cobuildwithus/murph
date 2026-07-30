@@ -31,15 +31,16 @@ const DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
   dateStyle: "medium",
   timeZone: "UTC",
 });
-const DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
+const MONTH_DAY_FORMATTER = new Intl.DateTimeFormat("en-US", {
   day: "numeric",
+  month: "short",
+  timeZone: "UTC",
+});
+const TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
   hour: "numeric",
   minute: "2-digit",
-  month: "short",
-  second: "2-digit",
   timeZone: "UTC",
   timeZoneName: "short",
-  year: "numeric",
 });
 
 interface HostedUsageReferralActivityRecord {
@@ -177,7 +178,11 @@ function projectHostedUsageMissionActivity(input: {
     selectedLabel: formatDate(input.row.armedAt),
     status,
     statusLabel: projectHostedUsageMissionStatusLabel(status),
-    timingLabel: projectHostedUsageMissionTimingLabel(input.row, status),
+    timingLabel: projectHostedUsageMissionTimingLabel(
+      input.row,
+      status,
+      input.now,
+    ),
     title: policy.title,
   };
 }
@@ -254,21 +259,22 @@ function projectHostedUsageMissionStatusLabel(
 function projectHostedUsageMissionTimingLabel(
   row: HostedUsageReferralActivityRecord,
   status: HostedAiUsageMissionActivityStatus,
+  now: Date,
 ): string {
   if (row.status === "rewarded") {
     return row.rewardedAt
-      ? `Earned ${formatDate(row.rewardedAt)}`
+      ? `Earned ${formatMissionDate(row.rewardedAt, now)}`
       : "Reward earned";
   }
   if (row.qualifiedAt) {
-    return `Qualified ${formatDate(row.qualifiedAt)}`;
+    return `Qualified ${formatMissionDate(row.qualifiedAt, now)}`;
   }
   if (status === "checking_final_activity") {
-    return `Action closed ${formatDateTime(row.expiresAt)}; checking delayed activity`;
+    return `Closed ${formatMissionDateTime(row.expiresAt, now)}`;
   }
   return row.status === "armed"
-    ? `Start a new group by ${formatDateTime(row.expiresAt)}`
-    : `Ends ${formatDateTime(row.expiresAt)}`;
+    ? `Start by ${formatMissionDateTime(row.expiresAt, now)}`
+    : `Ends ${formatMissionDateTime(row.expiresAt, now)}`;
 }
 
 function formatUsdMicros(value: bigint): string {
@@ -280,6 +286,12 @@ function formatDate(value: Date): string {
   return DATE_FORMATTER.format(value);
 }
 
-function formatDateTime(value: Date): string {
-  return DATE_TIME_FORMATTER.format(value);
+function formatMissionDate(value: Date, now: Date): string {
+  return value.getUTCFullYear() === now.getUTCFullYear()
+    ? MONTH_DAY_FORMATTER.format(value)
+    : formatDate(value);
+}
+
+function formatMissionDateTime(value: Date, now: Date): string {
+  return `${formatMissionDate(value, now)} at ${TIME_FORMATTER.format(value)}`;
 }
