@@ -4362,7 +4362,7 @@ describe('assistant outbox runtime', () => {
     })
   })
 
-  it('marks Linq text-plus-link partial delivery as abandoned without replaying accepted text', async () => {
+  it('keeps Linq text-plus-link partial delivery retryable with its accepted text identity', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-linq-link-partial-')
 
     const seeded = await createIntent(vaultRoot, {
@@ -4391,9 +4391,9 @@ describe('assistant outbox runtime', () => {
       vault: vaultRoot,
     })
 
-    expect(dispatched.intent.status).toBe('abandoned')
+    expect(dispatched.intent.status).toBe('retryable')
     expect(dispatched.intent.deliveryConfirmationPending).toBe(false)
-    expect(dispatched.intent.nextAttemptAt).toBeNull()
+    expect(dispatched.intent.nextAttemptAt).not.toBeNull()
     expect(dispatched.intent.delivery).toMatchObject({
       channel: 'linq',
       messageLength: seeded.message.length,
@@ -4404,9 +4404,40 @@ describe('assistant outbox runtime', () => {
       targetKind: 'thread',
     })
     expect(dispatched.deliveryError).toMatchObject({
-      code: 'ASSISTANT_DELIVERY_AMBIGUOUS',
+      code: 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
     })
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
+
+    const deliveryIdempotencyKey = mockedDeliverAssistantMessageOverBinding
+      .mock.calls[0]?.[0].idempotencyKey
+    expect(deliveryIdempotencyKey).toBe(`assistant-outbox:${seeded.intentId}`)
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        channel: 'linq',
+        idempotencyKey: deliveryIdempotencyKey,
+        providerMessageId: 'linq-link-message',
+        providerMessageIds: ['linq-text-message', 'linq-link-message'],
+        providerThreadId: 'thread-linq-link',
+        target: 'thread-linq-link',
+        targetKind: 'thread',
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: true,
+      outboxIntentId: null,
+      session: undefined,
+    })
+
+    const recovered = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: seeded.intentId,
+      now: new Date('2026-04-08T04:24:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(recovered.intent.status).toBe('sent')
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(2)
+    expect(mockedDeliverAssistantMessageOverBinding.mock.calls[1]?.[0])
+      .toMatchObject({ idempotencyKey: deliveryIdempotencyKey })
   })
 
   it('abandons Linq media-only voice memo ambiguity without retrying', async () => {

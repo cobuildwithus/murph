@@ -3711,7 +3711,7 @@ function createHostedAssistantLinqSendDependency(input: {
           effectsPort: input.effectsPort ?? null,
           outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
             attemptedAt,
-            answeredMailboxItemIds: request.answeredMailboxItemIds ?? [],
+            answeredMailboxItemIds: [],
             deliveryContext,
             directRecipientPhoneNumber: originalParticipantRecipientPhoneNumber,
             failedAt: new Date(),
@@ -4232,12 +4232,14 @@ async function recordHostedAssistantLinqDeliveryOutcomeOrQueueBestEffort(input: 
 function shouldRequireHostedAssistantLinqDeliveryOutcomeWrite(
   outcome: HostedRuntimeLinqDeliveryOutcomeRequest,
 ): boolean {
-  const providerAccepted = Boolean(outcome.acceptedAt)
-    || (
-      Boolean(outcome.failedAt)
-      && outcome.failureCode
-        === HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE
-    );
+  const richLinkPartial = Boolean(outcome.failedAt)
+    && outcome.failureCode
+      === HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE;
+  if (richLinkPartial) {
+    return true;
+  }
+
+  const providerAccepted = Boolean(outcome.acceptedAt);
   if (!providerAccepted) {
     return false;
   }

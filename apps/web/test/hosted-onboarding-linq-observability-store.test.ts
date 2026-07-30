@@ -3045,20 +3045,82 @@ describe("hosted Linq observability stores", () => {
         ],
       }),
     );
-    expect(fixture.hostedMailboxItemUpdateMany).toHaveBeenCalledWith({
-      data: {
-        consumedAt: failedAt,
-      },
-      where: {
-        consumedAt: null,
-        id: {
-          in: answeredMailboxItemIds,
-        },
-        kind: "conversation.message",
-        lane: "conversation",
-        userId: "member_123",
-      },
+    expect(fixture.hostedMailboxItemUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("supersedes only the matching rich-link checkpoint after both identities recover", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const acceptedAt = new Date("2026-03-26T12:05:02.000Z");
+    const primaryMessageId = "linq_text_accepted";
+    const linkMessageId = "linq_link_recovered";
+    const primaryMessageLookupKey =
+      createHostedLinqMessageLookupKey(primaryMessageId);
+    fixture.hostedLinqDeliveryFindUnique
+      .mockResolvedValueOnce({
+        acceptedAt: null,
+        deliveredAt: null,
+        failedAt: new Date("2026-03-26T12:00:02.000Z"),
+        failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+        id: "hld_partial_link",
+        lastReceiptAt: null,
+        messageLookupKey: primaryMessageLookupKey,
+        skippedAt: null,
+        status: "failed",
+      })
+      .mockResolvedValueOnce({
+        failedAt: null,
+        failureCode: null,
+        failureReason: null,
+        status: "accepted",
+      });
+
+    await expect(recordHostedLinqRuntimeDeliveryOutcomeTx({
+      acceptedAt,
+      answeredMailboxItemIds: ["mailbox_item_primary_answered"],
+      attemptedAt: new Date("2026-03-26T12:05:01.000Z"),
+      idempotencyKey: "assistant-outbox:intent_partial_link",
+      linqChatId: "linq_chat_123",
+      messageIds: [primaryMessageId, linkMessageId],
+      prisma: fixture.prisma as never,
+      sourceRef: "intent_partial_link",
+      targetKind: "thread",
+      userId: "member_123",
+    })).resolves.toEqual({
+      deliveryId: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
+      recorded: true,
     });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          acceptedAt,
+          failedAt: null,
+          failureCode: null,
+          status: "accepted",
+        }),
+        where: expect.objectContaining({
+          OR: expect.arrayContaining([
+            expect.objectContaining({
+              failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+              messageLookupKey: primaryMessageLookupKey,
+              status: "failed",
+            }),
+          ]),
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqDeliveryMessageCreateMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({ ordinal: 0 }),
+        expect.objectContaining({ ordinal: 1 }),
+      ],
+      skipDuplicates: true,
+    });
+    expect(fixture.hostedMailboxItemUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { consumedAt: acceptedAt },
+      }),
+    );
   });
 
   it("does not double-count outbound totals when the provider echo lands before runtime acceptance", async () => {
@@ -3281,7 +3343,13 @@ describe("hosted Linq observability stores", () => {
           acceptedAt: null,
           deliveredAt: null,
           idempotencyKey: deliveryIdempotencyLookupKey,
-          lastReceiptAt: null,
+          OR: expect.arrayContaining([
+            expect.objectContaining({
+              failedAt: null,
+              lastReceiptAt: null,
+              messageLookupKey: null,
+            }),
+          ]),
         }),
       }),
     );

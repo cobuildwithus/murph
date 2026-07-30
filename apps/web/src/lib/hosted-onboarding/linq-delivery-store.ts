@@ -979,13 +979,7 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
       recorded: false,
     };
   }
-  const answeredMailboxConsumedAt = acceptedAt ?? (
-    failedAt
-    && normalizeNullable(input.failureCode)
-      === HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE
-      ? failedAt
-      : null
-  );
+  const answeredMailboxConsumedAt = acceptedAt;
   const line = await readHostedLinqDeliveryLineIdentityTx({
     phoneNumber: input.phoneNumber ?? null,
     phoneNumberLookupKey: input.phoneNumberLookupKey ?? null,
@@ -1000,6 +994,9 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
   const messageLookupKey = createHostedLinqMessageLookupKey(finalMessageId);
   const messageLookupKeyCandidates =
     createHostedLinqMessageLookupKeyReadCandidates(finalMessageId);
+  const recoveredPrimaryMessageLookupKey = providerMessageIds.length > 1
+    ? createHostedLinqMessageLookupKey(providerMessageIds[0] ?? null)
+    : null;
   const deliveryId = buildHostedLinqDeliveryId(idempotencyKey);
   const acceptedStatus = resolveHostedLinqRuntimeAcceptedStatus({
     targetKind: input.targetKind ?? null,
@@ -1082,6 +1079,7 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
           linqChatId: input.linqChatId ?? null,
           messageId: finalMessageId,
           messageLookupKey,
+          recoveredPrimaryMessageLookupKey,
           prisma,
           sourceRef: input.sourceRef ?? null,
           targetKind: input.targetKind ?? null,
@@ -1102,6 +1100,7 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
         linqChatId: input.linqChatId ?? null,
         messageId: finalMessageId,
         messageLookupKey,
+        recoveredPrimaryMessageLookupKey,
         prisma,
         sourceRef: input.sourceRef ?? null,
         targetKind: input.targetKind ?? null,
@@ -1119,6 +1118,7 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
         linqChatId: input.linqChatId ?? null,
         messageId: finalMessageId,
         messageLookupKey,
+        recoveredPrimaryMessageLookupKey,
         prisma,
         sourceRef: input.sourceRef ?? null,
         targetKind: input.targetKind ?? null,
@@ -1139,6 +1139,10 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
         acceptedAt,
         deliveryId,
         messageIds: providerMessageIds,
+        prisma,
+      });
+      await recomputeHostedLinqDeliveryFromMessagesTx({
+        deliveryId,
         prisma,
       });
     }
@@ -1180,7 +1184,11 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
         });
       }
     }
-    if (answeredMailboxConsumedAt && input.answeredMailboxItemIds?.length) {
+    if (
+      acceptedAdvanced
+      && answeredMailboxConsumedAt
+      && input.answeredMailboxItemIds?.length
+    ) {
       await prisma.hostedMailboxItem.updateMany({
         data: {
           consumedAt: answeredMailboxConsumedAt,
@@ -1218,6 +1226,7 @@ async function updateHostedLinqRuntimeDeliveryOutcomeIfPreProviderTx(input: {
   linqChatId: string | null;
   messageId: string | null;
   messageLookupKey: string | null;
+  recoveredPrimaryMessageLookupKey: string | null;
   prisma: HostedLinqDeliveryClient;
   sourceRef: string | null;
   targetKind: string | null;
@@ -1229,16 +1238,27 @@ async function updateHostedLinqRuntimeDeliveryOutcomeIfPreProviderTx(input: {
         acceptedAt: null,
         deliveredAt: null,
         idempotencyKey: input.idempotencyKey,
-        lastReceiptAt: null,
         OR: [
           {
             failedAt: null,
+            lastReceiptAt: null,
             messageLookupKey: null,
           },
           {
             failedAt: { not: null },
+            lastReceiptAt: null,
             messageLookupKey: null,
           },
+          ...(input.recoveredPrimaryMessageLookupKey
+            ? [{
+                failedAt: { not: null },
+                failureCode:
+                  HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE,
+                messageLookupKey: input.recoveredPrimaryMessageLookupKey,
+                skippedAt: null,
+                status: "failed",
+              }]
+            : []),
         ],
       },
       data: {

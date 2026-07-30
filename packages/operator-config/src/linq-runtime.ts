@@ -1123,7 +1123,7 @@ function createLinqRichLinkPartialDeliveryFailure(input: {
   const providerMessageIds = [...input.providerMessageIds]
   const failure = new VaultCliError(
     'ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY',
-    'iMessage rich-link delivery could not confirm both provider messages after the primary request was accepted; automatic retry is disabled to avoid duplicate text.',
+    'iMessage rich-link delivery could not confirm both provider messages after the primary request was accepted; deterministic recovery must reuse the same provider keys.',
     {
       idempotencyKey: input.idempotencyKey,
       providerMessageIds,

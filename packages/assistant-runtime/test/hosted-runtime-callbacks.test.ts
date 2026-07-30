@@ -10397,7 +10397,7 @@ describe("hosted runtime callbacks", () => {
     expect(recordedOutcome).not.toContain("private reply text");
   });
 
-  it("persists accepted Linq text identity before a rich-link partial settles", async () => {
+  it("persists a recoverable Linq rich-link checkpoint before the retry settles", async () => {
     const answeredMailboxItemIds = ["mailbox_item_answered_1"];
     const effect = createEffect({
       answeredMailboxItemIds,
@@ -10455,10 +10455,10 @@ describe("hosted runtime callbacks", () => {
             target: "linq_chat_123",
             targetKind: "thread",
           }),
-          status: "abandoned",
+          status: "retryable",
         }, {
-          code: "ASSISTANT_DELIVERY_AMBIGUOUS",
-          message: "Provider delivery may have partially succeeded.",
+          code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+          message: "Provider delivery requires deterministic recovery.",
         });
       }
 
@@ -10490,26 +10490,25 @@ describe("hosted runtime callbacks", () => {
 
     expect(outcomes).toEqual([
       expect.objectContaining({
-        deliveryStatus: "failed_ambiguous",
-        providerMessageId: "linq_text_accepted",
-        providerMessageIds: ["linq_text_accepted"],
-        retryable: false,
+        deliveryStatus: "retryable",
+        retryable: true,
       }),
     ]);
     expect(recordDeliveryOutcome).toHaveBeenCalledWith(
       expect.objectContaining({
         failedAt: expect.stringMatching(/Z$/u),
         failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
-        answeredMailboxItemIds,
         providerMessageId: "linq_text_accepted",
         providerMessageIds: ["linq_text_accepted"],
         providerThreadId: "linq_chat_123",
       }),
       { signal: expect.any(AbortSignal) },
     );
+    expect(recordDeliveryOutcome.mock.calls[0]?.[0])
+      .not.toHaveProperty("answeredMailboxItemIds");
   });
 
-  it("surfaces rich-link partial outcome recording failure before terminalizing", async () => {
+  it("surfaces rich-link checkpoint recording failure before scheduling recovery", async () => {
     const answeredMailboxItemIds = ["mailbox_item_answered_1"];
     const providerError = Object.assign(
       new Error("Linq rich-link delivery failed after primary acceptance."),
@@ -10555,13 +10554,14 @@ describe("hosted runtime callbacks", () => {
     });
     expect(recordDeliveryOutcome).toHaveBeenCalledWith(
       expect.objectContaining({
-        answeredMailboxItemIds,
         failedAt: expect.stringMatching(/Z$/u),
         failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
         providerMessageIds: ["linq_text_accepted"],
       }),
       { signal: expect.any(AbortSignal) },
     );
+    expect(recordDeliveryOutcome.mock.calls[0]?.[0])
+      .not.toHaveProperty("answeredMailboxItemIds");
   });
 
   it("checks egress authority for signup welcome Linq sends into existing threads", async () => {

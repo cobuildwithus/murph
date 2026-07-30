@@ -258,6 +258,16 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
   sending: AssistantOutboxIntent
   vault: string
 }): Promise<AssistantOutboxIntent> {
+  const linqPartialDelivery = readLinqPartialDeliveryFromError({
+    error: input.error,
+    failedAt: input.failedAt,
+    sending: input.sending,
+  })
+  const recoverableLinqRichLinkPartial =
+    isRecoverableLinqRichLinkPartialDelivery({
+      error: input.error,
+      sending: input.sending,
+    })
   const ambiguousDelivery = readAmbiguousDeliveryFromError({
     error: input.error,
     failedAt: input.failedAt,
@@ -320,8 +330,14 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
     const failedIntent = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence({
         ...baseIntent,
-        delivery: ambiguousDelivery ?? current?.delivery ?? input.sending.delivery,
-        deliveryConfirmationPending: abandonedDelivery || retryExhausted
+        delivery:
+          ambiguousDelivery ??
+          linqPartialDelivery ??
+          current?.delivery ??
+          input.sending.delivery,
+        deliveryConfirmationPending: recoverableLinqRichLinkPartial
+          ? false
+          : abandonedDelivery || retryExhausted
           ? false
           : input.deliveryMayHaveSucceeded
             ? input.deliveryTransportIdempotent
@@ -379,8 +395,35 @@ function readAmbiguousDeliveryFromError(input: {
   failedAt: Date
   sending: AssistantOutboxIntent
 }): AssistantChannelDelivery | null {
-  return readTelegramAmbiguousDeliveryFromError(input) ??
-    readLinqPartialDeliveryFromError(input)
+  const telegramDelivery = readTelegramAmbiguousDeliveryFromError(input)
+  if (telegramDelivery) {
+    return telegramDelivery
+  }
+  const linqPartialDelivery = readLinqPartialDeliveryFromError(input)
+  return isRecoverableLinqRichLinkPartialDelivery(input)
+    ? null
+    : linqPartialDelivery
+}
+
+function isRecoverableLinqRichLinkPartialDelivery(input: {
+  error: unknown
+  sending: AssistantOutboxIntent
+}): boolean {
+  if (input.sending.channel !== 'linq') {
+    return false
+  }
+
+  const errorRecord = readRecord(input.error)
+  const context = readRecord(errorRecord?.context)
+  const code =
+    readNonEmptyString(errorRecord?.code) ??
+    readNonEmptyString(context?.code) ??
+    null
+  if (code !== 'ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY') {
+    return false
+  }
+
+  return readProviderMessageIdsFromErrorRecord(errorRecord, context) !== null
 }
 
 function isAmbiguousDeliveryWithoutProviderIds(input: {

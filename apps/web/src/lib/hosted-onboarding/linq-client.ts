@@ -373,7 +373,7 @@ function createHostedLinqRichLinkPartialDeliveryFailure(input: {
     },
     httpStatus: 502,
     message:
-      "Linq rich-link delivery could not confirm both provider messages after the primary request was accepted.",
+      "Linq rich-link delivery could not confirm both provider messages after the primary request was accepted; deterministic recovery must reuse the same provider keys.",
     retryable: false,
   });
   return Object.assign(failure, {

@@ -63,7 +63,7 @@ import {
 const userId = `member_local_linq_first_contact_${Date.now()}`;
 const directReplyUserId = `member_local_linq_direct_reply_${Date.now()}`;
 const richLinkLostAckUserId = `member_local_linq_link_lost_ack_${Date.now()}`;
-const richLinkUnresolvedAckUserId = `member_local_linq_link_unresolved_ack_${Date.now()}`;
+const richLinkRetryRecoveryUserId = `member_local_linq_link_retry_recovery_${Date.now()}`;
 const richLinkFallbackUserId = `member_local_linq_link_fallback_${Date.now()}`;
 const duplicateWelcomeUserId = `member_local_linq_duplicate_welcome_${Date.now()}`;
 const fastReplyUserId = `member_local_linq_fast_reply_${Date.now()}`;
@@ -81,7 +81,7 @@ const progressToolAttemptText = "Checking the current iMessage thread now.";
 const progressToolFinalReplyText = "I checked that and can keep helping from here.";
 const typingLoopReplyText = "I saw that and can help from here.";
 const richLinkLostAckUrl = "https://example.test/continue/lost-ack";
-const richLinkUnresolvedAckUrl = "https://example.test/continue/unresolved-ack";
+const richLinkRetryRecoveryUrl = "https://example.test/continue/recovered";
 const richLinkFallbackUrl = "https://example.test/continue/fallback";
 const productionLikeAssistantModel = "gpt-5.6-terra";
 const localRunnerIdleTtlMs = "300000";
@@ -517,31 +517,31 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
     });
   }, 300_000);
 
-  it("terminalizes an unresolved rich-link acknowledgment without replaying assistant text", async () => {
-    const chatId = `chat_local_linq_link_unresolved_ack_${Date.now()}`;
+  it("recovers a pre-accept rich-link transport failure without replaying assistant text", async () => {
+    const chatId = `chat_local_linq_link_retry_recovery_${Date.now()}`;
     const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
     const primaryText = "Continue after confirmation:";
-    const eventId = `evt_linq_link_unresolved_ack_${richLinkUnresolvedAckUserId}`;
+    const eventId = `evt_linq_link_retry_recovery_${richLinkRetryRecoveryUserId}`;
     await requireScenario().seedActiveHostedLinqMember({
-      homePhone: buildLinqHomePhoneNumber(richLinkUnresolvedAckUserId),
-      memberId: richLinkUnresolvedAckUserId,
-      memberPhone: buildLinqRecipientPhoneNumber(richLinkUnresolvedAckUserId),
+      homePhone: buildLinqHomePhoneNumber(richLinkRetryRecoveryUserId),
+      memberId: richLinkRetryRecoveryUserId,
+      memberPhone: buildLinqRecipientPhoneNumber(richLinkRetryRecoveryUserId),
     });
     await requireScenario().runWake(
-      buildActivationWake(richLinkUnresolvedAckUserId),
-      richLinkUnresolvedAckUserId,
+      buildActivationWake(richLinkRetryRecoveryUserId),
+      richLinkRetryRecoveryUserId,
     );
-    await requireScenario().waitForHostedCompletion(richLinkUnresolvedAckUserId);
+    await requireScenario().waitForHostedCompletion(richLinkRetryRecoveryUserId);
     await requireScenario().bindActiveHostedLinqHomeChat({
       chatId,
-      memberId: richLinkUnresolvedAckUserId,
-      recipientPhone: buildLinqRecipientPhoneNumber(richLinkUnresolvedAckUserId),
+      memberId: richLinkRetryRecoveryUserId,
+      recipientPhone: buildLinqRecipientPhoneNumber(richLinkRetryRecoveryUserId),
     });
 
     const primaryMatcher = (request: ObservedLinqRequest): boolean =>
       requireLinqStub().readObservedMessageText(request) === primaryText;
     const linkMatcher = (request: ObservedLinqRequest): boolean =>
-      requireLinqStub().readObservedMessageLink(request) === richLinkUnresolvedAckUrl;
+      requireLinqStub().readObservedMessageLink(request) === richLinkRetryRecoveryUrl;
     const primaryBaseline = requireLinqStub().countAcceptedSends(
       replyPath,
       primaryMatcher,
@@ -555,23 +555,23 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
       linkMatcher,
     );
     const providerBaseline = countAssistantProviderResponsesApiRequests();
-    requireLinqStub().armNextPostAcceptLostAcknowledgment({
+    requireLinqStub().armNextPreAcceptRetryableSendFailure({
       expectedPath: replyPath,
       matchRequest: linkMatcher,
     });
     requireScenario().queueAssistantResponses([
-      `${primaryText}\n${richLinkUnresolvedAckUrl}`,
+      `${primaryText}\n${richLinkRetryRecoveryUrl}`,
     ], {
-      matchInputContains: "Give me the unresolved acknowledgment link",
+      matchInputContains: "Give me the recovery link",
     });
 
     const response = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
-      richLinkUnresolvedAckUserId,
+      richLinkRetryRecoveryUserId,
       chatId,
       {
         eventId,
         messageId: `msg_${eventId}`,
-        text: "Give me the unresolved acknowledgment link.",
+        text: "Give me the recovery link.",
       },
     ));
     expect(response.status).toBe(202);
@@ -580,38 +580,64 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
       expectedPath: replyPath,
       matchRequest: primaryMatcher,
       scenario: requireScenario(),
-      userId: richLinkUnresolvedAckUserId,
+      userId: richLinkRetryRecoveryUserId,
     });
     await requireLinqStub().waitForMatchingSendCount({
       expectedCount: observedLinkBaseline + 3,
       expectedPath: replyPath,
       matchRequest: linkMatcher,
       scenario: requireScenario(),
-      userId: richLinkUnresolvedAckUserId,
+      userId: richLinkRetryRecoveryUserId,
     });
     expect(requireLinqStub().countAcceptedSends(replyPath, linkMatcher)).toBe(
-      acceptedLinkBaseline + 1,
+      acceptedLinkBaseline,
     );
+    await expect(readHostedMailboxItemForTest({
+      dedupeKey: eventId,
+      environment: requireScenario().runtimeEnv,
+      userId: richLinkRetryRecoveryUserId,
+    })).resolves.toMatchObject({
+      consumedAt: null,
+    });
+
+    const retryEnsure = await ensureProcessingAfterSyntheticMailboxAppendForTest({
+      harness: requireScenario().harness,
+      userId: richLinkRetryRecoveryUserId,
+    });
+    expect(retryEnsure.kind).toBe("runtime_processing_accepted");
+    await requireLinqStub().waitForMatchingAcceptedSendCount({
+      expectedCount: acceptedLinkBaseline + 1,
+      expectedPath: replyPath,
+      matchRequest: linkMatcher,
+      scenario: requireScenario(),
+      userId: richLinkRetryRecoveryUserId,
+    });
     const completed = await requireScenario().waitForHostedCompletion(
-      richLinkUnresolvedAckUserId,
+      richLinkRetryRecoveryUserId,
     );
     expect(completed.lastErrorCode ?? null).toBeNull();
     expect(completed.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
     expect(countAssistantProviderResponsesApiRequests()).toBe(providerBaseline + 1);
+    expect(requireLinqStub().countAcceptedSends(replyPath, primaryMatcher)).toBe(
+      primaryBaseline + 1,
+    );
+    expect(requireLinqStub().countAcceptedSends(replyPath, linkMatcher)).toBe(
+      acceptedLinkBaseline + 1,
+    );
     await expect(readHostedMailboxItemForTest({
       dedupeKey: eventId,
       environment: requireScenario().runtimeEnv,
-      userId: richLinkUnresolvedAckUserId,
+      userId: richLinkRetryRecoveryUserId,
     })).resolves.toMatchObject({
       consumedAt: expect.any(String),
     });
 
     const lateEnsure = await ensureProcessingAfterSyntheticMailboxAppendForTest({
       harness: requireScenario().harness,
-      userId: richLinkUnresolvedAckUserId,
+      userId: richLinkRetryRecoveryUserId,
     });
     expect(lateEnsure.kind).toBe("runtime_processing_accepted");
-    await requireScenario().waitForHostedIdle(richLinkUnresolvedAckUserId);
+    await requireScenario().waitForHostedIdle(richLinkRetryRecoveryUserId);
     expect(countAssistantProviderResponsesApiRequests()).toBe(providerBaseline + 1);
     expect(requireLinqStub().countAcceptedSends(replyPath, primaryMatcher)).toBe(
       primaryBaseline + 1,
@@ -1605,7 +1631,7 @@ function buildLinqFirstContactLocalInboundAllowlist(): string {
   return [
     directReplyUserId,
     richLinkLostAckUserId,
-    richLinkUnresolvedAckUserId,
+    richLinkRetryRecoveryUserId,
     richLinkFallbackUserId,
     duplicateWelcomeUserId,
     fastReplyUserId,

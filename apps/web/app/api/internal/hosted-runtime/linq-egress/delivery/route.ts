@@ -10,7 +10,6 @@ import {
   createHostedLinqChatLookupKeyReadCandidates,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
-  HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE,
   recordHostedLinqRuntimeDeliveryOutcomeTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import {
@@ -81,7 +80,6 @@ export const POST = withJsonError(async (request: Request) => {
   );
   const failureCode = readOptionalBodyString(body.failureCode);
   const answeredMailboxItemIds = acceptedAt
-    || failureCode === HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE
     ? parseAnsweredMailboxItemIds(body.answeredMailboxItemIds)
     : [];
   const providerTarget = readOptionalBodyString(body.providerTarget);

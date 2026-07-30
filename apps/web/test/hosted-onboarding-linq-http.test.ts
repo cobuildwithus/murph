@@ -652,7 +652,7 @@ describe("createHostedLinqChat", () => {
             code: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
             deliveryMayHaveSucceeded: true,
             message:
-              "Linq rich-link delivery could not confirm both provider messages after the primary request was accepted.",
+              "Linq rich-link delivery could not confirm both provider messages after the primary request was accepted; deterministic recovery must reuse the same provider keys.",
             providerMessageIds: ["msg_text"],
             retryable: false,
           });
@@ -1096,7 +1096,7 @@ describe("sendHostedLinqChatMessage", () => {
             code: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
             deliveryMayHaveSucceeded: true,
             message:
-              "Linq rich-link delivery could not confirm both provider messages after the primary request was accepted.",
+              "Linq rich-link delivery could not confirm both provider messages after the primary request was accepted; deterministic recovery must reuse the same provider keys.",
             providerMessageIds: ["msg_text"],
             retryable: false,
           });

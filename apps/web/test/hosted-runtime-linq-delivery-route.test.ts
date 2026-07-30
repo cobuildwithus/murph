@@ -623,7 +623,7 @@ describe("hosted runtime Linq delivery route", () => {
     );
   });
 
-  it("carries answered mailbox item ids for a terminal rich-link partial delivery", async () => {
+  it("does not carry answered mailbox item ids for a recoverable rich-link partial delivery", async () => {
     const answeredMailboxItemIds = ["mailbox_item_primary_answered"];
     const response = await route.POST(buildDeliveryRequest({
       answeredMailboxItemIds,
@@ -643,7 +643,7 @@ describe("hosted runtime Linq delivery route", () => {
     expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledWith(
       expect.objectContaining({
         acceptedAt: null,
-        answeredMailboxItemIds,
+        answeredMailboxItemIds: [],
         failedAt: new Date("2026-04-26T00:00:05.000Z"),
         failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
         messageIds: ["linq_text_accepted"],
