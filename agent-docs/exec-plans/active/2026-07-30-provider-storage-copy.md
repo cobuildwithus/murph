@@ -35,4 +35,3 @@ Updated: 2026-07-30
 - Desktop and mobile design-catalog browser proof.
 - Required product-experience, frontend, coverage, Claude UI, parent, CI, and
   ReviewGPT gates.
-
