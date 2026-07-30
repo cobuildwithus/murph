@@ -17,6 +17,10 @@ decide the copy, state selection, action count, or whether an element exists.
 Outcome:
 Determine whether the declared product experience renders faithfully, visually coherently, responsively, accessibly, and with a maintainable frontend implementation.
 
+Use one overriding taste check: is this the simplest complete implementation of
+the declared experience, with nothing unnecessary? The internal bar is
+something Steve Jobs would be proud of.
+
 Success criteria:
 - Every finding is tied to reachable rendered or code evidence and user impact.
 - Recommendations preserve the declared experience and reuse established primitives where possible.
