@@ -5,6 +5,7 @@ import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
   authDialogProps: null as null | {
+    autoSendPastedPhoneNumber?: boolean;
     open: boolean;
     privyRuntime?: { kind: string };
   },
@@ -16,6 +17,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
   AuthDialog(props: {
+    autoSendPastedPhoneNumber?: boolean;
     open: boolean;
     privyRuntime?: { kind: string };
   }) {
@@ -116,6 +118,7 @@ test("warms one shared Privy runtime after homepage idle and reuses it on click"
 
   expect(mocks.runtimeMount).not.toHaveBeenCalled();
   expect(mocks.authDialogProps).toMatchObject({ open: false });
+  expect(mocks.authDialogProps?.autoSendPastedPhoneNumber).toBe(true);
   expect(mocks.authDialogProps?.privyRuntime).toBeUndefined();
 
   await act(async () => {

@@ -70,6 +70,7 @@ export function LandingAuthDialogButton({
       </button>
       {!auth.shared ? (
         <AuthDialog
+          autoSendPastedPhoneNumber
           open={open}
           onCompleted={handleLandingAuthCompleted}
           onOpenChange={setOpen}
@@ -90,6 +91,7 @@ export function LandingAuthDialog({
 }) {
   return (
     <AuthDialog
+      autoSendPastedPhoneNumber
       open={open}
       onCompleted={handleLandingAuthCompleted}
       onOpenChange={onOpenChange}

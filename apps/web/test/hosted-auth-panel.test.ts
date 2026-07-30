@@ -537,7 +537,7 @@ test("HostedAuthPanel keeps phone auth mounted after SMS code entry starts", asy
   cleanupRender = cleanup;
 
   expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeTruthy();
-  expect(mocks.hostedPhoneAuthProps?.autoSendPastedPhoneNumber).toBe(true);
+  expect(mocks.hostedPhoneAuthProps?.autoSendPastedPhoneNumber).toBe(false);
   expect(mocks.hostedPhoneAuthProps?.onCodeSent).toBeTypeOf("function");
 
   await act(async () => {
@@ -561,6 +561,18 @@ test("HostedAuthPanel keeps phone auth mounted after SMS code entry starts", asy
 
   expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeTruthy();
   expect(container.textContent).not.toContain("Continue with email");
+});
+
+test("HostedAuthPanel forwards an explicit homepage pasted-phone opt-in", async () => {
+  const { cleanup } = await renderClientComponent(
+    createElement(HostedAuthPanel, {
+      autoSendPastedPhoneNumber: true,
+      methods: ["phone", "telegram", "email"],
+    }),
+  );
+  cleanupRender = cleanup;
+
+  expect(mocks.hostedPhoneAuthProps?.autoSendPastedPhoneNumber).toBe(true);
 });
 
 test("HostedAuthPanel keeps a phone-less Telegram resume busy while completion is pending", async () => {

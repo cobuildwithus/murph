@@ -7,13 +7,14 @@ Updated: 2026-07-30
 ## Goal
 
 - Let the homepage login/signup phone form immediately request a verification
-  code when a paste or browser replacement supplies a valid phone number.
+  code when a whole-field paste supplies a valid phone number.
 - Keep ordinary typing on the existing button/Enter submission path.
 
 ## Success criteria
 
-- Pasting a valid local or international number uses the existing guarded
-  Privy send-code path exactly once.
+- Pasting a valid local or international number into an empty field or over a
+  full-field selection uses the existing guarded Privy send-code path exactly
+  once.
 - International paste updates the country selector before the code-entry state
   is shown.
 - Invalid pasted values, typed values, link flows, authenticated states,
@@ -44,7 +45,7 @@ Updated: 2026-07-30
 
 1. Port the still-relevant behavior from the preserved historical task commit
    onto current main.
-2. Detect paste/browser replacement at the shared input boundary and carry the
+2. Detect a whole-field paste at the shared input boundary and carry the
    resolved country with the changed national number.
 3. Auto-send from the input event through the current controller gates.
 4. Add regressions for paste, typing, invalid values, gating, link intent,
@@ -53,8 +54,9 @@ Updated: 2026-07-30
 
 ## Decisions
 
-- Treat `insertFromPaste` and `insertReplacementText` as explicit whole-value
-  sources. A change without one of those browser input types remains manual.
+- Treat `insertFromPaste` as an explicit whole-value source only when the paste
+  event targets an empty field or replaces the full current selection.
+  Browser replacements and partial edits remain manual.
 - Trigger the send from the input event rather than introducing candidate state
   and a second effect.
 - Preserve the manual button as fallback and accessibility affordance.
@@ -70,14 +72,25 @@ Updated: 2026-07-30
 
 ## Checkpoint evidence
 
-- The public auth panel is the only caller that opts into pasted-phone
-  auto-send. Settings and link flows retain manual submission.
+- Homepage-owned auth compositions explicitly opt into pasted-phone auto-send.
+  The reusable panel defaults to manual submission, with negative composition
+  proof for generic, family-invite, and group-invite dialogs.
 - The real phone input and hosted controller are exercised together for an
-  invalid paste, an ordinary typed value, and a valid international paste that
-  advances to code entry.
+  invalid paste, ordinary typing, a valid suffix paste, a browser replacement,
+  and a valid whole-field international paste that advances to code entry.
+- Preliminary specialist ReviewGPT found that the original opt-in was owned too
+  low in the generic panel and that input-type-only detection also classified
+  partial edits as whole-value submission. Both findings were accepted and
+  corrected without adding another state or side-effect owner. The review
+  supplied no patch artifact.
+- The required product-experience checklist was reapplied after remediation.
+  No finding remains: the homepage whole-field paste removes one redundant
+  action, partial edits retain the explicit send boundary, existing progress
+  and error states remain owned by the phone-auth controller, and other auth
+  journeys remain unchanged.
 - Passing local checks:
   - hosted phone-auth Vitest: 71 tests
-  - hosted auth-panel Vitest: 23 tests
+  - auth surface composition Vitest: 45 tests across 6 files
   - `apps/web` typecheck
   - scoped `apps/web` ESLint
   - frontend design-proof tests
@@ -91,5 +104,5 @@ Updated: 2026-07-30
   during setup on a pre-existing Cloudflare runner bundle-size budget overage.
 - The required Claude Fable UI review was attempted and ended at explicit usage
   credit exhaustion, so no Claude findings were available.
-- Preliminary specialist ReviewGPT, exact-head CI, parent final review, plan
-  closure, and the final ReviewGPT gate remain pending.
+- Exact-head CI, parent final review, plan closure, and the final ReviewGPT gate
+  remain pending.

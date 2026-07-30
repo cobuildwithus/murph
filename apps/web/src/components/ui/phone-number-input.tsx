@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useRef,
   useState,
   type ChangeEvent,
   type ComponentProps,
@@ -148,6 +149,8 @@ export function PhoneNumberInput({
     metadata?: PhoneNumberInputChangeMetadata,
   ) => void;
 }) {
+  const wholeFieldPastePendingRef = useRef(false);
+
   return (
     <div className={cn("flex gap-3", className)}>
       <CountryCodePicker
@@ -167,6 +170,11 @@ export function PhoneNumberInput({
         placeholder={selectedCountry.placeholder}
         inputSize={inputSize}
         value={value}
+        onPaste={(event) => {
+          wholeFieldPastePendingRef.current =
+            event.currentTarget.selectionStart === 0
+            && event.currentTarget.selectionEnd === event.currentTarget.value.length;
+        }}
         onChange={(event) => {
           const nextValue = event.currentTarget.value;
           const internationalNumber = splitInternationalPhoneNumberInput({
@@ -174,7 +182,11 @@ export function PhoneNumberInput({
             selectedCountry,
             value: nextValue,
           });
-          const autoSendCandidate = isPhoneInputAutoSendCandidate(event);
+          const autoSendCandidate = isPhoneInputAutoSendCandidate(
+            event,
+            wholeFieldPastePendingRef.current,
+          );
+          wholeFieldPastePendingRef.current = false;
 
           if (!internationalNumber) {
             onPhoneNumberChange(
@@ -210,17 +222,19 @@ export function PhoneNumberInput({
 
 function isPhoneInputAutoSendCandidate(
   event: ChangeEvent<HTMLInputElement>,
+  wholeFieldPastePending: boolean,
 ): boolean {
+  if (!wholeFieldPastePending) {
+    return false;
+  }
+
   const nativeEvent = event.nativeEvent;
 
   if (!("inputType" in nativeEvent) || typeof nativeEvent.inputType !== "string") {
     return false;
   }
 
-  return (
-    nativeEvent.inputType === "insertFromPaste"
-    || nativeEvent.inputType === "insertReplacementText"
-  );
+  return nativeEvent.inputType === "insertFromPaste";
 }
 
 const COUNTRY_TRIGGER_CLASS = cn(

@@ -214,6 +214,13 @@ describe("HostedPhoneAuth", () => {
       );
 
       await act(async () => {
+        setInputSelectionForTest(input, 0, 0);
+        input.dispatchEvent(
+          new rendered.window.Event("paste", {
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
         valueDescriptor?.set?.call(input, "+44 7400 123456");
         input.dispatchEvent(
           new rendered.window.InputEvent("input", {
@@ -243,6 +250,19 @@ describe("HostedPhoneAuth", () => {
 
       expect(onCountryChange).not.toHaveBeenCalled();
       expect(onPhoneNumberChange).toHaveBeenCalledWith("4155552671", undefined);
+      onPhoneNumberChange.mockClear();
+
+      await act(async () => {
+        valueDescriptor?.set?.call(input, "4155552672");
+        input.dispatchEvent(
+          new rendered.window.InputEvent("input", {
+            bubbles: true,
+            inputType: "insertReplacementText",
+          }),
+        );
+      });
+
+      expect(onPhoneNumberChange).toHaveBeenCalledWith("4155552672", undefined);
     } finally {
       await rendered.cleanup();
       vi.doUnmock("@/src/components/ui/combobox");
@@ -253,7 +273,7 @@ describe("HostedPhoneAuth", () => {
     }
   });
 
-  it("auto-sends a valid paste from the public phone form while ordinary typing stays manual", async () => {
+  it("auto-sends only a whole-field paste from the public phone form", async () => {
     vi.resetModules();
     vi.doMock("@/src/hooks/use-mobile", () => ({
       useIsMobile: () => false,
@@ -315,6 +335,13 @@ describe("HostedPhoneAuth", () => {
       );
 
       await act(async () => {
+        setInputSelectionForTest(input, 0, 0);
+        input.dispatchEvent(
+          new rendered.window.Event("paste", {
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
         valueDescriptor?.set?.call(input, "123");
         input.dispatchEvent(
           new rendered.window.InputEvent("input", {
@@ -328,7 +355,7 @@ describe("HostedPhoneAuth", () => {
       expect(mocks.sendCode).not.toHaveBeenCalled();
 
       await act(async () => {
-        valueDescriptor?.set?.call(input, "4155552671");
+        valueDescriptor?.set?.call(input, "415");
         input.dispatchEvent(
           new rendered.window.InputEvent("input", {
             bubbles: true,
@@ -342,6 +369,49 @@ describe("HostedPhoneAuth", () => {
       findSendVerificationCodeButton(rendered.container);
 
       await act(async () => {
+        setInputSelectionForTest(input, input.value.length, input.value.length);
+        input.dispatchEvent(
+          new rendered.window.Event("paste", {
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+        valueDescriptor?.set?.call(input, "4155552671");
+        input.dispatchEvent(
+          new rendered.window.InputEvent("input", {
+            bubbles: true,
+            inputType: "insertFromPaste",
+          }),
+        );
+        await flushHostedPhoneAuthEffects();
+      });
+
+      expect(mocks.sendCode).not.toHaveBeenCalled();
+      findSendVerificationCodeButton(rendered.container);
+
+      await act(async () => {
+        setInputSelectionForTest(input, 9, 10);
+        valueDescriptor?.set?.call(input, "4155552672");
+        input.dispatchEvent(
+          new rendered.window.InputEvent("input", {
+            bubbles: true,
+            inputType: "insertReplacementText",
+          }),
+        );
+        await flushHostedPhoneAuthEffects();
+      });
+
+      expect(mocks.sendCode).not.toHaveBeenCalled();
+      findSendVerificationCodeButton(rendered.container);
+
+      await act(async () => {
+        setInputSelectionForTest(input, 0, input.value.length);
+        input.dispatchEvent(
+          new rendered.window.Event("paste", {
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
         valueDescriptor?.set?.call(input, "+44 7400 123456");
         input.dispatchEvent(
           new rendered.window.InputEvent("input", {
@@ -4035,6 +4105,23 @@ function findSendVerificationCodeButton(container: HTMLElement): HTMLButtonEleme
 
   assert.ok(button);
   return button;
+}
+
+function setInputSelectionForTest(
+  input: HTMLInputElement,
+  selectionStart: number,
+  selectionEnd: number,
+) {
+  Object.defineProperties(input, {
+    selectionEnd: {
+      configurable: true,
+      value: selectionEnd,
+    },
+    selectionStart: {
+      configurable: true,
+      value: selectionStart,
+    },
+  });
 }
 
 async function loadHostedInvitePhoneAuthHarness(input?: {
