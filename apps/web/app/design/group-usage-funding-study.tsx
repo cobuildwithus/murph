@@ -210,6 +210,17 @@ const DESIGN_UNAVAILABLE_USAGE_STATUS: HostedPlanUsageStatus = {
   status: "unavailable",
 };
 
+const DESIGN_TRIAL_CONVERSION_USAGE_STATUS: HostedPlanUsageStatus = {
+  generatedAt: "2026-07-22T12:00:00.000Z",
+  reason: "trial_conversion_pending",
+  recommendedAction: {
+    kind: "start_pulse",
+    label: "Start Pulse",
+    url: "/settings#subscription",
+  },
+  status: "unavailable",
+};
+
 const DESIGN_EXHAUSTED_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
   ...DESIGN_PERSONAL_USAGE_STATUS,
   remainingPercent: 0,
@@ -439,6 +450,12 @@ function PersonalUsageCreditOwnerStudy() {
         state="exhausted-without-credit"
         usageStatus={DESIGN_EXHAUSTED_USAGE_STATUS}
       />
+      <PersonalUsageCreditState
+        canStartPaidPulse
+        label="Pulse trial ended"
+        state="trial-conversion"
+        usageStatus={DESIGN_TRIAL_CONVERSION_USAGE_STATUS}
+      />
       <div
         className="flex flex-col gap-3"
         data-design-state="fulfilled-with-overall-usage"
@@ -480,6 +497,7 @@ function PersonalUsageCreditOwnerStudy() {
 
 function PersonalUsageCreditState(props: {
   allowHistoryInteraction?: boolean;
+  canStartPaidPulse?: boolean;
   label: string;
   state: string;
   usageActivityDetail?: ReactNode;
@@ -508,6 +526,7 @@ function PersonalUsageCreditState(props: {
         <HostedBillingSettings
           authenticated
           billingStatus="active"
+          canStartPaidPulse={props.canStartPaidPulse}
           currentBillingPhase="paid"
           currentBillingPlanCode="launch_monthly"
           payerMemberId={DESIGN_PAYER_MEMBER_ID}
