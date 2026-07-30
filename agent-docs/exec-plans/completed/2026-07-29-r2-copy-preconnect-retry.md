@@ -1,8 +1,8 @@
 # Bound R2 CopyObject retries to proven pre-connect timeouts
 
-Status: active
+Status: completed
 Created: 2026-07-29
-Updated: 2026-07-29
+Updated: 2026-07-30
 
 ## Goal
 
@@ -18,16 +18,17 @@ Updated: 2026-07-29
   one-shot and fail closed.
 - Focused Cloudflare tests and typecheck pass, ReviewGPT returns no unresolved
   accepted finding, and exact-head CI is green.
-- A fresh isolated destination rehearsal can run without any production R2
-  write, delete, routing, deployment, or downtime.
+- The reviewed copier is ready for a fresh isolated-destination rehearsal
+  without any production R2 write, delete, routing, deployment, or downtime.
 
 ## Scope
 
 - In scope: the online CopyObject request boundary, focused regression tests,
-  ReviewGPT/CI proof, and the production-read rehearsal.
+  and ReviewGPT/CI proof needed before the production-read rehearsal.
 - Out of scope: changing production Worker configuration, production R2
-  mutation, destination cleanup, cutover, or account-deletion restoration
-  before the rehearsal reaches a safe terminal result.
+  mutation, destination cleanup, cutover, the live rehearsal itself, or
+  account-deletion restoration before the rehearsal reaches a safe terminal
+  result.
 
 ## Constraints
 
@@ -51,7 +52,8 @@ Updated: 2026-07-29
 2. Add focused success and fail-closed regression coverage.
 3. Run focused verification, preliminary specialists, parent review, final
    ReviewGPT, and exact-head CI.
-4. Land the fix and run the full isolated rehearsal against a fresh bucket.
+4. Land the fix, then hand off to the separate live rehearsal operation against
+   a fresh bucket.
 
 ## Decisions
 
@@ -74,3 +76,4 @@ Updated: 2026-07-29
   failures make one PUT attempt; no production resource is mutated.
 - Current focused result: 37 online-copy tests and Cloudflare typecheck pass
   after the redirect and response-drain remediations.
+Completed: 2026-07-30
