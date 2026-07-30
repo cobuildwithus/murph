@@ -1,6 +1,6 @@
 # Enable explicit group-room model selection
 
-Status: active
+Status: completed
 Created: 2026-07-30
 Updated: 2026-07-30
 
@@ -68,9 +68,11 @@ Updated: 2026-07-30
 5. [x] Commit, push, open the PR, and run the preliminary
    product-experience/prompt/coverage
    specialist pass concurrently with exact-head CI.
-6. [ ] Complete parent review and verification, close this plan, then run final
-   ReviewGPT and the exact-head merge-ready preflight.
-7. [ ] Merge the green PR and retire the clean inactive task worktree.
+6. [x] Complete parent review and final focused verification on the rebased
+   implementation head.
+7. [x] Close this implementation plan; final ReviewGPT, exact-head CI and
+   preflight, merge, and worktree retirement continue in the PR completion
+   lane.
 
 ## Decisions
 
@@ -88,6 +90,11 @@ Updated: 2026-07-30
   second monolithic cross-runtime harness because the existing focused runtime
   and hosted-web tests already prove the invocation-boundary projection and
   durable room-member preference behavior.
+- Parent product-experience revalidation found the purpose complete and the
+  journey coherent: an explicit current-room request reports a next-turn save,
+  the running reply keeps its starting model, and the separately accepted
+  follow-up resumes the same native thread with the saved room model. No new UI
+  or participant-private settings surface is introduced.
 
 ## Verification
 
@@ -107,9 +114,11 @@ Updated: 2026-07-30
     1 passed.
   - Generic hot-runtime next-phase configuration projection scenario: 1 passed.
   - Assistant-engine and hosted-web typechecks: passed.
+  - Agent docs drift, diff whitespace, and privacy/secret-pattern scans: passed.
   - Complete provider input capture using pinned Codex App Server and
     `gpt-tokenizer` 3.4.0 `o200k_base`: personal 121,334 bytes / 26,538 tokens
     at base and head; group 105,043 bytes / 23,078 tokens at base and 106,334
     bytes / 23,386 tokens at head. The +1,291-byte / +308-token group delta
     (+1.242% / +1.349%) is the generated room tool (+1,128 bytes / +275
     tokens) plus the corrected group guidance (+163 bytes / +33 tokens).
+Completed: 2026-07-30
