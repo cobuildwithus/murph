@@ -395,9 +395,80 @@ describe('executeGenerateImageTool', () => {
       providerRequestOrdinal: 1,
     })
 
+    expect(result).toMatchObject({
+      rpcSuccess: false,
+      rpcText: expect.stringMatching(
+        /^image generation failed: ASSISTANT_IMAGE_GENERATION_FAILED \(stage=transport, TypeError, \d+ms\)$/u,
+      ),
+    })
+  })
+
+  it('bounds and sanitizes the structured OpenAI error message', async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({
+        error: {
+          code: 'invalid_prompt',
+          internal_debug: 'private-body-field-must-not-appear',
+          message: `  Actual\u0000 OpenAI detail ${'x'.repeat(400)}  `,
+        },
+      }, {
+        headers: {
+          'x-request-id': 'req_image_bounded',
+        },
+        status: 400,
+      }))
+
+    const result = await executeGenerateImageTool({
+      args: {
+        alt: null,
+        outputFormat: 'png',
+        prompt: 'Render the object.',
+        quality: 'medium',
+        size: '1024x1024',
+      },
+      env: {
+        OPENAI_API_KEY: 'openai-test-key',
+      },
+      fetchImpl,
+      providerRequestOrdinal: 1,
+    })
+
+    expect(result.rpcSuccess).toBe(false)
+    expect(result.rpcText).not.toContain('\u0000')
+    expect(result.rpcText).not.toContain('private-body-field-must-not-appear')
+    const providerMessage = result.rpcText?.split('): ')[1]
+    expect(providerMessage).toMatch(/^Actual OpenAI detail x+…$/u)
+    expect(Array.from(providerMessage ?? '')).toHaveLength(300)
+  })
+
+  it('does not expose an unstructured OpenAI error body', async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response('upstream body must-not-appear', {
+        headers: {
+          'openai-request-id': 'req_image_unstructured',
+        },
+        status: 502,
+      }))
+
+    const result = await executeGenerateImageTool({
+      args: {
+        alt: null,
+        outputFormat: 'png',
+        prompt: 'Render the object.',
+        quality: 'medium',
+        size: '1024x1024',
+      },
+      env: {
+        OPENAI_API_KEY: 'openai-test-key',
+      },
+      fetchImpl,
+      providerRequestOrdinal: 1,
+    })
+
     expect(result).toEqual({
       rpcSuccess: false,
-      rpcText: 'image generation failed',
+      rpcText:
+        'image generation failed: ASSISTANT_IMAGE_GENERATION_FAILED (http 502, request req_image_unstructured)',
     })
   })
 
@@ -427,9 +498,11 @@ describe('executeGenerateImageTool', () => {
       providerRequestOrdinal: 1,
     })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       rpcSuccess: false,
-      rpcText: 'image generation failed',
+      rpcText: expect.stringMatching(
+        /^image generation failed: ASSISTANT_IMAGE_GENERATION_FAILED \(stage=transport, timed out, TimeoutError, \d+ms\)$/u,
+      ),
     })
   })
 
