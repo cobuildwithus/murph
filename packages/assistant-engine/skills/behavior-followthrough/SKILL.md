@@ -389,12 +389,30 @@ Automation instructions should include:
 - standard/tiny/fallback versions
 - anchor or likely action window
 - support style and privacy boundary
+- one exact availability line: `Availability conflict policy: fixed` or `Availability conflict policy: skip-when-busy`
 - whether this occurrence is a cue-only reminder or an explicitly authorized accountability check-in
 - skip conditions
 - repair-after policy
 - review point
 - for an accountability check-in, the action window, completion evidence to inspect, expected data freshness, and complete/already-reported/unknown behavior
 - whether visual or voice support is welcome, what it should add, and any shared-channel permission
+
+Use `Availability conflict policy: fixed` by default and always for an exact
+user-directed time, medication or clinician-directed support, safety-critical
+support, or any automation without explicit calendar-aware-delivery consent.
+Use `skip-when-busy` only after the user explicitly accepts calendar-aware
+delivery for this support or grants a durable general preference. Calendar
+connection alone is not consent. Before changing the policy, list configured
+Google Calendar and Outlook accounts. With none, keep the reminder fixed and
+offer the connection step. With more than one, keep it fixed until the user
+chooses one. A `skip-when-busy` automation must include exactly one source
+line, `Availability source policy: calendar-only`, plus one exact account line,
+`Availability calendar account: <toolkit> / <account-id>`, using the selected
+account's returned stable id. After saving, explain that Murph will refresh the
+policy in the background, usually within a day, and that the reminder sends
+normally until one succeeds. A successful refresh is a short evidence lease
+for occurrences scheduled within 24 hours. Disconnecting the calendar stops
+future refreshes but can take up to one day to stop skips from that lease.
 
 Automation instructions should not include:
 - fixed copy to repeat every time
@@ -465,6 +483,35 @@ same occurrence. A related reply may use any natural wording that answers,
 defers, declines, changes, pauses, or ends this support loop; unrelated
 conversation does not keep it alive. Backing off protects the conversation
 cadence and is not evidence that the behavior was missed.
+
+### Repair a mistimed interruption
+
+When the user replies to recent proactive support with a concrete reason the
+moment is unavailable or inappropriate—such as a meeting, flight, driving,
+sleep, illness, work, or a social obligation—treat it as feedback about the
+support loop, not as a miss or a motivation problem.
+
+- Briefly own the mistiming before answering an adjacent literal question.
+- Resolve the current occurrence. Do not push the standard or tiny version when
+  the context itself makes the action inappropriate, and do not carry it as
+  reminder debt.
+- A one-off conflict changes only this occurrence. A stated bounded period may
+  justify a bounded pause. A recurring conflict repairs the anchor, schedule,
+  or support instructions.
+- If the owning support can be repaired under current authorization, do that
+  before discussing optional integrations. Claim a change only after the
+  canonical tool result proves it.
+- If calendar-aware delivery would prevent recurrence and is not connected or
+  authorized, offer that one specific improvement after handling the current
+  interruption. Do not pitch email and calendar as a generic capability menu.
+- A clear acceptance authorizes the stated scope only. Save a durable preference
+  only when the user grants a broad ongoing preference, and patch eligible
+  support instructions to `Availability conflict policy: skip-when-busy`.
+  Bind it to one exact eligible calendar account with
+  `Availability source policy: calendar-only` and
+  `Availability calendar account: <toolkit> / <account-id>`.
+- Do not save a one-off meeting or flight as durable memory unless the user
+  describes a recurring pattern or a bounded period that will remain useful.
 
 ## Opt-in accountability check-ins
 

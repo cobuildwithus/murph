@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-07-29
+Last verified: 2026-07-31
 
 ## Accepted-Message Targeting
 
@@ -96,6 +96,39 @@ authority, and this adds no pre-model roster work, standalone Web query,
 decrypted contact roster, or compatibility branch. The legacy `read_current`
 wire is unchanged, and assistant-engine still removes the global member id and
 legacy roster handle before any group summary reaches the model.
+
+Immutable hosted memory consolidation remains an isolated one-shot automation
+with its network-denied memory-write profile. Reminder availability uses no
+model turn or separate automation: the existing hosted background automation
+pass deterministically scans active private automations that explicitly store
+`skip-when-busy`, `calendar-only`, and one exact Google Calendar or Outlook
+account binding; exact-time automations are ineligible. When the stored snapshot
+is missing or reaches its 23-hour refresh deadline,
+host code derives the exact account and current seven-day provider request,
+caps the result, reduces it to normalized busy timestamps, rereads the
+automation, and performs a version-fenced suffix replacement. Complete empty
+reads persist an empty snapshot so the same canonical `generatedAt` field also
+bounds refresh cadence. The pass returns the earliest next refresh deadline to
+the existing workspace checkpoint and Temporal timer owner, leaving one hour of
+headroom before delivery rejects 24-hour-old evidence without adding another
+scheduler or state owner. Foreground conversation admission aborts an in-flight
+calendar read through the existing background-maintenance signal; runtime
+shutdown remains the fallback cancellation signal. Ordinary
+user-authored saves and instruction patches strip the engine-owned suffix.
+Changing a reminder to an exact-time schedule atomically replaces
+`skip-when-busy` with `fixed` and removes its source, account, and snapshot.
+Scheduled delivery ignores it unless current policy/source/account
+authorization remains exact and the snapshot is canonical, unexpired, and
+covers a non-exact-time occurrence scheduled within 24 hours of generation. The
+snapshot is host-only derived data and is stripped from the instruction prompt
+before any model-backed notification turn. That snapshot is
+a short derived-data lease: disconnect or provider revocation stops future
+refreshes but does not synchronously cancel already-derived busy timestamps.
+Policy removal or account replacement invalidates the lease immediately;
+provider failure, incomplete pagination, malformed or older evidence, and
+concurrent edits send normally. Raw calendar content never reaches a model,
+memory, automation instructions, or logs, and normalized busy timestamps never
+reach a model prompt.
 
 Each synthetic hosted group runtime may additionally keep one assistant-authored
 `group-room-model` derived knowledge page. A twice-weekly managed automation

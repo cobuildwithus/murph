@@ -15,6 +15,7 @@ export {
   reconcileAutomationSupportSeriesNamespace,
 } from "./automation.ts";
 export * from "./automation.ts";
+export * from "./automation-availability.ts";
 export * from "./scheduled-logs.ts";
 export * from "./memory.ts";
 export {
