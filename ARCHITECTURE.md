@@ -106,10 +106,14 @@ cannot supply provider arguments, dates, an account, timestamps, or replacement
 instructions. The ordinary automation owner strips the engine-owned suffix
 from user-authored saves and instruction patches, while scheduled delivery
 ignores the suffix unless current policy/source/account authorization remains
-exact and the snapshot is canonical, unexpired, and at most 24 hours old.
-Provider failure, incomplete pagination, revocation, malformed or stale
-evidence, and concurrent edits therefore send normally. Raw calendar content
-never reaches the model, memory, automation instructions, or logs.
+exact and the snapshot is canonical, unexpired, and covers an occurrence
+scheduled within 24 hours of generation. That snapshot is a short derived-data
+lease: disconnect or provider revocation stops future refreshes but does not
+synchronously cancel already-derived busy timestamps. Policy removal or account
+replacement invalidates the lease immediately; provider failure, incomplete
+pagination, malformed or older evidence, and concurrent edits send normally.
+Raw calendar content never reaches the model, memory, automation instructions,
+or logs.
 
 Each synthetic hosted group runtime may additionally keep one assistant-authored
 `group-room-model` derived knowledge page. A twice-weekly managed automation

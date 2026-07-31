@@ -1267,6 +1267,12 @@ describe('applyMurphManagedAutomations', () => {
     expect(reminderSeed.instructions).toContain(
       'action: "refresh_calendar_availability"',
     )
+    expect(reminderSeed.instructions).toContain(
+      'A failed first refresh leaves the policy pending',
+    )
+    expect(reminderSeed.instructions).toContain(
+      'does not synchronously cancel that lease',
+    )
     expect(reminderSeed.instructions).not.toContain('vault-cli memory upsert')
     expect(reminderSeed.instructions).not.toContain('travel-confirmation')
     expect(reminderSeed.instructions).toContain(

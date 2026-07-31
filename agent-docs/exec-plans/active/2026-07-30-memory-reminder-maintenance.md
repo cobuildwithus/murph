@@ -94,7 +94,9 @@ Updated: 2026-07-30
    suppresses a reminder.
    Mitigation: Ordinary instruction writes strip the owned suffix; refresh
    revalidates the source/account/version after the read; delivery requires
-   exact current authorization and canonical evidence no older than 24 hours.
+   exact current policy/account authorization and a canonical evidence lease
+   for an occurrence scheduled within 24 hours of generation. Disconnect stops
+   future refreshes but can take up to one day to age out an existing lease.
 
 ## Tasks
 
@@ -127,8 +129,13 @@ Updated: 2026-07-30
   separate network-denied reminder maintenance turn that can read only
   `bank/automations` and has no memory authority.
 - A clean empty read removes the old block. Failed or incomplete refreshes
-  leave instructions unchanged, but delivery ignores evidence more than 24
-  hours old so failure remains fail-open.
+  leave instructions unchanged, but delivery ignores evidence for occurrences
+  scheduled more than 24 hours after generation so failure remains fail-open.
+- Round 2 retrospective chose a bounded derived-data lease instead of a live
+  account-status network check on every occurrence. Setup remains pending until
+  the first successful refresh. Disconnect/revoke prevents future refreshes but
+  may leave an issued lease usable for occurrences scheduled within 24 hours;
+  policy removal or account replacement invalidates it immediately.
 
 ## Verification
 

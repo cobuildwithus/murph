@@ -436,6 +436,12 @@ describe('member reminder maintenance policy', () => {
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'Availability calendar account: <toolkit> / <account-id>',
     )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'until one succeeds, the reminder sends normally',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'can take up to one day to stop skips',
+    )
     const skill = await readFile(
       path.join(
         resolveAssistantSkillsRoot(),
@@ -452,6 +458,8 @@ describe('member reminder maintenance policy', () => {
     expect(skill).toContain(
       'Availability calendar account: <toolkit> / <account-id>',
     )
+    expect(skill).toMatch(/the reminder sends\s+normally until one succeeds/u)
+    expect(skill).toMatch(/can take up to one day to stop skips/u)
   })
 })
 

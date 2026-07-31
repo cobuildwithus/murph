@@ -408,8 +408,11 @@ offer the connection step. With more than one, keep it fixed until the user
 chooses one. A `skip-when-busy` automation must include exactly one source
 line, `Availability source policy: calendar-only`, plus one exact account line,
 `Availability calendar account: <toolkit> / <account-id>`, using the selected
-account's returned stable id. After saving, explain that protection begins
-after the next overnight refresh; do not claim it is already active.
+account's returned stable id. After saving, explain that Murph will try to
+activate the policy on the next overnight refresh and that the reminder sends
+normally until one succeeds. A successful refresh is a short evidence lease
+for occurrences scheduled within 24 hours. Disconnecting the calendar stops
+future refreshes but can take up to one day to stop skips from that lease.
 
 Automation instructions should not include:
 - fixed copy to repeat every time
