@@ -193,7 +193,6 @@ export interface HostedMemberAssistantNotificationState {
 }
 
 export interface HostedMemberMessagingSetupState {
-  emailLinked: boolean;
   identity: Pick<HostedMemberIdentityState, "phoneLookupKey"> | null;
   routing: Pick<
     HostedMemberRoutingStateSnapshot,
@@ -781,11 +780,6 @@ export async function readHostedMemberMessagingSetupState(input: {
       id: input.memberId,
     },
     select: {
-      emailAuthorization: {
-        select: {
-          verifiedEmailVerifiedAt: true,
-        },
-      },
       identity: {
         select: {
           phoneLookupKey: true,
@@ -804,9 +798,6 @@ export async function readHostedMemberMessagingSetupState(input: {
     : null;
 
   return {
-    emailLinked: Boolean(
-      memberRecord.emailAuthorization?.verifiedEmailVerifiedAt,
-    ),
     identity: memberRecord.identity
       ? {
           phoneLookupKey: memberRecord.identity.phoneLookupKey,
