@@ -392,6 +392,31 @@ describe("deploy artifact validation", () => {
     );
   });
 
+  it("rejects a runner bundle with a mismatched Health Commons biomarker direction catalog hash", async () => {
+    const fixture = await createDeployArtifactFixture();
+
+    await writeFile(
+      path.join(
+        fixture.runnerBundleDir,
+        "node_modules",
+        "@murphai",
+        "health-commons",
+        "generated",
+        "biomarker-desired-directions.json",
+      ),
+      `${JSON.stringify({
+        ...createHealthCommonsRuntimeArtifacts().biomarkerDesiredDirections,
+        catalogHash: "sha256:other",
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    await rewriteRunnerBundleManifest(fixture);
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      "Runner Health Commons runtime artifacts have mismatched catalog hashes",
+    );
+  });
+
   it("rejects a runner bundle with inconsistent Health Commons compact protocol keys", async () => {
     const fixture = await createDeployArtifactFixture();
 

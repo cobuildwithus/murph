@@ -13,10 +13,11 @@ Key decisions:
 - Generate a compact biomarker desired-direction artifact owned by `packages/health-commons`.
 - Add that compact artifact to the runner-specific Health Commons package allowlist and deploy validation instead of restoring `generated/web/**`.
 - Make progress-card composition recover only from a missing compact artifact by passing an empty direction snapshot and appending a warning.
+- Relay only that exact missing-direction warning through every member-facing progress-card owner; keep unrelated renderer diagnostics private.
 - Add direct packed-package coverage that resolves a known desired direction from the extracted runner artifact and direct use-case coverage for missing-asset neutral recovery.
 
 State:
-- Candidate ready for exact-head PR review.
+- Accepted first-round findings remediated locally; correction candidate is ready to commit, push, and review.
 
 Done:
 - Reproduced the incompatible current contracts: hosted packaging omits and rejects `generated/web/**`, while progress-card composition reads `generated/web/browse/biomarkers.json` through the pinned package root.
@@ -27,12 +28,17 @@ Done:
 - Added missing-file recovery that preserves the progress card with neutral sentiment and an explicit warning while malformed artifacts still fail closed.
 - Proved the packaged success path by extracting the runner tarball and resolving a known direction from the compact artifact.
 - Passed the focused Health Commons runtime and verification suites, the full affected vault-usecase test file, the full affected Cloudflare packaging and deploy-validation test files, and all three touched-owner typechecks.
+- Preliminary specialist ReviewGPT and final ReviewGPT round 1 independently found that the missing-direction warning stopped at command JSON instead of being guaranteed member-facing. The specialist pass also requested direct catalog-hash mismatch coverage.
+- Added the exact branch-specific same-response disclosure to manual active-experiment context, day-four and final lifecycle moments, weekly health digest, and experiment-onboarding guidance. Added owner tests for every route and did not expose other renderer warnings.
+- Applied and verified the specialist's narrow catalog-hash mismatch regression test.
+- Passed four focused assistant owner suites (97 tests), assistant-engine typecheck, and the affected Cloudflare deploy-artifact suite (42 tests).
+- Captured complete first provider-visible requests through the pinned real Codex App Server with a synthetic scheduled weekly direct/group turn and active experiment, `gpt-5.6-terra`, low reasoning, code mode, and `gpt-tokenizer` 3.4.0 `o200k_harmony`: individual 131,789 bytes / 28,470 tokens at base and 132,309 / 28,566 at head; group 118,331 / 25,541 at base and 118,591 / 25,589 at head.
 
 Now:
-- Commit and push the exact review candidate, open the PR, and launch the required preliminary specialist and final ReviewGPT gates concurrently with CI.
+- Commit and push the combined first-round remediation, update the PR evidence, and launch final ReviewGPT correction round 2 against that exact head.
 
 Next:
-- Resolve any accepted review findings, complete parent final review and merge-conflict proof, then archive this plan with the final scoped commit.
+- Require green correction-head CI and ReviewGPT, complete parent product-experience and final diff review plus merge-conflict proof, then archive this plan with the final scoped commit.
 
 Open questions (UNCONFIRMED if needed):
 - None blocking implementation.
@@ -43,6 +49,11 @@ Working set (files/ids/commands):
 - `packages/health-commons/test/runtime.test.ts`
 - `packages/vault-usecases/src/usecases/experiment-journal-vault.ts`
 - `packages/vault-usecases/test/**`
+- `packages/assistant-engine/src/assistant/active-experiment-context.ts`
+- `packages/assistant-engine/src/assistant/experiment-support-automations.ts`
+- `packages/assistant-engine/src/assistant/managed-automations.ts`
+- `packages/assistant-engine/skills/experiment-onboarding/SKILL.md`
+- `packages/assistant-engine/test/**`
 - `apps/cloudflare/scripts/runner-bundle/workspace-artifacts.ts`
 - `apps/cloudflare/scripts/deploy-artifacts.ts`
 - `apps/cloudflare/test/runner-bundle-workspace-artifacts.test.ts`

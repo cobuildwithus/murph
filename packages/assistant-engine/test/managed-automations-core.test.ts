@@ -266,6 +266,12 @@ describe('applyMurphManagedAutomations core integration', () => {
       'Never make Murph\'s tracking mismatch the user-facing takeaway',
     )
     expect(record?.instructions).toContain(
+      '`biomarker desired directions unavailable; mover sentiment shown as neutral`',
+    )
+    expect(record?.instructions).toContain(
+      'say in the same response that direction context was unavailable',
+    )
+    expect(record?.instructions).toContain(
       '{"kind":"skip","privateSummary":"No weekly digest cleared the memorability bar."}',
     )
 
