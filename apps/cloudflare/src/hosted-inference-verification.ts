@@ -19,6 +19,7 @@ import {
 } from "./runner-egress-custom-inference.ts";
 
 const HOSTED_INFERENCE_VERIFICATION_REVISION = 1;
+const HOSTED_INFERENCE_VERIFICATION_TOTAL_TIMEOUT_MS = 60_000;
 const HOSTED_INFERENCE_VERIFICATION_TIMEOUT_MS = 20_000;
 const HOSTED_INFERENCE_VERIFICATION_RESPONSE_MAX_BYTES = 2 * 1024 * 1024;
 const HOSTED_INFERENCE_VERIFICATION_TOOL_NAME = "murph_verify_connection";
@@ -40,8 +41,16 @@ export class HostedInferenceVerificationError extends Error {
 
 export async function verifyHostedInferenceConnection(input: {
   request: CloudflareHostedInferenceVerificationRequest;
+  signal?: AbortSignal;
   upstreamFetchImpl?: typeof fetch;
 }): Promise<CloudflareHostedInferenceVerificationResult> {
+  const deadlineAt = Date.now() + HOSTED_INFERENCE_VERIFICATION_TOTAL_TIMEOUT_MS;
+  const timeoutSignal = AbortSignal.timeout(
+    HOSTED_INFERENCE_VERIFICATION_TOTAL_TIMEOUT_MS,
+  );
+  const signal = input.signal
+    ? AbortSignal.any([input.signal, timeoutSignal])
+    : timeoutSignal;
   const target = buildVerificationTarget(input.request);
   const firstInput = buildToolProbeInput();
   const toolResponse = await sendVerificationRequest({
@@ -57,6 +66,8 @@ export async function verifyHostedInferenceConnection(input: {
       },
       tools: [buildVerificationTool()],
     },
+    deadlineAt,
+    signal,
     target,
     upstreamFetchImpl: input.upstreamFetchImpl,
   });
@@ -95,6 +106,8 @@ export async function verifyHostedInferenceConnection(input: {
       tool_choice: "none",
       tools: [buildVerificationTool()],
     },
+    deadlineAt,
+    signal,
     target,
     upstreamFetchImpl: input.upstreamFetchImpl,
   });
@@ -124,6 +137,8 @@ export async function verifyHostedInferenceConnection(input: {
         max_output_tokens: 64,
         model: buildHostedCustomInferenceModelAlias(target.revision),
       },
+      deadlineAt,
+      signal,
       target,
       upstreamFetchImpl: input.upstreamFetchImpl,
     });
@@ -132,11 +147,6 @@ export async function verifyHostedInferenceConnection(input: {
       HOSTED_INFERENCE_VERIFICATION_IMAGE_NONCE,
     );
   }
-
-  await verifyCancellation({
-    target,
-    upstreamFetchImpl: input.upstreamFetchImpl,
-  });
 
   return {
     verificationProfile: HOSTED_CUSTOM_INFERENCE_VERIFICATION_PROFILE,
@@ -189,12 +199,24 @@ function buildVerificationTool(): Record<string, unknown> {
 
 async function sendVerificationRequest(input: {
   body: Record<string, unknown>;
+  deadlineAt: number;
+  signal: AbortSignal;
   target: HostedInferenceRuntimeTarget;
   upstreamFetchImpl?: typeof fetch;
 }): Promise<Record<string, unknown>> {
+  const remainingMs = input.deadlineAt - Date.now();
+  if (input.signal.aborted || remainingMs <= 0) {
+    throw new HostedInferenceVerificationError();
+  }
   const response = await fetchVerificationUpstream({
     body: input.body,
-    signal: AbortSignal.timeout(HOSTED_INFERENCE_VERIFICATION_TIMEOUT_MS),
+    signal: AbortSignal.any([
+      input.signal,
+      AbortSignal.timeout(Math.min(
+        HOSTED_INFERENCE_VERIFICATION_TIMEOUT_MS,
+        remainingMs,
+      )),
+    ]),
     target: input.target,
     upstreamFetchImpl: input.upstreamFetchImpl,
   });
@@ -253,54 +275,6 @@ async function fetchVerificationUpstream(input: {
     );
   } catch {
     throw new HostedInferenceVerificationError();
-  }
-}
-
-async function verifyCancellation(input: {
-  target: HostedInferenceRuntimeTarget;
-  upstreamFetchImpl?: typeof fetch;
-}): Promise<void> {
-  const controller = new AbortController();
-  let observedChunk = false;
-  const timeout = setTimeout(
-    () => controller.abort(),
-    HOSTED_INFERENCE_VERIFICATION_TIMEOUT_MS,
-  );
-  try {
-    const response = await fetchVerificationUpstream({
-      body: {
-        input:
-          "Return a short streamed response to this synthetic cancellation probe.",
-        max_output_tokens: 64,
-        model: buildHostedCustomInferenceModelAlias(input.target.revision),
-      },
-      signal: controller.signal,
-      target: input.target,
-      upstreamFetchImpl: input.upstreamFetchImpl,
-    });
-    if (
-      !response.ok
-      || !response.body
-      || response.headers.get("content-type")?.split(";", 1)[0]?.trim()
-        !== "text/event-stream"
-    ) {
-      await response.body?.cancel();
-      throw new HostedInferenceVerificationError();
-    }
-    const reader = response.body.getReader();
-    const first = await reader.read();
-    observedChunk = !first.done && Boolean(first.value?.byteLength);
-    controller.abort();
-    await reader.cancel().catch(() => undefined);
-    reader.releaseLock();
-    if (!observedChunk) {
-      throw new HostedInferenceVerificationError();
-    }
-  } catch (error) {
-    if (error instanceof HostedInferenceVerificationError) throw error;
-    if (!observedChunk) throw new HostedInferenceVerificationError();
-  } finally {
-    clearTimeout(timeout);
   }
 }
 

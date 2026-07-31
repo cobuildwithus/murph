@@ -514,7 +514,10 @@ and signed resolution routes with both `HOSTED_CUSTOM_INFERENCE_ENABLED` and
 `HOSTED_CUSTOM_CHAT_COMPLETIONS_ENABLED` set to `0`. Then deploy Cloudflare and
 the runner bundle with `container_rollout=immediate`, require managed-container
 smoke to report the exact new runner fingerprint, and exercise the native
-Responses synthetic text/tool/cancellation probes through the deployed Worker.
+Responses synthetic tool/final-response probes through the deployed Worker.
+The verification operation has one 60-second Worker deadline inside the
+75-second Web control timeout; cancellation propagation is covered at the
+Worker stream-adapter boundary instead of claimed as a remote capability.
 The invocation target uses the existing provider-egress signing secret through
 a context-separated key derivation; this release adds no custom-inference
 secret or binding.

@@ -44,7 +44,10 @@ const inferenceVerificationRoute = {
       const request = parseCloudflareHostedInferenceVerificationRequest(
         requireJsonObject(JSON.parse(payload)),
       );
-      return json(await verifyHostedInferenceConnection({ request }));
+      return json(await verifyHostedInferenceConnection({
+        request,
+        signal: context.request.signal,
+      }));
     } catch (error) {
       if (
         error instanceof HostedInferenceVerificationError

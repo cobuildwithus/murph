@@ -15,7 +15,7 @@ const REQUEST = {
 };
 
 describe("hosted inference verification", () => {
-  it("proves the synthetic tool loop, final text, and cancellation", async () => {
+  it("proves the synthetic tool loop and final text", async () => {
     const observed: Request[] = [];
     const upstreamFetchImpl = vi.fn(async (request: RequestInfo | URL) => {
       const normalized = request instanceof Request
@@ -71,18 +71,7 @@ describe("hosted inference verification", () => {
           },
         ]);
       }
-      return new Response(
-        new ReadableStream<Uint8Array>({
-          start(controller) {
-            controller.enqueue(
-              new TextEncoder().encode(
-                'event: response.created\ndata: {"type":"response.created"}\n\n',
-              ),
-            );
-          },
-        }),
-        { headers: { "content-type": "text/event-stream" } },
-      );
+      throw new Error("Unexpected verification request.");
     }) as typeof fetch;
 
     await expect(verifyHostedInferenceConnection({
@@ -93,7 +82,7 @@ describe("hosted inference verification", () => {
       verified: true,
     });
 
-    expect(upstreamFetchImpl).toHaveBeenCalledTimes(3);
+    expect(upstreamFetchImpl).toHaveBeenCalledTimes(2);
     expect(observed.every((request) => request.redirect === "manual")).toBe(
       true,
     );
@@ -108,6 +97,113 @@ describe("hosted inference verification", () => {
       store: false,
       stream: true,
     });
+  });
+
+  it("propagates caller cancellation and does not start another probe", async () => {
+    const controller = new AbortController();
+    const observed: Request[] = [];
+    const upstreamFetchImpl = vi.fn(async (request: RequestInfo | URL) => {
+      const normalized = request instanceof Request
+        ? request
+        : new Request(request);
+      observed.push(normalized);
+      controller.abort();
+      return eventStream([
+        {
+          response: {
+            id: "resp_tool",
+            model: "example-model",
+            output: [{
+              arguments: JSON.stringify({
+                nonce: "murph_connection_probe_v1",
+              }),
+              call_id: "call_verify",
+              name: "murph_verify_connection",
+              status: "completed",
+              type: "function_call",
+            }],
+            status: "completed",
+          },
+          type: "response.completed",
+        },
+      ]);
+    }) as typeof fetch;
+
+    await expect(verifyHostedInferenceConnection({
+      request: REQUEST,
+      signal: controller.signal,
+      upstreamFetchImpl,
+    })).rejects.toEqual(new HostedInferenceVerificationError());
+
+    expect(upstreamFetchImpl).toHaveBeenCalledTimes(1);
+    expect(observed[0]?.signal.aborted).toBe(true);
+  });
+
+  it("keeps three slow logical probes inside one aggregate deadline", async () => {
+    let now = 0;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+    const timeoutDurations: number[] = [];
+    const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockImplementation(
+      (duration) => {
+        timeoutDurations.push(duration);
+        return realTimeout(duration);
+      },
+    );
+    let requestCount = 0;
+    const upstreamFetchImpl = vi.fn(async () => {
+      requestCount += 1;
+      now += 19_000;
+      if (requestCount === 1) {
+        return eventStream([{
+          response: {
+            id: "resp_tool",
+            model: "example-model",
+            output: [{
+              arguments: JSON.stringify({
+                nonce: "murph_connection_probe_v1",
+              }),
+              call_id: "call_verify",
+              name: "murph_verify_connection",
+              status: "completed",
+              type: "function_call",
+            }],
+            status: "completed",
+          },
+          type: "response.completed",
+        }]);
+      }
+      const text = requestCount === 2
+        ? "murph_connection_verified_v1"
+        : "murph_image_verified_v1";
+      return eventStream([{
+        response: {
+          id: `resp_${requestCount}`,
+          model: "example-model",
+          output: [{
+            content: [{ type: "output_text", text }],
+            role: "assistant",
+            status: "completed",
+            type: "message",
+          }],
+          status: "completed",
+        },
+        type: "response.completed",
+      }]);
+    }) as typeof fetch;
+
+    try {
+      await expect(verifyHostedInferenceConnection({
+        request: { ...REQUEST, supportsImages: true },
+        upstreamFetchImpl,
+      })).resolves.toMatchObject({ verified: true });
+    } finally {
+      nowSpy.mockRestore();
+      timeoutSpy.mockRestore();
+    }
+
+    expect(upstreamFetchImpl).toHaveBeenCalledTimes(3);
+    expect(timeoutDurations).toEqual([60_000, 20_000, 20_000, 20_000]);
   });
 
   it("fails closed without exposing an upstream error body", async () => {

@@ -180,7 +180,7 @@ test("hosted Codex runtime config writes Venice Responses config without secret 
   assert.doesNotMatch(config, /signed-venice-egress-credential/u);
 });
 
-test("hosted Codex runtime config gives custom inference one conservative Responses policy", async () => {
+test("hosted Codex runtime config preserves capabilities with custom inference", async () => {
   const operatorHomeRoot = await createTemporaryDirectory();
   const result = await prepareHostedCodexRuntimeEnvironment({
     operatorHomeRoot,
@@ -211,8 +211,10 @@ test("hosted Codex runtime config gives custom inference one conservative Respon
   assert.match(config, /^stream_max_retries = 0$/mu);
   assert.doesNotMatch(config, /^supports_websockets = true$/mu);
   assert.doesNotMatch(config, /^model_reasoning_effort = /mu);
-  assert.match(config, /\[features\]\nplugins = false\nmemories = false/u);
-  assert.match(config, /\[features\.multi_agent_v2\]\nenabled = false/u);
+  assert.match(config, /\[features\]\nplugins = false\nmemories = true/u);
+  assert.match(config, /\[features\.multi_agent_v2\]\nenabled = true/u);
+  assert.match(config, /^max_concurrent_threads_per_session = 4$/mu);
+  assert.match(config, /\[memories\]\nuse_memories = true\ngenerate_memories = true/u);
   assert.equal(
     new Set<string>(HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY)
       .has("MURPH_CUSTOM_INFERENCE_API_KEY"),

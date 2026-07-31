@@ -10,7 +10,9 @@ export const HOSTED_CUSTOM_INFERENCE_RESPONSES_MAX_BODY_BYTES = 8 * 1024 * 1024;
 const HOSTED_CUSTOM_INFERENCE_MAX_TOOLS = 128;
 const HOSTED_CUSTOM_INFERENCE_MAX_TOOL_SCHEMA_BYTES = 256 * 1024;
 const HOSTED_CUSTOM_INFERENCE_MAX_SSE_EVENT_BYTES = 1024 * 1024;
-const HOSTED_CUSTOM_INFERENCE_MAX_STREAM_BYTES = 64 * 1024 * 1024;
+const HOSTED_CUSTOM_INFERENCE_MAX_STREAM_BYTES = 16 * 1024 * 1024;
+const HOSTED_CUSTOM_INFERENCE_MAX_TRANSLATED_OUTPUT_BYTES = 16 * 1024 * 1024;
+const HOSTED_CUSTOM_INFERENCE_MAX_TRANSLATED_STATE_BYTES = 512 * 1024;
 const HOSTED_CUSTOM_INFERENCE_CUSTOM_TOOL_PREFIX = "murph_custom_";
 const HOSTED_CUSTOM_INFERENCE_NAMESPACE_TOOL_PREFIX = "murph_ns_";
 const HOSTED_CUSTOM_INFERENCE_TEXT_ENCODER = new TextEncoder();
@@ -596,6 +598,7 @@ function translateChatCompletionsStream(
     finishReason: null,
     model: null,
     output: [],
+    retainedBytes: 0,
     responseId: null,
     text: null,
     toolCalls: new Map(),
@@ -658,14 +661,18 @@ interface SseEvent {
 
 function transformSseStream(
   source: ReadableStream<Uint8Array>,
-  transform: (event: SseEvent) => string,
+  transform: (event: SseEvent) => string | Iterable<string>,
   finish: () => void,
 ): ReadableStream<Uint8Array> {
   const reader = source.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
   let totalBytes = 0;
+  let translatedBytes = 0;
   let cancelled = false;
+  let sourceDone = false;
+  let readerReleased = false;
+  let transformedOutput: Iterator<string> | null = null;
   let pendingCarriageReturn = false;
   const normalizeLineEndings = (value: string, final: boolean): string => {
     let text = pendingCarriageReturn ? `\r${value}` : value;
@@ -676,27 +683,48 @@ function transformSseStream(
     }
     return text.replaceAll("\r\n", "\n").replaceAll("\r", "\n");
   };
+  const releaseReader = (): void => {
+    if (readerReleased) return;
+    readerReleased = true;
+    reader.releaseLock();
+  };
+  const enqueue = (
+    controller: ReadableStreamDefaultController<Uint8Array>,
+    value: string,
+  ): boolean => {
+    if (!value) return false;
+    const encoded = HOSTED_CUSTOM_INFERENCE_TEXT_ENCODER.encode(value);
+    translatedBytes += encoded.byteLength;
+    if (translatedBytes > HOSTED_CUSTOM_INFERENCE_MAX_TRANSLATED_OUTPUT_BYTES) {
+      throw invalidResponse();
+    }
+    controller.enqueue(encoded);
+    return true;
+  };
 
   return new ReadableStream<Uint8Array>({
     async cancel(reason) {
       cancelled = true;
-      await reader.cancel(reason);
+      try {
+        await reader.cancel(reason);
+      } finally {
+        releaseReader();
+      }
     },
-    async start(controller) {
+    async pull(controller) {
       try {
         while (!cancelled) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          totalBytes += value.byteLength;
-          if (totalBytes > HOSTED_CUSTOM_INFERENCE_MAX_STREAM_BYTES) {
-            throw invalidResponse();
+          if (transformedOutput) {
+            const next = transformedOutput.next();
+            if (!next.done) {
+              if (enqueue(controller, next.value)) return;
+              continue;
+            }
+            transformedOutput = null;
           }
-          buffer += normalizeLineEndings(
-            decoder.decode(value, { stream: true }),
-            false,
-          );
-          let separator = buffer.indexOf("\n\n");
-          while (separator >= 0) {
+
+          const separator = buffer.indexOf("\n\n");
+          if (separator >= 0) {
             const raw = buffer.slice(0, separator);
             buffer = buffer.slice(separator + 2);
             if (raw.trim()) {
@@ -706,31 +734,48 @@ function transformSseStream(
               ) {
                 throw invalidResponse();
               }
-              const encoded = transform(parseSseEvent(raw));
-              if (encoded) {
-                controller.enqueue(
-                  HOSTED_CUSTOM_INFERENCE_TEXT_ENCODER.encode(encoded),
-                );
-              }
+              const output = transform(parseSseEvent(raw));
+              transformedOutput = typeof output === "string"
+                ? [output][Symbol.iterator]()
+                : output[Symbol.iterator]();
             }
-            separator = buffer.indexOf("\n\n");
+            continue;
           }
+
+          if (sourceDone) {
+            if (buffer.trim()) throw invalidResponse();
+            finish();
+            releaseReader();
+            controller.close();
+            return;
+          }
+
           if (
             HOSTED_CUSTOM_INFERENCE_TEXT_ENCODER.encode(buffer).byteLength
             > HOSTED_CUSTOM_INFERENCE_MAX_SSE_EVENT_BYTES
           ) {
             throw invalidResponse();
           }
+
+          const { done, value } = await reader.read();
+          if (done) {
+            sourceDone = true;
+            buffer += normalizeLineEndings(decoder.decode(), true);
+            continue;
+          }
+          totalBytes += value.byteLength;
+          if (totalBytes > HOSTED_CUSTOM_INFERENCE_MAX_STREAM_BYTES) {
+            throw invalidResponse();
+          }
+          buffer += normalizeLineEndings(
+            decoder.decode(value, { stream: true }),
+            false,
+          );
         }
-        buffer += normalizeLineEndings(decoder.decode(), true);
-        if (buffer.trim()) throw invalidResponse();
-        finish();
-        controller.close();
       } catch (error) {
         controller.error(error);
         await reader.cancel(error).catch(() => undefined);
-      } finally {
-        reader.releaseLock();
+        releaseReader();
       }
     },
   });
@@ -788,6 +833,7 @@ interface ChatTranslationState {
   finishReason: "length" | "stop" | "tool_calls" | null;
   model: string | null;
   output: Record<string, unknown>[];
+  retainedBytes: number;
   responseId: string | null;
   text: ChatTextState | null;
   toolCalls: Map<number, ChatToolCallState>;
@@ -817,10 +863,9 @@ function appendChatTextDelta(
   delta: string,
 ): string {
   if (!state.responseId) throw invalidResponse();
-  if (state.toolCalls.size > 0) throw invalidResponse();
   let output = "";
   if (!state.text) {
-    const outputIndex = state.output.length;
+    const outputIndex = state.toolCalls.size;
     const id = `msg_${safeIdentifier(state.responseId)}`;
     state.text = { id, outputIndex, text: "" };
     output += formatSseEvent("response.output_item.added", {
@@ -842,6 +887,7 @@ function appendChatTextDelta(
       type: "response.content_part.added",
     });
   }
+  reserveChatTranslationBytes(state, delta);
   state.text.text += delta;
   output += formatSseEvent("response.output_text.delta", {
     content_index: 0,
@@ -857,7 +903,6 @@ function appendChatToolCallDeltas(
   state: ChatTranslationState,
   value: unknown,
 ): string {
-  if (state.text) throw invalidResponse();
   if (!Array.isArray(value) || value.length > HOSTED_CUSTOM_INFERENCE_MAX_TOOLS) {
     throw invalidResponse();
   }
@@ -875,6 +920,9 @@ function appendChatToolCallDeltas(
     const functionDelta = raw.function;
     let call = state.toolCalls.get(raw.index);
     if (!call) {
+      if (state.toolCalls.size >= HOSTED_CUSTOM_INFERENCE_MAX_TOOLS) {
+        throw invalidResponse();
+      }
       const encodedName = typeof functionDelta.name === "string"
         ? functionDelta.name
         : "";
@@ -897,8 +945,12 @@ function appendChatToolCallDeltas(
             : "function",
         name,
         namespace: decodedNamespaceTool?.namespace ?? null,
-        outputIndex: state.toolCalls.size,
+        outputIndex: (state.text ? 1 : 0) + state.toolCalls.size,
       };
+      reserveChatTranslationBytes(
+        state,
+        `${call.id}\u0000${call.name}\u0000${call.namespace ?? ""}`,
+      );
       state.toolCalls.set(raw.index, call);
       output += formatSseEvent("response.output_item.added", {
         item: call.kind === "custom"
@@ -937,6 +989,7 @@ function appendChatToolCallDeltas(
     }
     if (functionDelta.arguments !== undefined) {
       if (typeof functionDelta.arguments !== "string") throw invalidResponse();
+      reserveChatTranslationBytes(state, functionDelta.arguments);
       call.arguments += functionDelta.arguments;
       if (
         HOSTED_CUSTOM_INFERENCE_TEXT_ENCODER.encode(call.arguments).byteLength
@@ -957,7 +1010,20 @@ function appendChatToolCallDeltas(
   return output;
 }
 
-function completeChatTranslation(state: ChatTranslationState): string {
+function reserveChatTranslationBytes(
+  state: ChatTranslationState,
+  value: string,
+): void {
+  state.retainedBytes += HOSTED_CUSTOM_INFERENCE_TEXT_ENCODER.encode(value)
+    .byteLength;
+  if (state.retainedBytes > HOSTED_CUSTOM_INFERENCE_MAX_TRANSLATED_STATE_BYTES) {
+    throw invalidResponse();
+  }
+}
+
+function* completeChatTranslation(
+  state: ChatTranslationState,
+): Generator<string, void, void> {
   if (
     !state.created
     || !state.responseId
@@ -972,7 +1038,21 @@ function completeChatTranslation(state: ChatTranslationState): string {
   ) {
     throw invalidResponse();
   }
-  let output = "";
+  const entries: Array<
+    | {
+        content: Record<string, unknown>;
+        item: Record<string, unknown>;
+        kind: "text";
+        outputIndex: number;
+        text: ChatTextState;
+      }
+    | {
+        call: ChatToolCallState;
+        item: Record<string, unknown>;
+        kind: "tool";
+        outputIndex: number;
+      }
+  > = [];
   if (state.text) {
     const content = {
       annotations: [],
@@ -986,59 +1066,68 @@ function completeChatTranslation(state: ChatTranslationState): string {
       status: "completed",
       type: "message",
     };
-    output += formatSseEvent("response.output_text.done", {
-      content_index: 0,
-      item_id: state.text.id,
-      output_index: state.text.outputIndex,
-      text: state.text.text,
-      type: "response.output_text.done",
-    });
-    output += formatSseEvent("response.content_part.done", {
-      content_index: 0,
-      item_id: state.text.id,
-      output_index: state.text.outputIndex,
-      part: content,
-      type: "response.content_part.done",
-    });
-    output += formatSseEvent("response.output_item.done", {
+    entries.push({
+      content,
       item,
-      output_index: state.text.outputIndex,
-      type: "response.output_item.done",
+      kind: "text",
+      outputIndex: state.text.outputIndex,
+      text: state.text,
     });
-    state.output.push(item);
   }
-  for (const call of [...state.toolCalls.values()].sort((a, b) =>
-    a.outputIndex - b.outputIndex
-  )) {
-    const item = buildCompletedToolCallItem(call);
-    if (call.kind !== "custom") {
-      output += formatSseEvent("response.function_call_arguments.done", {
-        arguments: call.arguments,
-        item_id: `fcall_${safeIdentifier(call.id)}`,
-        output_index: call.outputIndex,
+  for (const call of state.toolCalls.values()) {
+    entries.push({
+      call,
+      item: buildCompletedToolCallItem(call),
+      kind: "tool",
+      outputIndex: call.outputIndex,
+    });
+  }
+  entries.sort((a, b) => a.outputIndex - b.outputIndex);
+  state.output = entries.map((entry) => entry.item);
+
+  for (const entry of entries) {
+    if (entry.kind === "text") {
+      yield formatSseEvent("response.output_text.done", {
+        content_index: 0,
+        item_id: entry.text.id,
+        output_index: entry.outputIndex,
+        text: entry.text.text,
+        type: "response.output_text.done",
+      });
+      yield formatSseEvent("response.content_part.done", {
+        content_index: 0,
+        item_id: entry.text.id,
+        output_index: entry.outputIndex,
+        part: entry.content,
+        type: "response.content_part.done",
+      });
+    } else if (entry.call.kind !== "custom") {
+      yield formatSseEvent("response.function_call_arguments.done", {
+        arguments: entry.call.arguments,
+        item_id: `fcall_${safeIdentifier(entry.call.id)}`,
+        output_index: entry.outputIndex,
         type: "response.function_call_arguments.done",
       });
     }
-    output += formatSseEvent("response.output_item.done", {
-      item,
-      output_index: call.outputIndex,
+    yield formatSseEvent("response.output_item.done", {
+      item: entry.item,
+      output_index: entry.outputIndex,
       type: "response.output_item.done",
     });
-    state.output.push(item);
   }
+
   state.completed = true;
   const terminalType = state.finishReason === "length"
     ? "response.incomplete"
     : "response.completed";
-  output += formatSseEvent(terminalType, {
+  yield formatSseEvent(terminalType, {
     response: buildCompletedResponsesRecord(
       state,
       state.finishReason === "length" ? "incomplete" : "completed",
     ),
     type: terminalType,
   });
-  output += "data: [DONE]\n\n";
-  return output;
+  yield "data: [DONE]\n\n";
 }
 
 function buildCompletedToolCallItem(

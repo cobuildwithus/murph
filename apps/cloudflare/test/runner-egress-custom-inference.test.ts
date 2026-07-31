@@ -491,6 +491,190 @@ describe("hosted custom inference egress", () => {
     expect(toolText).not.toContain(encodedCustomName);
   });
 
+  it("preserves mixed Chat text and tool calls in encounter order", async () => {
+    const response = await adaptHostedCustomInferenceUpstreamResponse({
+      protocol: "chat_completions",
+      response: chatStream([
+        chatChunk({ content: "I will check. " }),
+        chatChunk({
+          tool_calls: [{
+            function: {
+              arguments: "{\"query\":\"wea",
+              name: "lookup",
+            },
+            id: "call_mixed_1",
+            index: 0,
+            type: "function",
+          }],
+        }),
+        chatChunk({
+          tool_calls: [{
+            function: { arguments: "ther\"}" },
+            index: 0,
+          }],
+        }, "tool_calls"),
+      ]),
+      revision: CUSTOM_INFERENCE_REVISION,
+    });
+    const text = await response.text();
+    const completedBlock = text.split("\n\n").find((block) =>
+      block.startsWith("event: response.completed\n")
+    );
+    const completedData = completedBlock
+      ?.split("\n")
+      .find((line) => line.startsWith("data: "))
+      ?.slice("data: ".length);
+
+    expect(completedData).toBeTruthy();
+    const completed = JSON.parse(completedData ?? "null") as {
+      response: { output: Array<{ type: string }> };
+    };
+    expect(completed.response.output.map((item) => item.type)).toEqual([
+      "message",
+      "function_call",
+    ]);
+    expect(text).toContain('"output_index":0');
+    expect(text).toContain('"output_index":1');
+    expect(text).toContain('"arguments":"{\\"query\\":\\"weather\\"}"');
+
+    const reverseResponse = await adaptHostedCustomInferenceUpstreamResponse({
+      protocol: "chat_completions",
+      response: chatStream([
+        chatChunk({
+          tool_calls: [{
+            function: { arguments: "{}", name: "lookup" },
+            id: "call_mixed_2",
+            index: 0,
+            type: "function",
+          }],
+        }),
+        chatChunk({ content: "I found it." }, "tool_calls"),
+      ]),
+      revision: CUSTOM_INFERENCE_REVISION,
+    });
+    const reverseText = await reverseResponse.text();
+    const reverseCompletedData = reverseText.split("\n\n")
+      .find((block) => block.startsWith("event: response.completed\n"))
+      ?.split("\n")
+      .find((line) => line.startsWith("data: "))
+      ?.slice("data: ".length);
+    expect(reverseCompletedData).toBeTruthy();
+    const reverseCompleted = JSON.parse(reverseCompletedData ?? "null") as {
+      response: { output: Array<{ type: string }> };
+    };
+    expect(reverseCompleted.response.output.map((item) => item.type)).toEqual([
+      "function_call",
+      "message",
+    ]);
+  });
+
+  it("bounds cumulative Chat tool calls across streamed events", async () => {
+    const response = await adaptHostedCustomInferenceUpstreamResponse({
+      protocol: "chat_completions",
+      response: chatStream(Array.from({ length: 129 }, (_, index) =>
+        chatChunk({
+          tool_calls: [{
+            function: { arguments: "{}", name: "lookup" },
+            id: `call_${index}`,
+            index,
+            type: "function",
+          }],
+        }, index === 128 ? "tool_calls" : null)
+      )),
+      revision: CUSTOM_INFERENCE_REVISION,
+    });
+
+    await expect(response.text()).rejects.toThrow(
+      HostedCustomInferenceRequestError,
+    );
+
+    const healthy = await adaptHostedCustomInferenceUpstreamResponse({
+      protocol: "chat_completions",
+      response: chatStream([chatChunk({ content: "healthy" }, "stop")]),
+      revision: CUSTOM_INFERENCE_REVISION,
+    });
+    await expect(healthy.text()).resolves.toContain(
+      "event: response.completed",
+    );
+  });
+
+  it("bounds cumulative retained Chat translation state", async () => {
+    const largeDelta = "x".repeat(300 * 1024);
+    const response = await adaptHostedCustomInferenceUpstreamResponse({
+      protocol: "chat_completions",
+      response: chatStream([
+        chatChunk({ content: largeDelta }),
+        chatChunk({ content: largeDelta }, "stop"),
+      ]),
+      revision: CUSTOM_INFERENCE_REVISION,
+    });
+
+    await expect(response.text()).rejects.toThrow(
+      HostedCustomInferenceRequestError,
+    );
+  });
+
+  it("reads upstream SSE only as the adapted consumer demands it", async () => {
+    const chunks = [
+      sse("response.created", {
+        response: {
+          id: "resp_backpressure",
+          model: "upstream-model",
+          output: [],
+          status: "in_progress",
+        },
+        type: "response.created",
+      }),
+      ...Array.from({ length: 20 }, (_, index) =>
+        sse("response.output_text.delta", {
+          delta: String(index),
+          type: "response.output_text.delta",
+        })
+      ),
+      sse("response.completed", {
+        response: {
+          id: "resp_backpressure",
+          model: "upstream-model",
+          output: [],
+          status: "completed",
+        },
+        type: "response.completed",
+      }),
+      "data: [DONE]\n\n",
+    ].map((chunk) => new TextEncoder().encode(chunk));
+    let nextChunk = 0;
+    let cancelled = false;
+    const upstream = new ReadableStream<Uint8Array>({
+      cancel() {
+        cancelled = true;
+      },
+      pull(controller) {
+        const chunk = chunks[nextChunk];
+        nextChunk += 1;
+        if (chunk) {
+          controller.enqueue(chunk);
+        } else {
+          controller.close();
+        }
+      },
+    });
+    const response = await adaptHostedCustomInferenceUpstreamResponse({
+      protocol: "responses",
+      response: new Response(upstream, {
+        headers: { "content-type": "text/event-stream" },
+      }),
+      revision: CUSTOM_INFERENCE_REVISION,
+    });
+    const reader = response.body?.getReader();
+    expect(reader).toBeDefined();
+
+    const first = await reader?.read();
+    expect(first?.done).toBe(false);
+    expect(nextChunk).toBeLessThan(chunks.length);
+    await reader?.cancel("consumer stopped");
+    expect(cancelled).toBe(true);
+  });
+
   it("preserves the Chat length finish reason as an incomplete Responses result", async () => {
     const response = await adaptHostedCustomInferenceUpstreamResponse({
       protocol: "chat_completions",

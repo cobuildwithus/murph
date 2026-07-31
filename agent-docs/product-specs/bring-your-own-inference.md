@@ -160,7 +160,7 @@ The profile proves:
 - one function call;
 - matching tool output;
 - a final response after the tool output;
-- cancellation and bounded error behavior; and
+- bounded transport and error behavior; and
 - image input when image support is declared.
 
 The configured context window is bounded and labeled as configured, not fully

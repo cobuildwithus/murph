@@ -582,8 +582,6 @@ export function buildHostedCodexConfigToml(input: {
     : input.provider.id;
   const customInferenceProvider =
     input.provider.id === HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID;
-  const operatorMemoriesEnabled = !customInferenceProvider;
-  const multiAgentEnabled = !customInferenceProvider;
   const autoCompactTokenLimit = input.contextWindowTokens === null
       || input.contextWindowTokens === undefined
     ? DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT
@@ -642,9 +640,7 @@ export function buildHostedCodexConfigToml(input: {
     "# sync work on cold wake; Murph owns the hosted runtime tool surface.",
     "[features]",
     "plugins = false",
-    `memories = ${
-      operatorMemoriesEnabled && HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.featureEnabled
-    }`,
+    `memories = ${HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.featureEnabled}`,
     "",
     "[features.current_time_reminder]",
     "enabled = true",
@@ -655,27 +651,19 @@ export function buildHostedCodexConfigToml(input: {
     "# This table owns enablement and the proactive per-turn mode/tool hints.",
     "# A CLI boolean override would replace the table and silently drop them.",
     "[features.multi_agent_v2]",
-    `enabled = ${multiAgentEnabled}`,
-    ...(multiAgentEnabled
-      ? [
-          "# V2 counts the root in this limit: four means root plus three children.",
-          "max_concurrent_threads_per_session = 4",
-          `usage_hint_text = ${tomlString(HOSTED_CODEX_MULTI_AGENT_USAGE_HINT_TEXT)}`,
-          `multi_agent_mode_hint_text = ${tomlString(HOSTED_CODEX_MULTI_AGENT_MODE_HINT_TEXT)}`,
-          `subagent_usage_hint_text = ${tomlString(HOSTED_CODEX_SUBAGENT_USAGE_HINT_TEXT)}`,
-        ]
-      : []),
+    "enabled = true",
+    "# V2 counts the root in this limit: four means root plus three children.",
+    "max_concurrent_threads_per_session = 4",
+    `usage_hint_text = ${tomlString(HOSTED_CODEX_MULTI_AGENT_USAGE_HINT_TEXT)}`,
+    `multi_agent_mode_hint_text = ${tomlString(HOSTED_CODEX_MULTI_AGENT_MODE_HINT_TEXT)}`,
+    `subagent_usage_hint_text = ${tomlString(HOSTED_CODEX_SUBAGENT_USAGE_HINT_TEXT)}`,
     "",
     "# Codex-native memories are operator memory only. Murph product memory",
     "# remains canonical in the vault; snapshots keep the Codex home allowlist",
     "# narrow instead of recursively preserving every generated memory artifact.",
     "[memories]",
-    `use_memories = ${
-      operatorMemoriesEnabled && HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.useMemories
-    }`,
-    `generate_memories = ${
-      operatorMemoriesEnabled && HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.generateMemories
-    }`,
+    `use_memories = ${HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.useMemories}`,
+    `generate_memories = ${HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.generateMemories}`,
     `disable_on_external_context = ${HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.disableOnExternalContext}`,
     `min_rollout_idle_hours = ${HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.minRolloutIdleHours}`,
     `max_rollouts_per_startup = ${HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.maxRolloutsPerStartup}`,
