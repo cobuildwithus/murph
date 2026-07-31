@@ -45,3 +45,58 @@ jobs:
           MURPH_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           MURPH_PR_BODY: ${{ github.event.pull_request.body }}
           MURPH_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+
+  byoi-integration:
+    name: BYOI integration
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'agent/bring-your-own-inference'
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+          ref: agent/bring-your-own-inference
+
+      - name: Apply asserted BYOI edits
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git merge --no-edit origin/main
+          python3 scripts/apply-byoi-branch-patch.py
+          python3 scripts/apply-byoi-runtime-pinning.py
+          python3 scripts/apply-byoi-custom-provider.py
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("agent-docs/index.md")
+          text = path.read_text()
+          row = (
+              "| `agent-docs/product-specs/bring-your-own-inference.md` | "
+              "One encrypted personal custom-inference connection with native "
+              "Responses, a bounded Chat adapter seam, invocation-fenced egress, "
+              "Codex-only execution, and no silent managed fallback. | "
+              "Custom inference product spec | High | 2026-07-31 |\n"
+          )
+          if row not in text:
+              anchor = (
+                  "| `agent-docs/product-specs/index.md` | Index for product-spec docs. "
+                  "| Product-spec inventory | High | 2026-07-16 |\n"
+              )
+              if text.count(anchor) != 1:
+                  raise RuntimeError("agent-docs/index.md: product-spec index anchor drifted")
+              path.write_text(text.replace(anchor, anchor + row, 1))
+          PY
+          git diff --check
+          if ! git diff --quiet --exit-code; then
+            git add --all
+            git commit -m "feat(runtime): pin and proxy custom inference"
+          fi
+          git push origin HEAD:agent/bring-your-own-inference
