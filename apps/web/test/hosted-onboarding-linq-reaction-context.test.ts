@@ -8,7 +8,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   appendConsumedHostedGroupReactionMailboxEnvelopeTx: vi.fn(),
   getHostedLinqChatSummary: vi.fn(),
-  getHostedLinqReactionTargetMessage: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
   readHostedThreadRouteByThreadIdentity: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
@@ -25,8 +24,6 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
   getHostedLinqChatSummary: mocks.getHostedLinqChatSummary,
-  getHostedLinqReactionTargetMessage:
-    mocks.getHostedLinqReactionTargetMessage,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
@@ -62,13 +59,6 @@ beforeEach(() => {
       { handle: "+15551234567", isMe: false, status: "active" },
     ],
     isGroup: true,
-  });
-  mocks.getHostedLinqReactionTargetMessage.mockResolvedValue({
-    chatId: "chat_group_123",
-    id: "message_target_123",
-    isFromMe: false,
-    parts: ["A useful group message"],
-    service: "iMessage",
   });
   mocks.appendConsumedHostedGroupReactionMailboxEnvelopeTx.mockResolvedValue({
     dedupeConflict: false,
@@ -162,7 +152,7 @@ describe("stageHostedLinqGroupReactionContext", () => {
         mode: "delta",
         schema: "murph.hosted-group-reaction.v1",
         targetMessageId: "message_target_123",
-        targetText: "A useful group message",
+        targetText: null,
       });
       expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
         expectedUserId: "member_group_123",
@@ -208,36 +198,32 @@ describe("stageHostedLinqGroupReactionContext", () => {
     });
   });
 
-  it("persists the reaction even when target text cannot be fetched", async () => {
-    mocks.getHostedLinqReactionTargetMessage.mockRejectedValueOnce(
-      new Error("provider unavailable"),
-    );
+  it("replays byte-identical durable input without reading mutable provider message state", async () => {
+    const event = buildReactionEvent({
+      customEmoji: "😂",
+      reactionType: "custom",
+    });
+    const prisma = createPrismaStub();
 
-    await expect(stageHostedLinqGroupReactionContext({
-      event: buildReactionEvent({
-        customEmoji: "😂",
-        reactionType: "custom",
-      }),
-      prisma: createPrismaStub(),
-    })).resolves.toBe(true);
+    await stageHostedLinqGroupReactionContext({ event, prisma });
+    await stageHostedLinqGroupReactionContext({ event, prisma });
 
-    const envelope =
+    expect(mocks.getHostedLinqChatSummary).not.toHaveBeenCalled();
+    const firstEnvelope =
       mocks.appendConsumedHostedGroupReactionMailboxEnvelopeTx.mock.calls[0]?.[0]
         .envelope;
-    const text = readHostedExecutionConversationMessageText(envelope.message);
+    const secondEnvelope =
+      mocks.appendConsumedHostedGroupReactionMailboxEnvelopeTx.mock.calls[1]?.[0]
+        .envelope;
+    expect(secondEnvelope).toEqual(firstEnvelope);
+    const text = readHostedExecutionConversationMessageText(firstEnvelope.message);
     expect(parseHostedExecutionGroupReactionEventText(text)).toMatchObject({
       targetMessageId: "message_target_123",
       targetText: null,
     });
   });
 
-  it("uses only the exact reacted part when the provider supplies it", async () => {
-    mocks.getHostedLinqReactionTargetMessage.mockResolvedValueOnce({
-      chatId: "chat_group_123",
-      id: "message_target_123",
-      parts: ["first part", "second part"],
-    });
-
+  it("preserves the exact reacted part index without copying mutable target text", async () => {
     await stageHostedLinqGroupReactionContext({
       event: buildReactionEvent({ partIndex: 1, reactionType: "laugh" }),
       prisma: createPrismaStub(),
@@ -248,7 +234,7 @@ describe("stageHostedLinqGroupReactionContext", () => {
         .envelope;
     const text = readHostedExecutionConversationMessageText(envelope.message);
     expect(parseHostedExecutionGroupReactionEventText(text)).toMatchObject({
-      targetText: "second part",
+      targetText: null,
     });
     expect(envelope.message.linqMessage.replyToPartIndex).toBe(1);
   });
