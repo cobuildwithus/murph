@@ -311,7 +311,7 @@ describe('reminder availability maintenance', () => {
       'Availability calendar account: <toolkit> / <account-id>',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'until refresh succeeds, the reminder sends normally',
+      'background refresh can take a day',
     )
     const skill = await readFile(
       path.join(
