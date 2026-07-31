@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 import { CheckIcon } from "lucide-react";
-import type {
-  HostedPlanUsageStatus,
+import {
+  HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME,
+  type HostedPlanUsageStatus,
 } from "@murphai/hosted-execution/plan-usage";
 
 import { Button } from "@/src/components/ui/button";
@@ -97,10 +98,13 @@ export function HostedBillingSettings(props: {
   usageActivityDetail?: ReactNode;
   usageStatus?: HostedPlanUsageStatus | null;
   usageTopUpActivePurchase?: HostedUsageTopUpActivePurchase | null;
+  usageTopUpCheckoutUrl?: string;
   usageTopUpContactOptions?: readonly MurphContactOption[];
   usageTopUpInitialOpen?: boolean;
   usageTopUpOffers?: readonly HostedUsageTopUpOffer[];
   usageTopUpPurchaseReturn?: HostedUsageTopUpReturn | null;
+  usageTopUpScope?: "family" | "personal";
+  usageTopUpTargetLabel?: string;
 }) {
   if (!props.authenticated) {
     return (
@@ -160,7 +164,7 @@ export function HostedBillingSettings(props: {
                           targetPlanCode="launch_group_monthly"
                           timing="at_trial_end"
                         >
-                          Choose Group
+                          Choose {HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME}
                         </StartPaidPulseButton>
                       )
                     : (
@@ -170,7 +174,7 @@ export function HostedBillingSettings(props: {
                           mode="schedule"
                           targetPlanCode="launch_group_monthly"
                         >
-                          Choose Group
+                          Choose {HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME}
                         </HostedPlanChangeButton>
                       )
                   : isPulseTrial && props.canStartPaidPulse === true
@@ -180,7 +184,7 @@ export function HostedBillingSettings(props: {
                           targetPlanCode="launch_group_monthly"
                           timing="now"
                         >
-                          Start Group
+                          Start {HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME}
                         </StartPaidPulseButton>
                       )
                   : null,
@@ -188,7 +192,7 @@ export function HostedBillingSettings(props: {
             currentLabel: "Current plan",
             features: GROUP_FEATURES,
             key: "launch_group_monthly",
-            name: "Group",
+            name: HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME,
             note: pendingGroupSwitchDate
               ? `Scheduled to start ${pendingGroupSwitchDate}`
               : "Available to confirmed members of a Murph group.",
@@ -240,7 +244,7 @@ export function HostedBillingSettings(props: {
               <PendingPlanChangeNote
                 currentPlanName="Pulse"
                 effectiveAt={pendingGroupSwitchDate}
-                targetPlanName="Group"
+                targetPlanName={HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME}
               />
             )
         : !pulseCurrent && hasPendingPulseSwitch && pendingPulseSwitchDate
@@ -288,7 +292,7 @@ export function HostedBillingSettings(props: {
             <PendingPlanChangeNote
               currentPlanName="Edge"
               effectiveAt={pendingGroupSwitchDate}
-              targetPlanName="Group"
+              targetPlanName={HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME}
             />
           )
         : null,
@@ -329,11 +333,12 @@ export function HostedBillingSettings(props: {
               Payment method saved
             </p>
             <p className="mt-1 font-serif text-xl font-semibold tracking-tight text-foreground">
-              Group has not started
+              {HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME} has not started
             </p>
             <p className="mt-1 max-w-2xl text-sm text-pretty text-muted-foreground">
-              Group has not started. Review the plan options below and make a
-              fresh choice when you are ready.
+              {HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME} has not started. Review
+              the plan options below and make a fresh choice when you are
+              ready.
             </p>
           </div>
         </div>
@@ -345,11 +350,14 @@ export function HostedBillingSettings(props: {
         pulseTrialBillingContinuationPending={pulseTrialBillingContinuationPending}
         status={props.usageStatus}
         usageTopUpActivePurchase={props.usageTopUpActivePurchase}
+        usageTopUpCheckoutUrl={props.usageTopUpCheckoutUrl}
         usageTopUpContactOptions={props.usageTopUpContactOptions}
         usageTopUpInitialOpen={props.usageTopUpInitialOpen}
         usageTopUpOffers={usageTopUpOffers}
         payerMemberId={props.payerMemberId}
         usageTopUpPurchaseReturn={props.usageTopUpPurchaseReturn}
+        usageTopUpScope={props.usageTopUpScope}
+        usageTopUpTargetLabel={props.usageTopUpTargetLabel}
       />
       {props.usageActivityDetail}
       <div
@@ -385,11 +393,14 @@ function PlanUsageBand(props: {
   pulseTrialBillingContinuationPending: boolean;
   status?: HostedPlanUsageStatus | null;
   usageTopUpActivePurchase?: HostedUsageTopUpActivePurchase | null;
+  usageTopUpCheckoutUrl?: string;
   usageTopUpContactOptions?: readonly MurphContactOption[];
   usageTopUpInitialOpen?: boolean;
   usageTopUpOffers: readonly HostedUsageTopUpOffer[];
   payerMemberId?: string | null;
   usageTopUpPurchaseReturn?: HostedUsageTopUpReturn | null;
+  usageTopUpScope?: "family" | "personal";
+  usageTopUpTargetLabel?: string;
 }) {
   const payerMemberId = props.payerMemberId?.trim() || null;
   const inactiveTopUpDialog =
@@ -400,11 +411,14 @@ function PlanUsageBand(props: {
     ) ? (
       <HostedUsageTopUpDialog
         activePurchase={props.usageTopUpActivePurchase}
+        checkoutUrl={props.usageTopUpCheckoutUrl}
         contactOptions={props.usageTopUpContactOptions}
         initialOpen={props.usageTopUpInitialOpen}
         offers={[]}
         payerMemberId={payerMemberId}
         purchaseReturn={props.usageTopUpPurchaseReturn}
+        scope={props.usageTopUpScope}
+        targetLabel={props.usageTopUpTargetLabel}
       />
     ) : null;
 
@@ -453,6 +467,10 @@ function PlanUsageBand(props: {
   }
 
   const periodEndLabel = formatHostedBillingDate(new Date(status.periodEnd));
+  const displayPlanName =
+    status.planCode === "launch_group_monthly"
+      ? HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME
+      : status.planName;
   const periodLabel = status.periodKind === "trial"
     ? `Trial ends ${periodEndLabel}`
     : `Resets ${periodEndLabel}`;
@@ -463,11 +481,14 @@ function PlanUsageBand(props: {
   const usageTopUpDialog = payerMemberId ? (
     <HostedUsageTopUpDialog
       activePurchase={props.usageTopUpActivePurchase}
+      checkoutUrl={props.usageTopUpCheckoutUrl}
       contactOptions={props.usageTopUpContactOptions}
       initialOpen={props.usageTopUpInitialOpen}
       offers={props.usageTopUpOffers}
       payerMemberId={payerMemberId}
       purchaseReturn={props.usageTopUpPurchaseReturn}
+      scope={props.usageTopUpScope}
+      targetLabel={props.usageTopUpTargetLabel}
       triggerClassName="shrink-0"
       triggerSize="sm"
     />
@@ -475,14 +496,14 @@ function PlanUsageBand(props: {
 
   return (
     <div
-      aria-label={`${status.planName} AI usage`}
+      aria-label={`${displayPlanName} AI usage`}
       className="border-y border-border/80 py-4"
     >
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <p className="text-sm font-semibold text-foreground">AI usage</p>
           <p className="mt-0.5 truncate text-xs text-muted-foreground">
-            {status.planName} · {periodLabel}
+            {displayPlanName} · {periodLabel}
           </p>
         </div>
         {props.usageTopUpOffers.length > 0 || props.usageTopUpActivePurchase
@@ -510,7 +531,7 @@ function PlanUsageBand(props: {
           value={status.usedPercent}
         />
         <span className="shrink-0 text-xs font-medium tabular-nums text-foreground">
-          {status.usedPercent}% used
+          {status.remainingPercent}% remaining
         </span>
       </div>
       {status.status === "exhausted" ? (

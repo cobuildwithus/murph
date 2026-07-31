@@ -231,7 +231,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Group member plan">
+      <StudySection title="Core member plan">
         <GroupMemberPlanStudy />
       </StudySection>
 
@@ -267,7 +267,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Overall AI usage, credits, and missions">
+      <StudySection title="Overall AI usage, purchase reset, Family owner action, credits, and referrals">
         <PersonalUsageCreditOwnerStudy />
       </StudySection>
 

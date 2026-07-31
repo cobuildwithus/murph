@@ -2348,6 +2348,79 @@ describe("hostedRunnerIntercept", () => {
     });
   });
 
+  it("normalizes Responses Lite tools before Venice upstream egress", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeProviderEgressCredential = vi.fn(async (input: {
+      providerKind: string;
+      runnerContainerName: string;
+      userId: string;
+    }) => createProviderEgressCredentialValidationResult(input));
+    const credential = await createTestProviderEgressCredential({
+      providerKind: "venice",
+    });
+    const env = createInterceptEnv({
+      HOSTED_VENICE_LUNA_MODEL: "qwen3-4b",
+      HOSTED_VENICE_SOL_MODEL: "qwen3-vl-235b-a22b",
+      HOSTED_VENICE_TERRA_MODEL: "zai-org-glm-4.7",
+      VENICE_API_KEY: "venice-worker-secret",
+      validateRuntimeProviderEgressCredential,
+    });
+    const responsesLiteTools = [{
+      name: "murph",
+      tools: [
+        { name: "connected_apps_manage" },
+        { name: "send_progress_update" },
+      ],
+      type: "namespace",
+    }];
+    const standardInput = [{
+      content: [{ text: "Show my connected apps.", type: "input_text" }],
+      role: "user",
+      type: "message",
+    }];
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.venice.ai/api/v1/responses", {
+        body: JSON.stringify({
+          input: [
+            {
+              role: "developer",
+              tools: responsesLiteTools,
+              type: "additional_tools",
+            },
+            ...standardInput,
+          ],
+          model: "gpt-5.6-terra",
+          parallel_tool_calls: false,
+          stream: true,
+          tool_choice: "auto",
+        }),
+        headers: {
+          authorization: `Bearer ${credential}`,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+      env,
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    const forwarded = findFetchCall(fetchMock, "api.venice.ai")?.[0];
+    expect(forwarded).toBeInstanceOf(Request);
+    const forwardedRequest = forwarded as Request;
+    await expect(forwardedRequest.json()).resolves.toEqual({
+      input: standardInput,
+      model:
+        "zai-org-glm-4.7:include_venice_system_prompt=false&enable_web_search=off&enable_web_scraping=false",
+      parallel_tool_calls: false,
+      stream: true,
+      tool_choice: "auto",
+      tools: responsesLiteTools,
+    });
+  });
+
   it("rejects malformed and oversized Venice bodies before upstream", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);

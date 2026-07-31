@@ -332,6 +332,7 @@ export interface HostedRuntimeLinqDeliveryOutcomeRequest {
   intentId?: string | null;
   lineLookupKey?: string | null;
   providerMessageId?: string | null;
+  providerMessageIds?: string[] | null;
   providerTarget?: string | null;
   providerThreadId?: string | null;
   target: string | null;

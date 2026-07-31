@@ -1,16 +1,20 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
   EXPERIMENT_PROGRESS_CARD_DAY_CODES,
   experimentProgressCardSchema,
 } from "@murphai/contracts";
+import { initializeVault } from "@murphai/core";
 import sharp from "sharp";
 import { test } from "vitest";
 
 import {
   buildExperimentProgressCardSvg,
+  renderAndSaveExperimentProgressCard,
 } from "../src/commands/experiment-progress-card-image.js";
 import { MURPH_LOGO_SVG } from "../src/commands/murph-logo-svg.js";
 
@@ -136,6 +140,15 @@ const BOUNDARY_CARD = experimentProgressCardSchema.parse({
   ],
 });
 
+const DIRECTION_UNAVAILABLE_CARD = experimentProgressCardSchema.parse({
+  ...CARD,
+  moverSentimentContext: "direction_unavailable",
+  movers: CARD.movers.map((mover) => ({
+    ...mover,
+    sentiment: "neutral" as const,
+  })),
+});
+
 test("progress-card renderer retains the authenticated card brand language", async () => {
   const svg = buildExperimentProgressCardSvg(CARD);
 
@@ -226,6 +239,48 @@ test("progress-card renderer retains the authenticated card brand language", asy
     top: 636,
     width: 8,
   });
+});
+
+test("progress-card renderer makes unavailable direction context visible and accessible", async () => {
+  const svg = buildExperimentProgressCardSvg(DIRECTION_UNAVAILABLE_CARD);
+
+  assert.match(
+    svg,
+    /aria-label="[^"]*Direction context unavailable · mover sentiment is neutral\."/u,
+  );
+  assert.match(
+    svg,
+    /data-role="mover-sentiment-context"[^>]*>Direction context unavailable · mover sentiment is neutral\.<\/text>/u,
+  );
+  assert.doesNotMatch(svg, /Health experiments with friends\./u);
+
+  const vaultRoot = await mkdtemp(
+    path.join(tmpdir(), "murph-progress-card-direction-unavailable-"),
+  );
+  try {
+    await initializeVault({ vaultRoot });
+    const media = await renderAndSaveExperimentProgressCard({
+      card: DIRECTION_UNAVAILABLE_CARD,
+      experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFM",
+      vaultRoot,
+    });
+    assert.equal(
+      media.alt,
+      "Morning light & recovery <check> experiment progress. Direction context unavailable · mover sentiment is neutral.",
+    );
+    const healthyMedia = await renderAndSaveExperimentProgressCard({
+      card: CARD,
+      experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFN",
+      vaultRoot,
+    });
+    assert.equal(
+      healthyMedia.alt,
+      "Morning light & recovery <check> experiment progress",
+    );
+    assert.doesNotMatch(healthyMedia.alt ?? "", /Direction context unavailable/u);
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
 });
 
 async function assertBackgroundRegion(

@@ -100,6 +100,6 @@ function parseHostedTrialPaidPlanCode(
   throw hostedOnboardingError({
     code: "HOSTED_TRIAL_START_PAID_PLAN_INVALID",
     httpStatus: 400,
-    message: "Choose Group or Pulse before starting a paid trial plan.",
+    message: "Choose Core or Pulse before starting a paid trial plan.",
   });
 }

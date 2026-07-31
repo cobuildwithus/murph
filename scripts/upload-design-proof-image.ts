@@ -13,17 +13,32 @@ const CONFIG_KEYS = [
 const ENV_FILE_NAMES = [".env.local", ".env"];
 const MAX_ENV_FILE_BYTES = 1024 * 1024;
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const MIN_IMAGE_WIDTH = 700;
+const MAX_IMAGE_DIMENSION = 2400;
 const MAX_RESPONSE_BYTES = 64 * 1024;
 const UPLOAD_TIMEOUT_MS = 30_000;
 const VERIFY_TIMEOUT_MS = 15_000;
+const DESIGN_PROOF_VARIANT_ID = "designproof";
+const DESIGN_PROOF_VARIANT = {
+  id: DESIGN_PROOF_VARIANT_ID,
+  neverRequireSignedURLs: true,
+  options: {
+    fit: "scale-down",
+    height: MAX_IMAGE_DIMENSION,
+    metadata: "none",
+    width: MAX_IMAGE_DIMENSION,
+  },
+} as const;
 
 const HELP = `Usage:
   pnpm design-proof:upload -- <screenshot> [screenshot ...]
 
-Uploads PNG, JPEG, or WebP design-proof screenshots to Cloudflare Images.
+Uploads lossless PNG design-proof screenshots to Cloudflare Images. Screenshots
+must be at least ${MIN_IMAGE_WIDTH}px wide and no more than ${MAX_IMAGE_DIMENSION}px on either axis.
 When a task worktree has no local credential, the command reads only the
 required Cloudflare Images settings from the primary checkout's ignored
-.env.local or .env file. Each verified public URL is printed on its own line.
+.env.local or .env file. The command creates or validates the non-downscaling
+${DESIGN_PROOF_VARIANT_ID} variant, then prints each verified URL on its own line.
 `;
 
 export class DesignProofUploadError extends Error {
@@ -237,33 +252,41 @@ export async function loadCloudflareImagesConfig({
 }
 
 function detectImage(bytes: Buffer): {
-  contentType: "image/jpeg" | "image/png" | "image/webp";
-  extension: "jpg" | "png" | "webp";
+  contentType: "image/png";
+  extension: "png";
+  height: number;
+  width: number;
 } {
   if (
-    bytes.length >= 8
+    bytes.length >= 24
     && bytes.subarray(0, 8).equals(
       Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     )
+    && bytes.subarray(12, 16).toString("ascii") === "IHDR"
   ) {
-    return { extension: "png", contentType: "image/png" };
+    const width = bytes.readUInt32BE(16);
+    const height = bytes.readUInt32BE(20);
+    if (width === 0 || height === 0) {
+      throw fail("The PNG has invalid pixel dimensions.");
+    }
+    if (width < MIN_IMAGE_WIDTH) {
+      throw fail(
+        `The design-proof screenshot must be at least ${MIN_IMAGE_WIDTH}px wide; capture at 2x pixel density or higher.`,
+      );
+    }
+    if (width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
+      throw fail(
+        `The design-proof screenshot must fit within ${MAX_IMAGE_DIMENSION}x${MAX_IMAGE_DIMENSION}px; crop to the changed surface.`,
+      );
+    }
+    return {
+      extension: "png",
+      contentType: "image/png",
+      height,
+      width,
+    };
   }
-  if (
-    bytes.length >= 3
-    && bytes[0] === 0xff
-    && bytes[1] === 0xd8
-    && bytes[2] === 0xff
-  ) {
-    return { extension: "jpg", contentType: "image/jpeg" };
-  }
-  if (
-    bytes.length >= 12
-    && bytes.subarray(0, 4).toString("ascii") === "RIFF"
-    && bytes.subarray(8, 12).toString("ascii") === "WEBP"
-  ) {
-    return { extension: "webp", contentType: "image/webp" };
-  }
-  throw fail("The input is not a supported PNG, JPEG, or WebP image.");
+  throw fail("The input is not a supported lossless PNG screenshot.");
 }
 
 async function readBoundedResponseText(response: Response): Promise<string> {
@@ -301,7 +324,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-function readPublicVariant(payload: unknown): string {
+function readDesignProofVariant(payload: unknown): string {
   if (
     !isRecord(payload)
     || payload.success !== true
@@ -318,7 +341,10 @@ function readPublicVariant(payload: unknown): string {
       if (
         url.protocol === "https:"
         && url.hostname === "imagedelivery.net"
-        && /^\/[^/]+\/[^/]+\/public$/u.test(url.pathname)
+        && new RegExp(
+          `^/[^/]+/[^/]+/${DESIGN_PROOF_VARIANT_ID}$`,
+          "u",
+        ).test(url.pathname)
         && url.search === ""
         && url.hash === ""
       ) {
@@ -328,7 +354,143 @@ function readPublicVariant(payload: unknown): string {
       // Continue until the canonical public variant is found.
     }
   }
-  throw fail("Cloudflare Images did not return a public delivery variant.");
+  throw fail(
+    `Cloudflare Images did not return the ${DESIGN_PROOF_VARIANT_ID} delivery variant.`,
+  );
+}
+
+function matchesDesignProofVariant(value: unknown): boolean {
+  if (!isRecord(value) || !isRecord(value.options)) return false;
+  return value.id === DESIGN_PROOF_VARIANT.id
+    && value.neverRequireSignedURLs
+      === DESIGN_PROOF_VARIANT.neverRequireSignedURLs
+    && value.options.fit === DESIGN_PROOF_VARIANT.options.fit
+    && value.options.height === DESIGN_PROOF_VARIANT.options.height
+    && value.options.metadata === DESIGN_PROOF_VARIANT.options.metadata
+    && value.options.width === DESIGN_PROOF_VARIANT.options.width;
+}
+
+function readVariantMap(payload: unknown): Record<string, unknown> {
+  if (
+    !isRecord(payload)
+    || payload.success !== true
+    || !isRecord(payload.result)
+    || !isRecord(payload.result.variants)
+  ) {
+    throw fail("Cloudflare Images returned an invalid variants response.");
+  }
+  return payload.result.variants;
+}
+
+function readCreatedVariant(payload: unknown): unknown {
+  if (
+    !isRecord(payload)
+    || payload.success !== true
+    || !isRecord(payload.result)
+  ) {
+    throw fail("Cloudflare Images returned an invalid variant response.");
+  }
+  return payload.result.variant;
+}
+
+async function readJsonResponse(
+  response: Response,
+  invalidMessage: string,
+): Promise<unknown> {
+  try {
+    return JSON.parse(await readBoundedResponseText(response));
+  } catch (error) {
+    if (error instanceof DesignProofUploadError) throw error;
+    throw fail(invalidMessage);
+  }
+}
+
+export async function ensureDesignProofVariant({
+  accountId,
+  apiKey,
+  fetchImpl = fetch,
+  timeoutMs = UPLOAD_TIMEOUT_MS,
+}: {
+  accountId: string;
+  apiKey: string;
+  fetchImpl?: FetchLike;
+  timeoutMs?: number;
+}): Promise<void> {
+  const endpoint = new URL(
+    `/client/v4/accounts/${accountId}/images/v1/variants`,
+    CLOUDFLARE_API_ORIGIN,
+  );
+  const headers = {
+    Accept: "application/json",
+    Authorization: `Bearer ${apiKey}`,
+    "User-Agent": "murph-design-proof-upload",
+  };
+  let listResponse: Response;
+  try {
+    listResponse = await fetchImpl(endpoint, {
+      headers,
+      method: "GET",
+      redirect: "error",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch {
+    throw fail("The Cloudflare Images variant check failed.");
+  }
+  if (!listResponse.ok) {
+    await discardResponse(listResponse);
+    throw fail(
+      `Cloudflare Images rejected the variant check (HTTP ${listResponse.status}).`,
+    );
+  }
+
+  const variants = readVariantMap(
+    await readJsonResponse(
+      listResponse,
+      "Cloudflare Images returned an invalid variants response.",
+    ),
+  );
+  const current = variants[DESIGN_PROOF_VARIANT_ID];
+  if (current !== undefined) {
+    if (!matchesDesignProofVariant(current)) {
+      throw fail(
+        `Cloudflare Images ${DESIGN_PROOF_VARIANT_ID} variant does not match the required high-resolution settings.`,
+      );
+    }
+    return;
+  }
+
+  let createResponse: Response;
+  try {
+    createResponse = await fetchImpl(endpoint, {
+      body: JSON.stringify(DESIGN_PROOF_VARIANT),
+      headers: {
+        ...headers,
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+      redirect: "error",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch {
+    throw fail("The Cloudflare Images variant creation request failed.");
+  }
+  if (!createResponse.ok) {
+    await discardResponse(createResponse);
+    throw fail(
+      `Cloudflare Images rejected the variant creation (HTTP ${createResponse.status}).`,
+    );
+  }
+  const created = readCreatedVariant(
+    await readJsonResponse(
+      createResponse,
+      "Cloudflare Images returned an invalid variant response.",
+    ),
+  );
+  if (!matchesDesignProofVariant(created)) {
+    throw fail(
+      `Cloudflare Images did not create the required ${DESIGN_PROOF_VARIANT_ID} variant.`,
+    );
+  }
 }
 
 async function verifyPublicImage(
@@ -411,14 +573,11 @@ export async function uploadDesignProofImage({
     throw fail(`Cloudflare Images rejected the upload (HTTP ${response.status}).`);
   }
 
-  let payload: unknown;
-  try {
-    payload = JSON.parse(await readBoundedResponseText(response));
-  } catch (error) {
-    if (error instanceof DesignProofUploadError) throw error;
-    throw fail("Cloudflare Images returned an invalid upload response.");
-  }
-  const publicUrl = readPublicVariant(payload);
+  const payload = await readJsonResponse(
+    response,
+    "Cloudflare Images returned an invalid upload response.",
+  );
+  const publicUrl = readDesignProofVariant(payload);
   await verifyPublicImage(publicUrl, fetchImpl, verifyTimeoutMs);
   return publicUrl;
 }
@@ -453,6 +612,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   }
 
   const config = await loadCloudflareImagesConfig();
+  await ensureDesignProofVariant(config);
   for (const [index, filePath] of parsed.files.entries()) {
     const publicUrl = await uploadDesignProofImage({
       ...config,

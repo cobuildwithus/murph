@@ -121,8 +121,10 @@ describe("hosted local warm-reuse egress e2e", () => {
       .listProviderRequests("/v1/responses")
       .slice(providerRequestsBeforeSwitch);
     expect(providerRequestsAfterSwitch).toHaveLength(1);
-    expect(readProviderRequestModel(providerRequestsAfterSwitch[0]?.body ?? ""))
+    const providerRequestBody = providerRequestsAfterSwitch[0]?.body ?? "";
+    expect(readProviderRequestModel(providerRequestBody))
       .toBe(terraProductModel);
+    expectCurrentResponsesLiteToolEnvelope(providerRequestBody);
 
     await Promise.all([
       secondTurn.completion,
@@ -155,6 +157,52 @@ function readProviderRequestModel(body: string): unknown {
   return payload && typeof payload === "object" && !Array.isArray(payload)
     ? Reflect.get(payload, "model")
     : null;
+}
+
+function expectCurrentResponsesLiteToolEnvelope(body: string): void {
+  const payload: unknown = JSON.parse(body);
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new TypeError("Expected the provider request to be a JSON object.");
+  }
+  expect(Reflect.has(payload, "tools")).toBe(false);
+
+  const input: unknown = Reflect.get(payload, "input");
+  if (!Array.isArray(input)) {
+    throw new TypeError("Expected the provider request input to be an array.");
+  }
+  const additionalToolsItems = input.filter((item) =>
+    Boolean(
+      item
+      && typeof item === "object"
+      && !Array.isArray(item)
+      && Reflect.get(item, "type") === "additional_tools",
+    )
+  );
+  expect(additionalToolsItems).toHaveLength(1);
+  const additionalTools = additionalToolsItems[0];
+  if (
+    !additionalTools
+    || typeof additionalTools !== "object"
+    || Array.isArray(additionalTools)
+  ) {
+    throw new TypeError("Expected one Responses Lite tool envelope.");
+  }
+  expect(Reflect.has(additionalTools, "id")).toBe(false);
+  expect(Reflect.get(additionalTools, "role")).toBe("developer");
+  const tools: unknown = Reflect.get(additionalTools, "tools");
+  if (!Array.isArray(tools) || tools.length === 0) {
+    throw new TypeError(
+      "Expected the Responses Lite envelope to contain tool definitions.",
+    );
+  }
+  for (const tool of tools) {
+    if (!tool || typeof tool !== "object" || Array.isArray(tool)) {
+      throw new TypeError(
+        "Expected each Responses Lite tool definition to be a JSON object.",
+      );
+    }
+    expect(Reflect.get(tool, "type")).toEqual(expect.any(String));
+  }
 }
 
 async function readRuntimeWorkflowState(input: {

@@ -259,8 +259,16 @@ Required:
   `/design?tab=components` or `/design?tab=sections` catalog surface and embed
   hosted desktop and mobile screenshots captured there. The screenshots must
   show every materially changed component or section and the states needed for
-  review. Keep screenshot binaries out of the repository. Capture them only in
-  an ignored local audit path, then upload them from the local machine through
+  review. Capture lossless PNGs at `deviceScaleFactor: 2` or higher: use a
+  desktop viewport at least 1440 CSS pixels wide and a 390 CSS-pixel mobile
+  viewport. Crop each capture to the changed component or section instead of
+  shrinking a long full-page catalog screenshot. The resulting file must be at
+  least 700 pixels wide and no more than 2400 pixels on either axis; use 3x
+  scale when a narrow mobile component crop would otherwise miss the width
+  floor. Inspect each local file at native resolution and confirm that body copy
+  is immediately legible before upload. Keep screenshot binaries out of the
+  repository. Capture them only in an ignored local audit path, then upload them
+  from the local machine through
   the [Cloudflare Images upload API](https://developers.cloudflare.com/api/resources/images/subresources/v1/methods/create/)
   using `CLOUDFLARE_IMAGES_ACCOUNT_ID` and a least-privilege `Images Write` API
   token supplied only as local `CLOUDFLARE_IMAGES_API_KEY`. Set
@@ -269,10 +277,13 @@ Required:
   preserves exported environment values and otherwise reads only those two
   settings from the invoking checkout and then the Git-discovered primary
   checkout, without copying or printing the credential. Embed each returned
-  public `https://imagedelivery.net/...` variant URL in the PR body, and confirm
-  the URL renders. Before printing it, the command performs a bounded HTTP
-  delivery check for a successful `image/*` response; this does not replace the
-  visual confirmation in the PR body. Retain the local capture only until
+  public `https://imagedelivery.net/.../designproof` variant URL in the PR body.
+  The command creates or validates that dedicated 2400-by-2400 `scale-down`
+  variant, rejects undersized or uncropped input, and performs a bounded HTTP
+  delivery check before printing the URL. Open each delivered URL at native
+  resolution and confirm that it retains the local file's legibility; the
+  automated response check does not replace visual confirmation. Retain the
+  local capture only until
   required review packaging is complete, then delete it. Never print, commit,
   persist in repository files, or pass the credential to ReviewGPT or another
   external reviewer; if the local credential is unavailable, report the

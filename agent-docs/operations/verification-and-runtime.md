@@ -392,7 +392,11 @@ connection is unusable. Browser attachment alone must not block completion when
 Playwright can capture the required states. Treat that fallback as required:
 attempt Playwright before asking for a browser attachment or reporting a
 screenshot blocker, and record the exact command and failure only if Playwright
-cannot capture the proof.
+cannot capture the proof. Capture lossless PNGs at 2x device scale or higher,
+crop to the changed component or section, and visually inspect both the local
+file and the hosted `/designproof` Cloudflare Images variant at native
+resolution. Do not use a long full-page capture that makes review text smaller
+than the rendered UI.
 
 ## Scoped Verification Mode
 

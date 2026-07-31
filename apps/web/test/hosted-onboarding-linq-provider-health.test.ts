@@ -40,6 +40,7 @@ const inventoryMocks = vi.hoisted(() => ({
 
 vi.mock("@/src/lib/linq/api", () => ({
   fetchLinqApi: inventoryMocks.fetchLinqApi,
+  LINQ_API_DEFAULT_TIMEOUT_MS: 10_000,
   LinqApiTimeoutError: class LinqApiTimeoutError extends Error {},
 }));
 

@@ -43,11 +43,14 @@ import {
   HOSTED_ASSISTANT_REASONING_EFFORTS,
 } from '@murphai/hosted-execution/assistant-model'
 import {
+  HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME,
   HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES,
+  type HostedPlanUsageStatus,
   type HostedPlanUsageToolRequest,
 } from '@murphai/hosted-execution/plan-usage'
 import {
   hostedRuntimeSubscriptionToolRequestSchema,
+  type HostedRuntimeSubscriptionToolResponse,
   type HostedRuntimeSubscriptionToolRequest,
 } from '@murphai/hosted-execution/subscription'
 import {
@@ -3832,11 +3835,67 @@ async function executePlanUsageTool(input: {
   try {
     return toolTextResult(
       true,
-      safeToolPayloadText(await planUsageTool.read(input.request)),
+      safeToolPayloadText(
+        projectHostedPlanUsageForAssistant(
+          await planUsageTool.read(input.request),
+        ),
+      ),
     )
   } catch {
     return toolTextResult(false, 'plan usage could not be read')
   }
+}
+
+function projectHostedPlanUsageForAssistant(input: HostedPlanUsageStatus) {
+  const availablePlans = input.availablePlans?.map((plan) => (
+    plan.code === 'launch_group_monthly'
+      ? {
+          ...plan,
+          displayName: HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME,
+        }
+      : plan
+  ))
+  const scheduledPlan = input.scheduledPlan?.code === 'launch_group_monthly'
+    ? {
+        ...input.scheduledPlan,
+        displayName: HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME,
+      }
+    : input.scheduledPlan
+  const recommendedAction =
+    input.recommendedAction?.kind === 'change_plan'
+    && input.recommendedAction.targetPlanCode === 'launch_group_monthly'
+      ? {
+          ...input.recommendedAction,
+          label: projectHostedGroupPlanLabel(input.recommendedAction.label),
+        }
+      : input.recommendedAction
+  const subscriptionActionQuote =
+    input.subscriptionActionQuote?.targetPlanCode === 'launch_group_monthly'
+      ? {
+          ...input.subscriptionActionQuote,
+          label: projectHostedGroupPlanLabel(input.subscriptionActionQuote.label),
+        }
+      : input.subscriptionActionQuote
+
+  return {
+    ...input,
+    ...(input.status === 'unavailable'
+      ? {}
+      : {
+          planName:
+            input.planCode === 'launch_group_monthly'
+              ? HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME
+              : input.planName,
+        }),
+    availablePlans,
+    recommendedAction,
+    scheduledPlan,
+    subscriptionActionQuote,
+  }
+}
+
+function projectHostedGroupPlanLabel(label: string): string {
+  return label.replace(/\bGroup\b/gu, HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME)
 }
 
 async function executeIMessageContactTool(input: {
@@ -3908,7 +3967,10 @@ async function executeSubscriptionTool(input: {
             assistantInputId,
           },
     )
-    return toolTextResult(true, safeToolPayloadText(result))
+    return toolTextResult(
+      true,
+      safeToolPayloadText(projectHostedSubscriptionForAssistant(result)),
+    )
   } catch (error) {
     if (isHostedBillingPlanQuoteStaleError(error)) {
       return toolTextResult(
@@ -3917,6 +3979,22 @@ async function executeSubscriptionTool(input: {
       )
     }
     return toolTextResult(false, 'subscription action could not be completed')
+  }
+}
+
+function projectHostedSubscriptionForAssistant(
+  result: HostedRuntimeSubscriptionToolResponse,
+) {
+  if (result.plan.code !== 'launch_group_monthly') {
+    return result
+  }
+
+  return {
+    ...result,
+    plan: {
+      ...result.plan,
+      displayName: HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME,
+    },
   }
 }
 
