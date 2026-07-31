@@ -229,6 +229,73 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
+    'handles delegated initiative in a direct text',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-direct-delegated-initiative-e2e-'),
+      )
+
+      try {
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildDirectConversationDeveloperInstructions(),
+          env: config.env,
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Murph, choose our activity and take care of booking it.',
+            'Prioritize the lowest price and staying indoors if it rains.',
+            'Northside Climbing Gym is $28 per person, fully indoors, and well reviewed.',
+            'Rooftop Mini Golf is $35 per person and outdoors.',
+            'The Candle Workshop is $55 per person and indoors.',
+            'Choose one, explain why, and keep this moving without giving me a checklist.',
+            'I forgot to include the date, and I have not approved a final price or booking confirmation yet.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const text = result.finalMessage.trim()
+
+        expect(text, 'delegated choice').toMatch(
+          /Northside(?: Climbing Gym)?|climbing gym/iu,
+        )
+        expect(text, 'delegated rationale').toMatch(
+          /\$28|lowest price|least expensive|cheapest/iu,
+        )
+        expect(text, 'booking remains undone').toMatch(
+          /(?:have not|haven[’']t|not yet) (?:booked|reserved)|booking (?:is not|isn[’']t) (?:complete|confirmed|done)/iu,
+        )
+        expect(text, 'no false booking claim').not.toMatch(
+          /(?:I(?: have|[’']ve)|we(?: are|[’']re)|it(?: is|[’']s)) (?:now )?(?:booked|reserved|confirmed)|all set|locked in/iu,
+        )
+        expect(
+          (text.match(/\?/gu) ?? []).length,
+          'one blocking question',
+        ).toBe(1)
+        expect(text, 'date is the blocker').toMatch(
+          /(?:what|which) (?:date|day)|when[^?]*\?/iu,
+        )
+        expect(text, 'blocking question is final').toMatch(/\?$/u)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
     'answers schoolwork and declines professional deliverables in direct and group scopes',
     async () => {
       const config = await resolveRealCodexE2eConfig()
@@ -245,7 +312,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         const scopes = [
           {
             developerInstructions:
-              buildDirectSchoolworkDeveloperInstructions(),
+              buildDirectConversationDeveloperInstructions(),
             label: 'direct',
           },
           {
@@ -3010,7 +3077,7 @@ function buildHostedUsageOptionsDeveloperInstructions(
   })
 }
 
-function buildDirectSchoolworkDeveloperInstructions(): string {
+function buildDirectConversationDeveloperInstructions(): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
     assistantContextSnapshotPrompt: null,

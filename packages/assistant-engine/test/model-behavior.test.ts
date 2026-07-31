@@ -2594,7 +2594,10 @@ describe('assistant conversation scope', () => {
         'Ask only for facts that materially change safety, authorization, correctness, or the next useful step.',
       )
       expect(prompt).toContain(
-        'On texting routes, ask the highest-value blocker first and complete everything independent of it.',
+        'Complete everything useful that is independent of a blocker first.',
+      )
+      expect(prompt).toContain(
+        'If a texting-route reply still needs user input, ask exactly one highest-value blocker as the final question.',
       )
       expect(prompt).toContain(
         'Delegation authorizes judgment among already permitted options; it does not create consent or effect authority beyond the request and owning rule.',
