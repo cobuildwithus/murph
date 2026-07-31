@@ -1,5 +1,6 @@
 name: BYOI branch patch
 
+# Temporary integration runner. Removed before review-ready.
 on:
   push:
     branches:
