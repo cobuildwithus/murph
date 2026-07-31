@@ -1004,7 +1004,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
     );
   });
 
-  it("moves the overall usage bar backward immediately after a top-up", async () => {
+  it("starts a fresh overall usage meter immediately after a top-up", async () => {
     mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
       limitUsdMicros: 10_000_000n,
       remainingUsdMicros: 6_700_000n,
@@ -1016,15 +1016,65 @@ describe("readHostedPersonalAiUsageStatus", () => {
     await expect(readHostedPersonalAiUsageStatus({
       memberId: "member_recent_top_up",
       now: NOW,
-      prisma: buildPrisma(null) as never,
+      prisma: buildPrisma(null, {
+        latestPurchaseGrantAt: new Date("2026-07-03T11:00:00.000Z"),
+        spentSincePurchaseUsdMicros: 0n,
+      }) as never,
       publicBaseUrl: null,
     })).resolves.toMatchObject({
       forecast: null,
       recommendedAction: null,
-      remainingPercent: 45,
+      remainingPercent: 100,
       status: "active",
-      usedPercent: 55,
+      usedPercent: 0,
     });
+  });
+
+  it("advances the fresh meter only with usage recorded after the top-up", async () => {
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+      limitUsdMicros: 10_000_000n,
+      remainingUsdMicros: 3_000_000n,
+      spentUsdMicros: 10_000_000n,
+      usageCreditBalanceUsdMicros: 3_000_000n,
+      usageCreditLedgerVersion: 6n,
+    }));
+    const prisma = buildPrisma(
+      new Date("2026-07-03T11:30:00.000Z"),
+      {
+        latestPurchaseGrantAt: new Date("2026-07-03T11:00:00.000Z"),
+        spentSincePurchaseUsdMicros: 2_000_000n,
+      },
+    );
+
+    await expect(readHostedPersonalAiUsageStatus({
+      memberId: "member_recent_top_up_usage",
+      now: NOW,
+      prisma: prisma as never,
+      publicBaseUrl: null,
+    })).resolves.toMatchObject({
+      forecast: null,
+      remainingPercent: 60,
+      status: "active",
+      usedPercent: 40,
+    });
+    expect(prisma.hostedUsageCreditEntry.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          beneficiarySequence: { lte: 6n },
+          kind: "purchase_grant",
+        }),
+      }),
+    );
+    expect(prisma.hostedAiUsage.aggregate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          occurredAt: {
+            gt: new Date("2026-07-03T11:00:00.000Z"),
+            lte: NOW,
+          },
+        }),
+      }),
+    );
   });
 
   it("forecasts exhaustion against overall available capacity", async () => {
@@ -1056,12 +1106,31 @@ describe("readHostedPersonalAiUsageStatus", () => {
 
 function buildPrisma(
   firstUsageAt: Date | null,
-  hasConfirmedGroupMembership = false,
+  usageContext: boolean | {
+    latestPurchaseGrantAt: Date;
+    spentSincePurchaseUsdMicros: bigint;
+  } | null = null,
 ) {
+  const hasConfirmedGroupMembership = usageContext === true;
+  const usageMeter =
+    usageContext !== null && typeof usageContext === "object"
+      ? usageContext
+      : null;
   return {
     hostedAiUsage: {
+      aggregate: vi.fn(async () => ({
+        _sum: {
+          allowanceCostUsdMicros:
+            usageMeter?.spentSincePurchaseUsdMicros ?? null,
+        },
+      })),
       findFirst: vi.fn(async () => firstUsageAt
         ? { occurredAt: firstUsageAt }
+        : null),
+    },
+    hostedUsageCreditEntry: {
+      findFirst: vi.fn(async () => usageMeter
+        ? { effectiveAt: usageMeter.latestPurchaseGrantAt }
         : null),
     },
     hostedGroupMember: {
