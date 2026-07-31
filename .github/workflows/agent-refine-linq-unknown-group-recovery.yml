@@ -76,6 +76,9 @@ jobs:
             test/hosted-onboarding-linq-transport.test.ts
           git diff --check
 
+      - name: Generate Prisma client
+        run: pnpm --dir apps/web prisma:generate
+
       - name: Focused tests
         run: |
           pnpm --dir apps/web exec vitest run \
