@@ -137,3 +137,27 @@ replace_once(
 )
 
 path.write_text(content)
+
+handoff_test_path = Path("apps/web/test/hosted-group-start-handoff.test.ts")
+handoff_test = handoff_test_path.read_text()
+old_handoff_assertions = '''    expect(consumeHostedGroupStartHandoff({
+      now: new Date("2026-07-31T05:00:00.000Z"),
+      storage,
+    })).toBe(true);
+    expect(consumeHostedGroupStartHandoff({
+      now: new Date("2026-07-31T05:00:00.000Z"),
+      storage,
+    })).toBe(false);'''
+new_handoff_assertions = '''    expect(consumeHostedGroupStartHandoff({
+      now: new Date("2026-07-31T04:15:00.000Z"),
+      storage,
+    })).toBe(true);
+    expect(consumeHostedGroupStartHandoff({
+      now: new Date("2026-07-31T04:15:00.000Z"),
+      storage,
+    })).toBe(false);'''
+if handoff_test.count(old_handoff_assertions) != 1:
+    raise RuntimeError("handoff test: expected one 24-hour fixture anchor")
+handoff_test_path.write_text(
+    handoff_test.replace(old_handoff_assertions, new_handoff_assertions, 1),
+)
