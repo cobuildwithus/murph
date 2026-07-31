@@ -155,6 +155,7 @@ describe("hosted Core plan policy", () => {
       targetPlanCode: "launch_group_monthly",
     })).rejects.toMatchObject({
       code: "HOSTED_GROUP_PLAN_NOT_ELIGIBLE",
+      message: "The Core plan is available while you're part of a Murph group.",
     });
   });
 

@@ -25,6 +25,8 @@ runtime behavior.
    language and internal identifiers.
 2. Change the canonical display name to Core and update direct plan-specific
    Settings, assistant, test, design-catalog, and current product-document copy.
+   Teach the private assistant's billing instruction owner that Core maps to
+   `launch_group_monthly`.
 3. Preserve the legacy `Group` wire literal and translate it at existing Web and
    assistant presentation boundaries. Add no state, billing branch, protocol
    change, or deployment configuration.
@@ -41,5 +43,6 @@ runtime behavior.
   because the wire contract does not change. No Stripe, database, or runtime
   migration is required.
 
-Status: active
+Status: completed
 Updated: 2026-07-30
+Completed: 2026-07-30
