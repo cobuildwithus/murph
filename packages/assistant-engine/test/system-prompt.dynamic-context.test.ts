@@ -175,10 +175,10 @@ describe('assistant dynamic context prompt blocks', () => {
     expect(familySkill).not.toContain(genericSettingsRoute)
     expect(assembledBillingPrompt.split(genericSettingsRoute)).toHaveLength(2)
     expect(groupLayers.staticCacheableCorePrompt).toContain(
-      'after someone directly asks to fund, sponsor, contribute, add usage to the chat, or receive its funding link',
+      'after someone directly asks to fund, sponsor, contribute, pay to add usage, or receive its funding link',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
-      'after they ask for or accept an explanation of the group\'s usage options',
+      'after they ask generically how to get or add more usage, keep the room going, or accept an explanation of the group\'s usage options',
     )
     expect(assembledGroupFundingPrompt).not.toContain(
       'on a trusted low-usage turn or after the group asks',

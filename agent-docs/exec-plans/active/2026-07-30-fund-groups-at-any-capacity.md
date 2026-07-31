@@ -86,9 +86,10 @@ Updated: 2026-07-30
   the newly added credit is useful even when included capacity is currently
   healthy and carries forward if unused.
 - No new endpoint, model, table, queue, balance, or payment primitive is needed.
-- A direct request to fund, sponsor, contribute, add group usage, or get the
-  link reads only current group usage. Referral state is reserved for a broad
-  request for every option, ways to earn usage, or a mission.
+- A request that explicitly selects funding, sponsorship, contribution, paying
+  to add usage, or the funding link reads only current group usage. A generic
+  request to get or add more usage or keep the room going remains an
+  all-options request and reads both current funding and referral availability.
 - Product purpose revalidation after preliminary remediation: the irreducible
   purpose is to let a participant fund the room when they choose without a
   false depletion claim or referral detour. Reusing the current group read,
@@ -135,11 +136,18 @@ Updated: 2026-07-30
     proof. Its post-remediation recheck returned `NO FINDINGS` and confirmed
     the shared production/catalog composition, hierarchy, and responsive
     evidence.
+  - Final ReviewGPT round 1 found that a generic request to get or add more
+    group usage could be misclassified as a direct paid request and omit an
+    available earned path. The accepted correction reserves the one-read route
+    for explicit funding selection, restores generic get/add-more-usage wording
+    to the two-read all-options route, and removes the disambiguating
+    every-option sentence from the real Codex regression. The corrected live
+    scenario passed.
   - Complete initial Responses request measurement used pinned real Codex App
     Server, `gpt-5.6-terra` code mode, representative direct/group Linq turns,
     and `gpt-tokenizer` 3.4.0 `o200k_base`. It counted the full canonical JSON
     request body, including messages, eager tools, deferred metadata, generated
     guidance, and fixed fields, while excluding HTTP headers identically:
-    direct stayed 122,504 bytes / 26,962 tokens; group changed from 108,499
-    bytes / 23,948 tokens to 108,602 bytes / 23,971 tokens, or +103 bytes
-    (+0.095%) and +23 tokens (+0.096%), entirely from group instructions.
+    direct stayed 122,504 bytes / 26,939 tokens; group changed from 109,273
+    bytes / 24,055 tokens to 109,430 bytes / 24,091 tokens, or +157 bytes
+    (+0.144%) and +36 tokens (+0.150%), entirely from group instructions.

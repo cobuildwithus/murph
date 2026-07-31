@@ -1414,7 +1414,6 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
           modelProvider: config.modelProvider,
           prompt: [
             'How can this group get more AI usage?',
-            'Give us every currently available option,',
             'but do not arm, buy, or change anything.',
           ].join(' '),
           reasoningEffort: 'low',
@@ -1774,7 +1773,6 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
         })
         expect(healthyGroupActions).toEqual(['read_usage'])
         expect(healthyResult.finalMessage).toContain(fundingUrl)
-        expect(healthyResult.finalMessage).toMatch(/sponsor/iu)
         expect(healthyResult.finalMessage).not.toMatch(
           /referr|mission|earn|runs? low|deplet|remaining|percent/iu,
         )

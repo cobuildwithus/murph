@@ -44,7 +44,10 @@ describe('assistant hosted low-usage skill', () => {
       'how to get more usage, what options exist, how to earn usage, or about a mission',
     )
     expect(normalizedSkill).toContain(
-      'A direct funding intent asks to fund, sponsor, contribute, add usage to the chat, or receive its funding link',
+      'A direct funding intent explicitly asks to fund, sponsor, contribute, pay to add usage, receive the funding link, or otherwise selects the paid path over earned options',
+    )
+    expect(normalizedSkill).toContain(
+      'A broad-options intent asks generically how to get or add more usage, get more Murph time, or keep the room going',
     )
     expect(normalizedSkill).toContain(
       'Call `read_usage` only',
@@ -65,7 +68,7 @@ describe('assistant hosted low-usage skill', () => {
       'Do not answer with only the paid or funding path or make the sender ask again',
     )
     expect(normalizedSkill).toContain(
-      'A direct group funding intent is not a broad-options request',
+      'A direct group funding intent explicitly selects the paid or funding path rather than asking generically for more usage',
     )
     expect(normalizedSkill).toContain(
       "use this turn's `read_usage_referral` result",
