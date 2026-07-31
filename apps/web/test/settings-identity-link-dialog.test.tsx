@@ -19,7 +19,7 @@ const mocks = vi.hoisted(() => ({
   useUser: vi.fn(),
   phoneSettingsProps: [] as Array<{
     autoOpen?: boolean;
-    diagnosticReporter?: unknown;
+    diagnosticReporterFactory?: unknown;
     onAborted?: () => void;
   }>,
   telegramCardProps: [] as Array<{
@@ -77,13 +77,13 @@ vi.mock("@/src/components/ui/dialog", () => ({
 vi.mock("@/src/components/settings/hosted-phone-settings", () => ({
   HostedPhoneSettings(props: {
     autoOpen?: boolean;
-    diagnosticReporter?: unknown;
+    diagnosticReporterFactory?: unknown;
     onAborted?: () => void;
     onLinked?: (payload: { mode: string }) => void;
   }) {
     mocks.phoneSettingsProps.push({
       autoOpen: props.autoOpen,
-      diagnosticReporter: props.diagnosticReporter,
+      diagnosticReporterFactory: props.diagnosticReporterFactory,
       onAborted: props.onAborted,
     });
 
@@ -234,7 +234,7 @@ describe("HostedSettingsIdentityLinkDialog", () => {
       expect(container.textContent).toContain("Link phone child");
       expect(mocks.phoneSettingsProps).toHaveLength(1);
       expect(mocks.phoneSettingsProps[0]?.autoOpen).toBe(true);
-      expect(mocks.phoneSettingsProps[0]?.diagnosticReporter).toBe(
+      expect(mocks.phoneSettingsProps[0]?.diagnosticReporterFactory).toBe(
         mocks.reportPhoneDiagnostic,
       );
       expect(mocks.useHostedPhoneLinkDiagnostics).toHaveBeenCalledWith(
@@ -349,6 +349,16 @@ describe("HostedSettingsIdentityLinkDialog", () => {
       expect(container.textContent).not.toContain("Privy hand-off child");
       expect(container.textContent).not.toContain("Link telegram child");
       expect(mocks.telegramCardProps).toEqual([]);
+      if (initialMode === "phone") {
+        expect(mocks.phoneSettingsProps).toEqual([]);
+        expect(mocks.useHostedPhoneLinkDiagnostics).toHaveBeenCalledWith(
+          expect.objectContaining({
+            serverSessionMatches: false,
+            showLinkForm: true,
+            surface: "settings",
+          }),
+        );
+      }
 
       const signInAgainButton = Array.from(container.querySelectorAll("button")).find(
         (candidate) => candidate.textContent?.includes("Sign in again"),

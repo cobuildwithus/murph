@@ -32,12 +32,13 @@ import { SettingsStatusLine } from "./connected-account-card";
 import {
   toPhoneLinkProviderDetailCode,
   type HostedPhoneLinkDiagnosticReporter,
+  type HostedPhoneLinkDiagnosticReporterFactory,
 } from "./hosted-phone-link-diagnostics";
 import { toErrorMessage } from "./hosted-settings-utils";
 
 export function HostedPhoneSettings(props: {
   autoOpen?: boolean;
-  diagnosticReporter?: HostedPhoneLinkDiagnosticReporter;
+  diagnosticReporterFactory?: HostedPhoneLinkDiagnosticReporterFactory;
   initialPhoneNumber?: string | null;
   onAborted?: () => void;
   onLinked?: (payload: HostedPhoneLinkPayload) => Promise<void> | void;
@@ -53,24 +54,23 @@ export function HostedPhoneSettings(props: {
   const pendingSyncOperationRef = useRef<HostedPhoneLinkDiagnosticOperation | null>(null);
   const providerAttemptSequenceRef = useRef(0);
   const providerLaunchAttemptRef = useRef<number | null>(null);
+  const providerDiagnosticRef = useRef<HostedPhoneLinkDiagnosticReporter | null>(null);
   const providerPhoneBaselineRef = useRef<string | null>(null);
   const providerCompletionHandledRef = useRef(false);
-  const reportDiagnostic = props.diagnosticReporter ?? (() => {});
 
   const shouldUpdatePhone = Boolean(privyUser?.phone?.number);
   const { linkPhone } = useLinkAccount({
     onError: (error, details) => {
       if (details && details.linkMethod !== "sms") {
-        reportDiagnostic("provider_callback_ignored", {
+        providerDiagnosticRef.current?.("provider_callback_ignored", {
           detailCode: "non_sms_callback",
-          operation: "link",
         });
         return;
       }
 
       const providerAttempt = providerLaunchAttemptRef.current;
       if (providerAttempt !== null) {
-        handleProviderError(providerAttempt, error, "exited_link_flow", "link");
+        handleProviderError(providerAttempt, error, "exited_link_flow");
       }
     },
     onSuccess: (params) => {
@@ -83,11 +83,10 @@ export function HostedPhoneSettings(props: {
         void handlePrivyPhoneLinked(providerAttempt, {
           kind: "exact",
           phoneNumber: params.linkedAccount.number,
-        }, "link");
+        });
       } else {
-        reportDiagnostic("provider_callback_ignored", {
+        providerDiagnosticRef.current?.("provider_callback_ignored", {
           detailCode: params.linkMethod === "sms" ? "other" : "non_sms_callback",
-          operation: "link",
         });
       }
     },
@@ -95,16 +94,15 @@ export function HostedPhoneSettings(props: {
   const { updatePhone } = useUpdateAccount({
     onError: (error, details) => {
       if (details && details.linkMethod !== "sms") {
-        reportDiagnostic("provider_callback_ignored", {
+        providerDiagnosticRef.current?.("provider_callback_ignored", {
           detailCode: "non_sms_callback",
-          operation: "update",
         });
         return;
       }
 
       const providerAttempt = providerLaunchAttemptRef.current;
       if (providerAttempt !== null) {
-        handleProviderError(providerAttempt, error, "exited_update_flow", "update");
+        handleProviderError(providerAttempt, error, "exited_update_flow");
       }
     },
     onSuccess: (params) => {
@@ -117,11 +115,10 @@ export function HostedPhoneSettings(props: {
         void handlePrivyPhoneLinked(providerAttempt, {
           kind: "exact",
           phoneNumber: params.updatedAccount.number,
-        }, "update");
+        });
       } else {
-        reportDiagnostic("provider_callback_ignored", {
+        providerDiagnosticRef.current?.("provider_callback_ignored", {
           detailCode: params.updateMethod === "sms" ? "other" : "non_sms_callback",
-          operation: "update",
         });
       }
     },
@@ -141,12 +138,13 @@ export function HostedPhoneSettings(props: {
   async function syncPrivyPhone(
     expectation: HostedPhoneLinkSyncExpectation,
     operation: HostedPhoneLinkDiagnosticOperation,
+    reportDiagnostic: HostedPhoneLinkDiagnosticReporter,
   ) {
     pendingSyncExpectationRef.current = expectation;
     pendingSyncOperationRef.current = operation;
     setIsLinking(false);
     setIsSyncing(true);
-    reportDiagnostic("sync_started", { operation });
+    reportDiagnostic("sync_started");
 
     try {
       const result = await finalizeHostedPhoneLink({
@@ -157,7 +155,7 @@ export function HostedPhoneSettings(props: {
       if (result.status === "unchanged") {
         pendingSyncExpectationRef.current = null;
         pendingSyncOperationRef.current = null;
-        reportDiagnostic("sync_unchanged", { operation });
+        reportDiagnostic("sync_unchanged");
         props.onAborted?.();
         return;
       }
@@ -165,12 +163,11 @@ export function HostedPhoneSettings(props: {
       if (result.status === "synced") {
         pendingSyncExpectationRef.current = null;
         pendingSyncOperationRef.current = null;
-        reportDiagnostic("sync_succeeded", { operation });
+        reportDiagnostic("sync_succeeded");
       }
     } catch (error) {
       reportDiagnostic("sync_failed", {
         detailCode: "other",
-        operation,
       });
       setErrorMessage(toErrorMessage(error, "Your phone was verified, but we could not save it. Try again."));
     } finally {
@@ -181,7 +178,6 @@ export function HostedPhoneSettings(props: {
   async function handlePrivyPhoneLinked(
     providerAttempt: number,
     expectation: HostedPhoneLinkSyncExpectation,
-    operation: HostedPhoneLinkDiagnosticOperation,
   ) {
     if (
       providerLaunchAttemptRef.current !== providerAttempt
@@ -190,20 +186,34 @@ export function HostedPhoneSettings(props: {
       return;
     }
 
+    const reportDiagnostic = providerDiagnosticRef.current;
+    if (!reportDiagnostic) {
+      return;
+    }
+
     providerCompletionHandledRef.current = true;
-    reportDiagnostic("provider_succeeded", { operation });
+    reportDiagnostic("provider_succeeded");
     accountTransferPendingRef.current = false;
     providerLaunchAttemptRef.current = null;
-    await syncPrivyPhone(expectation, operation);
+    providerDiagnosticRef.current = null;
+    await syncPrivyPhone(
+      expectation,
+      pendingSyncOperationRef.current ?? (providerPhoneBaselineRef.current ? "update" : "link"),
+      reportDiagnostic,
+    );
   }
 
   function handleProviderError(
     providerAttempt: number,
     error: unknown,
     exitedFlowError: string,
-    operation: HostedPhoneLinkDiagnosticOperation,
   ) {
     if (providerLaunchAttemptRef.current !== providerAttempt) {
+      return;
+    }
+
+    const reportDiagnostic = providerDiagnosticRef.current;
+    if (!reportDiagnostic) {
       return;
     }
 
@@ -211,7 +221,6 @@ export function HostedPhoneSettings(props: {
       accountTransferPendingRef.current = true;
       reportDiagnostic("provider_transfer_required", {
         detailCode: "account_transfer_required",
-        operation,
       });
       setErrorMessage(null);
       return;
@@ -227,31 +236,43 @@ export function HostedPhoneSettings(props: {
 
       if (accountTransferPendingRef.current) {
         accountTransferPendingRef.current = false;
+        const operation = providerPhoneBaselineRef.current ? "update" : "link";
         pendingSyncExpectationRef.current = {
           kind: "changed-from",
           phoneNumber: providerPhoneBaselineRef.current,
         };
         pendingSyncOperationRef.current = operation;
-        void syncPrivyPhone(pendingSyncExpectationRef.current, operation);
+        providerDiagnosticRef.current = null;
+        void syncPrivyPhone(
+          pendingSyncExpectationRef.current,
+          operation,
+          reportDiagnostic,
+        );
         return;
       }
 
       reportDiagnostic("provider_cancelled", {
         detailCode: toPhoneLinkProviderDetailCode(error),
-        operation,
       });
+      providerDiagnosticRef.current = null;
       props.onAborted?.();
       return;
     }
 
     accountTransferPendingRef.current = false;
     providerLaunchAttemptRef.current = null;
+    providerDiagnosticRef.current = null;
     setIsLinking(false);
     reportDiagnostic("provider_failed", {
       detailCode: toPhoneLinkProviderDetailCode(error),
-      operation,
     });
     setErrorMessage(toPhoneLinkErrorMessage(error));
+  }
+
+  function createDiagnosticReporter(
+    operation: HostedPhoneLinkDiagnosticOperation,
+  ): HostedPhoneLinkDiagnosticReporter {
+    return props.diagnosticReporterFactory?.(operation) ?? (() => {});
   }
 
   async function handleLinkPhone() {
@@ -260,9 +281,12 @@ export function HostedPhoneSettings(props: {
 
     const pendingExpectation = pendingSyncExpectationRef.current;
     if (pendingExpectation) {
+      const operation =
+        pendingSyncOperationRef.current ?? (shouldUpdatePhone ? "update" : "link");
       await syncPrivyPhone(
         pendingExpectation,
-        pendingSyncOperationRef.current ?? (shouldUpdatePhone ? "update" : "link"),
+        operation,
+        createDiagnosticReporter(operation),
       );
       return;
     }
@@ -280,7 +304,11 @@ export function HostedPhoneSettings(props: {
       };
       pendingSyncExpectationRef.current = repairExpectation;
       pendingSyncOperationRef.current = "update";
-      await syncPrivyPhone(repairExpectation, "update");
+      await syncPrivyPhone(
+        repairExpectation,
+        "update",
+        createDiagnosticReporter("update"),
+      );
       return;
     }
 
@@ -290,7 +318,10 @@ export function HostedPhoneSettings(props: {
     providerLaunchAttemptRef.current = providerAttempt;
     setIsLinking(true);
     const operation = providerPhoneNumber ? "update" : "link";
-    reportDiagnostic("provider_started", { operation });
+    const reportDiagnostic = createDiagnosticReporter(operation);
+    providerDiagnosticRef.current = reportDiagnostic;
+    pendingSyncOperationRef.current = operation;
+    reportDiagnostic("provider_started");
     try {
       if (providerPhoneNumber) {
         updatePhone();
@@ -300,10 +331,10 @@ export function HostedPhoneSettings(props: {
     } catch (error) {
       if (providerLaunchAttemptRef.current === providerAttempt) {
         providerLaunchAttemptRef.current = null;
+        providerDiagnosticRef.current = null;
         setIsLinking(false);
         reportDiagnostic("provider_failed", {
           detailCode: toPhoneLinkProviderDetailCode(error),
-          operation,
         });
         setErrorMessage(toPhoneLinkErrorMessage(error));
       }

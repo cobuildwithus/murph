@@ -238,7 +238,7 @@ export function JoinInviteMessagingSetupIsland({
     && privySessionMatchesAppSession
     && expectedPrivyUserId !== null
     && user?.id === expectedPrivyUserId;
-  const reportPhoneDiagnostic = useHostedPhoneLinkDiagnostics({
+  const createPhoneDiagnosticReporter = useHostedPhoneLinkDiagnostics({
     appAuthenticated: authenticated,
     clientUserMatchesExpected: expectedPrivyUserId !== null && user?.id === expectedPrivyUserId,
     clientUserPresent: Boolean(user?.id),
@@ -283,7 +283,7 @@ export function JoinInviteMessagingSetupIsland({
   return (
     <div className="space-y-5">
       <HostedPhoneSettings
-        diagnosticReporter={reportPhoneDiagnostic}
+        diagnosticReporterFactory={createPhoneDiagnosticReporter}
         onLinked={refresh}
       />
 

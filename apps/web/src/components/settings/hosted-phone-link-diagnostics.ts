@@ -26,7 +26,6 @@ interface HostedPhoneLinkDiagnosticState {
 
 interface HostedPhoneLinkDiagnosticDetails {
   detailCode?: HostedPhoneLinkDiagnosticDetailCode;
-  operation?: HostedPhoneLinkDiagnosticOperation;
 }
 
 export type HostedPhoneLinkDiagnosticReporter = (
@@ -34,25 +33,38 @@ export type HostedPhoneLinkDiagnosticReporter = (
   details?: HostedPhoneLinkDiagnosticDetails,
 ) => void;
 
+export type HostedPhoneLinkDiagnosticReporterFactory = (
+  operation: HostedPhoneLinkDiagnosticOperation,
+) => HostedPhoneLinkDiagnosticReporter;
+
 export function useHostedPhoneLinkDiagnostics(input: HostedPhoneLinkDiagnosticState) {
-  const [attemptId] = useState(() => globalThis.crypto.randomUUID());
+  const [surfaceObservationId] = useState(() => globalThis.crypto.randomUUID());
   const blockedStateReportedRef = useRef(false);
   const surfaceReportedRef = useRef(false);
   const clientState = resolveClientState(input);
-  const report: HostedPhoneLinkDiagnosticReporter = useCallback((
+  const report = useCallback((
+    attemptId: string,
     event: HostedPhoneLinkDiagnosticEvent,
+    operation: HostedPhoneLinkDiagnosticOperation,
     details: HostedPhoneLinkDiagnosticDetails = {},
   ) => {
-    const { operation = input.operation, ...diagnosticDetails } = details;
     void reportHostedPhoneLinkDiagnostic({
       attemptId,
       clientState,
-      ...diagnosticDetails,
+      ...details,
       event,
       operation,
       surface: input.surface,
     });
-  }, [attemptId, clientState, input.operation, input.surface]);
+  }, [clientState, input.surface]);
+  const createAttemptReporter: HostedPhoneLinkDiagnosticReporterFactory = useCallback((
+    operation,
+  ) => {
+    const attemptId = globalThis.crypto.randomUUID();
+    return (event, details = {}) => {
+      report(attemptId, event, operation, details);
+    };
+  }, [report]);
 
   useEffect(() => {
     if (!input.showLinkForm || !input.appAuthenticated || surfaceReportedRef.current) {
@@ -60,8 +72,14 @@ export function useHostedPhoneLinkDiagnostics(input: HostedPhoneLinkDiagnosticSt
     }
 
     surfaceReportedRef.current = true;
-    report("surface_loaded");
-  }, [input.appAuthenticated, input.showLinkForm, report]);
+    report(surfaceObservationId, "surface_loaded", input.operation);
+  }, [
+    input.appAuthenticated,
+    input.operation,
+    input.showLinkForm,
+    report,
+    surfaceObservationId,
+  ]);
 
   useEffect(() => {
     if (
@@ -75,10 +93,18 @@ export function useHostedPhoneLinkDiagnostics(input: HostedPhoneLinkDiagnosticSt
     }
 
     blockedStateReportedRef.current = true;
-    report("surface_blocked");
-  }, [clientState, input.appAuthenticated, input.privyReady, input.showLinkForm, report]);
+    report(surfaceObservationId, "surface_blocked", input.operation);
+  }, [
+    clientState,
+    input.appAuthenticated,
+    input.operation,
+    input.privyReady,
+    input.showLinkForm,
+    report,
+    surfaceObservationId,
+  ]);
 
-  return report;
+  return createAttemptReporter;
 }
 
 export function toPhoneLinkProviderDetailCode(

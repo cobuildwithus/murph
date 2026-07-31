@@ -659,7 +659,7 @@ test("JoinInviteMessagingSetupIsland shows Privy phone linking and Telegram conn
   expect(container.querySelector('[data-connect-telegram="true"]')).toBeTruthy();
   expect(container.textContent).toContain("OR");
   expect(mocks.hostedPhoneSettingsProps).toMatchObject({
-    diagnosticReporter: mocks.reportPhoneDiagnostic,
+    diagnosticReporterFactory: mocks.reportPhoneDiagnostic,
     onLinked: expect.any(Function),
   });
   expect(mocks.useHostedPhoneLinkDiagnostics).toHaveBeenCalledWith(

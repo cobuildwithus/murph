@@ -105,7 +105,7 @@ function HostedSettingsIdentityMutationContent({
     && privySessionMatchesAppSession
     && expectedPrivyUserId !== null
     && user?.id === expectedPrivyUserId;
-  const reportPhoneDiagnostic = useHostedPhoneLinkDiagnostics({
+  const createPhoneDiagnosticReporter = useHostedPhoneLinkDiagnostics({
     appAuthenticated: true,
     clientUserMatchesExpected: expectedPrivyUserId !== null && user?.id === expectedPrivyUserId,
     clientUserPresent: Boolean(user?.id),
@@ -181,7 +181,7 @@ function HostedSettingsIdentityMutationContent({
     return (
       <HostedPhoneSettings
         autoOpen
-        diagnosticReporter={reportPhoneDiagnostic}
+        diagnosticReporterFactory={createPhoneDiagnosticReporter}
         initialPhoneNumber={account.phone.number}
         onAborted={() => onOpenChange(false)}
         onLinked={onSynced}

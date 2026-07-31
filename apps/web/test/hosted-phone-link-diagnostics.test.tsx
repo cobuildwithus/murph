@@ -1,4 +1,4 @@
-import { createElement, useEffect } from "react";
+import { createElement, useEffect, useMemo } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { useHostedPhoneLinkDiagnostics } from "@/src/components/settings/hosted-phone-link-diagnostics";
@@ -32,7 +32,7 @@ test("correlates surface and lifecycle events without identity metadata", async 
   cleanupRender = cleanup;
 
   await vi.waitFor(() => {
-    expect(mocks.reportHostedPhoneLinkDiagnostic).toHaveBeenCalledTimes(3);
+    expect(mocks.reportHostedPhoneLinkDiagnostic).toHaveBeenCalledTimes(5);
   });
 
   const diagnostics = mocks.reportHostedPhoneLinkDiagnostic.mock.calls.map(
@@ -41,9 +41,14 @@ test("correlates surface and lifecycle events without identity metadata", async 
   expect(diagnostics.map((diagnostic) => diagnostic.event)).toEqual([
     "surface_loaded",
     "provider_started",
-    "sync_succeeded",
+    "provider_cancelled",
+    "provider_started",
+    "provider_succeeded",
   ]);
-  expect(new Set(diagnostics.map((diagnostic) => diagnostic.attemptId)).size).toBe(1);
+  expect(new Set(diagnostics.map((diagnostic) => diagnostic.attemptId)).size).toBe(3);
+  expect(diagnostics[1]?.attemptId).toBe(diagnostics[2]?.attemptId);
+  expect(diagnostics[3]?.attemptId).toBe(diagnostics[4]?.attemptId);
+  expect(diagnostics[1]?.attemptId).not.toBe(diagnostics[3]?.attemptId);
   expect(diagnostics[0]?.attemptId).toMatch(
     /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
   );
@@ -54,7 +59,7 @@ test("correlates surface and lifecycle events without identity metadata", async 
       surface: "settings",
     }),
     expect.objectContaining({
-      event: "sync_succeeded",
+      event: "provider_succeeded",
       operation: "update",
       surface: "settings",
     }),
@@ -63,8 +68,34 @@ test("correlates surface and lifecycle events without identity metadata", async 
   expect(JSON.stringify(diagnostics)).not.toContain("providerUserId");
 });
 
+test("reports a session mismatch before a provider attempt exists", async () => {
+  const { cleanup } = await renderClientComponent(
+    createElement(BlockedPhoneLinkDiagnosticHarness),
+    { requireButton: false },
+  );
+  cleanupRender = cleanup;
+
+  await vi.waitFor(() => {
+    expect(mocks.reportHostedPhoneLinkDiagnostic).toHaveBeenCalledTimes(2);
+  });
+
+  const diagnostics = mocks.reportHostedPhoneLinkDiagnostic.mock.calls.map(
+    ([diagnostic]) => diagnostic,
+  );
+  expect(diagnostics.map((diagnostic) => diagnostic.event)).toEqual([
+    "surface_loaded",
+    "surface_blocked",
+  ]);
+  expect(diagnostics[0]?.attemptId).toBe(diagnostics[1]?.attemptId);
+  expect(diagnostics[1]).toEqual(expect.objectContaining({
+    clientState: "server_session_mismatch",
+    operation: "link",
+    surface: "settings",
+  }));
+});
+
 function PhoneLinkDiagnosticHarness() {
-  const report = useHostedPhoneLinkDiagnostics({
+  const createAttemptReporter = useHostedPhoneLinkDiagnostics({
     appAuthenticated: true,
     clientUserMatchesExpected: true,
     clientUserPresent: true,
@@ -76,11 +107,38 @@ function PhoneLinkDiagnosticHarness() {
     showLinkForm: true,
     surface: "settings",
   });
+  const firstAttempt = useMemo(
+    () => createAttemptReporter("link"),
+    [createAttemptReporter],
+  );
+  const secondAttempt = useMemo(
+    () => createAttemptReporter("update"),
+    [createAttemptReporter],
+  );
 
   useEffect(() => {
-    report("provider_started");
-    report("sync_succeeded", { operation: "update" });
-  }, [report]);
+    firstAttempt("provider_started");
+    firstAttempt("provider_cancelled", { detailCode: "exited_link_flow" });
+    secondAttempt("provider_started");
+    secondAttempt("provider_succeeded");
+  }, [firstAttempt, secondAttempt]);
+
+  return null;
+}
+
+function BlockedPhoneLinkDiagnosticHarness() {
+  useHostedPhoneLinkDiagnostics({
+    appAuthenticated: true,
+    clientUserMatchesExpected: true,
+    clientUserPresent: true,
+    expectedUserPresent: true,
+    operation: "link",
+    privyAuthenticated: true,
+    privyReady: true,
+    serverSessionMatches: false,
+    showLinkForm: true,
+    surface: "settings",
+  });
 
   return null;
 }
