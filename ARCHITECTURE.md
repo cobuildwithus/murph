@@ -750,9 +750,10 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   one-time offers. Hosted-group funding keeps the same purchase owner and
   payer/beneficiary split, but its primary flow is a durable payer authorization
   for one group with a $5, $10, or $20 calendar-month maximum. Activation is an
-  ordinary $5 usage-credit purchase. Later purchases are deterministic exact-$5
-  `HostedUsageCreditPurchase` rows admitted only at the existing beneficiary-
-  serialized settlement/capacity seam when capacity is low or exhausted. The
+  ordinary $5 usage-credit purchase available at any current group-capacity
+  state. Later purchases are deterministic exact-$5 `HostedUsageCreditPurchase`
+  rows admitted only at the existing beneficiary-serialized
+  settlement/capacity seam when capacity is low or exhausted. The
   authorization stores status, selected cap, and anchored period only; fulfilled
   plus pending purchases derive the current-period commitment, while
   `HostedUsageCreditEntry` remains the sole balance and carries unused credit
@@ -803,13 +804,17 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   preceding exact `{capacityState,fundingUrl,periodEnd,remainingPercent?}`
   response. It maps the preceding shape to `not_sponsored`, derives only the
   funding boolean, and discards period and percentage fields before they reach
-  assistant policy. Deploy that reader throughout Cloudflare/runner before Web
-  begins emitting the current shape. Because the preceding producer cannot
-  represent an active monthly sponsorship, the Web switch becomes a
-  forward-only tandem cutover once authorization creation is enabled. Remove
-  the preceding-shape reader only after that producer is neither routable nor a
-  rollback candidate and every warm runner from before the reader deployment
-  has been drained.
+  assistant policy. In the current shape, `fundingNeeded` expresses urgency
+  while `fundingUrl` remains the capability for an explicit contribution at
+  any valid group-capacity state. Assistant policy uses the boolean only for
+  proactive depletion messaging and may share the returned URL after an
+  explicit funding request even when the boolean is false. Deploy that reader
+  throughout Cloudflare/runner before Web begins emitting the current shape.
+  Because the preceding producer cannot represent an active monthly
+  sponsorship, the Web switch becomes a forward-only tandem cutover once
+  authorization creation is enabled. Remove the preceding-shape reader only
+  after that producer is neither routable nor a rollback candidate and every
+  warm runner from before the reader deployment has been drained.
 
   The app-local GCP KMS adapter owns web-side root wrapping plus authority
   signing. Hosted billing may store an encrypted unverified Stripe checkout
@@ -820,6 +825,19 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   idempotent Resend ownership; later successful payments must not repeat
   activation side effects, and email paths must not persist provider payloads
   or expose recipients in logs.
+
+  A separate authenticated ten-minute Vercel cron performs work only during the
+  6pm Eastern hour and sends one daily internal product-feedback digest through
+  that existing Resend transport. Web groups its owned
+  `HostedProductFeedback` rows from the prior 6pm-to-6pm window by the three
+  server-allowlisted product-feedback kinds and renders only fixed server-owned
+  count labels. The indexed aggregate query never reads the model-authored
+  summary, member relation or id, internal feedback id, changelog metadata,
+  health data, contact data, or raw conversation. Recipients come from a
+  dedicated environment allowlist, and every same-hour attempt reuses the
+  Eastern day key as the Resend idempotency key. Missing configuration fails
+  before the database read. This adds no digest table, cursor, scheduler,
+  retry queue, or second feedback owner.
 
   Inbound hosted conversation traffic appends one canonical
   `conversation.message` mailbox item with provider/channel detail inside its
@@ -1452,6 +1470,24 @@ Within that foreground loop, live steering is limited to exact-successor
 input from the same conversation, only until the first completed assistant
 response, and to 50 admitted messages cumulatively. Later or overflow rows
 stay pending for the next ordinary turn.
+
+The Environment walkthrough reuses that execution plane without turning audio
+into a chat attachment. Authenticated Web validates and stages one bounded
+application-encrypted recording under the member's opaque R2 namespace, then
+appends a pointer-only `environment-voice.captured` system mailbox wake. The
+first-seen admission uses the existing AI-usage gate and the member lock limits
+each member to one unconsumed Environment recording; exact capture retries
+resolve idempotently even when they arrive later. The write-fenced runtime
+verifies the staged bytes, applies the three-minute media cap during ffmpeg
+preparation, transcribes through the existing Worker-owned transcription effect,
+and gives the transcript only to a silent Habitat-scoped maintenance turn.
+Canonical Habitat writes checkpoint through the ordinary workspace owner before
+a post-checkpoint effect deletes the recording; failed work remains retryable
+and the 24-hour R2 lifecycle is only a cleanup backstop. Neither audio nor
+transcript becomes assistant conversation history, an outbound message, or
+Browser Vault product truth. The open page polls the existing Browser Vault
+replica after acceptance to distinguish an updated audit, a transcript with no
+clear new facts, and work that is still pending; it adds no second result store.
 
 Hosted dynamic image generation launches as invocation-local background work so
 the current tool call returns immediately. Provider work stays detached, while

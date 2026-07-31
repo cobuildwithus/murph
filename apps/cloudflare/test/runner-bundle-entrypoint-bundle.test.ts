@@ -563,7 +563,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     // budget-policy changes remain explicit and reviewed.
     expect(budgets).toEqual({
       entryBytes: 1_649_331 + 48_000,
-      staticClosureBytes: 8_117_894 + 96_000,
+      staticClosureBytes: 8_295_095 + 96_000,
       totalBytes: 9_979_011 + 32_768,
     });
   });

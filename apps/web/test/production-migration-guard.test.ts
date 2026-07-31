@@ -1402,6 +1402,7 @@ describe("hosted web production migration guard", () => {
     const cronPaths = (vercelJson.crons ?? []).map((cron) => cron.path).sort();
 
     assert.deepEqual(cronPaths, [
+      "/api/internal/hosted-execution/product-feedback/digest/cron",
       "/api/internal/hosted-execution/retention/cron",
       "/api/internal/hosted-growth/snapshot/cron",
       "/api/internal/hosted-growth/usage-referral/cron",
@@ -1410,6 +1411,17 @@ describe("hosted web production migration guard", () => {
       "/api/internal/hosted-onboarding/stripe/cron",
       "/api/internal/hosted-runtime/latency-alert/cron",
     ]);
+    assert.deepEqual(
+      (vercelJson.crons ?? []).find(
+        (cron) =>
+          cron.path
+            === "/api/internal/hosted-execution/product-feedback/digest/cron",
+      ),
+      {
+        path: "/api/internal/hosted-execution/product-feedback/digest/cron",
+        schedule: "*/10 * * * *",
+      },
+    );
     assert.deepEqual(
       (vercelJson.crons ?? []).find(
         (cron) =>

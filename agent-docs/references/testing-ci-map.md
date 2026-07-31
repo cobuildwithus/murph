@@ -249,6 +249,19 @@ quoted message; rendered transcript structure is ignored; attachment
 descriptors, extracted text, filenames, stored paths, and lifecycle metadata do
 not enter evidence; and attachment-only input fails closed before provider work.
 
+Hosted product-feedback digest coverage is Web-owned and provider-free.
+`hosted-product-feedback-digest.test.ts` proves the Eastern 6pm-to-6pm window
+across both DST transitions, dedicated recipients, fixed empty digest,
+day-keyed Resend idempotency, the fixed allowlisted-kind aggregate that never
+reads free-form summary text, observable missing configuration, and same-hour
+retry through the real production sender against an isolated loopback provider
+fake. `hosted-product-feedback-digest-cron.test.ts` proves Vercel cron auth
+happens before the service runs. The operational-email config suite proves the
+shared sender/transport can use a feature-specific recipient allowlist, while
+the privacy-foundation migration inventory and production migration guard keep
+the new index and approved ten-minute cron registration aligned. Routine CI
+never reads production feedback or enters Resend.
+
 ## Current CI Workflows
 
 - Linux CI `apps/web verify` invocations default to wrapping the hosted-web production
@@ -574,6 +587,7 @@ keep the one-second presentation-only deadline and late-result rejection.
   test against representative captured or synthetic pre-change histories for
   the newly affected path. Routine repo checks still do not validate a live
   Render deploy or a production Temporal Cloud namespace.
+- Environment voice capture is covered by hosted-web recorder dismissal and authenticated upload-route tests; hosted-execution wake parsing; Cloudflare control-client, encrypted-store, Vercel-OIDC staging, write-fenced runtime read/delete, and lifecycle configuration tests; assistant-runtime integrity, transient transcription, constrained Habitat-maintenance, and post-checkpoint deletion/retry tests; plus the ordinary Environment frontend proof. Routine CI uses synthetic audio-container bytes and a mocked transcript. It does not grant a real browser microphone permission, call production Workers AI, or prove deletion from the production R2 bucket, so deployed proof still requires one authenticated physical-microphone recording and an operator check of the applied lifecycle rule.
 - Hosted-local E2E scenarios launch the real Codex app-server binary by default, pointed at a local deterministic scripted Responses API stub through the test-only `HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL` override with a fake provider key, so default lanes exercise the production app-server protocol (including dynamic-tool `item/tool/call` relay and sandboxed shell execution of scripted vault-cli calls) with zero provider spend. No automated check calls a paid model provider by default. The opt-in `codex-gateway-prefix` hosted-local E2E scenario runs the real Codex app-server against a local Responses API recorder for cache-prefix diagnostics, fingerprints the first cacheable provider prompt prefix across repeated Linq wakes, and fails if those fingerprints diverge; it is excluded from the default `all` scenario set because it can intentionally fail while provider behavior is under investigation. The opt-in `linq-group-ios-app-download` scenario uses an authenticated live provider turn through the canonical hosted Linq group route and asserts the delivered public App Store link, final-line formatting, single-bubble delivery, and personal-setup boundary; it is manual-only so routine verification never spends provider credits. Codex App Server file/PDF inputs are not advertised as natively supported unless the app-server protocol grows a supported file input item.
 - Production-path hosted-local waiters are observational: completion, progress,
   and provider-output waits may read status or recorded stub requests and sleep,

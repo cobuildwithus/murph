@@ -720,6 +720,10 @@ test("buildHostedWebSecurityHeaders adds production-only HSTS alongside the CSP 
   assert.equal(productionHeaderValues.get("Cross-Origin-Opener-Policy"), "same-origin-allow-popups");
   assert.equal(productionHeaderValues.get("Origin-Agent-Cluster"), "?1");
   assert.equal(productionHeaderValues.get("X-DNS-Prefetch-Control"), "off");
+  assert.equal(
+    productionHeaderValues.get("Permissions-Policy"),
+    "camera=(), geolocation=(), microphone=(self)",
+  );
 
   const testHeaders = buildHostedWebSecurityHeaders(createProcessEnv({
     NODE_ENV: "test",
@@ -743,6 +747,10 @@ test("buildHostedWebSecurityHeaders adds production-only HSTS alongside the CSP 
   assert.equal(testHeaderValues.get("Cross-Origin-Opener-Policy"), "same-origin-allow-popups");
   assert.equal(testHeaderValues.get("Origin-Agent-Cluster"), "?1");
   assert.equal(testHeaderValues.get("X-DNS-Prefetch-Control"), "off");
+  assert.equal(
+    testHeaderValues.get("Permissions-Policy"),
+    "camera=(), geolocation=(), microphone=(self)",
+  );
 });
 
 test("next.config serves global security headers and stricter Murph Safe referrer privacy", async () => {

@@ -230,12 +230,13 @@ export async function sendTelegramImageMessage(
   const providerMessageIds: string[] = []
   let lastProviderMessageId: string | null = null
 
-  const caption = buildTelegramPhotoCaption(input.message)
-  if (!caption && input.message.trim().length > 0) {
+  const accessibleMessage = appendImageAlternativeText(input.message, media)
+  const caption = buildTelegramPhotoCaption(accessibleMessage)
+  if (!caption && accessibleMessage.trim().length > 0) {
     const deliveredText = await sendTelegramMessageDetailed(
       {
         idempotencyKey: input.idempotencyKey ?? null,
-        message: input.message,
+        message: accessibleMessage,
         replyToMessageId,
         target: targetLabel,
       },
@@ -559,7 +560,7 @@ export async function sendLinqMessage(
   )
   const message = (input.media ?? []).some((item) => item.kind === 'vault_file')
     ? ''
-    : input.message
+    : appendImageAlternativeText(input.message, input.media ?? [])
 
   if (participantFromPhoneNumber) {
     const created = await createLinqChat(
@@ -679,6 +680,34 @@ async function prepareLinqMessageMedia(
   }
 
   return prepared
+}
+
+function appendImageAlternativeText(
+  message: string,
+  media: readonly AssistantResponseMedia[],
+): string {
+  const alternatives: string[] = []
+  for (const item of media) {
+    if (item.kind !== 'image' && item.kind !== 'vault_image') {
+      continue
+    }
+    const alternative = normalizeOptionalText(item.alt)
+    if (
+      !alternative ||
+      message.includes(alternative) ||
+      alternatives.includes(alternative)
+    ) {
+      continue
+    }
+    alternatives.push(alternative)
+  }
+  if (alternatives.length === 0) {
+    return message
+  }
+  const normalizedMessage = message.trim()
+  return normalizedMessage.length > 0
+    ? `${normalizedMessage}\n\n${alternatives.join('\n\n')}`
+    : alternatives.join('\n\n')
 }
 
 export async function sendLinqVoiceMemoMessage(

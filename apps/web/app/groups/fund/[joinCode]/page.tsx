@@ -2,7 +2,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { GroupFundingSignInButton } from "@/src/components/hosted-groups/group-funding-sign-in-button";
-import { GroupUsageFundingCard } from "@/src/components/hosted-groups/group-usage-funding-card";
+import {
+  GroupUsageFundingActions,
+  GroupUsageFundingShell,
+} from "@/src/components/hosted-groups/group-usage-funding-shell";
 import {
   GroupSponsorshipDialog,
   type GroupSponsorshipMonthlyCapOption,
@@ -179,37 +182,41 @@ export default async function GroupFundingPage({
   const purchaseReturn = purchaseReturnMatchesTarget
     ? requestedPurchaseReturn
     : null;
+  const openOneTimeContribution =
+    sponsorshipManagement === null &&
+    usageStatus.sponsorshipStatus === "sponsored";
+  const oneTimeContributionDialog = member && oneTimeOffers.length > 0 ? (
+    <GroupSponsorshipDialog
+      checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
+      customizationAllowed={customizationAllowed}
+      initialOpen={openOneTimeContribution}
+      mode="one_time"
+      offers={oneTimeOffers}
+      payerMemberId={member.id}
+      purchaseReturn={purchaseReturn}
+      triggerSize="default"
+      triggerVariant="link"
+    />
+  ) : null;
   const oneTimeContributionAction = member && visibleActivePurchase ? (
     <GroupSponsorshipDialog
       activePurchase={visibleActivePurchase}
       checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
       customizationAllowed={customizationAllowed}
       frozenSponsorship={frozenSponsorship}
+      initialOpen
       mode="one_time"
       offers={oneTimeOffers}
       payerMemberId={member.id}
       purchaseReturn={purchaseReturn}
     />
-  ) : member && oneTimeOffers.length > 0 ? (
-    <>
-      <GroupSponsorshipDialog
-        checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
-        customizationAllowed={customizationAllowed}
-        mode="one_time"
-        offers={oneTimeOffers}
-        payerMemberId={member.id}
-        purchaseReturn={purchaseReturn}
-        triggerVariant="outline"
-      />
-      <p className="text-center text-xs text-muted-foreground">
-        Make a one-time contribution instead.
-      </p>
-    </>
+  ) : oneTimeContributionDialog ? (
+    <GroupUsageFundingActions oneTimeAction={oneTimeContributionDialog} />
   ) : null;
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-xl flex-col justify-center px-5 py-12 sm:px-6 sm:py-16">
-      <GroupUsageFundingCard
+    <main className="mx-auto flex min-h-screen w-full max-w-lg flex-col justify-center px-4 py-8 sm:px-6 sm:py-12">
+      <GroupUsageFundingShell
         action={
           member ? (
             sponsorshipManagement?.status === "pending_activation" &&
@@ -219,6 +226,7 @@ export default async function GroupFundingPage({
                 checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
                 customizationAllowed={customizationAllowed}
                 frozenSponsorship={frozenSponsorship}
+                initialOpen
                 mode="monthly"
                 monthlyCapMinor={sponsorshipManagement.monthlyCapMinor}
                 monthlyCapOptions={monthlyCapOptions}
@@ -230,7 +238,6 @@ export default async function GroupFundingPage({
               <div className="space-y-4">
                 <GroupSponsorshipManagementCard
                   endpoint={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/sponsorship`}
-                  groupName={groupName}
                   management={sponsorshipManagement}
                 />
                 {oneTimeContributionAction}
@@ -245,31 +252,21 @@ export default async function GroupFundingPage({
             ) : visibleActivePurchase ? (
               oneTimeContributionAction
             ) : oneTimeOffers.length > 0 ? (
-              <div className="space-y-3">
-                {usageStatus.fundingNeeded ? (
-                  <>
-                    <GroupSponsorshipDialog
-                      checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
-                      customizationAllowed={customizationAllowed}
-                      mode="monthly"
-                      monthlyCapOptions={monthlyCapOptions}
-                      offers={monthlyOffer}
-                      payerMemberId={member.id}
-                      purchaseReturn={purchaseReturn}
-                    />
-                    <p className="text-center text-xs leading-5 text-muted-foreground">
-                      Starts with $5. Murph adds another $5 only when this group
-                      needs it, up to the maximum you choose.
-                    </p>
-                  </>
-                ) : (
-                  <p className="text-center text-xs leading-5 text-muted-foreground">
-                    This group has enough usage credit right now. Monthly
-                    sponsorship becomes available when capacity runs low.
-                  </p>
+              <GroupUsageFundingActions
+                monthlyAction={(
+                  <GroupSponsorshipDialog
+                    checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
+                    customizationAllowed={customizationAllowed}
+                    initialOpen
+                    mode="monthly"
+                    monthlyCapOptions={monthlyCapOptions}
+                    offers={monthlyOffer}
+                    payerMemberId={member.id}
+                    purchaseReturn={purchaseReturn}
+                  />
                 )}
-                {oneTimeContributionAction}
-              </div>
+                oneTimeAction={oneTimeContributionDialog}
+              />
             ) : (
               <p className="py-2 text-center text-sm text-muted-foreground">
                 Sponsorship isn&apos;t available from this account right now.

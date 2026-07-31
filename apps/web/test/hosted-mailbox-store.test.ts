@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 
 import {
   buildHostedExecutionAssistantAskRequestedWake,
+  buildHostedExecutionEnvironmentVoiceCapturedWake,
   type HostedExecutionDirectRoute,
 } from "@murphai/hosted-execution";
 import {
@@ -16,6 +17,7 @@ import {
   appendHostedMailboxEnvelopeTx,
   appendHostedMailboxEnvelopeWithIdentityTx,
   appendHostedMailboxEnvelopeWithSourceMessageTx,
+  appendHostedEnvironmentVoiceMailboxEnvelopeTx,
   appendHostedMealPhotoMailboxEnvelopeTx,
   appendHostedMailboxItemTx,
   claimHostedMailboxConversationSubscriptionAction,
@@ -23,6 +25,7 @@ import {
   fetchHostedMailboxPayload,
   fetchHostedMailboxItemsAfterLaneCursors,
   fetchHostedRuntimeMailboxProjection,
+  hasPendingHostedEnvironmentVoiceMailboxItemTx,
   hasHostedMailboxMealPhotoCaptureSince,
   hasHostedMailboxItemByKind,
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
@@ -1762,6 +1765,120 @@ describe("appendHostedMailboxEnvelopeTx", () => {
     );
   });
 
+  it("keeps the first staged object as the canonical exact-duplicate environment recording", async () => {
+    const rows: HostedMailboxItemRow[] = [];
+    const hostedMailboxItem = createHostedMailboxItemDelegate({
+      create: vi.fn<HostedMailboxCreate>(async (args) => {
+        const row = buildHostedMailboxItemRow(args.data);
+        rows.push(row);
+        return row;
+      }),
+      findUnique: vi.fn<HostedMailboxFindUnique>(async (args) => {
+        const where = readHostedMailboxFindUniqueWhere(args);
+        return rows.find((row) => (
+          row.userId === where.userId && row.dedupeKey === where.dedupeKey
+        )) ?? null;
+      }),
+    });
+    const tx = createHostedMailboxTx({
+      hostedMailboxItem,
+      hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
+    });
+
+    const first = await appendHostedEnvironmentVoiceMailboxEnvelopeTx({
+      envelope: buildHostedEnvironmentVoiceEnvelope("a".repeat(40)),
+      tx,
+    });
+    const duplicate = await appendHostedEnvironmentVoiceMailboxEnvelopeTx({
+      envelope: buildHostedEnvironmentVoiceEnvelope("b".repeat(40)),
+      tx,
+    });
+
+    expect(first).toMatchObject({
+      claimedAudioKey: "a".repeat(40),
+      dedupeConflict: false,
+      duplicate: false,
+      inserted: true,
+    });
+    expect(duplicate).toMatchObject({
+      claimedAudioKey: "a".repeat(40),
+      dedupeConflict: false,
+      duplicate: true,
+      inserted: false,
+      item: { id: first.item.id },
+    });
+    expect(hostedMailboxItem.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("detects an environment recording ahead of the system lane watermark", async () => {
+    const findFirst = vi.fn<HostedMailboxItemFindFirst>(async () => (
+      buildHostedMailboxItemRow({
+        kind: "environment-voice.captured",
+        lane: "system",
+        laneSeq: 8n,
+        userId: "member_mailbox_1",
+      })
+    ));
+    const findUnique = vi.fn(async () => ({ consumedSeq: 7n }));
+    const tx = createHostedMailboxTx({
+      hostedMailboxItem: createHostedMailboxItemDelegate({ findFirst }),
+      hostedMailboxLaneCounter: { findUnique },
+      hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
+    });
+
+    await expect(
+      hasPendingHostedEnvironmentVoiceMailboxItemTx({
+        tx,
+        userId: "member_mailbox_1",
+      }),
+    ).resolves.toBe(true);
+    expect(findUnique).toHaveBeenCalledWith({
+      select: { consumedSeq: true },
+      where: {
+        userId_lane: {
+          lane: "system",
+          userId: "member_mailbox_1",
+        },
+      },
+    });
+    expect(findFirst).toHaveBeenCalledWith({
+      select: { id: true },
+      where: {
+        kind: "environment-voice.captured",
+        lane: "system",
+        laneSeq: { gt: 7n },
+        userId: "member_mailbox_1",
+      },
+    });
+  });
+
+  it("does not treat an environment recording behind the system lane watermark as pending", async () => {
+    const findFirst = vi.fn<HostedMailboxItemFindFirst>(async () => null);
+    const tx = createHostedMailboxTx({
+      hostedMailboxItem: createHostedMailboxItemDelegate({ findFirst }),
+      hostedMailboxLaneCounter: {
+        findUnique: vi.fn(async () => ({ consumedSeq: 8n })),
+      },
+      hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
+    });
+
+    await expect(
+      hasPendingHostedEnvironmentVoiceMailboxItemTx({
+        tx,
+        userId: "member_mailbox_1",
+      }),
+    ).resolves.toBe(false);
+    expect(findFirst).toHaveBeenCalledWith({
+      select: { id: true },
+      where: {
+        kind: "environment-voice.captured",
+        lane: "system",
+        laneSeq: { gt: 8n },
+        userId: "member_mailbox_1",
+      },
+    });
+  });
+
   it("still rejects conflicting reuse of a meal-photo capture event", async () => {
     const rows: HostedMailboxItemRow[] = [];
     const hostedMailboxItem = createHostedMailboxItemDelegate({
@@ -3060,6 +3177,7 @@ function createHostedMailboxPayloadDelegate(overrides: Partial<{
 function createHostedMailboxTx(input: {
   hostedGroup?: { findUnique: ReturnType<typeof vi.fn> };
   hostedMailboxItem: ReturnType<typeof createHostedMailboxItemDelegate>;
+  hostedMailboxLaneCounter?: { findUnique: ReturnType<typeof vi.fn> };
   hostedMailboxPayload: ReturnType<typeof createHostedMailboxPayloadDelegate>;
   hostedThreadContainer?: { findUnique: ReturnType<typeof vi.fn> };
   hostedThreadRoute?: { findFirst: ReturnType<typeof vi.fn> };
@@ -3099,6 +3217,9 @@ function createHostedMailboxTx(input: {
       throw new Error(`Unexpected hosted mailbox query: ${sql}`);
     }),
     hostedMailboxItem: input.hostedMailboxItem,
+    hostedMailboxLaneCounter: input.hostedMailboxLaneCounter ?? {
+      findUnique: vi.fn(async () => null),
+    },
     hostedMailboxPayload: input.hostedMailboxPayload,
     hostedGroup: input.hostedGroup ?? {
       findUnique: vi.fn(async () => null),
@@ -3203,6 +3324,25 @@ function buildHostedMealPhotoEnvelope(
     occurredAt: "2026-07-12T16:30:45.000Z",
     userId: "member_mailbox_1",
   };
+}
+
+function buildHostedEnvironmentVoiceEnvelope(
+  audioKey: string,
+  capturedAt = "2026-07-30T12:00:00.000Z",
+) {
+  const captureId = "c".repeat(64);
+  return buildHostedExecutionEnvironmentVoiceCapturedWake({
+    audioKey,
+    byteLength: 64_000,
+    captureId,
+    capturedAt,
+    contentType: "audio/webm",
+    durationMs: 12_000,
+    eventId: `environment-voice:${captureId}`,
+    memberId: "member_mailbox_1",
+    occurredAt: capturedAt,
+    sha256: captureId,
+  });
 }
 
 function readHostedMailboxRawSql(call: unknown[] | undefined): string {
