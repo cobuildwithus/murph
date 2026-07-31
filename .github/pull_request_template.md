@@ -53,7 +53,7 @@
 
 ## Design proof
 
-<!-- Required for user-facing apps/web UI changes. Update /design?tab=components for reusable components or /design?tab=sections for full page sections. Embed hosted screenshots captured from that design-page state. -->
+<!-- Required for user-facing apps/web UI changes. Update /design?tab=components for reusable components or /design?tab=sections for full page sections. Embed cropped lossless PNG screenshots captured at 2x device scale or higher from that design-page state and uploaded through the /designproof variant. Verify local and hosted images at native resolution. -->
 
 - Design page: <!-- /design?tab=components#... or /design?tab=sections#... -->
 - Coverage: <!-- Component or section names added or updated -->

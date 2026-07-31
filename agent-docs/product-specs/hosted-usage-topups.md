@@ -290,10 +290,12 @@ subscription invoice.
 
 ### Presentation
 
-Settings renders one bounded percentage from current-period spend and all
-remaining effective capacity. Buying credit can move that bar backward
-immediately. The presentation does not expose the internal dollar value of the
-plan allowance or the usage-credit balance.
+Settings renders one bounded percentage from counted usage in the current
+display window and all remaining effective capacity. The window starts at the
+allowance-period boundary or, when later, the latest fulfilled purchase grant
+in that period. Buying credit therefore starts a fresh 0%-used display, and
+only later counted usage advances it. The presentation does not expose the
+internal dollar value of the plan allowance or the usage-credit balance.
 
 Settings may separately show a bounded history of immutable purchase grants
 with the original added amount, source, and date. That history does not read or
@@ -324,9 +326,8 @@ The target composition is:
 - Title: **Add usage**
 - Three equal choices: **$5**, **$10**, and **$25**
 - No default selection and no “popular” badge
-- Description: **Choose a one-time credit amount for your account. We’ll use
-  your saved card when available. Stripe will ask when card details or
-  verification are needed.**
+- No visible explanatory paragraph; the dollar choices and action label carry
+  the flow. Keep a concise screen-reader description for the amount selector.
 - The group funding page uses a separate dialog: **Sponsor this chat** is the
   primary capped-monthly action and **Make a one-time contribution** is the
   secondary action. Do not repeat saved-card or verification mechanics there.
@@ -359,6 +360,19 @@ honest **Usage credit unavailable** state with no purchase control.
 The success and cancel URLs return to Settings with the opaque Murph purchase
 ID. They do not need to expose a Stripe Session ID. The app session must own the
 purchase before any status is returned.
+
+The persisted return URL is also the frozen target locator. A personal purchase
+and an owner-seat Family purchase return to `#subscription`; another member's
+Family purchase returns to `#family`. The target reader accepts legacy
+owner-seat Family URLs at `#family`, but a current billing-mode change never
+reinterprets a frozen personal purchase as Family recovery.
+
+When an exact return purchase ID is present, that purchase is the dialog's sole
+source of status, conflict, capabilities, copy, and completion. A payer-wide
+latest-active projection cannot contribute fields to that returned-purchase
+state, even when it is newer. A simultaneous active purchase remains visible
+only on its own frozen-target surface; the two purchase records are never
+composed into one dialog state.
 
 The browser renders only server-read status:
 
