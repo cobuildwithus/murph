@@ -44,6 +44,7 @@ export function createLobPhysicalNoteRuntime(input: {
 
   return {
     async create(request) {
+      request.signal?.throwIfAborted();
       const signal = request.signal
         ? AbortSignal.any([
             request.signal,
