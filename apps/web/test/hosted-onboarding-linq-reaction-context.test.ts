@@ -38,6 +38,7 @@ vi.mock("@/src/lib/hosted-onboarding/group-reaction-mailbox", () => ({
 import type { HostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq";
 import { parseHostedLinqProviderEvent } from "@/src/lib/hosted-onboarding/linq-provider-events";
 import {
+  appendHostedLinqGroupReactionMailboxTx,
   buildHostedLinqAffirmativeReactionMessageEvent,
   stageHostedLinqGroupReactionContext,
 } from "@/src/lib/hosted-onboarding/webhook-provider-linq-reaction-context";
@@ -283,6 +284,47 @@ describe("stageHostedLinqGroupReactionContext", () => {
       event: buildReactionEvent({ reactionType: "laugh" }),
       prisma: createPrismaStub(),
     })).rejects.toThrow("signal unavailable");
+  });
+});
+
+describe("appendHostedLinqGroupReactionMailboxTx", () => {
+  it("lets canonical offer owners retain a reaction without exposing its pre-member handle", async () => {
+    const tx = {} as Prisma.TransactionClient;
+    const event = buildReactionEvent({ reactionType: "like" });
+
+    await expect(appendHostedLinqGroupReactionMailboxTx({
+      actor: null,
+      event,
+      route: {
+        accountLookupKey: "lookup_v1_test",
+        containerMemberId: "member_group_123",
+      },
+      tx,
+    })).resolves.toEqual({
+      containerMemberId: "member_group_123",
+      item: {
+        id: "mailbox_reaction_123",
+        lane: "conversation",
+        laneSeq: "41",
+      },
+    });
+
+    const appendInput =
+      mocks.appendConsumedHostedGroupReactionMailboxEnvelopeTx.mock.calls[0]?.[0];
+    const text = readHostedExecutionConversationMessageText(
+      appendInput.envelope.message,
+    );
+    expect(parseHostedExecutionGroupReactionEventText(text)).toEqual({
+      actor: null,
+      changes: [{ operation: "added", reaction: "like" }],
+      channel: "linq",
+      mode: "delta",
+      schema: "murph.hosted-group-reaction.v1",
+      targetMessageId: "message_target_123",
+      targetText: null,
+    });
+    expect(appendInput.tx).toBe(tx);
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 });
 
