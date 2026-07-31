@@ -6,6 +6,7 @@ import {
   assertCurrentMealPhotoCaptureEnrollmentTx,
   issueMealPhotoCaptureEnrollment,
   requireActiveMealPhotoCaptureEnrollment,
+  revokeAllMealPhotoCaptureEnrollmentsForMember,
   revokeMealPhotoCaptureEnrollmentForMember,
   revokeMealPhotoCaptureEnrollmentForScopedToken,
 } from "../src/lib/device-sync/meal-photo-capture";
@@ -144,6 +145,32 @@ describe("meal photo capture enrollment credentials", () => {
     expect(second.uploadToken).not.toBe(first.uploadToken);
     expect(second.idempotencySecret).not.toBe(first.idempotencySecret);
     expect(prisma.getRecord()).toMatchObject({ revokedAt: null, revokeReason: null });
+  });
+
+  it("revokes every active enrollment when health-data consent is withdrawn", async () => {
+    const prisma = createEnrollmentPrismaHarness();
+    await issueMealPhotoCaptureEnrollment({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: enrollmentRequest(),
+    });
+    const now = new Date("2026-07-30T12:00:00.000Z");
+
+    await expect(revokeAllMealPhotoCaptureEnrollmentsForMember({
+      memberId: MEMBER_ID,
+      now,
+      prisma: prisma.client,
+    })).resolves.toEqual({ revokedCount: 1 });
+
+    expect(prisma.getRecord()).toMatchObject({
+      revokeReason: "health_data_consent_withdrawn",
+      revokedAt: now,
+      updatedAt: now,
+    });
+    expect(mocks.lockHostedMemberRow).toHaveBeenLastCalledWith(
+      prisma.tx,
+      MEMBER_ID,
+    );
   });
 
   it("locks scoped revocation to the enrollment member", async () => {

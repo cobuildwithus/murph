@@ -136,6 +136,7 @@ import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-t
 import { HostedAccountDeletionStatus } from "@/src/components/settings/hosted-data-privacy-settings";
 import { GarminHistoricalDataDialog } from "../(dashboard)/connect/connect-page-dialogs";
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
+import { HealthDataConsentControlStudy } from "./health-data-consent-study";
 
 function Section({
   children,
@@ -1992,6 +1993,12 @@ export function ComponentsContent() {
             <ConclusionCard title="Key insights" variant="insight" items={[{ icon: "•", text: "Evening sessions drove sleep gains. Morning sessions showed no benefit." }, { icon: "•", text: "2–3x/week appears sufficient. Skipping one session had no negative impact." }]} />
             <ConclusionCard title="Recommendations" variant="recommendation" items={[{ icon: "→", text: "Continue sauna 2x/week as maintenance." }, { icon: "→", text: "Add cold exposure post-sauna for contrast protocol." }]} />
           </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Health data consent settings">
+          <HealthDataConsentControlStudy />
         </Section>
 
         <Separator />

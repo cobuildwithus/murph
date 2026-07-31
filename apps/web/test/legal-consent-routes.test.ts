@@ -13,7 +13,8 @@ const mocks = vi.hoisted(() => ({
   recordHostedLaunchRequiredConsent: vi.fn(),
   requirePrivyMemberAuth: vi.fn(),
   revokeHostedAppSessionFromRequest: vi.fn(),
-  revokeHostedOptionalFeatureConsent: vi.fn(),
+  revokeHostedConsentScope: vi.fn(),
+  withdrawHostedHealthDataConsent: vi.fn(),
   prismaClient: {
     label: "test-prisma",
   },
@@ -43,9 +44,13 @@ vi.mock("@/src/lib/legal/consent", async () => {
     readHostedConsentStatus: mocks.readHostedConsentStatus,
     recordHostedLaunchConsentDecline: mocks.recordHostedLaunchConsentDecline,
     recordHostedLaunchRequiredConsent: mocks.recordHostedLaunchRequiredConsent,
-    revokeHostedOptionalFeatureConsent: mocks.revokeHostedOptionalFeatureConsent,
+    revokeHostedConsentScope: mocks.revokeHostedConsentScope,
   };
 });
+
+vi.mock("@/src/lib/hosted-privacy/health-data-consent-withdrawal", () => ({
+  withdrawHostedHealthDataConsent: mocks.withdrawHostedHealthDataConsent,
+}));
 
 type HostedConsentStatusRouteModule = typeof import("../app/api/legal/consent/status/route");
 type HostedConsentAcceptRouteModule = typeof import("../app/api/legal/consent/accept/route");
@@ -102,7 +107,8 @@ describe("legal consent routes", () => {
       "murph-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
     );
     mocks.grantHostedOptionalFeatureConsent.mockResolvedValue(currentStatus);
-    mocks.revokeHostedOptionalFeatureConsent.mockResolvedValue(currentStatus);
+    mocks.revokeHostedConsentScope.mockResolvedValue(currentStatus);
+    mocks.withdrawHostedHealthDataConsent.mockResolvedValue(currentStatus);
   });
 
   it("returns the current consent status for the authenticated hosted member", async () => {
@@ -419,11 +425,12 @@ describe("legal consent routes", () => {
     );
 
     expect(response.status).toBe(400);
-    expect(mocks.revokeHostedOptionalFeatureConsent).not.toHaveBeenCalled();
+    expect(mocks.revokeHostedConsentScope).not.toHaveBeenCalled();
+    expect(mocks.withdrawHostedHealthDataConsent).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "CONSENT_SCOPE_NOT_REVOCABLE",
-        message: "This consent is required to use hosted Murph and cannot be revoked through this endpoint.",
+        message: "The launch legal agreement cannot be revoked through this endpoint.",
         retryable: false,
       },
     });
@@ -445,12 +452,38 @@ describe("legal consent routes", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.revokeHostedOptionalFeatureConsent).toHaveBeenCalledWith({
+    expect(mocks.revokeHostedConsentScope).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: mocks.prismaClient,
       scope: "feature.connected-health-source",
       source: "settings",
     });
+    await expect(response.json()).resolves.toEqual(currentStatus);
+  });
+
+  it("routes health-data withdrawal through the cleanup orchestrator", async () => {
+    const response = await consentRevokeRoute.POST(
+      new Request("https://join.example.test/api/legal/consent/revoke", {
+        body: JSON.stringify({
+          scope: "launch.health-data",
+          source: "settings-health-data",
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.withdrawHostedHealthDataConsent).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+      request: expect.any(Request),
+      source: "settings-health-data",
+    });
+    expect(mocks.revokeHostedConsentScope).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual(currentStatus);
   });
 });

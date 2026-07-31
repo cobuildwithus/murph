@@ -26,6 +26,7 @@ import { FamilyInviteJoinStudy } from "./family-invite-join-study";
 import { GroupJoinStudy } from "./group-join-study";
 import { GroupMemberPlanStudy } from "./group-member-plan-study";
 import { GrowthScorecardStudy } from "./growth-scorecard-study";
+import { HealthDataConsentWithdrawalFlowStudy } from "./health-data-consent-study";
 import { HomeLoadStateStudy } from "./home-load-state-study";
 import { HomeOnboardingStepsStudy } from "./home-onboarding-steps-study";
 import { HomepageAuthWarmRuntimeStudy } from "./homepage-auth-warm-runtime-study";
@@ -139,6 +140,12 @@ export function SectionsContent() {
             veniceAvailable
           />
         </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Settings health data consent withdrawal and return">
+        <HealthDataConsentWithdrawalFlowStudy />
       </StudySection>
 
       <Separator />

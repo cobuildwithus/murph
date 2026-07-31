@@ -8,6 +8,13 @@ Last verified: 2026-07-30
 - Do not share raw filesystem archives of a repo clone for review or support. Ignored local `.env` files and build output such as `.next/` can leak through a clone/archive even when git has no tracked secret diff; use the guarded `scripts/package-audit-context.sh` / `pnpm zip:src` path instead, because it stages git-visible files and filters blocked local residue from the bundle.
 - Keep sensitive identifiers out of committed fixtures, examples, screenshots, uploaded artifacts, and user/provider-facing output. Do not let identifier redaction block local root-cause debugging.
 - Treat auth, wallet, payment, and health-related data flows as security-sensitive until documented otherwise.
+- Hosted health-data withdrawal is authorized only by the durable
+  `launch.health-data = revoked` grant. A missing legacy grant is not
+  withdrawal. Write revocation before cleanup, and recheck it independently at
+  AI, message, runtime-usage, health-source connection, webhook, scheduled
+  sync, and companion-processing boundaries. Cleanup failure must never restore
+  authority. Keep Settings, export, and deletion available without waking the
+  paused runtime; only renewed consent may restore processing.
 - Treat suspected breaches, unauthorized access, unauthorized disclosures, vendor incidents, and accidental tracking disclosures involving identifiable health data as FTC HBNR triage events; use `agent-docs/compliance/ftc-hbnr-incident-plan.md` before deciding that notice is not required.
 - Do not add third-party advertising pixels, retargeting SDKs, behavioral ad attribution, customer-list matching, tag-manager destinations, or analytics destinations that receive health data or health-context metadata; use `agent-docs/compliance/health-data-tracking-and-ads-rule.md` for any telemetry or marketing-tool review.
 - Hosted Web must keep the global `Referrer-Policy` at `strict-origin` or

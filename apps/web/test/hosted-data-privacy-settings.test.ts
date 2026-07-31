@@ -372,6 +372,63 @@ describe("HostedDataPrivacySettings", () => {
     expect(clickDownloadLink).not.toHaveBeenCalled();
   });
 
+  test("downloads the latest available replica after consent withdrawal", async () => {
+    mockHostedVaultExportFlowState();
+    mocks.loadBrowserVaultReplica.mockResolvedValueOnce({
+      client: {
+        replica: createBrowserVaultReplicaForTest(),
+      },
+      deviceSyncImportPending: true,
+      freshness: "stale",
+      refreshPending: true,
+      replicaRef: {
+        dataVersion: "d".repeat(64),
+      },
+      state: "ready",
+    });
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const createObjectURL = vi.fn(() => "blob:vault-export");
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(window, "URL", {
+      configurable: true,
+      value: {
+        createObjectURL,
+        revokeObjectURL,
+      },
+    });
+    const clickDownloadLink = vi.fn();
+    Object.defineProperty(window.HTMLElement.prototype, "click", {
+      configurable: true,
+      value: clickDownloadLink,
+    });
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, {
+        allowLatestAvailableExport: true,
+        authenticated: true,
+      }));
+    });
+
+    await clickButton(container, "Download my data", window);
+
+    expect(mocks.loadBrowserVaultReplica).toHaveBeenCalledTimes(1);
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    expect(clickDownloadLink).toHaveBeenCalledTimes(1);
+  });
+
   test("sends the typed deletion confirmation phrase when the delete flow is submitted", async () => {
     mockHostedDataPrivacyDeleteFlowState();
 

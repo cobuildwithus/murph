@@ -66,6 +66,7 @@ const POST_DELETE_REDIRECT_DELAY_MS = 2_500;
 const POST_DELETE_REDIRECT_FALLBACK_MS = 8_000;
 
 export function HostedDataPrivacySettings(props: {
+  allowLatestAvailableExport?: boolean;
   authenticated: boolean;
   authorizationEnabled?: boolean;
 }) {
@@ -73,10 +74,18 @@ export function HostedDataPrivacySettings(props: {
     return <HostedDataPrivacyUnavailable authenticated={props.authenticated} />;
   }
 
-  return <HostedDataPrivacySettingsAuthorized authenticated={props.authenticated} />;
+  return (
+    <HostedDataPrivacySettingsAuthorized
+      allowLatestAvailableExport={props.allowLatestAvailableExport === true}
+      authenticated={props.authenticated}
+    />
+  );
 }
 
-function HostedDataPrivacySettingsAuthorized(props: { authenticated: boolean }) {
+function HostedDataPrivacySettingsAuthorized(props: {
+  allowLatestAvailableExport: boolean;
+  authenticated: boolean;
+}) {
   const { authorize } = useSensitiveActionAuthorization();
   const [exportPending, setExportPending] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
@@ -148,9 +157,12 @@ function HostedDataPrivacySettingsAuthorized(props: { authenticated: boolean }) 
       }
 
       if (
-        result.freshness !== "fresh"
-        || result.refreshPending
-        || result.deviceSyncImportPending
+        !props.allowLatestAvailableExport
+        && (
+          result.freshness !== "fresh"
+          || result.refreshPending
+          || result.deviceSyncImportPending
+        )
       ) {
         throw new Error(
           "Your data is still being prepared. Try the export again in a moment.",

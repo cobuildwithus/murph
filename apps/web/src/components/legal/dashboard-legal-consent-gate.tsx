@@ -30,7 +30,7 @@ export function DashboardLegalConsentGate({
   const isUpdate = variant === "update";
   const pathname = usePathname();
 
-  if (pathname === "/records/connect") {
+  if (pathname === "/records/connect" || pathname === "/settings") {
     return null;
   }
 

@@ -489,6 +489,13 @@ it has been explicitly elevated to a cross-cutting invariant.
   authority fail closed. An advisory dependency may degrade only into an
   already-authorized narrower path and never silently suppress an accepted
   reply.
+- Explicit hosted health-data withdrawal revokes processing authority before
+  cleanup. AI and message admission, queued runtime usage, source connections,
+  webhooks, scheduled sync, and companion processing independently reject that
+  state. Cleanup failure cannot restore authority, while an absent legacy grant
+  is not reinterpreted as withdrawal. Settings, latest-available export, and
+  account deletion remain available; renewed consent is the only processing
+  restore path.
 
 ## Deployment Compatibility
 

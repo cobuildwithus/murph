@@ -256,6 +256,22 @@ export async function readHostedRuntimeReconciliationFacts(
       userId: input.userId,
     });
 
+    if (gate.status === "health_data_consent_withdrawn") {
+      const facts = buildHostedRuntimeBlockedFacts({
+        mailboxLag,
+        reason: "health_data_consent_withdrawn",
+        retryAt: null,
+        workspace: projectedWorkspace,
+      });
+      emitHostedRuntimeReconciliationFacts({
+        facts,
+        request: input,
+        usageGateRequired: true,
+        usageGateStatus: gate.status,
+      });
+      return facts;
+    }
+
     if (gate.status === "denied") {
       let noticeRetryAt: Date | null = null;
       if ((input.usageGateMode ?? "mutating") === "mutating") {

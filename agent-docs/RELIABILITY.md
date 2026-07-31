@@ -8,6 +8,13 @@ Last verified: 2026-07-30
 - Prefer explicit failure paths and actionable errors over silent fallback behavior.
 - Update architecture and verification docs in the same change that introduces new runtime entrypoints.
 - Avoid hidden coupling between scripts, docs, and runtime code; document new dependencies in `ARCHITECTURE.md` and `agent-docs/references/testing-ci-map.md`.
+- Health-data withdrawal commits its revocation boundary before best-effort
+  provider and runtime cleanup. Cleanup failures are secret-safe, do not roll
+  back the grant, and may be retried idempotently by repeating withdrawal.
+  Webhooks finalize an already-claimed trace without appending dirty work;
+  scheduled selection and wake admission both exclude explicit revocation; and
+  queued model work rechecks authority before usage is consumed. Renewal is a
+  new durable grant, not an implicit cleanup rollback.
 - Venice core inference is an all-or-none operator configuration: one Worker
   secret plus fixed Luna/Terra/Sol mappings. Deploy preflight rejects partial
   configuration, and Web keeps Venice hidden and projects OpenAI until the

@@ -25,6 +25,8 @@ import {
 } from "@murphai/device-syncd/types";
 import type { CompanionHrvRmssdObservation } from "@murphai/contracts";
 
+import { formatHostedExecutionSafeLogErrorDetails } from "../hosted-execution/logging";
+import { readHostedHealthDataConsentState } from "../legal/consent";
 import type { HostedDeviceSyncControlPlaneContext } from "./control-plane-context";
 import { createHostedDeviceSyncControlPlaneContext } from "./control-plane-context";
 import {
@@ -70,6 +72,15 @@ export class HostedDeviceSyncPublicIngressService {
           provider,
           sourceProviderSlug,
         }) => {
+          if (await this.hasWithdrawnHealthDataConsent(account.id)) {
+            throw deviceSyncError({
+              code: "HEALTH_DATA_CONSENT_REQUIRED",
+              httpStatus: 403,
+              message: "Use Murph again before connecting a health source.",
+              retryable: false,
+            });
+          }
+
           await handleHostedDeviceSyncConnectionEstablished({
             account,
             connection,
@@ -87,7 +98,31 @@ export class HostedDeviceSyncPublicIngressService {
           const pending = await this.context.store.hasPendingDirtyConnection(account.id);
           return pending ? { accepted: true } : null;
         },
-        onWebhookAccepted: async ({ account, claimToken, traceId, webhook, now }) => {
+        onWebhookAccepted: async ({
+          account,
+          claimToken,
+          traceId,
+          webhook,
+          provider,
+          now,
+        }) => {
+          if (await this.hasWithdrawnHealthDataConsent(account.id)) {
+            const completed = await this.context.store.completeWebhookTrace(
+              provider.provider,
+              traceId,
+              claimToken,
+            );
+            if (!completed) {
+              throw deviceSyncError({
+                code: "WEBHOOK_TRACE_CLAIM_LOST",
+                message: "Webhook trace claim was lost before durable acceptance completed.",
+                retryable: true,
+                httpStatus: 503,
+              });
+            }
+            return DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED;
+          }
+
           await handleHostedDeviceSyncWebhookAccepted({
             account,
             claimToken,
@@ -411,12 +446,61 @@ export class HostedDeviceSyncPublicIngressService {
     };
   }
 
+  async disconnectAllConnections(userId: string): Promise<{
+    attemptedCount: number;
+    disconnectedCount: number;
+    failedCount: number;
+  }> {
+    const connections = (await this.context.store.listConnectionsForUser(userId))
+      .filter((connection) => connection.status !== "disconnected");
+    let disconnectedCount = 0;
+    let failedCount = 0;
+
+    for (const connection of connections) {
+      try {
+        await disconnectHostedDeviceSyncConnection({
+          connectionId: connection.id,
+          registry: this.registry,
+          store: this.context.store,
+          userId,
+        });
+        disconnectedCount += 1;
+      } catch (error) {
+        failedCount += 1;
+        console.error("Health-data consent withdrawal could not disconnect a source.", {
+          ...formatHostedExecutionSafeLogErrorDetails(error, {
+            code: "HEALTH_DATA_CONSENT_SOURCE_DISCONNECT_FAILED",
+          }),
+          provider: connection.provider,
+        });
+      }
+    }
+
+    return {
+      attemptedCount: connections.length,
+      disconnectedCount,
+      failedCount,
+    };
+  }
+
   toBrowserConnection(account: PublicDeviceSyncAccount): HostedBrowserDeviceSyncConnection {
     return toHostedBrowserDeviceSyncConnection(account, this.context.env.routingIndexKey);
   }
 
   createBrowserConnectionId(connectionId: string): string {
     return createHostedBrowserConnectionId(this.context.env.routingIndexKey, connectionId);
+  }
+
+  private async hasWithdrawnHealthDataConsent(connectionId: string): Promise<boolean> {
+    const memberId = await this.context.store.getConnectionOwnerId(connectionId);
+    if (!memberId) {
+      return false;
+    }
+
+    return await readHostedHealthDataConsentState({
+      memberId,
+      prisma: this.context.store.prisma,
+    }) === "revoked";
   }
 
   private async requireOwnedBrowserConnection(
@@ -450,4 +534,12 @@ export function createHostedDeviceSyncPublicIngressService(
   const registry = createHostedDeviceSyncRegistry(process.env);
 
   return new HostedDeviceSyncPublicIngressService(context, webhookAdmin, registry);
+}
+
+export async function disconnectAllHostedDeviceSyncConnectionsForUser(input: {
+  request: Request;
+  userId: string;
+}) {
+  return createHostedDeviceSyncPublicIngressService(input.request)
+    .disconnectAllConnections(input.userId);
 }

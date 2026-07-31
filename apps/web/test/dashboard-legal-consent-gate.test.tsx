@@ -199,9 +199,9 @@ test("dashboard consent keeps a failed save retryable and continues after retry"
     {
       location: {
         hash: "",
-        href: "https://app.example.test/settings?tab=privacy",
+        href: "https://app.example.test/home?tab=privacy",
         origin: "https://app.example.test",
-        pathname: "/settings",
+        pathname: "/home",
         search: "?tab=privacy",
       },
       requireButton: false,
@@ -514,6 +514,29 @@ test("a consent preview uses only its injected in-memory acceptance owner", asyn
   expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
   expect(onAccepted).toHaveBeenCalledWith(acceptedStatus);
   expect(rendered.reload).not.toHaveBeenCalled();
+});
+
+test("settings remains available while launch consent is missing", async () => {
+  const rendered = await renderClientComponent(
+    createElement(DashboardLegalConsentGate, {
+      initialStatus: createLaunchConsentStatus(),
+    }),
+    {
+      location: {
+        hash: "#data-privacy",
+        href: "https://app.example.test/settings#data-privacy",
+        origin: "https://app.example.test",
+        pathname: "/settings",
+        search: "",
+      },
+      requireButton: false,
+    },
+  );
+  cleanupRender = rendered.cleanup;
+
+  expect(rendered.container.querySelector(
+    '[data-dashboard-legal-consent-gate="true"]',
+  )).toBeNull();
 });
 
 function expectNoLaunchCheckboxes(container: HTMLElement) {

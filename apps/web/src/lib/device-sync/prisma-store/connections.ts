@@ -25,6 +25,7 @@ import type {
 } from "@murphai/device-syncd/types";
 
 import type { HostedSecureBoxPrismaClient } from "../../hosted-crypto/secure-box";
+import { HOSTED_HEALTH_DATA_CONSENT_SCOPE } from "../../legal/consent";
 import { buildHostedProviderAccountBlindIndex } from "../routing-index";
 import { buildHostedPublicDeviceSyncAccount } from "../internal-runtime";
 import {
@@ -885,6 +886,15 @@ export class PrismaHostedConnectionStore {
               and "account_group"."billing_status" = 'active'
               and "account_group"."suspended_at" is null
           )
+        )
+        -- A missing historical grant remains compatible with legacy members.
+        -- Only an explicit withdrawal removes scheduled-sync authority.
+        and not exists (
+          select 1
+          from "hosted_consent_grant" as "consent_grant"
+          where "consent_grant"."member_id" = "member"."id"
+            and "consent_grant"."scope" = ${HOSTED_HEALTH_DATA_CONSENT_SCOPE}
+            and "consent_grant"."status" = 'revoked'
         )
         and not exists (
           select 1

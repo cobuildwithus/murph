@@ -78,6 +78,30 @@ export interface MealPhotoCaptureRevocationRequest {
   schemaVersion: 1;
 }
 
+export async function revokeAllMealPhotoCaptureEnrollmentsForMember(input: {
+  memberId: string;
+  now?: Date;
+  prisma: PrismaClient;
+}): Promise<{ revokedCount: number }> {
+  const now = input.now ?? new Date();
+  return input.prisma.$transaction(async (tx) => {
+    await lockHostedMemberRow(tx, input.memberId);
+    const result = await tx.hostedMealPhotoCaptureEnrollment.updateMany({
+      data: {
+        revokeReason: "health_data_consent_withdrawn",
+        revokedAt: now,
+        updatedAt: now,
+      },
+      where: {
+        memberId: input.memberId,
+        revokedAt: null,
+      },
+    });
+
+    return { revokedCount: result.count };
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
+
 export interface MealPhotoCaptureEnrollmentResponse {
   expiresAt: Date;
   idempotencySecret: string;

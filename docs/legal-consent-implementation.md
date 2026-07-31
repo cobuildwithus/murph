@@ -37,7 +37,9 @@ The hosted consent API routes are:
 - `GET /api/device-sync/companion/legal-consent`
 - `POST /api/device-sync/companion/legal-consent`
 
-All routes require authenticated hosted member context. Launch-required consent can be accepted but not revoked through the revoke endpoint. Optional feature scopes can be granted and revoked independently.
+All routes require authenticated hosted member context. The launch legal
+agreement is immutable through the revoke endpoint. Health-data consent and
+optional feature scopes can be revoked independently.
 The `POST` accept, decline, and revoke routes also enforce hosted
 mutation-origin checks before writing consent state. Decline records one
 `declined` event for each currently ungranted launch scope and ends the current
@@ -62,7 +64,7 @@ Current scopes are defined in `apps/web/src/lib/legal/consent.ts`:
 | Scope | Revocable | Purpose |
 | --- | --- | --- |
 | `launch.legal` | No | Terms, privacy policy, and Health AI safety disclosure acceptance. |
-| `launch.health-data` | No | Consumer health-data notice consent required for launch use. |
+| `launch.health-data` | Yes | Consumer health-data notice consent required for hosted health-data processing. |
 | `feature.health-ai` | Yes | Optional health-AI processing consent. |
 | `feature.health-commons-contribution` | Yes | Optional contribution of normalized results to Health Commons learning. |
 | `feature.connected-health-source` | Yes | Optional connected-source processing consent beyond explicit launch consent and connect action. |
@@ -74,12 +76,41 @@ Server-only helpers in `apps/web/src/lib/legal/consent.ts` provide:
 - document registry and scope definitions;
 - current consent status reads;
 - launch-required consent recording;
-- optional feature consent grant/revocation;
+- revocable consent-scope grant/revocation;
+- explicit health-data consent state resolution (`granted`, `revoked`, or
+  `missing`);
 - `assertHostedConsentScopeGranted`;
 - `assertHostedHistoricalLaunchConsentGranted`;
 - `assertHostedLaunchRequiredConsentGranted`.
 
 Browser-vault session creation requires current launch-required consent before reading hosted vault state. Device-sync connection and reconnection setup require both historical launch grants but intentionally ignore launch-document freshness: the member must also have an active authenticated session, take an explicit connect action, and complete the source provider's authorization flow. Current companion device status, token exchange, and sync ingestion use the same historical-launch boundary, so an existing authorized member remains available when document acceptance becomes stale while a member with zero or partial launch consent remains fail-closed. These device paths do not require a second connected-source consent grant because the explicit source action and provider authorization supply the feature intent. Future feature gates should follow the same pattern at the boundary where hosted processing would otherwise begin and should introduce separate optional scopes only when they cover distinct data use beyond the explicit source authorization.
+
+## Health-data withdrawal and renewal
+
+Settings exposes health-data withdrawal separately from account deletion. A
+confirmed withdrawal writes `launch.health-data = revoked` before attempting
+cleanup. That durable grant is the processing authority boundary: explicit
+revocation immediately fails closed at AI and message admission, queued runtime
+usage admission, new health-source connection, device webhook, scheduled sync,
+and companion health-processing boundaries.
+
+The cleanup phase best-effort disconnects wearable sources, revokes active
+meal-photo enrollments, and terminates the member runtime. Cleanup failure does
+not restore consent or resume processing; repeating withdrawal retries cleanup
+without appending another consent event. A missing legacy grant is a distinct
+state and cannot be turned into an explicit withdrawal by the withdrawal
+endpoint.
+
+Withdrawal does not delete the member account, existing data, or subscription.
+Settings, account export, and account deletion remain available. Export uses
+the latest retained vault replica without asking the paused runtime to refresh
+it, even when that replica is older or marked dirty.
+
+`Use Murph again` presents the existing health-data consent documents and
+records a new grant through the ordinary acceptance route. Processing authority
+returns only after that grant is durable. Provider credentials revoked during
+cleanup are not recreated automatically; the member reconnects those sources
+through the normal explicit source flow.
 
 ## Document updates and existing members
 
@@ -89,19 +120,51 @@ The authenticated dashboard layout reads consent status before starting the
 browser-vault provider. While launch consent is absent or stale, the requested
 route stays mounted but the browser-vault provider exposes an empty context,
 starts no session request, and clears any decrypted warm snapshot that may have
-loaded before the server check. Except on `/records/connect`, the layout places
-the current consent card in a non-dismissible modal over the inert dashboard.
+loaded before the server check. Except on `/records/connect` and `/settings`,
+the layout places the current consent card in a non-dismissible modal over the
+inert dashboard.
 A member with both historical launch grants and stale document versions sees
 update-specific copy; members with zero or partial launch consent see generic
 recovery copy. The reminder does not replace or block the device-connect page.
-Accepting both launch scopes reloads that exact route and restores protected
-vault-backed features. If the reminder status cannot be read, the layout omits
+Accepting the required launch scopes reloads that exact route and restores
+protected vault-backed features. Settings remains reachable so an explicitly
+withdrawn member can renew consent, export data, or delete the account. If the
+reminder status cannot be read, the layout omits
 the reminder and leaves the ordinary provider path enabled instead of taking
 device connection down. The public `/design` catalog injects an in-memory
 acceptance handler and inert handoff into the production component, so its
 interactive preview never calls the consent API or writes consent state.
 
-The ordinary Linq inbound webhook, mailbox ingestion, hosted container wake, and current-conversation reply path do not use launch consent as an admission gate. Country/prefix-gated Linq instant start may grant the existing no-card Pulse trial without launch consent solely so that same authenticated inbound conversation can receive a reply; it does not relax any independently consent-gated browser, connected-source, sharing, export, paid-billing/payment-method, or clinical-record action. Configured non-Strava device connection/reconnection and current companion device sync require both historical launch grants but not current document versions. A stale document version therefore does not stop an existing authorized member from texting Murph, receiving a reply in that active conversation, connecting an available device, or continuing current device sync. A member with zero or partial launch consent cannot start or use those health-data device paths. Native or chat-adjacent actions with no current-document consent UI of their own — reaction-based group joins, meal-photo enrollment and uploads, and iMessage mini-app proof actions — use the same historical-launch boundary as device sync. Meal-photo enrollment still requires a foreground verified Privy identity, active member access, explicit Photos opt-in, and a current private delivery route. Independently guarded browser-vault, clinical-record, export, billing, web group-join, and iMessage mini-app enrollment actions still fail closed with `HOSTED_CONSENT_REQUIRED` until the member accepts the current documents. Strava remains disabled for new connections and reconnect offers as a separate provider product gate.
+The ordinary Linq inbound webhook, mailbox ingestion, hosted container wake,
+and current-conversation reply path do not require current launch-document
+versions and do not interpret a missing legacy health-data row as withdrawal.
+They do reject an explicit `launch.health-data = revoked` state before message
+append or model work. Country/prefix-gated Linq instant start may grant the
+existing no-card Pulse trial without current launch consent solely so that same
+authenticated inbound conversation can receive a reply; it does not override
+an explicit withdrawal or relax any independently consent-gated browser,
+connected-source, sharing, export, paid-billing/payment-method, or
+clinical-record action.
+
+Configured non-Strava device connection/reconnection and current companion
+device sync require both historical launch grants but not current document
+versions. A stale document version therefore does not stop an existing
+authorized member from texting Murph, receiving a reply in that active
+conversation, connecting an available device, or continuing current device
+sync. Explicit withdrawal does stop those health-data paths. A member with zero
+or partial launch consent cannot start or use those health-data device paths,
+but that absence remains distinct from withdrawal for legacy compatibility.
+Native or chat-adjacent actions with no current-document consent UI of their
+own — reaction-based group joins, meal-photo enrollment and uploads, and
+iMessage mini-app proof actions — use the same historical-launch boundary as
+device sync. Meal-photo enrollment still requires a foreground verified Privy
+identity, active member access, explicit Photos opt-in, and a current private
+delivery route. Independently guarded browser-vault, clinical-record, billing,
+web group-join, and iMessage mini-app enrollment actions still fail closed with
+`HOSTED_CONSENT_REQUIRED` until the member accepts the current documents.
+Account export is the withdrawal exception described above. Strava remains
+disabled for new connections and reconnect offers as a separate provider
+product gate.
 
 If a companion health-data action encounters zero or partial historical launch
 consent, the native app keeps the Privy member session, closes Junction and

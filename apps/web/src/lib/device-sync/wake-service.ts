@@ -53,6 +53,7 @@ import {
 import {
   formatHostedExecutionSafeLogErrorDetails,
 } from "../hosted-execution/logging";
+import { readHostedHealthDataConsentState } from "../legal/consent";
 import {
   buildHostedDeviceSyncWake,
 } from "./wake";
@@ -850,6 +851,19 @@ export async function appendHostedDeviceSyncScheduledReconcileWake(input: {
   userId: string;
 }): Promise<HostedDeviceSyncReconcileWakeResult> {
   const prisma = getPrisma();
+  if (await readHostedHealthDataConsentState({
+    memberId: input.userId,
+    prisma,
+  }) === "revoked") {
+    return {
+      reason: "health_data_consent_withdrawn",
+      wakeAccepted: false,
+      wakeAppended: false,
+      wakeDuplicate: false,
+      wakeInserted: false,
+    };
+  }
+
   const store = new PrismaDeviceSyncControlPlaneStore({
     prisma,
   });
