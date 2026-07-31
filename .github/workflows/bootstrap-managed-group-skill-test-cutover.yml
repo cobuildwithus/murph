@@ -30,27 +30,29 @@ jobs:
 
           path = Path("packages/assistant-engine/test/assistant-skill-assets.test.ts")
           source = path.read_text(encoding="utf-8")
-          old = """  it('keeps private and shared activity interpretation in their owners', async () => {
-    const load = async (slug: string) => {
-      const skill = ASSISTANT_SKILLS.find((candidate) => candidate.slug === slug)
-      if (!skill) throw new Error(`Missing registered skill: ${slug}`)
-      return (await readSkillFile(skill)).replace(/\\s+/gu, ' ')
-    }
-    const [daily, shared] = await Promise.all([
-      load('daily-activity'),
-      load('group-chat'),
-    ])
 
-    expect(daily).toMatch(
-      /wearables day <date>.+wearables activity list.+canonical workout-day rollup/u,
-    )
-    expect(daily).toContain('current-local-day totals as provisional and say \"so far.\"')
-    expect(daily).toContain('not proof of failed provider sync or import')
-    expect(shared).toContain('its cause is unverified')
-    expect(shared).toContain('current-local-day value as provisional: say \"so far\"')
-  })
+          removed_import = """import {
+  HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND,
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+} from '@murphai/hosted-execution/vault-share'
+
 """
-          new = """  it('keeps private activity interpretation in its public owner', async () => {
+          source = source.replace(removed_import, "")
+
+          def replace_test(name: str, replacement: str = "") -> None:
+              global source
+              marker = f"  it('{name}'"
+              start = source.find(marker)
+              if start < 0:
+                  if replacement and replacement in source:
+                      return
+                  raise SystemExit(f"Missing test block: {name}")
+              next_test = source.find("\n  it('", start + len(marker))
+              if next_test < 0:
+                  raise SystemExit(f"Could not find end of test block: {name}")
+              source = source[:start] + replacement + source[next_test + 1:]
+
+          public_activity_test = """  it('keeps private activity interpretation in its public owner', async () => {
     const skill = ASSISTANT_SKILLS.find(
       (candidate) => candidate.slug === 'daily-activity',
     )
@@ -60,18 +62,29 @@ jobs:
     expect(daily).toMatch(
       /wearables day <date>.+wearables activity list.+canonical workout-day rollup/u,
     )
-    expect(daily).toContain('current-local-day totals as provisional and say \"so far.\"')
+    expect(daily).toContain('current-local-day totals as provisional and say "so far."')
     expect(daily).toContain('not proof of failed provider sync or import')
   })
+
 """
-          if old not in source:
-              if new not in source:
-                  raise SystemExit("Expected mixed public/private skill assertion was not found")
-          else:
-              path.write_text(source.replace(old, new), encoding="utf-8")
+          replace_test(
+              "keeps private and shared activity interpretation in their owners",
+              public_activity_test,
+          )
+          for test_name in (
+              "keeps group newsletter setup and opt-out behavior in the group-chat skill",
+              "keeps the new-group contact handoff natural and reactive",
+              "polls scheduled member asks to a terminal result in the current turn",
+              "registers a dedicated group newsletter editorial skill",
+              "keeps group challenge guidance aligned with selectable scoring projections",
+          ):
+              replace_test(test_name)
+
+          path.write_text(source, encoding="utf-8")
           PY
 
           git rm -f \
+            packages/assistant-engine/test/assistant-group-chat-style-skill.test.ts \
             packages/assistant-engine/test/assistant-group-challenge-buy-in-skill.test.ts \
             packages/assistant-engine/test/assistant-group-challenge-diagnostics-skill.test.ts \
             packages/assistant-engine/test/assistant-group-challenge-scorecards-skill.test.ts \
