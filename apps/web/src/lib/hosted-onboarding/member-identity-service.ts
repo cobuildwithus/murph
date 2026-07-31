@@ -453,6 +453,20 @@ export async function reconcileHostedPrivyIdentityOnMemberTx(input: {
   prisma: Prisma.TransactionClient;
   now: Date;
 }): Promise<HostedMemberCoreState> {
+  if (
+    input.identity.phone
+    && (
+      !input.authMethod
+      || input.authMethod === "phone"
+      || Boolean(input.expectedPhoneLookupKey)
+    )
+  ) {
+    await acquireHostedLinqParticipantPhoneLockTx({
+      phoneNumber: input.identity.phone.number,
+      tx: input.prisma,
+    });
+  }
+
   await lockHostedMemberRow(input.prisma, input.member.id);
   await assertHostedPrivyAccountDeletionNotPendingTx({
     prisma: input.prisma,
@@ -491,19 +505,6 @@ export async function reconcileHostedPrivyIdentityOnMemberTx(input: {
     authMethod: input.authMethod,
     identity: input.identity,
   });
-  if (
-    shouldPersistHostedPrivyPhoneIdentity({
-      authMethod,
-      expectedPhoneLookupKey: input.expectedPhoneLookupKey,
-    })
-    && input.identity.phone
-  ) {
-    await acquireHostedLinqParticipantPhoneLockTx({
-      phoneNumber: input.identity.phone.number,
-      tx: input.prisma,
-    });
-  }
-
   if (currentIdentity?.privyUserId && currentIdentity.privyUserId !== input.identity.userId) {
     throw hostedOnboardingError({
       code: "PRIVY_USER_MISMATCH",
