@@ -227,7 +227,10 @@ export async function completeHostedPrivyVerification(input: {
       suspendedAt: member.suspendedAt,
     });
     const messagingSetupRequired = isHostedMemberMessagingSetupRequired({
-      identity: messagingSetupState?.identity ?? null,
+      identity: {
+        ...(messagingSetupState?.identity ?? {}),
+        emailLinked: messagingSetupState?.emailLinked === true,
+      },
       routing: messagingSetupState?.routing ?? null,
     });
 
