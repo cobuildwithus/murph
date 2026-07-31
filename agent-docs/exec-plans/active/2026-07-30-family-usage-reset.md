@@ -160,3 +160,9 @@ Updated: 2026-07-30
     regressions reproduced the mixed state before the correction; 391 tests
     across seven affected Web files, Web typecheck, and touched-file ESLint
     passed afterward.
+  - ReviewGPT round 3 reported that a return with no offers or active purchase
+    would not mount. Static inspection showed the existing bottom fallback in
+    `PlanUsageBand` already mounts that exact return. A real
+    `HostedBillingSettings` regression now proves the return dialog is rendered
+    without server-render I/O; the direct dialog regression separately proves
+    it polls only the exact return. The affected suite passes 392 tests.

@@ -716,6 +716,40 @@ describe("HostedBillingSettings", () => {
     assert.doesNotMatch(markup, /reconcil/iu);
   });
 
+  test("mounts an exact return without offers or an active purchase", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const markup = renderToStaticMarkup(
+      createElement(HostedBillingSettings, {
+          authenticated: true,
+          payerMemberId: TEST_PAYER_MEMBER_ID,
+          usageStatus: buildUsageStatus(),
+          usageTopUpActivePurchase: null,
+          usageTopUpOffers: [],
+          usageTopUpPurchaseReturn: {
+            kind: "success",
+            purchaseId: "hucp_ownerreturn00000",
+          },
+          usageTopUpScope: "family",
+          usageTopUpTargetLabel: "you",
+        },
+      ),
+    );
+
+    assert.match(markup, /Confirming payment for you/);
+    assert.match(markup, /We’re confirming your payment/);
+    assert.doesNotMatch(
+      markup,
+      /Other checkout|unfinished checkout|another usage destination/i,
+    );
+    assert.equal(
+      mocks.requestHostedOnboardingJson.mock.calls.length,
+      0,
+      "server rendering must not perform purchase-status I/O",
+    );
+  });
+
   test("offers Text Murph on a fulfilled top-up when a contact channel resolves", async () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
