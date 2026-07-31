@@ -1,22 +1,16 @@
-name: Agent refine Linq unknown-group recovery
+name: Agent finalize Linq unknown-group recovery
 
 on:
   workflow_dispatch:
   pull_request:
     types:
       - ready_for_review
-  push:
-    branches:
-      - agent/linq-unknown-group-signup-recovery
-    paths:
-      - scripts/agent-refine-linq-unknown-group-recovery.mjs
-      - .github/workflows/agent-refine-linq-unknown-group-recovery.yml
 
 permissions:
   contents: write
 
 jobs:
-  refine:
+  finalize:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 55
@@ -26,12 +20,31 @@ jobs:
           ref: agent/linq-unknown-group-signup-recovery
           fetch-depth: 0
 
-      - name: Apply asserted refinement
+      - name: Repair and validate one-shot generator
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("scripts/agent-refine-linq-unknown-group-recovery.mjs")
+          content = path.read_text()
+          before = '    `${window.location.pathname}${window.location.search}`,\n'
+          after = r'    \`\${window.location.pathname}\${window.location.search}\`,' + "\n"
+          if content.count(before) != 1:
+              raise SystemExit("Expected one group-start fragment template anchor")
+          path.write_text(content.replace(before, after, 1))
+          PY
+          node --check scripts/agent-refine-linq-unknown-group-recovery.mjs
+
+      - name: Apply asserted implementation refinement
         run: node scripts/agent-refine-linq-unknown-group-recovery.mjs
+
+      - name: Apply final architecture and correctness audit
+        run: python scripts/agent-finalize-linq-unknown-group-recovery.py
 
       - name: Remove one-shot machinery
         run: |
           rm scripts/agent-refine-linq-unknown-group-recovery.mjs
+          rm scripts/agent-finalize-linq-unknown-group-recovery.py
           rm .github/workflows/agent-refine-linq-unknown-group-recovery.yml
 
       - uses: pnpm/action-setup@v4
@@ -44,16 +57,20 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Format implementation
+      - name: Format and validate the scoped diff
         run: |
           pnpm exec prettier --write \
             apps/web/app/api/groups/start/recover/route.ts \
+            apps/web/app/design/group-start-study.tsx \
+            apps/web/app/design/sections-content.tsx \
             apps/web/app/groups/start/page.tsx \
             apps/web/src/components/hosted-groups/group-start-client.tsx \
+            apps/web/src/components/hosted-groups/group-start-frame.tsx \
             apps/web/src/components/hosted-onboarding/join-invite-auto-trial-island.tsx \
             apps/web/src/components/hosted-onboarding/join-invite-islands.tsx \
             apps/web/src/components/hosted-onboarding/join-invite-success-client.tsx \
             apps/web/src/lib/hosted-groups/group-start-handoff.ts \
+            apps/web/src/lib/hosted-onboarding/hosted-member-routing-store.ts \
             apps/web/src/lib/hosted-onboarding/linq-group-setup.ts \
             apps/web/src/lib/hosted-onboarding/webhook-provider-linq-shared.ts \
             apps/web/src/lib/hosted-onboarding/webhook-provider-linq.ts \
@@ -61,17 +78,10 @@ jobs:
             apps/web/test/hosted-group-start-handoff.test.ts \
             apps/web/test/hosted-group-start-recovery-route.test.ts \
             apps/web/test/hosted-linq-group-setup.test.ts \
+            apps/web/test/hosted-member-routing-pending-group.test.ts \
             apps/web/test/hosted-onboarding-linq-thread-route.test.ts \
             agent-docs/exec-plans/completed/2026-07-31-unknown-linq-group-setup-recovery.md
           git diff --check
-
-      - name: Commit refinement
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "fix(web): harden unknown-group signup recovery"
-          git push origin HEAD:agent/linq-unknown-group-signup-recovery
 
       - name: Focused tests
         run: |
@@ -81,6 +91,7 @@ jobs:
             test/hosted-group-start-handoff.test.ts \
             test/hosted-group-start-recovery-route.test.ts \
             test/hosted-linq-group-setup.test.ts \
+            test/hosted-member-routing-pending-group.test.ts \
             test/hosted-onboarding-linq-thread-route.test.ts \
             test/join-invite-islands.test.ts \
             test/join-invite-success-client.test.ts
@@ -88,4 +99,10 @@ jobs:
       - name: Typecheck
         run: pnpm --dir apps/web typecheck
 
-# Apply once on ready-for-review, then remove this workflow from the branch.
+      - name: Commit verified finalization
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(web): finalize unknown-group signup recovery"
+          git push origin HEAD:agent/linq-unknown-group-signup-recovery
