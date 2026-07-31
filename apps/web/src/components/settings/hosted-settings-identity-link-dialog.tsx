@@ -2,10 +2,9 @@
 
 import { usePrivy, useUser } from "@privy-io/react-auth";
 import { useRouter } from "next/navigation";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
-import { HostedPrivyProvider } from "@/src/components/hosted-onboarding/privy-provider";
 import { Button } from "@/src/components/ui/button";
 import {
   Dialog,
@@ -40,7 +39,6 @@ export function HostedSettingsIdentityLinkDialog({
   const router = useRouter();
   const { openAuthDialog } = useAuth();
   const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID?.trim();
-  const clientId = process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID?.trim() || null;
 
   const closeAndRefresh = () => {
     onOpenChange(false);
@@ -66,17 +64,15 @@ export function HostedSettingsIdentityLinkDialog({
   }
 
   return (
-    <HostedPrivyProvider appId={appId} clientId={clientId}>
-      <HostedSettingsIdentityMutationContent
-        account={account}
-        expectedPrivyUserId={expectedPrivyUserId}
-        initialMode={initialMode}
-        onClientAuthRequired={promptClientAuth}
-        onOpenChange={onOpenChange}
-        onSynced={closeAndRefresh}
-        privySessionMatchesAppSession={privySessionMatchesAppSession}
-      />
-    </HostedPrivyProvider>
+    <HostedSettingsIdentityMutationContent
+      account={account}
+      expectedPrivyUserId={expectedPrivyUserId}
+      initialMode={initialMode}
+      onClientAuthRequired={promptClientAuth}
+      onOpenChange={onOpenChange}
+      onSynced={closeAndRefresh}
+      privySessionMatchesAppSession={privySessionMatchesAppSession}
+    />
   );
 }
 
@@ -97,8 +93,11 @@ function HostedSettingsIdentityMutationContent({
   onSynced: () => void;
   privySessionMatchesAppSession: boolean;
 }) {
-  const { authenticated, ready } = usePrivy();
+  const { authenticated, logout, ready } = usePrivy();
   const { user } = useUser();
+  const [reauthError, setReauthError] = useState<string | null>(null);
+  const [reauthPending, setReauthPending] = useState(false);
+  const clientIdentityPending = !ready || (authenticated && user === null);
   const clientSessionMatchesAppSession =
     ready
     && authenticated
@@ -111,7 +110,25 @@ function HostedSettingsIdentityMutationContent({
       ? Boolean(account.email.address)
       : Boolean(account.telegram.telegramUserId);
 
-  const copy = getSettingsIdentityLinkCopy(initialMode, hasExisting, account);
+  async function handleClientAuthRequired() {
+    if (reauthPending) {
+      return;
+    }
+
+    setReauthError(null);
+    setReauthPending(true);
+
+    try {
+      if (authenticated) {
+        await logout();
+      }
+      onClientAuthRequired();
+    } catch {
+      setReauthError("Sign out did not finish. Try again.");
+    } finally {
+      setReauthPending(false);
+    }
+  }
 
   if (!clientSessionMatchesAppSession) {
     return (
@@ -120,20 +137,15 @@ function HostedSettingsIdentityMutationContent({
         initialMode={initialMode}
         onOpenChange={onOpenChange}
       >
-        {ready ? (
-          <div className="space-y-4">
-            <p className="text-sm leading-6 text-muted-foreground">
-              Your sign-in changed. Sign in again using a login method already linked
-              to this Murph account before changing a linked account.
-            </p>
-            <Button type="button" size="xl" className="w-full" onClick={onClientAuthRequired}>
-              Sign in again
-            </Button>
-          </div>
+        {clientIdentityPending ? (
+          <HostedIdentitySessionLoading />
         ) : (
-          <p aria-live="polite" className="text-sm text-muted-foreground">
-            Preparing secure account linking…
-          </p>
+          <HostedIdentitySessionMismatch
+            disabled={reauthPending}
+            errorMessage={reauthError}
+            onSignInAgain={handleClientAuthRequired}
+            pending={reauthPending}
+          />
         )}
       </HostedSettingsIdentityDialogFrame>
     );
@@ -152,22 +164,23 @@ function HostedSettingsIdentityMutationContent({
     );
   }
 
+  if (initialMode === "phone") {
+    return (
+      <HostedPhoneSettings
+        autoOpen
+        initialPhoneNumber={account.phone.number}
+        onAborted={() => onOpenChange(false)}
+        onLinked={onSynced}
+      />
+    );
+  }
+
   return (
     <HostedSettingsIdentityDialogFrame
       account={account}
       initialMode={initialMode}
       onOpenChange={onOpenChange}
     >
-      {initialMode === "phone" ? (
-        <HostedPhoneSettings
-          authenticated
-          autoOpen
-          expectedPrivyUserId={expectedPrivyUserId}
-          initialPhoneNumber={account.phone.number}
-          onLinked={onSynced}
-          privySessionMatchesAppSession={privySessionMatchesAppSession}
-        />
-      ) : null}
       {initialMode === "telegram" ? (
         <HostedTelegramCardSettings
           authenticated
@@ -193,6 +206,49 @@ function HostedSettingsIdentityMutationContent({
         />
       ) : null}
     </HostedSettingsIdentityDialogFrame>
+  );
+}
+
+export function HostedIdentitySessionLoading() {
+  return (
+    <p aria-live="polite" className="text-sm text-muted-foreground">
+      Preparing secure account linking…
+    </p>
+  );
+}
+
+export function HostedIdentitySessionMismatch({
+  disabled = false,
+  errorMessage = null,
+  onSignInAgain,
+  pending = false,
+}: {
+  disabled?: boolean;
+  errorMessage?: string | null;
+  onSignInAgain: () => Promise<void> | void;
+  pending?: boolean;
+}) {
+  return (
+    <div className="space-y-4">
+      <p className="text-sm leading-6 text-muted-foreground">
+        Your sign-in changed. Sign in again using a login method already linked
+        to this Murph account before changing a linked account.
+      </p>
+      <Button
+        type="button"
+        size="xl"
+        className="w-full"
+        disabled={disabled}
+        onClick={() => void onSignInAgain()}
+      >
+        {pending ? "Signing out…" : "Sign in again"}
+      </Button>
+      {errorMessage ? (
+        <p role="alert" className="text-sm text-destructive">
+          {errorMessage}
+        </p>
+      ) : null}
+    </div>
   );
 }
 

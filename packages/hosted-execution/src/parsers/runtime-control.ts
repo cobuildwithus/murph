@@ -128,6 +128,7 @@ import {
   type HostedRuntimeAssistantConfigurationToolResponse,
   type HostedRuntimeAssistantConfigurationUpdateStatus,
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
+  hostedRuntimeLinqProviderErrorMessageForCode,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_GRANTS_MAX,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
@@ -3103,12 +3104,64 @@ export function parseHostedRuntimeGroupToolResponse(
       return { action, result: { status } };
     }
     if (status === "unavailable") {
-      assertAllowedObjectKeys(result, new Set(["status", "unavailableReason"]), "Hosted runtime group tool set_chat_avatar unavailable response result");
+      assertAllowedObjectKeys(
+        result,
+        new Set([
+          "status",
+          "unavailableReason",
+          "providerErrorCode",
+        ]),
+        "Hosted runtime group tool set_chat_avatar unavailable response result",
+      );
+      const providerErrorCode = result.providerErrorCode === undefined
+        ? undefined
+        : requireNumber(
+            result.providerErrorCode,
+            "Hosted runtime group tool set_chat_avatar providerErrorCode",
+          );
+      if (
+        providerErrorCode !== undefined
+        && (
+          !Number.isSafeInteger(providerErrorCode)
+          || providerErrorCode < 1_000
+          || providerErrorCode > 9_999
+        )
+      ) {
+        throw new TypeError(
+          "Hosted runtime group tool set_chat_avatar providerErrorCode must be a four-digit integer.",
+        );
+      }
+      const expectedProviderErrorMessage =
+        hostedRuntimeLinqProviderErrorMessageForCode(providerErrorCode);
+      if (
+        providerErrorCode !== undefined
+        && expectedProviderErrorMessage === null
+      ) {
+        throw new TypeError(
+          "Hosted runtime group tool set_chat_avatar providerErrorCode must be allowlisted.",
+        );
+      }
+      const unavailableReason = requireString(
+        result.unavailableReason,
+        "Hosted runtime group unavailableReason",
+      );
+      if (
+        unavailableReason !== "provider_unavailable"
+        && providerErrorCode !== undefined
+      ) {
+        throw new TypeError(
+          "Hosted runtime group tool set_chat_avatar provider diagnostics require provider_unavailable.",
+        );
+      }
       return {
         action,
         result: {
           status,
-          unavailableReason: requireString(result.unavailableReason, "Hosted runtime group unavailableReason"),
+          unavailableReason,
+          ...(providerErrorCode === undefined ? {} : { providerErrorCode }),
+          ...(expectedProviderErrorMessage === null
+            ? {}
+            : { providerErrorMessage: expectedProviderErrorMessage }),
         },
       };
     }

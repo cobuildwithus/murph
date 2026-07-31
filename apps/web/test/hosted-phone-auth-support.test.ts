@@ -71,17 +71,132 @@ describe("hosted phone auth support", () => {
     mocks.requestHostedOnboardingJson.mockResolvedValue({
       phoneNumber: "+14155552671",
       phoneNumberHint: "+1 415 555 2671",
+      status: "synced",
     });
 
-    await expect(requestHostedPhoneLinkSyncWithRetry()).resolves.toEqual({
+    await expect(requestHostedPhoneLinkSyncWithRetry({
+      kind: "exact",
+      phoneNumber: "+14155552671",
+    })).resolves.toEqual({
       phoneNumber: "+14155552671",
       phoneNumberHint: "+1 415 555 2671",
+      status: "synced",
     });
 
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
       method: "POST",
+      payload: {
+        kind: "exact",
+        phoneNumber: "+14155552671",
+      },
       url: "/api/settings/phone/sync",
     });
+  });
+
+  it("waits for a changed-from transfer before returning an unchanged cancellation", async () => {
+    const { requestHostedPhoneLinkSyncWithRetry } = await import(
+      "@/src/components/hosted-onboarding/hosted-phone-auth-support"
+    );
+    mocks.requestHostedOnboardingJson.mockResolvedValue({
+      status: "unchanged",
+    });
+
+    await expect(requestHostedPhoneLinkSyncWithRetry({
+      kind: "changed-from",
+      phoneNumber: "+14155550000",
+    })).resolves.toEqual({
+      status: "unchanged",
+    });
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(3);
+    expect(mocks.waitForRetryDelay).toHaveBeenNthCalledWith(1, 250);
+    expect(mocks.waitForRetryDelay).toHaveBeenNthCalledWith(2, 1_000);
+  });
+
+  it("retries provider propagation with the identical transfer expectation", async () => {
+    const { HostedOnboardingApiError } = await import(
+      "@/src/components/hosted-onboarding/client-api"
+    );
+    const { requestHostedPhoneLinkSyncWithRetry } = await import(
+      "@/src/components/hosted-onboarding/hosted-phone-auth-support"
+    );
+    mocks.requestHostedOnboardingJson
+      .mockRejectedValueOnce(new HostedOnboardingApiError({
+        code: "PRIVY_PHONE_NOT_READY",
+        message: "Phone is still moving.",
+        retryable: true,
+      }))
+      .mockResolvedValueOnce({
+        phoneNumber: "+14155552671",
+        phoneNumberHint: "+1 415 555 2671",
+        status: "synced",
+      });
+    const expectation = {
+      kind: "changed-from",
+      phoneNumber: "+14155550000",
+    } as const;
+
+    await expect(requestHostedPhoneLinkSyncWithRetry(expectation)).resolves.toEqual({
+      phoneNumber: "+14155552671",
+      phoneNumberHint: "+1 415 555 2671",
+      status: "synced",
+    });
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(1, {
+      method: "POST",
+      payload: expectation,
+      url: "/api/settings/phone/sync",
+    });
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(2, {
+      method: "POST",
+      payload: expectation,
+      url: "/api/settings/phone/sync",
+    });
+    expect(mocks.waitForRetryDelay).toHaveBeenCalledWith(250);
+  });
+
+  it("retries a transient provider user lookup with the identical exact expectation", async () => {
+    const { HostedOnboardingApiError } = await import(
+      "@/src/components/hosted-onboarding/client-api"
+    );
+    const { requestHostedPhoneLinkSyncWithRetry } = await import(
+      "@/src/components/hosted-onboarding/hosted-phone-auth-support"
+    );
+    mocks.requestHostedOnboardingJson
+      .mockRejectedValueOnce(new HostedOnboardingApiError({
+        code: "PRIVY_USER_LOOKUP_FAILED",
+        message: "Provider lookup is temporarily unavailable.",
+        retryable: true,
+      }))
+      .mockResolvedValueOnce({
+        phoneNumber: "+14155552671",
+        phoneNumberHint: "+1 415 555 2671",
+        status: "synced",
+      });
+    const expectation = {
+      kind: "exact",
+      phoneNumber: "+14155552671",
+    } as const;
+
+    await expect(requestHostedPhoneLinkSyncWithRetry(expectation)).resolves.toEqual({
+      phoneNumber: "+14155552671",
+      phoneNumberHint: "+1 415 555 2671",
+      status: "synced",
+    });
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(1, {
+      method: "POST",
+      payload: expectation,
+      url: "/api/settings/phone/sync",
+    });
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(2, {
+      method: "POST",
+      payload: expectation,
+      url: "/api/settings/phone/sync",
+    });
+    expect(mocks.waitForRetryDelay).toHaveBeenCalledWith(250);
   });
 
   it("retries Telegram completion lag with the Telegram auth intent", async () => {

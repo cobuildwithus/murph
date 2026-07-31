@@ -19,6 +19,7 @@ vi.mock("server-only", () => ({}));
 
 vi.mock("@privy-io/node", () => ({
   APIError: class APIError extends Error {},
+  NotFoundError: class NotFoundError extends Error {},
   PrivyClient: class PrivyClient {
     constructor(input: unknown) {
       dependencies.privyClientConstructor(input);

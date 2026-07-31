@@ -4,7 +4,9 @@ import {
 } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
-import { createHostedEmailLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
+import {
+  createHostedEmailLookupKey,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
 
 import {
   ensureHostedMemberForPhoneResolutionTx,
@@ -494,6 +496,7 @@ describe("hosted-onboarding member-identity-service", () => {
       }),
     }));
   });
+
 });
 
 function makeIdentity(

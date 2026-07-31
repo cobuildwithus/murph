@@ -1660,13 +1660,15 @@ function resolveAssistantCronNotificationTurnPolicy(
   job: ResolvedAssistantCronJob,
 ): AssistantNotificationTurnPolicy | null {
   const policy = resolveAssistantCronBackgroundMaintenancePolicy(job)
-  return policy
-    ? {
-        kind: 'maintenance-exact-skip',
-        maintenanceProfile: policy.profile,
-        privateSummary: policy.privateSummary,
-      }
-    : null
+  if (policy) {
+    return {
+      kind: 'maintenance-exact-skip',
+      maintenanceProfile: policy.profile,
+      privateSummary: policy.privateSummary,
+    }
+  }
+
+  return null
 }
 
 function assistantCronDeviceActivitySkipConsumesOccurrence(input: {

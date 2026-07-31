@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+
 const mocks = vi.hoisted(() => ({
   admitHostedGroupDisclosurePermissionAppendTx: vi.fn(),
   assertHostedLinqRouteEgressAuthority: vi.fn(),
@@ -2632,7 +2634,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       request: {
         action: "set_chat_avatar",
         groupChatIconUrl:
-          `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
+          `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
         linqThread: LINQ_THREAD,
       },
     })).resolves.toEqual({
@@ -2646,7 +2648,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.updateHostedLinqChatAvatar).toHaveBeenCalledWith({
       chatId: "chat_group_1",
       groupChatIconUrl:
-        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
     });
   });
 
@@ -2767,6 +2769,73 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         action: "set_chat_avatar",
         groupChatIconUrl:
           `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toEqual({
+      action: "set_chat_avatar",
+      result: {
+        status: "unavailable",
+        unavailableReason: "provider_unavailable",
+      },
+    });
+  });
+
+  it("preserves only validated HTTP provider diagnostics for group avatar failures", async () => {
+    mocks.updateHostedLinqChatAvatar.mockRejectedValue(hostedOnboardingError({
+      code: "LINQ_SEND_FAILED",
+      details: {
+        failureStage: "http",
+        providerErrorCode: 5006,
+        traceId: "must-not-propagate",
+      },
+      httpStatus: 502,
+      message: "Linq chat avatar update failed with HTTP 400.",
+    }));
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "set_chat_avatar",
+        groupChatIconUrl:
+          `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toEqual({
+      action: "set_chat_avatar",
+      result: {
+        providerErrorCode: 5006,
+        status: "unavailable",
+        unavailableReason: "provider_unavailable",
+      },
+    });
+  });
+
+  it.each([
+    new Error("transport failed with private details"),
+    hostedOnboardingError({
+      code: "LINQ_SEND_FAILED",
+      httpStatus: 502,
+      message: "Linq chat avatar update timed out.",
+      retryable: true,
+    }),
+    hostedOnboardingError({
+      code: "LINQ_SEND_FAILED",
+      details: {
+        failureStage: "http",
+        providerErrorMessage: "Failed to download image",
+      },
+      httpStatus: 502,
+      message: "Linq chat avatar update failed with HTTP 400.",
+    }),
+  ])("keeps non-validated avatar failures generic", async (error) => {
+    mocks.updateHostedLinqChatAvatar.mockRejectedValue(error);
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "set_chat_avatar",
+        groupChatIconUrl:
+          `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
         linqThread: LINQ_THREAD,
       },
     })).resolves.toEqual({
