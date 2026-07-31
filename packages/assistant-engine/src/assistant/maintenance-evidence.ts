@@ -291,7 +291,10 @@ async function collectAssistantDurableGroupReactionEvidence(input: {
       ? renderHostedExecutionGroupReactionEventEvidence(contextualReaction)
       : isAssistantLinqAffirmativeReactionInput(event)
         && !transcriptText.some((text) => text.includes(event.inputId))
-        ? renderAssistantLinqAffirmativeReactionEvidence(event)
+        ? renderAssistantLinqAffirmativeReactionEvidence({
+            event,
+            targetTextIndex,
+          })
         : null
     const text = evidence
       ? limitAssistantConversationHistoryTextBytes(
@@ -474,15 +477,22 @@ function isAssistantLinqAffirmativeReactionInput(
     && event.sourceMetadata.affirmativeReaction === true
 }
 
-function renderAssistantLinqAffirmativeReactionEvidence(
-  event: AssistantInputEventRecord,
-): string | null {
-  const text = event.content.text?.trim()
-  if (!text || event.sourceMetadata?.kind !== 'linq') {
+function renderAssistantLinqAffirmativeReactionEvidence(input: {
+  event: AssistantInputEventRecord
+  targetTextIndex: AssistantGroupReactionTargetTextIndex
+}): string | null {
+  const text = input.event.content.text?.trim()
+  if (!text || input.event.sourceMetadata?.kind !== 'linq') {
     return null
   }
-  const actor = event.sourceMetadata.senderHandle?.trim()
-  const targetMessageId = event.sourceMetadata.replyToMessageId?.trim()
+  const actor = input.event.sourceMetadata.senderHandle?.trim()
+  const targetMessageId = input.event.sourceMetadata.replyToMessageId?.trim()
+  const targetKey = buildAssistantGroupReactionTargetKey({
+    channel: 'linq',
+    messageId: targetMessageId,
+    threadId: input.event.conversation?.threadId,
+  })
+  const targetText = targetKey ? input.targetTextIndex.get(targetKey) : null
   return [
     'Group reaction event:',
     '- channel: linq',
@@ -490,6 +500,7 @@ function renderAssistantLinqAffirmativeReactionEvidence(
     `- target message id: ${targetMessageId
       ? JSON.stringify(targetMessageId)
       : 'unavailable'}`,
+    ...(targetText ? [`- target text: ${JSON.stringify(targetText)}`] : []),
     `- reaction delta: added ${JSON.stringify(text)}`,
   ].join('\n')
 }
