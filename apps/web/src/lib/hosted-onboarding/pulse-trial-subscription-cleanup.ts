@@ -270,6 +270,7 @@ export async function cancelHostedPulseTrialLoserSubscriptionsForMember(input: {
 }
 
 export async function retrieveHostedPulseTrialCleanupTarget(input: {
+  expandCustomer?: boolean;
   expectedCustomerId?: string;
   memberId: string;
   priceId: string;
@@ -278,13 +279,21 @@ export async function retrieveHostedPulseTrialCleanupTarget(input: {
   subscriptionId: string;
 }): Promise<Stripe.Subscription | null> {
   try {
+    const retrieveParams = input.expandCustomer
+      ? { expand: ["customer"] }
+      : null;
     const subscription = input.requestOptions
       ? await input.stripe.subscriptions.retrieve(
           input.subscriptionId,
-          {},
+          retrieveParams ?? {},
           input.requestOptions,
         )
-      : await input.stripe.subscriptions.retrieve(input.subscriptionId);
+      : retrieveParams
+        ? await input.stripe.subscriptions.retrieve(
+            input.subscriptionId,
+            retrieveParams,
+          )
+        : await input.stripe.subscriptions.retrieve(input.subscriptionId);
     const customerId = typeof subscription.customer === "string"
       ? subscription.customer
       : subscription.customer?.id;

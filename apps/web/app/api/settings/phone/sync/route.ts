@@ -29,9 +29,7 @@ import {
 import { normalizePhoneNumber } from "@/src/lib/hosted-onboarding/phone";
 import { readHostedPrivyUserById } from "@/src/lib/hosted-onboarding/privy";
 import { buildHostedPrivySessionState } from "@/src/lib/hosted-onboarding/privy-user";
-import { retrieveHostedPulseTrialCleanupTarget } from "@/src/lib/hosted-onboarding/pulse-trial-subscription-cleanup";
 import { requireFreshPrivyMemberAuthForHostedAppSession } from "@/src/lib/hosted-onboarding/request-auth";
-import { requireHostedStripeBillingPlanConfig } from "@/src/lib/hosted-onboarding/runtime";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
 
 export const POST = withJsonError(async (request: Request) => {
@@ -109,26 +107,21 @@ export const POST = withJsonError(async (request: Request) => {
         member: auth.member,
         now,
         prisma: tx,
+        targetPhoneNumberBeforeTransfer:
+          currentIdentity?.phoneNumber ?? null,
         transfer: phoneTransfer,
       }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
     traceHostedPhoneSync("source-classified", {
       sourceKind: retirement.autoTrialBilling ? "auto-trial" : "not-started",
     });
-    if (retirement.autoTrialBilling) {
-      await assertHostedPhoneTransferAutoTrialRetirementAuthority({
-        ...retirement.autoTrialBilling,
-        sourceMemberId: retirement.sourceMemberId,
-      });
-      traceHostedPhoneSync("billing-authority-confirmed", {
-        sourceKind: "auto-trial",
-      });
-    }
     const deletion =
       await deleteHostedPrivyPhoneTransferSourceAccountData({
         prisma,
         request,
         retirement,
         targetMember: auth.member,
+        targetPhoneNumberBeforeTransfer:
+          currentIdentity?.phoneNumber ?? null,
         targetPrivyUserId: appSession.privyUserId,
         transfer: phoneTransfer,
       });
@@ -231,36 +224,6 @@ function isHostedPhoneProjectionAligned(input: {
       input.currentIdentity.phoneLookupKey,
     )
   );
-}
-
-async function assertHostedPhoneTransferAutoTrialRetirementAuthority(input: {
-  sourceMemberId: string;
-  stripeCustomerId: string;
-  stripeSubscriptionId: string;
-}): Promise<void> {
-  const { priceId, stripe } = requireHostedStripeBillingPlanConfig({
-    billingPlanCode: "launch_monthly",
-  });
-  const subscription = await retrieveHostedPulseTrialCleanupTarget({
-    expectedCustomerId: input.stripeCustomerId,
-    memberId: input.sourceMemberId,
-    priceId,
-    stripe,
-    subscriptionId: input.stripeSubscriptionId,
-  });
-  if (
-    subscription
-    && subscription.status !== "trialing"
-    && subscription.status !== "canceled"
-    && subscription.status !== "incomplete_expired"
-  ) {
-    throw hostedOnboardingError({
-      code: "PRIVY_PHONE_TRANSFER_REQUIRES_SUPPORT",
-      httpStatus: 409,
-      message:
-        "That phone belongs to another Murph account with saved activity. Contact support to reconcile it safely.",
-    });
-  }
 }
 
 type PhoneSyncExpectation =

@@ -278,6 +278,31 @@ describe("Privy phone-transfer source retirement", () => {
 
     await expect(assertFence(fixture)).resolves.toBeUndefined();
   });
+
+  it("does not suspend the source after the target phone projection changes", async () => {
+    const fixture = makeFixture({
+      autoTrial: true,
+      targetPhoneNumber: "+15557654321",
+    });
+
+    await expect(prepare(fixture)).rejects.toMatchObject({
+      code: "PRIVY_PHONE_NOT_READY",
+    });
+    expect(fixture.prisma.hostedMember.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects the final fence after the target phone projection changes", async () => {
+    const fixture = makeFixture({
+      autoTrial: true,
+      targetPhoneNumber: "+15557654321",
+    });
+    fixture.sourceMember.billingStatus = HostedBillingStatus.canceled;
+    fixture.sourceMember.suspendedAt = NOW;
+
+    await expect(assertFence(fixture)).rejects.toMatchObject({
+      code: "PRIVY_PHONE_NOT_READY",
+    });
+  });
 });
 
 type Fixture = ReturnType<typeof makeFixture>;
@@ -311,6 +336,7 @@ function prepare(fixture: Fixture) {
     member: fixture.targetMember,
     now: NOW,
     prisma: fixture.prisma as never,
+    targetPhoneNumberBeforeTransfer: null,
     transfer: {
       phoneNumber: PHONE_NUMBER,
       sourceMemberId: SOURCE_MEMBER_ID,
@@ -344,6 +370,7 @@ function assertFence(fixture: Fixture) {
     },
     member: fixture.targetMember,
     prisma: fixture.prisma as never,
+    targetPhoneNumberBeforeTransfer: null,
     transfer: {
       phoneNumber: PHONE_NUMBER,
       sourceMemberId: SOURCE_MEMBER_ID,
@@ -352,7 +379,10 @@ function assertFence(fixture: Fixture) {
   });
 }
 
-function makeFixture(input: { autoTrial?: boolean } = {}) {
+function makeFixture(input: {
+  autoTrial?: boolean;
+  targetPhoneNumber?: string | null;
+} = {}) {
   const autoTrial = input.autoTrial ?? false;
   const targetMember = makeMember({
     billingStatus: HostedBillingStatus.active,
@@ -367,6 +397,7 @@ function makeFixture(input: { autoTrial?: boolean } = {}) {
   const targetIdentity = {
     ...emptyIdentity(),
     memberId: TARGET_MEMBER_ID,
+    phoneNumber: input.targetPhoneNumber ?? null,
     privyUserId: TARGET_PRIVY_USER_ID,
   };
   const sourceIdentity = {

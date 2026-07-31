@@ -105,6 +105,7 @@ export async function prepareHostedPrivyPhoneTransferSourceRetirementTx(input: {
   member: HostedMemberCoreState;
   now: Date;
   prisma: Prisma.TransactionClient;
+  targetPhoneNumberBeforeTransfer: string | null;
   transfer: HostedPrivyPhoneTransferProof;
 }): Promise<HostedPrivyPhoneTransferSourceRetirementProof> {
   const phoneNumber = input.identity.phone?.number;
@@ -165,6 +166,7 @@ export async function prepareHostedPrivyPhoneTransferSourceRetirementTx(input: {
   assertHostedMemberNotSuspended(currentMember);
   if (
     currentIdentity.privyUserId !== input.identity.userId
+    || currentIdentity.phoneNumber !== input.targetPhoneNumberBeforeTransfer
     || sourceIdentity.privyUserId !== input.transfer.sourcePrivyUserId
     || sourceIdentity.phoneNumber !== phoneNumber
   ) {
@@ -207,6 +209,7 @@ export async function assertHostedPrivyPhoneTransferSourceRetirementFenceTx(
     identity: HostedPrivyIdentity;
     member: HostedMemberCoreState;
     prisma: Prisma.TransactionClient;
+    targetPhoneNumberBeforeTransfer: string | null;
     transfer: HostedPrivyPhoneTransferProof;
   },
 ): Promise<void> {
@@ -250,6 +253,7 @@ export async function assertHostedPrivyPhoneTransferSourceRetirementFenceTx(
   if (
     !sourceMember.suspendedAt
     || currentIdentity.privyUserId !== input.identity.userId
+    || currentIdentity.phoneNumber !== input.targetPhoneNumberBeforeTransfer
     || sourceIdentity.privyUserId !== input.transfer.sourcePrivyUserId
     || sourceIdentity.phoneNumber !== phoneNumber
   ) {
