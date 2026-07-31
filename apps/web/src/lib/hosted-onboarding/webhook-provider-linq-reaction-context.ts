@@ -211,10 +211,12 @@ export async function appendHostedLinqGroupReactionMailboxTx(input: {
 }
 
 export async function signalHostedLinqGroupReactionMailbox(input: {
+  abortSignal?: AbortSignal;
   append: HostedLinqGroupReactionMailboxAppend;
   prisma: PrismaClient;
 }): Promise<void> {
   await signalHostedMailboxAppendRuntime({
+    ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
     expectedUserId: input.append.containerMemberId,
     knownCheckpoint: {
       lane: input.append.item.lane,
@@ -275,6 +277,7 @@ export async function stageHostedLinqGroupReactionContext(input: {
 
   input.signal?.throwIfAborted();
   await signalHostedLinqGroupReactionMailbox({
+    ...(input.signal ? { abortSignal: input.signal } : {}),
     append,
     prisma: input.prisma,
   });
