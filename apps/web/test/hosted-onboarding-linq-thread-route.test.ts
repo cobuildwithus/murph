@@ -169,6 +169,7 @@ vi.mock("../src/lib/hosted-onboarding/hosted-member-routing-store", async (impor
   return {
     ...actual,
     demoteHostedMemberLinqGroupChatBindingsTx: vi.fn(),
+    lookupHostedMemberRoutingByPendingLinqParticipantContact: vi.fn(),
     readHostedMemberRoutingState: vi.fn(),
   };
 });
@@ -253,6 +254,12 @@ beforeEach(() => {
     mailboxConsumedAt: null,
   });
   vi.mocked(memberRoutingStore.readHostedMemberRoutingState).mockReset();
+  vi.mocked(
+    memberRoutingStore.lookupHostedMemberRoutingByPendingLinqParticipantContact,
+  ).mockReset();
+  vi.mocked(
+    memberRoutingStore.lookupHostedMemberRoutingByPendingLinqParticipantContact,
+  ).mockResolvedValue(null);
   vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue({
     handles: [],
     isGroup: null,
@@ -4539,7 +4546,7 @@ describe("Linq group chat auto-provision", () => {
     mockAllowedThreadUsage();
   }
 
-  it("logs a privacy-safe reason when a group sender email has no verified authorization", async () => {
+  it("offers setup without logging an unknown group sender email", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const prisma = createStatefulThreadRoutePrisma();
     const senderEmail = "incident-sender@example.com";
@@ -4547,6 +4554,7 @@ describe("Linq group chat auto-provision", () => {
     const chatId = "chat_private_incident_123";
     const messageId = "message_private_incident_123";
     const messageText = "Private incident message with secret-token-value";
+    prisma.seedActiveManagedLinqLine(recipientPhone);
 
     try {
       const plan = await planHostedOnboardingLinqWebhook({
@@ -4561,10 +4569,15 @@ describe("Linq group chat auto-provision", () => {
       });
 
       expect(plan.response).toMatchObject({
-        ignored: true,
+        joinUrl: expect.stringContaining("/groups/start"),
         ok: true,
-        reason: "group-chat",
+        reason: "sent-group-setup",
       });
+      expect(plan.desiredSideEffects.map(({ payload }) => payload.template))
+        .toEqual([
+          "group_setup",
+          "group_email_recovery",
+        ]);
       expect(prisma.hostedMemberEmailAuthorization.findMany).toHaveBeenCalledTimes(1);
       expect(
         memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber,
@@ -4574,15 +4587,15 @@ describe("Linq group chat auto-provision", () => {
         ([message]) => message === "Hosted Linq webhook planner decision.",
       )?.[1];
       expect(plannerDetails).toMatchObject({
+        existingMemberActive: false,
         existingMemberMatch: "none",
-        ignored: true,
         linqChatPresent: true,
         linqContactKind: "email",
         linqRecipientPhonePresent: true,
         ok: true,
         reason: "sender-identity-unresolved",
-        responseReason: "group-chat",
-        routeStage: "new-group-admission-ignored",
+        responseReason: "sent-group-setup",
+        routeStage: "new-group-setup-planned",
       });
 
       const serializedDetails = JSON.stringify(plannerDetails);
@@ -4599,6 +4612,62 @@ describe("Linq group chat auto-provision", () => {
     } finally {
       info.mockRestore();
     }
+  });
+
+  it("offers one group setup link for an unknown phone sender", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000");
+    mockSenderLookup(null);
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toMatchObject({
+      ok: true,
+      reason: "sent-group-setup",
+    });
+    expect(plan.desiredSideEffects.map(({ payload }) => payload.template))
+      .toEqual(["group_setup"]);
+    expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
+  });
+
+  it("provisions normally after private email recovery links the sender", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    vi.mocked(
+      memberRoutingStore.lookupHostedMemberRoutingByPendingLinqParticipantContact,
+    ).mockResolvedValue({
+      core: senderCore,
+      matchedBy: "pendingLinqParticipantContactLookupKey",
+      routing: {
+        memberId: senderCore.id,
+      },
+    } as never);
+    mockSuccessfulGroupProvision({ prisma, senderCore });
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({
+        sender: "incident-sender@example.com",
+      }),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "wake-appended-thread-route",
+    });
+    expect(prisma.hostedThreadContainer.create).toHaveBeenCalledTimes(1);
+    expect(
+      memberRoutingStore.lookupHostedMemberRoutingByPendingLinqParticipantContact,
+    ).toHaveBeenCalledWith({
+      contact: expect.objectContaining({
+        kind: "email",
+        value: "incident-sender@example.com",
+      }),
+      prisma,
+    });
   });
 
   it.each([

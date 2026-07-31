@@ -86,6 +86,7 @@ import {
   buildFallbackSignupLinkResponse,
   buildFamilyInviteAcceptedResponse,
   buildGroupLineRecoveryResponse,
+  buildGroupSetupRequiredResponse,
   buildIgnoredLinqWebhookPlan,
   buildQuotaReplyResponse,
   buildSignupLinkResponse,
@@ -2513,21 +2514,27 @@ async function planHostedLinqGroupChatWebhook(input: {
         address: participantContact.value,
         prisma: input.prisma,
       });
-  const sender = senderLookup?.core ?? null;
-  if (!sender) {
-    return ignored("sender-identity-unresolved");
-  }
-  const senderIdentityMatch: HostedLinqExistingMemberMatch =
-    participantContact.kind === "phone" ? "phone-identity" : "verified-email";
-  if (
-    isHostedMemberSuspended(sender.suspendedAt)
-    || !(await readHostedRuntimeAiAccessDecision({
-      memberId: sender.id,
-      prisma: input.prisma,
-    })).allowed
-  ) {
-    return ignored("sender-inactive", senderIdentityMatch);
-  }
+  const pendingSenderLookup = senderLookup
+    ? null
+    : await lookupHostedMemberRoutingByPendingLinqParticipantContact({
+        contact: participantContact,
+        prisma: input.prisma,
+      });
+  const sender = senderLookup?.core ?? pendingSenderLookup?.core ?? null;
+  const senderIdentityMatch: HostedLinqExistingMemberMatch = senderLookup
+    ? participantContact.kind === "phone"
+      ? "phone-identity"
+      : "verified-email"
+    : pendingSenderLookup
+      ? "pending-contact"
+      : "none";
+  const senderAccessAllowed = sender
+    ? !isHostedMemberSuspended(sender.suspendedAt)
+      && (await readHostedRuntimeAiAccessDecision({
+        memberId: sender.id,
+        prisma: input.prisma,
+      })).allowed
+    : false;
 
   const lineState = await readHostedLinqIncomingLineState({
     phoneNumberLookupKeys: input.threadRouteAccountLookupKeys,
@@ -2560,6 +2567,40 @@ async function planHostedLinqGroupChatWebhook(input: {
       "recipient-line-degraded-unavailable",
       senderIdentityMatch,
       "group-chat-line-unavailable",
+    );
+  }
+
+  if (!sender || !senderAccessAllowed) {
+    if (lineState.kind !== "assignable") {
+      return ignored(
+        "recipient-line-not-assigned",
+        senderIdentityMatch,
+        "group-chat-line-unavailable",
+      );
+    }
+
+    const reason = sender
+      ? "sender-inactive"
+      : "sender-identity-unresolved";
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildGroupSetupRequiredResponse({
+        chatId: summary.chatId,
+        messageId: summary.messageId,
+        occurredAt,
+        ...(sender === null
+          && participantContact.kind === "email"
+          && isHostedLinqIMessageService(messageEvent.data.service)
+            ? { participantEmail: participantContact.value }
+            : {}),
+        recipientPhone: incomingRecipientPhone,
+        sourceEventId: input.event.event_id,
+      }),
+      buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
+        existingMemberActive: false,
+        existingMemberMatch: senderIdentityMatch,
+        reason,
+        routeStage: "new-group-setup-planned",
+      }),
     );
   }
   if (
