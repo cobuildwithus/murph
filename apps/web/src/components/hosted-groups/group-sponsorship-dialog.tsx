@@ -31,6 +31,7 @@ import {
 import { Input } from "@/src/components/ui/input";
 import { RadioGroup } from "@/src/components/ui/radio-group";
 import { Textarea } from "@/src/components/ui/textarea";
+import { cn } from "@/src/lib/utils";
 
 type GroupSponsorshipDialogProps = Omit<
   HostedUsageTopUpDialogProps,
@@ -135,14 +136,21 @@ function GroupSponsorshipDialog({
           ? <FrozenSponsorshipDetails sponsorship={frozenSponsorship ?? null} />
           : null
       }
-      renderSelectionDetails={({ disabled, selectedOffer }) => {
+      renderSelectionDetails={({
+        disabled,
+        mobileStickyActionVisible,
+        selectedOffer,
+      }) => {
         const runningBitDurationLabel = readRunningBitDurationLabel({
           mode,
           offerCode: selectedOffer?.offerCode ?? null,
           offers,
         });
         return (
-          <div className="space-y-4 max-md:flex max-md:min-h-0 max-md:flex-1 max-md:flex-col max-md:space-y-0">
+          <div
+            className="space-y-4 max-md:flex max-md:flex-1 max-md:flex-col max-md:space-y-0"
+            data-slot="group-sponsorship-selection-details"
+          >
             {mode === "monthly" ? (
               <FieldSet
                 className="space-y-3 max-md:flex max-md:flex-1 max-md:flex-col max-md:space-y-0"
@@ -204,7 +212,12 @@ function GroupSponsorshipDialog({
                   Add a note
                   <ChevronDownIcon data-icon="inline-end" aria-hidden="true" />
                 </CollapsibleTrigger>
-                <CollapsibleContent className="h-auto max-md:pb-24">
+                <CollapsibleContent
+                  className={cn(
+                    "h-auto",
+                    mobileStickyActionVisible && "max-md:pb-24",
+                  )}
+                >
                   <FieldGroup className="pt-4">
                     <Field data-disabled={disabled || undefined}>
                       <FieldLabel htmlFor="group-sponsor-alias">

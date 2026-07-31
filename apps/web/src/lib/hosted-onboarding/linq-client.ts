@@ -7,6 +7,7 @@ import {
 import {
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
+  hostedRuntimeLinqProviderErrorMessageForCode,
   isHostedRuntimePrivateImageDeliveryUrl,
 } from "@murphai/hosted-execution/runtime-control";
 import type { TextPart } from "@linqapp/sdk/resources";
@@ -35,6 +36,7 @@ const HOSTED_LINQ_MULTI_REQUEST_TIMEOUT_MS =
   Math.floor(LINQ_API_DEFAULT_TIMEOUT_MS / 2);
 const HOSTED_LINQ_RICH_LINK_ATTEMPT_TIMEOUT_MS =
   Math.floor(HOSTED_LINQ_MULTI_REQUEST_TIMEOUT_MS / 2);
+const HOSTED_LINQ_ERROR_RESPONSE_MAX_BYTES = 16 * 1024;
 
 export type HostedLinqSendResult = {
   chatId: string | null;
@@ -427,10 +429,10 @@ export async function updateHostedLinqChatAvatar(input: {
     group_chat_icon: normalizeHostedLinqGroupChatIconUrl(input.groupChatIconUrl),
   };
 
-  const response = await fetchHostedLinqApiOrThrow({
+  const response = await fetchHostedLinqJsonApiOrThrow({
     body: JSON.stringify(body),
+    maxResponseBytes: HOSTED_LINQ_ERROR_RESPONSE_MAX_BYTES,
     method: "PUT",
-    operation: "chat avatar update",
     path: `chats/${encodeURIComponent(normalizeRequiredString(input.chatId, "chat id"))}`,
     signal: input.signal,
     timeoutMessage: "Linq chat avatar update timed out.",
@@ -439,6 +441,9 @@ export async function updateHostedLinqChatAvatar(input: {
   if (!response.ok) {
     throw buildHostedLinqRequestFailedError({
       operation: "chat avatar update",
+      providerErrorDiagnostics: readHostedLinqProviderErrorDiagnostics(
+        response.payload,
+      ),
       retryable: isRetryableHostedLinqStatus(response.status),
       status: response.status,
     });
@@ -880,6 +885,7 @@ async function fetchHostedLinqApiOrThrow(input: {
 
 async function fetchHostedLinqJsonApiOrThrow(input: {
   body?: string;
+  maxResponseBytes?: number;
   method: string;
   path: string;
   signal?: AbortSignal;
@@ -894,6 +900,9 @@ async function fetchHostedLinqJsonApiOrThrow(input: {
       apiToken,
       body: input.body,
       method: input.method,
+      ...(input.maxResponseBytes === undefined
+        ? {}
+        : { maxResponseBytes: input.maxResponseBytes }),
       path: input.path,
       signal: input.signal,
       timeoutMs: input.timeoutMs,
@@ -914,6 +923,9 @@ async function fetchHostedLinqJsonApiOrThrow(input: {
 
 function buildHostedLinqRequestFailedError(input: {
   operation: string;
+  providerErrorDiagnostics?: {
+    providerErrorCode?: number;
+  } | null;
   retryable: boolean;
   status: number;
 }) {
@@ -922,11 +934,50 @@ function buildHostedLinqRequestFailedError(input: {
     details: {
       failureStage: "http",
       status: input.status,
+      ...input.providerErrorDiagnostics,
     },
     message: `Linq ${input.operation} failed with HTTP ${input.status}.`,
     httpStatus: 502,
     retryable: input.retryable,
   });
+}
+
+function readHostedLinqProviderErrorDiagnostics(payload: unknown): {
+  providerErrorCode?: number;
+} | null {
+  if (
+    payload === null
+    || typeof payload !== "object"
+    || Array.isArray(payload)
+    || Reflect.get(payload, "success") !== false
+  ) {
+    return null;
+  }
+  const providerError = Reflect.get(payload, "error");
+  if (
+    providerError === null
+    || typeof providerError !== "object"
+    || Array.isArray(providerError)
+  ) {
+    return null;
+  }
+
+  const code = Reflect.get(providerError, "code");
+  const providerErrorCode = typeof code === "number"
+    && Number.isSafeInteger(code)
+    && code >= 1_000
+    && code <= 9_999
+      ? code
+      : null;
+  if (providerErrorCode === null) {
+    return null;
+  }
+  if (
+    hostedRuntimeLinqProviderErrorMessageForCode(providerErrorCode) === null
+  ) {
+    return null;
+  }
+  return { providerErrorCode };
 }
 
 async function readHostedLinqOptionalJsonResponse<T>(response: Response): Promise<T | null> {

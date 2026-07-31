@@ -1028,11 +1028,20 @@ describe("parseHostedRuntimeGroupTool", () => {
     expect(parseHostedRuntimeGroupToolRequest({
       action: "set_chat_avatar",
       groupChatIconUrl:
-        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
     })).toEqual({
       action: "set_chat_avatar",
       groupChatIconUrl:
-        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
+    });
+    const extensionlessIconUrl =
+      `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`;
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "set_chat_avatar",
+      groupChatIconUrl: extensionlessIconUrl,
+    })).toEqual({
+      action: "set_chat_avatar",
+      groupChatIconUrl: extensionlessIconUrl,
     });
     const previewOrigin = "https://hosted-runner-staging.example.test";
     const previewIconUrl =
@@ -1623,16 +1632,74 @@ describe("parseHostedRuntimeGroupTool", () => {
     expect(parseHostedRuntimeGroupToolResponse({
       action: "set_chat_avatar",
       result: {
+        providerErrorCode: 5006,
         status: "unavailable",
         unavailableReason: "provider_unavailable",
       },
     })).toEqual({
       action: "set_chat_avatar",
       result: {
+        providerErrorCode: 5006,
+        providerErrorMessage: "The avatar image type was not accepted.",
         status: "unavailable",
         unavailableReason: "provider_unavailable",
       },
     });
+
+    for (const invalidResult of [
+      {
+        providerErrorCode: 506,
+        status: "unavailable",
+        unavailableReason: "provider_unavailable",
+      },
+      {
+        providerErrorCode: "5006",
+        status: "unavailable",
+        unavailableReason: "provider_unavailable",
+      },
+      {
+        providerErrorMessage: "Capability https://example.test/private-media/v1/private",
+        status: "unavailable",
+        unavailableReason: "provider_unavailable",
+      },
+      {
+        providerErrorMessage: "x".repeat(241),
+        status: "unavailable",
+        unavailableReason: "provider_unavailable",
+      },
+      {
+        providerErrorMessage: "Failed to download image",
+        status: "unavailable",
+        unavailableReason: "provider_unavailable",
+      },
+      {
+        providerErrorCode: 5006,
+        providerErrorMessage: "Failed to download image",
+        status: "unavailable",
+        unavailableReason: "provider_unavailable",
+      },
+      {
+        providerErrorCode: 5008,
+        providerErrorMessage: "Unknown provider error",
+        status: "unavailable",
+        unavailableReason: "provider_unavailable",
+      },
+      {
+        rawBody: "private",
+        status: "unavailable",
+        unavailableReason: "provider_unavailable",
+      },
+      {
+        providerErrorCode: 5006,
+        status: "unavailable",
+        unavailableReason: "owner_unavailable",
+      },
+    ]) {
+      expect(() => parseHostedRuntimeGroupToolResponse({
+        action: "set_chat_avatar",
+        result: invalidResult,
+      })).toThrow();
+    }
 
     expect(() =>
       parseHostedRuntimeGroupToolResponse({
@@ -2828,7 +2895,31 @@ describe("parseHostedRuntimeGroupTool", () => {
         status: "ok",
         usage: {
           fundingNeeded: false,
-          fundingUrl: null,
+          fundingUrl:
+            "https://www.withmurph.ai/groups/fund/group_join_code_1234",
+          sponsorshipStatus: "not_sponsored",
+        },
+      },
+    });
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "read_usage",
+      result: {
+        status: "ok",
+        usage: {
+          fundingNeeded: false,
+          fundingUrl:
+            "https://www.withmurph.ai/groups/fund/group_join_code_1234",
+          sponsorshipStatus: "not_sponsored",
+        },
+      },
+    })).toEqual({
+      action: "read_usage",
+      result: {
+        status: "ok",
+        usage: {
+          fundingNeeded: false,
+          fundingUrl:
+            "https://www.withmurph.ai/groups/fund/group_join_code_1234",
           sponsorshipStatus: "not_sponsored",
         },
       },

@@ -65,6 +65,7 @@ export interface AssistantSystemPromptInput {
   murphProductBaseUrl?: string | null;
   onboardingGuidance: boolean;
   modelBehaviorProfile: AssistantModelBehaviorProfile;
+  ordinaryInboundTurn?: boolean;
   scheduledOccurrenceAt?: string | null;
   turnTrigger?: AssistantTurnTrigger | null;
 }
@@ -509,7 +510,7 @@ function buildAssistantProductUpdatesGuidanceText(): string {
   return [
     "Murph product updates:",
     `- When the user asks what is new, what shipped recently, or whether Murph can already do something, read the canonical public JSON feeds over the network before answering: shipped updates at ${MURPH_PRODUCT_ORIGIN}/api/changelog?days=14 (\`days\` up to 155, or paired \`from\`/\`to\` dates) and current capabilities at ${MURPH_PRODUCT_ORIGIN}/api/feature-catalog. Never claim there is no way to check Murph's own updates.`,
-    `- Those feeds are the only source of shipped-product truth: do not answer from memory, infer launches or timing elsewhere, or promise unreleased work. Summarize only the few items that fit this user, using each item's own title and link; ${MURPH_PRODUCT_ORIGIN}/changelog is the full page.`,
+    `- Those feeds are the only source of shipped-product truth: do not answer from memory, infer launches or timing elsewhere, or promise unreleased work. Summarize only the few items that fit this user, using each item's own title. Keep product-update summaries link-free unless the user explicitly asks for a link; ${MURPH_PRODUCT_ORIGIN}/changelog is the full page when they do.`,
     "- If a feed is unavailable, invalid, or empty for the window, say that plainly instead of guessing.",
   ].join("\n");
 }
@@ -847,6 +848,11 @@ function buildDynamicTurnContextPrompt(input: AssistantSystemPromptInput): strin
   });
   return joinPromptSections(
     buildAssistantCurrentDateLineText(input.currentLocalDate),
+    input.hostedRuntime === true
+      && audienceVerified
+      && input.ordinaryInboundTurn === true
+      ? buildAssistantLateChildResultGuidanceText()
+      : null,
     ...(audienceVerified
       ? normalizeAssistantDynamicContextPrompts(input.assistantDynamicContextPrompts)
       : []),
@@ -1245,6 +1251,14 @@ function buildAssistantNonBlockingDelegationText(): string {
 - Keep internal machinery out of visible replies: no subagent, child-worker, or spawn jargon, no record ids, and no save/verification bookkeeping such as "user-reported" or "unconfirmed". If the user asks what happened, explain it in plain words.`;
 }
 
+function buildAssistantLateChildResultGuidanceText(): string {
+  return `Late child results for ordinary inbound turns:
+- On every later ordinary inbound turn, revisit each child you spawned that was still generating when you sent the spawning reply, unless it has already reached a stopping condition below.
+- Use a newly completed result at most once and only when it is still relevant. Stop revisiting that child after using its result, or after it fails, is cancelled, or loses relevance.
+- If it is still generating or no completion is present in the native parent-thread context, do not call \`wait_agent\`, wait, or block the reply. Handle the current request and check again on the next ordinary inbound turn.
+- Never perform this recheck during a scheduled automation, maintenance, system-notification, or output-only turn.`;
+}
+
 function buildAssistantMessageReactionGuidanceText(
   conversationScope: AssistantConversationScope,
 ): string {
@@ -1409,7 +1423,7 @@ function buildAssistantToolTruthfulnessText(): string {
 }
 
 function buildAssistantGroupToolTruthfulnessText(): string {
-  return "Never claim you searched, read, wrote, logged, updated, or inspected something unless a real group-authorized command or runtime action happened. Never invent or guess join, share, enrollment, or authorization URLs. Do not send personal settings, wearable-connect, OAuth, billing, account, or browser-handoff links from this room. Separately, the canonical public Murph iOS App Store listing named in this prompt may be shared when the app-link rule above applies; it is public download information, not a personal account or wearable-connect link. Two narrow group-owned exceptions are allowed: a clearly labeled per-person enrollment link explicitly provided by its owning workflow, and a same-turn first-party group funding URL returned by `murph.group action=\"read_usage\"` only after someone asks for or accepts an explanation of the group's usage options. Describe a per-person enrollment link as changing only that participant's account, never the room settings. Never describe the group funding link as a personal billing or account-management page.";
+  return "Never claim you searched, read, wrote, logged, updated, or inspected something unless a real group-authorized command or runtime action happened. Never invent or guess join, share, enrollment, or authorization URLs. Do not send personal settings, wearable-connect, OAuth, billing, account, or browser-handoff links from this room. Separately, the canonical public Murph iOS App Store listing named in this prompt may be shared when the app-link rule above applies; it is public download information, not a personal account or wearable-connect link. Two narrow group-owned exceptions are allowed: a clearly labeled per-person enrollment link explicitly provided by its owning workflow, and a same-turn first-party group funding URL returned by `murph.group action=\"read_usage\"` after someone directly asks to fund, sponsor, contribute, pay to add usage, or receive its funding link, or after they ask generically how to get or add more usage, keep the room going, or accept an explanation of the group's usage options. Describe a per-person enrollment link as changing only that participant's account, never the room settings. Never describe the group funding link as a personal billing or account-management page.";
 }
 
 function buildAssistantMaintenanceExecutionGuidanceText(
