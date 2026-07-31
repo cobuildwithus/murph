@@ -353,6 +353,9 @@ function buildStableRouteCapabilityPrompt(
     input.hostedRuntime === true
       ? buildAssistantLowUsageGuidanceText(conversationScope)
       : null,
+    input.hostedRuntime === true
+      ? buildAssistantLateChildResultGuidanceText()
+      : null,
     conversationScope === "direct"
       ? buildAssistantNonBlockingDelegationText()
       : null,
@@ -1240,6 +1243,13 @@ function buildAssistantNonBlockingDelegationText(): string {
 - Keep safety judgment, user messages, approvals, voice, dynamic/server tools, browser, phone, external actions, and reply-critical work in the parent. If the answer depends on the result, use progress updates and finish it there. Children may outlive the reply.
 - A spawn proves work started, not that writes or enrichment finished. In the spawning reply, one short personable line may truthfully say the team is sorting or saving what the user shared; never promise completion. Claim saved or enriched details only after canonical readback.
 - Keep internal machinery out of visible replies: no subagent, child-worker, or spawn jargon, no record ids, and no save/verification bookkeeping such as "user-reported" or "unconfirmed". If the user asks what happened, explain it in plain words.`;
+}
+
+function buildAssistantLateChildResultGuidanceText(): string {
+  return `Late child results:
+- If a child you spawned is still generating when you reply, check whether it has completed on every later turn.
+- Incorporate its result when it has completed and is still relevant.
+- If it is still generating, do not wait or block the reply; check again on the next turn.`;
 }
 
 function buildAssistantMessageReactionGuidanceText(

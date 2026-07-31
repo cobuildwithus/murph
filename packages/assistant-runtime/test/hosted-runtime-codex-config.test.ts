@@ -71,6 +71,9 @@ const HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL =
   "HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL";
 const EXPECTED_MULTI_AGENT_USAGE_HINT = [
   "Proactively spawn a hosted child for bounded background parsing or import work and optional enrichment or research whose result is not needed in the current reply, and reply without waiting.",
+  "If a child you spawned is still generating when you reply, check whether it has completed on every later turn.",
+  "If it has completed, incorporate its result when it is still relevant.",
+  "If it has not completed, do not wait or block the reply; check again on the next turn.",
   "Follow the active route or skill contract for child design and completion proof.",
 ].join(" ");
 const EXPECTED_MULTI_AGENT_MODE_HINT =

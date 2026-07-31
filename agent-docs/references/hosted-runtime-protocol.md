@@ -156,6 +156,12 @@ may assign one independent canonical record family per child, with every write
 idempotently attributable to that source. A terminal lifecycle receipt remains
 advisory; canonical readback is completion proof. If the member needs the result
 in the current reply, the root keeps the work and uses normal progress updates.
+If the root replies while a child is still generating, every later root turn
+checks again for completion. It incorporates a completed result when that
+result is still relevant; otherwise it replies without waiting and checks the
+unfinished child again on the next ordinary turn. This recheck uses Codex's
+native parent-thread completion context and creates no queue, wake, or
+automatic follow-up.
 
 Hosted configuration admits one root plus at most three concurrent children
 per session. Independent roots may retain their own children inside the same

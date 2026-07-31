@@ -407,17 +407,29 @@ describe('assistant execution prompt contract', () => {
   })
 
   it('allows a loaded skill to split accepted durable input across bounded children', () => {
-    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      hostedRuntime: true,
+    }))
     const groupPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       conversationScope: 'group',
+      hostedRuntime: true,
+    }))
+    const nonHostedGroupPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      conversationScope: 'group',
+      hostedRuntime: false,
     }))
     const unverifiedPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       conversationScope: 'unverified-external',
+      hostedRuntime: true,
     }))
 
     expect(prompt).toContain('Non-blocking delegation:')
     expect(groupPrompt).not.toContain('Non-blocking delegation:')
     expect(unverifiedPrompt).not.toContain('Non-blocking delegation:')
+    expect(prompt).toContain('Late child results:')
+    expect(groupPrompt).toContain('Late child results:')
+    expect(nonHostedGroupPrompt).not.toContain('Late child results:')
+    expect(unverifiedPrompt).not.toContain('Late child results:')
     expect(prompt).toContain(
       'A loaded skill may instead use the durably accepted current input or attachment as the source and delegate up to three independent persistence families',
     )
@@ -442,6 +454,24 @@ describe('assistant execution prompt contract', () => {
     )
     expect(prompt).toContain(
       'Children may outlive the reply.',
+    )
+    expect(prompt).toContain(
+      'If a child you spawned is still generating when you reply, check whether it has completed on every later turn.',
+    )
+    expect(prompt).toContain(
+      'Incorporate its result when it has completed and is still relevant.',
+    )
+    expect(prompt).toContain(
+      'If it is still generating, do not wait or block the reply; check again on the next turn.',
+    )
+    expect(groupPrompt).toContain(
+      'If a child you spawned is still generating when you reply, check whether it has completed on every later turn.',
+    )
+    expect(groupPrompt).toContain(
+      'Incorporate its result when it has completed and is still relevant.',
+    )
+    expect(groupPrompt).toContain(
+      'If it is still generating, do not wait or block the reply; check again on the next turn.',
     )
     expect(prompt).toContain(
       'one short personable line may truthfully say the team is sorting or saving what the user shared',
