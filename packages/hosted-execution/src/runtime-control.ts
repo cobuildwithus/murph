@@ -14,6 +14,9 @@ import type {
   AssistantUsageTokenPricingBasis,
 } from "./assistant-usage.ts";
 import type {
+  HostedAssistantCustomInferenceOverride,
+} from "./assistant-inference.ts";
+import type {
   HostedAssistantModelOverride,
   HostedAssistantProductModel,
   HostedAssistantProvider,
@@ -2541,6 +2544,7 @@ export interface HostedWorkspaceState {
 
 export interface HostedWorkspaceReadResponse {
   fetchedAt: string;
+  hostedAssistantCustomInferenceOverride?: HostedAssistantCustomInferenceOverride;
   hostedAssistantModelOverride?: HostedAssistantModelOverride;
   hostedAssistantProviderOverride?: HostedAssistantProviderOverride;
   hostedAssistantReasoningEffortOverride?: HostedAssistantReasoningEffortOverride;
