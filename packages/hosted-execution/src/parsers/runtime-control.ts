@@ -2742,7 +2742,7 @@ export function parseHostedRuntimeGroupToolResponse(
             status,
             usage: {
               fundingNeeded: capacityState !== "healthy",
-              fundingUrl: capacityState === "healthy" ? null : fundingUrl,
+              fundingUrl,
               sponsorshipStatus: "not_sponsored",
             },
           },
