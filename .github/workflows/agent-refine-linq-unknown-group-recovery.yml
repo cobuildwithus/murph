@@ -1,0 +1,86 @@
+name: Agent refine Linq unknown-group recovery
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/linq-unknown-group-signup-recovery
+    paths:
+      - scripts/agent-refine-linq-unknown-group-recovery.mjs
+      - .github/workflows/agent-refine-linq-unknown-group-recovery.yml
+
+permissions:
+  contents: write
+
+jobs:
+  refine:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/linq-unknown-group-signup-recovery
+          fetch-depth: 0
+
+      - name: Apply asserted refinement
+        run: node scripts/agent-refine-linq-unknown-group-recovery.mjs
+
+      - name: Remove one-shot machinery
+        run: |
+          rm scripts/agent-refine-linq-unknown-group-recovery.mjs
+          rm .github/workflows/agent-refine-linq-unknown-group-recovery.yml
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Format implementation
+        run: |
+          pnpm exec prettier --write \
+            apps/web/app/api/groups/start/recover/route.ts \
+            apps/web/app/groups/start/page.tsx \
+            apps/web/src/components/hosted-groups/group-start-client.tsx \
+            apps/web/src/components/hosted-onboarding/join-invite-auto-trial-island.tsx \
+            apps/web/src/components/hosted-onboarding/join-invite-islands.tsx \
+            apps/web/src/components/hosted-onboarding/join-invite-success-client.tsx \
+            apps/web/src/lib/hosted-groups/group-start-handoff.ts \
+            apps/web/src/lib/hosted-onboarding/linq-group-setup.ts \
+            apps/web/src/lib/hosted-onboarding/webhook-provider-linq-shared.ts \
+            apps/web/src/lib/hosted-onboarding/webhook-provider-linq.ts \
+            apps/web/src/lib/hosted-onboarding/webhook-transport.ts \
+            apps/web/test/hosted-group-start-handoff.test.ts \
+            apps/web/test/hosted-group-start-recovery-route.test.ts \
+            apps/web/test/hosted-linq-group-setup.test.ts \
+            apps/web/test/hosted-onboarding-linq-thread-route.test.ts \
+            agent-docs/exec-plans/completed/2026-07-31-unknown-linq-group-setup-recovery.md
+          git diff --check
+
+      - name: Commit refinement
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(web): harden unknown-group signup recovery"
+          git push origin HEAD:agent/linq-unknown-group-signup-recovery
+
+      - name: Focused tests
+        run: |
+          pnpm --dir apps/web exec vitest run \
+            --config vitest.workspace.ts \
+            --no-coverage \
+            test/hosted-group-start-handoff.test.ts \
+            test/hosted-group-start-recovery-route.test.ts \
+            test/hosted-linq-group-setup.test.ts \
+            test/hosted-onboarding-linq-thread-route.test.ts \
+            test/join-invite-islands.test.ts \
+            test/join-invite-success-client.test.ts
+
+      - name: Typecheck
+        run: pnpm --dir apps/web typecheck
