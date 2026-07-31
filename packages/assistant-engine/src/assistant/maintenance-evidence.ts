@@ -352,9 +352,9 @@ function buildAssistantGroupReactionTargetTextIndex(input: {
       continue
     }
     const key = buildAssistantGroupReactionTargetKey({
-      channel: event.replyTarget?.channel,
+      channel: event.conversation.source,
       messageId: event.replyTarget?.messageId,
-      threadId: event.replyTarget?.threadId ?? event.conversation.threadId,
+      threadId: event.conversation.threadId,
     })
     const text = normalizeAssistantGroupReactionTargetText(event.content.text)
     if (key && text && !targetTextByRef.has(key)) {
@@ -383,8 +383,7 @@ function buildAssistantGroupReactionTargetTextIndex(input: {
     ) {
       continue
     }
-    const threadId = intent.externalThreadRouteAuthority?.threadId
-      ?? intent.threadId
+    const threadId = intent.threadId
     const text = normalizeAssistantGroupReactionTargetText(intent.message)
     if (!threadId || !text) {
       continue

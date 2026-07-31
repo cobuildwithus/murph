@@ -71,6 +71,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/logging", () => ({
   logHostedOnboardingDiagnostic: mocks.logHostedOnboardingDiagnostic,
+  toHostedOnboardingLogIdSuffix: (value: string | null | undefined) =>
+    value?.trim().slice(-6) || null,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({

@@ -125,7 +125,7 @@ describe("handleHostedTelegramGroupReactionWebhook", () => {
       ? readHostedExecutionConversationMessageText(envelope.message)
       : null;
     expect(parseHostedExecutionGroupReactionEventText(text)).toEqual({
-      actor: "telegram-user:42",
+      actor: null,
       changes: [
         { operation: "removed", reaction: "❤" },
         { operation: "removed", reaction: "custom_emoji:custom-old" },
@@ -224,7 +224,7 @@ describe("handleHostedTelegramGroupReactionWebhook", () => {
     });
   });
 
-  it("retains actor-chat identity without adding topic or display-name machinery", async () => {
+  it("keeps anonymous administrators unattributed", async () => {
     const prisma = createPrismaStub();
     await handleHostedTelegramGroupReactionWebhook({
       prisma,
@@ -252,7 +252,7 @@ describe("handleHostedTelegramGroupReactionWebhook", () => {
         .envelope;
     const text = readHostedExecutionConversationMessageText(envelope.message);
     expect(parseHostedExecutionGroupReactionEventText(text)).toMatchObject({
-      actor: "telegram-chat:-1009",
+      actor: null,
     });
   });
 

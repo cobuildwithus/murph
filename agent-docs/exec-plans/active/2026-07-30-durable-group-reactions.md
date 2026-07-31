@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-07-30
-Updated: 2026-07-30
+Updated: 2026-07-31
 
 ## Goal
 
@@ -70,6 +70,8 @@ include both `message_reaction` and `message_reaction_count` in
   discard the reaction itself.
 - Reaction evidence is bounded by existing assistant-input text retention and
   the room automation's seven-day/entry/byte limits.
+- Telegram webhook authentication proves the room event, not a reactor's Murph
+  identity, so individual Telegram reactions remain unattributed.
 - Raw participant handles may attribute evidence during one maintenance run but
   may not be copied into the saved room-model page.
 
@@ -82,7 +84,8 @@ include both `message_reaction` and `message_reaction_count` in
 - Telegram individual deltas, anonymous snapshots, empty snapshots, custom,
   paid, future reaction kinds, route/access rejection, duplicate replay, and
   route-level webhook bypass.
-- Assistant maintenance evidence with no later chat turn, affirmative fallback,
-  transcript dedupe, member-memory exclusion, and trust-boundary rejection.
+- Assistant maintenance evidence with production-shaped blinded local thread
+  identities, no later chat turn, affirmative fallback, transcript dedupe,
+  member-memory exclusion, and trust-boundary rejection.
 - Run focused owner suites, package/web typecheck and lint, diff-aware tests,
   exact-head CI, ReviewGPT, and final patch inspection.

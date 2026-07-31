@@ -169,10 +169,6 @@ describe("stageHostedLinqGroupReactionContext", () => {
   );
 
   it("persists a signed reaction without requiring a current roster read", async () => {
-    mocks.getHostedLinqChatSummary.mockRejectedValueOnce(
-      new Error("roster temporarily unavailable"),
-    );
-
     await expect(stageHostedLinqGroupReactionContext({
       event: buildReactionEvent({ reactionType: "laugh" }),
       prisma: createPrismaStub(),

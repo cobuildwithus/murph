@@ -87,11 +87,12 @@ test('room maintenance resolves a Telegram reaction target from its durable inbo
 
   await upsertReactionInput({
     channel: 'telegram',
+    conversationThreadId: 'blind:telegram:chat-room',
     eventId: 'telegram-target-message',
     replyTarget: {
       channel: 'telegram',
       messageId: '77',
-      threadId: 'chat-room',
+      threadId: 'raw:telegram:chat-room',
     },
     senderHandle: 'telegram-user:42',
     text: 'the exact Telegram message everyone laughed at',
@@ -99,6 +100,7 @@ test('room maintenance resolves a Telegram reaction target from its durable inbo
   })
   await upsertReactionInput({
     channel: 'telegram',
+    conversationThreadId: 'blind:telegram:chat-room',
     eventId: 'telegram-reaction-laugh',
     senderHandle: HOSTED_EXECUTION_GROUP_REACTION_SENDER_ATTESTATION,
     text: formatHostedExecutionGroupReactionEventText({
@@ -146,18 +148,19 @@ test('room maintenance resolves a Telegram reaction target from Murph sent-messa
     externalThreadRouteAuthority: {
       channel: 'telegram',
       containerMemberId: 'member-group',
-      threadId: 'chat-room',
+      threadId: 'raw:telegram:chat-room',
     },
     message: 'Murph delivered the line that landed',
     operation: null,
     sentAt: '2026-07-30T12:00:00.000Z',
     status: 'sent',
-    threadId: 'chat-room',
+    threadId: 'blind:telegram:chat-room',
     threadIsDirect: false,
   }])
 
   await upsertReactionInput({
     channel: 'telegram',
+    conversationThreadId: 'blind:telegram:chat-room',
     eventId: 'telegram-reaction-outbound',
     senderHandle: HOSTED_EXECUTION_GROUP_REACTION_SENDER_ATTESTATION,
     text: formatHostedExecutionGroupReactionEventText({
@@ -191,22 +194,24 @@ test('room maintenance includes an affirmative Linq reaction that never reached 
   cleanupPaths.push(parentRoot)
 
   await upsertReactionInput({
+    conversationThreadId: 'blind:linq:chat-room',
     eventId: 'linq-target-message',
     replyTarget: {
       channel: 'linq',
       messageId: 'message-42',
-      threadId: 'chat-room',
+      threadId: 'raw:linq:chat-room',
     },
     text: 'the exact Linq message that earned a heart',
     vaultRoot,
   })
   await upsertReactionInput({
     affirmativeReaction: true,
+    conversationThreadId: 'blind:linq:chat-room',
     eventId: 'linq-reaction-heart',
     replyTarget: {
       channel: 'linq',
       messageId: 'event-heart',
-      threadId: 'chat-room',
+      threadId: 'raw:linq:chat-room',
     },
     text: 'Reacted with a heart reaction.',
     vaultRoot,
@@ -361,6 +366,7 @@ async function upsertReactionInput(input: {
   actorIsSelf?: boolean
   affirmativeReaction?: boolean
   channel?: 'linq' | 'telegram'
+  conversationThreadId?: string
   eventId: string
   replyTarget?: {
     channel: string | null
@@ -381,7 +387,7 @@ async function upsertReactionInput(input: {
         actorId: null,
         actorIsSelf: input.actorIsSelf ?? false,
         source: channel,
-        threadId: 'chat-room',
+        threadId: input.conversationThreadId ?? 'chat-room',
         threadIsDirect: input.threadIsDirect ?? false,
       },
       occurredAt: '2026-07-30T12:00:00.000Z',

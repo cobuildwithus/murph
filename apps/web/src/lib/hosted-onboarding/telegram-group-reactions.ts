@@ -220,7 +220,9 @@ function parseHostedTelegramIndividualReaction(
 
   return {
     ...common,
-    actor: readHostedTelegramReactionActor(record),
+    // Telegram authenticates the webhook and room, not the reactor's Murph
+    // identity. Preserve the reaction while keeping the actor unattributed.
+    actor: null,
     changes,
     mode: "delta",
   };
@@ -365,21 +367,6 @@ function stableHostedTelegramReactionJson(
       Object.entries(value).sort(([left], [right]) => left.localeCompare(right)),
     ),
   );
-}
-
-function readHostedTelegramReactionActor(
-  record: Record<string, unknown>,
-): string | null {
-  const user = readHostedTelegramRecord(record.user);
-  const userId = user ? readHostedTelegramIdentifier(user.id) : null;
-  if (userId) {
-    return `telegram-user:${userId}`;
-  }
-  const actorChat = readHostedTelegramRecord(record.actor_chat);
-  const actorChatId = actorChat
-    ? readHostedTelegramIdentifier(actorChat.id)
-    : null;
-  return actorChatId ? `telegram-chat:${actorChatId}` : null;
 }
 
 function readHostedTelegramReactionCount(value: unknown): number | null {
