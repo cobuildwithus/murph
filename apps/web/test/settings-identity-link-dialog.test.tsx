@@ -9,8 +9,19 @@ const ORIGINAL_PRIVY_CLIENT_ID = process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID;
 const mocks = vi.hoisted(() => ({
   onOpenChange: vi.fn(),
   openAuthDialog: vi.fn(),
+  privyLogout: vi.fn(),
+  privyProvider: vi.fn((props: { children: ReactNode }) =>
+    createElement("div", null, props.children)),
+  reportPhoneDiagnostic: vi.fn(),
   refresh: vi.fn(),
+  useHostedPhoneLinkDiagnostics: vi.fn(),
+  usePrivy: vi.fn(),
   useUser: vi.fn(),
+  phoneSettingsProps: [] as Array<{
+    autoOpen?: boolean;
+    diagnosticReporter?: unknown;
+    onAborted?: () => void;
+  }>,
   telegramCardProps: [] as Array<{
     autoLink?: boolean;
     initialTelegramAccount?: { telegramUserId: string; username: string | null } | null;
@@ -19,10 +30,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@privy-io/react-auth", () => ({
-  usePrivy: () => ({
-    authenticated: true,
-    ready: true,
-  }),
+  usePrivy: mocks.usePrivy,
   useUser: mocks.useUser,
 }));
 
@@ -32,6 +40,10 @@ vi.mock("@/src/components/hosted-onboarding/auth-dialog-provider", () => ({
   }),
 }));
 
+vi.mock("@/src/components/settings/hosted-phone-link-diagnostics", () => ({
+  useHostedPhoneLinkDiagnostics: mocks.useHostedPhoneLinkDiagnostics,
+}));
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
     refresh: mocks.refresh,
@@ -39,9 +51,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/src/components/hosted-onboarding/privy-provider", () => ({
-  HostedPrivyProvider(props: { children: ReactNode }) {
-    return createElement("div", null, props.children);
-  },
+  HostedPrivyProvider: mocks.privyProvider,
 }));
 
 vi.mock("@/src/components/ui/dialog", () => ({
@@ -65,7 +75,18 @@ vi.mock("@/src/components/ui/dialog", () => ({
 }));
 
 vi.mock("@/src/components/settings/hosted-phone-settings", () => ({
-  HostedPhoneSettings(props: { onLinked?: (payload: { mode: string }) => void }) {
+  HostedPhoneSettings(props: {
+    autoOpen?: boolean;
+    diagnosticReporter?: unknown;
+    onAborted?: () => void;
+    onLinked?: (payload: { mode: string }) => void;
+  }) {
+    mocks.phoneSettingsProps.push({
+      autoOpen: props.autoOpen,
+      diagnosticReporter: props.diagnosticReporter,
+      onAborted: props.onAborted,
+    });
+
     return createElement(
       "button",
       {
@@ -132,7 +153,15 @@ vi.mock("@/src/components/settings/hosted-telegram-card-settings", () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.phoneSettingsProps = [];
   mocks.telegramCardProps = [];
+  mocks.usePrivy.mockReturnValue({
+    authenticated: true,
+    logout: mocks.privyLogout,
+    ready: true,
+  });
+  mocks.privyLogout.mockResolvedValue(undefined);
+  mocks.useHostedPhoneLinkDiagnostics.mockReturnValue(mocks.reportPhoneDiagnostic);
   mocks.useUser.mockReturnValue({
     user: {
       id: "privy-user-a",
@@ -149,7 +178,6 @@ afterEach(() => {
 
 describe("HostedSettingsIdentityLinkDialog", () => {
   it.each([
-    ["phone", "Link phone child"],
     ["email", "Link email child"],
     ["telegram", "Link telegram child"],
   ] as const)("closes and refreshes after %s sync succeeds", async (initialMode, buttonLabel) => {
@@ -181,6 +209,93 @@ describe("HostedSettingsIdentityLinkDialog", () => {
 
       expect(mocks.onOpenChange).toHaveBeenCalledWith(false);
       expect(mocks.refresh).toHaveBeenCalledTimes(1);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("skips the Murph dialog and hands the matched phone action directly to Privy", async () => {
+    const { HostedSettingsIdentityLinkDialog } = await import(
+      "@/src/components/settings/hosted-settings-identity-link-dialog"
+    );
+
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedSettingsIdentityLinkDialog, {
+        account: makeAccountSnapshot(),
+        expectedPrivyUserId: "privy-user-a",
+        initialMode: "phone",
+        onOpenChange: mocks.onOpenChange,
+        privySessionMatchesAppSession: true,
+      }),
+    );
+
+    try {
+      expect(container.querySelector("[data-dialog-open]")).toBeNull();
+      expect(container.textContent).toContain("Link phone child");
+      expect(mocks.phoneSettingsProps).toHaveLength(1);
+      expect(mocks.phoneSettingsProps[0]?.autoOpen).toBe(true);
+      expect(mocks.phoneSettingsProps[0]?.diagnosticReporter).toBe(
+        mocks.reportPhoneDiagnostic,
+      );
+      expect(mocks.useHostedPhoneLinkDiagnostics).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operation: "link",
+          showLinkForm: true,
+          surface: "settings",
+        }),
+      );
+      expect(mocks.privyProvider).not.toHaveBeenCalled();
+
+      const handOffButton = Array.from(container.querySelectorAll("button")).find(
+        (candidate) => candidate.textContent?.includes("Link phone child"),
+      );
+
+      await act(async () => {
+        handOffButton?.dispatchEvent(new Event("click", { bubbles: true }));
+      });
+
+      expect(mocks.onOpenChange).toHaveBeenCalledWith(false);
+      expect(mocks.refresh).toHaveBeenCalledTimes(1);
+
+      mocks.phoneSettingsProps[0]?.onAborted?.();
+      expect(mocks.onOpenChange).toHaveBeenCalledWith(false);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("hands projection recovery to the phone sync boundary", async () => {
+    mocks.useUser.mockReturnValue({
+      user: {
+        id: "privy-user-a",
+        phone: {
+          number: "+15550100002",
+        },
+      },
+    });
+    const { HostedSettingsIdentityLinkDialog } = await import(
+      "@/src/components/settings/hosted-settings-identity-link-dialog"
+    );
+
+    const { cleanup } = await renderClientComponent(
+      createElement(HostedSettingsIdentityLinkDialog, {
+        account: {
+          ...makeAccountSnapshot(),
+          phone: {
+            number: null,
+            verifiedAt: null,
+          },
+        },
+        expectedPrivyUserId: "privy-user-a",
+        initialMode: "phone",
+        onOpenChange: mocks.onOpenChange,
+        privySessionMatchesAppSession: true,
+      }),
+    );
+
+    try {
+      expect(mocks.phoneSettingsProps).toHaveLength(1);
+      expect(mocks.phoneSettingsProps[0]?.autoOpen).toBe(true);
     } finally {
       await cleanup();
     }
@@ -234,6 +349,103 @@ describe("HostedSettingsIdentityLinkDialog", () => {
       expect(container.textContent).not.toContain("Privy hand-off child");
       expect(container.textContent).not.toContain("Link telegram child");
       expect(mocks.telegramCardProps).toEqual([]);
+
+      const signInAgainButton = Array.from(container.querySelectorAll("button")).find(
+        (candidate) => candidate.textContent?.includes("Sign in again"),
+      );
+      expect(signInAgainButton).toBeTruthy();
+
+      await act(async () => {
+        signInAgainButton?.dispatchEvent(new Event("click", { bubbles: true }));
+        await Promise.resolve();
+      });
+
+      expect(mocks.privyLogout).toHaveBeenCalledTimes(1);
+      expect(mocks.onOpenChange).toHaveBeenCalledWith(false);
+      expect(mocks.openAuthDialog).toHaveBeenCalledTimes(1);
+      expect(mocks.privyLogout.mock.invocationCallOrder[0]).toBeLessThan(
+        mocks.openAuthDialog.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+      );
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it.each([
+    ["before Privy is ready", false, false, null],
+    ["while an authenticated Privy user snapshot hydrates", true, true, null],
+  ] as const)("shows a loading state %s without mounting mutation children", async (
+    _case,
+    authenticated,
+    ready,
+    user,
+  ) => {
+    mocks.usePrivy.mockReturnValue({
+      authenticated,
+      logout: mocks.privyLogout,
+      ready,
+    });
+    mocks.useUser.mockReturnValue({ user });
+    const { HostedSettingsIdentityLinkDialog } = await import(
+      "@/src/components/settings/hosted-settings-identity-link-dialog"
+    );
+
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedSettingsIdentityLinkDialog, {
+        account: makeAccountSnapshot(),
+        expectedPrivyUserId: "privy-user-a",
+        initialMode: "phone",
+        onOpenChange: mocks.onOpenChange,
+        privySessionMatchesAppSession: true,
+      }),
+      { requireButton: false },
+    );
+
+    try {
+      expect(container.textContent).toContain("Preparing secure account linking");
+      expect(container.textContent).not.toContain("Link phone child");
+      expect(container.textContent).not.toContain("Sign in again");
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("keeps the mismatch gate closed when the stale Privy session cannot sign out", async () => {
+    mocks.useUser.mockReturnValue({
+      user: {
+        id: "privy-user-b",
+      },
+    });
+    mocks.privyLogout.mockRejectedValueOnce(new Error("logout unavailable"));
+    const { HostedSettingsIdentityLinkDialog } = await import(
+      "@/src/components/settings/hosted-settings-identity-link-dialog"
+    );
+
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedSettingsIdentityLinkDialog, {
+        account: makeAccountSnapshot(),
+        expectedPrivyUserId: "privy-user-a",
+        initialMode: "phone",
+        onOpenChange: mocks.onOpenChange,
+        privySessionMatchesAppSession: true,
+      }),
+    );
+
+    try {
+      const signInAgainButton = Array.from(container.querySelectorAll("button")).find(
+        (candidate) => candidate.textContent?.includes("Sign in again"),
+      );
+
+      await act(async () => {
+        signInAgainButton?.dispatchEvent(new Event("click", { bubbles: true }));
+        await Promise.resolve();
+      });
+
+      expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+        "Sign out did not finish. Try again.",
+      );
+      expect(mocks.openAuthDialog).not.toHaveBeenCalled();
+      expect(mocks.onOpenChange).not.toHaveBeenCalledWith(false);
     } finally {
       await cleanup();
     }

@@ -3,11 +3,13 @@ export const HOSTED_PHONE_LINK_DIAGNOSTIC_EVENTS = [
   "surface_blocked",
   "provider_started",
   "provider_succeeded",
+  "provider_transfer_required",
   "provider_failed",
   "provider_cancelled",
   "provider_callback_ignored",
-  "client_refresh_failed",
+  "sync_started",
   "sync_succeeded",
+  "sync_unchanged",
   "sync_failed",
 ] as const;
 export const HOSTED_PHONE_LINK_DIAGNOSTIC_CLIENT_STATES = [

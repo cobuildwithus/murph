@@ -2920,6 +2920,7 @@ export async function executeMurphDynamicToolRequest(input: {
     }
     case 'send-progress-update':
       return await executeProgressUpdateTool({
+        deliveryContextOrdinal: input.deliveryContextOrdinal ?? null,
         progressDelivery: input.progressDelivery,
         text: input.request.text,
       })
@@ -3347,10 +3348,17 @@ export async function executeMurphDynamicToolRequest(input: {
               })
             }
             const privateMedia = result.responseMedia?.[0] ?? null
-            return {
-              media: result.rpcSuccess && privateMedia?.kind === 'vault_image'
+            const generatedMedia =
+              result.rpcSuccess && privateMedia?.kind === 'vault_image'
                 ? privateMedia
-                : null,
+                : null
+            return {
+              failureDiagnostic: generatedMedia
+                ? null
+                : result.rpcSuccess
+                  ? 'image generation completed without deliverable private media'
+                  : result.rpcText,
+              media: generatedMedia,
               runtimeIssue: null,
               savedImageRef: result.savedImageRef ?? null,
             }
@@ -5177,6 +5185,7 @@ function groupSharedProjectionUnavailableResult(
 }
 
 async function executeProgressUpdateTool(input: {
+  deliveryContextOrdinal: number | null
   progressDelivery: AssistantProgressDelivery | null
   text: string
 }): Promise<MurphDynamicToolExecutionResult> {
@@ -5184,7 +5193,12 @@ async function executeProgressUpdateTool(input: {
     return toolTextResult(false, 'progress updates are not available for this turn')
   }
   try {
-    const result = await input.progressDelivery.send(input.text, { source: 'model' })
+    const result = await input.progressDelivery.send(input.text, {
+      ...(input.deliveryContextOrdinal === null
+        ? {}
+        : { deliveryContextOrdinal: input.deliveryContextOrdinal }),
+      source: 'model',
+    })
     if (result.kind === 'sent') {
       return toolTextResult(true, 'progress update sent')
     }

@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   completeHostedPrivyVerification: vi.fn(),
   confirmHostedInvitePhoneCode: vi.fn(),
   createHostedBillingCheckout: vi.fn(),
+  getHostedAppSessionFromRequest: vi.fn(),
   getHostedInviteStatus: vi.fn(),
   getPrisma: vi.fn(),
   issueHostedAppSession: vi.fn(),
@@ -79,6 +80,7 @@ vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
+  getHostedAppSessionFromRequest: mocks.getHostedAppSessionFromRequest,
   issueHostedAppSession: mocks.issueHostedAppSession,
   requireHostedAppSessionFromRequest: mocks.requireHostedAppSessionFromRequest,
 }));
@@ -157,6 +159,7 @@ describe("hosted onboarding routes", () => {
       cookie: "murph-session=session-token; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000",
       sessionId: "hws_123",
     });
+    mocks.getHostedAppSessionFromRequest.mockResolvedValue(null);
     mocks.requireHostedAppSessionFromRequest.mockResolvedValue({
       member: {
         id: "member_123",
@@ -243,6 +246,7 @@ describe("hosted onboarding routes", () => {
     expect(response.headers.get("Set-Cookie")).toBe(
       "murph-session=session-token; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000",
     );
+    expect(mocks.getHostedAppSessionFromRequest).toHaveBeenCalledTimes(1);
     expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith({
       authMethod: "phone",
       identity: {

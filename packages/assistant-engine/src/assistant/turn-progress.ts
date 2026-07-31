@@ -51,6 +51,7 @@ export interface AssistantTurnProductFeedbackRecorder {
 export type AssistantProgressDeliverySource = 'model' | 'system'
 
 export interface AssistantProgressDeliverySendOptions {
+  deliveryContextOrdinal?: number
   required?: boolean
   source?: AssistantProgressDeliverySource
 }
@@ -69,7 +70,13 @@ type AssistantProgressDeliveryContext = {
   messageInput: AssistantMessageInput
   session: AssistantSession
 }
-type AssistantProgressDeliverInput = Parameters<DeliverAssistantProgressUpdate>[0]
+type AssistantProgressDeliverInput =
+  Parameters<DeliverAssistantProgressUpdate>[0] & {
+    deliveryContextOrdinal?: number
+  }
+type AssistantProgressDeliver = (
+  input: AssistantProgressDeliverInput
+) => ReturnType<DeliverAssistantProgressUpdate>
 
 // Progress updates are best-effort and every suppressed send used to vanish
 // without a trace, which made "model says sent, user saw nothing" undebuggable.
@@ -143,7 +150,7 @@ export function resolveAssistantProductFeedbackAcceptedInputIds(
 }
 
 export function createAssistantProgressDelivery(input: {
-  deliver?: DeliverAssistantProgressUpdate
+  deliver?: AssistantProgressDeliver
   getDeliveryContext?: () => AssistantProgressDeliveryContext
   messageInput: AssistantMessageInput
   onDeliveredSession?: (session: AssistantSession) => void
@@ -219,6 +226,11 @@ export function createAssistantProgressDelivery(input: {
 
       try {
         const progressInput: AssistantProgressDeliverInput = {
+          ...(options?.deliveryContextOrdinal === undefined
+            ? {}
+            : {
+                deliveryContextOrdinal: options.deliveryContextOrdinal,
+              }),
           input: deliveryContext.messageInput,
           ordinal,
           session: deliveryContext.session,

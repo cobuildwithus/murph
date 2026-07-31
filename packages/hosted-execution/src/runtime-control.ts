@@ -1085,12 +1085,25 @@ export interface HostedRuntimeGroupSetChatAvatarRequest {
   groupChatIconUrl: string;
 }
 
+export function hostedRuntimeLinqProviderErrorMessageForCode(
+  code: unknown,
+): string | null {
+  switch (code) {
+    case 5006:
+      return "The avatar image type was not accepted.";
+    case 5007:
+      return "The avatar image could not be downloaded.";
+    default:
+      return null;
+  }
+}
+
 export const HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN =
   "https://murph-hosted.cobuildwithus.workers.dev";
 export const HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_PATH_PREFIX =
   "/private-media/v1/";
 const HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_PATH_PATTERN =
-  /^\/private-media\/v1\/v1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{32,1024}$/u;
+  /^\/private-media\/v1\/v1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{32,1024}(?:\/group-avatar\.(?:jpg|png|webp))?$/u;
 
 export function isHostedRuntimePrivateImageDeliveryUrl(
   url: URL,
@@ -1527,7 +1540,12 @@ export type HostedRuntimeGroupToolResponse =
       result:
         | { status: "requested" }
         | { status: "ok" }
-        | { status: "unavailable"; unavailableReason: string };
+        | {
+            status: "unavailable";
+            unavailableReason: string;
+            providerErrorCode?: number;
+            providerErrorMessage?: string;
+          };
     }
   | {
       action: "preflight_set_chat_avatar";

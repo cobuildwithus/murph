@@ -94,6 +94,39 @@ describe("settings phone diagnostic route", () => {
     expect(mocks.logHostedOnboardingDiagnostic).not.toHaveBeenCalled();
   });
 
+  it("rejects cross-origin diagnostics before reading app-session state", async () => {
+    mocks.assertHostedOnboardingMutationOrigin.mockImplementationOnce(() => {
+      throw hostedOnboardingError({
+        code: "HOSTED_ONBOARDING_ORIGIN_INVALID",
+        httpStatus: 403,
+        message: "Invalid request origin.",
+      });
+    });
+
+    const response = await route.POST(jsonRequest(validDiagnostic()));
+
+    expect(response.status).toBe(403);
+    expect(mocks.requireHostedAppSessionFromRequest).not.toHaveBeenCalled();
+    expect(mocks.assertHostedMemberNotSuspended).not.toHaveBeenCalled();
+    expect(mocks.logHostedOnboardingDiagnostic).not.toHaveBeenCalled();
+  });
+
+  it("rejects suspended members before logging diagnostics", async () => {
+    mocks.assertHostedMemberNotSuspended.mockImplementationOnce(() => {
+      throw hostedOnboardingError({
+        code: "HOSTED_MEMBER_SUSPENDED",
+        httpStatus: 403,
+        message: "This hosted account is suspended.",
+      });
+    });
+
+    const response = await route.POST(jsonRequest(validDiagnostic()));
+
+    expect(response.status).toBe(403);
+    expect(mocks.requireHostedAppSessionFromRequest).toHaveBeenCalledWith(expect.any(Request));
+    expect(mocks.logHostedOnboardingDiagnostic).not.toHaveBeenCalled();
+  });
+
   it("requires a Murph app session before accepting browser diagnostics", async () => {
     mocks.requireHostedAppSessionFromRequest.mockRejectedValueOnce(hostedOnboardingError({
       code: "AUTH_REQUIRED",

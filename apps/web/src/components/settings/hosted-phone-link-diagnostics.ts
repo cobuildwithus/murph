@@ -24,21 +24,32 @@ interface HostedPhoneLinkDiagnosticState {
   surface: HostedPhoneLinkDiagnosticSurface;
 }
 
+interface HostedPhoneLinkDiagnosticDetails {
+  detailCode?: HostedPhoneLinkDiagnosticDetailCode;
+  operation?: HostedPhoneLinkDiagnosticOperation;
+}
+
+export type HostedPhoneLinkDiagnosticReporter = (
+  event: HostedPhoneLinkDiagnosticEvent,
+  details?: HostedPhoneLinkDiagnosticDetails,
+) => void;
+
 export function useHostedPhoneLinkDiagnostics(input: HostedPhoneLinkDiagnosticState) {
   const [attemptId] = useState(() => globalThis.crypto.randomUUID());
   const blockedStateReportedRef = useRef(false);
   const surfaceReportedRef = useRef(false);
   const clientState = resolveClientState(input);
-  const report = useCallback((
+  const report: HostedPhoneLinkDiagnosticReporter = useCallback((
     event: HostedPhoneLinkDiagnosticEvent,
-    details: { detailCode?: HostedPhoneLinkDiagnosticDetailCode } = {},
+    details: HostedPhoneLinkDiagnosticDetails = {},
   ) => {
+    const { operation = input.operation, ...diagnosticDetails } = details;
     void reportHostedPhoneLinkDiagnostic({
       attemptId,
       clientState,
-      ...details,
+      ...diagnosticDetails,
       event,
-      operation: input.operation,
+      operation,
       surface: input.surface,
     });
   }, [attemptId, clientState, input.operation, input.surface]);

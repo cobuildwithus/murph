@@ -209,6 +209,7 @@ import {
 import {
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_PRIVATE_SUMMARY,
+  MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
@@ -749,6 +750,267 @@ describe('assistant cron runtime orchestration', () => {
     )
     expect(cronMocks.upsertAutomation).toHaveBeenCalledTimes(2)
   })
+
+  it('materializes a finite latest-slot occurrence with execution budget and preserves it on reseed', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-upsert-one-shot-automation-',
+    )
+    cronMocks.loadVault.mockResolvedValue({
+      metadata: {
+        timezone: 'America/New_York',
+      },
+    })
+
+    const route = {
+      channel: 'telegram' as const,
+      deliverySource: null,
+      deliveryTarget: 'room-1',
+      identityId: null,
+      participantId: null,
+      threadId: null,
+    }
+    const created = await upsertAssistantCronAutomation({
+      firstOccurrenceActiveUntilLocalTime: '15:00',
+      firstOccurrencePolicy: 'once-after-current-local-day',
+      instructions: 'Make one final setup invitation.',
+      now: new Date('2026-04-08T15:00:00.000Z'),
+      route,
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '14:29',
+      },
+      slug: 'finish-onboarding-followup',
+      summary: 'One final setup invitation.',
+      tags: [...MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags],
+      title: 'Final Murph onboarding follow-up',
+      vault: vaultRoot,
+    })
+    if (!created) {
+      throw new Error('Expected one-shot onboarding follow-up to be seeded.')
+    }
+
+    expect(created.keepAfterRun).toBe(false)
+    expect(created.schedule).toEqual({
+      at: '2026-04-09T18:29:00.000Z',
+      kind: 'at',
+    })
+    expect(findCanonicalAutomation(vaultRoot, 'finish-onboarding-followup'))
+      .toMatchObject({
+        activeUntil: '2026-04-09T19:00:00.000Z',
+      })
+    expect(created.state.nextRunAt).toBe('2026-04-09T18:29:00.000Z')
+
+    cronMocks.loadVault.mockResolvedValue({
+      metadata: {
+        timezone: 'Asia/Tokyo',
+      },
+    })
+    const reseeded = await upsertAssistantCronAutomation({
+      firstOccurrenceActiveUntilLocalTime: '15:00',
+      firstOccurrencePolicy: 'once-after-current-local-day',
+      instructions: 'Use the latest final invitation wording.',
+      now: new Date('2026-04-09T12:00:00.000Z'),
+      route,
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '14:12',
+      },
+      slug: 'finish-onboarding-followup',
+      summary: 'One final setup invitation.',
+      tags: [...MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags],
+      title: 'Final Murph onboarding follow-up',
+      vault: vaultRoot,
+    })
+    if (!reseeded) {
+      throw new Error('Expected one-shot onboarding follow-up to be reseeded.')
+    }
+
+    expect(reseeded.jobId).toBe(created.jobId)
+    expect(reseeded.schedule).toEqual(created.schedule)
+    expect(reseeded.state.nextRunAt).toBe('2026-04-09T18:29:00.000Z')
+    expect(findCanonicalAutomation(vaultRoot, 'finish-onboarding-followup'))
+      .toMatchObject({
+        activeUntil: '2026-04-09T19:00:00.000Z',
+        instructions: 'Use the latest final invitation wording.',
+        schedule: created.schedule,
+      })
+
+    cronMocks.sendAssistantMessageLocal.mockImplementationOnce(
+      async (notificationInput: {
+        beforeCommit?: (context: {
+          decision: {
+            kind: 'send_message'
+            privateSummary: string
+            text: string
+          }
+          deliveryOutcome: null
+          response: string
+        }) => Promise<void>
+        beforeDelivery?: (context: {
+          decision: {
+            kind: 'send_message'
+            privateSummary: string
+            text: string
+          }
+          deliveryOutcome: null
+          response: string
+        }) => Promise<void>
+        beforeProviderAcceptedInputs?: () => Promise<void>
+        beforeToolExecution?: () => Promise<void>
+      }) => {
+        const context = {
+          decision: {
+            kind: 'send_message' as const,
+            privateSummary: 'Prepared the final onboarding continuation.',
+            text: 'Want to pick this back up?',
+          },
+          deliveryOutcome: null,
+          response: 'Want to pick this back up?',
+        }
+        vi.setSystemTime(new Date('2026-04-09T18:30:05.000Z'))
+        await notificationInput.beforeProviderAcceptedInputs?.()
+        vi.setSystemTime(new Date('2026-04-09T18:32:05.000Z'))
+        await notificationInput.beforeToolExecution?.()
+        vi.setSystemTime(new Date('2026-04-09T18:33:35.000Z'))
+        await notificationInput.beforeDelivery?.(context)
+        vi.setSystemTime(new Date('2026-04-09T18:34:05.000Z'))
+        await notificationInput.beforeCommit?.(context)
+        return {
+          deliveryOutcome: {
+            delivery: {
+              channel: 'telegram',
+              sentAt: '2026-04-09T18:34:00.000Z',
+              target: 'room-1',
+              targetKind: 'thread',
+            },
+            intentId: 'outbox_onboarding_final_followup',
+            kind: 'sent' as const,
+            media: [],
+            session: {
+              sessionId: 'session_onboarding_final_followup',
+            },
+          },
+          response: 'Want to pick this back up?',
+          session: {
+            sessionId: 'session_onboarding_final_followup',
+          },
+        }
+      },
+    )
+
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-09T18:29:05.000Z'))
+    const completed = await runAssistantCronJobNow({
+      job: created.jobId,
+      vault: vaultRoot,
+    })
+
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        turnPolicy: null,
+      }),
+    )
+    expect(completed.run.outcome).toBe('delivered')
+    expect(completed.removedAfterRun).toBe(true)
+    expect(findCanonicalAutomation(vaultRoot, 'finish-onboarding-followup')?.status)
+      .toBe('archived')
+  })
+
+  it.each([
+    {
+      onboardingStatus: 'completed',
+      expectedOutcome: 'delivered',
+      result: {
+        decision: {
+          kind: 'send_message',
+          privateSummary: 'Delivered the user-owned reminder.',
+          text: 'Your own scheduled reminder.',
+        },
+        deliveryOutcome: {
+          delivery: null,
+          intentId: 'outbox_user_owned_same_slug',
+          kind: 'sent',
+          media: [],
+          session: {
+            sessionId: 'session_user_owned_same_slug',
+          },
+        },
+        response: 'Your own scheduled reminder.',
+        session: {
+          sessionId: 'session_user_owned_same_slug',
+        },
+      },
+    },
+    {
+      onboardingStatus: 'open',
+      expectedOutcome: 'no_op',
+      result: {
+        decision: {
+          kind: 'skip',
+          privateSummary: 'The user-owned reminder had nothing to send.',
+        },
+        response: null,
+        session: {
+          sessionId: 'session_user_owned_same_slug',
+        },
+      },
+    },
+  ] as const)(
+    'keeps a user-owned same-slug automation on the generic $onboardingStatus-onboarding path',
+    async ({ expectedOutcome, onboardingStatus, result }) => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-04-09T18:29:05.000Z'))
+      const { vaultRoot } = await createRuntimeContext(
+        `assistant-cron-runtime-user-owned-onboarding-slug-${onboardingStatus}-`,
+      )
+      if (onboardingStatus === 'completed') {
+        await completeAssistantOnboarding({
+          completedAt: '2026-04-08T18:00:00.000Z',
+          reason: 'user_answered',
+          vault: vaultRoot,
+        })
+      }
+      getVaultAutomationStore(vaultRoot).push({
+        activeUntil: '2026-04-09T19:00:00.000Z',
+        automationId: `automation_user_owned_onboarding_slug_${onboardingStatus}`,
+        continuityPolicy: 'preserve',
+        createdAt: '2026-04-08T18:00:00.000Z',
+        instructions: 'Run the member-authored reminder.',
+        route: {
+          channel: 'telegram',
+          deliverySource: null,
+          deliveryTarget: 'room-1',
+          identityId: null,
+          participantId: null,
+          threadId: null,
+          threadIsDirect: true,
+        },
+        schedule: {
+          at: '2026-04-09T18:29:00.000Z',
+          kind: 'at',
+        },
+        slug: 'finish-onboarding-followup',
+        status: 'active',
+        summary: 'A member-authored reminder.',
+        tags: ['assistant', 'scheduled'],
+        title: 'Member-authored reminder',
+        updatedAt: '2026-04-08T18:00:00.000Z',
+      })
+      cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce(result)
+
+      const completed = await runAssistantCronJobNow({
+        job: `automation_user_owned_onboarding_slug_${onboardingStatus}`,
+        vault: vaultRoot,
+      })
+
+      expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+        expect.objectContaining({
+          turnPolicy: null,
+        }),
+      )
+      expect(completed.run.outcome).toBe(expectedOutcome)
+    },
+  )
 
   it('recomputes an existing canonical automation when the schedule cadence changes', async () => {
     vi.useFakeTimers()
