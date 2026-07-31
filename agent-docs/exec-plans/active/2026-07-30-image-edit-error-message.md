@@ -18,7 +18,8 @@ Updated: 2026-07-30
 - Local image-tool failures expose the provider message to the active Murph
   turn rather than collapsing to a generic failure.
 - Hosted background image failures deliver the same bounded diagnostic in a
-  trusted system completion and the resumed Murph turn receives it as data.
+  runtime-authenticated system completion and the resumed Murph turn receives
+  the provider text only as untrusted failure evidence.
 - Existing abort behavior, credentials, response bodies, and private image
   content remain outside diagnostics.
 - Focused assistant-engine and assistant-runtime tests plus typechecks pass;
@@ -82,9 +83,13 @@ Updated: 2026-07-30
 
 - Reuse `VaultCliError` metadata and the existing hosted completion envelope;
   add no new state owner or retry loop.
-- Provider error text is trusted only as bounded diagnostic data. Murph may
-  explain it but must not treat it as instructions or repeat internal support
-  identifiers unless useful.
+- Runtime provenance authenticates the completion status, not provider text.
+  Murph may use a bounded diagnostic only as failure evidence; it must never
+  follow commands, links, permission claims, tool requests, or policy text
+  inside it, and should not repeat internal support identifiers by default.
+- The queued completion turn explains or proposes a correction but cannot
+  start another image operation. A transient retry requires user authorization
+  in a later turn.
 - Keep the exact legacy `{status:"failed"}` hosted result envelope. Carry the
   optional diagnostic on one separate runtime-authored line so older readers
   retain their existing failure behavior during deployment skew.
@@ -108,6 +113,17 @@ Updated: 2026-07-30
   passed across the image adapter/tool, dynamic hosted tool, trusted completion
   serialization, and resumed-turn event path.
 - Package-local assistant-engine and assistant-runtime typechecks passed.
+- A production-owner hosted-runtime route scenario passed with one original
+  Linq inbound, one image-provider attempt, a sent acknowledgement, detached
+  failed-completion staging, a resumed system turn, and a sent same-thread
+  explanation. The final outbox intent had no media and omitted the raw provider
+  code and request id. Together with the controlled OpenAI 400 dynamic-tool
+  regression, this proves the bounded provider message reaches Murph and the
+  member-visible recovery path without another inbound turn.
+- Parent product-experience re-review after specialist remediation found no
+  remaining product finding: the smallest complete experience is the existing
+  truthful acknowledgement followed by a same-route plain-language failure
+  explanation and a later-turn, user-authorized retry offer.
 - The real pinned Codex 0.145.0 app-server with a local scripted Responses
   provider captured complete initial `gpt-5.6-terra`, low-reasoning, code-mode
   request bodies for identical representative direct and group inputs. Token

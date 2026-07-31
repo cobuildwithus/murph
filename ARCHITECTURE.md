@@ -1455,8 +1455,11 @@ usage recorder without awaiting it, and image delivery never waits for
 accounting or diagnostic writes. A provider rejection keeps the exact legacy
 failed result envelope and places its bounded structured OpenAI diagnostic on a
 separate runtime-authored line. The new reader presents that private string to
-Murph as data, not instructions; an older reader still recognizes the failed
-envelope, and neither path persists raw provider bodies or credentials. This
+Murph as untrusted provider text that may echo user input, never as instructions;
+only the completion provenance and normalized status are authoritative. The
+completion turn explains the cause without starting another image operation;
+retry requires later user authorization. An older reader still recognizes the
+failed envelope, and neither path persists raw provider bodies or credentials. This
 adds no durable image job, mailbox kind, scheduler, reservation, allowance
 implementation, or image-specific usage lifecycle; unfinished provider work
 may be lost with the runner invocation.

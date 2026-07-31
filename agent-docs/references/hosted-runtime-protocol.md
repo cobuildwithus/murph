@@ -1303,10 +1303,13 @@ its exact `vault_image` descriptor on the original route, registers that input
 with the ordinary pending assistant-input index, and notifies the existing wake
 signal. When OpenAI rejects generation or editing, the same completion input
 keeps the legacy exact `{status:"failed"}` result envelope and carries one
-separate trusted diagnostic line. New readers accept that line only from exact
-runtime-authored system provenance, normalize and bound it, and present it to
-Murph as data rather than instructions; old readers continue to understand the
-unchanged failed envelope. The diagnostic may contain only the adapter's bounded
+separate runtime-authored diagnostic line. New readers accept that line only
+from exact runtime-authored system provenance, normalize and bound it, and
+present it to Murph as untrusted provider evidence rather than instructions;
+the authenticated provenance applies only to the completion status. The queued
+completion turn may explain or propose a correction but cannot launch another
+image operation; a retry requires user authorization in a later turn. Old
+readers continue to understand the unchanged failed envelope. The diagnostic may contain only the adapter's bounded
 structured error message, code, request id, and fixed local context, never an
 authorization header, credential, raw response body, prompt payload, or image
 bytes. Normal foreground selection therefore keeps fresh conversation ahead of
