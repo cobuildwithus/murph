@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 155.9 148">
+<!-- SVG created with Arrow, by QuiverAI (https://quiver.ai) -->
+  <style type="text/css">.cls-0 {fill:#DADADA;}
+.cls-1 {fill:#505C3A;}
+.cls-2 {fill:#CCBCA3;}
+.cls-3 {fill:#F7EFE2;}
+.cls-4 {fill:#B67647;}
+.cls-5 {fill:#AE9F88;}
+.cls-6 {fill:none;stroke:#505C3A;stroke-width:4;stroke-miterlimit:10;}
+.cls-7 {fill:none;stroke:#505C3A;stroke-width:4;stroke-linecap:square;stroke-miterlimit:10;}</style>
+  <path class="cls-0" d="m80.6 7c-36.8 0-66.4 29.6-66.4 66.5s27.5 68.6 66.3 69.5c37.1 1 67.5-27.2 67.5-67s-30.6-69-67.4-69z"/>
+  <path class="cls-1" d="m76.1 4.2c-36.8 0-68.5 29.7-68.5 67.5 0 35.6 26.1 68.1 68.4 68.1 34.5 0 68.2-25.4 68.2-68.1 0-35.1-29.7-67.5-68.1-67.5z"/>
+  <path class="cls-2" d="m75.8 9c-34.1 0-63.7 27.6-63.7 63.2 0 32.3 24.1 63.3 63.7 63.3 31.5 0 63.9-23.6 63.9-63.4-0.1-31.8-27.2-63.1-63.9-63.1z"/>
+  <path class="cls-3" d="m75.9 13.2c-31.5 0-59.5 25.7-59.5 59 0 28.9 21.8 58.9 59.5 58.9 28.7 0 59.6-19.6 59.6-59-0.1-28.5-24.8-58.9-59.6-58.9z"/>
+  <circle class="cls-5" cx="75.9" cy="72.4" r="7"/>
+  <circle class="cls-4" cx="75.9" cy="72.4" r="6.1"/>
+  <path class="cls-5" d="m83.2 72 36.2-22.5-1.7-3.6-39.3 22.6s1.7 0.8 4.8 3.5z"/>
+  <polyline class="cls-6" points="48.4 54.5 75.7 72 116.9 46.5"/>
+  <path class="cls-1" d="m75.7 68.2c-1.7 0-3.9 1.4-3.9 4 0 2.3 1.9 4.1 3.9 4.1 2.1 0 3.9-1.7 3.9-3.9s-1.5-4.2-3.9-4.2z"/>
+  <line class="cls-7" x1="75.7" x2="115.7" y1="72.4" y2="47.4"/>
+</svg>

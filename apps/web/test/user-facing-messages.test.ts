@@ -188,8 +188,10 @@ describe("user-facing message variants", () => {
     }
   });
 
-  it("keeps Group sync continuity explicit when personal AI usage pauses", () => {
+  it("keeps Core sync continuity explicit when personal AI usage pauses", () => {
     for (const text of collectRenderedTexts("linq.ai_usage.group_upgrade_pulse")) {
+      expect(text).toMatch(/Core/u);
+      expect(text).not.toMatch(/\bGroup\b/u);
       expect(text).toMatch(/sync|syncing|wearable|health data/iu);
       expect(text).toMatch(/group/iu);
       expect(text).toMatch(/pause|paused|wait|reset/iu);

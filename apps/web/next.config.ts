@@ -217,7 +217,9 @@ export function buildHostedWebSecurityHeaders(
     },
     {
       key: "Permissions-Policy",
-      value: "camera=(), geolocation=(), microphone=()",
+      // The Environment recorder is same-origin and still requires the
+      // browser's explicit per-site permission. Embedded origins stay blocked.
+      value: "camera=(), geolocation=(), microphone=(self)",
     },
   ];
 

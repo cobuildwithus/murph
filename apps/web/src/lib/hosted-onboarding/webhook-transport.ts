@@ -796,6 +796,7 @@ async function sendHostedLinqSideEffect(
         chatId: result.chatId,
         effect: deliveryEffect,
         messageId: result.messageId,
+        messageIds: result.providerMessageIds,
         prisma: options.prisma,
         throwOnError: options.completeProviderOutcomeBeforeReturn,
       });
@@ -882,6 +883,7 @@ async function sendHostedLinqSideEffect(
       chatId: result.chatId ?? deliveryChatId,
       effect: deliveryEffect,
       messageId: result.messageId,
+      messageIds: result.providerMessageIds,
       prisma: options.prisma,
       throwOnError:
         deliveryEffect.payload.template === "ai_usage_quota"
@@ -925,12 +927,30 @@ async function sendHostedLinqSideEffect(
       && usageLimitPayload
     ) {
       if (usageLimitDispatchClaimed) {
-        await markHostedLinqDeliverySendFailedTx({
-          expectedAttemptedAt: new Date(usageLimitPayload.claimToken.sentAt),
-          failureCode: "linq_usage_limit_dispatch_retryable",
-          idempotencyKey: deliveryEffect.effectId,
-          prisma: options.prisma,
-        });
+        const partialDelivery =
+          readHostedLinqRichLinkPartialDeliveryFailure(error);
+        await markHostedLinqDeliverySendFailedTx(
+          partialDelivery
+            ? {
+                expectedAttemptedAt: new Date(
+                  usageLimitPayload.claimToken.sentAt,
+                ),
+                failureCode: partialDelivery.failureCode,
+                failureReason: error instanceof Error ? error.message : null,
+                idempotencyKey: deliveryEffect.effectId,
+                linqChatId: partialDelivery.linqChatId,
+                messageIds: partialDelivery.messageIds,
+                prisma: options.prisma,
+              }
+            : {
+                expectedAttemptedAt: new Date(
+                  usageLimitPayload.claimToken.sentAt,
+                ),
+                failureCode: "linq_usage_limit_dispatch_retryable",
+                idempotencyKey: deliveryEffect.effectId,
+                prisma: options.prisma,
+              },
+        );
       }
       console.error(
         "Hosted Linq side-effect delivery failed.",
@@ -1654,6 +1674,7 @@ async function markHostedLinqDeliveryAcceptedBestEffort(input: {
   chatId: string | null;
   effect: HostedLinqMessageSideEffect;
   messageId: string | null;
+  messageIds?: readonly string[];
   prisma: HostedLinqTransportPersistenceClient;
   throwOnError?: boolean;
 }): Promise<void> {
@@ -1670,6 +1691,7 @@ async function markHostedLinqDeliveryAcceptedBestEffort(input: {
         idempotencyKey: input.effect.effectId,
         linqChatId: input.chatId,
         messageId: input.messageId,
+        ...(input.messageIds ? { messageIds: input.messageIds } : {}),
         prisma,
       });
       if (milestone.reopenOnboardingLink) {
@@ -1752,9 +1774,12 @@ async function markHostedLinqDeliveryFailedBestEffort(input: {
   prisma: HostedLinqTransportPersistenceClient;
 }): Promise<void> {
   try {
+    const errorRecord = readErrorRecord(input.error);
+    const partialDelivery =
+      readHostedLinqRichLinkPartialDeliveryFailure(input.error);
     await markHostedLinqDeliverySendFailedTx({
       expectedAttemptedAt: input.expectedAttemptedAt,
-      failureCode: readHostedLinqSideEffectString(readErrorRecord(input.error), "code"),
+      failureCode: readHostedLinqSideEffectString(errorRecord, "code"),
       // This path can carry provider prose. Recovery deliveries retain only a
       // bounded code so participant or provider text cannot enter durable state.
       failureReason:
@@ -1764,11 +1789,57 @@ async function markHostedLinqDeliveryFailedBestEffort(input: {
             ? input.error.message
             : null,
       idempotencyKey: input.effect.effectId,
+      ...(partialDelivery
+        ? {
+            linqChatId: partialDelivery.linqChatId,
+            messageIds: partialDelivery.messageIds,
+          }
+        : {}),
       prisma: input.prisma,
     });
   } catch {
     // Preserve the original delivery error. This telemetry update is non-critical.
   }
+}
+
+function readHostedLinqRichLinkPartialDeliveryFailure(
+  error: unknown,
+): {
+  failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY";
+  linqChatId: string | null;
+  messageIds: string[];
+} | null {
+  const errorRecord = readErrorRecord(error);
+  if (
+    readHostedLinqSideEffectString(errorRecord, "code")
+    !== "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY"
+  ) {
+    return null;
+  }
+  return {
+    failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+    linqChatId: readHostedLinqSideEffectString(
+      errorRecord,
+      "providerThreadId",
+    ),
+    messageIds: readHostedLinqPartialDeliveryMessageIds(error),
+  };
+}
+
+function readHostedLinqPartialDeliveryMessageIds(error: unknown): string[] {
+  const errorRecord = readErrorRecord(error);
+  const values = errorRecord?.providerMessageIds;
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  const output: string[] = [];
+  for (const value of values) {
+    const messageId = typeof value === "string" ? value.trim() : "";
+    if (messageId && !output.includes(messageId)) {
+      output.push(messageId);
+    }
+  }
+  return output;
 }
 
 function buildHostedLinqSideEffectLogDetails(

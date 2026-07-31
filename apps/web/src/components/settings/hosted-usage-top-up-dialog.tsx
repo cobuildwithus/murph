@@ -199,14 +199,14 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
   const headerTitle = statusContent
     ? `${statusContent.title}${familyTarget && !purchase?.targetConflict ? ` for ${familyTarget}` : ""}`
     : props.offers.length === 0
-      ? "Usage credit unavailable"
+      ? "Usage unavailable"
       : props.scope === "group"
         ? groupPaymentMode === "monthly"
           ? "Sponsor this chat"
           : "Make a one-time contribution"
         : familyTarget
-          ? `Choose an amount for ${familyTarget}`
-          : "Choose an amount";
+          ? `Add usage for ${familyTarget}`
+          : "Add usage";
   const headerDescription = purchase
     ? showGroupMessagesAction && statusContent
       ? statusContent.message
@@ -219,17 +219,15 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
           : props.scope === "group"
             ? "We’ll update this group’s credit as soon as payment is complete."
             : familyTarget
-              ? `We’ll update the available credit for ${familyTarget} as soon as payment is complete.`
-              : "We’ll update your credit as soon as payment is complete."
+              ? `We’ll update the available usage for ${familyTarget} as soon as payment is complete.`
+              : "We’ll update your available usage as soon as payment is complete."
     : props.offers.length === 0
-      ? "There isn’t a usage-credit offer available for this account right now."
+      ? "There isn’t more usage available for this account right now."
       : props.scope === "group"
         ? groupPaymentMode === "monthly"
           ? "Choose your monthly sponsorship limit."
           : "Choose one explicit contribution of cost-weighted usage credit for this chat."
-        : familyTarget
-          ? `Choose a one-time credit amount for ${familyTarget}. We’ll use your saved card when available. Stripe will ask when card details or verification are needed.`
-          : "Choose a one-time credit amount for your account. We’ll use your saved card when available. Stripe will ask when card details or verification are needed.";
+        : null;
   const confirmationIndicator =
     showGroupMessagesAction && statusContent ? (
       <div
@@ -422,9 +420,9 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
           >
             {groupPaymentMode === "monthly" ? null : (
               <FieldSet disabled={hasAttempt || !controller.requestIdentityReady}>
-                <FieldLegend className="sr-only">Usage credit amount</FieldLegend>
+                <FieldLegend className="sr-only">Usage amount</FieldLegend>
                 <FieldDescription className="sr-only">
-                  Choose one usage credit amount.
+                  Choose one usage amount.
                 </FieldDescription>
                 <RadioGroup
                   value={selection.selectedOfferCode ?? ""}
@@ -446,7 +444,9 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                       }
                       description={
                         <span className="text-sm font-medium text-muted-foreground">
-                          Cost-weighted usage credit
+                          {props.scope === "group"
+                            ? "Cost-weighted usage credit"
+                            : "usage"}
                         </span>
                       }
                     />
@@ -725,13 +725,17 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
             {headerTitle}
           </DialogTitle>
           <DialogDescription
-            className={cn(
-              "max-w-md text-base leading-6",
-              showGroupMessagesAction &&
-                "max-w-lg text-[1.0625rem] leading-7 text-muted-foreground",
-            )}
+            className={
+              headerDescription
+                ? cn(
+                    "max-w-md text-base leading-6",
+                    showGroupMessagesAction &&
+                      "max-w-lg text-[1.0625rem] leading-7 text-muted-foreground",
+                  )
+                : "sr-only"
+            }
           >
-            {headerDescription}
+            {headerDescription ?? "Choose a usage amount."}
           </DialogDescription>
         </DialogHeader>
         {screenContent}

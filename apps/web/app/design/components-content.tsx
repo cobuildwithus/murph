@@ -139,7 +139,39 @@ import {
 import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
 import { HostedAccountDeletionStatus } from "@/src/components/settings/hosted-data-privacy-settings";
 import { GarminHistoricalDataDialog } from "../(dashboard)/connect/connect-page-dialogs";
+import {
+  EnvironmentCaptureCard,
+  EnvironmentEmptyState,
+  EnvironmentVoiceRefreshNotice,
+} from "../(dashboard)/environment/environment-page-client";
+import type { EnvironmentVoiceScript } from "../(dashboard)/environment/environment-voice-script";
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
+
+const DESIGN_ENVIRONMENT_GAP_SCRIPT: EnvironmentVoiceScript = {
+  dialogTitle: "Fill the gaps in your report",
+  flow: "fill-gaps",
+  idleDescription:
+    "Two short topics, based on what Murph does not know yet.",
+  idleTitle: "Only the missing details",
+  topics: [
+    {
+      eyebrow: "Sleep",
+      focus: ["Bedroom CO₂"],
+      id: "sleep",
+      prompt:
+        "Cover only the details Murph is still missing. If something does not apply or you would rather skip it, say so.",
+      title: "Your sleep setup",
+    },
+    {
+      eyebrow: "Workspace",
+      focus: ["Breaks"],
+      id: "workspace",
+      prompt:
+        "Cover only the details Murph is still missing. If something does not apply or you would rather skip it, say so.",
+      title: "Your remaining workspace details",
+    },
+  ],
+};
 
 function Section({
   children,
@@ -823,6 +855,86 @@ export function ComponentsContent() {
             </div>
           </div>
         </Section>
+
+        <Separator />
+
+        <div
+          data-design-component="environment-empty-state"
+          id="environment-empty-state-component"
+        >
+          <Section title="Environment empty state">
+            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+              Production zero-data state. One voice-first action leads to the
+              walkthrough, while the real report categories preview what Murph
+              will build without showing empty scores or missing facts.
+            </p>
+            <EnvironmentEmptyState
+              contactAction={{
+                href: "sms:+15555550100?body=I%20want%20to%20update%20what%20you%20know%20about%20my%20home%20environment.",
+                kind: "text",
+                label: "Text Murph",
+              }}
+            />
+          </Section>
+        </div>
+
+        <Separator />
+
+        <div
+          data-design-component="environment-capture-card"
+          id="environment-capture-card-component"
+          inert
+        >
+          <Section title="Environment progressive capture">
+            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+              Production partial-data state. The action opens a voice script
+              built only from facts Murph still does not know.
+            </p>
+            <EnvironmentCaptureCard
+              contactAction={null}
+              coverage={70}
+              known={21}
+              script={DESIGN_ENVIRONMENT_GAP_SCRIPT}
+            />
+          </Section>
+        </div>
+
+        <Separator />
+
+        <div
+          data-design-component="environment-voice-refresh-notice"
+          id="environment-voice-refresh-notice-component"
+          inert
+        >
+          <Section title="Environment voice processing feedback">
+            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+              The open report keeps ownership after upload: processing,
+              updated, no-clear-facts, and delayed recovery remain visible
+              without requiring a reload.
+            </p>
+            <div className="grid gap-4">
+              <EnvironmentVoiceRefreshNotice
+                state={{
+                  baselineValues: "{}",
+                  status: "processing",
+                }}
+                onCheckAgain={() => {}}
+              />
+              <EnvironmentVoiceRefreshNotice
+                state={{ factsChanged: true, status: "updated" }}
+                onCheckAgain={() => {}}
+              />
+              <EnvironmentVoiceRefreshNotice
+                state={{ factsChanged: false, status: "updated" }}
+                onCheckAgain={() => {}}
+              />
+              <EnvironmentVoiceRefreshNotice
+                state={{ status: "delayed" }}
+                onCheckAgain={() => {}}
+              />
+            </div>
+          </Section>
+        </div>
 
         <Separator />
 

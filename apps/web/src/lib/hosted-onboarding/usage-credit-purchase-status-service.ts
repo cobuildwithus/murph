@@ -698,9 +698,15 @@ function readHostedUsageCreditPurchaseTarget(input: Pick<
 
   const familyGroupId = url.searchParams.get("usageFamily");
   const familyMemberId = url.searchParams.get("usageMember");
+  const familyReturnHashMatches =
+    url.hash === "#family"
+    || (
+      url.hash === "#subscription"
+      && input.beneficiaryMemberId === input.payerMemberId
+    );
   if (
     url.pathname === "/settings"
-    && url.hash === "#family"
+    && familyReturnHashMatches
     && stringArraysEqual(searchKeys, [
       "usageCheckout",
       "usageFamily",

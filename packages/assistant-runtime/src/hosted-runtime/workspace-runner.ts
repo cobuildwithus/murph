@@ -2529,6 +2529,10 @@ function createHostedWorkspaceCanonicalWritePort(input: {
   return {
     async persistCanonicalWrite(writeInput) {
       const persist = async () => {
+        const assistantAutomationScheduleChanged =
+          hostedCanonicalWriteChangesAssistantAutomationSchedule(
+            writeInput.receipt,
+          );
         const snapshotDirtyDomains =
           listAssistantContextSnapshotDirtyDomainsForCanonicalWrite(
             writeInput.receipt,
@@ -2569,6 +2573,13 @@ function createHostedWorkspaceCanonicalWritePort(input: {
             throw new TypeError("Hosted canonical write receipt checkpoint requires runtime status checkpoint support.");
           }
           const checkpoint = await input.input.checkpointRuntimeRedactedStatus({
+            // Keep schedule persistence and wake ownership in one durable checkpoint.
+            ...(assistantAutomationScheduleChanged
+              ? {
+                  nextWakeAt: resolveHostedWorkspaceRunnerNowIso(input.input.now),
+                  nextWakeReason: HOSTED_ASSISTANT_WAKE_REASON,
+                }
+              : {}),
             reason: "canonical_runtime_commit",
             redactedStatus: checkpointRedactedStatus,
             workspace: input.checkpointRequestBuilder.latestWorkspace() ?? input.input.workspace,
@@ -2584,7 +2595,7 @@ function createHostedWorkspaceCanonicalWritePort(input: {
           reason: "canonical_runtime_commit",
           runtimeLogContext: input.input.runtimeLogContext,
         });
-        if (hostedCanonicalWriteChangesAssistantAutomationSchedule(writeInput.receipt)) {
+        if (assistantAutomationScheduleChanged) {
           input.onAssistantAutomationScheduleChanged?.();
         }
       };
