@@ -18,12 +18,15 @@ import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
 const PHYSICAL_NOTE_ARGUMENT_ROOT_KEYS = [
   'image_ref',
   'image_sha256',
+  'message_ref',
   'to',
 ] as const
+const ACCEPTED_INPUT_ID_PATTERN = /^ain_[0-9a-f]{32}$/u
 
 const physicalNoteArgumentsSchema = z.object({
   image_ref: z.string().trim().min(1).max(1024).optional(),
   image_sha256: z.string().trim().regex(/^[0-9a-f]{64}$/u).optional(),
+  message_ref: z.string().trim().regex(ACCEPTED_INPUT_ID_PATTERN).optional(),
   to: z.object({
     address_line1: z.string().trim().min(1).max(64),
     address_line2: z.string().trim().min(1).max(64).optional(),
@@ -40,6 +43,13 @@ const physicalNoteArgumentsSchema = z.object({
       path: ['image_ref'],
     })
   }
+  if (value.message_ref !== undefined && value.image_ref === undefined) {
+    context.addIssue({
+      code: 'custom',
+      message: 'message_ref is only valid with an earlier generated image.',
+      path: ['message_ref'],
+    })
+  }
 })
 
 export const MURPH_SEND_PHYSICAL_NOTE_TOOL = {
@@ -47,8 +57,8 @@ export const MURPH_SEND_PHYSICAL_NOTE_TOOL = {
   name: 'send_physical_note',
   description: [
     'Before creating or mailing a physical note, read $MURPH_ASSISTANT_SKILLS_ROOT/physical-notes/SKILL.md.',
-    'On the trusted hosted image-completion turn, omit image_ref and image_sha256 so runtime code binds the exact generated image and originating request automatically.',
-    'When a generated note was intentionally shown first and a person later says to send it, provide the exact image_ref and image_sha256 from that trusted completion; both are required together and runtime code re-reads and verifies the private vault bytes.',
+    'On the trusted hosted image-completion turn, omit image_ref, image_sha256, and message_ref so runtime code binds the exact generated image and originating request automatically.',
+    'When a generated note was intentionally shown first and a person later says to send it, provide the exact image_ref and image_sha256 from that trusted completion; both are required together and runtime code re-reads and verifies the private vault bytes. In a group, also provide the exact message_ref from the participant approving the send in the current turn.',
     'When the originating user already explicitly asked Murph to mail the note and supplied a complete US address, call this tool automatically after generation finishes; showing or attaching the image first is optional, not required.',
     'Do not call for a draft-only request, an incomplete address, bulk mail, an international address, impersonation, threats, harassment, fraud, or illegal content.',
     'The server decides whether the note is complimentary and computes any Murph-time cost. Never claim acceptance until this tool reports accepted.',
@@ -69,6 +79,12 @@ export const MURPH_SEND_PHYSICAL_NOTE_TOOL = {
         pattern: '^[0-9a-f]{64}$',
         description:
           'Optional exact SHA-256 paired with image_ref from an earlier trusted hosted image completion.',
+      },
+      message_ref: {
+        type: 'string',
+        pattern: '^ain_[0-9a-f]{32}$',
+        description:
+          'Exact current Message ref from the participant approving a later send of previously previewed artwork. Required in groups when image_ref and image_sha256 are supplied; omit on the automatic image-completion turn.',
       },
       to: {
         type: 'object',
@@ -96,6 +112,7 @@ export type PhysicalNoteDynamicToolRequest =
       imageRef?: string
       imageSha256?: string
       kind: 'send-physical-note'
+      messageRef?: string
       recipient: HostedPhysicalNoteRecipient
     }
   | {
@@ -141,8 +158,28 @@ export function readPhysicalNoteDynamicToolRequest(input: {
         }
       : {}),
     kind: 'send-physical-note',
+    ...(parsed.args.message_ref
+      ? { messageRef: parsed.args.message_ref }
+      : {}),
     recipient,
   }
+}
+
+export function resolvePhysicalNoteExplicitOriginInputId(input: {
+  acceptedInputIds: readonly string[]
+  conversationScope: 'direct' | 'group'
+  messageRef?: string
+}): string | null {
+  if (input.conversationScope === 'group') {
+    return input.messageRef
+      && input.acceptedInputIds.includes(input.messageRef)
+      ? input.messageRef
+      : null
+  }
+  const inputId = input.acceptedInputIds.at(-1) ?? null
+  return inputId && ACCEPTED_INPUT_ID_PATTERN.test(inputId)
+    ? inputId
+    : null
 }
 
 export function createPhysicalNoteRequestKey(input: {
