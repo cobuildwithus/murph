@@ -84,14 +84,31 @@ jobs:
           pnpm --dir apps/cloudflare typecheck
           pnpm --dir apps/web typecheck
 
-      - name: Run focused tests
+      - name: Run exact affected tests
         shell: bash
         run: |
           set -euo pipefail
-          pnpm --filter @murphai/hosted-execution test -- physical-notes
-          pnpm --filter @murphai/assistant-engine test -- assistant-physical-notes assistant-hosted-image-completion
-          pnpm --filter @murphai/assistant-runtime test -- hosted-runtime-image-generation
-          pnpm --dir apps/web test:prepared -- physical-notes-lob-runtime hosted-execution-usage-lob hosted-physical-note-storage-contract hosted-account-data-service
+          pnpm --dir packages/hosted-execution exec vitest run \
+            --config vitest.config.ts \
+            --no-coverage \
+            test/physical-notes.test.ts \
+            test/hosted-execution.test.ts
+          pnpm --dir packages/assistant-engine exec vitest run \
+            --config vitest.config.ts \
+            --no-coverage \
+            test/assistant-physical-notes.test.ts \
+            test/assistant-hosted-image-completion.test.ts
+          pnpm --dir packages/assistant-runtime exec vitest run \
+            --config vitest.config.ts \
+            --no-coverage \
+            test/hosted-runtime-image-generation.test.ts
+          pnpm exec vitest run \
+            --config apps/web/vitest.workspace.ts \
+            --no-coverage \
+            apps/web/test/physical-notes-lob-runtime.test.ts \
+            apps/web/test/hosted-execution-usage-lob.test.ts \
+            apps/web/test/hosted-physical-note-storage-contract.test.ts \
+            apps/web/test/hosted-account-data-service.test.ts
 
       - name: Commit verified integration and remove bootstrap
         shell: bash
