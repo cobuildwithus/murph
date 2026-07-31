@@ -166,13 +166,19 @@ export async function sendHostedProviderLinqMessage(
       request: effectiveRequest,
     });
     if (recovered) {
-      return recovered;
+      return withHostedProviderLinqEffectiveIdentity(
+        recovered,
+        effectiveRequest,
+      );
     }
     throw createHostedProviderLinqRecoverySenderRequiredError();
   }
 
   try {
-    return await sendHostedProviderLinqMessageDirect(effectiveRequest, context);
+    return withHostedProviderLinqEffectiveIdentity(
+      await sendHostedProviderLinqMessageDirect(effectiveRequest, context),
+      effectiveRequest,
+    );
   } catch (error) {
     const recovered = await maybeRecoverHostedProviderMissingLinqThread({
       context,
@@ -180,7 +186,10 @@ export async function sendHostedProviderLinqMessage(
       request: effectiveRequest,
     });
     if (recovered) {
-      return recovered;
+      return withHostedProviderLinqEffectiveIdentity(
+        recovered,
+        effectiveRequest,
+      );
     }
     throw error;
   }
@@ -406,12 +415,6 @@ async function materializeHostedProviderLinqDirectThread(input: {
     }
     return {
       ...delivered,
-      ...(input.request.idempotencyKey
-        ? {
-            idempotencyKey:
-              delivered.idempotencyKey ?? input.request.idempotencyKey,
-          }
-        : {}),
       providerThreadId: normalizeHostedProviderText(delivered.providerThreadId) ?? target,
       target,
     };
@@ -426,6 +429,19 @@ async function materializeHostedProviderLinqDirectThread(input: {
     }
     throw error;
   }
+}
+
+function withHostedProviderLinqEffectiveIdentity(
+  result: HostedRuntimeLinqSendResponse,
+  request: HostedRuntimeLinqSendRequest,
+): HostedRuntimeLinqSendResponse {
+  const idempotencyKey =
+    normalizeHostedProviderText(result.idempotencyKey)
+    ?? normalizeHostedProviderText(request.idempotencyKey);
+  return {
+    ...result,
+    ...(idempotencyKey ? { idempotencyKey } : {}),
+  };
 }
 
 function shouldMaterializeHostedProviderLinqDirectThreadFirst(

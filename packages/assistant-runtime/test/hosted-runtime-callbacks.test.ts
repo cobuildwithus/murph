@@ -10402,6 +10402,95 @@ describe("hosted runtime callbacks", () => {
     expect(recordedOutcome).not.toContain("private reply text");
   });
 
+  it("records a card fallback failure under its durably promoted identity", async () => {
+    const effect = createEffect({
+      bindingDeliveryTarget: "linq_chat_123",
+      channel: "linq",
+      explicitTarget: "linq_chat_123",
+      transportIdempotent: false,
+    });
+    const providerError = Object.assign(
+      new Error("Provider text fallback failed."),
+      { code: "LINQ_PROVIDER_FAILED" },
+    );
+    const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined);
+    const recordDeliveryOutcome = vi.fn<
+      NonNullable<ReturnType<typeof createHostedRuntimeEffectsPortStub>["recordLinqDeliveryOutcome"]>
+    >(async () => undefined);
+    mocks.sendLinqMessage.mockImplementationOnce(async (...args) => {
+      await args[1]?.persistAppCardTextFallback?.({
+        idempotencyKey: "assistant-outbox:intent_123:fallback",
+      });
+      throw providerError;
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      try {
+        await dependencies.sendLinq({
+          card: {
+            kind: "daily_nutrition",
+            localDate: "2026-07-31",
+            mealCount: 1,
+            totals: {
+              calories: { mealCount: 1, total: 500 },
+              carbsGrams: { mealCount: 1, total: 55 },
+              fatGrams: { mealCount: 1, total: 18 },
+              proteinGrams: { mealCount: 1, total: 35 },
+            },
+          },
+          idempotencyKey: "assistant-outbox:intent_123",
+          message: "Nutrition summary",
+          persistAppCardTextFallback,
+          replyToMessageId: null,
+          target: "linq_chat_123",
+          targetKind: "thread",
+          threadIsDirect: true,
+        });
+      } catch {
+        return createDispatchResult({
+          delivery: null,
+          status: "failed",
+        }, {
+          code: "LINQ_PROVIDER_FAILED",
+          message: "Provider send failed.",
+        });
+      }
+
+      throw new Error("Expected Linq text fallback to fail.");
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      }),
+      forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      platformEnv: {},
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+    await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryErrorCode: "LINQ_PROVIDER_FAILED",
+        deliveryStatus: "failed",
+      }),
+    ]);
+    expect(persistAppCardTextFallback).toHaveBeenCalledWith({
+      idempotencyKey: "assistant-outbox:intent_123:fallback",
+    });
+    expect(recordDeliveryOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        failureCode: "LINQ_PROVIDER_FAILED",
+        idempotencyKey: "assistant-outbox:intent_123:fallback",
+      }),
+      { signal: expect.any(AbortSignal) },
+    );
+  });
+
   it("persists a recoverable Linq rich-link checkpoint before the retry settles", async () => {
     const answeredMailboxItemIds = ["mailbox_item_answered_1"];
     const effect = createEffect({

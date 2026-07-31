@@ -3525,6 +3525,8 @@ function createHostedAssistantLinqSendDependency(input: {
       ?? normalizeHostedLinqDirectRecipient(deliveryContext?.fromPhoneNumber);
     const signal = mergeHostedAssistantLinqSignals(input.signal, request.signal);
     const idempotencyKey = request.idempotencyKey?.trim() || null;
+    let effectiveIdempotencyKey = idempotencyKey;
+    const persistAppCardTextFallback = request.persistAppCardTextFallback;
     const reviewedAssistantAskCompletion = idempotencyKey?.startsWith(
       HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
     ) === true;
@@ -3615,7 +3617,7 @@ function createHostedAssistantLinqSendDependency(input: {
               effectsPort: input.effectsPort ?? null,
               fromPhoneNumber,
               homeRouteFallbackAllowed: currentHomeRouteOnly,
-              idempotencyKey,
+              idempotencyKey: effectiveIdempotencyKey,
               intentId: input.intentId ?? null,
               replyToMessageId: request.replyToMessageId ?? null,
               providerDispatchRetrySafe: true,
@@ -3710,10 +3712,12 @@ function createHostedAssistantLinqSendDependency(input: {
               },
             }
           : {}),
-        ...(request.persistAppCardTextFallback
+        ...(persistAppCardTextFallback
           ? {
-              persistAppCardTextFallback:
-                request.persistAppCardTextFallback,
+              persistAppCardTextFallback: async (fallback) => {
+                await persistAppCardTextFallback(fallback);
+                effectiveIdempotencyKey = fallback.idempotencyKey;
+              },
             }
           : {}),
       });
@@ -3735,7 +3739,7 @@ function createHostedAssistantLinqSendDependency(input: {
             failureCode: readHostedAssistantLinqDeliveryFailureCode(error),
             failureReason: null,
             fromPhoneNumber,
-            idempotencyKey,
+            idempotencyKey: effectiveIdempotencyKey,
             intentId: input.intentId ?? null,
             providerTarget,
             providerThreadId: partialRichLinkResult.providerThreadId ?? null,
@@ -3762,7 +3766,7 @@ function createHostedAssistantLinqSendDependency(input: {
           failureCode: readHostedAssistantLinqDeliveryFailureCode(error),
           failureReason: readTrustedHostedAssistantLinqDeliveryFailureReason(error),
           fromPhoneNumber,
-          idempotencyKey,
+          idempotencyKey: effectiveIdempotencyKey,
           intentId: input.intentId ?? null,
           providerTarget,
           providerThreadId: null,
@@ -3775,8 +3779,8 @@ function createHostedAssistantLinqSendDependency(input: {
       throw error;
     }
     const acceptedAt = new Date();
-    const effectiveIdempotencyKey =
-      result.idempotencyKey ?? idempotencyKey;
+    effectiveIdempotencyKey =
+      result.idempotencyKey ?? effectiveIdempotencyKey;
     input.onProviderAccepted?.({
       acceptedAssistantInputIds: request.acceptedAssistantInputIds ?? [],
       acceptedAt,

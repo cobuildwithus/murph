@@ -450,7 +450,10 @@ describe("hosted provider effects", () => {
       env: { LINQ_API_TOKEN: "linq-token" },
       fetchImplementation: fetchMock,
       persistAppCardTextFallback,
-    })).resolves.toMatchObject({ providerMessageId: "fallback-message" });
+    })).resolves.toMatchObject({
+      idempotencyKey: "hosted-card-fallback",
+      providerMessageId: "fallback-message",
+    });
 
     expect(persistAppCardTextFallback).toHaveBeenCalledWith({
       idempotencyKey: "hosted-card-fallback",
@@ -458,6 +461,67 @@ describe("hosted provider effects", () => {
     expect(persistAppCardTextFallback.mock.invocationCallOrder[0]).toBeLessThan(
       fetchMock.mock.invocationCallOrder[1]!,
     );
+  });
+
+  it("returns the promoted identity after a direct app-card text fallback", async () => {
+    const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined);
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/capability/check_imessage")) {
+        return new Response(JSON.stringify({ available: true }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      const body = typeof init?.body === "string"
+        ? JSON.parse(init.body) as {
+            message?: { parts?: Array<{ type?: string }> };
+          }
+        : {};
+      if (body.message?.parts?.[0]?.type === "imessage_app") {
+        return new Response(JSON.stringify({ error: "unsupported app card" }), {
+          headers: { "content-type": "application/json" },
+          status: 400,
+        });
+      }
+      return new Response(JSON.stringify({
+        message: { id: "direct-fallback-message" },
+      }), {
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    await expect(sendHostedProviderLinqMessage({
+      card: {
+        kind: "daily_nutrition",
+        localDate: "2026-07-31",
+        mealCount: 1,
+        totals: {
+          calories: { mealCount: 1, total: 500 },
+          carbsGrams: { mealCount: 1, total: 55 },
+          fatGrams: { mealCount: 1, total: 18 },
+          proteinGrams: { mealCount: 1, total: 35 },
+        },
+      },
+      directRecipientPhoneNumber: "+15550001",
+      idempotencyKey: "hosted-card-rejected",
+      message: "Nutrition summary",
+      target: "direct-chat",
+      targetKind: "thread",
+      threadIsDirect: true,
+    }, {
+      env: { LINQ_API_TOKEN: "linq-token" },
+      fetchImplementation: fetchMock,
+      persistAppCardTextFallback,
+    })).resolves.toEqual({
+      idempotencyKey: "hosted-card-rejected:fallback",
+      providerMessageId: "direct-fallback-message",
+      providerThreadId: null,
+      target: "direct-chat",
+    });
+
+    expect(persistAppCardTextFallback).toHaveBeenCalledWith({
+      idempotencyKey: "hosted-card-rejected:fallback",
+    });
   });
 
   it.each([

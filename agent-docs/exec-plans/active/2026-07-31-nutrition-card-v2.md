@@ -117,3 +117,12 @@ Updated: 2026-07-31
   Composed proof must cover capability fallback and definitive app-card
   rejection followed by stale-thread materialization, alongside the existing
   interruption, persistence-failure, and ambiguous-delivery matrix.
+- Final ReviewGPT round 8 found the last stale-identity consumers at the hosted
+  boundary: a successful direct fallback response could omit its promoted key,
+  while terminal and partial provider outcomes still recorded the original
+  card key after durable promotion. The hosted provider boundary now returns
+  one normalized effective identity for direct and recovered sends, and the
+  hosted callback advances its outcome identity only after the existing outbox
+  persistence callback succeeds. Focused hosted provider and callback coverage
+  passes with 229 tests, including direct fallback success and terminal
+  fallback failure, and the assistant-runtime package typecheck passes.
