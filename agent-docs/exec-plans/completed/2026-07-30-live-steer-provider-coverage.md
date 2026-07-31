@@ -1,8 +1,8 @@
 # Bound live-steer acceptance to provider coverage
 
-Status: active
+Status: completed
 Created: 2026-07-30
-Updated: 2026-07-30
+Updated: 2026-07-31
 
 ## Goal
 
@@ -116,5 +116,12 @@ Updated: 2026-07-30
     ordinal-1 drains mutated the accepted journal from the same stale snapshot.
   - After serialization, the focused local-service and real App Server overlap
     cases pass together (`2 passed`, `99 skipped`).
-  - Assistant-engine typecheck and agent-doc drift checks pass. Exact-head CI
-    and correction ReviewGPT remain.
+  - Assistant-engine typecheck and agent-doc drift checks pass.
+  - Exact-head GitHub Actions pass, including assistant package coverage.
+  - ReviewGPT correction round 2 passed after 19 minutes 36 seconds with the
+    prior concurrency finding resolved and no regression, original-PR, or
+    adjacent pre-existing findings.
+  - Parent final review found no bypass of the serialized drain boundary. The
+    PR body records the immutable first-review shape, correction delta, and
+    bounded wait introduced for overlapping drains.
+Completed: 2026-07-31
