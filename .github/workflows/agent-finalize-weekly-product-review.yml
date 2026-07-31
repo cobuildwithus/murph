@@ -1,0 +1,175 @@
+name: Finalize weekly product review pull request
+
+on:
+  push:
+    branches:
+      - agent/weekly-founder-product-review-privacy
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+  actions: read
+
+jobs:
+  finalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: agent/weekly-founder-product-review-privacy
+
+      - name: Wait for validated implementation commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          ready=0
+          for attempt in $(seq 1 110); do
+            git fetch origin agent/weekly-founder-product-review-privacy main
+            git reset --hard origin/agent/weekly-founder-product-review-privacy
+
+            patch_count=$(find . -type f \( -iname '*weekly-founder-product-review*.patch' -o -iname '*opt-in-unlinked-and-confined-privacy-review*.patch' \) -print | wc -l | tr -d ' ')
+            apply_bootstrap_present=0
+            [[ -e .github/workflows/agent-apply-weekly-product-review.yml ]] && apply_bootstrap_present=1
+            implementation_present=0
+            if git grep -q 'executeConfinedReadOnlyReview' -- packages/assistant-engine \
+              && git grep -q 'feature.product-improvement-review' -- apps/web \
+              && git grep -q 'product_review' -- packages/hosted-execution; then
+              implementation_present=1
+            fi
+            latest_subject=$(git log -1 --pretty=%s)
+
+            if [[ "$patch_count" == 0 \
+              && "$apply_bootstrap_present" == 0 \
+              && "$implementation_present" == 1 \
+              && "$latest_subject" == 'feat: add privacy-reviewed weekly founder product review' ]]; then
+              ready=1
+              break
+            fi
+
+            echo "Waiting for validated implementation (attempt ${attempt}/110; patches=${patch_count}; applyBootstrap=${apply_bootstrap_present}; implementation=${implementation_present}; subject=${latest_subject})"
+            sleep 30
+          done
+
+          if [[ "$ready" != 1 ]]; then
+            echo 'Validated implementation commit did not arrive before the deadline.' >&2
+            exit 1
+          fi
+
+          git diff --check origin/main...HEAD
+          if git diff --name-only origin/main...HEAD | grep -E '(^|/)([^/]*\.patch|agent-(apply|finalize)-weekly-product-review\.yml)$'; then
+            echo 'Bootstrap artifacts remain in the pull-request diff.' >&2
+            exit 1
+          fi
+
+      - name: Remove finalizer from final branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          rm -f .github/workflows/agent-finalize-weekly-product-review.yml
+          git add -A
+          git commit -m 'chore: remove product review bootstrap'
+          git diff --check HEAD^ HEAD
+          git push origin HEAD:agent/weekly-founder-product-review-privacy
+
+      - name: Reopen and describe draft pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/pr-body.md <<'EOF'
+          ## Summary
+
+          Adds a default-off weekly founder product review that derives bounded, product-only opportunities from recent private conversation evidence, then requires a separate confined model to approve the proposed report before any persistence.
+
+          ## Privacy and authority boundaries
+
+          - Uses the existing managed-automation and product-feedback primitives rather than adding another scheduler or state owner.
+          - Requires explicit, revocable `feature.product-improvement-review` consent before evidence assembly or model work.
+          - Runs the final privacy pass as a fresh one-shot read-only model with no shell, network, apps, plugins, memories, delegation, workspace access, or dynamic tools.
+          - Gives the reviewer only the proposed report, never the underlying transcript or member identity.
+          - Fails closed on denial, malformed reviewer output, or reviewer failure.
+          - Persists approved `product_review` rows without `memberId`; a database constraint prevents linked product reviews and prevents other feedback kinds from becoming unlinked.
+          - Reuses the same confined-review primitive for the existing consented Assistant Ask disclosure review.
+
+          ## Validation before push
+
+          - Patch series applied against the exact branch base.
+          - `git diff --check`
+          - Prisma schema validation
+          - Diff-selected tests
+          - Full workspace typecheck
+          - Workspace-boundary verification
+          - Documentation drift verification
+
+          The PR remains draft until the exact-head pull-request checks pass.
+          EOF
+
+          state=$(gh pr view 1231 --repo cobuildwithus/murph --json state --jq .state)
+          if [[ "$state" == CLOSED ]]; then
+            gh pr reopen 1231 --repo cobuildwithus/murph
+          fi
+          gh pr edit 1231 \
+            --repo cobuildwithus/murph \
+            --title 'Add opt-in privacy-reviewed weekly founder product review' \
+            --body-file /tmp/pr-body.md
+
+      - name: Wait for exact-head pull-request checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_head=$(git rev-parse HEAD)
+          for attempt in $(seq 1 40); do
+            current_head=$(gh pr view 1231 --repo cobuildwithus/murph --json headRefOid --jq .headRefOid)
+            [[ "$current_head" == "$expected_head" ]] || {
+              echo "PR head moved from ${expected_head} to ${current_head}." >&2
+              exit 1
+            }
+            check_count=$(gh pr checks 1231 --repo cobuildwithus/murph --json name --jq length 2>/dev/null || echo 0)
+            if [[ "$check_count" =~ ^[0-9]+$ ]] && (( check_count > 0 )); then
+              break
+            fi
+            echo "Waiting for PR checks to register (attempt ${attempt}/40)."
+            sleep 15
+          done
+
+          check_count=$(gh pr checks 1231 --repo cobuildwithus/murph --json name --jq length 2>/dev/null || echo 0)
+          if ! [[ "$check_count" =~ ^[0-9]+$ ]] || (( check_count == 0 )); then
+            echo 'No exact-head PR checks registered.' >&2
+            exit 1
+          fi
+          gh pr checks 1231 --repo cobuildwithus/murph --watch --fail-fast --interval 15
+
+          current_head=$(gh pr view 1231 --repo cobuildwithus/murph --json headRefOid --jq .headRefOid)
+          [[ "$current_head" == "$expected_head" ]] || {
+            echo "PR head moved during validation from ${expected_head} to ${current_head}." >&2
+            exit 1
+          }
+
+      - name: Mark exact validated head ready for review
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          is_draft=$(gh pr view 1231 --repo cobuildwithus/murph --json isDraft --jq .isDraft)
+          if [[ "$is_draft" == true ]]; then
+            gh pr ready 1231 --repo cobuildwithus/murph
+          fi
+          head_sha=$(gh pr view 1231 --repo cobuildwithus/murph --json headRefOid --jq .headRefOid)
+          cat >> /tmp/pr-body.md <<EOF
+
+          ## Exact-head status
+
+          All required pull-request checks passed for \`${head_sha}\`; the PR is ready for review.
+          EOF
+          gh pr edit 1231 --repo cobuildwithus/murph --body-file /tmp/pr-body.md
