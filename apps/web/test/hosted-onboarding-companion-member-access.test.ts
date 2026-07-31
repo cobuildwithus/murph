@@ -117,10 +117,12 @@ describe("native companion hosted member admission", () => {
   it("requires bearer identity without falling back to browser authority", async () => {
     mocks.resolveHostedPrivySessionFromBearerToken.mockResolvedValue(null);
 
-    await expect(requireHostedCompanionMemberAccessFromRequest(
-      new Request("https://app.example.test/api/device-sync/companion/sign-in-token"),
+    await expect(requireHostedCompanionMemberAccessFromRequest({
       prisma,
-    )).rejects.toMatchObject({
+      request: new Request(
+        "https://app.example.test/api/device-sync/companion/sign-in-token",
+      ),
+    })).rejects.toMatchObject({
       code: "AUTH_REQUIRED",
       httpStatus: 401,
     });
@@ -163,12 +165,14 @@ describe("native companion hosted member admission", () => {
       identity,
       now: new Date("2026-07-31T11:00:00.000Z"),
       prisma,
+      timeZone: "America/Denver",
     })).rejects.toBe(consentRequired);
 
     expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith({
       identity,
       now: new Date("2026-07-31T11:00:00.000Z"),
       prisma,
+      timeZone: "America/Denver",
     });
     expect(mocks.ensureHostedAutoPulseTrialEnrollment).not.toHaveBeenCalled();
     expect(mocks.assertActiveHostedMemberAccessAllowed).not.toHaveBeenCalled();
