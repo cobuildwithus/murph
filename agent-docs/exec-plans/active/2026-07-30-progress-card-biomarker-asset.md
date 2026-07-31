@@ -14,10 +14,11 @@ Key decisions:
 - Add that compact artifact to the runner-specific Health Commons package allowlist and deploy validation instead of restoring `generated/web/**`.
 - Make progress-card composition recover only from a missing compact artifact by passing an empty direction snapshot and appending a warning.
 - Make the exact missing-direction caveat part of the deterministic private card artifact and its accessible description. Do not rely on prompt freshness to relay it, and keep unrelated renderer diagnostics private.
+- Preserve image accessibility at the existing channel boundary: providers with no native alt field append each media description once to the same outgoing message or photo caption.
 - Add direct packed-package coverage that resolves a known desired direction from the extracted runner artifact and direct use-case coverage for missing-asset neutral recovery.
 
 State:
-- ReviewGPT round 2 required a retrospective after proving the prompt-only manual correction could remain stale in a persisted context snapshot. The retrospective decision is to delete the distributed prompt relay and move the caveat into deterministic card rendering.
+- ReviewGPT round 3 found that SVG accessibility metadata and private-image alt text were discarded by PNG rasterization and the Linq/Telegram provider mappings. The accepted correction keeps the card as disclosure owner and makes the existing media description effective at those delivery boundaries.
 
 Done:
 - Reproduced the incompatible current contracts: hosted packaging omits and rejects `generated/web/**`, while progress-card composition reads `generated/web/browse/biomarkers.json` through the pinned package root.
@@ -37,12 +38,16 @@ Done:
 - Retrospective: the original requirement is one available progress card with an understandable neutral fallback. First review had 232 source additions / 23 deletions; the prompt correction grew that to 237 / 23, so churn is not the concern. The repeated mechanism is conditional delivery ownership in persisted prompt copies. Continuing with cache invalidation would still leave the first post-deploy request on safety-stale context, while adding runtime reconciliation would violate the simplicity constraint. The chosen correction deletes the five prompt relay lines and makes one typed card state drive visible and accessible caveat rendering. The card artifact is then the single deterministic owner, including for pre-existing snapshots and automations.
 - Added `moverSentimentContext: direction_unavailable` to the private card contract, set it only on the missing direction-asset branch, and render the caveat in the card footer, SVG accessibility label, and response-media alt text. The packaged healthy path keeps the field null and the existing branded footer.
 - Passed the focused contracts, query, vault-usecases, and CLI typechecks; the contract guard (1 test), missing/packaged vault path (6 tests), and renderer/media proof (2 tests) all pass. A 1200×780 fallback PNG was rendered and visually inspected: the note is readable, non-overlapping, and the normal card hierarchy remains intact; the temporary proof artifact was removed.
+- Exact-head CI exposed a stale generated CLI skill fingerprint after the response-contract change. Regenerated only `vault-cli-skill-hash.generated.ts`; the exact package-shape verifier and fresh CI then passed.
+- Final ReviewGPT round 3 found one valid accessibility gap: neither production image adapter forwarded the media description after SVG-to-PNG conversion.
+- Added one shared channel-runtime rule that appends nonempty image descriptions once to the existing Linq message or Telegram caption, while preserving the vault-file no-caption rule. Official provider contracts expose captions/messages but no native image-alt field.
+- Passed the assistant channel and hosted callback suites (257 tests), the renderer suite (2 tests), assistant-engine/assistant-runtime/CLI typechecks, prepared-runtime build, regenerated-schema check, and exact CLI package-shape verifier.
 
 Now:
-- Update the PR intent/provider-input/review evidence for the deterministic correction, then commit and push it.
+- Commit and push the channel-boundary accessibility correction, update the PR evidence, then start the exact-head final remediation review with CI.
 
 Next:
-- Run focused contract/query/vault/CLI proof, update provider-input and review evidence, push the retrospective correction, then require ReviewGPT round 3 and green exact-head CI.
+- Require clean exact-head ReviewGPT and CI, perform the parent final review, then archive this plan.
 
 Open questions (UNCONFIRMED if needed):
 - None blocking implementation.
@@ -51,13 +56,16 @@ Working set (files/ids/commands):
 - `packages/health-commons/src/build.ts`
 - `packages/health-commons/src/runtime.ts`
 - `packages/health-commons/test/runtime.test.ts`
+- `packages/contracts/src/experiment-progress-card.ts`
+- `packages/query/src/experiment-progress-card.ts`
 - `packages/vault-usecases/src/usecases/experiment-journal-vault.ts`
 - `packages/vault-usecases/test/**`
-- `packages/assistant-engine/src/assistant/active-experiment-context.ts`
-- `packages/assistant-engine/src/assistant/experiment-support-automations.ts`
-- `packages/assistant-engine/src/assistant/managed-automations.ts`
-- `packages/assistant-engine/skills/experiment-onboarding/SKILL.md`
-- `packages/assistant-engine/test/**`
+- `packages/cli/src/commands/experiment-progress-card-image.ts`
+- `packages/cli/src/vault-cli-skill-hash.generated.ts`
+- `packages/cli/test/experiment-progress-card-renderer.test.ts`
+- `packages/assistant-engine/src/assistant/channels/runtime.ts`
+- `packages/assistant-engine/test/assistant-channels-runtime.test.ts`
+- `packages/assistant-runtime/test/hosted-runtime-callbacks.test.ts`
 - `apps/cloudflare/scripts/runner-bundle/workspace-artifacts.ts`
 - `apps/cloudflare/scripts/deploy-artifacts.ts`
 - `apps/cloudflare/test/runner-bundle-workspace-artifacts.test.ts`

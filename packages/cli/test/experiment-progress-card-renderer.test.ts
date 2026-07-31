@@ -268,6 +268,16 @@ test("progress-card renderer makes unavailable direction context visible and acc
       media.alt,
       "Morning light & recovery <check> experiment progress. Direction context unavailable · mover sentiment is neutral.",
     );
+    const healthyMedia = await renderAndSaveExperimentProgressCard({
+      card: CARD,
+      experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFN",
+      vaultRoot,
+    });
+    assert.equal(
+      healthyMedia.alt,
+      "Morning light & recovery <check> experiment progress",
+    );
+    assert.doesNotMatch(healthyMedia.alt ?? "", /Direction context unavailable/u);
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
   }

@@ -201,9 +201,11 @@ separate source indexes only for tools that explicitly need source lookup.
 Hosted runner packaging must include that compact direction projection without
 shipping the web artifact tree. A missing direction projection is auxiliary
 availability loss: progress cards remain available with neutral mover sentiment
-and a visible, accessible caveat on the private card itself. The command also
-returns the exact warning for diagnostics. Malformed direction data remains a
-hard error.
+and a visible caveat on the private card itself. Raster delivery preserves the
+same accessible description: when an image channel has no native alt-text
+field, its adapter appends the media description once to the existing reply or
+photo caption. The command also returns the exact warning for diagnostics.
+Malformed direction data remains a hard error.
 
 Private runs, outcome cards, and future contributions should store commons references by key and revision instead of copying protocol prose. Future aggregate community summaries must be traceable back to the exact protocol revisions they summarize.
 
