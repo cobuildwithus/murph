@@ -229,7 +229,7 @@ export async function completeHostedPrivyVerification(input: {
     const messagingSetupRequired = isHostedMemberMessagingSetupRequired({
       identity: {
         ...(messagingSetupState?.identity ?? {}),
-        emailLinked: messagingSetupState?.emailLinked === true,
+        emailLinked: Boolean(input.identity.email?.verifiedAt),
       },
       routing: messagingSetupState?.routing ?? null,
     });
