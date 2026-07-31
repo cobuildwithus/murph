@@ -1,8 +1,8 @@
 # Spread and bound onboarding follow-up automation
 
-Status: active
+Status: completed
 Created: 2026-07-30
-Updated: 2026-07-30
+Updated: 2026-07-31
 
 ## Goal
 
@@ -67,7 +67,7 @@ Updated: 2026-07-30
 3. [x] Seed new one-shots and migrate existing recurring managed records.
 4. [x] Tighten the final-nudge instructions and update owner documentation.
 5. [x] Add focused unit/integration coverage and run scoped verification.
-6. [ ] Commit, push, open the PR, and complete the required review/CI loop.
+6. [x] Commit, push, open the PR, and complete the required review/CI loop.
 
 ## Decisions
 
@@ -75,6 +75,15 @@ Updated: 2026-07-30
 - Model the final follow-up as one canonical `at` occurrence. This makes the
   existing scheduler, rather than prompt compliance or a new state flag, the
   hard upper bound.
+- End delivery authority at 3:00 PM on the occurrence's local day so the
+  latest jitter slot has at least 30 minutes to finish and queued delivery
+  cannot surface later.
+- Use the ordinary scheduled send-or-skip contract. Only foreground replies
+  advance or complete onboarding; the background follow-up never mutates
+  onboarding state.
+- Reconcile only exact managed fingerprints: the current finite seed, the
+  immediate predecessor including its original 1:30 PM schedule, and the
+  bounded original legacy seed. Preserve edited records.
 
 ## Verification
 
@@ -93,9 +102,14 @@ Updated: 2026-07-30
 
 ## Verification log
 
-- Assistant-engine focused suites: 223 tests passed.
+- Assistant-engine focused suites: 484 tests passed across nine affected test
+  files.
 - Hosted-runtime event suite: 35 tests passed.
 - Assistant-engine package typecheck: passed.
 - Assistant-runtime package typecheck: passed.
 - `git diff --check`: passed.
-- Exact-head CI and ReviewGPT gates: pending the review-candidate push.
+- Exact-head GitHub Actions: all required checks passed.
+- Preliminary specialist review: completed; accepted findings were resolved.
+- Final ReviewGPT correction round 7: PASS with no findings.
+- Pull request #1203 contains the implementation and verification evidence.
+Completed: 2026-07-31
