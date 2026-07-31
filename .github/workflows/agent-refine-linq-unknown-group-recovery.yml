@@ -23,11 +23,15 @@ jobs:
       - name: Apply asserted final implementation
         run: python scripts/agent-run-linq-unknown-group-finalization.py
 
+      - name: Make group-start recovery effect-safe
+        run: python scripts/agent-fix-group-start-effect.py
+
       - name: Remove one-shot machinery
         run: |
           rm scripts/agent-refine-linq-unknown-group-recovery.mjs
           rm scripts/agent-finalize-linq-unknown-group-recovery.py
           rm scripts/agent-run-linq-unknown-group-finalization.py
+          rm scripts/agent-fix-group-start-effect.py
           rm .github/workflows/agent-refine-linq-unknown-group-recovery.yml
 
       - uses: pnpm/action-setup@v4
