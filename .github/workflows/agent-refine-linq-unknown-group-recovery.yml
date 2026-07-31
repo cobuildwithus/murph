@@ -38,50 +38,127 @@ jobs:
       - name: Apply asserted implementation refinement
         run: node scripts/agent-refine-linq-unknown-group-recovery.mjs
 
-      - name: Scope final audit to the new-group planner
+      - name: Scope and harden the final audit
         run: |
           python - <<'PY'
           from pathlib import Path
 
           path = Path("scripts/agent-finalize-linq-unknown-group-recovery.py")
-          content = path.read_text()
-          before = r'''replace_once(
-              provider_path,
-              '''    : await lookupHostedMemberRoutingByPendingLinqParticipantContact({
-                  contact: participantContact,
-                  prisma: input.prisma,
-                });''',
-              '''    : await lookupHostedMemberRoutingByPendingLinqParticipantContact({
-                  contact: participantContact,
-                  linqChatId: summary.chatId,
-                  prisma: input.prisma,
-                  recipientPhone: incomingRecipientPhone,
-                });''',
-              "require exact pending group authority",
-          )'''
-          after = r'''replace_once(
-              provider_path,
-              '''  const pendingSenderLookup = senderLookup
-                ? null
-                : await lookupHostedMemberRoutingByPendingLinqParticipantContact({
-                    contact: participantContact,
-                    prisma: input.prisma,
-                  });
-              const sender = senderLookup?.core ?? pendingSenderLookup?.core ?? null;''',
-              '''  const pendingSenderLookup = senderLookup
-                ? null
-                : await lookupHostedMemberRoutingByPendingLinqParticipantContact({
-                    contact: participantContact,
-                    linqChatId: summary.chatId,
-                    prisma: input.prisma,
-                    recipientPhone: incomingRecipientPhone,
-                  });
-              const sender = senderLookup?.core ?? pendingSenderLookup?.core ?? null;''',
-              "require exact pending group authority",
-          )'''
-          if content.count(before) != 1:
-              raise SystemExit("Expected one generic pending-group audit block")
-          path.write_text(content.replace(before, after, 1))
+          lines = path.read_text().splitlines()
+          label_index = next(
+              index
+              for index, line in enumerate(lines)
+              if '"require exact pending group authority",' in line
+          )
+          start = label_index
+          while start >= 0 and lines[start] != "replace_once(":
+              start -= 1
+          end = label_index
+          while end < len(lines) and lines[end] != ")":
+              end += 1
+          if start < 0 or end >= len(lines):
+              raise SystemExit("Could not isolate pending-group audit block")
+
+          replacement = [
+              "replace_once(",
+              "    provider_path,",
+              "    '''  const pendingSenderLookup = senderLookup",
+              "    ? null",
+              "    : await lookupHostedMemberRoutingByPendingLinqParticipantContact({",
+              "        contact: participantContact,",
+              "        prisma: input.prisma,",
+              "      });",
+              "  const sender = senderLookup?.core ?? pendingSenderLookup?.core ?? null;''',",
+              "    '''  const pendingSenderLookup = senderLookup",
+              "    ? null",
+              "    : await lookupHostedMemberRoutingByPendingLinqParticipantContact({",
+              "        contact: participantContact,",
+              "        linqChatId: summary.chatId,",
+              "        prisma: input.prisma,",
+              "        recipientPhone: incomingRecipientPhone,",
+              "      });",
+              "  const sender = senderLookup?.core ?? pendingSenderLookup?.core ?? null;''',",
+              "    \"require exact pending group authority\",",
+              ")",
+          ]
+          lines[start : end + 1] = replacement
+          content = "\n".join(lines) + "\n"
+
+          def replace_exact(before: str, after: str, label: str) -> None:
+              global content
+              count = content.count(before)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected one anchor, found {count}")
+              content = content.replace(before, after, 1)
+
+          replace_exact(
+              """import {
+            readHostedMemberRoutingState,
+            upsertHostedMemberPendingLinqBindingTx,
+          } from \"@/src/lib/hosted-onboarding/hosted-member-routing-store\";""",
+              """import {
+            acquireHostedMemberHomeLinqRouteLockTx,
+            readHostedMemberRoutingState,
+            upsertHostedMemberPendingLinqBindingTx,
+          } from \"@/src/lib/hosted-onboarding/hosted-member-routing-store\";""",
+              "import pending-route lock",
+          )
+          replace_exact(
+              """import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from \"@/src/lib/hosted-onboarding/shared\";""",
+              """import {
+            HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+            lockHostedMemberRow,
+          } from \"@/src/lib/hosted-onboarding/shared\";""",
+              "import member lock",
+          )
+          replace_exact(
+              """  const status = await prisma.$transaction(async (tx) => {
+            await acquireHostedLinqChatOwnershipLockTx({""",
+              """  const status = await prisma.$transaction(async (tx) => {
+            await lockHostedMemberRow(tx, session.member.id);
+            await acquireHostedMemberHomeLinqRouteLockTx({
+              memberId: session.member.id,
+              prisma: tx,
+            });
+            await acquireHostedLinqChatOwnershipLockTx({""",
+              "preserve member-home-chat lock order",
+          )
+          replace_exact(
+              """const mocks = vi.hoisted(() => ({
+            acquireHostedLinqChatOwnershipLockTx: vi.fn(),""",
+              """const mocks = vi.hoisted(() => ({
+            acquireHostedLinqChatOwnershipLockTx: vi.fn(),
+            acquireHostedMemberHomeLinqRouteLockTx: vi.fn(),""",
+              "mock home-route lock",
+          )
+          replace_exact(
+              """  openHostedLinqGroupEmailRecoveryToken: vi.fn(),
+            readHostedMemberRoutingState: vi.fn(),""",
+              """  openHostedLinqGroupEmailRecoveryToken: vi.fn(),
+            lockHostedMemberRow: vi.fn(),
+            readHostedMemberRoutingState: vi.fn(),""",
+              "mock member lock",
+          )
+          replace_exact(
+              """vi.mock(\"@/src/lib/hosted-onboarding/hosted-member-routing-store\", () => ({
+            readHostedMemberRoutingState: mocks.readHostedMemberRoutingState,""",
+              """vi.mock(\"@/src/lib/hosted-onboarding/hosted-member-routing-store\", () => ({
+            acquireHostedMemberHomeLinqRouteLockTx:
+              mocks.acquireHostedMemberHomeLinqRouteLockTx,
+            readHostedMemberRoutingState: mocks.readHostedMemberRoutingState,""",
+              "export mocked home-route lock",
+          )
+          replace_exact(
+              """vi.mock(\"@/src/lib/hosted-routing/linq-chat-ownership-lock\", () => ({""",
+              """vi.mock(\"@/src/lib/hosted-onboarding/shared\", () => ({
+            HOSTED_ONBOARDING_TRANSACTION_OPTIONS: {},
+            lockHostedMemberRow: mocks.lockHostedMemberRow,
+          }));
+          vi.mock(\"@/src/lib/hosted-routing/linq-chat-ownership-lock\", () => ({""",
+              "mock shared lock module",
+          )
+
+          path.write_text(content)
           PY
 
       - name: Apply final architecture and correctness audit
