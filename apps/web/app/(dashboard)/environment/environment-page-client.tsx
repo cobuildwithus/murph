@@ -278,7 +278,9 @@ export default function EnvironmentPageClient({
             baselineValues: valuesSignature,
             status: "processing",
           });
-          void refresh({ background: true });
+          void requestEnvironmentVoiceProcessingRecheck().finally(() =>
+            refresh({ background: true }).catch(() => undefined)
+          );
         }}
       />
       {hasEnvironmentData ? (
@@ -342,6 +344,15 @@ async function readEnvironmentVoiceProcessingStatus(): Promise<boolean | null> {
     return null;
   }
   return null;
+}
+
+async function requestEnvironmentVoiceProcessingRecheck(): Promise<void> {
+  const response = await fetch("/api/environment/voice", {
+    method: "PATCH",
+  });
+  if (!response.ok) {
+    throw new Error("Environment voice processing recheck failed.");
+  }
 }
 
 function EnvironmentShell({

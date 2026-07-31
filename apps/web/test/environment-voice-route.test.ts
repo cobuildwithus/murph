@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   requireActiveHostedAppSessionFromRequest: vi.fn(),
   resolveHostedRuntimeAiUsageGate: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
+  signalHostedRuntimeRecheckRuntime: vi.fn(),
   stageEnvironmentVoice: vi.fn(),
 }));
 
@@ -58,6 +59,7 @@ vi.mock("@/src/lib/hosted-onboarding/shared", () => ({
 }));
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
+  signalHostedRuntimeRecheckRuntime: mocks.signalHostedRuntimeRecheckRuntime,
 }));
 vi.mock("@/src/lib/hosted-orchestration/runtime-usage-decision", () => ({
   resolveHostedRuntimeAiUsageGate: mocks.resolveHostedRuntimeAiUsageGate,
@@ -66,7 +68,7 @@ vi.mock("@/src/lib/prisma", () => ({
   getPrisma: () => ({ $transaction: transaction }),
 }));
 
-import { GET, POST } from "../app/api/environment/voice/route";
+import { GET, PATCH, POST } from "../app/api/environment/voice/route";
 
 describe("environment voice upload route", () => {
   beforeEach(() => {
@@ -116,6 +118,42 @@ describe("environment voice upload route", () => {
     expect(
       mocks.hasPendingHostedEnvironmentVoiceMailboxItem,
     ).toHaveBeenCalledWith({ userId: "member_123" });
+  });
+
+  it("rechecks the existing runtime only while a recording is pending", async () => {
+    mocks.hasPendingHostedEnvironmentVoiceMailboxItem.mockResolvedValue(true);
+    const request = new Request(
+      "https://local.withmurph.ai/api/environment/voice",
+      { method: "PATCH" },
+    );
+
+    const response = await PATCH(request);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      processing: true,
+      recheckRequested: true,
+    });
+    expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(
+      request,
+    );
+    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+  });
+
+  it("does not wake the runtime when no environment recording is pending", async () => {
+    const response = await PATCH(new Request(
+      "https://local.withmurph.ai/api/environment/voice",
+      { method: "PATCH" },
+    ));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      processing: false,
+      recheckRequested: false,
+    });
+    expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
   });
 
   it("stages an authenticated recording, appends one mailbox wake, and signals runtime", async () => {

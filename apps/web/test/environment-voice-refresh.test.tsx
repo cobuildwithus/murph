@@ -184,7 +184,10 @@ test("keeps checking after processing takes longer than two minutes", async () =
   mocks.refresh.mockClear();
   const originalFetch = globalThis.fetch;
   let processing = true;
-  const fetchMock = vi.fn(async () => Response.json({ processing }));
+  const fetchMock = vi.fn(async (
+    _input: string | URL | Request,
+    _init?: RequestInit,
+  ) => Response.json({ processing }));
   globalThis.fetch = fetchMock;
   const rendered = await renderClientComponent(
     createElement(EnvironmentPageClient, { contactAction: null }),
@@ -209,10 +212,22 @@ test("keeps checking after processing takes longer than two minutes", async () =
       /Murph is taking longer than usual/,
     );
     const callsAtDelay = fetchMock.mock.calls.length;
+    const checkAgain = Array.from(
+      rendered.window.document.querySelectorAll("button"),
+    ).find((button) => button.textContent?.includes("Check again"));
+    assert.ok(checkAgain instanceof rendered.window.HTMLButtonElement);
+
+    await act(async () => {
+      checkAgain.click();
+      await Promise.resolve();
+    });
+    assert.ok(fetchMock.mock.calls.some(([input, init]) =>
+      input === "/api/environment/voice" && init?.method === "PATCH"
+    ));
 
     processing = false;
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(10_000);
+      await vi.advanceTimersByTimeAsync(2_000);
     });
 
     assert.ok(fetchMock.mock.calls.length > callsAtDelay);
