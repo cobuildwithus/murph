@@ -61,7 +61,9 @@ const MEMBER_MEMORY_EVIDENCE_LIMITS: AssistantMaintenanceEvidenceLimits = {
 const GROUP_ROOM_MODEL_EVIDENCE_LIMITS: AssistantMaintenanceEvidenceLimits = {
   heading: ASSISTANT_GROUP_ROOM_MODEL_EVIDENCE_HEADING,
   includeDurableGroupReactions: true,
-  maxEntries: 800,
+  // Preserve at least 1,000 recent room entries while the existing byte budget
+  // remains the independent prompt-cost and privacy bound.
+  maxEntries: 1_000,
   maxEntryBytes: 32_000,
   maxSessions: 24,
   maxSessionScan: 192,
