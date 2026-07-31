@@ -63,10 +63,11 @@ incorporates a newly completed result when it is still relevant.
   provider-visible `input`, tools, tool choice, parallel-tool flag, and text
   configuration for identical synthetic direct and group fixtures. With
   `gpt-5.6-terra`, low reasoning, MultiAgent V2, and `gpt-tokenizer` 3.4.0
-  `o200k_harmony`, direct input changed from 23,556 tokens / 108,437 bytes to
-  23,682 / 109,006 (+126, +0.535%; +569 bytes); group input changed from
-  19,290 / 88,866 to 19,416 / 89,435 (+126, +0.653%; +569 bytes). Local paths
-  were normalized; transport-only model, stream, reasoning, storage, service
-  tier, and client metadata were excluded identically. The delta is entirely
-  the new assembled late-child instruction and Codex-generated multi-agent
-  usage guidance; tool definitions and schemas are unchanged.
+  `o200k_harmony`, the current PR base and rebased head measure 23,787 tokens /
+  109,677 bytes and 23,913 / 110,246 for direct input (+126, +0.530%; +569
+  bytes), and 19,521 / 90,106 and 19,647 / 90,675 for group input (+126,
+  +0.645%; +569 bytes). Local paths were normalized; transport-only model,
+  stream, reasoning, storage, service tier, and client metadata were excluded
+  identically. The delta is entirely the new assembled late-child instruction
+  and Codex-generated multi-agent usage guidance; tool definitions and schemas
+  are unchanged.
