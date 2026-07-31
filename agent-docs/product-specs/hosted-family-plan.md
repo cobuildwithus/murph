@@ -136,6 +136,12 @@ ledger, webhook path, or accounting owner. The browser chooses an active member
 row and submits only the existing opaque offer code and request key to that
 row's authenticated same-origin route.
 
+For the active owner's own seat, the Settings AI-usage row exposes that same
+Family-targeted dialog directly, including when usage is exhausted. The stable
+`/settings?addUsage=family#family` handoff opens this visible dialog after
+revalidating the current owner row. Other Family members remain selected from
+their authenticated management surface.
+
 Web authorizes the payer as the current active group owner, resolves the exact
 selected beneficiary from that owner's active roster, rejects suspended or
 synthetic members, and requires the active Family billing projection. The
@@ -152,6 +158,19 @@ every other Family member's Add usage
 action is hidden. A request for a different member cannot resume, retry, or
 follow the existing checkout URL; it may only inspect or cancel the payer's
 frozen purchase and refresh the server projection.
+
+The frozen target also owns Settings recovery when the payer's billing mode
+changes. In particular, a personal purchase started before direct-to-Family
+conversion keeps its personal Checkout URL, retry capability, polling, and
+return owner until it becomes terminal. A new owner-seat Family purchase
+returns to `#subscription`, where its meter and dialog live; another member's
+Family purchase returns to `#family`. Target reconstruction continues to read
+older owner-seat Family URLs that used `#family`.
+
+An exact returned purchase exclusively owns its dialog state. A newer active
+purchase for another beneficiary stays on that beneficiary's frozen-target
+surface and cannot supply conflict, capability, or completion fields to the
+returned purchase.
 
 Once a beneficiary leaves the active roster, the former-member purchase remains
 inspectable and cancelable but is never payable from Settings: the server does

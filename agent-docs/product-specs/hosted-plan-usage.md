@@ -95,14 +95,17 @@ their stored limit.
 
 Usage is cost-weighted capacity across models and modalities. It is not a token
 count or cash balance. Used and remaining percentages are bounded integers that
-sum to 100. Their denominator is current-period spend plus every unit of
+sum to 100. The display window starts at the current allowance period or, when
+later, the beneficiary's latest fulfilled purchase grant in that period. Its
+denominator is counted usage since that window began plus every unit of
 effective capacity still available from the plan and generic usage credit. A
-fulfilled top-up can therefore move the percentage backward immediately.
-Settings still exposes neither the exact usage-credit balance nor the internal
-included-allowance value. At a monthly reset, period spend returns to zero, the
-plan allowance replenishes, and unused usage credit remains available. The
-operation that crosses effective capacity may finish, but subsequent
-usage-bearing work blocks and accepted conversation input remains pending.
+fulfilled top-up therefore starts a fresh 0%-used display; later counted usage
+advances that meter. Settings still exposes neither the exact usage-credit
+balance nor the internal included-allowance value. At a monthly reset, period
+spend returns to zero, the plan allowance replenishes, and unused usage credit
+remains available. The operation that crosses effective capacity may finish,
+but subsequent usage-bearing work blocks and accepted conversation input
+remains pending.
 
 For paid access, the included monthly usage value is exactly 80% of the
 server-owned recurring amount for that member's billing mode and tier. Direct
@@ -121,10 +124,11 @@ current bounds. It skips calendar fallbacks because their temporary key can be
 replaced by a delayed billing projection without a renewal. Existing allowance,
 spend, and future periods remain untouched.
 
-A forecast requires at least 24 hours of counted usage. It uses the same
-overall effective capacity as the percentage and is shown only when the
-observed pace projects exhaustion before the current period ends. The forecast
-is conservative and optional; the product must not invent one when the
+A forecast requires at least 24 hours of counted usage in the current display
+window. It uses the same overall effective capacity as the percentage and is
+shown only when that window's observed pace projects exhaustion before the
+current period ends. The forecast is conservative and optional; the product
+must not invent one when the
 projection omits it.
 
 ## Actions
