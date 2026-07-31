@@ -2,6 +2,7 @@ import {
   parseHostedWorkspaceCheckpointRequest,
   parseHostedWorkspaceCheckpointResponse,
 } from "@murphai/hosted-execution/parsers";
+import { after } from "next/server";
 
 import {
   requireHostedCloudflareCallbackRequest,
@@ -43,12 +44,20 @@ export const POST = withJsonError(async (request: Request) => {
     throw new TypeError("Hosted workspace checkpoint requires an existing workspace row.");
   }
 
-  await signalWorkspaceWakeBestEffort({
-    checkpointed: result.status === "updated",
-    inboxMediaRetentionWakeAt: result.workspace.inboxMediaRetentionWakeAt,
-    nextWakeAt: result.workspace.nextWakeAt,
-    userId,
-  });
+  if (
+    result.status === "updated"
+    && (
+      result.workspace.nextWakeAt !== null
+      || result.workspace.inboxMediaRetentionWakeAt !== null
+    )
+  ) {
+    const signalWake = () => signalWorkspaceWakeBestEffort(userId);
+    try {
+      after(signalWake);
+    } catch {
+      void signalWake();
+    }
+  }
 
   return jsonOk(parseHostedWorkspaceCheckpointResponse({
     checkpointed: result.status === "updated",
@@ -77,22 +86,10 @@ export const POST = withJsonError(async (request: Request) => {
   }));
 });
 
-async function signalWorkspaceWakeBestEffort(input: {
-  checkpointed: boolean;
-  inboxMediaRetentionWakeAt: string | null;
-  nextWakeAt: string | null;
-  userId: string;
-}): Promise<void> {
-  if (
-    !input.checkpointed
-    || (input.nextWakeAt === null && input.inboxMediaRetentionWakeAt === null)
-  ) {
-    return;
-  }
-
+async function signalWorkspaceWakeBestEffort(userId: string): Promise<void> {
   try {
     await signalHostedRuntimeRecheckRuntime({
-      userId: input.userId,
+      userId,
     });
   } catch (error) {
     console.warn("Hosted workspace wake recheck signal failed after checkpoint.", {
