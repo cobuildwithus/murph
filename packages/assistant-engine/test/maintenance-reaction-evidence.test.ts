@@ -1,5 +1,5 @@
 import { rm } from 'node:fs/promises'
-import { afterEach, expect, test } from 'vitest'
+import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
 import {
   formatHostedExecutionGroupReactionEventText,
@@ -9,6 +9,14 @@ import {
   parseAssistantSessionRecord,
   type AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
+
+const mocks = vi.hoisted(() => ({
+  listAssistantOutboxIntents: vi.fn(),
+}))
+
+vi.mock('../src/assistant/outbox.ts', () => ({
+  listAssistantOutboxIntents: mocks.listAssistantOutboxIntents,
+}))
 
 import {
   ASSISTANT_GROUP_ROOM_MODEL_EVIDENCE_HEADING,
@@ -25,6 +33,11 @@ import {
 import { createTempVaultContext } from './test-helpers.js'
 
 const cleanupPaths: string[] = []
+
+beforeEach(() => {
+  mocks.listAssistantOutboxIntents.mockReset()
+  mocks.listAssistantOutboxIntents.mockResolvedValue([])
+})
 
 afterEach(async () => {
   await Promise.all(
@@ -63,6 +76,111 @@ test('room maintenance sees a consumed durable reaction even when no chat turn f
   expect(evidence).toContain('- reaction delta: added \\"laugh\\"')
   expect(evidence).toContain(
     '- target text: \\"the combine has lost institutional backing\\"',
+  )
+})
+
+test('room maintenance resolves a Telegram reaction target from its durable inbound message', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-maintenance-telegram-inbound-target-',
+  )
+  cleanupPaths.push(parentRoot)
+
+  await upsertReactionInput({
+    channel: 'telegram',
+    eventId: 'telegram-target-message',
+    replyTarget: {
+      channel: 'telegram',
+      messageId: '77',
+      threadId: 'chat-room',
+    },
+    senderHandle: 'telegram-user:42',
+    text: 'the exact Telegram message everyone laughed at',
+    vaultRoot,
+  })
+  await upsertReactionInput({
+    channel: 'telegram',
+    eventId: 'telegram-reaction-laugh',
+    senderHandle: HOSTED_EXECUTION_GROUP_REACTION_SENDER_ATTESTATION,
+    text: formatHostedExecutionGroupReactionEventText({
+      actor: 'telegram-user:99',
+      changes: [{ operation: 'added', reaction: '😂' }],
+      channel: 'telegram',
+      mode: 'delta',
+      targetMessageId: '77',
+      targetText: null,
+    }),
+    vaultRoot,
+  })
+
+  const evidence = readGroupEvidenceText(
+    await buildAssistantMaintenanceConversationEvidence({
+      now: new Date('2026-07-31T03:00:00.000Z'),
+      profile: 'group-room-model',
+      vault: vaultRoot,
+    }),
+  )
+
+  expect(evidence).toContain(
+    '- target text: "the exact Telegram message everyone laughed at"',
+  )
+})
+
+test('room maintenance resolves a Telegram reaction target from Murph sent-message delivery', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-maintenance-telegram-outbound-target-',
+  )
+  cleanupPaths.push(parentRoot)
+  mocks.listAssistantOutboxIntents.mockResolvedValueOnce([{
+    channel: 'telegram',
+    delivery: {
+      channel: 'telegram',
+      idempotencyKey: null,
+      kind: 'message',
+      messageLength: 37,
+      providerMessageId: '88',
+      providerThreadId: null,
+      sentAt: '2026-07-30T12:00:00.000Z',
+      target: 'chat-room',
+      targetKind: 'thread',
+    },
+    externalThreadRouteAuthority: {
+      channel: 'telegram',
+      containerMemberId: 'member-group',
+      threadId: 'chat-room',
+    },
+    message: 'Murph delivered the line that landed',
+    operation: null,
+    sentAt: '2026-07-30T12:00:00.000Z',
+    status: 'sent',
+    threadId: 'chat-room',
+    threadIsDirect: false,
+  }])
+
+  await upsertReactionInput({
+    channel: 'telegram',
+    eventId: 'telegram-reaction-outbound',
+    senderHandle: HOSTED_EXECUTION_GROUP_REACTION_SENDER_ATTESTATION,
+    text: formatHostedExecutionGroupReactionEventText({
+      actor: 'telegram-user:99',
+      changes: [{ operation: 'added', reaction: '🔥' }],
+      channel: 'telegram',
+      mode: 'delta',
+      targetMessageId: '88',
+      targetText: null,
+    }),
+    vaultRoot,
+  })
+
+  const evidence = readGroupEvidenceText(
+    await buildAssistantMaintenanceConversationEvidence({
+      now: new Date('2026-07-31T03:00:00.000Z'),
+      profile: 'group-room-model',
+      vault: vaultRoot,
+    }),
+  )
+
+  expect(evidence).toContain(
+    '- target text: "Murph delivered the line that landed"',
   )
 })
 
@@ -229,6 +347,7 @@ function readGroupEvidenceText(evidence: string): string {
 async function upsertReactionInput(input: {
   actorIsSelf?: boolean
   affirmativeReaction?: boolean
+  channel?: 'linq' | 'telegram'
   eventId: string
   replyTarget?: {
     channel: string | null
@@ -240,6 +359,7 @@ async function upsertReactionInput(input: {
   threadIsDirect?: boolean
   vaultRoot: string
 }): Promise<AssistantInputEventRecord> {
+  const channel = input.channel ?? 'linq'
   return await upsertAssistantInputEvent({
     event: {
       content: { text: input.text },
@@ -247,23 +367,31 @@ async function upsertReactionInput(input: {
         accountId: null,
         actorId: null,
         actorIsSelf: input.actorIsSelf ?? false,
-        source: 'linq',
+        source: channel,
         threadId: 'chat-room',
         threadIsDirect: input.threadIsDirect ?? false,
       },
       occurredAt: '2026-07-30T12:00:00.000Z',
       receivedAt: '2026-07-30T12:00:01.000Z',
       replyTarget: input.replyTarget ?? null,
-      sourceMetadata: {
-        ...(input.affirmativeReaction ? { affirmativeReaction: true } : {}),
-        externalThreadRouteAuthorityPresent: true,
-        kind: 'linq',
-        partCount: 1,
-        reactionEligible: false,
-        replyToMessageId: 'message-42',
-        senderHandle: input.senderHandle ?? '+15551234567',
-        service: 'iMessage',
-      },
+      sourceMetadata: channel === 'linq'
+        ? {
+            ...(input.affirmativeReaction ? { affirmativeReaction: true } : {}),
+            externalThreadRouteAuthorityPresent: true,
+            kind: 'linq',
+            partCount: 1,
+            reactionEligible: false,
+            replyToMessageId: 'message-42',
+            senderHandle: input.senderHandle ?? '+15551234567',
+            service: 'iMessage',
+          }
+        : {
+            externalThreadRouteAuthorityPresent: true,
+            kind: 'telegram',
+            mediaGroupId: null,
+            replyContext: null,
+            senderHandle: input.senderHandle ?? 'telegram-user:42',
+          },
       sourceRef: {
         causalSeq: null,
         dedupeKey: `dedupe:${input.eventId}`,
