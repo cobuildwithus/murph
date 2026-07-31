@@ -134,6 +134,7 @@ import {
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
   applyMurphManagedAutomations,
   ensureAutomaticMealCloseoutAutomation,
+  isManagedOnboardingFollowupAutomation,
   resolveMurphManagedAutomationSeed,
   resolveMurphManagedMaintenancePolicy,
   type MurphManagedAutomationSeed,
@@ -184,6 +185,24 @@ const legacyOnboardingFollowupInstructions = [
   '',
   'If onboarding is still open, offer one brief, natural in-chat message inviting setup to continue. Keep it low-pressure, do not mention internal state, and do not use a fixed script.',
 ].join('\n')
+
+it('classifies onboarding follow-up ownership by managed fingerprint, not public slug', () => {
+  expect(isManagedOnboardingFollowupAutomation({
+    instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
+    slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+    tags: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags,
+  })).toBe(true)
+  expect(isManagedOnboardingFollowupAutomation({
+    instructions: legacyOnboardingFollowupInstructions,
+    slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+    tags: ['assistant', 'onboarding'],
+  })).toBe(true)
+  expect(isManagedOnboardingFollowupAutomation({
+    instructions: 'User-owned follow-up instructions.',
+    slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+    tags: ['assistant', 'scheduled'],
+  })).toBe(false)
+})
 
 beforeEach(() => {
   managedAutomationMocks.prepareExperimentLifecycleAutomations

@@ -588,11 +588,13 @@ export async function sendAssistantNotificationLocal(
             providerValidationErrorDetails,
           )
         }
+        let onboardingCompletionReason: 'user_answered' | 'user_declined' | null
         try {
-          await applyAssistantOnboardingFollowupDecision({
-            decision,
-            input,
-          })
+          onboardingCompletionReason =
+            await resolveAssistantOnboardingFollowupCompletionReason({
+              decision,
+              input,
+            })
         } catch (error) {
           throw annotateAssistantNotificationError(
             error,
@@ -626,6 +628,19 @@ export async function sendAssistantNotificationLocal(
             deliveryOutcome: null,
             response: null,
           })
+          if (onboardingCompletionReason) {
+            try {
+              await commitAssistantOnboardingFollowupCompletion({
+                reason: onboardingCompletionReason,
+                vault: input.vault,
+              })
+            } catch (error) {
+              throw annotateAssistantNotificationError(
+                error,
+                providerValidationErrorDetails,
+              )
+            }
+          }
           const savedSession = await persistAssistantTurnAndSession({
             assistantTranscriptText: null,
             input: messageInput,
@@ -1620,18 +1635,18 @@ function assistantMaintenanceRawEventsIncludeMutation(
   })
 }
 
-async function applyAssistantOnboardingFollowupDecision(input: {
+async function resolveAssistantOnboardingFollowupCompletionReason(input: {
   decision: AssistantNotificationDecision
   input: AssistantNotificationInput
-}): Promise<void> {
+}): Promise<'user_answered' | 'user_declined' | null> {
   if (input.input.turnPolicy?.kind !== 'onboarding-followup') {
-    return
+    return null
   }
 
   const onboardingState = await readAssistantOnboardingState(input.input.vault)
   if (onboardingState.status === 'completed') {
     if (input.decision.kind === 'skip') {
-      return
+      return null
     }
     throw new VaultCliError(
       'ASSISTANT_ONBOARDING_COMPLETION_DECISION_INVALID',
@@ -1641,7 +1656,7 @@ async function applyAssistantOnboardingFollowupDecision(input: {
   }
 
   if (input.decision.kind === 'send_message') {
-    return
+    return null
   }
 
   const onboardingAction = input.decision.onboardingAction
@@ -1653,17 +1668,24 @@ async function applyAssistantOnboardingFollowupDecision(input: {
     )
   }
   if (onboardingAction.kind === 'leave_open') {
-    return
+    return null
   }
 
+  return onboardingAction.reason
+}
+
+async function commitAssistantOnboardingFollowupCompletion(input: {
+  reason: 'user_answered' | 'user_declined'
+  vault: string
+}): Promise<void> {
   try {
     const completed = await completeAssistantOnboarding({
-      reason: onboardingAction.reason,
-      vault: input.input.vault,
+      reason: input.reason,
+      vault: input.vault,
     })
     if (
       completed.status === 'completed' &&
-      completed.completedReason === onboardingAction.reason
+      completed.completedReason === input.reason
     ) {
       return
     }

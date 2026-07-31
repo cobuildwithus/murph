@@ -45,6 +45,7 @@ import {
   type AssistantExecutionContext,
 } from '../execution-context.js'
 import {
+  isManagedOnboardingFollowupAutomation,
   isRetiredMurphManagedAutomationId,
   resolveMurphManagedAutomationOwnerScope,
   resolveMurphManagedMaintenancePolicy,
@@ -54,9 +55,6 @@ import { readAssistantOnboardingState } from '../onboarding-state.js'
 import {
   runOnboardingGoalCheckinAuthorityPrecondition,
 } from '../onboarding-goal-checkin-automation.js'
-import {
-  MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
-} from '../onboarding-followup-automation.js'
 import {
   resolveGroupNewsletterAutomationDelivery,
 } from '../group-newsletter-automation.js'
@@ -1666,8 +1664,9 @@ function resolveAssistantCronNotificationTurnPolicy(
     }
   }
 
-  return resolveAssistantCronAutomationSlug(job) ===
-    MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug
+  return job.kind === 'canonical' &&
+    job.source.kind === 'automation' &&
+    isManagedOnboardingFollowupAutomation(job.source)
     ? { kind: 'onboarding-followup' }
     : null
 }

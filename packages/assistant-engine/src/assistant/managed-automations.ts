@@ -1543,15 +1543,21 @@ function onboardingFollowupAutomationDefinitionChanged(
     )
 }
 
-function isManagedOnboardingFollowupAutomation(
-  automation: AutomationRecord,
+interface OnboardingFollowupAutomationIdentity {
+  instructions: string
+  slug: string
+  tags: readonly string[]
+}
+
+export function isManagedOnboardingFollowupAutomation(
+  automation: OnboardingFollowupAutomationIdentity,
 ): boolean {
   return isCurrentManagedOnboardingFollowupAutomation(automation) ||
     isLegacySeededOnboardingFollowupAutomation(automation)
 }
 
 function isCurrentManagedOnboardingFollowupAutomation(
-  automation: AutomationRecord,
+  automation: OnboardingFollowupAutomationIdentity,
 ): boolean {
   const tags = new Set(automation.tags)
   return tags.has('murph-managed') &&
@@ -1559,7 +1565,7 @@ function isCurrentManagedOnboardingFollowupAutomation(
 }
 
 function isLegacySeededOnboardingFollowupAutomation(
-  automation: AutomationRecord,
+  automation: OnboardingFollowupAutomationIdentity,
 ): boolean {
   return automation.slug === MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug &&
     automation.instructions === LEGACY_ONBOARDING_FOLLOWUP_AUTOMATION_INSTRUCTIONS &&

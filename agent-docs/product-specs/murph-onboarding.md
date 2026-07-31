@@ -47,7 +47,10 @@ privacy, authorization, or provider boundaries.
   not gate ordinary Murph use.
 - Keep the existing `finish-onboarding-followup` managed automation as the one
   recovery and continuation mechanism. Do not add a second automation for
-  context collection or split onboarding into competing lifecycle owners.
+  context collection or split onboarding into competing lifecycle owners. The
+  public slug alone does not confer this role: execution uses the existing
+  current-or-legacy managed ownership fingerprint so a member-owned
+  same-slug automation remains ordinary scheduled work.
 - Keep the post-onboarding choice point separate from unfinished-onboarding
   recovery. It is one finite managed one-shot for members who answered
   onboarding, not another collection flow, recurring cadence, or profile.
@@ -555,8 +558,10 @@ but they do not create another scheduled recovery attempt.
 
 The scheduled turn does not invoke the completion command itself. It returns a
 structured completion action to the notification boundary, which applies the
-existing canonical onboarding write and treats a failed write as a retryable
-run failure. A valid skip that intentionally leaves onboarding open names that
+existing canonical onboarding write only after cron's final source, lifecycle,
+cutoff, and foreground-preemption authority check. A rejected or stale result
+cannot change onboarding state; an authorized failed write is a retryable run
+failure. A valid skip that intentionally leaves onboarding open names that
 choice explicitly. The same 3:00 PM cutoff prevents a queued or delayed
 outbound intent from entering the provider after the finite local window.
 

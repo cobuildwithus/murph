@@ -882,7 +882,9 @@ command directly. Return the scheduled notification's structured
 `onboardingAction` instead: `complete` with `user_answered` or `user_declined`
 when onboarding should close, or `leave_open` for a valid silent skip while it
 remains open. The notification boundary applies completion through the same
-canonical state owner and fails the run if that write does not commit.
+canonical state owner only after the scheduled occurrence passes its final
+source, cutoff, lifecycle, and foreground-preemption authority check. It fails
+the run if that write does not commit.
 
 ### Finite next-day recovery
 

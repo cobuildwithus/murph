@@ -209,6 +209,7 @@ import {
 import {
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_PRIVATE_SUMMARY,
+  MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
@@ -780,7 +781,7 @@ describe('assistant cron runtime orchestration', () => {
       },
       slug: 'finish-onboarding-followup',
       summary: 'One final setup invitation.',
-      tags: ['assistant', 'onboarding'],
+      tags: [...MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags],
       title: 'Final Murph onboarding follow-up',
       vault: vaultRoot,
     })
@@ -816,7 +817,7 @@ describe('assistant cron runtime orchestration', () => {
       },
       slug: 'finish-onboarding-followup',
       summary: 'One final setup invitation.',
-      tags: ['assistant', 'onboarding'],
+      tags: [...MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags],
       title: 'Final Murph onboarding follow-up',
       vault: vaultRoot,
     })
@@ -916,6 +917,102 @@ describe('assistant cron runtime orchestration', () => {
     expect(findCanonicalAutomation(vaultRoot, 'finish-onboarding-followup')?.status)
       .toBe('archived')
   })
+
+  it.each([
+    {
+      onboardingStatus: 'completed',
+      expectedOutcome: 'delivered',
+      result: {
+        decision: {
+          kind: 'send_message',
+          privateSummary: 'Delivered the user-owned reminder.',
+          text: 'Your own scheduled reminder.',
+        },
+        deliveryOutcome: {
+          delivery: null,
+          intentId: 'outbox_user_owned_same_slug',
+          kind: 'sent',
+          media: [],
+          session: {
+            sessionId: 'session_user_owned_same_slug',
+          },
+        },
+        response: 'Your own scheduled reminder.',
+        session: {
+          sessionId: 'session_user_owned_same_slug',
+        },
+      },
+    },
+    {
+      onboardingStatus: 'open',
+      expectedOutcome: 'no_op',
+      result: {
+        decision: {
+          kind: 'skip',
+          privateSummary: 'The user-owned reminder had nothing to send.',
+        },
+        response: null,
+        session: {
+          sessionId: 'session_user_owned_same_slug',
+        },
+      },
+    },
+  ] as const)(
+    'keeps a user-owned same-slug automation on the generic $onboardingStatus-onboarding path',
+    async ({ expectedOutcome, onboardingStatus, result }) => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-04-09T18:29:05.000Z'))
+      const { vaultRoot } = await createRuntimeContext(
+        `assistant-cron-runtime-user-owned-onboarding-slug-${onboardingStatus}-`,
+      )
+      if (onboardingStatus === 'completed') {
+        await completeAssistantOnboarding({
+          completedAt: '2026-04-08T18:00:00.000Z',
+          reason: 'user_answered',
+          vault: vaultRoot,
+        })
+      }
+      getVaultAutomationStore(vaultRoot).push({
+        activeUntil: '2026-04-09T19:00:00.000Z',
+        automationId: `automation_user_owned_onboarding_slug_${onboardingStatus}`,
+        continuityPolicy: 'preserve',
+        createdAt: '2026-04-08T18:00:00.000Z',
+        instructions: 'Run the member-authored reminder.',
+        route: {
+          channel: 'telegram',
+          deliverySource: null,
+          deliveryTarget: 'room-1',
+          identityId: null,
+          participantId: null,
+          threadId: null,
+          threadIsDirect: true,
+        },
+        schedule: {
+          at: '2026-04-09T18:29:00.000Z',
+          kind: 'at',
+        },
+        slug: 'finish-onboarding-followup',
+        status: 'active',
+        summary: 'A member-authored reminder.',
+        tags: ['assistant', 'scheduled'],
+        title: 'Member-authored reminder',
+        updatedAt: '2026-04-08T18:00:00.000Z',
+      })
+      cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce(result)
+
+      const completed = await runAssistantCronJobNow({
+        job: `automation_user_owned_onboarding_slug_${onboardingStatus}`,
+        vault: vaultRoot,
+      })
+
+      expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+        expect.objectContaining({
+          turnPolicy: null,
+        }),
+      )
+      expect(completed.run.outcome).toBe(expectedOutcome)
+    },
+  )
 
   it('recomputes an existing canonical automation when the schedule cadence changes', async () => {
     vi.useFakeTimers()

@@ -4605,8 +4605,14 @@ test('sendAssistantNotificationLocal applies structured onboarding completion th
       providerResult,
       turnId: 'turn-onboarding-followup-owned-completion',
     })
+    const beforeCommit = vi.fn(async () => {
+      await expect(readAssistantOnboardingState(vault)).resolves.toMatchObject({
+        status: 'open',
+      })
+    })
 
     await expect(sendAssistantNotificationLocal({
+      beforeCommit,
       instructions: 'Complete onboarding or make one final continuation decision.',
       scheduledOccurrenceAt: '2026-04-09T18:29:00.000Z',
       turnPolicy: {
@@ -4627,6 +4633,7 @@ test('sendAssistantNotificationLocal applies structured onboarding completion th
       completedReason: 'user_answered',
       status: 'completed',
     })
+    expect(beforeCommit).toHaveBeenCalledOnce()
     expect(mocks.resolveAssistantSessionForMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message: expect.objectContaining({
@@ -4635,6 +4642,108 @@ test('sendAssistantNotificationLocal applies structured onboarding completion th
       }),
     )
     expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledOnce()
+    expect(deliverMessage).not.toHaveBeenCalled()
+  } finally {
+    await rm(vault, { force: true, recursive: true })
+  }
+})
+
+test('sendAssistantNotificationLocal does not complete onboarding after provider work is aborted', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'onboarding-followup-aborted-completion-'))
+  try {
+    const abortController = new AbortController()
+    const abortError = new VaultCliError(
+      'ASSISTANT_CRON_FOREGROUND_YIELDED',
+      'Assistant cron yielded to fresh foreground input.',
+    )
+    const providerResult = createProviderResult({
+      response: JSON.stringify({
+        kind: 'skip',
+        onboardingAction: {
+          kind: 'complete',
+          reason: 'user_answered',
+        },
+        privateSummary: 'The stale result would complete onboarding.',
+      }),
+    })
+    const {
+      deliverMessage,
+      mocks,
+      sendAssistantNotificationLocal,
+    } = await loadNotificationTurnHarness({
+      onExecuteCodexTurnWithRecovery: async () => {
+        abortController.abort(abortError)
+        return {
+          kind: 'succeeded',
+          providerTurn: providerResult,
+        }
+      },
+      providerResult,
+      turnId: 'turn-onboarding-followup-aborted-completion',
+    })
+
+    await expect(sendAssistantNotificationLocal({
+      abortSignal: abortController.signal,
+      instructions: 'Make one final continuation decision.',
+      turnPolicy: {
+        kind: 'onboarding-followup',
+      },
+      vault,
+    })).rejects.toBe(abortError)
+
+    await expect(readAssistantOnboardingState(vault)).resolves.toMatchObject({
+      status: 'open',
+    })
+    expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+    expect(deliverMessage).not.toHaveBeenCalled()
+  } finally {
+    await rm(vault, { force: true, recursive: true })
+  }
+})
+
+test('sendAssistantNotificationLocal does not complete onboarding when commit authority rejects', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'onboarding-followup-rejected-completion-'))
+  try {
+    const authorityError = new VaultCliError(
+      'ASSISTANT_CRON_CANONICAL_SOURCE_INVALIDATED',
+      'Scheduled onboarding source expired before commit.',
+    )
+    const providerResult = createProviderResult({
+      response: JSON.stringify({
+        kind: 'skip',
+        onboardingAction: {
+          kind: 'complete',
+          reason: 'user_declined',
+        },
+        privateSummary: 'The expired result would complete onboarding.',
+      }),
+    })
+    const {
+      deliverMessage,
+      mocks,
+      sendAssistantNotificationLocal,
+    } = await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-onboarding-followup-rejected-completion',
+    })
+    const beforeCommit = vi.fn(async () => {
+      throw authorityError
+    })
+
+    await expect(sendAssistantNotificationLocal({
+      beforeCommit,
+      instructions: 'Make one final continuation decision.',
+      turnPolicy: {
+        kind: 'onboarding-followup',
+      },
+      vault,
+    })).rejects.toBe(authorityError)
+
+    await expect(readAssistantOnboardingState(vault)).resolves.toMatchObject({
+      status: 'open',
+    })
+    expect(beforeCommit).toHaveBeenCalledOnce()
+    expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
     expect(deliverMessage).not.toHaveBeenCalled()
   } finally {
     await rm(vault, { force: true, recursive: true })

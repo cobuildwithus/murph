@@ -2614,7 +2614,10 @@ How old are you and what's your gender?
       'Send or skip ends this scheduled recovery.',
     )
     expect(compact).toContain(
-      'The notification boundary applies completion through the same canonical state owner and fails the run if that write does not commit.',
+      'The notification boundary applies completion through the same canonical state owner only after the scheduled occurrence passes its final source, cutoff, lifecycle, and foreground-preemption authority check.',
+    )
+    expect(compact).toContain(
+      'It fails the run if that write does not commit.',
     )
     expect(compact).toContain(
       '`leave_open` for a valid silent skip while it remains open',
