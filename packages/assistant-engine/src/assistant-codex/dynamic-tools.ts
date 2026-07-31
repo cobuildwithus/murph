@@ -435,7 +435,7 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
         minLength: 1,
         maxLength: HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
         description:
-          'Concise product-only summary of the feedback. When a path is missing, name the desired outcome and missing Murph capability rather than summarizing the conversation. Start with "Speculative:" only for clear inferred user workflow friction, or "Murph-observed:" only for repeated assistant-observed product/tool friction. Do not include tags, topics, raw user wording, health details, identifiers, contact details, secrets, or provider payloads.',
+          'Concise product-only summary of the feedback. Make it actionable without the conversation: name the generic actor, exact Murph surface or workflow, requested or attempted action, expected versus observed result, and any concrete constraint the source established. Preserve those distinctions instead of replacing them with vague labels. If a detail is not established, omit it or mark it unclear rather than infer or invent it. When a path is missing, name the desired outcome and missing Murph capability rather than summarizing the conversation. Start with "Speculative:" only for clear inferred user workflow friction, or "Murph-observed:" only for repeated assistant-observed product/tool friction. Do not include tags, topics, raw user wording, health details, identifiers, contact details, secrets, or provider payloads.',
       },
       relatedChangelogItemIds: {
         type: 'array',
