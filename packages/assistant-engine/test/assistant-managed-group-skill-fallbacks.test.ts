@@ -3,7 +3,10 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { resolveAssistantSkillsRoot } from "../src/assistant-skill-assets.js";
+import {
+  ASSISTANT_SKILLS,
+  resolveAssistantSkillsRoot,
+} from "../src/assistant-skill-assets.js";
 
 const MANAGED_GROUP_SKILL_SLUGS = [
   "group-chat",
@@ -42,5 +45,30 @@ describe("managed hosted group skill boundary", () => {
       "group-newsletter",
       "groupchat-comedy",
     ]);
+  });
+
+  it("keeps public routing metadata for the private-owned challenge skills", () => {
+    const challenge = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === "group-challenge",
+    );
+    const scorecards = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === "group-challenge-scorecards",
+    );
+
+    expect(challenge?.triggerHint).toContain(
+      "social-first formation grounded in the current room",
+    );
+    expect(challenge?.triggerHint).toContain(
+      "A vague challenge request is not exercise programming.",
+    );
+    expect(challenge?.triggerHint).toContain("group-challenge-scorecards");
+    expect(scorecards?.triggerHint).toContain("teams");
+    expect(scorecards?.triggerHint).toContain("shared or participant target");
+    expect(scorecards?.triggerHint).toContain("multiple metrics");
+    expect(scorecards?.triggerHint).toContain("weighted additive points");
+    expect(scorecards?.triggerHint).toContain("up-to-five-component");
+    expect(scorecards?.triggerHint).toContain(
+      "group-challenge still owns formation, buy-in, consent, durable state, scheduling, diagnostics, and close-out",
+    );
   });
 });
