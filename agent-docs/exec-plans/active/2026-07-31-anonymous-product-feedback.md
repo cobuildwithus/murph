@@ -79,14 +79,18 @@ Updated: 2026-07-31
   generation passed.
 - Complete provider-input capture through the pinned Codex App Server used
   `gpt-5.6-terra`, low reasoning, production code mode, identical synthetic
-  direct/group inputs, and `gpt-tokenizer` 3.4.0 `o200k_harmony`. The direct
-  fixture measured 26,277 to 26,441 tokens and 120,664 to 121,545 bytes; the
-  group fixture measured 21,797 to 21,961 tokens and 100,865 to 101,746 bytes.
-  Both are +164 tokens and +881 bytes, wholly attributable to the feedback
-  summary-schema privacy/detail guidance. Two consecutive captures were
-  identical.
-- The original exact-head CI passed. Focused remediation verification, the
-  updated prompt measurement, exact-head CI, and ReviewGPT correction
+  inputs, 16 representative direct tools, 13 representative group tools, and
+  `gpt-tokenizer` 3.4.0 `o200k_harmony`. Against current `origin/main`, the
+  direct fixture measured 30,062 to 30,242 tokens and 138,301 to 138,862 bytes
+  (+180 tokens, +0.5988%, +561 bytes); the group fixture measured 26,557 to
+  26,737 tokens and 122,700 to 123,261 bytes (+180 tokens, +0.6778%, +561
+  bytes). The shorter no-prose instruction contributes -19 tokens/-100 bytes;
+  the closed enum schema and Codex-generated declaration contribute +199
+  tokens/+661 bytes; other provider-visible input contributes zero. The
+  capture excluded only `client_metadata` and `prompt_cache_key` and normalized
+  temporary paths identically. Each reconstructed base replacement was
+  asserted to occur exactly once.
+- The original exact-head CI passed. Exact-head CI and ReviewGPT correction
   verification remain pending.
 - The remediation passed 451 Hosted Execution tests and 2,247 Cloudflare tests;
   162 focused assistant guidance/tool tests plus the durable-handoff,
