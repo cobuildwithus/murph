@@ -72,6 +72,7 @@ describe("native companion signup token route", () => {
     mocks.readOptionalJsonObject.mockResolvedValue({
       connectionIntent: "connect",
       platform: "ios",
+      timeZone: "America/Denver",
     });
     mocks.validateCompanionSignInRequestBody.mockReturnValue("connect");
     mocks.requireHostedCompanionMemberAccessFromRequest.mockResolvedValue({
@@ -103,7 +104,11 @@ describe("native companion signup token route", () => {
     );
     expect(
       mocks.requireHostedCompanionMemberAccessFromRequest,
-    ).toHaveBeenCalledWith(incoming, { label: "test-prisma" });
+    ).toHaveBeenCalledWith({
+      prisma: { label: "test-prisma" },
+      request: incoming,
+      timeZone: "America/Denver",
+    });
     expect(mocks.createSdkSignInSession).toHaveBeenCalledWith(
       "member_native",
       "junction",
