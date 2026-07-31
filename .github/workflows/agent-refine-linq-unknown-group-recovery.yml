@@ -5,6 +5,12 @@ on:
   pull_request:
     types:
       - ready_for_review
+  push:
+    branches:
+      - agent/linq-unknown-group-signup-recovery
+    paths:
+      - scripts/agent-fix-group-start-effect.py
+      - .github/workflows/agent-refine-linq-unknown-group-recovery.yml
 
 permissions:
   contents: write
