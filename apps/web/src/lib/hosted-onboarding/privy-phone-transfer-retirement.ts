@@ -26,6 +26,7 @@ import {
 } from "./hosted-member-store";
 import { buildHostedLinqInviteSignupEffectIdMemberPrefix } from "./linq-invite-signup-effect-id";
 import { acquireHostedLinqParticipantPhoneLockTx } from "./linq-participant-contact";
+import { normalizePhoneNumber } from "./phone";
 import {
   readHostedPrivyUserByIdIfExists,
   type HostedPrivyIdentity,
@@ -51,6 +52,34 @@ export interface HostedPrivyPhoneTransferSourceRetirementProof {
     stripeSubscriptionId: string;
   } | null;
   sourceMemberId: string;
+}
+
+export async function acquireHostedPrivyPhoneTransferPhoneLocksTx(input: {
+  prisma: Prisma.TransactionClient;
+  targetPhoneNumberBeforeTransfer: string | null;
+  transferPhoneNumber: string;
+}): Promise<void> {
+  const phoneNumbers = new Set<string>();
+  for (const value of [
+    input.targetPhoneNumberBeforeTransfer,
+    input.transferPhoneNumber,
+  ]) {
+    if (value === null) {
+      continue;
+    }
+    const phoneNumber = normalizePhoneNumber(value);
+    if (!phoneNumber) {
+      throwHostedPrivyPhoneTransferChanged();
+    }
+    phoneNumbers.add(phoneNumber);
+  }
+
+  for (const phoneNumber of [...phoneNumbers].sort()) {
+    await acquireHostedLinqParticipantPhoneLockTx({
+      phoneNumber,
+      tx: input.prisma,
+    });
+  }
 }
 
 export async function readHostedPrivyPhoneTransferProof(input: {
@@ -118,9 +147,10 @@ export async function prepareHostedPrivyPhoneTransferSourceRetirementTx(input: {
     throwHostedPrivyPhoneTransferChanged();
   }
 
-  await acquireHostedLinqParticipantPhoneLockTx({
-    phoneNumber,
-    tx: input.prisma,
+  await acquireHostedPrivyPhoneTransferPhoneLocksTx({
+    prisma: input.prisma,
+    targetPhoneNumberBeforeTransfer: input.targetPhoneNumberBeforeTransfer,
+    transferPhoneNumber: phoneNumber,
   });
   for (const memberId of [
     input.member.id,

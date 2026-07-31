@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const serviceMocks = vi.hoisted(() => ({
+  acquireHostedPrivyPhoneTransferPhoneLocksTx: vi.fn(),
   assertHostedPrivyPhoneTransferSourceRetirementFenceTx: vi.fn(),
   buildHostedPrivySessionState: vi.fn(),
   connectedAppsClient: {
@@ -73,6 +74,8 @@ vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/privy-phone-transfer-retirement", () => ({
+  acquireHostedPrivyPhoneTransferPhoneLocksTx:
+    serviceMocks.acquireHostedPrivyPhoneTransferPhoneLocksTx,
   assertHostedPrivyPhoneTransferSourceRetirementFenceTx:
     serviceMocks.assertHostedPrivyPhoneTransferSourceRetirementFenceTx,
   prepareHostedPrivyPhoneTransferSourceRetirementTx:
@@ -240,6 +243,10 @@ const VALID_DELETION_MODES = new Set([
 
 beforeEach(() => {
   vi.stubEnv("KERNEL_API_KEY", "");
+  serviceMocks.acquireHostedPrivyPhoneTransferPhoneLocksTx.mockReset();
+  serviceMocks.acquireHostedPrivyPhoneTransferPhoneLocksTx.mockResolvedValue(
+    undefined,
+  );
   serviceMocks.assertHostedPrivyPhoneTransferSourceRetirementFenceTx.mockReset();
   serviceMocks.assertHostedPrivyPhoneTransferSourceRetirementFenceTx.mockResolvedValue(
     undefined,
@@ -575,6 +582,11 @@ describe("deleteHostedAccountData", () => {
         order.push("transfer:fence");
       },
     );
+    serviceMocks.acquireHostedPrivyPhoneTransferPhoneLocksTx.mockImplementation(
+      async () => {
+        order.push("transfer:phone-locks");
+      },
+    );
     const stripe = {
       subscriptions: {
         cancel: vi.fn(async () => {
@@ -671,9 +683,8 @@ describe("deleteHostedAccountData", () => {
     expect(order.indexOf("stripe:subscription-cancel")).toBeLessThan(
       finalTransactionStart,
     );
-    expect(finalTransactionOrder.slice(0, 6)).toEqual([
-      "executeRaw",
-      "executeRaw:phone:+15551234567",
+    expect(finalTransactionOrder.slice(0, 5)).toEqual([
+      "transfer:phone-locks",
       "queryRaw",
       "queryRaw:member_123",
       "queryRaw",

@@ -50,9 +50,7 @@ import {
   parseHostedLinqInviteSignupEffectId,
 } from "../hosted-onboarding/linq-invite-signup-effect-id";
 import {
-  acquireHostedLinqParticipantPhoneLockTx,
-} from "../hosted-onboarding/linq-participant-contact";
-import {
+  acquireHostedPrivyPhoneTransferPhoneLocksTx,
   assertHostedPrivyPhoneTransferSourceRetirementFenceTx,
   prepareHostedPrivyPhoneTransferSourceRetirementTx,
   type HostedPrivyPhoneTransferProof,
@@ -931,9 +929,11 @@ async function deleteHostedAccountDataInternal(input: {
     : null;
   const databaseDeletion: HostedAccountDeletionDatabaseResult = await input.prisma.$transaction(async (tx) => {
     if (input.phoneTransfer && phoneTransferSession) {
-      await acquireHostedLinqParticipantPhoneLockTx({
-        phoneNumber: input.phoneTransfer.transfer.phoneNumber,
-        tx,
+      await acquireHostedPrivyPhoneTransferPhoneLocksTx({
+        prisma: tx,
+        targetPhoneNumberBeforeTransfer:
+          input.phoneTransfer.targetPhoneNumberBeforeTransfer,
+        transferPhoneNumber: input.phoneTransfer.transfer.phoneNumber,
       });
       for (const memberId of [
         input.phoneTransfer.targetMember.id,

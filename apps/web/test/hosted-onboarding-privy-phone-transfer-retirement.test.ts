@@ -47,6 +47,7 @@ vi.mock("@/src/lib/hosted-onboarding/shared", () => ({
 }));
 
 import {
+  acquireHostedPrivyPhoneTransferPhoneLocksTx,
   assertHostedPrivyPhoneTransferSourceRetirementFenceTx,
   prepareHostedPrivyPhoneTransferSourceRetirementTx,
 } from "@/src/lib/hosted-onboarding/privy-phone-transfer-retirement";
@@ -94,6 +95,62 @@ describe("Privy phone-transfer source retirement", () => {
         id: SOURCE_MEMBER_ID,
         suspendedAt: null,
       },
+    });
+  });
+
+  it("locks the target's prior phone and transferred phone before member rows", async () => {
+    const targetPhoneNumber = "+15550000001";
+    const fixture = makeFixture({ targetPhoneNumber });
+
+    await expect(prepare(fixture, targetPhoneNumber)).resolves.toEqual({
+      autoTrialBilling: null,
+      sourceMemberId: SOURCE_MEMBER_ID,
+    });
+
+    expect(mocks.acquireHostedLinqParticipantPhoneLockTx).toHaveBeenNthCalledWith(
+      1,
+      {
+        phoneNumber: targetPhoneNumber,
+        tx: fixture.prisma,
+      },
+    );
+    expect(mocks.acquireHostedLinqParticipantPhoneLockTx).toHaveBeenNthCalledWith(
+      2,
+      {
+        phoneNumber: PHONE_NUMBER,
+        tx: fixture.prisma,
+      },
+    );
+    expect(
+      mocks.acquireHostedLinqParticipantPhoneLockTx.mock.invocationCallOrder[1],
+    ).toBeLessThan(mocks.lockHostedMemberRow.mock.invocationCallOrder[0] ?? 0);
+  });
+
+  it("locks the transferred phone once when the target had no phone", async () => {
+    const fixture = makeFixture();
+
+    await acquireHostedPrivyPhoneTransferPhoneLocksTx({
+      prisma: fixture.prisma as never,
+      targetPhoneNumberBeforeTransfer: null,
+      transferPhoneNumber: PHONE_NUMBER,
+    });
+
+    expect(mocks.acquireHostedLinqParticipantPhoneLockTx).toHaveBeenCalledOnce();
+  });
+
+  it("normalizes and deduplicates equal prior and transferred phones", async () => {
+    const fixture = makeFixture();
+
+    await acquireHostedPrivyPhoneTransferPhoneLocksTx({
+      prisma: fixture.prisma as never,
+      targetPhoneNumberBeforeTransfer: "1 (555) 123-4567",
+      transferPhoneNumber: PHONE_NUMBER,
+    });
+
+    expect(mocks.acquireHostedLinqParticipantPhoneLockTx).toHaveBeenCalledOnce();
+    expect(mocks.acquireHostedLinqParticipantPhoneLockTx).toHaveBeenCalledWith({
+      phoneNumber: PHONE_NUMBER,
+      tx: fixture.prisma,
     });
   });
 
@@ -307,7 +364,10 @@ describe("Privy phone-transfer source retirement", () => {
 
 type Fixture = ReturnType<typeof makeFixture>;
 
-function prepare(fixture: Fixture) {
+function prepare(
+  fixture: Fixture,
+  targetPhoneNumberBeforeTransfer: string | null = null,
+) {
   mocks.readHostedMemberCoreState.mockImplementation(
     async ({ memberId }: { memberId: string }) =>
       memberId === TARGET_MEMBER_ID
@@ -336,7 +396,7 @@ function prepare(fixture: Fixture) {
     member: fixture.targetMember,
     now: NOW,
     prisma: fixture.prisma as never,
-    targetPhoneNumberBeforeTransfer: null,
+    targetPhoneNumberBeforeTransfer,
     transfer: {
       phoneNumber: PHONE_NUMBER,
       sourceMemberId: SOURCE_MEMBER_ID,
