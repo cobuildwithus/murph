@@ -18,7 +18,10 @@ import {
 
 import { assertHostedGroupParticipantActionOriginHasOwnMurph } from "../hosted-groups/participant-action-authority";
 import { isHostedOnboardingError } from "../hosted-onboarding/errors";
-import { assertActiveHostedMemberAccessAllowed } from "../hosted-onboarding/member-access";
+import {
+  assertActiveHostedMemberAccessAllowed,
+  readActiveHostedMemberAccess,
+} from "../hosted-onboarding/member-access";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   lockHostedMemberRow,
@@ -87,10 +90,15 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
   });
   const reservation = await prisma.$transaction(async (tx) => {
     await lockHostedMemberRow(tx, input.memberId);
-    await assertActiveHostedMemberAccessAllowed({
+    if (!await readActiveHostedMemberAccess({
       memberId: input.memberId,
       prisma: tx,
-    });
+    })) {
+      await assertActiveHostedMemberAccessAllowed({
+        memberId: input.memberId,
+        prisma: tx,
+      });
+    }
     const existing = await tx.hostedPhysicalNote.findUnique({
       where: {
         memberId_requestKey: {
