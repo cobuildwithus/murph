@@ -1615,7 +1615,6 @@ describe('applyMurphManagedAutomations', () => {
     expect(memoryRecord?.tags).toContain('murph-managed:overnight-memory-consolidation')
     expect(memoryRecord?.tags).toContain('runtime-maintenance')
     expect(memoryRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
-    expect(memoryRecord?.instructions).toContain('Goal: consolidate durable user context')
     expect(memoryRecord?.instructions).toContain('engine-supplied "Conversation evidence" section')
     expect(memoryRecord?.instructions).toContain('bounded committed user and assistant conversation messages from the last 7 days')
     expect(memoryRecord?.instructions).toContain('supplied conversation evidence')

@@ -93,6 +93,29 @@ describe("hosted phone auth support", () => {
     });
   });
 
+  it("swallows phone-link diagnostic transport failures", async () => {
+    const { reportHostedPhoneLinkDiagnostic } = await import(
+      "@/src/components/hosted-onboarding/hosted-phone-auth-support"
+    );
+    const diagnostic = {
+      attemptId: "11111111-1111-4111-8111-111111111111",
+      clientState: "eligible",
+      event: "provider_started",
+      operation: "link",
+      surface: "settings",
+    } as const;
+    mocks.requestHostedOnboardingJson.mockRejectedValueOnce(
+      new Error("diagnostics unavailable"),
+    );
+
+    await expect(reportHostedPhoneLinkDiagnostic(diagnostic)).resolves.toBeUndefined();
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+      keepalive: true,
+      payload: diagnostic,
+      url: "/api/settings/phone/diagnostic",
+    });
+  });
+
   it("waits for a changed-from transfer before returning an unchanged cancellation", async () => {
     const { requestHostedPhoneLinkSyncWithRetry } = await import(
       "@/src/components/hosted-onboarding/hosted-phone-auth-support"

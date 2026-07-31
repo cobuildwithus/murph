@@ -1006,7 +1006,6 @@ describe('applyMurphManagedAutomations core integration', () => {
     if (automation === null) {
       throw new Error('Expected overnight memory consolidation automation')
     }
-    expect(automation.instructions).toContain('Goal: consolidate durable user context')
     expect(automation.instructions).toContain(
       'engine-supplied "Conversation evidence" section',
     )

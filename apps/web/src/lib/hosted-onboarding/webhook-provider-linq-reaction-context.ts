@@ -1,20 +1,22 @@
 import "server-only";
 
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import {
-  HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_ITEM_MAX_CHARS,
-} from "@murphai/hosted-execution/contracts";
+  buildHostedExecutionLinqConversationMessageWake,
+  createHostedExecutionGroupReactionEventId,
+  formatHostedExecutionGroupReactionEventText,
+  HOSTED_EXECUTION_GROUP_REACTION_SENDER_ATTESTATION,
+} from "@murphai/hosted-execution";
 
 import {
-  appendHostedLinqThreadRouteReactionContextTx,
   readHostedThreadRouteByThreadIdentity,
+  type HostedThreadRouteSnapshot,
 } from "../hosted-routing/thread-route-store";
-import { createHostedPhoneLookupKey } from "./contact-privacy";
 import {
-  getHostedLinqChatSummary,
-  getHostedLinqReactionTargetMessage,
-  type HostedLinqReactionTargetMessage,
-} from "./linq-client";
+  signalHostedMailboxAppendRuntime,
+} from "../hosted-orchestration/signal-runtime";
+import { createHostedPhoneLookupKey } from "./contact-privacy";
+import { getHostedLinqChatSummary } from "./linq-client";
 import { createHostedLinqParticipantContact } from "./linq-participant-contact";
 import {
   isHostedLinqAffirmativeReaction,
@@ -23,8 +25,23 @@ import {
 import type { HostedLinqWebhookEvent } from "./linq-webhook";
 import { readActiveHostedMemberAccess } from "./member-access";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
+import {
+  appendConsumedHostedGroupReactionMailboxEnvelopeTx,
+} from "./group-reaction-mailbox";
 
-const HOSTED_LINQ_GROUP_REACTION_TARGET_MAX_CHARS = 320;
+const HOSTED_LINQ_GROUP_REACTION_VALUE_MAX_CHARS = 256;
+
+type HostedLinqGroupReactionRoute = Pick<
+  HostedThreadRouteSnapshot,
+  "accountLookupKey" | "containerMemberId"
+>;
+
+export type HostedLinqGroupReactionMailboxAppend = {
+  containerMemberId: string;
+  item: Awaited<
+    ReturnType<typeof appendConsumedHostedGroupReactionMailboxEnvelopeTx>
+  >["item"];
+};
 
 export async function buildHostedLinqAffirmativeReactionMessageEvent(input: {
   event: ParsedHostedLinqProviderEvent;
@@ -115,76 +132,156 @@ export async function buildHostedLinqAffirmativeReactionMessageEvent(input: {
   };
 }
 
+/**
+ * Appends one provider-authenticated Linq reaction through the existing
+ * conversation mailbox. Canonical offer owners may pass `actor: null` after
+ * they have decided the reaction so a pre-member handle never enters
+ * group-visible room evidence. The blind contact lookup stays envelope-local
+ * for the existing identifier and crypto contracts.
+ *
+ * Target text is deliberately absent here and resolved later from the bounded
+ * durable input/outbox spine. The same provider event therefore always rebuilds
+ * byte-identical mailbox content on retry.
+ */
+export async function appendHostedLinqGroupReactionMailboxTx(input: {
+  actor: string | null;
+  event: ParsedHostedLinqProviderEvent;
+  route: HostedLinqGroupReactionRoute;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedLinqGroupReactionMailboxAppend> {
+  const eventContext = readHostedLinqReactionEventContext(input.event);
+  if (!eventContext) {
+    throw new TypeError("Hosted Linq group reaction context is invalid.");
+  }
+
+  const occurredAt = input.event.providerCreatedAt.toISOString();
+  const reactionEventId = createHostedExecutionGroupReactionEventId(
+    input.event.eventId,
+  );
+  const reactionText = formatHostedExecutionGroupReactionEventText({
+    actor: input.actor,
+    changes: [{
+      operation: input.event.eventType === "reaction.removed"
+        ? "removed"
+        : "added",
+      reaction: readHostedLinqReactionValue(input.event),
+    }],
+    channel: "linq",
+    mode: "delta",
+    targetMessageId: eventContext.messageId,
+    targetText: null,
+  });
+  const envelope = buildHostedExecutionLinqConversationMessageWake({
+    ...(input.route.accountLookupKey
+      ? { accountLookupKey: input.route.accountLookupKey }
+      : {}),
+    contactKind: eventContext.actor.kind,
+    contactLookupKey: eventContext.actor.lookupKey,
+    eventId: reactionEventId,
+    linqMessage: {
+      chatId: eventContext.chatId,
+      from: HOSTED_EXECUTION_GROUP_REACTION_SENDER_ATTESTATION,
+      isFromMe: false,
+      messageId: reactionEventId,
+      parts: [{ type: "text", value: reactionText }],
+      reactionEligible: false,
+      replyToMessageId: eventContext.messageId,
+      ...(eventContext.partIndex === null
+        ? {}
+        : { replyToPartIndex: eventContext.partIndex }),
+      service: input.event.service ?? "iMessage",
+      threadIsDirect: false,
+    },
+    occurredAt,
+    routeAuthority: {
+      channel: "linq",
+      containerMemberId: input.route.containerMemberId,
+      threadId: eventContext.chatId,
+    },
+    userId: input.route.containerMemberId,
+  });
+  const appended = await appendConsumedHostedGroupReactionMailboxEnvelopeTx({
+    envelope,
+    tx: input.tx,
+  });
+  return {
+    containerMemberId: input.route.containerMemberId,
+    item: appended.item,
+  };
+}
+
+export async function signalHostedLinqGroupReactionMailbox(input: {
+  abortSignal?: AbortSignal;
+  append: HostedLinqGroupReactionMailboxAppend;
+  prisma: PrismaClient;
+}): Promise<void> {
+  await signalHostedMailboxAppendRuntime({
+    ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
+    expectedUserId: input.append.containerMemberId,
+    knownCheckpoint: {
+      lane: input.append.item.lane,
+      laneSeq: input.append.item.laneSeq,
+      userId: input.append.containerMemberId,
+    },
+    mailboxItemId: input.append.item.id,
+    prisma: input.prisma,
+  });
+}
+
+/**
+ * Retains the historical function name for the webhook call site, but no longer
+ * stages a lossy next-message hint. The verified provider event supplies the
+ * actor and target id; the canonical thread route supplies group/runtime
+ * authority. The shared append owner above keeps generic and operational Linq
+ * reactions on one durability contract.
+ *
+ * The reaction becomes an ordinary durable conversation mailbox item whose row
+ * is marked consumed at ingress, so it is imported as context without ever
+ * becoming a reply candidate or depending on a live roster re-read.
+ */
 export async function stageHostedLinqGroupReactionContext(input: {
   event: ParsedHostedLinqProviderEvent;
   prisma: PrismaClient;
   signal?: AbortSignal;
 }): Promise<boolean> {
+  input.signal?.throwIfAborted();
   const eventContext = readHostedLinqReactionEventContext(input.event);
   if (!eventContext) {
     return false;
   }
 
-  try {
-    const route = await readHostedThreadRouteByThreadIdentity({
-      channel: "linq",
+  const route = await readHostedThreadRouteByThreadIdentity({
+    channel: "linq",
+    prisma: input.prisma,
+    threadId: eventContext.chatId,
+  });
+  if (
+    !route
+    || !(await readActiveHostedMemberAccess({
+      memberId: route.containerMemberId,
       prisma: input.prisma,
-      threadId: eventContext.chatId,
-    });
-    if (
-      !route
-      || !(await readActiveHostedMemberAccess({
-        memberId: route.containerMemberId,
-        prisma: input.prisma,
-      }))
-    ) {
-      return false;
-    }
-
-    const chat = await readHostedLinqReactionCanonicalChat({
-      actor: eventContext.actor,
-      chatId: eventContext.chatId,
-      ...(input.signal ? { signal: input.signal } : {}),
-    });
-    if (!chat || chat.isGroup !== true) {
-      return false;
-    }
-    const actorHandle = eventContext.actor.value;
-
-    const target = await getHostedLinqReactionTargetMessage({
-      messageId: eventContext.messageId,
-      ...(input.signal ? { signal: input.signal } : {}),
-    });
-    const targetText = buildHostedLinqReactionTargetText({
-      chatId: eventContext.chatId,
-      messageId: eventContext.messageId,
-      partIndex: eventContext.partIndex,
-      target,
-    });
-    if (!targetText) {
-      return false;
-    }
-
-    const append = await input.prisma.$transaction(
-      (tx) => appendHostedLinqThreadRouteReactionContextTx({
-        accountLookupKey: chat.accountLookupKey,
-        containerMemberId: route.containerMemberId,
-        prisma: tx,
-        text: buildHostedLinqGroupReactionContextText({
-          actorHandle,
-          event: input.event,
-          targetText,
-        }),
-        threadId: eventContext.chatId,
-      }),
-      HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
-    );
-    return append === "appended";
-  } catch {
-    // Reaction context is optional and lossy. Provider, crypto, or route-read
-    // failure must not interfere with join offers or ordinary message ingress.
+    }))
+  ) {
     return false;
   }
+
+  const append = await input.prisma.$transaction(
+    (tx) => appendHostedLinqGroupReactionMailboxTx({
+      actor: eventContext.actor.value,
+      event: input.event,
+      route,
+      tx,
+    }),
+    HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  );
+
+  input.signal?.throwIfAborted();
+  await signalHostedLinqGroupReactionMailbox({
+    ...(input.signal ? { abortSignal: input.signal } : {}),
+    append,
+    prisma: input.prisma,
+  });
+  return true;
 }
 
 async function readHostedLinqReactionCanonicalChat(input: {
@@ -257,7 +354,6 @@ function readHostedLinqReactionEventContext(
     || !event.linqChatId
     || !event.linqMessageId
     || !event.reactionFromHandle
-    || (!event.reactionType && !event.reactionCustomEmoji)
   ) {
     return null;
   }
@@ -276,45 +372,13 @@ function readHostedLinqReactionEventContext(
   };
 }
 
-function buildHostedLinqReactionTargetText(input: {
-  chatId: string;
-  messageId: string;
-  partIndex: number | null;
-  target: HostedLinqReactionTargetMessage;
-}): string | null {
-  if (input.target.id !== input.messageId || input.target.chatId !== input.chatId) {
-    return null;
-  }
-  const parts = input.partIndex === null
-    ? input.target.parts
-    : input.target.parts[input.partIndex] === undefined
-      ? null
-      : [input.target.parts[input.partIndex]];
-  if (!parts) {
-    return null;
-  }
-  const text = parts
-    .join(" ")
-    .replace(/\s+/gu, " ")
-    .trim() || "[message content unavailable]";
-  return truncateHostedLinqGroupReactionText(
-    text,
-    HOSTED_LINQ_GROUP_REACTION_TARGET_MAX_CHARS,
-  );
-}
-
-function buildHostedLinqGroupReactionContextText(input: {
-  actorHandle: string;
-  event: ParsedHostedLinqProviderEvent;
-  targetText: string;
-}): string {
-  const operation = input.event.eventType === "reaction.removed"
-    ? "removed"
-    : "added";
-  return truncateHostedLinqGroupReactionText(
-    `Participant ${input.actorHandle} ${operation} ${readHostedLinqReactionLabel(input.event)} on: ${input.targetText}`,
-    HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_ITEM_MAX_CHARS,
-  );
+function readHostedLinqReactionValue(event: ParsedHostedLinqProviderEvent): string {
+  const value = event.reactionCustomEmoji?.trim()
+    || event.reactionType?.trim().toLowerCase().replace(/[\s-]+/gu, "_")
+    || "unknown";
+  return Array.from(value)
+    .slice(0, HOSTED_LINQ_GROUP_REACTION_VALUE_MAX_CHARS)
+    .join("");
 }
 
 function readHostedLinqReactionLabel(event: ParsedHostedLinqProviderEvent): string {
@@ -342,11 +406,4 @@ function readHostedLinqReactionLabel(event: ParsedHostedLinqProviderEvent): stri
     default:
       return event.reactionCustomEmoji ? "a custom reaction" : "a reaction";
   }
-}
-
-function truncateHostedLinqGroupReactionText(value: string, maxChars: number): string {
-  if (value.length <= maxChars) {
-    return value;
-  }
-  return `${value.slice(0, Math.max(0, maxChars - 12)).trimEnd()} [truncated]`;
 }

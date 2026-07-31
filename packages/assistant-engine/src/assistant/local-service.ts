@@ -646,7 +646,9 @@ export async function sendAssistantMessageLocal(
           initialAcceptedInputJournal.inputs
         let providerRequestAcceptedInputIds: readonly string[] =
           initialAcceptedInputJournal.inputIds
-        let beforeHostedToolExecution = async (): Promise<void> => {}
+        let beforeHostedToolExecution = async (
+          _throughDeliveryContextOrdinal: number,
+        ): Promise<void> => {}
         const refreshTypingIndicatorAfterProgress = () => {
           void runAssistantTurnBestEffort(async () => {
             await typingIndicator?.refreshAfterMessage?.()
@@ -679,7 +681,9 @@ export async function sendAssistantMessageLocal(
                       ? dependencies.sendLinq
                       : undefined
                   if (sendLinq) {
-                    await beforeHostedToolExecution()
+                    await beforeHostedToolExecution(
+                      progressInput.deliveryContextOrdinal ?? 0,
+                    )
                   }
                   const progressDependencies = sendLinq
                     ? {
@@ -746,7 +750,8 @@ export async function sendAssistantMessageLocal(
         const hostedToolContext = hostedExecutionContext
           ? createAssistantHostedToolContext({
               computerToolsAvailable: hostedComputerToolsAvailable,
-              beforeToolExecution: () => beforeHostedToolExecution(),
+              beforeToolExecution: (deliveryContextOrdinal) =>
+                beforeHostedToolExecution(deliveryContextOrdinal),
               executionContext: hostedExecutionContext,
               getDeliveryContext: () => ({
                 messageInput: currentInput,
@@ -1094,65 +1099,75 @@ export async function sendAssistantMessageLocal(
             ...timingInput,
           })
         }
-        const drainLiveSteeredActiveTurnInputs = async (drainInput: {
+        let liveSteeredActiveTurnInputDrainTail: Promise<void> =
+          Promise.resolve()
+        const drainLiveSteeredActiveTurnInputs = (drainInput: {
           continuation:
             ExecutedAssistantProviderTurnResult['codexContinuation'] | null
           sessionId: string
           throughDeliveryContextOrdinal?: number | null
         }) => {
-          while (true) {
-            if (
-              typeof drainInput.throughDeliveryContextOrdinal === 'number' &&
-              replyDeliveryContexts.length > drainInput.throughDeliveryContextOrdinal
-            ) {
-              break
+          const drain = liveSteeredActiveTurnInputDrainTail.then(async () => {
+            while (true) {
+              if (
+                typeof drainInput.throughDeliveryContextOrdinal === 'number' &&
+                replyDeliveryContexts.length >
+                  drainInput.throughDeliveryContextOrdinal
+              ) {
+                break
+              }
+              const activeTurnInput =
+                await turnInputController.admitLiveSteered()
+              if (activeTurnInput?.kind !== 'accepted') {
+                break
+              }
+              const accepted = await acceptActiveTurnInput({
+                activeTurnInput,
+                providerRequestAcceptedInputIds,
+                providerRequestOrdinal,
+                sessionId: drainInput.sessionId,
+              })
+              replyDeliveryContexts.push(
+                pickAssistantReplyDeliveryContext(currentInput),
+              )
+              acceptedInputIdsByDeliveryContextOrdinal[
+                replyDeliveryContexts.length - 1
+              ] = accepted.acceptedInputItems.map((item) => item.id)
+              if (drainInput.continuation) {
+                providerRequestJournal =
+                  await runtimeState.turns.acceptedInputs.updateProviderRequest({
+                    acceptedInputIds: accepted.acceptedInputJournal.inputIds,
+                    continuation: drainInput.continuation,
+                    ordinal: providerRequestOrdinal,
+                    providerAttemptId: null,
+                    turnId: currentUserTurn.turnId,
+                  }) ?? providerRequestJournal
+                providerRequestAcceptedInputIds =
+                  providerRequestJournal?.inputIds ??
+                  accepted.acceptedInputJournal.inputIds
+                providerRequestAcceptedInputItems =
+                  providerRequestJournal?.inputs ??
+                  accepted.acceptedInputJournal.inputs
+              } else {
+                providerRequestAcceptedInputIds =
+                  accepted.acceptedInputJournal.inputIds
+                providerRequestAcceptedInputItems =
+                  accepted.acceptedInputJournal.inputs
+              }
+              acceptedInputIdsForProviderRequest =
+                providerRequestAcceptedInputIds
+              acceptedInputItemsForProviderRequest =
+                providerRequestAcceptedInputItems
             }
-            const activeTurnInput =
-              await turnInputController.admitLiveSteered()
-            if (activeTurnInput?.kind !== 'accepted') {
-              break
-            }
-            const accepted = await acceptActiveTurnInput({
-              activeTurnInput,
-              providerRequestAcceptedInputIds,
-              providerRequestOrdinal,
-              sessionId: drainInput.sessionId,
-            })
-            replyDeliveryContexts.push(
-              pickAssistantReplyDeliveryContext(currentInput),
-            )
-            acceptedInputIdsByDeliveryContextOrdinal[
-              replyDeliveryContexts.length - 1
-            ] = accepted.acceptedInputItems.map((item) => item.id)
-            if (drainInput.continuation) {
-              providerRequestJournal =
-                await runtimeState.turns.acceptedInputs.updateProviderRequest({
-                  acceptedInputIds: accepted.acceptedInputJournal.inputIds,
-                  continuation: drainInput.continuation,
-                  ordinal: providerRequestOrdinal,
-                  providerAttemptId: null,
-                  turnId: currentUserTurn.turnId,
-                }) ?? providerRequestJournal
-              providerRequestAcceptedInputIds =
-                providerRequestJournal?.inputIds ??
-                accepted.acceptedInputJournal.inputIds
-              providerRequestAcceptedInputItems =
-                providerRequestJournal?.inputs ??
-                accepted.acceptedInputJournal.inputs
-            } else {
-              providerRequestAcceptedInputIds =
-                accepted.acceptedInputJournal.inputIds
-              providerRequestAcceptedInputItems =
-                accepted.acceptedInputJournal.inputs
-            }
-            acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
-            acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
-          }
+          })
+          liveSteeredActiveTurnInputDrainTail = drain.catch(() => undefined)
+          return drain
         }
-        beforeHostedToolExecution = async () => {
+        beforeHostedToolExecution = async (throughDeliveryContextOrdinal) => {
           await drainLiveSteeredActiveTurnInputs({
             continuation: providerRequestContinuation,
             sessionId: currentSession.sessionId,
+            throughDeliveryContextOrdinal,
           })
         }
         const providerOutcome = await executeCodexTurnWithRecovery({
@@ -1530,6 +1545,8 @@ export async function sendAssistantMessageLocal(
         await drainLiveSteeredActiveTurnInputs({
           continuation: providerResult.codexContinuation,
           sessionId: providerResult.session.sessionId,
+          throughDeliveryContextOrdinal:
+            providerResult.responseDeliveryContextOrdinal,
         })
         currentSession = applyAssistantProgressDeliveredSession({
           progressDeliveredSession: progressDeliveredSessionRef.value,

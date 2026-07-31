@@ -16,6 +16,10 @@ import {
   type AssistantResponseCard,
 } from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import {
+  AVAILABILITY_CONFLICT_BLOCK_END,
+  AVAILABILITY_CONFLICT_BLOCK_START,
+} from '@murphai/core'
 import type { AssistantChannelAdapter } from '../src/assistant/channel-adapters.ts'
 import type { CodexThreadIdentity } from '../src/assistant/codex-thread-route.ts'
 import type {
@@ -100,6 +104,23 @@ const DAILY_NUTRITION_CARD: AssistantResponseCard = {
   },
 }
 
+const AVAILABILITY_BASE_INSTRUCTIONS = [
+  'Send one flexible reminder.',
+  'Availability conflict policy: skip-when-busy',
+  'Availability source policy: calendar-only',
+  'Availability calendar account: googlecalendar / calendar-account',
+].join('\n')
+const AVAILABILITY_CONFLICT_INSTRUCTIONS = [
+  AVAILABILITY_BASE_INSTRUCTIONS,
+  '',
+  AVAILABILITY_CONFLICT_BLOCK_START,
+  'Availability conflict snapshot:',
+  '- generatedAt: 2026-07-30T03:00:00.000Z',
+  '- expiresAt: 2026-08-06T03:00:00.000Z',
+  '- 2026-07-30T14:00:00.000Z / 2026-07-30T15:00:00.000Z',
+  AVAILABILITY_CONFLICT_BLOCK_END,
+].join('\n')
+
 afterEach(() => {
   vi.resetModules()
   vi.unstubAllEnvs()
@@ -118,9 +139,99 @@ afterEach(() => {
   vi.doUnmock('../src/assistant/service-turn-routes.js')
   vi.doUnmock('../src/assistant/turns.js')
   vi.doUnmock('../src/assistant/channel-adapters.js')
+  vi.doUnmock('../src/assistant/channel-typing.js')
   vi.doUnmock('../src/assistant/turn-lock.js')
   vi.doUnmock('../src/assistant/response-media.js')
   vi.doUnmock('../src/assistant/first-contact.js')
+})
+
+test('sendAssistantNotificationLocal deterministically skips only an authorized busy occurrence before provider delivery', async () => {
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'summary',
+      text: 'This must not be delivered.',
+    }),
+  })
+  const {
+    deliverMessage,
+    mocks,
+    sendAssistantNotificationLocal,
+  } = await loadNotificationTurnHarness({
+    providerResult,
+    turnId: 'turn-availability-conflict-skip',
+  })
+  const result = await sendAssistantNotificationLocal({
+    executionContext: { hosted: null },
+    instructions: AVAILABILITY_CONFLICT_INSTRUCTIONS,
+    scheduledAutomationScheduleKind: 'dailyLocal',
+    scheduledOccurrenceAt: '2026-07-30T14:30:00.000Z',
+    vault: '/vaults/availability-conflict-skip',
+  })
+
+  expect(result).toMatchObject({
+    decision: {
+      kind: 'skip',
+    },
+    response: null,
+  })
+  expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
+  expect(deliverMessage).not.toHaveBeenCalled()
+})
+
+test.each([
+  {
+    caseName: 'a non-overlapping recurring occurrence',
+    instructions: AVAILABILITY_CONFLICT_INSTRUCTIONS,
+    occurrenceAt: '2026-07-30T15:30:00.000Z',
+    scheduleKind: 'dailyLocal' as const,
+  },
+  {
+    caseName: 'an overlapping exact-time occurrence',
+    instructions: AVAILABILITY_CONFLICT_INSTRUCTIONS,
+    occurrenceAt: '2026-07-30T14:30:00.000Z',
+    scheduleKind: 'at' as const,
+  },
+  {
+    caseName: 'malformed recurring evidence',
+    instructions: AVAILABILITY_CONFLICT_INSTRUCTIONS.replace(
+      AVAILABILITY_CONFLICT_BLOCK_END,
+      'incomplete evidence',
+    ),
+    occurrenceAt: '2026-07-30T14:30:00.000Z',
+    scheduleKind: 'dailyLocal' as const,
+  },
+])('sendAssistantNotificationLocal keeps evidence out of the provider for $caseName', async ({
+  instructions,
+  occurrenceAt,
+  scheduleKind,
+}) => {
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'summary',
+      text: 'Send the reminder.',
+    }),
+  })
+  const { mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: `turn-availability-evidence-${scheduleKind}`,
+    })
+
+  await sendAssistantNotificationLocal({
+    executionContext: { hosted: null },
+    instructions,
+    scheduledAutomationScheduleKind: scheduleKind,
+    scheduledOccurrenceAt: occurrenceAt,
+    vault: '/vaults/availability-evidence',
+  })
+
+  const providerPrompt = mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]
+    .input.prompt
+  expect(providerPrompt).toBe(AVAILABILITY_BASE_INSTRUCTIONS)
+  expect(providerPrompt).not.toContain(AVAILABILITY_CONFLICT_BLOCK_START)
+  expect(providerPrompt).not.toContain('2026-07-30T14:00:00.000Z')
 })
 
 test('sendAssistantNotificationLocal persists the turn before outbound delivery and forwards the dedupe token', async () => {

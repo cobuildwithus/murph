@@ -52,6 +52,7 @@ import {
 import {
   acquireHostedPrivyPhoneTransferPhoneLocksTx,
   assertHostedPrivyPhoneTransferSourceRetirementFenceTx,
+  HOSTED_PRIVY_PHONE_TRANSFER_RETIREMENT_TRANSACTION_OPTIONS,
   prepareHostedPrivyPhoneTransferSourceRetirementTx,
   type HostedPrivyPhoneTransferProof,
   type HostedPrivyPhoneTransferSourceRetirementProof,
@@ -891,7 +892,7 @@ async function deleteHostedAccountDataInternal(input: {
             phoneTransfer.targetPhoneNumberBeforeTransfer,
           transfer: phoneTransfer.transfer,
         }),
-      HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+      HOSTED_PRIVY_PHONE_TRANSFER_RETIREMENT_TRANSACTION_OPTIONS,
     );
     if (
       !isSameHostedPrivyPhoneTransferRetirement(

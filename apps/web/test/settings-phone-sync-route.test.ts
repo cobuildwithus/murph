@@ -45,6 +45,10 @@ vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/privy-phone-transfer-retirement", () => ({
+  HOSTED_PRIVY_PHONE_TRANSFER_RETIREMENT_TRANSACTION_OPTIONS: {
+    maxWait: 5_000,
+    timeout: 30_000,
+  },
   prepareHostedPrivyPhoneTransferSourceRetirementTx:
     mocks.prepareHostedPrivyPhoneTransferSourceRetirementTx,
   readHostedPrivyPhoneTransferProof: mocks.readHostedPrivyPhoneTransferProof,

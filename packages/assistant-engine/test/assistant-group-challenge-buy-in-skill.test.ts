@@ -52,7 +52,7 @@ describe('assistant group challenge buy-in guidance', () => {
       'Before requesting another setup contribution, do something useful or fun with what the room already gave you',
     )
     expect(challenge).toContain(
-      'it is never challenge buy-in or health-data consent.',
+      'it does not by itself establish challenge buy-in or health-data consent.',
     )
     expect(challenge).toContain(
       'Do not apply `experiment-onboarding`, `behavior-followthrough`, or a training skill merely because a challenge repeats or measures behavior.',
@@ -65,21 +65,35 @@ describe('assistant group challenge buy-in guidance', () => {
     )
   })
 
-  it('asks for a light named roll call before scoring the challenge', async () => {
+  it('uses one challenge-specific action for buy-in and sharing', async () => {
     const challengeRaw = await readSkill('group-challenge')
     const challenge = challengeRaw.replace(/\s+/gu, ' ')
     const comedy = (await readSkill('groupchat-comedy')).replace(/\s+/gu, ' ')
 
-    expect(challenge).toContain('Get the quick roll call')
+    expect(challenge).toContain('Resolve buy-in without duplicate asks')
     expect(challenge).toContain(
-      'recorded as in after the quick roll call',
+      'Avoid asking someone to perform two affirmative actions for the same challenge.',
     )
     expect(challenge).toContain(
-      'A data-sharing grant or visit to the join link does not establish challenge buy-in.',
+      'a grant activated within the next 24 hours may also count as challenge buy-in.',
     )
-    expect(challenge).not.toContain('joining the challenge is the opt-in')
+    expect(challenge).toContain(
+      'Use this rule only when the tool returns `presentation="native"` with `recencyEvidence="eligible"`.',
+    )
+    expect(challenge).toContain(
+      'canonical `grantedAt` that is at or after `offeredAt` and no later than 24 hours after it.',
+    )
+    expect(challenge).toContain(
+      'Never ask an eligible participant to reply "in" or like another roll-call message.',
+    )
+    expect(challenge).toContain(
+      'A grant without `grantedAt`, a grant before `offeredAt`, a grant more than 24 hours later, silence, an unresolved identity, unavailable recency evidence, or an offer followed by materially changed challenge terms does not establish buy-in.',
+    )
+    expect(challenge).toContain(
+      'do not infer entry from a later grant or claim a new adjacent permission message',
+    )
     expect(challengeRaw.indexOf('Make the stakes real')).toBeLessThan(
-      challengeRaw.indexOf('Get the quick roll call'),
+      challengeRaw.indexOf('Resolve buy-in without duplicate asks'),
     )
     expect(challenge).toContain(
       'something a human will actually receive, choose, give, do, perform, or owe',
@@ -91,21 +105,37 @@ describe('assistant group challenge buy-in guidance', () => {
       'grounded in the room\'s current language, relationships, canon, and plans rather than a generic menu.',
     )
     expect(challenge).toContain(
-      'ask each intended participant to reply "in" or like this message',
+      'Do not launch a blanket roll call before inspecting the exact scoring share.',
     )
     expect(challenge).toContain(
-      'keep the member-facing instruction concrete: "like this message."',
+      'Ask for one ordinary confirmation only from intended participants whose scoring scope was already granted and who never otherwise opted in.',
     )
-    expect(challenge).not.toContain('react positively')
     expect(challenge).toContain(
       'Do not prepend a setup-status, progress, or transition sentence',
     )
     expect(challenge).toContain(
       "We're ready once [pending name] checks in. In: [confirmed names]. Waiting on: [pending name].",
     )
-    expect(challenge).toContain('silence never means yes')
     expect(challenge).toContain(
-      'Score only the people recorded as in; shared data does not add a pending or silent person to the challenge.',
+      'accepting that displayed permission within 24 hours is the only action those participants need for both entry and sharing',
+    )
+    expect(challenge).toContain(
+      'exact scoring scope it proved `not_granted`',
+    )
+    expect(challenge).toContain(
+      'first honor any explicit decline or prior handled offer for that participant and scope; do not re-offer or nag.',
+    )
+    expect(challenge).toContain(
+      'record the offer as handled only when the tool reports `status="ok"`.',
+    )
+    expect(challenge).toContain(
+      'If it is now `missing` or `available` and its canonical `grantedAt` falls from `offeredAt` through the recorded 24-hour deadline, write participation state `in` in the same turn.',
+    )
+    expect(challenge).toContain(
+      'the grant remains valid but does not establish challenge entry',
+    )
+    expect(challenge).toContain(
+      'generic shared data does not add a pending or silent person to the challenge.',
     )
     expect(challenge).toContain(
       'Never ask a pending, declined, or withdrawn person.',
@@ -192,18 +222,20 @@ describe('assistant group challenge buy-in guidance', () => {
     )
   })
 
-  it('separates conversational challenge buy-in from group data sharing', async () => {
+  it('keeps generic sharing separate while deferring the narrow exception', async () => {
     const groupChat = (await readSkill('group-chat')).replace(/\s+/gu, ' ')
 
     expect(groupChat).toContain(
       'group membership or data sharing alone is not a yes to every challenge',
     )
     expect(groupChat).toContain(
-      'reply "in" or like the roll-call message',
+      'finalized challenge-specific permission offer may serve as one action for both entry and sharing only under `group-challenge`\'s exact 24-hour evidence rule',
     )
-    expect(groupChat).not.toContain('positive reaction')
     expect(groupChat).toContain(
-      'do not wake a silent member up to find that they were automatically entered either',
+      'Never ask that participant for a second roll-call response.',
+    )
+    expect(groupChat).toContain(
+      'A pre-existing or generic grant, missing or unavailable recency evidence, silence, or materially changed challenge terms does not count',
     )
     expect(groupChat).toContain(
       'What the group safely and individually opts to do within the `groupchat-comedy` hard limits',

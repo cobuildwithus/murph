@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-07-29
+Last verified: 2026-07-31
 
 ## Accepted-Message Targeting
 
@@ -70,11 +70,17 @@ exact display name and projection scopes to the trusted runtime. The runtime
 selects `post_join_offer` only for an exact interactive iMessage route and uses
 `create_join_link` for SMS, Telegram, explicit standalone-link requests, and
 scheduled group routes whose durable Linq binding lacks a service subtype. The
-model receives only normalized `native` or `link` presentation semantics; Web
-continues to own group creation, consent copy, dedupe, join URLs, and grants. An
-explicit native offer is suppressed only by a covering active offer, never by
-the scopes already granted by current members, because access may be intended
-for a provider-room participant who has not joined the hosted group yet.
+model receives normalized `native` or `link` presentation semantics plus only
+the canonical presentation time needed for the bounded challenge recency rule;
+Web continues to own group creation, consent copy, dedupe, join URLs, and
+grants. A newly posted native offer remains native. When a covering active offer
+suppresses another provider message, the semantic facade returns its
+first-party URL as a freshly visible link instead of claiming a new card was
+sent. Missing additive rollout evidence is handled but never recency-eligible.
+An explicit native offer is suppressed only by a covering active offer, never
+by the scopes already granted by current members, because access may be
+intended for a provider-room participant who has not joined the hosted group
+yet.
 
 Challenge kickoff and later interactive identity repair stay inside that same
 model-triggered `read_shared` request. At request time, the runtime adds only
@@ -90,6 +96,39 @@ authority, and this adds no pre-model roster work, standalone Web query,
 decrypted contact roster, or compatibility branch. The legacy `read_current`
 wire is unchanged, and assistant-engine still removes the global member id and
 legacy roster handle before any group summary reaches the model.
+
+Immutable hosted memory consolidation remains an isolated one-shot automation
+with its network-denied memory-write profile. Reminder availability uses no
+model turn or separate automation: the existing hosted background automation
+pass deterministically scans active private automations that explicitly store
+`skip-when-busy`, `calendar-only`, and one exact Google Calendar or Outlook
+account binding; exact-time automations are ineligible. When the stored snapshot
+is missing or reaches its 23-hour refresh deadline,
+host code derives the exact account and current seven-day provider request,
+caps the result, reduces it to normalized busy timestamps, rereads the
+automation, and performs a version-fenced suffix replacement. Complete empty
+reads persist an empty snapshot so the same canonical `generatedAt` field also
+bounds refresh cadence. The pass returns the earliest next refresh deadline to
+the existing workspace checkpoint and Temporal timer owner, leaving one hour of
+headroom before delivery rejects 24-hour-old evidence without adding another
+scheduler or state owner. Foreground conversation admission aborts an in-flight
+calendar read through the existing background-maintenance signal; runtime
+shutdown remains the fallback cancellation signal. Ordinary
+user-authored saves and instruction patches strip the engine-owned suffix.
+Changing a reminder to an exact-time schedule atomically replaces
+`skip-when-busy` with `fixed` and removes its source, account, and snapshot.
+Scheduled delivery ignores it unless current policy/source/account
+authorization remains exact and the snapshot is canonical, unexpired, and
+covers a non-exact-time occurrence scheduled within 24 hours of generation. The
+snapshot is host-only derived data and is stripped from the instruction prompt
+before any model-backed notification turn. That snapshot is
+a short derived-data lease: disconnect or provider revocation stops future
+refreshes but does not synchronously cancel already-derived busy timestamps.
+Policy removal or account replacement invalidates the lease immediately;
+provider failure, incomplete pagination, malformed or older evidence, and
+concurrent edits send normally. Raw calendar content never reaches a model,
+memory, automation instructions, or logs, and normalized busy timestamps never
+reach a model prompt.
 
 Each synthetic hosted group runtime may additionally keep one assistant-authored
 `group-room-model` derived knowledge page. A twice-weekly managed automation
@@ -169,7 +208,16 @@ feature rather than embedded in the generic ownership boundary.
 Web then captures the current roster and exact active grants, decrypts the
 bounded encrypted snapshots owned by those share rows, and returns every member
 with every requested scope as `not_granted`, `granted` plus `missing`, or
-`available`. Health projection delivery conditionally replaces the complete
+`available`. A current exact-scope grant also returns its canonical activation
+time as bounded authorization metadata; it is not causal consent proof. The
+challenge page may treat that grant as best-effort social entry only when the
+same participant/scope was recorded `not_granted`, the access tool returned an
+eligible provider creation second inside the current native send attempt, the
+grant activated within 24 hours after it, and the finalized metric, window,
+and stakes are unchanged. Link delivery, idempotent replay, reused offers, and
+every missing, older, late, or mismatched case require ordinary confirmation.
+Health projection
+delivery conditionally replaces the complete
 encrypted snapshot on the exact active share generation. Revoke and regrant
 clear it transactionally, and regrant rotates the share id. The explicit
 `device-sync-status.v0` grant instead authorizes one live bounded Web derivation

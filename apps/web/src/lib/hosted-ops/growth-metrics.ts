@@ -36,8 +36,15 @@ import {
   createHostedLinqParticipantContactLookupKeyReadCandidates,
   type HostedLinqParticipantContactKind,
 } from "@/src/lib/hosted-onboarding/linq-participant-contact";
+import {
+  buildHostedGrowthMessageSeries,
+  type HostedGrowthMessagePoint,
+} from "@/src/lib/hosted-ops/growth-message-series";
 import { HOSTED_MESSAGE_VOLUME_BASE } from "@/src/lib/message-volume";
 import { getPrisma } from "@/src/lib/prisma";
+
+export { buildHostedGrowthMessageSeries } from "@/src/lib/hosted-ops/growth-message-series";
+export type { HostedGrowthMessagePoint } from "@/src/lib/hosted-ops/growth-message-series";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const DAILY_SERIES_DAYS = 30;
@@ -227,6 +234,7 @@ export interface HostedGrowthDashboard {
   };
   current: HostedGrowthCurrentMetrics;
   dailySeries: HostedGrowthDailyPoint[];
+  messageSeries: HostedGrowthMessagePoint[];
   mrrWowPercent: number | null;
   newMembers: {
     today: number;
@@ -1032,6 +1040,7 @@ export async function readHostedGrowthDashboard(
     memberRows,
     rawTrialStartRows,
     snapshots,
+    messagesBeforeSeries,
     matureStarted,
     matureConverted,
     growthAggregate,
@@ -1086,6 +1095,21 @@ export async function readHostedGrowthDashboard(
         snapshotDate: {
           gte: dailyStart,
           lte: todayStart,
+        },
+      },
+    }),
+    prisma.hostedGrowthDailySnapshot.aggregate({
+      _count: {
+        inboundMessagesPriorDay: true,
+        outboundMessagesPriorDay: true,
+      },
+      _sum: {
+        inboundMessagesPriorDay: true,
+        outboundMessagesPriorDay: true,
+      },
+      where: {
+        snapshotDate: {
+          lt: dailyStart,
         },
       },
     }),
@@ -1279,6 +1303,16 @@ export async function readHostedGrowthDashboard(
     }),
     current,
     dailySeries,
+    messageSeries: buildHostedGrowthMessageSeries({
+      messagesBeforeSeries: HOSTED_MESSAGE_VOLUME_BASE +
+        (messagesBeforeSeries._sum.inboundMessagesPriorDay ?? 0) +
+        (messagesBeforeSeries._sum.outboundMessagesPriorDay ?? 0),
+      snapshots,
+      trackingEstablishedBeforeSeries:
+        messagesBeforeSeries._count.inboundMessagesPriorDay > 0
+        && messagesBeforeSeries._count.outboundMessagesPriorDay > 0,
+      windowEnd: now,
+    }),
     mrrWowPercent: comparableSnapshot === null
       ? null
       : calculatePercentChange(current.mrrUsdCents, comparableSnapshot.mrrUsdCents),

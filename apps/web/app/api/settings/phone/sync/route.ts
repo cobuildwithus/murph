@@ -23,6 +23,7 @@ import {
   reconcileHostedPrivyIdentityOnMemberTx,
 } from "@/src/lib/hosted-onboarding/member-identity-service";
 import {
+  HOSTED_PRIVY_PHONE_TRANSFER_RETIREMENT_TRANSACTION_OPTIONS,
   prepareHostedPrivyPhoneTransferSourceRetirementTx,
   readHostedPrivyPhoneTransferProof,
 } from "@/src/lib/hosted-onboarding/privy-phone-transfer-retirement";
@@ -110,7 +111,7 @@ export const POST = withJsonError(async (request: Request) => {
         targetPhoneNumberBeforeTransfer:
           currentIdentity?.phoneNumber ?? null,
         transfer: phoneTransfer,
-      }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+      }), HOSTED_PRIVY_PHONE_TRANSFER_RETIREMENT_TRANSACTION_OPTIONS);
     traceHostedPhoneSync("source-classified", {
       sourceKind: retirement.autoTrialBilling ? "auto-trial" : "not-started",
     });

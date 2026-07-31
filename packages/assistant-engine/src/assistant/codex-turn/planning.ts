@@ -806,15 +806,14 @@ export async function resolveAssistantRouteTurnPlan(input: {
     privateInteractiveAudience &&
     input.input.scheduledInvocationAuthority?.automationId ===
       MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID
-  // Maintenance turns run without a delivery target and must not expose any
-  // external-capable or delivery-facing tool surface, so the gate is the
-  // resolved tool set itself rather than prompt text.
+  // Maintenance turns run without a delivery target. The room-model profile
+  // receives only its host-owned tool for the exact managed automation.
   const availableDynamicTools = outputOnlyTurn || onboardingGoalCheckinTurn
       ? []
       : maintenanceTurn
       ? input.input.maintenanceProfile === 'group-room-model' &&
-        input.input.scheduledInvocationAuthority?.automationId ===
-          MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID
+      input.input.scheduledInvocationAuthority?.automationId ===
+        MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID
         ? [MURPH_GROUP_ROOM_MODEL_TOOL]
         : []
       : resolveMurphDynamicTools({
