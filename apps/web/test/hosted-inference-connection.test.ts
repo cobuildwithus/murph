@@ -1,4 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
+import {
+  HOSTED_CUSTOM_INFERENCE_VERIFICATION_PROFILE,
+} from "@murphai/hosted-execution/assistant-inference";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-crypto/secure-box";
@@ -10,8 +13,8 @@ import {
   parseHostedInferenceConnectionCandidate,
 } from "@/src/lib/hosted-inference/connection-policy";
 import {
-  HostedInferenceConnectionError,
   readSelectedHostedInferenceConnection,
+  readSelectedHostedInferenceConnectionOverride,
   replaceHostedInferenceConnection,
   setHostedInferenceConnectionSelected,
 } from "@/src/lib/hosted-inference/connection-store";
@@ -108,12 +111,12 @@ describe("hosted inference connection", () => {
       expectedRevision: null,
       memberId: MEMBER_ID,
       prisma: harness.prisma,
-      verificationProfile: "profile-v1",
       verifiedAt: new Date("2026-07-30T22:00:00.000Z"),
     });
     expect(created).toMatchObject({
       revision: 1,
       selected: false,
+      verificationProfile: HOSTED_CUSTOM_INFERENCE_VERIFICATION_PROFILE,
     });
     await expect(readSelectedHostedInferenceConnection({
       memberId: MEMBER_ID,
@@ -135,6 +138,17 @@ describe("hosted inference connection", () => {
       revision: 1,
       selected: true,
     });
+    await expect(readSelectedHostedInferenceConnectionOverride({
+      memberId: MEMBER_ID,
+      prisma: harness.prisma,
+    })).resolves.toEqual({
+      contextWindowTokens: 131_072,
+      modelAlias: "murph-custom-r1",
+      protocol: "responses",
+      revision: 1,
+      supportsImages: false,
+      verificationProfile: HOSTED_CUSTOM_INFERENCE_VERIFICATION_PROFILE,
+    });
 
     const replaced = await replaceHostedInferenceConnection({
       candidate: {
@@ -144,7 +158,6 @@ describe("hosted inference connection", () => {
       expectedRevision: 1,
       memberId: MEMBER_ID,
       prisma: harness.prisma,
-      verificationProfile: "profile-v1",
       verifiedAt: new Date("2026-07-30T22:05:00.000Z"),
     });
     expect(replaced).toMatchObject({
@@ -161,7 +174,6 @@ describe("hosted inference connection", () => {
       expectedRevision: null,
       memberId: MEMBER_ID,
       prisma: harness.prisma,
-      verificationProfile: "profile-v1",
     });
 
     await expect(replaceHostedInferenceConnection({
@@ -169,8 +181,7 @@ describe("hosted inference connection", () => {
       expectedRevision: 2,
       memberId: MEMBER_ID,
       prisma: harness.prisma,
-      verificationProfile: "profile-v1",
-    })).rejects.toMatchObject<Partial<HostedInferenceConnectionError>>({
+    })).rejects.toMatchObject({
       code: "HOSTED_INFERENCE_CONNECTION_CONFLICT",
     });
     expect(harness.row?.revision).toBe(1);
@@ -184,8 +195,7 @@ describe("hosted inference connection", () => {
       expectedRevision: null,
       memberId: MEMBER_ID,
       prisma: harness.prisma,
-      verificationProfile: "profile-v1",
-    })).rejects.toMatchObject<Partial<HostedInferenceConnectionError>>({
+    })).rejects.toMatchObject({
       code: "HOSTED_INFERENCE_PERSONAL_CHAT_REQUIRED",
     });
   });
