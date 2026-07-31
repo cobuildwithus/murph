@@ -58,8 +58,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-session", () => ({
 }));
 
 import {
-  ensureHostedCompanionMemberAccess,
-  requireHostedCompanionMemberAccessFromRequest,
+  ensureHostedCompanionMemberId,
+  requireHostedCompanionMemberIdFromRequest,
 } from "@/src/lib/hosted-onboarding/companion-member-access";
 
 const prisma = { label: "test-prisma" } as never;
@@ -117,7 +117,7 @@ describe("native companion hosted member admission", () => {
   it("requires bearer identity without falling back to browser authority", async () => {
     mocks.resolveHostedPrivySessionFromBearerToken.mockResolvedValue(null);
 
-    await expect(requireHostedCompanionMemberAccessFromRequest({
+    await expect(requireHostedCompanionMemberIdFromRequest({
       prisma,
       request: new Request(
         "https://app.example.test/api/device-sync/companion/sign-in-token",
@@ -135,10 +135,10 @@ describe("native companion hosted member admission", () => {
     mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(activeMember);
     mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
 
-    await expect(ensureHostedCompanionMemberAccess({
+    await expect(ensureHostedCompanionMemberId({
       identity,
       prisma,
-    })).resolves.toEqual(activeMember);
+    })).resolves.toBe(activeMember.id);
 
     expect(mocks.assertHostedMemberNotSuspended).toHaveBeenCalledWith(activeMember);
     expect(mocks.assertHostedHistoricalLaunchConsentGranted).toHaveBeenCalledWith({
@@ -161,7 +161,7 @@ describe("native companion hosted member admission", () => {
       consentRequired,
     );
 
-    await expect(ensureHostedCompanionMemberAccess({
+    await expect(ensureHostedCompanionMemberId({
       identity,
       now: new Date("2026-07-31T11:00:00.000Z"),
       prisma,
@@ -186,11 +186,11 @@ describe("native companion hosted member admission", () => {
       .mockResolvedValueOnce(false);
     mocks.completeHostedPrivyVerification.mockResolvedValue(completion());
 
-    await expect(ensureHostedCompanionMemberAccess({
+    await expect(ensureHostedCompanionMemberId({
       identity,
       now: new Date("2026-07-31T11:15:00.000Z"),
       prisma,
-    })).resolves.toEqual(pendingMember);
+    })).resolves.toBe(pendingMember.id);
 
     expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith({
       identity,
@@ -230,7 +230,7 @@ describe("native companion hosted member admission", () => {
       accessRequired,
     );
 
-    await expect(ensureHostedCompanionMemberAccess({
+    await expect(ensureHostedCompanionMemberId({
       identity,
       prisma,
     })).rejects.toBe(accessRequired);
@@ -249,10 +249,10 @@ describe("native companion hosted member admission", () => {
       .mockResolvedValueOnce(false)
       .mockResolvedValueOnce(true);
 
-    await expect(ensureHostedCompanionMemberAccess({
+    await expect(ensureHostedCompanionMemberId({
       identity,
       prisma,
-    })).resolves.toEqual(pendingMember);
+    })).resolves.toBe(pendingMember.id);
 
     expect(mocks.ensureHostedAutoPulseTrialEnrollment).not.toHaveBeenCalled();
     expect(mocks.assertActiveHostedMemberAccessAllowed).not.toHaveBeenCalled();
