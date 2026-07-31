@@ -30,6 +30,21 @@ describe('assistant personalization tool', () => {
     expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
       'never a participant',
     )
+    expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
+      'Reply casing maps to the existing tone field',
+    )
+    expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
+      'sentence case means formal',
+    )
+    expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
+      'lowercase means casual',
+    )
+    expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
+      'rather than an unsupported setting',
+    )
+    expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
+      'a one-reply formatting request does not persist',
+    )
     expect(JSON.stringify(MURPH_PERSONALIZATION_TOOL.inputSchema)).not.toContain(
       'memberId',
     )
