@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { access, appendFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { access, appendFile, chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { createServer as createHttpsServer } from "node:https";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -30,6 +30,9 @@ import {
   buildHostedExecutionRuntimeControlWake,
 } from "@murphai/hosted-execution";
 import {
+  HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
+} from "@murphai/hosted-execution/env";
+import {
   VAULT_LAYOUT,
 } from "@murphai/contracts";
 import {
@@ -45,7 +48,6 @@ import {
   markAssistantOutboxIntentSentById,
   readAssistantContextSnapshotState,
   recordHostedMailboxAssistantInputItem,
-  resolveAssistantSession,
   saveAssistantOutboxIntent,
   saveAssistantSession,
   type AssistantHostedImageGenerationLauncher,
@@ -350,6 +352,9 @@ import {
   markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort,
   restoreHostedWorkspaceRuntimeJobWorkspace,
 } from "../src/hosted-runtime/workspace-restore.ts";
+import {
+  recordHostedMaterializedArtifactPaths,
+} from "../src/hosted-runtime/materialized-artifact-state.ts";
 import {
   createHostedAssistantTurnEnvironment,
   normalizeHostedAssistantRuntimeConfig,
@@ -18531,6 +18536,252 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("delivers a failed image edit explanation through the production assistant and Linq owners", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "murph-image-edit-failure-route-"),
+    );
+    const vaultRoot = path.join(root, "vault");
+    const referenceImageRef = "raw/inbox/2026/04/image-edit-source.png";
+    const codexCommand = await createImageFailureCodexAppServerCommand({
+      referenceImageRef,
+      root,
+    });
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const mailboxItems = [createMailboxItem({
+      id: "mailbox_item_image_edit_failure_origin",
+      laneSeq: "1",
+    })];
+    const linqRequests: Array<Record<string, unknown>> = [];
+    const linqRequestPaths: string[] = [];
+    let imageProviderInvocationCount = 0;
+
+    const providerFetch = vi.fn<typeof fetch>(async (request, init) => {
+      const method =
+        init?.method ?? (request instanceof Request ? request.method : "GET");
+      const url = request instanceof Request ? request.url : String(request);
+      events.push(`provider.fetch:${method}:${new URL(url).pathname}`);
+      if (method === "POST" && url.includes("/v1/images/edits")) {
+        imageProviderInvocationCount += 1;
+        return new Response(JSON.stringify({
+          error: {
+            code: "invalid_image",
+            message: "The reference image could not be decoded.",
+            type: "invalid_request_error",
+          },
+        }), {
+          headers: {
+            "content-type": "application/json",
+            "x-request-id": "req_image_edit_failed",
+          },
+          status: 400,
+        });
+      }
+      if (method === "POST" && url.includes("/messages")) {
+        linqRequestPaths.push(new URL(url).pathname);
+        const requestBody = typeof init?.body === "string"
+          ? init.body
+          : request instanceof Request
+            ? await request.clone().text()
+            : "";
+        linqRequests.push(
+          requestBody ? JSON.parse(requestBody) as Record<string, unknown> : {},
+        );
+        events.push(`provider.send:${linqRequests.length}`);
+        return new Response(JSON.stringify({
+          message: { id: `provider_image_edit_failure_${linqRequests.length}` },
+        }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response(null, { status: 204 });
+    });
+
+    try {
+      const snapshotRef = createWorkspaceSnapshotV2Ref(
+        "snapshot_image_edit_failure_route",
+      );
+
+      const basePlatform = createPlatform({
+        mailboxPort: createMailboxPort({ events, items: mailboxItems }),
+        workspacePort: createWorkspacePort({
+          checkpointRequests,
+          events,
+          workspace: createWorkspaceState({ snapshotRef, version: "0" }),
+        }),
+        workspaceSnapshotPort: {
+          async abortSnapshotSession() {
+            throw new Error("Image failure route should not abort snapshots.");
+          },
+          async completeSnapshotSession() {
+            throw new Error("Image failure route should not complete snapshots.");
+          },
+          async putSnapshotObjectDirect() {
+            throw new Error("Image failure route should not upload snapshots.");
+          },
+          async restoreWorkspaceSnapshot(input) {
+            const restoredVaultRoot = path.join(input.durableRoot, "vault");
+            await initializeVault({
+              createdAt: TEST_NOW,
+              vaultRoot: restoredVaultRoot,
+            });
+            const referenceImagePath = path.join(
+              restoredVaultRoot,
+              referenceImageRef,
+            );
+            await mkdir(path.dirname(referenceImagePath), { recursive: true });
+            await writeFile(
+              referenceImagePath,
+              new Uint8Array([
+                0x89,
+                0x50,
+                0x4e,
+                0x47,
+                0x0d,
+                0x0a,
+                0x1a,
+                0x0a,
+              ]),
+            );
+            await recordHostedMaterializedArtifactPaths({
+              materializedArtifactPaths: new Set([
+                `vault:${referenceImageRef}`,
+              ]),
+              vaultRoot: restoredVaultRoot,
+            });
+          },
+          async startSnapshotSession() {
+            throw new Error("Image failure route should not start snapshots.");
+          },
+        },
+      });
+      await withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            forwardedEnv: {
+              [HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV]: codexCommand,
+              LINQ_API_TOKEN: "synthetic-linq-token",
+              NODE_ENV: "test",
+            },
+            resolvedConfig: {
+              channelCapabilities: {
+                emailSendReady: false,
+                telegramBotConfigured: false,
+              },
+              deviceSync: null,
+              managedAutoReplyChannels: [{
+                capabilityReady: true,
+                channel: "linq",
+                memberChannel: "linq",
+              }],
+            },
+            request: {
+              attemptId: "attempt_image_edit_failure_route",
+              budget: { maxMailboxItems: 10 },
+              idleCheckpointDelayMs: 50,
+              leaseGeneration: "8",
+              userId: TEST_USER_ID,
+              workspaceVersion: "0",
+            },
+          }),
+          {
+            async createCheckpointSnapshot() {
+              return {
+                snapshotRef: createBundleRef({
+                  hash: "8".repeat(64),
+                  key: "users/bundles/member-synthetic/image-edit-failure-route.bundle.json",
+                  size: 512,
+                }),
+              };
+            },
+            async importItem(item, context) {
+              const assistantInputId =
+                await stagePendingLinqAssistantInputForMailboxItem({
+                  item: item.item,
+                  threadId: "thread_image_edit_failure_route",
+                  vaultRoot,
+                });
+              context?.onConversationInputStaged?.("linq");
+              return { assistantInputId, status: "imported" };
+            },
+            platform: {
+              ...basePlatform,
+              effectsPort: {
+                async assertLinqRecentInboundEngagement(request) {
+                  assert.equal(
+                    request.target,
+                    "thread_image_edit_failure_route",
+                  );
+                  return {
+                    providerDispatchClaimed: true,
+                    threadIsDirect: true,
+                  };
+                },
+                async readRawEmailMessage() {
+                  return null;
+                },
+                async recordLinqDeliveryOutcome(request) {
+                  events.push(
+                    `provider.record:${request.providerMessageId ?? "missing"}`,
+                  );
+                },
+                async sendEmail() {},
+              },
+              providerFetch,
+            },
+            runtimeWakeSignal: createCoalescingRuntimeWakeSignal(),
+            vaultRoot,
+          },
+        ),
+        15_000,
+        () => events.join(","),
+      );
+
+      assert.equal(imageProviderInvocationCount, 1);
+      assert.equal(mailboxItems.length, 1);
+      assert.equal(linqRequests.length, 2, events.join(","));
+      assert.equal(linqRequestPaths.length, 2);
+      for (const requestPath of linqRequestPaths) {
+        assert.match(
+          requestPath,
+          /\/chats\/thread_image_edit_failure_route\/messages$/u,
+        );
+      }
+      const intents = await listAssistantOutboxIntents(vaultRoot);
+      assert.deepEqual(
+        intents.map((intent) => ({
+          channel: intent.channel,
+          media: intent.media,
+          message: intent.message,
+          status: intent.status,
+          threadId: intent.threadId,
+        })),
+        [
+          {
+            channel: "linq",
+            media: [],
+            message:
+              "I'm editing that image now. I'll send the result back here when it's ready.",
+            status: "sent",
+            threadId: "thread_image_edit_failure_route",
+          },
+          {
+            channel: "linq",
+            media: [],
+            message:
+              "OpenAI couldn't read the reference image, so the edit didn't complete. I can retry after you confirm, or you can send a different reference.",
+            status: "sent",
+            threadId: "thread_image_edit_failure_route",
+          },
+        ],
+      );
+      assert.doesNotMatch(intents[1]?.message ?? "", /invalid_image|req_/u);
+    } finally {
+      await removeTempRoot(root);
+    }
+  });
+
   test("foreground rerun batch keeps fresh context after consumed replay", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-foreground-context-replay-"));
     const events: string[] = [];
@@ -29875,6 +30126,137 @@ function createWorkspaceSnapshotV2Ref(snapshotId: string): HostedWorkspaceSnapsh
     upload: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
     userId: TEST_USER_ID,
   };
+}
+
+async function createImageFailureCodexAppServerCommand(input: {
+  referenceImageRef: string;
+  root: string;
+}): Promise<string> {
+  const commandPath = path.join(
+    input.root,
+    "synthetic-image-failure-codex.py",
+  );
+  const acknowledgement =
+    "I'm editing that image now. I'll send the result back here when it's ready.";
+  const failureExplanation =
+    "OpenAI couldn't read the reference image, so the edit didn't complete. I can retry after you confirm, or you can send a different reference.";
+  const commandSource = `#!/usr/bin/python3
+import json
+import sys
+
+thread_id = "00000000-0000-4000-8000-000000001216"
+pending_tool_call = None
+turn_ordinal = 0
+
+def send(message):
+    sys.stdout.write(json.dumps(message, separators=(",", ":")) + "\\n")
+    sys.stdout.flush()
+
+def finish_turn(turn_id, message):
+    send({
+        "method": "item/completed",
+        "params": {
+            "item": {
+                "id": "assistant-image-failure-" + str(turn_ordinal),
+                "phase": "final_answer",
+                "text": message,
+                "type": "agent_message",
+            },
+            "threadId": thread_id,
+            "turnId": turn_id,
+        },
+    })
+    send({
+        "method": "turn/completed",
+        "params": {
+            "status": "completed",
+            "threadId": thread_id,
+            "turnId": turn_id,
+        },
+    })
+
+for line in sys.stdin:
+    try:
+        request = json.loads(line)
+    except json.JSONDecodeError:
+        sys.exit(1)
+
+    method = request.get("method")
+    if method == "initialize":
+        send({"id": request.get("id"), "result": {}})
+        continue
+    if method == "initialized":
+        continue
+    if method in ("thread/start", "thread/resume"):
+        params = request.get("params") or {}
+        sandbox = params.get("sandbox")
+        if sandbox == "danger-full-access":
+            sandbox = {"type": "dangerFullAccess"}
+        elif sandbox == "read-only":
+            sandbox = {"type": "readOnly"}
+        elif sandbox == "workspace-write":
+            sandbox = {"type": "workspaceWrite"}
+        send({
+            "id": request.get("id"),
+            "result": {
+                "approvalPolicy": params.get("approvalPolicy"),
+                "cwd": params.get("cwd"),
+                "modelProvider": params.get("modelProvider"),
+                "sandbox": sandbox,
+                "thread": {"id": params.get("threadId", thread_id)},
+            },
+        })
+        continue
+    if method == "turn/start":
+        turn_ordinal += 1
+        turn_id = "turn-image-failure-" + str(turn_ordinal)
+        send({"id": request.get("id"), "result": {"turn": {"id": turn_id}}})
+        send({
+            "method": "turn/started",
+            "params": {"threadId": thread_id, "turnId": turn_id},
+        })
+        params = request.get("params") or {}
+        serialized_input = json.dumps(params.get("input", params))
+        is_failure_completion = (
+            "The reference image could not be decoded." in serialized_input
+            and "untrusted provider text" in serialized_input
+        )
+        if is_failure_completion:
+            finish_turn(turn_id, ${JSON.stringify(failureExplanation)})
+            continue
+        pending_tool_call = {"id": 1001, "turnId": turn_id}
+        send({
+            "id": pending_tool_call["id"],
+            "method": "item/tool/call",
+            "params": {
+                "arguments": {
+                    "prompt": "Edit image 1 so the subject faces left.",
+                    "referenceImageRefs": [${JSON.stringify(input.referenceImageRef)}],
+                },
+                "namespace": "murph",
+                "threadId": thread_id,
+                "tool": "generate_image",
+                "turnId": turn_id,
+            },
+        })
+        continue
+    if pending_tool_call and request.get("id") == pending_tool_call["id"]:
+        turn_id = pending_tool_call["turnId"]
+        pending_tool_call = None
+        serialized_result = json.dumps(request)
+        message = (
+            ${JSON.stringify(acknowledgement)}
+            if "image generation started in the background" in serialized_result
+            else "Synthetic image tool launch was unavailable."
+        )
+        finish_turn(turn_id, message)
+        continue
+    if "id" in request:
+        send({"id": request["id"], "result": {}})
+`;
+  await writeFile(commandPath, commandSource, "utf8");
+  await chmod(commandPath, 0o755);
+  return commandPath;
 }
 
 async function removeTempRoot(root: string): Promise<void> {

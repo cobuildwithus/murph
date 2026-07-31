@@ -171,6 +171,8 @@ export function createHostedImageGenerationController(input: {
             return;
           }
           completeOperation(request.operationId, {
+            failureDiagnostic:
+              "image generation failed before a diagnostic was returned",
             media: null,
             runtimeIssue: null,
             savedImageRef: null,

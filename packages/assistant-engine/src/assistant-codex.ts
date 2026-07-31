@@ -3721,6 +3721,7 @@ async function runCodexAppServerTurnOnProcess(
     try {
       contextCompactionProgressPending = true
       progressPromise = progressDelivery.send(text, {
+        deliveryContextOrdinal,
         required: true,
         source: 'system',
       })
@@ -4235,7 +4236,9 @@ async function runCodexAppServerTurnOnProcess(
           }
         }
         const hostedToolContext = resolveCodexAppServerHostedToolContext(input)
-        await hostedToolContext?.beforeToolExecution?.()
+        await hostedToolContext?.beforeToolExecution?.(
+          dynamicToolRequestDeliveryContextOrdinal,
+        )
         const result = await executeMurphDynamicToolRequest({
           authorizeAcceptedMessageTarget:
             input.authorizeAcceptedMessageTarget ?? null,

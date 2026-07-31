@@ -378,6 +378,7 @@ export interface AssistantHostedPrivateImageUrlPublisher {
 }
 
 export interface AssistantHostedImageGenerationResult {
+  failureDiagnostic?: string | null
   media: AssistantVaultImageResponseMedia | null
   runtimeIssue: AssistantRuntimeIssueInput | null
   savedImageRef: string | null

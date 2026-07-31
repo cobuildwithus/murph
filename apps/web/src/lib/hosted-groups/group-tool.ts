@@ -8,6 +8,7 @@ import {
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
+  hostedRuntimeLinqProviderErrorMessageForCode,
   isHostedRuntimePrivateImageDeliveryUrl,
   type HostedRuntimeGroupChatParticipant,
   type HostedRuntimeGroupParticipantDisplayName,
@@ -36,6 +37,7 @@ import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
 import {
   assertHostedMemberNotSuspended,
 } from "../hosted-onboarding/entitlement";
+import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { hasHostedMemberActivationProof } from "../hosted-onboarding/member-activation";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import {
@@ -1160,9 +1162,18 @@ async function handleHostedRuntimeGroupSetChatAvatar(input: {
   linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
   memberId: string;
 }): Promise<HostedRuntimeGroupToolResponse> {
-  const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
+  const unavailable = (
+    unavailableReason: string,
+    providerDiagnostics?: {
+      providerErrorCode?: number;
+    },
+  ): HostedRuntimeGroupToolResponse => ({
     action: "set_chat_avatar",
-    result: { status: "unavailable", unavailableReason },
+    result: {
+      status: "unavailable",
+      unavailableReason,
+      ...providerDiagnostics,
+    },
   });
 
   const access = await checkHostedRuntimeGroupLinqChatMutationAccess({
@@ -1183,14 +1194,45 @@ async function handleHostedRuntimeGroupSetChatAvatar(input: {
       chatId: access.chatId,
       groupChatIconUrl,
     });
-  } catch {
-    return unavailable("provider_unavailable");
+  } catch (error) {
+    return unavailable(
+      "provider_unavailable",
+      readHostedLinqAvatarProviderDiagnostics(error),
+    );
   }
 
   return {
     action: "set_chat_avatar",
     result: { status: "requested" },
   };
+}
+
+function readHostedLinqAvatarProviderDiagnostics(error: unknown): {
+  providerErrorCode?: number;
+} | undefined {
+  if (
+    !isHostedOnboardingError(error)
+    || error.code !== "LINQ_SEND_FAILED"
+    || error.details?.failureStage !== "http"
+  ) {
+    return undefined;
+  }
+  const code = error.details.providerErrorCode;
+  const providerErrorCode = typeof code === "number"
+    && Number.isSafeInteger(code)
+    && code >= 1_000
+    && code <= 9_999
+      ? code
+      : null;
+  if (providerErrorCode === null) {
+    return undefined;
+  }
+  if (
+    hostedRuntimeLinqProviderErrorMessageForCode(providerErrorCode) === null
+  ) {
+    return undefined;
+  }
+  return { providerErrorCode };
 }
 
 async function handleHostedRuntimeGroupSetChatAvatarPreflight(input: {
