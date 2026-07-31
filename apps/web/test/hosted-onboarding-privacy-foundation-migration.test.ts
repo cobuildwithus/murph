@@ -1034,6 +1034,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260730170000_add_mailbox_ai_usage_denied_at",
       "20260730180000_hosted_linq_delivery_thread_directness",
       "20260730190000_hosted_physical_notes",
+      "20260731001500_add_hosted_product_feedback_created_at_index",
       "migration_lock.toml",
     ]);
     expect(deviceSyncSignalSourceProviderMigrationSql).toContain(
@@ -2410,6 +2411,23 @@ describe("hosted Prisma baseline migration", () => {
     expect(migrationSql).not.toContain("NOT NULL");
     expect(migrationSql).toMatch(
       /CREATE UNIQUE INDEX\s+"hosted_member_billing_ref_stripe_checkout_session_lookup_key_key"/u,
+    );
+  });
+
+  it("adds the product-feedback digest read index without blocking writes", () => {
+    const migrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260731001500_add_hosted_product_feedback_created_at_index/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+
+    expect(migrationSql).toContain(
+      'CREATE INDEX CONCURRENTLY "hosted_product_feedback_created_at_kind_idx"',
+    );
+    expect(migrationSql).toContain(
+      'ON "hosted_product_feedback"("created_at", "kind")',
     );
   });
 });
