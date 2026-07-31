@@ -55,4 +55,28 @@ describe('hosted image completion', () => {
 
     expect(parseAssistantHostedImageCompletionText(text)).toBeNull()
   })
+
+  it('does not instruct downstream image actions after generation fails', () => {
+    const text = renderAssistantHostedImageCompletionSystemText({
+      originAssistantInputId: `ain_${'c'.repeat(32)}`,
+      result: {
+        media: null,
+        runtimeIssue: {
+          component: 'image-generation',
+          issueKind: 'tool_error',
+          phase: 'provider_turn',
+          severity: 'error',
+          summary: 'Provider request failed.',
+        },
+        savedImageRef: null,
+      },
+    })
+
+    expect(text).toContain('Image generation failed and no saved image exists.')
+    expect(text).toContain(
+      'Do not call image-dependent downstream tools for this completion.',
+    )
+    expect(text).not.toContain('Continue the pending task with the exact saved image.')
+    expect(parseAssistantHostedImageCompletionText(text)).toBeNull()
+  })
 })

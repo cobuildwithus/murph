@@ -52,6 +52,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
   boundUserId: string;
   commitTimeoutMs?: number | null;
   fetchImpl?: typeof fetch;
+  physicalNotesEnabled?: boolean | null;
   privateMediaDeliveryOrigin?: string | null;
   preparedSnapshotRestore?: HostedWorkspaceSnapshotPreparedRestore | null;
   providerFetchBaseUrlSource?: Readonly<Record<string, unknown>> | null;
@@ -160,12 +161,16 @@ export function buildHostedExecutionRuntimePlatform(input: {
             timeoutMs,
             transport,
           }),
-          physicalNotes: createHostedWebPhysicalNotePort({
-            boundUserId: input.boundUserId,
-            fetchImpl,
-            timeoutMs,
-            transport,
-          }),
+          ...(input.physicalNotesEnabled === true
+            ? {
+                physicalNotes: createHostedWebPhysicalNotePort({
+                  boundUserId: input.boundUserId,
+                  fetchImpl,
+                  timeoutMs,
+                  transport,
+                }),
+              }
+            : {}),
           phoneCalls: createHostedWebPhoneCallPort({
             boundUserId: input.boundUserId,
             fetchImpl,

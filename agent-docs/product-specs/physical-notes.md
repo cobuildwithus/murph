@@ -2,7 +2,8 @@
 
 ## Status
 
-Specified and implemented behind Lob configuration and a live-send kill switch.
+Specified and implemented behind an explicit runtime capability, Lob
+configuration, and a live-send kill switch.
 
 ## Product
 
@@ -68,6 +69,13 @@ Test keys may render proofs. A `live_` key is rejected unless
 `LOB_PHYSICAL_NOTE_COST_USD_MICROS` and its explicit pricing version, not from a
 scraped public rate.
 
+Cloudflare exposes the composable tool only when the non-secret platform
+capability `HOSTED_PHYSICAL_NOTES_ENABLED=true` is set. This flag must be enabled
+only after Web's Lob configuration is ready. Web still fails closed as
+`unavailable` when provider configuration is absent or invalid, and durable
+accepted replays resolve from their stored row without depending on current Lob
+configuration.
+
 ## Authority and safety
 
 One explicit user-authored send request authorizes one note. In a group, any
@@ -84,8 +92,9 @@ and postal-service retention remain governed by those providers.
 ## Deployment
 
 Deploy the Prisma migration and Web route/service first, with live sending off.
-Then deploy Cloudflare and the assistant runtime/tool surface. Verify at least
-one Lob test-mode proof before enabling live sending. The older runtime simply
-lacks the tool during a Web-first compatibility window; a new runtime against an
-old Web deployment would expose a route that does not exist and is therefore the
-unsafe order.
+Then deploy Cloudflare and the assistant runtime/tool surface with
+`HOSTED_PHYSICAL_NOTES_ENABLED` still off. Verify at least one Lob test-mode
+proof before enabling the Cloudflare capability, and enable live sending only
+after that proof passes. The older runtime simply lacks the tool during a
+Web-first compatibility window; a new runtime against an old Web deployment
+would expose a route that does not exist and is therefore the unsafe order.

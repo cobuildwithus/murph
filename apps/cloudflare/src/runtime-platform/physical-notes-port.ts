@@ -47,7 +47,7 @@ export function createHostedWebPhysicalNotePort(input: {
             complimentary: false,
             costUsdMicros: "0",
             physicalNoteId: null,
-            status: "failed",
+            status: error.status === 403 ? "permission_denied" : "failed",
           };
         }
         throw error;

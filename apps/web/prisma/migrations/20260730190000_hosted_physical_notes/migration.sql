@@ -27,10 +27,6 @@ CREATE UNIQUE INDEX "hosted_physical_note_member_id_request_key_key"
   ON "hosted_physical_note"("member_id", "request_key");
 CREATE UNIQUE INDEX "hosted_physical_note_member_id_complimentary_offer_code_key"
   ON "hosted_physical_note"("member_id", "complimentary_offer_code");
-CREATE INDEX "hosted_physical_note_member_id_created_at_idx"
-  ON "hosted_physical_note"("member_id", "created_at");
-CREATE INDEX "hosted_physical_note_status_updated_at_idx"
-  ON "hosted_physical_note"("status", "updated_at");
 
 ALTER TABLE "hosted_physical_note"
   ADD CONSTRAINT "hosted_physical_note_member_id_fkey"

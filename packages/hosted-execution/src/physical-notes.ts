@@ -41,6 +41,8 @@ export const hostedPhysicalNoteSendResponseSchema = z
       "failed",
       "insufficient_usage",
       "pending",
+      "permission_denied",
+      "unavailable",
     ]),
   })
   .strict();

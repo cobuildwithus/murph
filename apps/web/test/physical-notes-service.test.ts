@@ -19,6 +19,7 @@ import type {
   LobPhysicalNoteCreateResult,
   LobPhysicalNoteRuntime,
 } from "@/src/lib/physical-notes/lob-runtime";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
   assertActiveAccess: vi.fn(),
@@ -288,6 +289,7 @@ describe("createHostedPhysicalNote", () => {
       prisma: store.prisma,
       runtime: provider.runtime,
     });
+    vi.stubEnv("LOB_API_KEY", "");
     const replay = await createHostedPhysicalNote({
       ...request,
       prisma: store.prisma,
@@ -297,6 +299,72 @@ describe("createHostedPhysicalNote", () => {
     expect(replay).toEqual(first);
     expect(provider.create).toHaveBeenCalledOnce();
     expect(store.allRows()).toHaveLength(1);
+  });
+
+  it("fails closed without reserving a note when provider configuration is unavailable", async () => {
+    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
+    const store = createPhysicalNoteStore();
+    const provider = createPhysicalNoteRuntime([
+      { kind: "accepted", providerLetterId: "ltr_unexpected" },
+    ]);
+    vi.stubEnv("LOB_API_KEY", "");
+
+    await expect(createHostedPhysicalNote({
+      ...buildRequest(30),
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    })).resolves.toEqual({
+      complimentary: false,
+      costUsdMicros: "0",
+      physicalNoteId: null,
+      status: "unavailable",
+    });
+    expect(provider.create).not.toHaveBeenCalled();
+    expect(store.allRows()).toEqual([]);
+  });
+
+  it("releases a new group reservation when final participant authority is denied", async () => {
+    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
+    const store = createPhysicalNoteStore();
+    const provider = createPhysicalNoteRuntime([
+      { kind: "accepted", providerLetterId: "ltr_unexpected" },
+    ]);
+    mocks.isThreadContainerDestination.mockReturnValue(true);
+    mocks.requireDestination.mockResolvedValue({
+      conversationShape: "thread-container",
+      externalThreadRouteAuthority: {
+        accountLookupKey: "group_account",
+        channel: "linq",
+        containerMemberId: MEMBER_ID,
+        threadId: "thread_physical_note",
+      },
+    });
+    mocks.assertGroupOrigin
+      .mockResolvedValueOnce(MEMBER_ID)
+      .mockRejectedValueOnce(hostedOnboardingError({
+        code: "HOSTED_GROUP_PARTICIPANT_ACTION_AUTHORITY_REQUIRED",
+        httpStatus: 403,
+        message: "Current participant authority is required.",
+        retryable: false,
+      }));
+
+    await expect(createHostedPhysicalNote({
+      ...buildRequest(31),
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_PARTICIPANT_ACTION_AUTHORITY_REQUIRED",
+      httpStatus: 403,
+    });
+    expect(mocks.assertGroupOrigin).toHaveBeenCalledTimes(2);
+    expect(provider.create).not.toHaveBeenCalled();
+    expect(store.allRows()).toEqual([
+      expect.objectContaining({
+        complimentaryOfferCode: null,
+        providerLetterId: null,
+        status: "failed",
+      }),
+    ]);
   });
 
   it("rejects reuse of a request key for different note content", async () => {
@@ -457,9 +525,7 @@ function createPhysicalNoteRuntime(
   results: readonly LobPhysicalNoteCreateResult[],
 ) {
   const remaining = [...results];
-  const create = vi.fn(async (
-    _input: Parameters<LobPhysicalNoteRuntime["create"]>[0],
-  ): Promise<LobPhysicalNoteCreateResult> => {
+  const create = vi.fn(async (): Promise<LobPhysicalNoteCreateResult> => {
     const result = remaining.shift();
     if (!result) {
       throw new Error("unexpected physical-note provider call");

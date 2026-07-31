@@ -17,6 +17,7 @@ import {
 } from "@murphai/hosted-execution/physical-notes";
 
 import { assertHostedGroupParticipantActionOriginHasOwnMurph } from "../hosted-groups/participant-action-authority";
+import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { assertActiveHostedMemberAccessAllowed } from "../hosted-onboarding/member-access";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -104,6 +105,9 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
       }
       return { kind: "row" as const, created: false, row: existing };
     }
+    if (!config) {
+      return { kind: "unavailable" as const };
+    }
 
     const priorComplimentary = await tx.hostedPhysicalNote.findFirst({
       select: { id: true },
@@ -132,7 +136,10 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
         !gate.allowed
         || gate.remainingUsdMicros - reservedUsdMicros < config.costUsdMicros
       ) {
-        return { kind: "insufficient" as const };
+        return {
+          kind: "insufficient" as const,
+          costUsdMicros: config.costUsdMicros,
+        };
       }
     }
 
@@ -157,10 +164,13 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
     };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
+  if (reservation.kind === "unavailable") {
+    return unavailableResponse();
+  }
   if (reservation.kind === "insufficient") {
     return {
       complimentary: false,
-      costUsdMicros: config.costUsdMicros.toString(),
+      costUsdMicros: reservation.costUsdMicros.toString(),
       physicalNoteId: null,
       status: "insufficient_usage",
     };
@@ -185,6 +195,9 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
   ) {
     return toResponse(reservation.row, "pending");
   }
+  if (!config) {
+    return toResponse(reservation.row, "pending");
+  }
 
   const artworkExpiresAt = new Date(input.artwork.expiresAt);
   if (artworkExpiresAt.getTime() <= Date.now() + 60_000) {
@@ -195,7 +208,21 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
     apiKey: config.apiKey,
     fromAddressId: config.fromAddressId,
   });
-  await reassertGroupOrigin?.();
+  try {
+    await reassertGroupOrigin?.();
+  } catch (error) {
+    if (
+      reservation.created
+      && isHostedOnboardingError(error)
+      && !error.retryable
+    ) {
+      await markHostedPhysicalNoteFailed({
+        noteId: reservation.row.id,
+        prisma,
+      });
+    }
+    throw error;
+  }
   input.signal?.throwIfAborted();
   const providerResult = await runtime.create({
     artworkUrl: input.artwork.url,
@@ -225,16 +252,9 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
     return toResponse(current, "pending");
   }
   if (providerResult.kind === "definite_failure") {
-    await prisma.hostedPhysicalNote.updateMany({
-      data: {
-        complimentaryOfferCode: null,
-        status: "failed",
-      },
-      where: {
-        id: reservation.row.id,
-        providerLetterId: null,
-        status: "starting",
-      },
+    await markHostedPhysicalNoteFailed({
+      noteId: reservation.row.id,
+      prisma,
     });
     const current = await prisma.hostedPhysicalNote.findUniqueOrThrow({
       where: { id: reservation.row.id },
@@ -328,28 +348,47 @@ async function recordPaidPhysicalNoteUsageTx(input: {
   });
 }
 
-function readPhysicalNoteConfig(): PhysicalNoteConfig {
-  const apiKey = requireEnv("LOB_API_KEY");
+function readPhysicalNoteConfig(): PhysicalNoteConfig | null {
+  const apiKey = readEnv("LOB_API_KEY");
+  const fromAddressId = readEnv("LOB_FROM_ADDRESS_ID");
+  const pricingVersion = readEnv("LOB_PHYSICAL_NOTE_PRICING_VERSION");
+  const costText = readEnv("LOB_PHYSICAL_NOTE_COST_USD_MICROS");
+  if (!apiKey || !fromAddressId || !pricingVersion || !costText) {
+    return null;
+  }
   if (
     apiKey.startsWith("live_")
     && process.env.LOB_PHYSICAL_NOTES_LIVE_ENABLED?.trim().toLowerCase() !== "true"
   ) {
-    throw new TypeError(
-      "LOB_PHYSICAL_NOTES_LIVE_ENABLED=true is required for live physical mail.",
-    );
+    return null;
   }
-  const cost = Number(requireEnv("LOB_PHYSICAL_NOTE_COST_USD_MICROS"));
+  const cost = Number(costText);
   if (!Number.isSafeInteger(cost) || cost <= 0) {
-    throw new TypeError(
-      "LOB_PHYSICAL_NOTE_COST_USD_MICROS must be a positive safe integer.",
-    );
+    return null;
   }
   return {
     apiKey,
     costUsdMicros: BigInt(cost),
-    fromAddressId: requireEnv("LOB_FROM_ADDRESS_ID"),
-    pricingVersion: requireEnv("LOB_PHYSICAL_NOTE_PRICING_VERSION"),
+    fromAddressId,
+    pricingVersion,
   };
+}
+
+async function markHostedPhysicalNoteFailed(input: {
+  noteId: string;
+  prisma: PrismaClient;
+}): Promise<void> {
+  await input.prisma.hostedPhysicalNote.updateMany({
+    data: {
+      complimentaryOfferCode: null,
+      status: "failed",
+    },
+    where: {
+      id: input.noteId,
+      providerLetterId: null,
+      status: "starting",
+    },
+  });
 }
 
 function buildPhysicalNoteFingerprint(input: {
@@ -395,8 +434,16 @@ function createPhysicalNoteId(): string {
   return `hpn_${randomUUID().replaceAll("-", "")}`;
 }
 
-function requireEnv(name: string): string {
+function readEnv(name: string): string | null {
   const value = process.env[name]?.trim();
-  if (!value) throw new TypeError(`${name} must be configured.`);
-  return value;
+  return value || null;
+}
+
+function unavailableResponse(): HostedPhysicalNoteSendResponse {
+  return {
+    complimentary: false,
+    costUsdMicros: "0",
+    physicalNoteId: null,
+    status: "unavailable",
+  };
 }

@@ -3267,6 +3267,24 @@ export async function executeMurphDynamicToolRequest(input: {
                 status: result.status,
               }),
             )
+          case 'permission_denied':
+            return toolTextResult(
+              false,
+              JSON.stringify({
+                note:
+                  'The physical note was not sent because the current participant is not authorized to approve this action.',
+                status: result.status,
+              }),
+            )
+          case 'unavailable':
+            return toolTextResult(
+              false,
+              JSON.stringify({
+                note:
+                  'Physical-note mailing is currently unavailable, so nothing was sent. Do not regenerate the artwork or retry automatically.',
+                status: result.status,
+              }),
+            )
           case 'failed':
             return toolTextResult(
               false,

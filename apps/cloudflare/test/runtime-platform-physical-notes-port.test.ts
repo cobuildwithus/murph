@@ -47,7 +47,7 @@ describe("createHostedWebPhysicalNotePort", () => {
     }).allowed).toBe(false);
   });
 
-  it("reports typed pre-provider Web rejections as definite failures", async () => {
+  it("reports participant authority rejections distinctly", async () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
       error: {
         code: "HOSTED_GROUP_PARTICIPANT_ACTION_AUTHORITY_REQUIRED",
@@ -69,7 +69,7 @@ describe("createHostedWebPhysicalNotePort", () => {
       complimentary: false,
       costUsdMicros: "0",
       physicalNoteId: null,
-      status: "failed",
+      status: "permission_denied",
     });
   });
 
