@@ -23,7 +23,10 @@ the mail. The product is one US-only, one-artwork-page, color First Class note.
    trusted `ref` and `sha256` from the completion. After a later explicit send
    request, call `murph.send_physical_note` with those exact values as
    `image_ref` and `image_sha256`; runtime code re-reads and verifies the vault
-   bytes before mailing. Never invent or alter either value.
+   bytes before mailing. In a group, also pass the exact current approving
+   message as `message_ref`; do not infer approval from another participant or
+   from whichever message happened to arrive last. Never invent or alter any
+   of these values.
 
 Do not attach or preview the image merely because it exists. When the
 originating request already said to mail it and the address is complete, send
