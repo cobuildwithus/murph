@@ -109,6 +109,26 @@ describe("Privy phone-transfer source retirement", () => {
     });
   });
 
+  it("retries an exact automatic-trial scaffold after cleanup cancellation", async () => {
+    const fixture = makeFixture({ autoTrial: true });
+    if (!fixture.billingSnapshot) {
+      throw new TypeError("Expected automatic-trial billing fixture.");
+    }
+    fixture.sourceMember.billingStatus = HostedBillingStatus.canceled;
+    fixture.sourceMember.suspendedAt = NOW;
+    fixture.sourceShape.billingStatus = HostedBillingStatus.canceled;
+    fixture.billingSnapshot.billingRef.currentBillingPhase = null;
+
+    await expect(prepare(fixture)).resolves.toEqual({
+      autoTrialBilling: {
+        stripeCustomerId: STRIPE_CUSTOMER_ID,
+        stripeSubscriptionId: STRIPE_SUBSCRIPTION_ID,
+      },
+      sourceMemberId: SOURCE_MEMBER_ID,
+    });
+    expect(fixture.prisma.hostedMember.updateMany).not.toHaveBeenCalled();
+  });
+
   it("rejects a non-canonical browser-vault refresh event", async () => {
     const fixture = makeFixture({ autoTrial: true });
     const activationEventId =
@@ -348,7 +368,7 @@ function makeFixture(input: { autoTrial?: boolean } = {}) {
           checkoutAttemptId: null,
           checkoutCreatedAt: null,
           checkoutIntentHash: null,
-          currentBillingPhase: "trial",
+          currentBillingPhase: "trial" as string | null,
           currentBillingPlanCode: "launch_monthly",
           currentCheckoutOffer: "pulse_trial_7d",
           currentPeriodEnd: TRIAL_END,

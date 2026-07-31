@@ -363,7 +363,11 @@ async function classifyHostedPrivyPhoneTransferSourceScaffoldTx(input: {
   }
 
   if (
-    source.billingStatus !== HostedBillingStatus.active
+    (
+      source.billingStatus !== HostedBillingStatus.active
+      && source.billingStatus !== HostedBillingStatus.canceled
+      && source.billingStatus !== HostedBillingStatus.incomplete
+    )
     || !source.billingRef
     || !source.hostedWorkspace
     || !source.routing
@@ -650,11 +654,18 @@ async function assertHostedPrivyPhoneTransferAutoTrialScaffoldTx(input: {
     prisma: input.prisma,
   });
   const billingRef = billing?.billingRef;
+  const hasExpectedTrialLifecycle =
+    billing?.core.billingStatus === HostedBillingStatus.active
+      ? billingRef?.currentBillingPhase === "trial"
+      : (
+        billing?.core.billingStatus === HostedBillingStatus.canceled
+        || billing?.core.billingStatus === HostedBillingStatus.incomplete
+      )
+        && billingRef?.currentBillingPhase === null;
   if (
     !billing
-    || billing.core.billingStatus !== HostedBillingStatus.active
     || !billingRef
-    || billingRef.currentBillingPhase !== "trial"
+    || !hasExpectedTrialLifecycle
     || billingRef.currentBillingPlanCode !== "launch_monthly"
     || billingRef.currentCheckoutOffer !== HOSTED_PULSE_TRIAL_OFFER
     || billingRef.pulseTrialPolicyVersion
