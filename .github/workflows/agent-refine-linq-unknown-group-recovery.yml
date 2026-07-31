@@ -38,6 +38,52 @@ jobs:
       - name: Apply asserted implementation refinement
         run: node scripts/agent-refine-linq-unknown-group-recovery.mjs
 
+      - name: Scope final audit to the new-group planner
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("scripts/agent-finalize-linq-unknown-group-recovery.py")
+          content = path.read_text()
+          before = r'''replace_once(
+              provider_path,
+              '''    : await lookupHostedMemberRoutingByPendingLinqParticipantContact({
+                  contact: participantContact,
+                  prisma: input.prisma,
+                });''',
+              '''    : await lookupHostedMemberRoutingByPendingLinqParticipantContact({
+                  contact: participantContact,
+                  linqChatId: summary.chatId,
+                  prisma: input.prisma,
+                  recipientPhone: incomingRecipientPhone,
+                });''',
+              "require exact pending group authority",
+          )'''
+          after = r'''replace_once(
+              provider_path,
+              '''  const pendingSenderLookup = senderLookup
+                ? null
+                : await lookupHostedMemberRoutingByPendingLinqParticipantContact({
+                    contact: participantContact,
+                    prisma: input.prisma,
+                  });
+              const sender = senderLookup?.core ?? pendingSenderLookup?.core ?? null;''',
+              '''  const pendingSenderLookup = senderLookup
+                ? null
+                : await lookupHostedMemberRoutingByPendingLinqParticipantContact({
+                    contact: participantContact,
+                    linqChatId: summary.chatId,
+                    prisma: input.prisma,
+                    recipientPhone: incomingRecipientPhone,
+                  });
+              const sender = senderLookup?.core ?? pendingSenderLookup?.core ?? null;''',
+              "require exact pending group authority",
+          )'''
+          if content.count(before) != 1:
+              raise SystemExit("Expected one generic pending-group audit block")
+          path.write_text(content.replace(before, after, 1))
+          PY
+
       - name: Apply final architecture and correctness audit
         run: python scripts/agent-finalize-linq-unknown-group-recovery.py
 
