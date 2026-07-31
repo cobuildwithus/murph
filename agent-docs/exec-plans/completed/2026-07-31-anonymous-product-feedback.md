@@ -123,3 +123,16 @@ Completed: 2026-07-31
 - Verification of the restored free-text state (focused suites, typechecks,
   provider-input capture, exact-head CI, and a new ReviewGPT round) is recorded
   in the PR for this plan.
+- ReviewGPT round 3 on the restored design found compound blood-pressure
+  readings partially redacted; the correction adds one compound pattern ahead
+  of the scalar unit pattern with parser- and persistence-boundary proof.
+  Round 4 confirmed the correction but flagged the open-ended
+  spelling-by-spelling direction and required a requirement-level decision.
+- Requirement decision (owner-aligned): "no exact health value reaches
+  anonymous storage" is explicitly a best-effort mitigation, not a hard
+  admission invariant. The model-facing contract is the primary boundary for
+  summary content; the deterministic redaction pass is defense-in-depth over
+  recognizable shapes and is not extended per natural-language spelling.
+  `agent-docs/SECURITY.md` is reconciled to that single position. A fail-closed
+  semantic boundary was rejected because it would drop or truncate feedback,
+  contradicting the owner's direction to keep raw free-text summaries.
