@@ -515,7 +515,7 @@ function PersonalUsageCreditOwnerStudy() {
           </p>
           <div data-design-interaction="referral-details">
             <HostedAiUsageActivity
-              activity={DESIGN_AI_USAGE_WAITING_ACTIVITY}
+              activity={DESIGN_AI_USAGE_ACTIVITY}
               missionContactOption={null}
             />
           </div>

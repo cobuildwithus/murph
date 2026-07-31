@@ -443,8 +443,22 @@ for (const width of [768, 1280] as const) {
       ),
     ).toHaveCount(2);
 
-    const referralDetails = referralDetailsPreview.locator("details");
-    const referralDetailsSummary = referralDetails.locator("summary");
+    const currentReferrals = referralDetailsPreview.getByRole("list", {
+      name: "Current usage referrals",
+    });
+    await expect(currentReferrals).toBeVisible();
+    const referralDetailNames = [
+      "Details for Start an active group: In progress, Ends Aug 3 at 12:00 PM UTC",
+      "Details for Start an active group: Checking final activity, Closed Jul 27 at 12:00 PM UTC",
+      "Details for Start an active group: Reward pending, Qualified Jul 25",
+    ];
+    for (const name of referralDetailNames) {
+      await expect(currentReferrals.getByRole("button", { name })).toHaveCount(1);
+    }
+    const referralDetailsSummary = currentReferrals.getByRole("button", {
+      name: referralDetailNames[0],
+    });
+    const referralDetails = referralDetailsSummary.locator("..");
     await expect(referralDetails).not.toHaveAttribute("open", "");
     await referralDetailsSummary.click();
     await expect(referralDetails).toHaveAttribute("open", "");

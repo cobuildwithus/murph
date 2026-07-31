@@ -60,7 +60,7 @@ export function HostedAiUsageActivity(props: {
 
           {currentMissions.length > 0 ? (
             <ul
-              aria-label="Active usage referrals"
+              aria-label="Current usage referrals"
               className="divide-y divide-border/70 border-t border-border/70"
             >
               {currentMissions.map((mission) => (
@@ -150,7 +150,10 @@ function MissionRow(props: {
             <span>{mission.timingLabel}</span>
           </p>
           <details className="group mt-3">
-            <summary className="flex w-fit cursor-pointer list-none items-center gap-1.5 rounded-sm text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+            <summary
+              aria-label={`Details for ${mission.title}: ${mission.statusLabel}, ${mission.timingLabel}`}
+              className="flex w-fit cursor-pointer list-none items-center gap-1.5 rounded-sm text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden"
+            >
               Details
               <ChevronDown
                 aria-hidden="true"

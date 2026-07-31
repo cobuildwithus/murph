@@ -474,6 +474,7 @@ describe("HostedAiUsageActivity", () => {
     }));
 
     assert.match(markup, /<h3[^>]*>Referrals<\/h3>/);
+    assert.match(markup, /aria-label="Current usage referrals"/);
     assert.match(markup, />History</);
     assert.match(markup, /aria-label="Usage activity history"/);
     assert.match(markup, /Usage purchase/);
@@ -492,6 +493,14 @@ describe("HostedAiUsageActivity", () => {
     assert.match(markup, /Wait while Murph checks final activity\./);
     assert.match(markup, /Selected Jul 28, 2026/);
     assert.equal(markup.match(/>Details</gu)?.length, 2);
+    assert.match(
+      markup,
+      /aria-label="Details for Start an active group: In progress, Ends Aug 3, 2026"/,
+    );
+    assert.match(
+      markup,
+      /aria-label="Details for Start an active group: Checking final activity, Closed Jul 29, 2026"/,
+    );
     assert.ok(
       markup.indexOf("Checking final activity") < markup.indexOf(">History"),
     );
@@ -550,6 +559,16 @@ describe("HostedAiUsageActivity", () => {
       assert.ok(markup.indexOf(`Referral ${label}`) < historyIndex);
     }
     assert.ok(markup.indexOf("Referral Completed") > historyIndex);
+    assert.match(markup, /aria-label="Current usage referrals"/);
+    for (const label of ["Waiting", "Active", "Checking", "Reward pending"]) {
+      assert.match(
+        markup,
+        new RegExp(
+          `aria-label="Details for Referral ${label}: ${label}, Timing for ${label}"`,
+          "u",
+        ),
+      );
+    }
     assert.equal(markup.match(/>Details</gu)?.length, 4);
   });
 
