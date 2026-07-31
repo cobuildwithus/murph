@@ -45,6 +45,12 @@ describe('murph.generate_image dynamic tool schema', () => {
     expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
       'private media is provided in a later trusted system input',
     )
+    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
+      "use the prior result's saved image ref as referenceImageRefs[0]",
+    )
+    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
+      'preserve its composition, framing, placement, and every unmentioned detail',
+    )
     expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(
       'a known preference supports voice',
     )
@@ -339,6 +345,7 @@ describe('murph.generate_image dynamic tool schema', () => {
 
     releaseProvider()
     await expect(generation).resolves.toMatchObject({
+      failureDiagnostic: null,
       media: {
         contentType: 'image/webp',
         kind: 'vault_image',
@@ -354,6 +361,84 @@ describe('murph.generate_image dynamic tool schema', () => {
       }),
     }))
     releaseUsage()
+  })
+
+  it('keeps provider diagnostics in the hosted image result', async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-image-failure-'))
+    tempRoots.push(vaultRoot)
+    await initializeVault({ vaultRoot })
+    let generation: Promise<unknown> | null = null
+    const hostedToolContext = {
+      computerToolsAvailable: false,
+      currentAssistantInputId: () => 'input_image_failure_origin',
+      currentHostedDeliveryContext: () => null,
+      currentHostedMailboxItemIds: () => [],
+      currentUserActionScope: () => ({
+        acceptedInputIds: ['input_image_failure_origin'],
+        conversationId: 'conversation_failure',
+        conversationScope: 'direct',
+        inboundMailboxItemIds: ['mailbox_failure'],
+        originSessionId: 'session_failure',
+        recipientKey: 'recipient_failure',
+      }),
+      imageGenerationLauncher: {
+        launch(input) {
+          generation = input.run(
+            new AbortController().signal,
+            async (write) => await write(),
+          )
+          return 'started' as const
+        },
+      },
+      recordDetachedUsage: vi.fn(),
+      sendVaultFile: async () => ({
+        filename: 'unused',
+        status: 'denied' as const,
+      }),
+      vaultFileSendAvailable: false,
+    } satisfies AssistantHostedToolContext
+
+    const result = await executeMurphDynamicToolRequest({
+      env: { OPENAI_API_KEY: 'test-key' },
+      fetchImpl: async () => new Response(JSON.stringify({
+        error: {
+          code: 'invalid_prompt',
+          message: 'The image prompt was rejected.',
+          type: 'invalid_request_error',
+        },
+      }), {
+        headers: {
+          'content-type': 'application/json',
+          'x-request-id': 'req_image_failed',
+        },
+        status: 400,
+      }),
+      hostedToolContext,
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: {
+        args: {
+          alt: null,
+          outputFormat: 'webp',
+          prompt: 'Draw an invalid image.',
+          quality: 'medium',
+          referenceImageRefs: [],
+          size: '1024x1024',
+        },
+        kind: 'generate-image',
+      },
+      requireHostedPrivateImageDelivery: true,
+      vaultRoot,
+    })
+
+    expect(result.rpcResult.success).toBe(true)
+    await expect(generation).resolves.toEqual({
+      failureDiagnostic:
+        'image generation failed: ASSISTANT_IMAGE_GENERATION_FAILED (http 400, invalid_prompt, request req_image_failed): The image prompt was rejected.',
+      media: null,
+      runtimeIssue: null,
+      savedImageRef: null,
+    })
   })
 
   it('keeps the minimal legacy prompt-only call valid', () => {

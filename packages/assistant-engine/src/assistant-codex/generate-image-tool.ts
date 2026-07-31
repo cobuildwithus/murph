@@ -15,6 +15,9 @@ import {
 import type {
   AssistantResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import {
+  describeVaultCliFailure,
+} from '@murphai/operator-config/vault-cli-errors'
 
 import type {
   AssistantWorkspaceArtifactMaterializer,
@@ -193,10 +196,16 @@ export async function executeGenerateImageTool(input: {
       }
       return {
         rpcSuccess: false,
-        rpcText: 'image references could not be loaded',
+        rpcText: describeGenerateImageFailure(
+          'image references could not be loaded',
+          error,
+        ),
       }
     }
 
+    const operationLabel = referenceImages.length > 0
+      ? 'image edit'
+      : 'image generation'
     const operation: GenerateImageOperation = referenceImages.length > 0
       ? 'image_generation_with_references'
       : 'image_generation'
@@ -224,7 +233,10 @@ export async function executeGenerateImageTool(input: {
       }
       return {
         rpcSuccess: false,
-        rpcText: 'image generation failed',
+        rpcText: describeGenerateImageFailure(
+          `${operationLabel} failed`,
+          error,
+        ),
       }
     }
 
@@ -252,7 +264,7 @@ export async function executeGenerateImageTool(input: {
     if (!hasValidGeneratedImageBytes) {
       return {
         rpcSuccess: false,
-        rpcText: 'image generation returned invalid image data',
+        rpcText: `${operationLabel} returned invalid image data`,
         usageDraft,
       }
     }
@@ -713,9 +725,18 @@ function buildGenerateImagePromptWithReferences(input: {
   return [
     `Use the attached reference image${input.referenceImageCount === 1 ? '' : 's'} in the provided order.`,
     'The user prompt may refer to them as image 1, image 2, etc.',
+    'If the prompt identifies a reference as the image to edit, preserve its composition, placement, and every detail the prompt does not explicitly change.',
     '',
     input.prompt,
   ].join('\n')
+}
+
+function describeGenerateImageFailure(
+  fallback: string,
+  error: unknown,
+): string {
+  const diagnostic = describeVaultCliFailure(error)
+  return diagnostic ? `${fallback}: ${diagnostic}` : fallback
 }
 
 function hashReferenceImageSet(

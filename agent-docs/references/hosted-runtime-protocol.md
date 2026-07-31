@@ -1301,7 +1301,15 @@ uses the existing receipt checkpoint against the latest workspace. After the
 private capture is ready, the runtime upserts one trusted system input containing
 its exact `vault_image` descriptor on the original route, registers that input
 with the ordinary pending assistant-input index, and notifies the existing wake
-signal. Normal foreground selection therefore keeps fresh conversation ahead of
+signal. When OpenAI rejects generation or editing, the same completion input
+keeps the legacy exact `{status:"failed"}` result envelope and carries one
+separate trusted diagnostic line. New readers accept that line only from exact
+runtime-authored system provenance, normalize and bound it, and present it to
+Murph as data rather than instructions; old readers continue to understand the
+unchanged failed envelope. The diagnostic may contain only the adapter's bounded
+structured error message, code, request id, and fixed local context, never an
+authorization header, credential, raw response body, prompt payload, or image
+bytes. Normal foreground selection therefore keeps fresh conversation ahead of
 the completion and owns completion retry and terminal evidence. Provider
 completion starts the existing generic usage recorder without awaiting it, and
 image delivery never waits for accounting or diagnostic writes. When the model

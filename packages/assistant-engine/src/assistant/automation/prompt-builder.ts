@@ -55,6 +55,7 @@ export interface AssistantAutoReplyPromptProjection {
 
 export type AssistantTrustedHostedImageCompletion =
   | {
+      diagnostic: string | null
       status: 'failed'
     }
   | {

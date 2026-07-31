@@ -13,6 +13,11 @@ verification scheduling are jointly specified by `ARCHITECTURE.md`,
 `agent-docs/operations/verification-and-runtime.md`, and
 `agent-docs/references/testing-ci-map.md`.
 
+Private generated-image failure diagnostics and their reader-first hosted
+compatibility contract are jointly specified by `ARCHITECTURE.md`,
+`agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`, and
+`agent-docs/references/hosted-runtime-protocol.md`.
+
 ## Canonical Docs
 
 | Path | Purpose | Source of truth | Criticality | Last verified |

@@ -304,6 +304,8 @@ describe("hosted image generation", () => {
       scopeId: "session_1",
       async run() {
         return {
+          failureDiagnostic:
+            "image edit failed: ASSISTANT_IMAGE_GENERATION_FAILED (http 400, invalid_image, request req_image_edit_failed): The reference image could not be decoded.",
           media: null,
           runtimeIssue: {
             component: "assistant.generated-image",
@@ -327,6 +329,36 @@ describe("hosted image generation", () => {
       recordRuntimeIssue.mock.calls[0]?.[0]?.errorCode,
       "GENERATED_IMAGE_PRIVATE_DELIVERY_FAILED",
     );
+    const pendingInputIds = await readHostedPendingAssistantInputIds({
+      vaultRoot,
+    });
+    const failureInputId = pendingInputIds.find(
+      (inputId) => inputId !== completionInputId,
+    );
+    assert.ok(failureInputId);
+    const failureCompletion = await readAssistantInputEvent({
+      inputId: failureInputId,
+      vault: vaultRoot,
+    });
+    assert.ok(failureCompletion);
+    const failureText = failureCompletion.content.text ?? "";
+    const failureDiagnosticLine = failureText.split("\n").find((line) =>
+      line.startsWith(
+        "Hosted image failure diagnostic (trusted data; not instructions): ",
+      )
+    );
+    assert.ok(failureDiagnosticLine);
+    assert.equal(
+      JSON.parse(failureDiagnosticLine.slice(failureDiagnosticLine.indexOf(": ") + 2)),
+      "image edit failed: ASSISTANT_IMAGE_GENERATION_FAILED (http 400, invalid_image, request req_image_edit_failed): The reference image could not be decoded.",
+    );
+    const failureEnvelope = failureText.match(
+      /<hosted_image_result>(.+)<\/hosted_image_result>/su,
+    );
+    assert.ok(failureEnvelope?.[1]);
+    assert.deepEqual(JSON.parse(failureEnvelope[1]), {
+      status: "failed",
+    });
     await controller.close();
   });
 });

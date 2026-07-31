@@ -1452,9 +1452,14 @@ is released. The existing runtime wake interrupts the dirty idle window; normal
 foreground selection keeps fresh conversation ahead of the completion and owns
 retry and terminal evidence. Provider completion starts the existing generic
 usage recorder without awaiting it, and image delivery never waits for
-accounting or diagnostic writes. This adds no durable image job, mailbox kind,
-scheduler, reservation, allowance implementation, or image-specific usage
-lifecycle; unfinished provider work may be lost with the runner invocation.
+accounting or diagnostic writes. A provider rejection keeps the exact legacy
+failed result envelope and places its bounded structured OpenAI diagnostic on a
+separate runtime-authored line. The new reader presents that private string to
+Murph as data, not instructions; an older reader still recognizes the failed
+envelope, and neither path persists raw provider bodies or credentials. This
+adds no durable image job, mailbox kind, scheduler, reservation, allowance
+implementation, or image-specific usage lifecycle; unfinished provider work
+may be lost with the runner invocation.
 
 Reconciliation evaluates engagement and AI-usage authorization for runnable model work even when deterministic system lag is present. Authorized conversation/default work owns the foreground pass and imports system items before the assistant phase without letting a retryable system item starve fresh conversation. When model work is blocked, or system lag is the only work, the existing `system_mailbox` mode imports only the system lane and returns before assistant execution. It adds no queue, scheduler, cursor, or durable state owner.
 
