@@ -14,17 +14,21 @@ import {
 const mocks = vi.hoisted(() => ({
   acceptHostedGroupDisclosurePermissionReactionTx: vi.fn(),
   acceptHostedGroupJoinOfferTx: vi.fn(),
+  appendHostedLinqGroupReactionMailboxTx: vi.fn(),
   enqueueHostedGroupJoinOutreachTx: vi.fn(),
   revokeHostedGroupJoinOutreachForRemovedReactionTx: vi.fn(),
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort: vi.fn(),
+  logHostedOnboardingDiagnostic: vi.fn(),
   lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   markHostedLinqGroupJoinOfferHandledTx: vi.fn(),
   readHostedGroupJoinOfferTargetTx: vi.fn(),
+  readHostedThreadRouteByThreadIdentity: vi.fn(),
   materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
   resolveHostedPublicBaseUrl: vi.fn(),
   signalHostedGroupJoinConfirmationRuntimeBestEffort: vi.fn(),
+  signalHostedLinqGroupReactionMailbox: vi.fn(),
   signalHostedRuntimeMaintenanceRuntime: vi.fn(),
 }));
 
@@ -65,6 +69,10 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
     mocks.lookupHostedMemberByVerifiedEmailAddress,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/logging", () => ({
+  logHostedOnboardingDiagnostic: mocks.logHostedOnboardingDiagnostic,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
   readActiveHostedMemberAccess: mocks.readActiveHostedMemberAccess,
 }));
@@ -74,8 +82,20 @@ vi.mock("@/src/lib/hosted-onboarding/linq-provider-event-store", () => ({
     mocks.markHostedLinqGroupJoinOfferHandledTx,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/webhook-provider-linq-reaction-context", () => ({
+  appendHostedLinqGroupReactionMailboxTx:
+    mocks.appendHostedLinqGroupReactionMailboxTx,
+  signalHostedLinqGroupReactionMailbox:
+    mocks.signalHostedLinqGroupReactionMailbox,
+}));
+
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedRuntimeMaintenanceRuntime: mocks.signalHostedRuntimeMaintenanceRuntime,
+}));
+
+vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
+  readHostedThreadRouteByThreadIdentity:
+    mocks.readHostedThreadRouteByThreadIdentity,
 }));
 
 vi.mock("@/src/lib/hosted-web/public-url", () => ({
@@ -119,6 +139,14 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       revokedVaultShareProjectionKinds: [],
       selectedVaultShareProjectionKinds: ["sleep-times.v0"],
     });
+    mocks.appendHostedLinqGroupReactionMailboxTx.mockResolvedValue({
+      containerMemberId: "hbm_runtime",
+      item: {
+        id: "mailbox_group_reaction_1",
+        lane: "conversation",
+        laneSeq: "17",
+      },
+    });
     mocks.enqueueHostedGroupJoinOutreachTx.mockResolvedValue({
       kind: "enqueued",
       outreachId: "hgrpjoa_opaque",
@@ -136,12 +164,17 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       projectionKindsJson: [],
       runtimeMemberId: "hbm_runtime",
     });
+    mocks.readHostedThreadRouteByThreadIdentity.mockResolvedValue({
+      accountLookupKey: "hbidx:phone:v1:line",
+      containerMemberId: "hbm_runtime",
+    });
     mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort.mockResolvedValue(
       undefined,
     );
     mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
     mocks.resolveHostedPublicBaseUrl.mockReturnValue("https://murph.example");
     mocks.signalHostedGroupJoinConfirmationRuntimeBestEffort.mockResolvedValue(undefined);
+    mocks.signalHostedLinqGroupReactionMailbox.mockResolvedValue(undefined);
     mocks.signalHostedRuntimeMaintenanceRuntime.mockResolvedValue(undefined);
     mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mockResolvedValue(undefined);
     mocks.markHostedLinqGroupJoinOfferHandledTx.mockResolvedValue(undefined);
@@ -152,7 +185,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     restoreKeyring = null;
   });
 
-  it("accepts a live liked offer and wakes its private join confirmation", async () => {
+  it("accepts a live liked offer, retains it anonymously, and wakes its private join confirmation", async () => {
     const event = parseReactionEvent({
       reactionType: "like",
     });
@@ -178,10 +211,22 @@ describe("handleHostedGroupJoinOfferReaction", () => {
         ]),
       }),
     );
+    expect(mocks.appendHostedLinqGroupReactionMailboxTx).toHaveBeenCalledWith({
+      actor: null,
+      event,
+      route: expect.objectContaining({ containerMemberId: "hbm_runtime" }),
+      tx: expect.anything(),
+    });
     expect(mocks.markHostedLinqGroupJoinOfferHandledTx).toHaveBeenCalledWith({
       eventId: "evt_reaction_123",
       handledAt: new Date("2026-03-26T12:01:00.000Z"),
       prisma: expect.anything(),
+    });
+    expect(mocks.signalHostedLinqGroupReactionMailbox).toHaveBeenCalledWith({
+      append: expect.objectContaining({
+        containerMemberId: "hbm_runtime",
+      }),
+      prisma,
     });
     expect(mocks.acceptHostedGroupDisclosurePermissionReactionTx).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -215,7 +260,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     });
   });
 
-  it("grants only the exact permission bound to an exact Like and existing membership", async () => {
+  it("grants only the exact permission bound to an exact Like and retains the accepted reaction", async () => {
     mocks.acceptHostedGroupDisclosurePermissionReactionTx.mockResolvedValueOnce({
       kind: "accepted",
     });
@@ -230,6 +275,9 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     });
 
     expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+    expect(mocks.appendHostedLinqGroupReactionMailboxTx).toHaveBeenCalledWith(
+      expect.objectContaining({ actor: null }),
+    );
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
     expect(mocks.materializePendingHostedGroupJoinConfirmationsBestEffort)
       .not.toHaveBeenCalled();
@@ -245,6 +293,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
 
     expect(mocks.acceptHostedGroupDisclosurePermissionReactionTx).not.toHaveBeenCalled();
     expect(mocks.acceptHostedGroupJoinOfferTx).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedLinqGroupReactionMailboxTx).toHaveBeenCalledTimes(1);
   });
 
   it.each([
@@ -262,27 +311,30 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     expect(mocks.acceptHostedGroupDisclosurePermissionReactionTx).not.toHaveBeenCalled();
   });
 
-  it("emits recipient_region_unsupported for a refused-region canonical removal", async () => {
-    // The producer half of the ownership exception: the webhook can only consume
-    // this decision if the handler actually emits it, so assert it here rather
-    // than mocking the handler at the consumer.
+  it("emits recipient_region_unsupported for a canonical removal while retaining anonymous evidence", async () => {
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValueOnce(null);
+    const event = parseReactionEvent({
+      eventType: "reaction.removed",
+      handle: "+353871234567",
+      reactionType: "like",
+    });
     const prisma = createPrismaStub();
 
     await expect(handleHostedGroupJoinOfferReaction({
-      event: parseReactionEvent({
-        eventType: "reaction.removed",
-        handle: "+353871234567",
-        reactionType: "like",
-      }),
+      event,
       prisma,
     })).resolves.toEqual({
       reason: "recipient_region_unsupported",
       status: "ignored",
     });
 
-    // Nothing durable is written for a participant this feature declines.
     expect(mocks.enqueueHostedGroupJoinOutreachTx).not.toHaveBeenCalled();
+    expect(mocks.appendHostedLinqGroupReactionMailboxTx).toHaveBeenCalledWith({
+      actor: null,
+      event,
+      route: expect.objectContaining({ containerMemberId: "hbm_runtime" }),
+      tx: expect.anything(),
+    });
   });
 
   it("keeps a supported-region removal on its ordinary reaction_removed path", async () => {
@@ -296,6 +348,8 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       }),
       prisma,
     })).resolves.toEqual({ reason: "reaction_removed", status: "ignored" });
+
+    expect(mocks.appendHostedLinqGroupReactionMailboxTx).toHaveBeenCalledTimes(1);
   });
 
   it("does not treat a removed Like as disclosure consent or a legacy join", async () => {
@@ -313,12 +367,13 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
   });
 
-  it("durably enqueues first outreach for a nonmember phone reaction", async () => {
+  it("durably enqueues first outreach and anonymous room evidence for a nonmember phone reaction", async () => {
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValueOnce(null);
+    const event = parseReactionEvent({ reactionType: "like" });
     const prisma = createPrismaStub();
 
     await expect(handleHostedGroupJoinOfferReaction({
-      event: parseReactionEvent({ reactionType: "like" }),
+      event,
       prisma,
     })).resolves.toEqual({
       status: "accepted",
@@ -332,11 +387,15 @@ describe("handleHostedGroupJoinOfferReaction", () => {
         ]),
       }),
     );
+    expect(mocks.appendHostedLinqGroupReactionMailboxTx).toHaveBeenCalledWith({
+      actor: null,
+      event,
+      route: expect.objectContaining({ containerMemberId: "hbm_runtime" }),
+      tx: expect.anything(),
+    });
     expect(mocks.enqueueHostedGroupJoinOutreachTx).toHaveBeenCalledWith({
       offerId: "hgrpjo_opaque",
       participantPhoneNumber: "+15551234567",
-      // Reaction events carry `reacted_at` as providerCreatedAt, matching the
-      // existing join path's `now`.
       requestedAt: new Date("2026-03-26T12:01:00.000Z"),
       tx: expect.anything(),
     });
@@ -365,6 +424,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
 
     expect(mocks.lookupHostedMemberByVerifiedEmailAddress).toHaveBeenCalled();
     expect(mocks.enqueueHostedGroupJoinOutreachTx).not.toHaveBeenCalled();
+    expect(mocks.appendHostedLinqGroupReactionMailboxTx).not.toHaveBeenCalled();
   });
 
   it("records a revoked pre-member offer before enqueue", async () => {
@@ -385,6 +445,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     })).resolves.toEqual({ status: "ignored", reason: "offer_revoked" });
 
     expect(mocks.enqueueHostedGroupJoinOutreachTx).not.toHaveBeenCalled();
+    expect(mocks.appendHostedLinqGroupReactionMailboxTx).not.toHaveBeenCalled();
   });
 
   it("does not treat a reaction from the hosted line as member consent", async () => {
@@ -397,6 +458,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
 
     expect(mocks.acceptHostedGroupDisclosurePermissionReactionTx).not.toHaveBeenCalled();
     expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+    expect(mocks.appendHostedLinqGroupReactionMailboxTx).not.toHaveBeenCalled();
   });
 
   it("enqueues private missing-email nudge candidates after accepting an email-sharing offer", async () => {
@@ -436,9 +498,12 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     });
   });
 
-  it("accepts the reaction when the best-effort runtime wake fails", async () => {
+  it("accepts the reaction when either best-effort runtime signal fails", async () => {
     mocks.signalHostedRuntimeMaintenanceRuntime.mockRejectedValueOnce(
       new Error("runtime unavailable"),
+    );
+    mocks.signalHostedLinqGroupReactionMailbox.mockRejectedValueOnce(
+      new Error("group runtime unavailable"),
     );
     mocks.signalHostedGroupJoinConfirmationRuntimeBestEffort.mockResolvedValueOnce(undefined);
     const event = parseReactionEvent({
@@ -466,6 +531,25 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       prisma,
       timeoutMs: expect.any(Number),
     });
+    expect(mocks.logHostedOnboardingDiagnostic).toHaveBeenCalledWith(
+      "hosted-onboarding.group-offer-reaction-signal-failed",
+      { errorName: "Error" },
+    );
+  });
+
+  it("rolls back the offer decision when the reaction mailbox append fails", async () => {
+    mocks.appendHostedLinqGroupReactionMailboxTx.mockRejectedValueOnce(
+      new Error("mailbox unavailable"),
+    );
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent({ reactionType: "like" }),
+      prisma,
+    })).rejects.toThrow("mailbox unavailable");
+
+    expect(mocks.markHostedLinqGroupJoinOfferHandledTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedLinqGroupReactionMailbox).not.toHaveBeenCalled();
   });
 
   it("bounds a stalled maintenance wake after confirmation recovery", async () => {
@@ -567,6 +651,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     });
 
     expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+    expect(mocks.appendHostedLinqGroupReactionMailboxTx).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
       .not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
@@ -593,6 +678,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     });
 
     expect(mocks.acceptHostedGroupJoinOfferTx).toHaveBeenCalled();
+    expect(mocks.appendHostedLinqGroupReactionMailboxTx).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
       .not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
