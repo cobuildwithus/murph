@@ -151,13 +151,68 @@ describe("changelog registry", () => {
     });
   });
 
-  it("publishes the complete July 20 through July 30 shipment set", () => {
+  it("keeps the July 31 Environment claims private and evidence-aware", () => {
+    const items = new Map(
+      listPublishedChangelogItems().map((item) => [item.id, item]),
+    );
+
+    expect(items.get("private-environment-report")).toMatchObject({
+      sourcePullRequests: [573],
+      details: expect.stringContaining("optional equipment never counts against it"),
+      tryIt: {
+        href: "/environment",
+        label: "Open Environment",
+      },
+    });
+    expect(items.get("environment-voice-walkthrough")).toMatchObject({
+      sourcePullRequests: [573],
+      details: expect.stringContaining("Precise addresses are rejected"),
+    });
+  });
+
+  it("keeps the July 31 reliability and permission claims bounded", () => {
+    const items = new Map(
+      listPublishedChangelogItems().map((item) => [item.id, item]),
+    );
+
+    expect(items.get("group-access-across-channels")).toMatchObject({
+      sourcePullRequests: [1184],
+      details: expect.stringContaining("trusted route"),
+    });
+    expect(items.get("one-shot-reminders-survive-restart")).toMatchObject({
+      sourcePullRequests: [1209],
+      details: expect.stringContaining("best-effort wake signal"),
+    });
+    expect(items.get("delegated-work-before-blocker")).toMatchObject({
+      sourcePullRequests: [1214],
+      details: expect.stringContaining("cannot create new permission"),
+    });
+  });
+
+  it("publishes the complete July 20 through July 31 shipment set", () => {
     expect(
-      listChangelogEditions().slice(0, 11).map((edition) => ({
+      listChangelogEditions().slice(0, 12).map((edition) => ({
         id: edition.id,
         itemIds: edition.items.map((item) => item.id),
       })),
     ).toEqual([
+      {
+        id: "2026-07-31",
+        itemIds: [
+          "private-environment-report",
+          "environment-voice-walkthrough",
+          "native-link-previews",
+          "family-owner-usage-topups",
+          "group-access-across-channels",
+          "one-shot-reminders-survive-restart",
+          "venice-tool-compatible-replies",
+          "core-member-plan-name",
+          "usage-referrals-stay-current",
+          "safe-group-stakes",
+          "experiment-progress-cards-fail-soft",
+          "delegated-work-before-blocker",
+        ],
+      },
       {
         id: "2026-07-30",
         itemIds: [
@@ -466,8 +521,8 @@ describe("changelog registry", () => {
   it("keeps the default archive window to seven calendar days", () => {
     const firstPage = resolveChangelogPage(1);
     expect(firstPage?.editions).toHaveLength(7);
-    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-07-30");
-    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-07-24");
+    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-07-31");
+    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-07-25");
   });
 
   it("resolves only known canonical edition cursors", () => {
