@@ -15,11 +15,7 @@ import {
   signalHostedMailboxAppendRuntime,
 } from "../hosted-orchestration/signal-runtime";
 import { createHostedPhoneLookupKey } from "./contact-privacy";
-import {
-  getHostedLinqChatSummary,
-  getHostedLinqReactionTargetMessage,
-  type HostedLinqReactionTargetMessage,
-} from "./linq-client";
+import { getHostedLinqChatSummary } from "./linq-client";
 import { createHostedLinqParticipantContact } from "./linq-participant-contact";
 import {
   isHostedLinqAffirmativeReaction,
@@ -32,7 +28,6 @@ import {
   appendConsumedHostedGroupReactionMailboxEnvelopeTx,
 } from "./group-reaction-mailbox";
 
-const HOSTED_LINQ_GROUP_REACTION_TARGET_MAX_CHARS = 1_000;
 const HOSTED_LINQ_GROUP_REACTION_VALUE_MAX_CHARS = 256;
 
 export async function buildHostedLinqAffirmativeReactionMessageEvent(input: {
@@ -127,7 +122,12 @@ export async function buildHostedLinqAffirmativeReactionMessageEvent(input: {
 /**
  * Retains the historical function name for the webhook call site, but no longer
  * stages a lossy next-message hint. The verified provider event supplies the
- * actor and target; the canonical thread route supplies group/runtime authority.
+ * actor and target id; the canonical thread route supplies group/runtime
+ * authority. Target text is deliberately resolved later from the bounded
+ * durable input/outbox spine, rather than read from a mutable provider message
+ * during ingress. That keeps provider retries byte-identical and preserves the
+ * room model's existing evidence window.
+ *
  * The reaction becomes an ordinary durable conversation mailbox item whose row
  * is marked consumed at ingress, so it is imported as context without ever
  * becoming a reply candidate or depending on a live roster re-read.
@@ -157,12 +157,6 @@ export async function stageHostedLinqGroupReactionContext(input: {
     return false;
   }
 
-  const targetText = await readHostedLinqReactionTargetTextBestEffort({
-    chatId: eventContext.chatId,
-    messageId: eventContext.messageId,
-    partIndex: eventContext.partIndex,
-    ...(input.signal ? { signal: input.signal } : {}),
-  });
   const occurredAt = input.event.providerCreatedAt.toISOString();
   const reactionEventId = createHostedExecutionGroupReactionEventId(
     input.event.eventId,
@@ -178,7 +172,7 @@ export async function stageHostedLinqGroupReactionContext(input: {
     channel: "linq",
     mode: "delta",
     targetMessageId: eventContext.messageId,
-    targetText,
+    targetText: null,
   });
   const envelope = buildHostedExecutionLinqConversationMessageWake({
     ...(route.accountLookupKey
@@ -316,57 +310,6 @@ function readHostedLinqReactionEventContext(
     messageId: event.linqMessageId,
     partIndex: event.reactionPartIndex,
   };
-}
-
-async function readHostedLinqReactionTargetTextBestEffort(input: {
-  chatId: string;
-  messageId: string;
-  partIndex: number | null;
-  signal?: AbortSignal;
-}): Promise<string | null> {
-  try {
-    return buildHostedLinqReactionTargetText({
-      chatId: input.chatId,
-      messageId: input.messageId,
-      partIndex: input.partIndex,
-      target: await getHostedLinqReactionTargetMessage({
-        messageId: input.messageId,
-        ...(input.signal ? { signal: input.signal } : {}),
-      }),
-    });
-  } catch {
-    input.signal?.throwIfAborted();
-    return null;
-  }
-}
-
-function buildHostedLinqReactionTargetText(input: {
-  chatId: string;
-  messageId: string;
-  partIndex: number | null;
-  target: HostedLinqReactionTargetMessage;
-}): string | null {
-  if (input.target.id !== input.messageId || input.target.chatId !== input.chatId) {
-    return null;
-  }
-  const parts = input.partIndex === null
-    ? input.target.parts
-    : input.target.parts[input.partIndex] === undefined
-      ? null
-      : [input.target.parts[input.partIndex]];
-  if (!parts) {
-    return null;
-  }
-  const text = parts
-    .join(" ")
-    .replace(/\s+/gu, " ")
-    .trim();
-  if (!text) {
-    return null;
-  }
-  return Array.from(text)
-    .slice(0, HOSTED_LINQ_GROUP_REACTION_TARGET_MAX_CHARS)
-    .join("");
 }
 
 function readHostedLinqReactionValue(event: ParsedHostedLinqProviderEvent): string {
