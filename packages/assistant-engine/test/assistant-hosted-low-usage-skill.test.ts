@@ -275,6 +275,30 @@ describe('assistant hosted low-usage skill', () => {
     )
   })
 
+  it('maps the member-facing Core plan without renaming hosted groups', async () => {
+    const skill = await readLowUsageSkill()
+    const hostedGroupHeading =
+      '- **Group:** Call `read_usage` again when the state may have changed.'
+    const hostedGroupIndex = skill.indexOf(hostedGroupHeading)
+
+    expect(hostedGroupIndex).toBeGreaterThan(0)
+    const directPlanGuidance = skill.slice(0, hostedGroupIndex)
+    const hostedGroupGuidance = skill.slice(hostedGroupIndex)
+
+    expect(directPlanGuidance).toContain(
+      'Core is the member-facing name\n' +
+      '  for `targetPlanCode: "launch_group_monthly"`.',
+    )
+    expect(directPlanGuidance).toContain(
+      'Core maps\n' +
+      '  to `launch_group_monthly`.',
+    )
+    expect(directPlanGuidance).toContain('**Direct paid Core:**')
+    expect(directPlanGuidance).not.toMatch(/\bGroup\b/u)
+    expect(hostedGroupGuidance).toContain(hostedGroupHeading)
+    expect(hostedGroupGuidance).toContain('sponsorshipStatus')
+  })
+
   it('preserves explicit billing confirmation and payment truth', async () => {
     const skill = await readLowUsageSkill()
     const normalizedSkill = skill.replace(/\s+/gu, ' ')

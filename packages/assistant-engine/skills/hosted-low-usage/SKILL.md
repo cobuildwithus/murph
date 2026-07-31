@@ -1,6 +1,6 @@
 ---
 name: hosted-low-usage
-description: Use when trusted hosted turn context says Murph usage is running low; when a user asks about hosted plan, AI usage, billing, group funding, or the available ways to add or earn more usage; or when they ask how to keep a direct trial, Group, paid plan, Family-sponsored Murph, or hosted group conversation going.
+description: Use when trusted hosted turn context says Murph usage is running low; when a user asks about hosted plan, AI usage, billing, group funding, or the available ways to add or earn more usage; or when they ask how to keep a direct trial, Core, paid plan, Family-sponsored Murph, or hosted group conversation going.
 ---
 
 # Hosted low usage
@@ -84,7 +84,8 @@ change happened.
   trial browsing list, not a complete paid-plan catalog. When browsing or
   recommending, mention only plans present there. When a paid member names an
   exact target, call `murph.plan_usage` with that target and discuss it only
-  when the read returns a matching signed quote. Never infer Group eligibility
+  when the read returns a matching signed quote. Core is the member-facing name
+  for `targetPlanCode: "launch_group_monthly"`. Never infer Core eligibility
   from conversation or group activity. On that follow-up, describe the
   returned percentages and forecast as overall available AI usage. The read
   does not expose how much comes from included allowance or any usage-credit
@@ -161,10 +162,10 @@ Use the current scenario:
   introducing Murph elsewhere. Repeat the returned trial notice: earned usage
   does not extend the trial end date. Do not act on either path until its
   explicit confirmation rules are satisfied.
-- **Group:** Say that personal AI usage may pause at zero while wearable
+- **Core:** Say that personal AI usage may pause at zero while wearable
   syncing and authorized group activity continue. When `recommendedAction`
   targets `launch_monthly`, offer Pulse for more regular one-on-one Murph use.
-  Do not offer a Group top-up or imply that health syncing stops.
+  Do not offer a Core top-up or imply that health syncing stops.
 - **Direct paid Pulse or Edge:** When `recommendedAction` is `add_usage`, say
   that the member can add usage. If a referral mission is available, the first
   question may playfully offer the mission instead; otherwise ask whether they
@@ -353,20 +354,21 @@ active member, send `https://www.withmurph.ai/settings#family` so the owner
 chooses the member inside authenticated Settings. Both are navigation only,
 not permission to choose an amount, start Checkout, or claim usage was added.
 
-- **Trial:** Use only `availablePlans` from the latest read. Group fits staying
+- **Trial:** Use only `availablePlans` from the latest read. Core fits staying
   connected to Murph groups with lighter private usage; Pulse fits regular
   one-on-one Murph use. To quote another available choice, call
   `murph.plan_usage` again with that exact `targetPlanCode`. State the current
   `subscriptionActionQuote.label` before asking for confirmation. When timing
   is `at_trial_end`, say the trial continues and there is no immediate charge.
   Waiting for the trial end or usage reset remains valid.
-- **Direct paid exact choice:** When the member explicitly names Group, Pulse,
-  or Edge, call `murph.plan_usage` with that exact `targetPlanCode`. Continue
+- **Direct paid exact choice:** When the member explicitly names Core, Pulse,
+  or Edge, call `murph.plan_usage` with that exact `targetPlanCode`. Core maps
+  to `launch_group_monthly`. Continue
   only when it returns a matching `subscriptionActionQuote`; a missing quote
   means that change is not currently available. Paid reads need not advertise
   every valid target in `availablePlans`. Do not turn this user-choice path
-  into a recommendation, and never infer Group eligibility.
-- **Direct paid Group:** Pulse is the lasting option for more private Murph
+  into a recommendation, and never infer Core eligibility.
+- **Direct paid Core:** Pulse is the lasting option for more private Murph
   usage. State the exact current quote label and require explicit confirmation.
   Waiting for the monthly reset is valid. Wearable syncing and authorized group
   data continue while the personal AI allowance is exhausted.

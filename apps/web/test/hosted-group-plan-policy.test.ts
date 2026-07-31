@@ -23,10 +23,10 @@ import {
   parseHostedPublicBillingPlanCode,
 } from "@/src/lib/hosted-onboarding/billing-plans";
 
-describe("hosted Group plan policy", () => {
-  it("defines Group as a $3.50 Pulse-runtime plan with $2.80 of included AI cost", () => {
+describe("hosted Core plan policy", () => {
+  it("defines Core as a $3.50 Pulse-runtime plan with $2.80 of included AI cost", () => {
     expect(getHostedBillingPlanDefinition("launch_group_monthly")).toMatchObject({
-      displayName: "Group",
+      displayName: "Core",
       planCode: "pulse",
       recurringAmountUsdCents: 350,
     });
@@ -41,7 +41,7 @@ describe("hosted Group plan policy", () => {
     expect(getHostedBillingPlanCodeForPlan("pulse")).toBe("launch_monthly");
   });
 
-  it("keeps Group out of public signup catalogs and mutation parsing", () => {
+  it("keeps Core out of public signup catalogs and mutation parsing", () => {
     expect(
       listHostedBillingPlanPresentations().map((plan) => plan.code),
     ).toEqual(["launch_monthly", "launch_edge_monthly"]);
@@ -51,7 +51,7 @@ describe("hosted Group plan policy", () => {
     expect(parseHostedPublicBillingPlanCode("launch_group_monthly")).toBeNull();
   });
 
-  it("supports paid Group upgrades and period-end Group changes", () => {
+  it("supports paid Core upgrades and period-end Core changes", () => {
     expect(canUpgradeHostedBillingPlan({
       currentBillingPhase: "paid",
       currentBillingPlanCode: "launch_group_monthly",
@@ -86,7 +86,7 @@ describe("hosted Group plan policy", () => {
     })).toBe(true);
   });
 
-  it("shows Group only for eligible, current, or scheduled members", () => {
+  it("shows Core only for eligible, current, or scheduled members", () => {
     expect(resolveVisibleHostedBillingPlanCodes({
       currentPlanCode: null,
       groupPlanConfigured: true,
@@ -113,7 +113,7 @@ describe("hosted Group plan policy", () => {
     })[0]).toBe("launch_group_monthly");
   });
 
-  it("recommends Group only when configured and eligible", () => {
+  it("recommends Core only when configured and eligible", () => {
     expect(resolveHostedTrialContinuationOffer({
       groupPlanConfigured: true,
       hasConfirmedGroupMembership: true,
@@ -155,6 +155,7 @@ describe("hosted Group plan policy", () => {
       targetPlanCode: "launch_group_monthly",
     })).rejects.toMatchObject({
       code: "HOSTED_GROUP_PLAN_NOT_ELIGIBLE",
+      message: "The Core plan is available while you're part of a Murph group.",
     });
   });
 

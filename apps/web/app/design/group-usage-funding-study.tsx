@@ -249,8 +249,14 @@ const DESIGN_CREDIT_BACKED_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
 
 const DESIGN_FULFILLED_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
   ...DESIGN_PERSONAL_USAGE_STATUS,
-  remainingPercent: 45,
-  usedPercent: 55,
+  remainingPercent: 100,
+  usedPercent: 0,
+};
+
+const DESIGN_FAMILY_EXHAUSTED_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
+  ...DESIGN_EXHAUSTED_USAGE_STATUS,
+  accessKind: "family_sponsored",
+  planName: "Family",
 };
 
 function GroupUsageFundingStudy() {
@@ -483,10 +489,9 @@ function PersonalUsageCreditOwnerStudy() {
       id="personal-usage-credit-owner"
     >
       <p className="text-sm text-muted-foreground">
-        Static owner-layout preview keeps plan allowance and purchased credit
-        combined in one usage bar at the top. Current referrals stay visible
-        below it, while completed referrals and purchase history remain on
-        demand.
+        Static owner-layout preview keeps remaining capacity in one usage bar
+        at the top. A fulfilled purchase starts that display at 0% used, while
+        current referrals stay visible below it and history remains on demand.
       </p>
       <div
         className="flex flex-col gap-3"
@@ -519,10 +524,38 @@ function PersonalUsageCreditOwnerStudy() {
         usageStatus={DESIGN_CREDIT_BACKED_USAGE_STATUS}
       />
       <PersonalUsageCreditState
+        label="Fresh purchase starts at zero used"
+        state="fresh-purchase-meter"
+        usageStatus={DESIGN_FULFILLED_USAGE_STATUS}
+      />
+      <PersonalUsageCreditState
         label="All available usage exhausted"
         state="exhausted-without-credit"
         usageStatus={DESIGN_EXHAUSTED_USAGE_STATUS}
       />
+      <div
+        className="flex flex-col gap-3"
+        data-design-state="family-owner-exhausted"
+      >
+        <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Family owner can add usage for their own seat
+        </p>
+        <div inert>
+          <HostedBillingSettings
+            authenticated
+            billingStatus="active"
+            currentBillingPhase="paid"
+            currentBillingPlanCode="launch_monthly"
+            familyState="owner"
+            payerMemberId={DESIGN_PAYER_MEMBER_ID}
+            usageStatus={DESIGN_FAMILY_EXHAUSTED_USAGE_STATUS}
+            usageTopUpCheckoutUrl="/api/design/usage-credit-preview"
+            usageTopUpOffers={DESIGN_USAGE_OFFERS}
+            usageTopUpScope="family"
+            usageTopUpTargetLabel="you"
+          />
+        </div>
+      </div>
       <PersonalUsageCreditState
         canStartPaidPulse
         label="Pulse trial ended"

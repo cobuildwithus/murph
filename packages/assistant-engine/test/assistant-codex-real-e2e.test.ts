@@ -17,6 +17,7 @@ import {
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
   MURPH_GROUP_TOOL,
   MURPH_PLAN_USAGE_TOOL,
+  MURPH_SUBSCRIPTION_TOOL,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
   MURPH_CONNECTED_APPS_SEARCH_TOOL,
@@ -1191,6 +1192,203 @@ describeRealCodex('real Codex experiment onboarding e2e', () => {
 })
 
 describeRealCodex('real Codex hosted usage behavior e2e', () => {
+  it(
+    'routes a Core quote and confirmed change through the legacy billing code',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-core-plan-change-e2e-'),
+      )
+      const quoteId = 'quote_core_plan_e2e'
+      const confirmationInputId = `ain_${'c'.repeat(32)}`
+      let currentAssistantInputId = `ain_${'b'.repeat(32)}`
+      let subscriptionActionClaimed = false
+      const planUsageRequests: Array<Record<string, unknown>> = []
+      const subscriptionRequests: Array<Record<string, unknown>> = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'hosted-low-usage',
+        })
+
+        const commonInput: Omit<CodexAppServerTurnInput, 'prompt'> = {
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildHostedUsageOptionsDeveloperInstructions('direct'),
+          dynamicTools: [MURPH_PLAN_USAGE_TOOL, MURPH_SUBSCRIPTION_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            claimSubscriptionAssistantInputId: () => {
+              if (subscriptionActionClaimed) {
+                return null
+              }
+              subscriptionActionClaimed = true
+              return currentAssistantInputId
+            },
+            computerToolsAvailable: false,
+            currentAssistantInputId: () => currentAssistantInputId,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            planUsageTool: {
+              read: async (request) => {
+                planUsageRequests.push({ ...request })
+                return {
+                  accessKind: 'paid',
+                  forecast: null,
+                  generatedAt: '2026-07-30T12:00:00.000Z',
+                  periodEnd: '2026-08-30T12:00:00.000Z',
+                  periodKind: 'monthly',
+                  periodStart: '2026-07-30T12:00:00.000Z',
+                  planCode: 'launch_monthly',
+                  planName: 'Pulse',
+                  recommendedAction: null,
+                  remainingPercent: 64,
+                  status: 'active',
+                  subscriptionActionQuote: {
+                    action: 'change_plan',
+                    expiresAt: '2026-07-30T12:10:00.000Z',
+                    label:
+                      'Switch to Group at period end ($3.50/month)',
+                    monthlyPriceUsdCents: 350,
+                    quoteId,
+                    targetPlanCode: 'launch_group_monthly',
+                    timing: 'period_end',
+                  },
+                  usedPercent: 36,
+                }
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            subscriptionTool: {
+              request: async (request) => {
+                subscriptionRequests.push({ ...request })
+                return {
+                  action: 'change_plan',
+                  effectiveAt: '2026-08-30T12:00:00.000Z',
+                  plan: {
+                    code: 'launch_group_monthly',
+                    displayName: 'Group',
+                    interval: 'month',
+                    recurringAmountUsdCents: 350,
+                  },
+                  status: 'scheduled',
+                }
+              },
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        }
+        const quote = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: [
+            'What would switching from Pulse to Core cost?',
+            'Give me the exact price and timing, but do not change anything yet.',
+            'Ask me to confirm the exact quoted change.',
+          ].join(' '),
+        })
+        const quoteActions = readCapabilityRoutingActions(quote.jsonEvents)
+        const skillRead = quoteActions.find((action) =>
+          action.kind === 'command'
+          && action.command.includes('hosted-low-usage/SKILL.md')
+          && action.output.includes('# Hosted low usage')
+        )
+        const planUsageAction = quoteActions.find((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_PLAN_USAGE_TOOL.name
+        )
+
+        expect(skillRead, 'hosted-low-usage skill read').toBeDefined()
+        expect(planUsageAction, 'Core-targeted plan usage read').toBeDefined()
+        if (
+          skillRead?.kind !== 'command'
+          || planUsageAction?.kind !== 'dynamic'
+        ) {
+          throw new Error('Expected skill and Core plan-usage actions.')
+        }
+        expect(skillRead.eventIndex).toBeLessThan(planUsageAction.eventIndex)
+        expect(planUsageAction.argumentsValue).toEqual({
+          targetPlanCode: 'launch_group_monthly',
+        })
+        expect(planUsageRequests).toEqual([{
+          includeSubscriptionActionQuote: true,
+          subscriptionActionTargetPlanCode: 'launch_group_monthly',
+        }])
+        expect(subscriptionRequests).toHaveLength(0)
+        expect(quote.finalMessage).toMatch(/\bCore\b/u)
+        expect(quote.finalMessage).toMatch(/\$3\.50(?:\/month)?/u)
+        expect(quote.finalMessage).toMatch(
+          /August 30|2026-08-30|period end/iu,
+        )
+        expect(quote.finalMessage).toMatch(/confirm/iu)
+        expect(quote.finalMessage).not.toMatch(/\bGroup\b/u)
+
+        currentAssistantInputId = confirmationInputId
+        const confirmed = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: [
+            'Yes. I explicitly confirm switching from Pulse to Core for',
+            '$3.50/month at the end of my current period on August 30, 2026.',
+            'Apply that exact quoted change now.',
+          ].join(' '),
+          resumeSessionId: quote.sessionId,
+        })
+        const confirmedActions = readCapabilityRoutingActions(
+          confirmed.jsonEvents,
+        )
+        const subscriptionAction = confirmedActions.find((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_SUBSCRIPTION_TOOL.name
+        )
+
+        expect(subscriptionAction, 'confirmed Core subscription action')
+          .toBeDefined()
+        if (subscriptionAction?.kind !== 'dynamic') {
+          throw new Error('Expected a confirmed Core subscription action.')
+        }
+        expect(subscriptionAction.argumentsValue).toEqual({
+          action: 'change_plan',
+          quoteId,
+          targetPlanCode: 'launch_group_monthly',
+        })
+        expect(subscriptionRequests).toEqual([{
+          action: 'change_plan',
+          assistantInputId: confirmationInputId,
+          quoteId,
+          targetPlanCode: 'launch_group_monthly',
+        }])
+        expect(confirmed.finalMessage).toMatch(/\bCore\b/u)
+        expect(confirmed.finalMessage).toMatch(
+          /August 30|2026-08-30|scheduled/iu,
+        )
+        expect(confirmed.finalMessage).not.toMatch(/\bGroup\b/u)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    720_000,
+  )
+
   it(
     'answers broad hosted-usage requests from current usage and referral reads',
     async () => {

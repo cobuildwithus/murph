@@ -378,9 +378,14 @@ test("requires an explicit amount choice after opening from the settings deep li
     assert.equal(buttonByText(rendered.container, "Choose an amount").disabled, true);
     assert.equal(radioInputs.every((input) => !input.checked), true);
     expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
-    assert.match(
+    assert.equal(rendered.container.querySelector("h2")?.textContent, "Add usage");
+    assert.equal(
+      rendered.container.querySelector("h2 + p")?.classList.contains("sr-only"),
+      true,
+    );
+    assert.doesNotMatch(
       rendered.container.textContent ?? "",
-      /Choose a one-time credit amount for your account\./,
+      /one-time credit|saved card|Stripe/,
     );
     assert.equal(
       rendered.container.querySelector("h2")?.classList.contains("text-3xl"),
@@ -405,10 +410,12 @@ test("requires an explicit amount choice after opening from the settings deep li
     assert.ok(firstAmountCard);
     assert.equal(firstAmountCard.classList.contains("h-24"), true);
     assert.equal(firstAmountCard.classList.contains("sm:h-28"), true);
-    // Price leads, and the dialog describes the grant as cost-weighted credit
-    // without converting it into message counts.
     assert.match(firstAmountCard.textContent ?? "", /\$5/);
-    assert.match(firstAmountCard.textContent ?? "", /Cost-weighted usage credit/);
+    assert.match(firstAmountCard.textContent ?? "", /usage/);
+    assert.doesNotMatch(
+      firstAmountCard.textContent ?? "",
+      /credit|messages|~100/,
+    );
     assert.equal(
       firstAmountCard.classList.contains(
         "[&_[data-slot=field-content]]:justify-center",
@@ -455,9 +462,9 @@ test("requires an explicit amount choice after opening from the settings deep li
     );
     assert.equal(
       rendered.container.querySelector("legend")?.textContent,
-      "Usage credit amount",
+      "Usage amount",
     );
-    assert.match(rendered.container.textContent ?? "", /Choose one usage credit amount\./);
+    assert.match(rendered.container.textContent ?? "", /Choose one usage amount\./);
     expect(rendered.replaceState).toHaveBeenCalledWith(
       {},
       "",
@@ -1156,90 +1163,16 @@ test("names the exact Family beneficiary in the trigger and dialog", async () =>
 
     assert.equal(
       rendered.container.querySelector("h2")?.textContent,
-      "Choose an amount for Family member",
-    );
-    assert.match(
-      rendered.container.textContent ?? "",
-      /Choose a one-time credit amount for Family member\./,
-    );
-  } finally {
-    await rendered.cleanup();
-  }
-});
-
-test("composes the Family owner-self deep link through the real usage dialog", async () => {
-  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
-    purchaseId: "hucp_family_owner_self",
-    recovered: true,
-    status: "fulfilled",
-  });
-  const { HostedFamilySelfUsageTopUpHost } = await import(
-    "@/src/components/settings/hosted-family-self-usage-top-up-host"
-  );
-  const rendered = await renderClientComponent(
-    createElement(HostedFamilySelfUsageTopUpHost, {
-      memberId: "member/owner?primary",
-      offers: usageCreditOffers(),
-      payerMemberId: TEST_PAYER_MEMBER_ID,
-      targetLabel: "Morgan",
-    }),
-    {
-      location: {
-        href: "https://example.test/settings?addUsage=family#family",
-      },
-      requireButton: false,
-    },
-  );
-
-  try {
-    assert.ok(rendered.container.querySelector('[role="dialog"]'));
-    assert.equal(
-      rendered.container.querySelector("h2")?.textContent,
-      "Choose an amount for Morgan",
-    );
-    const radioInputs = Array.from(
-      rendered.container.querySelectorAll<HTMLInputElement>('input[type="radio"]'),
+      "Add usage for Family member",
     );
     assert.equal(
-      rendered.container
-        .querySelector('[role="radiogroup"]')
-        ?.getAttribute("data-value"),
-      "",
-    );
-    assert.equal(radioInputs.every((input) => !input.checked), true);
-    assert.equal(
-      buttonByText(rendered.container, "Choose an amount").disabled,
+      rendered.container.querySelector("h2 + p")?.classList.contains("sr-only"),
       true,
     );
-    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
-
-    await clickRadio(rendered.container, rendered.window, "usage_1000");
-
-    assert.equal(
-      rendered.container
-        .querySelector('[role="radiogroup"]')
-        ?.getAttribute("data-value"),
-      "usage_1000",
-    );
-    assert.equal(
-      buttonByText(rendered.container, "Add usage · $10").disabled,
-      false,
-    );
-
-    await clickButton(rendered.container, rendered.window, "Add usage · $10");
-
-    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
-      method: "POST",
-      payload: {
-        clientRequestKey: "00000000-0000-4000-8000-000000000001",
-        offerCode: "usage_1000",
-      },
-      signal: expect.any(AbortSignal),
-      url: "/api/settings/billing/family/members/member%2Fowner%3Fprimary/usage-credit/checkout",
-    });
-    assert.equal(
-      rendered.container.querySelector("h2")?.textContent,
-      "Usage added for Morgan",
+    assert.doesNotMatch(
+      rendered.container.querySelector('label[for="usage-top-up-0"]')
+        ?.textContent ?? "",
+      /messages|~100/,
     );
   } finally {
     await rendered.cleanup();
@@ -1263,10 +1196,10 @@ test("opens an honest unavailable state when a deep link has no current offers",
   );
 
   try {
-    assert.match(rendered.container.textContent ?? "", /Usage credit unavailable/);
+    assert.match(rendered.container.textContent ?? "", /Usage unavailable/);
     assert.match(
       rendered.container.textContent ?? "",
-      /There isn’t a usage-credit offer available for this account right now/,
+      /There isn’t more usage available for this account right now/,
     );
     assert.doesNotMatch(
       rendered.container.textContent ?? "",
@@ -3739,6 +3672,64 @@ test("treats a Stripe return as a status lookup, not proof of fulfillment", asyn
   } finally {
     await rendered.cleanup();
     vi.useRealTimers();
+  }
+});
+
+test("uses an exact return without inheriting a newer purchase conflict", async () => {
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+    purchaseId: "hucp_ownerreturn00000",
+    status: "fulfilled",
+  });
+  const { HostedUsageTopUpDialog } = await import(
+    "@/src/components/settings/hosted-usage-top-up-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(HostedUsageTopUpDialog, {
+      activePurchase: {
+        cancelAllowed: true,
+        offerCode: "usage_10_usd",
+        purchaseId: "hucp_memberactive0000",
+        retryAllowed: false,
+        status: "checkout_open",
+        targetConflict: true,
+      },
+      offers: [],
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+      purchaseReturn: {
+        kind: "success",
+        purchaseId: "hucp_ownerreturn00000",
+      },
+      scope: "family",
+      targetLabel: "you",
+    }),
+    {
+      location: {
+        href: "https://example.test/settings?usagePurchase=hucp_ownerreturn00000&usageCheckout=success#subscription",
+      },
+      requireButton: false,
+    },
+  );
+
+  try {
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+      method: "GET",
+      signal: expect.any(AbortSignal),
+      url: "/api/settings/billing/usage-credit/purchases/hucp_ownerreturn00000",
+    });
+    assert.match(rendered.container.textContent ?? "", /Usage added/);
+    assert.doesNotMatch(
+      rendered.container.textContent ?? "",
+      /Other checkout|unfinished checkout|another usage destination/i,
+    );
+    assert.equal(hasButton(rendered.container, "Cancel checkout"), false);
+    assert.equal(hasButton(rendered.container, "Retry checkout"), false);
+  } finally {
+    await rendered.cleanup();
   }
 });
 
