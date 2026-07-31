@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   isThreadContainerDestination: vi.fn(),
   lockMember: vi.fn(),
+  readActiveAccess: vi.fn(),
   readUsageGate: vi.fn(),
   recordUsage: vi.fn(),
   requireDestination: vi.fn(),
@@ -38,6 +39,7 @@ vi.mock("@/src/lib/hosted-groups/participant-action-authority", () => ({
 }));
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
   assertActiveHostedMemberAccessAllowed: mocks.assertActiveAccess,
+  readActiveHostedMemberAccess: mocks.readActiveAccess,
 }));
 vi.mock("@/src/lib/hosted-onboarding/shared", () => ({
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS: {},
@@ -117,6 +119,7 @@ beforeEach(() => {
   });
   mocks.isThreadContainerDestination.mockReturnValue(false);
   mocks.lockMember.mockResolvedValue(undefined);
+  mocks.readActiveAccess.mockResolvedValue(true);
   mocks.readUsageGate.mockResolvedValue({
     allowed: true,
     remainingUsdMicros: 1_000_000n,
@@ -365,6 +368,46 @@ describe("createHostedPhysicalNote", () => {
         status: "failed",
       }),
     ]);
+  });
+
+  it("allows a group note through participant-backed access", async () => {
+    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
+    const store = createPhysicalNoteStore();
+    const provider = createPhysicalNoteRuntime([
+      { kind: "accepted", providerLetterId: "ltr_group_participant" },
+    ]);
+    mocks.isThreadContainerDestination.mockReturnValue(true);
+    mocks.requireDestination.mockResolvedValue({
+      conversationShape: "thread-container",
+      externalThreadRouteAuthority: {
+        accountLookupKey: "group_account",
+        channel: "linq",
+        containerMemberId: MEMBER_ID,
+        threadId: "thread_physical_note",
+      },
+    });
+    mocks.assertGroupOrigin.mockResolvedValue(MEMBER_ID);
+    mocks.readActiveAccess.mockResolvedValue(true);
+    mocks.assertActiveAccess.mockRejectedValue(
+      new Error("owner-only access fallback should not run"),
+    );
+
+    await expect(createHostedPhysicalNote({
+      ...buildRequest(32),
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    })).resolves.toMatchObject({
+      complimentary: true,
+      status: "accepted",
+    });
+
+    expect(mocks.readActiveAccess).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      prisma: expect.anything(),
+    });
+    expect(mocks.assertActiveAccess).not.toHaveBeenCalled();
+    expect(mocks.assertGroupOrigin).toHaveBeenCalledTimes(2);
+    expect(provider.create).toHaveBeenCalledOnce();
   });
 
   it("rejects reuse of a request key for different note content", async () => {
