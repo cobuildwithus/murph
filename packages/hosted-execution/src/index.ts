@@ -49,6 +49,7 @@ export * from "./computer-use.ts";
 export * from "./phone-calls.ts";
 export * from "./email-ingress.ts";
 export * from "./env.ts";
+export * from "./group-reactions.ts";
 export * from "./hosted-email.ts";
 export * from "./hosted-codex-subscription-auth.ts";
 export * from "./observability.ts";

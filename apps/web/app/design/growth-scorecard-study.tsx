@@ -1,7 +1,65 @@
 import {
+  buildHostedGrowthMessageSeries,
+  type HostedGrowthMessageSnapshot,
+} from "@/src/lib/hosted-ops/growth-message-series";
+import {
   GrowthScorecard,
   type GrowthScorecardProps,
 } from "../(dashboard)/ops/growth/growth-scorecard";
+import { GrowthCharts } from "../(dashboard)/ops/growth/growth-charts";
+
+const GROWTH_DATES = Array.from({ length: 30 }, (_, index) => {
+  const date = new Date(Date.UTC(2026, 6, index + 1));
+  return date.toISOString().slice(0, 10);
+});
+
+const DAILY_MESSAGE_VOLUMES = GROWTH_DATES.map(
+  (_, index) => index === 14 ? 0 : 58 + ((index * 17) % 83),
+);
+const MESSAGE_TRACKING_START_INDEX = 8;
+const MISSING_TRACKED_MESSAGE_INDEX = 24;
+const MESSAGE_SNAPSHOTS = GROWTH_DATES
+  .slice(MESSAGE_TRACKING_START_INDEX - 1)
+  .flatMap((messageDate, relativeIndex) => {
+    const messageIndex = relativeIndex + MESSAGE_TRACKING_START_INDEX - 1;
+    if (messageIndex === MISSING_TRACKED_MESSAGE_INDEX) {
+      return [];
+    }
+    const snapshotDate = new Date(`${messageDate}T00:00:00.000Z`);
+    snapshotDate.setUTCDate(snapshotDate.getUTCDate() + 1);
+    const messages = DAILY_MESSAGE_VOLUMES[messageIndex] ?? 0;
+    const trackingAvailable = messageIndex >= MESSAGE_TRACKING_START_INDEX;
+
+    return [{
+      inboundMessagesPriorDay: trackingAvailable
+        ? Math.floor(messages * 0.45)
+        : null,
+      outboundMessagesPriorDay: trackingAvailable
+        ? messages - Math.floor(messages * 0.45)
+        : null,
+      snapshotDate,
+    } satisfies HostedGrowthMessageSnapshot];
+  });
+const MESSAGE_SERIES = buildHostedGrowthMessageSeries({
+  messagesBeforeSeries: 5_240,
+  snapshots: MESSAGE_SNAPSHOTS,
+  trackingEstablishedBeforeSeries: false,
+  windowEnd: new Date("2026-07-31T12:00:00.000Z"),
+});
+
+const DAILY_SERIES = GROWTH_DATES.map((date, index) => ({
+  date,
+  newMembers: 2 + ((index * 3) % 8),
+  trialStarts: 1 + ((index * 2) % 5),
+}));
+
+const SNAPSHOT_SERIES = GROWTH_DATES.map((date, index) => ({
+  coveredMembers: 82 + index * 3,
+  date,
+  mrrUsdCents: 14_400 + index * 320,
+  payingCustomers: 54 + Math.floor(index * 0.8),
+  trialingMembers: 16 + (index % 7),
+}));
 
 const STUDY_INPUT = {
   activeUsers: {
@@ -92,6 +150,16 @@ export function GrowthScorecardStudy() {
       data-design-study="ops-weekly-growth-compass"
       id="ops-weekly-growth-compass"
     >
+      <div id="growth-message-volume-charts">
+        <div className="mb-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Thirty-day movement
+        </div>
+        <GrowthCharts
+          dailySeries={DAILY_SERIES}
+          messageSeries={MESSAGE_SERIES}
+          snapshotSeries={SNAPSHOT_SERIES}
+        />
+      </div>
       <StudyState id="target-hit" label="Target hit" mrrWowPercent={10.8} />
       <StudyState id="below-target" label="Below target" mrrWowPercent={6.2} />
       <StudyState

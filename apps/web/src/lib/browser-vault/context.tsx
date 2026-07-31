@@ -377,12 +377,16 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
 
   useEffect(() => {
     const onFocus = () => {
+      if (admittedPathname === pathname) {
+        void pollStaleReplica();
+        return;
+      }
       void revalidateAuthority(pathname);
     };
 
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
-  }, [pathname, revalidateAuthority]);
+  }, [admittedPathname, pathname, pollStaleReplica, revalidateAuthority]);
 
   const authorityAdmitted = admittedPathname === pathname;
   const value = useMemo<BrowserVaultContextValue>(() => ({

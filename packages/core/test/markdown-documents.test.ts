@@ -347,6 +347,37 @@ describe("markdown document primitives", () => {
     })).rejects.toThrow(/activeUntil must be after schedule\.at/u);
   });
 
+  it("rejects an automation patch after its observed definition changes", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const created = await upsertAutomation({
+      vaultRoot,
+      now: new Date("2026-07-30T00:00:00.000Z"),
+      ...createAutomationPayload(),
+    });
+    const updated = await patchAutomation({
+      vaultRoot,
+      lookup: created.record.automationId,
+      instructions: "Use the current reminder wording.",
+      now: new Date("2026-07-30T00:01:00.000Z"),
+    });
+
+    await expect(patchAutomation({
+      vaultRoot,
+      expectedUpdatedAt: created.record.updatedAt,
+      instructions: "Replace the reminder wording.",
+      lookup: created.record.automationId,
+    })).rejects.toMatchObject({
+      code: "VAULT_AUTOMATION_CONFLICT",
+    });
+    await expect(showAutomation({
+      automationId: created.record.automationId,
+      vaultRoot,
+    })).resolves.toMatchObject({
+      instructions: updated.record.instructions,
+      updatedAt: updated.record.updatedAt,
+    });
+  });
+
   it("allows first support-series assignment but preserves ownership thereafter", async () => {
     const vaultRoot = await makeVaultRoot();
     const supportSeriesTag = buildAutomationSupportSeriesTag("experiment:exp_sleep");

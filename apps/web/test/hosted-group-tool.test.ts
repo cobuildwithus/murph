@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+
 const mocks = vi.hoisted(() => ({
   admitHostedGroupDisclosurePermissionAppendTx: vi.fn(),
   assertHostedLinqRouteEgressAuthority: vi.fn(),
@@ -55,6 +57,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllEnvs();
 });
 
@@ -2601,10 +2604,11 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       messageId: "msg_1",
     });
     mocks.shareMurphHostedLinqContactCardVcfToChat.mockResolvedValue({ status: "sent" });
-    mocks.sendHostedLinqChatMessage.mockResolvedValue({
+    mocks.sendHostedLinqChatMessage.mockImplementation(() => Promise.resolve({
       chatId: "chat_group_1",
+      messageCreatedAt: new Date().toISOString(),
       messageId: "msg_offer_1",
-    });
+    }));
     mocks.updateHostedLinqChatAvatar.mockResolvedValue(undefined);
     mocks.updateHostedLinqChatDisplayName.mockResolvedValue(undefined);
   });
@@ -2632,7 +2636,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       request: {
         action: "set_chat_avatar",
         groupChatIconUrl:
-          `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
+          `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
         linqThread: LINQ_THREAD,
       },
     })).resolves.toEqual({
@@ -2646,7 +2650,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.updateHostedLinqChatAvatar).toHaveBeenCalledWith({
       chatId: "chat_group_1",
       groupChatIconUrl:
-        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
     });
   });
 
@@ -2767,6 +2771,73 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         action: "set_chat_avatar",
         groupChatIconUrl:
           `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toEqual({
+      action: "set_chat_avatar",
+      result: {
+        status: "unavailable",
+        unavailableReason: "provider_unavailable",
+      },
+    });
+  });
+
+  it("preserves only validated HTTP provider diagnostics for group avatar failures", async () => {
+    mocks.updateHostedLinqChatAvatar.mockRejectedValue(hostedOnboardingError({
+      code: "LINQ_SEND_FAILED",
+      details: {
+        failureStage: "http",
+        providerErrorCode: 5006,
+        traceId: "must-not-propagate",
+      },
+      httpStatus: 502,
+      message: "Linq chat avatar update failed with HTTP 400.",
+    }));
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "set_chat_avatar",
+        groupChatIconUrl:
+          `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toEqual({
+      action: "set_chat_avatar",
+      result: {
+        providerErrorCode: 5006,
+        status: "unavailable",
+        unavailableReason: "provider_unavailable",
+      },
+    });
+  });
+
+  it.each([
+    new Error("transport failed with private details"),
+    hostedOnboardingError({
+      code: "LINQ_SEND_FAILED",
+      httpStatus: 502,
+      message: "Linq chat avatar update timed out.",
+      retryable: true,
+    }),
+    hostedOnboardingError({
+      code: "LINQ_SEND_FAILED",
+      details: {
+        failureStage: "http",
+        providerErrorMessage: "Failed to download image",
+      },
+      httpStatus: 502,
+      message: "Linq chat avatar update failed with HTTP 400.",
+    }),
+  ])("keeps non-validated avatar failures generic", async (error) => {
+    mocks.updateHostedLinqChatAvatar.mockRejectedValue(error);
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "set_chat_avatar",
+        groupChatIconUrl:
+          `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
         linqThread: LINQ_THREAD,
       },
     })).resolves.toEqual({
@@ -2914,7 +2985,17 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     });
   });
 
-  it("ignores arbitrary legacy copy and posts a canonical offer matching the stored snapshot", async () => {
+  it("posts the canonical snapshot with provider-owned recency chronology", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-31T12:01:00.400Z"));
+    mocks.sendHostedLinqChatMessage.mockImplementationOnce(() => {
+      vi.setSystemTime(new Date("2026-07-31T12:01:00.700Z"));
+      return Promise.resolve({
+        chatId: "chat_group_1",
+        messageCreatedAt: "2026-07-31T12:01:00.000Z",
+        messageId: "msg_offer_1",
+      });
+    });
     mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx.mockResolvedValueOnce({
       group: groupSummaryWithOwnerEmailGrant(),
       joinCode: "abc123",
@@ -2942,6 +3023,8 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       result: {
         group: groupSummaryWithOwnerEmailGrant(),
         joinUrl: "https://www.withmurph.ai/groups/join/abc123",
+        offeredAt: "2026-07-31T12:01:00.000Z",
+        offerState: "posted",
         status: "sent",
       },
     });
@@ -2978,7 +3061,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
       groupId: GROUP_SUMMARY.id,
       message: { channel: "linq", messageId: "msg_offer_1" },
-      postedAt: expect.any(Date),
+      postedAt: new Date("2026-07-31T12:01:00.000Z"),
       projectionScopes: NEWSLETTER_DEFAULT_SCOPES,
       tx: fakeTx,
     });
@@ -2989,6 +3072,40 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         prisma: expect.any(Object),
       });
     expect(mocks.sendHostedLinqAttachmentMessage).not.toHaveBeenCalled();
+  });
+
+  it("omits recency evidence when the provider omits message chronology", async () => {
+    mocks.sendHostedLinqChatMessage.mockResolvedValueOnce({
+      chatId: "chat_group_1",
+      messageId: "msg_offer_without_time",
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "post_join_offer",
+        joinOffer: {
+          projectionScopes: [{ projectionKind: "steps-days.v0" }],
+        },
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toEqual({
+      action: "post_join_offer",
+      result: {
+        group: GROUP_SUMMARY,
+        joinUrl: "https://www.withmurph.ai/groups/join/abc123",
+        offerState: "posted",
+        status: "sent",
+      },
+    });
+
+    expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
+      groupId: GROUP_SUMMARY.id,
+      message: { channel: "linq", messageId: "msg_offer_without_time" },
+      postedAt: expect.any(Date),
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+      tx: fakeTx,
+    });
   });
 
   it("keeps the permissions link without promising or disclosing private outreach", async () => {
@@ -3112,6 +3229,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       result: {
         group: GROUP_SUMMARY,
         joinUrl: "https://www.withmurph.ai/groups/join/abc123",
+        offerState: "existing",
         status: "sent",
       },
     });
@@ -3165,6 +3283,8 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       result: {
         group: fullyGrantedGroup,
         joinUrl: "https://www.withmurph.ai/groups/join/abc123",
+        offeredAt: expect.any(String),
+        offerState: "posted",
         status: "sent",
       },
     });
@@ -3217,6 +3337,8 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       result: {
         group: fullyGrantedGroup,
         joinUrl: "https://www.withmurph.ai/groups/join/abc123",
+        offeredAt: expect.any(String),
+        offerState: "posted",
         status: "sent",
       },
     });
@@ -3267,16 +3389,54 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.recordHostedGroupJoinOfferTx).not.toHaveBeenCalled();
   });
 
-  it("reuses one provider key and message binding across an unresolved retry", async () => {
+  it.each([
+    ["inside the original window", 60 * 60 * 1_000],
+    ["after the original window", 25 * 60 * 60 * 1_000],
+  ])("fails replayed provider chronology closed %s", async (_label, retryDelayMs) => {
     const requestedScopes = [{ projectionKind: "steps-days.v0" as const }];
     const request = {
       action: "post_join_offer" as const,
       joinOffer: { projectionScopes: requestedScopes },
       linqThread: LINQ_THREAD,
     };
+    const originalCreatedAt = new Date("2026-07-31T12:01:00.000Z");
+    vi.useFakeTimers();
+    vi.setSystemTime(originalCreatedAt);
+    mocks.sendHostedLinqChatMessage.mockResolvedValue({
+      chatId: "chat_group_1",
+      messageCreatedAt: originalCreatedAt.toISOString(),
+      messageId: "msg_offer_1",
+    });
+    mocks.recordHostedGroupJoinOfferTx.mockRejectedValueOnce(
+      new Error("transient binding failure"),
+    );
 
-    await handleHostedRuntimeGroupTool({ memberId: "member_container", request });
-    await handleHostedRuntimeGroupTool({ memberId: "member_container", request });
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request,
+    })).resolves.toEqual({
+      action: "post_join_offer",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "offer_binding_failed",
+      },
+    });
+
+    vi.setSystemTime(originalCreatedAt.getTime() + retryDelayMs);
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request,
+    })).resolves.toEqual({
+      action: "post_join_offer",
+      result: {
+        group: GROUP_SUMMARY,
+        joinUrl: "https://www.withmurph.ai/groups/join/abc123",
+        offerState: "posted",
+        status: "sent",
+      },
+    });
 
     const providerCalls = mocks.sendHostedLinqChatMessage.mock.calls;
     expect(providerCalls).toHaveLength(2);
@@ -3286,14 +3446,14 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenNthCalledWith(1, {
       groupId: GROUP_SUMMARY.id,
       message: { channel: "linq", messageId: "msg_offer_1" },
-      postedAt: expect.any(Date),
+      postedAt: originalCreatedAt,
       projectionScopes: requestedScopes,
       tx: fakeTx,
     });
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenNthCalledWith(2, {
       groupId: GROUP_SUMMARY.id,
       message: { channel: "linq", messageId: "msg_offer_1" },
-      postedAt: expect.any(Date),
+      postedAt: originalCreatedAt,
       projectionScopes: requestedScopes,
       tx: fakeTx,
     });
@@ -3524,6 +3684,8 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       result: {
         group: GROUP_SUMMARY,
         joinUrl: "https://www.withmurph.ai/groups/join/abc123",
+        offeredAt: expect.any(String),
+        offerState: "posted",
         status: "sent",
       },
     });

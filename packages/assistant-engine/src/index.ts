@@ -64,6 +64,7 @@ export type {
 } from './assistant/issue-reporting.js'
 export * from './assistant/device-activity-automations.js'
 export * from './assistant/managed-automations.js'
+export * from './assistant/reminder-availability-maintenance.js'
 export * from './assistant/onboarding-followup-automation.js'
 export * from './assistant-cron.js'
 export * from './assistant-outbox.js'

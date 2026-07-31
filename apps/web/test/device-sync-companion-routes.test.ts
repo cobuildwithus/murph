@@ -43,6 +43,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@privy-io/node", () => ({
+  NotFoundError: class NotFoundError extends Error {},
   PrivyClient: vi.fn(),
   verifyIdentityToken: mocks.verifyIdentityToken,
 }));

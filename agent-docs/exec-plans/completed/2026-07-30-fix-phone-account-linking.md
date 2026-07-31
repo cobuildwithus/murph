@@ -1,6 +1,6 @@
 # Fix phone account linking
 
-Status: active
+Status: completed
 Created: 2026-07-30
 Updated: 2026-07-30
 
@@ -47,11 +47,11 @@ Updated: 2026-07-30
 
 ## Tasks
 
-1. Replace login-based phone linking with provider account-management hooks.
-2. Thread exact session identity through Settings and join-invite surfaces.
-3. Delete the dead link intent from the SMS login controller.
-4. Add focused regressions and a synthetic design-catalog study.
-5. Run scoped verification, browser proof, review gates, commit, and PR checks.
+1. [x] Replace login-based phone linking with provider account-management hooks.
+2. [x] Thread exact session identity through Settings and join-invite surfaces.
+3. [x] Delete the dead link intent from the SMS login controller.
+4. [x] Add focused regressions and a synthetic design-catalog study.
+5. [x] Run scoped verification, browser proof, review gates, commit, and PR checks.
 
 ## Decisions
 
@@ -60,11 +60,24 @@ Updated: 2026-07-30
 - The Settings identity dialog owns one shared exact-session boundary for phone,
   email, and Telegram mutation children.
 - Join-invite also gates Telegram and withholds its provider seed on mismatch.
+- A ready authenticated Privy client with no concrete user snapshot is still
+  hydrating, not mismatched.
+- The two production parents own client identity admission; the phone action
+  owns only provider link/update progress and completion.
+- Privy completion with an existing Murph app session is same-member
+  reauthentication. Both the Privy user and resolved member must match before
+  web may issue a replacement app session.
 
 ## Verification
 
-- Commands to run: focused Vitest files, hosted-web typecheck, frontend design
-  proof, desktop/mobile browser proof, scoped workflow checks, ReviewGPT, and
-  required PR CI.
-- Expected outcomes: no provider mutation on mismatch, one phone sync on
-  successful link/update, no production login-based link path, and green checks.
+- Seven focused Vitest files passed with 162 tests before the final
+  same-member route assertion was added; its focused route suite then passed
+  with 17 tests.
+- Hosted-web typecheck passed. Hosted-web lint passed with zero errors and
+  unrelated pre-existing warnings only.
+- Desktop and mobile design-catalog proof covers add, replace, opening,
+  provider loading, mismatch recovery, and failed stale-session logout.
+- The parallel preliminary specialist and final ReviewGPT round-one audits
+  produced accepted findings that were reproduced and corrected. Final
+  correction verification and exact-head CI continue on the PR head.
+Completed: 2026-07-30

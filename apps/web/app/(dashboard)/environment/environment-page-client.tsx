@@ -13,8 +13,9 @@ import {
   normalizeHabitatCityOrRegion,
 } from "@murphai/contracts";
 import Image from "next/image";
-import { ArrowRight, ShieldCheck } from "lucide-react";
+import { ArrowRight, LoaderCircle, ShieldCheck } from "lucide-react";
 
+import { MurphContactDialog } from "@/src/components/murph/murph-contact-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
 import { PageHeader } from "@/src/components/ui/page-header";
@@ -47,6 +48,7 @@ const PRIORITY_ORDER = { high: 0, medium: 1, low: 2 } as const;
 const EMPTY_HABITAT_VALUES: HabitatValues = {};
 const EMPTY_HABITAT_SCENE = resolveHabitatScene(EMPTY_HABITAT_VALUES);
 const VOICE_REFRESH_INTERVAL_MS = 2_000;
+const VOICE_REFRESH_DELAYED_INTERVAL_MS = 10_000;
 const VOICE_REFRESH_WINDOW_MS = 2 * 60 * 1_000;
 
 export type VoiceRefreshState =
@@ -73,9 +75,9 @@ const EMPTY_CATEGORY_SUMMARIES: Readonly<Record<string, string>> = {
 };
 
 export default function EnvironmentPageClient({
-  contactAction,
+  contactOptions,
 }: {
-  contactAction: MurphContactOption | null;
+  contactOptions: readonly MurphContactOption[];
 }) {
   const {
     client,
@@ -87,6 +89,8 @@ export default function EnvironmentPageClient({
     useState<VoiceRefreshState>({ status: "idle" });
   const checkedInitialVoiceProcessingRef = useRef(false);
   const initialVoiceProcessingCheckRef = useRef(0);
+  const voiceRefreshBaselineRef = useRef<string | null>(null);
+  const voiceRefreshStartedAtRef = useRef<number | null>(null);
   const values = useMemo(
     () => (client ? selectEnvironmentHabitatValues(client) : {}),
     [client],
@@ -115,6 +119,8 @@ export default function EnvironmentPageClient({
     displayedVoiceRefreshState.status === "processing" ||
     displayedVoiceRefreshState.status === "delayed";
   const onVoiceAccepted = useCallback(() => {
+    voiceRefreshBaselineRef.current = valuesSignature;
+    voiceRefreshStartedAtRef.current = Date.now();
     setVoiceRefreshState({
       baselineValues: valuesSignature,
       status: "processing",
@@ -136,6 +142,8 @@ export default function EnvironmentPageClient({
       }
       checkedInitialVoiceProcessingRef.current = true;
       if (processing === true) {
+        voiceRefreshBaselineRef.current = valuesSignature;
+        voiceRefreshStartedAtRef.current = Date.now();
         setVoiceRefreshState((current) =>
           current.status === "idle"
             ? {
@@ -154,18 +162,16 @@ export default function EnvironmentPageClient({
   }, [status, valuesSignature]);
 
   useEffect(() => {
-    if (voiceRefreshState.status !== "processing") {
+    if (
+      voiceRefreshState.status !== "processing"
+      && voiceRefreshState.status !== "delayed"
+    ) {
       return;
     }
     let cancelled = false;
-    const startedAt = Date.now();
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     const poll = async () => {
       if (cancelled) {
-        return;
-      }
-      if (Date.now() - startedAt >= VOICE_REFRESH_WINDOW_MS) {
-        setVoiceRefreshState({ status: "delayed" });
         return;
       }
       const processing = await readEnvironmentVoiceProcessingStatus();
@@ -180,11 +186,32 @@ export default function EnvironmentPageClient({
                 baselineValues: current.baselineValues,
                 status: "completed",
               }
+            : current.status === "delayed"
+              ? {
+                  baselineValues:
+                    voiceRefreshBaselineRef.current ?? valuesSignature,
+                  status: "completed",
+                }
             : current,
         );
         return;
       }
-      timeoutId = setTimeout(() => void poll(), VOICE_REFRESH_INTERVAL_MS);
+      if (
+        voiceRefreshState.status === "processing"
+        && Date.now() - (
+          voiceRefreshStartedAtRef.current ?? Date.now()
+        ) >= VOICE_REFRESH_WINDOW_MS
+      ) {
+        voiceRefreshBaselineRef.current = voiceRefreshState.baselineValues;
+        setVoiceRefreshState({ status: "delayed" });
+        return;
+      }
+      timeoutId = setTimeout(
+        () => void poll(),
+        voiceRefreshState.status === "delayed"
+          ? VOICE_REFRESH_DELAYED_INTERVAL_MS
+          : VOICE_REFRESH_INTERVAL_MS,
+      );
     };
     timeoutId = setTimeout(() => void poll(), VOICE_REFRESH_INTERVAL_MS);
     return () => {
@@ -193,7 +220,7 @@ export default function EnvironmentPageClient({
         clearTimeout(timeoutId);
       }
     };
-  }, [refresh, voiceRefreshState]);
+  }, [refresh, valuesSignature, voiceRefreshState]);
 
   if (status === "loading") {
     return (
@@ -246,11 +273,15 @@ export default function EnvironmentPageClient({
       <EnvironmentVoiceRefreshNotice
         state={displayedVoiceRefreshState}
         onCheckAgain={() => {
+          voiceRefreshBaselineRef.current = valuesSignature;
+          voiceRefreshStartedAtRef.current = Date.now();
           setVoiceRefreshState({
             baselineValues: valuesSignature,
             status: "processing",
           });
-          void refresh({ background: true });
+          void requestEnvironmentVoiceProcessingRecheck().finally(() =>
+            refresh({ background: true }).catch(() => undefined)
+          );
         }}
       />
       {hasEnvironmentData ? (
@@ -260,14 +291,14 @@ export default function EnvironmentPageClient({
           notes={notes}
           grade={grade}
           coverage={coverage}
-          contactAction={contactAction}
+          contactOptions={contactOptions}
           conditions={conditions}
           onVoiceAccepted={onVoiceAccepted}
           voiceCaptureDisabled={voiceCaptureDisabled}
         />
       ) : (
         <EnvironmentEmptyState
-          contactAction={contactAction}
+          contactOptions={contactOptions}
           onVoiceAccepted={onVoiceAccepted}
           processing={voiceCaptureDisabled}
           script={voiceScript}
@@ -316,6 +347,15 @@ async function readEnvironmentVoiceProcessingStatus(): Promise<boolean | null> {
   return null;
 }
 
+async function requestEnvironmentVoiceProcessingRecheck(): Promise<void> {
+  const response = await fetch("/api/environment/voice", {
+    method: "PATCH",
+  });
+  if (!response.ok) {
+    throw new Error("Environment voice processing recheck failed.");
+  }
+}
+
 function EnvironmentShell({
   actions,
   children,
@@ -341,12 +381,12 @@ function EnvironmentShell({
 }
 
 export function EnvironmentEmptyState({
-  contactAction,
+  contactOptions,
   onVoiceAccepted,
   processing = false,
   script = buildEnvironmentVoiceScript(EMPTY_HABITAT_VALUES),
 }: {
-  contactAction: MurphContactOption | null;
+  contactOptions: readonly MurphContactOption[];
   onVoiceAccepted?: () => void;
   processing?: boolean;
   script?: EnvironmentVoiceScript;
@@ -391,17 +431,11 @@ export function EnvironmentEmptyState({
                     : "Update by voice"
               }
             />
-            {contactAction ? (
-              <a
-                href={contactAction.href}
-                target={contactAction.target}
-                rel={contactAction.rel}
-                className="inline-flex min-h-11 items-center gap-1.5 text-base font-medium text-muted-foreground underline decoration-border underline-offset-4 hover:text-foreground sm:min-h-0 sm:text-sm"
-              >
-                Prefer typing? Use chat
-                <ArrowRight className="size-4 shrink-0" aria-hidden="true" />
-              </a>
-            ) : null}
+            <EnvironmentChatAction
+              contactOptions={contactOptions}
+              label="Prefer typing? Use chat"
+              presentation="link"
+            />
           </div>
 
           <p className="mt-7 max-w-[58ch] text-pretty text-base text-muted-foreground sm:text-sm">
@@ -449,7 +483,7 @@ function EnvironmentReport({
   notes,
   grade,
   coverage,
-  contactAction,
+  contactOptions,
   conditions,
   onVoiceAccepted,
   voiceCaptureDisabled,
@@ -459,11 +493,12 @@ function EnvironmentReport({
   notes: ReturnType<typeof deriveCategoryNote>[];
   grade: ReturnType<typeof overallGrade>;
   coverage: ReturnType<typeof resolveEnvironmentCoverage>;
-  contactAction: MurphContactOption | null;
+  contactOptions: readonly MurphContactOption[];
   conditions: { outdoorAir: string; weather: string };
   onVoiceAccepted: () => void;
   voiceCaptureDisabled: boolean;
 }) {
+  const contactAction = contactOptions[0] ?? null;
   const nextChecks = buildNextChecks(scene, notes);
   const noteByCategoryId = new Map(notes.map((note) => [note.id, note]));
   const voiceScript = buildEnvironmentVoiceScript(values);
@@ -485,7 +520,7 @@ function EnvironmentReport({
       />
 
       <EnvironmentCaptureCard
-        contactAction={contactAction}
+        contactOptions={contactOptions}
         coverage={coverage.coverage}
         known={coverage.known}
         script={voiceScript}
@@ -515,14 +550,14 @@ function EnvironmentReport({
 }
 
 export function EnvironmentCaptureCard({
-  contactAction,
+  contactOptions,
   coverage,
   known,
   script,
   onVoiceAccepted,
   processing = false,
 }: {
-  contactAction: MurphContactOption | null;
+  contactOptions: readonly MurphContactOption[];
   coverage: number;
   known: number;
   script: EnvironmentVoiceScript;
@@ -579,25 +614,87 @@ export function EnvironmentCaptureCard({
           }
           triggerVariant={updating ? "outline" : "default"}
         />
-        {contactAction ? (
-          <Button
-            size="default"
-            variant="ghost"
-            render={
-              <a
-                href={contactAction.href}
-                target={contactAction.target}
-                rel={contactAction.rel}
-              />
-            }
-            nativeButton={false}
-          >
-            {updating ? "Update in chat" : "Chat instead"}
-            <ArrowRight className="size-4" aria-hidden="true" />
-          </Button>
-        ) : null}
+        <EnvironmentChatAction
+          contactOptions={contactOptions}
+          label={updating ? "Update in chat" : "Chat instead"}
+          presentation="button"
+        />
       </div>
     </section>
+  );
+}
+
+function EnvironmentChatAction({
+  contactOptions,
+  label,
+  presentation,
+}: {
+  contactOptions: readonly MurphContactOption[];
+  label: string;
+  presentation: "button" | "link";
+}) {
+  if (contactOptions.length === 0) {
+    return null;
+  }
+
+  const content = (
+    <>
+      {label}
+      <ArrowRight className="size-4 shrink-0" aria-hidden="true" />
+    </>
+  );
+  const contactAction = contactOptions[0];
+
+  if (contactOptions.length === 1 && contactAction) {
+    if (presentation === "link") {
+      return (
+        <a
+          href={contactAction.href}
+          target={contactAction.target}
+          rel={contactAction.rel}
+          className="inline-flex min-h-11 items-center gap-1.5 text-base font-medium text-muted-foreground underline decoration-border underline-offset-4 hover:text-foreground sm:min-h-0 sm:text-sm"
+        >
+          {content}
+        </a>
+      );
+    }
+    return (
+      <Button
+        size="default"
+        variant="ghost"
+        render={
+          <a
+            href={contactAction.href}
+            target={contactAction.target}
+            rel={contactAction.rel}
+          />
+        }
+        nativeButton={false}
+      >
+        {content}
+      </Button>
+    );
+  }
+
+  return (
+    <MurphContactDialog
+      options={contactOptions}
+      trigger={(open) =>
+        presentation === "link" ? (
+          <button
+            type="button"
+            className="inline-flex min-h-11 items-center gap-1.5 text-base font-medium text-muted-foreground underline decoration-border underline-offset-4 hover:text-foreground sm:min-h-0 sm:text-sm"
+            onClick={open}
+          >
+            {content}
+          </button>
+        ) : (
+          <Button size="default" variant="ghost" onClick={open}>
+            {content}
+          </Button>
+        )
+      }
+    />
   );
 }
 
@@ -614,7 +711,13 @@ export function EnvironmentVoiceRefreshNotice({
   if (state.status === "processing") {
     return (
       <Alert aria-live="polite">
-        <AlertTitle>Murph is processing your recording</AlertTitle>
+        <AlertTitle className="flex items-center gap-2">
+          <LoaderCircle
+            aria-hidden="true"
+            className="size-4 animate-spin text-primary motion-reduce:animate-none"
+          />
+          Murph is processing your recording
+        </AlertTitle>
         <AlertDescription>
           This report will refresh automatically when the clear facts are ready.
         </AlertDescription>
@@ -639,7 +742,13 @@ export function EnvironmentVoiceRefreshNotice({
   }
   return (
     <Alert aria-live="polite">
-      <AlertTitle>Murph is taking longer than usual</AlertTitle>
+      <AlertTitle className="flex items-center gap-2">
+        <LoaderCircle
+          aria-hidden="true"
+          className="size-4 animate-spin text-primary motion-reduce:animate-none"
+        />
+        Murph is taking longer than usual
+      </AlertTitle>
       <AlertDescription>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <span>
