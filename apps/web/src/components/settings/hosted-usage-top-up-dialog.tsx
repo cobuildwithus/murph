@@ -411,11 +411,12 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
           </div>
         ) : selection ? (
           <div
+            data-slot="usage-top-up-selection"
             className={cn(
               "flex flex-col gap-5",
               props.scope === "group" &&
                 groupPaymentMode === "monthly" &&
-                "max-md:h-full",
+                "max-md:min-h-full",
             )}
           >
             {groupPaymentMode === "monthly" ? null : (
@@ -456,6 +457,10 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
             )}
             {props.renderSelectionDetails?.({
               disabled: hasAttempt || !controller.requestIdentityReady,
+              mobileStickyActionVisible:
+                props.scope === "group" &&
+                groupPaymentMode === "monthly" &&
+                !selectionNeedsRecovery,
               selectedOffer: controller.selectedOffer,
             })}
             <FieldError>{controller.requestIdentityError}</FieldError>
@@ -620,7 +625,11 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
         {canShowTrigger ? (
           <DrawerTrigger asChild>{drawerTriggerButton}</DrawerTrigger>
         ) : null}
-        <DrawerContent className="h-[calc(100dvh-0.75rem)] border-border data-[vaul-drawer-direction=bottom]:mt-3 data-[vaul-drawer-direction=bottom]:max-h-[calc(100dvh-0.75rem)] data-[vaul-drawer-direction=bottom]:rounded-t-[2rem]">
+        <DrawerContent
+          className="h-[calc(100dvh-0.75rem)] border-border data-[vaul-drawer-direction=bottom]:mt-3 data-[vaul-drawer-direction=bottom]:max-h-[calc(100dvh-0.75rem)] data-[vaul-drawer-direction=bottom]:rounded-t-[2rem]"
+          data-inert={props.inert ? "true" : undefined}
+          inert={props.inert ? true : undefined}
+        >
           <DrawerHeader
             className={cn(
               "relative items-start gap-2 px-6 pb-2 pt-2 text-left",
@@ -705,6 +714,8 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
       ) : null}
       <DialogContent
         ref={scrollContentRef}
+        data-inert={props.inert ? "true" : undefined}
+        inert={props.inert ? true : undefined}
         className={cn(
           "max-h-[calc(100dvh-2rem)] gap-7 overflow-y-auto border border-border bg-popover p-6 sm:max-w-xl sm:p-8",
           showGroupMessagesAction && "sm:max-w-2xl sm:gap-8 sm:p-10",
