@@ -1355,6 +1355,7 @@ async function maybeHandleCustomInferenceRequest(input: {
         upstreamFetchImpl: input.upstreamFetchImpl,
         url: input.url,
       }),
+      revision: target.revision,
     });
   } catch (error) {
     if (error instanceof HostedCustomInferenceRequestError) {

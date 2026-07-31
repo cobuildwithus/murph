@@ -111,13 +111,13 @@ export const GET = withJsonError(async (request: Request) => {
       message: "The selected custom inference connection is invalid.",
     });
   }
-  const platformAiUsageAllowed = customInferenceOverride
-    ? (await resolveHostedRuntimeAiUsageGate({
-        mode: "read_only",
-        prisma,
-        userId,
-      })).status === "allowed"
-    : null;
+  const platformAiUsageAllowed = (
+    await resolveHostedRuntimeAiUsageGate({
+      mode: "read_only",
+      prisma,
+      userId,
+    })
+  ).status === "allowed";
 
   return jsonOk(parseHostedWorkspaceReadResponse({
     fetchedAt: new Date().toISOString(),
@@ -144,7 +144,7 @@ export const GET = withJsonError(async (request: Request) => {
             assistantConfiguration.hostedAssistantReasoningEffortOverride,
         }
       : {}),
-    ...(platformAiUsageAllowed === null ? {} : { platformAiUsageAllowed }),
+    platformAiUsageAllowed,
     workspace: workspace
       ? {
           browserVaultReplicaRef: workspace.browserVaultReplicaRef,

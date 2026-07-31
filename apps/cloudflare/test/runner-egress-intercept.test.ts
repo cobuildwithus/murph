@@ -429,7 +429,9 @@ describe("hostedRunnerIntercept", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await response.text()).toBe(upstreamStream);
+    const responseText = await response.text();
+    expect(responseText).toContain('"model":"murph-custom-r7"');
+    expect(responseText).not.toContain("synthetic-upstream-model");
     expect(validateRuntimeProviderEgressToken).toHaveBeenCalledWith({
       providerEgressToken: PROVIDER_EGRESS_TOKEN,
       userId: "member_123",

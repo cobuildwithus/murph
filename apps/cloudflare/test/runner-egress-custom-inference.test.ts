@@ -19,6 +19,8 @@ const SIGNING_SOURCE = {
   HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
     "synthetic-provider-egress-signing-secret",
 };
+const CUSTOM_INFERENCE_REVISION = 7;
+const CUSTOM_MODEL_ALIAS = `murph-custom-r${CUSTOM_INFERENCE_REVISION}`;
 
 describe("hosted custom inference egress", () => {
   it("pins and authenticates an encrypted runtime target without plaintext envelope fields", async () => {
@@ -161,6 +163,60 @@ describe("hosted custom inference egress", () => {
     expect(parsed.tools[1].function.name).toMatch(/^murph_custom_/u);
   });
 
+  it("groups contiguous Responses tool calls into one Chat assistant turn", () => {
+    const body = buildHostedCustomInferenceUpstreamRequestBody({
+      body: encodeJson({
+        input: [
+          {
+            arguments: '{"value":1}',
+            call_id: "call_1",
+            name: "first_tool",
+            type: "function_call",
+          },
+          {
+            arguments: '{"value":2}',
+            call_id: "call_2",
+            name: "second_tool",
+            type: "function_call",
+          },
+          {
+            call_id: "call_1",
+            output: "first result",
+            type: "function_call_output",
+          },
+          {
+            call_id: "call_2",
+            output: "second result",
+            type: "function_call_output",
+          },
+        ],
+        model: CUSTOM_MODEL_ALIAS,
+      }),
+      target: buildTarget({ protocol: "chat_completions" }),
+    });
+
+    expect(JSON.parse(body).messages).toEqual([
+      {
+        content: null,
+        role: "assistant",
+        tool_calls: [
+          {
+            function: { arguments: '{"value":1}', name: "first_tool" },
+            id: "call_1",
+            type: "function",
+          },
+          {
+            function: { arguments: '{"value":2}', name: "second_tool" },
+            id: "call_2",
+            type: "function",
+          },
+        ],
+      },
+      { content: "first result", role: "tool", tool_call_id: "call_1" },
+      { content: "second result", role: "tool", tool_call_id: "call_2" },
+    ]);
+  });
+
   it("round-trips namespaced dynamic tools without losing their namespace", async () => {
     const translated = JSON.parse(
       buildHostedCustomInferenceUpstreamRequestBody({
@@ -213,6 +269,7 @@ describe("hosted custom inference egress", () => {
           }],
         }, "tool_calls"),
       ]),
+      revision: CUSTOM_INFERENCE_REVISION,
     });
     const text = await response.text();
 
@@ -287,9 +344,12 @@ describe("hosted custom inference egress", () => {
       response: new Response(valid, {
         headers: { "content-type": "text/event-stream" },
       }),
+      revision: CUSTOM_INFERENCE_REVISION,
     });
 
-    await expect(response.text()).resolves.toBe(valid);
+    const adapted = await response.text();
+    expect(adapted).toContain(`"model":"${CUSTOM_MODEL_ALIAS}"`);
+    expect(adapted).not.toContain("upstream-model");
 
     const invalid = await adaptHostedCustomInferenceUpstreamResponse({
       protocol: "responses",
@@ -300,8 +360,52 @@ describe("hosted custom inference egress", () => {
         }),
         { headers: { "content-type": "text/event-stream" } },
       ),
+      revision: CUSTOM_INFERENCE_REVISION,
     });
     await expect(invalid.text()).rejects.toThrow(HostedCustomInferenceRequestError);
+  });
+
+  it("accepts CRLF event separators split across byte chunks", async () => {
+    const source = [
+      sse("response.created", {
+        response: {
+          id: "resp_fragmented",
+          model: "upstream-model",
+          output: [],
+          status: "in_progress",
+        },
+        type: "response.created",
+      }),
+      sse("response.completed", {
+        response: {
+          id: "resp_fragmented",
+          model: "upstream-model",
+          output: [],
+          status: "completed",
+        },
+        type: "response.completed",
+      }),
+      "data: [DONE]\n\n",
+    ].join("").replaceAll("\n", "\r\n");
+    const bytes = new TextEncoder().encode(source);
+    const response = await adaptHostedCustomInferenceUpstreamResponse({
+      protocol: "responses",
+      response: new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          for (const byte of bytes) {
+            controller.enqueue(Uint8Array.of(byte));
+          }
+          controller.close();
+        },
+      }), {
+        headers: { "content-type": "text/event-stream" },
+      }),
+      revision: CUSTOM_INFERENCE_REVISION,
+    });
+
+    const adapted = await response.text();
+    expect(adapted).toContain("event: response.completed");
+    expect(adapted).toContain(`"model":"${CUSTOM_MODEL_ALIAS}"`);
   });
 
   it("rejects an oversized SSE event before parsing it", async () => {
@@ -314,6 +418,7 @@ describe("hosted custom inference egress", () => {
         })}\n\n`,
         { headers: { "content-type": "text/event-stream" } },
       ),
+      revision: CUSTOM_INFERENCE_REVISION,
     });
 
     await expect(response.text()).rejects.toThrow(
@@ -333,6 +438,7 @@ describe("hosted custom inference egress", () => {
           total_tokens: 5,
         }),
       ]),
+      revision: CUSTOM_INFERENCE_REVISION,
     });
     const text = await textResponse.text();
     expect(text).toContain("event: response.created");
@@ -342,6 +448,8 @@ describe("hosted custom inference egress", () => {
     expect(text).toContain('"input_tokens":3');
     expect(text).toContain("event: response.completed");
     expect(text).toContain("data: [DONE]");
+    expect(text).toContain(`"model":"${CUSTOM_MODEL_ALIAS}"`);
+    expect(text).not.toContain("upstream-model");
 
     const encodedCustomName = JSON.parse(
       buildHostedCustomInferenceUpstreamRequestBody({
@@ -374,6 +482,7 @@ describe("hosted custom inference egress", () => {
           }],
         }, "tool_calls"),
       ]),
+      revision: CUSTOM_INFERENCE_REVISION,
     });
     const toolText = await toolResponse.text();
     expect(toolText).toContain('"type":"custom_tool_call"');
@@ -388,6 +497,7 @@ describe("hosted custom inference egress", () => {
       response: chatStream([
         chatChunk({ content: "partial" }, "length"),
       ]),
+      revision: CUSTOM_INFERENCE_REVISION,
     });
     const text = await response.text();
 
@@ -405,11 +515,74 @@ describe("hosted custom inference egress", () => {
     const response = await adaptHostedCustomInferenceUpstreamResponse({
       protocol: "responses",
       response: upstream,
+      revision: CUSTOM_INFERENCE_REVISION,
     });
     const text = await response.text();
     expect(response.status).toBe(502);
     expect(response.headers.has("set-cookie")).toBe(false);
     expect(text).not.toContain("raw private provider failure");
+
+    const streamedFailure = await adaptHostedCustomInferenceUpstreamResponse({
+      protocol: "responses",
+      response: new Response([
+        sse("response.created", {
+          response: {
+            id: "resp_failed",
+            model: "upstream-model",
+            output: [],
+            status: "in_progress",
+          },
+          type: "response.created",
+        }),
+        sse("response.failed", {
+          response: {
+            error: { message: "raw private streamed failure" },
+            id: "resp_failed",
+            model: "upstream-model",
+            output: [],
+            status: "failed",
+          },
+          type: "response.failed",
+        }),
+      ].join(""), {
+        headers: { "content-type": "text/event-stream" },
+      }),
+      revision: CUSTOM_INFERENCE_REVISION,
+    });
+    await expect(streamedFailure.text()).rejects.toThrow(
+      "The custom inference endpoint returned an invalid stream.",
+    );
+
+    const embeddedFailure = await adaptHostedCustomInferenceUpstreamResponse({
+      protocol: "responses",
+      response: new Response([
+        sse("response.created", {
+          response: {
+            id: "resp_embedded_failure",
+            model: "upstream-model",
+            output: [],
+            status: "in_progress",
+          },
+          type: "response.created",
+        }),
+        sse("response.completed", {
+          response: {
+            error: { message: "raw private embedded failure" },
+            id: "resp_embedded_failure",
+            model: "upstream-model",
+            output: [],
+            status: "completed",
+          },
+          type: "response.completed",
+        }),
+      ].join(""), {
+        headers: { "content-type": "text/event-stream" },
+      }),
+      revision: CUSTOM_INFERENCE_REVISION,
+    });
+    await expect(embeddedFailure.text()).rejects.toThrow(
+      "The custom inference endpoint returned an invalid stream.",
+    );
 
     const headers = new Headers({
       authorization: "Bearer caller-value",
@@ -436,7 +609,7 @@ function buildTarget(
       : "https://inference.example.com/v1/responses",
     model: "upstream-model",
     protocol: "responses",
-    revision: 7,
+    revision: CUSTOM_INFERENCE_REVISION,
     schema: HOSTED_INFERENCE_RUNTIME_TARGET_SCHEMA,
     supportsImages: true,
     verificationProfile: "murph-codex-0.145.0-portable-responses-v1",

@@ -507,6 +507,43 @@ describe("hosted runner container identity", () => {
     })).resolves.toEqual(runtimeTarget);
   });
 
+  it("rejects a managed route when allowance changed after reconciliation", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const durable = createRunnerDurableState();
+    const stateStore = new RunnerStateStore(durable.state);
+    const invokedContainerNames: string[] = [];
+    const service = createRuntimeInvocationService({
+      invokedContainerNames,
+      platformAiUsageAllowed: false,
+      runnerRuntimeEnvSource: {
+        CF_VERSION_METADATA: { id: "version_1" },
+        HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_TERRA_MODEL,
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+          "provider-egress-signing-secret",
+        OPENAI_API_KEY: "test-openai-key",
+      },
+      stateStore,
+      state: durable.state,
+    });
+    const token = await stateStore.beginWriteFence({
+      runnerContainerName: "member_123--v-version_1",
+      userId: TEST_USER_ID,
+    });
+
+    await expect(service.prepareWithFence({
+      input: {
+        orchestrationAttemptId: "orchestration_attempt_managed_denied",
+        userId: TEST_USER_ID,
+      },
+      token,
+    })).rejects.toThrow(
+      "Hosted managed inference was no longer allowed during invocation preparation.",
+    );
+    expect(invokedContainerNames).toEqual([]);
+  });
+
   it("wakes an active runtime through the write fence's stored runner container name", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -703,6 +740,7 @@ function createRuntimeInvocationService(input: {
   hostedAssistantProviderOverride?: HostedAssistantProviderOverride;
   hostedAssistantReasoningEffortOverride?: HostedAssistantReasoningEffortOverride;
   invokedContainerNames: string[];
+  platformAiUsageAllowed?: boolean;
   runnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
   state: DurableObjectStateLike;
   stateStore: RunnerStateStore;
@@ -722,11 +760,16 @@ function createRuntimeInvocationService(input: {
     readHostedWebControlBaseUrl: () => "https://web.example.test",
     readHostedWorkspaceFromWeb: async () => ({
       fetchedAt: FIXED_NOW,
+      ...(input.platformAiUsageAllowed === undefined
+        ? {}
+        : { platformAiUsageAllowed: input.platformAiUsageAllowed }),
       ...(input.hostedAssistantCustomInferenceOverride
         ? {
             hostedAssistantCustomInferenceOverride:
               input.hostedAssistantCustomInferenceOverride,
-            platformAiUsageAllowed: false,
+            ...(input.platformAiUsageAllowed === undefined
+              ? { platformAiUsageAllowed: false }
+              : {}),
           }
         : {}),
       ...(input.hostedAssistantModelOverride

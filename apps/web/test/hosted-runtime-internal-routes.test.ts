@@ -1657,6 +1657,29 @@ describe("hosted runtime internal web routes", () => {
     expect(payload.hostedAssistantProviderOverride).toBeUndefined();
   });
 
+  it("projects the current platform usage decision for a managed route", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(
+      buildWorkspaceRecord({ version: "4" }),
+    );
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValueOnce({
+      status: "denied",
+    });
+
+    const response = await workspaceRoute.GET(new Request(
+      "https://join.example.test/api/internal/hosted-workspace",
+    ));
+    const payload = parseHostedWorkspaceReadResponse(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(payload.platformAiUsageAllowed).toBe(false);
+    expect(payload.hostedAssistantCustomInferenceOverride).toBeUndefined();
+    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
+      mode: "read_only",
+      prisma: expect.any(Object),
+      userId: "member_routes_1",
+    });
+  });
+
   it("projects a selected custom route without managed inference facts", async () => {
     process.env.HOSTED_CUSTOM_INFERENCE_ENABLED = "1";
     mocks.readHostedWorkspace.mockResolvedValue(

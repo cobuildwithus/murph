@@ -31,6 +31,8 @@ describe("hosted inference connection settings", () => {
     assert.match(markup, /type="password"/u);
     assert.match(markup, /Verify and save/u);
     assert.match(markup, /Public HTTPS on port 443/u);
+    assert.match(markup, /Responses API/u);
+    assert.match(markup, /Bearer token/u);
     assert.doesNotMatch(markup, />Chat Completions</u);
   });
 
@@ -58,6 +60,11 @@ describe("hosted inference connection settings", () => {
     assert.match(markup, /inference\.example\.test/u);
     assert.match(markup, /example-model/u);
     assert.match(markup, /In use/u);
+    assert.match(markup, /Revision/u);
+    assert.match(markup, />4</u);
+    assert.match(markup, /Jul 30, 2026/u);
+    assert.match(markup, /12:00 PM UTC/u);
+    assert.match(markup, /class="normal-case"/u);
     assert.doesNotMatch(markup, /type="password"/u);
     assert.doesNotMatch(markup, /https:\/\/inference\.example\.test/u);
   });

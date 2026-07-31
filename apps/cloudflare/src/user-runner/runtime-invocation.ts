@@ -235,6 +235,10 @@ export class RuntimeInvocationService {
         );
       }
       platformAiUsageAllowed = workspaceRead.platformAiUsageAllowed;
+    } else if (workspaceRead.platformAiUsageAllowed === false) {
+      throw new Error(
+        "Hosted managed inference was no longer allowed during invocation preparation.",
+      );
     }
     const customInferenceEnvelope = customInferenceTarget
       ? await sealHostedInferenceRuntimeTarget({

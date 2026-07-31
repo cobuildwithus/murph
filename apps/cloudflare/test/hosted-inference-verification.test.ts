@@ -123,6 +123,26 @@ describe("hosted inference verification", () => {
       upstreamFetchImpl,
     })).rejects.toEqual(new HostedInferenceVerificationError());
   });
+
+  it("maps a streamed provider failure to the fixed verification error", async () => {
+    const upstreamFetchImpl = vi.fn(async () => eventStream([
+      {
+        response: {
+          error: { message: "private streamed provider failure" },
+          id: "resp_failed",
+          model: "example-model",
+          output: [],
+          status: "failed",
+        },
+        type: "response.failed",
+      },
+    ])) as typeof fetch;
+
+    await expect(verifyHostedInferenceConnection({
+      request: REQUEST,
+      upstreamFetchImpl,
+    })).rejects.toEqual(new HostedInferenceVerificationError());
+  });
 });
 
 function eventStream(

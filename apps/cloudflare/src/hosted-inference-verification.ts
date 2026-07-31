@@ -198,25 +198,25 @@ async function sendVerificationRequest(input: {
     target: input.target,
     upstreamFetchImpl: input.upstreamFetchImpl,
   });
-  let adapted: Response;
   try {
-    adapted = await adaptHostedCustomInferenceUpstreamResponse({
+    const adapted = await adaptHostedCustomInferenceUpstreamResponse({
       protocol: input.target.protocol,
       response,
+      revision: input.target.revision,
     });
+    if (!adapted.ok) {
+      await adapted.body?.cancel();
+      throw new HostedInferenceVerificationError();
+    }
+
+    const stream = await readBoundedText(
+      adapted.body,
+      HOSTED_INFERENCE_VERIFICATION_RESPONSE_MAX_BYTES,
+    );
+    return requireCompletedResponse(stream);
   } catch {
     throw new HostedInferenceVerificationError();
   }
-  if (!adapted.ok) {
-    await adapted.body?.cancel();
-    throw new HostedInferenceVerificationError();
-  }
-
-  const stream = await readBoundedText(
-    adapted.body,
-    HOSTED_INFERENCE_VERIFICATION_RESPONSE_MAX_BYTES,
-  );
-  return requireCompletedResponse(stream);
 }
 
 async function fetchVerificationUpstream(input: {

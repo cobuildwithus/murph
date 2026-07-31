@@ -44,6 +44,15 @@ const HOSTED_INFERENCE_CONNECTION_URL =
   "/api/settings/inference-connection";
 const HOSTED_ASSISTANT_MODE_URL = "/api/settings/assistant";
 const DEFAULT_CONTEXT_WINDOW_TOKENS = 131_072;
+const PROTOCOL_LABELS: Record<HostedInferenceProtocol, string> = {
+  chat_completions: "Chat Completions",
+  responses: "Responses API",
+};
+const AUTH_KIND_LABELS: Record<HostedInferenceAuthKind, string> = {
+  api_key: "api-key header",
+  bearer: "Bearer token",
+  x_api_key: "x-api-key header",
+};
 
 interface HostedInferenceConnectionSettingsProps {
   chatCompletionsAvailable: boolean;
@@ -95,6 +104,7 @@ export function HostedInferenceConnectionSettings(
   >(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [status, setStatus] = useState<{
+    action: "connection" | "mode";
     message: string;
     tone: "destructive" | "neutral";
   } | null>(null);
@@ -104,6 +114,7 @@ export function HostedInferenceConnectionSettings(
   async function saveMode(): Promise<void> {
     if (draftMode === "custom" && !connection) {
       setStatus({
+        action: "mode",
         message: "Verify a connection before switching to your endpoint.",
         tone: "neutral",
       });
@@ -116,6 +127,7 @@ export function HostedInferenceConnectionSettings(
       && !props.chatCompletionsAvailable
     ) {
       setStatus({
+        action: "mode",
         message:
           "Chat Completions connections are not available in this deployment.",
         tone: "destructive",
@@ -136,6 +148,7 @@ export function HostedInferenceConnectionSettings(
         current ? { ...current, selected: response.mode === "custom" } : current
       );
       setStatus({
+        action: "mode",
         message: response.mode === "custom"
           ? "New core replies use your verified endpoint."
           : "New core replies use Murph-managed inference.",
@@ -143,6 +156,7 @@ export function HostedInferenceConnectionSettings(
       });
     } catch (error) {
       setStatus({
+        action: "mode",
         message: readSafeConnectionError(
           error,
           "We couldn’t change the inference mode. Try again.",
@@ -165,6 +179,7 @@ export function HostedInferenceConnectionSettings(
       || parsedContext > HOSTED_INFERENCE_CONTEXT_WINDOW_MAX_TOKENS
     ) {
       setStatus({
+        action: "connection",
         message:
           `Context window must be between ${HOSTED_INFERENCE_CONTEXT_WINDOW_MIN_TOKENS.toLocaleString()} and ${HOSTED_INFERENCE_CONTEXT_WINDOW_MAX_TOKENS.toLocaleString()} tokens.`,
         tone: "destructive",
@@ -197,12 +212,14 @@ export function HostedInferenceConnectionSettings(
       setEditing(false);
       setConfirmDelete(false);
       setStatus({
+        action: "connection",
         message:
           "Verified and saved. Review the destination below, then choose Your endpoint to use it.",
         tone: "neutral",
       });
     } catch (error) {
       setStatus({
+        action: "connection",
         message: readSafeConnectionError(
           error,
           "The endpoint could not be verified. Your previous connection was not changed.",
@@ -233,11 +250,13 @@ export function HostedInferenceConnectionSettings(
       setEndpointUrl("");
       setSecret("");
       setStatus({
+        action: "connection",
         message: "Connection deleted. Murph-managed inference remains active.",
         tone: "neutral",
       });
     } catch (error) {
       setStatus({
+        action: "connection",
         message: readSafeConnectionError(
           error,
           "We couldn’t delete the connection. Try again.",
@@ -284,11 +303,13 @@ export function HostedInferenceConnectionSettings(
         <ChoiceCard
           description="Core conversation content goes to your verified endpoint."
           id="assistant-inference-custom"
-          meta={
-            connection
-              ? `${connection.endpointHost} · ${connection.model}`
-              : "Connection required"
-          }
+          meta={connection
+            ? (
+                <span className="normal-case">
+                  {connection.endpointHost} · {connection.model}
+                </span>
+              )
+            : "Connection required"}
           title="Your endpoint"
           value="custom"
         />
@@ -309,6 +330,9 @@ export function HostedInferenceConnectionSettings(
           </span>
         ) : null}
       </div>
+      {status?.action === "mode" ? (
+        <SettingsStatusLine message={status.message} tone={status.tone} />
+      ) : null}
 
       <Separator />
 
@@ -359,6 +383,14 @@ export function HostedInferenceConnectionSettings(
             value={connection.supportsImages ? "Verified" : "Unavailable"}
           />
           <ConnectionFact
+            label="Revision"
+            value={String(connection.revision)}
+          />
+          <ConnectionFact
+            label="Verified"
+            value={formatVerificationTime(connection.verifiedAt)}
+          />
+          <ConnectionFact
             label="Status"
             value={connection.selected ? "In use" : "Verified, inactive"}
           />
@@ -381,6 +413,7 @@ export function HostedInferenceConnectionSettings(
                 Protocol
               </FieldLabel>
               <Select
+                items={PROTOCOL_LABELS}
                 onValueChange={(value) => {
                   if (value && isHostedInferenceProtocol(value)) {
                     setProtocol(value);
@@ -406,6 +439,7 @@ export function HostedInferenceConnectionSettings(
                 Authentication
               </FieldLabel>
               <Select
+                items={AUTH_KIND_LABELS}
                 onValueChange={(value) => {
                   if (value && isHostedInferenceAuthKind(value)) {
                     setAuthKind(value);
@@ -587,7 +621,7 @@ export function HostedInferenceConnectionSettings(
         </div>
       ) : null}
 
-      {status ? (
+      {status?.action === "connection" ? (
         <SettingsStatusLine message={status.message} tone={status.tone} />
       ) : null}
     </div>
@@ -605,6 +639,18 @@ function ConnectionFact(input: { label: string; value: string }) {
       </dd>
     </div>
   );
+}
+
+function formatVerificationTime(value: string): string {
+  const verifiedAt = new Date(value);
+  if (Number.isNaN(verifiedAt.getTime())) {
+    return "Unavailable";
+  }
+  return `${new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "UTC",
+  }).format(verifiedAt)} UTC`;
 }
 
 function readSafeConnectionError(error: unknown, fallback: string): string {

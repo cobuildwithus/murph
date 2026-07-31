@@ -88,6 +88,7 @@ export function buildHostedCustomInferenceUpstreamRequestBody(input: {
 export async function adaptHostedCustomInferenceUpstreamResponse(input: {
   protocol: HostedInferenceRuntimeTarget["protocol"];
   response: Response;
+  revision: number;
 }): Promise<Response> {
   if (!input.response.ok) {
     await input.response.body?.cancel();
@@ -109,9 +110,10 @@ export async function adaptHostedCustomInferenceUpstreamResponse(input: {
     );
   }
 
+  const modelAlias = buildHostedCustomInferenceModelAlias(input.revision);
   const body = input.protocol === "responses"
-    ? validateNativeResponsesStream(input.response.body)
-    : translateChatCompletionsStream(input.response.body);
+    ? validateNativeResponsesStream(input.response.body, modelAlias)
+    : translateChatCompletionsStream(input.response.body, modelAlias);
   return new Response(body, {
     headers: {
       "cache-control": "no-store",
@@ -391,6 +393,16 @@ function translateResponsesInputToChatMessages(input: {
   instructions: unknown;
 }): Record<string, unknown>[] {
   const messages: Record<string, unknown>[] = [];
+  let pendingToolCalls: Record<string, unknown>[] = [];
+  const flushPendingToolCalls = (): void => {
+    if (pendingToolCalls.length === 0) return;
+    messages.push({
+      content: null,
+      role: "assistant",
+      tool_calls: pendingToolCalls,
+    });
+    pendingToolCalls = [];
+  };
   if (typeof input.instructions === "string" && input.instructions.trim()) {
     messages.push({ content: input.instructions, role: "developer" });
   } else if (input.instructions !== undefined && input.instructions !== null) {
@@ -409,6 +421,7 @@ function translateResponsesInputToChatMessages(input: {
       throw invalidRequest();
     }
     if (item.type === "message") {
+      flushPendingToolCalls();
       messages.push({
         content: normalizeChatMessageContent(item.content),
         role: requireChatRole(item.role),
@@ -422,28 +435,24 @@ function translateResponsesInputToChatMessages(input: {
       const namespace = custom || item.namespace === undefined
         ? null
         : requireToolName(item.namespace);
-      messages.push({
-        content: null,
-        role: "assistant",
-        tool_calls: [{
-          function: {
-            arguments: custom
-              ? JSON.stringify({
-                  input: typeof item.input === "string" ? item.input : "",
+      pendingToolCalls.push({
+        function: {
+          arguments: custom
+            ? JSON.stringify({
+                input: typeof item.input === "string" ? item.input : "",
+              })
+            : requireArguments(item.arguments),
+          name: custom
+            ? encodeCustomToolName(originalName)
+            : namespace
+              ? encodeNamespaceToolName({
+                  name: originalName,
+                  namespace,
                 })
-              : requireArguments(item.arguments),
-            name: custom
-              ? encodeCustomToolName(originalName)
-              : namespace
-                ? encodeNamespaceToolName({
-                    name: originalName,
-                    namespace,
-                  })
-                : originalName,
-          },
-          id: callId,
-          type: "function",
-        }],
+              : originalName,
+        },
+        id: callId,
+        type: "function",
       });
       continue;
     }
@@ -451,6 +460,7 @@ function translateResponsesInputToChatMessages(input: {
       item.type === "function_call_output"
       || item.type === "custom_tool_call_output"
     ) {
+      flushPendingToolCalls();
       messages.push({
         content: normalizeToolOutput(item.output),
         role: "tool",
@@ -465,8 +475,10 @@ function translateResponsesInputToChatMessages(input: {
     ) {
       continue;
     }
+    flushPendingToolCalls();
     throw unsupportedTool();
   }
+  flushPendingToolCalls();
   return messages;
 }
 
@@ -518,6 +530,7 @@ function normalizeChatToolChoice(value: unknown): unknown {
 
 function validateNativeResponsesStream(
   source: ReadableStream<Uint8Array>,
+  modelAlias: string,
 ): ReadableStream<Uint8Array> {
   let terminal = false;
   let created = false;
@@ -539,6 +552,9 @@ function validateNativeResponsesStream(
     ) {
       throw invalidResponse();
     }
+    if (type === "error" || type === "response.failed") {
+      throw invalidResponse();
+    }
     if (!created && type !== "response.created" && type !== "error") {
       throw invalidResponse();
     }
@@ -548,11 +564,21 @@ function validateNativeResponsesStream(
     }
     if (
       type === "response.completed"
-      || type === "response.failed"
       || type === "response.incomplete"
-      || type === "error"
     ) {
       terminal = true;
+    }
+    if (payload.error !== undefined && payload.error !== null) {
+      throw invalidResponse();
+    }
+    if (isJsonObject(payload.response)) {
+      if (
+        payload.response.error !== undefined
+        && payload.response.error !== null
+      ) {
+        throw invalidResponse();
+      }
+      payload.response.model = modelAlias;
     }
     return formatSseEvent(type, payload);
   }, () => {
@@ -562,6 +588,7 @@ function validateNativeResponsesStream(
 
 function translateChatCompletionsStream(
   source: ReadableStream<Uint8Array>,
+  modelAlias: string,
 ): ReadableStream<Uint8Array> {
   const state: ChatTranslationState = {
     completed: false,
@@ -583,7 +610,7 @@ function translateChatCompletionsStream(
     if (payload.object !== "chat.completion.chunk") {
       throw invalidResponse();
     }
-    let output = initializeChatTranslation(state, payload);
+    let output = initializeChatTranslation(state, payload, modelAlias);
     readChatUsage(state, payload.usage);
     const choices = payload.choices;
     if (!Array.isArray(choices) || choices.length > 1) {
@@ -639,6 +666,16 @@ function transformSseStream(
   let buffer = "";
   let totalBytes = 0;
   let cancelled = false;
+  let pendingCarriageReturn = false;
+  const normalizeLineEndings = (value: string, final: boolean): string => {
+    let text = pendingCarriageReturn ? `\r${value}` : value;
+    pendingCarriageReturn = false;
+    if (!final && text.endsWith("\r")) {
+      pendingCarriageReturn = true;
+      text = text.slice(0, -1);
+    }
+    return text.replaceAll("\r\n", "\n").replaceAll("\r", "\n");
+  };
 
   return new ReadableStream<Uint8Array>({
     async cancel(reason) {
@@ -654,7 +691,10 @@ function transformSseStream(
           if (totalBytes > HOSTED_CUSTOM_INFERENCE_MAX_STREAM_BYTES) {
             throw invalidResponse();
           }
-          buffer += decoder.decode(value, { stream: true }).replaceAll("\r\n", "\n");
+          buffer += normalizeLineEndings(
+            decoder.decode(value, { stream: true }),
+            false,
+          );
           let separator = buffer.indexOf("\n\n");
           while (separator >= 0) {
             const raw = buffer.slice(0, separator);
@@ -682,7 +722,7 @@ function transformSseStream(
             throw invalidResponse();
           }
         }
-        buffer += decoder.decode();
+        buffer += normalizeLineEndings(decoder.decode(), true);
         if (buffer.trim()) throw invalidResponse();
         finish();
         controller.close();
@@ -757,13 +797,14 @@ interface ChatTranslationState {
 function initializeChatTranslation(
   state: ChatTranslationState,
   payload: Record<string, unknown>,
+  modelAlias: string,
 ): string {
   if (state.created) return "";
   const rawId = typeof payload.id === "string" ? payload.id : "";
   const model = typeof payload.model === "string" ? payload.model : "";
   if (!rawId || !model) throw invalidResponse();
   state.responseId = `resp_murph_${safeIdentifier(rawId)}`;
-  state.model = model;
+  state.model = modelAlias;
   state.created = true;
   return formatSseEvent("response.created", {
     response: buildCompletedResponsesRecord(state, "in_progress"),
