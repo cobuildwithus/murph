@@ -453,10 +453,18 @@ export class HostedDeviceSyncPublicIngressService {
   }> {
     const connections = (await this.context.store.listConnectionsForUser(userId))
       .filter((connection) => connection.status !== "disconnected");
+    let attemptedCount = 0;
     let disconnectedCount = 0;
     let failedCount = 0;
 
     for (const connection of connections) {
+      if (await readHostedHealthDataConsentState({
+        memberId: userId,
+        prisma: this.context.store.prisma,
+      }) !== "revoked") {
+        break;
+      }
+      attemptedCount += 1;
       try {
         await disconnectHostedDeviceSyncConnection({
           connectionId: connection.id,
@@ -477,7 +485,7 @@ export class HostedDeviceSyncPublicIngressService {
     }
 
     return {
-      attemptedCount: connections.length,
+      attemptedCount,
       disconnectedCount,
       failedCount,
     };

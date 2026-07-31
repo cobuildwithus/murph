@@ -25,7 +25,11 @@ import type {
 } from "@murphai/device-syncd/types";
 
 import type { HostedSecureBoxPrismaClient } from "../../hosted-crypto/secure-box";
-import { HOSTED_HEALTH_DATA_CONSENT_SCOPE } from "../../legal/consent";
+import {
+  HOSTED_HEALTH_DATA_CONSENT_SCOPE,
+  readHostedHealthDataConsentState,
+} from "../../legal/consent";
+import { lockHostedMemberRow } from "../../hosted-onboarding/shared";
 import { buildHostedProviderAccountBlindIndex } from "../routing-index";
 import { buildHostedPublicDeviceSyncAccount } from "../internal-runtime";
 import {
@@ -156,6 +160,21 @@ export class PrismaHostedConnectionStore {
     const setupWrite = buildHostedConnectionSetupWrite(input, connectedAt, "create");
 
     const result = await this.prisma.$transaction(async (tx) => {
+      if (ownerId) {
+        await lockHostedMemberRow(tx, ownerId);
+        if (await readHostedHealthDataConsentState({
+          memberId: ownerId,
+          prisma: tx,
+        }) === "revoked") {
+          throw deviceSyncError({
+            code: "HEALTH_DATA_CONSENT_REQUIRED",
+            httpStatus: 403,
+            message: "Use Murph again before connecting a health source.",
+            retryable: false,
+          });
+        }
+      }
+
       let existing = await tx.deviceConnection.findUnique({
         where: {
           provider_providerAccountBlindIndex: {

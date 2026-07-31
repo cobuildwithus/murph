@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
   lockHostedMemberRow: vi.fn(),
   lockHostedMemberSponsoredAccessRows: vi.fn(),
+  readHostedHealthDataConsentState: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
@@ -26,6 +27,7 @@ vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
 vi.mock("@/src/lib/legal/consent", () => ({
   assertHostedHistoricalLaunchConsentGranted: mocks.assertHostedHistoricalLaunchConsentGranted,
   assertHostedLaunchRequiredConsentGranted: mocks.assertHostedLaunchRequiredConsentGranted,
+  readHostedHealthDataConsentState: mocks.readHostedHealthDataConsentState,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/shared", async (importOriginal) => {
@@ -69,6 +71,7 @@ describe("meal photo capture enrollment credentials", () => {
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     mocks.lockHostedMemberSponsoredAccessRows.mockResolvedValue(undefined);
+    mocks.readHostedHealthDataConsentState.mockResolvedValue("revoked");
   });
 
   it("persists only hashed bearer/installation values and an encrypted secret", async () => {
@@ -171,6 +174,26 @@ describe("meal photo capture enrollment credentials", () => {
       prisma.tx,
       MEMBER_ID,
     );
+  });
+
+  it("does not let deferred withdrawal cleanup revoke a renewed enrollment", async () => {
+    const prisma = createEnrollmentPrismaHarness();
+    await issueMealPhotoCaptureEnrollment({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: enrollmentRequest(),
+    });
+    mocks.readHostedHealthDataConsentState.mockResolvedValueOnce("granted");
+
+    await expect(revokeAllMealPhotoCaptureEnrollmentsForMember({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+    })).resolves.toEqual({ revokedCount: 0 });
+
+    expect(prisma.getRecord()).toMatchObject({
+      revokeReason: null,
+      revokedAt: null,
+    });
   });
 
   it("locks scoped revocation to the enrollment member", async () => {

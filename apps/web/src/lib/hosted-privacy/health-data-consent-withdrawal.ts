@@ -18,7 +18,6 @@ import {
 export async function withdrawHostedHealthDataConsent(input: {
   memberId: string;
   prisma: PrismaClient;
-  request: Request;
   source?: string;
 }): Promise<HostedConsentStatus> {
   const priorState = await readHostedHealthDataConsentState({
@@ -35,7 +34,7 @@ export async function withdrawHostedHealthDataConsent(input: {
 
   // The grant is the authority boundary. Revoke it before provider cleanup so
   // independently guarded processing paths fail closed immediately.
-  const status = priorState === "revoked"
+  return priorState === "revoked"
     ? await readHostedConsentStatus({
         memberId: input.memberId,
         prisma: input.prisma,
@@ -46,7 +45,30 @@ export async function withdrawHostedHealthDataConsent(input: {
         scope: HOSTED_HEALTH_DATA_CONSENT_SCOPE,
         source: input.source,
       });
+}
 
+export async function cleanupWithdrawnHostedHealthDataConsent(input: {
+  memberId: string;
+  prisma: PrismaClient;
+  request: Request;
+}): Promise<void> {
+  let consentStillRevoked = false;
+  await runWithdrawalCleanup("consent state", async () => {
+    consentStillRevoked = await readHostedHealthDataConsentState({
+      memberId: input.memberId,
+      prisma: input.prisma,
+    }) === "revoked";
+  });
+  if (!consentStillRevoked) {
+    return;
+  }
+
+  // Stop in-flight processing first. Provider cleanup is intentionally
+  // best-effort and cannot change the already committed withdrawal result.
+  await terminateHostedUserRuntimeWorkflowBestEffort({
+    reason: "health-data-consent-withdrawn",
+    userId: input.memberId,
+  });
   await runWithdrawalCleanup("device connections", async () => {
     await disconnectAllHostedDeviceSyncConnectionsForUser({
       request: input.request,
@@ -59,15 +81,6 @@ export async function withdrawHostedHealthDataConsent(input: {
       prisma: input.prisma,
     });
   });
-
-  // Disconnect cleanup can enqueue one final state-change wake. Terminating
-  // afterward prevents a sleeping runtime from resuming pre-withdrawal work.
-  await terminateHostedUserRuntimeWorkflowBestEffort({
-    reason: "health-data-consent-withdrawn",
-    userId: input.memberId,
-  });
-
-  return status;
 }
 
 async function runWithdrawalCleanup(

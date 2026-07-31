@@ -94,12 +94,22 @@ revocation immediately fails closed at AI and message admission, queued runtime
 usage admission, new health-source connection, device webhook, scheduled sync,
 and companion health-processing boundaries.
 
-The cleanup phase best-effort disconnects wearable sources, revokes active
-meal-photo enrollments, and terminates the member runtime. Cleanup failure does
-not restore consent or resume processing; repeating withdrawal retries cleanup
-without appending another consent event. A missing legacy grant is a distinct
-state and cannot be turned into an explicit withdrawal by the withdrawal
-endpoint.
+Consent grant/revocation and health-processing admissions serialize on the
+hosted member row, with connection-level locks acquired afterward. Connection
+establishment, webhook, scheduled-sync, companion, and meal-photo credential
+writes therefore re-read consent inside the same transaction that persists
+work. An explicitly revoked exact message sender or shared-data grantor is
+excluded even when another group participant keeps the synthetic room runtime
+active.
+
+The route returns once revocation commits and schedules cleanup after the
+response. Cleanup terminates the member runtime first, then best-effort
+disconnects wearable sources and revokes active meal-photo enrollments. It
+re-checks the durable grant so delayed cleanup cannot undo renewed consent.
+Cleanup failure does not restore consent or resume processing; repeating
+withdrawal retries cleanup without appending another consent event. A missing
+legacy grant is a distinct state and cannot be turned into an explicit
+withdrawal by the withdrawal endpoint.
 
 Withdrawal does not delete the member account, existing data, or subscription.
 Settings, account export, and account deletion remain available. Export uses
@@ -120,9 +130,10 @@ The authenticated dashboard layout reads consent status before starting the
 browser-vault provider. While launch consent is absent or stale, the requested
 route stays mounted but the browser-vault provider exposes an empty context,
 starts no session request, and clears any decrypted warm snapshot that may have
-loaded before the server check. Except on `/records/connect` and `/settings`,
-the layout places the current consent card in a non-dismissible modal over the
-inert dashboard.
+loaded before the server check. The layout places the current consent card in a
+non-dismissible modal over the inert dashboard, except on `/records/connect`
+and on `/settings` for an explicitly withdrawn member.
+
 A member with both historical launch grants and stale document versions sees
 update-specific copy; members with zero or partial launch consent see generic
 recovery copy. The reminder does not replace or block the device-connect page.

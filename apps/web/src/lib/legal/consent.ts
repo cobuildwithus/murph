@@ -9,7 +9,10 @@ import {
 } from "@prisma/client";
 
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
-import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
+import {
+  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  lockHostedMemberRow,
+} from "../hosted-onboarding/shared";
 
 export const HOSTED_LEGAL_DOCUMENT_VERSION = "2026-07-23";
 export const HOSTED_PRIVACY_POLICY_VERSION = "2026-07-23";
@@ -346,6 +349,7 @@ export async function recordHostedConsentGrant(input: {
     ?? (scopeDefinition.revocable ? "granted" : "accepted");
 
   await input.prisma.$transaction(async (tx) => {
+    await lockHostedMemberRow(tx, input.memberId);
     const event = await tx.hostedConsentEvent.create({
       data: {
         action,
@@ -415,6 +419,10 @@ export async function revokeHostedConsentScope(input: {
   const now = input.now ?? new Date();
 
   await input.prisma.$transaction(async (tx) => {
+    // Health-processing admissions use this same member row as their
+    // serialization fence. Once this lock is acquired, every later admission
+    // must observe the committed revocation before it can persist new work.
+    await lockHostedMemberRow(tx, input.memberId);
     const existingGrant = await tx.hostedConsentGrant.findUnique({
       where: {
         memberId_scope: {
@@ -551,6 +559,22 @@ export function resolveHostedHealthDataConsentState(
     return grant.status;
   }
   return "missing";
+}
+
+/**
+ * Set-based form of the explicit-withdrawal rule. A missing historical grant
+ * remains compatible with legacy members; only a persisted revocation denies
+ * health-data processing.
+ */
+export function hostedHealthDataConsentNotRevokedWhere(): Prisma.HostedMemberWhereInput {
+  return {
+    consentGrants: {
+      none: {
+        scope: HOSTED_HEALTH_DATA_CONSENT_SCOPE,
+        status: "revoked",
+      },
+    },
+  };
 }
 
 export async function readHostedHealthDataConsentState(input: {

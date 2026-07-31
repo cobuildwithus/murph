@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-07-30
-Updated: 2026-07-30
+Updated: 2026-07-31
 
 ## Goal
 
@@ -67,15 +67,16 @@ Updated: 2026-07-30
 
 ## Tasks
 
-1. Inventory current legal consent, admission, cleanup, export, and Settings
+1. [x] Inventory current legal consent, admission, cleanup, export, and Settings
    owners; compare every supplied patch hunk against current `main`.
-2. Implement the smallest current-owner correction and update durable docs.
-3. Add or rebase focused unit, route, rendering, and orchestration coverage.
-4. Run focused verification and direct desktop/mobile design-catalog proof.
-5. Commit and push the candidate, open the PR, then run preliminary specialist,
-   Claude UI, final ReviewGPT, and CI gates concurrently where allowed.
-6. Resolve accepted findings, rerun affected proof, finalize the plan/commit,
-   and prove mergeability.
+2. [x] Implement the smallest current-owner correction and update durable docs.
+3. [x] Add or rebase focused unit, route, rendering, and orchestration coverage.
+4. [x] Run focused verification and direct desktop/mobile design-catalog proof.
+5. [ ] Commit and push the corrected candidate, then retry the preliminary
+   specialist pass, run final ReviewGPT correction verification, and prove the
+   exact head in CI.
+6. [ ] Resolve any remaining accepted findings, complete the parent final
+   review, archive this plan, and prove mergeability.
 
 ## Decisions
 
@@ -85,6 +86,11 @@ Updated: 2026-07-30
   not add a second withdrawal state owner.
 - Commit explicit revocation before best-effort cleanup, and recheck that state
   before queued model usage and after the slow export-authorization boundary.
+- Serialize consent grant/revocation and health-processing admission on the
+  hosted member row; acquire connection locks only after that authority read.
+- Return the committed withdrawal response before provider cleanup, terminate
+  runtime work first in the deferred cleanup, and re-check consent so delayed
+  cleanup cannot undo renewal.
 - Keep the public design study fully inert by rendering the exported dialog
   bodies inline; preview-only state must not enter the production component or
   escape through a portal.
@@ -98,8 +104,11 @@ Updated: 2026-07-30
   compatibly, re-consent restores only after current documents are accepted,
   cleanup failures do not undo revocation, and all required checks/reviews pass.
 - Completed local proof:
-  - the focused regression command passed 22 files and 656 tests;
-  - hosted-web and hosted-execution typechecks passed;
+  - the original candidate regression command passed 22 files and 624 tests;
+  - the review-remediation regression command covers 11 focused files and more
+    than 400 consent, messaging, runtime, group, device, and Settings tests;
+  - hosted-web, hosted-execution, and device-syncd typechecks passed;
+  - the focused device-syncd public-ingress suite passed 67 tests;
   - hosted-web ESLint passed with existing warnings only, and focused changed
     paths passed without new warnings;
   - the real production dialog focused Cancel first, and every target
@@ -107,6 +116,12 @@ Updated: 2026-07-30
   - the Claude Code UI double-check found and verified fixes for the public
     preview portal escape, destructive initial focus, mobile row rhythm, and
     hidden withdrawal failure feedback, ending with no findings.
+- Final ReviewGPT round 1 found five accepted authority, ordering, cleanup, and
+  Settings-gate issues. The corrected candidate now enforces exact Linq sender
+  and grantor consent, transaction-local source and meal admission, unconditional
+  runtime reconciliation denial, response-independent cleanup, and the narrow
+  explicit-withdrawal Settings exception. Final correction verification and a
+  valid preliminary specialist retry remain pending on the pushed exact head.
 - The design catalog emitted an existing hydration mismatch from the unrelated
   Family billing recovery study. It did not involve or prevent the target
   consent studies from rendering and is outside this task's diff.

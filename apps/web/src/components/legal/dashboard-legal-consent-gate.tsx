@@ -29,8 +29,16 @@ export function DashboardLegalConsentGate({
 }) {
   const isUpdate = variant === "update";
   const pathname = usePathname();
+  const healthDataExplicitlyWithdrawn = initialStatus.scopes.some(
+    (scope) =>
+      scope.scope === "launch.health-data"
+      && scope.grant?.status === "revoked",
+  );
 
-  if (pathname === "/records/connect" || pathname === "/settings") {
+  if (
+    pathname === "/records/connect"
+    || (pathname === "/settings" && healthDataExplicitlyWithdrawn)
+  ) {
     return null;
   }
 

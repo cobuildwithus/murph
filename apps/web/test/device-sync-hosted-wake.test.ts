@@ -36,6 +36,7 @@ const mocks = vi.hoisted(() => {
     upsertDirtyConnection: vi.fn(),
     upsertConnectionSource: vi.fn(),
     withConnectionMutationLock: vi.fn(),
+    withHealthDataAdmissionLock: vi.fn(),
     prismaTx: {
       __tx: true,
       $queryRaw: vi.fn(),
@@ -325,6 +326,7 @@ vi.mock("@/src/lib/device-sync/prisma-store", () => ({
     upsertDirtyConnection = mocks.upsertDirtyConnection;
     upsertConnectionSource = mocks.upsertConnectionSource;
     withConnectionMutationLock = mocks.withConnectionMutationLock;
+    withHealthDataAdmissionLock = mocks.withHealthDataAdmissionLock;
     prisma = mocks.prisma;
   },
   generateHostedAgentBearerToken: vi.fn(),
@@ -533,6 +535,11 @@ describe("hosted device-sync wakes", () => {
     mocks.registryGet.mockReturnValue(undefined);
     mocks.registryList.mockReturnValue([]);
     mocks.withConnectionMutationLock.mockImplementation(async (
+      _connectionId: string,
+      callback: (tx: typeof mocks.prismaTx) => Promise<unknown>,
+    ) => callback(mocks.prismaTx));
+    mocks.withHealthDataAdmissionLock.mockImplementation(async (
+      _userId: string,
       _connectionId: string,
       callback: (tx: typeof mocks.prismaTx) => Promise<unknown>,
     ) => callback(mocks.prismaTx));
@@ -1169,7 +1176,8 @@ describe("hosted device-sync wakes", () => {
       connection.id,
       mocks.prismaTx,
     );
-    expect(mocks.withConnectionMutationLock).toHaveBeenCalledWith(
+    expect(mocks.withHealthDataAdmissionLock).toHaveBeenCalledWith(
+      "user-123",
       connection.id,
       expect.any(Function),
     );
@@ -2479,7 +2487,11 @@ describe("hosted device-sync wakes", () => {
 
     await controlPlane.handleOAuthCallback("oura", { expectedOwnerId: "user-123" });
 
-    expect(mocks.withConnectionMutationLock).toHaveBeenCalledWith("dsc_123", expect.any(Function));
+    expect(mocks.withHealthDataAdmissionLock).toHaveBeenCalledWith(
+      "user-123",
+      "dsc_123",
+      expect.any(Function),
+    );
     expect(mocks.getConnectionForUser).toHaveBeenCalledWith(
       "user-123",
       "dsc_123",
@@ -2615,7 +2627,11 @@ describe("hosted device-sync wakes", () => {
       retryable: false,
     });
 
-    expect(mocks.withConnectionMutationLock).toHaveBeenCalledWith("dsc_123", expect.any(Function));
+    expect(mocks.withHealthDataAdmissionLock).toHaveBeenCalledWith(
+      "user-123",
+      "dsc_123",
+      expect.any(Function),
+    );
     expect(mocks.getConnectionForUser).toHaveBeenCalledWith(
       "user-123",
       "dsc_123",
@@ -2641,7 +2657,7 @@ describe("hosted device-sync wakes", () => {
       retryable: false,
     });
 
-    expect(mocks.withConnectionMutationLock).not.toHaveBeenCalled();
+    expect(mocks.withHealthDataAdmissionLock).not.toHaveBeenCalled();
     expect(mocks.upsertConnectionSource).not.toHaveBeenCalled();
     expect(mocks.createSignal).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
@@ -3047,7 +3063,8 @@ describe("hosted device-sync wakes", () => {
       accepted: true,
     });
 
-    expect(mocks.withConnectionMutationLock).toHaveBeenCalledWith(
+    expect(mocks.withHealthDataAdmissionLock).toHaveBeenCalledWith(
+      "user-123",
       "dsc_123",
       expect.any(Function),
     );
@@ -3424,7 +3441,8 @@ describe("hosted device-sync wakes", () => {
       retryable: false,
     });
 
-    expect(mocks.withConnectionMutationLock).toHaveBeenCalledWith(
+    expect(mocks.withHealthDataAdmissionLock).toHaveBeenCalledWith(
+      "user-123",
       establishedConnection.id,
       expect.any(Function),
     );
@@ -4307,7 +4325,8 @@ describe("hosted device-sync wakes", () => {
       "claim-token",
       mocks.prismaTx,
     );
-    expect(mocks.withConnectionMutationLock).toHaveBeenCalledWith(
+    expect(mocks.withHealthDataAdmissionLock).toHaveBeenCalledWith(
+      "user-123",
       "dsc_123",
       expect.any(Function),
     );

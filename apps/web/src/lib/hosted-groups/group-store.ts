@@ -31,6 +31,7 @@ import {
 import {
   assertHostedHistoricalLaunchConsentGranted,
   assertHostedLaunchRequiredConsentGranted,
+  hostedHealthDataConsentNotRevokedWhere,
 } from "../legal/consent";
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
 import {
@@ -752,7 +753,12 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
             take: HOSTED_GROUP_SHARED_READ_MAX_GRANTS + 1,
             where: {
               destinationMemberId: input.runtimeMemberId,
-              grantor: activeHostedMemberAccessWhere(),
+              grantor: {
+                AND: [
+                  activeHostedMemberAccessWhere(),
+                  hostedHealthDataConsentNotRevokedWhere(),
+                ],
+              },
               grantorMemberId: { in: memberIds },
               projectionScopeKey: { in: authorityScopeKeys },
               status: "granted",

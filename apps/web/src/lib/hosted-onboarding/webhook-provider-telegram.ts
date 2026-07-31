@@ -235,15 +235,6 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     return buildIgnoredTelegramWebhookPlan("suspended-member");
   }
 
-  if (summary.isDirect) {
-    await upsertHostedMemberTelegramRoutingBindingTx({
-      memberId: existingMember.id,
-      prisma: input.prisma,
-      telegramThreadId: telegramMessage.threadId,
-      telegramUserId: summary.senderTelegramUserId,
-    });
-  }
-
   const accessNow = new Date();
   if (!(await readHostedRuntimeAiAccessDecision({
     memberId: existingMember.id,
@@ -251,6 +242,15 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     prisma: input.prisma,
   })).allowed) {
     return buildIgnoredTelegramWebhookPlan("inactive-member");
+  }
+
+  if (summary.isDirect) {
+    await upsertHostedMemberTelegramRoutingBindingTx({
+      memberId: existingMember.id,
+      prisma: input.prisma,
+      telegramThreadId: telegramMessage.threadId,
+      telegramUserId: summary.senderTelegramUserId,
+    });
   }
 
   let runtimeMemberId = existingMember.id;

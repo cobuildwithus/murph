@@ -550,6 +550,7 @@ export async function planHostedLinqMessageEditedWebhook(input: {
   const originalIsDirect =
     originalWake.message.linqMessage.threadIsDirect !== false;
   if (originalIsDirect) {
+    await lockHostedMemberRow(input.prisma, sourceUserId);
     const [routing, accessDecision] = await Promise.all([
       readHostedMemberRoutingState({
         memberId: sourceUserId,
@@ -575,8 +576,18 @@ export async function planHostedLinqMessageEditedWebhook(input: {
     }
   } else {
     const authorityNow = input.now ?? new Date();
-    const senderMemberId = originalWake.message.senderMemberId;
-    const [route, participant, containerAccess] =
+    const senderMemberId = originalWake.message.senderMemberId
+      ?? (
+        await resolveHostedThreadContainerInboundParticipantTx({
+          participantContact,
+          prisma: input.prisma,
+        })
+      )?.memberId
+      ?? null;
+    if (senderMemberId) {
+      await lockHostedMemberRow(input.prisma, senderMemberId);
+    }
+    const [route, participant, containerAccess, senderAccess] =
       await Promise.all([
         readHostedThreadRouteByThreadIdentity({
           channel: "linq",
@@ -602,10 +613,22 @@ export async function planHostedLinqMessageEditedWebhook(input: {
           now: authorityNow,
           prisma: input.prisma,
         }),
+        senderMemberId
+          ? readHostedRuntimeAiAccessDecision({
+              memberId: senderMemberId,
+              now: authorityNow,
+              prisma: input.prisma,
+            })
+          : null,
       ]);
     if (
       route?.containerMemberId !== sourceUserId
       || !containerAccess.allowed
+      || (
+        senderAccess !== null
+        && !senderAccess.allowed
+        && senderAccess.reason === "health_data_consent_withdrawn"
+      )
       || (
         participant !== null
         && (
@@ -1009,6 +1032,57 @@ export async function planHostedOnboardingLinqWebhook(input: {
         routeStage: "ignored-suspended-member",
       }),
     );
+  }
+
+  if (existingMember) {
+    await lockHostedMemberRow(input.prisma, existingMember.id);
+    const exactMemberAccess = await readHostedRuntimeAiAccessDecision({
+      memberId: existingMember.id,
+      noticeSeed: input.event.event_id,
+      now: new Date(occurredAt),
+      prisma: input.prisma,
+    });
+    if (
+      !exactMemberAccess.allowed
+      && exactMemberAccess.reason === "health_data_consent_withdrawn"
+    ) {
+      if (
+        !isHostedLinqDirectChatAttested(messageEvent)
+        || !exactMemberAccess.userNotice
+      ) {
+        return logHostedLinqWebhookPlannerDecisionAndReturn(
+          buildIgnoredLinqWebhookPlan("health-data-consent-withdrawn"),
+          buildHostedLinqWebhookPlannerDetails(input.event, context, {
+            accessReason: exactMemberAccess.reason,
+            existingMemberActive: false,
+            existingMemberMatch,
+            reason: "health-data-consent-withdrawn",
+            routeStage: "health-data-consent-withdrawn",
+          }),
+        );
+      }
+      return logHostedLinqWebhookPlannerDecisionAndReturn(
+        buildInactiveMemberAccessNoticeResponse({
+          chatId: summary.chatId,
+          memberId: existingMember.id,
+          message: exactMemberAccess.userNotice.message,
+          messageId: summary.messageId,
+          noticeCode: exactMemberAccess.userNotice.code,
+          occurredAt,
+          sourceEventId: input.event.event_id,
+        }),
+        buildHostedLinqWebhookPlannerDetails(input.event, context, {
+          accessReason: exactMemberAccess.reason,
+          existingMemberActive: false,
+          existingMemberMatch,
+          noticeCode: exactMemberAccess.userNotice.code,
+          reason: HOSTED_LINQ_INACTIVE_MEMBER_NOTICE_REASON[
+            exactMemberAccess.userNotice.code
+          ],
+          routeStage: "health-data-consent-withdrawn",
+        }),
+      );
+    }
   }
 
   const buildUnassignableHomeLinePlan = (routeStage: string) =>
@@ -2069,14 +2143,44 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
     })
   ) {
     verifiedInboundParticipant =
-      await renewHostedThreadContainerParticipantAccessFromInboundTx({
-        containerMemberId: input.route.containerMemberId,
-        now: participantAccessNow,
-        occurredAt,
+      await resolveHostedThreadContainerInboundParticipantTx({
         participantContact,
         prisma: input.prisma,
         resolvedParticipantMemberId: input.resolvedParticipantMemberId,
       });
+    if (verifiedInboundParticipant) {
+      await lockHostedMemberRow(
+        input.prisma,
+        verifiedInboundParticipant.memberId,
+      );
+      const senderAccess = await readHostedRuntimeAiAccessDecision({
+        memberId: verifiedInboundParticipant.memberId,
+        now: participantAccessNow,
+        prisma: input.prisma,
+      });
+      if (
+        !senderAccess.allowed
+        && senderAccess.reason === "health_data_consent_withdrawn"
+      ) {
+        return logHostedLinqWebhookPlannerDecisionAndReturn(
+          buildIgnoredLinqWebhookPlan("health-data-consent-withdrawn"),
+          buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
+            accessReason: senderAccess.reason,
+            existingMemberActive: false,
+            existingMemberMatch: "none",
+            reason: "health-data-consent-withdrawn",
+            routeStage: "thread-route-sender-consent-withdrawn",
+          }),
+        );
+      }
+      await renewHostedThreadContainerParticipantAccessTx({
+        containerMemberId: input.route.containerMemberId,
+        now: participantAccessNow,
+        observedAt: new Date(occurredAt),
+        participantMemberId: verifiedInboundParticipant.memberId,
+        prisma: input.prisma,
+      });
+    }
   }
 
   let containerAccessActive = (await readHostedRuntimeAiAccessDecision({
@@ -2519,6 +2623,7 @@ async function planHostedLinqGroupChatWebhook(input: {
   }
   const senderIdentityMatch: HostedLinqExistingMemberMatch =
     participantContact.kind === "phone" ? "phone-identity" : "verified-email";
+  await lockHostedMemberRow(input.prisma, sender.id);
   if (
     isHostedMemberSuspended(sender.suspendedAt)
     || !(await readHostedRuntimeAiAccessDecision({
@@ -3245,10 +3350,7 @@ function serializedHostedLinqWakeBytes(
   return new TextEncoder().encode(JSON.stringify(wake)).byteLength;
 }
 
-async function renewHostedThreadContainerParticipantAccessFromInboundTx(input: {
-  containerMemberId: string;
-  now: Date;
-  occurredAt: string;
+async function resolveHostedThreadContainerInboundParticipantTx(input: {
   participantContact: HostedLinqParticipantContact;
   prisma: Prisma.TransactionClient;
   resolvedParticipantMemberId?: string;
@@ -3268,13 +3370,6 @@ async function renewHostedThreadContainerParticipantAccessFromInboundTx(input: {
     return null;
   }
 
-  await renewHostedThreadContainerParticipantAccessTx({
-    containerMemberId: input.containerMemberId,
-    now: input.now,
-    observedAt: new Date(input.occurredAt),
-    participantMemberId,
-    prisma: input.prisma,
-  });
   return {
     contact: input.participantContact,
     memberId: participantMemberId,

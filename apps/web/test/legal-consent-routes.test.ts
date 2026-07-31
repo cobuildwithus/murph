@@ -5,7 +5,9 @@ vi.mock("server-only", () => ({}));
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
+  after: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
+  cleanupWithdrawnHostedHealthDataConsent: vi.fn(),
   getPrisma: vi.fn(),
   grantHostedOptionalFeatureConsent: vi.fn(),
   readHostedConsentStatus: vi.fn(),
@@ -18,6 +20,11 @@ const mocks = vi.hoisted(() => ({
   prismaClient: {
     label: "test-prisma",
   },
+}));
+
+vi.mock("next/server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/server")>()),
+  after: mocks.after,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -49,6 +56,8 @@ vi.mock("@/src/lib/legal/consent", async () => {
 });
 
 vi.mock("@/src/lib/hosted-privacy/health-data-consent-withdrawal", () => ({
+  cleanupWithdrawnHostedHealthDataConsent:
+    mocks.cleanupWithdrawnHostedHealthDataConsent,
   withdrawHostedHealthDataConsent: mocks.withdrawHostedHealthDataConsent,
 }));
 
@@ -480,8 +489,17 @@ describe("legal consent routes", () => {
     expect(mocks.withdrawHostedHealthDataConsent).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: mocks.prismaClient,
-      request: expect.any(Request),
       source: "settings-health-data",
+    });
+    expect(mocks.after).toHaveBeenCalledWith(expect.any(Function));
+    expect(mocks.cleanupWithdrawnHostedHealthDataConsent).not.toHaveBeenCalled();
+    const cleanup = mocks.after.mock.calls[0]?.[0];
+    expect(cleanup).toBeTypeOf("function");
+    await cleanup?.();
+    expect(mocks.cleanupWithdrawnHostedHealthDataConsent).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+      request: expect.any(Request),
     });
     expect(mocks.revokeHostedConsentScope).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual(currentStatus);

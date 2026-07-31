@@ -446,7 +446,8 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
     source: "connection-established",
     userId: ownerId,
   });
-  const mailboxAppend = await input.store.withConnectionMutationLock(
+  const mailboxAppend = await input.store.withHealthDataAdmissionLock(
+    ownerId,
     input.account.id,
     async (tx) => {
       const current = await input.store.getConnectionForUser(ownerId, input.account.id, tx);
@@ -696,95 +697,99 @@ async function persistHostedDeviceSyncCompanionResource(input: {
   wakeReason: string;
 }): Promise<void> {
   const result = await retryHostedDirtyStateContention(async () =>
-    input.store.withConnectionMutationLock(input.connectionId, async (tx) => {
-      const connection = await input.store.getConnectionForUser(
-        input.userId,
-        input.connectionId,
-        tx,
-      );
-      if (
-        !connection
-        || connection.provider !== "junction"
-        || connection.status !== "active"
-        || (
-          input.setupRequirement === "established"
-          && !isEstablishedDeviceSyncConnection(connection)
-        )
-      ) {
-        throw deviceSyncError({
-          code: "COMPANION_HEALTH_CONNECTION_REQUIRED",
-          message: "Finish companion health setup before syncing health data.",
-          retryable: false,
-          httpStatus: 409,
-        });
-      }
+    input.store.withHealthDataAdmissionLock(
+      input.userId,
+      input.connectionId,
+      async (tx) => {
+        const connection = await input.store.getConnectionForUser(
+          input.userId,
+          input.connectionId,
+          tx,
+        );
+        if (
+          !connection
+          || connection.provider !== "junction"
+          || connection.status !== "active"
+          || (
+            input.setupRequirement === "established"
+            && !isEstablishedDeviceSyncConnection(connection)
+          )
+        ) {
+          throw deviceSyncError({
+            code: "COMPANION_HEALTH_CONNECTION_REQUIRED",
+            message: "Finish companion health setup before syncing health data.",
+            retryable: false,
+            httpStatus: 409,
+          });
+        }
 
-      const dirtyUpdate = await input.store.upsertDirtyConnection({
-        connectionId: connection.id,
-        dirtyAt: input.occurredAt,
-        eventType: input.eventType,
-        provider: connection.provider,
-        resourceCategory: input.resourceCategory,
-        resources: [input.resource],
-        tx,
-        userId: input.userId,
-      });
-      // Insert/no-op first so an exact replay at the cap remains a successful
-      // no-op. A net-new 17th payload rolls back, preserving the bounded queue.
-      const pendingPayloadCount = await tx.deviceSyncDirtyPayload.count({
-        where: {
+        const dirtyUpdate = await input.store.upsertDirtyConnection({
           connectionId: connection.id,
-          userId: input.userId,
-        },
-      });
-      if (pendingPayloadCount > COMPANION_HEALTH_MAX_PENDING_PAYLOADS) {
-        throw deviceSyncError({
-          code: "COMPANION_HEALTH_BACKLOG_FULL",
-          message: "Companion health sync is still processing. Retry later.",
-          retryable: true,
-          httpStatus: 429,
-        });
-      }
-      if (!dirtyUpdate.shouldRequestWake) {
-        return { wakeMailboxItemId: null };
-      }
-
-      const wake = buildHostedDeviceSyncWake({
-        connectionId: connection.id,
-        eventId: buildHostedDeviceSyncDirtyTransitionWakeEventId({
-          connectionId: connection.id,
-          dirtyRevision: dirtyUpdate.dirty.dirtyRevision,
-          expectedConnectedAt: connection.connectedAt,
-          provider: connection.provider,
-          userId: input.userId,
-        }),
-        expectedConnectedAt: connection.connectedAt,
-        hint: {
+          dirtyAt: input.occurredAt,
           eventType: input.eventType,
-          occurredAt: input.occurredAt,
-          reason: input.wakeReason,
+          provider: connection.provider,
           resourceCategory: input.resourceCategory,
-        },
-        occurredAt: input.occurredAt,
-        provider: connection.provider,
-        source: "webhook-hint",
-        userId: input.userId,
-      });
-      const mailboxAppend = await appendHostedMailboxEnvelopeTx({
-        envelope: wake,
-        tx,
-      });
-      if (mailboxAppend.dedupeConflict) {
-        throw deviceSyncError({
-          code: "HOSTED_DEVICE_SYNC_DIRTY_WAKE_DEDUPE_CONFLICT",
-          httpStatus: 503,
-          message: "Hosted device-sync dirty wake conflicted with an existing wake identity.",
-          retryable: true,
+          resources: [input.resource],
+          tx,
+          userId: input.userId,
         });
-      }
+        // Insert/no-op first so an exact replay at the cap remains a successful
+        // no-op. A net-new 17th payload rolls back, preserving the bounded queue.
+        const pendingPayloadCount = await tx.deviceSyncDirtyPayload.count({
+          where: {
+            connectionId: connection.id,
+            userId: input.userId,
+          },
+        });
+        if (pendingPayloadCount > COMPANION_HEALTH_MAX_PENDING_PAYLOADS) {
+          throw deviceSyncError({
+            code: "COMPANION_HEALTH_BACKLOG_FULL",
+            message: "Companion health sync is still processing. Retry later.",
+            retryable: true,
+            httpStatus: 429,
+          });
+        }
+        if (!dirtyUpdate.shouldRequestWake) {
+          return { wakeMailboxItemId: null };
+        }
 
-      return { wakeMailboxItemId: mailboxAppend.item.id };
-    }));
+        const wake = buildHostedDeviceSyncWake({
+          connectionId: connection.id,
+          eventId: buildHostedDeviceSyncDirtyTransitionWakeEventId({
+            connectionId: connection.id,
+            dirtyRevision: dirtyUpdate.dirty.dirtyRevision,
+            expectedConnectedAt: connection.connectedAt,
+            provider: connection.provider,
+            userId: input.userId,
+          }),
+          expectedConnectedAt: connection.connectedAt,
+          hint: {
+            eventType: input.eventType,
+            occurredAt: input.occurredAt,
+            reason: input.wakeReason,
+            resourceCategory: input.resourceCategory,
+          },
+          occurredAt: input.occurredAt,
+          provider: connection.provider,
+          source: "webhook-hint",
+          userId: input.userId,
+        });
+        const mailboxAppend = await appendHostedMailboxEnvelopeTx({
+          envelope: wake,
+          tx,
+        });
+        if (mailboxAppend.dedupeConflict) {
+          throw deviceSyncError({
+            code: "HOSTED_DEVICE_SYNC_DIRTY_WAKE_DEDUPE_CONFLICT",
+            httpStatus: 503,
+            message: "Hosted device-sync dirty wake conflicted with an existing wake identity.",
+            retryable: true,
+          });
+        }
+
+        return { wakeMailboxItemId: mailboxAppend.item.id };
+      },
+    ));
 
   if (result.wakeMailboxItemId) {
     await startHostedDeviceSyncWakeWorkflow(result.wakeMailboxItemId, {
@@ -824,6 +829,8 @@ export async function appendHostedDeviceSyncManualReconcileWake(input: {
     userId: input.userId,
   });
   const appendResult = await persistHostedDeviceSyncWake({
+    healthDataConnectionId: input.connectionId,
+    healthDataUserId: input.userId,
     wake,
     store,
     persist: async () => {},
@@ -887,6 +894,8 @@ export async function appendHostedDeviceSyncScheduledReconcileWake(input: {
     userId: input.userId,
   });
   const appendResult = await persistHostedDeviceSyncWake({
+    healthDataConnectionId: input.connectionId,
+    healthDataUserId: input.userId,
     signalFailureMode: "throw",
     wake,
     store,
@@ -936,6 +945,8 @@ export function buildHostedDeviceSyncScheduledReconcileWakeEventId(input: {
 }
 
 async function persistHostedDeviceSyncWake(input: {
+  healthDataConnectionId?: string;
+  healthDataUserId?: string;
   wake: HostedExecutionWake;
   signalFailureMode?: "best_effort" | "throw";
   startWorkflowOnDuplicate?: boolean;
@@ -956,7 +967,7 @@ async function persistHostedDeviceSyncWake(input: {
     result: null,
   };
 
-  await input.store.prisma.$transaction(async (tx) => {
+  const persistInTransaction = async (tx: HostedPrismaTransactionClient) => {
     await input.persist(tx);
     const mailboxAppend = await appendHostedMailboxEnvelopeTx({
       envelope: input.wake,
@@ -965,7 +976,16 @@ async function persistHostedDeviceSyncWake(input: {
     mailboxItemId = mailboxAppend.item.id;
     mailboxAppendState.result = mailboxAppend;
     await input.persistAfterAppend?.(tx, mailboxAppend);
-  });
+  };
+  if (input.healthDataUserId && input.healthDataConnectionId) {
+    await input.store.withHealthDataAdmissionLock(
+      input.healthDataUserId,
+      input.healthDataConnectionId,
+      persistInTransaction,
+    );
+  } else {
+    await input.store.prisma.$transaction(persistInTransaction);
+  }
 
   const mailboxAppendResult = mailboxAppendState.result;
   if (!mailboxItemId || !mailboxAppendResult) {
@@ -1063,7 +1083,10 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
   userId: string;
 }): Promise<void> {
   const result = await retryHostedDirtyStateContention(async () =>
-    input.store.withConnectionMutationLock(input.connectionId, async (tx) => {
+    input.store.withHealthDataAdmissionLock(
+      input.userId,
+      input.connectionId,
+      async (tx) => {
       const current = await input.store.getConnectionForUser(
         input.userId,
         input.connectionId,
@@ -1192,7 +1215,8 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
       return {
         wakeMailboxItemId,
       };
-    }));
+      },
+    ));
 
   if (result.wakeMailboxItemId) {
     await startHostedDeviceSyncWakeWorkflow(result.wakeMailboxItemId, {
