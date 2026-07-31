@@ -51,7 +51,7 @@ describe("hosted billing plan quotes", () => {
     })).toBe("immediate");
   });
 
-  it("quotes the ordinary Group trial choice after the free trial", () => {
+  it("quotes the ordinary Core trial choice after the free trial", () => {
     const quote = createHostedBillingPlanQuote({
       memberId: "member_trial_quote",
       now: NOW,
@@ -66,7 +66,7 @@ describe("hosted billing plan quotes", () => {
     });
 
     expect(quote).toMatchObject({
-      label: "Choose Group after your trial ($3.50/month)",
+      label: "Choose Core after your trial ($3.50/month)",
       monthlyPriceUsdCents: 350,
       targetPlanCode: "launch_group_monthly",
       timing: "at_trial_end",

@@ -117,6 +117,83 @@ describe("assistant plan usage tool", () => {
     );
   });
 
+  it("projects the legacy Group wire name as Core for the assistant", async () => {
+    const request = readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          targetPlanCode: "launch_group_monthly",
+        },
+        namespace: "murph",
+        tool: "plan_usage",
+      },
+    });
+    if (!request) {
+      throw new Error("Expected a plan usage dynamic tool request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: buildHostedToolContext({
+        read: vi.fn(async () => ({
+          accessKind: "paid" as const,
+          availablePlans: [
+            {
+              code: "launch_group_monthly" as const,
+              displayName: "Group" as const,
+              monthlyPriceUsdCents: 350,
+              selectable: true as const,
+            },
+          ],
+          forecast: null,
+          generatedAt: "2026-07-30T12:00:00.000Z",
+          periodEnd: "2026-08-30T12:00:00.000Z",
+          periodKind: "monthly" as const,
+          periodStart: "2026-07-30T12:00:00.000Z",
+          planCode: "launch_group_monthly" as const,
+          planName: "Group" as const,
+          recommendedAction: {
+            kind: "change_plan" as const,
+            label: "Choose Group next month",
+            targetPlanCode: "launch_group_monthly" as const,
+            url: "https://example.test/settings#subscription",
+          },
+          remainingPercent: 50,
+          scheduledPlan: {
+            code: "launch_group_monthly" as const,
+            displayName: "Group" as const,
+            effectiveAt: "2026-08-30T12:00:00.000Z",
+          },
+          status: "active" as const,
+          subscriptionActionQuote: {
+            action: "change_plan" as const,
+            expiresAt: "2026-07-30T12:10:00.000Z",
+            label: "Choose Group after your trial ($3.50/month)",
+            monthlyPriceUsdCents: 350,
+            quoteId: "quote_test_group",
+            targetPlanCode: "launch_group_monthly" as const,
+            timing: "period_end" as const,
+          },
+          usedPercent: 50,
+        })),
+      }),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request,
+    });
+
+    const resultText = result.rpcResult.contentItems[0]?.text ?? "";
+    expect(result.rpcResult.success).toBe(true);
+    expect(resultText).toContain('"planName":"Core"');
+    expect(resultText).toContain('"displayName":"Core"');
+    expect(resultText).toContain('"label":"Choose Core next month"');
+    expect(resultText).toContain(
+      '"label":"Choose Core after your trial ($3.50/month)"',
+    );
+    expect(resultText).not.toMatch(/\bGroup\b/u);
+  });
+
   it("rejects extra arguments", () => {
     expect(readMurphDynamicToolRequest({
       method: "item/tool/call",

@@ -506,6 +506,7 @@ export async function sendLinqMessage(
   dependencies: LinqRuntimeDependencies = {},
 ): Promise<{
   providerMessageId: string | null
+  providerMessageIds?: string[]
   providerThreadId: string | null
   target: string | null
 }> {
@@ -578,6 +579,9 @@ export async function sendLinqMessage(
 
     return {
       providerMessageId: normalizeOptionalText(created.messageId),
+      ...(created.providerMessageIds && created.providerMessageIds.length > 0
+        ? { providerMessageIds: [...created.providerMessageIds] }
+        : {}),
       providerThreadId: normalizeOptionalText(created.chatId),
       target: normalizeOptionalText(created.chatId),
     }
@@ -600,6 +604,9 @@ export async function sendLinqMessage(
   )
   return {
     providerMessageId: normalizeOptionalText(delivered.message?.id ?? null),
+    ...(delivered.providerMessageIds && delivered.providerMessageIds.length > 0
+      ? { providerMessageIds: [...delivered.providerMessageIds] }
+      : {}),
     providerThreadId: null,
     target,
   }

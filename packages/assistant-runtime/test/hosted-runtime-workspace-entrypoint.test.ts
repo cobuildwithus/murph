@@ -17,6 +17,7 @@ import {
   initializeVault,
   runCanonicalWrite,
   showAutomation,
+  upsertAutomation,
 } from "@murphai/core";
 import {
   openInboxRuntime,
@@ -23027,6 +23028,209 @@ describe("hosted workspace runtime entrypoint", () => {
         undefined,
       );
     } finally {
+      await removeTempRoot(firstVaultRoot);
+      await removeTempRoot(restoredVaultRoot);
+    }
+  });
+
+  test("services a due one-shot automation after its canonical checkpoint survives host abort", async () => {
+    const firstVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const restoredVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const restoredCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const artifactBytesByHash = new Map<string, Uint8Array>();
+    const baseSnapshotRef = createWorkspaceSnapshotV2Ref(
+      "snapshot-one-shot-automation-abort-base",
+    );
+    const checkpointedWorkspaces: HostedWorkspaceState[] = [];
+    const abortController = new AbortController();
+    const abortReason = new Error(
+      "Synthetic stop after one-shot automation checkpoint.",
+    );
+    const originalAutomationPass =
+      mocks.runAssistantAutomationPass.getMockImplementation();
+    let automationPassCount = 0;
+
+    assert.ok(originalAutomationPass);
+    try {
+      await expect(
+        runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
+          async createCheckpointSnapshot() {
+            throw new Error("One-shot abort test should not reach snapshotting.");
+          },
+          async importItem() {
+            throw new Error("One-shot abort test should not import mailbox items.");
+          },
+          platform: createPlatform({
+            artifactBytesByHash,
+            events,
+            mailboxPort: createMailboxPort({
+              events,
+              items: [],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              checkpointWorkspace(request) {
+                const workspace = createWorkspaceState({
+                  nextWakeAt: request.nextWakeAt ?? null,
+                  nextWakeReason: request.nextWakeReason ?? null,
+                  redactedStatus: request.redactedStatus ?? null,
+                  snapshotRef: request.snapshotRef,
+                  version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+                });
+                checkpointedWorkspaces.push(workspace);
+                if (
+                  request.reason === "canonical_runtime_commit"
+                  && !abortController.signal.aborted
+                ) {
+                  abortController.abort(abortReason);
+                }
+                return workspace;
+              },
+              events,
+              workspace: createWorkspaceState({
+                snapshotRef: baseSnapshotRef,
+                version: "0",
+              }),
+            }),
+            workspaceSnapshotPort: {
+              async abortSnapshotSession() {
+                throw new Error("One-shot abort test should not abort snapshots.");
+              },
+              async completeSnapshotSession() {
+                throw new Error("One-shot abort test should not complete snapshots.");
+              },
+              async putSnapshotObjectDirect() {
+                throw new Error("One-shot abort test should not upload snapshots.");
+              },
+              async restoreWorkspaceSnapshot(input) {
+                await initializeVault({
+                  createdAt: TEST_NOW,
+                  vaultRoot: input.durableRoot,
+                });
+              },
+              async startSnapshotSession() {
+                throw new Error("One-shot abort test should not start snapshots.");
+              },
+            },
+          }),
+          signal: abortController.signal,
+          async runAssistantPhase(input) {
+            await upsertAutomation({
+              automationId: "automation_01JQ8PWXP5A68SQM1W0GYM41V9",
+              continuityPolicy: "fresh",
+              instructions: "Send the scheduled reminder.",
+              now: new Date(TEST_NOW),
+              route: {
+                channel: "linq",
+                deliveryTarget: "synthetic_direct_chat",
+                identityId: null,
+                participantId: null,
+                threadId: "synthetic_direct_chat",
+                threadIsDirect: true,
+              },
+              schedule: {
+                at: TEST_NOW,
+                kind: "at",
+              },
+              status: "active",
+              title: "Synthetic one-shot reminder",
+              vaultRoot: input.restored.vaultRoot,
+            });
+            return { progressed: false };
+          },
+          vaultRoot: firstVaultRoot,
+        }),
+      ).rejects.toBe(abortReason);
+
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "canonical_runtime_commit",
+      ]);
+      const workspaceAfterCrash = checkpointedWorkspaces[0];
+      assert.ok(workspaceAfterCrash);
+      assert.deepEqual(workspaceAfterCrash.snapshotRef, baseSnapshotRef);
+      assert.match(workspaceAfterCrash.nextWakeAt ?? "", /^\d{4}-\d{2}-\d{2}T/u);
+      assert.equal(workspaceAfterCrash.nextWakeReason, "assistant");
+
+      mocks.runAssistantAutomationPass.mockImplementation(
+        async () => {
+          automationPassCount += 1;
+          const automation = await showAutomation({
+            automationId: "automation_01JQ8PWXP5A68SQM1W0GYM41V9",
+            vaultRoot: restoredVaultRoot,
+          });
+          assert.ok(automation);
+          assert.equal(automation.status, "active");
+          assert.deepEqual(automation.schedule, {
+            at: TEST_NOW,
+            kind: "at",
+          });
+          return {
+            currentTurnDeliveryIntentIds: [],
+            nextWakeAt: null,
+            progressed: false,
+          };
+        },
+      );
+
+      await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
+        request: {
+          workspaceVersion: workspaceAfterCrash.version,
+        },
+      }), {
+        async createCheckpointSnapshot() {
+          return {
+            snapshotRef: baseSnapshotRef,
+          };
+        },
+        async importItem() {
+          throw new Error("Restored one-shot wake should not need mailbox input.");
+        },
+        platform: createPlatform({
+          artifactBytesByHash,
+          events,
+          mailboxPort: createMailboxPort({
+            events,
+            items: [],
+          }),
+          workspacePort: createWorkspacePort({
+            checkpointRequests: restoredCheckpointRequests,
+            events,
+            workspace: workspaceAfterCrash,
+          }),
+          workspaceSnapshotPort: {
+            async abortSnapshotSession() {
+              throw new Error("One-shot restore test should not abort snapshots.");
+            },
+            async completeSnapshotSession() {
+              throw new Error("One-shot restore test should not complete snapshots.");
+            },
+            async putSnapshotObjectDirect() {
+              throw new Error("One-shot restore test should not upload snapshots.");
+            },
+            async restoreWorkspaceSnapshot(input) {
+              await initializeVault({
+                createdAt: TEST_NOW,
+                vaultRoot: input.durableRoot,
+              });
+            },
+            async startSnapshotSession() {
+              throw new Error("One-shot restore test should not start snapshots.");
+            },
+          },
+        }),
+        vaultRoot: restoredVaultRoot,
+      });
+
+      assert.equal(automationPassCount, 2);
+      assert.ok(
+        restoredCheckpointRequests.some((request) =>
+          request.reason === "idle_shutdown"
+        ),
+      );
+    } finally {
+      mocks.runAssistantAutomationPass.mockImplementation(originalAutomationPass);
       await removeTempRoot(firstVaultRoot);
       await removeTempRoot(restoredVaultRoot);
     }
