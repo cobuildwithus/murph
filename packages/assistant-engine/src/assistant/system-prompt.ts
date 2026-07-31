@@ -353,9 +353,6 @@ function buildStableRouteCapabilityPrompt(
     input.hostedRuntime === true
       ? buildAssistantLowUsageGuidanceText(conversationScope)
       : null,
-    input.hostedRuntime === true
-      ? buildAssistantLateChildResultGuidanceText()
-      : null,
     conversationScope === "direct"
       ? buildAssistantNonBlockingDelegationText()
       : null,
@@ -847,6 +844,11 @@ function buildDynamicTurnContextPrompt(input: AssistantSystemPromptInput): strin
   });
   return joinPromptSections(
     buildAssistantCurrentDateLineText(input.currentLocalDate),
+    input.hostedRuntime === true
+      && audienceVerified
+      && isOrdinaryInboundAssistantTurn(input)
+      ? buildAssistantLateChildResultGuidanceText()
+      : null,
     ...(audienceVerified
       ? normalizeAssistantDynamicContextPrompts(input.assistantDynamicContextPrompts)
       : []),
@@ -1246,10 +1248,18 @@ function buildAssistantNonBlockingDelegationText(): string {
 }
 
 function buildAssistantLateChildResultGuidanceText(): string {
-  return `Late child results:
-- If a child you spawned is still generating when you reply, check whether it has completed on every later turn.
-- Incorporate its result when it has completed and is still relevant.
-- If it is still generating, do not wait or block the reply; check again on the next turn.`;
+  return `Late child results for ordinary inbound turns:
+- On every later ordinary inbound turn, revisit each child you spawned that was still generating when you sent the spawning reply, unless it has already reached a stopping condition below.
+- Use a newly completed result at most once and only when it is still relevant. Stop revisiting that child after using its result, or after it fails, is cancelled, or loses relevance.
+- If it is still generating or no completion is present in the native parent-thread context, do not call \`wait_agent\`, wait, or block the reply. Handle the current request and check again on the next ordinary inbound turn.
+- Never perform this recheck during a scheduled, automation, maintenance, system-notification, or output-only turn.`;
+}
+
+function isOrdinaryInboundAssistantTurn(
+  input: AssistantSystemPromptInput,
+): boolean {
+  return input.scheduledOccurrenceAt == null
+    && (input.turnTrigger == null || input.turnTrigger === "manual-ask");
 }
 
 function buildAssistantMessageReactionGuidanceText(

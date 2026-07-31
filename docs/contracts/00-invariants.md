@@ -112,9 +112,12 @@ it has been explicitly elevated to a cross-cutting invariant.
   invocation-scoped automation or device capability. Root completion or a
   later ordinary turn does not terminate valid detached work merely to rotate
   request authority. If the root replies while its child is still generating,
-  every later root turn checks again for completion. A completed result is
-  incorporated when it remains relevant; an unfinished child never blocks the
-  current reply and is checked again on the next ordinary turn.
+  every later ordinary inbound root turn checks again for completion. A newly
+  completed relevant result is incorporated at most once. Use, failure,
+  cancellation, or loss of relevance ends that child's rechecks; an unfinished
+  child never blocks the current reply and is checked again on the next
+  ordinary inbound turn. Scheduled, automation, maintenance,
+  system-notification, and output-only turns never perform this recheck.
 - Before a hosted workspace snapshot, Murph waits for every exact resident child
   and checks every touched root and resident child for background terminals. A
   root's lifecycle set retains every admitted child until that boundary clears;

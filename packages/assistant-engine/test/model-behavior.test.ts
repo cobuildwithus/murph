@@ -418,6 +418,19 @@ describe('assistant execution prompt contract', () => {
       conversationScope: 'group',
       hostedRuntime: false,
     }))
+    const scheduledPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      hostedRuntime: true,
+      scheduledOccurrenceAt: '2026-04-15T13:00:00.000Z',
+      turnTrigger: 'automation-cron',
+    }))
+    const autoReplyPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      hostedRuntime: true,
+      turnTrigger: 'automation-auto-reply',
+    }))
+    const manualDeliveryPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      hostedRuntime: true,
+      turnTrigger: 'manual-deliver',
+    }))
     const unverifiedPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       conversationScope: 'unverified-external',
       hostedRuntime: true,
@@ -426,10 +439,15 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain('Non-blocking delegation:')
     expect(groupPrompt).not.toContain('Non-blocking delegation:')
     expect(unverifiedPrompt).not.toContain('Non-blocking delegation:')
-    expect(prompt).toContain('Late child results:')
-    expect(groupPrompt).toContain('Late child results:')
-    expect(nonHostedGroupPrompt).not.toContain('Late child results:')
-    expect(unverifiedPrompt).not.toContain('Late child results:')
+    expect(prompt.match(/Late child results for ordinary inbound turns:/g) ?? [])
+      .toHaveLength(1)
+    expect(groupPrompt.match(/Late child results for ordinary inbound turns:/g) ?? [])
+      .toHaveLength(1)
+    expect(nonHostedGroupPrompt).not.toContain('Late child results')
+    expect(scheduledPrompt).not.toContain('Late child results')
+    expect(autoReplyPrompt).not.toContain('Late child results')
+    expect(manualDeliveryPrompt).not.toContain('Late child results')
+    expect(unverifiedPrompt).not.toContain('Late child results')
     expect(prompt).toContain(
       'A loaded skill may instead use the durably accepted current input or attachment as the source and delegate up to three independent persistence families',
     )
@@ -456,22 +474,28 @@ describe('assistant execution prompt contract', () => {
       'Children may outlive the reply.',
     )
     expect(prompt).toContain(
-      'If a child you spawned is still generating when you reply, check whether it has completed on every later turn.',
+      'On every later ordinary inbound turn, revisit each child you spawned that was still generating when you sent the spawning reply',
     )
     expect(prompt).toContain(
-      'Incorporate its result when it has completed and is still relevant.',
+      'Use a newly completed result at most once and only when it is still relevant.',
     )
     expect(prompt).toContain(
-      'If it is still generating, do not wait or block the reply; check again on the next turn.',
+      'Stop revisiting that child after using its result, or after it fails, is cancelled, or loses relevance.',
+    )
+    expect(prompt).toContain(
+      'do not call `wait_agent`, wait, or block the reply.',
+    )
+    expect(prompt).toContain(
+      'Never perform this recheck during a scheduled, automation, maintenance, system-notification, or output-only turn.',
     )
     expect(groupPrompt).toContain(
-      'If a child you spawned is still generating when you reply, check whether it has completed on every later turn.',
+      'On every later ordinary inbound turn, revisit each child you spawned that was still generating when you sent the spawning reply',
     )
     expect(groupPrompt).toContain(
-      'Incorporate its result when it has completed and is still relevant.',
+      'Use a newly completed result at most once and only when it is still relevant.',
     )
     expect(groupPrompt).toContain(
-      'If it is still generating, do not wait or block the reply; check again on the next turn.',
+      'do not call `wait_agent`, wait, or block the reply.',
     )
     expect(prompt).toContain(
       'one short personable line may truthfully say the team is sorting or saving what the user shared',

@@ -62,9 +62,6 @@ const DEFAULT_HOSTED_CODEX_APPROVAL_POLICY = "never";
 const DEFAULT_HOSTED_CODEX_SANDBOX = "danger-full-access";
 const HOSTED_CODEX_MULTI_AGENT_USAGE_HINT_TEXT = [
   "Proactively spawn a hosted child for bounded background parsing or import work and optional enrichment or research whose result is not needed in the current reply, and reply without waiting.",
-  "If a child you spawned is still generating when you reply, check whether it has completed on every later turn.",
-  "If it has completed, incorporate its result when it is still relevant.",
-  "If it has not completed, do not wait or block the reply; check again on the next turn.",
   "Follow the active route or skill contract for child design and completion proof.",
 ].join(" ");
 const HOSTED_CODEX_MULTI_AGENT_MODE_HINT_TEXT =

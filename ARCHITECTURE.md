@@ -1151,19 +1151,22 @@ per session. Each child is a one-shot leaf with one bounded family: no
 interaction with the root or another child, reuse, nested spawn, or background
 terminal is allowed. Root completion and later ordinary turns leave valid
 detached work alone. When a root replies while its child is still generating,
-every later root turn checks Codex's native parent-thread completion context
-again. It incorporates a completed result when still relevant and never waits
-for an unfinished child before replying; the next ordinary turn checks again.
-This adds no queue, wake, or automatic follow-up owner. Before publishing a
-workspace snapshot, the runtime waits for every exact resident child and checks
-every touched root and child for background terminals. The lifecycle owner
-retains the full child set for each root until that boundary clears, so one
-sibling's completion cannot evict another. A routine checkpoint wake only
-interrupts that boundary wait and leaves the App Server plus all resident
-evidence warm. A timeout or unsupported lifecycle stops the exact process and
-fails the boundary closed. Explicit workspace invocation abort/preemption also
-interrupts the wait and synchronously stops the exact process before workspace
-or job-slot ownership can be reused.
+every later ordinary inbound root turn checks Codex's native parent-thread
+completion context again. It incorporates a newly completed relevant result at
+most once and never waits or calls `wait_agent` for an unfinished child before
+replying. Use, failure, cancellation, or loss of relevance stops rechecks for
+that child. Scheduled, automation, maintenance, system-notification, and
+output-only turns never recheck. This adds no queue, wake, or automatic
+follow-up owner. Before publishing a workspace snapshot, the runtime waits for
+every exact resident child and checks every touched root and child for
+background terminals. The lifecycle owner retains the full child set for each
+root until that boundary clears, so one sibling's completion cannot evict
+another. A routine checkpoint wake only interrupts that boundary wait and
+leaves the App Server plus all resident evidence warm. A timeout or unsupported
+lifecycle stops the exact process and fails the boundary closed. Explicit
+workspace invocation abort/preemption also interrupts the wait and
+synchronously stops the exact process before workspace or job-slot ownership
+can be reused.
 
 - Low hosted usage is not a proactive message. Web's existing mailbox allowance check projects an optional coarse low-capacity bit for an allowed conversation batch; the runtime binds it to the accepted input sidecar, and assistant turn context asks Murph to mention it naturally after answering the current request. No balance, price, contributor, or internal accounting reaches the runtime. The hosted developer-policy addition changes the stable assistant contract: every existing native-resume hosted conversation starts one new provider thread on its first turn after deployment, using the existing bounded committed-transcript fallback, and later turns resume that new thread. Exhaustion remains a deterministic notice because denied input cannot start a model turn. Its target is derived after the foreground checkpoint from durable provider-accepted assistant input events: direct Linq and Telegram inputs retain their exact origin; group Linq inputs additionally require exact external-thread route authority. Every accepted input must resolve to the same route, the newest accepted message supplies the reply target, and missing, mixed, or invalid provenance fails closed. The runtime does not keep a parallel mailbox route projection, and a thread-container crossing never falls back to a member home route.
 
