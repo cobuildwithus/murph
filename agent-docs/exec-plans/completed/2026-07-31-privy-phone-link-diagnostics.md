@@ -1,6 +1,6 @@
 # Add Privy phone-link diagnostics
 
-Status: active
+Status: completed
 Created: 2026-07-31
 Updated: 2026-07-31
 
@@ -35,13 +35,20 @@ Updated: 2026-07-31
 
 ## Tasks
 
-1. Define the minimal diagnostic event contract and authenticated endpoint.
-2. Emit events at attempt, provider callback, and Murph sync boundaries.
-3. Add focused privacy and lifecycle regression coverage.
-4. Run scoped verification, required review gates, CI, and close the plan.
+- [x] Define the minimal diagnostic event contract and authenticated endpoint.
+- [x] Emit events at surface, attempt, provider callback, transfer, and Murph
+  sync boundaries.
+- [x] Add focused privacy and lifecycle regression coverage.
+- [x] Run scoped verification and the required specialist and final review
+  gates; hand the plan-closing head to exact-head CI.
 
 ## Verification
 
-- Focused Vitest coverage for the phone settings component and diagnostic route.
-- Hosted web typecheck and any diff-selected required checks.
-- Exact-head ReviewGPT and CI through the normal PR lane.
+- Passed 68 focused Vitest cases across phone settings, the diagnostic route,
+  the diagnostic hook, transport support, and both production callers.
+- Passed hosted-web typecheck and targeted ESLint.
+- Preliminary specialist findings were accepted and covered. Final ReviewGPT
+  round 2 passed with no findings on the remediated implementation head.
+- The broad PR matrix passed on the remediated implementation head. The
+  plan-closing push must produce the final exact-head CI result.
+Completed: 2026-07-31
