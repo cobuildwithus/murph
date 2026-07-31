@@ -14035,7 +14035,7 @@ describe('assistant codex runtime', () => {
     })
   })
 
-  it('handles the Murph progress dynamic tool without changing the final response', async () => {
+  it('handles the Murph progress dynamic tool after live steering without changing the final response', async () => {
     const workingDirectory = await createTempDir('assistant-codex-progress-tool-')
     const progressDelivery = createProgressDeliveryMock()
     const progressText =
@@ -14074,6 +14074,27 @@ describe('assistant codex runtime', () => {
               },
             }),
           )
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'user-progress-initial',
+                message: 'Process this blood test.',
+                type: 'user_message',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'user-progress-steered',
+                message: 'Include the late result too.',
+                type: 'user_message',
+              },
+            },
+          }))
+          await new Promise((resolve) => setTimeout(resolve, 0))
           child.stderr.write('Provider-side status text\n')
           child.stdout.write(
             jsonLine({
@@ -14149,7 +14170,7 @@ describe('assistant codex runtime', () => {
 
     expect(progressDelivery.send).toHaveBeenCalledWith(
       progressText,
-      { deliveryContextOrdinal: 0, source: 'model' },
+      { deliveryContextOrdinal: 1, source: 'model' },
     )
     expect(progressDelivery.send).not.toHaveBeenCalledWith('Provider-side status text')
   })
@@ -14899,7 +14920,7 @@ describe('assistant codex runtime', () => {
     })
   })
 
-  it('sends one current-channel progress update when Codex compacts context', async () => {
+  it('sends one current-channel progress update at the live-steered context when Codex compacts context', async () => {
     const workingDirectory = await createTempDir('assistant-codex-context-compact-')
     const onProgress = vi.fn()
     const onTraceEvent = vi.fn()
@@ -14933,6 +14954,16 @@ describe('assistant codex runtime', () => {
           itemId: 'context-compact-1',
           threadId: 'thread-context-compact',
           turnId: 'turn-context-compact',
+          userMessages: [
+            {
+              id: 'user-context-compact-initial',
+              message: 'Answer after compacting context.',
+            },
+            {
+              id: 'user-context-compact-steered',
+              message: 'Include the late follow up.',
+            },
+          ],
         })
       })
       return child
@@ -14955,7 +14986,7 @@ describe('assistant codex runtime', () => {
     expect(progressDelivery.send).toHaveBeenCalledTimes(1)
     expect(progressDelivery.send).toHaveBeenCalledWith(
       selectedProgressText,
-      { deliveryContextOrdinal: 0, required: true, source: 'system' },
+      { deliveryContextOrdinal: 1, required: true, source: 'system' },
     )
     expect(
       onProgress.mock.calls.some(([event]) => event?.id === 'context-compact-1'),
@@ -21137,6 +21168,10 @@ async function writeSuccessfulContextCompactionTurn(input: {
   progressText?: string
   threadId: string
   turnId: string
+  userMessages?: readonly {
+    id: string
+    message: string
+  }[]
 }): Promise<void> {
   const initialize = await waitForRpcMethod(input.child, 'initialize')
   input.child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
@@ -21158,6 +21193,21 @@ async function writeSuccessfulContextCompactionTurn(input: {
       },
     },
   }))
+  for (const userMessage of input.userMessages ?? []) {
+    input.child.stdout.write(jsonLine({
+      method: 'item/completed',
+      params: {
+        item: {
+          id: userMessage.id,
+          message: userMessage.message,
+          type: 'user_message',
+        },
+      },
+    }))
+  }
+  if (input.userMessages?.length) {
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  }
   input.child.stdout.write(jsonLine({
     method: 'item/started',
     params: {
