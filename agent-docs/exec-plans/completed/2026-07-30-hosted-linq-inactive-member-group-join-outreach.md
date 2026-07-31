@@ -1,6 +1,6 @@
 # Hosted Linq inactive-member group-join outreach
 
-Status: active
+Status: completed
 
 ## Outcome and invariant
 
@@ -50,6 +50,10 @@ A canonical affirmative Linq group-join reaction has exactly one owner. Active m
   the decision to keep one explicit order in the existing planner: recipient
   control, exact opener correlation, then generic billing/home routing. The
   production PostgreSQL reproduction failed before and passes after that fix.
+- Final correction round 3 returned `ROUND_OUTCOME: PASS` with no findings after
+  a substantive 16-minute review. Exact-turn attachment integrity, ancestry,
+  requested-model evidence, current blobs, remediation diffs, and change-shape
+  counts all passed; the model sidecar records the requested Pro review model.
 - The patch applies cleanly to current `main`, and `git diff --check` passes.
 - Focused Vitest passes all 253 reaction, webhook, drain, and ordinary Linq
   dispatch tests.
@@ -57,8 +61,9 @@ A canonical affirmative Linq group-join reaction has exactly one owner. Active m
   member-creation, activation, opener, routing, reply-correlation, revocation,
   recipient-control, and deletion-fence cases.
 - Hosted-web typecheck and targeted ESLint pass.
-- Pending: the new exact-head PR CI, final ReviewGPT correction review, and
-  parent final review.
+- Exact-head PR CI is fully green. Parent final review found no accepted issue,
+  the reviewed head merges cleanly with the latest fetched `main`, and the diff
+  integrity and privacy scans remain clean.
 
 ## Progress
 
@@ -67,5 +72,7 @@ A canonical affirmative Linq group-join reaction has exactly one owner. Active m
 - [x] Implement the scoped behavior change.
 - [x] Add focused tests and update live contracts.
 - [x] Run focused verification and inspect the candidate diff.
-- [ ] Complete exact-head PR review and CI gates.
-- [ ] Close this plan only after all required evidence is green.
+- [x] Complete exact-head PR review and CI gates.
+- [x] Close this plan only after all required evidence is green.
+Updated: 2026-07-31
+Completed: 2026-07-31
