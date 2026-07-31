@@ -49,6 +49,47 @@ describe("hosted physical-note contracts", () => {
     });
   });
 
+  it("rejects recipient fields that Lob cannot accept", () => {
+    const baseRequest = {
+      artwork: {
+        expiresAt: "2026-07-31T00:00:00.000Z",
+        sha256: "a".repeat(64),
+        url: "https://media.example.test/private-image",
+      },
+      originAssistantInputId: `ain_${"b".repeat(32)}`,
+      recipient: {
+        addressLine1: "123 Main St",
+        city: "Atlanta",
+        name: "Sam",
+        postalCode: "30308",
+        state: "GA",
+      },
+      requestKey: "physical_note_123",
+    };
+
+    expect(() => hostedPhysicalNoteSendRequestSchema.parse({
+      ...baseRequest,
+      recipient: {
+        ...baseRequest.recipient,
+        name: "x".repeat(41),
+      },
+    })).toThrow();
+    expect(() => hostedPhysicalNoteSendRequestSchema.parse({
+      ...baseRequest,
+      recipient: {
+        ...baseRequest.recipient,
+        addressLine1: "x".repeat(65),
+      },
+    })).toThrow();
+    expect(() => hostedPhysicalNoteSendRequestSchema.parse({
+      ...baseRequest,
+      recipient: {
+        ...baseRequest.recipient,
+        addressLine2: "x".repeat(65),
+      },
+    })).toThrow();
+  });
+
   it("requires a temporary HTTPS artwork capability", () => {
     expect(() => hostedPhysicalNoteSendRequestSchema.parse({
       artwork: {
