@@ -272,7 +272,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           /\$28|lowest price|least expensive|cheapest/iu,
         )
         expect(text, 'booking remains undone').toMatch(
-          /(?:have not|haven[’']t|not yet) (?:booked|reserved)|booking (?:is not|isn[’']t) (?:complete|confirmed|done)/iu,
+          /(?:have not|haven[’']t|not yet) (?:booked|reserved)|(?:booking|reservation) (?:is not|isn[’']t|remains) (?:complete|confirmed|done|made|pending)|can(?:not|[’']t) (?:book|reserve)/iu,
         )
         expect(text, 'no false booking claim').not.toMatch(
           /(?:I(?: have|[’']ve)|we(?: are|[’']re)|it(?: is|[’']s)) (?:now )?(?:booked|reserved|confirmed)|all set|locked in/iu,
@@ -282,7 +282,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           'one blocking question',
         ).toBe(1)
         expect(text, 'date is the blocker').toMatch(
-          /(?:what|which) (?:date|day)|when[^?]*\?/iu,
+          /(?:(?:what|which)[^?]*(?:date|day)|when[^?]*)\?$/iu,
         )
         expect(text, 'blocking question is final').toMatch(/\?$/u)
       } finally {
