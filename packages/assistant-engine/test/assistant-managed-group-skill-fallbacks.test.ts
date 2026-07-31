@@ -30,11 +30,14 @@ describe("managed hosted group skill boundary", () => {
 
       expect(raw).toContain(`name: ${slug}`);
       expect(normalized).toContain(
-        "For an explicit request that depends on this managed feature, perform no effect and state one plain capability limitation.",
+        "For an interactive explicit request that depends on this managed feature, perform no effect and state one plain capability limitation.",
       );
       expect(normalized).toContain(PUBLIC_FALLBACK_MARKER);
       expect(normalized).toContain(
-        "Silence remains available only when the resident conversational-floor rules independently make the beat human-owned or unaddressed.",
+        "For an unattended or scheduled occurrence, perform no effect and return the resident delivery skip outcome without user-facing text; do not mutate the preserved automation.",
+      );
+      expect(normalized).toContain(
+        "Silence otherwise remains available only when the resident conversational-floor rules independently make the beat human-owned or unaddressed.",
       );
       expect(raw).not.toContain("cobuildwithus/");
       expect(raw).not.toContain("trusted hosted build");
@@ -98,6 +101,10 @@ describe("managed hosted group skill boundary", () => {
     expect(normalized).toContain(
       "perform no effect and state one plain capability limitation",
     );
+    expect(normalized).toContain(
+      "return the resident delivery skip outcome without user-facing text",
+    );
+    expect(normalized).toContain("do not mutate the preserved automation");
     expect(normalized).not.toContain(
       "unless the public runtime contracts and current evidence support it",
     );
