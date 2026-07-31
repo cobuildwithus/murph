@@ -1741,6 +1741,12 @@ describe('assistant user-facing wording guidance', () => {
     const prompt = buildAssistantSystemPromptWithCacheMetadata(
       createCommonNotificationPromptInput({
         channel: 'linq',
+        notificationDecisionProfile: 'onboarding-followup',
+      }),
+    ).prompt
+    const genericPrompt = buildAssistantSystemPromptWithCacheMetadata(
+      createCommonNotificationPromptInput({
+        channel: 'linq',
       }),
     ).prompt
 
@@ -1749,8 +1755,9 @@ describe('assistant user-facing wording guidance', () => {
       '{"kind":"skip","onboardingAction":{"kind":"leave_open"},"privateSummary":"..."}',
     )
     expect(prompt).toContain(
-      'Include `onboardingAction` only when the engine-supplied scheduled onboarding task requires it.',
+      'Scheduled onboarding skip extension:',
     )
+    expect(genericPrompt).not.toContain('onboardingAction')
     expect(prompt).toContain(
       'No Markdown link syntax such as `[text](url)`',
     )

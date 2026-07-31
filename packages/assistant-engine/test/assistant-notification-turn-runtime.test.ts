@@ -4627,6 +4627,13 @@ test('sendAssistantNotificationLocal applies structured onboarding completion th
       completedReason: 'user_answered',
       status: 'completed',
     })
+    expect(mocks.resolveAssistantSessionForMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          notificationDecisionProfile: 'onboarding-followup',
+        }),
+      }),
+    )
     expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledOnce()
     expect(deliverMessage).not.toHaveBeenCalled()
   } finally {

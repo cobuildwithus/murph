@@ -735,6 +735,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
       murphProductBaseUrl: resolveAssistantMurphProductBaseUrl(
         input.sharedPlan.cliAccess.env,
       ),
+      notificationDecisionProfile:
+        input.input.notificationDecisionProfile ?? null,
       onboardingGuidance: options.injectOnboardingGuidance,
       modelBehaviorProfile,
       scheduledOccurrenceAt: input.input.scheduledOccurrenceAt ?? null,

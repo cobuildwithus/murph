@@ -1328,6 +1328,10 @@ function buildAssistantNotificationMessageInput(
     maintenanceProfile: maintenanceTurn
       ? requireAssistantNotificationMaintenanceProfile(input)
       : null,
+    notificationDecisionProfile:
+      input.turnPolicy?.kind === 'onboarding-followup'
+        ? 'onboarding-followup'
+        : null,
     maxSessionAgeMs: input.maxSessionAgeMs,
     model: input.model,
     modelProvider: input.modelProvider,
