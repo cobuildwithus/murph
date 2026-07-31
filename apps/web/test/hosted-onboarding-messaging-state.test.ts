@@ -138,6 +138,42 @@ describe("hosted member messaging authority", () => {
     });
   });
 
+  it("treats verified email as setup-complete without inventing another delivery route", () => {
+    const input = {
+      identity: {
+        emailLinked: true,
+        phoneLookupKey: null,
+      },
+      routing: null,
+    };
+    const messaging = resolveHostedMemberMessagingState(input);
+
+    expect(messaging).toMatchObject({
+      hasDirectMessagingChannel: true,
+      hasEmail: true,
+      hasLinq: false,
+      hasPhone: false,
+      hasTelegram: false,
+    });
+    expect(isHostedMemberMessagingSetupRequired(input)).toBe(false);
+    expect(resolveHostedMemberChannels({
+      emailLinked: true,
+      identity: {
+        phoneLookupKey: null,
+      },
+      routing: null,
+    })).toEqual({
+      email: true,
+      linq: false,
+      telegram: false,
+    });
+    expect(resolveHostedMemberAssistantNotificationRoute({
+      linqChatId: null,
+      memberId: "member_email",
+      messaging,
+    })).toBeNull();
+  });
+
   it("treats a linked Telegram identity as setup-complete while delivery still waits for an inbound thread", () => {
     const input = {
       identity: null,
