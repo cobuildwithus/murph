@@ -387,6 +387,21 @@ export function isLinqChatNotFoundSendMessageError(
     && error.context?.linqFailureKind === 'chat_not_found'
 }
 
+export function isDefinitiveLinqIMessageAppCardRejection(
+  error: unknown,
+): error is VaultCliError {
+  const status = error instanceof VaultCliError ? error.context?.status : null
+  return error instanceof VaultCliError
+    && error.code === 'LINQ_API_REQUEST_FAILED'
+    && error.context?.provider === 'linq'
+    && error.context?.operation === 'send_imessage_app_card'
+    && error.context?.method === 'POST'
+    && error.context?.path === '/chats/[chat]/messages'
+    && error.context?.failureStage === 'http'
+    && error.context?.retryable === false
+    && (status === 400 || status === 415 || status === 422)
+}
+
 export async function sendLinqChatMessage(
   input: {
     chatId: string

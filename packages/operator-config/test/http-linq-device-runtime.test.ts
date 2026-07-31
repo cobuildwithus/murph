@@ -21,6 +21,7 @@ import {
   createLinqChat,
   createLinqWebhookSubscription,
   deleteLinqMessage,
+  isDefinitiveLinqIMessageAppCardRejection,
   markLinqChatRead,
   probeLinqApi,
   sendLinqChatMessage,
@@ -485,6 +486,36 @@ test('linq app-card failure diagnostics do not expose nutrition values', async (
         !serialized.includes('private-chat-route')
     },
   )
+})
+
+test('linq app-card rejection classification permits only definitive pre-acceptance statuses', () => {
+  const createError = (
+    status: number,
+    retryable: boolean,
+  ): VaultCliError => new VaultCliError(
+    'LINQ_API_REQUEST_FAILED',
+    'Linq rejected the iMessage app card.',
+    {
+      failureStage: 'http',
+      method: 'POST',
+      operation: 'send_imessage_app_card',
+      path: '/chats/[chat]/messages',
+      provider: 'linq',
+      retryable,
+      status,
+    },
+  )
+
+  for (const status of [400, 415, 422]) {
+    expect(isDefinitiveLinqIMessageAppCardRejection(
+      createError(status, false),
+    )).toBe(true)
+  }
+  for (const status of [404, 408, 429, 500]) {
+    expect(isDefinitiveLinqIMessageAppCardRejection(
+      createError(status, status !== 404),
+    )).toBe(false)
+  }
 })
 
 test('linq runtime serializes reply targets only for marked native replies', async () => {

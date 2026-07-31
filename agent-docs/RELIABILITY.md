@@ -1,11 +1,16 @@
 # Reliability
 
-Last verified: 2026-07-30
+Last verified: 2026-07-31
 
 ## Current Guardrails
 
 - Keep behavior deterministic and documented as the first modules are added.
 - Prefer explicit failure paths and actionable errors over silent fallback behavior.
+- Native iMessage nutrition-card delivery falls back to its already-derived
+  ordinary text only after Linq definitively rejects the app-card request with
+  HTTP 400, 415, or 422. The fallback uses a distinct stable provider key so a
+  replay is idempotent. Transport ambiguity, timeouts, rate limits, and server
+  failures remain failed delivery attempts and must not start a second send.
 - Update architecture and verification docs in the same change that introduces new runtime entrypoints.
 - Avoid hidden coupling between scripts, docs, and runtime code; document new dependencies in `ARCHITECTURE.md` and `agent-docs/references/testing-ci-map.md`.
 - Venice core inference is an all-or-none operator configuration: one Worker

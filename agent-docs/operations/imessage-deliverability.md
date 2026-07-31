@@ -1,6 +1,6 @@
 # iMessage Deliverability and Reply Safety
 
-Last verified: 2026-07-29
+Last verified: 2026-07-31
 
 ## Purpose
 
@@ -67,7 +67,7 @@ Read and apply this guide when touching any of these surfaces:
 
 Response cards are optional outbox-owned presentation siblings of response media, not a direct-send surface or a separate delivery owner. The outbox continues to own the semantic message, target, status, receipt, retry, and idempotency lifecycle, and a card cannot coexist with media.
 
-Card values are immutable message content. They are stored inline in the iMessage app message URL as versioned Base64-encoded JSON; encoding is not encryption. V1 remains a supported calorie/protein/carbs/fat compatibility input. V2 adds the exact canonical fiber total and nullable per-metric goal snapshots. Each non-null goal snapshot carries only an exact target copied after a complete bounded active-goal read proves exactly one qualifying record for that daily metric and unit, plus Murph's frozen semantic assessment. A saturated result or ambiguous match leaves the target null. Missing or partial totals can carry only an `unavailable` status, and an assessed status must not point opposite the frozen total and target. The snapshot is presentation for that message, not persisted goal progress or a new source of truth. A missing or untrusted target stays null and neutral. There is no persisted remote card state, fetch API, cleanup lifecycle, or card-specific queue. Linq capability failure or an ineligible route falls back to the same deterministic ordinary text through the existing channel delivery path. Preservation of the inline URL in `selectedMessage.url` remains a physical-device release gate for the paired iOS implementation.
+Card values are immutable message content. They are stored inline in the iMessage app message URL as versioned Base64-encoded JSON; encoding is not encryption. V1 remains a supported calorie/protein/carbs/fat compatibility input. V2 adds the exact canonical fiber total and nullable per-metric goal snapshots. Each non-null goal snapshot carries only an exact target copied after a complete bounded active-goal read proves exactly one qualifying record for that daily metric and unit, plus Murph's frozen semantic assessment. A saturated result or ambiguous match leaves the target null. Missing or partial totals can carry only an `unavailable` status, and an assessed status must not point opposite the frozen total and target. The snapshot is presentation for that message, not persisted goal progress or a new source of truth. A missing or untrusted target stays null and neutral. There is no persisted remote card state, fetch API, cleanup lifecycle, or card-specific queue. Linq capability failure or an ineligible route falls back to the same deterministic ordinary text through the existing channel delivery path. After capability succeeds, only a definitive pre-acceptance app-card rejection (HTTP 400, 415, or 422) may use that text fallback, under a distinct stable provider key. A timeout, transport error, rate limit, or server failure remains ambiguous and cannot trigger a second send. Preservation of the inline URL in `selectedMessage.url` remains a physical-device release gate for the paired iOS implementation.
 
 ## Implementation checklist
 

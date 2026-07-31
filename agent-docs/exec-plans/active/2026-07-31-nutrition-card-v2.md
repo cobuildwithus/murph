@@ -23,8 +23,10 @@ Updated: 2026-07-31
   exactly one qualifying record for its daily metric and unit.
 - Missing or partial metrics cannot carry a colored assessment, and directional
   statuses cannot contradict the frozen total and target.
-- The existing private-direct closeout, outbox, Linq capability fallback, SMS
-  fallback, and immutable inline URL behavior remain unchanged.
+- The existing private-direct closeout, outbox, SMS fallback, and immutable
+  inline URL behavior remain unchanged. A definitive pre-acceptance native-card
+  rejection reuses the ordinary text path under a distinct stable provider key;
+  ambiguous delivery never starts that fallback.
 - The paired iOS extension renders V1 and V2 offline from
   `selectedMessage.url`, with no account, network, persistence, or second data
   owner.
@@ -88,3 +90,11 @@ Updated: 2026-07-31
   decoder now fail closed for both cases, including partial metrics; focused
   backend tests pass across three suites with 16 tests, and the iOS extension
   suite passes with 29 tests.
+- Final ReviewGPT round 5 passed the remediated goal/status head with no
+  findings. The preliminary completion-specialist review found one delivery
+  gap: a definitive app-card rejection after a positive capability check could
+  escape without sending the already-derived text. The existing Linq delivery
+  owner now falls back only for HTTP 400, 415, or 422 under a distinct stable
+  key; timeout, transport, rate-limit, and server outcomes remain fail-closed.
+  Focused provider/channel coverage passes with 103 tests, and both affected
+  packages typecheck.

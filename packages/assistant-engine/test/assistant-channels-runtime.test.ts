@@ -1685,6 +1685,92 @@ describe('assistant channels runtime seam', () => {
     }
   })
 
+  it('falls back once with a distinct key after a definitive Linq app-card rejection', async () => {
+    runtimeMocks.checkLinqIMessageCapability.mockResolvedValue(true)
+    runtimeMocks.sendLinqIMessageAppCard.mockRejectedValue(new VaultCliError(
+      'LINQ_API_REQUEST_FAILED',
+      'Linq rejected the iMessage app card.',
+      {
+        failureStage: 'http',
+        method: 'POST',
+        operation: 'send_imessage_app_card',
+        path: '/chats/[chat]/messages',
+        provider: 'linq',
+        retryable: false,
+        status: 400,
+      },
+    ))
+    runtimeMocks.sendLinqChatMessage.mockResolvedValue({
+      message: { id: 'card-text-fallback-1' },
+    })
+
+    await expect(sendLinqMessage({
+      card: NUTRITION_CARD,
+      directRecipientPhoneNumber: '+15550001',
+      idempotencyKey: 'card-definitive-rejection',
+      message: NUTRITION_CARD_TEXT,
+      target: 'private-thread-rejected-card',
+      targetKind: 'thread',
+      threadIsDirect: true,
+    }, {
+      env: { LINQ_API_TOKEN: 'linq-token' },
+    })).resolves.toEqual({
+      providerMessageId: 'card-text-fallback-1',
+      providerThreadId: null,
+      target: 'private-thread-rejected-card',
+    })
+
+    expect(runtimeMocks.sendLinqIMessageAppCard).toHaveBeenCalledTimes(1)
+    expect(runtimeMocks.sendLinqChatMessage).toHaveBeenCalledTimes(1)
+    expect(runtimeMocks.sendLinqChatMessage).toHaveBeenCalledWith({
+      chatId: 'private-thread-rejected-card',
+      idempotencyKey: 'card-definitive-rejection:fallback',
+      message: NUTRITION_CARD_TEXT,
+      replyToMessageId: null,
+    }, {
+      env: { LINQ_API_TOKEN: 'linq-token' },
+      fetchImplementation: undefined,
+    })
+  })
+
+  it.each([
+    ['rate limit', { failureStage: 'http', retryable: true, status: 429 }],
+    ['server failure', { failureStage: 'http', retryable: true, status: 500 }],
+    ['transport ambiguity', { failureStage: 'transport', retryable: true }],
+  ] as const)(
+    'does not text-fallback after an ambiguous Linq app-card %s',
+    async (_label, failure) => {
+      runtimeMocks.checkLinqIMessageCapability.mockResolvedValue(true)
+      const error = new VaultCliError(
+        'LINQ_API_REQUEST_FAILED',
+        'Linq app-card delivery was not confirmed.',
+        {
+          ...failure,
+          method: 'POST',
+          operation: 'send_imessage_app_card',
+          path: '/chats/[chat]/messages',
+          provider: 'linq',
+        },
+      )
+      runtimeMocks.sendLinqIMessageAppCard.mockRejectedValue(error)
+
+      await expect(sendLinqMessage({
+        card: NUTRITION_CARD,
+        directRecipientPhoneNumber: '+15550001',
+        idempotencyKey: 'card-ambiguous-outcome',
+        message: NUTRITION_CARD_TEXT,
+        target: 'private-thread-ambiguous-card',
+        targetKind: 'thread',
+        threadIsDirect: true,
+      }, {
+        env: { LINQ_API_TOKEN: 'linq-token' },
+      })).rejects.toBe(error)
+
+      expect(runtimeMocks.sendLinqIMessageAppCard).toHaveBeenCalledTimes(1)
+      expect(runtimeMocks.sendLinqChatMessage).not.toHaveBeenCalled()
+    },
+  )
+
   it('uploads private Linq image bytes and sends only the provider attachment id', async () => {
     const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47])
     const fallbackDescription =

@@ -11,6 +11,7 @@ import {
 import {
   checkLinqIMessageCapability,
   createLinqChat,
+  isDefinitiveLinqIMessageAppCardRejection,
   resolveLinqApiToken,
   sendLinqChatMessage,
   sendLinqIMessageAppCard,
@@ -581,6 +582,7 @@ export async function sendLinqMessage(
     input.nativeReplyRequested !== true &&
     directRecipientPhoneNumber !== null &&
     idempotencyKey !== null
+  let appCardFallbackIdempotencyKey: string | null = null
   if (shouldAttemptNativeCard) {
     let capabilityAvailable = false
     try {
@@ -601,22 +603,32 @@ export async function sendLinqMessage(
       }
     }
     if (capabilityAvailable) {
-      const delivered = await sendLinqIMessageAppCard(
-        {
-          card,
-          chatId: target,
-          idempotencyKey,
-        },
-        {
-          env,
-          fetchImplementation: dependencies.fetchImplementation,
-          ...(dependencies.signal ? { signal: dependencies.signal } : {}),
-        },
-      )
-      return {
-        providerMessageId: normalizeOptionalText(delivered.message?.id ?? null),
-        providerThreadId: null,
-        target,
+      try {
+        const delivered = await sendLinqIMessageAppCard(
+          {
+            card,
+            chatId: target,
+            idempotencyKey,
+          },
+          {
+            env,
+            fetchImplementation: dependencies.fetchImplementation,
+            ...(dependencies.signal ? { signal: dependencies.signal } : {}),
+          },
+        )
+        return {
+          providerMessageId: normalizeOptionalText(delivered.message?.id ?? null),
+          providerThreadId: null,
+          target,
+        }
+      } catch (error) {
+        if (
+          dependencies.signal?.aborted ||
+          !isDefinitiveLinqIMessageAppCardRejection(error)
+        ) {
+          throw error
+        }
+        appCardFallbackIdempotencyKey = `${idempotencyKey}:fallback`
       }
     }
   }
@@ -658,7 +670,8 @@ export async function sendLinqMessage(
   const delivered = await sendLinqChatMessage(
     {
       chatId: target,
-      idempotencyKey: input.idempotencyKey ?? null,
+      idempotencyKey:
+        appCardFallbackIdempotencyKey ?? input.idempotencyKey ?? null,
       message,
       ...(media.length > 0 ? { media } : {}),
       ...(input.nativeReplyRequested === true ? { nativeReplyRequested: true } : {}),
