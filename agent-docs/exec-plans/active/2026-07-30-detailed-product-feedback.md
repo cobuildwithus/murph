@@ -11,17 +11,19 @@ Updated: 2026-07-30
 
 ## Success criteria
 
-- Feedback guidance requires concrete product actors, workflow/context,
+- The feedback tool schema requires concrete product actors, workflow/context,
   expected behavior, observed/requested outcome, and uncertainty when relevant.
 - Guidance forbids vague inferred labels and invented interpretation while
   preserving the existing product-only privacy boundary.
-- Focused prompt tests prove the new summary-quality contract.
+- Focused prompt tests prove one model-visible owner for the rubric, and an
+  opt-in real-Codex test inspects emitted tool arguments for representative
+  ordinary and managed-turn scenarios.
 - Required prompt/product/coverage review and exact-head CI complete.
 
 ## Scope
 
-- In scope: assistant feedback tool description, feedback-capture prompt
-  guidance, managed feedback automation guidance, and focused tests.
+- In scope: the assistant feedback tool schema and focused unit/real-Codex
+  regression tests.
 - Out of scope: database schema changes, longer summaries, raw conversation
   retention, feedback-table mutation, or a feedback-management UI.
 
@@ -45,7 +47,7 @@ Updated: 2026-07-30
 ## Tasks
 
 1. Inspect every feedback-capture instruction surface and existing tests.
-2. Add one consistent summary-quality rule at the smallest ownership points.
+2. Add one summary-quality rule at the single model-visible ownership point.
 3. Add focused regression assertions and run prompt/package verification.
 4. Commit, push, open a PR, and complete required specialist review and CI.
 
@@ -54,10 +56,35 @@ Updated: 2026-07-30
 - Keep the 500-character storage limit; the defect is lossy summarization, not
   insufficient storage.
 - Do not add persisted fields or a new feedback taxonomy.
+- Keep the detailed rubric solely in the feedback tool schema. The ordinary
+  system prompt and managed product-notes history already carry qualification,
+  lifecycle, and privacy policy; repeating the field rubric there adds prompt
+  cost and creates drift risk.
+- Accept the preliminary specialist coverage finding by adding a real Codex
+  app-server test over actual emitted `submit_product_feedback` arguments for a
+  concrete failure, ambiguous report, private-detail markers, and managed
+  product-notes history.
 
 ## Verification
 
-- Commands to run: focused assistant-engine feedback/model-behavior tests,
-  package typecheck if routed, prompt readback, and `git diff --check`.
-- Expected outcomes: all checks pass and the assembled instructions preserve
-  specificity without weakening privacy.
+- `pnpm --dir packages/assistant-engine exec vitest run --config
+  vitest.config.ts test/assistant-product-feedback.test.ts
+  test/model-behavior.test.ts test/managed-automations-core.test.ts
+  test/managed-automations.test.ts test/assistant-codex-real-e2e.test.ts`:
+  163 passed, 20 opt-in real-model cases skipped.
+- `pnpm --dir packages/assistant-engine typecheck`: passed.
+- `git diff --check`: passed.
+- The opt-in focused real-model command reaches the committed test but is
+  blocked locally before provider start because the supported provider-key
+  environment is absent. A direct authenticated Codex attempt was also blocked
+  before provider start by the local subscription usage limit. Keep this
+  verification gap explicit; do not replace the real-model assertion with a
+  scripted provider.
+- Deterministic installed-Codex request capture, with ephemeral absolute paths
+  normalized to fixed placeholders, measures the corrected single-owner delta
+  at +68 `o200k_harmony` tokens and +382 UTF-8 bytes for both representative
+  individual and group requests.
+- Preliminary ReviewGPT returned two accepted findings: add model-boundary
+  behavior coverage and remove duplicated rubric text. Both corrections are in
+  the current candidate; the preliminary pass is not rerun after a substantive
+  result.

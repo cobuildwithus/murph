@@ -1032,10 +1032,6 @@ describe('applyMurphManagedAutomations', () => {
     expect(seed.instructions).toContain('Murph-observed:')
     expect(seed.instructions).toContain('Do not log vague low-confidence guesses')
     expect(seed.instructions).toContain('concise product-only summary')
-    expect(seed.instructions).toContain('Make the summary actionable without the conversation')
-    expect(seed.instructions).toContain('expected versus observed result')
-    expect(seed.instructions).toContain('instead of replacing them with vague labels')
-    expect(seed.instructions).toContain('omit it or mark it unclear rather than infer or invent it')
     expect(seed.instructions).toContain('tags, topics, raw user wording')
     expect(seed.instructions).not.toContain('kind/topic')
     expect(seed.instructions).toContain(
