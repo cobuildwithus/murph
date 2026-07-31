@@ -1258,6 +1258,20 @@ test.each(["success", "cancel"] as const)(
       beneficiaryMemberId: "member_123",
       kind: "personal",
     });
+    const activePurchase = {
+      offerCode: "usage_5_usd",
+      purchaseId: "hucp_abcdefghijklmnop",
+      retryAllowed: true,
+      status: "checkout_open",
+      target: {
+        beneficiaryMemberId: "member_123",
+        kind: "personal",
+      },
+      url: "https://checkout.stripe.test/session",
+    } as const;
+    mocks.readHostedActiveUsageCreditPurchaseForPayer.mockResolvedValue(
+      activePurchase,
+    );
 
     const { default: SettingsPage } = await import(
       "../app/(dashboard)/settings/page"
@@ -1271,6 +1285,7 @@ test.each(["success", "cancel"] as const)(
 
     expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
       expect.objectContaining({
+        usageTopUpActivePurchase: activePurchase,
         usageTopUpCheckoutUrl: undefined,
         usageTopUpPurchaseReturn: {
           kind: checkoutKind,
@@ -1399,6 +1414,73 @@ test("SettingsPage keeps a frozen active purchase visible when current offers ar
     expect.objectContaining({
       usageTopUpActivePurchase: activePurchase,
       usageTopUpOffers: [],
+    }),
+    undefined,
+  );
+});
+
+test("SettingsPage keeps a frozen personal purchase recoverable after Family activation", async () => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPrivySession.mockResolvedValue(null);
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "active",
+      id: "member_123",
+      suspendedAt: null,
+    },
+    linkedAccounts: [],
+    session: {
+      privyUserId: "did:privy:user_123",
+    },
+  });
+  mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue({
+    billingActive: true,
+    billingStatus: "active",
+    displayName: null,
+    groupId: "hbag_abcdefghijklmnop",
+    invites: [],
+    members: [
+      {
+        isOwner: true,
+        label: null,
+        memberId: "member_123",
+        status: "active",
+      },
+    ],
+    ownerMemberId: "member_123",
+    plans: {},
+    seats: {},
+    suspendedAt: null,
+  });
+  const activePurchase = {
+    offerCode: "usage_10_usd",
+    purchaseId: "hucp_abcdefghijklmnop",
+    retryAllowed: true,
+    status: "checkout_open",
+    target: {
+      beneficiaryMemberId: "member_123",
+      kind: "personal",
+    },
+    url: "https://checkout.stripe.test/session",
+  } as const;
+  mocks.readHostedActiveUsageCreditPurchaseForPayer.mockResolvedValue(
+    activePurchase,
+  );
+
+  const { default: SettingsPage } = await import(
+    "../app/(dashboard)/settings/page"
+  );
+  renderToStaticMarkup(await SettingsPage());
+
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      usageTopUpActivePurchase: activePurchase,
+      usageTopUpCheckoutUrl: undefined,
+      usageTopUpOffers: [],
+      usageTopUpPurchaseReturn: null,
+      usageTopUpScope: "personal",
+      usageTopUpTargetLabel: undefined,
     }),
     undefined,
   );

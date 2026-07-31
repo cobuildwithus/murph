@@ -261,7 +261,9 @@ export default async function SettingsPage({
   const familySettingsUsageTopUpReturnMemberId =
     familyOwnerUsageTopUpPurchaseReturn ? null : familyUsageTopUpReturnMemberId;
   const billingUsageTopUpUsesFamilyOwner =
-    familyOwnerUsageTopUpAvailable && personalUsageTopUpPurchaseReturn === null;
+    familyOwnerUsageTopUpAvailable
+    && usageTopUpActivePurchase?.target.kind !== "personal"
+    && personalUsageTopUpPurchaseReturn === null;
   const billingUsageTopUpActivePurchase = billingUsageTopUpUsesFamilyOwner
     ? familyOwnerUsageTopUpActivePurchase
     : personalUsageTopUpActivePurchase;

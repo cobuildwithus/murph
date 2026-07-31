@@ -159,6 +159,14 @@ action is hidden. A request for a different member cannot resume, retry, or
 follow the existing checkout URL; it may only inspect or cancel the payer's
 frozen purchase and refresh the server projection.
 
+The frozen target also owns Settings recovery when the payer's billing mode
+changes. In particular, a personal purchase started before direct-to-Family
+conversion keeps its personal Checkout URL, retry capability, polling, and
+return owner until it becomes terminal. A new owner-seat Family purchase
+returns to `#subscription`, where its meter and dialog live; another member's
+Family purchase returns to `#family`. Target reconstruction continues to read
+older owner-seat Family URLs that used `#family`.
+
 Once a beneficiary leaves the active roster, the former-member purchase remains
 inspectable and cancelable but is never payable from Settings: the server does
 not release its Checkout URL or retry action. Historical invite labels and

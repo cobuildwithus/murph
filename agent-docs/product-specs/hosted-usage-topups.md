@@ -361,6 +361,12 @@ The success and cancel URLs return to Settings with the opaque Murph purchase
 ID. They do not need to expose a Stripe Session ID. The app session must own the
 purchase before any status is returned.
 
+The persisted return URL is also the frozen target locator. A personal purchase
+and an owner-seat Family purchase return to `#subscription`; another member's
+Family purchase returns to `#family`. The target reader accepts legacy
+owner-seat Family URLs at `#family`, but a current billing-mode change never
+reinterprets a frozen personal purchase as Family recovery.
+
 The browser renders only server-read status:
 
 | State | Copy |

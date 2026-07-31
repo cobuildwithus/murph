@@ -77,6 +77,12 @@ Updated: 2026-07-30
    copy, whose offers intentionally use estimates.
    Mitigation: Scope dollar-only choices to the personal/Family dialog and keep
    the separate group sponsorship catalog unchanged.
+4. Risk: A payer who starts a personal purchase and then activates Family could
+   lose the frozen purchase's exact recovery controls if Settings follows only
+   the current billing mode.
+   Mitigation: Let an active personal target or personal return own the billing
+   row before current Family availability, and keep the frozen target encoded
+   in the persisted provider return URL.
 
 ## Tasks
 
@@ -106,6 +112,10 @@ Updated: 2026-07-30
   dedicated public `designproof` Cloudflare Images variant. That variant uses
   `scale-down` with a 2400-by-2400 ceiling, so compliant captures retain their
   pixel dimensions.
+- Frozen purchase and return targets win over current billing mode. New
+  owner-seat Family returns land at `#subscription`; another member's returns
+  remain at `#family`, and the target reader accepts legacy owner-seat
+  `#family` URLs.
 
 ## Verification
 
@@ -132,3 +142,7 @@ Updated: 2026-07-30
     dollar amounts plus the short `usage` label.
   - Five replacement PNGs were visually inspected locally and after Cloudflare
     Images delivery. Each delivered file retained its source pixel dimensions.
+  - ReviewGPT round 1 found one exact-target recovery issue. Focused regression
+    coverage first reproduced both affected mechanisms, then 389 tests across
+    seven directly affected Web files, Web typecheck, and touched-file ESLint
+    passed after the correction.
