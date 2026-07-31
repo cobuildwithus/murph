@@ -126,6 +126,9 @@ import {
   ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
 } from '../assistant/generated-delivery-files.js'
 import {
+  readAssistantHostedImageCompletion,
+} from '../assistant/hosted-image-completion.js'
+import {
   resolveAssistantVaultImageResponseMedia,
 } from '../assistant/vault-file-send.js'
 import type {
@@ -217,6 +220,14 @@ import {
   readPhoneCallDynamicToolRequest,
   type PhoneCallDynamicToolRequest,
 } from './dynamic-tools/phone-calls.js'
+import {
+  createPhysicalNoteRequestKey,
+  MURPH_SEND_PHYSICAL_NOTE_TOOL,
+  readPhysicalNoteDynamicToolRequest,
+  resolvePhysicalNoteExplicitOriginInputId,
+  type PhysicalNoteDynamicToolRequest,
+} from './dynamic-tools/physical-notes.js'
+export { MURPH_SEND_PHYSICAL_NOTE_TOOL } from './dynamic-tools/physical-notes.js'
 import {
   executeGenerateSongDynamicTool,
   MURPH_GENERATE_SONG_TOOL,
@@ -1303,6 +1314,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_REACT_TO_MESSAGE_TOOL,
   MURPH_CREATE_CLINICAL_RECORDS_CONNECT_LINK_TOOL,
   MURPH_CREATE_PHONE_CALL_TOOL,
+  MURPH_SEND_PHYSICAL_NOTE_TOOL,
   MURPH_LABS_TOOL,
 ] as const
 
@@ -1353,6 +1365,7 @@ export interface MurphDynamicToolAvailability {
   personalizationAvailable?: boolean | null
   productFeedbackAvailable?: boolean | null
   progressUpdateMode?: 'direct' | 'group'
+  physicalNotesAvailable?: boolean | null
   phoneCallsAvailable?: boolean | null
   voiceMemoGenerationAvailable?: boolean | null
   vaultFileSendAvailable?: boolean | null
@@ -1400,6 +1413,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_ASK_GROK_TOOL, defaultOff((a) => a.askGrokAvailable)],
     [MURPH_SEND_VAULT_FILE_TOOL, defaultOff((a) => a.vaultFileSendAvailable)],
     [MURPH_CREATE_PHONE_CALL_TOOL, defaultOff((a) => a.phoneCallsAvailable)],
+    [MURPH_SEND_PHYSICAL_NOTE_TOOL, defaultOff((a) => a.physicalNotesAvailable)],
     ...MURPH_COMPUTER_DYNAMIC_TOOLS.map(
       (tool) =>
         [tool, defaultOff((a) => a.computerToolsAvailable)] as const,
@@ -2164,6 +2178,7 @@ export type MurphDynamicToolRequest =
       args: HostedComputerFinishRunRequest & { runId: string }
     }
   | PhoneCallDynamicToolRequest
+  | PhysicalNoteDynamicToolRequest
   | ClinicalRecordsConnectLinkDynamicToolRequest
   | {
       kind: 'send-vault-file'
@@ -2382,6 +2397,14 @@ export function readMurphDynamicToolRequest(
   })
   if (phoneCallRequest) {
     return phoneCallRequest
+  }
+
+  const physicalNoteRequest = readPhysicalNoteDynamicToolRequest({
+    arguments: request.arguments,
+    tool: request.tool,
+  })
+  if (physicalNoteRequest) {
+    return physicalNoteRequest
   }
 
   const clinicalRecordsConnectLinkRequest =
@@ -2884,6 +2907,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid vault file arguments')
     case 'invalid-phone-call-arguments':
       return toolTextResult(false, 'invalid phone-call arguments')
+    case 'invalid-physical-note-arguments':
+      return toolTextResult(false, 'invalid physical-note arguments')
     case 'invalid-clinical-records-connect-link-arguments':
       return toolTextResult(false, 'invalid Clinical Records connect-link arguments')
     case 'unsupported-dynamic-tool':
@@ -3071,6 +3096,209 @@ export async function executeMurphDynamicToolRequest(input: {
         return replyRequiredResult(
           false,
           'secure vault-file approval could not be prepared',
+        )
+      }
+    }
+    case 'send-physical-note': {
+      const hostedToolContext = input.hostedToolContext ?? null
+      const physicalNotes = hostedToolContext?.physicalNotes ?? null
+      const publisher = hostedToolContext?.privateImageUrlPublisher ?? null
+      const vaultRoot = input.vaultRoot?.trim() ?? ''
+      if (!hostedToolContext || !physicalNotes || !publisher || !vaultRoot) {
+        return toolTextResult(
+          false,
+          'physical-note sending is unavailable without hosted mail transport and the owning vault',
+        )
+      }
+
+      const hasExplicitArtwork =
+        input.request.imageRef !== undefined
+        && input.request.imageSha256 !== undefined
+      let trustedCompletion: Awaited<
+        ReturnType<typeof readAssistantHostedImageCompletion>
+      > = null
+      let artwork: ResolvedGenerateImageReference | null = null
+      let originAssistantInputId: string | null = null
+      try {
+        trustedCompletion = hasExplicitArtwork
+          ? null
+          : await readAssistantHostedImageCompletion({
+              assistantInputId:
+                hostedToolContext.currentAssistantInputId?.() ?? null,
+              vault: vaultRoot,
+            })
+        const userActionScope = hasExplicitArtwork
+          ? hostedToolContext.currentUserActionScope?.() ?? null
+          : null
+        const explicitOriginAssistantInputId = userActionScope
+          ? resolvePhysicalNoteExplicitOriginInputId({
+              acceptedInputIds: userActionScope.acceptedInputIds,
+              conversationScope: userActionScope.conversationScope,
+              ...(input.request.messageRef
+                ? { messageRef: input.request.messageRef }
+                : {}),
+            })
+          : null
+        originAssistantInputId = trustedCompletion?.originAssistantInputId
+          ?? explicitOriginAssistantInputId
+          ?? null
+        const imageRef = trustedCompletion?.imageRef
+          ?? input.request.imageRef
+          ?? null
+        const imageSha256 = trustedCompletion?.imageSha256
+          ?? input.request.imageSha256
+          ?? null
+        if (
+          !originAssistantInputId
+          || !imageRef
+          || !imageSha256
+          || !imageRef.startsWith('raw/captures/')
+        ) {
+          return toolTextResult(
+            false,
+            hasExplicitArtwork
+              ? 'sending previously previewed physical-note artwork requires fresh user input, the exact trusted generated-image ref and SHA-256, and in groups the exact approving Message ref'
+              : 'physical-note sending requires the current trusted hosted image completion',
+          )
+        }
+
+        const [resolvedArtwork] = await resolveGenerateImageReferences({
+          materializeWorkspaceArtifacts:
+            input.materializeWorkspaceArtifacts ?? null,
+          refs: [imageRef],
+          vaultRoot,
+        })
+        if (
+          !resolvedArtwork
+          || resolvedArtwork.sha256 !== imageSha256
+          || (
+            trustedCompletion !== null
+            && (
+              resolvedArtwork.mediaType !== trustedCompletion.contentType
+              || resolvedArtwork.bytes.byteLength !== trustedCompletion.sizeBytes
+            )
+          )
+        ) {
+          return toolTextResult(
+            false,
+            'the selected physical-note artwork no longer matches its trusted saved image',
+          )
+        }
+        artwork = resolvedArtwork
+      } catch {
+        return toolTextResult(
+          false,
+          'the selected physical-note artwork could not be read from the private vault',
+        )
+      }
+      if (!artwork || !originAssistantInputId) {
+        return toolTextResult(
+          false,
+          'physical-note artwork authority could not be established',
+        )
+      }
+
+      let published: Awaited<
+        ReturnType<typeof publisher.publishPrivateImageUrl>
+      >
+      try {
+        published = await publisher.publishPrivateImageUrl({
+          bytes: artwork.bytes,
+          contentType: artwork.mediaType,
+        })
+      } catch {
+        return toolTextResult(
+          false,
+          'the physical-note artwork could not be prepared for private printing',
+        )
+      }
+
+      try {
+        const completion = {
+          imageRef: artwork.sourceRef,
+          imageSha256: artwork.sha256,
+          originAssistantInputId,
+        }
+        const result = await physicalNotes.send({
+          artwork: {
+            expiresAt: published.expiresAt,
+            sha256: artwork.sha256,
+            url: published.url,
+          },
+          originAssistantInputId,
+          recipient: input.request.recipient,
+          requestKey: createPhysicalNoteRequestKey({
+            completion,
+            recipient: input.request.recipient,
+          }),
+        }, {
+          signal: input.abortSignal ?? null,
+        })
+
+        switch (result.status) {
+          case 'accepted':
+            return toolTextResult(
+              true,
+              JSON.stringify({
+                complimentary: result.complimentary,
+                note:
+                  'Lob accepted the exact generated artwork for printing. Do not attach the image unless it adds conversational value. Say it is headed to print, not delivered.',
+                physicalNoteId: result.physicalNoteId,
+                status: result.status,
+              }),
+            )
+          case 'pending':
+            return toolTextResult(
+              true,
+              JSON.stringify({
+                note:
+                  'The provider outcome is not certain. Do not retry this note automatically or claim that it was mailed.',
+                physicalNoteId: result.physicalNoteId,
+                status: result.status,
+              }),
+            )
+          case 'insufficient_usage':
+            return toolTextResult(
+              false,
+              JSON.stringify({
+                costUsdMicros: result.costUsdMicros,
+                note:
+                  'The complimentary note was already used and this conversation does not currently have enough Murph time for the configured print-and-mail cost.',
+                status: result.status,
+              }),
+            )
+          case 'permission_denied':
+            return toolTextResult(
+              false,
+              JSON.stringify({
+                note:
+                  'The physical note was not sent because the current participant is not authorized to approve this action.',
+                status: result.status,
+              }),
+            )
+          case 'unavailable':
+            return toolTextResult(
+              false,
+              JSON.stringify({
+                note:
+                  'Physical-note mailing is currently unavailable, so nothing was sent. Do not regenerate the artwork or retry automatically.',
+                status: result.status,
+              }),
+            )
+          case 'failed':
+            return toolTextResult(
+              false,
+              'the physical note was not accepted for printing',
+            )
+        }
+      } catch {
+        return toolTextResult(
+          false,
+          JSON.stringify({
+            note:
+              'Murph could not confirm whether this physical note was accepted. Do not regenerate or retry it automatically, and do not claim that it was mailed.',
+            status: 'pending',
+          }),
         )
       }
     }

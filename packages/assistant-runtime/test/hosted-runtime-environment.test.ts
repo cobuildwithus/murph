@@ -321,12 +321,14 @@ test("hosted runtime launch spec owns semantic env split and runtime config", ()
     },
     platformEnv: {
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
+      HOSTED_PHYSICAL_NOTES_ENABLED: "true",
       TELEGRAM_API_BASE_URL: "https://api.telegram.example",
       TELEGRAM_BOT_TOKEN: "telegram-token",
       TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
     },
     userEnv: {
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
+      HOSTED_PHYSICAL_NOTES_ENABLED: "true",
       OPENAI_API_KEY: "user-openai-secret",
       TELEGRAM_BOT_TOKEN: "user-telegram-token",
     },
@@ -340,6 +342,7 @@ test("hosted runtime launch spec owns semantic env split and runtime config", ()
     },
     platformEnv: {
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
+      HOSTED_PHYSICAL_NOTES_ENABLED: "true",
       TELEGRAM_API_BASE_URL: "https://api.telegram.example",
       TELEGRAM_BOT_TOKEN: "telegram-token",
       TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
@@ -741,6 +744,7 @@ test("hosted runtime platform env selector and timeout parser are reusable outsi
     buildHostedRuntimePlatformEnv({
       HOSTED_WEB_BASE_URL: "https://web.example.test",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
+      HOSTED_PHYSICAL_NOTES_ENABLED: "true",
       JUNCTION_API_KEY: "junction-api-key",
       JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
       JUNCTION_ENV: "sandbox",
@@ -752,6 +756,7 @@ test("hosted runtime platform env selector and timeout parser are reusable outsi
     }),
     {
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
+      HOSTED_PHYSICAL_NOTES_ENABLED: "true",
       JUNCTION_API_KEY: "junction-api-key",
       JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
       JUNCTION_ENV: "sandbox",

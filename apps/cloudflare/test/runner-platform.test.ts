@@ -431,6 +431,19 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(platform.subscriptionToolPort?.request).toEqual(expect.any(Function));
   });
 
+  it("attaches physical-note transport only when explicitly enabled", () => {
+    const disabled = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+    });
+    const enabled = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      physicalNotesEnabled: true,
+    });
+
+    expect(disabled.physicalNotes).toBeUndefined();
+    expect(enabled.physicalNotes?.send).toEqual(expect.any(Function));
+  });
+
   it("attaches the hosted labs port when web-control transport is available", () => {
     const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",

@@ -274,6 +274,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deletes phone-call rows and encrypted private briefs/results explicitly. Export reports counts only and omits private content and ciphertext.",
   },
   {
+    slug: "prisma.hosted_physical_note",
+    label: "Hosted physical notes",
+    deletion: "live-delete",
+    note: "Deletes bounded Lob request, status, pricing, and provider-reference rows with the hosted member. Postal addresses and artwork are never stored here; mail already accepted by Lob cannot be recalled from Lob or postal carriers.",
+  },
+  {
     slug: "prisma.hosted_runtime_log",
     label: "Legacy primary runtime logs",
     deletion: "live-delete",

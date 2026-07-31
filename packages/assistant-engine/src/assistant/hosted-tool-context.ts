@@ -44,6 +44,7 @@ import type {
   AssistantHostedNewsletterTool,
   AssistantHostedPersonalizationTool,
   AssistantHostedPlanUsageTool,
+  AssistantPhysicalNotePort,
   AssistantHostedPrivateImageUrlPublisher,
   AssistantHostedSubscriptionTool,
   AssistantHostedDeviceTool,
@@ -115,6 +116,7 @@ export interface AssistantHostedToolContext {
   readonly newsletterTool?: AssistantHostedNewsletterTool | null
   readonly personalizationTool?: AssistantHostedPersonalizationTool | null
   readonly planUsageTool?: AssistantHostedPlanUsageTool | null
+  readonly physicalNotes?: AssistantPhysicalNotePort | null
   readonly privateImageUrlPublisher?: AssistantHostedPrivateImageUrlPublisher | null
   readonly subscriptionTool?: AssistantHostedSubscriptionTool | null
   readonly phoneCalls?: AssistantPhoneCallPort | null
@@ -276,6 +278,7 @@ export function createAssistantHostedToolContext(input: {
     newsletterTool,
     personalizationTool: executionContext?.personalizationTool ?? null,
     planUsageTool: executionContext?.planUsageTool ?? null,
+    physicalNotes: executionContext?.physicalNotes ?? null,
     privateImageUrlPublisher:
       executionContext?.privateImageUrlPublisher ?? null,
     subscriptionTool: executionContext?.subscriptionTool ?? null,
