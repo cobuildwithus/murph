@@ -1,6 +1,9 @@
 name: Bootstrap clean group skill test boundary
 
 on:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - agent/private-group-assistant-skills-cutover
@@ -10,6 +13,7 @@ permissions:
 
 jobs:
   bootstrap:
+    if: ${{ github.event_name == 'push' || github.head_ref == 'agent/private-group-assistant-skills-cutover' }}
     runs-on: ubuntu-24.04
     steps:
       - name: Check out cutover branch
