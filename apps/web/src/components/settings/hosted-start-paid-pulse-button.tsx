@@ -556,6 +556,7 @@ export function StartPaidPlanConfirmationContent(props: {
   errorMessage: string | null;
   onClose: () => void;
   onConfirm: () => void;
+  staticPresentation?: boolean;
   status: StartPaidPulseStatus;
   targetPlanCode: HostedTrialPaidPlanCode;
   timing: "at_trial_end" | "now";
@@ -572,24 +573,39 @@ export function StartPaidPlanConfirmationContent(props: {
     props.targetPlanCode === "launch_group_monthly"
       ? GROUP_FEATURES
       : PULSE_FEATURES;
+  const title = props.status === "scheduled"
+    ? `${targetPlanName} is set`
+    : props.timing === "at_trial_end"
+      ? `Continue with ${targetPlanName}`
+      : `Start ${targetPlanName}`;
+  const description = props.status === "scheduled"
+    ? `Your trial continues. ${targetPlanName} begins at ${targetPriceLabel}/month when it ends.`
+    : props.timing === "at_trial_end"
+      ? `Your current trial continues. ${targetPlanName} begins at ${targetPriceLabel}/month when it ends.`
+      : `Your trial ends now and ${targetPlanName} begins at ${targetPriceLabel}/month. You will be charged immediately.`;
 
   return (
     <>
         <DialogHeader className="pr-10">
-          <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
-            {props.status === "scheduled"
-              ? `${targetPlanName} is set`
-              : props.timing === "at_trial_end"
-                ? `Continue with ${targetPlanName}`
-                : `Start ${targetPlanName}`}
-          </DialogTitle>
-          <DialogDescription className="text-sm leading-6 text-[#736a58]">
-            {props.status === "scheduled"
-              ? `Your trial continues. ${targetPlanName} begins at ${targetPriceLabel}/month when it ends.`
-              : props.timing === "at_trial_end"
-                ? `Your current trial continues. ${targetPlanName} begins at ${targetPriceLabel}/month when it ends.`
-                : `Your trial ends now and ${targetPlanName} begins at ${targetPriceLabel}/month. You will be charged immediately.`}
-          </DialogDescription>
+          {props.staticPresentation ? (
+            <>
+              <h2 className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
+                {title}
+              </h2>
+              <p className="text-sm leading-6 text-[#736a58]">
+                {description}
+              </p>
+            </>
+          ) : (
+            <>
+              <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
+                {title}
+              </DialogTitle>
+              <DialogDescription className="text-sm leading-6 text-[#736a58]">
+                {description}
+              </DialogDescription>
+            </>
+          )}
         </DialogHeader>
 
         <PlanFeatureCard
