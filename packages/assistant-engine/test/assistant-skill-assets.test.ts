@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -49,6 +50,12 @@ const RESEARCHED_HEALTH_TOPIC_SKILL_SLUGS = [
   'gut-digestion',
   'general-eye-health',
 ] as const
+
+const managedGroupSkillsArePublicFallbacks = readFileSync(
+  path.join(resolveAssistantSkillsRoot(), 'group-chat', 'SKILL.md'),
+  'utf8',
+).includes('This public fallback intentionally contains no managed')
+const managedGroupSkillIt = managedGroupSkillsArePublicFallbacks ? it.skip : it
 
 type AssistantSkillMetadata = {
   readonly description: string
@@ -226,22 +233,27 @@ describe('assistant skill assets', () => {
     )
   })
 
-  it('keeps private and shared activity interpretation in their owners', async () => {
-    const load = async (slug: string) => {
-      const skill = ASSISTANT_SKILLS.find((candidate) => candidate.slug === slug)
-      if (!skill) throw new Error(`Missing registered skill: ${slug}`)
-      return (await readSkillFile(skill)).replace(/\s+/gu, ' ')
-    }
-    const [daily, shared] = await Promise.all([
-      load('daily-activity'),
-      load('group-chat'),
-    ])
+  it('keeps private activity interpretation in its owner', async () => {
+    const dailySkill = ASSISTANT_SKILLS.find(
+      (candidate) => candidate.slug === 'daily-activity',
+    )
+    if (!dailySkill) throw new Error('Missing registered skill: daily-activity')
+    const daily = (await readSkillFile(dailySkill)).replace(/\s+/gu, ' ')
 
     expect(daily).toMatch(
       /wearables day <date>.+wearables activity list.+canonical workout-day rollup/u,
     )
     expect(daily).toContain('current-local-day totals as provisional and say "so far."')
     expect(daily).toContain('not proof of failed provider sync or import')
+  })
+
+  managedGroupSkillIt('keeps shared activity interpretation in its owner', async () => {
+    const groupChatSkill = ASSISTANT_SKILLS.find(
+      (candidate) => candidate.slug === 'group-chat',
+    )
+    if (!groupChatSkill) throw new Error('Missing registered skill: group-chat')
+    const shared = (await readSkillFile(groupChatSkill)).replace(/\s+/gu, ' ')
+
     expect(shared).toContain('its cause is unverified')
     expect(shared).toContain('current-local-day value as provisional: say "so far"')
   })
@@ -691,7 +703,7 @@ describe('assistant skill assets', () => {
     expect(nutritionText).not.toContain('### GI comfort and performance')
   })
 
-  it('keeps group newsletter setup and opt-out behavior in the group-chat skill', async () => {
+  managedGroupSkillIt('keeps group newsletter setup and opt-out behavior in the group-chat skill', async () => {
     const groupChatSkill = ASSISTANT_SKILLS.find((skill) => skill.slug === 'group-chat')
     expect(groupChatSkill).toBeTruthy()
     if (!groupChatSkill) return
@@ -837,7 +849,7 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('Never call an SMS room\niMessage')
   })
 
-  it('keeps the new-group contact handoff natural and reactive', async () => {
+  managedGroupSkillIt('keeps the new-group contact handoff natural and reactive', async () => {
     const groupChatSkill = ASSISTANT_SKILLS.find((skill) => skill.slug === 'group-chat')
     expect(groupChatSkill).toBeTruthy()
     if (!groupChatSkill) return
@@ -866,7 +878,7 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('the shape of "')
   })
 
-  it('polls scheduled member asks to a terminal result in the current turn', async () => {
+  managedGroupSkillIt('polls scheduled member asks to a terminal result in the current turn', async () => {
     const groupChatSkill = ASSISTANT_SKILLS.find((skill) => skill.slug === 'group-chat')
     expect(groupChatSkill).toBeTruthy()
     if (!groupChatSkill) return
@@ -885,7 +897,7 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('resumes that same current\nautomation')
   })
 
-  it('registers a dedicated group newsletter editorial skill', async () => {
+  managedGroupSkillIt('registers a dedicated group newsletter editorial skill', async () => {
     const newsletterSkill = ASSISTANT_SKILLS.find(
       (skill) => skill.slug === 'group-newsletter',
     )
@@ -944,7 +956,7 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('best total this month')
   })
 
-  it('keeps group challenge guidance aligned with selectable scoring projections', async () => {
+  managedGroupSkillIt('keeps group challenge guidance aligned with selectable scoring projections', async () => {
     const groupChallengeSkill = ASSISTANT_SKILLS.find(
       (skill) => skill.slug === 'group-challenge',
     )

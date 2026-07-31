@@ -130,7 +130,7 @@ describe("hosted local Codex image media delivery e2e", () => {
     expect(readObservedLinqMessageParts(replySend)).toEqual([
       {
         type: "text",
-        value: assistantReplyText,
+        value: `${assistantReplyText}\n\nExercise setup reference`,
       },
       {
         type: "media",
@@ -247,7 +247,7 @@ describe("hosted local Codex image media delivery e2e", () => {
     expect(readObservedLinqMessageParts(completedSend)).toEqual([
       {
         type: "text",
-        value: generatedImageReplyText,
+        value: `${generatedImageReplyText}\n\nGenerated mobility setup`,
       },
       expect.objectContaining({
         attachment_id: expect.stringMatching(/^attachment_local_/u),
@@ -347,7 +347,7 @@ describe("hosted local Codex image media delivery e2e", () => {
     expect(readObservedLinqMessageParts(reuseCompletedSend)).toEqual([
       {
         type: "text",
-        value: reuseReplyText,
+        value: `${reuseReplyText}\n\nReused mobility setup`,
       },
       expect.objectContaining({
         attachment_id: expect.stringMatching(/^attachment_local_/u),
