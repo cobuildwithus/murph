@@ -52,6 +52,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   configureHostedContactPrivacyKeyringForTest();
   mocks.readHostedThreadRouteByThreadIdentity.mockResolvedValue({
+    accountLookupKey: "lookup_v1_test",
     containerMemberId: "member_group_123",
   });
   mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
@@ -117,6 +118,7 @@ describe("stageHostedLinqGroupReactionContext", () => {
         prisma,
       })).resolves.toBe(true);
 
+      expect(mocks.getHostedLinqChatSummary).not.toHaveBeenCalled();
       expect(
         mocks.appendConsumedHostedGroupReactionMailboxEnvelopeTx,
       ).toHaveBeenCalledTimes(1);
@@ -127,6 +129,7 @@ describe("stageHostedLinqGroupReactionContext", () => {
         eventId: "group-reaction:event_reaction_123",
         kind: "conversation.message",
         message: {
+          accountLookupKey: "lookup_v1_test",
           channel: "linq",
           linqMessage: {
             chatId: "chat_group_123",
@@ -173,6 +176,22 @@ describe("stageHostedLinqGroupReactionContext", () => {
       });
     },
   );
+
+  it("persists a signed reaction without requiring a current roster read", async () => {
+    mocks.getHostedLinqChatSummary.mockRejectedValueOnce(
+      new Error("roster temporarily unavailable"),
+    );
+
+    await expect(stageHostedLinqGroupReactionContext({
+      event: buildReactionEvent({ reactionType: "laugh" }),
+      prisma: createPrismaStub(),
+    })).resolves.toBe(true);
+
+    expect(mocks.getHostedLinqChatSummary).not.toHaveBeenCalled();
+    expect(
+      mocks.appendConsumedHostedGroupReactionMailboxEnvelopeTx,
+    ).toHaveBeenCalledTimes(1);
+  });
 
   it("persists a signed reaction even when the provider omits its value", async () => {
     await expect(stageHostedLinqGroupReactionContext({
@@ -234,7 +253,7 @@ describe("stageHostedLinqGroupReactionContext", () => {
     expect(envelope.message.linqMessage.replyToPartIndex).toBe(1);
   });
 
-  it("rejects self echoes, missing routes, inactive containers, and direct chats", async () => {
+  it("rejects self echoes, missing routes, and inactive containers", async () => {
     const prisma = createPrismaStub();
 
     await expect(stageHostedLinqGroupReactionContext({
@@ -252,18 +271,6 @@ describe("stageHostedLinqGroupReactionContext", () => {
       containerMemberId: "member_group_123",
     });
     mocks.readActiveHostedMemberAccess.mockResolvedValueOnce(false);
-    await expect(stageHostedLinqGroupReactionContext({
-      event: buildReactionEvent({ reactionType: "laugh" }),
-      prisma,
-    })).resolves.toBe(false);
-
-    mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
-      handles: [
-        { handle: "+15550000000", isMe: true, status: "active" },
-        { handle: "+15551234567", isMe: false, status: "active" },
-      ],
-      isGroup: false,
-    });
     await expect(stageHostedLinqGroupReactionContext({
       event: buildReactionEvent({ reactionType: "laugh" }),
       prisma,
