@@ -1,8 +1,8 @@
 # Bring your own inference
 
-Status: active
+Status: completed
 Created: 2026-07-30
-Updated: 2026-07-30
+Updated: 2026-07-31
 
 ## Goal
 
@@ -117,3 +117,4 @@ Updated: 2026-07-30
 - Completion: relevant preliminary ReviewGPT lenses, final ReviewGPT gate, green
   exact-head CI, clean merge-base proof, closed plan, and documented rollout and
   rollback floor.
+Completed: 2026-07-31
