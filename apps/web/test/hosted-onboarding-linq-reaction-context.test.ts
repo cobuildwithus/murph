@@ -1,19 +1,26 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
+import {
+  parseHostedExecutionGroupReactionEventText,
+  readHostedExecutionConversationMessageText,
+} from "@murphai/hosted-execution";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  appendHostedLinqThreadRouteReactionContextTx: vi.fn(),
+  appendConsumedHostedGroupReactionMailboxEnvelopeTx: vi.fn(),
   getHostedLinqChatSummary: vi.fn(),
   getHostedLinqReactionTargetMessage: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
   readHostedThreadRouteByThreadIdentity: vi.fn(),
+  signalHostedMailboxAppendRuntime: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
-  appendHostedLinqThreadRouteReactionContextTx:
-    mocks.appendHostedLinqThreadRouteReactionContextTx,
   readHostedThreadRouteByThreadIdentity:
     mocks.readHostedThreadRouteByThreadIdentity,
+}));
+
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
@@ -26,6 +33,11 @@ vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
   readActiveHostedMemberAccess: mocks.readActiveHostedMemberAccess,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/group-reaction-mailbox", () => ({
+  appendConsumedHostedGroupReactionMailboxEnvelopeTx:
+    mocks.appendConsumedHostedGroupReactionMailboxEnvelopeTx,
+}));
+
 import type { HostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq";
 import { parseHostedLinqProviderEvent } from "@/src/lib/hosted-onboarding/linq-provider-events";
 import {
@@ -36,97 +48,203 @@ import {
 const TEST_CONTACT_PRIVACY_KEY =
   "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=";
 
+beforeEach(() => {
+  vi.clearAllMocks();
+  configureHostedContactPrivacyKeyringForTest();
+  mocks.readHostedThreadRouteByThreadIdentity.mockResolvedValue({
+    containerMemberId: "member_group_123",
+  });
+  mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
+  mocks.getHostedLinqChatSummary.mockResolvedValue({
+    handles: [
+      { handle: "+15550000000", isMe: true, status: "active" },
+      { handle: "+15551234567", isMe: false, status: "active" },
+    ],
+    isGroup: true,
+  });
+  mocks.getHostedLinqReactionTargetMessage.mockResolvedValue({
+    chatId: "chat_group_123",
+    id: "message_target_123",
+    isFromMe: false,
+    parts: ["A useful group message"],
+    service: "iMessage",
+  });
+  mocks.appendConsumedHostedGroupReactionMailboxEnvelopeTx.mockResolvedValue({
+    dedupeConflict: false,
+    duplicate: false,
+    inserted: true,
+    item: {
+      id: "mailbox_reaction_123",
+      lane: "conversation",
+      laneSeq: "41",
+    },
+  });
+  mocks.signalHostedMailboxAppendRuntime.mockResolvedValue({
+    signalAccepted: true,
+    workflowId: "hosted-user-runtime:member_group_123",
+  });
+});
+
+afterEach(() => {
+  delete process.env.HOSTED_CONTACT_PRIVACY_KEYS;
+  delete process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION;
+  clearHostedOnboardingEnvCache();
+});
+
 describe("stageHostedLinqGroupReactionContext", () => {
-  let restoreContactPrivacyKeyring: (() => void) | null = null;
+  it.each([
+    ["laugh", undefined, "added", "laugh"],
+    ["dislike", undefined, "added", "dislike"],
+    ["emphasize", undefined, "added", "emphasize"],
+    ["question", undefined, "added", "question"],
+    ["custom", "😂", "added", "😂"],
+    ["custom", "🔥", "added", "🔥"],
+    ["heart", undefined, "removed", "heart"],
+  ])(
+    "persists %s %s as a consumed mailbox conversation item",
+    async (reactionType, customEmoji, operation, expectedReaction) => {
+      const eventType = operation === "removed"
+        ? "reaction.removed"
+        : "reaction.added";
+      const prisma = createPrismaStub();
 
-  beforeEach(() => {
-    vi.clearAllMocks();
-    restoreContactPrivacyKeyring = configureHostedContactPrivacyKeyringForTest();
-    mocks.readHostedThreadRouteByThreadIdentity.mockResolvedValue({
-      containerMemberId: "member_group_123",
-    });
-    mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
-    mocks.getHostedLinqChatSummary.mockResolvedValue({
-      handles: [
-        {
-          handle: "+15550000000",
-          isMe: true,
-          status: "active",
+      await expect(stageHostedLinqGroupReactionContext({
+        event: buildReactionEvent({
+          customEmoji,
+          eventType,
+          reactionType,
+        }),
+        prisma,
+      })).resolves.toBe(true);
+
+      expect(
+        mocks.appendConsumedHostedGroupReactionMailboxEnvelopeTx,
+      ).toHaveBeenCalledTimes(1);
+      const appendInput =
+        mocks.appendConsumedHostedGroupReactionMailboxEnvelopeTx.mock.calls[0]?.[0];
+      const envelope = appendInput?.envelope;
+      expect(envelope).toMatchObject({
+        eventId: "group-reaction:event_reaction_123",
+        kind: "conversation.message",
+        message: {
+          channel: "linq",
+          linqMessage: {
+            chatId: "chat_group_123",
+            from: "group-reaction",
+            isFromMe: false,
+            messageId: "group-reaction:event_reaction_123",
+            reactionEligible: false,
+            replyToMessageId: "message_target_123",
+            threadIsDirect: false,
+          },
+          routeAuthority: {
+            channel: "linq",
+            containerMemberId: "member_group_123",
+            threadId: "chat_group_123",
+          },
         },
-        {
-          handle: "+15551234567",
-          isMe: false,
-          status: "active",
+        occurredAt: "2026-07-14T12:00:00.000Z",
+        userId: "member_group_123",
+      });
+      const text = envelope
+        ? readHostedExecutionConversationMessageText(envelope.message)
+        : null;
+      expect(parseHostedExecutionGroupReactionEventText(text)).toEqual({
+        actor: "+15551234567",
+        changes: [{
+          operation,
+          reaction: expectedReaction,
+        }],
+        channel: "linq",
+        mode: "delta",
+        schema: "murph.hosted-group-reaction.v1",
+        targetMessageId: "message_target_123",
+        targetText: "A useful group message",
+      });
+      expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+        expectedUserId: "member_group_123",
+        knownCheckpoint: {
+          lane: "conversation",
+          laneSeq: "41",
+          userId: "member_group_123",
         },
-      ],
-      isGroup: true,
-    });
-    mocks.getHostedLinqReactionTargetMessage.mockResolvedValue({
-      chatId: "chat_group_123",
-      id: "message_target_123",
-      isFromMe: false,
-      parts: ["A useful group message"],
-      service: "iMessage",
-    });
-    mocks.appendHostedLinqThreadRouteReactionContextTx.mockResolvedValue("appended");
-  });
+        mailboxItemId: "mailbox_reaction_123",
+        prisma,
+      });
+    },
+  );
 
-  afterEach(() => {
-    restoreContactPrivacyKeyring?.();
-    restoreContactPrivacyKeyring = null;
-  });
-
-  it("stages bounded actor-attributed context for the account-bound active group", async () => {
-    const event = buildReactionEvent({
-      customEmoji: "🔥",
-      reactionType: "custom",
-    });
-    const prisma = createPrismaStub();
-    mocks.getHostedLinqReactionTargetMessage.mockResolvedValue({
-      chatId: "chat_group_123",
-      id: "message_target_123",
-      parts: [
-        "x".repeat(400),
-        "[link]",
-      ],
-    });
-
+  it("persists a signed reaction even when the provider omits its value", async () => {
     await expect(stageHostedLinqGroupReactionContext({
-      event,
-      prisma,
+      event: buildReactionEvent({ reactionType: "" }),
+      prisma: createPrismaStub(),
     })).resolves.toBe(true);
 
-    expect(mocks.readHostedThreadRouteByThreadIdentity).toHaveBeenCalledWith({
-      channel: "linq",
-      prisma,
-      threadId: "chat_group_123",
+    const envelope =
+      mocks.appendConsumedHostedGroupReactionMailboxEnvelopeTx.mock.calls[0]?.[0]
+        .envelope;
+    const text = readHostedExecutionConversationMessageText(envelope.message);
+    expect(parseHostedExecutionGroupReactionEventText(text)).toMatchObject({
+      changes: [{ operation: "added", reaction: "unknown" }],
     });
-    expect(mocks.readActiveHostedMemberAccess).toHaveBeenCalledWith({
-      memberId: "member_group_123",
-      prisma,
-    });
-    expect(mocks.appendHostedLinqThreadRouteReactionContextTx).toHaveBeenCalledTimes(1);
-    const appendInput = mocks.appendHostedLinqThreadRouteReactionContextTx.mock.calls[0]?.[0];
-    expect(appendInput).toMatchObject({
-      accountLookupKey: expect.stringMatching(/^hbidx:phone:/u),
-      containerMemberId: "member_group_123",
-      text: expect.stringMatching(
-        /^Participant \+15551234567 added a custom reaction on: x+ \[truncated\]$/u,
-      ),
-      threadId: "chat_group_123",
-    });
-    expect(appendInput?.text.length).toBeLessThanOrEqual(512);
-    expect(appendInput?.text).toContain("+15551234567");
-    expect(appendInput?.text).not.toContain("🔥");
-    expect(appendInput?.text).not.toContain("https://");
   });
 
-  it("ignores a missing or inactive route before provider reads", async () => {
-    const prisma = createPrismaStub();
-    mocks.readHostedThreadRouteByThreadIdentity.mockResolvedValueOnce(null);
+  it("persists the reaction even when target text cannot be fetched", async () => {
+    mocks.getHostedLinqReactionTargetMessage.mockRejectedValueOnce(
+      new Error("provider unavailable"),
+    );
 
     await expect(stageHostedLinqGroupReactionContext({
-      event: buildReactionEvent(),
+      event: buildReactionEvent({
+        customEmoji: "😂",
+        reactionType: "custom",
+      }),
+      prisma: createPrismaStub(),
+    })).resolves.toBe(true);
+
+    const envelope =
+      mocks.appendConsumedHostedGroupReactionMailboxEnvelopeTx.mock.calls[0]?.[0]
+        .envelope;
+    const text = readHostedExecutionConversationMessageText(envelope.message);
+    expect(parseHostedExecutionGroupReactionEventText(text)).toMatchObject({
+      targetMessageId: "message_target_123",
+      targetText: null,
+    });
+  });
+
+  it("uses only the exact reacted part when the provider supplies it", async () => {
+    mocks.getHostedLinqReactionTargetMessage.mockResolvedValueOnce({
+      chatId: "chat_group_123",
+      id: "message_target_123",
+      parts: ["first part", "second part"],
+    });
+
+    await stageHostedLinqGroupReactionContext({
+      event: buildReactionEvent({ partIndex: 1, reactionType: "laugh" }),
+      prisma: createPrismaStub(),
+    });
+
+    const envelope =
+      mocks.appendConsumedHostedGroupReactionMailboxEnvelopeTx.mock.calls[0]?.[0]
+        .envelope;
+    const text = readHostedExecutionConversationMessageText(envelope.message);
+    expect(parseHostedExecutionGroupReactionEventText(text)).toMatchObject({
+      targetText: "second part",
+    });
+    expect(envelope.message.linqMessage.replyToPartIndex).toBe(1);
+  });
+
+  it("rejects self echoes, missing routes, inactive containers, and direct chats", async () => {
+    const prisma = createPrismaStub();
+
+    await expect(stageHostedLinqGroupReactionContext({
+      event: buildReactionEvent({ isFromMe: true, reactionType: "laugh" }),
+      prisma,
+    })).resolves.toBe(false);
+
+    mocks.readHostedThreadRouteByThreadIdentity.mockResolvedValueOnce(null);
+    await expect(stageHostedLinqGroupReactionContext({
+      event: buildReactionEvent({ reactionType: "laugh" }),
       prisma,
     })).resolves.toBe(false);
 
@@ -134,30 +252,11 @@ describe("stageHostedLinqGroupReactionContext", () => {
       containerMemberId: "member_group_123",
     });
     mocks.readActiveHostedMemberAccess.mockResolvedValueOnce(false);
-
     await expect(stageHostedLinqGroupReactionContext({
-      event: buildReactionEvent(),
+      event: buildReactionEvent({ reactionType: "laugh" }),
       prisma,
     })).resolves.toBe(false);
 
-    expect(mocks.getHostedLinqChatSummary).not.toHaveBeenCalled();
-    expect(mocks.getHostedLinqReactionTargetMessage).not.toHaveBeenCalled();
-    expect(mocks.appendHostedLinqThreadRouteReactionContextTx).not.toHaveBeenCalled();
-  });
-
-  it("ignores a canonical self-reaction before route or provider reads", async () => {
-    await expect(stageHostedLinqGroupReactionContext({
-      event: buildReactionEvent({ isFromMe: true }),
-      prisma: createPrismaStub(),
-    })).resolves.toBe(false);
-
-    expect(mocks.readHostedThreadRouteByThreadIdentity).not.toHaveBeenCalled();
-    expect(mocks.getHostedLinqChatSummary).not.toHaveBeenCalled();
-    expect(mocks.getHostedLinqReactionTargetMessage).not.toHaveBeenCalled();
-  });
-
-  it("ignores direct chats and stale self or actor roster entries", async () => {
-    const prisma = createPrismaStub();
     mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
       handles: [
         { handle: "+15550000000", isMe: true, status: "active" },
@@ -165,250 +264,76 @@ describe("stageHostedLinqGroupReactionContext", () => {
       ],
       isGroup: false,
     });
-
     await expect(stageHostedLinqGroupReactionContext({
-      event: buildReactionEvent(),
+      event: buildReactionEvent({ reactionType: "laugh" }),
       prisma,
     })).resolves.toBe(false);
 
-    mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
-      handles: [
-        { handle: "+15550000000", isMe: true, status: "removed" },
-        { handle: "+15551234567", isMe: false, status: "active" },
-      ],
-      isGroup: true,
-    });
-
-    await expect(stageHostedLinqGroupReactionContext({
-      event: buildReactionEvent(),
-      prisma,
-    })).resolves.toBe(false);
-
-    mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
-      handles: [
-        { handle: "+15550000000", isMe: true, status: "active" },
-        { handle: "+15551234567", isMe: false, status: "removed" },
-      ],
-      isGroup: true,
-    });
-
-    await expect(stageHostedLinqGroupReactionContext({
-      event: buildReactionEvent(),
-      prisma,
-    })).resolves.toBe(false);
-
-    mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
-      handles: [
-        { handle: "+15550000000", isMe: true, status: null },
-        { handle: "+15551234567", isMe: false, status: "active" },
-      ],
-      isGroup: true,
-    });
-
-    await expect(stageHostedLinqGroupReactionContext({
-      event: buildReactionEvent(),
-      prisma,
-    })).resolves.toBe(false);
-
-    mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
-      handles: [
-        { handle: "+15550000000", isMe: true, status: "active" },
-        { handle: "+15551234567", isMe: false, status: null },
-      ],
-      isGroup: true,
-    });
-
-    await expect(stageHostedLinqGroupReactionContext({
-      event: buildReactionEvent(),
-      prisma,
-    })).resolves.toBe(false);
-
-    expect(mocks.getHostedLinqReactionTargetMessage).not.toHaveBeenCalled();
-    expect(mocks.appendHostedLinqThreadRouteReactionContextTx).not.toHaveBeenCalled();
-  });
-
-  it("ignores a target that does not exactly match the reacted message and chat", async () => {
-    const prisma = createPrismaStub();
-    mocks.getHostedLinqReactionTargetMessage.mockResolvedValue({
-      chatId: "chat_other_123",
-      id: "message_target_123",
-      parts: ["A message from another chat"],
-    });
-
-    await expect(stageHostedLinqGroupReactionContext({
-      event: buildReactionEvent(),
-      prisma,
-    })).resolves.toBe(false);
-
-    expect(mocks.appendHostedLinqThreadRouteReactionContextTx).not.toHaveBeenCalled();
-  });
-
-  it("uses only the reacted part and rejects an out-of-range part index", async () => {
-    const prisma = createPrismaStub();
-    mocks.getHostedLinqReactionTargetMessage.mockResolvedValue({
-      chatId: "chat_group_123",
-      id: "message_target_123",
-      parts: ["first part", "second part"],
-    });
-
-    await expect(stageHostedLinqGroupReactionContext({
-      event: buildReactionEvent({ partIndex: 1 }),
-      prisma,
-    })).resolves.toBe(true);
     expect(
-      mocks.appendHostedLinqThreadRouteReactionContextTx.mock.calls[0]?.[0].text,
-    ).toBe(
-      "Participant +15551234567 added a like reaction on: second part",
-    );
-
-    mocks.appendHostedLinqThreadRouteReactionContextTx.mockClear();
-    await expect(stageHostedLinqGroupReactionContext({
-      event: buildReactionEvent({ partIndex: 2 }),
-      prisma,
-    })).resolves.toBe(false);
-    expect(mocks.appendHostedLinqThreadRouteReactionContextTx).not.toHaveBeenCalled();
+      mocks.appendConsumedHostedGroupReactionMailboxEnvelopeTx,
+    ).not.toHaveBeenCalled();
   });
 
-  it("drops optional context when transactional staging fails", async () => {
-    mocks.appendHostedLinqThreadRouteReactionContextTx.mockRejectedValueOnce(
-      new DOMException("timed out", "TimeoutError"),
+  it("fails the webhook when the durable append or signal fails so a provider retry can replay it", async () => {
+    mocks.appendConsumedHostedGroupReactionMailboxEnvelopeTx.mockRejectedValueOnce(
+      new Error("mailbox unavailable"),
     );
-
     await expect(stageHostedLinqGroupReactionContext({
-      event: buildReactionEvent(),
+      event: buildReactionEvent({ reactionType: "laugh" }),
       prisma: createPrismaStub(),
-    })).resolves.toBe(false);
-  });
+    })).rejects.toThrow("mailbox unavailable");
 
-  it.each([false, true])(
-    "promotes a canonical affirmative reaction without a provider target read through the ordinary %s group flag",
-    async (isGroup) => {
-      mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
-        handles: [
-          { handle: "+15550000000", isMe: true, status: "active" },
-          { handle: "+15551234567", isMe: false, status: "active" },
-        ],
-        isGroup,
-      });
+    mocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(
+      new Error("signal unavailable"),
+    );
+    await expect(stageHostedLinqGroupReactionContext({
+      event: buildReactionEvent({ reactionType: "laugh" }),
+      prisma: createPrismaStub(),
+    })).rejects.toThrow("signal unavailable");
+  });
+});
+
+describe("buildHostedLinqAffirmativeReactionMessageEvent", () => {
+  it.each([
+    ["like", undefined, "Reacted with a like reaction."],
+    ["heart", undefined, "Reacted with a heart reaction."],
+    ["custom", "👍", "Reacted with 👍."],
+    ["custom", "❤", "Reacted with ❤."],
+  ])(
+    "keeps qualifying %s additions on the ordinary durable reply path",
+    async (reactionType, customEmoji, expectedText) => {
       await expect(buildHostedLinqAffirmativeReactionMessageEvent({
-        event: buildReactionEvent(),
+        event: buildReactionEvent({ customEmoji, reactionType }),
       })).resolves.toMatchObject({
         data: {
-          chat: {
-            id: "chat_group_123",
-            is_group: isGroup,
-          },
-          from: "+15551234567",
-          is_from_me: false,
           message: {
             id: "event_reaction_123",
-            parts: [
-              {
-                type: "text",
-                value: "Reacted with a like reaction.",
-              },
-            ],
-            reply_to: {
-              message_id: "message_target_123",
-            },
+            parts: [{ type: "text", value: expectedText }],
+            reply_to: { message_id: "message_target_123" },
           },
         },
         event_id: "event_reaction_123",
         event_type: "message.received",
       });
-      expect(mocks.getHostedLinqReactionTargetMessage).not.toHaveBeenCalled();
     },
   );
 
-  it.each([
-    ["heart", undefined, "Reacted with a heart reaction."],
-    ["custom", "👍", "Reacted with 👍."],
-    ["custom", "❤", "Reacted with ❤."],
-  ])(
-    "describes a qualifying %s reaction in the synthetic message",
-    async (reactionType, customEmoji, expectedText) => {
-      mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
-        handles: [
-          { handle: "+15550000000", isMe: true, status: "active" },
-          { handle: "+15551234567", isMe: false, status: "active" },
-        ],
-        isGroup: false,
-      });
-
-      await expect(buildHostedLinqAffirmativeReactionMessageEvent({
-        event: buildReactionEvent({
-          customEmoji,
-          reactionType,
-        }),
-      })).resolves.toMatchObject({
-        data: {
-          message: {
-            parts: [
-              {
-                type: "text",
-                value: expectedText,
-              },
-            ],
-          },
-        },
-      });
-    },
-  );
-
-  it.each([
-    [
-      "self-line",
-      [
-        { handle: "+15550000000", isMe: true, status: "active" },
-        { handle: "+15550000001", isMe: true, status: "active" },
-        { handle: "+15551234567", isMe: false, status: "active" },
-      ],
-    ],
-    [
-      "actor",
-      [
-        { handle: "+15550000000", isMe: true, status: "active" },
-        { handle: "+15551234567", isMe: false, status: "active" },
-        { handle: "+15551234567", isMe: false, status: "active" },
-      ],
-    ],
-  ])("rejects an ambiguous active %s roster", async (_kind, handles) => {
-    mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
-      handles,
-      isGroup: false,
-    });
+  it("leaves laughs and removals on the consumed context-only path", async () => {
     await expect(buildHostedLinqAffirmativeReactionMessageEvent({
-      event: buildReactionEvent(),
+      event: buildReactionEvent({ reactionType: "laugh" }),
     })).resolves.toBeNull();
-  });
-
-  it("keeps nonaffirmative reactions on the silent path and leaves target authorship to outbox attestation", async () => {
     await expect(buildHostedLinqAffirmativeReactionMessageEvent({
       event: buildReactionEvent({
-        customEmoji: "😂",
-        reactionType: "custom",
+        eventType: "reaction.removed",
+        reactionType: "heart",
       }),
     })).resolves.toBeNull();
-    expect(mocks.getHostedLinqReactionTargetMessage).not.toHaveBeenCalled();
-
-    await expect(buildHostedLinqAffirmativeReactionMessageEvent({
-      event: buildReactionEvent(),
-    })).resolves.toMatchObject({
-      data: {
-        message: {
-          id: "event_reaction_123",
-          reply_to: {
-            message_id: "message_target_123",
-          },
-        },
-      },
-    });
-    expect(mocks.getHostedLinqReactionTargetMessage).not.toHaveBeenCalled();
   });
 });
 
 function buildReactionEvent(input: {
   customEmoji?: string;
+  eventType?: "reaction.added" | "reaction.removed";
   isFromMe?: boolean;
   partIndex?: number;
   reactionType?: string;
@@ -427,7 +352,7 @@ function buildReactionEvent(input: {
         reaction_type: input.reactionType ?? "like",
       },
       event_id: "event_reaction_123",
-      event_type: "reaction.added",
+      event_type: input.eventType ?? "reaction.added",
       trace_id: "trace_reaction_123",
       webhook_version: "2026-02-03",
     } as HostedLinqWebhookEvent,
@@ -440,30 +365,18 @@ function buildReactionEvent(input: {
 
 function createPrismaStub(): PrismaClient {
   const transactionClient = {} as Prisma.TransactionClient;
-  const prisma: PrismaClient = Object.assign(Object.create(null), {
+  return Object.assign(Object.create(null), {
     $transaction: vi.fn(
       async (callback: (tx: Prisma.TransactionClient) => Promise<unknown>) =>
         callback(transactionClient),
     ),
-  });
-  return prisma;
+  }) as PrismaClient;
 }
 
-function configureHostedContactPrivacyKeyringForTest(): () => void {
-  const previousKeys = process.env.HOSTED_CONTACT_PRIVACY_KEYS;
-  const previousCurrentVersion = process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION;
+function configureHostedContactPrivacyKeyringForTest(): void {
   process.env.HOSTED_CONTACT_PRIVACY_KEYS = `v1:${TEST_CONTACT_PRIVACY_KEY}`;
   process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = "v1";
   clearHostedOnboardingEnvCache();
-
-  return () => {
-    restoreEnvValue("HOSTED_CONTACT_PRIVACY_KEYS", previousKeys);
-    restoreEnvValue(
-      "HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION",
-      previousCurrentVersion,
-    );
-    clearHostedOnboardingEnvCache();
-  };
 }
 
 function clearHostedOnboardingEnvCache(): void {
@@ -472,12 +385,4 @@ function clearHostedOnboardingEnvCache(): void {
       __murphHostedOnboardingEnv?: unknown;
     }
   ).__murphHostedOnboardingEnv;
-}
-
-function restoreEnvValue(key: string, value: string | undefined): void {
-  if (value === undefined) {
-    delete process.env[key];
-    return;
-  }
-  process.env[key] = value;
 }
