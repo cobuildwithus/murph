@@ -4,6 +4,9 @@ import { createHash } from "node:crypto";
 
 const BROWSER_VAULT_REFRESH_CONTROL_DEDUPE_WINDOW_MS = 60_000;
 
+export const HOSTED_BROWSER_VAULT_REFRESH_RUNTIME_CONTROL_EVENT_ID_PREFIX =
+  "runtime-control:browser-vault-refresh:";
+
 export function buildHostedBrowserVaultRefreshRuntimeControlEvent(input: {
   nowMs?: number;
   userId: string;
@@ -27,7 +30,8 @@ export function buildHostedBrowserVaultRefreshRuntimeControlEvent(input: {
     .slice(0, 32);
 
   return {
-    eventId: `runtime-control:browser-vault-refresh:${fingerprint}`,
+    eventId:
+      `${HOSTED_BROWSER_VAULT_REFRESH_RUNTIME_CONTROL_EVENT_ID_PREFIX}${fingerprint}`,
     occurredAt: new Date(bucketMs).toISOString(),
   };
 }

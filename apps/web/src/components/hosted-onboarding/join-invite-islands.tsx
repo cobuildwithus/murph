@@ -21,6 +21,7 @@ import type {
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 
 import { ConsentSkeleton, HostedLegalConsentCard } from "../legal/hosted-legal-consent-card";
+import { useHostedPhoneLinkDiagnostics } from "../settings/hosted-phone-link-diagnostics";
 import { ConnectTelegram } from "../settings/hosted-telegram-settings";
 import { HostedPhoneSettings } from "../settings/hosted-phone-settings";
 import {
@@ -237,6 +238,18 @@ export function JoinInviteMessagingSetupIsland({
     && privySessionMatchesAppSession
     && expectedPrivyUserId !== null
     && user?.id === expectedPrivyUserId;
+  const createPhoneDiagnosticReporter = useHostedPhoneLinkDiagnostics({
+    appAuthenticated: authenticated,
+    clientUserMatchesExpected: expectedPrivyUserId !== null && user?.id === expectedPrivyUserId,
+    clientUserPresent: Boolean(user?.id),
+    expectedUserPresent: expectedPrivyUserId !== null,
+    operation: user?.phone?.number ? "update" : "link",
+    privyAuthenticated,
+    privyReady,
+    serverSessionMatches: privySessionMatchesAppSession,
+    showLinkForm: true,
+    surface: "join_invite",
+  });
 
   function refresh() {
     router.refresh();
@@ -269,7 +282,10 @@ export function JoinInviteMessagingSetupIsland({
 
   return (
     <div className="space-y-5">
-      <HostedPhoneSettings onLinked={refresh} />
+      <HostedPhoneSettings
+        diagnosticReporterFactory={createPhoneDiagnosticReporter}
+        onLinked={refresh}
+      />
 
       <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
         <span className="h-px flex-1 bg-border" />

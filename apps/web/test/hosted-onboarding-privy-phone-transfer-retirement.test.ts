@@ -43,6 +43,7 @@ vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/shared", () => ({
+  HOSTED_ONBOARDING_TRANSACTION_OPTIONS: { maxWait: 5_000 },
   lockHostedMemberRow: mocks.lockHostedMemberRow,
 }));
 
@@ -252,7 +253,89 @@ describe("Privy phone-transfer source retirement", () => {
     expect(fixture.prisma.hostedMember.updateMany).not.toHaveBeenCalled();
   });
 
-  it("rejects a browser-vault refresh event outside its canonical time bucket", async () => {
+  it("fences an automatic-trial scaffold the runtime already booted", async () => {
+    const fixture = makeFixture({ autoTrial: true });
+    const activationEventId =
+      `member.activated:hosted.auto_pulse_trial.enrolled:${SOURCE_MEMBER_ID}:auto-pulse-trial:${STRIPE_SUBSCRIPTION_ID}`;
+    fixture.prisma.hostedWorkspace.findUnique.mockResolvedValue({
+      acceptedAttemptFailureRecheckClaimedAt: null,
+      browserVaultReplicaRef: null,
+      checkpointedAt: NOW,
+      inboxMediaRetentionSignalAttemptedAt: null,
+      inboxMediaRetentionWakeAt: null,
+      nextWakeAt: new Date(NOW.getTime() + 60_000),
+      nextWakeReason: "maintenance",
+      redactedStatusJson: null,
+      snapshotRef: "snapshots/source",
+      userId: SOURCE_MEMBER_ID,
+      version: 6n,
+    });
+    fixture.prisma.hostedMailboxItem.findMany.mockResolvedValue([
+      { ...mailboxItem(1, "member.activated", activationEventId), consumedAt: NOW },
+      {
+        ...mailboxItem(
+          2,
+          "assistant.notification.requested",
+          `assistant.notification.requested:signup-welcome:${SOURCE_MEMBER_ID}:${activationEventId}`,
+        ),
+        consumedAt: NOW,
+      },
+      {
+        ...mailboxItem(
+          3,
+          "runtime.browser-vault-refresh-requested",
+          BROWSER_VAULT_REFRESH_CONTROL_EVENT_ID,
+        ),
+        consumedAt: NOW,
+        occurredAt: new Date(NOW.getTime() + 30_000),
+      },
+      {
+        ...mailboxItem(
+          4,
+          "runtime.browser-vault-refresh-requested",
+          `${BROWSER_VAULT_REFRESH_CONTROL_EVENT_ID}later`,
+        ),
+        causalSeq: 9n,
+        occurredAt: new Date(NOW.getTime() + 120_000),
+      },
+    ]);
+    fixture.prisma.hostedMailboxLaneCounter.findMany.mockResolvedValue([
+      { consumedSeq: 0n, lane: "causal", nextSeq: 76n },
+      { consumedSeq: 0n, lane: "conversation", nextSeq: 1n },
+      { consumedSeq: 3n, lane: "system", nextSeq: 55n },
+    ]);
+    fixture.sourceShape._count.hostedAiUsagePeriods = 1;
+    fixture.sourceShape._count.hostedMailboxItems = 4;
+    fixture.sourceShape._count.hostedMailboxLaneCounters = 3;
+    fixture.sourceShape._count.hostedMailboxPayloads = 2;
+    fixture.sourceShape._count.hostedRuntimeLogs = 43;
+    fixture.sourceShape._count.aiUsage = 2;
+    fixture.sourceShape._count.linqDailyStates = 1;
+
+    await expect(prepare(fixture)).resolves.toEqual({
+      autoTrialBilling: {
+        stripeCustomerId: STRIPE_CUSTOMER_ID,
+        stripeSubscriptionId: STRIPE_SUBSCRIPTION_ID,
+      },
+      sourceMemberId: SOURCE_MEMBER_ID,
+    });
+  });
+
+  it("rejects a source whose conversation counter recorded any input", async () => {
+    const fixture = makeFixture({ autoTrial: true });
+    fixture.prisma.hostedMailboxLaneCounter.findMany.mockResolvedValue([
+      { consumedSeq: 0n, lane: "causal", nextSeq: 4n },
+      { consumedSeq: 1n, lane: "conversation", nextSeq: 2n },
+      { consumedSeq: 0n, lane: "system", nextSeq: 4n },
+    ]);
+
+    await expect(prepare(fixture)).rejects.toMatchObject({
+      code: "PRIVY_PHONE_TRANSFER_REQUIRES_SUPPORT",
+    });
+    expect(fixture.prisma.hostedMember.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects a source holding a conversation-lane mailbox item", async () => {
     const fixture = makeFixture({ autoTrial: true });
     const activationEventId =
       `member.activated:hosted.auto_pulse_trial.enrolled:${SOURCE_MEMBER_ID}:auto-pulse-trial:${STRIPE_SUBSCRIPTION_ID}`;
@@ -264,13 +347,34 @@ describe("Privy phone-transfer source retirement", () => {
         `assistant.notification.requested:signup-welcome:${SOURCE_MEMBER_ID}:${activationEventId}`,
       ),
       {
-        ...mailboxItem(
-          3,
-          "runtime.browser-vault-refresh-requested",
-          BROWSER_VAULT_REFRESH_CONTROL_EVENT_ID,
-        ),
-        occurredAt: new Date(NOW.getTime() + 30_000),
+        ...mailboxItem(3, "conversation.message", "conversation:inbound-1"),
+        lane: "conversation",
+        laneSeq: 1n,
       },
+    ]);
+
+    await expect(prepare(fixture)).rejects.toMatchObject({
+      code: "PRIVY_PHONE_TRANSFER_REQUIRES_SUPPORT",
+    });
+    expect(fixture.prisma.hostedMember.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects a source with an unexpected system mailbox kind", async () => {
+    const fixture = makeFixture({ autoTrial: true });
+    const activationEventId =
+      `member.activated:hosted.auto_pulse_trial.enrolled:${SOURCE_MEMBER_ID}:auto-pulse-trial:${STRIPE_SUBSCRIPTION_ID}`;
+    fixture.prisma.hostedMailboxItem.findMany.mockResolvedValue([
+      mailboxItem(1, "member.activated", activationEventId),
+      mailboxItem(
+        2,
+        "assistant.notification.requested",
+        `assistant.notification.requested:signup-welcome:${SOURCE_MEMBER_ID}:${activationEventId}`,
+      ),
+      mailboxItem(
+        3,
+        "member.preferences.updated",
+        `member.preferences.updated:${SOURCE_MEMBER_ID}:1`,
+      ),
     ]);
 
     await expect(prepare(fixture)).rejects.toMatchObject({

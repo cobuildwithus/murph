@@ -3399,6 +3399,18 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         });
         if (options.shutdownSignal?.aborted === true) {
           await flushImageGenerationWork();
+          if (imageAssistantWakePending) {
+            pendingWake = selectEarliestHostedRuntimeWake([
+              {
+                at: pendingWake.nextWakeAt,
+                reason: pendingWake.nextWakeReason,
+              },
+              {
+                at: new Date().toISOString(),
+                reason: "assistant",
+              },
+            ]);
+          }
         }
         if (dirtyWaitResult.kind === "external_wake") {
           const latencySeed = createHostedRuntimeWakeLatencySeed(
