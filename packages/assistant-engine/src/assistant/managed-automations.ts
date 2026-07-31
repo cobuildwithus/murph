@@ -295,6 +295,10 @@ const PREVIOUS_ONBOARDING_FOLLOWUP_AUTOMATION = {
     '',
     "Output: send one brief, natural, low-pressure in-chat continuation only when it advances unfinished onboarding. Every user-facing scheduled continuation must include exactly one easy, reply-oriented question; otherwise return skip. Do not mention internal state, setup completion, or this automation, and do not use a fixed script. The user's reply will be handled by the next normal Murph onboarding turn.",
   ].join('\n'),
+  schedule: {
+    kind: 'dailyLocal',
+    localTime: '13:30',
+  },
   slug: 'finish-onboarding-followup',
   summary:
     'Daily aspiration-and-foundation continuation check until Murph onboarding is complete.',
@@ -1602,6 +1606,10 @@ function isPreviousSeededOnboardingFollowupAutomation(
       PREVIOUS_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy &&
     automation.instructions ===
       PREVIOUS_ONBOARDING_FOLLOWUP_AUTOMATION.instructions &&
+    murphManagedAutomationValuesEqual(
+      automation.schedule,
+      PREVIOUS_ONBOARDING_FOLLOWUP_AUTOMATION.schedule,
+    ) &&
     murphManagedAutomationValuesEqual(
       automation.tags,
       PREVIOUS_ONBOARDING_FOLLOWUP_AUTOMATION.tags,

@@ -1173,7 +1173,7 @@ describe('applyMurphManagedAutomations core integration', () => {
         route: existingRoute,
         schedule: {
           kind: 'dailyLocal',
-          localTime: '08:00',
+          localTime: '13:30',
         },
         slug: 'finish-onboarding-followup',
         status,
@@ -1328,6 +1328,60 @@ describe('applyMurphManagedAutomations core integration', () => {
         localTime: '13:30',
       },
       title: `${previousOnboardingFollowupDefinition.title} edited`,
+    })
+  })
+
+  it('does not migrate an immediate predecessor with a user-edited schedule', async () => {
+    const vaultRoot = await createVaultRoot()
+    const automationId = 'automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FF'
+
+    await upsertAutomation({
+      automationId,
+      continuityPolicy: previousOnboardingFollowupDefinition.continuityPolicy,
+      instructions: previousOnboardingFollowupDefinition.instructions,
+      now: new Date('2026-06-23T12:00:00.000Z'),
+      route: defaultRoute,
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '13:30',
+      },
+      slug: previousOnboardingFollowupDefinition.slug,
+      status: 'active',
+      summary: previousOnboardingFollowupDefinition.summary,
+      tags: [...previousOnboardingFollowupDefinition.tags],
+      title: previousOnboardingFollowupDefinition.title,
+      vaultRoot,
+    })
+    await patchAutomation({
+      lookup: automationId,
+      now: new Date('2026-06-23T12:30:00.000Z'),
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '08:00',
+      },
+      vaultRoot,
+    })
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-23T13:00:00.000Z'),
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 5,
+      skipped: 0,
+      updated: 0,
+    })
+    await expect(showAutomation({
+      automationId,
+      vaultRoot,
+    })).resolves.toMatchObject({
+      activeUntil: null,
+      instructions: previousOnboardingFollowupDefinition.instructions,
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '08:00',
+      },
+      title: previousOnboardingFollowupDefinition.title,
     })
   })
 
