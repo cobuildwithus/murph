@@ -49,7 +49,11 @@ type HostedGroupJoinOfferReactionSkipReason =
 export type HostedGroupJoinOfferReactionResult =
   | {
       status: "accepted";
-      reason: "accepted" | "outreach_enqueued" | "outreach_revoked";
+      reason:
+        | "accepted"
+        | "outreach_enqueued"
+        | "outreach_revoked"
+        | "reaction_recorded";
     }
   | { status: "ignored"; reason: HostedGroupJoinOfferReactionSkipReason };
 
@@ -160,13 +164,17 @@ export async function handleHostedGroupJoinOfferReaction(input: {
       if (revoked.kind === "revoked") {
         return { status: "accepted", reason: "outreach_revoked" };
       }
+      if (regionSupportedForRemoval) {
+        // The canonical owner already retained this removal. Make that decision
+        // terminal so the shared webhook cannot append a second actor-attributed
+        // envelope under the same provider event id.
+        return { status: "accepted", reason: "reaction_recorded" };
+      }
       // This owner decided a canonical-offer reaction from a refused region, so
       // the disposition has to be consumable. Its durable room evidence is
       // anonymous: no pre-member phone enters the group model.
       return skipHostedGroupJoinOfferReaction({
-        reason: regionSupportedForRemoval
-          ? "reaction_removed"
-          : "recipient_region_unsupported",
+        reason: "recipient_region_unsupported",
       });
     } catch (error) {
       if (!readHostedGroupJoinOfferTargetSkipReason(error)) {
