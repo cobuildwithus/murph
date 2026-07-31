@@ -85,4 +85,4 @@ jobs:
       - name: Typecheck
         run: pnpm --dir apps/web typecheck
 
-# Re-trigger after the workflow exists on the branch.
+# Re-trigger refinement from a non-Actions actor, then remove this workflow.
