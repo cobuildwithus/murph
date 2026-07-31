@@ -221,14 +221,28 @@ import {
 } from "@/src/lib/hosted-onboarding/webhook-transport";
 import { requireHostedOnboardingLinqConfig } from "@/src/lib/hosted-onboarding/runtime";
 
-const usageTransactionPrisma = {};
+const usageHostedLinqDelivery = {
+  findUnique: vi.fn().mockResolvedValue({ id: "hld_usage_notice" }),
+  updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+};
+const usageHostedLinqDeliveryMessage = {
+  createMany: vi.fn().mockResolvedValue({ count: 1 }),
+};
+const usageHostedLinqProviderEvent = {
+  findMany: vi.fn().mockResolvedValue([]),
+};
+const usageTransactionPrisma = {
+  hostedLinqDelivery: usageHostedLinqDelivery,
+  hostedLinqDeliveryMessage: usageHostedLinqDeliveryMessage,
+  hostedLinqProviderEvent: usageHostedLinqProviderEvent,
+};
 const usagePrisma = {
   $transaction: vi.fn(async (
     operation: (prisma: typeof usageTransactionPrisma) => Promise<unknown>,
   ) => operation(usageTransactionPrisma)),
-  hostedLinqDelivery: {
-    updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-  },
+  hostedLinqDelivery: usageHostedLinqDelivery,
+  hostedLinqDeliveryMessage: usageHostedLinqDeliveryMessage,
+  hostedLinqProviderEvent: usageHostedLinqProviderEvent,
 };
 
 describe("hosted Linq webhook transport", () => {
@@ -615,6 +629,51 @@ describe("hosted Linq webhook transport", () => {
 
     expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
+
+  it.each(["invite_signup", "invite_signup_fallback"] as const)(
+    "makes no provider call when a repeated %s partial resolves to its completed delivery row",
+    async (template) => {
+      vi.mocked(claimHostedLinqDeliveryProviderDispatchTx).mockResolvedValueOnce({
+        claimed: false,
+        id: "hld_partial_signup",
+        outcome: "completed",
+      });
+      const effect = template === "invite_signup"
+        ? createHostedWebhookLinqMessageSideEffect({
+            chatId: "chat-1",
+            inviteId: "invite-1",
+            memberId: "member-1",
+            occurredAt: "2026-03-26T12:00:00.000Z",
+            replyToMessageId: "message-1",
+            sourceEventId: "event-partial-replay",
+            template,
+          })
+        : createHostedWebhookLinqMessageSideEffect({
+            assignedRecipientPhone: "+15550100001",
+            inviteId: "invite-1",
+            memberId: "member-1",
+            memberPhone: "+15551234567",
+            occurredAt: "2026-03-26T12:00:00.000Z",
+            sourceEventId: "event-partial-replay",
+            template,
+          });
+
+      await expect(drainHostedLinqSideEffectsDirect({
+        prisma: createInviteSignupPrismaFixture() as never,
+        sideEffects: [effect],
+      })).resolves.toEqual({
+        sentCount: 0,
+        skipped: [{
+          effectId: effect.effectId,
+          reason: "notice_already_claimed",
+          template,
+        }],
+      });
+
+      expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+      expect(createHostedLinqChat).not.toHaveBeenCalled();
+    },
+  );
 
   it("gives different group reply events independent provider identities", async () => {
     const firstEffect = createHostedWebhookLinqMessageSideEffect({
@@ -2811,6 +2870,57 @@ describe("hosted Linq webhook transport", () => {
       expectedAttemptedAt: new Date("2026-03-26T12:00:01.000Z"),
       failureCode: "linq_usage_limit_dispatch_retryable",
       idempotencyKey: effect.effectId,
+      prisma: usagePrisma,
+    });
+    expect(releaseHostedLinqQuotaReplyNoticeClaim).not.toHaveBeenCalled();
+  });
+
+  it("preserves an AI usage quota rich-link partial delivery as terminal", async () => {
+    const partialFailureMessage =
+      "Linq rich-link delivery could not confirm both provider messages after the primary request was accepted.";
+    vi.mocked(sendHostedLinqChatMessage).mockRejectedValueOnce(Object.assign(
+      new Error(partialFailureMessage),
+      {
+        code: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+        deliveryMayHaveSucceeded: true,
+        providerMessageId: "msg_text",
+        providerMessageIds: ["msg_text"],
+        providerThreadId: "chat-1",
+        retryable: false,
+      },
+    ));
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      claimToken: {
+        periodStart: "2026-03-01T00:00:00.000Z",
+        sentAt: "2026-03-26T12:00:01.000Z",
+        usageCreditLedgerVersion: "0",
+      },
+      memberId: "member-1",
+      message:
+        "Usage details:\nhttps://pay.example.test/checkout/session_123",
+      noticeCode: "pulse_upgrade_edge",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      sourceEventId: "event-ai-usage-partial",
+      template: "ai_usage_quota",
+    });
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        prisma: usagePrisma as never,
+        sideEffects: [effect],
+      }),
+    ).rejects.toThrow(partialFailureMessage);
+
+    expect(markHostedLinqDeliveryAcceptedTx).not.toHaveBeenCalled();
+    expect(markHostedLinqDeliverySendFailedTx).toHaveBeenCalledWith({
+      expectedAttemptedAt: new Date("2026-03-26T12:00:01.000Z"),
+      failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+      failureReason: partialFailureMessage,
+      idempotencyKey: effect.effectId,
+      linqChatId: "chat-1",
+      messageIds: ["msg_text"],
       prisma: usagePrisma,
     });
     expect(releaseHostedLinqQuotaReplyNoticeClaim).not.toHaveBeenCalled();

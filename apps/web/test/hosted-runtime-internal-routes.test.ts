@@ -15,6 +15,7 @@ const MAILBOX_ITEM_2_PAYLOAD_REF = "hosted-mailbox-payload:mailbox_item_2";
 const UNSAFE_SENTINEL = "UNSAFE_CONTENT_SENTINEL";
 
 const mocks = vi.hoisted(() => ({
+  after: vi.fn<(task: () => Promise<void> | void) => void>(),
   checkpointHostedWorkspace: vi.fn(),
   fetchHostedMailboxItemsAfterLaneCursors: vi.fn(),
   fetchHostedMailboxPayload: vi.fn(),
@@ -39,11 +40,17 @@ const mocks = vi.hoisted(() => ({
   recordHostedIngressAssistantMilestone: vi.fn(),
   recordHostedIngressProviderStarted: vi.fn(),
   recordHostedIngressRuntimeMilestone: vi.fn(),
+  tryMarkHostedMailboxConversationAiUsageDenied: vi.fn(),
   recordHostedRuntimeLogs: vi.fn(),
   requireHostedCloudflareCallbackJsonRequest: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
   resolveHostedRuntimeAiUsageGate: vi.fn(),
   signalHostedRuntimeRecheckRuntime: vi.fn(),
+}));
+
+vi.mock("next/server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/server")>()),
+  after: mocks.after,
 }));
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
@@ -60,6 +67,8 @@ vi.mock("@/src/lib/hosted-mailbox/store", async (importOriginal) => ({
   readHostedMailboxConsumedSeqByLane: mocks.readHostedMailboxConsumedSeqByLane,
   readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
   readHostedMailboxMaxSeqByLane: mocks.readHostedMailboxMaxSeqByLane,
+  tryMarkHostedMailboxConversationAiUsageDenied:
+    mocks.tryMarkHostedMailboxConversationAiUsageDenied,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
@@ -251,6 +260,7 @@ describe("hosted runtime internal web routes", () => {
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
       status: "allowed",
     });
+    mocks.tryMarkHostedMailboxConversationAiUsageDenied.mockResolvedValue(false);
     mocks.signalHostedRuntimeRecheckRuntime.mockResolvedValue({
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_routes_1",
@@ -1117,6 +1127,9 @@ describe("hosted runtime internal web routes", () => {
       conversationUsageStatus: "low",
       items: [expect.objectContaining({ id: "mailbox_item_low" })],
     });
+    expect(
+      mocks.tryMarkHostedMailboxConversationAiUsageDenied,
+    ).not.toHaveBeenCalled();
   });
 
   it("rejects conversation mailbox items when the AI usage gate denies runtime consumption", async () => {
@@ -1173,6 +1186,14 @@ describe("hosted runtime internal web routes", () => {
     expect(response.status).toBe(403);
     expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
       mode: "read_first",
+      userId: "member_routes_1",
+    });
+    expect(
+      mocks.tryMarkHostedMailboxConversationAiUsageDenied,
+    ).toHaveBeenCalledWith({
+      afterConversationLaneSeq: 11n,
+      prisma: expect.objectContaining({ kind: "prisma" }),
+      throughConversationLaneSeq: 12n,
       userId: "member_routes_1",
     });
   });
@@ -1893,6 +1914,8 @@ describe("hosted runtime internal web routes", () => {
             version: "5",
           },
         });
+      expect(mocks.after).toHaveBeenCalledTimes(1);
+      await mocks.after.mock.calls[0]?.[0]();
       expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
         userId: "member_routes_1",
       });
@@ -1901,8 +1924,15 @@ describe("hosted runtime internal web routes", () => {
     }
   });
 
-  it("signals a runtime recheck after checkpointing a due workspace wake", async () => {
+  it("returns a due workspace checkpoint before running its recheck signal", async () => {
     const nextWakeAt = "2026-04-25T23:59:00.000Z";
+    let resolveSignal!: () => void;
+    mocks.signalHostedRuntimeRecheckRuntime.mockImplementationOnce(
+      async () =>
+        await new Promise<void>((resolve) => {
+          resolveSignal = resolve;
+        }),
+    );
     mocks.checkpointHostedWorkspace.mockResolvedValue({
       status: "updated",
       workspace: buildWorkspaceRecord({
@@ -1936,9 +1966,15 @@ describe("hosted runtime internal web routes", () => {
           version: "5",
         },
       });
+    expect(mocks.after).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
+
+    const signalTask = mocks.after.mock.calls[0]?.[0]();
     expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
       userId: "member_routes_1",
     });
+    resolveSignal();
+    await signalTask;
   });
 
   it("does not fail checkpointing when the wake recheck signal is unavailable", async () => {
@@ -1982,6 +2018,8 @@ describe("hosted runtime internal web routes", () => {
             version: "5",
           },
         });
+      expect(mocks.after).toHaveBeenCalledTimes(1);
+      await mocks.after.mock.calls[0]?.[0]();
       expect(warnSpy).toHaveBeenCalledWith(
         "Hosted workspace wake recheck signal failed after checkpoint.",
         {

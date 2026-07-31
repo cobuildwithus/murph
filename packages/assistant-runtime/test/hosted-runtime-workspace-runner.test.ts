@@ -3087,7 +3087,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("signals automation schedule writes after checkpointing their receipts", async () => {
+  test("durably arms automation schedule writes while checkpointing their receipts", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     await initializeVault({
       createdAt: new Date(TEST_NOW),
@@ -3128,8 +3128,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             attemptId: "attempt_synthetic_runner_dirty_receipt_snapshot",
             expectedWorkspaceVersion: checkpointInput.workspace?.version ?? "0",
             leaseGeneration: "1",
-            nextWakeAt: checkpointInput.workspace?.nextWakeAt ?? null,
-            nextWakeReason: checkpointInput.workspace?.nextWakeReason ?? null,
+            nextWakeAt: checkpointInput.nextWakeAt ?? null,
+            nextWakeReason: checkpointInput.nextWakeReason ?? null,
             reason: "canonical_runtime_commit",
             redactedStatus: checkpointInput.redactedStatus,
             snapshotRef: checkpointInput.workspace?.snapshotRef ?? null,
@@ -3181,13 +3181,35 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
 
       assert.equal(result.latestWorkspace?.version, "1");
+      assert.equal(result.latestWorkspace?.nextWakeAt, TEST_NOW);
+      assert.equal(result.latestWorkspace?.nextWakeReason, "assistant");
       assert.deepEqual(runtimeCheckpointInputs.map((input) => input.reason), [
         "canonical_runtime_commit",
       ]);
+      assert.deepEqual(
+        runtimeCheckpointInputs.map((input) => ({
+          nextWakeAt: input.nextWakeAt ?? null,
+          nextWakeReason: input.nextWakeReason ?? null,
+        })),
+        [{
+          nextWakeAt: TEST_NOW,
+          nextWakeReason: "assistant",
+        }],
+      );
       assert.deepEqual(snapshotInputs, []);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "canonical_runtime_commit",
       ]);
+      assert.deepEqual(
+        checkpointRequests.map((request) => ({
+          nextWakeAt: request.nextWakeAt ?? null,
+          nextWakeReason: request.nextWakeReason ?? null,
+        })),
+        [{
+          nextWakeAt: TEST_NOW,
+          nextWakeReason: "assistant",
+        }],
+      );
       assert.deepEqual(checkpointRequests[0]?.snapshotRef, previousSnapshotRef);
       assert.equal(result.runtimeStateDirty, true);
     } finally {

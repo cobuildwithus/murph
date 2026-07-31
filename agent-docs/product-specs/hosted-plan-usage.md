@@ -95,14 +95,17 @@ their stored limit.
 
 Usage is cost-weighted capacity across models and modalities. It is not a token
 count or cash balance. Used and remaining percentages are bounded integers that
-sum to 100. Their denominator is current-period spend plus every unit of
+sum to 100. The display window starts at the current allowance period or, when
+later, the beneficiary's latest fulfilled purchase grant in that period. Its
+denominator is counted usage since that window began plus every unit of
 effective capacity still available from the plan and generic usage credit. A
-fulfilled top-up can therefore move the percentage backward immediately.
-Settings still exposes neither the exact usage-credit balance nor the internal
-included-allowance value. At a monthly reset, period spend returns to zero, the
-plan allowance replenishes, and unused usage credit remains available. The
-operation that crosses effective capacity may finish, but subsequent
-usage-bearing work blocks and accepted conversation input remains pending.
+fulfilled top-up therefore starts a fresh 0%-used display; later counted usage
+advances that meter. Settings still exposes neither the exact usage-credit
+balance nor the internal included-allowance value. At a monthly reset, period
+spend returns to zero, the plan allowance replenishes, and unused usage credit
+remains available. The operation that crosses effective capacity may finish,
+but subsequent usage-bearing work blocks and accepted conversation input
+remains pending.
 
 For paid access, the included monthly usage value is exactly 80% of the
 server-owned recurring amount for that member's billing mode and tier. Direct
@@ -121,10 +124,11 @@ current bounds. It skips calendar fallbacks because their temporary key can be
 replaced by a delayed billing projection without a renewal. Existing allowance,
 spend, and future periods remain untouched.
 
-A forecast requires at least 24 hours of counted usage. It uses the same
-overall effective capacity as the percentage and is shown only when the
-observed pace projects exhaustion before the current period ends. The forecast
-is conservative and optional; the product must not invent one when the
+A forecast requires at least 24 hours of counted usage in the current display
+window. It uses the same overall effective capacity as the percentage and is
+shown only when that window's observed pace projects exhaustion before the
+current period ends. The forecast is conservative and optional; the product
+must not invent one when the
 projection omits it.
 
 ## Actions
@@ -391,23 +395,26 @@ inventing a billing menu:
   owner must make the change, while Family Edge has no higher current tier; and
 - a hosted group gets a proactive first heads-up: on the first trusted
   low-usage turn the assistant calls `murph.group action="read_usage"` once.
-  The segment stays conversational, link-free, and route-neutral: it calls the
+  A sponsored group receives only the binary acknowledgment that Murph is
+  sponsored in the chat; payer identity, cap, charges, balance, percentages,
+  message counts, and refill events stay private. For an unsponsored group with
+  `fundingNeeded: false`, the heads-up is suppressed. When funding is needed,
+  the segment stays conversational, link-free, and route-neutral: it calls the
   shared capacity "Murph time," says Murph may pause for the room, and asks
   whether they want Murph to check the options without naming or counting any
-  path. It never frames each text as a unit being purchased or spent. A
-  `healthy` read suppresses the heads-up entirely. After someone asks for the
-  options, asks for more Murph time, asks how to keep the room going, or accepts
-  the quick path, the assistant reads the options for that responding sender,
-  using the exact accepted request-bearing message as participant authority
-  rather than inferring one sender from the whole grouped turn. It refreshes
-  current usage as needed, presents every returned earned and sponsored path,
-  and places the funding URL after the sponsored path instead of leading with
-  it. Playful payer
-  nomination is allowed, but who actually paid, purchase status, and amounts
-  stay private, and the assistant never promises a URL the read did not return.
-  For a group without an owner-created join code, the funding URL carries a
-  signed funding-only locator that grants no enrollment
-  or sharing, so the URL is normally present without any write.
+  path. It never frames each text as a unit being purchased or spent. After
+  someone asks for the options, asks for more Murph time, asks how to keep the
+  room going, or accepts the quick path, the assistant reads the options for
+  that responding sender, using the exact accepted request-bearing message as
+  participant authority rather than inferring one sender from the whole grouped
+  turn. It refreshes current usage as needed, presents every returned earned
+  and sponsored path, and includes a returned first-party funding URL only when
+  `fundingNeeded` is true, after the sponsored path instead of leading with it.
+  Playful payer nomination is allowed, but who actually paid, purchase status,
+  and amounts stay private, and the assistant never promises a URL the read did
+  not return. For a group without an owner-created join code, the funding URL
+  carries a signed funding-only locator that grants no enrollment or sharing,
+  so the URL is normally present without any write.
 
 For an explicit Family member-usage management request, the assistant first
 calls `murph.family_plan action="read_status"`. It may provide

@@ -1060,16 +1060,11 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       requestedVaultShareProjectionScopes: projectionScopes,
       tx,
     });
-    const offerPost = hasEveryHostedGroupMemberGrantedProjectionScopes(
-      result.group,
+    const offerPost = await prepareHostedGroupJoinOfferPostTx({
+      groupId: result.group.id,
       projectionScopes,
-    )
-      ? { kind: "not_needed" as const }
-      : await prepareHostedGroupJoinOfferPostTx({
-          groupId: result.group.id,
-          projectionScopes,
-          tx,
-        });
+      tx,
+    });
     if (offerPost.kind === "unavailable") {
       return { kind: "active_offer_state_unavailable" as const };
     }
@@ -1091,10 +1086,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   if (!joinUrl) {
     return unavailable("join_links_unavailable");
   }
-  if (
-    created.offerPost.kind === "active_offer"
-    || created.offerPost.kind === "not_needed"
-  ) {
+  if (created.offerPost.kind === "active_offer") {
     return {
       action: "post_join_offer",
       result: {
@@ -1161,31 +1153,6 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       status: "sent",
     },
   };
-}
-
-function hasEveryHostedGroupMemberGrantedProjectionScopes(
-  group: {
-    memberCount: number;
-    members: readonly {
-      grantedVaultShareProjectionScopes: readonly HostedVaultShareProjectionScope[];
-    }[];
-  },
-  projectionScopes: readonly HostedVaultShareProjectionScope[],
-): boolean {
-  if (group.members.length !== group.memberCount) {
-    return false;
-  }
-  const requestedScopeKeys = projectionScopes.map(
-    buildHostedVaultShareProjectionScopeKey,
-  );
-  return group.members.every((member) => {
-    const grantedScopeKeys = new Set(
-      member.grantedVaultShareProjectionScopes.map(
-        buildHostedVaultShareProjectionScopeKey,
-      ),
-    );
-    return requestedScopeKeys.every((scopeKey) => grantedScopeKeys.has(scopeKey));
-  });
 }
 
 async function handleHostedRuntimeGroupSetChatAvatar(input: {
@@ -1279,7 +1246,7 @@ function buildHostedGroupJoinOfferMessage(input: {
   // for everyone.
   return `Like or heart this message if these default sharing choices look right: ${
     renderHostedGroupJoinOfferScopeSentence(input.projectionScopes)
-  }. To choose different permissions, use ${input.joinUrl}.`;
+  }. Use ${input.joinUrl} to choose different permissions.`;
 }
 
 async function enqueueGroupOwnerNewsletterEmailNeededNudgeIfGrantedBestEffort(input: {

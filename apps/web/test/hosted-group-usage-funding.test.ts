@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   hasHostedRuntimeActiveAccess: vi.fn(),
   readHostedAiUsageGate: vi.fn(),
+  readHostedGroupSponsorshipPublicState: vi.fn(),
   resolveHostedPublicBaseUrl: vi.fn(),
 }));
 
@@ -16,13 +17,15 @@ vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
   hasHostedRuntimeActiveAccess: mocks.hasHostedRuntimeActiveAccess,
 }));
 
+vi.mock("@/src/lib/hosted-groups/group-sponsorship-authorization", () => ({
+  readHostedGroupSponsorshipPublicState:
+    mocks.readHostedGroupSponsorshipPublicState,
+}));
+
 vi.mock("@/src/lib/hosted-web/public-url", () => ({
   resolveHostedPublicBaseUrl: mocks.resolveHostedPublicBaseUrl,
 }));
 
-import {
-  calculateHostedGroupUsageRemainingPercent,
-} from "@/src/lib/hosted-groups/group-usage-capacity";
 import {
   buildHostedGroupUsageFundingLocatorForRuntimeMember,
   normalizeHostedGroupUsageFundingLocator,
@@ -40,6 +43,9 @@ describe("hosted group usage funding", () => {
     vi.clearAllMocks();
     process.env.HOSTED_APP_SESSION_HMAC_KEY = TEST_HMAC_KEY;
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
+    mocks.readHostedGroupSponsorshipPublicState.mockResolvedValue(
+      "not_sponsored",
+    );
     mocks.resolveHostedPublicBaseUrl.mockReturnValue("https://www.withmurph.ai");
   });
 
@@ -75,15 +81,14 @@ describe("hosted group usage funding", () => {
   });
 
   it.each([
-    [3_000_000n, "healthy", 66],
-    [900_000n, "low", 20],
-    [1n, "low", 0],
-    [0n, "exhausted", 0],
-    [9_000_000n, "healthy", 100],
-  ] as const)("projects %s remaining as %s without exposing accounting", async (
+    [3_000_000n, false],
+    [900_000n, true],
+    [1n, true],
+    [0n, true],
+    [9_000_000n, false],
+  ] as const)("projects only whether funding is needed for %s remaining", async (
     remainingUsdMicros,
-    capacityState,
-    remainingPercent,
+    fundingNeeded,
   ) => {
     const prisma = {
       hostedGroup: {
@@ -106,23 +111,42 @@ describe("hosted group usage funding", () => {
       prisma: prisma as never,
       runtimeMemberId: "member_group_runtime",
     })).resolves.toEqual({
-      capacityState,
-      fundingUrl:
-        "https://www.withmurph.ai/groups/fund/group_join_code_1234",
-      periodEnd: "2026-08-01T00:00:00.000Z",
-      remainingPercent,
+      fundingNeeded,
+      fundingUrl: fundingNeeded
+        ? "https://www.withmurph.ai/groups/fund/group_join_code_1234"
+        : null,
+      sponsorshipStatus: "not_sponsored",
     });
   });
 
-  it.each([0n, -1n])(
-    "reports zero percent when the period limit %s is not a valid denominator",
-    (limitUsdMicros) => {
-      expect(calculateHostedGroupUsageRemainingPercent({
-        limitUsdMicros,
-        remainingUsdMicros: 1_000_000n,
-      })).toBe(0);
-    },
-  );
+  it("collapses every live sponsorship state to a private-safe room projection", async () => {
+    const prisma = {
+      hostedGroup: {
+        findUnique: vi.fn(async () => ({ joinCode: "group_join_code_1234" })),
+      },
+      hostedThreadContainer: {
+        findUnique: vi.fn(async () => ({ memberId: "member_group_runtime" })),
+      },
+    };
+    mocks.readHostedAiUsageGate.mockResolvedValue({
+      allowanceSource: "thread_container",
+      allowed: false,
+      limitUsdMicros: 4_500_000n,
+      periodEnd: new Date("2026-08-01T00:00:00.000Z"),
+      reason: "ai_usage_limit_exceeded",
+      remainingUsdMicros: 0n,
+    });
+    mocks.readHostedGroupSponsorshipPublicState.mockResolvedValue("sponsored");
+
+    await expect(readHostedGroupUsageStatus({
+      prisma: prisma as never,
+      runtimeMemberId: "member_group_runtime",
+    })).resolves.toEqual({
+      fundingNeeded: false,
+      fundingUrl: null,
+      sponsorshipStatus: "sponsored",
+    });
+  });
 
   it("derives a signed funding-only locator URL for a chat with no group row", async () => {
     const prisma = {
@@ -150,10 +174,9 @@ describe("hosted group usage funding", () => {
       buildHostedGroupUsageFundingLocatorForRuntimeMember("member_group_runtime");
 
     expect(status).toEqual({
-      capacityState: "exhausted",
+      fundingNeeded: true,
       fundingUrl: `https://www.withmurph.ai/groups/fund/${encodeURIComponent(expectedLocator ?? "")}`,
-      periodEnd: "2026-08-01T00:00:00.000Z",
-      remainingPercent: 0,
+      sponsorshipStatus: "not_sponsored",
     });
     expect(expectedLocator).toMatch(/^gf1\.member_group_runtime\./u);
   });
@@ -180,7 +203,8 @@ describe("hosted group usage funding", () => {
       runtimeMemberId: "member_group_runtime",
     });
 
-    expect(status?.capacityState).toBe("low");
+    expect(status?.fundingNeeded).toBe(true);
+    expect(status?.sponsorshipStatus).toBe("not_sponsored");
     expect(status?.fundingUrl).toContain("/groups/fund/gf1.member_group_runtime.");
   });
 

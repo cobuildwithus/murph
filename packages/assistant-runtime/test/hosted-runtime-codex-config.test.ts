@@ -1594,6 +1594,7 @@ test("hosted Codex config keeps skill instructions disabled while enabling opera
   assert.match(config, /^memories = true$/mu);
   assert.match(config, /^\[features\.multi_agent_v2\]$/mu);
   assert.match(config, /^enabled = true$/mu);
+  assert.doesNotMatch(config, /^expose_spawn_agent_model_overrides/mu);
   assert.doesNotMatch(config, /^agent_max_threads/mu);
   assert.ok(config.includes(
     `usage_hint_text = ${JSON.stringify(EXPECTED_MULTI_AGENT_USAGE_HINT)}`,

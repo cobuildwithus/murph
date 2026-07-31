@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { CheckIcon, CircleAlertIcon, MessageCircle } from "lucide-react";
+import {
+  CheckIcon,
+  CircleAlertIcon,
+  MessageCircle,
+  XIcon,
+} from "lucide-react";
 
 import { MurphContactChannelRows } from "@/src/components/murph/murph-contact-channel-rows";
 import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
@@ -16,12 +21,22 @@ import {
   DialogTrigger,
 } from "@/src/components/ui/dialog";
 import {
+  Drawer,
+  DrawerClose,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@/src/components/ui/drawer";
+import {
   FieldDescription,
   FieldError,
   FieldLegend,
   FieldSet,
 } from "@/src/components/ui/field";
 import { RadioGroup } from "@/src/components/ui/radio-group";
+import { useIsMobile } from "@/src/hooks/use-mobile";
 import { cn } from "@/src/lib/utils";
 
 import {
@@ -32,9 +47,14 @@ import {
 import { useHostedUsageTopUpDialog } from "./use-hosted-usage-top-up-dialog";
 
 function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
-  const controller = useHostedUsageTopUpDialog(props);
+  const isMobile = useIsMobile();
+  const groupPaymentMode = props.groupPaymentMode ?? "one_time";
+  const controller = useHostedUsageTopUpDialog({
+    ...props,
+    groupPaymentMode,
+  });
   const { screen } = controller.state;
-  const dialogContentRef = useRef<HTMLDivElement>(null);
+  const scrollContentRef = useRef<HTMLDivElement>(null);
   const firstOfferRef = useRef<HTMLSpanElement>(null);
   const focusTitleAfterPurchaseActionRef = useRef(false);
   const titleRef = useRef<HTMLHeadingElement>(null);
@@ -53,8 +73,8 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
         previousScreen.attempt.error === null
       );
     if (controller.state.open && enteredSelectionRecovery) {
-      if (dialogContentRef.current) {
-        dialogContentRef.current.scrollTop = 0;
+      if (scrollContentRef.current) {
+        scrollContentRef.current.scrollTop = 0;
       }
       titleRef.current?.focus({ preventScroll: true });
     } else if (
@@ -138,7 +158,11 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
     props.scope === "family" && props.targetLabel ? props.targetLabel : null;
   const triggerLabel =
     purchaseTriggerLabel ??
-    (props.scope === "group" ? "Sponsor this chat" : "Add usage");
+    (props.scope === "group"
+      ? groupPaymentMode === "one_time"
+        ? "Make a one-time contribution"
+        : "Sponsor this chat"
+      : "Add usage");
   const statusContent = purchase
     ? readStatusContent({
         canResumeCheckout: canResume,
@@ -172,155 +196,102 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
     selection?.attempt.kind === "locked" &&
     selection.attempt.requestKey !== null &&
     selectionError !== null;
-
-  return (
-    <Dialog
-      open={controller.state.open}
-      onOpenChange={controller.handleOpenChange}
-    >
-      {props.offers.length > 0 || purchaseTriggerLabel ? (
-        <DialogTrigger
-          render={
-            <Button
-              type="button"
-              size={props.triggerSize ?? (props.scope === "group" ? "xl" : "lg")}
-              variant={
-                props.triggerVariant ??
-                (props.scope === "group" ? "default" : "outline")
-              }
-              className={cn(
-                props.scope === "group" ? "w-full" : undefined,
-                props.triggerClassName,
-              )}
-              aria-label={
-                familyTarget ? `${triggerLabel} for ${familyTarget}` : undefined
-              }
-            />
-          }
-        >
-          {triggerLabel}
-        </DialogTrigger>
-      ) : null}
-      <DialogContent
-        ref={dialogContentRef}
-        className={cn(
-          "max-h-[calc(100dvh-2rem)] gap-7 overflow-y-auto border border-border bg-popover p-6 sm:max-w-xl sm:p-8",
-          showGroupMessagesAction && "sm:max-w-2xl sm:gap-8 sm:p-10",
-        )}
-        initialFocus={titleRef}
+  const headerTitle = statusContent
+    ? `${statusContent.title}${familyTarget && !purchase?.targetConflict ? ` for ${familyTarget}` : ""}`
+    : props.offers.length === 0
+      ? "Usage unavailable"
+      : props.scope === "group"
+        ? groupPaymentMode === "monthly"
+          ? "Sponsor this chat"
+          : "Make a one-time contribution"
+        : familyTarget
+          ? `Add usage for ${familyTarget}`
+          : "Add usage";
+  const headerDescription = purchase
+    ? showGroupMessagesAction && statusContent
+      ? statusContent.message
+      : purchase.targetConflict
+        ? "Manage the unfinished checkout before starting one for this usage destination."
+        : purchase.selectionConflict
+          ? purchase.selectionConflict === "sponsorship"
+            ? "The sponsor details you just entered were not applied. Review the original purchase below."
+            : "The amount you just selected was not started. Review the earlier purchase below."
+          : props.scope === "group"
+            ? "We’ll update this group’s credit as soon as payment is complete."
+            : familyTarget
+              ? `We’ll update the available usage for ${familyTarget} as soon as payment is complete.`
+              : "We’ll update your available usage as soon as payment is complete."
+    : props.offers.length === 0
+      ? "There isn’t more usage available for this account right now."
+      : props.scope === "group"
+        ? groupPaymentMode === "monthly"
+          ? "Choose your monthly sponsorship limit."
+          : "Choose one explicit contribution of cost-weighted usage credit for this chat."
+        : null;
+  const confirmationIndicator =
+    showGroupMessagesAction && statusContent ? (
+      <div
+        className="flex items-center gap-3"
+        role="status"
+        aria-live="polite"
+        aria-label={`${statusContent.title}. ${statusContent.message}`}
       >
-        <DialogHeader className={cn("pr-10", showGroupMessagesAction && "gap-4")}>
-          {showGroupMessagesAction && statusContent ? (
+        <span
+          className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground"
+          aria-hidden="true"
+        >
+          <CheckIcon className="size-5 stroke-[2.5]" />
+        </span>
+        <span className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-primary">
+          Nice one
+        </span>
+      </div>
+    ) : null;
+  const screenContent = (
+    <>
+      {purchase && statusContent ? (
+        <div className="flex flex-col gap-5">
+          {!showGroupMessagesAction ? (
             <div
-              className="flex items-center gap-3"
+              className="rounded-2xl border border-border bg-muted/30 p-5"
               role="status"
               aria-live="polite"
-              aria-label={`${statusContent.title}. ${statusContent.message}`}
             >
-              <span
-                className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground"
-                aria-hidden="true"
-              >
-                <CheckIcon className="size-5 stroke-[2.5]" />
-              </span>
-              <span className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-primary">
-                Nice one
-              </span>
+              <p className="text-pretty text-sm leading-6 text-foreground">
+                {statusContent.message}
+              </p>
             </div>
           ) : null}
-          <DialogTitle
-            ref={titleRef}
-            tabIndex={-1}
-            className={cn(
-              "text-3xl font-semibold leading-[1.1] tracking-tight outline-none",
-              showGroupMessagesAction &&
-                "max-w-lg text-[2.5rem] leading-[1.02] tracking-[-0.035em] sm:text-5xl",
-            )}
-          >
-            {statusContent
-              ? `${statusContent.title}${familyTarget && !purchase?.targetConflict ? ` for ${familyTarget}` : ""}`
-              : props.offers.length === 0
-                ? "Usage credit unavailable"
-                : props.scope === "group"
-                  ? "Sponsor more messages"
-                  : familyTarget
-                    ? `Choose an amount for ${familyTarget}`
-                    : "Choose an amount"}
-          </DialogTitle>
-          <DialogDescription
-            className={cn(
-              "max-w-md text-base leading-6",
-              showGroupMessagesAction &&
-                "max-w-lg text-[1.0625rem] leading-7 text-muted-foreground",
-            )}
-          >
-            {purchase
-              ? showGroupMessagesAction && statusContent
-                ? statusContent.message
-                : purchase.targetConflict
-                ? "Manage the unfinished checkout before starting one for this usage destination."
-                : purchase.selectionConflict
-                  ? purchase.selectionConflict === "sponsorship"
-                    ? "The sponsor details you just entered were not applied. Review the original purchase below."
-                    : "The amount you just selected was not started. Review the earlier purchase below."
-                  : props.scope === "group"
-                    ? "We’ll update this group’s credit as soon as payment is complete."
-                    : familyTarget
-                      ? `We’ll update the available credit for ${familyTarget} as soon as payment is complete.`
-                      : "We’ll update your credit as soon as payment is complete."
-              : props.offers.length === 0
-                ? "There isn’t a usage-credit offer available for this account right now."
-                : props.scope === "group"
-                  ? "Choose a one-time contribution to keep Murph talking for everyone here."
-                  : familyTarget
-                    ? `Choose a one-time credit amount for ${familyTarget}. We’ll use your saved card when available. Stripe will ask when card details or verification are needed.`
-                    : "Choose a one-time credit amount for your account. We’ll use your saved card when available. Stripe will ask when card details or verification are needed."}
-          </DialogDescription>
-        </DialogHeader>
-
-        {purchase && statusContent ? (
-          <div className="flex flex-col gap-5">
-            {!showGroupMessagesAction ? (
-              <div
-                className="rounded-2xl border border-border bg-muted/30 p-5"
-                role="status"
-                aria-live="polite"
-              >
-                <p className="text-pretty text-sm leading-6 text-foreground">
-                  {statusContent.message}
-                </p>
+          {showGroupMessagesAction ? null : props.renderPurchaseDetails}
+          <FieldError>{purchase.checkoutError}</FieldError>
+          <div className="flex flex-col gap-2">
+            {showGroupMessagesAction ? (
+              <div className="grid gap-5 border-y border-border py-5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:py-6">
+                <div className="space-y-1.5">
+                  <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                    Back to the chat
+                  </p>
+                  <p className="text-pretty text-sm leading-6 text-foreground">
+                    Messages will open. Choose this group to keep going.
+                  </p>
+                </div>
+                {/* Messages has no deep link into an existing group thread, so
+                  the group follow-up can only open the app itself. */}
+                <a
+                  href="sms:"
+                  className={cn(
+                    buttonVariants({ size: "xl" }),
+                    "w-full sm:w-auto",
+                  )}
+                >
+                  <MessageCircle
+                    className="size-4 shrink-0"
+                    aria-hidden="true"
+                  />
+                  Open Messages
+                </a>
               </div>
             ) : null}
-            {showGroupMessagesAction ? null : props.renderPurchaseDetails}
-            <FieldError>{purchase.checkoutError}</FieldError>
-            <div className="flex flex-col gap-2">
-              {showGroupMessagesAction ? (
-                <div className="grid gap-5 border-y border-border py-5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:py-6">
-                  <div className="space-y-1.5">
-                    <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                      Back to the chat
-                    </p>
-                    <p className="text-pretty text-sm leading-6 text-foreground">
-                      Messages will open. Choose this group to keep going.
-                    </p>
-                  </div>
-                  {/* Messages has no deep link into an existing group thread, so
-                  the group follow-up can only open the app itself. */}
-                  <a
-                    href="sms:"
-                    className={cn(
-                      buttonVariants({ size: "xl" }),
-                      "w-full sm:w-auto",
-                    )}
-                  >
-                    <MessageCircle
-                      className="size-4 shrink-0"
-                      aria-hidden="true"
-                    />
-                    Open Messages
-                  </a>
-                </div>
-              ) : null}
               {canResume ? (
                 <Button
                   type="button"
@@ -439,42 +410,50 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
             </Button>
           </div>
         ) : selection ? (
-          <div className="flex flex-col gap-5">
-            <FieldSet disabled={hasAttempt || !controller.requestIdentityReady}>
-              <FieldLegend className="sr-only">Usage credit amount</FieldLegend>
-              <FieldDescription className="sr-only">
-                Choose one usage credit amount.
-              </FieldDescription>
-              <RadioGroup
-                value={selection.selectedOfferCode ?? ""}
-                onValueChange={controller.selectOffer}
-                className="grid gap-3 sm:grid-cols-3"
-              >
-                {props.offers.map((offer, index) => (
-                  <ChoiceCard
-                    key={offer.offerCode}
-                    ref={index === 0 ? firstOfferRef : undefined}
-                    id={`${props.scope === "group" ? "group-" : ""}usage-top-up-${index}`}
-                    value={offer.offerCode}
-                    disabled={hasAttempt}
-                    className="h-24 [&_[data-slot=field-content]]:gap-0.5 [&_[data-slot=field-content]]:justify-center sm:h-28"
-                    title={
-                      <span className="flex h-8 items-center font-serif text-3xl font-semibold leading-none tabular-nums">
-                        <span className="sr-only">About </span>
-                        <span aria-hidden="true">~</span>
-                        {offer.estimatedMessages}
-                      </span>
-                    }
-                    description={
-                      <span className="text-sm font-medium text-muted-foreground">
-                        messages ·{" "}
-                        <span className="tabular-nums">{offer.amountLabel}</span>
-                      </span>
-                    }
-                  />
-                ))}
-              </RadioGroup>
-            </FieldSet>
+          <div
+            className={cn(
+              "flex flex-col gap-5",
+              props.scope === "group" &&
+                groupPaymentMode === "monthly" &&
+                "max-md:h-full",
+            )}
+          >
+            {groupPaymentMode === "monthly" ? null : (
+              <FieldSet disabled={hasAttempt || !controller.requestIdentityReady}>
+                <FieldLegend className="sr-only">Usage amount</FieldLegend>
+                <FieldDescription className="sr-only">
+                  Choose one usage amount.
+                </FieldDescription>
+                <RadioGroup
+                  value={selection.selectedOfferCode ?? ""}
+                  onValueChange={controller.selectOffer}
+                  className="grid gap-3 sm:grid-cols-3"
+                >
+                  {props.offers.map((offer, index) => (
+                    <ChoiceCard
+                      key={offer.offerCode}
+                      ref={index === 0 ? firstOfferRef : undefined}
+                      id={`${props.scope === "group" ? "group-" : ""}usage-top-up-${index}`}
+                      value={offer.offerCode}
+                      disabled={hasAttempt}
+                      className="h-24 [&_[data-slot=field-content]]:gap-0.5 [&_[data-slot=field-content]]:justify-center sm:h-28"
+                      title={
+                        <span className="flex h-8 items-center font-serif text-3xl font-semibold leading-none tabular-nums">
+                          {offer.amountLabel}
+                        </span>
+                      }
+                      description={
+                        <span className="text-sm font-medium text-muted-foreground">
+                          {props.scope === "group"
+                            ? "Cost-weighted usage credit"
+                            : "usage"}
+                        </span>
+                      }
+                    />
+                  ))}
+                </RadioGroup>
+              </FieldSet>
+            )}
             {props.renderSelectionDetails?.({
               disabled: hasAttempt || !controller.requestIdentityReady,
               selectedOffer: controller.selectedOffer,
@@ -556,12 +535,24 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                 </Button>
               </div>
             ) : (
-              <div className="grid gap-3 sm:grid-cols-[auto_minmax(0,1fr)]">
+              <div
+                className={cn(
+                  "grid gap-3 sm:grid-cols-[auto_minmax(0,1fr)]",
+                  props.scope === "group" &&
+                    groupPaymentMode === "monthly" &&
+                    "max-md:sticky max-md:bottom-0 max-md:z-20 max-md:-mx-6 max-md:mt-auto max-md:border-t max-md:bg-popover max-md:px-4 max-md:pt-4 max-md:pb-[max(env(safe-area-inset-bottom),1rem)]",
+                )}
+              >
                 <Button
                   type="button"
                   variant="ghost"
                   size="xl"
-                  className="w-full sm:w-auto"
+                  className={cn(
+                    "w-full sm:w-auto",
+                    props.scope === "group" &&
+                      groupPaymentMode === "monthly" &&
+                      "max-md:hidden",
+                  )}
                   onClick={() => controller.handleOpenChange(false)}
                 >
                   Cancel
@@ -584,7 +575,9 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                       : "Adding usage…"
                     : controller.selectedOffer
                       ? props.scope === "group"
-                        ? `Sponsor ~${controller.selectedOffer.estimatedMessages} messages · ${controller.selectedOffer.amountLabel}`
+                        ? groupPaymentMode === "monthly"
+                          ? `Sponsor this chat · ${controller.selectedOffer.amountLabel}`
+                          : `Contribute ${controller.selectedOffer.amountLabel}`
                         : `Add usage · ${controller.selectedOffer.amountLabel}`
                       : "Choose an amount"}
                 </Button>
@@ -592,6 +585,160 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
             )}
           </div>
         ) : null}
+    </>
+  );
+  const canShowTrigger = props.offers.length > 0 || purchaseTriggerLabel;
+  const drawerTriggerButton = (
+    <Button
+      type="button"
+      size={props.triggerSize ?? (props.scope === "group" ? "xl" : "lg")}
+      variant={
+        props.triggerVariant ??
+        (props.scope === "group" ? "default" : "outline")
+      }
+      className={cn(
+        props.scope === "group" ? "w-full" : undefined,
+        props.triggerClassName,
+      )}
+      aria-label={
+        familyTarget ? `${triggerLabel} for ${familyTarget}` : undefined
+      }
+    >
+      {triggerLabel}
+    </Button>
+  );
+  const useMobileDrawer =
+    isMobile && props.scope === "group" && groupPaymentMode === "monthly";
+
+  if (useMobileDrawer) {
+    return (
+      <Drawer
+        handleOnly
+        open={controller.state.open}
+        onOpenChange={controller.handleOpenChange}
+      >
+        {canShowTrigger ? (
+          <DrawerTrigger asChild>{drawerTriggerButton}</DrawerTrigger>
+        ) : null}
+        <DrawerContent className="h-[calc(100dvh-0.75rem)] border-border data-[vaul-drawer-direction=bottom]:mt-3 data-[vaul-drawer-direction=bottom]:max-h-[calc(100dvh-0.75rem)] data-[vaul-drawer-direction=bottom]:rounded-t-[2rem]">
+          <DrawerHeader
+            className={cn(
+              "relative items-start gap-2 px-6 pb-2 pt-2 text-left",
+              showGroupMessagesAction && "gap-4",
+            )}
+          >
+            {confirmationIndicator}
+            <DrawerTitle
+              ref={titleRef}
+              tabIndex={-1}
+              className={cn(
+                "pr-10 font-serif text-3xl font-semibold leading-[1.1] tracking-tight text-foreground outline-none",
+                showGroupMessagesAction &&
+                  "max-w-lg text-[2.5rem] leading-[1.02] tracking-[-0.035em]",
+              )}
+            >
+              {headerTitle}
+            </DrawerTitle>
+            <DrawerDescription
+              className={cn(
+                "max-w-md text-left text-base leading-6",
+                showGroupMessagesAction &&
+                  "max-w-lg text-[1.0625rem] leading-7 text-muted-foreground",
+              )}
+            >
+              {headerDescription}
+            </DrawerDescription>
+            <DrawerClose asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="absolute right-4 top-0"
+              >
+                <XIcon aria-hidden="true" />
+                <span className="sr-only">Close</span>
+              </Button>
+            </DrawerClose>
+          </DrawerHeader>
+          <div
+            ref={scrollContentRef}
+            className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 pt-4"
+          >
+            {screenContent}
+          </div>
+        </DrawerContent>
+      </Drawer>
+    );
+  }
+
+  return (
+    <Dialog
+      open={controller.state.open}
+      onOpenChange={controller.handleOpenChange}
+    >
+      {canShowTrigger ? (
+        <DialogTrigger
+          render={
+            <Button
+              type="button"
+              size={
+                props.triggerSize ?? (props.scope === "group" ? "xl" : "lg")
+              }
+              variant={
+                props.triggerVariant ??
+                (props.scope === "group" ? "default" : "outline")
+              }
+              className={cn(
+                props.scope === "group" ? "w-full" : undefined,
+                props.triggerClassName,
+              )}
+              aria-label={
+                familyTarget
+                  ? `${triggerLabel} for ${familyTarget}`
+                  : undefined
+              }
+            />
+          }
+        >
+          {triggerLabel}
+        </DialogTrigger>
+      ) : null}
+      <DialogContent
+        ref={scrollContentRef}
+        className={cn(
+          "max-h-[calc(100dvh-2rem)] gap-7 overflow-y-auto border border-border bg-popover p-6 sm:max-w-xl sm:p-8",
+          showGroupMessagesAction && "sm:max-w-2xl sm:gap-8 sm:p-10",
+        )}
+        initialFocus={titleRef}
+      >
+        <DialogHeader className={cn("pr-10", showGroupMessagesAction && "gap-4")}>
+          {confirmationIndicator}
+          <DialogTitle
+            ref={titleRef}
+            tabIndex={-1}
+            className={cn(
+              "text-3xl font-semibold leading-[1.1] tracking-tight outline-none",
+              showGroupMessagesAction &&
+                "max-w-lg text-[2.5rem] leading-[1.02] tracking-[-0.035em] sm:text-5xl",
+            )}
+          >
+            {headerTitle}
+          </DialogTitle>
+          <DialogDescription
+            className={
+              headerDescription
+                ? cn(
+                    "max-w-md text-base leading-6",
+                    showGroupMessagesAction &&
+                      "max-w-lg text-[1.0625rem] leading-7 text-muted-foreground",
+                  )
+                : "sr-only"
+            }
+          >
+            {headerDescription ?? "Choose a usage amount."}
+          </DialogDescription>
+        </DialogHeader>
+        {screenContent}
       </DialogContent>
     </Dialog>
   );

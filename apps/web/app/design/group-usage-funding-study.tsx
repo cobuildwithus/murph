@@ -1,6 +1,10 @@
 "use client";
 
-import { useState, type ReactNode, type SyntheticEvent } from "react";
+import {
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react";
 import type {
   HostedPlanUsageAvailableStatus,
   HostedPlanUsageStatus,
@@ -8,6 +12,7 @@ import type {
 
 import { GroupUsageFundingCard } from "@/src/components/hosted-groups/group-usage-funding-card";
 import { GroupSponsorshipDialog } from "@/src/components/hosted-groups/group-sponsorship-dialog";
+import { GroupSponsorshipManagementCard } from "@/src/components/hosted-groups/group-sponsorship-management-card";
 import { HostedAiUsageActivity } from "@/src/components/settings/hosted-ai-usage-activity";
 import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-settings";
 import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
@@ -20,31 +25,34 @@ import {
 } from "@/src/lib/murph-contact-routing";
 
 const DESIGN_USAGE_OFFERS = [
-  { amountLabel: "$5", estimatedMessages: 100, offerCode: "usage_5_usd" },
-  { amountLabel: "$10", estimatedMessages: 200, offerCode: "usage_10_usd" },
-  { amountLabel: "$25", estimatedMessages: 500, offerCode: "usage_25_usd" },
+  { amountLabel: "$5", offerCode: "usage_5_usd" },
+  { amountLabel: "$10", offerCode: "usage_10_usd" },
+  { amountLabel: "$25", offerCode: "usage_25_usd" },
 ] as const;
 const DESIGN_PAYER_MEMBER_ID = "design_usage_top_up_payer";
 
 const DESIGN_GROUP_SPONSORSHIP_OFFERS = [
   {
     amountLabel: "$5",
-    estimatedMessages: 100,
     offerCode: "usage_5_usd",
     runningBitDurationLabel: null,
   },
   {
     amountLabel: "$10",
-    estimatedMessages: 200,
     offerCode: "usage_10_usd",
     runningBitDurationLabel: "1 day",
   },
   {
     amountLabel: "$20",
-    estimatedMessages: 400,
     offerCode: "usage_20_usd",
     runningBitDurationLabel: "3 days",
   },
+] as const;
+
+const DESIGN_GROUP_MONTHLY_CAPS = [
+  { amountLabel: "$5", monthlyCapMinor: 500 },
+  { amountLabel: "$10", monthlyCapMinor: 1_000 },
+  { amountLabel: "$20", monthlyCapMinor: 2_000 },
 ] as const;
 
 const DESIGN_TOP_UP_CONTACT_OPTIONS: MurphContactOption[] = [
@@ -122,6 +130,18 @@ const DESIGN_AI_USAGE_ACTIVITY: HostedAiUsageActivitySnapshot = {
       title: "Start an active group",
     },
     {
+      destinationLabel: "the group",
+      id: "design-mission-reward-pending",
+      requirementsLabel:
+        "Start a fresh group and make it genuinely active, with multiple people actually talking.",
+      rewardLabel: "$3.50",
+      selectedLabel: "Jul 18, 2026",
+      status: "reward_pending",
+      statusLabel: "Reward pending",
+      timingLabel: "Qualified Jul 25",
+      title: "Start an active group",
+    },
+    {
       destinationLabel: "your Murph",
       id: "design-mission-new-person",
       requirementsLabel:
@@ -188,6 +208,12 @@ const DESIGN_AI_USAGE_DISABLED_HISTORY: HostedAiUsageActivitySnapshot = {
   missionsEnabled: false,
 };
 
+const DESIGN_AI_USAGE_HISTORY_INTERACTION: HostedAiUsageActivitySnapshot = {
+  credits: DESIGN_AI_USAGE_DISABLED_HISTORY.credits,
+  missions: DESIGN_AI_USAGE_DISABLED_HISTORY.missions,
+  missionsEnabled: true,
+};
+
 const DESIGN_PERSONAL_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
   accessKind: "paid",
   forecast: null,
@@ -236,167 +262,213 @@ const DESIGN_CREDIT_BACKED_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
 
 const DESIGN_FULFILLED_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
   ...DESIGN_PERSONAL_USAGE_STATUS,
-  remainingPercent: 45,
-  usedPercent: 55,
+  remainingPercent: 100,
+  usedPercent: 0,
+};
+
+const DESIGN_FAMILY_EXHAUSTED_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
+  ...DESIGN_EXHAUSTED_USAGE_STATUS,
+  accessKind: "family_sponsored",
+  planName: "Family",
 };
 
 function GroupUsageFundingStudy() {
-  const [groupFulfilledPreviewKey, setGroupFulfilledPreviewKey] = useState(0);
-  const [groupPaymentRecoveryPreviewKey, setGroupPaymentRecoveryPreviewKey] =
-    useState(0);
-  const [fulfilledPreviewKey, setFulfilledPreviewKey] = useState(0);
-  const [multiChannelPreviewKey, setMultiChannelPreviewKey] = useState(0);
+  const endpoint = "/api/design/group-sponsorship-management";
+  const [activationPreviewOpen, setActivationPreviewOpen] = useState(false);
+
+  useEffect(() => {
+    function syncActivationPreview() {
+      setActivationPreviewOpen(
+        window.location.hash === "#group-usage-funding",
+      );
+    }
+
+    syncActivationPreview();
+    window.addEventListener("hashchange", syncActivationPreview);
+    return () =>
+      window.removeEventListener("hashchange", syncActivationPreview);
+  }, []);
+
+  const oneTimeContribution = (
+    <div className="space-y-4">
+      <p className="text-center text-sm text-muted-foreground">
+        Murph is sponsored in this chat.
+      </p>
+      <GroupSponsorshipDialog
+        checkoutUrl="/api/design/usage-credit-preview"
+        customizationAllowed
+        mode="one_time"
+        offers={DESIGN_GROUP_SPONSORSHIP_OFFERS}
+        payerMemberId={DESIGN_PAYER_MEMBER_ID}
+        triggerVariant="outline"
+      />
+    </div>
+  );
+  const oneTimeRecovery = () => (
+    <div className="space-y-4">
+      <p className="text-center text-sm text-muted-foreground">
+        Murph is sponsored in this chat.
+      </p>
+      <GroupSponsorshipDialog
+        activePurchase={{
+          cancelAllowed: true,
+          offerCode: "usage_10_usd",
+          purchaseId: "hucp_design_one_time_recovery",
+          retryAllowed: true,
+          status: "checkout_open",
+          url: "https://checkout.stripe.test/design-group-one-time",
+        }}
+        checkoutUrl="/api/design/usage-credit-preview"
+        customizationAllowed
+        frozenSponsorship={null}
+        mode="one_time"
+        offers={[]}
+        payerMemberId={DESIGN_PAYER_MEMBER_ID}
+      />
+    </div>
+  );
 
   return (
     <div
-      className="flex min-h-[42rem] flex-col items-center justify-center gap-8 rounded-3xl border border-border bg-background px-4 py-12 sm:px-8"
+      className="space-y-10 rounded-3xl border border-border bg-background px-4 py-10 sm:px-8"
       data-design-study="group-usage-funding"
       id="group-usage-funding"
     >
-      <div className="w-full max-w-xl">
+      <div className="space-y-2">
+        <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Production components · inert synthetic states
+        </p>
+        <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
+          Monthly sponsorship is the primary flow. It starts with one ordinary
+          $5 usage-credit purchase and permits later $5 refills only when the
+          group needs capacity, up to the payer&apos;s private monthly maximum.
+          One-time contribution remains a separate secondary action.
+        </p>
+      </div>
+
+      <DesignSponsorshipState
+        label="Activation"
+        state="monthly-activation"
+      >
         <GroupUsageFundingCard
-          action={
-            <GroupSponsorshipDialog
-              checkoutUrl="/api/design/usage-credit-preview"
-              customizationAllowed
-              offers={DESIGN_GROUP_SPONSORSHIP_OFFERS}
-              payerMemberId={DESIGN_PAYER_MEMBER_ID}
-            />
-          }
+          action={(
+            <div inert>
+              <GroupSponsorshipDialog
+                key={activationPreviewOpen ? "open" : "closed"}
+                checkoutUrl="/api/design/usage-credit-preview"
+                customizationAllowed
+                initialOpen={activationPreviewOpen}
+                mode="monthly"
+                monthlyCapMinor={1_000}
+                monthlyCapOptions={DESIGN_GROUP_MONTHLY_CAPS}
+                offers={[DESIGN_GROUP_SPONSORSHIP_OFFERS[0]]}
+                payerMemberId={DESIGN_PAYER_MEMBER_ID}
+              />
+            </div>
+          )}
           groupName="Sunday sleep crew"
         />
-        <p className="mt-3 text-sm leading-6 text-muted-foreground">
-          The amount dialog authorizes one contribution at a time. Optional
-          sponsor details open behind Add a note and use a quiet sage
-          border-only focus state.
-        </p>
-      </div>
-      <PersonalUsageCreditState
-        label="Historical activity without a current usage bar"
-        state="usage-history-without-overall-bar"
-        usageStatus={DESIGN_UNAVAILABLE_USAGE_STATUS}
-        usageActivityDetail={
-          <section className="flex flex-col gap-4">
-            <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-              AI usage
-            </div>
-            <HostedAiUsageActivity
-              activity={DESIGN_AI_USAGE_DISABLED_HISTORY}
-              missionContactOption={null}
-            />
-          </section>
-        }
-      />
-      <div
-        className="flex w-full max-w-xl flex-col items-start gap-3"
-        data-design-state="usage-added-follow-up"
-      >
-        <p className="text-sm text-muted-foreground">
-          After a group payment completes, the confirmation makes the added
-          capacity unmistakable, then offers Open Messages. Messages cannot
-          deep-link to the group thread, so the handoff says to choose the
-          group. Personal and Family top-ups keep the Text Murph action: one
-          channel renders a direct link; several channels render inline rows in
-          the same dialog.
-        </p>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            variant="outline"
-            onClick={() => setGroupFulfilledPreviewKey((key) => key + 1)}
-          >
-            Preview group usage added
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => setGroupPaymentRecoveryPreviewKey((key) => key + 1)}
-          >
-            Preview group payment recovery
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => setFulfilledPreviewKey((key) => key + 1)}
-          >
-            Preview usage added with Text Murph
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => setMultiChannelPreviewKey((key) => key + 1)}
-          >
-            Preview usage added with channel choices
-          </Button>
-        </div>
-        {groupFulfilledPreviewKey > 0 ? (
-          <GroupSponsorshipDialog
-            key={groupFulfilledPreviewKey}
-            activePurchase={{
-              offerCode: "usage_5_usd",
-              purchaseId: "hucp_design_added_0",
-              retryAllowed: false,
-              status: "fulfilled",
-            }}
-            deferTerminalRefreshUntilClose
-            customizationAllowed
-            frozenSponsorship={{
-              publicAlias: "Sunday sleep crew",
-              runningBitRequest: "Keep the recovery jokes going.",
-              sponsorMessage: "More room for the group.",
-            }}
-            initialOpen
-            offers={[]}
-            payerMemberId={DESIGN_PAYER_MEMBER_ID}
+      </DesignSponsorshipState>
+
+      <div className="grid gap-6 xl:grid-cols-2">
+        <DesignSponsorshipState
+          label="Ordinary sponsored participant + one-time action"
+          state="ordinary-sponsored-one-time"
+        >
+          <GroupUsageFundingCard
+            action={<div inert>{oneTimeContribution}</div>}
+            groupName="Sunday sleep crew"
           />
-        ) : null}
-        {groupPaymentRecoveryPreviewKey > 0 ? (
-          <GroupSponsorshipDialog
-            key={groupPaymentRecoveryPreviewKey}
-            activePurchase={{
-              cancelAllowed: true,
-              offerCode: "usage_20_usd",
-              purchaseId: "hucp_design_pending_0",
-              retryAllowed: true,
-              status: "payment_pending",
+        </DesignSponsorshipState>
+
+        <DesignSponsorshipState
+          label="Active management near cap"
+          state="monthly-active"
+        >
+          <GroupSponsorshipManagementCard
+            endpoint={endpoint}
+            groupName="Sunday sleep crew"
+            inert
+            management={{
+              authorizationId: "hgsa_design_active",
+              chargedThisPeriodMinor: 500,
+              monthlyCapMinor: 1_000,
+              pendingMonthlyCapMinor: null,
+              pendingThisPeriodMinor: 500,
+              periodEnd: "2026-08-30T16:00:00.000Z",
+              status: "active",
             }}
-            checkoutUrl="/api/design/usage-credit-preview"
-            customizationAllowed
-            initialOpen
-            offers={[]}
-            payerMemberId={DESIGN_PAYER_MEMBER_ID}
           />
-        ) : null}
-        {fulfilledPreviewKey > 0 ? (
-          <HostedUsageTopUpDialog
-            key={fulfilledPreviewKey}
-            activePurchase={{
-              offerCode: "usage_5_usd",
-              purchaseId: "hucp_design_added_1",
-              retryAllowed: false,
-              status: "fulfilled",
+        </DesignSponsorshipState>
+
+        <DesignSponsorshipState
+          label="Paused with next-period decrease"
+          state="monthly-paused"
+        >
+          <GroupSponsorshipManagementCard
+            endpoint={endpoint}
+            groupName="Sunday sleep crew"
+            inert
+            management={{
+              authorizationId: "hgsa_design_paused",
+              chargedThisPeriodMinor: 1_000,
+              monthlyCapMinor: 2_000,
+              pendingMonthlyCapMinor: 500,
+              pendingThisPeriodMinor: 0,
+              periodEnd: "2026-08-30T16:00:00.000Z",
+              status: "paused",
             }}
-            contactOptions={DESIGN_TOP_UP_CONTACT_OPTIONS}
-            deferTerminalRefreshUntilClose
-            initialOpen
-            offers={[]}
-            payerMemberId={DESIGN_PAYER_MEMBER_ID}
           />
-        ) : null}
-        {multiChannelPreviewKey > 0 ? (
-          <HostedUsageTopUpDialog
-            key={multiChannelPreviewKey}
-            activePurchase={{
-              offerCode: "usage_5_usd",
-              purchaseId: "hucp_design_added_2",
-              retryAllowed: false,
-              status: "fulfilled",
+        </DesignSponsorshipState>
+
+        <DesignSponsorshipState
+          label="Payment recovery"
+          state="monthly-recovery"
+        >
+          <GroupSponsorshipManagementCard
+            endpoint={endpoint}
+            groupName="Sunday sleep crew"
+            inert
+            management={{
+              authorizationId: "hgsa_design_recovery",
+              chargedThisPeriodMinor: 500,
+              monthlyCapMinor: 1_000,
+              pendingMonthlyCapMinor: null,
+              pendingThisPeriodMinor: 0,
+              periodEnd: "2026-08-30T16:00:00.000Z",
+              status: "recovery_required",
             }}
-            contactOptions={DESIGN_TOP_UP_MULTI_CONTACT_OPTIONS}
-            deferTerminalRefreshUntilClose
-            initialOpen
-            offers={[]}
-            payerMemberId={DESIGN_PAYER_MEMBER_ID}
           />
-        ) : null}
+        </DesignSponsorshipState>
+
+        <DesignSponsorshipState
+          label="Sponsored-chat one-time purchase recovery"
+          state="sponsored-one-time-recovery"
+        >
+          <GroupUsageFundingCard
+            action={<div inert>{oneTimeRecovery()}</div>}
+            groupName="Sunday sleep crew"
+          />
+        </DesignSponsorshipState>
       </div>
     </div>
+  );
+}
+
+function DesignSponsorshipState(props: {
+  children: ReactNode;
+  label: string;
+  state: string;
+}) {
+  return (
+    <section className="space-y-3" data-design-state={props.state}>
+      <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+        {props.label}
+      </p>
+      <div className="w-full max-w-xl">
+        {props.children}
+      </div>
+    </section>
   );
 }
 
@@ -410,10 +482,9 @@ function PersonalUsageCreditOwnerStudy() {
       id="personal-usage-credit-owner"
     >
       <p className="text-sm text-muted-foreground">
-        Static owner-layout preview keeps plan allowance and purchased credit
-        combined in one usage bar at the top. Current referrals stay visible
-        below it, while completed referrals and purchase history remain on
-        demand.
+        Static owner-layout preview keeps remaining capacity in one usage bar
+        at the top. A fulfilled purchase starts that display at 0% used, while
+        current referrals stay visible below it and history remains on demand.
       </p>
       <div
         className="flex flex-col gap-3"
@@ -423,7 +494,6 @@ function PersonalUsageCreditOwnerStudy() {
           Overall usage with active referrals and history
         </p>
         <PersonalUsageCreditState
-          allowHistoryInteraction
           label="Overall usage active"
           state="active-with-credit"
           usageStatus={DESIGN_PERSONAL_USAGE_STATUS}
@@ -440,17 +510,73 @@ function PersonalUsageCreditOwnerStudy() {
           }
         />
       </div>
+      <div
+        className="grid gap-6 lg:grid-cols-2"
+        data-design-state="usage-activity-interactions"
+      >
+        <section className="flex flex-col gap-3">
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            Referral details interaction
+          </p>
+          <div data-design-interaction="referral-details">
+            <HostedAiUsageActivity
+              activity={DESIGN_AI_USAGE_ACTIVITY}
+              missionContactOption={null}
+            />
+          </div>
+        </section>
+        <section className="flex flex-col gap-3">
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            Guidance with history interaction
+          </p>
+          <div data-design-interaction="guidance-with-history">
+            <HostedAiUsageActivity
+              activity={DESIGN_AI_USAGE_HISTORY_INTERACTION}
+              missionContactOption={DESIGN_USAGE_MISSION_CONTACT_OPTION}
+            />
+          </div>
+        </section>
+      </div>
       <PersonalUsageCreditState
         label="Plan usage exhausted, credit remains"
         state="exhausted-with-credit"
         usageStatus={DESIGN_CREDIT_BACKED_USAGE_STATUS}
       />
       <PersonalUsageCreditState
+        label="Fresh purchase starts at zero used"
+        state="fresh-purchase-meter"
+        usageStatus={DESIGN_FULFILLED_USAGE_STATUS}
+      />
+      <PersonalUsageCreditState
         label="All available usage exhausted"
         state="exhausted-without-credit"
         usageStatus={DESIGN_EXHAUSTED_USAGE_STATUS}
       />
+      <div
+        className="flex flex-col gap-3"
+        data-design-state="family-owner-exhausted"
+      >
+        <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Family owner can add usage for their own seat
+        </p>
+        <div inert>
+          <HostedBillingSettings
+            authenticated
+            billingStatus="active"
+            currentBillingPhase="paid"
+            currentBillingPlanCode="launch_monthly"
+            familyState="owner"
+            payerMemberId={DESIGN_PAYER_MEMBER_ID}
+            usageStatus={DESIGN_FAMILY_EXHAUSTED_USAGE_STATUS}
+            usageTopUpCheckoutUrl="/api/design/usage-credit-preview"
+            usageTopUpOffers={DESIGN_USAGE_OFFERS}
+            usageTopUpScope="family"
+            usageTopUpTargetLabel="you"
+          />
+        </div>
+      </div>
       <PersonalUsageCreditState
+        billingState="pulse-trial"
         canStartPaidPulse
         label="Pulse trial ended"
         state="trial-conversion"
@@ -496,7 +622,7 @@ function PersonalUsageCreditOwnerStudy() {
 }
 
 function PersonalUsageCreditState(props: {
-  allowHistoryInteraction?: boolean;
+  billingState?: "paid" | "pulse-trial";
   canStartPaidPulse?: boolean;
   label: string;
   state: string;
@@ -512,23 +638,21 @@ function PersonalUsageCreditState(props: {
         {props.label}
       </p>
       <div
-        data-design-interaction={
-          props.allowHistoryInteraction ? "history-only" : undefined
-        }
-        inert={props.allowHistoryInteraction ? undefined : true}
-        onClickCapture={
-          props.allowHistoryInteraction ? blockNonHistoryPreviewAction : undefined
-        }
-        onSubmitCapture={
-          props.allowHistoryInteraction ? blockNonHistoryPreviewAction : undefined
-        }
+        inert
       >
         <HostedBillingSettings
           authenticated
           billingStatus="active"
           canStartPaidPulse={props.canStartPaidPulse}
-          currentBillingPhase="paid"
+          currentBillingPhase={
+            props.billingState === "pulse-trial" ? "trial" : "paid"
+          }
           currentBillingPlanCode="launch_monthly"
+          currentCheckoutOffer={
+            props.billingState === "pulse-trial"
+              ? "pulse_trial_7d"
+              : "standard"
+          }
           payerMemberId={DESIGN_PAYER_MEMBER_ID}
           usageActivityDetail={props.usageActivityDetail}
           usageStatus={props.usageStatus}
@@ -539,24 +663,12 @@ function PersonalUsageCreditState(props: {
   );
 }
 
-function blockNonHistoryPreviewAction(event: SyntheticEvent<HTMLDivElement>) {
-  const target = event.target;
-  if (
-    target instanceof Element &&
-    target.closest("[data-hosted-ai-usage-activity] details")
-  ) {
-    return;
-  }
-
-  event.preventDefault();
-  event.stopPropagation();
-}
-
 export {
   DESIGN_AI_USAGE_ACTIVITY,
   DESIGN_AI_USAGE_DISABLED_HISTORY,
   DESIGN_AI_USAGE_EMPTY_ACTIVITY,
   DESIGN_AI_USAGE_WAITING_ACTIVITY,
+  DESIGN_GROUP_MONTHLY_CAPS,
   DESIGN_GROUP_SPONSORSHIP_OFFERS,
   DESIGN_USAGE_OFFERS,
   DESIGN_USAGE_MISSION_CONTACT_OPTION,

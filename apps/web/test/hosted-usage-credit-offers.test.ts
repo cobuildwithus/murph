@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  estimateHostedUsageCreditMessages,
   filterHostedNonGroupUsageCreditOfferCodes,
   getHostedUsageCreditOfferDefinition,
   HOSTED_GROUP_SPONSORSHIP_OFFER_CODES,
@@ -42,14 +41,10 @@ describe("hosted usage-credit offer catalog", () => {
     ]);
   });
 
-  it("quotes every offer's message estimate from one rate", () => {
-    expect(
-      HOSTED_USAGE_CREDIT_OFFER_CODES.map((code) =>
-        estimateHostedUsageCreditMessages(
-          getHostedUsageCreditOfferDefinition(code).cashAmountMinor,
-        )
-      ),
-    ).toEqual([100, 200, 400, 500]);
+  it("keeps dollar amounts as cost-weighted credit without a message conversion", () => {
+    const source = String.raw`${getHostedUsageCreditOfferDefinition}`;
+    expect(source).not.toContain("message");
+    expect(source).not.toContain("0.05");
   });
 
   it("accepts only exact internal offer codes", () => {

@@ -231,7 +231,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Group member plan">
+      <StudySection title="Core member plan">
         <GroupMemberPlanStudy />
       </StudySection>
 
@@ -261,13 +261,13 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Sponsor more messages: group funding, recovery, and fulfilled receipt">
+      <StudySection title="Capped monthly group sponsorship and one-time contribution">
         <GroupUsageFundingStudy />
       </StudySection>
 
       <Separator />
 
-      <StudySection title="Overall AI usage, credits, and missions">
+      <StudySection title="Overall AI usage, purchase reset, Family owner action, credits, and referrals">
         <PersonalUsageCreditOwnerStudy />
       </StudySection>
 

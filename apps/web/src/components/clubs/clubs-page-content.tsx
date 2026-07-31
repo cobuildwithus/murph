@@ -635,7 +635,7 @@ const FAQS = [
   },
   {
     answer:
-      "Organizers buy AI usage as needed—there’s no platform fee. Members get Murph free for two weeks, then can continue on the Group plan for $3.50/month.",
+      "Organizers buy AI usage as needed—there’s no platform fee. Members get Murph free for two weeks, then can continue on Core for $3.50/month.",
     question: "How much does it cost?",
   },
   {

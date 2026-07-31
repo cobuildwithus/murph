@@ -182,26 +182,40 @@ export async function projectHostedPersonalAiUsageStatus(input: {
   }
 
   const exhausted = usageLimitExceeded;
-  // The bar follows the same effective-capacity boundary as admission: usage
-  // already spent plus every unit of included allowance or generic usage credit
-  // still available.
+  const meterWindow = exhausted
+    ? {
+        resetAt: null,
+        spentUsdMicros: decision.spentUsdMicros,
+      }
+    : await readHostedUsageMeterWindow({
+        beneficiaryMemberId: input.memberId,
+        ledgerVersion: decision.usageCreditLedgerVersion,
+        now,
+        periodStart: decision.periodStart,
+        periodSpentUsdMicros: decision.spentUsdMicros,
+        prisma,
+      });
+  // Admission still follows all effective capacity. The display meter starts a
+  // fresh window after the latest fulfilled purchase so newly added usage reads
+  // as unused until the beneficiary spends against it.
   const totalCapacityUsdMicros =
-    decision.spentUsdMicros + decision.remainingUsdMicros;
+    meterWindow.spentUsdMicros + decision.remainingUsdMicros;
   const usedPercent = calculateUsedPercent({
     capacity: totalCapacityUsdMicros,
     exhausted,
-    spent: decision.spentUsdMicros,
+    spent: meterWindow.spentUsdMicros,
   });
-  const forecast = exhausted || decision.spentUsdMicros <= 0n
+  const forecast = exhausted || meterWindow.spentUsdMicros <= 0n
     ? null
     : await buildUsageForecast({
         capacity: totalCapacityUsdMicros,
         memberId: input.memberId,
         now,
+        observedAfter: meterWindow.resetAt,
         periodEnd: decision.periodEnd,
         periodStart: decision.periodStart,
         prisma,
-        spent: decision.spentUsdMicros,
+        spent: meterWindow.spentUsdMicros,
       });
   const accessKind = decision.allowanceSource === "direct_trial"
     ? "trial"
@@ -319,10 +333,87 @@ function calculateUsedPercent(input: {
   return Math.min(99, Math.max(1, floored));
 }
 
+async function readHostedUsageMeterWindow(input: {
+  beneficiaryMemberId: string;
+  ledgerVersion: bigint;
+  now: Date;
+  periodStart: Date;
+  periodSpentUsdMicros: bigint;
+  prisma: HostedPlanUsageClient;
+}): Promise<{
+  resetAt: Date | null;
+  spentUsdMicros: bigint;
+}> {
+  if (input.ledgerVersion <= 0n || input.periodSpentUsdMicros <= 0n) {
+    return {
+      resetAt: null,
+      spentUsdMicros: input.periodSpentUsdMicros,
+    };
+  }
+
+  const latestPurchaseGrant =
+    await input.prisma.hostedUsageCreditEntry.findFirst({
+      orderBy: {
+        beneficiarySequence: "desc",
+      },
+      select: {
+        effectiveAt: true,
+      },
+      where: {
+        beneficiaryMemberId: input.beneficiaryMemberId,
+        beneficiarySequence: {
+          lte: input.ledgerVersion,
+        },
+        effectiveAt: {
+          gte: input.periodStart,
+          lte: input.now,
+        },
+        kind: "purchase_grant",
+      },
+    });
+  if (!latestPurchaseGrant) {
+    return {
+      resetAt: null,
+      spentUsdMicros: input.periodSpentUsdMicros,
+    };
+  }
+
+  const usageSincePurchase = await input.prisma.hostedAiUsage.aggregate({
+    _sum: {
+      allowanceCostUsdMicros: true,
+    },
+    where: {
+      allowanceCostUsdMicros: {
+        gt: 0n,
+      },
+      allowanceCounted: true,
+      allowancePeriodStart: input.periodStart,
+      memberId: input.beneficiaryMemberId,
+      occurredAt: {
+        gt: latestPurchaseGrant.effectiveAt,
+        lte: input.now,
+      },
+    },
+  });
+  const observedSpend =
+    usageSincePurchase._sum.allowanceCostUsdMicros ?? 0n;
+  const boundedSpend = observedSpend < 0n
+    ? 0n
+    : observedSpend > input.periodSpentUsdMicros
+      ? input.periodSpentUsdMicros
+      : observedSpend;
+
+  return {
+    resetAt: latestPurchaseGrant.effectiveAt,
+    spentUsdMicros: boundedSpend,
+  };
+}
+
 async function buildUsageForecast(input: {
   capacity: bigint;
   memberId: string;
   now: Date;
+  observedAfter: Date | null;
   periodEnd: Date;
   periodStart: Date;
   prisma: HostedPlanUsageClient;
@@ -342,6 +433,13 @@ async function buildUsageForecast(input: {
       allowanceCounted: true,
       allowancePeriodStart: input.periodStart,
       memberId: input.memberId,
+      ...(input.observedAfter
+        ? {
+            occurredAt: {
+              gt: input.observedAfter,
+            },
+          }
+        : {}),
     },
   });
   const observedFrom = firstCountedUsage?.occurredAt ?? null;
