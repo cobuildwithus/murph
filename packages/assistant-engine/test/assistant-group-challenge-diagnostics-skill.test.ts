@@ -353,7 +353,7 @@ describe('assistant group challenge diagnostics guidance', () => {
       'If `read_current` returns `status="none"`, do not create a hosted group as a side effect of challenge kickoff.',
     )
     expect(challenge).toContain(
-      'the next Murph permissions message is the only tap those participants need for both entry and sharing.',
+      'accepting that displayed permission within 24 hours is the only action those participants need for both entry and sharing',
     )
     expect(challenge).toContain(
       'exact scoring scope it proved `not_granted`',
@@ -383,7 +383,7 @@ describe('assistant group challenge diagnostics guidance', () => {
       'permission offer cannot connect a source, grant Apple Health or operating-system Steps access',
     )
     expect(challenge).toContain(
-      'Treat `status="ok"` as an opaque handled result.',
+      '`recencyEvidence="eligible"` plus canonical `offeredAt` proves only when that link was presented.',
     )
     expect(challenge).toContain(
       'This scheduled surface returns `presentation="link"`; include the exact returned `joinUrl` once',

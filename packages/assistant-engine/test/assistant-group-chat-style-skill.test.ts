@@ -529,17 +529,20 @@ describe('assistant group-chat style guidance', () => {
     )
   })
 
-  it('treats native consent as an opaque handled path', async () => {
+  it('distinguishes fresh native consent from rollout-compatible handled status', async () => {
     const normalized = await readNormalizedGroupChatSkill()
 
     expect(normalized).toContain(
       'does not prove UI was newly posted or is currently visible',
     )
     expect(normalized).toContain(
-      'Never send a companion confirmation that a card is available, posted, or ready',
+      '`recencyEvidence="eligible"`, the host newly posted the native consent message',
     )
     expect(normalized).toContain(
-      'When that handled native path is the turn\'s only useful user-facing outcome, call `murph.finish_without_reply`',
+      'When `recencyEvidence="unavailable"`, the result is rollout-compatible handled status only',
+    )
+    expect(normalized).toContain(
+      'When that unverified native path is the turn\'s only useful user-facing outcome, call `murph.finish_without_reply`',
     )
     expect(normalized).toContain(
       'otherwise answer only the substantive question',

@@ -1228,6 +1228,12 @@ export type HostedRuntimeGroupSharedRecord = Pick<
 
 export interface HostedRuntimeGroupSharedProjection {
   dataStatus: "available" | "missing";
+  /**
+   * Canonical UTC time at which the current exact-scope grant became active.
+   * Missing means the producer predates this additive evidence field; null is
+   * valid only when the scope is not granted.
+   */
+  grantedAt?: string | null;
   grantStatus: "granted" | "not_granted";
   projectionScope: HostedVaultShareSelectableProjectionScope;
   projectionScopeKey: string;
@@ -1493,7 +1499,13 @@ export type HostedRuntimeGroupToolResponse =
   | {
       action: "create_join_link";
       result:
-        | { status: "ok"; group: HostedRuntimeGroupSummary; joinUrl: string }
+        | {
+            status: "ok";
+            group: HostedRuntimeGroupSummary;
+            joinUrl: string;
+            /** Additive rollout evidence for the freshly returned link. */
+            offeredAt?: string;
+          }
         | { status: "unavailable"; unavailableReason: string; group: null };
     }
   | {
@@ -1510,7 +1522,20 @@ export type HostedRuntimeGroupToolResponse =
   | {
       action: "post_join_offer";
       result:
-        | { status: "sent"; group: HostedRuntimeGroupSummary; joinUrl: string }
+        | {
+            status: "sent";
+            group: HostedRuntimeGroupSummary;
+            joinUrl: string;
+            /**
+             * `posted` means this request sent a new native permission message.
+             * `existing` means Web reused a covering active offer; consumers
+             * should present the returned first-party link instead of claiming
+             * a new native message was sent.
+             */
+            offerState?: "existing" | "posted";
+            /** Additive rollout evidence for this handled presentation. */
+            offeredAt?: string;
+          }
         | { status: "unavailable"; unavailableReason: string; group: null };
     }
   | {

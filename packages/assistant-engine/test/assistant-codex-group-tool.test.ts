@@ -75,6 +75,7 @@ function newsletterToolCall(argumentsValue: unknown): Record<string, unknown> {
 type NewsletterToolRequest = NonNullable<AssistantHostedToolContext["newsletterTool"]>["request"];
 const NEWSLETTER_AUTHORIZATION_PROOF = "a".repeat(64);
 type GroupToolRequest = NonNullable<AssistantHostedToolContext["groupTool"]>["request"];
+type GroupToolResponse = Awaited<ReturnType<GroupToolRequest>>;
 type GroupPermissionOfferRequest = NonNullable<
   AssistantHostedToolContext["groupPermissionOfferTool"]
 >["request"];
@@ -966,6 +967,7 @@ describe("murph.group dynamic tool", () => {
           projections: [
             {
               dataStatus: "available" as const,
+              grantedAt: "2026-07-31T12:30:00.000Z",
               grantStatus: "granted" as const,
               projectionScope: { projectionKind: "steps-days.v0" as const },
               projectionScopeKey: "steps-days.v0",
@@ -982,6 +984,7 @@ describe("murph.group dynamic tool", () => {
             },
             {
               dataStatus: "missing" as const,
+              grantedAt: null,
               grantStatus: "not_granted" as const,
               projectionScope: { projectionKind: "device-sync-status.v0" as const },
               projectionScopeKey: "device-sync-status.v0",
@@ -989,6 +992,7 @@ describe("murph.group dynamic tool", () => {
             },
             {
               dataStatus: "available" as const,
+              grantedAt: "2026-07-31T12:31:00.000Z",
               grantStatus: "granted" as const,
               projectionScope: { projectionKind: "workouts.v0" as const },
               projectionScopeKey: "workouts.v0",
@@ -1017,6 +1021,7 @@ describe("murph.group dynamic tool", () => {
           projections: [
             {
               dataStatus: "missing" as const,
+              grantedAt: "2026-07-31T12:32:00.000Z",
               grantStatus: "granted" as const,
               projectionScope: { projectionKind: "steps-days.v0" as const },
               projectionScopeKey: "steps-days.v0",
@@ -1024,6 +1029,7 @@ describe("murph.group dynamic tool", () => {
             },
             {
               dataStatus: "available" as const,
+              grantedAt: "2026-07-31T12:33:00.000Z",
               grantStatus: "granted" as const,
               projectionScope: { projectionKind: "device-sync-status.v0" as const },
               projectionScopeKey: "device-sync-status.v0",
@@ -1038,6 +1044,7 @@ describe("murph.group dynamic tool", () => {
             },
             {
               dataStatus: "missing" as const,
+              grantedAt: null,
               grantStatus: "not_granted" as const,
               projectionScope: { projectionKind: "workouts.v0" as const },
               projectionScopeKey: "workouts.v0",
@@ -1116,6 +1123,7 @@ describe("murph.group dynamic tool", () => {
             // status the model actually acts on.
             projections: {
               "steps-days.v0": {
+                grantedAt: "2026-07-31T12:30:00.000Z",
                 records: [{
                   data: {
                     date: "2026-07-18",
@@ -1139,6 +1147,7 @@ describe("murph.group dynamic tool", () => {
                   }],
                 },
                 kinds: ["running"],
+                grantedAt: "2026-07-31T12:31:00.000Z",
                 status: "available",
                 timeSemantics: "canonical-event-zone-or-vault-zone.v0",
               },
@@ -1149,8 +1158,14 @@ describe("murph.group dynamic tool", () => {
             displayName: "Alex",
             participantId: "participant_b",
             projections: {
-              "steps-days.v0": { status: "missing" },
-              "device-sync-status.v0": { status: "available" },
+              "steps-days.v0": {
+                grantedAt: "2026-07-31T12:32:00.000Z",
+                status: "missing",
+              },
+              "device-sync-status.v0": {
+                grantedAt: "2026-07-31T12:33:00.000Z",
+                status: "available",
+              },
               "workouts.v0": { status: "not_granted" },
             },
           },
@@ -2592,6 +2607,7 @@ describe("murph.group dynamic tool", () => {
             result: {
               group,
               joinUrl: "https://example.test/groups/join/exact",
+              offeredAt: "2026-07-31T12:00:00.000Z",
               status: "ok",
             },
           }
@@ -2601,6 +2617,8 @@ describe("murph.group dynamic tool", () => {
               result: {
                 group,
                 joinUrl: "https://example.test/groups/join/native-hidden",
+                offeredAt: "2026-07-31T12:01:00.000Z",
+                offerState: "posted",
                 status: "sent",
               },
             }
@@ -2667,13 +2685,20 @@ describe("murph.group dynamic tool", () => {
       action: "offer_access",
       result: {
         joinUrl: "https://example.test/groups/join/exact",
+        offeredAt: "2026-07-31T12:00:00.000Z",
         presentation: "link",
+        recencyEvidence: "eligible",
         status: "ok",
       },
     });
     expect(readGroupToolPayload(nativeResult)).toEqual({
       action: "offer_access",
-      result: { presentation: "native", status: "ok" },
+      result: {
+        offeredAt: "2026-07-31T12:01:00.000Z",
+        presentation: "native",
+        recencyEvidence: "eligible",
+        status: "ok",
+      },
     });
     expect(JSON.stringify(readGroupToolPayload(standaloneResult))).not.toContain(
       "private-group-id",
@@ -2681,6 +2706,91 @@ describe("murph.group dynamic tool", () => {
     expect(JSON.stringify(readGroupToolPayload(nativeResult))).not.toContain(
       "native-hidden",
     );
+  });
+
+  it("shows a fresh exact link for a reused native offer and fails closed without recency evidence", async () => {
+    const group = {
+      displayName: null,
+      id: "private-group-id",
+      kind: "friends" as const,
+      memberCount: 0,
+      members: [],
+      requestedVaultShareProjectionKinds: ["steps-days.v0" as const],
+      requestedVaultShareProjectionScopes: [
+        { projectionKind: "steps-days.v0" as const },
+      ],
+      status: "active" as const,
+    };
+    const responses: GroupToolResponse[] = [
+      {
+        action: "post_join_offer",
+        result: {
+          group,
+          joinUrl: "https://example.test/groups/join/reused",
+          offeredAt: "2026-07-31T12:02:00.000Z",
+          offerState: "existing",
+          status: "sent",
+        },
+      },
+      {
+        action: "post_join_offer",
+        result: {
+          group,
+          joinUrl: "https://example.test/groups/join/legacy-hidden",
+          status: "sent",
+        },
+      },
+    ];
+    const groupRequest = vi.fn<GroupToolRequest>(async () => {
+      const response = responses.shift();
+      if (!response) throw new Error("Missing test response.");
+      return response;
+    });
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "offer_access",
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected access-offer request.");
+    }
+
+    const reusedResult = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({ groupRequest }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+    const legacyResult = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({ groupRequest }),
+      nextUsageOrdinal: () => 2,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(readGroupToolPayload(reusedResult)).toEqual({
+      action: "offer_access",
+      result: {
+        joinUrl: "https://example.test/groups/join/reused",
+        offeredAt: "2026-07-31T12:02:00.000Z",
+        presentation: "link",
+        recencyEvidence: "eligible",
+        status: "ok",
+      },
+    });
+    expect(readGroupToolPayload(legacyResult)).toEqual({
+      action: "offer_access",
+      result: {
+        presentation: "native",
+        recencyEvidence: "unavailable",
+        status: "ok",
+      },
+    });
   });
 
   it("normalizes a host-substituted access link after requesting the native path", async () => {
@@ -2708,6 +2818,7 @@ describe("murph.group dynamic tool", () => {
             status: "active",
           },
           joinUrl: "https://example.test/groups/join/host-selected",
+          offeredAt: "2026-07-31T12:03:00.000Z",
           status: "ok",
         },
       };
@@ -2735,7 +2846,9 @@ describe("murph.group dynamic tool", () => {
       action: "offer_access",
       result: {
         joinUrl: "https://example.test/groups/join/host-selected",
+        offeredAt: "2026-07-31T12:03:00.000Z",
         presentation: "link",
+        recencyEvidence: "eligible",
         status: "ok",
       },
     });
@@ -2815,6 +2928,7 @@ describe("murph.group dynamic tool", () => {
             status: "active",
           },
           joinUrl: "https://example.test/join/offer",
+          offeredAt: "2026-07-31T12:04:00.000Z",
           status: "ok",
         },
       }),
@@ -2847,11 +2961,66 @@ describe("murph.group dynamic tool", () => {
       action: "offer_access",
       result: {
         joinUrl: "https://example.test/join/offer",
+        offeredAt: "2026-07-31T12:04:00.000Z",
         presentation: "link",
+        recencyEvidence: "eligible",
         status: "ok",
       },
     });
     expect(JSON.stringify(readGroupToolPayload(result))).not.toContain("private");
+  });
+
+  it("rejects non-canonical scheduled offer evidence", async () => {
+    const groupPermissionOfferRequest = vi.fn<GroupPermissionOfferRequest>(
+      async () => ({
+        action: "create_join_link",
+        result: {
+          group: {
+            displayName: null,
+            id: "private-group-id",
+            kind: "challenge",
+            memberCount: 0,
+            members: [],
+            requestedVaultShareProjectionKinds: ["steps-days.v0"],
+            requestedVaultShareProjectionScopes: [
+              { projectionKind: "steps-days.v0" },
+            ],
+            status: "active",
+          },
+          joinUrl: "https://example.test/join/offer",
+          offeredAt: "2026-07-31T12:04:00Z",
+          status: "ok",
+        },
+      }),
+    );
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "offer_access",
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected a scheduled permission-offer request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        groupPermissionOfferRequest,
+        groupToolAvailable: false,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(result.rpcResult).toEqual({
+      success: false,
+      contentItems: [{
+        type: "inputText",
+        text: "group tool request failed",
+      }],
+    });
   });
 
   it("keeps non-offer group mutations unavailable without the full group port", async () => {

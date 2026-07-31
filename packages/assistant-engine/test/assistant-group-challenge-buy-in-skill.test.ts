@@ -75,16 +75,19 @@ describe('assistant group challenge buy-in guidance', () => {
       'Avoid asking someone to perform two affirmative actions for the same challenge.',
     )
     expect(challenge).toContain(
-      'accepting that offer also counts as challenge buy-in.',
+      'a grant activated within the next 24 hours may also count as challenge buy-in.',
     )
     expect(challenge).toContain(
-      'When a recorded participant\'s scope changes from `not_granted` to either granted state, `missing` or `available`, record them as `in`',
+      'Use this rule only when the tool returns `recencyEvidence="eligible"`.',
     )
     expect(challenge).toContain(
-      'never ask them to reply "in" or like another roll-call message.',
+      'canonical `grantedAt` that is at or after `offeredAt` and no later than 24 hours after it.',
     )
     expect(challenge).toContain(
-      'A pre-existing or generic grant, silence, an unresolved identity, or an offer followed by materially changed challenge terms does not establish buy-in.',
+      'Never ask an eligible participant to reply "in" or like another roll-call message.',
+    )
+    expect(challenge).toContain(
+      'A grant without `grantedAt`, a grant before `offeredAt`, a grant more than 24 hours later, silence, an unresolved identity, unavailable recency evidence, or an offer followed by materially changed challenge terms does not establish buy-in.',
     )
     expect(challengeRaw.indexOf('Make the stakes real')).toBeLessThan(
       challengeRaw.indexOf('Resolve buy-in without duplicate asks'),
@@ -111,7 +114,7 @@ describe('assistant group challenge buy-in guidance', () => {
       "We're ready once [pending name] checks in. In: [confirmed names]. Waiting on: [pending name].",
     )
     expect(challenge).toContain(
-      'the next Murph permissions message is the only tap those participants need for both entry and sharing.',
+      'accepting that displayed permission within 24 hours is the only action those participants need for both entry and sharing',
     )
     expect(challenge).toContain(
       'exact scoring scope it proved `not_granted`',
@@ -123,10 +126,10 @@ describe('assistant group challenge buy-in guidance', () => {
       'record the offer as handled only when the tool reports `status="ok"`.',
     )
     expect(challenge).toContain(
-      'For each recorded, resolved pending participant whose state changed from `not_granted` to `missing` or `available`, write participation state `in` in the same turn.',
+      'If it is now `missing` or `available` and its canonical `grantedAt` falls from `offeredAt` through the recorded 24-hour deadline, write participation state `in` in the same turn.',
     )
     expect(challenge).toContain(
-      'the permission grant remains valid but does not confirm the changed challenge',
+      'the grant remains valid but does not establish challenge entry',
     )
     expect(challenge).toContain(
       'generic shared data does not add a pending or silent person to the challenge.',
@@ -223,13 +226,13 @@ describe('assistant group challenge buy-in guidance', () => {
       'group membership or data sharing alone is not a yes to every challenge',
     )
     expect(groupChat).toContain(
-      'finalized challenge-specific permission offer may serve as one action for both entry and sharing',
+      'finalized challenge-specific permission offer may serve as one action for both entry and sharing only under `group-challenge`\'s exact 24-hour evidence rule',
     )
     expect(groupChat).toContain(
-      'never ask that participant for a second roll-call response.',
+      'Never ask that participant for a second roll-call response.',
     )
     expect(groupChat).toContain(
-      'A pre-existing or generic grant, silence, or materially changed challenge terms does not count',
+      'A pre-existing or generic grant, missing or unavailable recency evidence, silence, or materially changed challenge terms does not count',
     )
     expect(groupChat).toContain(
       'What the group safely and individually opts to do within the `groupchat-comedy` hard limits',

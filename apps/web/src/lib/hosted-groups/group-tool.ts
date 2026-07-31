@@ -885,6 +885,7 @@ async function handleHostedRuntimeGroupCreateJoinLink(input: {
     result: {
       group: created.group,
       joinUrl,
+      offeredAt: now.toISOString(),
       status: "ok",
     },
   };
@@ -1092,6 +1093,8 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       result: {
         group: created.group,
         joinUrl,
+        offeredAt: now.toISOString(),
+        offerState: "existing",
         status: "sent",
       },
     };
@@ -1150,6 +1153,8 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     result: {
       group: created.group,
       joinUrl,
+      offeredAt: now.toISOString(),
+      offerState: "posted",
       status: "sent",
     },
   };

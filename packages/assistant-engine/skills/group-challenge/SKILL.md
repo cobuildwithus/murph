@@ -24,9 +24,9 @@ one.
 Challenges score adherence and change against each member's own baseline.
 Full standings, callouts, and leaderboards are in-bounds only for people
 recorded as `in`, and only for the challenge metric and window. Group
-membership, silence, a visit to the join link, or a pre-existing or generic
-data-sharing grant does not establish challenge buy-in. The finalized
-challenge-specific permission acceptance described below is the one narrow
+membership, silence, a visit to the join link, or a grant outside the exact
+recent-grant rule does not establish challenge buy-in. The finalized
+challenge-specific recent-grant rule described below is the one narrow
 exception. Score whatever challenge the group chose; your own jokes stay off
 weight, appearance, and health conditions.
 
@@ -87,21 +87,26 @@ scoring read needs no offer, the diagnostic read may prove and offer
 for `device-sync-status.v0` on its own evidence. One offer per turn either way.
 
 Avoid asking someone to perform two affirmative actions for the same challenge.
-When a permission offer is opened specifically for one challenge after its
-metric, window, and stakes have been stated, accepting that offer also counts
-as challenge buy-in. Record the finalized terms, exact required scoring scope,
-and each eligible pending participant whose kickoff read showed that scope
-`not_granted`. On the next challenge turn, call `read_shared` again with that
-exact scoring scope. When a recorded participant's scope changes from
-`not_granted` to either granted state, `missing` or `available`, record them as
-`in`; never ask them to reply "in" or like another roll-call message.
+When `offer_access` presents one exact scoring permission after the metric,
+window, and stakes have been stated, a grant activated within the next 24 hours
+may also count as challenge buy-in. Record the finalized terms, exact required
+scoring scope, returned `offeredAt`, and each eligible pending participant whose
+same-turn read showed that scope `not_granted`. Use this rule only when the tool
+returns `recencyEvidence="eligible"`. On a later challenge turn, call
+`read_shared` again with that exact scoring scope. Record a resolved participant
+as `in` only when the same exact projection now contains a canonical `grantedAt`
+that is at or after `offeredAt` and no later than 24 hours after it. This is the
+product's explicit best-effort social signal; it does not claim the grant was
+legally bound to the challenge. Never ask an eligible participant to reply
+"in" or like another roll-call message.
 
 The permission acceptance still authorizes only the disclosed Murph group
-shares. Interpreting that explicit challenge-specific acceptance as social
+shares. Interpreting that recent exact-scope grant as social
 buy-in does not widen the grant, connect a source, or grant Apple Health
-access. A pre-existing or generic grant, silence, an unresolved identity, or an
-offer followed by materially changed challenge terms does not establish
-buy-in. During later standings, Murph may proactively open the existing
+access. A grant without `grantedAt`, a grant before `offeredAt`, a grant more
+than 24 hours later, silence, an unresolved identity, unavailable recency
+evidence, or an offer followed by materially changed challenge terms does not
+establish buy-in. During later standings, Murph may proactively open the existing
 server-authored access flow only after `read_shared` proves an exact required
 scope is `not_granted` for at least one affected participant whose
 challenge-page state contains neither an explicit decline for that exact share
@@ -279,10 +284,12 @@ The page carries these sections, kept current:
 - **Sharing choices** — per participant and exact scope, explicit sharing
   declines and any permission-offer action already handled. For a
   challenge-specific one-action offer, also record the finalized metric,
-  window, and stakes, the exact required scoring scope, and the pending
-  participants whose pre-offer read showed `not_granted`, so a later read can
-  prove the transition. Silence is not consent or refusal, but a handled offer
-  action is not a reason to retry it.
+  window, and stakes, the exact required scoring scope, the tool's canonical
+  `offeredAt`, the 24-hour deadline, and the pending participants whose
+  same-turn read showed `not_granted`, so a later exact `grantedAt` can prove
+  recency. Record this evidence only when the tool returns
+  `recencyEvidence="eligible"`. Silence is not consent or refusal, but a handled
+  offer action is not a reason to retry it.
 - **Baselines** — per-member starting values where shared data allows, or
   `pending` until usable records arrive.
 - **Stakes** — verbatim, exactly as the group agreed them.
@@ -417,25 +424,34 @@ the full rules.
    that participant and scope; do not re-offer or nag. Record every other
    affected participant as `pending`, together with that pre-offer state and
    the finalized metric, window, and stakes. Do not ask those participants for
-   a separate roll-call response. Tell the room in the preceding challenge
-   reply that the next Murph permissions message is the only tap those
-   participants need for both entry and sharing. Then call `murph.group
-   action="offer_access"` exactly once from that scoring read with only the
-   exact scoring scope it proved `not_granted`, following `group-chat`'s
-   existing permission flow. Do not author the consent copy. Follow
-   `group-chat` for the returned presentation and record the offer as handled
-   only when the tool reports `status="ok"`.
+   a separate roll-call response when valid recency evidence is available.
+   Call `murph.group action="offer_access"` exactly once from that scoring read
+   with only the exact scoring scope it proved `not_granted`, following
+   `group-chat`'s existing permission flow. Do not author the consent copy.
+   Follow `group-chat` for the returned presentation and record the offer as
+   handled only when the tool reports `status="ok"`. When it also returns
+   `recencyEvidence="eligible"` and canonical `offeredAt`, tell the room that
+   accepting that displayed permission within 24 hours is the only action those
+   participants need for both entry and sharing; store `offeredAt` and its
+   24-hour deadline. A native presentation is the new Murph permission message
+   already posted above the ordinary reply. A link presentation must include the
+   exact returned `joinUrl` once in that reply. When recency evidence is
+   unavailable, do not infer entry from a later grant; use one ordinary
+   challenge confirmation instead.
 
    On the next challenge turn after that offer, read the exact scoring scope
    again before asking anyone for confirmation. For each recorded, resolved
-   pending participant whose state changed from `not_granted` to `missing` or
-   `available`, write participation state `in` in the same turn. Leave anyone
-   still `not_granted` pending without retrying or nagging. If the metric,
-   window, or stakes changed materially after the offer, the permission grant
-   remains valid but does not confirm the changed challenge; ask for one
-   ordinary confirmation of the new terms instead. Never imply that reacting
-   to an ordinary challenge message grants data access, and never use data a
-   member has not granted to this group.
+   pending participant, inspect only that participant's exact scoring
+   projection. If it is now `missing` or `available` and its canonical
+   `grantedAt` falls from `offeredAt` through the recorded 24-hour deadline,
+   write participation state `in` in the same turn. Leave anyone still
+   `not_granted` pending without retrying or nagging. A missing timestamp, a
+   timestamp before the offer, or a timestamp after the deadline means the
+   grant remains valid but does not establish challenge entry; ask for one
+   ordinary confirmation. Do the same when the metric, window, or stakes
+   changed materially after the offer. Never imply that reacting to an ordinary
+   challenge message grants data access, and never use data a member has not
+   granted to this group.
 6. **Invite room-native cast material and photos.** At kickoff, ask each
    currently confirmed participant by name in one group message for one
    lightweight contribution that fits this room, plus a photo if they want their
@@ -501,10 +517,11 @@ automation action rules with a `dailyLocal` schedule and
    participation state is `in`. Do not use group membership, current grants,
    or returned shared records to add someone to the challenge. The only
    grant-state exception is a challenge-page participant with the exact
-   finalized one-action offer and pre-offer `not_granted` evidence described
-   above; resolve and durably record that transition before building the
-   roster. Score only the people recorded as `in`; generic shared data does not
-   add a pending or silent person to the challenge.
+   finalized one-action offer, same-turn `not_granted` baseline, eligible
+   `offeredAt`, and matching `grantedAt` inside the recorded 24-hour window;
+   resolve and durably record that transition before building the roster. Score
+   only the people recorded as `in`; generic shared data does not add a pending
+   or silent person to the challenge.
 
    After the model turn has begun, call `murph.group action="read_shared"`
    with the exact scoring scope alone, then the conditional device-only read
@@ -562,7 +579,9 @@ automation action rules with a `dailyLocal` schedule and
    Each projection carries one `status`. `status="not_granted"` means the group
    share is not granted; `status="missing"` means it is granted but
    no usable record was returned; and `status="available"` means use only the
-   returned records. If every record otherwise eligible under that scope's
+   returned records. A granted projection may also carry canonical `grantedAt`;
+   use it only for the bounded challenge-entry rule above, never as evidence of
+   record freshness or causation. If every record otherwise eligible under that scope's
    producer-owned completion marker is pending, keep the participant pending,
    skip diagnostics and permission offers, and describe the applicable
    settlement rule. Apply `group-chat`'s
@@ -656,10 +675,13 @@ automation action rules with a `dailyLocal` schedule and
    presentation, and active-offer/all-granted dedupe. Never author generic
    permission copy or tell someone to Like the standings.
 
-   Treat `status="ok"` as an opaque handled result. This scheduled surface
-   returns `presentation="link"`; include the exact returned `joinUrl` once in
-   the same substantive standings response. Do not infer, announce, or append a
-   companion message claiming native consent UI is visible.
+   This scheduled surface returns `presentation="link"`; include the exact
+   returned `joinUrl` once in the same substantive standings response. Do not
+   infer, announce, or append a companion message claiming native consent UI is
+   visible. `recencyEvidence="eligible"` plus canonical `offeredAt` proves only
+   when that link was presented. For a pending participant's exact scoring
+   scope, record that timestamp and 24-hour deadline for the one-action entry
+   rule above. Never use a diagnostic-scope offer as challenge buy-in.
    For each participant whose same read showed `not_granted`, record that the
    offer action was handled for that exact participant and scope so future
    standings do not retry or nag; never record that a card was visible. When

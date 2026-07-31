@@ -1666,6 +1666,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       result: {
         group: groupSummaryWithOwnerEmailGrant(),
         joinUrl: "https://www.withmurph.ai/groups/join/abc123",
+        offeredAt: expect.any(String),
         status: "ok",
       },
     });
@@ -2942,6 +2943,8 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       result: {
         group: groupSummaryWithOwnerEmailGrant(),
         joinUrl: "https://www.withmurph.ai/groups/join/abc123",
+        offeredAt: expect.any(String),
+        offerState: "posted",
         status: "sent",
       },
     });
@@ -3112,6 +3115,8 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       result: {
         group: GROUP_SUMMARY,
         joinUrl: "https://www.withmurph.ai/groups/join/abc123",
+        offeredAt: expect.any(String),
+        offerState: "existing",
         status: "sent",
       },
     });
@@ -3165,6 +3170,8 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       result: {
         group: fullyGrantedGroup,
         joinUrl: "https://www.withmurph.ai/groups/join/abc123",
+        offeredAt: expect.any(String),
+        offerState: "posted",
         status: "sent",
       },
     });
@@ -3217,6 +3224,8 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       result: {
         group: fullyGrantedGroup,
         joinUrl: "https://www.withmurph.ai/groups/join/abc123",
+        offeredAt: expect.any(String),
+        offerState: "posted",
         status: "sent",
       },
     });
@@ -3524,6 +3533,8 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       result: {
         group: GROUP_SUMMARY,
         joinUrl: "https://www.withmurph.ai/groups/join/abc123",
+        offeredAt: expect.any(String),
+        offerState: "posted",
         status: "sent",
       },
     });
