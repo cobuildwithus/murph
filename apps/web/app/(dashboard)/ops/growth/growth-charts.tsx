@@ -116,7 +116,12 @@ export function GrowthCharts(input: GrowthChartsProps) {
               width={44}
             />
             <ChartTooltip
-              content={<ChartTooltipContent labelFormatter={formatTooltipDate} />}
+              content={(
+                <ChartTooltipContent
+                  className="min-w-52"
+                  labelFormatter={formatTooltipDate}
+                />
+              )}
               cursor={{ stroke: "var(--color-border)", strokeDasharray: "3 3" }}
             />
             <Line
@@ -170,7 +175,12 @@ export function GrowthCharts(input: GrowthChartsProps) {
               width={36}
             />
             <ChartTooltip
-              content={<ChartTooltipContent labelFormatter={formatTooltipDate} />}
+              content={(
+                <ChartTooltipContent
+                  className="min-w-52"
+                  labelFormatter={formatTooltipDate}
+                />
+              )}
               cursor={{ fill: "var(--color-muted)", fillOpacity: 0.35 }}
             />
             <Bar
