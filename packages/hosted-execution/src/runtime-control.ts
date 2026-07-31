@@ -843,6 +843,7 @@ const HOSTED_PRODUCT_FEEDBACK_SUMMARY_REDACTION_PATTERNS = [
   /\b0x[A-Fa-f0-9]{40,64}\b/gu,
   /\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}\b/gu,
   /\b(?:sk|pk|rk|ak|pat|ghp|gho|ghu|ghs|github_pat|xox[baprs])_[A-Za-z0-9_=-]{12,}\b/gu,
+  /\b\d+(?:\.\d+)?\s*\/\s*\d+(?:\.\d+)?\s*mmHg\b/giu,
   /\b\d+(?:\.\d+)?\s*(?:bpm|mg\/dL|mmol\/L|mmHg|mIU\/L|ng\/mL|pg\/mL|g\/dL|µg\/dL)\b/giu,
   /\b[A-Fa-f0-9]{32,}\b/gu,
 ] as const;

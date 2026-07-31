@@ -217,6 +217,21 @@ describe("normalizeHostedProductFeedback", () => {
     );
   });
 
+  it("redacts compound blood-pressure readings without leaving either component", () => {
+    for (const reading of ["120/80 mmHg", "120 / 80 mmHg"]) {
+      const summary = normalizeHostedProductFeedback(makeFeedback({
+        kind: "frustration",
+        relatedChangelogItemIds: [],
+        summary: `Blood pressure was ${reading} and the cuff sync failed.`,
+      })).summary;
+      expect(summary).toBe(
+        "Blood pressure was [redacted] and the cuff sync failed.",
+      );
+      expect(summary).not.toContain("120");
+      expect(summary).not.toContain("80");
+    }
+  });
+
   it("throws the hosted onboarding error type for rejected content", () => {
     expect(() =>
       normalizeHostedProductFeedback(
