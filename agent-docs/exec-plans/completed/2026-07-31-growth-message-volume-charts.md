@@ -1,6 +1,6 @@
 # Growth message-volume charts
 
-Status: active
+Status: completed
 Created: 2026-07-31
 
 ## Outcome
@@ -39,3 +39,5 @@ Created: 2026-07-31
 - Preliminary `completion-specialists` ReviewGPT pass with product-experience, frontend, and coverage lenses.
 - Claude Code UI double-check while credits are available.
 - Exact-head required CI and parent final review.
+Updated: 2026-07-31
+Completed: 2026-07-31
