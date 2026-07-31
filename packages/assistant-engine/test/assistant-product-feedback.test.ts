@@ -11,6 +11,13 @@ import {
   createAssistantProductFeedbackRecorder,
   resolveAssistantProductFeedbackAcceptedInputIds,
 } from "../src/assistant/turn-progress.js";
+import {
+  MURPH_MANAGED_AUTOMATIONS,
+  MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+} from "../src/assistant/managed-automations.js";
+import {
+  buildAssistantSystemPrompt,
+} from "../src/assistant/system-prompt.js";
 
 describe("assistant product feedback", () => {
   it("is stable across related-item ordering and summary wording, and scoped to accepted input", () => {
@@ -139,6 +146,44 @@ describe("assistant product feedback", () => {
     expect(schema).toContain('Speculative:');
     expect(schema).toContain('Murph-observed:');
     expect(schema).not.toContain('"topic"');
+  });
+
+  it("keeps the detailed summary rubric single-owned by the tool schema", () => {
+    const rubricMarker =
+      "name the generic actor, exact Murph surface or workflow";
+    const systemPrompt = buildAssistantSystemPrompt({
+      assistantCliContract: null,
+      assistantContextSnapshotPrompt: null,
+      assistantHostedDeviceConnectAvailable: false,
+      assistantKnowledgeToolsAvailable: false,
+      channel: "telegram",
+      cliAccess: {
+        rawCommand: "vault-cli",
+        setupCommand: "murph",
+      },
+      conversationScope: "direct",
+      currentLocalDate: "2026-07-30",
+      currentTimeZone: "America/New_York",
+      hostedRuntime: true,
+      modelBehaviorProfile: "gpt5-agentic",
+      onboardingGuidance: false,
+      turnTrigger: null,
+    });
+    const productNotes = MURPH_MANAGED_AUTOMATIONS.find(
+      (automation) =>
+        automation.automationId === MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+    );
+    expect(productNotes).toBeDefined();
+
+    const toolSchema = JSON.stringify(
+      MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema,
+    );
+    const ordinaryStack = `${systemPrompt}\n${toolSchema}`;
+    const managedStack =
+      `${systemPrompt}\n${productNotes?.instructions ?? ""}\n${toolSchema}`;
+
+    expect(ordinaryStack.split(rubricMarker)).toHaveLength(2);
+    expect(managedStack.split(rubricMarker)).toHaveLength(2);
   });
 
   it("parses and collects one explicit feedback candidate without a pre-reply write", async () => {

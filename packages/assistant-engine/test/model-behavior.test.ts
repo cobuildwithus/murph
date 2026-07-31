@@ -1054,14 +1054,6 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain(
       'Record only the structured kind, a concise product-only summary, and relevant changelog item ids when known',
     )
-    expect(prompt).toContain('Make the summary actionable without the conversation')
-    expect(prompt).toContain('generic actor')
-    expect(prompt).toContain('expected versus observed result')
-    expect(prompt).toContain('concrete constraint the source established')
-    expect(prompt).toContain('instead of replacing them with vague labels')
-    expect(prompt).toContain(
-      'omit it or mark it unclear rather than infer or invent it',
-    )
     expect(prompt).toContain('Changelog ids are optional metadata')
     expect(prompt).toContain('Start inferred summaries with `Speculative:`')
     expect(prompt).toContain('assistant-observed summaries with `Murph-observed:`')

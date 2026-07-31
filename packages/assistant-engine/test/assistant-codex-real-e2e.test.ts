@@ -17,6 +17,7 @@ import {
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
   MURPH_GROUP_TOOL,
   MURPH_PLAN_USAGE_TOOL,
+  MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
   MURPH_SUBSCRIPTION_TOOL,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
@@ -43,8 +44,15 @@ import type {
   AssistantHostedAutomationToolRequest,
 } from '../src/assistant/execution-context.ts'
 import {
+  MURPH_MANAGED_AUTOMATIONS,
+  MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+} from '../src/assistant/managed-automations.ts'
+import {
   buildAssistantSystemPrompt,
 } from '../src/assistant/system-prompt.ts'
+import type {
+  AssistantTurnProductFeedbackRecorder,
+} from '../src/assistant/turn-progress.ts'
 import { extractCodexAssistantProviderUsage } from '../src/assistant/providers/helpers.ts'
 import type {
   AssistantProviderDynamicTool,
@@ -1939,6 +1947,203 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
   )
 })
 
+describeRealCodex('real Codex product-feedback summary e2e', () => {
+  it(
+    'emits specific, non-invented, product-only feedback at the dynamic-tool boundary',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const commonInput = {
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+          ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildCapabilityRoutingDeveloperInstructions(),
+        dynamicTools: [MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL],
+        env: config.env,
+        excludeResumeTurns: true,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write' as const,
+      }
+      const scenarios = [
+        {
+          assertSummary(summary: string) {
+            expect(summary).toMatch(/\b(?:member|user)\b/iu)
+            expect(summary).toMatch(/\bsettings\b|\bdevices?\b/iu)
+            expect(summary).toMatch(/\boura\b/iu)
+            expect(summary).toMatch(/\bconnect/iu)
+            expect(summary).toMatch(/\b(?:expect|wanted|should)\w*\b/iu)
+            expect(summary).toMatch(
+              /\b(?:auth\w*.*succeed|success\w*.*auth)\w*\b/iu,
+            )
+            expect(summary).toMatch(
+              /\b(?:not added|did not add|did not appear|returned|remain\w* disconnected|failed|absent|missing)\b/iu,
+            )
+          },
+          prompt: [
+            'Treat this synthetic report as explicit Murph product frustration and use the product-feedback tool.',
+            'A member attempted to connect a supported Oura account from Murph Settings > Devices.',
+            'They expected Oura to appear as connected, but Murph returned to the device list without adding it.',
+            'The source establishes that provider authentication succeeded.',
+          ].join(' '),
+        },
+        {
+          assertSummary(summary: string) {
+            expect(summary).toMatch(/\b(?:member|user)\b/iu)
+            expect(summary).toMatch(/\bsetup chooser\b/iu)
+            expect(summary).not.toMatch(
+              /\b(?:account|authentication|challenge|device|error|failure|group|interest|onboarding|saved|schedule|template|wearable)\b/iu,
+            )
+          },
+          prompt: [
+            'Treat this synthetic report as explicit Murph product frustration and use the product-feedback tool.',
+            'A member says the Murph setup chooser does not fit what they need.',
+            'No concrete workflow, attempted action, expected result, observed result, or constraint is established.',
+          ].join(' '),
+        },
+        {
+          assertSummary(summary: string) {
+            expect(summary).toMatch(/\b(?:member|user)\b/iu)
+            expect(summary).toMatch(/\bautomation\b|\breminder\b/iu)
+            expect(summary).toMatch(/\b(?:expect|wanted|should)\w*\b/iu)
+            expect(summary).toMatch(
+              /\b(?:save\w*.*success|success\w*.*sav)\w*\b/iu,
+            )
+            expect(summary).not.toMatch(
+              /PRIVATE_(?:HEALTH|CONTACT|IDENTIFIER)_DETAIL|unrelated private markers/iu,
+            )
+          },
+          prompt: [
+            'Treat this synthetic report as explicit Murph product frustration and use the product-feedback tool.',
+            'A member changed a Murph automation reminder from 9:00 to 7:00.',
+            'They expected the new time to persist, but the automation still showed 9:00.',
+            'The source establishes that Save reported success.',
+            'Unrelated private markers must not enter product feedback:',
+            'PRIVATE_HEALTH_DETAIL, PRIVATE_CONTACT_DETAIL, and PRIVATE_IDENTIFIER_DETAIL.',
+          ].join(' '),
+        },
+      ] as const
+
+      try {
+        for (const scenario of scenarios) {
+          const workingDirectory = await mkdtemp(
+            path.join(tmpdir(), 'murph-product-feedback-e2e-'),
+          )
+          try {
+            const result = await executeRealCodexAppServerTurn({
+              ...commonInput,
+              productFeedbackRecorder: createRealCodexFeedbackRecorder(),
+              prompt: scenario.prompt,
+              workingDirectory,
+            })
+            const feedbackCalls = readCapabilityRoutingActions(
+              result.jsonEvents,
+            ).filter(
+              (action) =>
+                action.kind === 'dynamic'
+                && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name,
+            )
+
+            expect(feedbackCalls).toHaveLength(1)
+            const feedbackCall = feedbackCalls[0]
+            if (feedbackCall?.kind !== 'dynamic') {
+              throw new Error('Expected one product-feedback dynamic tool call.')
+            }
+            const summary = readString(feedbackCall.argumentsValue.summary)
+            expect(summary).not.toBeNull()
+            if (!summary) {
+              throw new Error('Expected a product-feedback summary.')
+            }
+            expect(summary.length).toBeLessThanOrEqual(500)
+            scenario.assertSummary(summary)
+          } finally {
+            await removeRealCodexTemporaryPaths([workingDirectory])
+          }
+        }
+
+        const managedAutomation = MURPH_MANAGED_AUTOMATIONS.find(
+          (automation) =>
+            automation.automationId
+            === MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+        )
+        if (!managedAutomation) {
+          throw new Error('Expected the managed product-notes automation.')
+        }
+        const managedWorkingDirectory = await mkdtemp(
+          path.join(tmpdir(), 'murph-product-feedback-managed-e2e-'),
+        )
+        try {
+          const first = await executeRealCodexAppServerTurn({
+            ...commonInput,
+            productFeedbackRecorder: createRealCodexFeedbackRecorder(),
+            prompt: [
+              'This is a deterministic context-loading probe.',
+              'Do not execute the scheduled instructions or call tools; reply exactly PRODUCT_NOTES_CONTEXT_READY.',
+              'The managed product-notes instructions that precede a later member turn are:',
+              managedAutomation.instructions,
+            ].join('\n\n'),
+            workingDirectory: managedWorkingDirectory,
+          })
+          expect(first.finalMessage).toContain('PRODUCT_NOTES_CONTEXT_READY')
+          expect(
+            readCapabilityRoutingActions(first.jsonEvents).filter(
+              (action) =>
+                action.kind === 'dynamic'
+                && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name,
+            ),
+          ).toHaveLength(0)
+
+          const second = await executeRealCodexAppServerTurn({
+            ...commonInput,
+            productFeedbackRecorder: createRealCodexFeedbackRecorder(),
+            prompt: [
+              'Treat this synthetic later-turn report as explicit Murph product frustration and use the product-feedback tool.',
+              'A member expected Murph product notes to show two recent changelog updates, but the note was skipped after the feature catalog failed.',
+              'The source establishes that the changelog fetch succeeded.',
+            ].join(' '),
+            resumeSessionId: first.sessionId,
+            workingDirectory: managedWorkingDirectory,
+          })
+          const managedFeedbackCalls = readCapabilityRoutingActions(
+            second.jsonEvents,
+          ).filter(
+            (action) =>
+              action.kind === 'dynamic'
+              && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name,
+          )
+          expect(managedFeedbackCalls).toHaveLength(1)
+          const managedFeedbackCall = managedFeedbackCalls[0]
+          if (managedFeedbackCall?.kind !== 'dynamic') {
+            throw new Error(
+              'Expected one managed product-feedback dynamic tool call.',
+            )
+          }
+          const managedSummary = readString(
+            managedFeedbackCall.argumentsValue.summary,
+          )
+          expect(managedSummary).not.toBeNull()
+          expect(managedSummary?.length).toBeLessThanOrEqual(500)
+          expect(managedSummary).toMatch(/\b(?:member|user)\b/iu)
+          expect(managedSummary).toMatch(/\bproduct[- ]notes?\b/iu)
+          expect(managedSummary).toMatch(/\b(?:expect|wanted|should)\w*\b/iu)
+          expect(managedSummary).toMatch(/\bskip/iu)
+          expect(managedSummary).toMatch(
+            /\b(?:changelog.*succeed|success\w*.*changelog)\w*\b/iu,
+          )
+        } finally {
+          await removeRealCodexTemporaryPaths([managedWorkingDirectory])
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+    720_000,
+  )
+})
+
 describeRealCodex('real Codex app-server cache usage e2e', () => {
   it(
     'loads each moved capability owner before its representative tool call',
@@ -2778,6 +2983,18 @@ async function executeRealCodexAppServerTurn(
     })
   } catch (error) {
     throw new Error(buildRealCodexE2eFailureMessage(error))
+  }
+}
+
+function createRealCodexFeedbackRecorder(): AssistantTurnProductFeedbackRecorder {
+  return {
+    async recordProductFeedback() {
+      return { recorded: true }
+    },
+    discardProductFeedback() {},
+    readProductFeedback() {
+      return null
+    },
   }
 }
 

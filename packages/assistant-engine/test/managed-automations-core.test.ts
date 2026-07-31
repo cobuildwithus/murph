@@ -531,10 +531,6 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(productUpdatesRecord?.instructions).toContain('Murph-observed:')
     expect(productUpdatesRecord?.instructions).toContain('Do not log vague low-confidence guesses')
     expect(productUpdatesRecord?.instructions).toContain('concise product-only summary')
-    expect(productUpdatesRecord?.instructions).toContain('Make the summary actionable without the conversation')
-    expect(productUpdatesRecord?.instructions).toContain('expected versus observed result')
-    expect(productUpdatesRecord?.instructions).toContain('instead of replacing them with vague labels')
-    expect(productUpdatesRecord?.instructions).toContain('omit it or mark it unclear rather than infer or invent it')
     expect(productUpdatesRecord?.instructions).toContain('tags, topics, raw user wording')
     expect(productUpdatesRecord?.instructions).not.toContain('kind/topic')
     expect(productUpdatesRecord?.instructions).toContain(
