@@ -1,4 +1,4 @@
-name: Agent physical notes bootstrap
+name: Agent physical notes finalize
 
 on:
   pull_request:
@@ -8,8 +8,12 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: agent-physical-notes-finalize-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
-  apply-and-verify:
+  verify-and-clean:
     if: github.event.pull_request.head.ref == 'agent/physical-notes'
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -19,68 +23,52 @@ jobs:
           fetch-depth: 0
           ref: agent/physical-notes
 
-      - name: Apply physical-notes implementation
-        id: apply
+      - name: Wire Web source path
         shell: bash
         run: |
           set -euo pipefail
-          if git log -1 --pretty=%B | grep -Fq '[physical-notes-applied]'; then
-            echo 'already_applied=true' >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          python - <<'PY'
+          from pathlib import Path
 
-          cat .github/agent-physical-notes-base.patch.gz.part* > /tmp/physical-notes-base.patch.gz
-          cat .github/agent-physical-notes-corrections.patch.gz.part* > /tmp/physical-notes-corrections.patch.gz
-          gzip -dc /tmp/physical-notes-base.patch.gz > /tmp/physical-notes-base.patch
-          gzip -dc /tmp/physical-notes-corrections.patch.gz > /tmp/physical-notes-corrections.patch
-          gzip -dc .github/agent-physical-notes-current.py.gz > /tmp/apply_physical_notes_current.py
-          gzip -dc .github/agent-physical-notes-send-block.txt.gz > /tmp/new_send_physical_note_block.txt
-
-          git apply --3way --verbose \
-            --exclude='apps/web/prisma/schema.prisma' \
-            --exclude='apps/web/src/lib/hosted-execution/usage-allowance.ts' \
-            --exclude='packages/assistant-engine/src/assistant-codex/dynamic-tools.ts' \
-            --exclude='packages/assistant-engine/src/assistant/execution-context.ts' \
-            --exclude='packages/assistant-runtime/src/hosted-runtime/platform.ts' \
-            /tmp/physical-notes-base.patch
-          git apply --verbose \
-            --exclude='packages/assistant-engine/src/assistant-codex/dynamic-tools.ts' \
-            /tmp/physical-notes-corrections.patch
-          python /tmp/apply_physical_notes_current.py
+          path = Path('apps/web/tsconfig.json')
+          text = path.read_text()
+          mapping = '''      "@murphai/hosted-execution/physical-notes": [
+                  "../../packages/hosted-execution/src/physical-notes.ts"
+                ],
+          '''
+          if mapping not in text:
+              anchor = '''      "@murphai/hosted-execution/phone-calls": [
+                  "../../packages/hosted-execution/src/phone-calls.ts"
+                ],
+          '''
+              if anchor not in text:
+                  raise SystemExit('hosted-execution phone-calls path anchor not found')
+              path.write_text(text.replace(anchor, anchor + mapping, 1))
+          PY
           git diff --check
 
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
-          git commit -m 'feat: add composable physical notes [physical-notes-applied]'
-          git push origin HEAD:agent/physical-notes
-          echo 'already_applied=false' >> "$GITHUB_OUTPUT"
-
       - uses: actions/setup-node@v4
-        if: steps.apply.outputs.already_applied != 'true'
         with:
           node-version: 24.14.1
 
       - name: Install dependencies
-        if: steps.apply.outputs.already_applied != 'true'
         shell: bash
         run: |
           set -euo pipefail
           corepack enable
           pnpm install --frozen-lockfile
 
-      - name: Typecheck changed owners
-        if: steps.apply.outputs.already_applied != 'true'
+      - name: Typecheck affected owners
         shell: bash
         run: |
           set -euo pipefail
           pnpm --filter @murphai/hosted-execution typecheck
           pnpm --filter @murphai/assistant-engine typecheck
           pnpm --filter @murphai/assistant-runtime typecheck
+          pnpm --dir apps/cloudflare typecheck
           pnpm --dir apps/web typecheck
 
       - name: Run focused tests
-        if: steps.apply.outputs.already_applied != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -88,3 +76,16 @@ jobs:
           pnpm --filter @murphai/assistant-engine test -- assistant-physical-notes assistant-hosted-image-completion
           pnpm --filter @murphai/assistant-runtime test -- hosted-runtime-image-generation
           pnpm --dir apps/web test:prepared -- physical-notes-lob-runtime hosted-execution-usage-lob hosted-physical-note-storage-contract hosted-account-data-service
+
+      - name: Commit verified integration and remove bootstrap
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm -f .github/agent-physical-notes-*
+          git rm -f .github/workflows/agent-physical-notes-bootstrap.yml
+          git add apps/web/tsconfig.json
+          git diff --cached --check
+          git commit -m 'chore: finalize physical-note integration'
+          git push origin HEAD:agent/physical-notes
