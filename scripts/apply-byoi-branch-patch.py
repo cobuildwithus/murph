@@ -205,6 +205,96 @@ def patch_workspace_contracts() -> None:
     )
 
 
+def patch_assistant_preference_read() -> None:
+    replace_once(
+        "apps/web/src/lib/hosted-onboarding/assistant-model-preference.ts",
+        '} from "@murphai/hosted-execution/assistant-model";\n',
+        '} from "@murphai/hosted-execution/assistant-model";\n'
+        'import {\n'
+        '  HOSTED_CUSTOM_INFERENCE_VERIFICATION_PROFILE,\n'
+        '  buildHostedCustomInferenceModelAlias,\n'
+        '  requireHostedInferenceProtocol,\n'
+        '  type HostedAssistantCustomInferenceOverride,\n'
+        '} from "@murphai/hosted-execution/assistant-inference";\n',
+    )
+    replace_once(
+        "apps/web/src/lib/hosted-onboarding/assistant-model-preference.ts",
+        "  billingStatus: true,\n"
+        "  suspendedAt: true,\n",
+        "  billingStatus: true,\n"
+        "  inferenceConnection: {\n"
+        "    select: {\n"
+        "      contextWindowTokens: true,\n"
+        "      protocol: true,\n"
+        "      revision: true,\n"
+        "      selected: true,\n"
+        "      supportsImages: true,\n"
+        "      verificationProfile: true,\n"
+        "    },\n"
+        "  },\n"
+        "  suspendedAt: true,\n",
+    )
+    replace_once(
+        "apps/web/src/lib/hosted-onboarding/assistant-model-preference.ts",
+        "  configurationAvailable: boolean;\n"
+        "  dormantSolPreference: boolean;\n",
+        "  configurationAvailable: boolean;\n"
+        "  customInferenceReverificationRequired: boolean;\n"
+        "  customInferenceSelected: boolean;\n"
+        "  dormantSolPreference: boolean;\n"
+        "  hostedAssistantCustomInferenceOverride?: HostedAssistantCustomInferenceOverride;\n",
+    )
+    replace_once(
+        "apps/web/src/lib/hosted-onboarding/assistant-model-preference.ts",
+        "      configurationAvailable: false,\n"
+        "      dormantSolPreference: false,\n",
+        "      configurationAvailable: false,\n"
+        "      customInferenceReverificationRequired: false,\n"
+        "      customInferenceSelected: false,\n"
+        "      dormantSolPreference: false,\n",
+    )
+    replace_once(
+        "apps/web/src/lib/hosted-onboarding/assistant-model-preference.ts",
+        "  const solAvailable = isThreadContainerMember || isHostedMemberSolModelEligible({\n",
+        "  const inferenceConnection = configurationAvailable && !isThreadContainerMember\n"
+        "    ? member.inferenceConnection\n"
+        "    : null;\n"
+        "  const customInferenceSelected = inferenceConnection?.selected === true;\n"
+        "  const customInferenceReverificationRequired = customInferenceSelected\n"
+        "    && inferenceConnection.verificationProfile\n"
+        "      !== HOSTED_CUSTOM_INFERENCE_VERIFICATION_PROFILE;\n"
+        "  const customInferenceOverride = customInferenceSelected\n"
+        "      && !customInferenceReverificationRequired\n"
+        "      && inferenceConnection\n"
+        "    ? {\n"
+        "        contextWindowTokens: inferenceConnection.contextWindowTokens,\n"
+        "        modelAlias: buildHostedCustomInferenceModelAlias(\n"
+        "          inferenceConnection.revision,\n"
+        "        ),\n"
+        "        protocol: requireHostedInferenceProtocol(\n"
+        "          inferenceConnection.protocol,\n"
+        "        ),\n"
+        "        revision: inferenceConnection.revision,\n"
+        "        supportsImages: inferenceConnection.supportsImages,\n"
+        "        verificationProfile: inferenceConnection.verificationProfile,\n"
+        "      } satisfies HostedAssistantCustomInferenceOverride\n"
+        "    : null;\n"
+        "  const solAvailable = isThreadContainerMember || isHostedMemberSolModelEligible({\n",
+    )
+    replace_once(
+        "apps/web/src/lib/hosted-onboarding/assistant-model-preference.ts",
+        "    configurationAvailable,\n"
+        "    dormantSolPreference,\n",
+        "    configurationAvailable,\n"
+        "    customInferenceReverificationRequired,\n"
+        "    customInferenceSelected,\n"
+        "    dormantSolPreference,\n"
+        "    ...(customInferenceOverride\n"
+        "      ? { hostedAssistantCustomInferenceOverride: customInferenceOverride }\n"
+        "      : {}),\n",
+    )
+
+
 def patch_architecture_docs() -> None:
     replace_once(
         "agent-docs/product-specs/bring-your-own-inference.md",
@@ -243,6 +333,7 @@ def main() -> None:
     patch_crypto_lane()
     patch_prisma_schema()
     patch_workspace_contracts()
+    patch_assistant_preference_read()
     patch_architecture_docs()
 
 
