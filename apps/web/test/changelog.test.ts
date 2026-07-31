@@ -179,6 +179,10 @@ describe("changelog registry", () => {
       sourcePullRequests: [1184],
       details: expect.stringContaining("trusted route"),
     });
+    expect(items.get("fund-groups-at-any-capacity")).toMatchObject({
+      sourcePullRequests: [1207],
+      details: expect.stringContaining("explicit confirmation"),
+    });
     expect(items.get("one-shot-reminders-survive-restart")).toMatchObject({
       sourcePullRequests: [1209],
       details: expect.stringContaining("best-effort wake signal"),
@@ -204,6 +208,7 @@ describe("changelog registry", () => {
           "native-link-previews",
           "family-owner-usage-topups",
           "group-access-across-channels",
+          "fund-groups-at-any-capacity",
           "one-shot-reminders-survive-restart",
           "venice-tool-compatible-replies",
           "core-member-plan-name",

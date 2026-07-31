@@ -67,7 +67,7 @@ const RAW_CHANGELOG_EDITIONS = [
     publishedOn: "2026-07-31",
     title: "A clearer view of home, stronger follow-through",
     summary:
-      "Environment turns what Murph knows about your home into a private report and one-memo walkthrough. Group access, link previews, reminders, usage, Venice replies, and delegated work all get clearer or more reliable paths.",
+      "Environment turns what Murph knows about your home into a private report and one-memo walkthrough. Group funding and access, link previews, reminders, usage, Venice replies, and delegated work all get clearer or more reliable paths.",
     items: [
       {
         id: "private-environment-report",
@@ -132,6 +132,18 @@ const RAW_CHANGELOG_EDITIONS = [
           "Murph chooses the presentation from the trusted route, includes one usable access surface, and returns a truthful unavailable result when the route cannot be proven.",
         relevanceTags: ["groups", "sharing", "imessage", "telegram"],
         sourcePullRequests: [1184],
+      },
+      {
+        id: "fund-groups-at-any-capacity",
+        kind: "feature",
+        priority: 5,
+        title: "Fund a group whenever you choose",
+        summary:
+          "Anyone in an active hosted group can open its first-party funding page at any capacity. Unsponsored groups open monthly sponsorship, while other participants in sponsored groups can add a one-time contribution.",
+        details:
+          "An explicit request to fund, sponsor, contribute, or get the funding link no longer detours into referrals or claims that a healthy group needs funding. The active payer can manage sponsorship on the same page, and every payment still requires explicit confirmation and Stripe reconciliation.",
+        relevanceTags: ["groups", "funding", "usage", "billing"],
+        sourcePullRequests: [1207],
       },
       {
         id: "one-shot-reminders-survive-restart",

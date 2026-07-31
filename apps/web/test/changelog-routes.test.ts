@@ -35,9 +35,9 @@ describe("changelog routes", () => {
     }>;
 
     expect(response.status).toBe(200);
-    expect(items).toHaveLength(30);
+    expect(items).toHaveLength(31);
     expect(items.map((item) => item.publishedOn)).toEqual([
-      ...Array.from({ length: 12 }, () => "2026-07-31"),
+      ...Array.from({ length: 13 }, () => "2026-07-31"),
       ...Array.from({ length: 18 }, () => "2026-07-30"),
     ]);
     expect(items.map((item) => item.id)).toEqual(
@@ -47,6 +47,7 @@ describe("changelog routes", () => {
         "native-link-previews",
         "family-owner-usage-topups",
         "group-access-across-channels",
+        "fund-groups-at-any-capacity",
         "one-shot-reminders-survive-restart",
         "venice-tool-compatible-replies",
         "core-member-plan-name",
