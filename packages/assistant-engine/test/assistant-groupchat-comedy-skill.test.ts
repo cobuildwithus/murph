@@ -110,7 +110,7 @@ describe('assistant group-chat comedy skill', () => {
     )
   })
 
-  it('keeps challenge payoffs human-owned, room-native, practical, and format-aware', async () => {
+  it('keeps challenge payoffs human-owned, room-native, strong, practical, and format-aware', async () => {
     const comedy = await readSkill('groupchat-comedy')
     const normalized = comedy.replace(/\s+/gu, ' ')
 
@@ -144,6 +144,15 @@ describe('assistant group-chat comedy skill', () => {
       'A modest purchase or ordinary consumable is fair when it materially creates the bit',
     )
     expect(normalized).toContain(
+      'Prefer one primary payoff with a visible, participatory moment over a bundle of weak gestures.',
+    )
+    expect(normalized).toContain(
+      'Background room administration — letting the winner control the chat avatar or name — and a generic apology are garnish, not default stakes.',
+    )
+    expect(normalized).toContain(
+      'A specific performance, temporary role, choice, privilege, or shared ritual the group will witness usually beats a passive settings mutation.',
+    )
+    expect(normalized).toContain(
       'pitch one or two specific options in the group\'s own register, as sharp as its existing tone supports',
     )
     expect(normalized).toContain(
@@ -154,6 +163,9 @@ describe('assistant group-chat comedy skill', () => {
     )
     expect(normalized).toContain(
       'crossing the mileage target unlocks a group breakfast after the next run',
+    )
+    expect(normalized).toContain(
+      'A sharper room may instead earn a recreation of a room-canon photo, a short on-camera performance, or its own timed bit using one ordinary serving of a familiar non-intoxicating food or drink.',
     )
     expect(normalized).toContain(
       'The screenshot should be the performance, milestone, or line, not a receipt or a single-use outfit.',
@@ -167,6 +179,21 @@ describe('assistant group-chat comedy skill', () => {
     )
     expect(normalized).toContain(
       'Food or drink stunts can be funny, but the hard limits still apply',
+    )
+    expect(normalized).toContain(
+      'Apply the resident group-safety concrete-act rule: competitive wording is not itself a hazard',
+    )
+    expect(normalized).toContain(
+      'Do not replace a safe group-authored stake with a sanitized version merely to make Murph feel cautious',
+    )
+    expect(normalized).toContain(
+      'accept it and lock it in rather than renegotiating it into a blander Murph-authored version',
+    )
+    expect(normalized).toContain(
+      'Unhinged changes register, not risk classification.',
+    )
+    expect(normalized).toContain(
+      'Safe, opted-in stakes remain playable at every level',
     )
     expect(normalized).toContain(
       "These limits govern Murph's participation and framing, including stakes the group proposes.",
@@ -350,6 +377,10 @@ describe('assistant group-chat comedy skill', () => {
       'do not turn zero-purchase into a rule: a modest purchase can carry a strong bit',
     )
     expect(normalized).toContain('single-use junk')
+    expect(normalized).toContain('each with one strong primary payoff')
+    expect(normalized).toContain(
+      "lock it in instead of continuing to negotiate toward Murph's preferred version",
+    )
     expect(normalized).toContain(
       "the group's explicit choice wins when it is safe, opted-in, and within the `groupchat-comedy` hard limits",
     )
