@@ -31,8 +31,6 @@ Updated: 2026-07-30
   - OpenAI image generation/edit response parsing and safe error normalization.
   - Local and hosted image-tool error propagation.
   - Trusted hosted completion parsing/prompt guidance and focused regressions.
-  - The supplied patch's reference-edit guidance where it remains compatible
-    with current architecture.
 - Out of scope:
   - Provider retries or fallback providers.
   - New durable state, queues, schemas, or external logging.
@@ -124,16 +122,23 @@ Updated: 2026-07-30
   remaining product finding: the smallest complete experience is the existing
   truthful acknowledgement followed by a same-route plain-language failure
   explanation and a later-turn, user-authorized retry offer.
+- Final ReviewGPT round 1 found that the supplied reference-fidelity guidance
+  changed successful revision behavior outside the diagnostic goal. Accepted:
+  the tool/schema, edit prompt, ready-completion guidance, and presence-only
+  tests were restored to base behavior. The saved image ref transport and all
+  failure propagation remain intact.
 - The real pinned Codex 0.145.0 app-server with a local scripted Responses
   provider captured complete initial `gpt-5.6-terra`, low-reasoning, code-mode
   request bodies for identical representative direct and group inputs. Token
   counts use `gpt-tokenizer` 3.4.0 `o200k_harmony`; only HTTP transport headers
   are excluded.
-  - Direct: base 100,184 bytes / 22,288 tokens; candidate 100,580 bytes /
-    22,371 tokens (`+396` bytes, `+83` tokens, `+0.372%` tokens).
-  - Group: base 112,163 bytes / 24,781 tokens; candidate 112,559 bytes /
-    24,864 tokens (`+396` bytes, `+83` tokens, `+0.335%` tokens).
-  - Both request reconstructions replaced exactly one image-tool description
-    and one reference-image parameter description. The complete delta is tool
-    and schema guidance; assembled instructions and other provider-visible
-    fields are unchanged.
+  - First-reviewed head: direct 100,580 bytes / 22,371 tokens and group
+    112,559 bytes / 24,864 tokens.
+  - Corrected candidate: direct 100,184 bytes / 22,288 tokens and group
+    112,163 bytes / 24,781 tokens, byte/token-identical to base (`0` delta).
+  - Complete request reconstruction identified exactly one image-tool
+    description and one reference-image parameter description as the full
+    first-head delta. Both now match base exactly; assembled initial
+    instructions and all other provider-visible fields remain unchanged. The
+    retained failure guidance is conditional resumed-turn context and does not
+    enter an ordinary initial direct or group request.

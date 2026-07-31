@@ -725,7 +725,6 @@ function buildGenerateImagePromptWithReferences(input: {
   return [
     `Use the attached reference image${input.referenceImageCount === 1 ? '' : 's'} in the provided order.`,
     'The user prompt may refer to them as image 1, image 2, etc.',
-    'If the prompt identifies a reference as the image to edit, preserve its composition, placement, and every detail the prompt does not explicitly change.',
     '',
     input.prompt,
   ].join('\n')

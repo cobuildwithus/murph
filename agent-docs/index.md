@@ -13,8 +13,9 @@ verification scheduling are jointly specified by `ARCHITECTURE.md`,
 `agent-docs/operations/verification-and-runtime.md`, and
 `agent-docs/references/testing-ci-map.md`.
 
-Private generated-image failure diagnostics, their untrusted-provider-text
-boundary, and their reader-first hosted compatibility contract are jointly specified by `ARCHITECTURE.md`,
+Private generated-image failure diagnostics, their failure-only scope,
+untrusted-provider-text boundary, and reader-first hosted compatibility
+contract are jointly specified by `ARCHITECTURE.md`,
 `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`, and
 `agent-docs/references/hosted-runtime-protocol.md`.
 

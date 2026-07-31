@@ -675,9 +675,6 @@ describe('assistant auto-reply event-first path', () => {
     expect(trustedSendInput.turnContext).toContain(
       'call `murph.attach_response_media` only with its exact `media` array',
     )
-    expect(trustedSendInput.turnContext).toContain(
-      'Treat a non-null `savedImageRef` as the canonical edit target',
-    )
   })
 
   it('passes untrusted hosted image failure evidence to the resumed turn', async () => {

@@ -45,12 +45,6 @@ describe('murph.generate_image dynamic tool schema', () => {
     expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
       'private media is provided in a later trusted system input',
     )
-    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
-      "use the prior result's saved image ref as referenceImageRefs[0]",
-    )
-    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
-      'preserve its composition, framing, placement, and every unmentioned detail',
-    )
     expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(
       'a known preference supports voice',
     )
