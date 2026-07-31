@@ -21,6 +21,10 @@ import {
 } from "@murphai/health-metrics";
 import { resolveHealthCommonsBiomarkerEntityKey } from "./biomarker-entity-mappings.ts";
 import {
+  HEALTH_COMMONS_BIOMARKER_DESIRED_DIRECTIONS_SCHEMA_VERSION,
+  type HealthCommonsBiomarkerDesiredDirectionsArtifact,
+} from "./biomarker-runtime-artifacts.ts";
+import {
   HEALTH_COMMONS_PROTOCOL_FAMILY_GRAPH_SCHEMA_VERSION,
   HEALTH_COMMONS_PROTOCOL_INDEX_SCHEMA_VERSION,
   HEALTH_COMMONS_PROTOCOL_RUN_SPECS_SCHEMA_VERSION,
@@ -34,6 +38,10 @@ import {
   type HealthCommonsProtocolRunSpec,
   type HealthCommonsProtocolRunSpecsArtifact,
 } from "./protocol-artifacts.ts";
+export type {
+  HealthCommonsBiomarkerDesiredDirectionEntry,
+  HealthCommonsBiomarkerDesiredDirectionsArtifact,
+} from "./biomarker-runtime-artifacts.ts";
 export type {
   HealthCommonsProtocolEntitySummary,
   HealthCommonsProtocolFamilySummary,
@@ -124,6 +132,10 @@ export interface LoadGeneratedHealthCommonsProtocolRunSpecsOptions {
 
 export interface LoadGeneratedHealthCommonsProtocolFamilyGraphOptions {
   protocolFamilyGraphPath?: string | URL;
+}
+
+export interface LoadGeneratedHealthCommonsBiomarkerDesiredDirectionsOptions {
+  biomarkerDesiredDirectionsPath?: string | URL;
 }
 
 export interface LoadGeneratedHealthCommonsWebArtifactOptions {
@@ -363,6 +375,8 @@ export interface HealthCommonsRouteBundleReader extends HealthCommonsCatalogRead
 const DEFAULT_GENERATED_PROTOCOL_INDEX_PATH = "generated/protocol-index.json";
 const DEFAULT_GENERATED_PROTOCOL_RUN_SPECS_PATH = "generated/protocol-run-specs.json";
 const DEFAULT_GENERATED_PROTOCOL_FAMILY_GRAPH_PATH = "generated/protocol-family-graph.json";
+const DEFAULT_GENERATED_BIOMARKER_DESIRED_DIRECTIONS_PATH =
+  "generated/biomarker-desired-directions.json";
 const DEFAULT_LIST_LIMIT = 25;
 const DEFAULT_RELATION_LIMIT = 12;
 const DEFAULT_SEARCH_LIMIT = 20;
@@ -388,6 +402,8 @@ const HEALTH_COMMONS_WEB_PROJECTION_KEYS: readonly HealthCommonsWebProjectionKey
 let cachedGeneratedProtocolIndexReader: HealthCommonsProtocolIndexReader | null = null;
 let cachedGeneratedProtocolRunSpecReader: HealthCommonsProtocolRunSpecReader | null = null;
 let cachedGeneratedProtocolFamilyGraphReader: HealthCommonsProtocolFamilyGraphReader | null = null;
+let cachedGeneratedBiomarkerDesiredDirections:
+  HealthCommonsBiomarkerDesiredDirectionsArtifact | null = null;
 let cachedGeneratedWebBiomarkerIndex: HealthCommonsWebBiomarkerIndex | null = null;
 let cachedGeneratedWebExperimentIndex: HealthCommonsWebExperimentIndex | null = null;
 let cachedGeneratedWebRouteIndex: HealthCommonsWebRouteIndex | null = null;
@@ -493,6 +509,31 @@ export function getGeneratedHealthCommonsProtocolFamilyGraphReader(
   return cachedGeneratedProtocolFamilyGraphReader;
 }
 
+export function loadGeneratedHealthCommonsBiomarkerDesiredDirections(
+  options: LoadGeneratedHealthCommonsBiomarkerDesiredDirectionsOptions = {},
+): HealthCommonsBiomarkerDesiredDirectionsArtifact {
+  const raw = readFileSync(
+    options.biomarkerDesiredDirectionsPath ??
+      defaultGeneratedBiomarkerDesiredDirectionsUrl(),
+    "utf8",
+  );
+  const parsed = parseJsonObject(raw);
+  assertGeneratedHealthCommonsBiomarkerDesiredDirections(parsed);
+  return parsed;
+}
+
+export function getGeneratedHealthCommonsBiomarkerDesiredDirections(
+  options: LoadGeneratedHealthCommonsBiomarkerDesiredDirectionsOptions = {},
+): HealthCommonsBiomarkerDesiredDirectionsArtifact {
+  if (options.biomarkerDesiredDirectionsPath) {
+    return loadGeneratedHealthCommonsBiomarkerDesiredDirections(options);
+  }
+
+  cachedGeneratedBiomarkerDesiredDirections ??=
+    loadGeneratedHealthCommonsBiomarkerDesiredDirections();
+  return cachedGeneratedBiomarkerDesiredDirections;
+}
+
 export function loadGeneratedHealthCommonsWebRouteIndex(
   options: LoadGeneratedHealthCommonsWebArtifactOptions = {},
 ): HealthCommonsWebRouteIndex {
@@ -564,10 +605,10 @@ export function getGeneratedHealthCommonsWebBiomarkerIndex(
 
 export function resolveGeneratedHealthCommonsBiomarkerDesiredDirection(
   biomarkerKey: string,
-  options: LoadGeneratedHealthCommonsWebArtifactOptions = {},
+  options: LoadGeneratedHealthCommonsBiomarkerDesiredDirectionsOptions = {},
 ): HealthCommonsBiomarkerDesiredDirection | null {
   const canonicalBiomarkerKey = resolveCanonicalBiomarkerKey(biomarkerKey);
-  const entry = getGeneratedHealthCommonsWebBiomarkerIndex(options).biomarkers.find(
+  const entry = getGeneratedHealthCommonsBiomarkerDesiredDirections(options).biomarkers.find(
     (biomarker) => biomarker.key === canonicalBiomarkerKey,
   );
   return entry?.desiredDirection ?? null;
@@ -2190,6 +2231,13 @@ function defaultGeneratedProtocolFamilyGraphUrl(): URL {
   );
 }
 
+function defaultGeneratedBiomarkerDesiredDirectionsUrl(): URL {
+  return new URL(
+    DEFAULT_GENERATED_BIOMARKER_DESIRED_DIRECTIONS_PATH,
+    defaultHealthCommonsPackageRootUrl(),
+  );
+}
+
 function defaultHealthCommonsPackageRootUrl(): URL {
   const envValue = process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV]?.trim();
   if (envValue) {
@@ -2247,7 +2295,7 @@ function parseJsonObject(raw: string): unknown {
   const parsed = JSON.parse(raw) as unknown;
 
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("Health Commons generated web artifact must be a JSON object.");
+    throw new Error("Health Commons generated artifact must be a JSON object.");
   }
 
   return parsed;
@@ -2392,6 +2440,23 @@ function isGeneratedProtocolFamilyGraphEdge(value: unknown): boolean {
       value["type"] === "parent_family" ||
       value["type"] === "related_protocol"
     );
+}
+
+function assertGeneratedHealthCommonsBiomarkerDesiredDirections(
+  value: unknown,
+): asserts value is HealthCommonsBiomarkerDesiredDirectionsArtifact {
+  if (
+    !isRecord(value) ||
+    value["schemaVersion"] !==
+      HEALTH_COMMONS_BIOMARKER_DESIRED_DIRECTIONS_SCHEMA_VERSION ||
+    typeof value["catalogHash"] !== "string" ||
+    !Array.isArray(value["biomarkers"]) ||
+    !value["biomarkers"].every(isGeneratedBiomarkerDesiredDirectionEntry)
+  ) {
+    throw new Error(
+      "Health Commons generated biomarker desired directions are invalid.",
+    );
+  }
 }
 
 function assertGeneratedWebRouteIndex(
@@ -2710,7 +2775,7 @@ function isGeneratedWebBiomarkerIndexEntry(value: unknown): boolean {
     typeof value["bundlePath"] === "string" &&
     Array.isArray(value["categories"]) &&
     value["categories"].every(isString) &&
-    isGeneratedWebBiomarkerDesiredDirection(value["desiredDirection"]) &&
+    isHealthCommonsBiomarkerDesiredDirection(value["desiredDirection"]) &&
     Array.isArray(value["fallbackRanges"]) &&
     value["fallbackRanges"].every(isGeneratedWebBiomarkerFallbackRange) &&
     typeof value["hidden"] === "boolean" &&
@@ -3136,7 +3201,16 @@ function isGeneratedWebResearchConfidenceLabel(value: unknown): boolean {
   return typeof value === "string" && GENERATED_WEB_RESEARCH_CONFIDENCE_LABELS.has(value);
 }
 
-function isGeneratedWebBiomarkerDesiredDirection(value: unknown): boolean {
+function isGeneratedBiomarkerDesiredDirectionEntry(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    typeof value["key"] === "string" &&
+    value["desiredDirection"] !== null &&
+    isHealthCommonsBiomarkerDesiredDirection(value["desiredDirection"])
+  );
+}
+
+function isHealthCommonsBiomarkerDesiredDirection(value: unknown): boolean {
   return value === null
     || (typeof value === "string"
       && (HEALTH_COMMONS_BIOMARKER_DESIRED_DIRECTIONS as readonly string[]).includes(value));

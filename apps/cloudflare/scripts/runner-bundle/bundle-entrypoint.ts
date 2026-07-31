@@ -61,18 +61,24 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // media, hosted-alert integration, and open-ended experiment outcomes add
 // authored code to existing runner chunks without adding a forbidden boot
 // input. The combined 2026-07-29 macOS assembly measured an 8,117,894B static
-// closure while remaining within the reviewed total budget. Ratchet the static
-// baseline to that combined measurement and retain the established small-growth
-// tolerances.
+// closure while remaining within the reviewed total budget.
 //
-// Direct Group subscription handling and Linq group-line recovery extend the
-// existing runner chunks without adding a forbidden boot input. The combined
-// 2026-07-30 macOS assembly measured 9,935,873B, below the existing 9,936,771B
-// cross-platform baseline. Retain that higher baseline and the established
-// 32KB allowance.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_936_771 + 32_768;
+// Direct Group subscription handling, Linq group-line recovery, and the
+// rich-link retry-integrity guards extend the existing runner chunks without
+// adding a forbidden boot input. The combined 2026-07-30 macOS assembly
+// measured 9,979,011B. Ratchet the total baseline to that measurement and
+// retain the established 32KB allowance.
+//
+// Private Environment voice processing reuses the existing hosted-runtime,
+// parser, and vault paths, but keeps the capture-to-checkpoint handling in the
+// static runner graph. CI measured an 8,196,760B static closure and macOS
+// measured 9,894,078B total on 2026-07-30. After rebasing both changes together,
+// the final macOS assembly measured 9,971,103B total and an 8,295,095B static
+// closure. No forbidden subsystem entered the boot graph. Preserve that static
+// measurement alongside main's higher cross-platform total measurement.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_979_011 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_649_331;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_117_894;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_295_095;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:

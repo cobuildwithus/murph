@@ -113,7 +113,9 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain(
     "Capped monthly group sponsorship and one-time contribution",
   );
-  expect(sectionsMarkup).toContain("Overall AI usage, credits, and missions");
+  expect(sectionsMarkup).toContain(
+    "Overall AI usage, purchase reset, Family owner action, credits, and referrals",
+  );
   expect(sectionsMarkup).toContain("Biomarker result detail");
   expect(sectionsMarkup).toContain("Biomarker reference context");
   expect(sectionsMarkup).toContain("Boundary result detail");
@@ -138,9 +140,14 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain("Static owner-layout preview");
   expect(sectionsMarkup).toContain("Overall usage active");
   expect(sectionsMarkup).toContain("Plan usage exhausted, credit remains");
+  expect(sectionsMarkup).toContain("Fresh purchase starts at zero used");
   expect(sectionsMarkup).toContain("All available usage exhausted");
+  expect(sectionsMarkup).toContain(
+    "Family owner can add usage for their own seat",
+  );
   expect(sectionsMarkup).toContain("76% used");
   expect(sectionsMarkup).toContain("24% remaining");
+  expect(sectionsMarkup).toContain("0% used");
   expect(sectionsMarkup).toContain("Fulfilled top-up with refreshed usage");
   expect(sectionsMarkup).toContain("Preview fulfilled top-up");
   expect(sectionsMarkup).toContain("Add usage to continue");

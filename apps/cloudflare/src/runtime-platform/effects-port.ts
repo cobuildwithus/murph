@@ -20,6 +20,9 @@ import {
   buildHostedExecutionRunnerMealPhotoPath,
 } from "../runner-meal-photo-route.ts";
 import {
+  buildHostedExecutionRunnerEnvironmentVoicePath,
+} from "../runner-environment-voice-route.ts";
+import {
   HOSTED_EXECUTION_RUNNER_TELEGRAM_DOWNLOAD_FILE_PATH,
   HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH,
   parseHostedRunnerTelegramDownloadFileResponse,
@@ -108,6 +111,48 @@ export function createCloudflareEffectsPort(input: {
 
   return {
     ...providerFileEffectsPort,
+    async deleteEnvironmentVoice(audioKey) {
+      const response = await fetchHostedResponse({
+        description: "Hosted environment voice delete",
+        fetchImpl: input.fetchImpl,
+        init: {
+          headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
+            description: "Hosted environment voice delete",
+            workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
+          }),
+          method: "DELETE",
+        },
+        timeoutMs: input.timeoutMs,
+        url: new URL(
+          buildHostedExecutionRunnerEnvironmentVoicePath(audioKey),
+          `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.effectsPort}/`,
+        ),
+      });
+      assertHostedOk(response, "Hosted environment voice delete");
+    },
+    async readEnvironmentVoice(audioKey) {
+      const response = await fetchHostedResponse({
+        description: "Hosted environment voice read",
+        fetchImpl: input.fetchImpl,
+        init: {
+          headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
+            description: "Hosted environment voice read",
+            workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
+          }),
+          method: "GET",
+        },
+        timeoutMs: input.timeoutMs,
+        url: new URL(
+          buildHostedExecutionRunnerEnvironmentVoicePath(audioKey),
+          `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.effectsPort}/`,
+        ),
+      });
+      if (response.status === 404) {
+        return null;
+      }
+      assertHostedOk(response, "Hosted environment voice read");
+      return new Uint8Array(await response.arrayBuffer());
+    },
     async deleteMealPhoto(mealPhotoKey) {
       const response = await fetchHostedResponse({
         description: "Hosted meal photo delete",

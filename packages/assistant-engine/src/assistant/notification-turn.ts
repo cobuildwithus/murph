@@ -1607,8 +1607,11 @@ function isAssistantMaintenanceMutationCommand(
   if (normalized === null) {
     return false
   }
-  return profile === 'group-room-model'
-    ? false
+  if (profile === 'group-room-model') {
+    return false
+  }
+  return profile === 'habitat-voice'
+    ? /\bvault-cli\b[\s\S]*\bhabitat\s+save\b/u.test(normalized)
     : /\bvault-cli\b[\s\S]*\bmemory\s+(?:upsert|update)\b/u.test(normalized)
 }
 

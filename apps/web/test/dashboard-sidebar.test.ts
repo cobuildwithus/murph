@@ -198,6 +198,17 @@ test("Sidebar does not render the Overview page as a navigation item", () => {
   assert.doesNotMatch(markup, />Overview<\/a>/);
 });
 
+test("Sidebar renders Environment as an active primary destination", () => {
+  mocks.usePathname.mockReturnValue("/environment");
+
+  const markup = renderToStaticMarkup(createElement(Sidebar));
+
+  assert.match(
+    markup,
+    /data-active="true">\s*<a[^>]*href="\/environment"[^>]*>[\s\S]*Environment<\/a>/,
+  );
+});
+
 test("Sidebar renders an active Biomarkers tab for the live RHR page", () => {
   mocks.usePathname.mockReturnValue("/biomarkers/resting-heart-rate");
 

@@ -341,6 +341,18 @@ a redundant root `pnpm typecheck`.
 | Changes under `packages/cli` | Either `pnpm test:diff <path ...>`, or `pnpm typecheck` plus `pnpm --dir packages/cli verify:coverage` | Prefer `pnpm test:diff <path ...>` when it truthfully covers the touched CLI files. Otherwise run `pnpm --dir packages/cli verify:coverage` so the package stays on its prepared runtime and package-shape coverage lane instead of falling back to a no-coverage loop. Repo checks now run `packages/cli` typecheck plus package-local verification through `pnpm verify:cli`. The package-local `pnpm --dir packages/cli test` loop is source-first and no longer requires prepared runtime artifacts or package-shape verification just to start. `pnpm test:diff` keeps reverse-dependent CLI fanout on that same source-first lane by default and escalates into `pnpm verify:cli` only when the diff directly touches CLI artifact-sensitive surfaces such as the CLI package manifest/build/package-shape config, the CLI workspace Vitest configs, the prepared-runtime helper, or the root workspace manifests. Those built-runtime and package-shape checks live behind explicit acceptance commands (`pnpm --dir packages/cli verify`, `pnpm --dir packages/cli verify:coverage`, and the repo-composed `pnpm verify:cli`). The CLI Vitest surface runs through nine workspace buckets; the health-tail, read-model, assistant, and expansion buckets share the bounded root worker pool, while the five explicit `fileParallelism: false` smoke buckets retain separate serial phases. Local worker caps default to `MURPH_VITEST_MAX_WORKERS=75%` unless the environment overrides it, file-level Vitest parallelism is enabled locally by default but disabled in CI by default, and in-file suite concurrency is opt-in unless `MURPH_VITEST_SUITE_CONCURRENCY` explicitly enables it. `MURPH_VITEST_FILE_PARALLELISM` can force file parallelism, and `MURPH_VITEST_MAX_CONCURRENCY` / `MURPH_CLI_VITEST_MAX_CONCURRENCY` cap concurrent tests within a file when suite concurrency is enabled (default `2` locally, `1` in CI). The prepared acceptance lane still covers the required hosted-execution, runtime-state, core, importer, device-syncd, query, inboxd, parser, and CLI runtime artifacts, including the reusable `packages/cli/dist/cli-entry.js` module. The shared CLI runtime-artifact helper trusts a verified in-process artifact state instead of rechecking the full artifact set on every later invocation, and non-stdin CLI integration tests can reuse a persistent subprocess harness by default with `MURPH_CLI_TEST_PERSISTENT_HARNESS=0` as the escape hatch back to isolated per-command processes. |
 | User explicitly says to skip checks | Skip checks for that turn only. | User instruction takes precedence. |
 
+For the hosted product-feedback digest, focused Web proof includes the digest
+service, authenticated cron route, shared operational-email config, production
+cron allowlist, Prisma schema/migration inventory, and Web typecheck. The
+service proof must exercise the Eastern daily window across both DST
+transitions, the dedicated recipient list, fixed empty digest, day-keyed
+idempotency key, fixed three-kind aggregate that never reads free-form summary
+text, observable missing configuration, and a bounded same-hour retry. The
+direct scenario must compose the production sender against an isolated
+loopback Resend fake and prove identical request/key reuse plus one fake
+delivery after an ambiguous failure. Routine tests must not call Resend or read
+production feedback.
+
 For hosted assistant-provider choice, the truthful diff lane must cover
 `packages/hosted-execution`, `packages/operator-config`,
 `packages/assistant-runtime`, `apps/web`, and `apps/cloudflare`. Focused
@@ -392,7 +404,11 @@ connection is unusable. Browser attachment alone must not block completion when
 Playwright can capture the required states. Treat that fallback as required:
 attempt Playwright before asking for a browser attachment or reporting a
 screenshot blocker, and record the exact command and failure only if Playwright
-cannot capture the proof.
+cannot capture the proof. Capture lossless PNGs at 2x device scale or higher,
+crop to the changed component or section, and visually inspect both the local
+file and the hosted `/designproof` Cloudflare Images variant at native
+resolution. Do not use a long full-page capture that makes review text smaller
+than the rendered UI.
 
 ## Scoped Verification Mode
 

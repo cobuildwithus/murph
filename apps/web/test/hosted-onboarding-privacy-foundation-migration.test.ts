@@ -1025,11 +1025,14 @@ describe("hosted Prisma baseline migration", () => {
       "20260729010000_hosted_account_cleanup_runtime_logs",
       "20260729043000_hosted_member_assistant_provider_preference",
       "20260729154500_hosted_linq_recent_message_load",
+      "20260729160000_hosted_linq_delivery_messages",
       "20260729170000_hosted_thread_route_account_lookup_key",
       "20260729180000_linq_provider_health_projection",
       "20260729190000_composable_usage_referral_missions",
       "20260730120000_hosted_capped_group_sponsorship",
       "20260730170000_add_mailbox_ai_usage_denied_at",
+      "20260730180000_hosted_linq_delivery_thread_directness",
+      "20260731001500_add_hosted_product_feedback_created_at_index",
       "migration_lock.toml",
     ]);
     expect(deviceSyncSignalSourceProviderMigrationSql).toContain(
@@ -2348,6 +2351,37 @@ describe("hosted Prisma baseline migration", () => {
     }
   });
 
+  it("stores multi-part Linq receipt identities under one delivery without raw provider ids", () => {
+    const schema = readFileSync(
+      new URL("../prisma/schema.prisma", import.meta.url),
+      "utf8",
+    );
+    const migrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260729160000_hosted_linq_delivery_messages/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const messageModel = readPrismaModelBlock(
+      schema,
+      "HostedLinqDeliveryMessage",
+    );
+
+    expect(messageModel).toMatch(
+      /messageLookupKey\s+String\s+@unique\s+@map\("message_lookup_key"\)/u,
+    );
+    expect(messageModel).toMatch(
+      /delivery\s+HostedLinqDelivery\s+@relation\(fields: \[deliveryId\], references: \[id\], onDelete: Cascade\)/u,
+    );
+    expect(messageModel).not.toMatch(/\bmessageId\s+String\b/u);
+    expect(migrationSql).toContain(
+      'REFERENCES "hosted_linq_delivery"("id")',
+    );
+    expect(migrationSql).toContain("ON DELETE CASCADE");
+    expect(migrationSql).not.toMatch(/"message_id"\s+TEXT/u);
+  });
+
   it("adds only nullable Checkout-attempt columns and their lookup index", () => {
     const migrationSql = readFileSync(
       new URL(
@@ -2375,6 +2409,23 @@ describe("hosted Prisma baseline migration", () => {
     expect(migrationSql).not.toContain("NOT NULL");
     expect(migrationSql).toMatch(
       /CREATE UNIQUE INDEX\s+"hosted_member_billing_ref_stripe_checkout_session_lookup_key_key"/u,
+    );
+  });
+
+  it("adds the product-feedback digest read index without blocking writes", () => {
+    const migrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260731001500_add_hosted_product_feedback_created_at_index/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+
+    expect(migrationSql).toContain(
+      'CREATE INDEX CONCURRENTLY "hosted_product_feedback_created_at_kind_idx"',
+    );
+    expect(migrationSql).toContain(
+      'ON "hosted_product_feedback"("created_at", "kind")',
     );
   });
 });

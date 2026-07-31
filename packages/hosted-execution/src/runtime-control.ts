@@ -62,6 +62,7 @@ export const HOSTED_MAILBOX_KINDS = [
   "assistant.ask.completed",
   "clinical-records.sync-requested",
   "device-sync.wake",
+  "environment-voice.captured",
   "group-newsletter.email-needed",
   "meal-photo.captured",
   "vault-share.delivery",

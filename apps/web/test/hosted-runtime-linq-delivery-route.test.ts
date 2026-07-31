@@ -23,6 +23,8 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", () => ({
+  HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE:
+    "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
   recordHostedLinqRuntimeDeliveryOutcomeTx: mocks.recordHostedLinqRuntimeDeliveryOutcomeTx,
 }));
 
@@ -229,7 +231,11 @@ describe("hosted runtime Linq delivery route", () => {
       fromPhoneNumber: "+15550100099",
       idempotencyKey: "assistant-outbox:intent_123",
       intentId: "intent_123",
-      providerMessageId: "linq_message_sent",
+      providerMessageId: "linq_link_message",
+      providerMessageIds: [
+        "linq_text_message",
+        "linq_link_message",
+      ],
       providerTarget: "+15550100001",
       providerThreadId: "linq_chat_123",
       target: "+15550100001",
@@ -253,7 +259,8 @@ describe("hosted runtime Linq delivery route", () => {
         failedAt: null,
         idempotencyKey: "assistant-outbox:intent_123",
         linqChatId: "linq_chat_123",
-        messageId: "linq_message_sent",
+        messageId: "linq_link_message",
+        messageIds: ["linq_text_message", "linq_link_message"],
         phoneNumber: "+15550100099",
         phoneNumberLookupKey: null,
         sourceRef: "intent_123",
@@ -594,6 +601,8 @@ describe("hosted runtime Linq delivery route", () => {
       failedAt: "2026-04-26T00:00:05.000Z",
       failureCode: "synthetic_failure",
       idempotencyKey: "assistant-outbox:intent_123",
+      providerMessageId: "linq_text_accepted",
+      providerMessageIds: ["linq_text_accepted"],
       providerTarget: "+15550100001",
       providerThreadId: "linq_chat_123",
       target: "+15550100001",
@@ -607,6 +616,37 @@ describe("hosted runtime Linq delivery route", () => {
         answeredMailboxItemIds: [],
         failedAt: new Date("2026-04-26T00:00:05.000Z"),
         failureCode: "synthetic_failure",
+        messageId: "linq_text_accepted",
+        messageIds: ["linq_text_accepted"],
+        userId: "member_123",
+      }),
+    );
+  });
+
+  it("does not carry answered mailbox item ids for a recoverable rich-link partial delivery", async () => {
+    const answeredMailboxItemIds = ["mailbox_item_primary_answered"];
+    const response = await route.POST(buildDeliveryRequest({
+      answeredMailboxItemIds,
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      failedAt: "2026-04-26T00:00:05.000Z",
+      failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+      idempotencyKey: "assistant-outbox:intent_partial",
+      providerMessageId: "linq_text_accepted",
+      providerMessageIds: ["linq_text_accepted"],
+      providerTarget: "+15550100001",
+      providerThreadId: "linq_chat_123",
+      target: "+15550100001",
+      targetKind: "participant",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acceptedAt: null,
+        answeredMailboxItemIds: [],
+        failedAt: new Date("2026-04-26T00:00:05.000Z"),
+        failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+        messageIds: ["linq_text_accepted"],
         userId: "member_123",
       }),
     );

@@ -600,6 +600,71 @@ describe("createHostedUsageCreditCheckout", () => {
     });
   });
 
+  it("returns an owner-seat Family purchase to the usage meter and reads legacy URLs", async () => {
+    const fake = createFakePrisma();
+    mocks.resolveHostedFamilyUsageCreditCheckoutTargetTx.mockResolvedValueOnce({
+      beneficiaryMemberId: MEMBER_ID,
+      groupId: "hbag_abcdefghijklmnop",
+      stripeCustomerId: "cus_family_owner",
+    });
+    mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
+      buildStripeSession(request)
+    );
+
+    const checkout = await createHostedFamilyMemberUsageCreditCheckout({
+      beneficiaryMemberId: MEMBER_ID,
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      now: NOW,
+      offerCode: "usage_5_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    });
+    const purchase = onlyPurchase(fake.purchases);
+    const successUrl = new URL(String(purchase.checkoutSuccessUrl));
+    const cancelUrl = new URL(String(purchase.checkoutCancelUrl));
+    expect(successUrl).toMatchObject({
+      hash: "#subscription",
+      pathname: "/settings",
+    });
+    expect(cancelUrl).toMatchObject({
+      hash: "#subscription",
+      pathname: "/settings",
+    });
+    expect(Object.fromEntries(successUrl.searchParams)).toEqual({
+      usageCheckout: "success",
+      usageFamily: "hbag_abcdefghijklmnop",
+      usageMember: MEMBER_ID,
+      usagePurchase: checkout.purchaseId,
+    });
+    expect(Object.fromEntries(cancelUrl.searchParams)).toEqual({
+      usageCheckout: "cancel",
+      usageFamily: "hbag_abcdefghijklmnop",
+      usageMember: MEMBER_ID,
+      usagePurchase: checkout.purchaseId,
+    });
+    await expect(readHostedUsageCreditPurchaseTargetForPayer({
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+      purchaseId: checkout.purchaseId,
+    })).resolves.toEqual({
+      beneficiaryMemberId: MEMBER_ID,
+      familyGroupId: "hbag_abcdefghijklmnop",
+      kind: "family",
+    });
+
+    successUrl.hash = "family";
+    purchase.checkoutSuccessUrl = successUrl.toString();
+    await expect(readHostedUsageCreditPurchaseTargetForPayer({
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+      purchaseId: checkout.purchaseId,
+    })).resolves.toEqual({
+      beneficiaryMemberId: MEMBER_ID,
+      familyGroupId: "hbag_abcdefghijklmnop",
+      kind: "family",
+    });
+  });
+
   it.each([
     ["personal", "cus_123"],
     ["family", "cus_family_owner"],

@@ -12,6 +12,7 @@ export type HostedStorageScope =
   | "browser-vault-replica"
   | "bundle"
   | "email-raw"
+  | "environment-voice"
   | "meal-photo"
   | "private-media"
   | "runner-secrets";
@@ -292,6 +293,7 @@ const HOSTED_STORAGE_SCOPES = new Set<HostedStorageScope>([
   "browser-vault-replica",
   "bundle",
   "email-raw",
+  "environment-voice",
   "meal-photo",
   "private-media",
   "runner-secrets",

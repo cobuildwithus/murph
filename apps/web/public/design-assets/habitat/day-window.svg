@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 154.6 159">
+<!-- SVG created with Arrow, by QuiverAI (https://quiver.ai) -->
+  <style type="text/css">.cls-0 {fill:#D8D5D4;}
+.cls-1 {fill:#EBE7DA;stroke:#575643;stroke-width:0.9133;stroke-miterlimit:10;}
+.cls-2 {fill:#CCC2AB;}
+.cls-3 {fill:none;stroke:#575643;stroke-width:0.9133;stroke-linecap:square;stroke-miterlimit:10;}
+.cls-4 {fill:#A69C89;}
+.cls-5 {fill:#CEBFA6;}
+.cls-6 {fill:#587055;stroke:#575643;stroke-width:0.96;stroke-miterlimit:10;}
+.cls-7 {opacity:0.5;fill:#495947;}
+.cls-8 {fill:none;stroke:#CC966A;stroke-width:1.9359;stroke-miterlimit:10;}
+.cls-9 {fill:#CC966A;}
+.cls-10 {fill:#A27151;}
+.cls-11 {fill:none;stroke:#575643;stroke-width:0.9133;stroke-miterlimit:10;}</style>
+  <polygon class="cls-0" points="10.4 143.8 15.5 148.5 144.4 148.5 144.4 16.1 138.8 10.8"/>
+  <path class="cls-1" d="m138 143.5c0 0.3-0.3 0.6-0.6 0.6h-126.2c-0.2-0.1-0.2-0.3-0.2-0.6v-132.3c0-0.2 0-0.4 0.2-0.4h126.1c0.3 0 0.6 0.2 0.6 0.5l0.1 132.2z"/>
+  <path class="cls-5" d="m133.1 135.7c0 0.3-0.2 0.5-0.5 0.5h-116.6v-117.7h116.6c0.3 0 0.5 0.2 0.5 0.5v116.7z"/>
+  <path class="cls-4" d="m21.2 18.5-4.8-0.1v117.7h4.6l0.2-117.6z"/>
+  <path class="cls-3" d="m16.3 18.5h116c0.5 0 0.8 0.2 0.8 0.5v116.5c0 0.3-0.2 0.6-0.6 0.6h-116.2"/>
+  <line class="cls-11" x1="21" x2="21" y1="18.5" y2="136"/>
+  <path class="cls-6" d="m126.7 25.2c0-0.2-0.2-0.7-0.8-0.7h-98.2c-0.4 0.1-0.8 0.5-0.8 0.7v104.3c0.1 0.4 0.4 0.8 0.8 0.8h98.3c0.5 0 0.8-0.5 0.8-0.8l-0.1-104.3z"/>
+  <path class="cls-7" d="m32.1 30.1c0-0.5 0.4-0.9 0.9-0.9h94v-4.5l-99.8-0.2-0.5 0.6 0.2 30.1 5.2 0.4v-25.5z"/>
+  <path class="cls-8" d="m39.8 53.3 26.6 76.8"/>
+  <path class="cls-8" d="m48 49.1 55.2 81"/>
+  <path class="cls-8" d="m55 42 71.9 61.5"/>
+  <path class="cls-8" d="m60 34.9 66.7 29.7"/>
+  <path class="cls-9" d="m27.2 55.2v-30.5h34.1c0.3 2.8 0.9 10.4-5.2 18.7-6.6 9-16.4 12.7-28.9 11.8z"/>
+  <path class="cls-10" d="m27.2 55.2v-30.5h34l0.1 4.5h-28.2c-0.5 0-1 0.4-1 0.9v25.4l-4.9-0.3z"/>
+</svg>

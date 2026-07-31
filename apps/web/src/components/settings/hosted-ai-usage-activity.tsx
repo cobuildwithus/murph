@@ -17,21 +17,16 @@ export function HostedAiUsageActivity(props: {
   const hasMissionSurface =
     canStartMissions || props.activity.missions.length > 0;
   const currentMissions = props.activity.missions.filter(
-    (mission) =>
-      mission.status === "in_progress" ||
-      mission.status === "waiting_for_group",
+    (mission) => mission.status !== "completed",
   );
   const historicalMissions = props.activity.missions.filter(
-    (mission) =>
-      mission.status !== "in_progress" &&
-      mission.status !== "waiting_for_group",
+    (mission) => mission.status === "completed",
   );
   const hasHistory =
     historicalMissions.length > 0 || props.activity.credits.length > 0;
   const showReferralEmptyState =
     canStartMissions &&
-    currentMissions.length === 0 &&
-    !hasHistory;
+    currentMissions.length === 0;
 
   if (!hasMissionSurface && !hasHistory) {
     return null;
@@ -65,7 +60,7 @@ export function HostedAiUsageActivity(props: {
 
           {currentMissions.length > 0 ? (
             <ul
-              aria-label="Active usage referrals"
+              aria-label="Current usage referrals"
               className="divide-y divide-border/70 border-t border-border/70"
             >
               {currentMissions.map((mission) => (
@@ -154,6 +149,23 @@ function MissionRow(props: {
             </span>
             <span>{mission.timingLabel}</span>
           </p>
+          <details className="group mt-3">
+            <summary
+              aria-label={`Details for ${mission.title}: ${mission.statusLabel}, ${mission.timingLabel}`}
+              className="flex w-fit cursor-pointer list-none items-center gap-1.5 rounded-sm text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden"
+              role="button"
+            >
+              Details
+              <ChevronDown
+                aria-hidden="true"
+                className="size-3.5 transition-transform duration-200 group-open:rotate-180"
+              />
+            </summary>
+            <div className="mt-3 max-w-2xl space-y-1.5 text-xs leading-5 text-muted-foreground">
+              <p>{mission.requirementsLabel}</p>
+              <p>Selected {mission.selectedLabel}</p>
+            </div>
+          </details>
         </div>
         <div className="text-right">
           <div className="font-serif text-2xl font-semibold leading-none tabular-nums text-foreground">

@@ -258,6 +258,16 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
   sending: AssistantOutboxIntent
   vault: string
 }): Promise<AssistantOutboxIntent> {
+  const linqPartialDelivery = readLinqPartialDeliveryFromError({
+    error: input.error,
+    failedAt: input.failedAt,
+    sending: input.sending,
+  })
+  const recoverableLinqRichLinkPartial =
+    isRecoverableLinqRichLinkPartialDelivery({
+      error: input.error,
+      sending: input.sending,
+    })
   const ambiguousDelivery = readAmbiguousDeliveryFromError({
     error: input.error,
     failedAt: input.failedAt,
@@ -303,6 +313,8 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
       return current
     }
     const baseIntent = current ?? input.sending
+    const preserveNonConfirmableLinqRichLinkCheckpoint =
+      carriesNonConfirmableLinqRichLinkCheckpoint(baseIntent)
     const attemptCount = baseIntent.attemptCount
     const failedAt = input.failedAt.toISOString()
     const retryExhausted = retryRequested &&
@@ -320,8 +332,16 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
     const failedIntent = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence({
         ...baseIntent,
-        delivery: ambiguousDelivery ?? current?.delivery ?? input.sending.delivery,
-        deliveryConfirmationPending: abandonedDelivery || retryExhausted
+        delivery:
+          ambiguousDelivery ??
+          linqPartialDelivery ??
+          current?.delivery ??
+          input.sending.delivery,
+        deliveryConfirmationPending:
+          recoverableLinqRichLinkPartial ||
+          preserveNonConfirmableLinqRichLinkCheckpoint
+          ? false
+          : abandonedDelivery || retryExhausted
           ? false
           : input.deliveryMayHaveSucceeded
             ? input.deliveryTransportIdempotent
@@ -379,8 +399,46 @@ function readAmbiguousDeliveryFromError(input: {
   failedAt: Date
   sending: AssistantOutboxIntent
 }): AssistantChannelDelivery | null {
-  return readTelegramAmbiguousDeliveryFromError(input) ??
-    readLinqPartialDeliveryFromError(input)
+  const telegramDelivery = readTelegramAmbiguousDeliveryFromError(input)
+  if (telegramDelivery) {
+    return telegramDelivery
+  }
+  const linqPartialDelivery = readLinqPartialDeliveryFromError(input)
+  return isRecoverableLinqRichLinkPartialDelivery(input)
+    ? null
+    : linqPartialDelivery
+}
+
+function isRecoverableLinqRichLinkPartialDelivery(input: {
+  error: unknown
+  sending: AssistantOutboxIntent
+}): boolean {
+  if (input.sending.channel !== 'linq') {
+    return false
+  }
+
+  const errorRecord = readRecord(input.error)
+  const context = readRecord(errorRecord?.context)
+  const code =
+    readNonEmptyString(errorRecord?.code) ??
+    readNonEmptyString(context?.code) ??
+    null
+  if (code !== 'ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY') {
+    return false
+  }
+
+  return readProviderMessageIdsFromErrorRecord(errorRecord, context)?.length === 1
+}
+
+function carriesNonConfirmableLinqRichLinkCheckpoint(
+  intent: AssistantOutboxIntent,
+): boolean {
+  const delivery = intent.delivery
+  return intent.channel === 'linq' &&
+    delivery?.kind !== 'message-reaction' &&
+    delivery?.channel === 'linq' &&
+    intent.deliveryConfirmationPending === false &&
+    delivery.providerMessageIds?.length === 1
 }
 
 function isAmbiguousDeliveryWithoutProviderIds(input: {
@@ -476,7 +534,10 @@ function isLinqPartialDeliveryWithoutProviderIds(input: {
     readNonEmptyString(errorRecord?.code) ??
     readNonEmptyString(context?.code) ??
     null
-  if (code !== 'ASSISTANT_LINQ_VOICE_MEMO_PARTIAL_DELIVERY') {
+  if (
+    code !== 'ASSISTANT_LINQ_VOICE_MEMO_PARTIAL_DELIVERY'
+    && code !== 'ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY'
+  ) {
     return false
   }
 
@@ -558,7 +619,10 @@ function readLinqPartialDeliveryFromError(input: {
     readNonEmptyString(errorRecord?.code) ??
     readNonEmptyString(context?.code) ??
     null
-  if (code !== 'ASSISTANT_LINQ_VOICE_MEMO_PARTIAL_DELIVERY') {
+  if (
+    code !== 'ASSISTANT_LINQ_VOICE_MEMO_PARTIAL_DELIVERY'
+    && code !== 'ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY'
+  ) {
     return null
   }
 

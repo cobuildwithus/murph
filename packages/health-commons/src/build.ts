@@ -8,6 +8,7 @@ import {
   buildHealthCommonsSourceArtifactIndex,
   buildHealthCommonsSourceIndex,
 } from "./catalog.ts";
+import { buildHealthCommonsBiomarkerDesiredDirectionsArtifact } from "./biomarker-runtime-artifacts.ts";
 import { stablePrettyJson } from "./normalize.ts";
 import { buildHealthCommonsProtocolGeneratedArtifacts } from "./protocol-artifacts.ts";
 import { buildHealthCommonsWebGeneratedArtifacts } from "./web-artifacts.ts";
@@ -106,6 +107,8 @@ function buildGeneratedFiles(
     catalog,
     routeIndex: webArtifacts.routeIndex,
   });
+  const biomarkerDesiredDirections =
+    buildHealthCommonsBiomarkerDesiredDirectionsArtifact(webArtifacts.biomarkerIndex);
   const files = new Map<string, string>([
     ["catalog.hash", `${catalog.catalogHash}\n`],
     ["redirects.json", stablePrettyJson({ redirects: catalog.redirects })],
@@ -115,6 +118,7 @@ function buildGeneratedFiles(
     ["protocol-index.json", stablePrettyJson(protocolArtifacts.index)],
     ["protocol-run-specs.json", stablePrettyJson(protocolArtifacts.runSpecs)],
     ["protocol-family-graph.json", stablePrettyJson(protocolArtifacts.familyGraph)],
+    ["biomarker-desired-directions.json", stablePrettyJson(biomarkerDesiredDirections)],
     ["source-index.json", stablePrettyJson(sourceIndex)],
     ["source-identities.ndjson", sourceIndex.identityLookup.map((entry) => JSON.stringify(entry)).join("\n") + "\n"],
     ["source-artifact-index.json", stablePrettyJson(sourceArtifactIndex)],

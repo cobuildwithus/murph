@@ -474,6 +474,7 @@ describe("HostedAiUsageActivity", () => {
     }));
 
     assert.match(markup, /<h3[^>]*>Referrals<\/h3>/);
+    assert.match(markup, /aria-label="Current usage referrals"/);
     assert.match(markup, />History</);
     assert.match(markup, /aria-label="Usage activity history"/);
     assert.match(markup, /Usage purchase/);
@@ -482,14 +483,27 @@ describe("HostedAiUsageActivity", () => {
     assert.doesNotMatch(markup, /Remaining|\$6\.42/);
     assert.match(markup, /Start an active group/);
     assert.match(markup, /to the group/);
-    const detailMarkup = /<details\b[^>]*>[\s\S]*?<\/details>/u.exec(markup)?.[0];
-    assert.ok(detailMarkup);
-    const detailOpeningTag = /^<details\b[^>]*>/u.exec(detailMarkup)?.[0];
-    assert.ok(detailOpeningTag);
-    assert.doesNotMatch(detailOpeningTag, /\sopen(?:=|\s|>)/u);
-    assert.doesNotMatch(markup, /Start a fresh group and get people talking\./);
-    assert.doesNotMatch(markup, /Selected Jul 27, 2026/);
-    assert.doesNotMatch(markup, />Details</);
+    const detailOpeningTags = markup.match(/<details\b[^>]*>/gu) ?? [];
+    assert.equal(detailOpeningTags.length, 3);
+    detailOpeningTags.forEach((openingTag) => {
+      assert.doesNotMatch(openingTag, /\sopen(?:=|\s|>)/u);
+    });
+    assert.match(markup, /Start a fresh group and get people talking\./);
+    assert.match(markup, /Selected Jul 27, 2026/);
+    assert.match(markup, /Wait while Murph checks final activity\./);
+    assert.match(markup, /Selected Jul 28, 2026/);
+    assert.equal(markup.match(/>Details</gu)?.length, 2);
+    assert.match(
+      markup,
+      /aria-label="Details for Start an active group: In progress, Ends Aug 3, 2026"[^>]*role="button"/,
+    );
+    assert.match(
+      markup,
+      /aria-label="Details for Start an active group: Checking final activity, Closed Jul 29, 2026"/,
+    );
+    assert.ok(
+      markup.indexOf("Checking final activity") < markup.indexOf(">History"),
+    );
     assert.doesNotMatch(markup, /Amounts added, not current balance/);
     assert.match(markup, /Ask Murph/);
     assert.match(
@@ -498,6 +512,105 @@ describe("HostedAiUsageActivity", () => {
     );
     assert.match(markup, /href="sms:\+15550100001\?body=mission"/);
     assert.doesNotMatch(markup, /<table/);
+  });
+
+  it("keeps every nonterminal referral current and only completed referrals in History", async () => {
+    const { HostedAiUsageActivity } = await import(
+      "@/src/components/settings/hosted-ai-usage-activity"
+    );
+    const mission = (
+      id: string,
+      status:
+        | "checking_final_activity"
+        | "completed"
+        | "in_progress"
+        | "reward_pending"
+        | "waiting_for_group",
+      statusLabel: string,
+    ) => ({
+      destinationLabel: "the group",
+      id,
+      requirementsLabel: `Requirements for ${statusLabel}`,
+      rewardLabel: "$3.50",
+      selectedLabel: "Jul 27, 2026",
+      status,
+      statusLabel,
+      timingLabel: `Timing for ${statusLabel}`,
+      title: `Referral ${statusLabel}`,
+    });
+    const markup = renderToStaticMarkup(createElement(HostedAiUsageActivity, {
+      activity: {
+        credits: [],
+        missions: [
+          mission("waiting", "waiting_for_group", "Waiting"),
+          mission("active", "in_progress", "Active"),
+          mission("checking", "checking_final_activity", "Checking"),
+          mission("pending", "reward_pending", "Reward pending"),
+          mission("completed", "completed", "Completed"),
+        ],
+        missionsEnabled: true,
+      },
+      missionContactOption: null,
+    }));
+    const historyIndex = markup.indexOf(">History");
+
+    assert.notEqual(historyIndex, -1);
+    for (const label of ["Waiting", "Active", "Checking", "Reward pending"]) {
+      assert.ok(markup.indexOf(`Referral ${label}`) < historyIndex);
+    }
+    assert.ok(markup.indexOf("Referral Completed") > historyIndex);
+    assert.match(markup, /aria-label="Current usage referrals"/);
+    for (const label of ["Waiting", "Active", "Checking", "Reward pending"]) {
+      assert.match(
+        markup,
+        new RegExp(
+          `aria-label="Details for Referral ${label}: ${label}, Timing for ${label}"`,
+          "u",
+        ),
+      );
+    }
+    assert.equal(markup.match(/>Details</gu)?.length, 4);
+  });
+
+  it("keeps compact referral guidance visible alongside existing History", async () => {
+    const { HostedAiUsageActivity } = await import(
+      "@/src/components/settings/hosted-ai-usage-activity"
+    );
+    const markup = renderToStaticMarkup(createElement(HostedAiUsageActivity, {
+      activity: {
+        credits: [{
+          addedLabel: "$5.00",
+          dateLabel: "Jul 29, 2026",
+          id: "credit_with_empty_referrals",
+          sourceLabel: "Purchased by you",
+        }],
+        missions: [{
+          destinationLabel: "your Murph",
+          id: "completed_with_empty_referrals",
+          requirementsLabel: "Invite a friend.",
+          rewardLabel: "$2.00",
+          selectedLabel: "Jul 10, 2026",
+          status: "completed",
+          statusLabel: "Completed",
+          timingLabel: "Earned Jul 16, 2026",
+          title: "Completed referral",
+        }],
+        missionsEnabled: true,
+      },
+      missionContactOption: {
+        href: "sms:+15550100001?body=mission",
+        kind: "text",
+        label: "Messages",
+      },
+    }));
+
+    assert.match(
+      markup,
+      /Earn usage by inviting friends or adding Murph to a groupchat/,
+    );
+    assert.match(markup, />History</);
+    assert.match(markup, /Completed referral/);
+    assert.match(markup, /Usage purchase/);
   });
 
   it("keeps completed history while hiding the mission handoff when new missions are disabled", async () => {

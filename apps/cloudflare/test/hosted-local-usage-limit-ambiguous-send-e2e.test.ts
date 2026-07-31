@@ -134,18 +134,29 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
     });
 
     const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
-    const usageNoticeMatcher = (request: ObservedLinqRequest): boolean => {
+    const usageNoticeTextMatcher = (request: ObservedLinqRequest): boolean => {
       const text = requireLinqStub().readObservedMessageText(request);
-      return text?.includes(usageLimitNoticeUrl) === true
+      return text !== null
+        && !text.includes(usageLimitNoticeUrl)
         && /allowance|cap|Edge|month|reset|usage/iu.test(text);
     };
+    const usageNoticeLinkMatcher = (request: ObservedLinqRequest): boolean =>
+      requireLinqStub().readObservedMessageLink(request) === usageLimitNoticeUrl;
+    const observedTextBaseline = requireLinqStub().countObservedSends(
+      replyPath,
+      usageNoticeTextMatcher,
+    );
+    const acceptedTextBaseline = requireLinqStub().countAcceptedSends(
+      replyPath,
+      usageNoticeTextMatcher,
+    );
     const observedBaseline = requireLinqStub().countObservedSends(
       replyPath,
-      usageNoticeMatcher,
+      usageNoticeLinkMatcher,
     );
     const acceptedBaseline = requireLinqStub().countAcceptedSends(
       replyPath,
-      usageNoticeMatcher,
+      usageNoticeLinkMatcher,
     );
     const firstReplyMatcher = (request: ObservedLinqRequest): boolean =>
       requireLinqStub().readObservedMessageText(request) === firstAssistantReply;
@@ -159,7 +170,7 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
 
     requireLinqStub().armNextPostAcceptLostAcknowledgment({
       expectedPath: replyPath,
-      matchRequest: usageNoticeMatcher,
+      matchRequest: usageNoticeLinkMatcher,
       responseCount: 1,
     });
     requireScenario().queueAssistantResponses([firstAssistantReply], {
@@ -190,25 +201,45 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       userId,
     });
     await requireLinqStub().waitForMatchingSendCount({
-      expectedCount: observedBaseline + 1,
+      expectedCount: observedTextBaseline + 1,
       expectedPath: replyPath,
-      matchRequest: usageNoticeMatcher,
+      matchRequest: usageNoticeTextMatcher,
+      scenario: requireScenario(),
+      userId,
+    });
+    await requireLinqStub().waitForMatchingAcceptedSendCount({
+      expectedCount: acceptedTextBaseline + 1,
+      expectedPath: replyPath,
+      matchRequest: usageNoticeTextMatcher,
+      scenario: requireScenario(),
+      userId,
+    });
+    await requireLinqStub().waitForMatchingSendCount({
+      expectedCount: observedBaseline + 2,
+      expectedPath: replyPath,
+      matchRequest: usageNoticeLinkMatcher,
       scenario: requireScenario(),
       userId,
     });
     await requireLinqStub().waitForMatchingAcceptedSendCount({
       expectedCount: acceptedBaseline + 1,
       expectedPath: replyPath,
-      matchRequest: usageNoticeMatcher,
+      matchRequest: usageNoticeLinkMatcher,
       scenario: requireScenario(),
       userId,
     });
     const firstCompletedStatus = await requireScenario().waitForHostedIdle(userId);
 
-    expect(requireLinqStub().countObservedSends(replyPath, usageNoticeMatcher)).toBe(
-      observedBaseline + 1,
+    expect(requireLinqStub().countObservedSends(replyPath, usageNoticeTextMatcher)).toBe(
+      observedTextBaseline + 1,
     );
-    expect(requireLinqStub().countAcceptedSends(replyPath, usageNoticeMatcher)).toBe(
+    expect(requireLinqStub().countAcceptedSends(replyPath, usageNoticeTextMatcher)).toBe(
+      acceptedTextBaseline + 1,
+    );
+    expect(requireLinqStub().countObservedSends(replyPath, usageNoticeLinkMatcher)).toBe(
+      observedBaseline + 2,
+    );
+    expect(requireLinqStub().countAcceptedSends(replyPath, usageNoticeLinkMatcher)).toBe(
       acceptedBaseline + 1,
     );
     expect(countAssistantResponseRequests()).toBe(providerBaseline + 1);
@@ -225,10 +256,10 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
     });
     expect(deliveriesAfterAmbiguousSend).toHaveLength(1);
     expect(deliveriesAfterAmbiguousSend[0]).toMatchObject({
-      acceptedAt: null,
-      failedAt: expect.any(Date),
-      failureCode: "linq_usage_limit_dispatch_retryable",
-      status: "failed",
+      acceptedAt: expect.any(Date),
+      failedAt: null,
+      failureCode: null,
+      status: "accepted",
       template: "ai_usage_quota",
     });
     expect(deliveriesAfterAmbiguousSend[0]?.idempotencyKey).toEqual(expect.any(String));
@@ -301,37 +332,25 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
     expect(requireLinqStub().countObservedSends(replyPath, secondReplyMatcher)).toBe(
       secondReplyBaseline,
     );
-    await requireLinqStub().waitForMatchingSendCount({
-      expectedCount: observedBaseline + 2,
-      expectedPath: replyPath,
-      matchRequest: usageNoticeMatcher,
-      scenario: requireScenario(),
-      userId,
-    });
-    expect(requireLinqStub().countAcceptedSends(replyPath, usageNoticeMatcher)).toBe(
+    expect(requireLinqStub().countObservedSends(replyPath, usageNoticeTextMatcher)).toBe(
+      observedTextBaseline + 1,
+    );
+    expect(requireLinqStub().countAcceptedSends(replyPath, usageNoticeTextMatcher)).toBe(
+      acceptedTextBaseline + 1,
+    );
+    expect(requireLinqStub().countObservedSends(replyPath, usageNoticeLinkMatcher)).toBe(
+      observedBaseline + 2,
+    );
+    expect(requireLinqStub().countAcceptedSends(replyPath, usageNoticeLinkMatcher)).toBe(
       acceptedBaseline + 1,
     );
     expect(countAssistantResponseRequests()).toBe(providerBaseline + 1);
 
-    const blockedDeliveries = await vi.waitFor(async () => {
-      const deliveries = await listHostedLinqDeliveriesForTest({
-        environment: requireScenario().runtimeEnv,
-        template: "ai_usage_quota",
-      });
-      expect(deliveries).toHaveLength(1);
-      expect(deliveries[0]).toMatchObject({
-        acceptedAt: expect.any(Date),
-        failedAt: null,
-        failureCode: null,
-        idempotencyKey: deliveriesAfterAmbiguousSend[0]?.idempotencyKey,
-        status: "accepted",
-        template: "ai_usage_quota",
-      });
-      return deliveries;
-    }, {
-      interval: 250,
-      timeout: 30_000,
+    const blockedDeliveries = await listHostedLinqDeliveriesForTest({
+      environment: requireScenario().runtimeEnv,
+      template: "ai_usage_quota",
     });
+    expect(blockedDeliveries).toEqual(deliveriesAfterAmbiguousSend);
 
     const grant = await grantHostedUsageCreditForTest({
       environment: requireScenario().runtimeEnv,
@@ -375,10 +394,16 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       secondReplyBaseline + 1,
     );
     expect(countAssistantResponseRequests()).toBe(providerBaseline + 2);
-    expect(requireLinqStub().countObservedSends(replyPath, usageNoticeMatcher)).toBe(
+    expect(requireLinqStub().countObservedSends(replyPath, usageNoticeTextMatcher)).toBe(
+      observedTextBaseline + 1,
+    );
+    expect(requireLinqStub().countAcceptedSends(replyPath, usageNoticeTextMatcher)).toBe(
+      acceptedTextBaseline + 1,
+    );
+    expect(requireLinqStub().countObservedSends(replyPath, usageNoticeLinkMatcher)).toBe(
       observedBaseline + 2,
     );
-    expect(requireLinqStub().countAcceptedSends(replyPath, usageNoticeMatcher)).toBe(
+    expect(requireLinqStub().countAcceptedSends(replyPath, usageNoticeLinkMatcher)).toBe(
       acceptedBaseline + 1,
     );
     await expect(listHostedLinqDeliveriesForTest({

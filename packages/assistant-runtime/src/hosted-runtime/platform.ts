@@ -328,6 +328,7 @@ export interface HostedRuntimeLinqDeliveryOutcomeRequest {
   intentId?: string | null;
   lineLookupKey?: string | null;
   providerMessageId?: string | null;
+  providerMessageIds?: string[] | null;
   providerTarget?: string | null;
   providerThreadId?: string | null;
   target: string | null;
@@ -360,6 +361,8 @@ type HostedRuntimeEffectsPortBase = {
     request: HostedRuntimeTelegramGetFileRequest,
     context?: { signal?: AbortSignal | null },
   ): Promise<HostedRuntimeTelegramFile | null>;
+  deleteEnvironmentVoice?(audioKey: string): Promise<void>;
+  readEnvironmentVoice?(audioKey: string): Promise<Uint8Array | null>;
   deleteMealPhoto?(mealPhotoKey: string): Promise<void>;
   readMealPhoto?(mealPhotoKey: string): Promise<Uint8Array | null>;
   readRawEmailMessage(rawMessageKey: string): Promise<Uint8Array | null>;

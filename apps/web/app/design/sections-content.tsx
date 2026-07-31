@@ -39,6 +39,7 @@ import {
   PersonalUsageCreditOwnerStudy,
 } from "./group-usage-funding-study";
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
+import { EnvironmentProgressStudy } from "./environment-progress-study";
 
 function StudySection({
   children,
@@ -143,6 +144,12 @@ export function SectionsContent() {
 
       <Separator />
 
+      <StudySection title="Environment progressive voice capture">
+        <EnvironmentProgressStudy />
+      </StudySection>
+
+      <Separator />
+
       <StudySection title="Homepage experiment flow">
         <HowItWorksSection />
       </StudySection>
@@ -231,7 +238,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Group member plan">
+      <StudySection title="Core member plan">
         <GroupMemberPlanStudy />
       </StudySection>
 
@@ -267,7 +274,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Overall AI usage, credits, and missions">
+      <StudySection title="Overall AI usage, purchase reset, Family owner action, credits, and referrals">
         <PersonalUsageCreditOwnerStudy />
       </StudySection>
 
