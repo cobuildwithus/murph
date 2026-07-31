@@ -1877,7 +1877,10 @@ function assertHostedPrivyPhoneTransferUnusedStripeSurface(input: {
     || input.subscription.cancel_at !== null
     || input.subscription.cancel_at_period_end !== false
     || input.subscription.pending_invoice_item_interval !== null
-    || input.subscription.pending_setup_intent !== null
+    // Stripe itself attaches a pending SetupIntent to every
+    // automatic-collection trial without a payment method, so its presence
+    // is provider scaffolding. A setup intent that ever succeeded sets the
+    // payment method checked above, which stays fail-closed.
     || input.subscription.pending_update !== null
     || input.subscription.pause_collection !== null
     || input.subscription.schedule !== null
