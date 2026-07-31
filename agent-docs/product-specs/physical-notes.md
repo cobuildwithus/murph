@@ -46,6 +46,11 @@ complimentary offer code, configured provider cost, pricing version, and
 timestamps. It never stores the postal address, image URL, artwork, prompt, or
 note text.
 
+A new send validates that its private artwork capability has enough lifetime
+before reserving either the complimentary claim or paid capacity. Accepted
+replays resolve from the durable row even after that temporary capability
+expires; an existing uncertain send remains pending rather than being rewritten.
+
 The row is inserted before the provider call. `memberId + requestKey` makes exact
 replay idempotent, while `memberId + complimentaryOfferCode` atomically admits
 one complimentary note per direct member or synthetic group member. A definite
@@ -80,9 +85,14 @@ configuration.
 
 One explicit user-authored send request authorizes one note. In a group, any
 current activated participant may originate the request; the group runtime owns
-the benefit and usage. The tool remains bounded to one domestic recipient and
-rejects bulk, international, threatening, harassing, fraudulent, impersonating,
-doxxing, or illegal mail through product policy and the constrained tool shape.
+the benefit and usage. The service uses the repository's canonical
+participant-aware thread-container access derivation, so an inactive owner does
+not block an otherwise authorized active participant. It does not add a
+physical-note-specific entitlement path.
+
+The tool remains bounded to one domestic recipient and rejects bulk,
+international, threatening, harassing, fraudulent, impersonating, doxxing, or
+illegal mail through product policy and the constrained tool shape.
 
 `accepted` means Lob accepted the mailpiece for printing; it does not mean USPS
 delivered it. An accepted physical mailpiece cannot be recalled by deleting the
