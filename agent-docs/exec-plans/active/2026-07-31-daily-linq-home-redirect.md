@@ -63,6 +63,15 @@ Updated: 2026-07-31
   home line, and UTC day when that member sends an inbound in the wrong chat.
 - Reuse the existing deterministic delivery effect instead of adding persisted
   reminder state.
+- Accepted the preliminary specialist's two related findings: continue-only
+  copy could imply that the unprocessed inbound moved between threads, and the
+  original broad keyword assertion admitted nouns and inflections as false
+  positives. Rendering now adds a direct no-transfer/resend sentence whenever
+  an authored variant lacks an explicit send/resend construction, and the
+  focused assertion matches only that concrete action.
+- The preliminary pass returned no patch artifact. The first final ReviewGPT
+  attempt failed during draft staging and produced no review verdict or final
+  round baseline; final round 1 must start fresh on the corrected pushed head.
 
 ## Verification
 
@@ -80,5 +89,21 @@ Updated: 2026-07-31
   - PASS: `pnpm docs:drift` and `git diff --check`.
   - CONFIRMED: 104 authored redirect variants; rendered uniqueness and required
     home number/action language are covered by the focused message tests.
-- Pending: exact-head CI, preliminary product-experience and coverage lenses,
-  and final ReviewGPT gate for the idempotency/external-egress change.
+- Corrected-head results after specialist remediation:
+  - PASS: focused transport and user-facing-message Vitest run (84 tests).
+  - PASS: focused Linq dispatch redirect scenarios (4 tests), including proof
+    that wrong-line input is not mailbox-enqueued and the provider copy gives
+    an explicit resend instruction.
+  - PASS: `pnpm --filter @murphai/hosted-web typecheck` and `git diff --check`.
+- Corrected-head product-purpose verdict: PASS. The irreducible purpose is to
+  prevent a recognized member from waiting on an unprocessed wrong-line
+  message. The smallest complete experience remains one immediate, link-free
+  redirect in that chat with the current home number and an explicit resend
+  action. The corrected renderer makes the no-transfer fact truthful across
+  all 104 variants without adding a screen, choice, scheduler, or continuation.
+  No material product-experience evidence gap remains: the dispatch scenario
+  proves the input is not enqueued and the reply is actionable, while existing
+  provider-retry coverage owns delivery recovery.
+- Pending: corrected exact-head CI and final ReviewGPT gate for the
+  idempotency/external-egress change. The one substantive preliminary pass is
+  complete and its accepted findings are resolved locally.

@@ -8,6 +8,8 @@ import {
 
 const USER_FACING_MESSAGE_MIN_VARIANT_COUNT = 20;
 const HOME_REDIRECT_MIN_VARIANT_COUNT = 100;
+const HOME_REDIRECT_EXPLICIT_RESEND_PATTERN =
+  /\b(?:resend (?:(?:the|this|your)(?: last)? message|what you just wrote)|send (?:(?:the|this|your)(?: last)? message|that)(?: again)?|that message can't move between threads\. resend it to the number above)\b/iu;
 
 /**
  * The thread notice has room for personality, but every variant still has to
@@ -139,11 +141,9 @@ describe("user-facing message variants", () => {
     );
   });
 
-  it("tells the member to move every wrong-line conversation", () => {
+  it("tells the member to resend every unprocessed wrong-line message", () => {
     for (const text of collectRenderedTexts("linq.home_redirect")) {
-      expect(text).toMatch(
-        /continue|keep|message|move|resend|save|send|shift|switch|text|use/iu,
-      );
+      expect(text).toMatch(HOME_REDIRECT_EXPLICIT_RESEND_PATTERN);
       expect(text).not.toMatch(/https?:\/\//iu);
     }
   });

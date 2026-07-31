@@ -1,5 +1,9 @@
 const USER_FACING_MESSAGE_MIN_VARIANT_COUNT = 20
 const HOME_REDIRECT_MESSAGE_MIN_VARIANT_COUNT = 100
+const HOME_REDIRECT_EXPLICIT_RESEND_PATTERN =
+  /\b(?:resend (?:(?:the|this|your)(?: last)? message|what you just wrote)|send (?:(?:the|this|your)(?: last)? message|that)(?: again)?)\b/iu
+const HOME_REDIRECT_RESEND_FALLBACK =
+  "That message can't move between threads. Resend it to the number above."
 
 export const HOSTED_SPONSORED_GROUP_PAUSE_MESSAGE =
   "Murph is paused in this chat right now."
@@ -384,7 +388,7 @@ Sound good?`,
 {homeRecipientPhone}`,
     `Please resend what you just wrote to your main Murph line:
 {homeRecipientPhone}`,
-    `I can see this message, but I can only continue with you here:
+    `I can't carry messages from this thread to your main Murph line:
 {homeRecipientPhone}`,
     `I'm ready for your message on the Murph line assigned to you:
 {homeRecipientPhone}`,
@@ -494,7 +498,7 @@ Sound good?`,
 {homeRecipientPhone}`,
     `I can't carry this message into your active thread. Resend it here:
 {homeRecipientPhone}`,
-    `Your connected Murph conversation uses this number:
+    `This isn't the number connected to your Murph conversation. Use:
 {homeRecipientPhone}`,
     `Head to your main Murph line and send that message again:
 {homeRecipientPhone}`,
@@ -504,11 +508,11 @@ Sound good?`,
 {homeRecipientPhone}`,
     `Use this number to keep talking with Murph:
 {homeRecipientPhone}`,
-    `This thread reached me, but your conversation continues here:
+    `This thread reached me, but it can't carry your message to your main line:
 {homeRecipientPhone}`,
     `Put your next message on the Murph line connected to you:
 {homeRecipientPhone}`,
-    `The live thread for your Murph messages is on:
+    `Your live Murph thread is on a different number:
 {homeRecipientPhone}`,
     `I'll continue once you resend your message to your home line:
 {homeRecipientPhone}`,
@@ -814,11 +818,15 @@ function renderUserFacingMessageAtIndex<K extends UserFacingMessageTemplateKey>(
   }
 
   const rendered = renderUserFacingMessageTemplate(template, input.context)
+  const completeRendered = input.key === "linq.home_redirect"
+    && !HOME_REDIRECT_EXPLICIT_RESEND_PATTERN.test(rendered)
+    ? `${rendered}\n${HOME_REDIRECT_RESEND_FALLBACK}`
+    : rendered
 
   return {
     text: USAGE_LIMIT_PERCENTAGE_TEMPLATE_KEYS.has(input.key)
-      ? addUsageLimitPercentage(rendered)
-      : rendered,
+      ? addUsageLimitPercentage(completeRendered)
+      : completeRendered,
   }
 }
 
