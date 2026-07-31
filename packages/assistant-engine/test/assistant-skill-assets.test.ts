@@ -233,22 +233,27 @@ describe('assistant skill assets', () => {
     )
   })
 
-  managedGroupSkillIt('keeps private and shared activity interpretation in their owners', async () => {
-    const load = async (slug: string) => {
-      const skill = ASSISTANT_SKILLS.find((candidate) => candidate.slug === slug)
-      if (!skill) throw new Error(`Missing registered skill: ${slug}`)
-      return (await readSkillFile(skill)).replace(/\s+/gu, ' ')
-    }
-    const [daily, shared] = await Promise.all([
-      load('daily-activity'),
-      load('group-chat'),
-    ])
+  it('keeps private activity interpretation in its owner', async () => {
+    const dailySkill = ASSISTANT_SKILLS.find(
+      (candidate) => candidate.slug === 'daily-activity',
+    )
+    if (!dailySkill) throw new Error('Missing registered skill: daily-activity')
+    const daily = (await readSkillFile(dailySkill)).replace(/\s+/gu, ' ')
 
     expect(daily).toMatch(
       /wearables day <date>.+wearables activity list.+canonical workout-day rollup/u,
     )
     expect(daily).toContain('current-local-day totals as provisional and say "so far."')
     expect(daily).toContain('not proof of failed provider sync or import')
+  })
+
+  managedGroupSkillIt('keeps shared activity interpretation in its owner', async () => {
+    const groupChatSkill = ASSISTANT_SKILLS.find(
+      (candidate) => candidate.slug === 'group-chat',
+    )
+    if (!groupChatSkill) throw new Error('Missing registered skill: group-chat')
+    const shared = (await readSkillFile(groupChatSkill)).replace(/\s+/gu, ' ')
+
     expect(shared).toContain('its cause is unverified')
     expect(shared).toContain('current-local-day value as provisional: say "so far"')
   })

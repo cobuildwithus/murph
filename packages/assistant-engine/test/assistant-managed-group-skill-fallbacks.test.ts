@@ -30,14 +30,20 @@ describe("managed hosted group skill boundary", () => {
 
       expect(raw).toContain(`name: ${slug}`);
       expect(normalized).toContain(
-        "private `cobuildwithus/murph-cloud` repository",
+        "For an explicit request that depends on this managed feature, perform no effect and state one plain capability limitation.",
       );
       expect(normalized).toContain(PUBLIC_FALLBACK_MARKER);
+      expect(normalized).toContain(
+        "Silence remains available only when the resident conversational-floor rules independently make the beat human-owned or unaddressed.",
+      );
+      expect(raw).not.toContain("cobuildwithus/");
+      expect(raw).not.toContain("trusted hosted build");
+      expect(raw).not.toContain("materializ");
       expect(raw.length).toBeLessThan(2_000);
     }
   });
 
-  it("uses exactly the intended managed group skill set", () => {
+  it("keeps the exact managed group fallback set registered at stable slugs", () => {
     expect([...MANAGED_GROUP_SKILL_SLUGS].sort()).toEqual([
       "group-challenge",
       "group-challenge-scorecards",
@@ -45,6 +51,13 @@ describe("managed hosted group skill boundary", () => {
       "group-newsletter",
       "groupchat-comedy",
     ]);
+
+    const registeredSlugs = new Set(
+      ASSISTANT_SKILLS.map((skill) => skill.slug),
+    );
+    for (const slug of MANAGED_GROUP_SKILL_SLUGS) {
+      expect(registeredSlugs.has(slug), slug).toBe(true);
+    }
   });
 
   it("keeps public routing metadata for the private-owned challenge skills", () => {
@@ -83,7 +96,7 @@ describe("managed hosted group skill boundary", () => {
       "Do not create, score, settle, or announce a challenge in this build.",
     );
     expect(normalized).toContain(
-      "managed group challenges are unavailable rather than approximating them",
+      "perform no effect and state one plain capability limitation",
     );
     expect(normalized).not.toContain(
       "unless the public runtime contracts and current evidence support it",
