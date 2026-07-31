@@ -84,3 +84,5 @@ jobs:
 
       - name: Typecheck
         run: pnpm --dir apps/web typecheck
+
+# Re-trigger after the workflow exists on the branch.
