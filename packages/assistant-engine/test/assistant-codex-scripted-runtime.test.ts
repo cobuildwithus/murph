@@ -1847,7 +1847,8 @@ function buildScriptedHostedSystemPrompt(
     hostedRuntime: true,
     modelBehaviorProfile: 'gpt5-agentic',
     onboardingGuidance: false,
-    turnTrigger: 'manual-ask',
+    ordinaryInboundTurn: true,
+    turnTrigger: 'automation-auto-reply',
   })
 }
 

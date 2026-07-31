@@ -49,7 +49,10 @@ incorporates a newly completed result when it is still relevant.
 
 ## Verification log
 
-- Focused assistant-engine prompt suite: 71 tests passed.
+- Focused assistant-engine prompt and real scripted App Server suites: 97 tests
+  passed. The direct and group protocol cases prove the first root reply
+  finishes before the delayed child, then the next root turn receives and uses
+  that child's `FINAL_ANSWER` without calling `wait_agent`.
 - Focused assistant-runtime Codex config suite: 42 tests passed and 2 opt-in
   tests skipped.
 - `@murphai/assistant-engine` and `@murphai/assistant-runtime` typechecks
@@ -59,15 +62,23 @@ incorporates a newly completed result when it is still relevant.
   completed child notification into a later parent turn without
   `wait_agent`; its MultiAgent V2 completion test delivers the child payload
   as a parent-thread `FINAL_ANSWER` agent message.
+- Preliminary ReviewGPT returned three findings. The implementation now limits
+  rechecks to ordinary inbound turns, names terminal and at-most-once handling,
+  excludes scheduled and delivery-only turns, keeps the system prompt as the
+  sole lifecycle-policy owner, and includes the real cross-turn direct/group
+  App Server regression proof. Production `automation-auto-reply` turns are
+  explicitly covered because they are the normal hosted inbound reply path;
+  the existing turn planner supplies one positive ordinary-inbound fact so
+  output-only continuations remain excluded without another lifecycle owner.
 - A temporary, removed real Codex App Server capture measured complete first
   provider-visible `input`, tools, tool choice, parallel-tool flag, and text
   configuration for identical synthetic direct and group fixtures. With
   `gpt-5.6-terra`, low reasoning, MultiAgent V2, and `gpt-tokenizer` 3.4.0
   `o200k_harmony`, the current PR base and rebased head measure 23,787 tokens /
-  109,677 bytes and 23,913 / 110,246 for direct input (+126, +0.530%; +569
-  bytes), and 19,521 / 90,106 and 19,647 / 90,675 for group input (+126,
-  +0.645%; +569 bytes). Local paths were normalized; transport-only model,
+  109,677 bytes and 23,942 / 110,442 for direct input (+155, +0.652%; +765
+  bytes), and 19,521 / 90,106 and 19,676 / 90,871 for group input (+155,
+  +0.794%; +765 bytes). Local paths were normalized; transport-only model,
   stream, reasoning, storage, service tier, and client metadata were excluded
-  identically. The delta is entirely the new assembled late-child instruction
-  and Codex-generated multi-agent usage guidance; tool definitions and schemas
-  are unchanged.
+  identically. The delta is entirely the new assembled late-child instruction;
+  Codex-generated multi-agent usage guidance, tool definitions, and schemas are
+  unchanged.

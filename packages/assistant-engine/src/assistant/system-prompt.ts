@@ -65,6 +65,7 @@ export interface AssistantSystemPromptInput {
   murphProductBaseUrl?: string | null;
   onboardingGuidance: boolean;
   modelBehaviorProfile: AssistantModelBehaviorProfile;
+  ordinaryInboundTurn?: boolean;
   scheduledOccurrenceAt?: string | null;
   turnTrigger?: AssistantTurnTrigger | null;
 }
@@ -846,7 +847,7 @@ function buildDynamicTurnContextPrompt(input: AssistantSystemPromptInput): strin
     buildAssistantCurrentDateLineText(input.currentLocalDate),
     input.hostedRuntime === true
       && audienceVerified
-      && isOrdinaryInboundAssistantTurn(input)
+      && input.ordinaryInboundTurn === true
       ? buildAssistantLateChildResultGuidanceText()
       : null,
     ...(audienceVerified
@@ -1252,14 +1253,7 @@ function buildAssistantLateChildResultGuidanceText(): string {
 - On every later ordinary inbound turn, revisit each child you spawned that was still generating when you sent the spawning reply, unless it has already reached a stopping condition below.
 - Use a newly completed result at most once and only when it is still relevant. Stop revisiting that child after using its result, or after it fails, is cancelled, or loses relevance.
 - If it is still generating or no completion is present in the native parent-thread context, do not call \`wait_agent\`, wait, or block the reply. Handle the current request and check again on the next ordinary inbound turn.
-- Never perform this recheck during a scheduled, automation, maintenance, system-notification, or output-only turn.`;
-}
-
-function isOrdinaryInboundAssistantTurn(
-  input: AssistantSystemPromptInput,
-): boolean {
-  return input.scheduledOccurrenceAt == null
-    && (input.turnTrigger == null || input.turnTrigger === "manual-ask");
+- Never perform this recheck during a scheduled automation, maintenance, system-notification, or output-only turn.`;
 }
 
 function buildAssistantMessageReactionGuidanceText(

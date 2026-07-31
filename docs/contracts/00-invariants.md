@@ -116,7 +116,7 @@ it has been explicitly elevated to a cross-cutting invariant.
   completed relevant result is incorporated at most once. Use, failure,
   cancellation, or loss of relevance ends that child's rechecks; an unfinished
   child never blocks the current reply and is checked again on the next
-  ordinary inbound turn. Scheduled, automation, maintenance,
+  ordinary inbound turn. Scheduled automation, maintenance,
   system-notification, and output-only turns never perform this recheck.
 - Before a hosted workspace snapshot, Murph waits for every exact resident child
   and checks every touched root and resident child for background terminals. A

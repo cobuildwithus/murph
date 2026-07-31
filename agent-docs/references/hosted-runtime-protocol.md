@@ -160,7 +160,7 @@ If the root replies while a child is still generating, every later ordinary
 inbound root turn checks again for completion. It incorporates a newly
 completed relevant result at most once; use, failure, cancellation, or loss of
 relevance ends that child's rechecks. Otherwise it replies without waiting and
-checks the unfinished child again on the next ordinary inbound turn. Scheduled,
+checks the unfinished child again on the next ordinary inbound turn. Scheduled
 automation, maintenance, system-notification, and output-only turns never
 perform this recheck. The recheck uses Codex's native parent-thread completion
 context rather than `wait_agent` and creates no queue, wake, or automatic

@@ -1155,7 +1155,7 @@ every later ordinary inbound root turn checks Codex's native parent-thread
 completion context again. It incorporates a newly completed relevant result at
 most once and never waits or calls `wait_agent` for an unfinished child before
 replying. Use, failure, cancellation, or loss of relevance stops rechecks for
-that child. Scheduled, automation, maintenance, system-notification, and
+that child. Scheduled automation, maintenance, system-notification, and
 output-only turns never recheck. This adds no queue, wake, or automatic
 follow-up owner. Before publishing a workspace snapshot, the runtime waits for
 every exact resident child and checks every touched root and child for
