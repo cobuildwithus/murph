@@ -76,7 +76,10 @@ export function resolveHostedMemberMessagingState(input: {
     !hasTelegram && normalizeMessagingIdentity(input.routing?.telegramUserId) !== null;
 
   return {
-    hasDirectMessagingChannel: hasEmail || hasLinq || hasTelegram,
+    // Preserve the historical chat-specific meaning used by the dashboard.
+    // Verified email satisfies onboarding readiness below, but it does not
+    // imply that a Linq or Telegram conversation thread already exists.
+    hasDirectMessagingChannel: hasLinq || hasTelegram,
     hasEmail,
     hasLinq,
     hasPhone,
@@ -99,7 +102,9 @@ export function isHostedMemberMessagingSetupRequired(input: {
   // also completes setup even before its first inbound thread exists: the
   // member has told us how to reach them, while delivery remains an independent
   // concern surfaced as telegramAwaitingInbound.
-  return !messaging.hasDirectMessagingChannel && !messaging.telegramAwaitingInbound;
+  return !messaging.hasEmail
+    && !messaging.hasDirectMessagingChannel
+    && !messaging.telegramAwaitingInbound;
 }
 
 export function resolveHostedMemberChannels(input: {
