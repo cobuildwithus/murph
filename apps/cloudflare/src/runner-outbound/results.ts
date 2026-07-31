@@ -23,6 +23,13 @@ import {
   HOSTED_MEAL_PHOTO_CONTENT_TYPE,
 } from "../meal-photo-store.ts";
 import {
+  createHostedEnvironmentVoiceStore,
+  deleteHostedEnvironmentVoiceObject,
+} from "../environment-voice-store.ts";
+import {
+  matchHostedExecutionRunnerEnvironmentVoicePath,
+} from "../runner-environment-voice-route.ts";
+import {
   matchHostedExecutionRunnerMealPhotoPath,
 } from "../runner-meal-photo-route.ts";
 import { asWorkerStringEnvironment } from "../worker-contracts.ts";
@@ -110,6 +117,21 @@ export async function handleRunnerResultsRequest(input: {
       userId: input.userId,
     });
   }
+  const environmentVoiceKey =
+    matchHostedExecutionRunnerEnvironmentVoicePath(input.url.pathname);
+  if (environmentVoiceKey) {
+    if (input.request.method !== "GET" && input.request.method !== "DELETE") {
+      return methodNotAllowed();
+    }
+    return handleRunnerEnvironmentVoiceRequest({
+      audioKey: environmentVoiceKey,
+      bucket: input.env.BUNDLES,
+      env: input.env,
+      environment: input.environment,
+      request: input.request,
+      userId: input.userId,
+    });
+  }
 
   const messageMatch = /^\/messages\/(?<rawMessageKey>[^/]+)$/u.exec(input.url.pathname);
   if (messageMatch?.groups) {
@@ -175,6 +197,55 @@ async function handleRunnerMealPhotoRequest(input: {
     headers: {
       "cache-control": "no-store",
       "content-type": HOSTED_MEAL_PHOTO_CONTENT_TYPE,
+      "x-content-type-options": "nosniff",
+    },
+    status: 200,
+  });
+}
+
+async function handleRunnerEnvironmentVoiceRequest(input: {
+  audioKey: string;
+  bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
+  env: RunnerOutboundEnvironmentSource;
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  request: Request;
+  userId: string;
+}): Promise<Response> {
+  if (!await requestOwnsRuntimeWriteFenceWrite(input)) {
+    return unauthorized();
+  }
+  if (input.request.method === "DELETE") {
+    await deleteHostedEnvironmentVoiceObject({
+      audioKey: input.audioKey,
+      bucket: input.bucket,
+      userId: input.userId,
+    });
+    return new Response(null, { status: 204 });
+  }
+
+  const crypto = await resolveRunnerOutboundUserCryptoContext({
+    bucket: input.bucket,
+    domain: "ingress",
+    env: input.env,
+    environment: input.environment,
+    userId: input.userId,
+  });
+  const store = createHostedEnvironmentVoiceStore({
+    bucket: input.bucket,
+    keysById: crypto.keysById,
+    resolveRootKeyById: crypto.resolveKeyById,
+    rootKey: crypto.rootKey,
+    rootKeyId: crypto.rootKeyId,
+    userId: input.userId,
+  });
+  const payload = await store.readAudio(input.audioKey);
+  if (!payload) {
+    return notFound();
+  }
+  return new Response(copyBytesToArrayBuffer(payload), {
+    headers: {
+      "cache-control": "no-store",
+      "content-type": "application/octet-stream",
       "x-content-type-options": "nosniff",
     },
     status: 200,

@@ -132,6 +132,28 @@ export async function hostedMealPhotoUserPrefix(input: {
   return `hosted-meal-photos/images/${resolveHostedStorageNamespaceId(input)}/`;
 }
 
+export async function hostedEnvironmentVoiceObjectKey(input: {
+  audioKey: string;
+  storageNamespaceId?: string | null;
+  userId: string;
+}): Promise<string> {
+  const userSegment = resolveHostedStorageNamespaceId(input);
+  const audioKey = requireHostedEnvironmentVoiceKey(input.audioKey);
+  const audioSegment = deriveHostedStoragePathId({
+    length: 48,
+    scope: "environment-voice-path",
+    value: `environment-voice:${userSegment}:${audioKey}`,
+  });
+  return `hosted-environment-voice/audio/${userSegment}/${audioSegment}.audio.enc`;
+}
+
+export async function hostedEnvironmentVoiceUserPrefix(input: {
+  storageNamespaceId?: string | null;
+  userId: string;
+}): Promise<string> {
+  return `hosted-environment-voice/audio/${resolveHostedStorageNamespaceId(input)}/`;
+}
+
 export async function hostedPrivateMediaObjectKey(input: {
   sha256: string;
   storageNamespaceId?: string | null;
@@ -251,6 +273,13 @@ function requireHostedMealPhotoKey(value: string): string {
     throw new TypeError("Hosted meal photo key is invalid.");
   }
   return normalized;
+}
+
+function requireHostedEnvironmentVoiceKey(value: string): string {
+  if (!/^[a-f0-9]{40}$/u.test(value)) {
+    throw new TypeError("Hosted environment voice key is invalid.");
+  }
+  return value;
 }
 
 function requireHostedPrivateMediaSha256(value: string): string {
