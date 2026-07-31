@@ -147,6 +147,19 @@ jobs:
               token_success_with_envelope,
           )
 
+          selected_columns = """        active_provider_egress_token_hash,
+                active_runner_container_name,"""
+          selected_columns_with_envelope = """        active_provider_egress_token_hash,
+                active_custom_inference_envelope,
+                active_runner_container_name,"""
+          patch_section(
+              "apps/cloudflare/src/user-runner/runner-state-store.ts",
+              "  private selectMetaRowSync(): RunnerMetaRow | null {",
+              "  private insertMetaRowSync(meta: RunnerMetaRow): void {",
+              selected_columns,
+              selected_columns_with_envelope,
+          )
+
           projected_success = """    return {
                 attemptId: validation.attemptId,
                 leaseGeneration: validation.leaseGeneration,
