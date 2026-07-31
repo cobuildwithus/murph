@@ -111,6 +111,35 @@ test("renders separate active and paused consent controls", async () => {
   expect(paused.container.textContent).toContain("Use Murph again");
 });
 
+test("renders legacy missing and unavailable consent states without treating either as withdrawn", async () => {
+  const notEnabled = await renderClientComponent(
+    createElement(HostedHealthDataConsentSettings, {
+      authenticated: true,
+      initialStatus: createConsentStatus("missing"),
+    }),
+    { requireButton: false },
+  );
+  cleanupRender = notEnabled.cleanup;
+
+  expect(notEnabled.container.textContent).toContain("Not enabled");
+  expect(findButton(notEnabled.container, "Review").disabled).toBe(false);
+
+  await cleanupRender();
+  cleanupRender = null;
+
+  const unavailable = await renderClientComponent(
+    createElement(HostedHealthDataConsentSettings, {
+      authenticated: true,
+      initialStatus: null,
+    }),
+    { requireButton: false },
+  );
+  cleanupRender = unavailable.cleanup;
+
+  expect(unavailable.container.textContent).toContain("Status unavailable");
+  expect(findButton(unavailable.container, "Review").disabled).toBe(true);
+});
+
 test("confirms that withdrawal preserves the account, data, and subscription", async () => {
   const rendered = await renderClientComponent(
     createElement(HostedHealthDataConsentSettings, {
@@ -133,6 +162,30 @@ test("confirms that withdrawal preserves the account, data, and subscription", a
   expect(rendered.container.textContent).toContain(
     "Your account, existing data, and subscription will not be deleted.",
   );
+});
+
+test("keeps the withdrawal dialog visibly pending while revocation is in flight", async () => {
+  mocks.requestHostedOnboardingJson.mockReturnValue(new Promise(() => {}));
+  const rendered = await renderClientComponent(
+    createElement(HostedHealthDataConsentSettings, {
+      authenticated: true,
+      initialStatus: createConsentStatus("granted"),
+    }),
+    { requireButton: false },
+  );
+  cleanupRender = rendered.cleanup;
+
+  await act(async () => {
+    findButton(rendered.container, "Withdraw consent")
+      .dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+  await act(async () => {
+    findButton(rendered.container, "Withdraw consent", 1)
+      .dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  expect(findButton(rendered.container, "Withdrawing...").disabled).toBe(true);
+  expect(findButton(rendered.container, "Cancel").disabled).toBe(true);
 });
 
 test("withdraws through the health-data route and invalidates the browser vault", async () => {
@@ -211,7 +264,7 @@ function findButton(
 }
 
 function createConsentStatus(
-  healthStatus: "granted" | "revoked",
+  healthStatus: "granted" | "missing" | "revoked",
 ): HostedConsentStatus {
   const healthDocument = {
     href: "/consumer-health-data-privacy-policy",
@@ -263,18 +316,20 @@ function createConsentStatus(
       {
         current: healthGranted,
         documents: [healthDocument],
-        grant: {
-          documentVersions: {
-            "consumer-health-data-notice": "2026-07-23",
-          },
-          grantedAt: "2026-07-23T12:00:00.000Z",
-          lastEventId: null,
-          revokedAt: healthGranted ? null : "2026-07-30T12:00:00.000Z",
-          scope: "launch.health-data",
-          source: "test",
-          status: healthStatus,
-          updatedAt: "2026-07-30T12:00:00.000Z",
-        },
+        grant: healthStatus === "missing"
+          ? null
+          : {
+              documentVersions: {
+                "consumer-health-data-notice": "2026-07-23",
+              },
+              grantedAt: "2026-07-23T12:00:00.000Z",
+              lastEventId: null,
+              revokedAt: healthGranted ? null : "2026-07-30T12:00:00.000Z",
+              scope: "launch.health-data",
+              source: "test",
+              status: healthStatus,
+              updatedAt: "2026-07-30T12:00:00.000Z",
+            },
         granted: healthGranted,
         label: "Health data notice and processing authorization",
         missingDocuments: healthGranted ? [] : [healthDocument],

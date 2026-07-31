@@ -49,6 +49,8 @@ const DESIGN_HEALTH_DOCUMENTS: HostedConsentDocumentSnapshot[] = [
 
 export const DESIGN_ACTIVE_HEALTH_DATA_CONSENT_STATUS =
   createDesignHealthDataConsentStatus("granted");
+export const DESIGN_NOT_ENABLED_HEALTH_DATA_CONSENT_STATUS =
+  createDesignHealthDataConsentStatus("missing");
 export const DESIGN_WITHDRAWN_HEALTH_DATA_CONSENT_STATUS =
   createDesignHealthDataConsentStatus("revoked");
 
@@ -70,6 +72,15 @@ export function HealthDataConsentControlStudy() {
           authenticated
           initialStatus={DESIGN_WITHDRAWN_HEALTH_DATA_CONSENT_STATUS}
         />
+      </ConsentStateFrame>
+      <ConsentStateFrame label="Not enabled">
+        <HostedHealthDataConsentSettings
+          authenticated
+          initialStatus={DESIGN_NOT_ENABLED_HEALTH_DATA_CONSENT_STATUS}
+        />
+      </ConsentStateFrame>
+      <ConsentStateFrame label="Status unavailable">
+        <HostedHealthDataConsentSettings authenticated initialStatus={null} />
       </ConsentStateFrame>
     </div>
   );
@@ -149,14 +160,16 @@ function ConsentStateFrame({
 }
 
 function createDesignHealthDataConsentStatus(
-  healthStatus: "granted" | "revoked",
+  healthStatus: "granted" | "missing" | "revoked",
 ): HostedConsentStatus {
   const legalGrant = buildDesignGrant("launch.legal", "granted", DESIGN_LEGAL_DOCUMENTS);
-  const healthGrant = buildDesignGrant(
-    "launch.health-data",
-    healthStatus,
-    DESIGN_HEALTH_DOCUMENTS,
-  );
+  const healthGrant = healthStatus === "missing"
+    ? null
+    : buildDesignGrant(
+        "launch.health-data",
+        healthStatus,
+        DESIGN_HEALTH_DOCUMENTS,
+      );
   const healthGranted = healthStatus === "granted";
 
   return {
