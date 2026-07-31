@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   createSdkSignInSession: vi.fn(),
   getPrisma: vi.fn(),
   readOptionalJsonObject: vi.fn(),
-  requireHostedCompanionMemberAccessFromRequest: vi.fn(),
+  requireHostedCompanionMemberIdFromRequest: vi.fn(),
   validateCompanionSignInRequestBody: vi.fn(),
 }));
 
@@ -29,8 +29,8 @@ vi.mock("@/src/lib/http", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/companion-member-access", () => ({
-  requireHostedCompanionMemberAccessFromRequest:
-    mocks.requireHostedCompanionMemberAccessFromRequest,
+  requireHostedCompanionMemberIdFromRequest:
+    mocks.requireHostedCompanionMemberIdFromRequest,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -75,9 +75,9 @@ describe("native companion signup token route", () => {
       timeZone: "America/Denver",
     });
     mocks.validateCompanionSignInRequestBody.mockReturnValue("connect");
-    mocks.requireHostedCompanionMemberAccessFromRequest.mockResolvedValue({
-      id: "member_native",
-    });
+    mocks.requireHostedCompanionMemberIdFromRequest.mockResolvedValue(
+      "member_native",
+    );
     mocks.createSdkSignInSession.mockResolvedValue({
       environment: "sandbox",
       signInToken: "junction-token-do-not-log",
@@ -99,11 +99,11 @@ describe("native companion signup token route", () => {
     expect(
       mocks.validateCompanionSignInRequestBody.mock.invocationCallOrder[0],
     ).toBeLessThan(
-      mocks.requireHostedCompanionMemberAccessFromRequest.mock
+      mocks.requireHostedCompanionMemberIdFromRequest.mock
         .invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
     );
     expect(
-      mocks.requireHostedCompanionMemberAccessFromRequest,
+      mocks.requireHostedCompanionMemberIdFromRequest,
     ).toHaveBeenCalledWith({
       prisma: { label: "test-prisma" },
       request: incoming,
@@ -129,13 +129,13 @@ describe("native companion signup token route", () => {
 
     expect(response.status).toBe(400);
     expect(
-      mocks.requireHostedCompanionMemberAccessFromRequest,
+      mocks.requireHostedCompanionMemberIdFromRequest,
     ).not.toHaveBeenCalled();
     expect(mocks.createSdkSignInSession).not.toHaveBeenCalled();
   });
 
   it("never reaches Junction when hosted signup or consent is incomplete", async () => {
-    mocks.requireHostedCompanionMemberAccessFromRequest.mockRejectedValueOnce(
+    mocks.requireHostedCompanionMemberIdFromRequest.mockRejectedValueOnce(
       hostedOnboardingError({
         code: "HOSTED_CONSENT_REQUIRED",
         httpStatus: 403,
