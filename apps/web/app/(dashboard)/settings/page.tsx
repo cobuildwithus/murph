@@ -73,7 +73,6 @@ import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 import { readHostedAiUsageActivity } from "@/src/lib/hosted-execution/usage-activity";
 import { readHostedPersonalAiUsageStatus } from "@/src/lib/hosted-execution/usage-status";
 import {
-  estimateHostedUsageCreditMessages,
   filterHostedNonGroupUsageCreditOfferCodes,
   getHostedUsageCreditOfferDefinition,
   type HostedUsageCreditOfferCode,
@@ -787,7 +786,6 @@ function projectHostedUsageTopUpOffers(
 
     return {
       amountLabel: formatUsageTopUpAmount(offer.cashAmountMinor),
-      estimatedMessages: estimateHostedUsageCreditMessages(offer.cashAmountMinor),
       offerCode: offer.code,
     };
   });

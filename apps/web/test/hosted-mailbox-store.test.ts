@@ -40,6 +40,7 @@ import {
   readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
   readHostedMailboxWakeAfterDedupeLockTx,
   resolveHostedMailboxRuntimeFetchLaneCursors,
+  tryMarkHostedMailboxConversationAiUsageDenied,
   type HostedMailboxItemRow,
   type HostedMailboxPayloadRow,
 } from "@/src/lib/hosted-mailbox/store";
@@ -691,6 +692,59 @@ describe("readHostedMailboxConversationWakeByAssistantInputId", () => {
     expect(findMany).toHaveBeenCalledWith(
       expect.objectContaining({ take: 2 }),
     );
+  });
+});
+
+describe("tryMarkHostedMailboxConversationAiUsageDenied", () => {
+  it("marks only the observed fresh conversation sequence window once", async () => {
+    const executeRaw = vi.fn(async (query: unknown) => {
+      void query;
+      return 2;
+    });
+
+    await expect(tryMarkHostedMailboxConversationAiUsageDenied({
+      afterConversationLaneSeq: 11n,
+      prisma: {
+        $executeRaw: executeRaw,
+      } as never,
+      throughConversationLaneSeq: 14n,
+      userId: "member_mailbox_1",
+    })).resolves.toBe(true);
+
+    const query = executeRaw.mock.calls[0]?.[0] as {
+      strings: string[];
+      values: unknown[];
+    };
+    expect(query.strings.join("?")).toContain(
+      "lane_seq > ?\n        AND lane_seq <= ?",
+    );
+    expect(query.strings.join("?")).toContain(
+      "statement_timestamp() AT TIME ZONE 'UTC'",
+    );
+    expect(query.values).toEqual(["member_mailbox_1", 11n, 14n]);
+  });
+
+  it("keeps a failed observability mark non-fatal", async () => {
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const executeRaw = vi.fn(async () => {
+      throw new Error("database unavailable");
+    });
+
+    await expect(tryMarkHostedMailboxConversationAiUsageDenied({
+      afterConversationLaneSeq: 0n,
+      prisma: {
+        $executeRaw: executeRaw,
+      } as never,
+      throughConversationLaneSeq: 1n,
+      userId: "member_mailbox_1",
+    })).resolves.toBe(false);
+    expect(consoleWarn).toHaveBeenCalledWith(
+      "Hosted mailbox usage-denial mark failed.",
+      expect.objectContaining({
+        errorCode: "HOSTED_MAILBOX_USAGE_DENIAL_MARK_FAILED",
+      }),
+    );
+    consoleWarn.mockRestore();
   });
 });
 

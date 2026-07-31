@@ -112,8 +112,7 @@ describe("murph.group dynamic tool", () => {
       "list_memberships",
       "leave_membership",
       "update_display_name",
-      "create_join_link",
-      "post_join_offer",
+      "offer_access",
       "read_chat_participants",
       "set_chat_avatar",
       "share_contact_card",
@@ -127,8 +126,10 @@ describe("murph.group dynamic tool", () => {
       .toBe(HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS);
     expect(MURPH_GROUP_TOOL.inputSchema.properties.permissionText.maxLength)
       .toBe(HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS);
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.requestedVaultShareProjectionScopes.maxItems)
-      .toBe(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length);
+    expect(MURPH_GROUP_TOOL.inputSchema.properties)
+      .not.toHaveProperty("requestedVaultShareProjectionScopes");
+    expect(MURPH_GROUP_TOOL.inputSchema.properties)
+      .toHaveProperty("standaloneLink");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.maxItems)
       .toBe(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length);
     const [
@@ -169,7 +170,7 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.description)
       .toContain("Existing membership and other grants remain unchanged");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.description)
-      .toContain("Web writes the complete causal consent sentence");
+      .toContain("trusted host owns the exact consent copy");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.membershipId.description)
       .toContain("immediately preceding list_memberships result");
     expect(MURPH_GROUP_TOOL.description.length).toBeLessThanOrEqual(800);
@@ -183,25 +184,17 @@ describe("murph.group dynamic tool", () => {
       .toContain('read_shared status="partial" is incomplete');
     expect(MURPH_GROUP_TOOL.description).toContain("ask is asynchronous");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain(
-        "For scheduled ask_member, poll pending by exact replay until completed or unavailable",
-      );
+      .toContain("Scheduled ask_member must replay exactly");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain("a changed question conflicts");
+      .toContain("changed questions conflict");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain('Rename/avatar status="ok" means provider acceptance, not completion');
-    expect(MURPH_GROUP_TOOL.description)
-      .not.toContain('. status="ok" means provider acceptance, not completion');
+      .toContain("update_display_name or set_chat_avatar ok means provider acceptance");
     expect(MURPH_GROUP_TOOL.description)
       .toContain("group=null proves neither absence nor label storage");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain("A participant displayName is an address-book name");
+      .toContain("Participant displayName and untrusted read_chat_name text");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain("use it naturally");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("never for identity, matching, consent, routing, persistence, or authority");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("` / ` means alternatives");
+      .toContain("prove no identity, consent, routing, persistence, or authority");
     expect(MURPH_GROUP_TOOL.description)
       .toContain("Results authorize no other action");
   });
@@ -236,7 +229,7 @@ describe("murph.group dynamic tool", () => {
     expect(
       MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL
         .inputSchema.properties.action.enum,
-    ).toEqual(["read_shared", "post_join_offer"]);
+    ).toEqual(["read_shared", "offer_access"]);
     expect(
       Object.keys(
         MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL.inputSchema.properties,
@@ -247,7 +240,7 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL.description)
       .toContain("current authorized scheduled group turn");
     expect(MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL.description)
-      .toContain("posted offer leaves existing membership and other grants unchanged");
+      .toContain("Existing membership and other grants stay unchanged");
 
     expect(resolveMurphDynamicTools({
       groupAvailable: false,
@@ -332,18 +325,15 @@ describe("murph.group dynamic tool", () => {
     });
 
     expect(readMurphDynamicToolRequest(groupToolCall({
-      action: "post_join_offer",
+      action: "offer_access",
       displayName: "Sunday Sleep Crew",
       projectionScopes: [{ projectionKind: "sleep-times.v0" }],
     }))).toEqual({
       kind: "group",
       request: {
-        action: "post_join_offer",
-        joinOffer: {
-          displayName: "Sunday Sleep Crew",
-          messageTemplate: HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
-          projectionScopes: [{ projectionKind: "sleep-times.v0" }],
-        },
+        action: "offer_access",
+        displayName: "Sunday Sleep Crew",
+        projectionScopes: [{ projectionKind: "sleep-times.v0" }],
       },
     });
 
@@ -364,7 +354,7 @@ describe("murph.group dynamic tool", () => {
     }))?.kind).toBe("invalid-group-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
-      action: "post_join_offer",
+      action: "offer_access",
       messageTemplate: "Model-authored consent copy must not cross the boundary.",
       linqThread: { chatId: "chat_hijack" },
     }))?.kind).toBe("invalid-group-arguments");
@@ -1435,7 +1425,7 @@ describe("murph.group dynamic tool", () => {
     });
   });
 
-  it("strips global member ids from every group-summary mutation result", async () => {
+  it("strips group metadata from access results and member ids from summaries", async () => {
     const group = {
       displayName: "Challenge group",
       id: "group_challenge",
@@ -1487,16 +1477,25 @@ describe("murph.group dynamic tool", () => {
       throw new Error(`Unexpected group action ${request.action}.`);
     });
     const modelRequests = [
-      { action: "create_join_link" },
-      { action: "update_display_name", displayName: "Challenge group" },
       {
-        action: "post_join_offer",
-        projectionScopes: [{ projectionKind: "steps-days.v0" }],
+        args: { action: "offer_access", standaloneLink: true },
+        exposesGroupSummary: false,
+      },
+      {
+        args: { action: "update_display_name", displayName: "Challenge group" },
+        exposesGroupSummary: true,
+      },
+      {
+        args: {
+          action: "offer_access",
+          projectionScopes: [{ projectionKind: "steps-days.v0" }],
+        },
+        exposesGroupSummary: false,
       },
     ];
 
     for (const modelRequest of modelRequests) {
-      const request = readMurphDynamicToolRequest(groupToolCall(modelRequest));
+      const request = readMurphDynamicToolRequest(groupToolCall(modelRequest.args));
       if (!request || request.kind !== "group") {
         throw new Error("Expected group mutation request.");
       }
@@ -1520,7 +1519,11 @@ describe("murph.group dynamic tool", () => {
       expect(resultText.text).not.toContain("handle");
       expect(resultText.text).not.toContain("summary_group_internal");
       expect(resultText.text).not.toContain("summary_member_internal");
-      expect(resultText.text).toContain("group_challenge");
+      if (modelRequest.exposesGroupSummary) {
+        expect(resultText.text).toContain("group_challenge");
+      } else {
+        expect(resultText.text).not.toContain("group_challenge");
+      }
     }
   });
 
@@ -2077,9 +2080,9 @@ describe("murph.group dynamic tool", () => {
     });
   });
 
-  it("keeps scheduled permission offers on the existing bounded port", async () => {
+  it("keeps scheduled access offers on the existing bounded port", async () => {
     const request = readMurphDynamicToolRequest(groupToolCall({
-      action: "post_join_offer",
+      action: "offer_access",
       projectionScopes: [{ projectionKind: "sleep-times.v0" }],
     }));
     if (!request || request.kind !== "group") {
@@ -2088,7 +2091,7 @@ describe("murph.group dynamic tool", () => {
     const groupRequest = vi.fn<GroupToolRequest>();
     const groupPermissionOfferRequest = vi.fn<GroupPermissionOfferRequest>(
       async () => ({
-        action: "post_join_offer",
+        action: "create_join_link",
         result: {
           group: null,
           status: "unavailable",
@@ -2120,6 +2123,13 @@ describe("murph.group dynamic tool", () => {
     expect(result.rpcResult.success).toBe(true);
     expect(groupPermissionOfferRequest).toHaveBeenCalledWith({
       projectionScopes: [{ projectionKind: "sleep-times.v0" }],
+    });
+    expect(readGroupToolPayload(result)).toEqual({
+      action: "offer_access",
+      result: {
+        status: "unavailable",
+        unavailableReason: "permission_offer_unavailable",
+      },
     });
     expect(groupRequest).not.toHaveBeenCalled();
   });
@@ -2375,11 +2385,11 @@ describe("murph.group dynamic tool", () => {
     expect(result.rpcResult.success).toBe(true);
     expect(readGroupToolPayload(result)).toEqual(response);
     expect(MURPH_GROUP_TOOL.description)
-      .toContain('Rename/avatar status="ok" means provider acceptance, not completion');
+      .toContain("update_display_name or set_chat_avatar ok means provider acceptance");
     expect(MURPH_GROUP_TOOL.description)
       .toContain("group=null proves neither absence nor label storage");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.displayName.description)
-      .toContain("then tries to store the same hosted group label");
+      .toContain('Required for action="update_display_name"');
   });
 
   it("rejects invalid update_display_name arguments", () => {
@@ -2410,12 +2420,11 @@ describe("murph.group dynamic tool", () => {
     }))?.kind).toBe("invalid-group-arguments");
   });
 
-  it("parses create_join_link arguments into a bounded joinLink request", () => {
-    const request = readMurphDynamicToolRequest(groupToolCall({
-      action: "create_join_link",
+  it("parses one provider-neutral access offer", () => {
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "offer_access",
       displayName: "Sunday sleep crew",
-      kind: "friends",
-      requestedVaultShareProjectionScopes: [
+      projectionScopes: [
         { projectionKind: "sleep-times.v0" },
         {
           projectionKind: "activity-minutes-days.v1",
@@ -2430,142 +2439,315 @@ describe("murph.group dynamic tool", () => {
           selector: { activityKind: "running" },
         },
       ],
-    }));
-
-    expect(request).toEqual({
+    }))).toEqual({
       kind: "group",
       request: {
-        action: "create_join_link",
-        joinLink: {
-          displayName: "Sunday sleep crew",
-          kind: "friends",
-          requestedVaultShareProjectionScopes: [
-            { projectionKind: "sleep-times.v0" },
-            {
-              projectionKind: "activity-minutes-days.v1",
-              selector: { activityKind: "running" },
-            },
-            {
-              projectionKind: "activity-distance-days.v1",
-              selector: { activityKind: "running" },
-            },
-            {
-              projectionKind: "activity-session-count-days.v1",
-              selector: { activityKind: "running" },
-            },
-          ],
-        },
+        action: "offer_access",
+        displayName: "Sunday sleep crew",
+        projectionScopes: [
+          { projectionKind: "sleep-times.v0" },
+          {
+            projectionKind: "activity-minutes-days.v1",
+            selector: { activityKind: "running" },
+          },
+          {
+            projectionKind: "activity-distance-days.v1",
+            selector: { activityKind: "running" },
+          },
+          {
+            projectionKind: "activity-session-count-days.v1",
+            selector: { activityKind: "running" },
+          },
+        ],
       },
     });
-  });
 
-  it("parses a bare create_join_link request without joinLink details", () => {
-    const request = readMurphDynamicToolRequest(groupToolCall({
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "offer_access",
+    }))).toEqual({
+      kind: "group",
+      request: { action: "offer_access" },
+    });
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "offer_access",
+      standaloneLink: true,
+    }))).toEqual({
+      kind: "group",
+      request: { action: "offer_access", standaloneLink: true },
+    });
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
       action: "create_join_link",
-    }));
-
-    expect(request).toEqual({
-      kind: "group",
-      request: { action: "create_join_link" },
-    });
-  });
-
-  it("keeps displayName optional on post_join_offer", () => {
-    const request = readMurphDynamicToolRequest(groupToolCall({
+    }))?.kind).toBe("invalid-group-arguments");
+    expect(readMurphDynamicToolRequest(groupToolCall({
       action: "post_join_offer",
-      projectionScopes: [{ projectionKind: "sleep-times.v0" }],
-    }));
-
-    expect(request).toEqual({
-      kind: "group",
-      request: {
-        action: "post_join_offer",
-        joinOffer: {
-          messageTemplate: HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
-          projectionScopes: [{ projectionKind: "sleep-times.v0" }],
-        },
-      },
-    });
+    }))?.kind).toBe("invalid-group-arguments");
   });
 
   it("rejects unsupported group kinds and projection kinds", () => {
     expect(readMurphDynamicToolRequest(groupToolCall({
-      action: "create_join_link",
+      action: "offer_access",
       kind: "everyone",
     }))?.kind).toBe("invalid-group-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
-      action: "create_join_link",
-      requestedVaultShareProjectionScopes: [{ projectionKind: "all-health-data" }],
+      action: "offer_access",
+      projectionScopes: [{ projectionKind: "all-health-data" }],
     }))?.kind).toBe("invalid-group-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
-      action: "create_join_link",
-      requestedVaultShareProjectionScopes: [{ projectionKind: "activity-minutes-days.v1" }],
+      action: "offer_access",
+      projectionScopes: [{ projectionKind: "activity-minutes-days.v1" }],
     }))?.kind).toBe("invalid-group-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
-      action: "create_join_link",
-      requestedVaultShareProjectionScopes: [{ projectionKind: "activity-distance-days.v1" }],
+      action: "offer_access",
+      projectionScopes: [{ projectionKind: "activity-distance-days.v1" }],
     }))?.kind).toBe("invalid-group-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
-      action: "create_join_link",
-      requestedVaultShareProjectionScopes: [{
+      action: "offer_access",
+      projectionScopes: [{
         projectionKind: "activity-session-count-days.v1",
         selector: { activityKind: "running+walking" },
       }],
     }))?.kind).toBe("invalid-group-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
-      action: "create_join_link",
-      requestedVaultShareProjectionScopes: [{
+      action: "offer_access",
+      projectionScopes: [{
         projectionKind: "activity-distance-days.v1",
         selector: { activityKind: "sleep" },
       }],
     }))?.kind).toBe("invalid-group-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
-      action: "create_join_link",
-      requestedVaultShareProjectionScopes: [{
+      action: "offer_access",
+      projectionScopes: [{
         projectionKind: "activity-session-count-days.v1",
         selector: { activityKind: "sleep" },
       }],
     }))?.kind).toBe("invalid-group-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
-      action: "post_join_offer",
+      action: "offer_access",
       intro: "Like this to join.",
     }))?.kind).toBe("invalid-group-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
-      action: "post_join_offer",
+      action: "offer_access",
       displayName: "   ",
       projectionScopes: [{ projectionKind: "sleep-times.v0" }],
     }))?.kind).toBe("invalid-group-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
-      action: "post_join_offer",
+      action: "offer_access",
       displayName: "a".repeat(121),
       projectionScopes: [{ projectionKind: "sleep-times.v0" }],
     }))?.kind).toBe("invalid-group-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
-      action: "post_join_offer",
+      action: "offer_access",
       projectionScopes: [{ projectionKind: "all-health-data" }],
     }))?.kind).toBe("invalid-group-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
-      action: "post_join_offer",
+      action: "offer_access",
       messageTemplate: "Model-authored offer copy.",
       projectionScopes: [{ projectionKind: "sleep-times.v0" }],
     }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "offer_access",
+      projectionScopes: [
+        { projectionKind: "sleep-times.v0" },
+        { projectionKind: "sleep-times.v0" },
+      ],
+    }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "offer_access",
+      standaloneLink: "yes",
+    }))?.kind).toBe("invalid-group-arguments");
+  });
+
+  it("maps provider-neutral access offers to native consent or an exact link", async () => {
+    const group = {
+      displayName: "Private group label",
+      id: "private-group-id",
+      kind: "friends" as const,
+      memberCount: 0,
+      members: [],
+      requestedVaultShareProjectionKinds: ["steps-days.v0" as const],
+      requestedVaultShareProjectionScopes: [
+        { projectionKind: "steps-days.v0" as const },
+      ],
+      status: "active" as const,
+    };
+    const groupRequest = vi.fn<GroupToolRequest>(async (request) =>
+      request.action === "create_join_link"
+        ? {
+            action: request.action,
+            result: {
+              group,
+              joinUrl: "https://example.test/groups/join/exact",
+              status: "ok",
+            },
+          }
+        : request.action === "post_join_offer"
+          ? {
+              action: request.action,
+              result: {
+                group,
+                joinUrl: "https://example.test/groups/join/native-hidden",
+                status: "sent",
+              },
+            }
+          : (() => {
+              throw new Error(`Unexpected group action ${request.action}.`);
+            })()
+    );
+
+    const standalone = readMurphDynamicToolRequest(groupToolCall({
+      action: "offer_access",
+      displayName: "Sunday sleep crew",
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+      standaloneLink: true,
+    }));
+    const native = readMurphDynamicToolRequest(groupToolCall({
+      action: "offer_access",
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    }));
+    if (
+      !standalone
+      || standalone.kind !== "group"
+      || !native
+      || native.kind !== "group"
+    ) {
+      throw new Error("Expected access-offer requests.");
+    }
+
+    const standaloneResult = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({ groupRequest }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: standalone,
+      vaultRoot: null,
+    });
+    const nativeResult = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({ groupRequest }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: native,
+      vaultRoot: null,
+    });
+
+    expect(groupRequest).toHaveBeenNthCalledWith(1, {
+      action: "create_join_link",
+      joinLink: {
+        displayName: "Sunday sleep crew",
+        requestedVaultShareProjectionScopes: [
+          { projectionKind: "steps-days.v0" },
+        ],
+      },
+    });
+    expect(groupRequest).toHaveBeenNthCalledWith(2, {
+      action: "post_join_offer",
+      joinOffer: {
+        messageTemplate: HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
+        projectionScopes: [{ projectionKind: "steps-days.v0" }],
+      },
+    });
+    expect(readGroupToolPayload(standaloneResult)).toEqual({
+      action: "offer_access",
+      result: {
+        joinUrl: "https://example.test/groups/join/exact",
+        presentation: "link",
+        status: "ok",
+      },
+    });
+    expect(readGroupToolPayload(nativeResult)).toEqual({
+      action: "offer_access",
+      result: { presentation: "native", status: "ok" },
+    });
+    expect(JSON.stringify(readGroupToolPayload(standaloneResult))).not.toContain(
+      "private-group-id",
+    );
+    expect(JSON.stringify(readGroupToolPayload(nativeResult))).not.toContain(
+      "native-hidden",
+    );
+  });
+
+  it("normalizes a host-substituted access link after requesting the native path", async () => {
+    const groupRequest = vi.fn<GroupToolRequest>(async (request) => {
+      expect(request).toEqual({
+        action: "post_join_offer",
+        joinOffer: {
+          messageTemplate: HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
+          projectionScopes: [{ projectionKind: "steps-days.v0" }],
+        },
+      });
+      return {
+        action: "create_join_link",
+        result: {
+          group: {
+            displayName: null,
+            id: "private-group-id",
+            kind: "friends",
+            memberCount: 0,
+            members: [],
+            requestedVaultShareProjectionKinds: ["steps-days.v0"],
+            requestedVaultShareProjectionScopes: [
+              { projectionKind: "steps-days.v0" },
+            ],
+            status: "active",
+          },
+          joinUrl: "https://example.test/groups/join/host-selected",
+          status: "ok",
+        },
+      };
+    });
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "offer_access",
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected access-offer request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({ groupRequest }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(groupRequest).toHaveBeenCalledOnce();
+    expect(readGroupToolPayload(result)).toEqual({
+      action: "offer_access",
+      result: {
+        joinUrl: "https://example.test/groups/join/host-selected",
+        presentation: "link",
+        status: "ok",
+      },
+    });
+    expect(JSON.stringify(readGroupToolPayload(result))).not.toContain(
+      "private-group-id",
+    );
   });
 
   it("forwards only the runtime-owned legacy offer template", async () => {
     const modelAuthoredCopy = "Model-authored consent copy must never be forwarded.";
     expect(readMurphDynamicToolRequest(groupToolCall({
-      action: "post_join_offer",
+      action: "offer_access",
       messageTemplate: modelAuthoredCopy,
       projectionScopes: [{ projectionKind: "steps-days.v0" }],
     }))?.kind).toBe("invalid-group-arguments");
@@ -2579,14 +2761,14 @@ describe("murph.group dynamic tool", () => {
       },
     }));
     const request = readMurphDynamicToolRequest(groupToolCall({
-      action: "post_join_offer",
+      action: "offer_access",
       projectionScopes: [{ projectionKind: "steps-days.v0" }],
     }));
     if (!request || request.kind !== "group") {
       throw new Error("Expected group request.");
     }
 
-    await executeMurphDynamicToolRequest({
+    const result = await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl: fetch,
       hostedToolContext: createGroupHostedToolContext({
@@ -2606,12 +2788,19 @@ describe("murph.group dynamic tool", () => {
       },
     });
     expect(JSON.stringify(groupRequest.mock.calls)).not.toContain(modelAuthoredCopy);
+    expect(readGroupToolPayload(result)).toEqual({
+      action: "offer_access",
+      result: {
+        status: "unavailable",
+        unavailableReason: "test_unavailable",
+      },
+    });
   });
 
   it("routes the narrow scheduled offer without exposing group metadata", async () => {
     const groupPermissionOfferRequest = vi.fn<GroupPermissionOfferRequest>(
       async () => ({
-        action: "post_join_offer",
+        action: "create_join_link",
         result: {
           group: {
             displayName: "Private label",
@@ -2625,13 +2814,13 @@ describe("murph.group dynamic tool", () => {
             ],
             status: "active",
           },
-          joinUrl: "https://example.test/private-offer",
-          status: "sent",
+          joinUrl: "https://example.test/join/offer",
+          status: "ok",
         },
       }),
     );
     const request = readMurphDynamicToolRequest(groupToolCall({
-      action: "post_join_offer",
+      action: "offer_access",
       projectionScopes: [{ projectionKind: "steps-days.v0" }],
     }));
     if (!request || request.kind !== "group") {
@@ -2655,8 +2844,12 @@ describe("murph.group dynamic tool", () => {
       projectionScopes: [{ projectionKind: "steps-days.v0" }],
     });
     expect(readGroupToolPayload(result)).toEqual({
-      action: "post_join_offer",
-      result: { status: "sent" },
+      action: "offer_access",
+      result: {
+        joinUrl: "https://example.test/join/offer",
+        presentation: "link",
+        status: "ok",
+      },
     });
     expect(JSON.stringify(readGroupToolPayload(result))).not.toContain("private");
   });

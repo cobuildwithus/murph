@@ -701,6 +701,13 @@ disclosure grants. Mutation summaries from `create_join_link`, `post_join_offer`
 and `update_display_name` do not open unrelated permission text or depend on
 that secure-box operation.
 
+`post_join_offer` is an explicit request to publish the native consent surface.
+Web may satisfy it without another provider send only when a covering active
+offer already exists. Grants held by current hosted members never suppress the
+offer: a provider-room participant who has not joined the hosted group may be
+the intended recipient. A fresh request returns `sent` only after the provider
+send succeeds and its message binding is durably recorded.
+
 An unfinished child leaves the request pending. Before invocation return,
 checkpoint, shutdown, fence loss, or workspace replacement, the runtime
 interrupts the exact child, waits a bounded grace period, terminates only that
@@ -2277,6 +2284,24 @@ mailbox item early. Missing, expired, or chronologically invalid expectation
 data cannot hide still-unconsumed work. The terminal and publication-expectation
 leaves alone use max-timestamp merge semantics. Every other latency leaf remains
 assign-once.
+Fresh conversation mailbox rows observed at an authoritative Web AI
+usage-denial boundary receive the assign-once `ai_usage_denied_at` timestamp.
+The best-effort write uses database UTC time, updates only unconsumed rows
+inside the observed import/consume replay-floor and conversation-high-water
+window, and precedes fallible usage-notice delivery. It does not alter gate,
+mailbox-consumption, or reply behavior. A chronologically valid denial
+timestamp excludes that trace row before the bounded read and
+completed-delivery or unresolved-provider grouping only while no later
+execution evidence exists. The monitor derives one effective latency origin
+from ingress, assistant-input staging, provider start, delivery, and consumption
+before applying its 24-hour window and row cap. When all execution evidence
+follows the denial, latency starts at the earliest milestone instead of ingress,
+including when original ingress is older than the monitor window. An unblocked
+row sharing the same delivery remains independently alertable. Missing or
+impossible denial chronology provides no suppression. The existing seven-day
+trace cleanup requires both original ingress and latest trace activity to be
+older than its cutoff, preserving a resumed trace across quiet-hour alert
+deferral while still bounding inactive traces.
 Durable consumption remains the long-term terminal proof and the rolling-deploy
 or best-effort-link fallback after handling is otherwise known.
 Accepted grouped Linq replies keep the complete answered mailbox-item set on the

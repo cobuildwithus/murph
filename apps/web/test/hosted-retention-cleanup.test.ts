@@ -219,9 +219,14 @@ describe("hosted retention cleanup", () => {
       HOSTED_RETENTION_BATCH_SIZE,
     ]);
 
-    expect(
-      findRetentionCall(executeRaw, 'DELETE FROM "hosted_ingress_latency_trace"').slice(1),
-    ).toEqual([
+    const latencyTraceCall = findRetentionCall(
+      executeRaw,
+      'DELETE FROM "hosted_ingress_latency_trace"',
+    );
+    expect(sqlOf(latencyTraceCall)).toContain('"accepted_at" <');
+    expect(sqlOf(latencyTraceCall)).toContain('"updated_at" <');
+    expect(latencyTraceCall.slice(1)).toEqual([
+      new Date(now.getTime() - HOSTED_INGRESS_LATENCY_TRACE_RETENTION_MS),
       new Date(now.getTime() - HOSTED_INGRESS_LATENCY_TRACE_RETENTION_MS),
       HOSTED_RETENTION_BATCH_SIZE,
     ]);

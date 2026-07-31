@@ -16,12 +16,18 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const usageCreditMocks = vi.hoisted(() => ({
+  admitHostedGroupSponsorshipRefillTx: vi.fn(),
   settleHostedUsageCreditForUsageTx: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-credits", () => ({
   settleHostedUsageCreditForUsageTx:
     usageCreditMocks.settleHostedUsageCreditForUsageTx,
+}));
+
+vi.mock("@/src/lib/hosted-groups/group-sponsorship-authorization", () => ({
+  admitHostedGroupSponsorshipRefillTx:
+    usageCreditMocks.admitHostedGroupSponsorshipRefillTx,
 }));
 
 import {
@@ -42,6 +48,8 @@ const FAMILY_PULSE_ALLOWANCE_USD_MICROS = 5_600_000n;
 const FAMILY_EDGE_ALLOWANCE_USD_MICROS = 15_200_000n;
 
 beforeEach(() => {
+  usageCreditMocks.admitHostedGroupSponsorshipRefillTx.mockReset();
+  usageCreditMocks.admitHostedGroupSponsorshipRefillTx.mockResolvedValue(null);
   usageCreditMocks.settleHostedUsageCreditForUsageTx.mockReset();
   usageCreditMocks.settleHostedUsageCreditForUsageTx.mockImplementation(
     async (input: { debitUsdMicros: bigint }) => ({
@@ -1271,6 +1279,34 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     expect(lockSql[1]).toContain('FROM "hosted_ai_usage_period"');
   });
 
+  it("admits one post-settlement refill at the existing thread-container capacity seam", async () => {
+    const now = new Date("2026-03-29T12:00:05.000Z");
+    const tx = createAllowanceTx({
+      executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
+      hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
+      limitUsdMicros: 4_500_000n,
+      spentUsdMicros: 3_599_500n,
+      threadContainerLimitUsdMicros: 4_500_000n,
+    });
+
+    await expect(accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now,
+      record: BASE_USAGE_RECORD,
+      tx: tx as never,
+    })).resolves.toBeNull();
+
+    expect(usageCreditMocks.admitHostedGroupSponsorshipRefillTx)
+      .toHaveBeenCalledTimes(1);
+    expect(usageCreditMocks.admitHostedGroupSponsorshipRefillTx)
+      .toHaveBeenCalledWith({
+        beneficiaryMemberId: "member_123",
+        capacityState: "low",
+        now,
+        tx,
+      });
+  });
+
   it("uses included capacity first and settles only the excess against purchased credit", async () => {
     const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
     const tx = createAllowanceTx({
@@ -2200,6 +2236,39 @@ describe("resolveHostedAiUsageGate", () => {
       usageCreditBalanceUsdMicros: 0n,
       usageCreditLedgerVersion: 0n,
     });
+  });
+
+  it("gives an exhausted group gate the deterministic refill admission seam before denial", async () => {
+    const now = new Date("2026-03-29T12:00:00.000Z");
+    const prisma = createGatePrisma({
+      limitUsdMicros: 4_500_000n,
+      spentUsdMicros: 4_500_000n,
+      threadContainerLimitUsdMicros: 4_500_000n,
+    });
+    usageCreditMocks.admitHostedGroupSponsorshipRefillTx.mockResolvedValue({
+      authorizationId: "hgsa_abcdefghijklmnop",
+      purchaseId: "hucp_deterministic_refill",
+    });
+
+    await expect(resolveHostedAiUsageGate({
+      memberId: "member_123",
+      now,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: false,
+      allowanceSource: "thread_container",
+      reason: "ai_usage_limit_exceeded",
+    });
+
+    expect(usageCreditMocks.admitHostedGroupSponsorshipRefillTx)
+      .toHaveBeenCalledTimes(1);
+    expect(usageCreditMocks.admitHostedGroupSponsorshipRefillTx)
+      .toHaveBeenCalledWith({
+        beneficiaryMemberId: "member_123",
+        capacityState: "exhausted",
+        now,
+        tx: prisma,
+      });
   });
 
   it("allows base-exhausted members while purchased credit remains", async () => {

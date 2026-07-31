@@ -4,13 +4,16 @@ import type { PrismaClient } from "@prisma/client";
 import { MURPH_PRODUCT_ORIGIN } from "@murphai/contracts";
 
 import { readHostedGroupUsageStatus } from "../hosted-groups/group-usage-funding";
-import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
+import {
+  HOSTED_SPONSORED_GROUP_PAUSE_MESSAGE,
+  renderUserFacingMessage,
+} from "../hosted-messages/user-facing-messages";
 import type { HostedAiUsageLimitNoticeCode } from "./usage-allowance";
 import { readHostedPersonalAiUsageStatus } from "./usage-status";
 
 /**
- * Adds the personal top-up action only from current delivery-time authority.
- * Any projection failure deliberately leaves the already-neutral notice alone.
+ * Adds or replaces delivery copy only from current delivery-time authority.
+ * Any projection failure leaves the canonical notice unchanged.
  */
 export async function projectHostedAiUsageLimitNoticeForDelivery(input: {
   memberId: string;
@@ -24,8 +27,11 @@ export async function projectHostedAiUsageLimitNoticeForDelivery(input: {
         prisma: input.prisma,
         runtimeMemberId: input.memberId,
       });
+      if (status?.sponsorshipStatus === "sponsored") {
+        return HOSTED_SPONSORED_GROUP_PAUSE_MESSAGE;
+      }
       if (
-        status?.capacityState !== "exhausted"
+        !status?.fundingNeeded
         || !status.fundingUrl
       ) {
         return input.message;
@@ -36,15 +42,14 @@ export async function projectHostedAiUsageLimitNoticeForDelivery(input: {
       }
       /**
        * Only this branch knows the group can actually be funded right now, so
-       * it owns the ask. Seeding on the authoritative period end rotates the
-       * ask for a group that runs out two periods running. Seeding on the
-       * rendered notice instead would correlate the two hashes and collapse
-       * the ask to a fraction of its variants.
+       * it owns the ask. A live monthly sponsorship suppresses this branch,
+       * leaving only the neutral group pause notice without payer or amount
+       * details.
        */
       const funding = renderUserFacingMessage({
         context: { fundingUrl: fundingUrl.toString() },
         key: "linq.ai_usage.thread_limit_funding",
-        seed: `${input.memberId}:${status.periodEnd}`,
+        seed: input.memberId,
       });
       return `${input.message}\n\n${funding.text}`;
     }

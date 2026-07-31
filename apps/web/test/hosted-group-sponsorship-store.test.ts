@@ -32,13 +32,13 @@ afterEach(() => {
 describe("hosted group sponsorship store", () => {
   it("normalizes bounded plain text and rejects extra or unsafe input", () => {
     expect(parseHostedGroupSponsorshipDraft({
-      publicAlias: "  Jake’s Lower Back  ",
+      publicAlias: "  The Group Historian  ",
       runningBitRequest: "Treat me like the exhausted CFO.",
-      sponsorMessage: "Please stop inviting Jake to basketball.",
+      sponsorMessage: "For whatever adventure comes next.",
     })).toEqual({
-      publicAlias: "Jake’s Lower Back",
+      publicAlias: "The Group Historian",
       runningBitRequest: "Treat me like the exhausted CFO.",
-      sponsorMessage: "Please stop inviting Jake to basketball.",
+      sponsorMessage: "For whatever adventure comes next.",
     });
     expect(parseHostedGroupSponsorshipDraft({})).toBeNull();
     expect(() => parseHostedGroupSponsorshipDraft({
@@ -53,9 +53,9 @@ describe("hosted group sponsorship store", () => {
   it("freezes encrypted content, rejects changed replay, and activates one expiring bit", async () => {
     const harness = createHarness();
     const draft = {
-      publicAlias: "Jake’s Lower Back",
+      publicAlias: "The Group Historian",
       runningBitRequest: "Treat me like the exhausted CFO.",
-      sponsorMessage: "Please stop inviting Jake to basketball.",
+      sponsorMessage: "For whatever adventure comes next.",
     };
 
     await createHostedGroupSponsorshipMomentTx({
@@ -72,8 +72,8 @@ describe("hosted group sponsorship store", () => {
       creatorMemberId: "member_sponsor",
       purchaseId: "purchase_123",
     });
-    expect(harness.row.configurationDigest).not.toContain("Jake");
-    expect(harness.row.publicAliasEncrypted).not.toContain("Jake");
+    expect(harness.row.configurationDigest).not.toContain("Group Historian");
+    expect(harness.row.publicAliasEncrypted).not.toContain("Group Historian");
 
     await expect(assertHostedGroupSponsorshipRequestMatchesTx({
       draft,

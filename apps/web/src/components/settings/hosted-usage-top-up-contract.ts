@@ -19,7 +19,6 @@ type HostedUsageTopUpSelectionConflict = "offer" | "sponsorship";
 interface HostedUsageTopUpOffer {
   offerCode: string;
   amountLabel: string;
-  estimatedMessages: number;
 }
 
 interface HostedUsageTopUpActivePurchase {
@@ -47,6 +46,7 @@ interface HostedUsageTopUpDialogProps {
   checkoutUrl?: string;
   contactOptions?: readonly MurphContactOption[];
   deferTerminalRefreshUntilClose?: boolean;
+  groupPaymentMode?: "monthly" | "one_time";
   initialOpen?: boolean;
   offers: readonly HostedUsageTopUpOffer[];
   payerMemberId: string;
