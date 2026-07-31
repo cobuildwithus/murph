@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-07-30
+Last verified: 2026-07-31
 
 ## Decision
 
@@ -1817,19 +1817,22 @@ projection-pending input is a causal barrier until the existing
 projection-completion notification retries it; terminal projection failure is
 still replyable through the normal fallback. Duplicate staging and
 projection-completion notifications at or behind the newest queued or committed
-frontier are ignored before exact-successor proof. After the provider
-acknowledges `turn/steer`, Murph journals and checkpoints the accepted input
-before any hosted tool effect or final delivery may proceed. First-response
-closure removes the conversation registration and starts no further steer, but
-retains the existing provider-turn correlation until the one steer already
-started under that exact key settles; a rejected steer is not acknowledged and
-its input remains pending. Missing input, a causal gap, a boundary change,
-capacity overflow, or input arriving after the first completed response remains
-pending for a normal later assistant turn. Strict active-turn-targeted input
-still fails closed instead of falling through, and the assistant engine does
-not synthesize another provider request inside the same assistant turn. Final-delivery and hosted-tool effect
-keys use the newest accepted causal input as the stable replay anchor while the
-full answered-mailbox set remains attached as evidence.
+frontier are ignored before exact-successor proof. A successful `turn/steer`
+acknowledges transport only. Before any hosted tool effect or final delivery,
+Murph journals and checkpoints only accepted inputs at or below that tool
+request's or provider result's authoritative delivery-context ordinal. An
+acknowledged later input that remains above the ordinal stays pending for a
+normal later assistant turn. First-response closure removes the conversation
+registration and starts no further steer, but retains the existing
+provider-turn correlation until the one steer already started under that exact
+key settles; a rejected steer is not acknowledged and its input remains
+pending. Missing input, a causal gap, a boundary change, capacity overflow, or
+input arriving after the first completed response remains pending for a normal
+later assistant turn. Strict active-turn-targeted input still fails closed
+instead of falling through, and the assistant engine does not synthesize
+another provider request inside the same assistant turn. Final-delivery and
+hosted-tool effect keys use the newest accepted causal input as the stable
+replay anchor while the full answered-mailbox set remains attached as evidence.
 When mailbox import produces or reuses a canonical write receipt, the runner
 publishes the receipt-log fingerprint and the advanced imported watermark in
 the same status checkpoint. That progress checkpoint is still required when

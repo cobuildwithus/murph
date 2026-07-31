@@ -2920,6 +2920,7 @@ export async function executeMurphDynamicToolRequest(input: {
     }
     case 'send-progress-update':
       return await executeProgressUpdateTool({
+        deliveryContextOrdinal: input.deliveryContextOrdinal ?? null,
         progressDelivery: input.progressDelivery,
         text: input.request.text,
       })
@@ -5184,6 +5185,7 @@ function groupSharedProjectionUnavailableResult(
 }
 
 async function executeProgressUpdateTool(input: {
+  deliveryContextOrdinal: number | null
   progressDelivery: AssistantProgressDelivery | null
   text: string
 }): Promise<MurphDynamicToolExecutionResult> {
@@ -5191,7 +5193,12 @@ async function executeProgressUpdateTool(input: {
     return toolTextResult(false, 'progress updates are not available for this turn')
   }
   try {
-    const result = await input.progressDelivery.send(input.text, { source: 'model' })
+    const result = await input.progressDelivery.send(input.text, {
+      ...(input.deliveryContextOrdinal === null
+        ? {}
+        : { deliveryContextOrdinal: input.deliveryContextOrdinal }),
+      source: 'model',
+    })
     if (result.kind === 'sent') {
       return toolTextResult(true, 'progress update sent')
     }
