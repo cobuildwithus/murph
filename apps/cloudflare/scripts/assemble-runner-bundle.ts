@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { resolveCloudflareDeployPaths } from "./deploy-automation.js";
 import { writeRunnerBundleManifest } from "./deploy-artifacts.js";
+import { installHostedGroupSkills } from "./hosted-group-skills.js";
 import {
   hostedRunnerBundleOnlyDependencyNames,
   hostedRunnerRuntimePackageName,
@@ -138,6 +139,16 @@ async function assembleRunnerBundle(): Promise<void> {
         runtimePackageRoot: appDir,
       },
     );
+    const installedHostedGroupSkills = await installHostedGroupSkills({
+      bundleRoot: stagingBundleDir,
+      env: process.env,
+      repoRoot,
+    });
+    if (installedHostedGroupSkills) {
+      console.log(
+        `Installed ${installedHostedGroupSkills.skillCount} private hosted group skills.`,
+      );
+    }
     await assertInstalledRunnerHealthCommonsRuntimeImport(stagingBundleDir);
     await pruneRunnerBundle(stagingBundleDir);
     await rewriteRuntimePackageManifest(stagingBundleDir);
