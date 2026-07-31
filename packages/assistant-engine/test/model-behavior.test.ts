@@ -2567,6 +2567,47 @@ describe('assistant Murph onboarding guidance', () => {
 })
 
 describe('assistant conversation scope', () => {
+  it('takes explicitly delegated initiative across direct and group scopes without expanding authority', () => {
+    const groupPrompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput({
+        conversationScope: 'group',
+      }),
+    )
+    const directPrompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput(),
+    )
+    const unverifiedPrompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput({
+        conversationScope: 'unverified-external',
+      }),
+    )
+
+    for (const prompt of [directPrompt, groupPrompt]) {
+      expect(prompt).toContain('Delegated initiative:')
+      expect(prompt).toContain(
+        'When the requester clearly delegates judgment or an outcome—asking Murph to handle something, choose, decide, figure it out, take the lead, use its judgment, or make it happen—take the mandate instead of handing the work back as a checklist.',
+      )
+      expect(prompt).toContain(
+        'Do not ask for preferences merely to avoid choosing; mention only assumptions that materially affect the result.',
+      )
+      expect(prompt).toContain(
+        'Ask only for facts that materially change safety, authorization, correctness, or the next useful step.',
+      )
+      expect(prompt).toContain(
+        'On texting routes, ask the highest-value blocker first and complete everything independent of it.',
+      )
+      expect(prompt).toContain(
+        'Delegation authorizes judgment among already permitted options; it does not create consent or effect authority beyond the request and owning rule.',
+      )
+      expect(prompt).toContain(
+        'Never infer another person\'s consent or new permission to access private data, spend, book, contact, invite, publish, schedule, persist, recur, or take another external or irreversible action.',
+      )
+    }
+
+    expect(groupPrompt).not.toContain('Delegated planning:')
+    expect(unverifiedPrompt).not.toContain('Delegated initiative:')
+  })
+
   it('allows the public iOS download while keeping personal setup out of group prompts', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       assistantCliContract: [
