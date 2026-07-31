@@ -54,10 +54,6 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
   const prisma = input.prisma ?? getPrisma();
   const config = readPhysicalNoteConfig();
   const recipient = normalizeHostedPhysicalNoteRecipient(input.recipient);
-  const artworkExpiresAt = new Date(input.artwork.expiresAt);
-  if (artworkExpiresAt.getTime() <= Date.now() + 60_000) {
-    throw new TypeError("Physical-note artwork URL expires too soon.");
-  }
 
   const destination = await requireHostedAssistantNotificationDestination({
     memberId: input.memberId,
@@ -177,6 +173,11 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
     return toResponse(reservation.row, "pending");
   }
 
+  const artworkExpiresAt = new Date(input.artwork.expiresAt);
+  if (artworkExpiresAt.getTime() <= Date.now() + 60_000) {
+    throw new TypeError("Physical-note artwork URL expires too soon.");
+  }
+
   const runtime = input.runtime ?? createLobPhysicalNoteRuntime({
     apiKey: config.apiKey,
     fromAddressId: config.fromAddressId,
@@ -204,6 +205,9 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
         providerLetterId: requireProviderLetterId(current),
       });
       return toResponse(accepted, "accepted");
+    }
+    if (current.status === "failed") {
+      return toResponse(current, "failed");
     }
     return toResponse(current, "pending");
   }
