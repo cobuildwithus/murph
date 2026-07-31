@@ -33,6 +33,23 @@ describe("hosted operational alert email config", () => {
     });
   });
 
+  it("can reuse the transport with a feature-specific recipient list", () => {
+    expect(readHostedOperationalAlertEmailConfig(
+      {
+        ...alertEmailEnv,
+        HOSTED_PRODUCT_FEEDBACK_DIGEST_EMAILS:
+          "product@example.test, founder@example.test",
+      },
+      "HOSTED_PRODUCT_FEEDBACK_DIGEST_EMAILS",
+    )).toMatchObject({
+      recipients: ["product@example.test", "founder@example.test"],
+      resend: {
+        apiKey: "re_test",
+        from: "Murph Alerts <alerts@example.test>",
+      },
+    });
+  });
+
   it.each([
     ["API key", { ...alertEmailEnv, RESEND_API_KEY: "" }],
     ["sender", { ...alertEmailEnv, HOSTED_LINQ_ALERT_EMAIL_FROM: "" }],

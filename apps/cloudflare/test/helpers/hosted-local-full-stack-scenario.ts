@@ -207,6 +207,7 @@ export async function startHostedLocalFullStackScenario(input: {
   seedEnvironment?: NodeJS.ProcessEnv;
   streamLogs?: boolean;
   testControls?: boolean;
+  webProcessEnvOverrides?: NodeJS.ProcessEnv;
 }): Promise<HostedLocalFullStackScenario> {
   const assistantProviderRequests: HostedLocalAssistantProviderStubRequest[] = [];
   const providerRequestBodyFingerprintSecret = randomUUID();
@@ -332,7 +333,10 @@ export async function startHostedLocalFullStackScenario(input: {
       statusPath: (userId: string) => `/internal/users/${encodeURIComponent(userId)}/status`,
       streamLogs: input.streamLogs,
       testControls,
-      webProcessEnvOverrides: buildHostedLocalFullStackWebProcessEnvOverrides(runtimeEnv),
+      webProcessEnvOverrides: {
+        ...buildHostedLocalFullStackWebProcessEnvOverrides(runtimeEnv),
+        ...(input.webProcessEnvOverrides ?? {}),
+      },
     });
     preparedRunnerBundleCacheKeys.add(runnerBundleCacheKey);
     const scenarioHarness = harness;
