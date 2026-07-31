@@ -166,6 +166,46 @@ describe("physical-note durable replay", () => {
     expect(mocks.readUsageGate).not.toHaveBeenCalled();
     expect(mocks.recordUsage).not.toHaveBeenCalled();
   });
+
+  it("rejects expiring artwork before reserving a new note", async () => {
+    const hostedPhysicalNote = {
+      create: vi.fn(),
+      findUnique: vi.fn().mockResolvedValue(null),
+    };
+    const prismaLike = {
+      $transaction: vi.fn(async <T>(
+        callback: (tx: Prisma.TransactionClient) => Promise<T>,
+      ): Promise<T> => await callback(
+        asPhysicalNoteTransactionClient(prisma),
+      )),
+      hostedPhysicalNote,
+    };
+    const prisma = asPhysicalNotePrismaClient(prismaLike);
+    const create = vi.fn<LobPhysicalNoteRuntime["create"]>();
+    const runtime = { create } satisfies LobPhysicalNoteRuntime;
+    const { createHostedPhysicalNote } = await import(
+      "@/src/lib/physical-notes/service"
+    );
+
+    await expect(createHostedPhysicalNote({
+      artwork: {
+        expiresAt: new Date(Date.now() + 30_000).toISOString(),
+        sha256: "3".repeat(64),
+        url: "https://assets.example.test/expiring-note.png",
+      },
+      memberId: MEMBER_ID,
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      prisma,
+      recipient: RECIPIENT,
+      requestKey: "physical-note-expiring",
+      runtime,
+    })).rejects.toThrow("Physical-note artwork URL expires too soon.");
+
+    expect(hostedPhysicalNote.create).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+    expect(mocks.readUsageGate).not.toHaveBeenCalled();
+    expect(mocks.recordUsage).not.toHaveBeenCalled();
+  });
 });
 
 function buildRequestFingerprint(): string {
@@ -182,7 +222,7 @@ function buildRequestFingerprint(): string {
 
 function asPhysicalNotePrismaClient(value: object): PrismaClient {
   // Test-only boundary: this replay fixture implements only the delegates
-  // reached by the accepted-row path.
+  // reached by the accepted-row and pre-reservation paths.
   return value as PrismaClient;
 }
 
