@@ -220,13 +220,24 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
     apiKey: config.apiKey,
     fromAddressId: config.fromAddressId,
   });
+  let providerResult;
   try {
     await reassertGroupOrigin?.();
+    input.signal?.throwIfAborted();
+    providerResult = await runtime.create({
+      artworkUrl: input.artwork.url,
+      idempotencyKey: reservation.row.id,
+      noteId: reservation.row.id,
+      recipient,
+      signal: input.signal,
+    });
   } catch (error) {
     if (
       reservation.created
-      && isHostedOnboardingError(error)
-      && !error.retryable
+      && (
+        input.signal?.aborted === true
+        || (isHostedOnboardingError(error) && !error.retryable)
+      )
     ) {
       await markHostedPhysicalNoteFailed({
         noteId: reservation.row.id,
@@ -235,14 +246,6 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
     }
     throw error;
   }
-  input.signal?.throwIfAborted();
-  const providerResult = await runtime.create({
-    artworkUrl: input.artwork.url,
-    idempotencyKey: reservation.row.id,
-    noteId: reservation.row.id,
-    recipient,
-    signal: input.signal,
-  });
 
   if (providerResult.kind === "ambiguous_failure") {
     const current = await prisma.hostedPhysicalNote.findUniqueOrThrow({
