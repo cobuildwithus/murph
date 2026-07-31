@@ -25,7 +25,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/src/components/ui/table";
-import { useBrowserVault } from "@/src/lib/browser-vault/context";
+import {
+  useBrowserVault,
+  type BrowserVaultContextValue,
+} from "@/src/lib/browser-vault/context";
 import {
   formatIsoDate,
   formatNumber,
@@ -35,7 +38,18 @@ import {
 } from "@/src/lib/browser-vault/display";
 
 export default function OverviewPage() {
-  const { client, error, refresh, refreshPending, status } = useBrowserVault();
+  return <OverviewPageContent browserVault={useBrowserVault()} />;
+}
+
+export function OverviewPageContent({
+  browserVault,
+}: {
+  browserVault: Pick<
+    BrowserVaultContextValue,
+    "client" | "error" | "refresh" | "refreshPending" | "status"
+  >;
+}) {
+  const { client, error, refresh, refreshPending, status } = browserVault;
   const timeZone = useMemo(
     () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
     [],

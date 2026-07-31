@@ -21,6 +21,7 @@ import { AccountExitReasonStudy } from "./account-exit-reason-study";
 import { ChangelogArchiveStudy } from "./changelog-archive-study";
 import { ClubsPageStudy } from "./clubs-page-study";
 import { ConnectSourceCardStudy } from "./connect-source-card-study";
+import { DashboardBackgroundRefreshStudy } from "./dashboard-background-refresh-study";
 import { DeviceSyncCallbackStudy } from "./device-sync-callback-study";
 import { FamilyInviteJoinStudy } from "./family-invite-join-study";
 import { GroupJoinStudy } from "./group-join-study";
@@ -146,6 +147,12 @@ export function SectionsContent() {
 
       <StudySection title="Environment progressive voice capture">
         <EnvironmentProgressStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Dashboard content during background refresh">
+        <DashboardBackgroundRefreshStudy />
       </StudySection>
 
       <Separator />

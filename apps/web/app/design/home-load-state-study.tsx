@@ -7,8 +7,8 @@ export function HomeLoadStateStudy() {
     <div className="flex max-w-4xl flex-col gap-8">
       <div
         className="flex flex-col gap-8 rounded-2xl border border-border bg-background p-5 sm:p-8"
-        data-design-section="dashboard-background-refresh"
-        id="dashboard-background-refresh-section"
+        data-design-section="home-partial-load"
+        id="home-partial-load-section"
       >
         <PageHeader
           description="Connect your health data, pick an experiment, and see what actually works for you."
@@ -26,8 +26,7 @@ export function HomeLoadStateStudy() {
                 {label}
               </p>
               <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                This dashboard content remains visible while private data
-                refreshes in the background.
+                This home action remains available while missing details reload.
               </p>
             </div>
           ))}
