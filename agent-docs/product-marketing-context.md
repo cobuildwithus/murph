@@ -159,7 +159,7 @@ points and composable help, not unlimited provider access or clinical scope.
   not validated.
 - The older $15/month or $150/year launch pricing is obsolete.
 - For Clubs, organizers buy AI usage as needed with no platform fee. Members
-  receive two free weeks of Murph and can continue on the eligible Group plan
+  receive two free weeks of Murph and can continue on the eligible Core plan
   for **$3.50/month** after that plan lands.
 
 ## Product Loops

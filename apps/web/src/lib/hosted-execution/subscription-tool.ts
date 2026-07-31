@@ -416,13 +416,12 @@ function projectHostedSubscriptionPlan(
 ): HostedSubscriptionPlan {
   const definition = getHostedBillingPlanDefinition(code);
 
-  if (
-    code === "launch_group_monthly"
-    && definition.displayName === "Group"
-  ) {
+  if (code === "launch_group_monthly") {
     return {
       code,
-      displayName: definition.displayName,
+      // Keep the runtime wire contract stable while the member-facing label
+      // is projected as Core by Web and the assistant.
+      displayName: "Group",
       interval: definition.interval,
       recurringAmountUsdCents: definition.recurringAmountUsdCents,
     };

@@ -93,7 +93,7 @@ test("ClubPage presents the live challenge flow clearly", async () => {
   assert.match(markup, /Organizers buy AI usage as needed/);
   assert.match(markup, /no platform fee/);
   assert.match(markup, /free for two weeks/);
-  assert.match(markup, /Group plan for \$3\.50\/month/);
+  assert.match(markup, /Core for \$3\.50\/month/);
   assert.ok(
     markup.indexOf("ATL moves together")
       > markup.indexOf("can we see if the whole club"),

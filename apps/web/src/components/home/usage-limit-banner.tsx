@@ -37,7 +37,7 @@ const usageLimitBannerCopy: Record<
   },
   group_upgrade_pulse: {
     body: "New replies and other AI work are blocked until your included usage resets. Your wearable keeps syncing and your group activity stays current.",
-    title: "You've used 100% of this month's included Group usage",
+    title: "You've used 100% of this month's included Core usage",
   },
   pulse_upgrade_edge: {
     body: "New replies and other AI work are blocked until your included usage resets.",
@@ -76,7 +76,7 @@ export function UsageLimitBanner({
         ? " You can add more usage now."
         : recommendedAction?.kind === "change_plan"
           ? recommendedAction.targetPlanCode === "launch_group_monthly"
-            ? " Group keeps you connected with lighter private Murph usage."
+            ? " Core keeps you connected with lighter private Murph usage."
             : recommendedAction.targetPlanCode === "launch_monthly"
               ? " Pulse includes more private Murph usage."
               : " Edge offers more included usage."

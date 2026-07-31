@@ -254,7 +254,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
     {
       currentPlanCode: "launch_monthly" as const,
       expectedTiming: "period_end" as const,
-      label: "Switch to Group ($3.50/month)",
+      label: "Switch to Core ($3.50/month)",
       requestedTargetPlanCode: "launch_group_monthly" as const,
     },
     {

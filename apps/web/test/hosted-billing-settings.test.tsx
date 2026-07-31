@@ -188,7 +188,7 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, /Manage billing/);
   });
 
-  test("shows the $3.50 Group plan only from the server-authorized catalog", async () => {
+  test("shows the $3.50 Core plan only from the server-authorized catalog", async () => {
     const { HostedBillingSettings } = await import(
       "@/src/components/settings/hosted-billing-settings"
     );
@@ -211,14 +211,14 @@ describe("HostedBillingSettings", () => {
       },
     ));
 
-    assert.doesNotMatch(hiddenMarkup, />Group</);
-    assert.match(visibleMarkup, />Group</);
+    assert.doesNotMatch(hiddenMarkup, />Core</);
+    assert.match(visibleMarkup, />Core</);
     assert.match(visibleMarkup, /\$3\.50/);
-    assert.match(visibleMarkup, /Choose Group/);
+    assert.match(visibleMarkup, /Choose Core/);
     assert.match(visibleMarkup, /Available to confirmed members/);
   });
 
-  test("keeps Group members on the ordinary upgrade path", async () => {
+  test("keeps Core members on the ordinary upgrade path", async () => {
     const { HostedBillingSettings } = await import(
       "@/src/components/settings/hosted-billing-settings"
     );
@@ -235,13 +235,13 @@ describe("HostedBillingSettings", () => {
       },
     ));
 
-    assert.match(markup, />Group</);
+    assert.match(markup, />Core</);
     assert.match(markup, /Current plan/);
     assert.match(markup, /Choose Pulse/);
     assert.match(markup, /Choose Edge/);
   });
 
-  test("acknowledges a saved card and requires fresh exact-price Group confirmation", async () => {
+  test("acknowledges a saved card and requires fresh exact-price Core confirmation", async () => {
     const { HostedBillingSettings } = await import(
       "@/src/components/settings/hosted-billing-settings"
     );
@@ -265,15 +265,15 @@ describe("HostedBillingSettings", () => {
     );
     assert.match(
       rendered.window.document.body.textContent ?? "",
-      /Group has not started/,
+      /Core has not started/,
     );
     assert.match(
       rendered.window.document.body.textContent ?? "",
-      /Choose Group/,
+      /Choose Core/,
     );
     assert.doesNotMatch(
       rendered.window.document.body.textContent ?? "",
-      /Review and start Group/,
+      /Review and start Core/,
     );
     assert.equal(mocks.requestHostedTrialPlanStartPaid.mock.calls.length, 0);
     await rendered.cleanup();
@@ -288,10 +288,10 @@ describe("HostedBillingSettings", () => {
       },
     ));
     assert.match(currentMarkup, /Current plan/);
-    assert.doesNotMatch(currentMarkup, /Group has not started/);
+    assert.doesNotMatch(currentMarkup, /Core has not started/);
   });
 
-  test("confirms the exact Group price and trial-end timing before scheduling", async () => {
+  test("confirms the exact Core price and trial-end timing before scheduling", async () => {
     const { StartPaidPulseButton } = await import(
       "@/src/components/settings/hosted-start-paid-pulse-button"
     );
@@ -301,7 +301,7 @@ describe("HostedBillingSettings", () => {
         targetPlanCode: "launch_group_monthly",
         timing: "at_trial_end",
       },
-      "Choose Group",
+      "Choose Core",
     ));
 
     await act(async () => {
@@ -311,12 +311,12 @@ describe("HostedBillingSettings", () => {
     });
     assert.match(
       rendered.window.document.body.textContent ?? "",
-      /Group begins at \$3\.50\/month when it ends/,
+      /Core begins at \$3\.50\/month when it ends/,
     );
 
     const confirmButton = findLastButtonByText(
       rendered.window.document,
-      "Choose Group",
+      "Choose Core",
       rendered.window,
     );
     await act(async () => {
@@ -334,12 +334,12 @@ describe("HostedBillingSettings", () => {
     );
     assert.match(
       rendered.window.document.body.textContent ?? "",
-      /Group is set/,
+      /Core is set/,
     );
     await rendered.cleanup();
   });
 
-  test("gives Pulse members a recovery path for a scheduled Group switch", async () => {
+  test("gives Pulse members a recovery path for a scheduled Core switch", async () => {
     const { HostedBillingSettings } = await import(
       "@/src/components/settings/hosted-billing-settings"
     );
@@ -356,13 +356,13 @@ describe("HostedBillingSettings", () => {
       },
     ));
 
-    assert.match(markup, /Group starts Aug 1, 2026/);
+    assert.match(markup, /Core starts Aug 1, 2026/);
     assert.match(markup, /Pulse stays active until then/);
     assert.match(markup, /Change scheduled plan/);
     assert.match(markup, /mailto:support@withmurph\.ai/);
   });
 
-  test("says syncing continues when Group AI usage is exhausted", async () => {
+  test("says syncing continues when Core AI usage is exhausted", async () => {
     const { HostedBillingSettings } = await import(
       "@/src/components/settings/hosted-billing-settings"
     );
@@ -382,6 +382,8 @@ describe("HostedBillingSettings", () => {
 
     assert.match(markup, /wearable keeps syncing/);
     assert.match(markup, /group activity stays current/);
+    assert.match(markup, /Core · Resets/);
+    assert.doesNotMatch(markup, /Group · Resets/);
   });
 
   test("shows trial usage, timing, and a conservative forecast before the plan cards", async () => {
@@ -1040,7 +1042,7 @@ describe("HostedBillingSettings", () => {
     ));
 
     assert.doesNotMatch(markup, /Choose Group next month from usage/);
-    assert.match(markup, /Choose Group/);
+    assert.match(markup, /Choose Core/);
   });
 
   test("suppresses a plan change when the signed quote targets another plan", async () => {
