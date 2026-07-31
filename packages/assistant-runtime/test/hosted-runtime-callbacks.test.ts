@@ -7743,8 +7743,10 @@ describe("hosted runtime callbacks", () => {
   });
 
   it("verifies private Telegram image bytes before provider dispatch and sends multipart", async () => {
+    const fallbackDescription =
+      "Morning light experiment progress. Direction context unavailable · mover sentiment is neutral.";
     const image = {
-      alt: "Private generated chart",
+      alt: fallbackDescription,
       contentType: "image/webp" as const,
       filename: "generated-chart.webp",
       kind: "vault_image" as const,
@@ -7776,9 +7778,12 @@ describe("hosted runtime callbacks", () => {
       expect(init?.body).toBeInstanceOf(FormData);
       const entries = Object.fromEntries((init?.body as FormData).entries());
       expect(entries).toMatchObject({
-        caption: "Private chart",
+        caption: `Private chart\n\n${fallbackDescription}`,
         chat_id: "chat_123",
       });
+      expect(String(entries.caption).match(
+        /Direction context unavailable · mover sentiment is neutral\./gu,
+      )).toHaveLength(1);
       expect(entries.photo).toBeInstanceOf(File);
       expect((entries.photo as File).name).toBe("generated-chart.webp");
       expect((entries.photo as File).type).toBe("image/webp");
