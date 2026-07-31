@@ -18,7 +18,7 @@ export function TrialBillingBanner() {
   return (
     <section
       aria-label="Trial billing"
-      className="flex flex-col gap-5 rounded-lg border border-[#c4a882]/25 border-l-[3px] border-l-[#7a8c6e] bg-[rgba(255,252,246,0.9)] p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6"
+      className="flex flex-col gap-5 rounded-lg border border-[#c4a882]/25 bg-[rgba(255,252,246,0.9)] p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6"
     >
       <div className="min-w-0">
         <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#5a6e32]">

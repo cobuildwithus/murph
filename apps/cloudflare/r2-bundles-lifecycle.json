@@ -27,6 +27,19 @@
       }
     },
     {
+      "id": "delete-hosted-environment-voice-after-24h",
+      "enabled": true,
+      "conditions": {
+        "prefix": "hosted-environment-voice/audio/"
+      },
+      "deleteObjectsTransition": {
+        "condition": {
+          "type": "Age",
+          "maxAge": 86400
+        }
+      }
+    },
+    {
       "id": "delete-hosted-meal-photos-after-31d",
       "enabled": true,
       "conditions": {

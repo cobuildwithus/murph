@@ -7,6 +7,8 @@ import { describe, expect, it } from "vitest";
 import {
   CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS,
   buildCloudflareHostedControlBrowserVaultSessionPath,
+  buildCloudflareHostedControlEnvironmentVoiceDeletePath,
+  buildCloudflareHostedControlEnvironmentVoiceStagePath,
   buildCloudflareHostedControlMealPhotoDeletePath,
   buildCloudflareHostedControlMealPhotoStagePath,
   buildCloudflareHostedControlRuntimeEnsureProcessingPath,
@@ -39,11 +41,19 @@ describe("cloudflare hosted control routes", () => {
     expect(buildCloudflareHostedControlMealPhotoDeletePath("user/a b")).toBe(
       "/internal/users/user%2Fa%20b/meal-photos/delete",
     );
+    expect(buildCloudflareHostedControlEnvironmentVoiceStagePath("user/a b")).toBe(
+      "/internal/users/user%2Fa%20b/environment-voice/stage",
+    );
+    expect(buildCloudflareHostedControlEnvironmentVoiceDeletePath("user/a b")).toBe(
+      "/internal/users/user%2Fa%20b/environment-voice/delete",
+    );
   });
 
   it("rejects blank user identifiers before building routes", () => {
     for (const buildPath of [
       buildCloudflareHostedControlBrowserVaultSessionPath,
+      buildCloudflareHostedControlEnvironmentVoiceDeletePath,
+      buildCloudflareHostedControlEnvironmentVoiceStagePath,
       buildCloudflareHostedControlMealPhotoDeletePath,
       buildCloudflareHostedControlMealPhotoStagePath,
       buildCloudflareHostedControlUserDataDeletionPath,
@@ -59,6 +69,18 @@ describe("cloudflare hosted control routes", () => {
     const userId = "user/a b";
     const encodedUserId = "user%2Fa%20b";
 
+    expect(
+      matchCloudflareHostedControlUserRoutePath(
+        "environmentVoiceDelete",
+        buildCloudflareHostedControlEnvironmentVoiceDeletePath(userId),
+      ),
+    ).toEqual({ userId: encodedUserId });
+    expect(
+      matchCloudflareHostedControlUserRoutePath(
+        "environmentVoiceStage",
+        buildCloudflareHostedControlEnvironmentVoiceStagePath(userId),
+      ),
+    ).toEqual({ userId: encodedUserId });
     expect(
       matchCloudflareHostedControlUserRoutePath(
         "mealPhotoDelete",
@@ -109,6 +131,8 @@ describe("cloudflare hosted control routes", () => {
     ).toBeNull();
     expect(CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS).toEqual({
       browserVaultSession: { method: "POST", suffix: "browser-vault/session" },
+      environmentVoiceDelete: { method: "DELETE", suffix: "environment-voice/delete" },
+      environmentVoiceStage: { method: "POST", suffix: "environment-voice/stage" },
       mealPhotoDelete: { method: "DELETE", suffix: "meal-photos/delete" },
       mealPhotoStage: { method: "POST", suffix: "meal-photos/stage" },
       runtimeEnsureProcessing: { method: "POST", suffix: "runtime/ensure-processing" },
@@ -157,11 +181,16 @@ describe("cloudflare hosted control routes", () => {
     });
     expect(Object.keys(routesModule).sort()).toEqual([
       "CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE",
+      "CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_CAPTURE_ID_HEADER",
+      "CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_KEY_HEADER",
+      "CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_SHA256_HEADER",
       "CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_CAPTURE_ID_HEADER",
       "CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_KEY_HEADER",
       "CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_SHA256_HEADER",
       "CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS",
       "buildCloudflareHostedControlBrowserVaultSessionPath",
+      "buildCloudflareHostedControlEnvironmentVoiceDeletePath",
+      "buildCloudflareHostedControlEnvironmentVoiceStagePath",
       "buildCloudflareHostedControlMealPhotoDeletePath",
       "buildCloudflareHostedControlMealPhotoStagePath",
       "buildCloudflareHostedControlRuntimeEnsureProcessingPath",
@@ -172,6 +201,8 @@ describe("cloudflare hosted control routes", () => {
     ]);
     expect(routesModule).toMatchObject({
       buildCloudflareHostedControlBrowserVaultSessionPath: expect.any(Function),
+      buildCloudflareHostedControlEnvironmentVoiceDeletePath: expect.any(Function),
+      buildCloudflareHostedControlEnvironmentVoiceStagePath: expect.any(Function),
       buildCloudflareHostedControlMealPhotoDeletePath: expect.any(Function),
       buildCloudflareHostedControlMealPhotoStagePath: expect.any(Function),
       buildCloudflareHostedControlTelegramUsageLimitNoticePath: expect.any(Function),
