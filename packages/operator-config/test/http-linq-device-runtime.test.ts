@@ -478,7 +478,8 @@ test('linq app-card failure diagnostics do not expose nutrition values', async (
         context: error.context,
         message: error.message,
       })
-      return error.code === 'LINQ_API_REQUEST_FAILED' &&
+      return isDefinitiveLinqIMessageAppCardRejection(error) &&
+        error.code === 'LINQ_API_REQUEST_FAILED' &&
         error.context?.operation === 'send_imessage_app_card' &&
         error.context?.requestMessagePartCount === 1 &&
         !serialized.includes('1490.25') &&
