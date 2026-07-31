@@ -8,12 +8,14 @@ import {
   assistantConversationHistoryUtf8Bytes,
   compareAssistantTimestampsAscending,
   limitAssistantConversationHistoryTextBytes,
+  normalizeNullableString,
 } from './shared.js'
 import { assistantRouteSupportsGroupRoomModel } from './group-room-model.js'
 import {
   listAssistantInputEvents,
   type AssistantInputEventRecord,
 } from './input-store.js'
+import { listAssistantOutboxIntents } from './outbox.js'
 import {
   listAssistantTranscriptTailEntries,
   listAssistantSessions,
@@ -72,12 +74,15 @@ const ASSISTANT_MAINTENANCE_EVIDENCE_EMPTY_BODY =
   'No committed user or assistant conversation messages were found in this window. Do not write any new memory this run.'
 const ASSISTANT_GROUP_ROOM_MODEL_EVIDENCE_EMPTY_BODY =
   'No committed group conversation or reaction entries were found in this window. Do not create or update the group room model this run.'
+const ASSISTANT_GROUP_REACTION_TARGET_TEXT_MAX_CODE_POINTS = 1_000
 
 interface AssistantMaintenanceEvidenceMessage {
   createdAt: string
   kind: 'assistant' | 'user'
   text: string
 }
+
+type AssistantGroupReactionTargetTextIndex = ReadonlyMap<string, string>
 
 /**
  * Builds the only conversation evidence a silent maintenance turn may consult.
@@ -245,6 +250,14 @@ async function collectAssistantDurableGroupReactionEvidence(input: {
     return []
   }
 
+  const outboxIntents = await listAssistantOutboxIntents(input.vault)
+    .catch(() => [])
+  const targetTextIndex = buildAssistantGroupReactionTargetTextIndex({
+    events,
+    outboxIntents,
+    since: input.since,
+    until: input.until,
+  })
   const transcriptText = input.transcriptMessages
     .filter((message) => message.kind === 'user')
     .map((message) => message.text)
@@ -267,8 +280,15 @@ async function collectAssistantDurableGroupReactionEvidence(input: {
     }
 
     const durableReaction = readAssistantTrustedDurableGroupReaction(event)
-    const evidence = durableReaction
-      ? renderHostedExecutionGroupReactionEventEvidence(durableReaction)
+    const contextualReaction = durableReaction
+      ? attachAssistantGroupReactionTargetText({
+          event,
+          reaction: durableReaction,
+          targetTextIndex,
+        })
+      : null
+    const evidence = contextualReaction
+      ? renderHostedExecutionGroupReactionEventEvidence(contextualReaction)
       : isAssistantLinqAffirmativeReactionInput(event)
         && !transcriptText.some((text) => text.includes(event.inputId))
         ? renderAssistantLinqAffirmativeReactionEvidence(event)
@@ -289,6 +309,137 @@ async function collectAssistantDurableGroupReactionEvidence(input: {
     })
   }
   return reactions
+}
+
+function buildAssistantGroupReactionTargetTextIndex(input: {
+  events: readonly AssistantInputEventRecord[]
+  outboxIntents: Awaited<ReturnType<typeof listAssistantOutboxIntents>>
+  since: number
+  until: number
+}): AssistantGroupReactionTargetTextIndex {
+  const targetTextByRef = new Map<string, string>()
+
+  for (const event of input.events) {
+    if (
+      event.contentRetiredAt
+      || !event.conversation
+      || !assistantRouteSupportsGroupRoomModel({
+        channel: event.conversation.source,
+        threadIsDirect: event.conversation.threadIsDirect,
+      })
+    ) {
+      continue
+    }
+    const occurredAt = Date.parse(event.occurredAt)
+    if (
+      Number.isNaN(occurredAt)
+      || occurredAt < input.since
+      || occurredAt > input.until
+    ) {
+      continue
+    }
+    const key = buildAssistantGroupReactionTargetKey({
+      channel: event.replyTarget?.channel,
+      messageId: event.replyTarget?.messageId,
+      threadId: event.replyTarget?.threadId ?? event.conversation.threadId,
+    })
+    const text = normalizeAssistantGroupReactionTargetText(event.content.text)
+    if (key && text && !targetTextByRef.has(key)) {
+      targetTextByRef.set(key, text)
+    }
+  }
+
+  for (const intent of input.outboxIntents) {
+    const sentAt = Date.parse(intent.sentAt ?? intent.delivery?.sentAt ?? '')
+    if (
+      Number.isNaN(sentAt)
+      || sentAt < input.since
+      || sentAt > input.until
+      || intent.status !== 'sent'
+      || intent.operation !== null
+      || intent.threadIsDirect !== false
+      || !intent.delivery
+      || intent.delivery.kind === 'message-reaction'
+    ) {
+      continue
+    }
+    const channel = normalizeNullableString(intent.channel)?.toLowerCase()
+    if (
+      (channel !== 'linq' && channel !== 'telegram')
+      || intent.delivery.channel !== channel
+    ) {
+      continue
+    }
+    const threadId = intent.externalThreadRouteAuthority?.threadId
+      ?? intent.threadId
+    const text = normalizeAssistantGroupReactionTargetText(intent.message)
+    if (!threadId || !text) {
+      continue
+    }
+    const providerMessageIds = [
+      ...(intent.delivery.providerMessageIds ?? []),
+      intent.delivery.providerMessageId,
+    ]
+    for (const messageId of providerMessageIds) {
+      const key = buildAssistantGroupReactionTargetKey({
+        channel,
+        messageId,
+        threadId,
+      })
+      if (key && !targetTextByRef.has(key)) {
+        targetTextByRef.set(key, text)
+      }
+    }
+  }
+
+  return targetTextByRef
+}
+
+function attachAssistantGroupReactionTargetText(input: {
+  event: AssistantInputEventRecord
+  reaction: HostedExecutionGroupReactionEvent
+  targetTextIndex: AssistantGroupReactionTargetTextIndex
+}): HostedExecutionGroupReactionEvent {
+  if (input.reaction.targetText) {
+    return input.reaction
+  }
+  const key = buildAssistantGroupReactionTargetKey({
+    channel: input.reaction.channel,
+    messageId: input.reaction.targetMessageId,
+    threadId: input.event.conversation?.threadId,
+  })
+  const targetText = key ? input.targetTextIndex.get(key) : null
+  return targetText
+    ? { ...input.reaction, targetText }
+    : input.reaction
+}
+
+function buildAssistantGroupReactionTargetKey(input: {
+  channel: string | null | undefined
+  messageId: string | null | undefined
+  threadId: string | null | undefined
+}): string | null {
+  const channel = normalizeNullableString(input.channel)?.toLowerCase()
+  const messageId = normalizeNullableString(input.messageId)
+  const threadId = normalizeNullableString(input.threadId)
+  return (channel === 'linq' || channel === 'telegram')
+    && messageId
+    && threadId
+    ? `${channel}\u0000${threadId}\u0000${messageId}`
+    : null
+}
+
+function normalizeAssistantGroupReactionTargetText(
+  value: string | null | undefined,
+): string | null {
+  const normalized = normalizeNullableString(value)
+    ?.replace(/\s+/gu, ' ')
+    .trim()
+  return normalized
+    ? Array.from(normalized)
+      .slice(0, ASSISTANT_GROUP_REACTION_TARGET_TEXT_MAX_CODE_POINTS)
+      .join('')
+    : null
 }
 
 function readAssistantTrustedDurableGroupReaction(
