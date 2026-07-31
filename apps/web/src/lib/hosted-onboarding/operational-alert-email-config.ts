@@ -20,10 +20,16 @@ export type HostedOperationalAlertEmailConfig = {
 
 export function readHostedOperationalAlertEmailConfig(
   source: Readonly<Record<string, string | undefined>>,
+  recipientsEnvironmentVariable:
+    | "HOSTED_LINQ_ALERT_EMAILS"
+    | "HOSTED_PRODUCT_FEEDBACK_DIGEST_EMAILS"
+    = "HOSTED_LINQ_ALERT_EMAILS",
 ): HostedOperationalAlertEmailConfig | null {
   const apiKey = normalizeNullableString(source.RESEND_API_KEY);
   const from = normalizeNullableString(source.HOSTED_LINQ_ALERT_EMAIL_FROM);
-  const recipients = parseCommaSeparatedList(source.HOSTED_LINQ_ALERT_EMAILS);
+  const recipients = parseCommaSeparatedList(
+    source[recipientsEnvironmentVariable],
+  );
   if (!apiKey || !from || recipients.length === 0) {
     return null;
   }
