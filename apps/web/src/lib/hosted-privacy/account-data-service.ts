@@ -33,6 +33,9 @@ import {
   acquireHostedGroupJoinOutreachDrainLockTx,
 } from "@/src/lib/hosted-groups/group-join-outreach-store";
 import {
+  cancelHostedGroupSponsorshipsForPayerAccountDeletionTx,
+} from "../hosted-groups/group-sponsorship-authorization";
+import {
   hasHostedLinqInviteSignupLiveDeliveryTx,
 } from "../hosted-onboarding/linq-delivery-store";
 import {
@@ -912,6 +915,11 @@ async function deleteHostedAccountDataInternal(input: {
         throwHostedPrivyPhoneTransferTargetNotReady();
       }
     }
+    await cancelHostedGroupSponsorshipsForPayerAccountDeletionTx({
+      now: deletionStartedAt,
+      payerMemberIds: deletionMemberIds,
+      tx,
+    });
     await lockHostedMemberForAccountDeletionTx({
       memberId: input.memberId,
       prisma: tx,
@@ -1831,6 +1839,12 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_usage_credit_purchase", await input.prisma.hostedUsageCreditPurchase.deleteMany({
     where: buildHostedUsageCreditPurchaseDeletionWhere(memberIdFilter),
   }));
+  record(
+    "prisma.hosted_group_sponsorship_authorization",
+    await input.prisma.hostedGroupSponsorshipAuthorization.deleteMany({
+      where: { beneficiaryMemberId: memberIdFilter },
+    }),
+  );
   record("prisma.hosted_ai_usage", await input.prisma.hostedAiUsage.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_ai_usage_period", await input.prisma.hostedAiUsagePeriod.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_product_feedback", await input.prisma.hostedProductFeedback.deleteMany({ where: { memberId: memberIdFilter } }));

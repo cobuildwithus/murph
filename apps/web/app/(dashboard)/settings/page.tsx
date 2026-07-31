@@ -29,13 +29,21 @@ import {
   withServerApprovedPrivyAccountHints,
 } from "@/src/lib/hosted-onboarding/account-settings-snapshot";
 import {
+  canScheduleHostedBillingPlanChange,
   canStartHostedPulseTrialPaidPlan,
   canSwitchHostedBillingPlanToPulse,
-  canUpgradeHostedBillingPlanToEdge,
+  canUpgradeHostedBillingPlan,
+  parseHostedBillingPlanCode,
 } from "@/src/lib/hosted-onboarding/billing-plans";
+import {
+  hasConfirmedHostedGroupMembership,
+  resolveVisibleHostedBillingPlanCodes,
+} from "@/src/lib/hosted-onboarding/billing-plan-eligibility";
 import { isHostedVeniceAssistantEnabled } from "@/src/lib/hosted-onboarding/assistant-model-preference";
 import { readHostedPulseTrialContinuationCookie } from "@/src/lib/hosted-onboarding/billing-pulse-trial-continuation";
 import {
+  HOSTED_START_PAID_GROUP_RETURN_PARAM,
+  HOSTED_START_PAID_GROUP_RETURN_VALUE,
   HOSTED_PULSE_TRIAL_CONTINUATION_ACTION_PARAM,
   HOSTED_PULSE_TRIAL_CONTINUATION_EXPIRES_PARAM,
   HOSTED_PULSE_TRIAL_CONTINUATION_PATH,
@@ -56,13 +64,15 @@ import {
   readHostedConfiguredUsageCreditOfferCodes,
   readHostedPersonalUsageCreditOfferCodes,
 } from "@/src/lib/hosted-onboarding/personal-usage-credit-eligibility";
+import {
+  isHostedBillingPlanSelectionAvailable,
+} from "@/src/lib/hosted-onboarding/runtime";
 import { getPrisma } from "@/src/lib/prisma";
 import { readHostedSecureApprovalStatus } from "@/src/lib/sensitive-actions/secure-approval-status";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 import { readHostedAiUsageActivity } from "@/src/lib/hosted-execution/usage-activity";
 import { readHostedPersonalAiUsageStatus } from "@/src/lib/hosted-execution/usage-status";
 import {
-  estimateHostedUsageCreditMessages,
   filterHostedNonGroupUsageCreditOfferCodes,
   getHostedUsageCreditOfferDefinition,
   type HostedUsageCreditOfferCode,
@@ -86,6 +96,7 @@ type SettingsSearchParams = {
   expires?: string | string[] | undefined;
   signature?: string | string[] | undefined;
   startPulse?: string | string[] | undefined;
+  startGroup?: string | string[] | undefined;
   usageCheckout?: string | string[] | undefined;
   usageFamily?: string | string[] | undefined;
   usageMember?: string | string[] | undefined;
@@ -111,6 +122,10 @@ export default async function SettingsPage({
   const usageTopUpPurchaseReturn = readUsageTopUpPurchaseReturn(
     resolvedSearchParams,
   );
+  const groupPaymentMethodSaved =
+    readFirstSearchParamValue(
+      resolvedSearchParams[HOSTED_START_PAID_GROUP_RETURN_PARAM],
+    ) === HOSTED_START_PAID_GROUP_RETURN_VALUE;
   const { authenticated, authenticatedMember, session } =
     await getHostedDashboardPageAuthSnapshot();
   // Stripe sends the payment-method return here unsigned-in when the member
@@ -120,7 +135,7 @@ export default async function SettingsPage({
   const pulseTrialPaymentReturn = readPulseTrialPaymentReturn(resolvedSearchParams);
 
   if (!authenticated) {
-    if (pulseTrialPaymentReturn === null) {
+    if (pulseTrialPaymentReturn === null && !groupPaymentMethodSaved) {
       redirect("/");
     }
     return <SettingsAuthRequired />;
@@ -162,6 +177,8 @@ export default async function SettingsPage({
   const secureApprovalStatus =
     settingsData?.secureApprovalStatus ?? ({ status: "unavailable" } as const);
   const usageStatus = settingsData?.usageStatus ?? null;
+  const hasConfirmedGroupMembership =
+    settingsData?.hasConfirmedGroupMembership === true;
   const usageActivity = settingsData?.usageActivity ?? null;
   const usageTopUpOfferCodes = settingsData?.usageTopUpOfferCodes ?? [];
   const usageTopUpActivePurchase = settingsData?.usageTopUpActivePurchase ?? null;
@@ -238,13 +255,54 @@ export default async function SettingsPage({
     !activeFamilyOwner &&
     !sponsoredMember &&
     !authenticatedMember.suspendedAt;
-  const canUpgradeToEdge =
+  const currentPlanCode = parseHostedBillingPlanCode(
+    billingRef?.currentBillingPlanCode,
+  );
+  const scheduledPlanCode = parseHostedBillingPlanCode(
+    billingRef?.scheduledBillingPlanCode,
+  );
+  const hasScheduledPlanChange = scheduledPlanCode !== null;
+  const groupPlanConfigured = settingsData?.groupPlanAvailable === true;
+  const showGroupPlan = resolveVisibleHostedBillingPlanCodes({
+    currentPlanCode,
+    groupPlanConfigured,
+    hasConfirmedGroupMembership,
+    scheduledPlanCode,
+  }).includes("launch_group_monthly");
+  const canUpgradeToPulse =
+    !hasScheduledPlanChange &&
     authenticatedMember !== null &&
     hasHostedMemberOwnActiveBilling(authenticatedMember) &&
-    canUpgradeHostedBillingPlanToEdge({
+    canUpgradeHostedBillingPlan({
       currentBillingPhase: billingRef?.currentBillingPhase,
       currentBillingPlanCode: billingRef?.currentBillingPlanCode,
       currentCheckoutOffer: billingRef?.currentCheckoutOffer,
+      targetPlanCode: "launch_monthly",
+    });
+  const canUpgradeToEdge =
+    !hasScheduledPlanChange &&
+    authenticatedMember !== null &&
+    hasHostedMemberOwnActiveBilling(authenticatedMember) &&
+    canUpgradeHostedBillingPlan({
+      currentBillingPhase: billingRef?.currentBillingPhase,
+      currentBillingPlanCode: billingRef?.currentBillingPlanCode,
+      currentCheckoutOffer: billingRef?.currentCheckoutOffer,
+      targetPlanCode: "launch_edge_monthly",
+    });
+  const canSwitchToGroup =
+    !hasScheduledPlanChange &&
+    authenticatedMember !== null &&
+    groupPlanConfigured &&
+    hasConfirmedGroupMembership &&
+    canScheduleHostedBillingPlanChange({
+      billingStatus: authenticatedMember.billingStatus,
+      currentBillingPhase: billingRef?.currentBillingPhase,
+      currentBillingPlanCode: billingRef?.currentBillingPlanCode,
+      currentCheckoutOffer: billingRef?.currentCheckoutOffer,
+      stripeCustomerId: billingRef?.stripeCustomerId,
+      stripeSubscriptionId: billingRef?.stripeSubscriptionId,
+      suspendedAt: authenticatedMember.suspendedAt,
+      targetPlanCode: "launch_group_monthly",
     });
   const privySessionMatchesAppSession =
     freshPrivySession !== null && freshPrivySession.identity.userId === session?.privyUserId;
@@ -352,26 +410,36 @@ export default async function SettingsPage({
           authenticated={authenticated}
           billingStatus={authenticatedMember?.billingStatus}
           canStartFamily={canStartFamily}
+          canSwitchToGroup={canSwitchToGroup}
           familyState={activeFamilyOwner ? "owner" : sponsoredMember ? "sponsored" : "none"}
+          groupPaymentMethodSaved={groupPaymentMethodSaved}
           pulseTrialBillingContinuationPending={pulseTrialBillingContinuationPending}
-          canStartPaidPulse={canStartHostedPulseTrialPaidPlan({
-            billingStatus: authenticatedMember?.billingStatus,
-            currentBillingPhase: billingRef?.currentBillingPhase,
-            currentBillingPlanCode: billingRef?.currentBillingPlanCode,
-            currentCheckoutOffer: billingRef?.currentCheckoutOffer,
-            hasStripeCustomerId: Boolean(billingRef?.stripeCustomerId),
-            hasStripeSubscriptionId: Boolean(billingRef?.stripeSubscriptionId),
-            suspendedAt: authenticatedMember?.suspendedAt,
-          })}
+          canStartPaidPulse={
+            !hasScheduledPlanChange &&
+            canStartHostedPulseTrialPaidPlan({
+              billingStatus: authenticatedMember?.billingStatus,
+              currentBillingPhase: billingRef?.currentBillingPhase,
+              currentBillingPlanCode: billingRef?.currentBillingPlanCode,
+              currentCheckoutOffer: billingRef?.currentCheckoutOffer,
+              hasStripeCustomerId: Boolean(billingRef?.stripeCustomerId),
+              hasStripeSubscriptionId: Boolean(billingRef?.stripeSubscriptionId),
+              suspendedAt: authenticatedMember?.suspendedAt,
+            })
+          }
+          canUpgradeToPulse={canUpgradeToPulse}
           canUpgradeToEdge={canUpgradeToEdge}
-          canSwitchToPulse={canSwitchHostedBillingPlanToPulse({
-            billingStatus: authenticatedMember?.billingStatus,
-            currentBillingPhase: billingRef?.currentBillingPhase,
-            currentBillingPlanCode: billingRef?.currentBillingPlanCode,
-            stripeCustomerId: billingRef?.stripeCustomerId,
-            stripeSubscriptionId: billingRef?.stripeSubscriptionId,
-            suspendedAt: authenticatedMember?.suspendedAt,
-          })}
+          showGroupPlan={showGroupPlan}
+          canSwitchToPulse={
+            !hasScheduledPlanChange &&
+            canSwitchHostedBillingPlanToPulse({
+              billingStatus: authenticatedMember?.billingStatus,
+              currentBillingPhase: billingRef?.currentBillingPhase,
+              currentBillingPlanCode: billingRef?.currentBillingPlanCode,
+              stripeCustomerId: billingRef?.stripeCustomerId,
+              stripeSubscriptionId: billingRef?.stripeSubscriptionId,
+              suspendedAt: authenticatedMember?.suspendedAt,
+            })
+          }
           currentBillingPhase={billingRef?.currentBillingPhase}
           currentCheckoutOffer={billingRef?.currentCheckoutOffer}
           currentBillingPlanCode={billingRef?.currentBillingPlanCode}
@@ -406,6 +474,12 @@ export default async function SettingsPage({
         <HostedAssistantModelSettings
           canUpgradeToEdge={canUpgradeToEdge}
           configurationAvailable={account?.assistant?.configurationAvailable === true}
+          expectedCurrentPlanCode={
+            currentPlanCode === "launch_group_monthly"
+            || currentPlanCode === "launch_monthly"
+              ? currentPlanCode
+              : undefined
+          }
           initialDormantSolPreference={
             account?.assistant?.dormantSolPreference === true
           }
@@ -554,9 +628,20 @@ async function readSettingsPageData(input: {
     memberId,
     prisma,
   });
+  const hasConfirmedGroupMembership =
+    await hasConfirmedHostedGroupMembership({
+      memberId,
+      prisma,
+    });
+  const groupPlanAvailable =
+    hasConfirmedGroupMembership
+    && await isHostedBillingPlanSelectionAvailable({
+      billingPlanCode: "launch_group_monthly",
+    });
   const usageStatus = await readHostedPersonalAiUsageStatus({
     memberId,
     prisma,
+    publicBaseUrl: null,
   });
   const usageActivity = await readHostedAiUsageActivity({
     memberId,
@@ -594,6 +679,8 @@ async function readSettingsPageData(input: {
   return {
     familyAccess,
     familyOwner,
+    groupPlanAvailable,
+    hasConfirmedGroupMembership,
     freshPrivySession: await freshPrivySessionPromise,
     secureApprovalStatus: await secureApprovalStatusPromise,
     settingsSnapshot,
@@ -705,7 +792,6 @@ function projectHostedUsageTopUpOffers(
 
     return {
       amountLabel: formatUsageTopUpAmount(offer.cashAmountMinor),
-      estimatedMessages: estimateHostedUsageCreditMessages(offer.cashAmountMinor),
       offerCode: offer.code,
     };
   });

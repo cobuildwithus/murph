@@ -362,7 +362,7 @@ describe('assistant execution prompt contract', () => {
     )
   })
 
-  it('keeps a comic register from downgrading a described unsafe act in a group', () => {
+  it('calibrates group safety from the concrete act instead of dramatic framing', () => {
     const groupLayers = buildAssistantSystemPromptLayers(
       createCommonCodexPromptInput({
         conversationScope: 'group',
@@ -372,8 +372,8 @@ describe('assistant execution prompt contract', () => {
       createCommonCodexPromptInput(),
     )
 
-    // The joke-reading counterweight and the described-act rule are one ordered
-    // decision rule, not two absolutes the model has to reconcile at runtime.
+    // Joke-reading, described-act, and proposed-dare rules form one ordered
+    // calibration instead of stacking independent safety absolutes.
     expect(groupLayers.staticCacheableCorePrompt).toContain(
       'Comic delivery is evidence about tone, never about the act described. Take the first branch that applies.',
     )
@@ -386,8 +386,23 @@ describe('assistant execution prompt contract', () => {
     expect(groupLayers.staticCacheableCorePrompt).toContain(
       'reading a joke as an emergency is a real failure, not a safe default',
     )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'For proposed low-stakes dares, classify risk from the concrete act, not the dramatic verb.',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      '"Chug," "race," and "as fast as you can" are not hazards by themselves',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'One ordinary serving of a familiar non-intoxicating food or drink for a consenting adult is not dangerous consumption merely because it is timed.',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'With no concrete material hazard, stay in the room\'s register without a warning or sanitized rewrite.',
+    )
     expect(directLayers.staticCacheableCorePrompt).not.toContain(
       'Comic delivery is evidence about tone',
+    )
+    expect(directLayers.staticCacheableCorePrompt).not.toContain(
+      'For proposed low-stakes dares',
     )
   })
 

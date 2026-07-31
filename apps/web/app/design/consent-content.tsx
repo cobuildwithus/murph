@@ -93,6 +93,16 @@ export function ConsentContent() {
                 variant="legal"
               />
             </div>
+            <div className="flex flex-col gap-3" inert>
+              <PreviewLabel>Accepted · opening destination</PreviewLabel>
+              <HostedLaunchConsentPrompt
+                documents={DESIGN_LAUNCH_DOCUMENTS}
+                handoffPending
+                mode="panel"
+                onContinue={() => {}}
+                onDecline={() => {}}
+              />
+            </div>
             <div className="flex flex-col gap-3">
               <PreviewLabel>Retryable error</PreviewLabel>
               <HostedLaunchConsentPrompt

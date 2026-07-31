@@ -2774,53 +2774,119 @@ describe("parseHostedRuntimeGroupTool", () => {
     ).toThrow(/between 1 and 48 Unicode code points/u);
   });
 
-  it("parses quantified group usage responses without accepting accounting fields", () => {
-    const legacyResponse = {
+  it("parses privacy-safe group usage responses and rejects accounting fields", () => {
+    const response = {
       action: "read_usage" as const,
       result: {
         status: "ok" as const,
         usage: {
-          capacityState: "low" as const,
+          fundingNeeded: true,
           fundingUrl: "https://www.withmurph.ai/groups/fund/group_join_code_1234",
-          periodEnd: "2026-08-01T00:00:00.000Z",
-        },
-      },
-    };
-    expect(parseHostedRuntimeGroupToolResponse(legacyResponse))
-      .toEqual(legacyResponse);
-    const response = {
-      ...legacyResponse,
-      result: {
-        ...legacyResponse.result,
-        usage: {
-          ...legacyResponse.result.usage,
-          remainingPercent: 20,
+          sponsorshipStatus: "not_sponsored" as const,
         },
       },
     };
     expect(parseHostedRuntimeGroupToolResponse(response)).toEqual(response);
-    for (const invalidRemainingPercent of [-1, 20.5, 101]) {
-      expect(() => parseHostedRuntimeGroupToolResponse({
-        ...response,
-        result: {
-          ...response.result,
-          usage: {
-            ...response.result.usage,
-            remainingPercent: invalidRemainingPercent,
-          },
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "read_usage",
+      result: {
+        status: "ok",
+        usage: {
+          capacityState: "low",
+          fundingUrl:
+            "https://www.withmurph.ai/groups/fund/group_join_code_1234",
+          periodEnd: "2026-08-30T12:00:00.000Z",
+          remainingPercent: 20,
         },
-      })).toThrow(/remainingPercent/u);
-    }
+      },
+    })).toEqual({
+      action: "read_usage",
+      result: {
+        status: "ok",
+        usage: {
+          fundingNeeded: true,
+          fundingUrl:
+            "https://www.withmurph.ai/groups/fund/group_join_code_1234",
+          sponsorshipStatus: "not_sponsored",
+        },
+      },
+    });
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "read_usage",
+      result: {
+        status: "ok",
+        usage: {
+          capacityState: "healthy",
+          fundingUrl:
+            "https://www.withmurph.ai/groups/fund/group_join_code_1234",
+          periodEnd: "2026-08-30T12:00:00.000Z",
+        },
+      },
+    })).toEqual({
+      action: "read_usage",
+      result: {
+        status: "ok",
+        usage: {
+          fundingNeeded: false,
+          fundingUrl: null,
+          sponsorshipStatus: "not_sponsored",
+        },
+      },
+    });
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "read_usage",
+      result: {
+        status: "ok",
+        usage: {
+          capacityState: "healthy",
+          fundingUrl: null,
+          periodEnd: "2026-08-30",
+        },
+      },
+    })).toThrow(/periodEnd must be canonical/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "read_usage",
+      result: {
+        status: "ok",
+        usage: {
+          capacityState: "exhausted",
+          fundingUrl:
+            "https://www.withmurph.ai/groups/fund/group_join_code_1234",
+          periodEnd: "2026-08-30T12:00:00.000Z",
+          remainingPercent: 101,
+        },
+      },
+    })).toThrow(/remainingPercent must be at most 100/u);
     expect(() => parseHostedRuntimeGroupToolResponse({
       ...response,
       result: {
         ...response.result,
         usage: {
           ...response.result.usage,
-          remainingUsdMicros: "900000",
+          remainingPercent: 20,
         },
       },
     })).toThrow(/not allowed/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      ...response,
+      result: {
+        ...response.result,
+        usage: {
+          ...response.result.usage,
+          fundingNeeded: "yes",
+        },
+      },
+    })).toThrow(/fundingNeeded/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      ...response,
+      result: {
+        ...response.result,
+        usage: {
+          ...response.result.usage,
+          sponsorshipStatus: "recovery_required",
+        },
+      },
+    })).toThrow(/sponsorshipStatus/u);
     expect(parseHostedRuntimeGroupToolResponse({
       action: "read_usage",
       result: {

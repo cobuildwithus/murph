@@ -434,6 +434,14 @@ enum HostedUsageCreditPurchaseStatus {
   payment_failed
 }
 
+enum HostedGroupSponsorshipAuthorizationStatus {
+  pending_activation
+  active
+  paused
+  recovery_required
+  canceled
+}
+
 enum HostedUsageCreditEntryKind {
   purchase_grant
   referral_grant
@@ -558,6 +566,8 @@ model HostedMember {
   hostedAiUsagePeriods           HostedAiUsagePeriod[]
   usageCreditPurchasesPaid       HostedUsageCreditPurchase[]     @relation("HostedUsageCreditPurchasePayer")
   usageCreditPurchasesReceived   HostedUsageCreditPurchase[]     @relation("HostedUsageCreditPurchaseBeneficiary")
+  groupSponsorshipsPaid          HostedGroupSponsorshipAuthorization[] @relation("HostedGroupSponsorshipAuthorizationPayer")
+  groupSponsorshipsReceived      HostedGroupSponsorshipAuthorization[] @relation("HostedGroupSponsorshipAuthorizationBeneficiary")
   groupSponsorshipMomentsCreated HostedGroupSponsorshipMoment[]  @relation("HostedGroupSponsorshipMomentCreator")
   usageCreditEntries             HostedUsageCreditEntry[]
   usageReferralsAsReferrer       HostedUsageReferral[]            @relation("HostedUsageReferralReferrer")
@@ -967,6 +977,7 @@ model HostedMailboxItem {
   payloadBytes            Int?                  @map("payload_bytes")
   payloadHash             String?               @map("payload_hash")
   consumedAt              DateTime?             @map("consumed_at")
+  aiUsageDeniedAt         DateTime?             @map("ai_usage_denied_at")
   expiresAt               DateTime?             @map("expires_at")
   contentRetiredAt        DateTime?             @map("content_retired_at")
   retentionDisposition    String?               @map("retention_disposition")
@@ -1434,14 +1445,44 @@ model HostedUsageCreditPurchase {
   payer                             HostedMember?                        @relation("HostedUsageCreditPurchasePayer", fields: [payerMemberId], references: [id], onDelete: Restrict)
   beneficiary                       HostedMember                         @relation("HostedUsageCreditPurchaseBeneficiary", fields: [beneficiaryMemberId], references: [id], onDelete: Restrict)
   entries                           HostedUsageCreditEntry[]
+  groupSponsorshipAuthorizationId   String?                              @map("group_sponsorship_authorization_id")
+  groupSponsorshipPeriodStartedAt  DateTime?                            @map("group_sponsorship_period_started_at")
+  groupSponsorshipChargeOrdinal    Int?                                 @map("group_sponsorship_charge_ordinal")
+  groupSponsorshipAuthorization    HostedGroupSponsorshipAuthorization? @relation(fields: [groupSponsorshipAuthorizationId], references: [id], onDelete: Restrict)
   groupSponsorshipMoment            HostedGroupSponsorshipMoment?
 
   @@unique([payerMemberId, clientRequestKey], map: "hosted_usage_credit_purchase_payer_request_key")
+  @@unique([groupSponsorshipAuthorizationId, groupSponsorshipPeriodStartedAt, groupSponsorshipChargeOrdinal], map: "hosted_usage_credit_purchase_sponsorship_period_ordinal_key")
   @@index([payerMemberId, status, createdAt], map: "hosted_usage_credit_purchase_payer_status_idx")
   @@index([beneficiaryMemberId, status, createdAt], map: "hosted_usage_credit_purchase_beneficiary_status_idx")
   @@index([stripePriceLookupKey], map: "hosted_usage_credit_purchase_price_lookup_idx")
   @@index([stripeCustomerLookupKey], map: "hosted_usage_credit_purchase_customer_lookup_idx")
+  @@index([groupSponsorshipAuthorizationId, groupSponsorshipPeriodStartedAt, status], map: "hosted_usage_credit_purchase_sponsorship_period_status_idx")
   @@map("hosted_usage_credit_purchase")
+}
+
+model HostedGroupSponsorshipAuthorization {
+  id                       String   @id
+  payerMemberId            String?  @map("payer_member_id")
+  beneficiaryMemberId      String   @map("beneficiary_member_id")
+  status                   HostedGroupSponsorshipAuthorizationStatus @default(pending_activation)
+  monthlyCapMinor          Int      @map("monthly_cap_minor")
+  pendingMonthlyCapMinor   Int?     @map("pending_monthly_cap_minor")
+  periodStartedAt          DateTime @map("period_started_at")
+  periodEndsAt             DateTime @map("period_ends_at")
+  anchorDay                Int      @map("anchor_day")
+  anchorEndOfMonth         Boolean  @map("anchor_end_of_month")
+  recoveryStartedAt        DateTime? @map("recovery_started_at")
+  canceledAt               DateTime? @map("canceled_at")
+  createdAt                DateTime @default(now()) @map("created_at")
+  updatedAt                DateTime @updatedAt @map("updated_at")
+  payer                    HostedMember? @relation("HostedGroupSponsorshipAuthorizationPayer", fields: [payerMemberId], references: [id], onDelete: SetNull)
+  beneficiary              HostedMember @relation("HostedGroupSponsorshipAuthorizationBeneficiary", fields: [beneficiaryMemberId], references: [id], onDelete: Restrict)
+  purchases                HostedUsageCreditPurchase[]
+
+  @@index([payerMemberId, status, updatedAt], map: "hosted_group_sponsorship_authorization_payer_status_idx")
+  @@index([beneficiaryMemberId, status, updatedAt], map: "hosted_group_sponsorship_authorization_beneficiary_status_idx")
+  @@map("hosted_group_sponsorship_authorization")
 }
 
 model HostedGroupSponsorshipMoment {

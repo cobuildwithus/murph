@@ -20,8 +20,16 @@ import {
   parseHostedBillingCheckoutOffer,
   parseHostedBillingPhase,
   parseHostedBillingPlanCode,
+  type HostedBillingPlanCode,
 } from "./billing-plans";
+import { assertHostedBillingPlanSelectable } from "./billing-plan-eligibility";
 import {
+  scheduleHostedBillingPlanSwitch,
+  type HostedBillingPlanSwitchResult,
+} from "./billing-plan-switch-to-pulse-service";
+import {
+  HOSTED_START_PAID_GROUP_RETURN_PARAM,
+  HOSTED_START_PAID_GROUP_RETURN_VALUE,
   HOSTED_START_PAID_PULSE_RETURN_PARAM,
   HOSTED_START_PAID_PULSE_RETURN_VALUE,
   type HostedPulseTrialContinuationAction,
@@ -47,6 +55,7 @@ import { isHostedStripeLegacyAiUsageMeteredItem } from "./legacy-usage-price";
 import {
   requireHostedOnboardingPublicBaseUrl,
   requireHostedStripeBillingPlanConfig,
+  requireValidatedHostedStripeBillingPlanConfig,
 } from "./runtime";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
 import { applyStripeInvoicePaid } from "./stripe-billing-events";
@@ -55,6 +64,10 @@ import {
   describeHostedStripeErrorDetails,
   logHostedStripeFailure,
 } from "./stripe-error-log";
+import {
+  hasHostedStripeSubscriptionPaymentMethod,
+  readHostedStripeSubscriptionPaymentMethodId,
+} from "./stripe-subscription-payment-method";
 
 const START_PAID_PULSE_PLAN = "launch_monthly";
 const START_PAID_PULSE_PAYMENT_METHOD_RETURN_PATH = "/settings#subscription";
@@ -98,28 +111,48 @@ type HostedPulseTrialStartPaidIdempotencyOperation =
   | "active-trial-end-now-v2"
   | "paused-resume-v1";
 
-export type HostedPulseTrialStartPaidResult =
+export type HostedTrialPaidPlanCode = Extract<
+  HostedBillingPlanCode,
+  "launch_group_monthly" | "launch_monthly"
+>;
+
+export type HostedTrialStartPaidResult<
+  TPlanCode extends HostedTrialPaidPlanCode = HostedTrialPaidPlanCode,
+> =
   | {
-    billingPlanCode: "launch_monthly";
+    billingPlanCode: TPlanCode;
     status: "billing_pending";
   }
   | {
-    billingPlanCode: "launch_monthly";
+    billingPlanCode: TPlanCode;
     status: "started";
   }
   | {
-    billingPlanCode: "launch_monthly";
+    billingPlanCode: TPlanCode;
     paymentUrl: string;
     resumeStartAfterPaymentMethodSetup?: true;
     status: "payment_required";
   };
 
-export type HostedPulseTrialContinueResult =
-  | HostedPulseTrialStartPaidResult
+export type HostedTrialContinueResult<
+  TPlanCode extends HostedTrialPaidPlanCode = HostedTrialPaidPlanCode,
+> =
+  | HostedTrialStartPaidResult<TPlanCode>
   | {
-    billingPlanCode: "launch_monthly";
+    billingPlanCode: TPlanCode;
     status: "continuing";
   };
+
+export type HostedPulseTrialStartPaidResult =
+  HostedTrialStartPaidResult<"launch_monthly">;
+export type HostedPulseTrialContinueResult =
+  HostedTrialContinueResult<"launch_monthly">;
+
+export type HostedTrialPaidPlanTransitionResult<
+  TPlanCode extends HostedTrialPaidPlanCode = HostedTrialPaidPlanCode,
+> =
+  | HostedBillingPlanSwitchResult
+  | HostedTrialContinueResult<TPlanCode>;
 
 interface HostedPulseTrialPaidPlanInput {
   memberId: string;
@@ -137,14 +170,18 @@ type HostedPulseTrialPaymentMethodPortalContinuation =
     memberId: string;
   }
   | {
-    kind: "settings";
-  };
+      kind: "settings";
+    }
+  | {
+      kind: "settings_group";
+    };
 
 export async function startHostedPulseTrialPaidPlan(
   input: HostedPulseTrialStartPaidPlanInput,
 ): Promise<HostedPulseTrialStartPaidResult> {
   return transitionHostedPulseTrialPaidPlan({
     ...input,
+    targetPlanCode: START_PAID_PULSE_PLAN,
     timing: "now",
   });
 }
@@ -154,19 +191,104 @@ export async function continueHostedPulseTrialPaidPlan(
 ): Promise<HostedPulseTrialContinueResult> {
   return transitionHostedPulseTrialPaidPlan({
     ...input,
+    targetPlanCode: START_PAID_PULSE_PLAN,
     timing: "at_trial_end",
   });
 }
 
+export async function startHostedTrialPaidPlan(
+  input: HostedPulseTrialPaidPlanInput & {
+    targetPlanCode: HostedTrialPaidPlanCode;
+    timing: "at_trial_end" | "now";
+  },
+): Promise<HostedTrialPaidPlanTransitionResult> {
+  if (input.timing === "now") {
+    return transitionHostedPulseTrialPaidPlan({
+      ...input,
+      timing: "now",
+    });
+  }
+
+  if (
+    input.targetPlanCode === "launch_group_monthly"
+  ) {
+    const switchResult = await scheduleHostedBillingPlanSwitch({
+      memberId: input.memberId,
+      now: input.now,
+      prisma: input.prisma,
+      requiredSourceBillingPhase: "trial",
+      targetPlanCode: input.targetPlanCode,
+    });
+    if (switchResult.status !== "payment_method_required") {
+      return switchResult;
+    }
+
+    const prisma = input.prisma ?? getPrisma();
+    const billingRef = await readHostedMemberStripeBillingRef({
+      memberId: input.memberId,
+      prisma,
+    });
+    const stripeCustomerId = billingRef?.stripeCustomerId ?? null;
+    if (!stripeCustomerId) {
+      throw hostedOnboardingError({
+        code: "HOSTED_BILLING_STRIPE_SUBSCRIPTION_NOT_READY",
+        httpStatus: 409,
+        message: "Your subscription is not ready for billing changes yet.",
+      });
+    }
+    const targetConfig = requireHostedStripeBillingPlanConfig({
+      billingPlanCode: input.targetPlanCode,
+    });
+    const now = input.now ?? new Date();
+    const paymentMethodContinuation =
+      resolveHostedPulseTrialPaymentMethodContinuation({
+        continuation: input.paymentMethodContinuation,
+        memberId: input.memberId,
+        targetPlanCode: input.targetPlanCode,
+        timing: input.timing,
+      });
+
+    return {
+      billingPlanCode: input.targetPlanCode,
+      paymentUrl: await createHostedPulseTrialStartPaidPaymentMethodPortalUrl({
+        continuation: paymentMethodContinuation,
+        now,
+        stripe: targetConfig.stripe,
+        stripeCustomerId,
+      }),
+      status: "payment_required",
+    };
+  }
+
+  return transitionHostedPulseTrialPaidPlan({
+    ...input,
+    targetPlanCode: "launch_monthly",
+    timing: "at_trial_end",
+  });
+}
+
+async function transitionHostedPulseTrialPaidPlan<
+  TPlanCode extends HostedTrialPaidPlanCode,
+>(
+  input: HostedPulseTrialStartPaidPlanInput & {
+    targetPlanCode: TPlanCode;
+    timing: "now";
+  },
+): Promise<HostedTrialStartPaidResult<TPlanCode>>;
 async function transitionHostedPulseTrialPaidPlan(
-  input: HostedPulseTrialStartPaidPlanInput & { timing: "now" },
-): Promise<HostedPulseTrialStartPaidResult>;
-async function transitionHostedPulseTrialPaidPlan(
-  input: HostedPulseTrialPaidPlanInput & { timing: "at_trial_end" },
+  input: HostedPulseTrialPaidPlanInput & {
+    targetPlanCode: "launch_monthly";
+    timing: "at_trial_end";
+  },
 ): Promise<HostedPulseTrialContinueResult>;
-async function transitionHostedPulseTrialPaidPlan(
-  input: HostedPulseTrialStartPaidPlanInput & { timing: "at_trial_end" | "now" },
-): Promise<HostedPulseTrialContinueResult> {
+async function transitionHostedPulseTrialPaidPlan<
+  TPlanCode extends HostedTrialPaidPlanCode,
+>(
+  input: HostedPulseTrialStartPaidPlanInput & {
+    targetPlanCode: TPlanCode;
+    timing: "at_trial_end" | "now";
+  },
+): Promise<HostedTrialContinueResult<TPlanCode>> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
   const member = await readHostedMemberCoreState({
@@ -189,6 +311,15 @@ async function transitionHostedPulseTrialPaidPlan(
     prisma,
   });
 
+  if (parseHostedBillingPlanCode(billingRef?.scheduledBillingPlanCode)) {
+    throw hostedOnboardingError({
+      code: "HOSTED_BILLING_PLAN_CHANGE_ALREADY_SCHEDULED",
+      httpStatus: 409,
+      message:
+        "A plan change is already scheduled. Review the current billing state before changing plans again.",
+    });
+  }
+
   assertHostedPulseTrialStartPaidRecoverableSourceState({ billingRef });
   const currentBillingPhase =
     parseHostedBillingPhase(billingRef?.currentBillingPhase);
@@ -197,7 +328,7 @@ async function transitionHostedPulseTrialPaidPlan(
   if (input.timing === "at_trial_end" && !canStart) {
     if (currentBillingPhase === "paid") {
       return {
-        billingPlanCode: START_PAID_PULSE_PLAN,
+        billingPlanCode: input.targetPlanCode,
         status: "started",
       };
     }
@@ -215,10 +346,13 @@ async function transitionHostedPulseTrialPaidPlan(
     });
   }
 
-  const pulseConfig = requireHostedStripeBillingPlanConfig({
+  const sourceConfig = requireHostedStripeBillingPlanConfig({
     billingPlanCode: START_PAID_PULSE_PLAN,
   });
-  const stripe = pulseConfig.stripe;
+  const targetConfig = await requireValidatedHostedStripeBillingPlanConfig({
+    billingPlanCode: input.targetPlanCode,
+  });
+  const stripe = targetConfig.stripe;
   const subscription = await callHostedStripeStartPaidPulseOperation(
     "subscription.retrieve",
     () => stripe.subscriptions.retrieve(stripeSubscriptionId, {
@@ -249,22 +383,24 @@ async function transitionHostedPulseTrialPaidPlan(
     invoice: readExpandedLatestInvoice(subscription),
     memberId: input.memberId,
     now,
-    priceId: pulseConfig.priceId,
+    priceId: targetConfig.priceId,
     prisma,
     stripeCustomerId,
     stripeSubscriptionId,
     subscription,
+    targetPlanCode: input.targetPlanCode,
   });
 
-  const legacyMeteredItems = buildHostedStripePulseTrialStartPaidLegacyMeteredItemDeletes({
-    priceId: pulseConfig.priceId,
+  const transitionItems = buildHostedStripeTrialPaidPlanTransitionItems({
+    sourcePriceId: sourceConfig.priceId,
     subscription,
+    targetPriceId: targetConfig.priceId,
   });
 
   if (canStart && isHostedStripePulseTrialStartPaidPendingWithoutInvoiceProof(subscription)) {
     const pendingInvoiceResult = await resolveExistingInvoiceResult();
     return pendingInvoiceResult ?? {
-      billingPlanCode: START_PAID_PULSE_PLAN,
+      billingPlanCode: input.targetPlanCode,
       status: "billing_pending",
     };
   }
@@ -282,19 +418,21 @@ async function transitionHostedPulseTrialPaidPlan(
     const paymentMethodContinuation = resolveHostedPulseTrialPaymentMethodContinuation({
       continuation: input.paymentMethodContinuation,
       memberId: input.memberId,
+      targetPlanCode: input.targetPlanCode,
       timing: input.timing,
     });
     const pausedStartResult = await resumeHostedPulseTrialStartPaidPausedSubscription({
-      legacyMeteredItems,
       memberId: input.memberId,
       now,
       paymentMethodContinuation,
-      priceId: pulseConfig.priceId,
+      priceId: targetConfig.priceId,
       prisma,
       stripe,
       stripeCustomerId,
       stripeSubscriptionId,
       subscription,
+      targetPlanCode: input.targetPlanCode,
+      transitionItems,
       trialEnd: billingRef?.currentTrialEndsAt ?? null,
     });
 
@@ -305,11 +443,12 @@ async function transitionHostedPulseTrialPaidPlan(
     return reconcileHostedPulseTrialStartPaidSubscriptionAfterStripeFailure({
       memberId: input.memberId,
       now,
-      priceId: pulseConfig.priceId,
+      priceId: targetConfig.priceId,
       prisma,
       stripe,
       stripeCustomerId,
       stripeSubscriptionId,
+      targetPlanCode: input.targetPlanCode,
     });
   }
 
@@ -323,10 +462,11 @@ async function transitionHostedPulseTrialPaidPlan(
     const paymentMethodContinuation = resolveHostedPulseTrialPaymentMethodContinuation({
       continuation: input.paymentMethodContinuation,
       memberId: input.memberId,
+      targetPlanCode: input.targetPlanCode,
       timing: input.timing,
     });
     return {
-      billingPlanCode: START_PAID_PULSE_PLAN,
+      billingPlanCode: input.targetPlanCode,
       paymentUrl: await createHostedPulseTrialStartPaidPaymentMethodPortalUrl({
         continuation: paymentMethodContinuation,
         now,
@@ -342,20 +482,21 @@ async function transitionHostedPulseTrialPaidPlan(
 
   if (input.timing === "at_trial_end") {
     return {
-      billingPlanCode: START_PAID_PULSE_PLAN,
+      billingPlanCode: input.targetPlanCode,
       status: "continuing",
     };
   }
 
   const trialStartResult = await updateHostedPulseTrialStartPaidSubscription({
-    legacyMeteredItems,
     memberId: input.memberId,
     now,
-    priceId: pulseConfig.priceId,
+    priceId: targetConfig.priceId,
     prisma,
     stripe,
     stripeCustomerId,
     stripeSubscriptionId,
+    targetPlanCode: input.targetPlanCode,
+    transitionItems,
     trialEnd: billingRef?.currentTrialEndsAt ?? null,
   });
 
@@ -366,11 +507,12 @@ async function transitionHostedPulseTrialPaidPlan(
   return reconcileHostedPulseTrialStartPaidSubscriptionAfterStripeFailure({
     memberId: input.memberId,
     now,
-    priceId: pulseConfig.priceId,
+    priceId: targetConfig.priceId,
     prisma,
     stripe,
     stripeCustomerId,
     stripeSubscriptionId,
+    targetPlanCode: input.targetPlanCode,
   });
 }
 
@@ -525,49 +667,6 @@ function assertHostedStripePulseTrialSubscriptionBillingShapeCanChange(input: {
   }
 }
 
-function hasHostedStripeSubscriptionPaymentMethod(subscription: Stripe.Subscription): boolean {
-  return Boolean(readHostedStripeSubscriptionPaymentMethodId(subscription));
-}
-
-/**
- * The payment method that should settle this subscription's next invoice.
- * A resumed trial cuts a cycle invoice immediately, so the card has to be on the
- * subscription: a card held only on the customer leaves that invoice in
- * `requires_payment_method`, which strands the resume in `pending_update` until
- * Stripe expires and voids it.
- */
-function readHostedStripeSubscriptionPaymentMethodId(
-  subscription: Stripe.Subscription,
-): string | null {
-  const subscriptionPaymentMethodId =
-    coerceStripeObjectId(subscription.default_payment_method) ||
-    coerceStripeObjectId(subscription.default_source);
-
-  if (subscriptionPaymentMethodId) {
-    return subscriptionPaymentMethodId;
-  }
-
-  const customer = readExpandedStripeCustomer(subscription.customer);
-  if (!customer) {
-    return null;
-  }
-
-  return coerceStripeObjectId(customer.invoice_settings.default_payment_method) ||
-    coerceStripeObjectId(customer.default_source) ||
-    null;
-}
-
-function readExpandedStripeCustomer(
-  customer: Stripe.Subscription["customer"],
-): Stripe.Customer | null {
-  return customer &&
-    typeof customer === "object" &&
-    customer.object === "customer" &&
-    !customer.deleted
-    ? customer
-    : null;
-}
-
 async function createHostedPulseTrialStartPaidPaymentMethodPortalUrl(input: {
   continuation: HostedPulseTrialPaymentMethodPortalContinuation | null;
   now: Date;
@@ -614,10 +713,18 @@ async function createHostedPulseTrialStartPaidPaymentMethodPortalUrl(input: {
 function resolveHostedPulseTrialPaymentMethodContinuation(input: {
   continuation: HostedPulseTrialPaidPlanInput["paymentMethodContinuation"];
   memberId: string;
+  targetPlanCode: HostedTrialPaidPlanCode;
   timing: "at_trial_end" | "now";
 }): HostedPulseTrialPaymentMethodPortalContinuation | null {
   if (input.continuation === undefined) {
     return null;
+  }
+
+  // The legacy continuation contract can only resume Pulse. A Group payment
+  // setup therefore returns to a marked Settings receipt without auto-running
+  // the wrong plan; the member confirms a fresh, current Group quote there.
+  if (input.targetPlanCode === "launch_group_monthly") {
+    return { kind: "settings_group" };
   }
 
   if (input.continuation === "settings") {
@@ -652,6 +759,12 @@ function buildHostedPulseTrialPaymentMethodCompletedReturnUrl(input: {
   }
 
   const completedReturnUrl = new URL(input.settingsReturnUrl);
+  if (input.continuation?.kind === "settings_group") {
+    completedReturnUrl.searchParams.set(
+      HOSTED_START_PAID_GROUP_RETURN_PARAM,
+      HOSTED_START_PAID_GROUP_RETURN_VALUE,
+    );
+  }
   if (input.continuation?.kind === "settings") {
     completedReturnUrl.searchParams.set(
       HOSTED_START_PAID_PULSE_RETURN_PARAM,
@@ -665,8 +778,26 @@ function buildHostedStripePulseTrialStartPaidLegacyMeteredItemDeletes(input: {
   priceId: string;
   subscription: Stripe.Subscription;
 }): Stripe.SubscriptionUpdateParams.Item[] {
+  return buildHostedStripeTrialPaidPlanTransitionItems({
+    sourcePriceId: input.priceId,
+    subscription: input.subscription,
+    targetPriceId: input.priceId,
+  });
+}
+
+function buildHostedStripeTrialPaidPlanTransitionItems(input: {
+  sourcePriceId: string;
+  subscription: Stripe.Subscription;
+  targetPriceId: string;
+}): Stripe.SubscriptionUpdateParams.Item[] {
   const activeItems = input.subscription.items.data;
-  const recurringItems = activeItems.filter((item) => item.price?.id === input.priceId);
+  const acceptedRecurringPriceIds = new Set([
+    input.sourcePriceId,
+    input.targetPriceId,
+  ]);
+  const recurringItems = activeItems.filter((item) =>
+    acceptedRecurringPriceIds.has(item.price?.id ?? "")
+  );
 
   if (recurringItems.length !== 1) {
     throw buildHostedPulseTrialStartPaidItemError();
@@ -682,7 +813,14 @@ function buildHostedStripePulseTrialStartPaidLegacyMeteredItemDeletes(input: {
     throw buildHostedPulseTrialStartPaidItemError();
   }
 
-  const legacyMeteredItems: Stripe.SubscriptionUpdateParams.Item[] = [];
+  const transitionItems: Stripe.SubscriptionUpdateParams.Item[] =
+    recurringItem.price.id === input.targetPriceId
+      ? []
+      : [{
+          id: recurringItem.id,
+          price: input.targetPriceId,
+          quantity: 1,
+        }];
 
   for (const item of activeItems) {
     if (item.id === recurringItem.id) {
@@ -690,7 +828,7 @@ function buildHostedStripePulseTrialStartPaidLegacyMeteredItemDeletes(input: {
     }
 
     if (isHostedStripeLegacyAiUsageMeteredItem(item)) {
-      legacyMeteredItems.push({
+      transitionItems.push({
         deleted: true,
         id: item.id,
       });
@@ -700,7 +838,7 @@ function buildHostedStripePulseTrialStartPaidLegacyMeteredItemDeletes(input: {
     throw buildHostedPulseTrialStartPaidItemError();
   }
 
-  return legacyMeteredItems;
+  return transitionItems;
 }
 
 function buildHostedPulseTrialStartPaidItemError(): Error {
@@ -722,7 +860,9 @@ function assertHostedStripePulseTrialStartPaidPostMutationSubscriptionShape(inpu
   }
 }
 
-async function maybeResolveHostedPulseTrialStartPaidInvoiceResult(input: {
+async function maybeResolveHostedPulseTrialStartPaidInvoiceResult<
+  TPlanCode extends HostedTrialPaidPlanCode,
+>(input: {
   invoice: Stripe.Invoice | null;
   memberId: string;
   now: Date;
@@ -730,7 +870,8 @@ async function maybeResolveHostedPulseTrialStartPaidInvoiceResult(input: {
   stripeCustomerId: string;
   stripeSubscriptionId: string;
   subscription: Stripe.Subscription;
-}): Promise<HostedPulseTrialStartPaidResult | null> {
+  targetPlanCode: TPlanCode;
+}): Promise<HostedTrialStartPaidResult<TPlanCode> | null> {
   if (!input.invoice || !isHostedPulseTrialStartPaidInvoiceForSubscription({
     invoice: input.invoice,
     stripeSubscriptionId: input.stripeSubscriptionId,
@@ -755,13 +896,14 @@ async function maybeResolveHostedPulseTrialStartPaidInvoiceResult(input: {
     return await hasHostedPulseTrialStartPaidLocallyStarted({
       memberId: input.memberId,
       prisma: input.prisma,
+      targetPlanCode: input.targetPlanCode,
     })
       ? {
-          billingPlanCode: START_PAID_PULSE_PLAN,
+          billingPlanCode: input.targetPlanCode,
           status: "started",
         }
       : {
-          billingPlanCode: START_PAID_PULSE_PLAN,
+          billingPlanCode: input.targetPlanCode,
           status: "billing_pending",
         };
   }
@@ -771,7 +913,7 @@ async function maybeResolveHostedPulseTrialStartPaidInvoiceResult(input: {
 
   if (paymentUrl && paymentRequired) {
     return {
-      billingPlanCode: START_PAID_PULSE_PLAN,
+      billingPlanCode: input.targetPlanCode,
       paymentUrl,
       status: "payment_required",
     };
@@ -791,7 +933,7 @@ async function maybeResolveHostedPulseTrialStartPaidInvoiceResult(input: {
     input.invoice.status === "uncollectible"
   ) {
     return {
-      billingPlanCode: START_PAID_PULSE_PLAN,
+      billingPlanCode: input.targetPlanCode,
       status: "billing_pending",
     };
   }
@@ -799,7 +941,9 @@ async function maybeResolveHostedPulseTrialStartPaidInvoiceResult(input: {
   return null;
 }
 
-async function maybeResolveHostedPulseTrialStartPaidPostMutationInvoiceResult(input: {
+async function maybeResolveHostedPulseTrialStartPaidPostMutationInvoiceResult<
+  TPlanCode extends HostedTrialPaidPlanCode,
+>(input: {
   invoice: Stripe.Invoice | null;
   memberId: string;
   now: Date;
@@ -808,7 +952,8 @@ async function maybeResolveHostedPulseTrialStartPaidPostMutationInvoiceResult(in
   stripeCustomerId: string;
   stripeSubscriptionId: string;
   subscription: Stripe.Subscription;
-}): Promise<HostedPulseTrialStartPaidResult | null> {
+  targetPlanCode: TPlanCode;
+}): Promise<HostedTrialStartPaidResult<TPlanCode> | null> {
   assertHostedStripePulseTrialStartPaidRecoverableSubscriptionStatus({
     subscription: input.subscription,
   });
@@ -828,8 +973,9 @@ async function maybeResolveHostedPulseTrialStartPaidPostMutationInvoiceResult(in
   return maybeResolveHostedPulseTrialStartPaidInvoiceResult(input);
 }
 
-async function updateHostedPulseTrialStartPaidSubscription(input: {
-  legacyMeteredItems: Stripe.SubscriptionUpdateParams.Item[];
+async function updateHostedPulseTrialStartPaidSubscription<
+  TPlanCode extends HostedTrialPaidPlanCode,
+>(input: {
   memberId: string;
   now: Date;
   priceId: string;
@@ -837,20 +983,29 @@ async function updateHostedPulseTrialStartPaidSubscription(input: {
   stripe: Stripe;
   stripeCustomerId: string;
   stripeSubscriptionId: string;
+  targetPlanCode: TPlanCode;
+  transitionItems: Stripe.SubscriptionUpdateParams.Item[];
   trialEnd: Date | null;
-}): Promise<HostedPulseTrialStartPaidResult | null> {
+}): Promise<HostedTrialStartPaidResult<TPlanCode> | null> {
   let stripeMutationCompleted = false;
 
   try {
     const updatedSubscription = await withHostedMemberStripeMutationLock({
       memberId: input.memberId,
       prisma: input.prisma,
-      run: async () => {
+      run: async (tx) => {
+        await assertHostedBillingPlanSelectable({
+          memberId: input.memberId,
+          prisma: tx,
+          targetPlanCode: input.targetPlanCode,
+        });
         const subscription = await callHostedStripeStartPaidPulseOperation(
           "subscription.update.trial-end-now",
           () => input.stripe.subscriptions.update(input.stripeSubscriptionId, {
             expand: [...START_PAID_PULSE_STRIPE_UPDATE_EXPANSIONS],
-            ...(input.legacyMeteredItems.length > 0 ? { items: input.legacyMeteredItems } : {}),
+            ...(input.transitionItems.length > 0
+              ? { items: input.transitionItems }
+              : {}),
             metadata: { murphTrialExtensionTargetTrialEnd: "" },
             payment_behavior: "allow_incomplete",
             trial_end: "now",
@@ -883,10 +1038,11 @@ async function updateHostedPulseTrialStartPaidSubscription(input: {
       stripeCustomerId: input.stripeCustomerId,
       stripeSubscriptionId: input.stripeSubscriptionId,
       subscription: updatedSubscription,
+      targetPlanCode: input.targetPlanCode,
     });
 
     return updatedInvoiceResult ?? {
-      billingPlanCode: START_PAID_PULSE_PLAN,
+      billingPlanCode: input.targetPlanCode,
       status: "billing_pending",
     };
   } catch (error) {
@@ -901,7 +1057,9 @@ async function updateHostedPulseTrialStartPaidSubscription(input: {
   }
 }
 
-async function reconcileHostedPulseTrialStartPaidSubscriptionAfterStripeFailure(input: {
+async function reconcileHostedPulseTrialStartPaidSubscriptionAfterStripeFailure<
+  TPlanCode extends HostedTrialPaidPlanCode,
+>(input: {
   memberId: string;
   now: Date;
   priceId: string;
@@ -909,7 +1067,8 @@ async function reconcileHostedPulseTrialStartPaidSubscriptionAfterStripeFailure(
   stripe: Stripe;
   stripeCustomerId: string;
   stripeSubscriptionId: string;
-}): Promise<HostedPulseTrialStartPaidResult> {
+  targetPlanCode: TPlanCode;
+}): Promise<HostedTrialStartPaidResult<TPlanCode>> {
   const subscription = await callHostedStripeStartPaidPulseOperation(
     "subscription.retrieve.reconcile-trial-end-now",
     () => input.stripe.subscriptions.retrieve(input.stripeSubscriptionId, {
@@ -934,6 +1093,7 @@ async function reconcileHostedPulseTrialStartPaidSubscriptionAfterStripeFailure(
     stripeCustomerId: input.stripeCustomerId,
     stripeSubscriptionId: input.stripeSubscriptionId,
     subscription,
+    targetPlanCode: input.targetPlanCode,
   });
 
   if (existingInvoiceResult) {
@@ -943,13 +1103,14 @@ async function reconcileHostedPulseTrialStartPaidSubscriptionAfterStripeFailure(
   // The first update may have committed even when Stripe returned a 5xx/network
   // failure. Do not issue the same paid transition under a fresh idempotency key.
   return {
-    billingPlanCode: START_PAID_PULSE_PLAN,
+    billingPlanCode: input.targetPlanCode,
     status: "billing_pending",
   };
 }
 
-async function resumeHostedPulseTrialStartPaidPausedSubscription(input: {
-  legacyMeteredItems: Stripe.SubscriptionUpdateParams.Item[];
+async function resumeHostedPulseTrialStartPaidPausedSubscription<
+  TPlanCode extends HostedTrialPaidPlanCode,
+>(input: {
   memberId: string;
   now: Date;
   paymentMethodContinuation: HostedPulseTrialPaymentMethodPortalContinuation | null;
@@ -959,15 +1120,17 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription(input: {
   stripeCustomerId: string;
   stripeSubscriptionId: string;
   subscription: Stripe.Subscription;
+  targetPlanCode: TPlanCode;
+  transitionItems: Stripe.SubscriptionUpdateParams.Item[];
   trialEnd: Date | null;
-}): Promise<HostedPulseTrialStartPaidResult | null> {
+}): Promise<HostedTrialStartPaidResult<TPlanCode> | null> {
   assertHostedStripePulseTrialSubscriptionCanResumePaid({
     subscription: input.subscription,
   });
 
   if (!hasHostedStripeSubscriptionPaymentMethod(input.subscription)) {
     return {
-      billingPlanCode: START_PAID_PULSE_PLAN,
+      billingPlanCode: input.targetPlanCode,
       paymentUrl: await createHostedPulseTrialStartPaidPaymentMethodPortalUrl({
         continuation: input.paymentMethodContinuation,
         now: input.now,
@@ -987,7 +1150,12 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription(input: {
     const resumedSubscription = await withHostedMemberStripeMutationLock({
       memberId: input.memberId,
       prisma: input.prisma,
-      run: async () => {
+      run: async (tx) => {
+        await assertHostedBillingPlanSelectable({
+          memberId: input.memberId,
+          prisma: tx,
+          targetPlanCode: input.targetPlanCode,
+        });
         const cleanedSubscription = await callHostedStripeStartPaidPulseOperation(
           "subscription.update.paused-pre-resume-cleanup",
           // Stripe rejects `proration_behavior` outright while a subscription is
@@ -997,9 +1165,9 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription(input: {
           // against a paused subscription.
           () => input.stripe.subscriptions.update(input.stripeSubscriptionId, {
             expand: [...START_PAID_PULSE_STRIPE_UPDATE_EXPANSIONS],
-            ...(input.legacyMeteredItems.length > 0
+            ...(input.transitionItems.length > 0
               ? {
-                items: input.legacyMeteredItems,
+                items: input.transitionItems,
                 proration_behavior: "none" as const,
               }
               : {}),
@@ -1060,10 +1228,11 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription(input: {
       stripeCustomerId: input.stripeCustomerId,
       stripeSubscriptionId: input.stripeSubscriptionId,
       subscription: resumedSubscription,
+      targetPlanCode: input.targetPlanCode,
     });
 
     return resumedInvoiceResult ?? {
-      billingPlanCode: START_PAID_PULSE_PLAN,
+      billingPlanCode: input.targetPlanCode,
       status: "billing_pending",
     };
   } catch (error) {
@@ -1081,13 +1250,15 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription(input: {
 async function hasHostedPulseTrialStartPaidLocallyStarted(input: {
   memberId: string;
   prisma: PrismaClient;
+  targetPlanCode: HostedTrialPaidPlanCode;
 }): Promise<boolean> {
   const billingRef = await readHostedMemberStripeBillingRef({
     memberId: input.memberId,
     prisma: input.prisma,
   });
 
-  return parseHostedBillingPlanCode(billingRef?.currentBillingPlanCode) === START_PAID_PULSE_PLAN &&
+  return parseHostedBillingPlanCode(billingRef?.currentBillingPlanCode) ===
+      input.targetPlanCode &&
     parseHostedBillingPhase(billingRef?.currentBillingPhase) === "paid";
 }
 

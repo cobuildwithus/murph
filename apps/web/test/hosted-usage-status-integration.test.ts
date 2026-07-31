@@ -2,6 +2,7 @@ import { HostedBillingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  isHostedBillingPlanSelectionAvailable: vi.fn(),
   readHostedMemberBillingEligibilityState: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
 }));
@@ -14,6 +15,16 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
   readHostedMemberBillingEligibilityState: mocks.readHostedMemberBillingEligibilityState,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
+  getHostedOnboardingEnvironment: () => ({
+    stripePriceIdsByPlan: {
+      launch_group_monthly: null,
+    },
+  }),
+  isHostedBillingPlanSelectionAvailable:
+    mocks.isHostedBillingPlanSelectionAvailable,
+}));
+
 import { readHostedPersonalAiUsageStatus } from "@/src/lib/hosted-execution/usage-status";
 
 const NOW = new Date("2026-04-09T12:00:00.000Z");
@@ -23,6 +34,7 @@ const TRIAL_END = new Date("2026-04-08T12:00:00.000Z");
 describe("hosted plan usage production gate integration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.isHostedBillingPlanSelectionAvailable.mockResolvedValue(true);
     mocks.readHostedMemberBillingEligibilityState.mockResolvedValue({
       currentBillingPhase: "trial",
       currentBillingPlanCode: "launch_monthly",
@@ -47,11 +59,21 @@ describe("hosted plan usage production gate integration", () => {
       }) as never,
       publicBaseUrl: "https://example.test",
     })).resolves.toEqual({
+      availablePlans: [
+        {
+          code: "launch_monthly",
+          displayName: "Pulse",
+          monthlyPriceUsdCents: 800,
+          selectable: true,
+        },
+      ],
       generatedAt: NOW.toISOString(),
       reason: "trial_conversion_pending",
+      recommendedPlanCode: "launch_monthly",
       recommendedAction: {
-        kind: "start_pulse",
+        kind: "change_plan",
         label: "Start Pulse now ($8/month)",
+        targetPlanCode: "launch_monthly",
         url: "https://example.test/settings#subscription",
       },
       status: "unavailable",
@@ -98,6 +120,9 @@ function buildPrisma(input: {
 }) {
   return {
     hostedAccountGroupMembership: {
+      findFirst: vi.fn(async () => null),
+    },
+    hostedGroupMember: {
       findFirst: vi.fn(async () => null),
     },
     hostedMember: {

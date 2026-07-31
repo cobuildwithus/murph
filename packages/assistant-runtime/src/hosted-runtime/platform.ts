@@ -86,6 +86,7 @@ import type {
 } from "@murphai/hosted-execution/phone-calls";
 import type {
   HostedPlanUsageStatus,
+  HostedPlanUsageToolRequest,
 } from "@murphai/hosted-execution/plan-usage";
 import type {
   HostedRuntimeSubscriptionControlRequest,
@@ -465,7 +466,7 @@ export interface HostedRuntimeFamilyPlanToolPort {
 }
 
 export interface HostedRuntimePlanUsageToolPort {
-  read(): Promise<HostedPlanUsageStatus>;
+  read(request: HostedPlanUsageToolRequest): Promise<HostedPlanUsageStatus>;
 }
 
 export interface HostedRuntimeIMessageContactToolPort {

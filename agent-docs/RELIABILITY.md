@@ -316,6 +316,21 @@ Last verified: 2026-07-30
   a cleanup warning blocks the new link instead of adopting an ambiguous
   linkage or revoking sibling sources.
 - The hosted reply-latency operator alert remains one singleton incident owner.
+  Fresh conversation mailbox rows that the existing Web AI usage gate
+  intentionally denies receive one assign-once timestamp at the mutating
+  reconciliation or mailbox-fetch denial boundary. The database-timed write is
+  bounded by the observed replay floor and conversation high-water, happens
+  before fallible usage-notice delivery, reuses the existing mailbox work
+  owner, and cannot fail the gate. The monitor excludes only chronologically
+  valid stamps with no execution evidence. It derives one effective latency
+  origin from ingress, staging, provider, delivery, and consumption facts
+  before applying its 24-hour window, bounded scan, or delivery/provider
+  grouping. Post-denial execution is measured from its earliest milestone even
+  when the original ingress is older than the window. An unblocked row sharing
+  the same reply remains alertable. The existing seven-day ingress-trace cleanup
+  retires a trace only after both its original ingress and latest activity are
+  stale, so a resumed trace survives quiet-hour deferral without making
+  inactive traces unbounded.
   Outbound paging requires the shared Resend operational-email sender and
   recipients plus a valid IANA operator timezone; it never falls back to
   Linq/iMessage. It suppresses sends from 11 PM through 7 AM local time and
@@ -425,6 +440,28 @@ Last verified: 2026-07-30
   and its binding is cleared under the same reconciliation fence. Direct
   PaymentIntent events reuse the existing Stripe receipt and financial
   reconciliation owner rather than adding a retry queue.
+- Capped group sponsorship extends that same reliability owner rather than
+  adding a subscription, scheduler, queue, or balance. Low-capacity settlement
+  admits at most one deterministic $5 purchase while the beneficiary row is
+  locked. Its id is derived from authorization, anchored period, and ordinal;
+  fulfilled plus nonterminal purchases consume cap headroom. The existing
+  minute Stripe sweep performs post-commit provider work, and the verified
+  Stripe-event receipt remains the only grant and continuation authority. The
+  beneficiary-locked admission is the linearization point for need and cap
+  headroom; its deterministic purchase is the durable exact-$5 reservation.
+  The sweep rechecks authorization, period, cap, purchase identity, and runtime
+  access without holding a database transaction across provider I/O or
+  reinterpreting need after admission. Unused granted credit carries forward.
+  Safe no-card or authentication-required outcomes terminalize the exact
+  purchase, move the authorization to `recovery_required`, and stop later
+  admissions without delaying the ordinary reply. Payer recovery reuses that
+  failed purchase only if its exact $5 still fits under the current cap; a cap
+  reduced to fulfilled spend leaves the failure immutable and reactivates
+  without provider work. Provider ambiguity retains the same purchase for
+  bounded retry/reconciliation. Lazy month rollover never expires ledger
+  credit, never clears recovery, and applies a deferred cap decrease only at
+  the next anchored boundary. Activation owns the sole public sponsorship
+  moment; refill fulfillment is silent and private notices are period-deduped.
 - The Vercel predeploy migration replaces the detached-payer checks before the
   saved-card producer can serve traffic. That replacement is backward
   compatible with the old application, retains the PaymentIntent/Charge and
