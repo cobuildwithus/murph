@@ -298,8 +298,9 @@ first-party customize page. Native consent grants only the disclosed snapshot.
 A returned link grants nothing until the member accepts the first-party page.
 The standings message itself never grants permission.
 
-Only a native access message whose canonical provider creation time falls
-inside the current send attempt adds `offeredAt` evidence. An idempotent replay
+Only a native access message whose canonical provider creation second falls
+inside the current send attempt adds `offeredAt` evidence. This matches Linq's
+accepted whole-second timestamp precision. An idempotent replay
 retains its original provider time, is still durably bound, and returns
 unavailable recency evidence instead of claiming a new adjacent message or
 minting a fresh window. When Web finds a covering active native offer instead
@@ -434,6 +435,8 @@ cross-member fanout, polling, a scheduler, or persisted rollout state.
   a false claim that another native message was posted.
 - A provider-idempotent replay outside the current send interval keeps its
   durable message binding but cannot establish challenge-entry recency.
+- Same-provider-second chronology is an accepted best-effort ambiguity; no
+  challenge-bound or provider-created-versus-replayed claim is made from it.
 - A participant whose exact scope was `not_granted` becomes `in` only after a
   newly posted native offer when the later exact `grantedAt` falls inside the
   recorded eligible 24-hour window and the challenge terms did not change.

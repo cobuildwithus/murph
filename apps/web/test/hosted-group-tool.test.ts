@@ -2918,11 +2918,14 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
 
   it("posts the canonical snapshot with provider-owned recency chronology", async () => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-07-31T12:01:00.000Z"));
-    mocks.sendHostedLinqChatMessage.mockResolvedValueOnce({
-      chatId: "chat_group_1",
-      messageCreatedAt: "2026-07-31T12:01:00.000Z",
-      messageId: "msg_offer_1",
+    vi.setSystemTime(new Date("2026-07-31T12:01:00.400Z"));
+    mocks.sendHostedLinqChatMessage.mockImplementationOnce(() => {
+      vi.setSystemTime(new Date("2026-07-31T12:01:00.700Z"));
+      return Promise.resolve({
+        chatId: "chat_group_1",
+        messageCreatedAt: "2026-07-31T12:01:00.000Z",
+        messageId: "msg_offer_1",
+      });
     });
     mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx.mockResolvedValueOnce({
       group: groupSummaryWithOwnerEmailGrant(),

@@ -1127,9 +1127,19 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   const providerCreatedAt = Number.isFinite(providerCreatedAtMs)
     ? new Date(providerCreatedAtMs)
     : null;
+  const providerSendStartedAtSecond = Math.floor(
+    providerSendStartedAt.getTime() / 1_000,
+  );
+  const providerSendCompletedAtSecond = Math.floor(
+    providerSendCompletedAt.getTime() / 1_000,
+  );
+  const providerCreatedAtSecond = providerCreatedAt === null
+    ? null
+    : Math.floor(providerCreatedAt.getTime() / 1_000);
   const providerCreatedDuringAttempt = providerCreatedAt !== null
-    && providerCreatedAt >= providerSendStartedAt
-    && providerCreatedAt <= providerSendCompletedAt;
+    && providerCreatedAtSecond !== null
+    && providerCreatedAtSecond >= providerSendStartedAtSecond
+    && providerCreatedAtSecond <= providerSendCompletedAtSecond;
   const postedAt = providerCreatedAt ?? providerSendCompletedAt;
 
   try {

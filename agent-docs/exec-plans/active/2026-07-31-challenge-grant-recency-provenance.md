@@ -65,6 +65,11 @@ Updated: 2026-07-31
    retry can return the older provider message without posting another surface.
    Mitigation: require provider creation time to fall inside the current send
    attempt; bind older replays durably but keep entry recency unavailable.
+5. Risk: Linq accepts whole-second message chronology while local send bounds
+   retain milliseconds.
+   Mitigation: compare all values at provider-second precision, preserve older
+   replay fallbacks, and include same-second ambiguity in the accepted
+   best-effort residual.
 
 ## Tasks
 
@@ -91,6 +96,9 @@ Updated: 2026-07-31
   message was created by the current attempt after a binding rollback. The
   required retrospective continues with one fail-closed interval comparison at
   the existing provider boundary; no replay lifecycle or new owner is added.
+- Final ReviewGPT round 3 found that raw millisecond bounds rejected a fresh
+  whole-second provider timestamp. Compare at provider-second precision and
+  retain the existing early/late replay proof.
 - Reuse the existing provider message and grant timestamps; add no schema or
   state owner.
 
