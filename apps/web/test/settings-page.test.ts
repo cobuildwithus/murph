@@ -1218,8 +1218,105 @@ test.each([
   },
 );
 
+test("SettingsPage keeps a delayed owner return separate from a newer member purchase", async () => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPrivySession.mockResolvedValue(null);
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "active",
+      id: "member_123",
+      suspendedAt: null,
+    },
+    linkedAccounts: [],
+    session: {
+      privyUserId: "did:privy:user_123",
+    },
+  });
+  const familyOwner = {
+    billingActive: true,
+    billingStatus: "active",
+    displayName: null,
+    groupId: "hbag_abcdefghijklmnop",
+    invites: [],
+    members: [
+      {
+        isOwner: true,
+        label: null,
+        memberId: "member_123",
+        status: "active",
+      },
+      {
+        isOwner: false,
+        label: "Family member",
+        memberId: "member_family",
+        status: "active",
+      },
+    ],
+    ownerMemberId: "member_123",
+    plans: {},
+    seats: {},
+    suspendedAt: null,
+  };
+  mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(familyOwner);
+  const newerMemberPurchase = {
+    offerCode: "usage_10_usd",
+    purchaseId: "hucp_memberactive0000",
+    retryAllowed: true,
+    status: "checkout_open",
+    target: {
+      beneficiaryMemberId: "member_family",
+      familyGroupId: familyOwner.groupId,
+      kind: "family",
+    },
+    url: "https://checkout.stripe.test/newer-member",
+  } as const;
+  mocks.readHostedActiveUsageCreditPurchaseForPayer.mockResolvedValue(
+    newerMemberPurchase,
+  );
+  mocks.readHostedUsageCreditPurchaseTargetForPayer.mockResolvedValue({
+    beneficiaryMemberId: "member_123",
+    familyGroupId: familyOwner.groupId,
+    kind: "family",
+  });
+
+  const { default: SettingsPage } = await import(
+    "../app/(dashboard)/settings/page"
+  );
+  renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({
+      usageCheckout: "success",
+      usageFamily: familyOwner.groupId,
+      usageMember: "member_123",
+      usagePurchase: "hucp_ownerreturn00000",
+    }),
+  }));
+
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      usageTopUpActivePurchase: null,
+      usageTopUpPurchaseReturn: {
+        kind: "success",
+        purchaseId: "hucp_ownerreturn00000",
+      },
+      usageTopUpScope: "family",
+      usageTopUpTargetLabel: "you",
+    }),
+    undefined,
+  );
+  expect(mocks.HostedFamilySettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      usageTopUpActiveMemberId: "member_family",
+      usageTopUpActivePurchase: newerMemberPurchase,
+      usageTopUpPurchaseReturn: null,
+      usageTopUpReturnMemberId: null,
+    }),
+    undefined,
+  );
+});
+
 test.each(["success", "cancel"] as const)(
-  "SettingsPage preserves a personal $1 return after the payer becomes a Family owner",
+  "SettingsPage preserves an exact personal $1 return after the payer becomes a Family owner",
   async (checkoutKind) => {
     mocks.getPrisma.mockReturnValue(mocks.prisma);
     mocks.getHostedPrivySession.mockResolvedValue(null);
@@ -1285,7 +1382,7 @@ test.each(["success", "cancel"] as const)(
 
     expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
       expect.objectContaining({
-        usageTopUpActivePurchase: activePurchase,
+        usageTopUpActivePurchase: null,
         usageTopUpCheckoutUrl: undefined,
         usageTopUpPurchaseReturn: {
           kind: checkoutKind,

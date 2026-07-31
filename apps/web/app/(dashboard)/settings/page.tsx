@@ -264,15 +264,17 @@ export default async function SettingsPage({
     familyOwnerUsageTopUpAvailable
     && usageTopUpActivePurchase?.target.kind !== "personal"
     && personalUsageTopUpPurchaseReturn === null;
-  const billingUsageTopUpActivePurchase = billingUsageTopUpUsesFamilyOwner
-    ? familyOwnerUsageTopUpActivePurchase
-    : personalUsageTopUpActivePurchase;
-  const billingUsageTopUpOffers = billingUsageTopUpUsesFamilyOwner
-    ? familyUsageTopUpOffers
-    : usageTopUpOffers;
   const billingUsageTopUpPurchaseReturn = billingUsageTopUpUsesFamilyOwner
     ? familyOwnerUsageTopUpPurchaseReturn
     : personalUsageTopUpPurchaseReturn;
+  const billingUsageTopUpActivePurchase = billingUsageTopUpPurchaseReturn
+    ? null
+    : billingUsageTopUpUsesFamilyOwner
+      ? familyOwnerUsageTopUpActivePurchase
+      : personalUsageTopUpActivePurchase;
+  const billingUsageTopUpOffers = billingUsageTopUpUsesFamilyOwner
+    ? familyUsageTopUpOffers
+    : usageTopUpOffers;
   const canStartFamily =
     authenticatedMember != null &&
     !activeFamilyOwner &&

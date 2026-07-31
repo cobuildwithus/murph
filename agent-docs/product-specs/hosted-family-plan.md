@@ -167,6 +167,11 @@ returns to `#subscription`, where its meter and dialog live; another member's
 Family purchase returns to `#family`. Target reconstruction continues to read
 older owner-seat Family URLs that used `#family`.
 
+An exact returned purchase exclusively owns its dialog state. A newer active
+purchase for another beneficiary stays on that beneficiary's frozen-target
+surface and cannot supply conflict, capability, or completion fields to the
+returned purchase.
+
 Once a beneficiary leaves the active roster, the former-member purchase remains
 inspectable and cancelable but is never payable from Settings: the server does
 not release its Checkout URL or retry action. Historical invite labels and

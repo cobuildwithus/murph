@@ -367,6 +367,13 @@ Family purchase returns to `#family`. The target reader accepts legacy
 owner-seat Family URLs at `#family`, but a current billing-mode change never
 reinterprets a frozen personal purchase as Family recovery.
 
+When an exact return purchase ID is present, that purchase is the dialog's sole
+source of status, conflict, capabilities, copy, and completion. A payer-wide
+latest-active projection cannot contribute fields to that returned-purchase
+state, even when it is newer. A simultaneous active purchase remains visible
+only on its own frozen-target surface; the two purchase records are never
+composed into one dialog state.
+
 The browser renders only server-read status:
 
 | State | Copy |

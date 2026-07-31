@@ -3675,6 +3675,64 @@ test("treats a Stripe return as a status lookup, not proof of fulfillment", asyn
   }
 });
 
+test("uses an exact return without inheriting a newer purchase conflict", async () => {
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+    purchaseId: "hucp_ownerreturn00000",
+    status: "fulfilled",
+  });
+  const { HostedUsageTopUpDialog } = await import(
+    "@/src/components/settings/hosted-usage-top-up-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(HostedUsageTopUpDialog, {
+      activePurchase: {
+        cancelAllowed: true,
+        offerCode: "usage_10_usd",
+        purchaseId: "hucp_memberactive0000",
+        retryAllowed: false,
+        status: "checkout_open",
+        targetConflict: true,
+      },
+      offers: [],
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+      purchaseReturn: {
+        kind: "success",
+        purchaseId: "hucp_ownerreturn00000",
+      },
+      scope: "family",
+      targetLabel: "you",
+    }),
+    {
+      location: {
+        href: "https://example.test/settings?usagePurchase=hucp_ownerreturn00000&usageCheckout=success#subscription",
+      },
+      requireButton: false,
+    },
+  );
+
+  try {
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+      method: "GET",
+      signal: expect.any(AbortSignal),
+      url: "/api/settings/billing/usage-credit/purchases/hucp_ownerreturn00000",
+    });
+    assert.match(rendered.container.textContent ?? "", /Usage added/);
+    assert.doesNotMatch(
+      rendered.container.textContent ?? "",
+      /Other checkout|unfinished checkout|another usage destination/i,
+    );
+    assert.equal(hasButton(rendered.container, "Cancel checkout"), false);
+    assert.equal(hasButton(rendered.container, "Retry checkout"), false);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("keeps a recovery-only terminal return visible until the owner closes it", async () => {
   mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
     purchaseId: "hucp_inactive_return",

@@ -83,6 +83,10 @@ Updated: 2026-07-30
    Mitigation: Let an active personal target or personal return own the billing
    row before current Family availability, and keep the frozen target encoded
    in the persisted provider return URL.
+5. Risk: A delayed exact return could inherit conflict or recovery fields from
+   the payer's newer active purchase.
+   Mitigation: Treat the returned purchase ID as the exclusive dialog state
+   source and keep a simultaneous active purchase on its own target surface.
 
 ## Tasks
 
@@ -116,6 +120,9 @@ Updated: 2026-07-30
   owner-seat Family returns land at `#subscription`; another member's returns
   remain at `#family`, and the target reader accepts legacy owner-seat
   `#family` URLs.
+- An exact return ID exclusively owns its dialog status, conflict, capabilities,
+  copy, and completion. A payer-wide latest-active record is ignored by that
+  dialog and remains available only through its own frozen-target surface.
 
 ## Verification
 
@@ -146,3 +153,10 @@ Updated: 2026-07-30
     coverage first reproduced both affected mechanisms, then 389 tests across
     seven directly affected Web files, Web typecheck, and touched-file ESLint
     passed after the correction.
+  - ReviewGPT round 2 found that a delayed exact return could still inherit
+    another purchase's conflict fields. The required anomaly retrospective
+    selected a first-principles identity rule instead of another routing patch:
+    an exact return is the dialog's sole state source. Two distinct-ID
+    regressions reproduced the mixed state before the correction; 391 tests
+    across seven affected Web files, Web typecheck, and touched-file ESLint
+    passed afterward.
