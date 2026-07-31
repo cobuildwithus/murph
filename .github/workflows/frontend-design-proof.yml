@@ -71,6 +71,109 @@ jobs:
           git fetch origin main
           git merge --no-edit origin/main
           python3 scripts/apply-byoi-branch-patch.py
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def patch_section(
+              path: str,
+              start_marker: str,
+              end_marker: str,
+              old: str,
+              new: str,
+          ) -> None:
+              target = Path(path)
+              text = target.read_text()
+              start = text.index(start_marker)
+              end = text.index(end_marker, start)
+              section = text[start:end]
+              if new in section:
+                  return
+              if section.count(old) != 1:
+                  raise RuntimeError(
+                      f"{path}: expected one scoped BYOI anchor, found {section.count(old)}"
+                  )
+              target.write_text(
+                  text[:start] + section.replace(old, new, 1) + text[end:]
+              )
+
+          token_result = """      attemptId: string;
+                leaseGeneration: string;
+                owns: true;"""
+          token_result_with_envelope = """      attemptId: string;
+                customInferenceEnvelope?: string;
+                leaseGeneration: string;
+                owns: true;"""
+          patch_section(
+              "apps/cloudflare/src/user-runner/runner-state-store.ts",
+              "export type RunnerProviderEgressTokenValidationResult =",
+              "export type RunnerProviderEgressCredentialValidationResult =",
+              token_result,
+              token_result_with_envelope,
+          )
+          patch_section(
+              "apps/cloudflare/src/worker-contracts.ts",
+              "export type WorkerProviderEgressTokenValidationResult =",
+              "export type WorkerProviderEgressCredentialValidationRejectReason =",
+              token_result,
+              token_result_with_envelope,
+          )
+
+          token_success = """    return {
+                attemptId: token.attemptId,
+                leaseGeneration: token.leaseGeneration,
+                owns: true,
+                record: this.readStateFromMetaSync(meta),
+                userId: token.userId,
+                workspaceVersion: token.workspaceVersion,
+              };
+          """
+          token_success_with_envelope = """    return {
+                attemptId: token.attemptId,
+                ...(meta.active_custom_inference_envelope
+                  ? { customInferenceEnvelope: meta.active_custom_inference_envelope }
+                  : {}),
+                leaseGeneration: token.leaseGeneration,
+                owns: true,
+                record: this.readStateFromMetaSync(meta),
+                userId: token.userId,
+                workspaceVersion: token.workspaceVersion,
+              };
+          """
+          patch_section(
+              "apps/cloudflare/src/user-runner/runner-state-store.ts",
+              "  async validateProviderEgressToken(input: {",
+              "  async validateProviderEgressCredential(input: {",
+              token_success,
+              token_success_with_envelope,
+          )
+
+          projected_success = """    return {
+                attemptId: validation.attemptId,
+                leaseGeneration: validation.leaseGeneration,
+                owns: true,
+                userId: validation.userId,
+                workspaceVersion: validation.workspaceVersion,
+              };
+          """
+          projected_success_with_envelope = """    return {
+                attemptId: validation.attemptId,
+                ...(validation.customInferenceEnvelope
+                  ? { customInferenceEnvelope: validation.customInferenceEnvelope }
+                  : {}),
+                leaseGeneration: validation.leaseGeneration,
+                owns: true,
+                userId: validation.userId,
+                workspaceVersion: validation.workspaceVersion,
+              };
+          """
+          patch_section(
+              "apps/cloudflare/src/user-runner/hosted-user-runner.ts",
+              "  async validateRuntimeProviderEgressToken(input: {",
+              "  async validateRuntimeProviderEgressCredential(input: {",
+              projected_success,
+              projected_success_with_envelope,
+          )
+          PY
           python3 scripts/apply-byoi-runtime-pinning.py
           python3 scripts/apply-byoi-custom-provider.py
           python3 - <<'PY'
