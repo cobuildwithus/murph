@@ -156,6 +156,55 @@ COMMIT;
     )
 
 
+def patch_workspace_contracts() -> None:
+    replace_once(
+        "packages/hosted-execution/src/runtime-control.ts",
+        'import type {\n  AssistantUsageRecord,\n  AssistantUsageTokenPricingBasis,\n} from "./assistant-usage.ts";\n',
+        'import type {\n  AssistantUsageRecord,\n  AssistantUsageTokenPricingBasis,\n} from "./assistant-usage.ts";\n'
+        'import type {\n  HostedAssistantCustomInferenceOverride,\n} from "./assistant-inference.ts";\n',
+    )
+    replace_once(
+        "packages/hosted-execution/src/runtime-control.ts",
+        "export interface HostedWorkspaceReadResponse {\n"
+        "  fetchedAt: string;\n",
+        "export interface HostedWorkspaceReadResponse {\n"
+        "  fetchedAt: string;\n"
+        "  hostedAssistantCustomInferenceOverride?: HostedAssistantCustomInferenceOverride;\n",
+    )
+    replace_once(
+        "packages/hosted-execution/src/parsers/runtime-control.ts",
+        'import {\n  parseAssistantUsageRecord,\n} from "../assistant-usage.ts";\n',
+        'import {\n  parseAssistantUsageRecord,\n} from "../assistant-usage.ts";\n'
+        'import {\n  parseHostedAssistantCustomInferenceOverride,\n} from "../assistant-inference.ts";\n',
+    )
+    replace_once(
+        "packages/hosted-execution/src/parsers/runtime-control.ts",
+        "  const hostedAssistantModelOverride = parseHostedAssistantModelOverride(\n"
+        "    record.hostedAssistantModelOverride,\n"
+        "  );\n",
+        "  const hostedAssistantCustomInferenceOverride =\n"
+        "    record.hostedAssistantCustomInferenceOverride === undefined\n"
+        "      || record.hostedAssistantCustomInferenceOverride === null\n"
+        "      ? null\n"
+        "      : parseHostedAssistantCustomInferenceOverride(\n"
+        "          record.hostedAssistantCustomInferenceOverride,\n"
+        "        );\n"
+        "  const hostedAssistantModelOverride = parseHostedAssistantModelOverride(\n"
+        "    record.hostedAssistantModelOverride,\n"
+        "  );\n",
+    )
+    replace_once(
+        "packages/hosted-execution/src/parsers/runtime-control.ts",
+        "  return {\n"
+        "    fetchedAt: requireString(record.fetchedAt, \"Hosted workspace read response fetchedAt\"),\n",
+        "  return {\n"
+        "    fetchedAt: requireString(record.fetchedAt, \"Hosted workspace read response fetchedAt\"),\n"
+        "    ...(hostedAssistantCustomInferenceOverride\n"
+        "      ? { hostedAssistantCustomInferenceOverride }\n"
+        "      : {}),\n",
+    )
+
+
 def patch_architecture_docs() -> None:
     replace_once(
         "agent-docs/product-specs/bring-your-own-inference.md",
@@ -193,6 +242,7 @@ def patch_architecture_docs() -> None:
 def main() -> None:
     patch_crypto_lane()
     patch_prisma_schema()
+    patch_workspace_contracts()
     patch_architecture_docs()
 
 
