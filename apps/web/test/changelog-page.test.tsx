@@ -57,13 +57,14 @@ describe("ChangelogPage", () => {
       await ChangelogPage({ searchParams: Promise.resolve({}) }),
     );
 
+    expect(markup).toContain("A clearer view of home, stronger follow-through");
     expect(markup).toContain("More ways through, less waiting around");
     expect(markup).toContain("Corrections that carry forward");
     expect(markup).toContain("A first text that goes somewhere");
     expect(markup).toContain("Reminders on your time, not ours");
     expect(markup).toContain("Group memory, clearer recovery");
     expect(markup).toContain("A Murph that knows when to speak");
-    expect(markup).toContain("Group chats that read the room");
+    expect(markup).not.toContain("Group chats that read the room");
     expect(markup).not.toContain(
       "Updated documents, honest reactions, usage you can see",
     );
@@ -83,9 +84,9 @@ describe("ChangelogPage", () => {
     expect(markup).not.toContain("Better answers, better instincts");
     expect(markup).not.toContain("Murph referees your group challenge");
     expect(markup).toContain('aria-label="Changelog pages"');
-    expect(markup).toContain('href="/changelog?edition=2026-07-23"');
+    expect(markup).toContain('href="/changelog?edition=2026-07-24"');
     expect(markup).toContain(
-      'href="/changelog?edition=2026-07-30#capped-monthly-group-sponsorship"',
+      'href="/changelog?edition=2026-07-31#private-environment-report"',
     );
     expect(markup).toContain("Older");
     expect(markup).not.toContain(">Newer<");
@@ -98,9 +99,10 @@ describe("ChangelogPage", () => {
 
     expect(markup).toContain("Ask about X");
     expect(markup).toContain("Turn it up");
+    expect(markup).toContain("Open Environment");
+    expect(markup).toContain('href="/environment"');
     expect(markup).toContain("Explore club challenges");
     expect(markup).toContain('href="/clubs"');
-    expect(markup).toMatch(/Ask what(?:&#x27;|')s new/u);
     expect(
       mocks.resolveHostedMurphContactOptions.mock.calls.map(([input]) => input),
     ).toEqual(
@@ -115,12 +117,6 @@ describe("ChangelogPage", () => {
           message: {
             body: "Turn up my Unhinged setting a little.",
             subject: "Try it: Ask Murph to loosen up",
-          },
-        },
-        {
-          message: {
-            body: "What changed in Murph this week?",
-            subject: "Try it: Ask Murph what changed",
           },
         },
       ]),
