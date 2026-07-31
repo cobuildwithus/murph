@@ -110,16 +110,20 @@ An eligible paid Pulse or Edge member can:
 8. Continue using that credit after an included-usage reset until the credit is
    consumed.
 
-An authenticated member can open `/groups/fund/[joinCode]`, see only the
-group's coarse `healthy`, `low`, or `exhausted` usage state, and either sponsor
-the chat up to $5, $10, or $20 per month or make one fixed one-time
-contribution for that group's synthetic runtime beneficiary. This does not
-require the payer to have an individual paid plan. The browser submits only
-the server-owned fixed $5 activation offer, selected monthly maximum, request
-key, and bounded optional sponsorship draft for monthly creation. A one-time
-contribution submits the selected fixed offer without a monthly maximum. A
-recovery attempt adds only the literal recovery-only capability. Web resolves
-payer, beneficiary, amount, grant, and sponsorship policy.
+An authenticated member can open `/groups/fund/[joinCode]` at any capacity.
+The route does not publish the group's usage state. It immediately opens the
+applicable existing control: capped monthly sponsorship for an unsponsored
+group, one-time contribution for a participant who is not the current
+automatic sponsor, pending-purchase recovery for the exact payer, or private
+sponsorship management for the exact active payer. Closing an immediate
+dialog or drawer leaves only the composable alternative action and the return
+link. This does not require the payer to have an individual paid plan. The
+browser submits only the server-owned fixed $5 activation offer, selected
+monthly maximum, request key, and bounded optional sponsorship draft for
+monthly creation. A one-time contribution submits the selected fixed offer
+without a monthly maximum. A recovery attempt adds only the literal
+recovery-only capability. Web resolves payer, beneficiary, amount, grant, and
+sponsorship policy.
 If a payment is recovered, Web restores the authenticated payer's exact
 encrypted sponsor draft, shows that it is still attached, and resubmits it
 unchanged. Every active-purchase recovery compares the normalized draft,
@@ -328,9 +332,11 @@ The target composition is:
 - No default selection and no “popular” badge
 - No visible explanatory paragraph; the dollar choices and action label carry
   the flow. Keep a concise screen-reader description for the amount selector.
-- The group funding page uses a separate dialog: **Sponsor this chat** is the
-  primary capped-monthly action and **Make a one-time contribution** is the
-  secondary action. Do not repeat saved-card or verification mechanics there.
+- The group funding route immediately opens its applicable existing group
+  control. **Sponsor this chat** is the primary capped-monthly action when no
+  automatic sponsor exists; **Make a one-time contribution** is the fallback
+  for another payer; and the exact active payer sees private management on the
+  same URL. Do not repeat saved-card or verification mechanics there.
 - Primary action after selection: **Add usage · $10**
 - Pending action: **Adding usage…**
 - Secondary action: **Cancel**
