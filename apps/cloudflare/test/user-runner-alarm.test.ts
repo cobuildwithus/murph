@@ -41,6 +41,7 @@ import {
   hostedBrowserVaultReplicaUserPrefix,
   hostedBundleUserPrefix,
   hostedEmailRawMessageUserPrefix,
+  hostedEnvironmentVoiceUserPrefix,
   hostedRunnerSecretsObjectKey,
   hostedWorkspaceSnapshotObjectKey,
   hostedWorkspaceSnapshotUserPrefix,
@@ -4241,6 +4242,8 @@ describe("HostedUserRunner execution coordination", () => {
       `${await hostedBrowserVaultReplicaUserPrefix({ userId: TEST_USER_ID })}replica.json`;
     const workspaceSnapshotKey =
       `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_abc.snapshot.enc`;
+    const environmentVoiceKey =
+      `${await hostedEnvironmentVoiceUserPrefix({ userId: TEST_USER_ID })}voice.audio.enc`;
     const rawEmailKey =
       `${await hostedEmailRawMessageUserPrefix({ userId: TEST_USER_ID })}message.eml`;
     const runnerSecretsKey = await hostedRunnerSecretsObjectKey({ userId: TEST_USER_ID });
@@ -4248,6 +4251,7 @@ describe("HostedUserRunner execution coordination", () => {
       artifactKey,
       browserVaultKey,
       bundleKey,
+      environmentVoiceKey,
       rawEmailKey,
       runnerSecretsKey,
       workspaceSnapshotKey,
@@ -4293,7 +4297,7 @@ describe("HostedUserRunner execution coordination", () => {
     await expect(harness.runner.deleteHostedUserData(TEST_USER_ID)).resolves.toMatchObject({
       ok: true,
       r2: {
-        deletedObjectCount: 6,
+        deletedObjectCount: 7,
         skippedUserScopedPrefixes: false,
         supported: true,
       },
@@ -4306,6 +4310,7 @@ describe("HostedUserRunner execution coordination", () => {
       artifactKey,
       browserVaultKey,
       bundleKey,
+      environmentVoiceKey,
       rawEmailKey,
       runnerSecretsKey,
       workspaceSnapshotKey,

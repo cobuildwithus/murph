@@ -141,6 +141,50 @@ test("audio preparation accepts WAV directly and requires ffmpeg for other audio
   );
 });
 
+test("audio preparation hard-caps provider input instead of trusting attachment metadata", async () => {
+  const directory = await makeTempDirectory("murph-parser-audio-duration-cap");
+  const invocationLogPath = path.join(directory, "ffmpeg-invocation.json");
+  const fakeFfmpegPath = await writeExecutableFile(
+    directory,
+    "fake-duration-cap-ffmpeg",
+    [
+      "#!/usr/bin/env node",
+      "const fs = require('node:fs');",
+      `fs.writeFileSync(${JSON.stringify(invocationLogPath)}, JSON.stringify(process.argv.slice(2)), "utf8");`,
+    ].join("\n"),
+  );
+  const wavPath = await writeExternalFile(
+    directory,
+    "long.wav",
+    "RIFF----WAVEwav-bytes-placeholder",
+  );
+
+  await prepareAudioInput({
+    artifact: {
+      absolutePath: wavPath,
+      attachmentId: "att_audio_duration_cap",
+      captureId: "cap_audio_duration_cap",
+      fileName: "long.wav",
+      kind: "audio",
+      mime: "audio/wav",
+      storedPath: "raw/inbox/example/long.wav",
+    },
+    ffmpeg: {
+      allowSystemLookup: false,
+      commandCandidates: [fakeFfmpegPath],
+      maxDurationSeconds: 180,
+      remoteTranscriptionOnly: true,
+    },
+    scratchDirectory: directory,
+  });
+
+  const invocation = JSON.parse(await fs.readFile(invocationLogPath, "utf8"));
+  assert.ok(Array.isArray(invocation));
+  const durationFlag = invocation.indexOf("-t");
+  assert.ok(durationFlag >= 0);
+  assert.equal(invocation[durationFlag + 1], "180");
+});
+
 test("audio preparation passes remote-accepted formats through untouched when remote transcription is the only lane", async () => {
   const directory = await makeTempDirectory("murph-parser-audio-passthrough");
   const remoteOnlyFfmpeg = { ...disableFfmpegLookup(), remoteTranscriptionOnly: true };

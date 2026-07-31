@@ -54,6 +54,11 @@ enabled:  Yes
 prefix:   hosted-private-media/images/
 action:   Expire objects after 1 days
 
+name:     delete-hosted-environment-voice-after-24h
+enabled:  Yes
+prefix:   hosted-environment-voice/audio/
+action:   Expire objects after 1 days
+
 name:     delete-hosted-meal-photos-after-31d
 enabled:  Yes
 prefix:   hosted-meal-photos/images/
@@ -605,6 +610,12 @@ describe("R2 lifecycle parsing", () => {
         prefix: "hosted-email/messages/",
       },
       {
+        days: 1,
+        enabled: true,
+        id: "delete-hosted-environment-voice-after-24h",
+        prefix: "hosted-environment-voice/audio/",
+      },
+      {
         days: 31,
         enabled: true,
         id: "delete-hosted-meal-photos-after-31d",
@@ -623,7 +634,7 @@ describe("R2 lifecycle parsing", () => {
     expect(parseWranglerLifecycleList(
       lifecycleOutput(SOURCE_BUCKET),
       SOURCE_BUCKET,
-    )).toHaveLength(3);
+    )).toHaveLength(4);
     expect(() => parseWranglerLifecycleList(
       lifecycleOutput(SOURCE_BUCKET).replace("enabled:  Yes", "enabled:  Maybe"),
       SOURCE_BUCKET,

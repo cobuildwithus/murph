@@ -37,6 +37,11 @@ enabled:  Yes
 prefix:   hosted-private-media/images/
 action:   Expire objects after 1 days
 
+name:     delete-hosted-environment-voice-after-24h
+enabled:  Yes
+prefix:   hosted-environment-voice/audio/
+action:   Expire objects after 1 days
+
 name:     delete-hosted-meal-photos-after-31d
 enabled:  Yes
 prefix:   hosted-meal-photos/images/
