@@ -83,18 +83,21 @@ reuse the old provider thread.
 
 ## Ownership and data flow
 
-1. Web validates and encrypts the singular member-owned connection.
+1. Web verifies, encrypts, and stores the singular member-owned connection.
 2. Web projects only bounded custom metadata in the signed workspace response.
-3. Cloudflare launches Codex with one fixed internal provider and an opaque
-   revision-derived model alias.
-4. Codex sends Responses requests to the existing `web-control.worker` internal
-   origin.
-5. The existing provider fetch adds the current bound user and runtime write
-   fence.
-6. Cloudflare validates that fence, asks Web for the exact selected connection,
-   and receives the decrypted configuration over the existing signed callback.
-7. Cloudflare revalidates endpoint policy, rewrites model/auth, and streams the
-   result.
+3. During invocation preparation, Cloudflare resolves the exact selected
+   revision once through the existing signed Web callback.
+4. Cloudflare revalidates endpoint policy, seals the target under a
+   context-separated Worker key, and binds the envelope to the existing active
+   UserRunner write fence beside workspace version and platform-usage authority.
+5. Cloudflare launches Codex with one fixed internal provider, a
+   revision-derived model alias, and a public non-secret sentinel.
+6. Codex sends Responses requests to the fixed custom-inference internal
+   origin. Existing provider fetch attaches only the current opaque
+   provider-egress authority.
+7. Cloudflare validates that authority against the active fence, opens the
+   pinned envelope, rewrites model/auth, and streams the result through the
+   selected protocol adapter.
 
 The endpoint URL, upstream model id, and API secret never enter runner env,
 Codex config, prompts, workspace snapshots, or operational logs.
@@ -180,14 +183,18 @@ compaction against the exact pinned Codex build.
 
 ## Privacy, export, and deletion
 
-Authenticated export may include the selected mode, protocol, sanitized host,
-model id, configured context, image declaration, revision, compatibility
-profile, and verification time. It never includes the API secret, ciphertext,
-full query string, internal alias, or raw provider errors.
+The authenticated Settings reader returns the selected mode, protocol,
+sanitized host, model id, configured context, image declaration, revision,
+compatibility profile, and verification time. The current Data & Privacy
+download remains a browser-vault export and deliberately omits the database
+connection row. Neither surface includes the API secret, ciphertext, full query
+string, internal alias, or raw provider errors.
 
 Account deletion explicitly removes the connection row before deleting the
 member; relation cascade remains a safety net. There is no upstream vendor
-cleanup because the endpoint and account are member-owned.
+cleanup because the endpoint and account are member-owned. Deleting the member
+also clears the existing UserRunner state that can hold an invocation-scoped
+encrypted target envelope.
 
 ## Non-goals
 

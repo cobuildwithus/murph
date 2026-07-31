@@ -21,6 +21,7 @@ vi.mock("@murphai/hosted-execution", async () => {
 
 import {
   buildHostedOpenAiCacheDiagnostic,
+  handleHostedRunnerCustomInferenceOutbound,
   handleHostedRunnerElevenLabsOutbound,
   handleHostedRunnerExaOutbound,
   handleHostedRunnerInternalOutbound,
@@ -76,6 +77,12 @@ import {
 import {
   HOSTED_VENICE_RESPONSES_MAX_BODY_BYTES,
 } from "../src/runner-egress-venice.ts";
+import {
+  sealHostedInferenceRuntimeTarget,
+} from "../src/hosted-inference-target-envelope.ts";
+import {
+  HOSTED_INFERENCE_RUNTIME_TARGET_SCHEMA,
+} from "../src/hosted-inference-runtime-target.ts";
 
 const WRITE_FENCE_HEADERS = {
   [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: "attempt_1",
@@ -306,6 +313,11 @@ describe("hostedRunnerIntercept", () => {
     expect(hostedRunnerIntercept).toBe(handleHostedRunnerOpenInternetOutbound);
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.openAi])
       .toBe(handleHostedRunnerOpenAiOutbound);
+    expect(
+      HOSTED_RUNNER_OUTBOUND_BY_HOST[
+        HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.customInference
+      ],
+    ).toBe(handleHostedRunnerCustomInferenceOutbound);
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.venice])
       .toBe(handleHostedRunnerVeniceOutbound);
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.elevenLabs])
@@ -329,6 +341,158 @@ describe("hostedRunnerIntercept", () => {
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST["host.docker.internal"])
       .toBe(handleHostedRunnerOpenInternetOutbound);
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST["unexpected.example.test"]).toBeUndefined();
+  });
+
+  it("pins custom inference to the active fence and strips caller authority before egress", async () => {
+    const envelope = await sealHostedInferenceRuntimeTarget({
+      source: {
+        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+          PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET,
+      },
+      target: {
+        auth: {
+          kind: "x_api_key",
+          secret: "synthetic-custom-upstream-secret",
+        },
+        contextWindowTokens: 131_072,
+        endpointUrl: "https://inference.example.com/v1/responses",
+        model: "synthetic-upstream-model",
+        protocol: "responses",
+        revision: 7,
+        schema: HOSTED_INFERENCE_RUNTIME_TARGET_SCHEMA,
+        supportsImages: false,
+        verificationProfile: "murph-codex-0.145.0-portable-responses-v1",
+      },
+    });
+    const validateRuntimeProviderEgressToken = vi.fn(async (input: {
+      providerEgressToken: string;
+      userId: string;
+    }): Promise<WorkerProviderEgressTokenValidationResult> => ({
+      attemptId: "attempt_provider_egress",
+      customInferenceEnvelope: envelope,
+      leaseGeneration: "7",
+      owns: true,
+      userId: input.userId,
+      workspaceVersion: "4",
+    }));
+    const upstreamStream = [
+      "event: response.created",
+      `data: ${JSON.stringify({
+        response: {
+          id: "resp_synthetic",
+          model: "synthetic-upstream-model",
+          output: [],
+          status: "in_progress",
+        },
+        type: "response.created",
+      })}`,
+      "",
+      "event: response.completed",
+      `data: ${JSON.stringify({
+        response: {
+          id: "resp_synthetic",
+          model: "synthetic-upstream-model",
+          output: [],
+          status: "completed",
+        },
+        type: "response.completed",
+      })}`,
+      "",
+      "data: [DONE]",
+      "",
+      "",
+    ].join("\n");
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      new Response(upstreamStream, {
+        headers: { "content-type": "text/event-stream" },
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await hostedRunnerIntercept(
+      new Request("http://murph-custom-inference.worker/v1/responses", {
+        body: JSON.stringify({
+          input: "synthetic request",
+          model: "murph-custom-r7",
+          stream: true,
+        }),
+        headers: {
+          ...BOUND_USER_PROVIDER_EGRESS_HEADERS,
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+          cookie: "caller-private-cookie",
+          "x-api-key": "caller-private-key",
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({ validateRuntimeProviderEgressToken }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe(upstreamStream);
+    expect(validateRuntimeProviderEgressToken).toHaveBeenCalledWith({
+      providerEgressToken: PROVIDER_EGRESS_TOKEN,
+      userId: "member_123",
+    });
+    const forwarded = readForwardedRequest(fetchMock);
+    expect(forwarded.url).toBe("https://inference.example.com/v1/responses");
+    expect(forwarded.redirect).toBe("manual");
+    expect(forwarded.headers.get("x-api-key"))
+      .toBe("synthetic-custom-upstream-secret");
+    expect(forwarded.headers.has("authorization")).toBe(false);
+    expect(forwarded.headers.has("cookie")).toBe(false);
+    expect(forwarded.headers.has(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(false);
+    expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
+    await expect(forwarded.json()).resolves.toEqual({
+      input: "synthetic request",
+      model: "synthetic-upstream-model",
+      parallel_tool_calls: false,
+      store: false,
+      stream: true,
+    });
+  });
+
+  it("keeps custom core inference available while denying Murph-funded provider egress", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeProviderEgressToken = vi.fn(async (input: {
+      providerEgressToken: string;
+      userId: string;
+    }): Promise<WorkerProviderEgressTokenValidationResult> => ({
+      attemptId: "attempt_provider_egress",
+      leaseGeneration: "7",
+      owns: true,
+      platformAiUsageAllowed: false,
+      userId: input.userId,
+      workspaceVersion: "4",
+    }));
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.openai.com/v1/responses", {
+        body: JSON.stringify({
+          input: "platform-funded request",
+          model: "gpt-5.6-terra",
+          stream: true,
+        }),
+        headers: {
+          ...BOUND_USER_PROVIDER_EGRESS_HEADERS,
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        OPENAI_API_KEY: "synthetic-platform-secret",
+        validateRuntimeProviderEgressToken,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(402);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "HOSTED_PLATFORM_AI_USAGE_DENIED" },
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("preserves runtime write-fence headers for internal intercepted requests", async () => {

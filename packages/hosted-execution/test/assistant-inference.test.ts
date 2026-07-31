@@ -108,3 +108,18 @@ test("custom inference override parser rejects alias and context drift", () => {
     /contextWindowTokens/u,
   );
 });
+
+test("custom inference override parser rejects unknown fields", () => {
+  assert.throws(
+    () => parseHostedAssistantCustomInferenceOverride({
+      contextWindowTokens: 131_072,
+      modelAlias: "murph-custom-r2",
+      protocol: "responses",
+      revision: 2,
+      supportsImages: false,
+      unexpected: true,
+      verificationProfile: HOSTED_CUSTOM_INFERENCE_VERIFICATION_PROFILE,
+    }),
+    /unknown fields/u,
+  );
+});

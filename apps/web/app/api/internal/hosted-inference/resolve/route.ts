@@ -11,8 +11,15 @@ import {
 import {
   projectHostedInferenceRuntimeTarget,
 } from "@/src/lib/hosted-inference/runtime-target";
+import {
+  requireHostedInferenceProtocolEnabled,
+} from "@/src/lib/hosted-inference/feature";
+import {
+  readActiveHostedMemberAccess,
+} from "@/src/lib/hosted-onboarding/member-access";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
+import { getPrisma } from "@/src/lib/prisma";
 
 const HOSTED_INFERENCE_RESOLVE_CALLBACK_BODY_LIMIT_BYTES = 0;
 
@@ -21,9 +28,18 @@ export const GET = withJsonError(async (request: Request) => {
     maxBodyBytes: HOSTED_INFERENCE_RESOLVE_CALLBACK_BODY_LIMIT_BYTES,
   });
   const expectedRevision = readExpectedRevision(request);
+  const prisma = getPrisma();
+  if (!(await readActiveHostedMemberAccess({ memberId, prisma }))) {
+    throw hostedOnboardingError({
+      code: "HOSTED_ACCESS_REQUIRED",
+      httpStatus: 403,
+      message: "Active Murph access is required to use custom inference.",
+    });
+  }
   const connection = await readSelectedHostedInferenceConnection({
     expectedRevision,
     memberId,
+    prisma,
   });
   if (!connection) {
     throw hostedOnboardingError({
@@ -32,6 +48,7 @@ export const GET = withJsonError(async (request: Request) => {
       message: "No custom inference connection is selected.",
     });
   }
+  requireHostedInferenceProtocolEnabled(connection.protocol);
 
   return jsonOk(projectHostedInferenceRuntimeTarget(connection));
 });

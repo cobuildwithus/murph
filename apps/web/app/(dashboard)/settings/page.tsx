@@ -10,6 +10,7 @@ import { CustomizeMurphSettings } from "@/src/components/settings/customize-murp
 import { HostedAccountSettingsCards } from "@/src/components/settings/hosted-account-settings-cards";
 import { HostedAiUsageActivity } from "@/src/components/settings/hosted-ai-usage-activity";
 import { HostedAssistantModelSettings } from "@/src/components/settings/hosted-assistant-model-settings";
+import { HostedInferenceConnectionSettings } from "@/src/components/settings/hosted-inference-connection-settings";
 import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-settings";
 import type {
   HostedUsageTopUpOffer,
@@ -39,6 +40,13 @@ import {
   resolveVisibleHostedBillingPlanCodes,
 } from "@/src/lib/hosted-onboarding/billing-plan-eligibility";
 import { isHostedVeniceAssistantEnabled } from "@/src/lib/hosted-onboarding/assistant-model-preference";
+import {
+  isHostedCustomChatCompletionsEnabled,
+  isHostedCustomInferenceEnabled,
+} from "@/src/lib/hosted-inference/feature";
+import {
+  readHostedInferenceConnectionView,
+} from "@/src/lib/hosted-inference/connection-store";
 import { readHostedPulseTrialContinuationCookie } from "@/src/lib/hosted-onboarding/billing-pulse-trial-continuation";
 import {
   HOSTED_START_PAID_GROUP_RETURN_PARAM,
@@ -182,6 +190,7 @@ export default async function SettingsPage({
   const usageTopUpOfferCodes = settingsData?.usageTopUpOfferCodes ?? [];
   const usageTopUpActivePurchase = settingsData?.usageTopUpActivePurchase ?? null;
   const usageTopUpReturnTarget = settingsData?.usageTopUpReturnTarget ?? null;
+  const inferenceConnection = settingsData?.inferenceConnection ?? null;
   const account = settingsSnapshot?.account ?? null;
   const billingRef = settingsSnapshot?.billingRef ?? null;
   const routing = settingsSnapshot?.routing ?? null;
@@ -534,6 +543,26 @@ export default async function SettingsPage({
         />
       </section>
 
+      {isHostedCustomInferenceEnabled() ? (
+        <section
+          id="inference"
+          className="flex scroll-mt-24 flex-col gap-4"
+        >
+          <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            Inference
+          </div>
+          <HostedInferenceConnectionSettings
+            chatCompletionsAvailable={
+              isHostedCustomChatCompletionsEnabled()
+            }
+            configurationAvailable={
+              account?.assistant?.configurationAvailable === true
+            }
+            initialConnection={inferenceConnection}
+          />
+        </section>
+      ) : null}
+
       {familyOwner && authenticatedMember ? (
         <section id="family" className="flex scroll-mt-24 flex-col gap-4">
           <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
@@ -646,6 +675,12 @@ async function readSettingsPageData(input: {
     memberId,
     prisma,
   });
+  const inferenceConnection = isHostedCustomInferenceEnabled()
+    ? await readHostedInferenceConnectionView({
+        memberId,
+        prisma,
+      })
+    : null;
   const familyOwner = await readHostedFamilyOwnerSnapshotForMember({
     memberId,
     prisma,
@@ -707,6 +742,7 @@ async function readSettingsPageData(input: {
     familyOwner,
     groupPlanAvailable,
     hasConfirmedGroupMembership,
+    inferenceConnection,
     freshPrivySession: await freshPrivySessionPromise,
     secureApprovalStatus: await secureApprovalStatusPromise,
     settingsSnapshot,

@@ -15,7 +15,14 @@ import {
 import {
   readSelectedHostedInferenceConnectionOverride,
 } from "@/src/lib/hosted-inference/connection-store";
+import {
+  isHostedCustomInferenceEnabled,
+  isHostedCustomChatCompletionsEnabled,
+} from "@/src/lib/hosted-inference/feature";
 import { getPrisma } from "@/src/lib/prisma";
+import {
+  resolveHostedRuntimeAiUsageGate,
+} from "@/src/lib/hosted-orchestration/runtime-usage-decision";
 import {
   isHostedVeniceAssistantEnabled,
   readHostedMemberAssistantModelPreference,
@@ -61,6 +68,17 @@ export const GET = withJsonError(async (request: Request) => {
   }
   if (
     assistantConfiguration?.customInferenceSelected
+    && !isHostedCustomInferenceEnabled()
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_CUSTOM_INFERENCE_UNAVAILABLE",
+      httpStatus: 409,
+      message:
+        "Custom inference is unavailable. Murph did not fall back to managed inference.",
+    });
+  }
+  if (
+    assistantConfiguration?.customInferenceSelected
     && !customInferenceConsumerSupported
   ) {
     throw hostedOnboardingError({
@@ -73,6 +91,17 @@ export const GET = withJsonError(async (request: Request) => {
   const customInferenceOverride =
     assistantConfiguration?.hostedAssistantCustomInferenceOverride ?? null;
   if (
+    customInferenceOverride?.protocol === "chat_completions"
+    && !isHostedCustomChatCompletionsEnabled()
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_CUSTOM_CHAT_COMPLETIONS_UNAVAILABLE",
+      httpStatus: 409,
+      message:
+        "Chat Completions custom inference is unavailable. Murph did not fall back to managed inference.",
+    });
+  }
+  if (
     assistantConfiguration?.customInferenceSelected
     && !customInferenceOverride
   ) {
@@ -82,6 +111,13 @@ export const GET = withJsonError(async (request: Request) => {
       message: "The selected custom inference connection is invalid.",
     });
   }
+  const platformAiUsageAllowed = customInferenceOverride
+    ? (await resolveHostedRuntimeAiUsageGate({
+        mode: "read_only",
+        prisma,
+        userId,
+      })).status === "allowed"
+    : null;
 
   return jsonOk(parseHostedWorkspaceReadResponse({
     fetchedAt: new Date().toISOString(),
@@ -108,6 +144,7 @@ export const GET = withJsonError(async (request: Request) => {
             assistantConfiguration.hostedAssistantReasoningEffortOverride,
         }
       : {}),
+    ...(platformAiUsageAllowed === null ? {} : { platformAiUsageAllowed }),
     workspace: workspace
       ? {
           browserVaultReplicaRef: workspace.browserVaultReplicaRef,

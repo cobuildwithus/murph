@@ -5,6 +5,9 @@ import {
   deploySmokeRoutes,
 } from "./route-handlers/deploy-smoke.ts";
 import {
+  inferenceVerificationRoutes,
+} from "./route-handlers/inference-verification.ts";
+import {
   runtimeProcessingRoutes,
   userStatusRoutes,
 } from "./route-handlers/runtime-control.ts";
@@ -19,6 +22,7 @@ import { mealPhotoRoutes } from "./route-handlers/meal-photo-stage.ts";
 export const workerInternalRoutes = [
   ...deploySmokeRoutes,
   ...runtimeProcessingRoutes,
+  ...inferenceVerificationRoutes,
   ...userDataDeleteRoutes,
   ...telegramUsageLimitNoticeRoutes,
   ...mealPhotoRoutes,

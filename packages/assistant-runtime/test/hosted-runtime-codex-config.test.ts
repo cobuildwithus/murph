@@ -180,6 +180,46 @@ test("hosted Codex runtime config writes Venice Responses config without secret 
   assert.doesNotMatch(config, /signed-venice-egress-credential/u);
 });
 
+test("hosted Codex runtime config gives custom inference one conservative Responses policy", async () => {
+  const operatorHomeRoot = await createTemporaryDirectory();
+  const result = await prepareHostedCodexRuntimeEnvironment({
+    operatorHomeRoot,
+    runtimeEnv: {
+      HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS: "131072",
+      HOSTED_ASSISTANT_MODEL: "murph-custom-r7",
+      HOSTED_ASSISTANT_PROVIDER: "hosted-custom-inference",
+      MURPH_CUSTOM_INFERENCE_API_KEY: "__cloudflare_injected__",
+    },
+  });
+
+  assert.equal(
+    result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
+    "hosted-custom-inference",
+  );
+  const config = await readFile(result.codexConfigPath, "utf8");
+  assert.match(config, /^model = "murph-custom-r7"$/mu);
+  assert.match(config, /^model_provider = "hosted-custom-inference"$/mu);
+  assert.match(config, /\[model_providers\."hosted-custom-inference"\]/u);
+  assert.match(
+    config,
+    /base_url = "http:\/\/murph-custom-inference\.worker\/v1"/u,
+  );
+  assert.match(config, /env_key = "MURPH_CUSTOM_INFERENCE_API_KEY"/u);
+  assert.match(config, /^model_context_window = 131072$/mu);
+  assert.match(config, /^model_auto_compact_token_limit = 98304$/mu);
+  assert.match(config, /^request_max_retries = 1$/mu);
+  assert.match(config, /^stream_max_retries = 0$/mu);
+  assert.doesNotMatch(config, /^supports_websockets = true$/mu);
+  assert.doesNotMatch(config, /^model_reasoning_effort = /mu);
+  assert.match(config, /\[features\]\nplugins = false\nmemories = false/u);
+  assert.match(config, /\[features\.multi_agent_v2\]\nenabled = false/u);
+  assert.equal(
+    new Set<string>(HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY)
+      .has("MURPH_CUSTOM_INFERENCE_API_KEY"),
+    false,
+  );
+});
+
 test("hosted Codex runtime config writes OpenAI Responses config without secret values", async () => {
   const operatorHomeRoot = await createTemporaryDirectory();
   const result = await prepareHostedCodexRuntimeEnvironment({

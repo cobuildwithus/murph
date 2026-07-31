@@ -75,6 +75,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'groupSponsorshipMomentsCreated HostedGroupSponsorshipMoment[] @relation("HostedGroupSponsorshipMomentCreator")',
     'groupSponsorshipsPaid HostedGroupSponsorshipAuthorization[] @relation("HostedGroupSponsorshipAuthorizationPayer")',
     'groupSponsorshipsReceived HostedGroupSponsorshipAuthorization[] @relation("HostedGroupSponsorshipAuthorizationBeneficiary")',
+    "inferenceConnection HostedInferenceConnection?",
     "linqContactCardShares HostedLinqContactCardShare[]",
     "mealPhotoCaptureEnrollments HostedMealPhotoCaptureEnrollment[]",
     'pendingActivationTimeZone String? @map("pending_activation_time_zone")',
@@ -1032,6 +1033,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260730120000_hosted_capped_group_sponsorship",
       "20260730170000_add_mailbox_ai_usage_denied_at",
       "20260730180000_hosted_linq_delivery_thread_directness",
+      "20260730233000_hosted_inference_connection",
       "migration_lock.toml",
     ]);
     expect(deviceSyncSignalSourceProviderMigrationSql).toContain(

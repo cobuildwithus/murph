@@ -97,7 +97,7 @@ export async function requestHostedOnboardingJson<T>(input: {
   credentials?: RequestCredentials;
   headers?: Record<string, string>;
   keepalive?: boolean;
-  method?: "DELETE" | "GET" | "PATCH" | "POST";
+  method?: "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
   onSuccessfulResponseError?: () => void;
   onSuccessfulResponseHeaders?: () => void;
   payload?: Record<string, unknown>;

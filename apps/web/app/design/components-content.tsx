@@ -37,6 +37,7 @@ import {
   AssistantProviderDialog,
   AssistantProviderSummary,
 } from "@/src/components/settings/hosted-assistant-model-settings";
+import { HostedInferenceConnectionSettings } from "@/src/components/settings/hosted-inference-connection-settings";
 import { HealthDomainCard } from "@/src/components/overview/health-domain-card";
 import { ActiveExperimentBanner } from "@/src/components/overview/active-experiment-banner";
 import { TrialBillingBanner } from "@/src/components/home/trial-billing-banner";
@@ -1047,6 +1048,18 @@ export function ComponentsContent() {
             open={providerDialogOpen}
             provider={providerValue}
           />
+        </Section>
+
+        <Separator />
+
+        <Section title="Custom inference connection">
+          <div inert>
+            <HostedInferenceConnectionSettings
+              chatCompletionsAvailable
+              configurationAvailable
+              initialConnection={null}
+            />
+          </div>
         </Section>
 
         <Separator />

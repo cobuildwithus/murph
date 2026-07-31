@@ -18,16 +18,17 @@ const MIGRATION = readFileSync(
 
 describe("hosted inference connection migration", () => {
   it("creates one private encrypted connection per hosted member", () => {
+    const model = readPrismaModel(SCHEMA, "HostedInferenceConnection");
     expect(SCHEMA).toContain("model HostedInferenceConnection {");
-    expect(SCHEMA).toContain(
+    expect(model).toContain(
       "memberId            String       @id @map(\"member_id\")",
     );
-    expect(SCHEMA).toContain(
+    expect(model).toContain(
       "configEncrypted     String       @map(\"config_encrypted\")",
     );
-    expect(SCHEMA).not.toContain("endpointUrl");
-    expect(SCHEMA).not.toContain("apiKey");
-    expect(SCHEMA).not.toContain("authSecret");
+    expect(model).not.toContain("endpointUrl");
+    expect(model).not.toContain("apiKey");
+    expect(model).not.toContain("authSecret");
   });
 
   it("preserves managed preferences through a singular selection boolean", () => {
@@ -54,3 +55,13 @@ describe("hosted inference connection migration", () => {
     expect(MIGRATION).toContain("ON DELETE CASCADE ON UPDATE CASCADE");
   });
 });
+
+function readPrismaModel(schema: string, name: string): string {
+  const match = schema.match(
+    new RegExp(`model ${name} \\{(?<body>[\\s\\S]*?)\\n\\}`, "u"),
+  );
+  if (!match?.groups?.body) {
+    throw new Error(`Missing Prisma model ${name}.`);
+  }
+  return match.groups.body;
+}

@@ -15,6 +15,7 @@ import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser
 import { TogetherSection } from "@/src/components/homepage/together-section";
 import { ModelProviderSecuritySection } from "@/src/components/security/model-provider-security-section";
 import { HostedAssistantModelSettings } from "@/src/components/settings/hosted-assistant-model-settings";
+import { HostedInferenceConnectionSettings } from "@/src/components/settings/hosted-inference-connection-settings";
 import { Separator } from "@/src/components/ui/separator";
 import { AccountDeletionMaintenanceStudy } from "./account-deletion-maintenance-study";
 import { AccountExitReasonStudy } from "./account-exit-reason-study";
@@ -137,6 +138,33 @@ export function SectionsContent() {
             initialProvider="venice"
             solAvailable
             veniceAvailable
+          />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Settings custom inference connection">
+        <div
+          id="settings-custom-inference"
+          data-design-section="settings-custom-inference"
+          inert
+        >
+          <HostedInferenceConnectionSettings
+            chatCompletionsAvailable
+            configurationAvailable
+            initialConnection={{
+              contextWindowTokens: 131_072,
+              endpointHost: "inference.example.com",
+              model: "example-health-model",
+              protocol: "responses",
+              revision: 4,
+              selected: true,
+              supportsImages: false,
+              verificationProfile:
+                "murph-codex-0.145.0-portable-responses-v1",
+              verifiedAt: "2026-07-30T22:00:00.000Z",
+            }}
           />
         </div>
       </StudySection>

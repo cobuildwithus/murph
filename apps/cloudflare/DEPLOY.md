@@ -495,6 +495,33 @@ first, verify new workspace reads omit the Venice override, and only then
 remove the Venice secret/mappings or roll Cloudflare back. The nullable stored
 preference may remain; while the flag is off it resolves to OpenAI.
 
+## Custom Inference Activation
+
+Custom inference is reader-first and fail-closed. Apply the additive Web
+database migration and deploy Web storage, verification, workspace projection,
+and signed resolution routes with both `HOSTED_CUSTOM_INFERENCE_ENABLED` and
+`HOSTED_CUSTOM_CHAT_COMPLETIONS_ENABLED` set to `0`. Then deploy Cloudflare and
+the runner bundle with `container_rollout=immediate`, require managed-container
+smoke to report the exact new runner fingerprint, and exercise the native
+Responses synthetic text/tool/cancellation probes through the deployed Worker.
+The invocation target uses the existing provider-egress signing secret through
+a context-separated key derivation; this release adds no custom-inference
+secret or binding.
+
+After that proof, set `HOSTED_CUSTOM_INFERENCE_ENABLED=1` for the intended Web
+rollout and verify one controlled native Responses connection end to end.
+Enable `HOSTED_CUSTOM_CHAT_COMPLETIONS_ENABLED=1` only after the exact Chat
+adapter conformance suite passes on the deployed candidate. A selected custom
+workspace presented to an incompatible Worker fails closed; it must never
+resolve to OpenAI or Venice.
+
+Rollback begins by preventing new custom selection and explicitly returning
+currently selected members to managed inference. Only after no selected custom
+connection remains may Web disable the main flag or Cloudflare/runner roll below
+the custom-inference contract. Forward-fix the compatible Worker/runner while
+any custom selection is active; an old runtime interpreting an unknown override
+as managed inference is not a supported rollback state.
+
 ## Required GitHub Environment Secrets
 
 Set these in the selected GitHub environment as secrets:

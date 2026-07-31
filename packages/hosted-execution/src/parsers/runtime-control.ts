@@ -5841,6 +5841,12 @@ export function parseHostedWorkspaceReadResponse(value: unknown): HostedWorkspac
     parseHostedAssistantReasoningEffortOverride(
       record.hostedAssistantReasoningEffortOverride,
     );
+  const platformAiUsageAllowed = record.platformAiUsageAllowed === undefined
+    ? null
+    : requireBoolean(
+        record.platformAiUsageAllowed,
+        "Hosted workspace read response platformAiUsageAllowed",
+      );
 
   return {
     fetchedAt: requireString(record.fetchedAt, "Hosted workspace read response fetchedAt"),
@@ -5856,6 +5862,7 @@ export function parseHostedWorkspaceReadResponse(value: unknown): HostedWorkspac
     ...(hostedAssistantReasoningEffortOverride
       ? { hostedAssistantReasoningEffortOverride }
       : {}),
+    ...(platformAiUsageAllowed === null ? {} : { platformAiUsageAllowed }),
     workspace: record.workspace === null ? null : parseHostedWorkspaceState(record.workspace),
   };
 }

@@ -111,6 +111,7 @@ import {
 
 const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_member",
+  "prisma.hosted_inference_connection",
   "prisma.hosted_web_session",
   "prisma.hosted_sensitive_action_challenge",
   "prisma.hosted_member_identity",

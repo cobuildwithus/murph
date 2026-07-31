@@ -283,7 +283,7 @@ async function readSelectedHostedInferenceConnectionRow(input: {
   return member.inferenceConnection;
 }
 
-async function requirePersonalHostedInferenceMember(input: {
+export async function requirePersonalHostedInferenceMember(input: {
   memberId: string;
   prisma: HostedInferenceConnectionReadClient;
 }): Promise<void> {

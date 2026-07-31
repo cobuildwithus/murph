@@ -19,6 +19,14 @@ export function parseHostedInferenceConnectionCandidate(
   value: unknown,
 ): HostedInferenceConnectionCandidate {
   const record = requireRecord(value, "Hosted inference connection");
+  requireExactKeys(record, [
+    "auth",
+    "contextWindowTokens",
+    "endpointUrl",
+    "model",
+    "protocol",
+    "supportsImages",
+  ]);
   const protocol = requireHostedInferenceProtocol(record.protocol);
   return {
     auth: parseHostedInferenceConnectionAuth(record.auth),
@@ -85,6 +93,7 @@ function parseHostedInferenceConnectionAuth(
   value: unknown,
 ): HostedInferenceConnectionAuth {
   const record = requireRecord(value, "Hosted inference auth");
+  requireExactKeys(record, ["kind", "secret"]);
   const secret = requireTrimmedString(
     record.secret,
     "Hosted inference auth secret",
@@ -129,4 +138,17 @@ function requireRecord(
     throw new TypeError(`${label} must be an object.`);
   }
   return value as Record<string, unknown>;
+}
+
+function requireExactKeys(
+  record: Record<string, unknown>,
+  expected: readonly string[],
+): void {
+  const expectedKeys = new Set(expected);
+  if (
+    Object.keys(record).length !== expectedKeys.size
+    || Object.keys(record).some((key) => !expectedKeys.has(key))
+  ) {
+    throw new TypeError("Hosted inference connection contains unknown fields.");
+  }
 }

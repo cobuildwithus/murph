@@ -334,6 +334,7 @@ describe("cloudflare worker routes", () => {
     expect(workerInternalRoutes.map(({ name }) => name)).toEqual([
       "deploy-container-smoke",
       "runtime-ensure-processing",
+      "inference-verification",
       "user-data-delete",
       "telegram-usage-limit-notice",
       "meal-photo-stage",
@@ -357,6 +358,7 @@ describe("cloudflare worker routes", () => {
       "test-direct-r2-presigned-put",
       "deploy-container-smoke",
       "runtime-ensure-processing",
+      "inference-verification",
       "user-data-delete",
       "telegram-usage-limit-notice",
       "meal-photo-stage",

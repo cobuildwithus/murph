@@ -191,6 +191,14 @@ export function parseHostedAssistantCustomInferenceOverride(
     value,
     "Hosted custom inference override",
   );
+  requireHostedInferenceExactKeys(record, [
+    "contextWindowTokens",
+    "modelAlias",
+    "protocol",
+    "revision",
+    "supportsImages",
+    "verificationProfile",
+  ]);
   const revision = requireHostedInferenceRevision(record.revision);
   const modelAlias = requireHostedInferenceString(
     record.modelAlias,
@@ -313,4 +321,17 @@ function requireHostedInferenceRecord(
     throw new TypeError(`${label} must be an object.`);
   }
   return value as Record<string, unknown>;
+}
+
+function requireHostedInferenceExactKeys(
+  record: Record<string, unknown>,
+  expected: readonly string[],
+): void {
+  const expectedKeys = new Set(expected);
+  if (
+    Object.keys(record).length !== expectedKeys.size
+    || Object.keys(record).some((key) => !expectedKeys.has(key))
+  ) {
+    throw new TypeError("Hosted custom inference override contains unknown fields.");
+  }
 }

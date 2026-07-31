@@ -11,6 +11,9 @@ import {
   type HostedAssistantProviderOverride,
   type HostedAssistantReasoningEffortOverride,
 } from "@murphai/hosted-execution/assistant-model";
+import type {
+  HostedAssistantCustomInferenceOverride,
+} from "@murphai/hosted-execution/assistant-inference";
 
 import {
   readHostedRunnerContainerIdentity,
@@ -48,6 +51,9 @@ import {
   RuntimeProcessingController,
 } from "../src/user-runner/runtime-processing-controller.js";
 import {
+  openHostedInferenceRuntimeTarget,
+} from "../src/hosted-inference-target-envelope.js";
+import {
   RunnerStoreCache,
   type RunnerUserStores,
 } from "../src/user-runner/runner-store-cache.js";
@@ -71,6 +77,7 @@ const TEST_USER_ID = "member_123";
 describe("hosted runner container identity", () => {
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   it("round-trips a versioned runner container identity", () => {
@@ -412,6 +419,94 @@ describe("hosted runner container identity", () => {
     ).toBe("xhigh");
   });
 
+  it("resolves a selected custom target once, pins it to the fence, and gives Codex only a sentinel", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const durable = createRunnerDurableState();
+    const stateStore = new RunnerStateStore(durable.state);
+    const override: HostedAssistantCustomInferenceOverride = {
+      contextWindowTokens: 131_072,
+      modelAlias: "murph-custom-r7",
+      protocol: "responses",
+      revision: 7,
+      supportsImages: false,
+      verificationProfile: "murph-codex-0.145.0-portable-responses-v1",
+    };
+    const runtimeTarget = {
+      auth: {
+        kind: "bearer",
+        secret: "synthetic-upstream-secret",
+      },
+      contextWindowTokens: override.contextWindowTokens,
+      endpointUrl: "https://inference.example.com/v1/responses",
+      model: "synthetic-upstream-model",
+      protocol: override.protocol,
+      revision: override.revision,
+      schema: "murph.hosted-inference-runtime-target.v1",
+      supportsImages: override.supportsImages,
+      verificationProfile: override.verificationProfile,
+    };
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      Response.json(runtimeTarget)
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const runnerRuntimeEnvSource = {
+      CF_VERSION_METADATA: { id: "version_1" },
+      HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_TERRA_MODEL,
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+        "provider-egress-signing-secret",
+      OPENAI_API_KEY: "test-openai-key",
+    };
+    const service = createRuntimeInvocationService({
+      hostedAssistantCustomInferenceOverride: override,
+      invokedContainerNames: [],
+      runnerRuntimeEnvSource,
+      stateStore,
+      state: durable.state,
+    });
+    const token = await stateStore.beginWriteFence({
+      runnerContainerName: "member_123--v-version_1",
+      userId: TEST_USER_ID,
+    });
+
+    const prepared = await service.prepareWithFence({
+      input: {
+        orchestrationAttemptId: "orchestration_attempt_custom_inference",
+        userId: TEST_USER_ID,
+      },
+      token,
+    });
+    const forwardedEnv = prepared.job.runtime?.forwardedEnv;
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(forwardedEnv).toMatchObject({
+      HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS: "131072",
+      HOSTED_ASSISTANT_MODEL: "murph-custom-r7",
+      HOSTED_ASSISTANT_PROVIDER: "hosted-custom-inference",
+      MURPH_CUSTOM_INFERENCE_API_KEY: "__cloudflare_injected__",
+    });
+    expect(forwardedEnv).not.toHaveProperty("HOSTED_ASSISTANT_REASONING_EFFORT");
+    expect(JSON.stringify(prepared.job)).not.toContain(runtimeTarget.endpointUrl);
+    expect(JSON.stringify(prepared.job)).not.toContain(runtimeTarget.auth.secret);
+
+    if (!token.providerEgressToken) {
+      throw new Error("Expected a provider egress token on the active fence.");
+    }
+    const validation = await stateStore.validateProviderEgressToken({
+      providerEgressToken: token.providerEgressToken,
+      userId: TEST_USER_ID,
+    });
+    expect(validation).toMatchObject({ owns: true });
+    if (!validation.owns || !validation.customInferenceEnvelope) {
+      throw new Error("Expected the selected custom target on the active fence.");
+    }
+    await expect(openHostedInferenceRuntimeTarget({
+      envelope: validation.customInferenceEnvelope,
+      source: runnerRuntimeEnvSource,
+    })).resolves.toEqual(runtimeTarget);
+  });
+
   it("wakes an active runtime through the write fence's stored runner container name", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -603,6 +698,7 @@ class EmptyRunnerSecretsService extends RunnerSecretsService {
 }
 
 function createRuntimeInvocationService(input: {
+  hostedAssistantCustomInferenceOverride?: HostedAssistantCustomInferenceOverride;
   hostedAssistantModelOverride?: HostedAssistantModelOverride;
   hostedAssistantProviderOverride?: HostedAssistantProviderOverride;
   hostedAssistantReasoningEffortOverride?: HostedAssistantReasoningEffortOverride;
@@ -626,6 +722,13 @@ function createRuntimeInvocationService(input: {
     readHostedWebControlBaseUrl: () => "https://web.example.test",
     readHostedWorkspaceFromWeb: async () => ({
       fetchedAt: FIXED_NOW,
+      ...(input.hostedAssistantCustomInferenceOverride
+        ? {
+            hostedAssistantCustomInferenceOverride:
+              input.hostedAssistantCustomInferenceOverride,
+            platformAiUsageAllowed: false,
+          }
+        : {}),
       ...(input.hostedAssistantModelOverride
         ? { hostedAssistantModelOverride: input.hostedAssistantModelOverride }
         : {}),
