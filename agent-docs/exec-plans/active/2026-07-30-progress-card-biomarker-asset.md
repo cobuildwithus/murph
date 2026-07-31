@@ -13,11 +13,11 @@ Key decisions:
 - Generate a compact biomarker desired-direction artifact owned by `packages/health-commons`.
 - Add that compact artifact to the runner-specific Health Commons package allowlist and deploy validation instead of restoring `generated/web/**`.
 - Make progress-card composition recover only from a missing compact artifact by passing an empty direction snapshot and appending a warning.
-- Relay only that exact missing-direction warning through every member-facing progress-card owner; keep unrelated renderer diagnostics private.
+- Make the exact missing-direction caveat part of the deterministic private card artifact and its accessible description. Do not rely on prompt freshness to relay it, and keep unrelated renderer diagnostics private.
 - Add direct packed-package coverage that resolves a known desired direction from the extracted runner artifact and direct use-case coverage for missing-asset neutral recovery.
 
 State:
-- Accepted first-round findings remediated locally; correction candidate is ready to commit, push, and review.
+- ReviewGPT round 2 required a retrospective after proving the prompt-only manual correction could remain stale in a persisted context snapshot. The retrospective decision is to delete the distributed prompt relay and move the caveat into deterministic card rendering.
 
 Done:
 - Reproduced the incompatible current contracts: hosted packaging omits and rejects `generated/web/**`, while progress-card composition reads `generated/web/browse/biomarkers.json` through the pinned package root.
@@ -33,12 +33,16 @@ Done:
 - Applied and verified the specialist's narrow catalog-hash mismatch regression test.
 - Passed four focused assistant owner suites (97 tests), assistant-engine typecheck, and the affected Cloudflare deploy-artifact suite (42 tests).
 - Captured complete first provider-visible requests through the pinned real Codex App Server with a synthetic scheduled weekly direct/group turn and active experiment, `gpt-5.6-terra`, low reasoning, code mode, and `gpt-tokenizer` 3.4.0 `o200k_harmony`: individual 131,789 bytes / 28,470 tokens at base and 132,309 / 28,566 at head; group 118,331 / 25,541 at base and 118,591 / 25,589 at head.
+- Final ReviewGPT round 2 returned `RETROSPECTIVE_REQUIRED`: an existing clean schema-v5 context snapshot can retain the pre-remediation manual prompt across deployment and restarts, reproducing the same member-facing disclosure gap.
+- Retrospective: the original requirement is one available progress card with an understandable neutral fallback. First review had 232 source additions / 23 deletions; the prompt correction grew that to 237 / 23, so churn is not the concern. The repeated mechanism is conditional delivery ownership in persisted prompt copies. Continuing with cache invalidation would still leave the first post-deploy request on safety-stale context, while adding runtime reconciliation would violate the simplicity constraint. The chosen correction deletes the five prompt relay lines and makes one typed card state drive visible and accessible caveat rendering. The card artifact is then the single deterministic owner, including for pre-existing snapshots and automations.
+- Added `moverSentimentContext: direction_unavailable` to the private card contract, set it only on the missing direction-asset branch, and render the caveat in the card footer, SVG accessibility label, and response-media alt text. The packaged healthy path keeps the field null and the existing branded footer.
+- Passed the focused contracts, query, vault-usecases, and CLI typechecks; the contract guard (1 test), missing/packaged vault path (6 tests), and renderer/media proof (2 tests) all pass. A 1200×780 fallback PNG was rendered and visually inspected: the note is readable, non-overlapping, and the normal card hierarchy remains intact; the temporary proof artifact was removed.
 
 Now:
-- Commit and push the combined first-round remediation, update the PR evidence, and launch final ReviewGPT correction round 2 against that exact head.
+- Update the PR intent/provider-input/review evidence for the deterministic correction, then commit and push it.
 
 Next:
-- Require green correction-head CI and ReviewGPT, complete parent product-experience and final diff review plus merge-conflict proof, then archive this plan with the final scoped commit.
+- Run focused contract/query/vault/CLI proof, update provider-input and review evidence, push the retrospective correction, then require ReviewGPT round 3 and green exact-head CI.
 
 Open questions (UNCONFIRMED if needed):
 - None blocking implementation.

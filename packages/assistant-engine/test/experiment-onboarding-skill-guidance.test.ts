@@ -427,18 +427,6 @@ describe('experiment onboarding skill guidance', () => {
     expect(raw).toContain('send only when `decision.action` is `notify`')
   })
 
-  it('requires the missing-direction progress-card caveat in the same response', async () => {
-    const raw = await readExperimentOnboardingSkill()
-
-    expect(raw).toContain(
-      '`biomarker desired directions unavailable; mover sentiment shown as neutral`',
-    )
-    expect(raw).toContain(
-      'say in the same response that direction context was unavailable',
-    )
-    expect(raw).toContain('Do not relay other rendering warnings.')
-  })
-
   it('branches device-observable experiments from progress evidence', async () => {
     const raw = await readExperimentOnboardingSkill()
 

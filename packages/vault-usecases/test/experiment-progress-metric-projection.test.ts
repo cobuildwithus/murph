@@ -811,6 +811,10 @@ test("experiment progress cards stay available when biomarker direction assets a
 
     assert.equal(result.card.movers.length, 1);
     assert.equal(result.card.movers[0]?.sentiment, "neutral");
+    assert.equal(
+      result.card.moverSentimentContext,
+      "direction_unavailable",
+    );
     assert.ok(
       result.warnings.includes(
         "biomarker desired directions unavailable; mover sentiment shown as neutral",
@@ -834,6 +838,7 @@ test("experiment progress cards stay available when biomarker direction assets a
       vault: vaultRoot,
     });
     assert.equal(packagedResult.card.movers[0]?.sentiment, "positive");
+    assert.equal(packagedResult.card.moverSentimentContext, null);
     assert.ok(
       !packagedResult.warnings.includes(
         "biomarker desired directions unavailable; mover sentiment shown as neutral",

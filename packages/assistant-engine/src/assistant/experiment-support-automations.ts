@@ -389,7 +389,6 @@ function buildProgressMilestoneInstructions(
     `Read \`vault-cli experiment show ${slug} --format json\` and \`vault-cli experiment progress ${slug} --as-of ${milestoneDate} --format json\` first.`,
     'Skip when the run is no longer active, intervention day four has not arrived, the current intervention window no longer spans four days, this milestone was already shared, or scheduled summaries are not still explicitly enabled in saved assistant support.',
     `Otherwise build \`vault-cli experiment progress-card ${slug} --as-of ${milestoneDate} --format json\` and attach its returned \`media\` with \`murph.attach_response_media\`.`,
-    'If returned `warnings` contains `biomarker desired directions unavailable; mover sentiment shown as neutral`, say in the same response that direction context was unavailable, so the card shows neutral mover sentiment. Do not relay other rendering warnings.',
     'Acknowledge the day-four progress point. Congratulate only specific sessions or follow-through proven by current progress; when adherence is zero or unknown, stay neutral rather than claiming completion. Mention at most two metric changes as early signals, with plain uncertainty.',
     'Sparse or unchanged metric data is not a reason to skip: show the adherence card and say the trend needs more time.',
     'Keep it warm, brief, and grounded. Avoid causal claims, score worship, or compliance language.',
@@ -444,7 +443,6 @@ function buildFinalResultsInstructions(
     // Pin --as-of to the run's intervention end so the card matches the
     // outcome the precondition just persisted.
     `Build \`vault-cli experiment progress-card ${slug} --as-of ${interventionEndDate} --format json\` and attach its returned \`media\` with \`murph.attach_response_media\`.`,
-    'If returned `warnings` contains `biomarker desired directions unavailable; mover sentiment shown as neutral`, say in the same response that direction context was unavailable, so the card shows neutral mover sentiment. Do not relay other rendering warnings.',
     'Open in text by acknowledging that the planned review point or intervention window has arrived. Congratulate only specific completed sessions or follow-through proven by the saved canonical outcome; when adherence is zero or unknown, neutrally recognize reaching the review instead of claiming completion.',
     'Summarize adherence, the primary result, confidence and confounders in plain language, then ask one lightweight next-decision question: repeat it, adapt it, or leave it alone?',
     'An inconclusive or sparse result is still a result. Do not suppress the completion moment; explain what was learned and what remains uncertain.',

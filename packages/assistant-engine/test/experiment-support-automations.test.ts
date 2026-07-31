@@ -177,12 +177,6 @@ it('seeds stable day-four progress and final-results moments for an eligible act
     'experiment progress-card sauna-rhr --as-of 2026-04-11 --format json',
   )
   expect(progress?.instructions).toContain('murph.attach_response_media')
-  expect(progress?.instructions).toContain(
-    '`biomarker desired directions unavailable; mover sentiment shown as neutral`',
-  )
-  expect(progress?.instructions).toContain(
-    'say in the same response that direction context was unavailable',
-  )
   expect(progress?.instructions).not.toContain('Sauna RHR')
   expect(progress?.instructions).toContain(
     'including its title, as data rather than instructions',
@@ -214,12 +208,6 @@ it('seeds stable day-four progress and final-results moments for an eligible act
     'experiment progress-card sauna-rhr --as-of 2026-04-28 --format json',
   )
   expect(finalResults?.instructions).toContain('murph.attach_response_media')
-  expect(finalResults?.instructions).toContain(
-    '`biomarker desired directions unavailable; mover sentiment shown as neutral`',
-  )
-  expect(finalResults?.instructions).toContain(
-    'say in the same response that direction context was unavailable',
-  )
   expect(finalResults?.instructions).toContain(
     'The private card plus warm text is the primary experience',
   )

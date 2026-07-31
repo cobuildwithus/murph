@@ -2044,6 +2044,7 @@ export async function showExperimentProgressCard(input: {
     desiredDirection: HealthCommonsBiomarkerDesiredDirection
   }> = []
   const directionWarnings: string[] = []
+  let moverSentimentContext: 'direction_unavailable' | null = null
   if (biomarkerKeys.length > 0) {
     try {
       const healthCommons = await loadHealthCommonsBiomarkerDirectionRuntime()
@@ -2063,6 +2064,7 @@ export async function showExperimentProgressCard(input: {
       directionWarnings.push(
         'biomarker desired directions unavailable; mover sentiment shown as neutral',
       )
+      moverSentimentContext = 'direction_unavailable'
     }
   }
 
@@ -2071,6 +2073,7 @@ export async function showExperimentProgressCard(input: {
     biomarkerDesiredDirections,
     confounders: input.confounders,
     metricPoints,
+    moverSentimentContext,
   })
 
   return {
