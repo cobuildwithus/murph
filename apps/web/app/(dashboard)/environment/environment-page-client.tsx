@@ -15,6 +15,7 @@ import {
 import Image from "next/image";
 import { ArrowRight, LoaderCircle, ShieldCheck } from "lucide-react";
 
+import { MurphContactDialog } from "@/src/components/murph/murph-contact-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
 import { PageHeader } from "@/src/components/ui/page-header";
@@ -74,9 +75,9 @@ const EMPTY_CATEGORY_SUMMARIES: Readonly<Record<string, string>> = {
 };
 
 export default function EnvironmentPageClient({
-  contactAction,
+  contactOptions,
 }: {
-  contactAction: MurphContactOption | null;
+  contactOptions: readonly MurphContactOption[];
 }) {
   const {
     client,
@@ -290,14 +291,14 @@ export default function EnvironmentPageClient({
           notes={notes}
           grade={grade}
           coverage={coverage}
-          contactAction={contactAction}
+          contactOptions={contactOptions}
           conditions={conditions}
           onVoiceAccepted={onVoiceAccepted}
           voiceCaptureDisabled={voiceCaptureDisabled}
         />
       ) : (
         <EnvironmentEmptyState
-          contactAction={contactAction}
+          contactOptions={contactOptions}
           onVoiceAccepted={onVoiceAccepted}
           processing={voiceCaptureDisabled}
           script={voiceScript}
@@ -380,12 +381,12 @@ function EnvironmentShell({
 }
 
 export function EnvironmentEmptyState({
-  contactAction,
+  contactOptions,
   onVoiceAccepted,
   processing = false,
   script = buildEnvironmentVoiceScript(EMPTY_HABITAT_VALUES),
 }: {
-  contactAction: MurphContactOption | null;
+  contactOptions: readonly MurphContactOption[];
   onVoiceAccepted?: () => void;
   processing?: boolean;
   script?: EnvironmentVoiceScript;
@@ -430,17 +431,11 @@ export function EnvironmentEmptyState({
                     : "Update by voice"
               }
             />
-            {contactAction ? (
-              <a
-                href={contactAction.href}
-                target={contactAction.target}
-                rel={contactAction.rel}
-                className="inline-flex min-h-11 items-center gap-1.5 text-base font-medium text-muted-foreground underline decoration-border underline-offset-4 hover:text-foreground sm:min-h-0 sm:text-sm"
-              >
-                Prefer typing? Use chat
-                <ArrowRight className="size-4 shrink-0" aria-hidden="true" />
-              </a>
-            ) : null}
+            <EnvironmentChatAction
+              contactOptions={contactOptions}
+              label="Prefer typing? Use chat"
+              presentation="link"
+            />
           </div>
 
           <p className="mt-7 max-w-[58ch] text-pretty text-base text-muted-foreground sm:text-sm">
@@ -488,7 +483,7 @@ function EnvironmentReport({
   notes,
   grade,
   coverage,
-  contactAction,
+  contactOptions,
   conditions,
   onVoiceAccepted,
   voiceCaptureDisabled,
@@ -498,11 +493,12 @@ function EnvironmentReport({
   notes: ReturnType<typeof deriveCategoryNote>[];
   grade: ReturnType<typeof overallGrade>;
   coverage: ReturnType<typeof resolveEnvironmentCoverage>;
-  contactAction: MurphContactOption | null;
+  contactOptions: readonly MurphContactOption[];
   conditions: { outdoorAir: string; weather: string };
   onVoiceAccepted: () => void;
   voiceCaptureDisabled: boolean;
 }) {
+  const contactAction = contactOptions[0] ?? null;
   const nextChecks = buildNextChecks(scene, notes);
   const noteByCategoryId = new Map(notes.map((note) => [note.id, note]));
   const voiceScript = buildEnvironmentVoiceScript(values);
@@ -524,7 +520,7 @@ function EnvironmentReport({
       />
 
       <EnvironmentCaptureCard
-        contactAction={contactAction}
+        contactOptions={contactOptions}
         coverage={coverage.coverage}
         known={coverage.known}
         script={voiceScript}
@@ -554,14 +550,14 @@ function EnvironmentReport({
 }
 
 export function EnvironmentCaptureCard({
-  contactAction,
+  contactOptions,
   coverage,
   known,
   script,
   onVoiceAccepted,
   processing = false,
 }: {
-  contactAction: MurphContactOption | null;
+  contactOptions: readonly MurphContactOption[];
   coverage: number;
   known: number;
   script: EnvironmentVoiceScript;
@@ -618,25 +614,87 @@ export function EnvironmentCaptureCard({
           }
           triggerVariant={updating ? "outline" : "default"}
         />
-        {contactAction ? (
-          <Button
-            size="default"
-            variant="ghost"
-            render={
-              <a
-                href={contactAction.href}
-                target={contactAction.target}
-                rel={contactAction.rel}
-              />
-            }
-            nativeButton={false}
-          >
-            {updating ? "Update in chat" : "Chat instead"}
-            <ArrowRight className="size-4" aria-hidden="true" />
-          </Button>
-        ) : null}
+        <EnvironmentChatAction
+          contactOptions={contactOptions}
+          label={updating ? "Update in chat" : "Chat instead"}
+          presentation="button"
+        />
       </div>
     </section>
+  );
+}
+
+function EnvironmentChatAction({
+  contactOptions,
+  label,
+  presentation,
+}: {
+  contactOptions: readonly MurphContactOption[];
+  label: string;
+  presentation: "button" | "link";
+}) {
+  if (contactOptions.length === 0) {
+    return null;
+  }
+
+  const content = (
+    <>
+      {label}
+      <ArrowRight className="size-4 shrink-0" aria-hidden="true" />
+    </>
+  );
+  const contactAction = contactOptions[0];
+
+  if (contactOptions.length === 1 && contactAction) {
+    if (presentation === "link") {
+      return (
+        <a
+          href={contactAction.href}
+          target={contactAction.target}
+          rel={contactAction.rel}
+          className="inline-flex min-h-11 items-center gap-1.5 text-base font-medium text-muted-foreground underline decoration-border underline-offset-4 hover:text-foreground sm:min-h-0 sm:text-sm"
+        >
+          {content}
+        </a>
+      );
+    }
+    return (
+      <Button
+        size="default"
+        variant="ghost"
+        render={
+          <a
+            href={contactAction.href}
+            target={contactAction.target}
+            rel={contactAction.rel}
+          />
+        }
+        nativeButton={false}
+      >
+        {content}
+      </Button>
+    );
+  }
+
+  return (
+    <MurphContactDialog
+      options={contactOptions}
+      trigger={(open) =>
+        presentation === "link" ? (
+          <button
+            type="button"
+            className="inline-flex min-h-11 items-center gap-1.5 text-base font-medium text-muted-foreground underline decoration-border underline-offset-4 hover:text-foreground sm:min-h-0 sm:text-sm"
+            onClick={open}
+          >
+            {content}
+          </button>
+        ) : (
+          <Button size="default" variant="ghost" onClick={open}>
+            {content}
+          </Button>
+        )
+      }
+    />
   );
 }
 

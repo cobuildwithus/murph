@@ -58,7 +58,7 @@ test("keeps processing through intermediate checkpoints until the voice job fini
   );
   globalThis.fetch = fetchMock;
   const rendered = await renderClientComponent(
-    createElement(EnvironmentPageClient, { contactAction: null }),
+    createElement(EnvironmentPageClient, { contactOptions: [] }),
     {
       location: {
         hash: "",
@@ -96,7 +96,7 @@ test("keeps processing through intermediate checkpoints until the voice job fini
 
     mocks.vault.workspaceVersion = "workspace-v2";
     await rendered.rerender(
-      createElement(EnvironmentPageClient, { contactAction: null }),
+      createElement(EnvironmentPageClient, { contactOptions: [] }),
     );
     assert.match(
       rendered.window.document.body.textContent ?? "",
@@ -138,7 +138,7 @@ test("restores server-side processing state after the page is reopened", async (
     createElement(
       StrictMode,
       null,
-      createElement(EnvironmentPageClient, { contactAction: null }),
+      createElement(EnvironmentPageClient, { contactOptions: [] }),
     ),
     {
       location: {
@@ -190,7 +190,7 @@ test("keeps checking after processing takes longer than two minutes", async () =
   ) => Response.json({ processing }));
   globalThis.fetch = fetchMock;
   const rendered = await renderClientComponent(
-    createElement(EnvironmentPageClient, { contactAction: null }),
+    createElement(EnvironmentPageClient, { contactOptions: [] }),
     {
       location: {
         hash: "",
