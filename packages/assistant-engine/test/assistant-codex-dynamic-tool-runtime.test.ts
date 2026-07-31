@@ -213,6 +213,92 @@ describe('Codex dynamic tool runtime routing', () => {
     ])
   })
 
+  it('starts overlapping nonserialized tool preflights at the captured ordinal', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-overlapping-preflight-work-',
+    )
+    const codexHome = await createTempDir(
+      'assistant-codex-overlapping-preflight-home-',
+    )
+    const firstPreflightStarted = createDeferred<void>()
+    const releaseFirstPreflight = createDeferred<void>()
+    const beforeToolExecution = vi.fn(async (deliveryContextOrdinal: number) => {
+      codexMocks.executionOrder.push(
+        `checkpoint:${deliveryContextOrdinal}`,
+      )
+      if (beforeToolExecution.mock.calls.length === 1) {
+        firstPreflightStarted.resolve()
+        await releaseFirstPreflight.promise
+      }
+    })
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      queueMicrotask(() => {
+        void runScriptedOverlappingProgressTurn(child)
+      })
+      return child
+    })
+
+    const turn = executeCodexAppServerTurn({
+      approvalPolicy: 'never',
+      codexCommand: 'codex',
+      codexHome,
+      dynamicTools: resolveMurphDynamicTools({
+        progressUpdatesAvailable: true,
+      }),
+      env: {
+        CODEX_HOME: codexHome,
+        PATH: '/usr/bin',
+      },
+      hostedToolContext: {
+        beforeToolExecution,
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: vi.fn(async () => {
+          throw new Error('Vault-file sending is unavailable for this turn.')
+        }),
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Run both progress tools.',
+      sandbox: 'workspace-write',
+      workingDirectory,
+    })
+
+    await firstPreflightStarted.promise
+    try {
+      await vi.waitFor(() => {
+        expect(beforeToolExecution).toHaveBeenCalledTimes(2)
+      })
+      await vi.waitFor(() => {
+        expect(codexMocks.dynamicToolCalls).toHaveLength(1)
+      })
+      expect(beforeToolExecution).toHaveBeenNthCalledWith(1, 1)
+      expect(beforeToolExecution).toHaveBeenNthCalledWith(2, 1)
+    } finally {
+      releaseFirstPreflight.resolve()
+    }
+
+    await expect(turn).resolves.toMatchObject({
+      finalMessage: 'overlapping progress complete',
+      threadId: 'thread-overlapping-preflight',
+      turnId: 'turn-overlapping-preflight',
+    })
+    expect(codexMocks.dynamicToolCalls).toEqual([
+      {
+        deliveryContextOrdinal: 1,
+        kind: 'send-progress-update',
+        voiceMemoRuntime: null,
+      },
+      {
+        deliveryContextOrdinal: 1,
+        kind: 'send-progress-update',
+        voiceMemoRuntime: null,
+      },
+    ])
+  })
+
   it('serializes overlapping assistant-style calls in provider command order', async () => {
     const workingDirectory = await createTempDir(
       'assistant-codex-style-order-work-',
@@ -270,6 +356,77 @@ describe('Codex dynamic tool runtime routing', () => {
     expect(executionOrder).toEqual([2, 8])
   })
 })
+
+async function runScriptedOverlappingProgressTurn(
+  child: MockChildProcess,
+): Promise<void> {
+  const initialize = await child.waitForRpcMethod('initialize')
+  child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+  const threadStart = await child.waitForRpcMethod('thread/start')
+  child.stdout.write(jsonLine({
+    id: threadStart.id,
+    result: { thread: { id: 'thread-overlapping-preflight' } },
+  }))
+  const turnStart = await child.waitForRpcMethod('turn/start')
+  child.stdout.write(jsonLine({
+    id: turnStart.id,
+    result: { turn: { id: 'turn-overlapping-preflight' } },
+  }))
+  child.stdout.write(jsonLine({
+    method: 'turn/started',
+    params: { turn: { id: 'turn-overlapping-preflight' } },
+  }))
+  for (const [id, message] of [
+    ['user-overlapping-initial', 'Run both progress tools.'],
+    ['user-overlapping-steered', 'Include this follow up.'],
+  ] as const) {
+    child.stdout.write(jsonLine({
+      method: 'item/completed',
+      params: {
+        item: {
+          id,
+          message,
+          type: 'user_message',
+        },
+      },
+    }))
+  }
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  for (const [id, text] of [
+    [21, 'Checking the first item.'],
+    [22, 'Checking the second item.'],
+  ] as const) {
+    child.stdout.write(jsonLine({
+      id,
+      method: 'item/tool/call',
+      params: {
+        arguments: { text },
+        namespace: 'murph',
+        tool: 'send_progress_update',
+        turnId: 'turn-overlapping-preflight',
+      },
+    }))
+  }
+  await child.waitForRpcId(21)
+  await child.waitForRpcId(22)
+  child.stdout.write(jsonLine({
+    method: 'item/completed',
+    params: {
+      item: {
+        id: 'assistant-overlapping-preflight',
+        message: 'overlapping progress complete',
+        type: 'assistant_message',
+      },
+    },
+  }))
+  child.stdout.write(jsonLine({
+    method: 'turn/completed',
+    params: {
+      turn: { id: 'turn-overlapping-preflight', status: 'completed' },
+    },
+  }))
+}
 
 async function runScriptedOverlappingStyleTurn(
   child: MockChildProcess,

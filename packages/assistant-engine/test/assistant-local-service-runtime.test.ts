@@ -33,6 +33,7 @@ import {
   readAssistantInputEvent,
   upsertAssistantInputEvent,
 } from '../src/assistant/input-store.ts'
+import { createStoreBackedAssistantInputSource } from '../src/assistant/input-source.ts'
 import { resolveAssistantConversationKey } from '../src/assistant/bindings.ts'
 import {
   ASSISTANT_IMAGE_RESPONSE_TRANSCRIPT_MARKER,
@@ -3231,7 +3232,7 @@ test('sendAssistantMessageLocal updates provider request metadata when final con
   )
 })
 
-test('sendAssistantMessageLocal bounds hosted tool preflight by provider-visible input', async () => {
+test('sendAssistantMessageLocal serializes concurrent hosted tool preflights at the provider-visible bound', async () => {
   const context = await createTempVaultContext(
     'assistant-local-service-active-turn-event-steer-',
   )
@@ -3308,48 +3309,88 @@ test('sendAssistantMessageLocal bounds hosted tool preflight by provider-visible
       }),
     },
   })
+  const uncoveredHostedInput = await upsertAssistantInputEvent({
+    vault: context.vaultRoot,
+    now: new Date('2026-04-22T10:00:02.000Z'),
+    event: {
+      content: {
+        attachmentDescriptors: [],
+        text: 'Acknowledged but uncovered follow up',
+      },
+      conversation: {
+        accountId: 'acct_1',
+        actorId: 'actor_2',
+        actorIsSelf: false,
+        source: 'telegram',
+        threadId: 'thread-1',
+        threadIsDirect: false,
+      },
+      occurredAt: '2026-04-22T10:00:01.000Z',
+      receivedAt: '2026-04-22T10:00:01.000Z',
+      replyTarget: {
+        channel: 'telegram',
+        messageId: 'message-event-steer-uncovered',
+        threadId: 'thread-1',
+      },
+      sourceRef: createHostedMailboxSourceRef({
+        eventId: 'evt_active_turn_event_steer_uncovered',
+        laneSeq: '3',
+      }),
+    },
+  })
   const providerStarted = createDeferred<void>()
   const providerRelease = createDeferred<void>()
   const toolExecutionRequested = createDeferred<void>()
   const ordinalZeroPreflightChecked = createDeferred<void>()
   const ordinalOnePreflightRequested = createDeferred<void>()
+  const firstCheckpointStarted = createDeferred<void>()
+  const firstCheckpointRelease = createDeferred<void>()
+  const secondPreflightRequested = createDeferred<void>()
   const toolExecutionCheckpointed = createDeferred<void>()
   const liveSteeredPrompts: string[] = []
   let earlierParticipantAuthorization: { targetInputId: string } | null = null
   let earlierParticipantAuthorizationError: unknown = null
   const activeTurnInput = vi.fn<AssistantActiveTurnInputAdmissionHook>(
     async (input) => {
-      if (input.knownInputIds?.includes(hostedInput.inputId)) {
-        return {
-          kind: 'no-new-input',
-        }
-      }
       if (activeTurnInput.mock.calls.length === 1) {
         return {
           kind: 'no-new-input',
         }
       }
-      expect(input.availableInputIds).toEqual([hostedInput.inputId])
+      const nextInput = [hostedInput, uncoveredHostedInput].find(
+        (candidate) =>
+          input.availableInputIds?.includes(candidate.inputId) === true &&
+          !input.knownInputIds?.includes(candidate.inputId),
+      )
+      if (!nextInput) {
+        return {
+          kind: 'no-new-input',
+        }
+      }
+      const prompt =
+        nextInput.inputId === hostedInput.inputId
+          ? 'Event-backed follow up'
+          : 'Acknowledged but uncovered follow up'
       return {
         acceptedInputs: [
           {
             contentRef: {
               kind: 'assistant-input-event',
-              refId: hostedInput.inputId,
-              version: hostedInput.schema,
+              refId: nextInput.inputId,
+              version: nextInput.schema,
             },
-            id: hostedInput.inputId,
+            id: nextInput.inputId,
             promptFallbackReason: 'missing-content-ref',
-            promptFallbackText: 'Event-backed follow up',
+            promptFallbackText: prompt,
             source: 'assistant-input',
           },
         ],
         kind: 'accepted',
-        prompt: 'Event-backed follow up',
-        transcriptText: 'Event-backed follow up',
+        prompt,
+        transcriptText: prompt,
         userMessageContent: [
           {
-            text: 'Event-backed follow up',
+            text: prompt,
             type: 'text',
           },
         ],
@@ -3366,6 +3407,14 @@ test('sendAssistantMessageLocal bounds hosted tool preflight by provider-visible
   })
   const { notifyAssistantActiveTurnInputAvailable } = await import(
     '../src/assistant/active-turn-input-controller.ts'
+  )
+  const activeTurnCheckpoint = vi.fn(
+    async (_input: AssistantActiveTurnInputCheckpointInput) => {
+      if (activeTurnCheckpoint.mock.calls.length === 1) {
+        firstCheckpointStarted.resolve()
+        await firstCheckpointRelease.promise
+      }
+    },
   )
   mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
     await providerInput.onProviderRequestPlanned?.({
@@ -3389,7 +3438,15 @@ test('sendAssistantMessageLocal bounds hosted tool preflight by provider-visible
     await providerInput.hostedToolContext?.beforeToolExecution?.(0)
     ordinalZeroPreflightChecked.resolve()
     await ordinalOnePreflightRequested.promise
-    await providerInput.hostedToolContext?.beforeToolExecution?.(1)
+    const firstPreflight =
+      providerInput.hostedToolContext?.beforeToolExecution?.(1) ??
+      Promise.resolve()
+    await firstCheckpointStarted.promise
+    const secondPreflight =
+      providerInput.hostedToolContext?.beforeToolExecution?.(1) ??
+      Promise.resolve()
+    secondPreflightRequested.resolve()
+    await Promise.all([firstPreflight, secondPreflight])
     try {
       earlierParticipantAuthorization =
         await providerInput.authorizeAcceptedMessageTarget?.({
@@ -3419,6 +3476,7 @@ test('sendAssistantMessageLocal bounds hosted tool preflight by provider-visible
   })
 
   const resultPromise = sendAssistantMessageLocal({
+    activeTurnCheckpoint,
     acceptedTurnInput: {
       initialInputs: [
         {
@@ -3457,6 +3515,22 @@ test('sendAssistantMessageLocal bounds hosted tool preflight by provider-visible
   await vi.waitFor(() => {
     expect(liveSteeredPrompts).toEqual(['Event-backed follow up'])
   })
+  await notifyAssistantActiveTurnInputAvailable({
+    conversation: {
+      channel: 'telegram',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      directness: 'group',
+    },
+    inputIds: [uncoveredHostedInput.inputId],
+    vault: context.vaultRoot,
+  })
+  await vi.waitFor(() => {
+    expect(liveSteeredPrompts).toEqual([
+      'Event-backed follow up',
+      'Acknowledged but uncovered follow up',
+    ])
+  })
   toolExecutionRequested.resolve()
   await ordinalZeroPreflightChecked.promise
 
@@ -3470,6 +3544,8 @@ test('sendAssistantMessageLocal bounds hosted tool preflight by provider-visible
   ).toEqual([earlierHostedInput.inputId])
 
   ordinalOnePreflightRequested.resolve()
+  await secondPreflightRequested.promise
+  firstCheckpointRelease.resolve()
   await toolExecutionCheckpointed.promise
 
   const journalBeforeToolEffect = await readAssistantAcceptedTurnInputJournal(
@@ -3491,7 +3567,8 @@ test('sendAssistantMessageLocal bounds hosted tool preflight by provider-visible
     targetInputId: earlierHostedInput.inputId,
   })
   assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 1)
-  assert.equal(activeTurnInput.mock.calls.length, 2)
+  assert.equal(activeTurnInput.mock.calls.length, 3)
+  expect(activeTurnCheckpoint).toHaveBeenCalledTimes(1)
   const journal = await readAssistantAcceptedTurnInputJournal(
     context.vaultRoot,
     'turn-1',
@@ -3505,6 +3582,30 @@ test('sendAssistantMessageLocal bounds hosted tool preflight by provider-visible
     earlierHostedInput.inputId,
     hostedInput.inputId,
   ])
+  expect(journal?.inputIds).not.toContain(uncoveredHostedInput.inputId)
+  expect(activeTurnCheckpoint).toHaveBeenCalledWith(
+    expect.objectContaining({
+      acceptedInputIds: [
+        earlierHostedInput.inputId,
+        hostedInput.inputId,
+      ],
+    }),
+  )
+  expect(
+    (await readAssistantTranscriptEntries(
+      resolveAssistantStatePaths(context.vaultRoot),
+      session.sessionId,
+    )).map((entry) => entry.text),
+  ).not.toContain('Acknowledged but uncovered follow up')
+  const nextTurnCandidates =
+    await createStoreBackedAssistantInputSource({
+      vault: context.vaultRoot,
+    }).listInputCandidates({
+      knownInputIds: journal?.inputIds ?? [],
+      limit: 10,
+    })
+  expect(nextTurnCandidates.inputs.map((candidate) => candidate.event.inputId))
+    .toEqual([uncoveredHostedInput.inputId])
 })
 
 test('sendAssistantMessageLocal attributes required progress after real live steering to the same provider request', async () => {

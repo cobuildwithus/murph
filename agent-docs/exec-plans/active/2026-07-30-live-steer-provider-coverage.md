@@ -64,6 +64,11 @@ Updated: 2026-07-30
    miss their combined ordering.
    Mitigation: Add a service-level deferred-promise regression reproducing the
    exact settlement order.
+4. Risk: Two nonserialized hosted effects enter the ordinal-bound drain before
+   the first accepted context advances the shared frontier.
+   Mitigation: Serialize the complete turn-local drain through ordinal check,
+   admission, durable acceptance, checkpoint, and context append; prove the
+   App Server still presents the overlapping request shape.
 
 ## Tasks
 
@@ -84,6 +89,11 @@ Updated: 2026-07-30
 
 - Use the existing delivery-context ordinal as the single coverage frontier
   instead of introducing acknowledgement state or another persisted owner.
+- Serialize only the operation-local drain critical section with a promise
+  chain. Acquire it before checking the ordinal and retain it through the
+  delivery-context append so concurrent callers cannot reserve the same
+  frontier. Keep later drains usable after a rejected caller without hiding
+  that rejection from its caller.
 - Product-experience and coverage lenses apply because the fix changes
   asynchronous continuation and recovery behavior. Prompt and frontend lenses
   do not apply.
@@ -100,3 +110,11 @@ Updated: 2026-07-30
     pending with no terminal reply evidence.
   - Typecheck, CI, preliminary specialist review, and final ReviewGPT review all
     pass.
+- Evidence:
+  - The concurrent-preflight regression failed before serialization with
+    `ASSISTANT_TURN_INPUT_JOURNAL_INVALID_PROVIDER_REQUEST`, proving two
+    ordinal-1 drains mutated the accepted journal from the same stale snapshot.
+  - After serialization, the focused local-service and real App Server overlap
+    cases pass together (`2 passed`, `99 skipped`).
+  - Assistant-engine typecheck and agent-doc drift checks pass. Exact-head CI
+    and correction ReviewGPT remain.
