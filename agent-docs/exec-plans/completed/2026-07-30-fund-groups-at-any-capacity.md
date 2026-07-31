@@ -1,6 +1,6 @@
 # fund-groups-at-any-capacity
 
-Status: active
+Status: completed
 Created: 2026-07-30
 Updated: 2026-07-30
 
@@ -142,7 +142,13 @@ Updated: 2026-07-30
     for explicit funding selection, restores generic get/add-more-usage wording
     to the two-read all-options route, and removes the disambiguating
     every-option sentence from the real Codex regression. The corrected live
-    scenario passed.
+    scenario passed. Final correction round 2 returned `PASS` with no
+    qualifying review-induced findings and confirmed that the correction adds
+    no owner, state, lifecycle, or irreversible-effect boundary.
+  - Required GitHub Actions passed on the behavior-bearing correction head,
+    including app verification, package coverage, build/typecheck, both CLI
+    hosts, frontend design proof, horizontal overflow, fixtures, tracked
+    artifacts, and Vercel.
   - Complete initial Responses request measurement used pinned real Codex App
     Server, `gpt-5.6-terra` code mode, representative direct/group Linq turns,
     and `gpt-tokenizer` 3.4.0 `o200k_base`. It counted the full canonical JSON
@@ -151,3 +157,4 @@ Updated: 2026-07-30
     direct stayed 122,504 bytes / 26,939 tokens; group changed from 109,273
     bytes / 24,055 tokens to 109,430 bytes / 24,091 tokens, or +157 bytes
     (+0.144%) and +36 tokens (+0.150%), entirely from group instructions.
+Completed: 2026-07-30
