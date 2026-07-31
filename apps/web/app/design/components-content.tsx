@@ -15,7 +15,10 @@ import {
 import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
 import { HostedDeviceSyncCallbackConfirmation } from "@/src/components/device-sync/hosted-device-sync-callback-confirmation";
 import { HomeExperimentCard } from "@/src/components/home/home-experiment-card";
-import { GroupUsageFundingCard } from "@/src/components/hosted-groups/group-usage-funding-card";
+import {
+  GroupUsageFundingActions,
+  GroupUsageFundingShell,
+} from "@/src/components/hosted-groups/group-usage-funding-shell";
 import { GroupSponsorshipDialog } from "@/src/components/hosted-groups/group-sponsorship-dialog";
 import { GroupSponsorshipManagementCard } from "@/src/components/hosted-groups/group-sponsorship-management-card";
 import { MetricCard } from "@/src/components/ui/metric-card";
@@ -1453,6 +1456,7 @@ export function ComponentsContent() {
               <div className="mt-6">
                 <HostedUsageTopUpDialog
                   checkoutUrl="/api/design/usage-credit-preview"
+                  inert
                   offers={DESIGN_USAGE_OFFERS}
                   payerMemberId="design_usage_top_up_payer"
                   scope="personal"
@@ -1463,18 +1467,35 @@ export function ComponentsContent() {
               data-design-component="group-usage-funding"
               id="group-usage-funding-component"
             >
-              <GroupUsageFundingCard
-                action={
-                  <GroupSponsorshipDialog
-                    checkoutUrl="/api/design/usage-credit-preview"
-                    customizationAllowed
-                    mode="monthly"
-                    monthlyCapMinor={1_000}
-                    monthlyCapOptions={DESIGN_GROUP_MONTHLY_CAPS}
-                    offers={[DESIGN_GROUP_SPONSORSHIP_OFFERS[0]]}
-                    payerMemberId="design_usage_top_up_payer"
+              <GroupUsageFundingShell
+                action={(
+                  <GroupUsageFundingActions
+                    monthlyAction={(
+                      <GroupSponsorshipDialog
+                        checkoutUrl="/api/design/usage-credit-preview"
+                        customizationAllowed
+                        inert
+                        mode="monthly"
+                        monthlyCapMinor={1_000}
+                        monthlyCapOptions={DESIGN_GROUP_MONTHLY_CAPS}
+                        offers={[DESIGN_GROUP_SPONSORSHIP_OFFERS[0]]}
+                        payerMemberId="design_usage_top_up_payer"
+                      />
+                    )}
+                    oneTimeAction={(
+                      <GroupSponsorshipDialog
+                        checkoutUrl="/api/design/usage-credit-preview"
+                        customizationAllowed
+                        inert
+                        mode="one_time"
+                        offers={DESIGN_GROUP_SPONSORSHIP_OFFERS}
+                        payerMemberId="design_usage_top_up_payer"
+                        triggerSize="default"
+                        triggerVariant="link"
+                      />
+                    )}
                   />
-                }
+                )}
                 groupName="Sunday sleep crew"
               />
             </div>
@@ -1485,7 +1506,6 @@ export function ComponentsContent() {
             >
               <GroupSponsorshipManagementCard
                 endpoint="/api/design/group-sponsorship-management"
-                groupName="Sunday sleep crew"
                 inert
                 management={{
                   authorizationId: "hgsa_design_component",
@@ -1516,6 +1536,7 @@ export function ComponentsContent() {
               <div className="mt-6 flex flex-wrap gap-3">
                 <HostedUsageTopUpDialog
                   checkoutUrl="/api/design/usage-credit-preview"
+                  inert
                   offers={DESIGN_USAGE_OFFERS}
                   payerMemberId="design_usage_top_up_payer"
                   scope="family"
@@ -1530,6 +1551,7 @@ export function ComponentsContent() {
                     targetConflict: true,
                   }}
                   checkoutUrl="/api/design/usage-credit-preview"
+                  inert
                   offers={[]}
                   payerMemberId="design_usage_top_up_payer"
                   scope="family"

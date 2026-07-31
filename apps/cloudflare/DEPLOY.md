@@ -382,6 +382,17 @@ is a narrow read-side seam, not a permanent rollout framework, and it must never
 restore group percentages, period boundaries, or other quantitative accounting
 to runtime or assistant policy.
 
+The current projection separates urgency from capability: `fundingNeeded`
+controls assistant-initiated depletion messaging, while a non-null `fundingUrl`
+may be used after an explicit funding request at any capacity. For that behavior,
+deploy the Cloudflare runner bundle first, then Web. Old Web leaves a healthy
+group's URL null, so the first step is inert; old runners may ignore a healthy
+URL from new Web, so the opposite skew is incomplete but safe. After both
+deployments, smoke an explicit funding request in a healthy unsponsored group
+and confirm Murph returns the first-party link without claiming the room needs
+funding. Open the link and confirm both monthly sponsorship and one-time
+contribution are available.
+
 ## Thread Usage Crossing Notice Rollout
 
 The assistant runtime usage-record request has an additive, optional Linq group

@@ -86,7 +86,7 @@ describe("hosted group usage funding", () => {
     [1n, true],
     [0n, true],
     [9_000_000n, false],
-  ] as const)("projects only whether funding is needed for %s remaining", async (
+  ] as const)("projects urgency independently for %s remaining", async (
     remainingUsdMicros,
     fundingNeeded,
   ) => {
@@ -112,9 +112,8 @@ describe("hosted group usage funding", () => {
       runtimeMemberId: "member_group_runtime",
     })).resolves.toEqual({
       fundingNeeded,
-      fundingUrl: fundingNeeded
-        ? "https://www.withmurph.ai/groups/fund/group_join_code_1234"
-        : null,
+      fundingUrl:
+        "https://www.withmurph.ai/groups/fund/group_join_code_1234",
       sponsorshipStatus: "not_sponsored",
     });
   });
@@ -143,7 +142,8 @@ describe("hosted group usage funding", () => {
       runtimeMemberId: "member_group_runtime",
     })).resolves.toEqual({
       fundingNeeded: false,
-      fundingUrl: null,
+      fundingUrl:
+        "https://www.withmurph.ai/groups/fund/group_join_code_1234",
       sponsorshipStatus: "sponsored",
     });
   });
