@@ -216,3 +216,17 @@ jobs:
             git commit -m "feat(runtime): pin and proxy custom inference"
           fi
           git push origin HEAD:agent/bring-your-own-inference
+
+      - name: Archive exact BYOI worktree
+        if: always()
+        shell: bash
+        run: tar --exclude=.git -czf /tmp/byoi-worktree.tgz .
+
+      - name: Upload exact BYOI worktree
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: byoi-worktree-${{ github.run_id }}
+          path: /tmp/byoi-worktree.tgz
+          retention-days: 1
+          if-no-files-found: error
