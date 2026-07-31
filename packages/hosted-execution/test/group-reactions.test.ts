@@ -110,6 +110,38 @@ describe('hosted group reaction envelope', () => {
     ].join('\n'))
   })
 
+  it('distinguishes unattributed participant deltas from anonymous aggregates', () => {
+    const delta = parseHostedExecutionGroupReactionEventText(
+      formatHostedExecutionGroupReactionEventText({
+        actor: null,
+        changes: [{ operation: 'added', reaction: 'like' }],
+        channel: 'linq',
+        mode: 'delta',
+        targetMessageId: 'message-45',
+        targetText: null,
+      }),
+    )
+    expect(delta).not.toBeNull()
+    expect(renderHostedExecutionGroupReactionEventEvidence(delta!)).toContain(
+      '- actor: unattributed participant',
+    )
+
+    const snapshot = parseHostedExecutionGroupReactionEventText(
+      formatHostedExecutionGroupReactionEventText({
+        actor: null,
+        changes: [{ count: 3, operation: 'snapshot', reaction: '😂' }],
+        channel: 'telegram',
+        mode: 'snapshot',
+        targetMessageId: 'message-46',
+        targetText: null,
+      }),
+    )
+    expect(snapshot).not.toBeNull()
+    expect(renderHostedExecutionGroupReactionEventEvidence(snapshot!)).toContain(
+      '- actor: anonymous aggregate',
+    )
+  })
+
   it('rejects malformed, mismatched, and unbounded envelopes', () => {
     expect(parseHostedExecutionGroupReactionEventText('ordinary message')).toBeNull()
     expect(parseHostedExecutionGroupReactionEventText([
