@@ -417,6 +417,38 @@ test('builds structured group evidence only from group-bound sessions', async ()
   })
 })
 
+test('keeps Habitat voice maintenance isolated from conversation history', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-maintenance-evidence-habitat-voice-',
+  )
+  cleanupPaths.push(parentRoot)
+
+  await saveAssistantSession(
+    vaultRoot,
+    createEvidenceTestSession({
+      lastTurnAt: '2026-06-29T23:00:00.000Z',
+      sessionId: 'session-private-history',
+    }),
+  )
+  await appendAssistantTranscriptEntries(vaultRoot, 'session-private-history', [
+    {
+      createdAt: '2026-06-29T23:00:00.000Z',
+      kind: 'user',
+      text: 'private conversation detail must stay outside voice extraction',
+    },
+  ])
+
+  const evidence = await buildAssistantMaintenanceConversationEvidence({
+    now: new Date('2026-06-30T03:00:00.000Z'),
+    profile: 'habitat-voice',
+    vault: vaultRoot,
+  })
+
+  expect(evidence).toContain('Environment voice evidence boundary')
+  expect(evidence).toContain('Do not read conversation history')
+  expect(evidence).not.toContain('private conversation detail')
+})
+
 test('applies the group session cap after route filtering', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'murph-maintenance-evidence-group-session-cap-',

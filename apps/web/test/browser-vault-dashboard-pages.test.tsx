@@ -13,11 +13,17 @@ import {
 import { listHealthCommonsExperimentBrowseProtocols } from "@/src/lib/health-commons/experiment-browse";
 
 const mocks = vi.hoisted(() => ({
+  resolveHostedMurphContactOptions: vi.fn(),
   useBrowserVault: vi.fn(),
 }));
 
+vi.mock("@/src/components/murph/hosted-murph-contact-action", () => ({
+  resolveHostedMurphContactOptions: mocks.resolveHostedMurphContactOptions,
+}));
+
 vi.mock("@/src/lib/browser-vault/context", () => ({
-  BrowserVaultProvider: ({ children }: { children: React.ReactNode }) => children,
+  BrowserVaultProvider: ({ children }: { children: React.ReactNode }) =>
+    children,
   useBrowserVault: mocks.useBrowserVault,
 }));
 
@@ -30,13 +36,22 @@ import { metadata as historyMetadata } from "../app/(dashboard)/history/layout";
 import OverviewPageClient from "../app/(dashboard)/overview/overview-page-client";
 import { metadata as overviewMetadata } from "../app/(dashboard)/overview/layout";
 
-type BrowserVaultEntity = Parameters<typeof createVaultReadModel>[0]["entities"][number];
+type BrowserVaultEntity = Parameters<
+  typeof createVaultReadModel
+>[0]["entities"][number];
 
 let clientFixture: Awaited<ReturnType<typeof createFixtureClient>>;
 const experimentProtocols = listHealthCommonsExperimentBrowseProtocols();
 
 beforeEach(async () => {
   clientFixture = await createFixtureClient();
+  mocks.resolveHostedMurphContactOptions.mockResolvedValue([
+    {
+      href: "sms:+15555550100?body=I%20want%20to%20update%20my%20environment.",
+      kind: "text",
+      label: "Text Murph",
+    },
+  ]);
   mocks.useBrowserVault.mockReturnValue({
     client: clientFixture,
     dataVersion: clientFixture.replica.source.dataVersion,
@@ -67,14 +82,23 @@ test("dashboard routes define page-specific metadata with the shared preview ima
   assert.equal(environmentMetadata.title, "Environment — Murph");
   assert.equal(
     environmentMetadata.description,
-    "The living-context facts Murph knows about your home, bedroom, light, and workspace.",
+    "What Murph knows about your home, and what to check next.",
   );
+
+  const environmentImage = {
+    alt: "Map your environment with Murph",
+    height: 630,
+    type: "image/png",
+    url: "/environment/opengraph-image",
+    width: 1200,
+  };
+  assert.deepEqual(environmentMetadata.openGraph?.images, [environmentImage]);
+  assert.deepEqual(environmentMetadata.twitter?.images, [environmentImage]);
 
   for (const routeMetadata of [
     overviewMetadata,
     historyMetadata,
     experimentsMetadata,
-    environmentMetadata,
   ]) {
     assert.deepEqual(routeMetadata.openGraph?.images, [
       {
@@ -111,7 +135,10 @@ test("dashboard no longer ships a signals app route", async () => {
 test("OverviewPage renders the dashboard overview", () => {
   const markup = renderToStaticMarkup(createElement(OverviewPageClient));
 
-  assert.match(markup, /A quick read on your recent notes, experiments, and tracked trends\./);
+  assert.match(
+    markup,
+    /A quick read on your recent notes, experiments, and tracked trends\./,
+  );
   assert.match(markup, /Morning walk/);
   assert.match(markup, /Travel recovery note/);
   assert.match(markup, /Weekly changes/);
@@ -175,21 +202,65 @@ test("HistoryPage renders recent timeline entries", () => {
   const markup = renderToStaticMarkup(createElement(HistoryPageClient));
 
   assert.match(markup, /Travel recovery note/);
-  assert.match(markup, /Recent notes, events, assessments, and daily summaries/);
+  assert.match(
+    markup,
+    /Recent notes, events, assessments, and daily summaries/,
+  );
   assert.match(markup, /sleep_duration_minutes daily summary/);
   assert.doesNotMatch(markup, /history\/sample\/sample_1\.md/);
 });
 
-test("EnvironmentPage renders the habitat catalog mock", () => {
-  const markup = renderToStaticMarkup(createElement(EnvironmentPage));
+test("EnvironmentPage renders private habitat facts from Browser Vault", async () => {
+  const markup = renderToStaticMarkup(await EnvironmentPage());
 
-  assert.match(markup, /Environment/);
-  assert.match(markup, /Mock preview/);
-  assert.match(markup, /Bedroom &amp; sleep/);
+  assert.match(markup, /Your environment/);
+  assert.match(markup, /Environment grade/);
+  assert.match(markup, /Murph knows 6 of 16/);
+  assert.match(markup, /Lisbon/);
+  assert.match(markup, /Not enough information for a fair grade/);
+  assert.match(markup, /Air &amp; water/);
   assert.match(markup, /Night temperature/);
-  assert.match(markup, /Desk ergonomics/);
-  assert.match(markup, /skipped/);
-  assert.match(markup, /unknown/);
+  assert.match(markup, /Recovery &amp; devices/);
+  assert.match(markup, /group\/category/);
+  assert.doesNotMatch(markup, /fixture data|mock/i);
+  assert.doesNotMatch(markup, /Overall picture/);
+  assert.doesNotMatch(markup, /Target score/);
+});
+
+test("EnvironmentPage gives zero-data members one clear start and previews the report", async () => {
+  const emptyClient = await createFixtureClient({ includeHabitat: false });
+  mocks.useBrowserVault.mockReturnValue({
+    client: emptyClient,
+    dataVersion: emptyClient.replica.source.dataVersion,
+    error: null,
+    ref: null,
+    refreshPending: false,
+    refresh: async () => {},
+    status: "ready",
+  });
+
+  const markup = renderToStaticMarkup(await EnvironmentPage());
+
+  assert.match(markup, /See how your home supports your sleep, air and focus/);
+  assert.match(markup, /Start the 2-minute walkthrough/);
+  assert.match(markup, /Prefer typing\? Use chat/);
+  assert.match(markup, /Murph will turn the clear details/);
+  assert.match(markup, /Your report will cover/);
+  assert.match(
+    markup,
+    /Missing answers and optional equipment never lower your grade/,
+  );
+  assert.match(markup, />Sleep</);
+  assert.match(markup, /Air &amp; water/);
+  assert.match(markup, /Recovery &amp; devices/);
+  assert.match(markup, />Workspace</);
+  assert.match(markup, /href="sms:\+15555550100\?body=/);
+  assert.doesNotMatch(markup, /Environment grade/);
+  assert.doesNotMatch(markup, /Coverage/);
+  assert.doesNotMatch(markup, /What to check next/);
+  assert.doesNotMatch(markup, /Not known/);
+  assert.doesNotMatch(markup, />Share</);
+  assert.doesNotMatch(markup, /t\.me|telegram/i);
 });
 
 test("ExperimentsPage renders the public library with private browser-vault overlays", () => {
@@ -244,7 +315,10 @@ test("ExperimentsPage merges protocol-shaped private runs into the matching publ
 
   assert.match(markup, /Finnish Dry Sauna/);
   assert.match(markup, /Started Apr 18, 2026 · 14 days · 150 studies/);
-  assert.doesNotMatch(markup, /protocol_variant:dry-sauna\/murph-finnish-standard-3x-week/);
+  assert.doesNotMatch(
+    markup,
+    /protocol_variant:dry-sauna\/murph-finnish-standard-3x-week/,
+  );
   assert.doesNotMatch(markup, /Morning walk/);
 });
 
@@ -281,7 +355,10 @@ test("ExperimentsPage keeps the public library visible when browser-vault loadin
 
   assert.match(markup, /Your experiments couldn/);
   assert.match(markup, /The latest refresh failed\./);
-  assert.match(markup, /The public experiment library is still available below\./);
+  assert.match(
+    markup,
+    /The public experiment library is still available below\./,
+  );
   assert.match(markup, /Finnish Dry Sauna/);
   assert.doesNotMatch(markup, /Red Light Glasses Before Bed/);
 });
@@ -315,7 +392,9 @@ test("dashboard empty pages show preparing copy while a replica refresh is pendi
     status: "empty",
   });
 
-  const overviewMarkup = renderToStaticMarkup(createElement(OverviewPageClient));
+  const overviewMarkup = renderToStaticMarkup(
+    createElement(OverviewPageClient),
+  );
   const historyMarkup = renderToStaticMarkup(createElement(HistoryPageClient));
 
   assert.match(overviewMarkup, /Preparing overview\./);
@@ -389,10 +468,13 @@ function createEntity(
   };
 }
 
-async function createFixtureClient(input: {
-  experimentSlug?: string;
-  extraEntities?: BrowserVaultEntity[];
-} = {}) {
+async function createFixtureClient(
+  input: {
+    experimentSlug?: string;
+    extraEntities?: BrowserVaultEntity[];
+    includeHabitat?: boolean;
+  } = {},
+) {
   const replica = await createBrowserVaultReplica({
     metricPoints: [],
     generatedAt: "2026-04-20T12:00:00.000Z",
@@ -471,6 +553,7 @@ async function createFixtureClient(input: {
           tags: ["cardio"],
           title: "Improve resting heart rate",
         }),
+        ...(input.includeHabitat === false ? [] : createHabitatEntities()),
         ...(input.extraEntities ?? []),
       ],
       metadata: {
@@ -483,10 +566,13 @@ async function createFixtureClient(input: {
   return createBrowserVaultQueryClient(replica);
 }
 
-function resolveRecordClass(family: BrowserVaultEntity["family"]): BrowserVaultEntity["recordClass"] {
+function resolveRecordClass(
+  family: BrowserVaultEntity["family"],
+): BrowserVaultEntity["recordClass"] {
   switch (family) {
     case "experiment":
     case "goal":
+    case "habitat":
     case "regimen":
       return "bank";
     case "journal":
@@ -496,4 +582,42 @@ function resolveRecordClass(family: BrowserVaultEntity["family"]): BrowserVaultE
     default:
       throw new Error(`Unsupported browser-vault test family: ${family}`);
   }
+}
+
+function createHabitatEntities(): BrowserVaultEntity[] {
+  return [
+    createEntity("habitat", "hab_home-location", {
+      attributes: {
+        aspect: "home-location",
+        domain: "environment",
+        indicators: {
+          area_type: "urban_center",
+          location: "Lisbon",
+        },
+      },
+      kind: "habitat",
+      path: "bank/habitat/home-location.md",
+      status: "active",
+      title: "Location & climate",
+    }),
+    createEntity("habitat", "hab_sleep-environment", {
+      attributes: {
+        aspect: "sleep-environment",
+        domain: "environment",
+        indicators: {
+          co2_meter: "aranet",
+          darkness: "blackout",
+          mattress_satisfaction: "good",
+          night_noise: "quiet",
+          night_temp_c: 20,
+          phone_by_bed: false,
+          tv_in_bedroom: false,
+        },
+      },
+      kind: "habitat",
+      path: "bank/habitat/sleep-environment.md",
+      status: "active",
+      title: "Bedroom & sleep",
+    }),
+  ];
 }

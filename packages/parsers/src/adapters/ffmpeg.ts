@@ -10,6 +10,8 @@ export interface FfmpegToolOptions {
   allowSystemLookup?: boolean;
   commandTimeoutMs?: number;
   maxCommandOutputBytes?: number;
+  /** Hard cap applied to prepared provider input. Requires ffmpeg. */
+  maxDurationSeconds?: number;
   /**
    * True when remote transcription is the only available transcription lane
    * (remote endpoint configured, local whisper.cpp unavailable). Audio in a
@@ -46,9 +48,13 @@ export async function prepareAudioInput(input: {
   }
 
   const remoteTranscriptionOnly = input.ffmpeg?.remoteTranscriptionOnly === true;
+  const maxDurationSeconds = normalizeMaxDurationSeconds(
+    input.ffmpeg?.maxDurationSeconds,
+  );
   if (
     artifact.kind === "audio" &&
     remoteTranscriptionOnly &&
+    maxDurationSeconds === null &&
     await isRemoteTranscriptionDirectAudioArtifact(artifact)
   ) {
     return { inputPath: artifact.absolutePath, preparedKind: "audio" };
@@ -59,6 +65,7 @@ export async function prepareAudioInput(input: {
     if (
       artifact.kind === "audio" &&
       !remoteTranscriptionOnly &&
+      maxDurationSeconds === null &&
       isDirectWhisperAudioArtifact(artifact)
     ) {
       return { inputPath: artifact.absolutePath, preparedKind: "audio" };
@@ -90,6 +97,9 @@ export async function prepareAudioInput(input: {
         "libmp3lame",
         "-b:a",
         "64k",
+        ...(maxDurationSeconds === null
+          ? []
+          : ["-t", String(maxDurationSeconds)]),
         "-map_metadata",
         "-1",
         "-map_chapters",
@@ -107,6 +117,9 @@ export async function prepareAudioInput(input: {
         "16000",
         "-c:a",
         "pcm_s16le",
+        ...(maxDurationSeconds === null
+          ? []
+          : ["-t", String(maxDurationSeconds)]),
         "-map_metadata",
         "-1",
         "-map_chapters",
@@ -132,6 +145,16 @@ export async function prepareAudioInput(input: {
     inputPath: outputPath,
     preparedKind: "audio",
   };
+}
+
+function normalizeMaxDurationSeconds(value: number | undefined): number | null {
+  if (value === undefined) {
+    return null;
+  }
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new TypeError("ffmpeg maxDurationSeconds must be a positive integer.");
+  }
+  return value;
 }
 
 // Container formats verified accepted by the hosted remote transcription model

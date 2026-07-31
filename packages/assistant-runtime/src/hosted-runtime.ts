@@ -5249,6 +5249,20 @@ function createAbortGuardedHostedRuntimePlatform(
       : {}),
     effectsPort: {
       ...platform.effectsPort,
+      ...(platform.effectsPort.deleteEnvironmentVoice
+        ? {
+            deleteEnvironmentVoice: (audioKey) =>
+              guard(() =>
+                platform.effectsPort.deleteEnvironmentVoice!(audioKey)
+              ),
+          }
+        : {}),
+      ...(platform.effectsPort.readEnvironmentVoice
+        ? {
+            readEnvironmentVoice: (audioKey) =>
+              guard(() => platform.effectsPort.readEnvironmentVoice!(audioKey)),
+          }
+        : {}),
       ...(platform.effectsPort.deletePreparedAssistantDelivery
         ? {
             deletePreparedAssistantDelivery: (deleteInput) =>

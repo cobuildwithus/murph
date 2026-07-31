@@ -17,7 +17,9 @@ export const hostedLocalProfiles: Record<HostedLocalProfileName, HostedLocalProf
   dev: {
     description:
       "Interactive hosted local stack using the production-shaped runner-container Codex app-server path.",
-    envDefaults: {},
+    envDefaults: {
+      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "250",
+    },
     mode: "dev",
     name: "dev",
   },

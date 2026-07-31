@@ -18,6 +18,9 @@ import {
   telegramUsageLimitNoticeRoutes,
 } from "./route-handlers/telegram-send.ts";
 import { mealPhotoRoutes } from "./route-handlers/meal-photo-stage.ts";
+import {
+  environmentVoiceRoutes,
+} from "./route-handlers/environment-voice-stage.ts";
 
 export const workerInternalRoutes = [
   ...deploySmokeRoutes,
@@ -25,6 +28,7 @@ export const workerInternalRoutes = [
   ...inferenceVerificationRoutes,
   ...userDataDeleteRoutes,
   ...telegramUsageLimitNoticeRoutes,
+  ...environmentVoiceRoutes,
   ...mealPhotoRoutes,
   ...browserVaultRoutes,
   ...userStatusRoutes,

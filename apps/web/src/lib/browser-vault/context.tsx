@@ -53,7 +53,7 @@ export interface BrowserVaultContextValue {
   freshness: BrowserVaultFreshness;
   ref: HostedBrowserVaultReplicaRef | null;
   refreshPending: boolean;
-  refresh(): Promise<void>;
+  refresh(options?: { background?: boolean }): Promise<void>;
   status: BrowserVaultStatus;
   workspaceVersion: string | null;
 }
@@ -283,9 +283,16 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
     [applyOutcome, initialMemberId],
   );
 
-  const refresh = useCallback(async () => {
-    await runProviderLoad({ authorityPathname: pathname });
-  }, [pathname, runProviderLoad]);
+  const refresh = useCallback(
+    async (options: { background?: boolean } = {}) => {
+      await runProviderLoad(
+        options.background
+          ? { background: true }
+          : { authorityPathname: pathname },
+      );
+    },
+    [pathname, runProviderLoad],
+  );
 
   const pollStaleReplica = useCallback(async () => {
     await runProviderLoad({ background: true });

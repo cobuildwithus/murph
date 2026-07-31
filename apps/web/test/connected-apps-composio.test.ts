@@ -56,13 +56,15 @@ describe("Composio connected-app client", () => {
               "INSTACART_CREATE_SHOPPING_LIST_PAGE",
               "INSTACART_GET_NEARBY_RETAILERS",
             ],
-          },
-          openweather_api: {
-            enable: [
-              "OPENWEATHER_API_GET_CURRENT_WEATHER",
-              "OPENWEATHER_API_GET5_DAY_FORECAST",
-            ],
-          },
+            },
+            openweather_api: {
+              enable: [
+                "OPENWEATHER_API_GET_AIR_POLLUTION_CURRENT",
+                "OPENWEATHER_API_GET_CURRENT_WEATHER",
+                "OPENWEATHER_API_GET5_DAY_FORECAST",
+                "OPENWEATHER_API_GET_GEOCODING_DIRECT",
+              ],
+            },
         },
         toolkits: {
           enable: [

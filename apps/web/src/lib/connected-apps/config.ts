@@ -40,11 +40,13 @@ export const HOSTED_CONNECTED_APPS_SERVICE_TOOLS = {
       "INSTACART_GET_NEARBY_RETAILERS",
     ],
   },
-  // Weather only; Mapbox remains Murph's geocoding/routing layer.
+  // Accountless outdoor conditions. Exact addresses are never required.
   openweather_api: {
     enable: [
+      "OPENWEATHER_API_GET_AIR_POLLUTION_CURRENT",
       "OPENWEATHER_API_GET_CURRENT_WEATHER",
       "OPENWEATHER_API_GET5_DAY_FORECAST",
+      "OPENWEATHER_API_GET_GEOCODING_DIRECT",
     ],
   },
 } as const;

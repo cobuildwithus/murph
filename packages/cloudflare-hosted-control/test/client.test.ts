@@ -31,11 +31,13 @@ describe("createCloudflareHostedControlClient", () => {
 
     expect(Object.keys(client).sort()).toEqual([
       "createBrowserVaultSession",
+      "deleteEnvironmentVoice",
       "deleteMealPhoto",
       "deleteUserData",
       "ensureRuntimeProcessing",
       "getRunnerStatus",
       "sendTelegramUsageLimitNotice",
+      "stageEnvironmentVoice",
       "stageMealPhoto",
       "verifyInferenceConnection",
     ]);
@@ -81,6 +83,67 @@ describe("createCloudflareHostedControlClient", () => {
     expect(new Headers(init.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe(
       "user_123",
     );
+  });
+
+  it("stages and deletes environment voice bytes through the bound user routes", async () => {
+    const bytes = Uint8Array.from([0x1a, 0x45, 0xdf, 0xa3, 1, 2, 3]);
+    const sha256 = await sha256Hex(bytes);
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(createJsonResponse({
+        audioKey: "a".repeat(40),
+        byteLength: bytes.byteLength,
+        sha256,
+      }))
+      .mockResolvedValueOnce(createJsonResponse({ deleted: true })) as typeof fetch;
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test",
+      fetchImpl,
+      getBearerToken: async () => "token-123",
+    });
+
+    await expect(client.stageEnvironmentVoice({
+      bytes,
+      captureId: sha256,
+      contentType: "audio/webm",
+      sha256,
+      userId: "user_123",
+    })).resolves.toEqual({
+      audioKey: "a".repeat(40),
+      byteLength: bytes.byteLength,
+      sha256,
+    });
+    await expect(client.deleteEnvironmentVoice({
+      audioKey: "a".repeat(40),
+      userId: "user_123",
+    })).resolves.toBeUndefined();
+
+    const [stageUrl, stageInit] = vi.mocked(fetchImpl).mock.calls[0] as [
+      string,
+      RequestInit,
+    ];
+    expect(stageUrl).toBe(
+      "https://runner.example.test/internal/users/user_123/environment-voice/stage",
+    );
+    expect(stageInit.method).toBe("POST");
+    expect(new Uint8Array(stageInit.body as ArrayBuffer)).toEqual(bytes);
+    const stageHeaders = new Headers(stageInit.headers);
+    expect(stageHeaders.get("content-type")).toBe("audio/webm");
+    expect(stageHeaders.get("x-murph-environment-voice-capture-id")).toBe(
+      sha256,
+    );
+    expect(stageHeaders.get("x-murph-environment-voice-sha256")).toBe(sha256);
+
+    const [deleteUrl, deleteInit] = vi.mocked(fetchImpl).mock.calls[1] as [
+      string,
+      RequestInit,
+    ];
+    expect(deleteUrl).toBe(
+      "https://runner.example.test/internal/users/user_123/environment-voice/delete",
+    );
+    expect(deleteInit.method).toBe("DELETE");
+    expect(
+      new Headers(deleteInit.headers).get("x-murph-environment-voice-key"),
+    ).toBe("a".repeat(40));
   });
 
   it("deletes one staged meal photo through the bound user route", async () => {
