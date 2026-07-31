@@ -25,10 +25,10 @@ const physicalNoteArgumentsSchema = z.object({
   image_ref: z.string().trim().min(1).max(1024).optional(),
   image_sha256: z.string().trim().regex(/^[0-9a-f]{64}$/u).optional(),
   to: z.object({
-    address_line1: z.string().trim().min(1).max(200),
-    address_line2: z.string().trim().min(1).max(200).optional(),
+    address_line1: z.string().trim().min(1).max(64),
+    address_line2: z.string().trim().min(1).max(64).optional(),
     city: z.string().trim().min(1).max(200),
-    name: z.string().trim().min(1).max(120),
+    name: z.string().trim().min(1).max(40),
     postal_code: z.string().trim().regex(/^\d{5}(?:-\d{4})?$/u),
     state: z.string().trim().length(2),
   }).strict(),
@@ -74,9 +74,9 @@ export const MURPH_SEND_PHYSICAL_NOTE_TOOL = {
         type: 'object',
         additionalProperties: false,
         properties: {
-          name: { type: 'string', minLength: 1, maxLength: 120 },
-          address_line1: { type: 'string', minLength: 1, maxLength: 200 },
-          address_line2: { type: 'string', minLength: 1, maxLength: 200 },
+          name: { type: 'string', minLength: 1, maxLength: 40 },
+          address_line1: { type: 'string', minLength: 1, maxLength: 64 },
+          address_line2: { type: 'string', minLength: 1, maxLength: 64 },
           city: { type: 'string', minLength: 1, maxLength: 200 },
           state: { type: 'string', minLength: 2, maxLength: 2 },
           postal_code: {
