@@ -650,7 +650,7 @@ export function StartPaidPlanConfirmationContent(props: {
                 ? "Check status"
                 : props.timing === "at_trial_end"
                   ? props.targetPlanCode === "launch_group_monthly"
-                    ? "Choose Group"
+                    ? `Choose ${targetPlanName}`
                     : "Keep Pulse"
                   : `Start ${targetPlanName}`}
           </Button>

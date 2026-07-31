@@ -25,7 +25,7 @@ export function GroupMemberPlanStudy() {
         </div>
       </StudyState>
 
-      <StudyState label="Payment method saved before starting Group">
+      <StudyState label="Payment method saved before starting Core">
         <div inert>
           <HostedBillingSettings
             authenticated
@@ -39,7 +39,7 @@ export function GroupMemberPlanStudy() {
         </div>
       </StudyState>
 
-      <StudyState label="Group member on the $3.50 plan">
+      <StudyState label="Group member on the $3.50 Core plan">
         <div inert>
           <HostedBillingSettings
             authenticated
@@ -54,7 +54,7 @@ export function GroupMemberPlanStudy() {
         </div>
       </StudyState>
 
-      <StudyState label="Pulse stays active until the scheduled Group switch">
+      <StudyState label="Pulse stays active until the scheduled Core switch">
         <div inert>
           <HostedBillingSettings
             authenticated

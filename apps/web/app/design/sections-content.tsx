@@ -231,7 +231,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Group member plan">
+      <StudySection title="Core member plan">
         <GroupMemberPlanStudy />
       </StudySection>
 
