@@ -128,6 +128,12 @@ describe("assistant product feedback", () => {
     expect(schema).toContain('"feature_interest"');
     expect(schema).toContain('"summary"');
     expect(schema).toContain('Use feature_request for a missing or unsupported Murph path');
+    expect(schema).toContain('Make it actionable without the conversation');
+    expect(schema).toContain('generic actor');
+    expect(schema).toContain('expected versus observed result');
+    expect(schema).toContain('concrete constraint the source established');
+    expect(schema).toContain('instead of replacing them with vague labels');
+    expect(schema).toContain('omit it or mark it unclear rather than infer or invent it');
     expect(schema).toContain('desired outcome and missing Murph capability');
     expect(schema).toContain('Optional metadata');
     expect(schema).toContain('Speculative:');
