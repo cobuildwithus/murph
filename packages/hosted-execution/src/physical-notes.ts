@@ -5,10 +5,10 @@ export const HOSTED_PHYSICAL_NOTE_SEND_TRANSPORT_TIMEOUT_MS = 45_000;
 
 export const hostedPhysicalNoteRecipientSchema = z
   .object({
-    addressLine1: z.string().trim().min(1).max(200),
-    addressLine2: z.string().trim().min(1).max(200).optional(),
+    addressLine1: z.string().trim().min(1).max(64),
+    addressLine2: z.string().trim().min(1).max(64).optional(),
     city: z.string().trim().min(1).max(200),
-    name: z.string().trim().min(1).max(120),
+    name: z.string().trim().min(1).max(40),
     postalCode: z.string().trim().regex(/^\d{5}(?:-\d{4})?$/u),
     state: z.string().trim().regex(/^[A-Z]{2}$/u),
   })
