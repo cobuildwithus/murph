@@ -29,3 +29,15 @@ permission.
 - Existing design study readback because the production presentation is
   unchanged and already renders the real capture component.
 - Required PR review and exact-head CI.
+
+## Outcome
+
+- Logged-out members now authenticate before the walkthrough opens and resume
+  on `/environment` after authentication.
+- The walkthrough remains mounted while iOS resolves microphone permission.
+- Focused Environment/auth tests passed: 62 tests across 10 files.
+- Changed-file lint, hosted-web typecheck, and `git diff --check` passed.
+- PR: https://github.com/cobuildwithus/murph/pull/1238
+Status: completed
+Updated: 2026-07-31
+Completed: 2026-07-31
