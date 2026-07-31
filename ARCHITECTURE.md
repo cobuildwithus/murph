@@ -831,13 +831,24 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   that existing Resend transport. Web groups its owned
   `HostedProductFeedback` rows from the prior 6pm-to-6pm window by the three
   server-allowlisted product-feedback kinds and renders only fixed server-owned
-  count labels. The indexed aggregate query never reads the model-authored
+  count labels. The indexed aggregate query never reads the server-constructed
   summary, member relation or id, internal feedback id, changelog metadata,
   health data, contact data, or raw conversation. Recipients come from a
   dedicated environment allowlist, and every same-hour attempt reuses the
   Eastern day key as the Resend idempotency key. Missing configuration fails
   before the database read. This adds no digest table, cursor, scheduler,
   retry queue, or second feedback owner.
+
+  The hosted product-feedback write boundary accepts only closed kind,
+  product-area, action, and outcome enums plus catalog-validated changelog ids;
+  arbitrary model-authored prose is not part of the runtime contract. Web
+  constructs any stored summary from those enum values. The signed callback
+  still authenticates and authorizes the bound runtime member, but ordinary
+  persistence discards that identity, stores `member_id = NULL`, and derives
+  the feedback id from the opaque idempotency key alone. The forward migration
+  clears historical summaries, replaces former member-derived ids, and removes
+  member links; a post-drain contract migration repeats that cleanup for rows
+  written by old Web functions during a rolling deployment.
 
   Inbound hosted conversation traffic appends one canonical
   `conversation.message` mailbox item with provider/channel detail inside its

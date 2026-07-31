@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH } from "@murphai/hosted-execution/runtime-control";
+import type {
+  HostedRuntimeProductFeedbackRecord,
+} from "@murphai/hosted-execution/runtime-control";
 
 const prismaMocks = vi.hoisted(() => ({
   createMany: vi.fn(),
@@ -15,6 +17,7 @@ vi.mock("@/src/lib/prisma", () => ({
 
 import { HostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
+  formatHostedProductFeedbackSummary,
   normalizeHostedProductFeedback,
   recordHostedProductFeedback,
 } from "@/src/lib/hosted-execution/product-feedback";
@@ -24,7 +27,7 @@ describe("recordHostedProductFeedback", () => {
     prismaMocks.createMany.mockReset();
   });
 
-  it("stores anonymous feedback by default and is idempotent by runtime key", async () => {
+  it("stores only a closed anonymous abstraction and is idempotent by runtime key", async () => {
     const insertedIds = new Set<string>();
     prismaMocks.createMany.mockImplementation(async (args: {
       data: Array<{ id: string }>;
@@ -37,30 +40,23 @@ describe("recordHostedProductFeedback", () => {
       return { count: 1 };
     });
 
-    const feedback = makeFeedback({
-      idempotencyKey: "a".repeat(64),
-    });
-    const first = await recordHostedProductFeedback({
-      feedback,
-    });
-    const second = await recordHostedProductFeedback({
-      feedback,
-    });
+    const feedback = makeFeedback({ idempotencyKey: "a".repeat(64) });
+    const first = await recordHostedProductFeedback({ feedback });
+    const second = await recordHostedProductFeedback({ feedback });
 
     expect(first.feedbackId).toBe(second.feedbackId);
     expect(first.recorded).toBe(true);
     expect(second.recorded).toBe(false);
-    expect(prismaMocks.createMany).toHaveBeenCalledTimes(2);
-    expect(prismaMocks.createMany).toHaveBeenNthCalledWith(1, expect.objectContaining({
-      data: [
-        expect.objectContaining({
-          memberId: null,
-          relatedChangelogItemIdsJson: ["native-message-formatting"],
-          summary: "Interested in native message formatting.",
-        }),
-      ],
+    expect(prismaMocks.createMany).toHaveBeenNthCalledWith(1, {
+      data: [{
+        id: first.feedbackId,
+        kind: "feature_interest",
+        memberId: null,
+        relatedChangelogItemIdsJson: ["native-message-formatting"],
+        summary: "product_area=messaging; action=view; outcome=interest",
+      }],
       skipDuplicates: true,
-    }));
+    });
   });
 
   it("does not encode an optional member link into the feedback id", async () => {
@@ -75,13 +71,9 @@ describe("recordHostedProductFeedback", () => {
       insertedIds.add(id);
       return { count: 1 };
     });
-    const feedback = makeFeedback({
-      idempotencyKey: "b".repeat(64),
-    });
+    const feedback = makeFeedback({ idempotencyKey: "b".repeat(64) });
 
-    const first = await recordHostedProductFeedback({
-      feedback,
-    });
+    const first = await recordHostedProductFeedback({ feedback });
     const second = await recordHostedProductFeedback({
       feedback,
       memberId: "member_explicitly_linked",
@@ -99,62 +91,37 @@ describe("recordHostedProductFeedback", () => {
     expect(prismaMocks.createMany).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
-        data: [
-          expect.objectContaining({
-            memberId: "member_explicitly_linked",
-          }),
-        ],
+        data: [expect.objectContaining({ memberId: "member_explicitly_linked" })],
       }),
     );
   });
 
-  it("accepts product feedback without changelog ids", async () => {
+  it("persists a useful closed classification without changelog ids", async () => {
     prismaMocks.createMany.mockResolvedValue({ count: 1 });
 
-    const interest = await recordHostedProductFeedback({
+    await recordHostedProductFeedback({
       feedback: makeFeedback({
-        relatedChangelogItemIds: [],
-        summary: "Interested in generated song reminders.",
-      }),
-    });
-    const request = await recordHostedProductFeedback({
-      feedback: makeFeedback({
-        idempotencyKey: "d".repeat(64),
+        action: "configure",
         kind: "feature_request",
+        outcome: "capability_missing",
+        productArea: "experiments_and_challenges",
         relatedChangelogItemIds: [],
-        summary: "Wants Strava integration support.",
       }),
     });
 
-    expect(interest.recorded).toBe(true);
-    expect(request.recorded).toBe(true);
-    expect(prismaMocks.createMany).toHaveBeenNthCalledWith(1, expect.objectContaining({
-      data: [
-        expect.objectContaining({
-          kind: "feature_interest",
-          relatedChangelogItemIdsJson: [],
-          summary: "Interested in generated song reminders.",
-        }),
-      ],
-    }));
-    expect(prismaMocks.createMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
-      data: [
-        expect.objectContaining({
-          kind: "feature_request",
-          relatedChangelogItemIdsJson: [],
-          summary: "Wants Strava integration support.",
-        }),
-      ],
+    expect(prismaMocks.createMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: [expect.objectContaining({
+        kind: "feature_request",
+        relatedChangelogItemIdsJson: [],
+        summary:
+          "product_area=experiments_and_challenges; action=configure; outcome=capability_missing",
+      })],
     }));
   });
 
-  it.each([
-    ["unknown changelog ids", makeFeedback({ relatedChangelogItemIds: ["not-a-real-item"] })],
-    ["empty summary", makeFeedback({ summary: " \n\t " })],
-    ["oversized summary", makeFeedback({ summary: "x".repeat(HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH + 1) })],
-  ])("rejects %s before persistence", async (_label, feedback) => {
+  it("rejects unknown changelog ids before persistence", async () => {
     await expect(recordHostedProductFeedback({
-      feedback,
+      feedback: makeFeedback({ relatedChangelogItemIds: ["not-a-real-item"] }),
     })).rejects.toMatchObject({
       code: "HOSTED_PRODUCT_FEEDBACK_REJECTED",
       httpStatus: 400,
@@ -164,79 +131,61 @@ describe("recordHostedProductFeedback", () => {
 });
 
 describe("normalizeHostedProductFeedback", () => {
-  it("accepts canonical changelog feature interest", () => {
-    expect(normalizeHostedProductFeedback(makeFeedback())).toEqual(makeFeedback());
-  });
+  it("accepts only canonical enum fields and published changelog ids", () => {
+    const canonical = makeFeedback();
+    expect(normalizeHostedProductFeedback(canonical)).toEqual(canonical);
 
-  it("accepts a newly published changelog id while rejecting unknown ids", () => {
-    const feedback = makeFeedback({
+    const published = makeFeedback({
+      productArea: "assistant",
       relatedChangelogItemIds: ["ask-grok-x-research"],
-      summary: "Interested in asking Grok about X.",
     });
-
-    expect(normalizeHostedProductFeedback(feedback)).toEqual(feedback);
-    expect(() =>
-      normalizeHostedProductFeedback(makeFeedback({
-        relatedChangelogItemIds: ["not-a-real-item"],
-      })),
-    ).toThrow(HostedOnboardingError);
+    expect(normalizeHostedProductFeedback(published)).toEqual(published);
   });
 
-  it("normalizes bounded summary text", () => {
-    expect(normalizeHostedProductFeedback(makeFeedback({
-      summary: "  Wants   better message formatting.  ",
-    })).summary).toBe("Wants better message formatting.");
-  });
-
-  it("redacts high-confidence contact details and secret-shaped tokens", () => {
-    expect(normalizeHostedProductFeedback(makeFeedback({
-      kind: "feature_request",
-      relatedChangelogItemIds: [],
+  it("rejects arbitrary extra prose and constructs summaries from enums only", () => {
+    const candidate = {
+      ...makeFeedback({
+        action: "sync",
+        kind: "frustration",
+        outcome: "failed",
+        productArea: "device_sync",
+        relatedChangelogItemIds: [],
+      }),
       summary:
-        "Email user@example.com, call 415-555-1212, token sk_test_abcdefghijklmnopqrstuvwxyz.",
-    })).summary).toBe(
-      "Email [redacted], call [redacted], token [redacted].",
-    );
-  });
+        "A name, diagnosis, medication dose, reproductive detail, location, relationship, exact value, and quotation.",
+    };
 
-  it("redacts account identifiers, handles, network addresses, and exact health values", () => {
-    expect(normalizeHostedProductFeedback(makeFeedback({
+    expect(() => normalizeHostedProductFeedback(candidate)).toThrow(
+      HostedOnboardingError,
+    );
+    expect(formatHostedProductFeedbackSummary(makeFeedback({
+      action: "sync",
       kind: "frustration",
+      outcome: "failed",
+      productArea: "device_sync",
       relatedChangelogItemIds: [],
-      summary: [
-        "Handle @private_person",
-        "member_abcdef123",
-        "550e8400-e29b-41d4-a716-446655440000",
-        "192.0.2.25",
-        "0x1234567890abcdef1234567890abcdef12345678",
-        "72 bpm",
-        "120 mg/dL",
-      ].join(", "),
-    })).summary).toBe(
-      "Handle [redacted], [redacted], [redacted], [redacted], [redacted], [redacted], [redacted]",
+    }))).toBe(
+      "product_area=device_sync; action=sync; outcome=failed",
     );
   });
 
-  it("throws the hosted onboarding error type for rejected content", () => {
-    expect(() =>
-      normalizeHostedProductFeedback(
-        makeFeedback({ relatedChangelogItemIds: ["not-a-real-item"] }),
-      ),
-    ).toThrow(HostedOnboardingError);
+  it("throws the hosted onboarding error type for rejected changelog metadata", () => {
+    expect(() => normalizeHostedProductFeedback(
+      makeFeedback({ relatedChangelogItemIds: ["not-a-real-item"] }),
+    )).toThrow(HostedOnboardingError);
   });
 });
 
-function makeFeedback(input: {
-  idempotencyKey?: string;
-  kind?: "feature_interest" | "feature_request" | "frustration";
-  relatedChangelogItemIds?: string[];
-  summary?: string;
-} = {}) {
+function makeFeedback(
+  input: Partial<HostedRuntimeProductFeedbackRecord> = {},
+): HostedRuntimeProductFeedbackRecord {
   return {
+    action: input.action ?? "view",
     idempotencyKey: input.idempotencyKey ?? "c".repeat(64),
     kind: input.kind ?? "feature_interest",
+    outcome: input.outcome ?? "interest",
+    productArea: input.productArea ?? "messaging",
     relatedChangelogItemIds:
       input.relatedChangelogItemIds ?? ["native-message-formatting"],
-    summary: input.summary ?? "Interested in native message formatting.",
   };
 }

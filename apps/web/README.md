@@ -302,8 +302,10 @@ The hosted Prisma schema keeps ownership sharp and nested:
   adapters normalize Linq and Telegram evidence into this Web-owned state; the
   assistant and browser never own attribution or grant authority.
 - `HostedProductFeedback` owns assistant-captured structured product feedback
-  with only a bounded product-only summary, kind, and optional changelog ids,
-  without storing raw conversation text, health details, tags, topics, or provider payloads
+  with only closed kind, product-area, action, and outcome classifications plus
+  optional catalog-validated changelog ids. Web constructs the bounded summary
+  from those enum values; the runtime cannot send prose, raw conversation text,
+  health details, tags, topics, identifiers, or provider payloads
 - `HostedPhoneCall` owns one member-bound Retell phone-call row per real call
   with a bounded call brief, provider call id, status, and final analysis
   result. Briefs and results use member/table/row/field/scope-bound hosted

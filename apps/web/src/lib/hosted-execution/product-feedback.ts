@@ -3,8 +3,9 @@ import "server-only";
 import { createHash } from "node:crypto";
 
 import {
-  HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
-  sanitizeHostedProductFeedbackSummary,
+  parseHostedRuntimeProductFeedbackRecordRequest,
+} from "@murphai/hosted-execution/parsers";
+import {
   type HostedRuntimeProductFeedbackRecord,
   type HostedRuntimeProductFeedbackRecordResponse,
 } from "@murphai/hosted-execution/runtime-control";
@@ -28,7 +29,7 @@ export async function recordHostedProductFeedback(input: {
         kind: feedback.kind,
         memberId: input.memberId ?? null,
         relatedChangelogItemIdsJson: [...feedback.relatedChangelogItemIds],
-        summary: feedback.summary,
+        summary: formatHostedProductFeedbackSummary(feedback),
       },
     ],
     skipDuplicates: true,
@@ -43,22 +44,34 @@ export async function recordHostedProductFeedback(input: {
 export function normalizeHostedProductFeedback(
   feedback: HostedRuntimeProductFeedbackRecord,
 ): HostedRuntimeProductFeedbackRecord {
-  const summary = sanitizeHostedProductFeedbackSummary(feedback.summary);
+  let parsed: HostedRuntimeProductFeedbackRecord;
+  try {
+    parsed = parseHostedRuntimeProductFeedbackRecordRequest({ feedback }).feedback;
+  } catch {
+    rejectHostedProductFeedback();
+  }
+
   if (
-    summary.length === 0 ||
-    summary.length > HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH ||
-    (feedback.relatedChangelogItemIds.length > 0 &&
-      !resolveChangelogCardItems(feedback.relatedChangelogItemIds))
+    parsed.relatedChangelogItemIds.length > 0 &&
+    !resolveChangelogCardItems(parsed.relatedChangelogItemIds)
   ) {
     rejectHostedProductFeedback();
   }
 
-  return {
-    idempotencyKey: feedback.idempotencyKey,
-    kind: feedback.kind,
-    relatedChangelogItemIds: [...feedback.relatedChangelogItemIds],
-    summary,
-  };
+  return parsed;
+}
+
+export function formatHostedProductFeedbackSummary(
+  feedback: Pick<
+    HostedRuntimeProductFeedbackRecord,
+    "action" | "outcome" | "productArea"
+  >,
+): string {
+  return [
+    `product_area=${feedback.productArea}`,
+    `action=${feedback.action}`,
+    `outcome=${feedback.outcome}`,
+  ].join("; ");
 }
 
 export function buildHostedProductFeedbackId(input: {
@@ -75,6 +88,6 @@ function rejectHostedProductFeedback(): never {
   throw hostedOnboardingError({
     code: "HOSTED_PRODUCT_FEEDBACK_REJECTED",
     httpStatus: 400,
-    message: "Product feedback must include a bounded summary and reference published changelog items when changelog ids are present.",
+    message: "Product feedback must use the closed product abstraction and reference published changelog items when changelog ids are present.",
   });
 }

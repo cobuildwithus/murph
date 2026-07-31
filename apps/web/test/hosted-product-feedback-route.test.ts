@@ -43,10 +43,12 @@ describe("hosted product feedback record route", () => {
 
   it("authenticates the callback and records bounded feedback", async () => {
     const feedback = {
+      action: "generate",
       idempotencyKey: "a".repeat(64),
       kind: "feature_interest",
+      outcome: "interest",
+      productArea: "voice_and_media",
       relatedChangelogItemIds: [],
-      summary: "Interested in generated song reminders.",
     };
     const response = await route.POST(
       new Request(

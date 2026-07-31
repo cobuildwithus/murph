@@ -1,6 +1,3 @@
-ALTER TABLE "hosted_product_feedback"
-  ALTER COLUMN "member_id" DROP NOT NULL;
-
 UPDATE "hosted_product_feedback"
 SET
   "summary" = NULL,

@@ -527,11 +527,12 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(productUpdatesRecord?.instructions).toContain('if there is something else they wish Murph could do')
     expect(productUpdatesRecord?.instructions).toContain('clear inferred workflow friction')
     expect(productUpdatesRecord?.instructions).toContain('interest in shipped changelog or catalog items')
-    expect(productUpdatesRecord?.instructions).toContain('Speculative:')
-    expect(productUpdatesRecord?.instructions).toContain('Murph-observed:')
     expect(productUpdatesRecord?.instructions).toContain('Do not log vague low-confidence guesses')
-    expect(productUpdatesRecord?.instructions).toContain('concise product-only summary')
-    expect(productUpdatesRecord?.instructions).toContain('tags, topics, raw user wording')
+    expect(productUpdatesRecord?.instructions).toContain('closed kind, product-area, action, and outcome enum values')
+    expect(productUpdatesRecord?.instructions).toContain('Choose `other` or `unclear`')
+    expect(productUpdatesRecord?.instructions).toContain('never put prose, raw user wording')
+    expect(productUpdatesRecord?.instructions).not.toContain('Speculative:')
+    expect(productUpdatesRecord?.instructions).not.toContain('concise product-only summary')
     expect(productUpdatesRecord?.instructions).not.toContain('kind/topic')
     expect(productUpdatesRecord?.instructions).toContain(
       '{"kind":"skip","privateSummary":"No product note cleared the send bar."}',

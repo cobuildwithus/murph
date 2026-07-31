@@ -19,9 +19,9 @@ Updated: 2026-07-31
 - The callback remains authenticated and member-bound for write authority, but
   the authenticated identity is not forwarded into persistence.
 - Feedback idempotency no longer depends on member identity.
-- The model-facing contract requires abstraction of private facts to generic
-  product concepts, while deterministic contact/secret redaction remains a
-  final guardrail.
+- The model-facing and runtime contracts allow only closed product kind,
+  product-area, action, and outcome classifications plus catalog-validated
+  changelog ids; they cannot carry arbitrary prose or private facts.
 - Optional member linkage remains server-controlled and nullable for an
   explicitly justified future path; the model and runtime payload cannot choose
   it.
@@ -40,14 +40,18 @@ Updated: 2026-07-31
 ## Implementation
 
 - Add a forward Prisma migration that clears existing `member_id` values and
-  makes the column nullable.
+  free-text summaries, replaces member-derived ids, and makes the member column
+  nullable. Repeat the data cleanup in a post-drain contract migration for
+  rows written by old Web functions during rolling deployment.
 - Make the Prisma relation optional and default the persistence service to an
   unlinked row.
 - Stop the authenticated callback route from passing its bound member identity
   into product-feedback persistence.
 - Derive deterministic feedback ids from the runtime idempotency key alone.
-- Tighten the model-facing privacy rubric and update durable architecture,
-  security, and account-data documentation.
+- Replace the model-authored summary with closed product-area, action, and
+  outcome enums. Validate those fields at every boundary and let Web construct
+  the stored summary from the enum values.
+- Update durable architecture, security, and account-data documentation.
 - Add focused regression tests proving anonymous persistence, authenticated
   routing without identity forwarding, migration behavior, idempotency, and
   private-detail abstraction.
@@ -60,7 +64,10 @@ Updated: 2026-07-31
   was selected.
 - Applying the actual migration inside a rolled-back temporary-table scenario
   proved the member column becomes nullable, linked rows become anonymous, and
-  former member-derived feedback ids are replaced.
+  former member-derived feedback ids are replaced. ReviewGPT correctly found
+  that unlinking arbitrary historical free text could preserve private facts
+  with no account-deletion path; remediation now clears those summaries and
+  removes arbitrary prose from all new runtime payloads.
 - Focused Web Vitest passed 95 tests across the product-feedback service,
   callback route, privacy migration, migration inventory, and account-data
   service.
@@ -78,4 +85,15 @@ Updated: 2026-07-31
   Both are +164 tokens and +881 bytes, wholly attributable to the feedback
   summary-schema privacy/detail guidance. Two consecutive captures were
   identical.
-- Exact-head CI and final ReviewGPT remain pending.
+- The original exact-head CI passed. Focused remediation verification, the
+  updated prompt measurement, exact-head CI, and ReviewGPT correction
+  verification remain pending.
+- The remediation passed 451 Hosted Execution tests and 2,247 Cloudflare tests;
+  162 focused assistant guidance/tool tests plus the durable-handoff,
+  reconnect, and real-model-definition cases; and 130 focused Web privacy,
+  migration, digest, and account-data tests. Hosted Execution, Assistant
+  Engine, Web, and Cloudflare typechecks passed.
+- A rolled-back local PostgreSQL proof applied the exact forward migration to a
+  synthetic linked free-text row, then simulated an old Web writer and applied
+  the exact post-drain contract migration. Both passes preserved row counts,
+  cleared member linkage and summaries, and replaced old ids.

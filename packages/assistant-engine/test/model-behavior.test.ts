@@ -1052,15 +1052,18 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain('purely external or transient failures')
     expect(prompt).toContain('Use `feature_request` for a missing or unsupported path')
     expect(prompt).toContain(
-      'Record only the structured kind, a concise product-only summary, and relevant changelog item ids when known',
+      'Record only the closed kind, product-area, action, and outcome enum values plus relevant changelog item ids when known',
     )
     expect(prompt).toContain('Changelog ids are optional metadata')
-    expect(prompt).toContain('Start inferred summaries with `Speculative:`')
-    expect(prompt).toContain('assistant-observed summaries with `Murph-observed:`')
+    expect(prompt).toContain(
+      'Choose `other` or `unclear` rather than encoding context outside those enums',
+    )
     expect(prompt).toContain('Do not log vague low-confidence guesses')
     expect(prompt).toContain(
-      'Never include tags, topics, raw user wording, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads',
+      'never put prose or private facts into feedback fields',
     )
+    expect(prompt).not.toContain('Start inferred summaries')
+    expect(prompt).not.toContain('concise product-only summary')
     expect(prompt).not.toContain('structured kind/topic')
     expect(prompt).not.toContain('feedback tags')
     expect(prompt).not.toContain('feedbackTags')

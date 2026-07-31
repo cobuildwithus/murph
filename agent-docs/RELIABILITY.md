@@ -662,7 +662,7 @@ Last verified: 2026-07-30
   work outside the 6pm Eastern hour, derives the prior 6pm-to-6pm window with
   time-zone-aware day boundaries, and groups only the three allowlisted
   product-feedback kinds into fixed count labels. That aggregate is bounded
-  independently of row volume and never reads the model-authored summary. An
+  independently of row volume and never reads the server-constructed summary. An
   empty window still sends the fixed empty digest, while missing configuration
   fails before the database read so the cron stays observably unhealthy.
   Every same-hour retry reuses the exact window and Eastern day-keyed Resend

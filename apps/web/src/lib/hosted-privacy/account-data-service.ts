@@ -343,7 +343,7 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     slug: "prisma.hosted_product_feedback",
     label: "Hosted product feedback rows",
     deletion: "live-delete",
-    note: "Deletes and exports only explicitly member-linked product feedback rows. Ordinary assistant-captured feedback is de-identified and stored without a member relation, so it cannot be associated with an account export or deletion request.",
+    note: "Deletes and exports only explicitly member-linked product feedback rows. Ordinary assistant-captured feedback stores only closed product classifications and catalog-validated changelog ids without a member relation, so it cannot be associated with an account export or deletion request.",
   },
   {
     slug: "prisma.hosted_group_join_outreach",

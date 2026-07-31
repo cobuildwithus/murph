@@ -12,20 +12,19 @@ import {
   resolveAssistantProductFeedbackAcceptedInputIds,
 } from "../src/assistant/turn-progress.js";
 import {
-  MURPH_MANAGED_AUTOMATIONS,
-  MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
-} from "../src/assistant/managed-automations.js";
-import {
   buildAssistantSystemPrompt,
 } from "../src/assistant/system-prompt.js";
 
+const feedback = {
+  action: "view" as const,
+  kind: "feature_interest" as const,
+  outcome: "interest" as const,
+  productArea: "messaging" as const,
+  relatedChangelogItemIds: ["beta", "alpha"],
+};
+
 describe("assistant product feedback", () => {
-  it("is stable across related-item ordering and summary wording, and scoped to accepted input", () => {
-    const feedback = {
-      kind: "feature_interest" as const,
-      relatedChangelogItemIds: ["beta", "alpha"],
-      summary: "Interested in the beta and alpha updates.",
-    };
+  it("is stable across related-item ordering and scoped to the latest accepted input", () => {
     const first = buildAssistantProductFeedbackIdempotencyKey({
       acceptedInputIds: ["assistant_input_1"],
       feedback,
@@ -35,13 +34,6 @@ describe("assistant product feedback", () => {
       feedback: {
         ...feedback,
         relatedChangelogItemIds: ["alpha", "beta"],
-      },
-    });
-    const reworded = buildAssistantProductFeedbackIdempotencyKey({
-      acceptedInputIds: ["assistant_input_1"],
-      feedback: {
-        ...feedback,
-        summary: "Different concise wording for the same explicit feedback.",
       },
     });
     const nextInput = buildAssistantProductFeedbackIdempotencyKey({
@@ -55,21 +47,14 @@ describe("assistant product feedback", () => {
 
     expect(first).toMatch(/^[a-f0-9]{64}$/u);
     expect(reordered).toBe(first);
-    expect(reworded).toBe(first);
     expect(nextInput).not.toBe(first);
     expect(liveSteeredInput).toBe(nextInput);
   });
 
   it("enables recording only for accepted assistant input", () => {
     expect(resolveAssistantProductFeedbackAcceptedInputIds([
-      {
-        id: "initial-user-prompt",
-        source: "initial",
-      },
-      {
-        id: "assistant_input_1",
-        source: "assistant-input",
-      },
+      { id: "initial-user-prompt", source: "initial" },
+      { id: "assistant_input_1", source: "assistant-input" },
     ])).toEqual(["assistant_input_1"]);
     expect(createAssistantProductFeedbackRecorder({
       acceptedInputItems: [{ id: "initial-user-prompt", source: "initial" }],
@@ -80,38 +65,28 @@ describe("assistant product feedback", () => {
   });
 
   it("exposes the dynamic tool only when the hosted recorder is available", () => {
-    const enabled = resolveMurphDynamicTools({
-      productFeedbackAvailable: true,
-    });
-    const disabled = resolveMurphDynamicTools({
-      productFeedbackAvailable: false,
-    });
-
-    expect(enabled).toContain(MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL);
-    expect(disabled).not.toContain(MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL);
+    expect(resolveMurphDynamicTools({ productFeedbackAvailable: true }))
+      .toContain(MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL);
+    expect(resolveMurphDynamicTools({ productFeedbackAvailable: false }))
+      .not.toContain(MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL);
   });
 
-  it("collects the first candidate with the latest checkpointed input authority", async () => {
+  it("collects the first closed candidate with latest checkpointed authority", async () => {
     let acceptedInputIds = ["assistant_input_1"];
-    const acceptProductFeedbackCandidate = vi.fn();
     const recorder = createAssistantProductFeedbackRecorder({
       acceptedInputItems: [{ id: "assistant_input_1", source: "assistant-input" }],
       getAcceptedInputIds: () => acceptedInputIds,
-      productFeedbackCandidateSink: { acceptProductFeedbackCandidate },
+      productFeedbackCandidateSink: {
+        acceptProductFeedbackCandidate: vi.fn(),
+      },
     });
     if (!recorder) {
       throw new Error("Expected a turn-scoped product feedback recorder.");
     }
     acceptedInputIds = ["assistant_input_1", "assistant_input_2"];
-    const feedback = {
-      kind: "feature_interest" as const,
-      relatedChangelogItemIds: [],
-      summary: "Interested in live steering.",
-    };
 
     await recorder.recordProductFeedback(feedback);
 
-    expect(acceptProductFeedbackCandidate).not.toHaveBeenCalled();
     expect(recorder.readProductFeedback()).toEqual({
       ...feedback,
       idempotencyKey: buildAssistantProductFeedbackIdempotencyKey({
@@ -121,79 +96,53 @@ describe("assistant product feedback", () => {
     });
   });
 
-  it("advertises one structured attempt and optional changelog metadata", () => {
+  it("advertises only the closed product abstraction", () => {
     const description = MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.description;
     const schema = JSON.stringify(MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema);
-    expect(MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema.required).toEqual(["kind", "summary"]);
-    expect(description).toContain("one structured Murph product-feedback candidate");
-    expect(description).toContain("current accepted request");
-    expect(description).toContain("optional related changelog item ids");
-    expect(description).toContain("accepted, already accepted, or unavailable");
+    expect(MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema.required).toEqual([
+      "action",
+      "kind",
+      "outcome",
+      "productArea",
+    ]);
+    expect(description).toContain("one de-identified Murph product-feedback candidate");
+    expect(description).toContain("never include prose or private facts");
     expect(description).toContain("persistence is best-effort after the reply");
-    expect(description).toContain("do not retry after any result");
-    expect(schema).toContain('"minItems":0');
-    expect(schema).toContain('"feature_interest"');
-    expect(schema).toContain('"summary"');
-    expect(schema).toContain('Use feature_request for a missing or unsupported Murph path');
-    expect(schema).toContain('Make it actionable without the conversation');
-    expect(schema).toContain('Concise de-identified, product-only summary');
-    expect(schema).toContain('generic actor');
-    expect(schema).toContain('expected versus observed result');
-    expect(schema).toContain('concrete product constraint the source established');
-    expect(schema).toContain('instead of replacing them with vague labels');
-    expect(schema).toContain('omit it or mark it unclear rather than infer or invent it');
-    expect(schema).toContain('Abstract every private fact');
-    expect(schema).toContain('least-specific product concept');
-    expect(schema).toContain('do not preserve a private fact merely because it was relevant');
-    expect(schema).toContain('Never include names, handles, account or member identifiers');
-    expect(schema).toContain('diagnoses, symptoms, medications, treatments');
-    expect(schema).toContain('exact health/fitness/nutrition values');
-    expect(schema).toContain('desired outcome and missing Murph capability');
-    expect(schema).toContain('Optional metadata');
-    expect(schema).toContain('Speculative:');
-    expect(schema).toContain('Murph-observed:');
+    expect(schema).toContain('"productArea"');
+    expect(schema).toContain('"action"');
+    expect(schema).toContain('"outcome"');
+    expect(schema).toContain('"capability_missing"');
+    expect(schema).toContain('"match_or_classify"');
+    expect(schema).toContain('"misclassified"');
+    expect(schema).not.toContain('"summary"');
     expect(schema).not.toContain('"topic"');
   });
 
-  it("keeps the detailed summary rubric single-owned by the tool schema", () => {
-    const rubricMarker =
-      "name the generic actor, exact Murph surface or workflow";
+  it("keeps effective prompt guidance aligned with the no-prose schema", () => {
     const systemPrompt = buildAssistantSystemPrompt({
       assistantCliContract: null,
       assistantContextSnapshotPrompt: null,
       assistantHostedDeviceConnectAvailable: false,
       assistantKnowledgeToolsAvailable: false,
       channel: "telegram",
-      cliAccess: {
-        rawCommand: "vault-cli",
-        setupCommand: "murph",
-      },
+      cliAccess: { rawCommand: "vault-cli", setupCommand: "murph" },
       conversationScope: "direct",
-      currentLocalDate: "2026-07-30",
-      currentTimeZone: "America/New_York",
+      currentLocalDate: "2026-07-31",
+      currentTimeZone: "Europe/Madrid",
       hostedRuntime: true,
       modelBehaviorProfile: "gpt5-agentic",
       onboardingGuidance: false,
       turnTrigger: null,
     });
-    const productNotes = MURPH_MANAGED_AUTOMATIONS.find(
-      (automation) =>
-        automation.automationId === MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
-    );
-    expect(productNotes).toBeDefined();
 
-    const toolSchema = JSON.stringify(
-      MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema,
+    expect(systemPrompt).toContain(
+      "closed kind, product-area, action, and outcome enum values",
     );
-    const ordinaryStack = `${systemPrompt}\n${toolSchema}`;
-    const managedStack =
-      `${systemPrompt}\n${productNotes?.instructions ?? ""}\n${toolSchema}`;
-
-    expect(ordinaryStack.split(rubricMarker)).toHaveLength(2);
-    expect(managedStack.split(rubricMarker)).toHaveLength(2);
+    expect(systemPrompt).toContain("never put prose or private facts into feedback fields");
+    expect(systemPrompt).not.toContain("Start inferred summaries");
   });
 
-  it("parses and collects one explicit feedback candidate without a pre-reply write", async () => {
+  it("parses and collects one closed candidate without a pre-reply write", async () => {
     const acceptProductFeedbackCandidate = vi.fn();
     const productFeedbackRecorder = createAssistantProductFeedbackRecorder({
       acceptedInputItems: [{ id: "assistant_input_1", source: "assistant-input" }],
@@ -203,9 +152,11 @@ describe("assistant product feedback", () => {
       method: "item/tool/call",
       params: {
         arguments: {
+          action: "view",
           kind: "feature_interest",
+          outcome: "interest",
+          productArea: "messaging",
           relatedChangelogItemIds: ["native-message-formatting"],
-          summary: "Interested in native message formatting.",
         },
         namespace: "murph",
         tool: "submit_product_feedback",
@@ -214,17 +165,16 @@ describe("assistant product feedback", () => {
 
     expect(request).toEqual({
       feedback: {
+        action: "view",
         kind: "feature_interest",
+        outcome: "interest",
+        productArea: "messaging",
         relatedChangelogItemIds: ["native-message-formatting"],
-        summary: "Interested in native message formatting.",
       },
       kind: "submit-product-feedback",
     });
-    if (!request) {
-      throw new Error("Expected a product feedback dynamic tool request.");
-    }
-    if (!productFeedbackRecorder) {
-      throw new Error("Expected a turn-scoped product feedback recorder.");
+    if (!request || !productFeedbackRecorder) {
+      throw new Error("Expected the product feedback request and recorder.");
     }
 
     const result = await executeMurphDynamicToolRequest({
@@ -238,167 +188,51 @@ describe("assistant product feedback", () => {
 
     expect(acceptProductFeedbackCandidate).not.toHaveBeenCalled();
     expect(productFeedbackRecorder.readProductFeedback()).toEqual({
-      idempotencyKey: buildAssistantProductFeedbackIdempotencyKey({
-        acceptedInputIds: ["assistant_input_1"],
-        feedback: {
-          kind: "feature_interest",
-          relatedChangelogItemIds: ["native-message-formatting"],
-          summary: "Interested in native message formatting.",
-        },
-      }),
+      action: "view",
+      idempotencyKey: expect.stringMatching(/^[a-f0-9]{64}$/u),
       kind: "feature_interest",
+      outcome: "interest",
+      productArea: "messaging",
       relatedChangelogItemIds: ["native-message-formatting"],
-      summary: "Interested in native message formatting.",
     });
     expect(result.rpcResult).toEqual({
       success: true,
       contentItems: [{ type: "inputText", text: "product feedback candidate accepted" }],
     });
-
-    const repeatedRequest = readMurphDynamicToolRequest({
-      method: "item/tool/call",
-      params: {
-        arguments: {
-          kind: "frustration",
-          summary: "This later candidate must not replace the first.",
-        },
-        namespace: "murph",
-        tool: "submit_product_feedback",
-      },
-    });
-    if (!repeatedRequest) {
-      throw new Error("Expected a repeated product feedback request.");
-    }
-    const repeatedResult = await executeMurphDynamicToolRequest({
-      env: {},
-      fetchImpl: fetch,
-      nextUsageOrdinal: () => 0,
-      productFeedbackRecorder,
-      progressDelivery: null,
-      request: repeatedRequest,
-    });
-
-    expect(repeatedResult.rpcResult).toEqual({
-      success: true,
-      contentItems: [{
-        type: "inputText",
-        text: "product feedback candidate already accepted",
-      }],
-    });
-    expect(productFeedbackRecorder.readProductFeedback()?.summary).toBe(
-      "Interested in native message formatting.",
-    );
   });
 
-  it("parses generalized feature-request feedback without changelog ids", () => {
+  it.each([
+    ["free text", {
+      action: "view",
+      kind: "frustration",
+      outcome: "unexpected_behavior",
+      productArea: "web_app",
+      summary: "A name, diagnosis, dose, location, or quotation.",
+    }],
+    ["invalid area", {
+      action: "view",
+      kind: "frustration",
+      outcome: "unexpected_behavior",
+      productArea: "private_health_context",
+    }],
+    ["invalid action", {
+      action: "quote_user",
+      kind: "frustration",
+      outcome: "unexpected_behavior",
+      productArea: "assistant",
+    }],
+    ["invalid outcome", {
+      action: "view",
+      kind: "frustration",
+      outcome: "named_person_failed",
+      productArea: "assistant",
+    }],
+    ["missing classification", { kind: "feature_request" }],
+  ])("rejects %s tool arguments before recording", (_label, args) => {
     expect(readMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
-        arguments: {
-          kind: "feature_interest",
-          summary: "Interested in generated song reminders.",
-        },
-        namespace: "murph",
-        tool: "submit_product_feedback",
-      },
-    })).toEqual({
-      feedback: {
-        kind: "feature_interest",
-        relatedChangelogItemIds: [],
-        summary: "Interested in generated song reminders.",
-      },
-      kind: "submit-product-feedback",
-    });
-
-    const request = readMurphDynamicToolRequest({
-      method: "item/tool/call",
-      params: {
-        arguments: {
-          kind: "feature_request",
-          summary: "Wants Strava integration support.",
-        },
-        namespace: "murph",
-        tool: "submit_product_feedback",
-      },
-    });
-
-    expect(request).toEqual({
-      feedback: {
-        kind: "feature_request",
-        relatedChangelogItemIds: [],
-        summary: "Wants Strava integration support.",
-      },
-      kind: "submit-product-feedback",
-    });
-  });
-
-  it("redacts sensitive-looking summary spans before recording", () => {
-    expect(readMurphDynamicToolRequest({
-      method: "item/tool/call",
-      params: {
-        arguments: {
-          kind: "feature_request",
-          summary:
-            "Email user@example.com, call 415-555-1212, token sk_test_abcdefghijklmnopqrstuvwxyz.",
-        },
-        namespace: "murph",
-        tool: "submit_product_feedback",
-      },
-    })).toEqual({
-      feedback: {
-        kind: "feature_request",
-        relatedChangelogItemIds: [],
-        summary: "Email [redacted], call [redacted], token [redacted].",
-      },
-      kind: "submit-product-feedback",
-    });
-  });
-
-  it("rejects malformed generalized feedback tool arguments", () => {
-    expect(readMurphDynamicToolRequest({
-      method: "item/tool/call",
-      params: {
-        arguments: {
-          feedbackTags: ["message-formatting"],
-          kind: "feature_request",
-          summary: "Wants better message formatting.",
-        },
-        namespace: "murph",
-        tool: "submit_product_feedback",
-      },
-    })?.kind).toBe("invalid-product-feedback-arguments");
-
-    expect(readMurphDynamicToolRequest({
-      method: "item/tool/call",
-      params: {
-        arguments: {
-          kind: "feature_request",
-          topic: "integrations",
-          summary: "Wants Strava integration support.",
-        },
-        namespace: "murph",
-        tool: "submit_product_feedback",
-      },
-    })?.kind).toBe("invalid-product-feedback-arguments");
-
-    expect(readMurphDynamicToolRequest({
-      method: "item/tool/call",
-      params: {
-        arguments: {
-          kind: "feature_request",
-        },
-        namespace: "murph",
-        tool: "submit_product_feedback",
-      },
-    })?.kind).toBe("invalid-product-feedback-arguments");
-
-    expect(readMurphDynamicToolRequest({
-      method: "item/tool/call",
-      params: {
-        arguments: {
-          kind: "feature_request",
-          summary: "",
-        },
+        arguments: args,
         namespace: "murph",
         tool: "submit_product_feedback",
       },
