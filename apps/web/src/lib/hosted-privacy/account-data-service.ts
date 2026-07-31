@@ -49,6 +49,7 @@ import {
   acquireHostedLinqParticipantPhoneLockTx,
 } from "../hosted-onboarding/linq-participant-contact";
 import {
+  assertHostedPrivyPhoneTransferSourceRetirementFenceTx,
   prepareHostedPrivyPhoneTransferSourceRetirementTx,
   type HostedPrivyPhoneTransferProof,
   type HostedPrivyPhoneTransferSourceRetirementProof,
@@ -850,6 +851,34 @@ async function deleteHostedAccountDataInternal(input: {
     ...connectedAppRevocations,
   ];
   assertProviderRevocationsAllowDeletion(providerRevocations);
+  const phoneTransfer = input.phoneTransfer;
+  const phoneTransferSessionBeforeBillingCleanup = phoneTransfer
+    ? await readHostedPrivyPhoneTransferTargetSession(phoneTransfer)
+    : null;
+  if (phoneTransfer && phoneTransferSessionBeforeBillingCleanup) {
+    // Reclassify immediately before billing cleanup. Stripe can promptly write
+    // the cancellation webhook back to this already-fenced source, so the
+    // final deletion transaction verifies only the immutable transfer fence.
+    const retirementBeforeBillingCleanup = await input.prisma.$transaction(
+      (tx) =>
+        prepareHostedPrivyPhoneTransferSourceRetirementTx({
+          identity: phoneTransferSessionBeforeBillingCleanup.identity,
+          member: phoneTransfer.targetMember,
+          now: deletionStartedAt,
+          prisma: tx,
+          transfer: phoneTransfer.transfer,
+        }),
+      HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+    );
+    if (
+      !isSameHostedPrivyPhoneTransferRetirement(
+        retirementBeforeBillingCleanup,
+        phoneTransfer.retirement,
+      )
+    ) {
+      throwHostedPrivyPhoneTransferTargetNotReady();
+    }
+  }
   // Cancel the subscription before local rows are deleted and fail closed:
   // a deleted account must never keep an active Stripe subscription billing it.
   const stripeSubscription = await cancelHostedStripeSubscriptionsForAccountDeletion({
@@ -868,26 +897,10 @@ async function deleteHostedAccountDataInternal(input: {
     });
   }
   const phoneTransferSession = input.phoneTransfer
-    ? buildHostedPrivySessionState(
-        await readHostedPrivyUserById(
-          input.phoneTransfer.targetPrivyUserId,
-        ),
-      )
+    ? await readHostedPrivyPhoneTransferTargetSession(input.phoneTransfer)
     : null;
-  if (
-    input.phoneTransfer
-    && (
-      !phoneTransferSession
-      || phoneTransferSession.identity.userId
-        !== input.phoneTransfer.targetPrivyUserId
-      || phoneTransferSession.identity.phone?.number
-        !== input.phoneTransfer.transfer.phoneNumber
-    )
-  ) {
-    throwHostedPrivyPhoneTransferTargetNotReady();
-  }
   const databaseDeletion: HostedAccountDeletionDatabaseResult = await input.prisma.$transaction(async (tx) => {
-    if (input.phoneTransfer) {
+    if (input.phoneTransfer && phoneTransferSession) {
       await acquireHostedLinqParticipantPhoneLockTx({
         phoneNumber: input.phoneTransfer.transfer.phoneNumber,
         tx,
@@ -898,22 +911,12 @@ async function deleteHostedAccountDataInternal(input: {
       ].sort()) {
         await lockHostedMemberRow(tx, memberId);
       }
-      const finalRetirement =
-        await prepareHostedPrivyPhoneTransferSourceRetirementTx({
-          identity: phoneTransferSession!.identity,
-          member: input.phoneTransfer.targetMember,
-          now: deletionStartedAt,
-          prisma: tx,
-          transfer: input.phoneTransfer.transfer,
-        });
-      if (
-        !isSameHostedPrivyPhoneTransferRetirement(
-          finalRetirement,
-          input.phoneTransfer.retirement,
-        )
-      ) {
-        throwHostedPrivyPhoneTransferTargetNotReady();
-      }
+      await assertHostedPrivyPhoneTransferSourceRetirementFenceTx({
+        identity: phoneTransferSession.identity,
+        member: input.phoneTransfer.targetMember,
+        prisma: tx,
+        transfer: input.phoneTransfer.transfer,
+      });
     }
     await cancelHostedGroupSponsorshipsForPayerAccountDeletionTx({
       now: deletionStartedAt,
@@ -1097,6 +1100,21 @@ async function deleteHostedAccountDataInternal(input: {
       },
     },
   };
+}
+
+async function readHostedPrivyPhoneTransferTargetSession(
+  input: HostedPrivyPhoneTransferAccountDeletionCompletion,
+): Promise<ReturnType<typeof buildHostedPrivySessionState>> {
+  const session = buildHostedPrivySessionState(
+    await readHostedPrivyUserById(input.targetPrivyUserId),
+  );
+  if (
+    session.identity.userId !== input.targetPrivyUserId
+    || session.identity.phone?.number !== input.transfer.phoneNumber
+  ) {
+    throwHostedPrivyPhoneTransferTargetNotReady();
+  }
+  return session;
 }
 
 function isSameHostedPrivyPhoneTransferRetirement(

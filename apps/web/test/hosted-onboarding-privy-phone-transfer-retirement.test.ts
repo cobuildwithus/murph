@@ -47,6 +47,7 @@ vi.mock("@/src/lib/hosted-onboarding/shared", () => ({
 }));
 
 import {
+  assertHostedPrivyPhoneTransferSourceRetirementFenceTx,
   prepareHostedPrivyPhoneTransferSourceRetirementTx,
 } from "@/src/lib/hosted-onboarding/privy-phone-transfer-retirement";
 import {
@@ -186,6 +187,18 @@ describe("Privy phone-transfer source retirement", () => {
         fixture.sourceShape._count.subscriptionCheckouts = 1;
       },
     },
+    {
+      label: "a sponsorship paid by the source",
+      mutate: (fixture: Fixture) => {
+        fixture.sourceShape._count.groupSponsorshipsPaid = 1;
+      },
+    },
+    {
+      label: "a sponsorship received by the source",
+      mutate: (fixture: Fixture) => {
+        fixture.sourceShape._count.groupSponsorshipsReceived = 1;
+      },
+    },
   ])("rejects a source scaffold containing $label", async ({ mutate }) => {
     const fixture = makeFixture({ autoTrial: true });
     mutate(fixture);
@@ -194,6 +207,14 @@ describe("Privy phone-transfer source retirement", () => {
       code: "PRIVY_PHONE_TRANSFER_REQUIRES_SUPPORT",
     });
     expect(fixture.prisma.hostedMember.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("keeps the source fence valid after cleanup changes trial billing state", async () => {
+    const fixture = makeFixture({ autoTrial: true });
+    fixture.sourceMember.billingStatus = HostedBillingStatus.canceled;
+    fixture.sourceMember.suspendedAt = NOW;
+
+    await expect(assertFence(fixture)).resolves.toBeUndefined();
   });
 });
 
@@ -227,6 +248,39 @@ function prepare(fixture: Fixture) {
     },
     member: fixture.targetMember,
     now: NOW,
+    prisma: fixture.prisma as never,
+    transfer: {
+      phoneNumber: PHONE_NUMBER,
+      sourceMemberId: SOURCE_MEMBER_ID,
+      sourcePrivyUserId: SOURCE_PRIVY_USER_ID,
+    },
+  });
+}
+
+function assertFence(fixture: Fixture) {
+  mocks.readHostedMemberCoreState.mockImplementation(
+    async ({ memberId }: { memberId: string }) =>
+      memberId === TARGET_MEMBER_ID
+        ? fixture.targetMember
+        : fixture.sourceMember,
+  );
+  mocks.readHostedMemberIdentity.mockImplementation(
+    async ({ memberId }: { memberId: string }) =>
+      memberId === TARGET_MEMBER_ID
+        ? fixture.targetIdentity
+        : fixture.sourceIdentity,
+  );
+
+  return assertHostedPrivyPhoneTransferSourceRetirementFenceTx({
+    identity: {
+      phone: {
+        number: PHONE_NUMBER,
+        verifiedAt: 1,
+      },
+      telegram: null,
+      userId: TARGET_PRIVY_USER_ID,
+    },
+    member: fixture.targetMember,
     prisma: fixture.prisma as never,
     transfer: {
       phoneNumber: PHONE_NUMBER,
@@ -566,6 +620,8 @@ function makeRelationCounts(autoTrial: boolean) {
     connectedAppConnectIntents: 0,
     consentEvents: autoTrial ? 2 : 0,
     consentGrants: autoTrial ? 2 : 0,
+    groupSponsorshipsPaid: 0,
+    groupSponsorshipsReceived: 0,
     groupSponsorshipMomentsCreated: 0,
     hostedAiUsagePeriods: 0,
     hostedCryptoAudits: autoTrial ? 4 : 1,
@@ -605,7 +661,7 @@ function makeMember(input: {
     createdAt: NOW,
     id: input.id,
     pendingActivationTimeZone: null,
-    suspendedAt: null,
+    suspendedAt: null as Date | null,
     updatedAt: NOW,
   };
 }

@@ -202,6 +202,61 @@ export async function prepareHostedPrivyPhoneTransferSourceRetirementTx(input: {
   };
 }
 
+export async function assertHostedPrivyPhoneTransferSourceRetirementFenceTx(
+  input: {
+    identity: HostedPrivyIdentity;
+    member: HostedMemberCoreState;
+    prisma: Prisma.TransactionClient;
+    transfer: HostedPrivyPhoneTransferProof;
+  },
+): Promise<void> {
+  // The full disposable-account classifier runs before provider cleanup.
+  // This final assertion intentionally ignores billing fields because the
+  // account-deletion-owned Stripe cancellation may already have updated them.
+  const phoneNumber = input.identity.phone?.number;
+  if (
+    !phoneNumber
+    || phoneNumber !== input.transfer.phoneNumber
+    || input.member.id === input.transfer.sourceMemberId
+    || input.identity.userId === input.transfer.sourcePrivyUserId
+  ) {
+    throwHostedPrivyPhoneTransferChanged();
+  }
+
+  const [currentMember, currentIdentity, sourceMember, sourceIdentity] =
+    await Promise.all([
+      readHostedMemberCoreState({
+        memberId: input.member.id,
+        prisma: input.prisma,
+      }),
+      readHostedMemberIdentity({
+        memberId: input.member.id,
+        prisma: input.prisma,
+      }),
+      readHostedMemberCoreState({
+        memberId: input.transfer.sourceMemberId,
+        prisma: input.prisma,
+      }),
+      readHostedMemberIdentity({
+        memberId: input.transfer.sourceMemberId,
+        prisma: input.prisma,
+      }),
+    ]);
+
+  if (!currentMember || !sourceMember || !currentIdentity || !sourceIdentity) {
+    throwHostedPrivyPhoneTransferChanged();
+  }
+  assertHostedMemberNotSuspended(currentMember);
+  if (
+    !sourceMember.suspendedAt
+    || currentIdentity.privyUserId !== input.identity.userId
+    || sourceIdentity.privyUserId !== input.transfer.sourcePrivyUserId
+    || sourceIdentity.phoneNumber !== phoneNumber
+  ) {
+    throwHostedPrivyPhoneTransferChanged();
+  }
+}
+
 async function classifyHostedPrivyPhoneTransferSourceScaffoldTx(input: {
   identity: NonNullable<Awaited<ReturnType<typeof readHostedMemberIdentity>>>;
   memberId: string;
@@ -387,6 +442,8 @@ async function readHostedPrivyPhoneTransferSourceShapeTx(input: {
           connectedAppConnectIntents: true,
           consentEvents: true,
           consentGrants: true,
+          groupSponsorshipsPaid: true,
+          groupSponsorshipsReceived: true,
           groupSponsorshipMomentsCreated: true,
           hostedAiUsagePeriods: true,
           hostedCryptoAudits: true,

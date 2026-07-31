@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const serviceMocks = vi.hoisted(() => ({
+  assertHostedPrivyPhoneTransferSourceRetirementFenceTx: vi.fn(),
   buildHostedPrivySessionState: vi.fn(),
   connectedAppsClient: {
     deleteAccount: vi.fn(),
@@ -69,6 +70,8 @@ vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/privy-phone-transfer-retirement", () => ({
+  assertHostedPrivyPhoneTransferSourceRetirementFenceTx:
+    serviceMocks.assertHostedPrivyPhoneTransferSourceRetirementFenceTx,
   prepareHostedPrivyPhoneTransferSourceRetirementTx:
     serviceMocks.prepareHostedPrivyPhoneTransferSourceRetirementTx,
 }));
@@ -219,6 +222,10 @@ const VALID_DELETION_MODES = new Set([
 
 beforeEach(() => {
   vi.stubEnv("KERNEL_API_KEY", "");
+  serviceMocks.assertHostedPrivyPhoneTransferSourceRetirementFenceTx.mockReset();
+  serviceMocks.assertHostedPrivyPhoneTransferSourceRetirementFenceTx.mockResolvedValue(
+    undefined,
+  );
   serviceMocks.buildHostedPrivySessionState.mockReset();
   serviceMocks.buildHostedPrivySessionState.mockReturnValue({
     identity: {
@@ -482,21 +489,45 @@ describe("HOSTED_ACCOUNT_DATA_STORE_COVERAGE", () => {
 
 
 describe("deleteHostedAccountData", () => {
-  it("atomically retires the transfer source and attaches the target after fresh Privy proof", async () => {
+  it("atomically retires the transfer source after cleanup-owned billing changes", async () => {
     const order: string[] = [];
+    let billingCleanupCompleted = false;
     serviceMocks.readHostedPrivyUserById.mockImplementation(async () => {
       order.push("privy:read");
       return { id: "did:privy:target" };
     });
     serviceMocks.prepareHostedPrivyPhoneTransferSourceRetirementTx.mockImplementation(
       async () => {
+        expect(billingCleanupCompleted).toBe(false);
         order.push("transfer:recheck");
         return {
-          autoTrialBilling: null,
+          autoTrialBilling: {
+            stripeCustomerId: "cus_delete_123",
+            stripeSubscriptionId: "sub_delete_123",
+          },
           sourceMemberId: "member_123",
         };
       },
     );
+    serviceMocks.assertHostedPrivyPhoneTransferSourceRetirementFenceTx.mockImplementation(
+      async () => {
+        expect(billingCleanupCompleted).toBe(true);
+        order.push("transfer:fence");
+      },
+    );
+    serviceMocks.getHostedOnboardingStripe.mockReturnValue({
+      subscriptions: {
+        cancel: vi.fn(async () => {
+          billingCleanupCompleted = true;
+          order.push("stripe:subscription-cancel");
+          return { id: "sub_delete_123", status: "canceled" };
+        }),
+        retrieve: vi.fn(async () => ({
+          id: "sub_delete_123",
+          status: "active",
+        })),
+      },
+    });
     serviceMocks.persistHostedAccountDeletionCleanupTx.mockImplementation(async () => {
       order.push("persist:cleanup");
     });
@@ -509,7 +540,9 @@ describe("deleteHostedAccountData", () => {
         return { mailboxItemId: "mailbox_target" };
       },
     );
+    const vendorRows = await makeVendorAccountRowsForTest("member_123");
     const prisma = createHostedAccountDeletionPrismaForTest({
+      ...vendorRows,
       onTransaction: () => order.push("prisma"),
       operationOrder: order,
     });
@@ -518,7 +551,10 @@ describe("deleteHostedAccountData", () => {
       prisma,
       request: new Request("https://join.example.test/settings"),
       retirement: {
-        autoTrialBilling: null,
+        autoTrialBilling: {
+          stripeCustomerId: "cus_delete_123",
+          stripeSubscriptionId: "sub_delete_123",
+        },
         sourceMemberId: "member_123",
       },
       targetMember: {
@@ -539,7 +575,13 @@ describe("deleteHostedAccountData", () => {
     const finalTransactionStart = order.lastIndexOf("prisma");
     const finalTransactionOrder = order.slice(finalTransactionStart + 1);
     expect(order.indexOf("privy:read")).toBeGreaterThan(order.indexOf("prisma"));
-    expect(order.indexOf("privy:read")).toBeLessThan(finalTransactionStart);
+    expect(order.lastIndexOf("privy:read")).toBeLessThan(finalTransactionStart);
+    expect(order.indexOf("transfer:recheck")).toBeLessThan(
+      order.indexOf("stripe:subscription-cancel"),
+    );
+    expect(order.indexOf("stripe:subscription-cancel")).toBeLessThan(
+      finalTransactionStart,
+    );
     expect(finalTransactionOrder.slice(0, 6)).toEqual([
       "executeRaw",
       "executeRaw:phone:+15551234567",
@@ -548,7 +590,7 @@ describe("deleteHostedAccountData", () => {
       "queryRaw",
       "queryRaw:member_target",
     ]);
-    expect(finalTransactionOrder.indexOf("transfer:recheck")).toBeGreaterThan(
+    expect(finalTransactionOrder.indexOf("transfer:fence")).toBeGreaterThan(
       finalTransactionOrder.indexOf("queryRaw:member_target"),
     );
     expect(finalTransactionOrder.indexOf("persist:cleanup")).toBeLessThan(
