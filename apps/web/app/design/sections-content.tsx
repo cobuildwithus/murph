@@ -39,6 +39,7 @@ import {
   PersonalUsageCreditOwnerStudy,
 } from "./group-usage-funding-study";
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
+import { EnvironmentProgressStudy } from "./environment-progress-study";
 
 function StudySection({
   children,
@@ -139,6 +140,12 @@ export function SectionsContent() {
             veniceAvailable
           />
         </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Environment progressive voice capture">
+        <EnvironmentProgressStudy />
       </StudySection>
 
       <Separator />
@@ -261,7 +268,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Capped monthly group sponsorship and one-time contribution">
+      <StudySection title="Always-available group sponsorship and contribution">
         <GroupUsageFundingStudy />
       </StudySection>
 
@@ -285,8 +292,10 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Ops weekly growth compass with complete and retention-limited sender evidence">
-        <GrowthScorecardStudy />
+      <StudySection title="Ops weekly growth compass with message-volume history and retention-limited sender evidence">
+        <div inert>
+          <GrowthScorecardStudy />
+        </div>
       </StudySection>
 
       <Separator />

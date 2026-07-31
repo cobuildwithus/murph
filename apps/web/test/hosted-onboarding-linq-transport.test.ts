@@ -349,6 +349,7 @@ describe("hosted Linq webhook transport", () => {
       chatId: "chat-1",
       homeRecipientPhone: "+15555550100",
       memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
       replyToMessageId: "message-1",
       sourceEventId: "event-1",
       template: "conversation_home_redirect",
@@ -362,6 +363,9 @@ describe("hosted Linq webhook transport", () => {
     ).resolves.toBeDefined();
 
     expect(effect.effectId).toMatch(/^linq-home-redirect:[0-9a-f]{32}$/);
+    expect(effect.payload).toMatchObject({
+      occurredAt: "2026-03-26T12:00:00.000Z",
+    });
     expect(buildHostedLinqConversationHomeRedirectReply).toHaveBeenCalledWith(expect.objectContaining({
       homeRecipientPhone: "+15555550100",
     }));
@@ -1481,7 +1485,7 @@ describe("hosted Linq webhook transport", () => {
     expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("yields a stable effect id for repeat wrong-chat inbounds and a fresh id when the home line changes", () => {
+  it("deduplicates wrong-chat redirects per UTC day and resets the next day", () => {
     const baseInput = {
       chatId: "chat-1",
       homeRecipientPhone: "+15555550100",
@@ -1491,23 +1495,41 @@ describe("hosted Linq webhook transport", () => {
 
     const firstRedirect = createHostedWebhookLinqMessageSideEffect({
       ...baseInput,
+      occurredAt: "2026-03-26T00:00:00.000Z",
       replyToMessageId: "message-1",
       sourceEventId: "event-1",
     });
     const secondRedirectSameHome = createHostedWebhookLinqMessageSideEffect({
       ...baseInput,
+      occurredAt: "2026-03-26T23:59:59.999Z",
       replyToMessageId: "message-2",
       sourceEventId: "event-2",
+    });
+    const replayedFirstRedirect = createHostedWebhookLinqMessageSideEffect({
+      ...baseInput,
+      occurredAt: "2026-03-26T00:00:00.000Z",
+      replyToMessageId: "message-1",
+      sourceEventId: "event-1",
+    });
+    const redirectOnNextDay = createHostedWebhookLinqMessageSideEffect({
+      ...baseInput,
+      occurredAt: "2026-03-27T00:00:00.000Z",
+      replyToMessageId: "message-3",
+      sourceEventId: "event-3",
     });
     const redirectAfterHomeLineChange = createHostedWebhookLinqMessageSideEffect({
       ...baseInput,
       homeRecipientPhone: "+15555550200",
-      replyToMessageId: "message-3",
-      sourceEventId: "event-3",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-4",
+      sourceEventId: "event-4",
     });
 
     expect(firstRedirect.effectId).toMatch(/^linq-home-redirect:[0-9a-f]{32}$/);
     expect(secondRedirectSameHome.effectId).toBe(firstRedirect.effectId);
+    expect(replayedFirstRedirect.effectId).toBe(firstRedirect.effectId);
+    expect(redirectOnNextDay.effectId).not.toBe(firstRedirect.effectId);
+    expect(redirectOnNextDay.effectId).toMatch(/^linq-home-redirect:[0-9a-f]{32}$/);
     expect(redirectAfterHomeLineChange.effectId).not.toBe(firstRedirect.effectId);
     expect(redirectAfterHomeLineChange.effectId).toMatch(/^linq-home-redirect:[0-9a-f]{32}$/);
   });
@@ -1523,6 +1545,7 @@ describe("hosted Linq webhook transport", () => {
         chatId: "chat-1",
         homeRecipientPhone: "+15555550100",
         memberId: "member-1",
+        occurredAt: "2026-03-26T12:00:00.000Z",
         replyToMessageId: "message-1",
         sourceEventId: "event-1",
         template: "conversation_home_redirect",
@@ -1541,6 +1564,7 @@ describe("hosted Linq webhook transport", () => {
         chatId: "chat-1",
         homeRecipientPhone: "+15555550100",
         memberId: "member-1",
+        occurredAt: "2026-03-26T12:00:00.000Z",
         replyToMessageId: "message-2",
         sourceEventId: "event-2",
         template: "conversation_home_redirect",

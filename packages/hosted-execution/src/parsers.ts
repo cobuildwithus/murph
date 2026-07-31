@@ -18,6 +18,8 @@ import {
 
 import {
   HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_PROMPT_PROFILES,
+  HOSTED_EXECUTION_ENVIRONMENT_VOICE_CONTENT_TYPES,
+  HOSTED_EXECUTION_ENVIRONMENT_VOICE_MAX_BYTES,
   HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES,
   HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS,
   isHostedConversationMessageChannel,
@@ -45,6 +47,7 @@ import type {
   HostedExecutionMemberPersonalityPreferences,
   HostedExecutionMemberPreferences,
   HostedExecutionMemberPreferencesUpdatedEvent,
+  HostedExecutionEnvironmentVoiceCapturedPayload,
   HostedExecutionMealPhotoCapturedPayload,
   HostedExecutionDeviceSyncWakeEvent,
   HostedExecutionDirectRoute,
@@ -81,6 +84,7 @@ import {
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
   buildHostedExecutionMemberPreferencesUpdatedWake,
+  buildHostedExecutionEnvironmentVoiceCapturedWake,
   buildHostedExecutionMealPhotoCapturedWake,
   buildHostedExecutionConversationMessageWake,
   buildHostedExecutionCodexAuthRequestedWake,
@@ -440,6 +444,36 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         sha256: mealPhoto.sha256,
       });
     }
+    case "environment-voice.captured": {
+      assertExactHostedExecutionKeys(record, [
+        "environmentVoice",
+        "eventId",
+        "kind",
+        "occurredAt",
+        "userId",
+      ], "Hosted execution environment-voice.captured wake");
+      const environmentVoice =
+        parseHostedExecutionEnvironmentVoiceCapturedPayload(
+          record.environmentVoice,
+        );
+      if (environmentVoice.capturedAt !== occurredAt) {
+        throw new TypeError(
+          "Hosted execution wake environment-voice.captured occurredAt must match capturedAt.",
+        );
+      }
+      return buildHostedExecutionEnvironmentVoiceCapturedWake({
+        audioKey: environmentVoice.audioKey,
+        byteLength: environmentVoice.byteLength,
+        captureId: environmentVoice.captureId,
+        capturedAt: environmentVoice.capturedAt,
+        contentType: environmentVoice.contentType,
+        durationMs: environmentVoice.durationMs,
+        eventId,
+        memberId: wireUserId,
+        occurredAt,
+        sha256: environmentVoice.sha256,
+      });
+    }
     case "runtime.manual-requested":
     case "runtime.maintenance-requested":
     case "runtime.browser-vault-refresh-requested":
@@ -539,6 +573,107 @@ export function parseHostedExecutionMealPhotoCapturedPayload(
     captureId,
     capturedAt,
     mealPhotoKey,
+    sha256,
+  };
+}
+
+export function parseHostedExecutionEnvironmentVoiceCapturedPayload(
+  value: unknown,
+): HostedExecutionEnvironmentVoiceCapturedPayload {
+  const record = requireObject(
+    value,
+    "Hosted execution environment-voice.captured payload",
+  );
+  assertExactHostedEnvironmentVoiceKeys(record);
+
+  const audioKey = requireString(
+    record.audioKey,
+    "Hosted execution environment-voice.captured audioKey",
+  );
+  if (!/^[a-f0-9]{40}$/u.test(audioKey)) {
+    throw new TypeError(
+      "Hosted execution environment-voice.captured audioKey is invalid.",
+    );
+  }
+
+  const captureId = requireString(
+    record.captureId,
+    "Hosted execution environment-voice.captured captureId",
+  );
+  if (!/^[a-f0-9]{64}$/u.test(captureId)) {
+    throw new TypeError(
+      "Hosted execution environment-voice.captured captureId must be a lowercase SHA-256 digest.",
+    );
+  }
+
+  const capturedAt = requireString(
+    record.capturedAt,
+    "Hosted execution environment-voice.captured capturedAt",
+  );
+  if (
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/u.test(capturedAt)
+    || !Number.isFinite(Date.parse(capturedAt))
+  ) {
+    throw new TypeError(
+      "Hosted execution environment-voice.captured capturedAt must be an ISO timestamp.",
+    );
+  }
+
+  const byteLength = record.byteLength;
+  if (
+    typeof byteLength !== "number"
+    || !Number.isSafeInteger(byteLength)
+    || byteLength <= 0
+    || byteLength > HOSTED_EXECUTION_ENVIRONMENT_VOICE_MAX_BYTES
+  ) {
+    throw new TypeError(
+      `Hosted execution environment-voice.captured byteLength must be between 1 and ${HOSTED_EXECUTION_ENVIRONMENT_VOICE_MAX_BYTES}.`,
+    );
+  }
+
+  const durationMs = record.durationMs;
+  if (
+    typeof durationMs !== "number"
+    || !Number.isSafeInteger(durationMs)
+    || durationMs <= 0
+    || durationMs > 3 * 60 * 1_000
+  ) {
+    throw new TypeError(
+      "Hosted execution environment-voice.captured durationMs must be between 1 and 180000.",
+    );
+  }
+
+  const contentType = requireString(
+    record.contentType,
+    "Hosted execution environment-voice.captured contentType",
+  );
+  const normalizedContentType =
+    HOSTED_EXECUTION_ENVIRONMENT_VOICE_CONTENT_TYPES.find(
+      (candidate) => candidate === contentType,
+    );
+  if (!normalizedContentType) {
+    throw new TypeError(
+      "Hosted execution environment-voice.captured contentType is invalid.",
+    );
+  }
+
+  const sha256 = requireString(
+    record.sha256,
+    "Hosted execution environment-voice.captured sha256",
+  );
+  if (!/^[a-f0-9]{64}$/u.test(sha256)) {
+    throw new TypeError(
+      "Hosted execution environment-voice.captured sha256 must be a lowercase SHA-256 digest.",
+    );
+  }
+
+  return {
+    audioKey,
+    byteLength,
+    captureId,
+    capturedAt,
+    contentType: normalizedContentType,
+    durationMs,
     sha256,
   };
 }
@@ -1833,6 +1968,27 @@ function assertExactHostedMealPhotoKeys(record: Record<string, unknown>): void {
     if (!allowed.has(key)) {
       throw new TypeError(
         `Hosted execution meal-photo.captured payload contains unsupported field ${JSON.stringify(key)}.`,
+      );
+    }
+  }
+}
+
+function assertExactHostedEnvironmentVoiceKeys(
+  record: Record<string, unknown>,
+): void {
+  const allowed = new Set([
+    "audioKey",
+    "byteLength",
+    "captureId",
+    "capturedAt",
+    "contentType",
+    "durationMs",
+    "sha256",
+  ]);
+  for (const key of Object.keys(record)) {
+    if (!allowed.has(key)) {
+      throw new TypeError(
+        `Hosted execution environment-voice.captured payload contains unsupported field ${JSON.stringify(key)}.`,
       );
     }
   }

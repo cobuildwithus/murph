@@ -614,6 +614,13 @@ function readHostedRuntimeInternalRequestLogPath(url: URL): string {
     return "/meal-photos/REDACTED";
   }
 
+  if (
+    url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort
+    && /^\/environment-voice\/[a-f0-9]{40}$/u.test(url.pathname)
+  ) {
+    return "/environment-voice/REDACTED";
+  }
+
   return url.pathname;
 }
 

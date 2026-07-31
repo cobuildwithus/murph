@@ -215,6 +215,49 @@ describe('executeGenerateImageTool reference images', () => {
     })
   })
 
+  it('returns actionable provider diagnostics for failed reference edits', async () => {
+    await withTempDir(async (root) => {
+      const vaultRoot = path.join(root, 'vault')
+      await initializeVault({ vaultRoot })
+      const refPath = path.join(vaultRoot, 'raw', 'inbox', 'photo.png')
+      await mkdir(path.dirname(refPath), { recursive: true })
+      await writeFile(refPath, PNG_BYTES)
+
+      const result = await executeGenerateImageTool({
+        args: {
+          alt: null,
+          outputFormat: 'png',
+          prompt: 'Use image 1 as the edit target and change only the subject.',
+          quality: 'high',
+          referenceImageRefs: ['raw/inbox/photo.png'],
+          size: '1024x1024',
+        },
+        env: { OPENAI_API_KEY: 'test-key' },
+        fetchImpl: async () => new Response(JSON.stringify({
+          error: {
+            code: 'invalid_image',
+            message: 'The reference image could not be decoded.',
+            type: 'invalid_request_error',
+          },
+        }), {
+          headers: {
+            'content-type': 'application/json',
+            'x-request-id': 'req_image_edit_failed',
+          },
+          status: 400,
+        }),
+        providerRequestOrdinal: 8,
+        vaultRoot,
+      })
+
+      expect(result).toEqual({
+        rpcSuccess: false,
+        rpcText:
+          'image edit failed: ASSISTANT_IMAGE_GENERATION_FAILED (http 400, invalid_image, request req_image_edit_failed): The reference image could not be decoded.',
+      })
+    })
+  })
+
   it('passes the assistant skills root through for package skill asset references', async () => {
     await withTempDir(async (root) => {
       const vaultRoot = path.join(root, 'vault')

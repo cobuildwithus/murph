@@ -1028,11 +1028,20 @@ describe("parseHostedRuntimeGroupTool", () => {
     expect(parseHostedRuntimeGroupToolRequest({
       action: "set_chat_avatar",
       groupChatIconUrl:
-        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
     })).toEqual({
       action: "set_chat_avatar",
       groupChatIconUrl:
-        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
+    });
+    const extensionlessIconUrl =
+      `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`;
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "set_chat_avatar",
+      groupChatIconUrl: extensionlessIconUrl,
+    })).toEqual({
+      action: "set_chat_avatar",
+      groupChatIconUrl: extensionlessIconUrl,
     });
     const previewOrigin = "https://hosted-runner-staging.example.test";
     const previewIconUrl =
@@ -1491,7 +1500,24 @@ describe("parseHostedRuntimeGroupTool", () => {
       action: "create_join_link",
       result: {
         group: GROUP_SUMMARY,
+        joinUrl: "https://example.com/groups/join/legacy",
+        status: "ok",
+      },
+    })).toEqual({
+      action: "create_join_link",
+      result: {
+        group: PARSED_GROUP_SUMMARY,
+        joinUrl: "https://example.com/groups/join/legacy",
+        status: "ok",
+      },
+    });
+
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "create_join_link",
+      result: {
+        group: GROUP_SUMMARY,
         joinUrl: "https://example.com/groups/join/abc123",
+        offeredAt: "2026-07-31T12:00:00.000Z",
         status: "ok",
       },
     })).toEqual({
@@ -1499,6 +1525,7 @@ describe("parseHostedRuntimeGroupTool", () => {
       result: {
         group: PARSED_GROUP_SUMMARY,
         joinUrl: "https://example.com/groups/join/abc123",
+        offeredAt: "2026-07-31T12:00:00.000Z",
         status: "ok",
       },
     });
@@ -1530,6 +1557,18 @@ describe("parseHostedRuntimeGroupTool", () => {
         },
       })
     ).toThrow(/not allowed/u);
+
+    expect(() =>
+      parseHostedRuntimeGroupToolResponse({
+        action: "create_join_link",
+        result: {
+          group: GROUP_SUMMARY,
+          joinUrl: "https://example.com/groups/join/abc123",
+          offeredAt: "2026-07-31T12:00:00Z",
+          status: "ok",
+        },
+      })
+    ).toThrow(/canonical UTC timestamp/u);
   });
 
   it("parses update_display_name responses", () => {
@@ -1623,16 +1662,74 @@ describe("parseHostedRuntimeGroupTool", () => {
     expect(parseHostedRuntimeGroupToolResponse({
       action: "set_chat_avatar",
       result: {
+        providerErrorCode: 5006,
         status: "unavailable",
         unavailableReason: "provider_unavailable",
       },
     })).toEqual({
       action: "set_chat_avatar",
       result: {
+        providerErrorCode: 5006,
+        providerErrorMessage: "The avatar image type was not accepted.",
         status: "unavailable",
         unavailableReason: "provider_unavailable",
       },
     });
+
+    for (const invalidResult of [
+      {
+        providerErrorCode: 506,
+        status: "unavailable",
+        unavailableReason: "provider_unavailable",
+      },
+      {
+        providerErrorCode: "5006",
+        status: "unavailable",
+        unavailableReason: "provider_unavailable",
+      },
+      {
+        providerErrorMessage: "Capability https://example.test/private-media/v1/private",
+        status: "unavailable",
+        unavailableReason: "provider_unavailable",
+      },
+      {
+        providerErrorMessage: "x".repeat(241),
+        status: "unavailable",
+        unavailableReason: "provider_unavailable",
+      },
+      {
+        providerErrorMessage: "Failed to download image",
+        status: "unavailable",
+        unavailableReason: "provider_unavailable",
+      },
+      {
+        providerErrorCode: 5006,
+        providerErrorMessage: "Failed to download image",
+        status: "unavailable",
+        unavailableReason: "provider_unavailable",
+      },
+      {
+        providerErrorCode: 5008,
+        providerErrorMessage: "Unknown provider error",
+        status: "unavailable",
+        unavailableReason: "provider_unavailable",
+      },
+      {
+        rawBody: "private",
+        status: "unavailable",
+        unavailableReason: "provider_unavailable",
+      },
+      {
+        providerErrorCode: 5006,
+        status: "unavailable",
+        unavailableReason: "owner_unavailable",
+      },
+    ]) {
+      expect(() => parseHostedRuntimeGroupToolResponse({
+        action: "set_chat_avatar",
+        result: invalidResult,
+      })).toThrow();
+    }
 
     expect(() =>
       parseHostedRuntimeGroupToolResponse({
@@ -1678,7 +1775,25 @@ describe("parseHostedRuntimeGroupTool", () => {
       action: "post_join_offer",
       result: {
         group: GROUP_SUMMARY,
+        joinUrl: "https://example.com/groups/join/legacy",
+        status: "sent",
+      },
+    })).toEqual({
+      action: "post_join_offer",
+      result: {
+        group: PARSED_GROUP_SUMMARY,
+        joinUrl: "https://example.com/groups/join/legacy",
+        status: "sent",
+      },
+    });
+
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "post_join_offer",
+      result: {
+        group: GROUP_SUMMARY,
         joinUrl: "https://example.com/groups/join/abc123",
+        offeredAt: "2026-07-31T12:00:00.000Z",
+        offerState: "posted",
         status: "sent",
       },
     })).toEqual({
@@ -1686,6 +1801,8 @@ describe("parseHostedRuntimeGroupTool", () => {
       result: {
         group: PARSED_GROUP_SUMMARY,
         joinUrl: "https://example.com/groups/join/abc123",
+        offeredAt: "2026-07-31T12:00:00.000Z",
+        offerState: "posted",
         status: "sent",
       },
     });
@@ -1705,6 +1822,45 @@ describe("parseHostedRuntimeGroupTool", () => {
         unavailableReason: "send_failed",
       },
     });
+
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "post_join_offer",
+      result: {
+        group: GROUP_SUMMARY,
+        joinUrl: "https://example.com/groups/join/abc123",
+        offerState: "existing",
+        status: "sent",
+      },
+    })).toEqual({
+      action: "post_join_offer",
+      result: {
+        group: PARSED_GROUP_SUMMARY,
+        joinUrl: "https://example.com/groups/join/abc123",
+        offerState: "existing",
+        status: "sent",
+      },
+    });
+
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "post_join_offer",
+      result: {
+        group: GROUP_SUMMARY,
+        joinUrl: "https://example.com/groups/join/abc123",
+        offeredAt: "2026-07-31T12:00:00.000Z",
+        status: "sent",
+      },
+    })).toThrow(/offeredAt requires offerState/u);
+
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "post_join_offer",
+      result: {
+        group: GROUP_SUMMARY,
+        joinUrl: "https://example.com/groups/join/abc123",
+        offeredAt: "2026-07-31T12:00:00.000Z",
+        offerState: "stale",
+        status: "sent",
+      },
+    })).toThrow(/offerState is invalid/u);
   });
 
   it("parses group tool responses with the typed member roster only", () => {
@@ -2195,6 +2351,7 @@ describe("parseHostedRuntimeGroupTool", () => {
             projections: [
               {
                 dataStatus: "available",
+                grantedAt: "2026-07-31T12:30:00.000Z",
                 grantStatus: "granted",
                 projectionScope: { projectionKind: "device-sync-status.v0" },
                 projectionScopeKey: "device-sync-status.v0",
@@ -2202,6 +2359,7 @@ describe("parseHostedRuntimeGroupTool", () => {
               },
               {
                 dataStatus: "available",
+                grantedAt: "2026-07-31T12:31:00.000Z",
                 grantStatus: "granted",
                 projectionScope: { projectionKind: "steps-days.v0" },
                 projectionScopeKey: "steps-days.v0",
@@ -2217,6 +2375,7 @@ describe("parseHostedRuntimeGroupTool", () => {
             projections: [
               {
                 dataStatus: "missing",
+                grantedAt: null,
                 grantStatus: "not_granted",
                 projectionScope: { projectionKind: "steps-days.v0" },
                 projectionScopeKey: "steps-days.v0",
@@ -2224,6 +2383,7 @@ describe("parseHostedRuntimeGroupTool", () => {
               },
               {
                 dataStatus: "missing",
+                grantedAt: "2026-07-31T12:32:00.000Z",
                 grantStatus: "granted",
                 projectionScope: { projectionKind: "device-sync-status.v0" },
                 projectionScopeKey: "device-sync-status.v0",
@@ -2274,6 +2434,45 @@ describe("parseHostedRuntimeGroupTool", () => {
     expect(parseHostedRuntimeGroupToolResponse({
       action: "read_shared",
       result: {
+        members: [{
+          currentTurnHandles: [],
+          displayName: null,
+          memberId: "legacy_member",
+          participantId: "legacy_participant",
+          projections: [{
+            dataStatus: "missing",
+            grantStatus: "granted",
+            projectionScope: { projectionKind: "steps-days.v0" },
+            projectionScopeKey: "steps-days.v0",
+            records: [],
+          }],
+        }],
+        requestedProjectionScopeKeys: ["steps-days.v0"],
+        status: "ok",
+      },
+    })).toEqual({
+      action: "read_shared",
+      result: {
+        members: [{
+          currentTurnHandles: [],
+          displayName: null,
+          memberId: "legacy_member",
+          participantId: "legacy_participant",
+          projections: [{
+            dataStatus: "missing",
+            grantStatus: "granted",
+            projectionScope: { projectionKind: "steps-days.v0" },
+            projectionScopeKey: "steps-days.v0",
+            records: [],
+          }],
+        }],
+        requestedProjectionScopeKeys: ["steps-days.v0"],
+        status: "ok",
+      },
+    });
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "read_shared",
+      result: {
         status: "unavailable",
         unavailableReason: "shared_data_unavailable",
       },
@@ -2289,6 +2488,7 @@ describe("parseHostedRuntimeGroupTool", () => {
   it("rejects read_shared identity leaks, inconsistent statuses, and corrupt records", () => {
     const projection = {
       dataStatus: "available",
+      grantedAt: "2026-07-31T12:30:00.000Z",
       grantStatus: "granted",
       projectionScope: { projectionKind: "steps-days.v0" },
       projectionScopeKey: "steps-days.v0",
@@ -2356,6 +2556,32 @@ describe("parseHostedRuntimeGroupTool", () => {
         }],
       },
     })).toThrow(/not_granted/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "read_shared",
+      result: {
+        ...result,
+        members: [{
+          ...result.members[0],
+          projections: [{
+            ...projection,
+            grantedAt: "2026-07-31T12:30:00Z",
+          }],
+        }],
+      },
+    })).toThrow(/canonical UTC timestamp/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "read_shared",
+      result: {
+        ...result,
+        members: [{
+          ...result.members[0],
+          projections: [{
+            ...projection,
+            grantedAt: null,
+          }],
+        }],
+      },
+    })).toThrow(/granted projections cannot have null grantedAt/u);
     expect(() => parseHostedRuntimeGroupToolResponse({
       action: "read_shared",
       result: {
@@ -2828,7 +3054,31 @@ describe("parseHostedRuntimeGroupTool", () => {
         status: "ok",
         usage: {
           fundingNeeded: false,
-          fundingUrl: null,
+          fundingUrl:
+            "https://www.withmurph.ai/groups/fund/group_join_code_1234",
+          sponsorshipStatus: "not_sponsored",
+        },
+      },
+    });
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "read_usage",
+      result: {
+        status: "ok",
+        usage: {
+          fundingNeeded: false,
+          fundingUrl:
+            "https://www.withmurph.ai/groups/fund/group_join_code_1234",
+          sponsorshipStatus: "not_sponsored",
+        },
+      },
+    })).toEqual({
+      action: "read_usage",
+      result: {
+        status: "ok",
+        usage: {
+          fundingNeeded: false,
+          fundingUrl:
+            "https://www.withmurph.ai/groups/fund/group_join_code_1234",
           sponsorshipStatus: "not_sponsored",
         },
       },

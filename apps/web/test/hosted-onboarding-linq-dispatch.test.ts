@@ -156,6 +156,9 @@ const mocks = vi.hoisted(() => {
   return state;
 });
 
+const HOME_REDIRECT_EXPLICIT_RESEND_PATTERN =
+  /\b(?:resend (?:(?:the|this|your)(?: last)? message|what you just wrote)|send (?:(?:the|this|your)(?: last)? message|that)(?: again)?|that message can't move between threads\. resend it to the number above)\b/iu;
+
 function expectHostedLinqPointerSignalAccepted(eventId = "evt_123", userId = "member_123"): void {
   expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
     abortSignal: expect.any(AbortSignal),
@@ -8745,6 +8748,11 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         chatId: "chat_other",
         message: expect.stringContaining("+15550100001"),
         replyToMessageId: "msg_123",
+      }),
+    );
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringMatching(HOME_REDIRECT_EXPLICIT_RESEND_PATTERN),
       }),
     );
     expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual([]);

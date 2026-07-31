@@ -1007,8 +1007,10 @@ describe('assistant skill assets', () => {
     expect(raw).toMatch(/Never author generic\s+permission copy or tell someone to Like the standings\./u)
     expect(raw).toMatch(/explicitly says they do not want to share a scope, record that\s+choice and do\s+not offer, repeat, or nag/u)
     expect(raw).toMatch(/grant\s+Apple Health or\s+operating-system Steps access/u)
-    expect(raw).toContain('Treat `status="ok"` as an opaque handled result')
-    expect(raw).toMatch(/This scheduled surface\s+returns `presentation="link"`; include the exact returned `joinUrl` once[\s\S]*Do not infer, announce, or append a\s+companion message claiming native consent UI is visible/u)
+    expect(raw).toMatch(/Its recency evidence is unavailable because final-reply delivery\s+owns presentation timing/u)
+    expect(raw).toMatch(/Never use a scheduled link or a diagnostic-scope\s+offer as challenge buy-in/u)
+    expect(raw).toMatch(/This scheduled surface\s+returns `presentation="link"`; include the exact\s+returned `joinUrl` once/u)
+    expect(raw).toMatch(/Do not\s+infer, announce, or append a companion message claiming native consent UI is\s+visible/u)
     expect(raw).toMatch(/record that the\s+offer action was handled for that exact participant and scope/u)
     expect(raw).not.toContain('When native consent is the only user-facing outcome')
     expect(raw).not.toContain('If the returned group proves')
@@ -1022,11 +1024,10 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('vault-cli group shared --kind')
     expect(raw).not.toContain('vault-cli group shared --scope')
     expect(raw).not.toContain('vault-cli group weekly --')
-    expect(raw).toMatch(/Whether `read_current` returns\s+`status="none"` or an existing group/u)
-    expect(raw).toMatch(/do not\s+create a hosted group or post a permission offer as part of challenge setup/u)
-    expect(raw).toMatch(/Explain any missing group setup or share naturally in the normal\s+group reply/u)
-    expect(raw).toMatch(/bounded proactive\s+standings behavior below begins only once the challenge is running/u)
-    expect(raw).toMatch(/Do not\s+tell the room to join again/u)
+    expect(raw).toMatch(/If `read_current` returns `status="none"`, do not create a hosted group as a\s+side effect of challenge kickoff/u)
+    expect(raw).toMatch(/Call `murph\.group\s+action="offer_access"` exactly once from that scoring read\s+with only the exact scoring scope it proved `not_granted`/u)
+    expect(raw).toMatch(/record the offer as\s+handled only when the tool reports `status="ok"`/u)
+    expect(raw).toMatch(/grant without `grantedAt`, a grant before `offeredAt`, a grant more\s+than 24 hours later, silence, an unresolved identity, unavailable recency\s+evidence, or an offer followed by materially changed challenge terms does not\s+establish buy-in/u)
     expect(raw).not.toContain('Mint the join link with `murph.group`')
     expect(raw).toContain(
       "under the developer prompt's shared\nautomation action rules",
@@ -2495,7 +2496,7 @@ How old are you and what's your gender?
       },
       {
         contract:
-          'If they ask to pause, leave onboarding open and let the existing managed onboarding follow-up automation own continuation.',
+          'If they ask to pause, leave onboarding open and let the finite managed next-day recovery occurrence decide whether continuation is timely.',
         section: parkSection,
         userMessage: 'Pause for now',
       },
@@ -2619,6 +2620,23 @@ How old are you and what's your gender?
     expect(compact).toContain(
       'If the last onboarding question is still unanswered, do not send a different setup question.',
     )
+    expect(raw).toContain('### Finite next-day recovery')
+    expect(compact).toContain(
+      'The occurrence may instead ask one natural, low-pressure question that lets the user choose whether to continue.',
+    )
+    expect(compact).toContain(
+      'Send or skip ends this scheduled recovery.',
+    )
+    expect(compact).toContain(
+      'do not run the completion command or otherwise mutate onboarding state',
+    )
+    expect(compact).toContain(
+      'Only a later foreground user reply may advance or complete onboarding through the canonical state owner.',
+    )
+    expect(compact).toContain(
+      'uses the ordinary scheduled notification skip and leaves onboarding state unchanged',
+    )
+    expect(compact).not.toContain('managed daily onboarding follow-up')
 
     expect(raw).not.toContain('roughly 9-10 short assistant messages')
     expect(raw).not.toContain('### 4. Establish the first ongoing support loop')

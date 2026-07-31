@@ -118,7 +118,7 @@ export interface AssistantHostedToolContext {
   readonly privateImageUrlPublisher?: AssistantHostedPrivateImageUrlPublisher | null
   readonly subscriptionTool?: AssistantHostedSubscriptionTool | null
   readonly phoneCalls?: AssistantPhoneCallPort | null
-  beforeToolExecution?(): Promise<void>
+  beforeToolExecution?(deliveryContextOrdinal: number): Promise<void>
   currentHostedDeliveryContext(): AssistantHostedDeliveryContext | null
   currentAssistantTarget?(): {
     model: string | null
@@ -163,7 +163,7 @@ type AssistantHostedToolDeliveryContext = {
 export function createAssistantHostedToolContext(input: {
   computerToolsAvailable?: boolean
   executionContext?: AssistantHostedExecutionContext | null
-  beforeToolExecution?: () => Promise<void>
+  beforeToolExecution?: (deliveryContextOrdinal: number) => Promise<void>
   getConversationScope?: () => AssistantConversationScope
   getDeliveryContext?: () => AssistantHostedToolDeliveryContext
   getUserActionAcceptedInputIds?: () => readonly string[]
