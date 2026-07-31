@@ -272,6 +272,7 @@ export interface HostedRuntimeLinqSendRequest {
 }
 
 export interface HostedRuntimeLinqSendResponse {
+  idempotencyKey?: string | null;
   providerMessageId?: string | null;
   providerMessageIds?: string[] | null;
   providerThreadId?: string | null;

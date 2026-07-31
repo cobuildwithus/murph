@@ -123,7 +123,10 @@ export function createAssistantChannelAdapter(
 
       return assistantChannelDeliverySchema.parse({
         channel: spec.channel,
-        idempotencyKey,
+        idempotencyKey:
+          spec.channel === 'linq'
+            ? readDeliveredIdempotencyKey(delivered) ?? idempotencyKey
+            : idempotencyKey,
         target: readDeliveredTarget(delivered) ?? candidate.target,
         targetKind: readDeliveredTargetKind(delivered) ?? candidate.kind,
         sentAt: new Date().toISOString(),
@@ -361,6 +364,14 @@ export function readDeliveredTarget(
   return delivered && typeof delivered === 'object'
     && 'target' in delivered
     ? normalizeOptionalText((delivered as { target?: string | null }).target)
+    : null
+}
+
+export function readDeliveredIdempotencyKey(delivered: unknown): string | null {
+  return delivered && typeof delivered === 'object'
+    && 'idempotencyKey' in delivered
+    && typeof delivered.idempotencyKey === 'string'
+    ? normalizeOptionalText(delivered.idempotencyKey)
     : null
 }
 

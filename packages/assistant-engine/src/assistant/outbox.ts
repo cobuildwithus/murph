@@ -83,6 +83,7 @@ import {
   markAssistantOutboxIntentSent,
   assistantOutboxIntentMatchesDispatchOwner,
   persistAssistantOutboxIntentDeliveryPendingConfirmation,
+  persistAssistantOutboxIntentLinqAppCardTextFallback,
   resetAssistantOutboxPreparedDispatch,
   rescheduleAssistantOutboxConfirmationRetry,
   sameAssistantChannelDelivery,
@@ -884,6 +885,7 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
   let deliveryTransportIdempotent = inferAssistantOutboxDeliveryTransportIdempotent(dispatchIntent)
   let preparedDispatchReserved = false
   let dispatchFailureOwnerIntent = dispatchIntent
+  let effectiveDispatchIntent = dispatchIntent
 
   try {
     const reconciledDelivery =
@@ -964,8 +966,28 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
     })
     preparedDispatchReserved = input.dispatchHooks?.prepareDispatchIntent !== undefined
 
+    const dispatchDependencies = withAssistantOutboxSignal(
+      input.dependencies,
+      input.signal,
+    )
     const delivered = await sendAssistantOutboxDispatchIntent({
-      dependencies: withAssistantOutboxSignal(input.dependencies, input.signal),
+      dependencies: dispatchIntent.card === null
+        ? dispatchDependencies
+        : {
+            ...(dispatchDependencies ?? {}),
+            persistLinqAppCardTextFallback: async ({ idempotencyKey }) => {
+              const persisted =
+                await persistAssistantOutboxIntentLinqAppCardTextFallback({
+                  idempotencyKey,
+                  intentPath: dispatchIntentPath,
+                  persistedAt: new Date(),
+                  sending: dispatchIntent,
+                  vault: input.vault,
+                })
+              effectiveDispatchIntent = persisted
+              dispatchFailureOwnerIntent = persisted
+            },
+          },
       ...dispatchIntent,
       vault: input.vault,
     })
@@ -982,7 +1004,7 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
     const deliveredIntent = buildAssistantOutboxDeliveredIntent({
       delivery,
       deliveryTransportIdempotent,
-      intent: dispatchIntent,
+      intent: effectiveDispatchIntent,
       session: delivered.session ?? null,
     })
     const deliveredOwnerIntent = assistantOutboxIntentSchema.parse(

@@ -412,6 +412,54 @@ describe("hosted provider effects", () => {
     );
   });
 
+  it("persists hosted app-card text fallback before its provider send", async () => {
+    const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined);
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/capability/check_imessage")) {
+        return new Response(JSON.stringify({ available: false }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({
+        message: { id: "fallback-message" },
+      }), {
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    await expect(sendHostedProviderLinqMessage({
+      card: {
+        kind: "daily_nutrition",
+        localDate: "2026-07-31",
+        mealCount: 1,
+        totals: {
+          calories: { mealCount: 1, total: 500 },
+          carbsGrams: { mealCount: 1, total: 55 },
+          fatGrams: { mealCount: 1, total: 18 },
+          proteinGrams: { mealCount: 1, total: 35 },
+        },
+      },
+      directRecipientPhoneNumber: "+15550001",
+      idempotencyKey: "hosted-card-fallback",
+      message: "Nutrition summary",
+      target: "direct-chat",
+      targetKind: "thread",
+      threadIsDirect: true,
+    }, {
+      env: { LINQ_API_TOKEN: "linq-token" },
+      fetchImplementation: fetchMock,
+      persistAppCardTextFallback,
+    })).resolves.toMatchObject({ providerMessageId: "fallback-message" });
+
+    expect(persistAppCardTextFallback).toHaveBeenCalledWith({
+      idempotencyKey: "hosted-card-fallback",
+    });
+    expect(persistAppCardTextFallback.mock.invocationCallOrder[0]).toBeLessThan(
+      fetchMock.mock.invocationCallOrder[1]!,
+    );
+  });
+
   it("does not re-home a stale Linq thread without fallback authority", async () => {
     const fetchMock = vi.fn(async (
       input: RequestInfo | URL,

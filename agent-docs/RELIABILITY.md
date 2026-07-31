@@ -8,9 +8,13 @@ Last verified: 2026-07-31
 - Prefer explicit failure paths and actionable errors over silent fallback behavior.
 - Native iMessage nutrition-card delivery falls back to its already-derived
   ordinary text only after Linq definitively rejects the app-card request with
-  HTTP 400, 415, or 422. The fallback uses a distinct stable provider key so a
-  replay is idempotent. Transport ambiguity, timeouts, rate limits, and server
-  failures remain failed delivery attempts and must not start a second send.
+  HTTP 400, 415, or 422. Before that text enters the provider, the existing
+  outbox atomically replaces the card with its text-only replay and persists
+  the distinct stable provider key; an interrupted process therefore replays
+  only that same text effect. Capability or route fallback freezes the same
+  text-only replay under the original key. Transport ambiguity, timeouts, rate
+  limits, and server failures remain failed delivery attempts and must not
+  start a second send.
 - Update architecture and verification docs in the same change that introduces new runtime entrypoints.
 - Avoid hidden coupling between scripts, docs, and runtime code; document new dependencies in `ARCHITECTURE.md` and `agent-docs/references/testing-ci-map.md`.
 - Venice core inference is an all-or-none operator configuration: one Worker

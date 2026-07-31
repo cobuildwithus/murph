@@ -515,6 +515,7 @@ export async function sendLinqMessage(
   },
   dependencies: LinqRuntimeDependencies = {},
 ): Promise<{
+  idempotencyKey?: string | null
   providerMessageId: string | null
   providerMessageIds?: string[]
   providerThreadId: string | null
@@ -633,6 +634,27 @@ export async function sendLinqMessage(
     }
   }
 
+  if (card !== null) {
+    const textFallbackIdempotencyKey =
+      appCardFallbackIdempotencyKey ?? idempotencyKey
+    if (!textFallbackIdempotencyKey) {
+      throw new VaultCliError(
+        'ASSISTANT_LINQ_APP_CARD_FALLBACK_IDEMPOTENCY_REQUIRED',
+        'An iMessage app-card text fallback requires a stable delivery identity.',
+      )
+    }
+    if (!dependencies.persistAppCardTextFallback) {
+      throw new VaultCliError(
+        'ASSISTANT_LINQ_APP_CARD_FALLBACK_PERSISTENCE_REQUIRED',
+        'An iMessage app-card text fallback must be persisted before provider delivery.',
+        { retryable: true },
+      )
+    }
+    await dependencies.persistAppCardTextFallback({
+      idempotencyKey: textFallbackIdempotencyKey,
+    })
+  }
+
   const media = await prepareLinqMessageMedia(
     responseMedia,
     dependencies,
@@ -684,6 +706,9 @@ export async function sendLinqMessage(
     },
   )
   return {
+    ...(appCardFallbackIdempotencyKey
+      ? { idempotencyKey: appCardFallbackIdempotencyKey }
+      : {}),
     providerMessageId: normalizeOptionalText(delivered.message?.id ?? null),
     ...(delivered.providerMessageIds && delivered.providerMessageIds.length > 0
       ? { providerMessageIds: [...delivered.providerMessageIds] }

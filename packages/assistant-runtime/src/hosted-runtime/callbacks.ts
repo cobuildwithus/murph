@@ -3710,6 +3710,12 @@ function createHostedAssistantLinqSendDependency(input: {
               },
             }
           : {}),
+        ...(request.persistAppCardTextFallback
+          ? {
+              persistAppCardTextFallback:
+                request.persistAppCardTextFallback,
+            }
+          : {}),
       });
     } catch (error) {
       if (!attemptedAt) {
@@ -3769,6 +3775,8 @@ function createHostedAssistantLinqSendDependency(input: {
       throw error;
     }
     const acceptedAt = new Date();
+    const effectiveIdempotencyKey =
+      result.idempotencyKey ?? idempotencyKey;
     input.onProviderAccepted?.({
       acceptedAssistantInputIds: request.acceptedAssistantInputIds ?? [],
       acceptedAt,
@@ -3782,7 +3790,7 @@ function createHostedAssistantLinqSendDependency(input: {
         deliveryContext,
         directRecipientPhoneNumber: originalParticipantRecipientPhoneNumber,
         fromPhoneNumber,
-        idempotencyKey,
+        idempotencyKey: effectiveIdempotencyKey,
         intentId: input.intentId ?? null,
         providerTarget,
         providerThreadId: result.providerThreadId ?? null,

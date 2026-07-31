@@ -72,6 +72,9 @@ export interface LinqRuntimeDependencies {
     media: AssistantVaultFileResponseMedia,
   ) => Promise<Uint8Array>
   maxSessionMs?: number
+  persistAppCardTextFallback?: (input: {
+    idempotencyKey: string
+  }) => Promise<void>
   refreshMs?: number
   signal?: AbortSignal
 }
@@ -168,8 +171,12 @@ export interface AssistantChannelDependencies {
     target: string
     targetKind?: AssistantDeliveryCandidate['kind']
     threadIsDirect?: boolean | null
+    persistAppCardTextFallback?: (input: {
+      idempotencyKey: string
+    }) => Promise<void>
   }) => Promise<
     | {
+        idempotencyKey?: string | null
         providerMessageId?: string | null
         providerMessageIds?: string[] | null
         providerThreadId?: string | null
@@ -178,6 +185,9 @@ export interface AssistantChannelDependencies {
       }
     | void
   >
+  persistLinqAppCardTextFallback?: (input: {
+    idempotencyKey: string
+  }) => Promise<void>
   sendLinqVoiceMemo?: (input: {
     answeredMailboxItemIds?: readonly string[] | null
     attachmentId: string

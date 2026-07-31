@@ -48,6 +48,9 @@ export interface HostedProviderEffectDependencies {
   fetchImplementation: typeof fetch | null;
   publicFetchImplementation?: typeof fetch | null;
   onProviderDispatchEntered?: (() => void) | null;
+  persistAppCardTextFallback?: (input: {
+    idempotencyKey: string;
+  }) => Promise<void>;
   signal?: AbortSignal;
   telegramMaxDeliveryAttempts?: number;
 }
@@ -58,6 +61,9 @@ interface HostedProviderEffectContext {
   env: NodeJS.ProcessEnv;
   fetchImplementation: typeof fetch;
   publicFetchImplementation?: typeof fetch;
+  persistAppCardTextFallback?: (input: {
+    idempotencyKey: string;
+  }) => Promise<void>;
   signal?: AbortSignal;
 }
 
@@ -308,6 +314,9 @@ async function sendHostedProviderLinqMessageDirect(
       : {}),
     ...(context.loadVaultFile ? { loadVaultFile: context.loadVaultFile } : {}),
     ...(context.loadVaultImage ? { loadVaultImage: context.loadVaultImage } : {}),
+    ...(context.persistAppCardTextFallback
+      ? { persistAppCardTextFallback: context.persistAppCardTextFallback }
+      : {}),
   });
 }
 
@@ -327,6 +336,9 @@ function createHostedProviderEffectContext(
     ...(dependencies.loadVaultImage
       ? { loadVaultImage: dependencies.loadVaultImage }
       : {}),
+    ...(dependencies.persistAppCardTextFallback
+      ? { persistAppCardTextFallback: dependencies.persistAppCardTextFallback }
+      : {}),
   };
 }
 
@@ -336,7 +348,8 @@ async function maybeRecoverHostedProviderMissingLinqThread(input: {
   request: HostedRuntimeLinqSendRequest;
 }): Promise<HostedRuntimeLinqSendResponse | null> {
   if (
-    !looksLikeMissingLinqChatError(input.error)
+    input.request.card != null
+    || !looksLikeMissingLinqChatError(input.error)
     || !canRecoverHostedProviderLinqDirectThread(input.request)
     || (input.request.targetKind !== "thread" && input.request.targetKind !== "explicit")
   ) {

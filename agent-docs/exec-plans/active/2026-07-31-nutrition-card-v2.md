@@ -25,7 +25,8 @@ Updated: 2026-07-31
   statuses cannot contradict the frozen total and target.
 - The existing private-direct closeout, outbox, SMS fallback, and immutable
   inline URL behavior remain unchanged. A definitive pre-acceptance native-card
-  rejection reuses the ordinary text path under a distinct stable provider key;
+  rejection atomically freezes the current outbox intent as text-only under a
+  distinct stable provider key before that fallback enters the provider;
   ambiguous delivery never starts that fallback.
 - The paired iOS extension renders V1 and V2 offline from
   `selectedMessage.url`, with no account, network, persistence, or second data
@@ -98,3 +99,10 @@ Updated: 2026-07-31
   key; timeout, transport, rate-limit, and server outcomes remain fail-closed.
   Focused provider/channel coverage passes with 103 tests, and both affected
   packages typecheck.
+- Final ReviewGPT round 6 found that the first rejection fix changed the
+  provider key only in memory, so a process interruption after text acceptance
+  could replay the stale card owner. The existing outbox now atomically clears
+  the card and persists the effective text key before provider entry. Focused
+  coverage drives a real Linq HTTP 400 through the outbox, interrupts after
+  accepted fallback text, and proves stale replay uses only the frozen text and
+  same fallback key; no new state or delivery owner was added.

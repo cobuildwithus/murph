@@ -91,6 +91,7 @@ import type {
   AssistantChannelDependencies,
 } from '../src/assistant/channels/types.ts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import type { LinqFetch } from '@murphai/operator-config/linq-runtime'
 import type {
   AssistantMessageInput,
   AssistantTurnSharedPlan,
@@ -98,6 +99,7 @@ import type {
 import {
   deliverAssistantMessageOverBinding,
 } from '../src/outbound-channel.ts'
+import { sendLinqMessage } from '../src/assistant/channels/runtime.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
 const mockedDeliverAssistantMessageOverBinding = vi.mocked(
@@ -1039,7 +1041,9 @@ describe('assistant outbox runtime', () => {
         media: [],
         message: rendered,
       }),
-      undefined,
+      expect.objectContaining({
+        persistLinqAppCardTextFallback: expect.any(Function),
+      }),
     )
 
     await expect(createAssistantOutboxIntent({
@@ -1072,6 +1076,144 @@ describe('assistant outbox runtime', () => {
       vault: vaultRoot,
     })).rejects.toMatchObject({
       code: 'ASSISTANT_RESPONSE_CARD_DIRECT_AUDIENCE_REQUIRED',
+    })
+  })
+
+  it('persists one text-only fallback identity before acceptance and reuses it after restart', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-card-fallback-restart-',
+    )
+    const intent = await createAssistantOutboxIntent({
+      actorId: '+15550001',
+      card: NUTRITION_RESPONSE_CARD,
+      channel: 'linq',
+      dedupeToken: 'stable-card-fallback-restart',
+      deliverySource: TEST_LINQ_DELIVERY_SOURCE,
+      message: 'ignored model prose',
+      sessionId: 'session-card-fallback-restart',
+      threadId: 'thread-card-fallback-restart',
+      threadIsDirect: true,
+      turnId: 'turn-card-fallback-restart',
+      vault: vaultRoot,
+    })
+    const originalIdempotencyKey = `assistant-outbox:${intent.intentId}`
+    const fallbackIdempotencyKey = `${originalIdempotencyKey}:fallback`
+    const processTerminated = new Error('simulated process termination')
+    const sendLinq = vi.fn<NonNullable<AssistantChannelDependencies['sendLinq']>>()
+    const providerRequests: Array<Record<string, unknown>> = []
+    const fetchImplementation: LinqFetch = vi.fn(async (url, init) => {
+      const body = typeof init.body === 'string'
+        ? JSON.parse(init.body) as Record<string, unknown>
+        : {}
+      providerRequests.push(body)
+      if (url.endsWith('/capability/check_imessage')) {
+        return new Response(JSON.stringify({ available: true }), {
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      const message = body.message as {
+        parts?: Array<{ type?: string }>
+      } | undefined
+      if (message?.parts?.[0]?.type === 'imessage_app') {
+        return new Response(JSON.stringify({ error: 'unsupported app card' }), {
+          headers: { 'Content-Type': 'application/json' },
+          status: 400,
+        })
+      }
+      return new Response(JSON.stringify({
+        message: { id: 'linq-card-fallback-text' },
+      }), {
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+
+    await useActualOutboundDeliveryImplementation()
+    sendLinq.mockImplementationOnce(async (request) => {
+      expect(request).toMatchObject({
+        card: NUTRITION_RESPONSE_CARD,
+        idempotencyKey: originalIdempotencyKey,
+      })
+      const delivered = await sendLinqMessage(request, {
+        env: {
+          LINQ_API_BASE_URL: 'https://linq.example.test/api/partner/v3',
+          LINQ_API_TOKEN: 'linq-token',
+        },
+        fetchImplementation,
+        ...(request.persistAppCardTextFallback
+          ? {
+              persistAppCardTextFallback:
+                request.persistAppCardTextFallback,
+            }
+          : {}),
+      })
+      await expect(readAssistantOutboxIntent(vaultRoot, intent.intentId)).resolves
+        .toMatchObject({
+          card: null,
+          deliveryIdempotencyKey: fallbackIdempotencyKey,
+          status: 'sending',
+        })
+      expect(delivered.idempotencyKey).toBe(fallbackIdempotencyKey)
+      throw processTerminated
+    })
+
+    await expect(dispatchAssistantOutboxIntent({
+      dependencies: { sendLinq },
+      dispatchHooks: {
+        shouldRethrowDispatchError: ({ error }) => error === processTerminated,
+      },
+      force: true,
+      intentId: intent.intentId,
+      now: new Date('2026-07-31T01:00:00.000Z'),
+      vault: vaultRoot,
+    })).rejects.toBe(processTerminated)
+
+    const interrupted = await readAssistantOutboxIntent(vaultRoot, intent.intentId)
+    expect(interrupted).toMatchObject({
+      card: null,
+      delivery: null,
+      deliveryIdempotencyKey: fallbackIdempotencyKey,
+      status: 'sending',
+    })
+
+    sendLinq.mockImplementationOnce(async (request) => {
+      return await sendLinqMessage(request, {
+        env: {
+          LINQ_API_BASE_URL: 'https://linq.example.test/api/partner/v3',
+          LINQ_API_TOKEN: 'linq-token',
+        },
+        fetchImplementation,
+      })
+    })
+    const replayed = await dispatchAssistantOutboxIntent({
+      dependencies: { sendLinq },
+      force: true,
+      intentId: intent.intentId,
+      now: new Date('2026-07-31T01:15:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(sendLinq).toHaveBeenCalledTimes(2)
+    expect(sendLinq.mock.calls[1]?.[0]).toMatchObject({
+      idempotencyKey: fallbackIdempotencyKey,
+      message: renderAssistantResponseCardText(NUTRITION_RESPONSE_CARD),
+    })
+    expect(sendLinq.mock.calls[1]?.[0]).not.toHaveProperty('card')
+    expect(providerRequests).toHaveLength(4)
+    expect(providerRequests.slice(1).map((request) => (
+      request.message as { idempotency_key?: string }
+    ).idempotency_key)).toEqual([
+      originalIdempotencyKey,
+      fallbackIdempotencyKey,
+      fallbackIdempotencyKey,
+    ])
+    expect(replayed.intent).toMatchObject({
+      card: null,
+      deliveryIdempotencyKey: fallbackIdempotencyKey,
+      status: 'sent',
+      delivery: {
+        idempotencyKey: fallbackIdempotencyKey,
+        providerMessageId: 'linq-card-fallback-text',
+      },
     })
   })
 
