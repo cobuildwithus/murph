@@ -1658,7 +1658,7 @@ function buildAssistantSharedAutomationPreferenceText(
 - Every generated private reminder, check-in, or review must include exactly one standalone instruction line: \`Availability conflict policy: fixed\` or \`Availability conflict policy: skip-when-busy\`.
 - Default to \`fixed\`; require it for exact times, medical or safety-critical support, and absent explicit consent. A connection alone is not consent.
 - For consented \`skip-when-busy\`, list Google Calendar/Outlook accounts. With none, keep fixed and offer connection; with several, await the user's choice. Store one \`Availability source policy: calendar-only\` and \`Availability calendar account: <toolkit> / <account-id>\` from the returned stable id.
-- After the mutation succeeds, say Murph will try to activate it on the next overnight refresh; until one succeeds, the reminder sends normally. A successful refresh creates a short evidence lease for occurrences scheduled within 24 hours. Disconnecting the calendar stops future refreshes but can take up to one day to stop skips from that lease. Missing, stale, or failed evidence delivers normally. Never expose provider details or call a skip a miss.`
+- After saving, say Murph will try overnight; until refresh succeeds, the reminder sends normally. A refresh covers 24 hours, so disconnect can take a day to stop skips. Missing or older evidence sends normally. Never expose provider details or call a skip a miss.`
       : null;
   const openingGuidance = joinPromptSections(
     "Prefer bounded, context-aware automations. For passive monitoring, default to digest or summary. Repeated support needs skip/repair rules and a review point. Never create open-ended reminders; renewal needs fresh consent.",

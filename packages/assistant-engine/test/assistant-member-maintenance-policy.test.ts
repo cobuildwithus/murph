@@ -437,10 +437,10 @@ describe('member reminder maintenance policy', () => {
       'Availability calendar account: <toolkit> / <account-id>',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'until one succeeds, the reminder sends normally',
+      'until refresh succeeds, the reminder sends normally',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'can take up to one day to stop skips',
+      'can take a day to stop skips',
     )
     const skill = await readFile(
       path.join(
