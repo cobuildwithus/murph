@@ -40,31 +40,30 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Format and validate the scoped diff
+      - name: Lint and validate the scoped diff
         run: |
-          pnpm exec prettier --write \
-            apps/web/app/api/groups/start/recover/route.ts \
-            apps/web/app/design/group-start-study.tsx \
-            apps/web/app/design/sections-content.tsx \
-            apps/web/app/groups/start/page.tsx \
-            apps/web/src/components/hosted-groups/group-start-client.tsx \
-            apps/web/src/components/hosted-groups/group-start-frame.tsx \
-            apps/web/src/components/hosted-onboarding/join-invite-auto-trial-island.tsx \
-            apps/web/src/components/hosted-onboarding/join-invite-islands.tsx \
-            apps/web/src/components/hosted-onboarding/join-invite-success-client.tsx \
-            apps/web/src/lib/hosted-groups/group-start-handoff.ts \
-            apps/web/src/lib/hosted-onboarding/hosted-member-routing-store.ts \
-            apps/web/src/lib/hosted-onboarding/linq-group-setup.ts \
-            apps/web/src/lib/hosted-onboarding/webhook-provider-linq-shared.ts \
-            apps/web/src/lib/hosted-onboarding/webhook-provider-linq.ts \
-            apps/web/src/lib/hosted-onboarding/webhook-transport.ts \
-            apps/web/test/hosted-group-start-handoff.test.ts \
-            apps/web/test/hosted-group-start-recovery-route.test.ts \
-            apps/web/test/hosted-linq-group-setup.test.ts \
-            apps/web/test/hosted-member-routing-pending-group.test.ts \
-            apps/web/test/hosted-onboarding-linq-thread-route.test.ts \
-            apps/web/test/hosted-onboarding-linq-transport.test.ts \
-            agent-docs/exec-plans/completed/2026-07-31-unknown-linq-group-setup-recovery.md
+          pnpm --dir apps/web exec eslint --fix \
+            app/api/groups/start/recover/route.ts \
+            app/design/group-start-study.tsx \
+            app/design/sections-content.tsx \
+            app/groups/start/page.tsx \
+            src/components/hosted-groups/group-start-client.tsx \
+            src/components/hosted-groups/group-start-frame.tsx \
+            src/components/hosted-onboarding/join-invite-auto-trial-island.tsx \
+            src/components/hosted-onboarding/join-invite-islands.tsx \
+            src/components/hosted-onboarding/join-invite-success-client.tsx \
+            src/lib/hosted-groups/group-start-handoff.ts \
+            src/lib/hosted-onboarding/hosted-member-routing-store.ts \
+            src/lib/hosted-onboarding/linq-group-setup.ts \
+            src/lib/hosted-onboarding/webhook-provider-linq-shared.ts \
+            src/lib/hosted-onboarding/webhook-provider-linq.ts \
+            src/lib/hosted-onboarding/webhook-transport.ts \
+            test/hosted-group-start-handoff.test.ts \
+            test/hosted-group-start-recovery-route.test.ts \
+            test/hosted-linq-group-setup.test.ts \
+            test/hosted-member-routing-pending-group.test.ts \
+            test/hosted-onboarding-linq-thread-route.test.ts \
+            test/hosted-onboarding-linq-transport.test.ts
           git diff --check
 
       - name: Focused tests
