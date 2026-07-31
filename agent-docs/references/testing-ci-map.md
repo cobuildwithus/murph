@@ -341,27 +341,26 @@ not enter evidence; and attachment-only input fails closed before provider work.
   input.
   `packages/assistant-runtime/test/hosted-runtime-maintenance.test.ts` proves
   that projection uses the existing nonblocking assistant-milestone port.
-  `packages/assistant-engine/test/assistant-member-maintenance-policy.test.ts`
-  proves the exact reminder-maintenance tool remains default-off, accepts only
-  one automation lookup, builds fixed bounded Google Calendar and Outlook
-  requests, excludes raw provider content, rejects incomplete pagination, and
-  keeps memory, reminder, and group authority isolated. The managed-automation,
-  planning, notification, and cron suites prove separate exact-id nightly
-  admission plus deterministic pre-provider skip behavior.
+  `packages/assistant-engine/test/reminder-availability-maintenance.test.ts`
+  proves reminder availability has no model-facing maintenance tool, builds
+  fixed bounded Google Calendar and Outlook requests from the exact stored
+  account, excludes raw provider content, rejects incomplete pagination and
+  concurrent edits, persists empty freshness leases, filters ineligible
+  automations, and avoids another read for 24 hours. The notification suite
+  proves deterministic pre-provider skip behavior.
   `packages/assistant-runtime/test/hosted-runtime-workspace-assistant-phase.test.ts`
-  proves the scheduled owner rejects fixed or unauthorized automations, stale
-  versions, changed account bindings, and malformed or excessive timestamps;
-  accepts one canonical version-fenced replacement idempotently; removes the
-  suffix after a complete empty read; and strips it on an ordinary policy
-  change.
+  proves the existing hosted background pass invokes deterministic reminder
+  availability without a provider/model turn and strips the owned suffix on an
+  ordinary policy change.
   `packages/hosted-execution/test/assistant-permissions.test.ts` and
   `packages/assistant-runtime/test/hosted-runtime-codex-config.test.ts` prove
   one-shot memory maintenance writes only canonical memory infrastructure and
-  disables network access, while reminder maintenance can read only canonical
-  automation definitions and also has no network.
+  disables network access; reminder availability needs no Codex permission
+  profile.
   `packages/core/test/automation-availability.test.ts` proves exact
-  policy/source/account authorization, canonical suffix parsing/removal, and
-  fail-open delivery after revocation or 24-hour evidence staleness.
+  policy/source/account authorization, canonical populated and empty snapshot
+  parsing/removal, and fail-open delivery after revocation or 24-hour evidence
+  staleness.
   `packages/core/test/markdown-documents.test.ts` proves stale observed
   automation updates cannot overwrite a newer definition.
   The latency-store proof also shows that terminal evidence carries an initial

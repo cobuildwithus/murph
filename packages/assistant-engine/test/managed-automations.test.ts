@@ -127,7 +127,6 @@ import {
   MURPH_MANAGED_AUTOMATIONS,
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
-  MURPH_REMINDER_AVAILABILITY_MAINTENANCE_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
   MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
@@ -1209,74 +1208,45 @@ describe('applyMurphManagedAutomations', () => {
     expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps memory and reminder maintenance in separate hosted-only seeds', () => {
-    const memorySeed = MURPH_MANAGED_AUTOMATIONS.find(
+  it('keeps overnight memory consolidation as a hosted-only every-other-night maintenance seed', () => {
+    const seed = MURPH_MANAGED_AUTOMATIONS.find(
       (entry) =>
         entry.automationId === MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
     )
-    const reminderSeed = MURPH_MANAGED_AUTOMATIONS.find(
-      (entry) =>
-        entry.automationId ===
-          MURPH_REMINDER_AVAILABILITY_MAINTENANCE_AUTOMATION_ID,
-    )
-    if (
-      !memorySeed
-      || memorySeed.schedule.kind !== 'cron'
-      || !reminderSeed
-      || reminderSeed.schedule.kind !== 'cron'
-    ) {
-      throw new Error('Expected separate memory and reminder maintenance cron seeds.')
+    if (!seed || seed.schedule.kind !== 'cron') {
+      throw new Error('Expected overnight memory consolidation to use a cron schedule.')
     }
 
-    expect(memorySeed.hostedRuntimeOnly).toBe(true)
-    expect(memorySeed.continuityPolicy).toBe('fresh')
-    expect(memorySeed.assistantTargetOverride).toEqual({
+    expect(seed.hostedRuntimeOnly).toBe(true)
+    expect(seed.continuityPolicy).toBe('fresh')
+    expect(seed.assistantTargetOverride).toEqual({
       reasoningEffort: 'medium',
     })
-    expect(memorySeed.schedule.expression).toBe('0 3 * * 1,3,5')
-    expect(memorySeed.slug).toBe('overnight-memory-consolidation')
-    expect(memorySeed.tags).toContain('runtime-maintenance')
-    expect(memorySeed.instructions).toContain(
-      'engine-supplied "Conversation evidence" section',
-    )
-    expect(memorySeed.instructions).toContain('vault-cli memory upsert')
-    expect(memorySeed.instructions).not.toContain('`murph.maintenance`')
-    expect(memorySeed.instructions).not.toContain('vault-cli automation list')
-    expect(memorySeed.instructions).toContain(
+    expect(seed.schedule.expression).toBe('0 3 * * 1,3,5')
+    expect(seed.slug).toBe('overnight-memory-consolidation')
+    expect(seed.tags).toContain('murph-managed:overnight-memory-consolidation')
+    expect(seed.tags).toContain('runtime-maintenance')
+    expect(seed.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
+    expect(seed.instructions).toContain('Goal: consolidate durable user context')
+    expect(seed.instructions).toContain('engine-supplied "Conversation evidence" section')
+    expect(seed.instructions).toContain('bounded committed user and assistant conversation messages from the last 7 days')
+    expect(seed.instructions).toContain('supplied conversation evidence')
+    expect(seed.instructions).toContain('vault-cli memory show --format json')
+    expect(seed.instructions).toContain('vault-cli memory upsert')
+    expect(seed.instructions).toContain('vault-cli memory update')
+    expect(seed.instructions).toContain('hidden Codex memory state')
+    expect(seed.instructions).toContain('Do not read transcript files or session storage')
+    expect(seed.instructions).toContain('Do not save assistant speculation')
+    expect(seed.instructions).toContain('identifiers of any kind, or medical or health details')
+    expect(seed.instructions).toContain(
       'clearly supported by the supplied conversation evidence',
     )
-    expect(memorySeed.instructions).toContain(
+    expect(seed.instructions).toContain(
       'deduplication and update targeting only',
     )
-    expect(memorySeed.instructions).toContain(
+    expect(seed.instructions).not.toContain('generated memory extraction')
+    expect(seed.instructions).toContain(
       '{"kind":"skip","privateSummary":"Overnight memory consolidation maintenance wake completed."}',
-    )
-
-    expect(reminderSeed.hostedRuntimeOnly).toBe(true)
-    expect(reminderSeed.schedule.expression).toBe('15 3 * * *')
-    expect(reminderSeed.instructions).toContain(
-      'vault-cli automation list --status active',
-    )
-    expect(reminderSeed.instructions).toContain('`murph.maintenance`')
-    expect(reminderSeed.instructions).toContain(
-      'Availability conflict policy: skip-when-busy',
-    )
-    expect(reminderSeed.instructions).toContain(
-      'Availability calendar account: <toolkit> / <account-id>',
-    )
-    expect(reminderSeed.instructions).toContain(
-      'action: "refresh_calendar_availability"',
-    )
-    expect(reminderSeed.instructions).toContain(
-      'A failed first refresh leaves the policy pending',
-    )
-    expect(reminderSeed.instructions).toContain(
-      'does not synchronously cancel that lease',
-    )
-    expect(reminderSeed.instructions).not.toContain('vault-cli memory upsert')
-    expect(reminderSeed.instructions).not.toContain('travel-confirmation')
-    expect(reminderSeed.instructions).toContain(
-      '{"kind":"skip","privateSummary":"Reminder availability maintenance wake completed."}',
     )
   })
 
@@ -1598,7 +1568,7 @@ describe('applyMurphManagedAutomations', () => {
     ).toBe(false)
   })
 
-  it('creates the hosted overnight memory and reminder maintenance automation in hosted runtime', async () => {
+  it('creates the hosted overnight memory consolidation automation in hosted runtime', async () => {
     const result = await applyMurphManagedAutomations({
       defaultRoute,
       now: new Date('2026-06-09T12:00:00.000Z'),
@@ -1610,7 +1580,7 @@ describe('applyMurphManagedAutomations', () => {
     })
 
     expect(result).toEqual({
-      created: 7,
+      created: 6,
       skipped: 0,
       updated: 0,
     })
@@ -1632,21 +1602,6 @@ describe('applyMurphManagedAutomations', () => {
     expect(memoryRecord?.assistantTargetOverride).toEqual({
       reasoningEffort: 'medium',
     })
-    const reminderRecord = managedAutomationMocks.records.get(
-      MURPH_REMINDER_AVAILABILITY_MAINTENANCE_AUTOMATION_ID,
-    )
-    expect(reminderRecord).toMatchObject({
-      automationId: MURPH_REMINDER_AVAILABILITY_MAINTENANCE_AUTOMATION_ID,
-      continuityPolicy: 'fresh',
-      route: defaultRoute,
-      schedule: {
-        kind: 'cron',
-        expression: '15 3 * * *',
-      },
-      slug: 'reminder-availability-maintenance',
-      status: 'active',
-      title: 'Reminder availability maintenance',
-    })
     expect(memoryRecord?.tags).toContain('murph-managed:overnight-memory-consolidation')
     expect(memoryRecord?.tags).toContain('runtime-maintenance')
     expect(memoryRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
@@ -1655,10 +1610,6 @@ describe('applyMurphManagedAutomations', () => {
     expect(memoryRecord?.instructions).toContain('supplied conversation evidence')
     expect(memoryRecord?.instructions).toContain('vault-cli memory show --format json')
     expect(memoryRecord?.instructions).toContain('vault-cli memory upsert')
-    expect(memoryRecord?.instructions).not.toContain('vault-cli automation list --status active')
-    expect(memoryRecord?.instructions).not.toContain('`murph.maintenance`')
-    expect(reminderRecord?.instructions).toContain('vault-cli automation list --status active')
-    expect(reminderRecord?.instructions).toContain('`murph.maintenance`')
     expect(memoryRecord?.instructions).toContain('Do not read transcript files or session storage')
     expect(memoryRecord?.instructions).toContain('Do not save assistant speculation')
     expect(memoryRecord?.instructions).not.toContain('generated memory extraction')

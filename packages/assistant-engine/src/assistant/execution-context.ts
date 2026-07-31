@@ -194,25 +194,6 @@ export type AssistantHostedAutomationToolRequest =
       desiredAutomationIds: readonly string[]
       supportSeriesId: string
     }
-  | {
-      action: 'authorize_maintenance_source'
-      lookup: string
-      source: 'calendar'
-    }
-  | {
-      account: string
-      action: 'replace_maintenance_conflicts'
-      busyIntervals: readonly {
-        end: string
-        start: string
-      }[]
-      expectedUpdatedAt: string
-      expiresAt: string
-      generatedAt: string
-      lookup: string
-      source: 'calendar'
-      toolkit: 'googlecalendar' | 'outlook'
-    }
 
 export type AssistantHostedAutomationToolResponse =
   | {
@@ -230,22 +211,6 @@ export type AssistantHostedAutomationToolResponse =
       missingDesiredAutomationIds: readonly string[]
       supportSeriesId: string
       unchangedCount: number
-    }
-  | {
-      action: 'authorize_maintenance_source'
-      account: string
-      automationId: string
-      authorized: true
-      expectedUpdatedAt: string
-      source: 'calendar'
-      toolkit: 'googlecalendar' | 'outlook'
-    }
-  | {
-      action: 'replace_maintenance_conflicts'
-      automationId: string
-      changed: boolean
-      lookupId: string
-      status: AutomationStatus
     }
 
 export interface AssistantHostedAutomationTool {
@@ -435,7 +400,6 @@ export type AssistantWorkspaceArtifactMaterializer = (
 export interface AssistantHostedExecutionContext {
   actionApprovalPort?: AssistantHostedActionApprovalPort | null
   automationTool?: AssistantHostedAutomationTool | null
-  createScheduledMemberMaintenanceTool?(): AssistantHostedAutomationTool | null
   currentAssistantInputId?: () => string | null
   createScheduledGroupTools?(input: {
     channel: string
@@ -590,12 +554,6 @@ export function normalizeAssistantExecutionContext(
     hosted: {
       ...(actionApprovalPort ? { actionApprovalPort } : {}),
       ...(automationTool ? { automationTool } : {}),
-      ...(typeof hosted?.createScheduledMemberMaintenanceTool === 'function'
-        ? {
-            createScheduledMemberMaintenanceTool:
-              hosted.createScheduledMemberMaintenanceTool,
-          }
-        : {}),
       ...(typeof hosted?.currentAssistantInputId === 'function'
         ? {
             currentAssistantInputId: hosted.currentAssistantInputId,

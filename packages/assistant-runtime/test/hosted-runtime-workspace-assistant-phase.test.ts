@@ -38,6 +38,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   applyMurphManagedAutomations: vi.fn(),
+  refreshReminderAvailability: vi.fn(),
   buildHostedLinqChannelEnv: vi.fn((input: {
     forwardedEnv: Readonly<Record<string, string>>;
     userEnv: Readonly<Record<string, string>>;
@@ -129,6 +130,7 @@ vi.mock("@murphai/assistant-engine", async (importOriginal) => {
     getAssistantCronStatus: mocks.getAssistantCronStatus,
     readAssistantInputEvent: mocks.readAssistantInputEvent,
     readAssistantOutboxIntent: mocks.readAssistantOutboxIntent,
+    refreshReminderAvailability: mocks.refreshReminderAvailability,
     recordHostedMailboxAssistantInputItem:
       automation.recordHostedMailboxAssistantInputItem,
     scheduleDeviceActivityTriggeredAutomations:
@@ -547,6 +549,11 @@ beforeEach(() => {
     created: 0,
     skipped: 1,
     updated: 0,
+  });
+  mocks.refreshReminderAvailability.mockResolvedValue({
+    attempted: 0,
+    failed: 0,
+    refreshed: 0,
   });
   mocks.prepareHostedAssistantAutomationForWake.mockResolvedValue(
     PREPARED_HOSTED_ASSISTANT_RUNTIME_STATE,
@@ -2897,6 +2904,38 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
+  it("runs deterministic reminder availability in the hosted background pass", async () => {
+    const connectedApps = { request: vi.fn() };
+    mocks.refreshReminderAvailability.mockResolvedValueOnce({
+      attempted: 1,
+      failed: 0,
+      refreshed: 1,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => "2026-07-30T00:00:00.000Z",
+      runtimeConnectedApps: connectedApps,
+      vaultRoot: "/tmp/murph-hosted-vault",
+    }));
+
+    expect(mocks.refreshReminderAvailability).toHaveBeenCalledWith({
+      connectedApps,
+      now: new Date("2026-07-30T00:00:00.000Z"),
+      shouldYield: null,
+      signal: null,
+      vaultRoot: "/tmp/murph-hosted-vault",
+    });
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "assistant_runtime_commit",
+      progressed: true,
+      redactedStatus: expect.objectContaining({
+        reminderAvailabilityMaintenanceAttempted: 1,
+        reminderAvailabilityMaintenanceFailed: 0,
+        reminderAvailabilityMaintenanceRefreshed: 1,
+      }),
+    }));
+  });
+
   it("checkpoints a retry wake after logging partial managed setup failures", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     const stableKeyFailure = new VaultCliError(
@@ -4358,266 +4397,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }
   });
 
-  it("limits reminder maintenance reads and patches to eligible private automation instructions", async () => {
-    const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-reminder-maintenance-"));
-    const vaultRoot = path.join(parentRoot, "vault");
-    const inputId = "ain_00000000000000000000000000000001";
-    const route = {
-      channel: "linq",
-      deliveryTarget: "direct-maintenance-chat",
-      identityId: "direct-maintenance-identity",
-      participantId: "direct-maintenance-participant",
-      threadId: "direct-maintenance-thread",
-      threadIsDirect: true,
-    } as const;
-    const instructions = [
-      "Send one flexible reminder about the planned task.",
-      "Availability conflict policy: skip-when-busy",
-      "Availability source policy: calendar-only",
-      "Availability calendar account: googlecalendar / calendar-account",
-      "Preserve trailing space here. ",
-    ].join("\n");
-
-    try {
-      await initializeVault({
-        createdAt: "2026-04-27T00:00:00.000Z",
-        vaultRoot,
-      });
-      const eligible = await upsertAutomation({
-        activeUntil: "2099-08-01T00:00:00.000Z",
-        continuityPolicy: "preserve",
-        instructions,
-        route,
-        schedule: { kind: "dailyLocal", localTime: "08:30" },
-        slug: "flexible-private-reminder",
-        status: "active",
-        supportKind: "reminder",
-        tags: ["assistant", "scheduled"],
-        title: "Flexible private reminder",
-        vaultRoot,
-      });
-      const fixed = await upsertAutomation({
-        activeUntil: "2099-08-01T00:00:00.000Z",
-        continuityPolicy: "preserve",
-        instructions: [
-          "Send one exact-time reminder.",
-          "Availability conflict policy: fixed",
-        ].join("\n"),
-        route,
-        schedule: { kind: "dailyLocal", localTime: "09:00" },
-        slug: "fixed-private-reminder",
-        status: "active",
-        supportKind: "reminder",
-        tags: ["assistant", "scheduled"],
-        title: "Fixed private reminder",
-        vaultRoot,
-      });
-      mocks.readAssistantInputEvent.mockResolvedValue({
-        conversation: {
-          accountId: "direct-maintenance-identity",
-          actorId: "direct-maintenance-participant",
-          actorIsSelf: false,
-          source: "linq",
-          threadId: "direct-maintenance-thread",
-          threadIsDirect: true,
-        },
-        replyTarget: {
-          channel: "linq",
-          messageId: "direct-maintenance-message",
-          threadId: "direct-maintenance-chat",
-        },
-      });
-
-      await runHostedWorkspaceAssistantPhase(createPhaseInput({
-        assistantInputIds: [inputId],
-        importedCount: 1,
-        vaultRoot,
-      }));
-      const laneInput = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
-      const automationTool =
-        laneInput?.executionContext?.hosted
-          ?.createScheduledMemberMaintenanceTool?.() ?? null;
-      if (!automationTool) {
-        throw new Error("Expected scheduled member maintenance automation tool.");
-      }
-
-      const generatedAt = new Date();
-      const expiresAt = new Date(generatedAt.getTime() + 7 * 24 * 60 * 60 * 1_000);
-      const busyStart = new Date(generatedAt.getTime() + 60 * 60 * 1_000);
-      const busyEnd = new Date(generatedAt.getTime() + 2 * 60 * 60 * 1_000);
-      const block = [
-        "<!-- murph:availability-conflicts:start -->",
-        "Availability conflict snapshot:",
-        `- generatedAt: ${generatedAt.toISOString()}`,
-        `- expiresAt: ${expiresAt.toISOString()}`,
-        "- If one interval satisfies `busyStart <= scheduledOccurrenceAt < busyEnd`, return `skip` and send nothing. Do not mention calendar, event labels, or provider details.",
-        `- ${busyStart.toISOString()} / ${busyEnd.toISOString()}`,
-        "<!-- murph:availability-conflicts:end -->",
-      ].join("\n");
-      const replacement = `${eligible.record.instructions}\n\n${block}`;
-      const authorization = await automationTool.request({
-        action: "authorize_maintenance_source",
-        lookup: eligible.record.automationId,
-        source: "calendar",
-      });
-      if (authorization.action !== "authorize_maintenance_source") {
-        throw new Error("Expected maintenance source authorization.");
-      }
-
-      await expect(automationTool.request({
-        action: "save",
-        instructions: "Create another automation.",
-        schedule: { kind: "dailyLocal", localTime: "10:00" },
-        title: "Unauthorized save",
-      })).rejects.toThrow(
-        "Only member maintenance automation operations are available.",
-      );
-      expect(authorization).toEqual({
-        action: "authorize_maintenance_source",
-        account: "calendar-account",
-        automationId: eligible.record.automationId,
-        authorized: true,
-        expectedUpdatedAt: eligible.record.updatedAt,
-        source: "calendar",
-        toolkit: "googlecalendar",
-      });
-      await expect(automationTool.request({
-        action: "authorize_maintenance_source",
-        lookup: fixed.record.automationId,
-        source: "calendar",
-      })).rejects.toThrow(
-        "Automation does not explicitly authorize calendar-bound skip-when-busy maintenance.",
-      );
-      await expect(automationTool.request({
-        account: authorization.account,
-        action: "replace_maintenance_conflicts",
-        busyIntervals: [{
-          end: busyEnd.toISOString(),
-          start: busyStart.toISOString(),
-        }],
-        expectedUpdatedAt: "2000-01-01T00:00:00.000Z",
-        expiresAt: expiresAt.toISOString(),
-        generatedAt: generatedAt.toISOString(),
-        lookup: eligible.record.automationId,
-        source: "calendar",
-        toolkit: authorization.toolkit,
-      })).rejects.toThrow(
-        "Automation availability authority changed during calendar refresh.",
-      );
-      await expect(automationTool.request({
-        account: "different-account",
-        action: "replace_maintenance_conflicts",
-        busyIntervals: [{
-          end: busyEnd.toISOString(),
-          start: busyStart.toISOString(),
-        }],
-        expectedUpdatedAt: authorization.expectedUpdatedAt,
-        expiresAt: expiresAt.toISOString(),
-        generatedAt: generatedAt.toISOString(),
-        lookup: eligible.record.automationId,
-        source: "calendar",
-        toolkit: authorization.toolkit,
-      })).rejects.toThrow(
-        "Automation availability authority changed during calendar refresh.",
-      );
-      const excessiveIntervals = Array.from({ length: 257 }, (_, index) => {
-        const start = new Date(generatedAt.getTime() + index * 60_000);
-        const end = new Date(start.getTime() + 30_000);
-        return { end: end.toISOString(), start: start.toISOString() };
-      });
-      await expect(automationTool.request({
-        account: authorization.account,
-        action: "replace_maintenance_conflicts",
-        busyIntervals: excessiveIntervals,
-        expectedUpdatedAt: authorization.expectedUpdatedAt,
-        expiresAt: expiresAt.toISOString(),
-        generatedAt: generatedAt.toISOString(),
-        lookup: eligible.record.automationId,
-        source: "calendar",
-        toolkit: authorization.toolkit,
-      })).rejects.toThrow(
-        "Availability conflict block is malformed, stale, or outside its seven-day bound.",
-      );
-      await expect(automationTool.request({
-        account: authorization.account,
-        action: "replace_maintenance_conflicts",
-        busyIntervals: [{
-          end: busyEnd.toISOString(),
-          start: busyStart.toISOString(),
-        }],
-        expectedUpdatedAt: authorization.expectedUpdatedAt,
-        expiresAt: expiresAt.toISOString(),
-        generatedAt: generatedAt.toISOString(),
-        lookup: eligible.record.automationId,
-        source: "calendar",
-        toolkit: authorization.toolkit,
-      })).resolves.toMatchObject({
-        action: "replace_maintenance_conflicts",
-        automationId: eligible.record.automationId,
-        changed: true,
-      });
-
-      await expect(showAutomation({
-        automationId: eligible.record.automationId,
-        vaultRoot,
-      })).resolves.toMatchObject({
-        instructions: replacement,
-        route,
-        schedule: eligible.record.schedule,
-        status: "active",
-        supportKind: "reminder",
-        tags: eligible.record.tags,
-      });
-
-      const refreshedAuthorization = await automationTool.request({
-        action: "authorize_maintenance_source",
-        lookup: eligible.record.automationId,
-        source: "calendar",
-      });
-      if (refreshedAuthorization.action !== "authorize_maintenance_source") {
-        throw new Error("Expected refreshed maintenance authorization.");
-      }
-      await expect(automationTool.request({
-        account: refreshedAuthorization.account,
-        action: "replace_maintenance_conflicts",
-        busyIntervals: [{
-          end: busyEnd.toISOString(),
-          start: busyStart.toISOString(),
-        }],
-        expectedUpdatedAt: refreshedAuthorization.expectedUpdatedAt,
-        expiresAt: expiresAt.toISOString(),
-        generatedAt: generatedAt.toISOString(),
-        lookup: eligible.record.automationId,
-        source: "calendar",
-        toolkit: refreshedAuthorization.toolkit,
-      })).resolves.toMatchObject({
-        action: "replace_maintenance_conflicts",
-        changed: false,
-      });
-      await expect(automationTool.request({
-        account: refreshedAuthorization.account,
-        action: "replace_maintenance_conflicts",
-        busyIntervals: [],
-        expectedUpdatedAt: refreshedAuthorization.expectedUpdatedAt,
-        expiresAt: expiresAt.toISOString(),
-        generatedAt: generatedAt.toISOString(),
-        lookup: eligible.record.automationId,
-        source: "calendar",
-        toolkit: refreshedAuthorization.toolkit,
-      })).resolves.toMatchObject({
-        action: "replace_maintenance_conflicts",
-        changed: true,
-      });
-      await expect(showAutomation({
-        automationId: eligible.record.automationId,
-        vaultRoot,
-      })).resolves.toMatchObject({
-        instructions: eligible.record.instructions,
-      });
-    } finally {
-      await rm(parentRoot, { force: true, recursive: true });
-    }
-  });
 
   it("scopes automation and group mutation authority to each durable accepted input", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-automation-tool-"));
@@ -16469,6 +16248,9 @@ function createPhaseInput(input: {
   recordDeferredUsage?: HostedWorkspaceRuntimeAssistantPhaseInput["recordDeferredUsage"];
   resolvedDeviceSync?: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["resolvedConfig"]["deviceSync"];
   runtimeClinicalRecordsPort?: RuntimeClinicalRecordsPort;
+  runtimeConnectedApps?: NonNullable<
+    HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["connectedApps"]
+  >;
   runtimeDeviceSyncPort?: RuntimeDeviceSyncPort;
   runtimeGroupToolPort?: NonNullable<
     HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["groupToolPort"]
@@ -16624,6 +16406,9 @@ function createPhaseInput(input: {
         ...(input.runtimeDeviceSyncPort ? { deviceSyncPort: input.runtimeDeviceSyncPort } : {}),
         ...(input.runtimeClinicalRecordsPort
           ? { clinicalRecordsPort: input.runtimeClinicalRecordsPort }
+          : {}),
+        ...(input.runtimeConnectedApps
+          ? { connectedApps: input.runtimeConnectedApps }
           : {}),
         ...(input.runtimeActionApprovalPort
           ? { actionApprovalPort: input.runtimeActionApprovalPort }

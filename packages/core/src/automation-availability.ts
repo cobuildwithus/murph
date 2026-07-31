@@ -117,9 +117,6 @@ export function replaceAutomationAvailabilityConflictSnapshot(input: {
   now?: Date;
 }): string {
   const base = stripAutomationAvailabilityConflictBlock(input.instructions);
-  if (input.busyIntervals.length === 0) {
-    return base;
-  }
   const block = [
     AVAILABILITY_CONFLICT_BLOCK_START,
     "Availability conflict snapshot:",
@@ -147,7 +144,7 @@ export function parseAutomationAvailabilityConflictBlock(
 ): AutomationAvailabilityConflictSnapshot {
   const lines = block.split("\n");
   if (
-    lines.length < 7
+    lines.length < 6
     || lines.length > MAX_BUSY_INTERVALS + 6
     || lines[0] !== AVAILABILITY_CONFLICT_BLOCK_START
     || lines[1] !== "Availability conflict snapshot:"

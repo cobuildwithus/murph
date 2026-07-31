@@ -127,10 +127,6 @@ export const MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID =
   'automation_01K4Y0Q5C8M9N2P3R4S5T6V7WX'
 export const MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY =
   'Overnight memory consolidation maintenance wake completed.'
-export const MURPH_REMINDER_AVAILABILITY_MAINTENANCE_AUTOMATION_ID =
-  'automation_01K5A7B9C2D4E6F8G0H1J3K5MN'
-export const MURPH_REMINDER_AVAILABILITY_MAINTENANCE_PRIVATE_SUMMARY =
-  'Reminder availability maintenance wake completed.'
 export const MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID =
   'automation_01K4Z8RMM6F7G8H9J0K1P2M3N4'
 export const MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_PRIVATE_SUMMARY =
@@ -158,14 +154,6 @@ export function resolveMurphManagedMaintenancePolicy(
     return {
       profile: 'member-memory',
       privateSummary: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
-    }
-  }
-  if (
-    automationId === MURPH_REMINDER_AVAILABILITY_MAINTENANCE_AUTOMATION_ID
-  ) {
-    return {
-      profile: 'member-reminders',
-      privateSummary: MURPH_REMINDER_AVAILABILITY_MAINTENANCE_PRIVATE_SUMMARY,
     }
   }
   if (automationId === MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID) {
@@ -682,37 +670,6 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       'Do not read transcript files or session storage, hidden Codex memory state, assistant runtime logs, unbounded filesystem trees, or vault health data. Do not call external services or send the user a message.',
       'Do not save assistant speculation, generic advice, transient task details, credentials, payment details, contact details, identifiers of any kind, or medical or health details from conversation text.',
       `Return exactly \`{"kind":"skip","privateSummary":"${MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY}"}\`.`,
-    ].join('\n'),
-  },
-  {
-    automationId: MURPH_REMINDER_AVAILABILITY_MAINTENANCE_AUTOMATION_ID,
-    slug: 'reminder-availability-maintenance',
-    title: 'Reminder availability maintenance',
-    summary:
-      'A silent hosted refresh of consent-bound calendar conflict snapshots.',
-    schedule: {
-      kind: 'cron',
-      expression: '15 3 * * *',
-    },
-    continuityPolicy: 'fresh',
-    ownerScope: 'member',
-    hostedRuntimeOnly: true,
-    assistantTargetOverride: {
-      reasoningEffort: 'medium',
-    },
-    tags: [
-      'murph-managed:reminder-availability-maintenance',
-      'runtime-maintenance',
-    ],
-    instructions: [
-      'Goal: silently keep explicitly flexible private reminders out of calendar conflicts during the coming week.',
-      '',
-      'Read active automations with `vault-cli automation list --status active --limit 100 --format json`. Use `vault-cli automation show <automation-id> --format json` only for a candidate whose complete instructions are needed. If no automation has explicit `skip-when-busy` authorization, finish without any connected-app call.',
-      'Only inspect private active automations whose complete instructions contain exactly one standalone line `Availability conflict policy: skip-when-busy`, one `Availability source policy: calendar-only` line, and one exact `Availability calendar account: <toolkit> / <account-id>` line saved after foreground consent and account selection. Exclude group routes, runtime maintenance, weekly digests, inactive or expired support, and any automation carrying `Availability conflict policy: fixed` or missing one of those exact lines.',
-      'For each eligible automation, call `murph.maintenance` once with `action: "refresh_calendar_availability"` and that automation id as `lookup`. The host derives the exact stored account, current seven-day window, provider tool, arguments, page cap, timestamp reduction, and version-fenced suffix replacement. Never list or search provider tools, choose or manage an account, supply provider arguments or timestamps, or construct or patch the owned suffix yourself.',
-      'A successful complete read installs normalized busy intervals or removes the old suffix when the bounded result is empty. A failed first refresh leaves the policy pending and reminders send normally. Later failed, partial, unsupported, disconnected, or concurrent refreshes change nothing. A successful snapshot is a bounded evidence lease for occurrences scheduled within 24 hours; disconnecting or revoking the account prevents future refreshes but does not synchronously cancel that lease. Scheduled delivery ignores malformed, expired, unauthorized, or older evidence and sends normally.',
-      'The tool result contains only refresh status, never provider content or calendar timestamps. Do not read memory, transcript files, session storage, hidden Codex memory state, assistant runtime logs, unbounded filesystem trees, vault health data, email, or provider content. Do not send the user a message.',
-      `Return exactly \`{"kind":"skip","privateSummary":"${MURPH_REMINDER_AVAILABILITY_MAINTENANCE_PRIVATE_SUMMARY}"}\`.`,
     ].join('\n'),
   },
   {

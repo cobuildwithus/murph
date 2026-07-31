@@ -27,7 +27,6 @@ import {
 } from '../group-room-model.js'
 import {
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
-  MURPH_REMINDER_AVAILABILITY_MAINTENANCE_AUTOMATION_ID,
 } from '../managed-automations.js'
 import {
   MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
@@ -110,7 +109,6 @@ import {
 import { resolveAssistantConversationScope } from '../conversation-policy.js'
 import {
   MURPH_GROUP_ROOM_MODEL_TOOL,
-  MURPH_MEMBER_MAINTENANCE_TOOL,
   resolveMurphDynamicTools,
   type MurphDynamicTool,
 } from '../../assistant-codex/dynamic-tools.js'
@@ -793,8 +791,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
   })
   const allowFinishWithoutReply =
     input.allowFinishWithoutReply ?? input.profile.toolProfile === 'provider-turn'
-  // Maintenance turns run without a delivery target. Each maintenance profile
-  // receives only the one host-owned tool for its exact managed automation.
+  // Maintenance turns run without a delivery target. The room-model profile
+  // receives only its host-owned tool for the exact managed automation.
   const availableDynamicTools = outputOnlyTurn || onboardingGoalCheckinTurn
       ? []
       : maintenanceTurn
@@ -802,11 +800,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
       input.input.scheduledInvocationAuthority?.automationId ===
         MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID
         ? [MURPH_GROUP_ROOM_MODEL_TOOL]
-        : input.input.maintenanceProfile === 'member-reminders' &&
-          input.input.scheduledInvocationAuthority?.automationId ===
-            MURPH_REMINDER_AVAILABILITY_MAINTENANCE_AUTOMATION_ID
-          ? [MURPH_MEMBER_MAINTENANCE_TOOL]
-          : []
+        : []
       : resolveMurphDynamicTools({
         assistantStyleSettingsAvailable,
         allowFinishWithoutReply,

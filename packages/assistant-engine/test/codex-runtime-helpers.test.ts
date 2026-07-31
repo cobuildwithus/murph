@@ -3137,51 +3137,6 @@ describe('Codex assistant registry helpers', () => {
     expect(appServerInput?.sandbox).toBeUndefined()
   })
 
-  it('forwards exact member-maintenance authority with named permissions', async () => {
-    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
-      finalMessage: 'Completed member maintenance.',
-      precedingAgentMessageSegments: [],
-      responseDeliveryContextOrdinal: 0,
-      transcriptMessage: 'Completed member maintenance.',
-      jsonEvents: [],
-      providerActionCount: 0,
-      sessionId: 'member-maintenance-thread',
-      stderr: '',
-      stdout: '',
-      threadId: 'member-maintenance-thread',
-      turnId: 'turn-member-maintenance',
-    })
-
-    const attempt = await executeCodexAssistantTurnAttemptFromInput({
-      providerConfig: {
-        provider: 'codex-cli',
-        sandbox: 'danger-full-access',
-      },
-      turn: {
-        dynamicTools: [],
-        memberMaintenanceAuthorized: true,
-        permissions: 'murph-member-memory-maintenance',
-        processLifetime: 'one-shot',
-        prompt: 'Maintain member memory and reminder availability.',
-        providerThreadEphemeral: true,
-        runtimeWorkspaceRoots: ['/tmp/provider-tests'],
-        workingDirectory: '/tmp/provider-tests',
-      },
-    })
-
-    expect(attempt.ok).toBe(true)
-    const appServerInput =
-      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]
-    expect(appServerInput).toMatchObject({
-      ephemeral: true,
-      memberMaintenanceAuthorized: true,
-      permissions: 'murph-member-memory-maintenance',
-      processLifetime: 'one-shot',
-      runtimeWorkspaceRoots: ['/tmp/provider-tests'],
-    })
-    expect(appServerInput?.sandbox).toBeUndefined()
-  })
-
   it('does not replay committed history after stale native resume fails', async () => {
     const traceEvents: AssistantProviderTraceEvent[] = []
 

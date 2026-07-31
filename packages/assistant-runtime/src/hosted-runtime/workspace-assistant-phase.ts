@@ -40,6 +40,7 @@ import {
   recordHostedMailboxAssistantInputItem,
   readAssistantInputEvent,
   readAssistantOutboxIntent,
+  refreshReminderAvailability,
   refreshAssistantContextSnapshotBestEffort,
   scheduleDeviceActivityTriggeredAutomations,
   upsertAssistantInputEvent,
@@ -66,9 +67,7 @@ import {
 import {
   AutomationAvailabilityConflictBlockError,
   patchAutomation,
-  readAutomationAvailabilityCalendarAuthorization,
   reconcileAutomationSupportSeries,
-  replaceAutomationAvailabilityConflictSnapshot,
   resolveAutomationUpsertSlug,
   showAutomation,
   stripAutomationAvailabilityConflictBlock,
@@ -1308,15 +1307,6 @@ function createHostedAssistantAutomationTool(input: {
           unchangedCount: result.unchangedCount,
         };
       }
-      if (
-        request.action === "authorize_maintenance_source"
-        || request.action === "replace_maintenance_conflicts"
-      ) {
-        throw new VaultCliError(
-          "invalid_option",
-          "Member maintenance operations require the scheduled maintenance owner.",
-        );
-      }
       if (request.action === "save") {
         const requestedSlug = resolveAutomationUpsertSlug({
           slug: request.slug,
@@ -1462,166 +1452,6 @@ function createHostedAssistantAutomationTool(input: {
       });
     },
   };
-}
-
-function createHostedAssistantMemberMaintenanceAutomationTool(input: {
-  vaultRoot: string;
-}): HostedAssistantAutomationTool {
-  return {
-    async request(request, context) {
-      context?.signal?.throwIfAborted();
-      if (request.action === "authorize_maintenance_source") {
-        const existing = await requireMemberMaintenanceAutomation({
-          lookup: request.lookup,
-          vaultRoot: input.vaultRoot,
-        });
-        const authorization = readMemberMaintenanceSourceAuthorization({
-          existing,
-          source: request.source,
-        });
-        context?.signal?.throwIfAborted();
-        return {
-          action: request.action,
-          account: authorization.account,
-          automationId: existing.automationId,
-          authorized: true,
-          expectedUpdatedAt: existing.updatedAt,
-          source: request.source,
-          toolkit: authorization.toolkit,
-        };
-      }
-      if (request.action === "replace_maintenance_conflicts") {
-        const existing = await requireMemberMaintenanceAutomation({
-          lookup: request.lookup,
-          vaultRoot: input.vaultRoot,
-        });
-        const authorization = readMemberMaintenanceSourceAuthorization({
-          existing,
-          source: request.source,
-        });
-        if (
-          existing.updatedAt !== request.expectedUpdatedAt
-          || authorization.account !== request.account
-          || authorization.toolkit !== request.toolkit
-        ) {
-          throw new VaultCliError(
-            "automation_conflict",
-            "Automation availability authority changed during calendar refresh.",
-          );
-        }
-        let replacement: string;
-        try {
-          replacement = replaceAutomationAvailabilityConflictSnapshot({
-            busyIntervals: request.busyIntervals,
-            expiresAt: request.expiresAt,
-            generatedAt: request.generatedAt,
-            instructions: existing.instructions,
-          });
-        } catch {
-          throw invalidMemberMaintenanceConflictBlock();
-        }
-        context?.signal?.throwIfAborted();
-        if (replacement === existing.instructions) {
-          return {
-            action: request.action,
-            automationId: existing.automationId,
-            changed: false,
-            lookupId: existing.slug,
-            status: existing.status,
-          };
-        }
-        const result = await patchAutomation({
-          expectedUpdatedAt: existing.updatedAt,
-          instructions: replacement,
-          lookup: existing.automationId,
-          vaultRoot: input.vaultRoot,
-        });
-        return {
-          action: request.action,
-          automationId: result.record.automationId,
-          changed: true,
-          lookupId: result.record.slug,
-          status: result.record.status,
-        };
-      }
-      throw new VaultCliError(
-        "invalid_option",
-        "Only member maintenance automation operations are available.",
-      );
-    },
-  };
-}
-
-async function requireMemberMaintenanceAutomation(input: {
-  lookup: string;
-  vaultRoot: string;
-}): Promise<NonNullable<Awaited<ReturnType<typeof showAutomation>>>> {
-  const existing = await showAutomation({
-    automationId: input.lookup,
-    slug: input.lookup,
-    vaultRoot: input.vaultRoot,
-  });
-  if (!existing) {
-    throw new VaultCliError(
-      "automation_not_found",
-      "Automation was not found.",
-    );
-  }
-  assertMemberMaintenanceAutomationEligible(existing);
-  return existing;
-}
-
-function assertMemberMaintenanceAutomationEligible(
-  existing: NonNullable<Awaited<ReturnType<typeof showAutomation>>>,
-): void {
-  const activeUntilMs = existing.activeUntil === null
-    ? null
-    : Date.parse(existing.activeUntil);
-  if (
-    existing.status !== "active"
-    || existing.route.threadIsDirect !== true
-    || existing.supportKind === "weekly_digest"
-    || existing.tags.includes("runtime-maintenance")
-    || (
-      activeUntilMs !== null
-      && (!Number.isFinite(activeUntilMs) || activeUntilMs <= Date.now())
-    )
-  ) {
-    throw new VaultCliError(
-      "invalid_option",
-      "Automation is not eligible for private reminder maintenance.",
-    );
-  }
-
-  if (!readAutomationAvailabilityCalendarAuthorization(existing.instructions)) {
-    throw new VaultCliError(
-      "invalid_option",
-      "Automation does not explicitly authorize calendar-bound skip-when-busy maintenance.",
-    );
-  }
-}
-
-function readMemberMaintenanceSourceAuthorization(input: {
-  existing: NonNullable<Awaited<ReturnType<typeof showAutomation>>>;
-  source: "calendar";
-}) {
-  const authorization = readAutomationAvailabilityCalendarAuthorization(
-    input.existing.instructions,
-  );
-  if (input.source === "calendar" && authorization) {
-    return authorization;
-  }
-  throw new VaultCliError(
-    "invalid_option",
-    "Automation does not explicitly authorize calendar maintenance.",
-  );
-}
-
-function invalidMemberMaintenanceConflictBlock(): VaultCliError {
-  return new VaultCliError(
-    "invalid_option",
-    "Availability conflict block is malformed, stale, or outside its seven-day bound.",
-  );
 }
 
 function stripHostedAssistantAvailabilityConflictBlock(
@@ -1877,10 +1707,6 @@ export async function runHostedWorkspaceAssistantPhase(
     {
       hosted: {
         actionApprovalPort: input.runtime.platform.actionApprovalPort ?? null,
-        createScheduledMemberMaintenanceTool: () =>
-          createHostedAssistantMemberMaintenanceAutomationTool({
-            vaultRoot: input.restored.vaultRoot,
-          }),
         ...(input.currentAssistantInputId
           ? {
               currentAssistantInputId: input.currentAssistantInputId,
@@ -2096,10 +1922,13 @@ export async function runHostedWorkspaceAssistantPhase(
     const managedAutomationsResult = hasFreshConversationInput
       || systemMailboxMaintenance.pendingAssistantInputWakeAt !== null
       ? null
-      : await applyHostedManagedAutomationsBestEffort({
-        input,
-        retryStableKeyFailure: false,
-      });
+      : mergeHostedAssistantPhaseResults(
+          await applyHostedManagedAutomationsBestEffort({
+            input,
+            retryStableKeyFailure: false,
+          }),
+          await refreshHostedReminderAvailabilityBestEffort({ input }),
+        );
     const shouldContinueAssistantLane = systemMailboxMaintenance.continueAssistantLane
       || managedAutomationsResult !== null;
     if (
@@ -2801,6 +2630,95 @@ function hasFreshHostedMailboxInput(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): boolean {
   return input.initialMailboxImport.importResult.fetchedCount > 0;
+}
+
+async function refreshHostedReminderAvailabilityBestEffort(input: {
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+}): Promise<HostedWorkspaceRunnerAssistantPhaseResult | null> {
+  if (input.input.shouldYieldBackgroundMaintenance?.() === true) {
+    return null;
+  }
+
+  let result: Awaited<ReturnType<typeof refreshReminderAvailability>>;
+  try {
+    result = await refreshReminderAvailability({
+      connectedApps: input.input.runtime.platform.connectedApps ?? null,
+      now: new Date(resolveHostedAssistantPhaseNowMs(input.input)),
+      shouldYield: input.input.shouldYieldBackgroundMaintenance ?? null,
+      signal: input.input.signal ?? null,
+      vaultRoot: input.input.restored.vaultRoot,
+    });
+  } catch (error) {
+    const failure = buildHostedRuntimeFailureDiagnostics(
+      error,
+      "Hosted reminder availability maintenance failed.",
+      { includeSafeIdentity: true },
+    );
+    await writeHostedRuntimeLogBestEffort({
+      entry: {
+        ...buildHostedRuntimeLogContextFields({
+          attemptId: input.input.request.attemptId,
+          leaseGeneration: input.input.request.leaseGeneration,
+          workspaceVersion: input.input.request.workspaceVersion,
+        }),
+        component: "runtime",
+        errorCode: failure.errorCode,
+        eventCode: "runner.error",
+        level: "warn",
+        phase: "error",
+        redactedJson: {
+          ...failure.redactedJson,
+          reminderAvailabilityMaintenanceFailed: true,
+        },
+      },
+      platform: input.input.runtime.platform,
+    });
+    return null;
+  }
+
+  if (result.failed > 0) {
+    await writeHostedRuntimeLogBestEffort({
+      entry: {
+        ...buildHostedRuntimeLogContextFields({
+          attemptId: input.input.request.attemptId,
+          leaseGeneration: input.input.request.leaseGeneration,
+          workspaceVersion: input.input.request.workspaceVersion,
+        }),
+        component: "runtime",
+        eventCode: "runner.error",
+        level: "warn",
+        phase: "error",
+        redactedJson: {
+          reminderAvailabilityMaintenanceAttempted: result.attempted,
+          reminderAvailabilityMaintenanceFailed: result.failed,
+          reminderAvailabilityMaintenanceRefreshed: result.refreshed,
+        },
+      },
+      platform: input.input.runtime.platform,
+    });
+  }
+  if (result.refreshed === 0) {
+    return null;
+  }
+
+  return {
+    checkpointReason: "assistant_runtime_commit",
+    ...(result.yielded === true
+      ? {
+          nextWakeAt: new Date(
+            resolveHostedAssistantPhaseNowMs(input.input)
+              + HOSTED_MANAGED_AUTOMATION_SETUP_RETRY_DELAY_MS,
+          ).toISOString(),
+        }
+      : {}),
+    progressed: true,
+    redactedStatus: {
+      reminderAvailabilityMaintenanceAttempted: result.attempted,
+      reminderAvailabilityMaintenanceFailed: result.failed,
+      reminderAvailabilityMaintenanceRefreshed: result.refreshed,
+      reminderAvailabilityMaintenanceYielded: result.yielded === true,
+    },
+  };
 }
 
 async function applyHostedManagedAutomationsBestEffort(input: {

@@ -8,6 +8,7 @@ import {
   readAutomationAvailabilityCalendarAuthorization,
   replaceAutomationAvailabilityConflictSnapshot,
   shouldSkipAutomationOccurrenceForAvailability,
+  splitAutomationAvailabilityConflictBlock,
   stripAutomationAvailabilityConflictBlock,
 } from "../src/automation-availability.ts";
 
@@ -69,13 +70,22 @@ describe("automation availability conflicts", () => {
     expect(stripAutomationAvailabilityConflictBlock(instructions)).toBe(
       BASE_INSTRUCTIONS,
     );
-    expect(replaceAutomationAvailabilityConflictSnapshot({
+    const emptySnapshotInstructions =
+      replaceAutomationAvailabilityConflictSnapshot({
       busyIntervals: [],
       expiresAt: "2026-08-06T03:00:00.000Z",
       generatedAt: "2026-07-30T03:00:00.000Z",
       instructions,
       now: new Date("2026-07-30T04:00:00.000Z"),
-    })).toBe(BASE_INSTRUCTIONS);
+    });
+    const emptySnapshotBlock =
+      splitAutomationAvailabilityConflictBlock(emptySnapshotInstructions).block;
+    expect(
+      parseAutomationAvailabilityConflictBlock(emptySnapshotBlock ?? ""),
+    ).toMatchObject({
+      busyIntervals: [],
+      generatedAt: "2026-07-30T03:00:00.000Z",
+    });
   });
 
   it("skips only authorized occurrences inside an unexpired interval", () => {

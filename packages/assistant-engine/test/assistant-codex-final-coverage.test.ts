@@ -9,7 +9,6 @@ import {
 import {
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
   MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
-  MURPH_MEMBER_REMINDER_MAINTENANCE_PERMISSION_PROFILE,
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
 
@@ -138,14 +137,12 @@ import type {
 } from '../src/assistant/codex-turn/planning.ts'
 import {
   MURPH_GROUP_ROOM_MODEL_TOOL,
-  MURPH_MEMBER_MAINTENANCE_TOOL,
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import { MURPH_GENERATE_SONG_TOOL } from '../src/assistant-codex/dynamic-tools/generate-song.ts'
 import {
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
-  MURPH_REMINDER_AVAILABILITY_MAINTENANCE_AUTOMATION_ID,
 } from '../src/assistant/managed-automations.ts'
 import {
   MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
@@ -1045,119 +1042,7 @@ describe('Codex model catalog', () => {
       providerMocks.executeCodexAssistantTurnAttemptFromInput,
     ).toHaveBeenCalledWith(expect.objectContaining({
       dynamicTools: [],
-      memberMaintenanceAuthorized: false,
       permissions: MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
-      processLifetime: 'one-shot',
-      providerThreadEphemeral: true,
-      runtimeWorkspaceRoots: ['/vaults/member'],
-    }))
-  })
-
-  it('runs reminder maintenance as a one-shot read-only permission turn', async () => {
-    const route = createRoute()
-    const session = createAssistantSession({
-      providerOptions: route.providerOptions,
-    })
-    const input = {
-      executionContext: {
-        hosted: {
-          memberId: 'member-maintenance',
-          userEnvKeys: [],
-        },
-      },
-      maintenanceProfile: 'member-reminders' as const,
-      prompt: 'Maintain reminder availability.',
-      scheduledInvocationAuthority: {
-        automationId: MURPH_REMINDER_AVAILABILITY_MAINTENANCE_AUTOMATION_ID,
-        occurrenceAt: '2026-07-25T08:00:00.000Z',
-      },
-      vault: '/vaults/member',
-    }
-
-    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportedUserMessageContentTypes: ['text'],
-      supportsReasoningEffort: true,
-    })
-    providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
-      createProviderAttemptResult(),
-    )
-    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
-      activeTurnSteering: null,
-      executionContext: input.executionContext,
-      hostedToolContext: {
-        computerToolsAvailable: false,
-        currentHostedDeliveryContext: () => null,
-        currentHostedMailboxItemIds: () => [],
-        sendVaultFile: vi.fn(),
-        vaultFileSendAvailable: false,
-      },
-      input,
-      profile: {
-        promptProfile: 'maintenance',
-        threadScope: 'isolated-thread',
-        toolProfile: 'maintenance-turn',
-      },
-      promptTimeContext: {
-        currentLocalDate: '2026-07-25',
-        currentTimeZone: 'America/New_York',
-      },
-      route,
-      sharedPlan: createSharedPlan(),
-      progressDelivery: null,
-      turnId: 'turn-member-maintenance',
-    } satisfies AssistantCodexTurnExecutionPlan)
-    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
-      attemptCount: 1,
-      route,
-      routePlan: {
-        assistantContractFingerprint:
-          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-        assistantCliContract: null,
-        cliEnv: {},
-        codexContinuation: {
-          kind: 'explicit-structured-history',
-        } satisfies AssistantCodexContinuation,
-        developerInstructions: null,
-        diagnosticsPolicy: {
-          environment: 'hosted',
-          privateIssueCaptureEnabled: false,
-          surface: 'linq',
-        },
-        dynamicTools: [MURPH_MEMBER_MAINTENANCE_TOOL],
-        onboardingGuidanceInjected: false,
-        planningDiagnostics: createRoutePlanningDiagnostics(),
-        promptCacheMetadata: null,
-        resume: null,
-        sessionContext: undefined,
-        systemPrompt: 'Member maintenance prompt.',
-        turnContextPrompt: null,
-        workingDirectory: '/vaults/member',
-      } satisfies AssistantRouteTurnPlan,
-      session,
-    } satisfies AssistantCodexAttemptPlan)
-
-    const outcome = await executeCodexTurnWithRecovery({
-      input,
-      plan: createSharedPlan(),
-      profile: {
-        nativeResumePolicy: 'disabled',
-        promptProfile: 'maintenance',
-        threadScope: 'isolated-thread',
-        toolProfile: 'maintenance-turn',
-      },
-      resolvedSession: session,
-      route,
-      turnCreatedAt: '2026-07-25T08:00:00.000Z',
-      turnId: 'turn-member-maintenance',
-    })
-
-    expect(outcome.kind).toBe('succeeded')
-    expect(
-      providerMocks.executeCodexAssistantTurnAttemptFromInput,
-    ).toHaveBeenCalledWith(expect.objectContaining({
-      dynamicTools: [MURPH_MEMBER_MAINTENANCE_TOOL],
-      memberMaintenanceAuthorized: true,
-      permissions: MURPH_MEMBER_REMINDER_MAINTENANCE_PERMISSION_PROFILE,
       processLifetime: 'one-shot',
       providerThreadEphemeral: true,
       runtimeWorkspaceRoots: ['/vaults/member'],

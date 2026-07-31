@@ -287,23 +287,6 @@ function serializeAutomationToolResponse(
         unchangedCount: response.unchangedCount,
       }
       break
-    case 'authorize_maintenance_source':
-      payload = {
-        action: response.action,
-        automationId: response.automationId,
-        authorized: response.authorized,
-        source: response.source,
-      }
-      break
-    case 'replace_maintenance_conflicts':
-      payload = {
-        action: response.action,
-        automationId: response.automationId,
-        changed: response.changed,
-        lookupId: response.lookupId,
-        status: response.status,
-      }
-      break
     case 'patch':
     case 'save':
       payload = {

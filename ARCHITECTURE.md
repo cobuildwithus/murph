@@ -91,29 +91,27 @@ decrypted contact roster, or compatibility branch. The legacy `read_current`
 wire is unchanged, and assistant-engine still removes the global member id and
 legacy roster handle before any group summary reaches the model.
 
-Immutable hosted memory consolidation and reminder-availability maintenance are
-separate one-shot automations. Memory keeps its existing network-denied
-memory-write profile and has no connected-app or automation tool. Reminder
-maintenance runs afterward under a network-denied profile that can read only
-`bank/automations`, and may inspect only
-active private automations that explicitly store `skip-when-busy`,
-`calendar-only`, and one exact Google Calendar or Outlook account binding. Its
-single `murph.maintenance` action accepts only an automation lookup. Host code
-rechecks that authority, derives the exact account and current seven-day
-provider request, caps the result, reduces it to normalized busy timestamps,
-and performs the version-fenced suffix replacement as one operation. The model
-cannot supply provider arguments, dates, an account, timestamps, or replacement
-instructions. The ordinary automation owner strips the engine-owned suffix
-from user-authored saves and instruction patches, while scheduled delivery
-ignores the suffix unless current policy/source/account authorization remains
-exact and the snapshot is canonical, unexpired, and covers an occurrence
-scheduled within 24 hours of generation. That snapshot is a short derived-data
-lease: disconnect or provider revocation stops future refreshes but does not
-synchronously cancel already-derived busy timestamps. Policy removal or account
-replacement invalidates the lease immediately; provider failure, incomplete
-pagination, malformed or older evidence, and concurrent edits send normally.
-Raw calendar content never reaches the model, memory, automation instructions,
-or logs.
+Immutable hosted memory consolidation remains an isolated one-shot automation
+with its network-denied memory-write profile. Reminder availability uses no
+model turn or separate automation: the existing hosted background automation
+pass deterministically scans active private automations that explicitly store
+`skip-when-busy`, `calendar-only`, and one exact Google Calendar or Outlook
+account binding. When the stored snapshot is missing or older than 24 hours,
+host code derives the exact account and current seven-day provider request,
+caps the result, reduces it to normalized busy timestamps, rereads the
+automation, and performs a version-fenced suffix replacement. Complete empty
+reads persist an empty snapshot so the same canonical `generatedAt` field also
+bounds refresh cadence without another scheduler or state owner. Ordinary
+user-authored saves and instruction patches strip the engine-owned suffix.
+Scheduled delivery ignores it unless current policy/source/account
+authorization remains exact and the snapshot is canonical, unexpired, and
+covers an occurrence scheduled within 24 hours of generation. That snapshot is
+a short derived-data lease: disconnect or provider revocation stops future
+refreshes but does not synchronously cancel already-derived busy timestamps.
+Policy removal or account replacement invalidates the lease immediately;
+provider failure, incomplete pagination, malformed or older evidence, and
+concurrent edits send normally. Raw calendar content never reaches a model,
+memory, automation instructions, or logs.
 
 Each synthetic hosted group runtime may additionally keep one assistant-authored
 `group-room-model` derived knowledge page. A twice-weekly managed automation

@@ -98,9 +98,6 @@ import {
 import {
   MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
 } from './onboarding-goal-checkin-automation.js'
-import {
-  MURPH_REMINDER_AVAILABILITY_MAINTENANCE_AUTOMATION_ID,
-} from './managed-automations.js'
 
 const assistantNotificationSkipDecisionSchema = z
   .object({
@@ -272,9 +269,7 @@ export async function sendAssistantNotificationLocal(
   })
   // Built before the turn lock so evidence reads never extend the window in
   // which fresh foreground input waits on lock admission.
-  const maintenanceEvidence =
-    isAssistantNotificationMaintenanceExactSkip(input)
-    && input.turnPolicy?.maintenanceProfile !== 'member-reminders'
+  const maintenanceEvidence = isAssistantNotificationMaintenanceExactSkip(input)
     ? await buildAssistantMaintenanceConversationEvidence({
         now: new Date(),
         profile: requireAssistantNotificationMaintenanceProfile(input),
@@ -397,41 +392,13 @@ export async function sendAssistantNotificationLocal(
       }
 
       const turnId = createAssistantTurnId()
-      const memberMaintenanceHostedToolsAuthorized =
-        isAssistantNotificationMaintenanceExactSkip(input) &&
-        input.turnPolicy?.maintenanceProfile === 'member-reminders' &&
-        input.scheduledInvocationAuthority?.automationId ===
-          MURPH_REMINDER_AVAILABILITY_MAINTENANCE_AUTOMATION_ID
       const hostedExecutionContext =
         isAssistantNotificationScheduledOccurrence(input) &&
-        (
-          !isAssistantNotificationMaintenanceExactSkip(input)
-          || memberMaintenanceHostedToolsAuthorized
-        )
+        !isAssistantNotificationMaintenanceExactSkip(input)
           ? executionContext?.hosted ?? null
           : null
-      const memberMaintenanceAutomationTool =
-        memberMaintenanceHostedToolsAuthorized
-          ? hostedExecutionContext?.createScheduledMemberMaintenanceTool?.() ?? null
-          : null
-      const turnHostedExecutionContext = (() => {
-        if (!hostedExecutionContext || !memberMaintenanceHostedToolsAuthorized) {
-          return hostedExecutionContext
-        }
-        const {
-          automationTool: _ordinaryAutomationTool,
-          ...maintenanceHostedExecutionContext
-        } = hostedExecutionContext
-        void _ordinaryAutomationTool
-        return memberMaintenanceAutomationTool
-          ? {
-              ...maintenanceHostedExecutionContext,
-              automationTool: memberMaintenanceAutomationTool,
-            }
-          : maintenanceHostedExecutionContext
-      })()
       const route = resolveAssistantTurnRoute(messageInput, defaults, resolved)
-      const hostedToolContext = turnHostedExecutionContext
+      const hostedToolContext = hostedExecutionContext
         ? createAssistantHostedToolContext({
             beforeToolExecution: input.beforeToolExecution
               ? async () => {
@@ -439,8 +406,8 @@ export async function sendAssistantNotificationLocal(
                 }
               : undefined,
             computerToolsAvailable:
-              typeof turnHostedExecutionContext.providerFetch === 'function',
-            executionContext: turnHostedExecutionContext,
+              typeof hostedExecutionContext.providerFetch === 'function',
+            executionContext: hostedExecutionContext,
             getConversationScope: () => conversationScope,
             messageInput,
             newsletterOutbox: {

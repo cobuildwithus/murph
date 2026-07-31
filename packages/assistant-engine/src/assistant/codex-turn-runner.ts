@@ -7,7 +7,6 @@ import {
 import {
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
   MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
-  MURPH_MEMBER_REMINDER_MAINTENANCE_PERMISSION_PROFILE,
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
 import {
@@ -77,7 +76,6 @@ import {
 import {
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
-  MURPH_REMINDER_AVAILABILITY_MAINTENANCE_AUTOMATION_ID,
 } from './managed-automations.js'
 import type {
   AssistantHostedToolContext,
@@ -495,15 +493,9 @@ async function executeAssistantCodexAttempt(input: {
       executionPlan.input.maintenanceProfile === 'member-memory' &&
       executionPlan.input.scheduledInvocationAuthority?.automationId ===
         MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID
-    const memberReminderMaintenanceTurn =
-      executionPlan.profile.toolProfile === 'maintenance-turn' &&
-      executionPlan.input.maintenanceProfile === 'member-reminders' &&
-      executionPlan.input.scheduledInvocationAuthority?.automationId ===
-        MURPH_REMINDER_AVAILABILITY_MAINTENANCE_AUTOMATION_ID
     const restrictedOneShotTurn =
       groupRoomModelMaintenanceTurn ||
       memberMemoryMaintenanceTurn ||
-      memberReminderMaintenanceTurn ||
       readOnlyAutomationTurn
     const audience = executionPlan.sharedPlan.conversationPolicy.audience
     const groupConversation =
@@ -566,7 +558,6 @@ async function executeAssistantCodexAttempt(input: {
         env: attemptEnv,
         groupConversation,
         groupRoomModelMaintenanceAuthorized: groupRoomModelMaintenanceTurn,
-        memberMaintenanceAuthorized: memberReminderMaintenanceTurn,
         hostedToolContext:
           nativeCapabilitiesRestrictedTurn || readOnlyAutomationTurn
           ? null
@@ -615,8 +606,6 @@ async function executeAssistantCodexAttempt(input: {
             ? MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE
             : memberMemoryMaintenanceTurn
               ? MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE
-              : memberReminderMaintenanceTurn
-                ? MURPH_MEMBER_REMINDER_MAINTENANCE_PERMISSION_PROFILE
               : readOnlyAutomationTurn && executionPlan.executionContext?.hosted
               ? MURPH_MEMBER_READ_PERMISSION_PROFILE
               : null,

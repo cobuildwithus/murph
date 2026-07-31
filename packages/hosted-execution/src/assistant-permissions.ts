@@ -3,8 +3,6 @@ export const MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE =
   "murph-group-room-model-maintenance" as const;
 export const MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE =
   "murph-member-memory-maintenance" as const;
-export const MURPH_MEMBER_REMINDER_MAINTENANCE_PERMISSION_PROFILE =
-  "murph-member-reminder-maintenance" as const;
 export const MURPH_MEMBER_READ_PERMISSION_PROFILE =
   "murph-member-read" as const;
 
@@ -65,23 +63,6 @@ export function buildMurphMemberMemoryMaintenancePermissionProfileTomlLines(): r
     '"**/.env.*" = "deny"',
     "",
     `[permissions.${MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE}.network]`,
-    "enabled = false",
-    "",
-  ];
-}
-
-export function buildMurphMemberReminderMaintenancePermissionProfileTomlLines(): readonly string[] {
-  return [
-    "# Silent reminder maintenance may read only canonical automation definitions.",
-    `[permissions.${MURPH_MEMBER_REMINDER_MAINTENANCE_PERMISSION_PROFILE}.filesystem]`,
-    '":minimal" = "read"',
-    "glob_scan_max_depth = 4",
-    "",
-    `[permissions.${MURPH_MEMBER_REMINDER_MAINTENANCE_PERMISSION_PROFILE}.filesystem.":workspace_roots"]`,
-    '"." = "deny"',
-    '"bank/automations" = "read"',
-    "",
-    `[permissions.${MURPH_MEMBER_REMINDER_MAINTENANCE_PERMISSION_PROFILE}.network]`,
     "enabled = false",
     "",
   ];

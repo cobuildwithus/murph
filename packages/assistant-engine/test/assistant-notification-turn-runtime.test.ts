@@ -45,9 +45,6 @@ import {
 import {
   MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
 } from '../src/assistant/onboarding-goal-checkin-automation.ts'
-import {
-  MURPH_REMINDER_AVAILABILITY_MAINTENANCE_AUTOMATION_ID,
-} from '../src/assistant/managed-automations.ts'
 
 type CodexAssistantTarget = Extract<
   AssistantSession['target'],
@@ -2585,7 +2582,7 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
   expect(deliverMessage).not.toHaveBeenCalled()
 })
 
-test('sendAssistantNotificationLocal gives hosted capabilities only to scheduled work that needs them', async () => {
+test('sendAssistantNotificationLocal gives hosted capabilities only to real scheduled occurrences', async () => {
   const providerResult = createProviderResult({
     response: '```json\n{"kind":"skip","privateSummary":"No notification required."}\n```',
   })
@@ -2598,7 +2595,6 @@ test('sendAssistantNotificationLocal gives hosted capabilities only to scheduled
     })),
   }
   const automationTool = { request: vi.fn() }
-  const memberMaintenanceAutomationTool = { request: vi.fn() }
   const connectedApps = { request: vi.fn() }
   const labsTool = { request: vi.fn() }
   const personalizationTool = { request: vi.fn() }
@@ -2619,8 +2615,6 @@ test('sendAssistantNotificationLocal gives hosted capabilities only to scheduled
   const executionContext = {
     hosted: {
       automationTool,
-      createScheduledMemberMaintenanceTool: () =>
-        memberMaintenanceAutomationTool,
       connectedApps,
       deviceTool,
       labsTool,
@@ -2644,42 +2638,15 @@ test('sendAssistantNotificationLocal gives hosted capabilities only to scheduled
   await sendAssistantNotificationLocal({
     executionContext,
     instructions: 'Run private maintenance.',
-    scheduledInvocationAuthority: {
-      automationId: MURPH_REMINDER_AVAILABILITY_MAINTENANCE_AUTOMATION_ID,
-      occurrenceAt: '2026-07-18T14:00:00.000Z',
-    },
     scheduledOccurrenceAt: '2026-07-18T14:00:00.000Z',
     turnPolicy: {
       kind: 'maintenance-exact-skip',
-      maintenanceProfile: 'member-reminders',
+      maintenanceProfile: 'member-memory',
       privateSummary: 'No notification required.',
     },
     vault: '/vaults/notification-device-scope',
   })
-  const {
-    createScheduledMemberMaintenanceTool:
-      _createScheduledMemberMaintenanceTool,
-    ...hostedWithoutMaintenanceFactory
-  } = executionContext.hosted
-  void _createScheduledMemberMaintenanceTool
-  await sendAssistantNotificationLocal({
-    executionContext: {
-      hosted: hostedWithoutMaintenanceFactory,
-    },
-    instructions: 'Run private maintenance without its exact owner.',
-    scheduledInvocationAuthority: {
-      automationId: MURPH_REMINDER_AVAILABILITY_MAINTENANCE_AUTOMATION_ID,
-      occurrenceAt: '2026-07-19T14:00:00.000Z',
-    },
-    scheduledOccurrenceAt: '2026-07-19T14:00:00.000Z',
-    turnPolicy: {
-      kind: 'maintenance-exact-skip',
-      maintenanceProfile: 'member-reminders',
-      privateSummary: 'No notification required.',
-    },
-    vault: '/vaults/notification-device-scope',
-  })
-  expect(observedHostedToolContexts).toHaveLength(4)
+  expect(observedHostedToolContexts).toHaveLength(3)
   expect(observedHostedToolContexts[0]).toBeNull()
   expect(observedHostedToolContexts[1]?.automationTool).toBe(automationTool)
   expect(observedHostedToolContexts[1]?.connectedApps).toBe(connectedApps)
@@ -2689,12 +2656,7 @@ test('sendAssistantNotificationLocal gives hosted capabilities only to scheduled
     personalizationTool,
   )
   expect(observedHostedToolContexts[1]?.computerToolsAvailable).toBe(true)
-  expect(observedHostedToolContexts[2]?.automationTool).toBe(
-    memberMaintenanceAutomationTool,
-  )
-  expect(observedHostedToolContexts[2]?.connectedApps).toBe(connectedApps)
-  expect(observedHostedToolContexts[3]?.automationTool).toBeNull()
-  expect(observedHostedToolContexts[3]?.connectedApps).toBe(connectedApps)
+  expect(observedHostedToolContexts[2]).toBeNull()
 })
 
 test('sendAssistantNotificationLocal exposes newsletter tools only with scheduled email authority', async () => {
