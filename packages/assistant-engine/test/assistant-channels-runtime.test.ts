@@ -823,6 +823,68 @@ describe('assistant channels runtime seam', () => {
     })
   })
 
+  it('preserves the image description through the existing Telegram caption overflow path', async () => {
+    const alternative = 'Direction context unavailable · mover sentiment is neutral.'
+    const message = 'x'.repeat(1_000)
+    const fetchImplementation = createQueuedFetch([
+      createTelegramResponse(200, {
+        ok: true,
+        result: {
+          message_id: 3001,
+        },
+      }),
+      createTelegramResponse(200, {
+        ok: true,
+        result: {
+          message_id: 3002,
+        },
+      }),
+    ])
+
+    await expect(
+      sendTelegramImageMessage(
+        {
+          media: [
+            {
+              alt: alternative,
+              kind: 'image',
+              source: 'test',
+              url: 'https://cdn.example.test/progress-card.png',
+            },
+          ],
+          message,
+          replyToMessageId: '42',
+          target: '123',
+        },
+        {
+          env: {
+            TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation,
+        },
+      ),
+    ).resolves.toMatchObject({
+      providerMessageId: '3002',
+      providerMessageIds: ['3001', '3002'],
+      target: '123',
+    })
+
+    const textRequest = readJsonBody(fetchImplementation.mock.calls[0]?.[1]?.body)
+    expect(textRequest).toMatchObject({
+      chat_id: '123',
+      reply_to_message_id: 42,
+      text: `${message}\n\n${alternative}`,
+    })
+    expect(String(textRequest.text).match(
+      /Direction context unavailable · mover sentiment is neutral\./gu,
+    )).toHaveLength(1)
+    expect(readJsonBody(fetchImplementation.mock.calls[1]?.[1]?.body)).toMatchObject({
+      chat_id: '123',
+      photo: 'https://cdn.example.test/progress-card.png',
+    })
+  })
+
   it('blocks an authority-bound Telegram photo redirect before the migrated request', async () => {
     const fetchImplementation = createQueuedFetch([
       createTelegramResponse(400, {
