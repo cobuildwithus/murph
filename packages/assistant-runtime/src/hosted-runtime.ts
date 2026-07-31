@@ -2939,7 +2939,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         let continueForegroundCausalPass =
           !assistantProviderHandoffRequested
           && shouldContinueForegroundCausalPass(passResult);
-        while (rerunAssistantInputBatch || continueForegroundCausalPass) {
+        while (
+          options.shutdownSignal?.aborted !== true
+          && (rerunAssistantInputBatch || continueForegroundCausalPass)
+        ) {
           passResult = await runSingleForegroundPass({
             foregroundCausalOnly:
               rerunAssistantInputBatch === null
