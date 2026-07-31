@@ -455,7 +455,7 @@ test("SettingsPage keeps a signed-out Stripe payment return recoverable", async 
   expect(mocks.getPrisma).not.toHaveBeenCalled();
 });
 
-test("SettingsPage keeps a signed-out Group payment return recoverable", async () => {
+test("SettingsPage keeps a signed-out Core payment return recoverable", async () => {
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: false,
     authenticatedMember: null,
@@ -472,7 +472,7 @@ test("SettingsPage keeps a signed-out Group payment return recoverable", async (
 
   assert.match(markup, /One more step/);
   assert.doesNotMatch(markup, /Payment method saved/);
-  assert.doesNotMatch(markup, /Group has not started/);
+  assert.doesNotMatch(markup, /Core has not started/);
   expect(mocks.getPrisma).not.toHaveBeenCalled();
 });
 

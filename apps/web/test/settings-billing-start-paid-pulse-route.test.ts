@@ -194,6 +194,7 @@ test("rejects an unsupported trial plan", async () => {
   await expect(response.json()).resolves.toMatchObject({
     error: {
       code: "HOSTED_TRIAL_START_PAID_PLAN_INVALID",
+      message: "Choose Core or Pulse before starting a paid trial plan.",
     },
   });
 });

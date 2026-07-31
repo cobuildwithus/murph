@@ -103,6 +103,6 @@ export async function assertHostedBillingPlanSelectable(input: {
     code: "HOSTED_GROUP_PLAN_NOT_ELIGIBLE",
     httpStatus: 409,
     message:
-      "The Group plan is available while you're part of a Murph group.",
+      "The Core plan is available while you're part of a Murph group.",
   });
 }

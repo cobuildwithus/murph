@@ -2,6 +2,9 @@ import {
   HOSTED_PLAN_CODES,
   type HostedPlanCode,
 } from "@murphai/hosted-execution/runtime-control";
+import {
+  HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME,
+} from "@murphai/hosted-execution/plan-usage";
 
 export { HOSTED_PLAN_CODES, type HostedPlanCode };
 
@@ -108,7 +111,7 @@ const HOSTED_BILLING_PLAN_DEFINITIONS = {
   launch_group_monthly: {
     badge: null,
     code: "launch_group_monthly",
-    displayName: "Group",
+    displayName: HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME,
     interval: "month",
     planCode: "pulse",
     priceIdEnvKey:
