@@ -45,7 +45,6 @@ import {
   type AssistantExecutionContext,
 } from '../execution-context.js'
 import {
-  isManagedOnboardingFollowupAutomation,
   isRetiredMurphManagedAutomationId,
   resolveMurphManagedAutomationOwnerScope,
   resolveMurphManagedMaintenancePolicy,
@@ -1664,11 +1663,7 @@ function resolveAssistantCronNotificationTurnPolicy(
     }
   }
 
-  return job.kind === 'canonical' &&
-    job.source.kind === 'automation' &&
-    isManagedOnboardingFollowupAutomation(job.source)
-    ? { kind: 'onboarding-followup' }
-    : null
+  return null
 }
 
 function assistantCronDeviceActivitySkipConsumesOccurrence(input: {

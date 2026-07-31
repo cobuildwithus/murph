@@ -1621,7 +1621,7 @@ describe("executeHostedMailboxEvent", () => {
       },
       {
         clause:
-          "For this scheduled occurrence only, do not run the onboarding completion command directly.",
+          "This background occurrence must never run the onboarding completion command or otherwise mutate onboarding state.",
         state: "overall decline",
       },
       {
@@ -1646,7 +1646,7 @@ describe("executeHostedMailboxEvent", () => {
       },
       {
         clause:
-          "It must contain exactly one easy, reply-oriented question; otherwise return skip.",
+          "It must contain exactly one easy, reply-oriented question; otherwise return an ordinary skip.",
         state: "eligible continuation",
       },
     ] as const;
@@ -1670,10 +1670,10 @@ describe("executeHostedMailboxEvent", () => {
       "The skill is the single owner of conversation order, checkpoint meaning, persistence, and completion; do not create a second state machine in this automation.",
     );
     expect(seedInput?.instructions).toContain(
-      "The notification boundary applies that action through the canonical onboarding owner and fails the run if completion does not commit.",
+      "This background occurrence must never run the onboarding completion command or otherwise mutate onboarding state.",
     );
     expect(seedInput?.instructions).toContain(
-      'include `onboardingAction: {"kind":"leave_open"}`',
+      "Only a later foreground user reply may advance or complete onboarding.",
     );
     expect(seedInput?.instructions).not.toContain(
       "If a promised follow-through or next step in the member's agreed support loop is due, do that first.",

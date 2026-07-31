@@ -151,9 +151,6 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   // Engine-owned silent-maintenance policy. It selects trusted prompt/evidence
   // boundaries and is never supplied by a model or persisted automation.
   maintenanceProfile?: AssistantMaintenanceProfile | null
-  // Engine-owned response extension for the finite onboarding notification.
-  // It is never model supplied or persisted into session identity.
-  notificationDecisionProfile?: 'onboarding-followup' | null
   onFinishWithoutReplyAccepted?: AssistantFinishWithoutReplyAcceptedHook | null
   onProviderEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onProviderRequestStarted?: AssistantProviderRequestStartHook | null

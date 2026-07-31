@@ -878,13 +878,11 @@ skipped category, and do not require a plan or support loop merely to use
 `user_answered`.
 
 During the finite next-day recovery occurrence, do not run the completion
-command directly. Return the scheduled notification's structured
-`onboardingAction` instead: `complete` with `user_answered` or `user_declined`
-when onboarding should close, or `leave_open` for a valid silent skip while it
-remains open. The notification boundary applies completion through the same
-canonical state owner only after the scheduled occurrence passes its final
-source, cutoff, lifecycle, and foreground-preemption authority check. It fails
-the run if that write does not commit.
+command or otherwise mutate onboarding state. Return an ordinary scheduled
+notification skip when the evidence already answers the checkpoint, declines
+onboarding, defers it, or makes another question untimely or unhelpful. Only a
+later foreground user reply may advance or complete onboarding through the
+canonical state owner.
 
 ### Finite next-day recovery
 
@@ -902,12 +900,10 @@ re-enable, rotate, or reschedule another onboarding follow-up.
 - Return skip after an answer, completion, overall decline, request for no
   follow-up, explicit deferral whose timing should be honored, newer urgent or
   safety-sensitive context, or evidence too stale or incomplete to support a
-  useful reopening question. Use the scheduled notification's `complete`
-  action for answered completion or overall decline, and `leave_open` for the
-  other valid silent skips.
+  useful reopening question. Every one of these cases uses the ordinary
+  scheduled notification skip and leaves onboarding state unchanged.
 - Send or skip ends this scheduled recovery. Any later member reply resumes
-  through ordinary reply-driven onboarding, which remains open unless
-  completion was durably recorded.
+  through ordinary reply-driven onboarding.
 
 ## Reply and follow-up rules
 
@@ -940,5 +936,5 @@ re-enable, rotate, or reschedule another onboarding follow-up.
   attention, or the current health-data reply should stand alone.
 - Skip conditions suppress a visible question; they do not complete onboarding
   or cancel the canonical completion operation when every criterion is already
-  satisfied. Use the structured scheduled action during the finite occurrence
-  and the direct command during ordinary reply-driven onboarding.
+  satisfied. During the finite scheduled occurrence, leave state unchanged.
+  During ordinary reply-driven onboarding, use the direct command.

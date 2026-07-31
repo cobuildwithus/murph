@@ -54,7 +54,7 @@ export const MURPH_ONBOARDING_FOLLOWUP_AUTOMATION =
       '',
       'If `onboarding.status` is `completed`, return skip. The managed-automation owner archives this follow-up deterministically.',
       '',
-      'For this scheduled occurrence only, do not run the onboarding completion command directly. If the onboarding skill says the visible and saved evidence satisfies answered completion or shows an overall decline, return skip with `onboardingAction: {"kind":"complete","reason":"user_answered"}` or `onboardingAction: {"kind":"complete","reason":"user_declined"}`. The notification boundary applies that action through the canonical onboarding owner and fails the run if completion does not commit.',
+      'This background occurrence must never run the onboarding completion command or otherwise mutate onboarding state. If the visible and saved evidence shows onboarding is already answered, declined, deferred, or no longer useful to reopen, return an ordinary skip. Only a later foreground user reply may advance or complete onboarding.',
       '',
       'Otherwise use exactly the next unresolved step from the onboarding skill, including aspiration capture, explicit parking, foundation questions, contextual return, and its targeted-read rules for omitted, truncated, or errored evidence. If that step is only a reflection or parking transition, combine it with the next skill-approved question when the skill permits; otherwise return skip. Do not compress, reorder, or bypass that policy merely because this is a scheduled run.',
       '',
@@ -62,7 +62,7 @@ export const MURPH_ONBOARDING_FOLLOWUP_AUTOMATION =
       '',
       'Before sending, triple-check the snapshot and recent messages for an answer, skip, defer, decline, or a newer topic that should win. Follow the onboarding skill’s finite next-day recovery rule exactly. Do not re-ask known or resolved context, repeat an unanswered setup question, or rotate to another setup question. Honor requested timing and return skip after an explicit decline, a request not to follow up, or whenever the finite reopening question would not be timely or useful.',
       '',
-      "Output: send at most one brief, natural, low-pressure in-chat continuation. It must contain exactly one easy, reply-oriented question; otherwise return skip. When onboarding is still open and a skip should leave it open, include `onboardingAction: {\"kind\":\"leave_open\"}`. Do not mention internal state, setup completion, final attempts, schedules, or this automation, and do not use a fixed script. The user's reply will be handled by the next normal Murph onboarding turn.",
+      "Output: send at most one brief, natural, low-pressure in-chat continuation. It must contain exactly one easy, reply-oriented question; otherwise return an ordinary skip. Do not mention internal state, setup completion, final attempts, schedules, or this automation, and do not use a fixed script. The user's reply will be handled by the next normal Murph onboarding turn.",
     ].join('\n'),
   } satisfies MurphOnboardingFollowupAutomationDefinition
 

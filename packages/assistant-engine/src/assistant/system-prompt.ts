@@ -63,7 +63,6 @@ export interface AssistantSystemPromptInput {
   conversationScope?: AssistantConversationScope;
   hostedRuntime?: boolean;
   murphProductBaseUrl?: string | null;
-  notificationDecisionProfile?: "onboarding-followup" | null;
   onboardingGuidance: boolean;
   modelBehaviorProfile: AssistantModelBehaviorProfile;
   scheduledOccurrenceAt?: string | null;
@@ -855,10 +854,7 @@ function buildDynamicTurnContextPrompt(input: AssistantSystemPromptInput): strin
       : null,
     scheduledOccurrenceContext,
     scheduledOccurrenceContext
-      ? buildAssistantDeliveryDecisionContractText(
-          input.channel,
-          input.notificationDecisionProfile,
-        )
+      ? buildAssistantDeliveryDecisionContractText(input.channel)
       : null
   );
 }
@@ -1428,7 +1424,6 @@ Structured output contract:
 
 function buildAssistantDeliveryDecisionContractText(
   channel: string | null,
-  notificationDecisionProfile?: "onboarding-followup" | null,
 ): string {
   const channelText = channel
     ? `The bound outbound channel is ${channel}.`
@@ -1442,14 +1437,7 @@ function buildAssistantDeliveryDecisionContractText(
   {"kind":"send_message","text":"...","privateSummary":"..."}
   {"kind":"send_message","text":"...","subject":"...","privateSummary":"..."}
 - \`text\` is the single final user-facing message. \`subject\` applies only to a new outbound email.
-- \`privateSummary\` is an internal run note. The platform delivers the result; do not deliver or narrate it separately.`,
-    notificationDecisionProfile === "onboarding-followup"
-      ? `Scheduled onboarding skip extension:
-- When the engine-supplied task requires an onboarding action, replace the ordinary skip shape with exactly one of:
-  {"kind":"skip","onboardingAction":{"kind":"complete","reason":"user_answered"},"privateSummary":"..."}
-  {"kind":"skip","onboardingAction":{"kind":"complete","reason":"user_declined"},"privateSummary":"..."}
-  {"kind":"skip","onboardingAction":{"kind":"leave_open"},"privateSummary":"..."}`
-      : null
+- \`privateSummary\` is an internal run note. The platform delivers the result; do not deliver or narrate it separately.`
   );
 }
 

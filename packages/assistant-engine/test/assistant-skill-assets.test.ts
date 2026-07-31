@@ -2614,13 +2614,13 @@ How old are you and what's your gender?
       'Send or skip ends this scheduled recovery.',
     )
     expect(compact).toContain(
-      'The notification boundary applies completion through the same canonical state owner only after the scheduled occurrence passes its final source, cutoff, lifecycle, and foreground-preemption authority check.',
+      'do not run the completion command or otherwise mutate onboarding state',
     )
     expect(compact).toContain(
-      'It fails the run if that write does not commit.',
+      'Only a later foreground user reply may advance or complete onboarding through the canonical state owner.',
     )
     expect(compact).toContain(
-      '`leave_open` for a valid silent skip while it remains open',
+      'uses the ordinary scheduled notification skip and leaves onboarding state unchanged',
     )
     expect(compact).not.toContain('managed daily onboarding follow-up')
 

@@ -907,9 +907,7 @@ describe('assistant cron runtime orchestration', () => {
 
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
-        turnPolicy: {
-          kind: 'onboarding-followup',
-        },
+        turnPolicy: null,
       }),
     )
     expect(completed.run.outcome).toBe('delivered')

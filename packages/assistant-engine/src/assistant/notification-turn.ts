@@ -95,33 +95,10 @@ import {
 import {
   MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
 } from './onboarding-goal-checkin-automation.js'
-import {
-  completeAssistantOnboarding,
-  readAssistantOnboardingState,
-} from './onboarding-state.js'
-
-const assistantNotificationOnboardingActionSchema = z.discriminatedUnion(
-  'kind',
-  [
-    z
-      .object({
-        kind: z.literal('complete'),
-        reason: z.enum(['user_answered', 'user_declined']),
-      })
-      .strict(),
-    z
-      .object({
-        kind: z.literal('leave_open'),
-      })
-      .strict(),
-  ],
-)
 
 const assistantNotificationSkipDecisionSchema = z
   .object({
     kind: z.literal('skip'),
-    onboardingAction:
-      assistantNotificationOnboardingActionSchema.optional(),
     privateSummary: z.string().min(1),
   })
   .strict()
@@ -187,7 +164,6 @@ export type AssistantNotificationTurnPolicy =
       maintenanceProfile: AssistantMaintenanceProfile
       privateSummary: string
     }
-  | { kind: 'onboarding-followup' }
 
 export type AssistantNotificationPromptProfile = 'creative-response'
 
@@ -588,20 +564,6 @@ export async function sendAssistantNotificationLocal(
             providerValidationErrorDetails,
           )
         }
-        let onboardingCompletionReason: 'user_answered' | 'user_declined' | null
-        try {
-          onboardingCompletionReason =
-            await resolveAssistantOnboardingFollowupCompletionReason({
-              decision,
-              input,
-            })
-        } catch (error) {
-          throw annotateAssistantNotificationError(
-            error,
-            providerValidationErrorDetails,
-          )
-        }
-
         if (isAssistantNotificationMaintenanceExactSkip(input)) {
           try {
             assertAssistantMaintenanceNotificationDecision({
@@ -628,19 +590,6 @@ export async function sendAssistantNotificationLocal(
             deliveryOutcome: null,
             response: null,
           })
-          if (onboardingCompletionReason) {
-            try {
-              await commitAssistantOnboardingFollowupCompletion({
-                reason: onboardingCompletionReason,
-                vault: input.vault,
-              })
-            } catch (error) {
-              throw annotateAssistantNotificationError(
-                error,
-                providerValidationErrorDetails,
-              )
-            }
-          }
           const savedSession = await persistAssistantTurnAndSession({
             assistantTranscriptText: null,
             input: messageInput,
@@ -1343,10 +1292,6 @@ function buildAssistantNotificationMessageInput(
     maintenanceProfile: maintenanceTurn
       ? requireAssistantNotificationMaintenanceProfile(input)
       : null,
-    notificationDecisionProfile:
-      input.turnPolicy?.kind === 'onboarding-followup'
-        ? 'onboarding-followup'
-        : null,
     maxSessionAgeMs: input.maxSessionAgeMs,
     model: input.model,
     modelProvider: input.modelProvider,
@@ -1633,71 +1578,6 @@ function assistantMaintenanceRawEventsIncludeMutation(
       isAssistantMaintenanceMutationCommand(event.commandLabel, profile)
     )
   })
-}
-
-async function resolveAssistantOnboardingFollowupCompletionReason(input: {
-  decision: AssistantNotificationDecision
-  input: AssistantNotificationInput
-}): Promise<'user_answered' | 'user_declined' | null> {
-  if (input.input.turnPolicy?.kind !== 'onboarding-followup') {
-    return null
-  }
-
-  const onboardingState = await readAssistantOnboardingState(input.input.vault)
-  if (onboardingState.status === 'completed') {
-    if (input.decision.kind === 'skip') {
-      return null
-    }
-    throw new VaultCliError(
-      'ASSISTANT_ONBOARDING_COMPLETION_DECISION_INVALID',
-      'Completed onboarding requires the notification to return skip.',
-      { retryable: true },
-    )
-  }
-
-  if (input.decision.kind === 'send_message') {
-    return null
-  }
-
-  const onboardingAction = input.decision.onboardingAction
-  if (!onboardingAction) {
-    throw new VaultCliError(
-      'ASSISTANT_ONBOARDING_OPEN_SKIP_UNCLASSIFIED',
-      'An onboarding follow-up skip must either complete onboarding or explicitly leave it open.',
-      { retryable: true },
-    )
-  }
-  if (onboardingAction.kind === 'leave_open') {
-    return null
-  }
-
-  return onboardingAction.reason
-}
-
-async function commitAssistantOnboardingFollowupCompletion(input: {
-  reason: 'user_answered' | 'user_declined'
-  vault: string
-}): Promise<void> {
-  try {
-    const completed = await completeAssistantOnboarding({
-      reason: input.reason,
-      vault: input.vault,
-    })
-    if (
-      completed.status === 'completed' &&
-      completed.completedReason === input.reason
-    ) {
-      return
-    }
-  } catch {
-    // The canonical onboarding owner remains the only completion authority.
-  }
-
-  throw new VaultCliError(
-    'ASSISTANT_ONBOARDING_COMPLETION_NOT_COMMITTED',
-    'Onboarding completion did not commit.',
-    { retryable: true },
-  )
 }
 
 function isAssistantMaintenanceMutationCommand(

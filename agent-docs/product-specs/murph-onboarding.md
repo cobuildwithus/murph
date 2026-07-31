@@ -47,10 +47,10 @@ privacy, authorization, or provider boundaries.
   not gate ordinary Murph use.
 - Keep the existing `finish-onboarding-followup` managed automation as the one
   recovery and continuation mechanism. Do not add a second automation for
-  context collection or split onboarding into competing lifecycle owners. The
-  public slug alone does not confer this role: execution uses the existing
-  current-or-legacy managed ownership fingerprint so a member-owned
-  same-slug automation remains ordinary scheduled work.
+  context collection or split onboarding into competing lifecycle owners.
+  Reconciliation recognizes only the exact current seed or the bounded legacy
+  seed; execution remains ordinary scheduled send-or-skip work, so editable
+  slug, tags, title, and instructions confer no onboarding-state authority.
 - Keep the post-onboarding choice point separate from unfinished-onboarding
   recovery. It is one finite managed one-shot for members who answered
   onboarding, not another collection flow, recurring cadence, or profile.
@@ -556,14 +556,13 @@ one easy question that invites a reply; a reflection-only scheduled message
 returns skip. Normal member replies may continue open onboarding indefinitely,
 but they do not create another scheduled recovery attempt.
 
-The scheduled turn does not invoke the completion command itself. It returns a
-structured completion action to the notification boundary, which applies the
-existing canonical onboarding write only after cron's final source, lifecycle,
-cutoff, and foreground-preemption authority check. A rejected or stale result
-cannot change onboarding state; an authorized failed write is a retryable run
-failure. A valid skip that intentionally leaves onboarding open names that
-choice explicitly. The same 3:00 PM cutoff prevents a queued or delayed
-outbound intent from entering the provider after the finite local window.
+The scheduled turn uses the ordinary notification send-or-skip contract and
+never invokes the completion command or otherwise mutates onboarding state.
+Evidence that the checkpoint is already answered, declined, deferred, or not
+useful to reopen produces an ordinary skip. Only a later foreground member
+reply may advance or complete onboarding through the canonical state owner.
+The same 3:00 PM cutoff prevents a queued or delayed outbound intent from
+entering the provider after the finite local window.
 
 ## Post-Onboarding Choice Point
 
