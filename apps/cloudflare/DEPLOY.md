@@ -28,6 +28,31 @@ Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budg
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
+## Health-Data Consent Stop-Target Rollout
+
+Deploy the Cloudflare Worker that retains an exact user-control stop target
+before deploying the Web health-data withdrawal routes, then deploy Web
+immediately. No runner-bundle shape changes, but the Worker changes the meaning
+of an existing Durable Object row: after write authority is cleared,
+`active_runner_container_name` may remain populated until that exact container
+is confirmed destroyed. Withdrawal and account deletion both consume this
+pending-stop pointer before acknowledging their respective cleanup boundary.
+
+After the first such pending-stop row is written, this Worker is a hard
+Cloudflare rollback floor. An older Worker treats the absent active attempt as
+no exact target, derives a container name from its own version, and can erase
+the retained pointer during account deletion while the intended newer runner
+survives. Do not roll the Worker below this floor, even if the new Web callback
+route remains deployed. Forward-fix the Worker on this version or newer. A Web
+rollback that leaves the new Worker in place fails runtime admission closed if
+the signed callback is absent, so retain the callback route or restore a
+compatible Web deployment promptly.
+
+After deployment, withdraw consent while a runner is active and confirm the
+stored target clears only after destruction succeeds. Also exercise one forced
+container-destroy retry through account deletion and confirm R2 and Durable
+Object deletion remain blocked until the same stored target is destroyed.
+
 ## Database Health Alert Rollout
 
 Before deploying the Worker version that introduces

@@ -500,6 +500,11 @@ it has been explicitly elevated to a cross-cutting invariant.
   grant is not reinterpreted as withdrawal. Settings, latest-available export,
   and account deletion remain available; renewed consent is the only processing
   restore path.
+- The Cloudflare Worker that can retain an exact user-control stop target after
+  clearing write authority is a hard rollback floor after the first such row is
+  written. Withdrawal and account deletion must consume that same persisted
+  target; an older Worker that derives its own versioned target is not a valid
+  rollback candidate. Recovery uses a forward fix on the compatible Worker.
 
 ## Deployment Compatibility
 

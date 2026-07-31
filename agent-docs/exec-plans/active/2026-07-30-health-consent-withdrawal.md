@@ -72,7 +72,7 @@ Updated: 2026-07-31
 2. [x] Implement the smallest current-owner correction and update durable docs.
 3. [x] Add or rebase focused unit, route, rendering, and orchestration coverage.
 4. [x] Run focused verification and direct desktop/mobile design-catalog proof.
-5. [ ] Commit and push the corrected candidate, run final ReviewGPT round 4,
+5. [ ] Commit and push the corrected candidate, run final ReviewGPT round 5,
    and prove the exact head in CI.
 6. [x] Replace the repeated consent-snapshot race with one serialized execution
    barrier at the existing Cloudflare write-fence owner and add interleaving
@@ -107,6 +107,11 @@ Updated: 2026-07-31
   the pointer only after that exact target is confirmed destroyed. An active
   legacy fence without a stored target resolves to the unversioned user runner;
   only a genuinely absent fence uses the current Worker-version target.
+- Treat the first Worker that can persist or consume that pending-stop pointer
+  as a hard rollback floor after any such row is written. Withdrawal and
+  account deletion share the pointer; an older Worker can derive a different
+  versioned target and must not be restored. Use a forward fix on the compatible
+  Worker instead of adding dual-read state.
 
 ## Review anomaly retrospective
 
@@ -186,6 +191,13 @@ Updated: 2026-07-31
   retry-safe target to account-data deletion. Name-aware prior-version success,
   fail-then-retry, legacy-null, and no-active-fence tests pass; final round 4 is
   pending on the corrected pushed head.
+- Final ReviewGPT round 4 found one accepted rollback-contract issue: the PR
+  allowed Worker-first rollback even though an older Worker cannot consume a
+  retained pending-stop pointer and could falsely complete account deletion.
+  The correction makes this Worker a documented hard rollback floor, discloses
+  account deletion as the same pointer consumer, and adds fail-then-retry proof
+  that R2 and Durable Object deletion remain blocked until the retained exact
+  runner is destroyed. Final round 5 remains pending.
 - The serialized Cloudflare barrier is implemented and covered by direct
   revoked admission plus withdrawal/renewal interleaving tests. The focused
   Cloudflare owner run passed 201 tests; hosted-execution and
