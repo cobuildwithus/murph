@@ -1442,7 +1442,7 @@ describe("updateHostedLinqChatAvatar", () => {
     });
   });
 
-  it("maps an allowlisted Linq error code to fixed first-party diagnostics", async () => {
+  it("preserves an allowlisted Linq error code without provider prose", async () => {
     const privateUrl =
       `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`;
     const privatePhone = "15550001111";
@@ -1473,7 +1473,6 @@ describe("updateHostedLinqChatAvatar", () => {
       details: {
         failureStage: "http",
         providerErrorCode: 5006,
-        providerErrorMessage: "The avatar image type was not accepted.",
         status: 400,
       },
       retryable: false,
@@ -1507,9 +1506,7 @@ describe("updateHostedLinqChatAvatar", () => {
     }).catch((caught: unknown) => caught) as { details?: Record<string, unknown> };
 
     expect(error.details?.providerErrorCode).toBe(5007);
-    expect(error.details?.providerErrorMessage).toBe(
-      "The avatar image could not be downloaded.",
-    );
+    expect(error.details).not.toHaveProperty("providerErrorMessage");
     expect(JSON.stringify(error)).not.toContain("provider detail");
   });
 

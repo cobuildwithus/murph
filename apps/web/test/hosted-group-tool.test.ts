@@ -2786,7 +2786,6 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       details: {
         failureStage: "http",
         providerErrorCode: 5006,
-        providerErrorMessage: "The avatar image type was not accepted.",
         traceId: "must-not-propagate",
       },
       httpStatus: 502,
@@ -2805,7 +2804,6 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       action: "set_chat_avatar",
       result: {
         providerErrorCode: 5006,
-        providerErrorMessage: "The avatar image type was not accepted.",
         status: "unavailable",
         unavailableReason: "provider_unavailable",
       },
@@ -2824,7 +2822,6 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       code: "LINQ_SEND_FAILED",
       details: {
         failureStage: "http",
-        providerErrorCode: 5006,
         providerErrorMessage: "Failed to download image",
       },
       httpStatus: 502,

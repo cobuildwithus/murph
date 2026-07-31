@@ -76,6 +76,9 @@ Updated: 2026-07-31
   test-only path/hunk inspection. Keep a real Linq fetch-and-apply mutation as
   an explicit post-deploy smoke because this task has no authorized isolated
   provider group or production mutation scope.
+- Accept final ReviewGPT's complexity-collapse finding: transport only the
+  allowlisted code across Web-to-runtime, then derive its fixed recovery text
+  once in the strict runtime parser for the model-visible result.
 
 ## Verification
 

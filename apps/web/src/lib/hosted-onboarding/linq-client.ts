@@ -925,7 +925,6 @@ function buildHostedLinqRequestFailedError(input: {
   operation: string;
   providerErrorDiagnostics?: {
     providerErrorCode?: number;
-    providerErrorMessage?: string;
   } | null;
   retryable: boolean;
   status: number;
@@ -945,7 +944,6 @@ function buildHostedLinqRequestFailedError(input: {
 
 function readHostedLinqProviderErrorDiagnostics(payload: unknown): {
   providerErrorCode?: number;
-  providerErrorMessage?: string;
 } | null {
   if (
     payload === null
@@ -974,16 +972,12 @@ function readHostedLinqProviderErrorDiagnostics(payload: unknown): {
   if (providerErrorCode === null) {
     return null;
   }
-  const providerErrorMessage = hostedRuntimeLinqProviderErrorMessageForCode(
-    providerErrorCode,
-  );
-  if (providerErrorMessage === null) {
+  if (
+    hostedRuntimeLinqProviderErrorMessageForCode(providerErrorCode) === null
+  ) {
     return null;
   }
-  return {
-    providerErrorCode,
-    providerErrorMessage,
-  };
+  return { providerErrorCode };
 }
 
 async function readHostedLinqOptionalJsonResponse<T>(response: Response): Promise<T | null> {

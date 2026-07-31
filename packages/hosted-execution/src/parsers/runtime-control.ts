@@ -3110,7 +3110,6 @@ export function parseHostedRuntimeGroupToolResponse(
           "status",
           "unavailableReason",
           "providerErrorCode",
-          "providerErrorMessage",
         ]),
         "Hosted runtime group tool set_chat_avatar unavailable response result",
       );
@@ -3132,22 +3131,8 @@ export function parseHostedRuntimeGroupToolResponse(
           "Hosted runtime group tool set_chat_avatar providerErrorCode must be a four-digit integer.",
         );
       }
-      const providerErrorMessage = result.providerErrorMessage === undefined
-        ? undefined
-        : requireString(
-            result.providerErrorMessage,
-            "Hosted runtime group tool set_chat_avatar providerErrorMessage",
-          );
       const expectedProviderErrorMessage =
         hostedRuntimeLinqProviderErrorMessageForCode(providerErrorCode);
-      if (
-        (providerErrorCode === undefined)
-        !== (providerErrorMessage === undefined)
-      ) {
-        throw new TypeError(
-          "Hosted runtime group tool set_chat_avatar provider diagnostics must include both code and message.",
-        );
-      }
       if (
         providerErrorCode !== undefined
         && expectedProviderErrorMessage === null
@@ -3156,21 +3141,13 @@ export function parseHostedRuntimeGroupToolResponse(
           "Hosted runtime group tool set_chat_avatar providerErrorCode must be allowlisted.",
         );
       }
-      if (
-        providerErrorCode !== undefined
-        && providerErrorMessage !== expectedProviderErrorMessage
-      ) {
-        throw new TypeError(
-          "Hosted runtime group tool set_chat_avatar providerErrorMessage must match its allowlisted code.",
-        );
-      }
       const unavailableReason = requireString(
         result.unavailableReason,
         "Hosted runtime group unavailableReason",
       );
       if (
         unavailableReason !== "provider_unavailable"
-        && (providerErrorCode !== undefined || providerErrorMessage !== undefined)
+        && providerErrorCode !== undefined
       ) {
         throw new TypeError(
           "Hosted runtime group tool set_chat_avatar provider diagnostics require provider_unavailable.",
@@ -3182,7 +3159,9 @@ export function parseHostedRuntimeGroupToolResponse(
           status,
           unavailableReason,
           ...(providerErrorCode === undefined ? {} : { providerErrorCode }),
-          ...(providerErrorMessage === undefined ? {} : { providerErrorMessage }),
+          ...(expectedProviderErrorMessage === null
+            ? {}
+            : { providerErrorMessage: expectedProviderErrorMessage }),
         },
       };
     }

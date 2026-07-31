@@ -1166,7 +1166,6 @@ async function handleHostedRuntimeGroupSetChatAvatar(input: {
     unavailableReason: string,
     providerDiagnostics?: {
       providerErrorCode?: number;
-      providerErrorMessage?: string;
     },
   ): HostedRuntimeGroupToolResponse => ({
     action: "set_chat_avatar",
@@ -1210,7 +1209,6 @@ async function handleHostedRuntimeGroupSetChatAvatar(input: {
 
 function readHostedLinqAvatarProviderDiagnostics(error: unknown): {
   providerErrorCode?: number;
-  providerErrorMessage?: string;
 } | undefined {
   if (
     !isHostedOnboardingError(error)
@@ -1220,7 +1218,6 @@ function readHostedLinqAvatarProviderDiagnostics(error: unknown): {
     return undefined;
   }
   const code = error.details.providerErrorCode;
-  const message = error.details.providerErrorMessage;
   const providerErrorCode = typeof code === "number"
     && Number.isSafeInteger(code)
     && code >= 1_000
@@ -1230,19 +1227,12 @@ function readHostedLinqAvatarProviderDiagnostics(error: unknown): {
   if (providerErrorCode === null) {
     return undefined;
   }
-  const expectedMessage = hostedRuntimeLinqProviderErrorMessageForCode(
-    providerErrorCode,
-  );
-  const providerErrorMessage = message === expectedMessage
-    ? expectedMessage
-    : null;
-  if (providerErrorMessage === null) {
+  if (
+    hostedRuntimeLinqProviderErrorMessageForCode(providerErrorCode) === null
+  ) {
     return undefined;
   }
-  return {
-    providerErrorCode,
-    providerErrorMessage,
-  };
+  return { providerErrorCode };
 }
 
 async function handleHostedRuntimeGroupSetChatAvatarPreflight(input: {
