@@ -1,0 +1,128 @@
+name: Apply weekly product review patch series
+
+on:
+  push:
+    branches:
+      - agent/weekly-founder-product-review-privacy
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-weekly-founder-product-review-privacy
+  cancel-in-progress: false
+
+jobs:
+  apply-and-verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out exact branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: agent/weekly-founder-product-review-privacy
+
+      - name: Configure toolchain
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.1
+
+      - name: Enable pinned pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.33.0 --activate
+
+      - name: Apply supplied patch series
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t patch_one_matches < <(find . -type f -iname '*weekly-founder-product-review*.patch' -print)
+          mapfile -t patch_two_matches < <(find . -type f -iname '*opt-in-unlinked-and-confined-privacy-review*.patch' -print)
+          if [[ ${#patch_one_matches[@]} -ne 1 ]]; then
+            printf 'Expected exactly one weekly product review patch, found %s\n' "${#patch_one_matches[@]}" >&2
+            printf '%s\n' "${patch_one_matches[@]}" >&2
+            exit 1
+          fi
+          if [[ ${#patch_two_matches[@]} -ne 1 ]]; then
+            printf 'Expected exactly one privacy follow-up patch, found %s\n' "${#patch_two_matches[@]}" >&2
+            printf '%s\n' "${patch_two_matches[@]}" >&2
+            exit 1
+          fi
+          patch_one=${patch_one_matches[0]}
+          patch_two=${patch_two_matches[0]}
+
+          apply_patch() {
+            local patch_file=$1
+            if git apply --check "$patch_file"; then
+              git apply "$patch_file"
+              return
+            fi
+            git apply --3way --whitespace=nowarn "$patch_file"
+          }
+
+          apply_patch "$patch_one"
+          apply_patch "$patch_two"
+          rm -f "$patch_one" "$patch_two"
+          rm -f .github/workflows/agent-apply-weekly-product-review.yml
+
+          if git grep -n -E '^(<<<<<<<|=======|>>>>>>>)' -- . ':!pnpm-lock.yaml'; then
+            echo 'Conflict markers remain after patch application.' >&2
+            exit 1
+          fi
+          git diff --check
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate Prisma schema
+        run: pnpm --dir apps/web exec prisma validate
+
+      - name: Create local implementation commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'Patch series produced no implementation diff.' >&2
+            exit 1
+          fi
+          git commit -m 'feat: add privacy-reviewed weekly founder product review'
+          git diff --check HEAD^ HEAD
+
+      - name: Run diff-selected tests
+        env:
+          GITHUB_BASE_REF: main
+        run: pnpm test:diff:local
+
+      - name: Run workspace typecheck
+        run: pnpm typecheck
+
+      - name: Verify workspace boundaries
+        run: pnpm verify:workspace-boundaries
+
+      - name: Verify documentation drift
+        run: pnpm docs:drift
+
+      - name: Push validated implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push origin HEAD:agent/weekly-founder-product-review-privacy
+
+      - name: Record validation summary
+        run: |
+          {
+            echo '## Weekly founder product review patch validation'
+            echo
+            echo '- Patch series applied against the exact branch base.'
+            echo '- Prisma schema validation passed.'
+            echo '- Diff-selected tests passed.'
+            echo '- Workspace typecheck passed.'
+            echo '- Workspace boundaries passed.'
+            echo '- Documentation drift check passed.'
+            echo '- Bootstrap patches and workflow were removed from the final commit.'
+          } >> "$GITHUB_STEP_SUMMARY"
