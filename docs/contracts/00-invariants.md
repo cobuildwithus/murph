@@ -504,7 +504,10 @@ it has been explicitly elevated to a cross-cutting invariant.
   clearing write authority is a hard rollback floor after the first such row is
   written. Withdrawal and account deletion must consume that same persisted
   target; an older Worker that derives its own versioned target is not a valid
-  rollback candidate. Recovery uses a forward fix on the compatible Worker.
+  rollback candidate. The consent-aware Web artifact is also a hard rollback
+  floor after it can record an explicit revoke because Web-only ingress and
+  shared-data readers must enforce that row. Recovery uses a coordinated
+  forward fix on the compatible Web and Worker pair.
 
 ## Deployment Compatibility
 

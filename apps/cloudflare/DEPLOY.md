@@ -42,11 +42,16 @@ After the first such pending-stop row is written, this Worker is a hard
 Cloudflare rollback floor. An older Worker treats the absent active attempt as
 no exact target, derives a container name from its own version, and can erase
 the retained pointer during account deletion while the intended newer runner
-survives. Do not roll the Worker below this floor, even if the new Web callback
-route remains deployed. Forward-fix the Worker on this version or newer. A Web
-rollback that leaves the new Worker in place fails runtime admission closed if
-the signed callback is absent, so retain the callback route or restore a
-compatible Web deployment promptly.
+survives.
+
+The consent-aware Web deployment is also a hard rollback floor after it can
+record the first explicit `launch.health-data = revoked` event. Retaining only
+the signed callback route is insufficient: webhook admission, scheduled sync,
+shared-data reads, messaging, and other Web-owned consumers enforce revocation
+inside that Web artifact and do not pass through the Worker callback. After the
+consent-aware Web deployment is live, do not roll either plane below its floor.
+Forward-fix the compatible Web and Worker pair; do not add a callback-only shim,
+dual-read consent state, or a second lifecycle owner.
 
 After deployment, withdraw consent while a runner is active and confirm the
 stored target clears only after destruction succeeds. Also exercise one forced

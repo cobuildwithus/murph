@@ -72,7 +72,7 @@ Updated: 2026-07-31
 2. [x] Implement the smallest current-owner correction and update durable docs.
 3. [x] Add or rebase focused unit, route, rendering, and orchestration coverage.
 4. [x] Run focused verification and direct desktop/mobile design-catalog proof.
-5. [ ] Commit and push the corrected candidate, run final ReviewGPT round 5,
+5. [ ] Commit and push the corrected candidate, run final ReviewGPT round 6,
    and prove the exact head in CI.
 6. [x] Replace the repeated consent-snapshot race with one serialized execution
    barrier at the existing Cloudflare write-fence owner and add interleaving
@@ -112,6 +112,11 @@ Updated: 2026-07-31
   account deletion share the pointer; an older Worker can derive a different
   versioned target and must not be restored. Use a forward fix on the compatible
   Worker instead of adding dual-read state.
+- Treat the consent-aware Web artifact as the matching hard rollback floor once
+  it can record an explicit revoke. The Worker callback covers only runtime
+  admission; Web-only webhook, sync, messaging, and cross-member shared-data
+  consumers require the current Web checks. Post-cutover recovery is a
+  coordinated forward fix on the consent-aware Web and Worker pair.
 
 ## Review anomaly retrospective
 
@@ -150,6 +155,31 @@ Updated: 2026-07-31
   active processing; pause withdrawal reconciliation, commit renewal, release
   it, and prove the renewal barrier wins; prove renewal signals processing
   without an unrelated inbound event.
+
+## Review anomaly retrospective — rollback compatibility
+
+- Trigger: final ReviewGPT round 5 verified the Worker pending-stop correction
+  but found that its remediation authorized an older Web artifact that cannot
+  enforce persisted revocation across Web-only consumers. This repeats round
+  4's underlying mechanism: newly meaningful durable state paired with a
+  legacy consumer that assumes the old semantics.
+- Original requirement: an explicit `launch.health-data = revoked` row remains
+  authoritative until renewed consent. No supported deployment or rollback may
+  admit new provider ingress, scheduled processing, runtime work, messaging, or
+  cross-member disclosure for that member.
+- Repeated mechanism: round 4 removed unsafe Worker rollback but moved rollback
+  permission to Web. Retaining the signed callback protected only Worker
+  runtime admission; it did not protect Web-owned webhook or shared-data paths.
+- Decision: continue with a compatibility-boundary correction. Deploy Worker
+  first and Web immediately. Once the consent-aware Web can create revocations,
+  both that Web artifact and the compatible Worker are hard rollback floors.
+  Recover with a coordinated forward fix; do not add dual-read state, a second
+  consent owner, a callback-only shim, or a new lifecycle mechanism.
+- Supported matrix and proof: post-cutover support is current consent-aware Web
+  plus current consent-aware Worker. Existing focused tests prove revoked
+  Worker runtime admission, revoked Web webhook/sync admission, and revoked
+  grantor filtering on cross-member shared-data reads. Missing legacy grants
+  remain allowed inside the current artifacts only.
 
 ## Verification
 
@@ -197,7 +227,11 @@ Updated: 2026-07-31
   The correction makes this Worker a documented hard rollback floor, discloses
   account deletion as the same pointer consumer, and adds fail-then-retry proof
   that R2 and Durable Object deletion remain blocked until the retained exact
-  runner is destroyed. Final round 5 remains pending.
+  runner is destroyed.
+- Final ReviewGPT round 5 verified the Worker/account-deletion correction and
+  required the rollback-compatibility retrospective above. The unsafe Web
+  rollback permission is removed; Web and Worker are now explicit coordinated
+  floors after revocation can exist. Final round 6 remains pending.
 - The serialized Cloudflare barrier is implemented and covered by direct
   revoked admission plus withdrawal/renewal interleaving tests. The focused
   Cloudflare owner run passed 201 tests; hosted-execution and
@@ -231,6 +265,10 @@ Updated: 2026-07-31
   user owner, user-data deletion, and runner-state store suites; Cloudflare
   typecheck and `git diff --check` pass. The repository has no canonical root
   ESLint command for these Cloudflare paths.
+- The rollback-matrix recheck passed all 107 Cloudflare user-owner assertions
+  and all 120 selected Web webhook/sync plus shared-data assertions, directly
+  proving revoked authority at the three owners named by the second
+  retrospective.
 - The required Fable UI double-check found and verified focused fixes for the
   export study's dialog context, source-review link hit geometry, retry-failure
   emphasis and focus retention, and missing ready/error/pending catalog states.
