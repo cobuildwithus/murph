@@ -531,7 +531,7 @@ function PlanUsageBand(props: {
           value={status.usedPercent}
         />
         <span className="shrink-0 text-xs font-medium tabular-nums text-foreground">
-          {status.usedPercent}% used
+          {status.remainingPercent}% remaining
         </span>
       </div>
       {status.status === "exhausted" ? (
