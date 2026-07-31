@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 const codexMocks = vi.hoisted(() => ({
   dynamicToolCalls: [] as Array<{
     assistantStyleSettingsAvailable?: boolean
+    deliveryContextOrdinal: number | null
     kind: string
     voiceMemoRuntime: unknown
   }>,
@@ -41,6 +42,7 @@ vi.mock('../src/assistant-codex/dynamic-tools.ts', async (importOriginal) => {
                   input.assistantStyleSettingsAvailable === true,
               }
             : {}),
+          deliveryContextOrdinal: input.deliveryContextOrdinal ?? null,
           kind: input.request.kind,
           voiceMemoRuntime: input.voiceMemoRuntime ?? null,
         })
@@ -181,20 +183,26 @@ describe('Codex dynamic tool runtime routing', () => {
 
     expect(codexMocks.dynamicToolCalls).toEqual([
       {
+        deliveryContextOrdinal: 0,
         kind: 'send-progress-update',
         voiceMemoRuntime: null,
       },
       {
+        deliveryContextOrdinal: 0,
         kind: 'generate-voice-memo',
         voiceMemoRuntime,
       },
       {
         assistantStyleSettingsAvailable: true,
+        deliveryContextOrdinal: 1,
         kind: 'assistant-style',
         voiceMemoRuntime: null,
       },
     ])
     expect(beforeToolExecution).toHaveBeenCalledTimes(3)
+    expect(beforeToolExecution).toHaveBeenNthCalledWith(1, 0)
+    expect(beforeToolExecution).toHaveBeenNthCalledWith(2, 0)
+    expect(beforeToolExecution).toHaveBeenNthCalledWith(3, 1)
     expect(codexMocks.executionOrder).toEqual([
       'checkpoint',
       'tool:send-progress-update',
@@ -348,6 +356,17 @@ async function runScriptedDynamicToolTurn(
       },
     },
   }))
+  child.stdout.write(jsonLine({
+    method: 'item/completed',
+    params: {
+      item: {
+        id: 'user-dynamic-runtime-initial',
+        message: 'Use three tools.',
+        type: 'user_message',
+      },
+    },
+  }))
+  await new Promise((resolve) => setTimeout(resolve, 0))
 
   child.stdout.write(jsonLine({
     id: 1,
@@ -376,6 +395,18 @@ async function runScriptedDynamicToolTurn(
     },
   }))
   await child.waitForRpcId(2)
+
+  child.stdout.write(jsonLine({
+    method: 'item/completed',
+    params: {
+      item: {
+        id: 'user-dynamic-runtime-steered',
+        message: 'Show my current style too.',
+        type: 'user_message',
+      },
+    },
+  }))
+  await new Promise((resolve) => setTimeout(resolve, 0))
 
   child.stdout.write(jsonLine({
     id: 3,

@@ -642,7 +642,9 @@ export async function sendAssistantMessageLocal(
           initialAcceptedInputJournal.inputs
         let providerRequestAcceptedInputIds: readonly string[] =
           initialAcceptedInputJournal.inputIds
-        let beforeHostedToolExecution = async (): Promise<void> => {}
+        let beforeHostedToolExecution = async (
+          _throughDeliveryContextOrdinal: number,
+        ): Promise<void> => {}
         const refreshTypingIndicatorAfterProgress = () => {
           void runAssistantTurnBestEffort(async () => {
             await typingIndicator?.refreshAfterMessage?.()
@@ -675,7 +677,9 @@ export async function sendAssistantMessageLocal(
                       ? dependencies.sendLinq
                       : undefined
                   if (sendLinq) {
-                    await beforeHostedToolExecution()
+                    await beforeHostedToolExecution(
+                      progressInput.deliveryContextOrdinal ?? 0,
+                    )
                   }
                   const progressDependencies = sendLinq
                     ? {
@@ -742,7 +746,8 @@ export async function sendAssistantMessageLocal(
         const hostedToolContext = hostedExecutionContext
           ? createAssistantHostedToolContext({
               computerToolsAvailable: hostedComputerToolsAvailable,
-              beforeToolExecution: () => beforeHostedToolExecution(),
+              beforeToolExecution: (deliveryContextOrdinal) =>
+                beforeHostedToolExecution(deliveryContextOrdinal),
               executionContext: hostedExecutionContext,
               getDeliveryContext: () => ({
                 messageInput: currentInput,
@@ -1145,10 +1150,11 @@ export async function sendAssistantMessageLocal(
             acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
           }
         }
-        beforeHostedToolExecution = async () => {
+        beforeHostedToolExecution = async (throughDeliveryContextOrdinal) => {
           await drainLiveSteeredActiveTurnInputs({
             continuation: providerRequestContinuation,
             sessionId: currentSession.sessionId,
+            throughDeliveryContextOrdinal,
           })
         }
         const providerOutcome = await executeCodexTurnWithRecovery({
@@ -1525,6 +1531,8 @@ export async function sendAssistantMessageLocal(
         await drainLiveSteeredActiveTurnInputs({
           continuation: providerResult.codexContinuation,
           sessionId: providerResult.session.sessionId,
+          throughDeliveryContextOrdinal:
+            providerResult.responseDeliveryContextOrdinal,
         })
         currentSession = applyAssistantProgressDeliveredSession({
           progressDeliveredSession: progressDeliveredSessionRef.value,

@@ -3881,7 +3881,7 @@ describe('assistant codex runtime', () => {
     })
     expect(progressDelivery.send).toHaveBeenCalledWith(
       'Still generating the image.',
-      { source: 'model' },
+      { deliveryContextOrdinal: 0, source: 'model' },
     )
   })
 
@@ -14149,7 +14149,7 @@ describe('assistant codex runtime', () => {
 
     expect(progressDelivery.send).toHaveBeenCalledWith(
       progressText,
-      { source: 'model' },
+      { deliveryContextOrdinal: 0, source: 'model' },
     )
     expect(progressDelivery.send).not.toHaveBeenCalledWith('Provider-side status text')
   })
@@ -14252,7 +14252,7 @@ describe('assistant codex runtime', () => {
     })
     expect(progressDelivery.send).toHaveBeenCalledWith(
       'Checking the file now.',
-      { source: 'model' },
+      { deliveryContextOrdinal: 0, source: 'model' },
     )
   })
 
@@ -14353,7 +14353,7 @@ describe('assistant codex runtime', () => {
     })
     expect(progressDelivery.send).toHaveBeenCalledWith(
       'Checking the file now.',
-      { source: 'model' },
+      { deliveryContextOrdinal: 0, source: 'model' },
     )
   })
 
@@ -14476,11 +14476,11 @@ describe('assistant codex runtime', () => {
     expect(progressDelivery.send).toHaveBeenCalledTimes(1)
     expect(progressDelivery.send).toHaveBeenCalledWith(
       'Checking the saved context now.',
-      { source: 'model' },
+      { deliveryContextOrdinal: 0, source: 'model' },
     )
     expect(progressDelivery.send).not.toHaveBeenCalledWith(
       'Reading the report now.',
-      { source: 'model' },
+      { deliveryContextOrdinal: 0, source: 'model' },
     )
     expect(onProgress).toHaveBeenCalledWith(expect.objectContaining({
       kind: 'message',
@@ -14581,7 +14581,7 @@ describe('assistant codex runtime', () => {
     }
     expect(progressDelivery.send).toHaveBeenCalledWith(
       expect.any(String),
-      { required: true, source: 'system' },
+      { deliveryContextOrdinal: 0, required: true, source: 'system' },
     )
 
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -14679,7 +14679,7 @@ describe('assistant codex runtime', () => {
     }
     expect(progressDelivery.send).toHaveBeenCalledWith(
       expect.any(String),
-      { required: true, source: 'system' },
+      { deliveryContextOrdinal: 0, required: true, source: 'system' },
     )
 
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -14795,7 +14795,7 @@ describe('assistant codex runtime', () => {
     }
     expect(progressDelivery.send).toHaveBeenCalledWith(
       expect.any(String),
-      { required: true, source: 'system' },
+      { deliveryContextOrdinal: 0, required: true, source: 'system' },
     )
 
     await new Promise((resolve) => setTimeout(resolve, 2_100))
@@ -14955,7 +14955,7 @@ describe('assistant codex runtime', () => {
     expect(progressDelivery.send).toHaveBeenCalledTimes(1)
     expect(progressDelivery.send).toHaveBeenCalledWith(
       selectedProgressText,
-      { required: true, source: 'system' },
+      { deliveryContextOrdinal: 0, required: true, source: 'system' },
     )
     expect(
       onProgress.mock.calls.some(([event]) => event?.id === 'context-compact-1'),
@@ -15015,11 +15015,11 @@ describe('assistant codex runtime', () => {
     expect(progressDelivery.send).toHaveBeenCalledTimes(1)
     expect(progressDelivery.send).toHaveBeenCalledWith(
       'Checking the group thread now.',
-      { source: 'model' },
+      { deliveryContextOrdinal: 0, source: 'model' },
     )
     expect(progressDelivery.send).not.toHaveBeenCalledWith(
       expect.any(String),
-      { required: true, source: 'system' },
+      { deliveryContextOrdinal: 0, required: true, source: 'system' },
     )
   })
 
@@ -15796,7 +15796,7 @@ describe('assistant codex runtime', () => {
     })
     expect(progressDelivery.send).toHaveBeenCalledWith(
       'Checking the file now.',
-      { source: 'model' },
+      { deliveryContextOrdinal: 0, source: 'model' },
     )
   })
 
@@ -21033,6 +21033,7 @@ it('rejects finish_without_reply after context compaction progress was sent', as
   })
 
   expect(progressDelivery.send).toHaveBeenCalledWith(expect.any(String), {
+    deliveryContextOrdinal: 0,
     required: true,
     source: 'system',
   })
