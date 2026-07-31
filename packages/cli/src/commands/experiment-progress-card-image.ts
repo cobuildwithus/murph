@@ -29,6 +29,8 @@ const CARD_HEIGHT = 780;
 const CARD_CONTENT_TYPE = "image/png";
 const CARD_SOURCE = "murph.experiment-progress-card";
 const CARD_LOOKUP_ROLE = "media_1";
+const DIRECTION_UNAVAILABLE_COPY =
+  "Direction context unavailable · mover sentiment is neutral.";
 const CONTENT_LEFT = 64;
 const CONTENT_RIGHT = CARD_WIDTH - CONTENT_LEFT;
 const CONTENT_WIDTH = CONTENT_RIGHT - CONTENT_LEFT;
@@ -75,7 +77,9 @@ export async function renderAndSaveExperimentProgressCard(input: {
   });
 
   return {
-    alt: `${card.title} experiment progress`,
+    alt: card.moverSentimentContext === "direction_unavailable"
+      ? `${card.title} experiment progress. ${DIRECTION_UNAVAILABLE_COPY}`
+      : `${card.title} experiment progress`,
     contentType: CARD_CONTENT_TYPE,
     filename: path.posix.basename(saved.ref),
     kind: "vault_image",
@@ -90,7 +94,7 @@ async function renderExperimentProgressCard(
   card: ExperimentProgressCardData,
 ): Promise<RenderedProgressCard> {
   const cardIdentity = createHash("sha256")
-    .update("murph.experiment-progress-card.render.v3")
+    .update("murph.experiment-progress-card.render.v4")
     .update("\0")
     .update(JSON.stringify(card))
     .digest("hex");
@@ -219,7 +223,12 @@ export function buildExperimentProgressCardSvg(
   const assumed = (card.sessions.assumed ?? 0) > 0
     ? ` · ${card.sessions.assumed} assumed`
     : "";
-  const accessibleTitle = `${card.title}. ${status}. ${sessions}${assumed}.`;
+  const directionUnavailable =
+    card.moverSentimentContext === "direction_unavailable";
+  const accessibleTitle = [
+    `${card.title}. ${status}. ${sessions}${assumed}.`,
+    directionUnavailable ? DIRECTION_UNAVAILABLE_COPY : null,
+  ].filter((value): value is string => value !== null).join(" ");
   const title = layoutCardTitle(card.title);
   const statusText = `${status} · ${sessions}${assumed}`;
   const statusY = title.lines.length === 1 ? 181 : 201;
@@ -255,7 +264,9 @@ export function buildExperimentProgressCardSvg(
     renderConfounders(card),
     `<line x1="${CONTENT_LEFT}" y1="700" x2="${CONTENT_RIGHT}" y2="700" stroke="${COLOR.border}" stroke-opacity=".2"/>`,
     `<image id="murph-wordmark" href="${LOGO_DATA_URI}" x="${CONTENT_LEFT}" y="708" width="${LOGO_WIDTH}" height="${LOGO_HEIGHT}" aria-label="murph"/>`,
-    `<text x="${CONTENT_RIGHT}" y="727" text-anchor="end" fill="${COLOR.foreground}" fill-opacity=".42" font-family="${SANS_FONT}" font-size="22">Health experiments with friends.</text>`,
+    directionUnavailable
+      ? `<text data-role="mover-sentiment-context" x="${CONTENT_RIGHT}" y="727" text-anchor="end" fill="${COLOR.muted}" font-family="${SANS_FONT}" font-size="17">${escapeSvg(DIRECTION_UNAVAILABLE_COPY)}</text>`
+      : `<text x="${CONTENT_RIGHT}" y="727" text-anchor="end" fill="${COLOR.foreground}" fill-opacity=".42" font-family="${SANS_FONT}" font-size="22">Health experiments with friends.</text>`,
     `<text x="${CONTENT_RIGHT}" y="756" text-anchor="end" fill="${COLOR.primary}" font-family="${SANS_FONT}" font-size="19">withmurph.ai</text>`,
     "</svg>",
   ].join("");

@@ -40,6 +40,7 @@ export interface BuildExperimentProgressCardOptions {
   biomarkerDesiredDirections?: readonly ExperimentProgressCardBiomarkerDirection[];
   confounders?: readonly ExperimentProgressCardConfounderInput[];
   metricPoints?: readonly MetricPoint[];
+  moverSentimentContext?: ExperimentProgressCardData["moverSentimentContext"];
 }
 
 export interface ExperimentProgressCardBuildResult {
@@ -80,6 +81,7 @@ export function buildExperimentProgressCard(
     phase: buildCardPhase(runStart, windowEnd, asOf),
     sessions: buildCardSessions(progress.adherence),
     weeks: buildCardWeeks({ asOf, calendar, runStart, warnings, windowEnd, windows }),
+    moverSentimentContext: options.moverSentimentContext ?? null,
     movers: buildCardMovers(
       progress.signals,
       options.biomarkerDesiredDirections ?? [],
