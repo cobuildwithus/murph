@@ -106,3 +106,14 @@ Updated: 2026-07-31
   coverage drives a real Linq HTTP 400 through the outbox, interrupts after
   accepted fallback text, and proves stale replay uses only the frozen text and
   same fallback key; no new state or delivery owner was added.
+- Final ReviewGPT round 7 required a second retrospective for the same
+  dual-authority mechanism: after durable text promotion, the in-flight
+  card-bearing request could still veto the existing authorized stale-thread
+  recovery and terminally consume the closeout without a message. The decision
+  is to keep the outbox as the sole owner and have the promotion boundary also
+  establish the one effective in-flight text identity. Every downstream
+  provider, recovery, receipt, failure, and replay path must consume that
+  identity; card-based recovery vetoes and compensating state are not allowed.
+  Composed proof must cover capability fallback and definitive app-card
+  rejection followed by stale-thread materialization, alongside the existing
+  interruption, persistence-failure, and ambiguous-delivery matrix.

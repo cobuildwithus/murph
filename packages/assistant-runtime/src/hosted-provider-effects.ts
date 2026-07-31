@@ -144,14 +144,26 @@ export async function sendHostedProviderLinqMessage(
   request: HostedRuntimeLinqSendRequest,
   dependencies: HostedProviderEffectDependencies,
 ): Promise<HostedRuntimeLinqSendResponse> {
+  let effectiveRequest = request;
   const context = createHostedProviderEffectContext(
     dependencies,
     "Hosted Linq message delivery",
   );
-  if (shouldMaterializeHostedProviderLinqDirectThreadFirst(request)) {
+  const persistAppCardTextFallback = context.persistAppCardTextFallback;
+  if (persistAppCardTextFallback) {
+    context.persistAppCardTextFallback = async (input) => {
+      await persistAppCardTextFallback(input);
+      effectiveRequest = {
+        ...effectiveRequest,
+        card: null,
+        idempotencyKey: input.idempotencyKey,
+      };
+    };
+  }
+  if (shouldMaterializeHostedProviderLinqDirectThreadFirst(effectiveRequest)) {
     const recovered = await materializeHostedProviderLinqDirectThread({
       context,
-      request,
+      request: effectiveRequest,
     });
     if (recovered) {
       return recovered;
@@ -160,12 +172,12 @@ export async function sendHostedProviderLinqMessage(
   }
 
   try {
-  return await sendHostedProviderLinqMessageDirect(request, context);
+    return await sendHostedProviderLinqMessageDirect(effectiveRequest, context);
   } catch (error) {
     const recovered = await maybeRecoverHostedProviderMissingLinqThread({
       context,
       error,
-      request,
+      request: effectiveRequest,
     });
     if (recovered) {
       return recovered;
@@ -348,8 +360,7 @@ async function maybeRecoverHostedProviderMissingLinqThread(input: {
   request: HostedRuntimeLinqSendRequest;
 }): Promise<HostedRuntimeLinqSendResponse | null> {
   if (
-    input.request.card != null
-    || !looksLikeMissingLinqChatError(input.error)
+    !looksLikeMissingLinqChatError(input.error)
     || !canRecoverHostedProviderLinqDirectThread(input.request)
     || (input.request.targetKind !== "thread" && input.request.targetKind !== "explicit")
   ) {
@@ -395,6 +406,12 @@ async function materializeHostedProviderLinqDirectThread(input: {
     }
     return {
       ...delivered,
+      ...(input.request.idempotencyKey
+        ? {
+            idempotencyKey:
+              delivered.idempotencyKey ?? input.request.idempotencyKey,
+          }
+        : {}),
       providerThreadId: normalizeHostedProviderText(delivered.providerThreadId) ?? target,
       target,
     };

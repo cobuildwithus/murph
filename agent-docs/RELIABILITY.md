@@ -12,7 +12,10 @@ Last verified: 2026-07-31
   outbox atomically replaces the card with its text-only replay and persists
   the distinct stable provider key; an interrupted process therefore replays
   only that same text effect. Capability or route fallback freezes the same
-  text-only replay under the original key. Transport ambiguity, timeouts, rate
+  text-only replay under the original key. Once that transition commits, the
+  effective text intent and key also own the current provider attempt and any
+  authorized stale-direct-thread materialization; the pre-transition card
+  request is no longer recovery authority. Transport ambiguity, timeouts, rate
   limits, and server failures remain failed delivery attempts and must not
   start a second send.
 - Update architecture and verification docs in the same change that introduces new runtime entrypoints.

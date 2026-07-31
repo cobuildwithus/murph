@@ -1826,6 +1826,99 @@ describe('assistant channels runtime seam', () => {
     expect(runtimeMocks.sendLinqChatMessage).not.toHaveBeenCalled()
   })
 
+  it.each([
+    {
+      capabilityAvailable: false,
+      expectedIdempotencyKey: 'card-stale-thread',
+      name: 'capability fallback',
+    },
+    {
+      capabilityAvailable: true,
+      expectedIdempotencyKey: 'card-stale-thread:fallback',
+      name: 'definitive app-card rejection',
+    },
+  ])('recovers a stale Linq thread after $name using the persisted text identity', async ({
+    capabilityAvailable,
+    expectedIdempotencyKey,
+  }) => {
+    vi.stubEnv('LINQ_API_TOKEN', 'linq-token')
+    const missingChatError = new VaultCliError(
+      'LINQ_API_REQUEST_FAILED',
+      'Linq request POST /chats/[chat]/messages failed with HTTP 404.',
+      {
+        failureStage: 'http',
+        linqFailureKind: 'chat_not_found',
+        method: 'POST',
+        operation: 'send_message',
+        path: '/chats/[chat]/messages',
+        provider: 'linq',
+        retryable: false,
+        status: 404,
+      },
+    )
+    const persistLinqAppCardTextFallback = vi.fn().mockResolvedValue(undefined)
+    runtimeMocks.checkLinqIMessageCapability.mockResolvedValue(capabilityAvailable)
+    if (capabilityAvailable) {
+      runtimeMocks.sendLinqIMessageAppCard.mockRejectedValue(new VaultCliError(
+        'LINQ_API_REQUEST_FAILED',
+        'Linq rejected the iMessage app card.',
+        {
+          failureStage: 'http',
+          method: 'POST',
+          operation: 'send_imessage_app_card',
+          path: '/chats/[chat]/messages',
+          provider: 'linq',
+          retryable: false,
+          status: 400,
+        },
+      ))
+    }
+    runtimeMocks.sendLinqChatMessage.mockRejectedValueOnce(missingChatError)
+    runtimeMocks.createLinqChat.mockResolvedValueOnce({
+      chatId: 'recovered-card-chat',
+      messageId: 'recovered-card-message',
+    })
+
+    await expect(ASSISTANT_CHANNEL_ADAPTERS.linq.send({
+      actorId: '+15550001',
+      bindingDelivery: createAssistantBindingDelivery('thread', 'stale-card-chat'),
+      card: NUTRITION_CARD,
+      deliverySource: {
+        kind: 'linq',
+        fromPhoneNumber: '+15550000',
+      },
+      explicitTarget: null,
+      idempotencyKey: 'card-stale-thread',
+      identityId: null,
+      message: NUTRITION_CARD_TEXT,
+      replyToMessageId: null,
+      threadIsDirect: true,
+    }, {
+      persistLinqAppCardTextFallback,
+    })).resolves.toMatchObject({
+      idempotencyKey: expectedIdempotencyKey,
+      providerMessageId: 'recovered-card-message',
+      providerThreadId: 'recovered-card-chat',
+      target: 'recovered-card-chat',
+    })
+
+    expect(persistLinqAppCardTextFallback).toHaveBeenCalledWith({
+      idempotencyKey: expectedIdempotencyKey,
+    })
+    expect(runtimeMocks.createLinqChat).toHaveBeenCalledWith({
+      from: '+15550000',
+      idempotencyKey: expectedIdempotencyKey,
+      message: NUTRITION_CARD_TEXT,
+      to: ['+15550001'],
+    }, {
+      env: process.env,
+      fetchImplementation: undefined,
+    })
+    expect(runtimeMocks.createLinqChat.mock.invocationCallOrder[0]).toBeGreaterThan(
+      persistLinqAppCardTextFallback.mock.invocationCallOrder[0]!,
+    )
+  })
+
   it('uploads private Linq image bytes and sends only the provider attachment id', async () => {
     const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47])
     const fallbackDescription =
