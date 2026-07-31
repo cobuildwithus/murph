@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   finalizeHostedPhoneLink: vi.fn(),
   linkAccountCallbacks: null as LinkAccountCallbacks | null,
   linkPhone: vi.fn(),
+  reportHostedPhoneLinkDiagnostic: vi.fn(),
   refreshUser: vi.fn(),
   useLinkAccount: vi.fn(),
   usePrivy: vi.fn(),
@@ -44,6 +45,7 @@ vi.mock("@privy-io/react-auth", () => ({
 
 vi.mock("@/src/components/hosted-onboarding/hosted-phone-auth-support", () => ({
   finalizeHostedPhoneLink: mocks.finalizeHostedPhoneLink,
+  reportHostedPhoneLinkDiagnostic: mocks.reportHostedPhoneLinkDiagnostic,
 }));
 
 let cleanupRender: (() => Promise<void>) | null = null;
@@ -80,6 +82,7 @@ describe("HostedPhoneSettings", () => {
       id: "privy-user-a",
       linkedAccounts: [],
     });
+    mocks.reportHostedPhoneLinkDiagnostic.mockResolvedValue(undefined);
     mocks.finalizeHostedPhoneLink.mockImplementation(async (input: {
       onLinked?: (payload: { phoneNumber: string; phoneNumberHint: string }) => Promise<void> | void;
     }) => {
@@ -103,6 +106,7 @@ describe("HostedPhoneSettings", () => {
     const markup = renderToStaticMarkup(
       createElement(HostedPhoneSettings, {
         authenticated: true,
+        diagnosticSurface: "settings",
         expectedPrivyUserId: "privy-user-a",
         initialPhoneNumber: "+15550100002",
         murphPhoneNumber: "+15550100001",
@@ -121,6 +125,7 @@ describe("HostedPhoneSettings", () => {
     const markup = renderToStaticMarkup(
       createElement(HostedPhoneSettings, {
         authenticated: true,
+        diagnosticSurface: "settings",
         expectedPrivyUserId: "privy-user-a",
         initialPhoneNumber: "+15550100002",
         murphPhoneNumber: null,
@@ -137,6 +142,7 @@ describe("HostedPhoneSettings", () => {
     const { cleanup, container } = await renderClientComponent(
       createElement(HostedPhoneSettings, {
         authenticated: true,
+        diagnosticSurface: "settings",
         expectedPrivyUserId: "privy-user-a",
         initialPhoneNumber: null,
         privySessionMatchesAppSession: true,
@@ -172,6 +178,7 @@ describe("HostedPhoneSettings", () => {
         createElement(HostedPhoneSettings, {
           authenticated: true,
           autoOpen: true,
+          diagnosticSurface: "settings",
           expectedPrivyUserId: "privy-user-a",
           initialPhoneNumber,
           privySessionMatchesAppSession: true,
@@ -193,6 +200,7 @@ describe("HostedPhoneSettings", () => {
       createElement(HostedPhoneSettings, {
         authenticated: true,
         autoOpen: true,
+        diagnosticSurface: "settings",
         expectedPrivyUserId: "privy-user-a",
         initialPhoneNumber: null,
         onLinked,
@@ -241,6 +249,15 @@ describe("HostedPhoneSettings", () => {
     });
     expect(mocks.finalizeHostedPhoneLink).toHaveBeenCalledTimes(1);
     expect(mocks.refreshUser).toHaveBeenCalledTimes(1);
+    expect(readDiagnosticEvents()).toEqual(expect.arrayContaining([
+      "surface_loaded",
+      "provider_started",
+      "provider_succeeded",
+      "sync_succeeded",
+    ]));
+    const serializedDiagnostics = JSON.stringify(mocks.reportHostedPhoneLinkDiagnostic.mock.calls);
+    expect(serializedDiagnostics).not.toContain("privy-user-a");
+    expect(serializedDiagnostics).not.toContain("+15550100002");
   });
 
   it("uses Privy's update-phone flow when the matched account already has a phone", async () => {
@@ -259,6 +276,7 @@ describe("HostedPhoneSettings", () => {
       createElement(HostedPhoneSettings, {
         authenticated: true,
         autoOpen: true,
+        diagnosticSurface: "settings",
         expectedPrivyUserId: "privy-user-a",
         initialPhoneNumber: "+15550100002",
         privySessionMatchesAppSession: true,
@@ -300,6 +318,7 @@ describe("HostedPhoneSettings", () => {
       createElement(HostedPhoneSettings, {
         authenticated: true,
         autoOpen: true,
+        diagnosticSurface: "settings",
         expectedPrivyUserId: "privy-user-a",
         initialPhoneNumber: "+15550100002",
         privySessionMatchesAppSession: true,
@@ -331,6 +350,7 @@ describe("HostedPhoneSettings", () => {
       createElement(HostedPhoneSettings, {
         authenticated: true,
         autoOpen: true,
+        diagnosticSurface: "settings",
         expectedPrivyUserId: "privy-user-a",
         initialPhoneNumber: null,
         privySessionMatchesAppSession: true,
@@ -345,6 +365,12 @@ describe("HostedPhoneSettings", () => {
     );
     expect(mocks.linkPhone).not.toHaveBeenCalled();
     expect(mocks.finalizeHostedPhoneLink).not.toHaveBeenCalled();
+    expect(mocks.reportHostedPhoneLinkDiagnostic).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientState: "provider_user_mismatch",
+        event: "surface_blocked",
+      }),
+    );
   });
 
   it("blocks provider mutation when the server could not prove the Privy session match", async () => {
@@ -354,6 +380,7 @@ describe("HostedPhoneSettings", () => {
       createElement(HostedPhoneSettings, {
         authenticated: true,
         autoOpen: true,
+        diagnosticSurface: "settings",
         expectedPrivyUserId: "privy-user-a",
         initialPhoneNumber: null,
         privySessionMatchesAppSession: false,
@@ -365,6 +392,12 @@ describe("HostedPhoneSettings", () => {
     expect(mocks.linkPhone).not.toHaveBeenCalled();
     expect(mocks.updatePhone).not.toHaveBeenCalled();
     expect(mocks.finalizeHostedPhoneLink).not.toHaveBeenCalled();
+    expect(mocks.reportHostedPhoneLinkDiagnostic).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientState: "server_session_mismatch",
+        event: "surface_blocked",
+      }),
+    );
   });
 
   it.each([
@@ -377,6 +410,7 @@ describe("HostedPhoneSettings", () => {
       createElement(HostedPhoneSettings, {
         authenticated: true,
         autoOpen: true,
+        diagnosticSurface: "settings",
         expectedPrivyUserId: "privy-user-a",
         initialPhoneNumber: null,
         privySessionMatchesAppSession: true,
@@ -395,6 +429,51 @@ describe("HostedPhoneSettings", () => {
       "That phone number belongs to another account. Sign in to that account or contact support.",
     );
     expect(mocks.finalizeHostedPhoneLink).not.toHaveBeenCalled();
+    expect(mocks.reportHostedPhoneLinkDiagnostic).toHaveBeenCalledWith(
+      expect.objectContaining({
+        detailCode: errorCode,
+        event: "provider_failed",
+      }),
+    );
+  });
+
+  it("records client refresh and Murph sync failures without serializing the error", async () => {
+    mocks.refreshUser.mockRejectedValueOnce(new Error("provider payload must stay private"));
+    mocks.finalizeHostedPhoneLink.mockRejectedValueOnce(
+      new Error("server response must stay private"),
+    );
+    const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedPhoneSettings, {
+        authenticated: true,
+        autoOpen: true,
+        diagnosticSurface: "settings",
+        expectedPrivyUserId: "privy-user-a",
+        initialPhoneNumber: null,
+        privySessionMatchesAppSession: true,
+      }),
+    );
+    cleanupRender = cleanup;
+
+    await act(async () => {
+      findButton(container, "Verify phone")?.dispatchEvent(new Event("click", { bubbles: true }));
+      mocks.linkAccountCallbacks?.onSuccess?.({
+        linkedAccount: { type: "phone" },
+        linkMethod: "sms",
+        user: { linkedAccounts: [] },
+      });
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => {
+      expect(readDiagnosticEvents()).toEqual(expect.arrayContaining([
+        "client_refresh_failed",
+        "sync_failed",
+      ]));
+    });
+    const serializedDiagnostics = JSON.stringify(mocks.reportHostedPhoneLinkDiagnostic.mock.calls);
+    expect(serializedDiagnostics).not.toContain("provider payload must stay private");
+    expect(serializedDiagnostics).not.toContain("server response must stay private");
   });
 
   it("does not use Privy client phone state as the displayed phone authority", async () => {
@@ -416,6 +495,7 @@ describe("HostedPhoneSettings", () => {
     const markup = renderToStaticMarkup(
       createElement(HostedPhoneSettings, {
         authenticated: true,
+        diagnosticSurface: "settings",
         expectedPrivyUserId: "privy-user-a",
         initialPhoneNumber: null,
         privySessionMatchesAppSession: true,
@@ -430,5 +510,11 @@ describe("HostedPhoneSettings", () => {
 function findButton(container: HTMLElement, label: string): HTMLButtonElement | undefined {
   return Array.from(container.querySelectorAll("button")).find(
     (candidate) => candidate.textContent?.includes(label),
+  );
+}
+
+function readDiagnosticEvents(): unknown[] {
+  return mocks.reportHostedPhoneLinkDiagnostic.mock.calls.map(
+    ([diagnostic]) => diagnostic?.event,
   );
 }

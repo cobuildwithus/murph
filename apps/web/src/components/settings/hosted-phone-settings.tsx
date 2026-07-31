@@ -10,6 +10,7 @@ import { useRef, useState } from "react";
 
 import { finalizeHostedPhoneLink } from "@/src/components/hosted-onboarding/hosted-phone-auth-support";
 import { Button } from "@/src/components/ui/button";
+import type { HostedPhoneLinkDiagnosticSurface } from "@/src/lib/hosted-onboarding/phone-link-diagnostic-contract";
 
 import type { HostedPhoneLinkPayload } from "../hosted-onboarding/hosted-phone-auth-types";
 import {
@@ -22,10 +23,15 @@ import {
   formatMaskedPhoneNumber,
   toErrorMessage,
 } from "./hosted-settings-utils";
+import {
+  toPhoneLinkProviderDetailCode,
+  useHostedPhoneLinkDiagnostics,
+} from "./hosted-phone-link-diagnostics";
 
 export function HostedPhoneSettings(props: {
   authenticated: boolean;
   autoOpen?: boolean;
+  diagnosticSurface: HostedPhoneLinkDiagnosticSurface;
   expectedPrivyUserId: string | null;
   initialPhoneNumber?: string | null;
   murphPhoneNumber?: string | null;
@@ -44,53 +50,95 @@ export function HostedPhoneSettings(props: {
 
   const currentPhoneNumber = linkedPhoneOverride?.phoneNumber ?? props.initialPhoneNumber ?? null;
   const showLinkForm = expanded;
+  const expectedUserPresent = props.expectedPrivyUserId !== null;
+  const clientUserPresent = Boolean(privyUser?.id);
+  const clientUserMatchesExpected =
+    expectedUserPresent && privyUser?.id === props.expectedPrivyUserId;
   const clientSessionMatchesAppSession =
     props.privySessionMatchesAppSession
-    && props.expectedPrivyUserId !== null
-    && privyUser?.id === props.expectedPrivyUserId;
+    && clientUserMatchesExpected;
   const canLinkPhone =
     props.authenticated
     && privyReady
     && privyAuthenticated
     && clientSessionMatchesAppSession;
   const shouldUpdatePhone = Boolean(privyUser?.phone?.number);
+  const reportDiagnostic = useHostedPhoneLinkDiagnostics({
+    appAuthenticated: props.authenticated,
+    clientUserMatchesExpected,
+    clientUserPresent,
+    expectedUserPresent,
+    operation: shouldUpdatePhone ? "update" : "link",
+    privyAuthenticated,
+    privyReady,
+    serverSessionMatches: props.privySessionMatchesAppSession,
+    showLinkForm,
+    surface: props.diagnosticSurface,
+  });
 
   const { linkPhone } = useLinkAccount({
     onError: (error, details) => {
       if (details && details.linkMethod !== "sms") {
+        reportDiagnostic("provider_callback_ignored", {
+          detailCode: "non_sms_callback",
+        });
         return;
       }
 
       setIsLinking(false);
+      const detailCode = toPhoneLinkProviderDetailCode(error);
+      reportDiagnostic(
+        error === "exited_link_flow" ? "provider_cancelled" : "provider_failed",
+        { detailCode },
+      );
       if (error !== "exited_link_flow") {
         setErrorMessage(toPhoneLinkErrorMessage(error));
       }
     },
     onSuccess: (params) => {
       if (params.linkMethod === "sms") {
+        reportDiagnostic("provider_succeeded");
         void handlePrivyPhoneLinked();
+      } else {
+        reportDiagnostic("provider_callback_ignored", {
+          detailCode: "non_sms_callback",
+        });
       }
     },
   });
   const { updatePhone } = useUpdateAccount({
     onError: (error, details) => {
       if (details && details.linkMethod !== "sms") {
+        reportDiagnostic("provider_callback_ignored", {
+          detailCode: "non_sms_callback",
+        });
         return;
       }
 
       setIsLinking(false);
+      const detailCode = toPhoneLinkProviderDetailCode(error);
+      reportDiagnostic(
+        error === "exited_update_flow" ? "provider_cancelled" : "provider_failed",
+        { detailCode },
+      );
       if (error !== "exited_update_flow") {
         setErrorMessage(toPhoneLinkErrorMessage(error));
       }
     },
     onSuccess: (params) => {
       if (params.updateMethod === "sms") {
+        reportDiagnostic("provider_succeeded");
         void handlePrivyPhoneLinked();
+      } else {
+        reportDiagnostic("provider_callback_ignored", {
+          detailCode: "non_sms_callback",
+        });
       }
     },
   });
 
   async function handleLinked(payload: HostedPhoneLinkPayload) {
+    reportDiagnostic("sync_succeeded");
     setErrorMessage(null);
     setSuccessMessage("Phone connected.");
     setLinkedPhoneOverride(payload);
@@ -113,9 +161,16 @@ export function HostedPhoneSettings(props: {
     setIsSyncing(true);
 
     try {
-      await refreshUser().catch(() => null);
+      const refreshSucceeded = await refreshUser().then(
+        () => true,
+        () => false,
+      );
+      if (!refreshSucceeded) {
+        reportDiagnostic("client_refresh_failed");
+      }
       await finalizeHostedPhoneLink({ onLinked: handleLinked });
     } catch (error) {
+      reportDiagnostic("sync_failed");
       setErrorMessage(toErrorMessage(error, "Your phone was verified, but we could not save it. Try again."));
     } finally {
       setIsSyncing(false);
@@ -143,6 +198,7 @@ export function HostedPhoneSettings(props: {
 
     providerCompletionHandledRef.current = false;
     setIsLinking(true);
+    reportDiagnostic("provider_started");
 
     try {
       if (shouldUpdatePhone) {
@@ -152,6 +208,9 @@ export function HostedPhoneSettings(props: {
       }
     } catch (error) {
       setIsLinking(false);
+      reportDiagnostic("provider_failed", {
+        detailCode: toPhoneLinkProviderDetailCode(error),
+      });
       setErrorMessage(toPhoneLinkErrorMessage(error));
     }
   }

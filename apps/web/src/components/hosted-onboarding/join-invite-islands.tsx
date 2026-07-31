@@ -227,6 +227,7 @@ export function JoinInviteMessagingSetupIsland({
       <HostedPhoneSettings
         authenticated={authenticated}
         autoOpen
+        diagnosticSurface="join_invite"
         expectedPrivyUserId={expectedPrivyUserId}
         initialPhoneNumber={null}
         onLinked={refresh}

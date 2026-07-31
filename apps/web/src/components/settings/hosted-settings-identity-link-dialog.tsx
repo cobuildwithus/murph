@@ -111,8 +111,6 @@ function HostedSettingsIdentityMutationContent({
       ? Boolean(account.email.address)
       : Boolean(account.telegram.telegramUserId);
 
-  const copy = getSettingsIdentityLinkCopy(initialMode, hasExisting, account);
-
   if (!clientSessionMatchesAppSession) {
     return (
       <HostedSettingsIdentityDialogFrame
@@ -162,6 +160,7 @@ function HostedSettingsIdentityMutationContent({
         <HostedPhoneSettings
           authenticated
           autoOpen
+          diagnosticSurface="settings"
           expectedPrivyUserId={expectedPrivyUserId}
           initialPhoneNumber={account.phone.number}
           onLinked={onSynced}
