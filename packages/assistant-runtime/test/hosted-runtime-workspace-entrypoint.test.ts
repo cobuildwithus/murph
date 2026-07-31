@@ -30519,6 +30519,7 @@ describe("hosted runtime shutdown signal", () => {
     const firstCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const secondCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
+    const firstAssistantMayFinish = createDeferred<void>();
     const providerStarted = createDeferred<void>();
     const shutdownController = new AbortController();
     let completionInputId: string | null = null;
@@ -30526,7 +30527,6 @@ describe("hosted runtime shutdown signal", () => {
     let firstAssistantPhaseCalls = 0;
     let secondAssistantPhaseCalls = 0;
 
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot: firstVaultRoot });
       const firstResultPromise = runHostedWorkspaceRuntimeJobInProcess(
@@ -30625,6 +30625,7 @@ describe("hosted runtime shutdown signal", () => {
               "started",
             );
             await releaseProviderInputs?.();
+            await firstAssistantMayFinish.promise;
             return {
               checkpointReason: "assistant_runtime_commit" as const,
               foregroundReplyFailed: 0,
@@ -30638,16 +30639,17 @@ describe("hosted runtime shutdown signal", () => {
       );
 
       await withRealTimeout(providerStarted.promise, 5_000, () => events.join(","));
-      await waitForFakeTimerScheduled(() => events.join(","));
       shutdownController.abort(
         new DOMException("Synthetic container SIGTERM.", "AbortError"),
       );
+      firstAssistantMayFinish.resolve();
       const firstResult = await withRealTimeout(
         firstResultPromise,
         15_000,
         () => events.join(","),
       );
 
+      assert.equal(firstAssistantPhaseCalls, 1);
       assert.equal(firstCheckpointRequests.length, 1);
       assert.equal(firstCheckpointRequests[0]?.idleCheckpointTrigger, "shutdown_signal");
       assert.equal(firstCheckpointRequests[0]?.nextWakeReason, "assistant");
@@ -30671,7 +30673,6 @@ describe("hosted runtime shutdown signal", () => {
         "murph.hosted-image-completion.v1",
       );
 
-      vi.useRealTimers();
       const secondWorkspace = createWorkspaceState({
         nextWakeAt: firstCheckpointRequests[0]?.nextWakeAt ?? null,
         nextWakeReason: "assistant",
@@ -30757,12 +30758,12 @@ describe("hosted runtime shutdown signal", () => {
         [],
       );
     } finally {
+      firstAssistantMayFinish.resolve();
       if (!shutdownController.signal.aborted) {
         shutdownController.abort(
           new DOMException("Synthetic test cleanup.", "AbortError"),
         );
       }
-      vi.useRealTimers();
       await removeTempRoot(root);
     }
   }, 30_000);

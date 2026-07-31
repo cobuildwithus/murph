@@ -2979,7 +2979,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         if (assistantProviderHandoffRequested) {
           return false;
         }
-        const shouldContinue = input.shouldContinue ?? (() => true);
+        // Graceful shutdown hands staged work to the durable checkpoint before
+        // this invocation starts another assistant or provider turn.
+        const shouldContinue = () =>
+          options.shutdownSignal?.aborted !== true
+          && (input.shouldContinue?.() ?? true);
         const runtimeStateDirtyBeforeMailboxImport = runtimeStateDirty;
         let invocationLocalAssistantInputBatch:
           HostedWorkspaceRunnerAssistantInputBatch | null = null;
