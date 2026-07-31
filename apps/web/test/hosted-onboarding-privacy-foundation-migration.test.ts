@@ -1031,6 +1031,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260729190000_composable_usage_referral_missions",
       "20260730120000_hosted_capped_group_sponsorship",
       "20260730170000_add_mailbox_ai_usage_denied_at",
+      "20260730180000_hosted_linq_delivery_thread_directness",
       "migration_lock.toml",
     ]);
     expect(deviceSyncSignalSourceProviderMigrationSql).toContain(
