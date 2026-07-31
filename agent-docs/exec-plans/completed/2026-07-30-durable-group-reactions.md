@@ -1,6 +1,6 @@
 # Make every group reaction durable room evidence
 
-Status: active
+Status: completed
 Created: 2026-07-30
 Updated: 2026-07-31
 
@@ -89,3 +89,4 @@ include both `message_reaction` and `message_reaction_count` in
   member-memory exclusion, and trust-boundary rejection.
 - Run focused owner suites, package/web typecheck and lint, diff-aware tests,
   exact-head CI, ReviewGPT, and final patch inspection.
+Completed: 2026-07-31
