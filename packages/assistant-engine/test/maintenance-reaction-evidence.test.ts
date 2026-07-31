@@ -191,6 +191,16 @@ test('room maintenance includes an affirmative Linq reaction that never reached 
   cleanupPaths.push(parentRoot)
 
   await upsertReactionInput({
+    eventId: 'linq-target-message',
+    replyTarget: {
+      channel: 'linq',
+      messageId: 'message-42',
+      threadId: 'chat-room',
+    },
+    text: 'the exact Linq message that earned a heart',
+    vaultRoot,
+  })
+  await upsertReactionInput({
     affirmativeReaction: true,
     eventId: 'linq-reaction-heart',
     replyTarget: {
@@ -210,6 +220,9 @@ test('room maintenance includes an affirmative Linq reaction that never reached 
   const reactionEvidence = readGroupEvidenceText(evidence)
 
   expect(reactionEvidence).toContain('Group reaction event:')
+  expect(reactionEvidence).toContain(
+    '- target text: "the exact Linq message that earned a heart"',
+  )
   expect(reactionEvidence).toContain(
     '- reaction delta: added "Reacted with a heart reaction."',
   )
