@@ -48,9 +48,10 @@ privacy, authorization, or provider boundaries.
 - Keep the existing `finish-onboarding-followup` managed automation as the one
   recovery and continuation mechanism. Do not add a second automation for
   context collection or split onboarding into competing lifecycle owners.
-  Reconciliation recognizes only the exact current seed or the bounded legacy
-  seed; execution remains ordinary scheduled send-or-skip work, so editable
-  slug, tags, title, and instructions confer no onboarding-state authority.
+  Reconciliation recognizes only the exact current seed, its immediate
+  predecessor, or the bounded original legacy seed; execution remains ordinary
+  scheduled send-or-skip work, so editable slug, tags, title, and instructions
+  confer no onboarding-state authority.
 - Keep the post-onboarding choice point separate from unfinished-onboarding
   recovery. It is one finite managed one-shot for members who answered
   onboarding, not another collection flow, recurring cadence, or profile.
