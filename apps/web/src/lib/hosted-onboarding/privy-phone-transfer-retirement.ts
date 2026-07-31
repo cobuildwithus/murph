@@ -31,7 +31,10 @@ import {
   readHostedPrivyUserByIdIfExists,
   type HostedPrivyIdentity,
 } from "./privy";
-import { lockHostedMemberRow } from "./shared";
+import {
+  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  lockHostedMemberRow,
+} from "./shared";
 import {
   HOSTED_BROWSER_VAULT_REFRESH_RUNTIME_CONTROL_EVENT_ID_PREFIX,
 } from "../hosted-orchestration/browser-vault-refresh-control";
@@ -39,6 +42,16 @@ import { getPrisma } from "../prisma";
 
 const HOSTED_PRIVY_PHONE_TRANSFER_AUTHORITY_TIMEOUT_MS = 5_000;
 const HOSTED_PRIVY_PHONE_TRANSFER_MAX_SCAFFOLD_SESSIONS = 20;
+
+/**
+ * The disposable-source census serializes on both member rows and then fans
+ * out across every member-material relation (thirty-plus reads), so it gets
+ * a strictly larger callback budget than the fifteen-second client default.
+ */
+export const HOSTED_PRIVY_PHONE_TRANSFER_RETIREMENT_TRANSACTION_OPTIONS = {
+  ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  timeout: 30_000,
+} as const;
 
 export interface HostedPrivyPhoneTransferProof {
   phoneNumber: string;

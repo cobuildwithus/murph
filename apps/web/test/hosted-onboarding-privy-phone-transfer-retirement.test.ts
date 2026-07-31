@@ -43,6 +43,7 @@ vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/shared", () => ({
+  HOSTED_ONBOARDING_TRANSACTION_OPTIONS: { maxWait: 5_000 },
   lockHostedMemberRow: mocks.lockHostedMemberRow,
 }));
 
