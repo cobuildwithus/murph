@@ -483,20 +483,6 @@ describe("createHostedLinqChat", () => {
       primaryMessageId: "msg_text",
     },
     {
-      expectedMessageId: "msg_link",
-      expectedMessageIds: ["msg_link"],
-      label: "only the link message id",
-      linkMessageId: "msg_link",
-      primaryMessageId: null,
-    },
-    {
-      expectedMessageId: null,
-      expectedMessageIds: [],
-      label: "neither message id",
-      linkMessageId: null,
-      primaryMessageId: null,
-    },
-    {
       expectedMessageId: "msg_duplicate",
       expectedMessageIds: ["msg_duplicate"],
       label: "the same id for both messages",
@@ -559,6 +545,51 @@ describe("createHostedLinqChat", () => {
           }],
         },
       });
+    },
+  );
+
+  it.each([
+    ["a link identity", "msg_link"],
+    ["no later identity", null],
+  ])(
+    "does not issue a new-chat rich-link request when the primary response has no identity, even with %s",
+    async (_label, linkMessageId) => {
+      const requestBodies: unknown[] = [];
+      let requestCount = 0;
+      const fetchMock = vi.fn(
+        async (_input: RequestInfo | URL, init?: RequestInit) => {
+          requestBodies.push(readJsonRequestBody(init));
+          requestCount += 1;
+          if (requestCount === 1) {
+            return createJsonResponse({
+              chat: {
+                id: "chat_created",
+                message: {},
+              },
+            }, 200);
+          }
+          return createJsonResponse({
+            chat_id: "chat_created",
+            message: linkMessageId ? { id: linkMessageId } : {},
+          }, 200);
+        },
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(createHostedLinqChat({
+        from: "+15550000000",
+        idempotencyKey: "create-123",
+        message:
+          "Your secure payment link:\nhttps://pay.example.test/checkout/session_123",
+        to: ["+15550000001"],
+      })).rejects.toMatchObject({
+        code: "LINQ_SEND_FAILED",
+        deliveryMayHaveSucceeded: true,
+        retryable: true,
+      });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(requestBodies).toHaveLength(1);
     },
   );
 
@@ -887,20 +918,6 @@ describe("sendHostedLinqChatMessage", () => {
       primaryMessageId: "msg_text",
     },
     {
-      expectedMessageId: "msg_link",
-      expectedMessageIds: ["msg_link"],
-      label: "only the link message id",
-      linkMessageId: "msg_link",
-      primaryMessageId: null,
-    },
-    {
-      expectedMessageId: null,
-      expectedMessageIds: [],
-      label: "neither message id",
-      linkMessageId: null,
-      primaryMessageId: null,
-    },
-    {
       expectedMessageId: "msg_duplicate",
       expectedMessageIds: ["msg_duplicate"],
       label: "the same id for both messages",
@@ -962,6 +979,93 @@ describe("sendHostedLinqChatMessage", () => {
       });
     },
   );
+
+  it.each([
+    ["a link identity", "msg_link"],
+    ["no later identity", null],
+  ])(
+    "does not issue an existing-chat rich-link request when the primary response has no identity, even with %s",
+    async (_label, linkMessageId) => {
+      const requestBodies: unknown[] = [];
+      let requestCount = 0;
+      const fetchMock = vi.fn(
+        async (_input: RequestInfo | URL, init?: RequestInit) => {
+          requestBodies.push(readJsonRequestBody(init));
+          requestCount += 1;
+          return createJsonResponse({
+            chat_id: "chat_123",
+            message: requestCount === 1
+              ? {}
+              : linkMessageId
+                ? { id: linkMessageId }
+                : {},
+          }, 200);
+        },
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(sendHostedLinqChatMessage({
+        chatId: "chat_123",
+        idempotencyKey: "payment-message:evt_123",
+        message:
+          "Complete payment here:\nhttps://pay.example.test/checkout/session_123",
+      })).rejects.toMatchObject({
+        code: "LINQ_SEND_FAILED",
+        deliveryMayHaveSucceeded: true,
+        retryable: true,
+      });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(requestBodies).toHaveLength(1);
+    },
+  );
+
+  it("retries an identity-less primary with the same key before issuing the link", async () => {
+    const requestBodies: unknown[] = [];
+    let primaryAttemptCount = 0;
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const body = readJsonRequestBody(init) as {
+          message?: { parts?: Array<{ type?: string }> };
+        };
+        requestBodies.push(body);
+        if (body.message?.parts?.[0]?.type === "link") {
+          return createJsonResponse({
+            chat_id: "chat_123",
+            message: { id: "msg_link" },
+          }, 200);
+        }
+        primaryAttemptCount += 1;
+        return createJsonResponse({
+          chat_id: "chat_123",
+          message: primaryAttemptCount === 1 ? {} : { id: "msg_text" },
+        }, 200);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const input = {
+      chatId: "chat_123",
+      idempotencyKey: "payment-message:evt_123",
+      message:
+        "Complete payment here:\nhttps://pay.example.test/checkout/session_123",
+    };
+
+    await expect(sendHostedLinqChatMessage(input)).rejects.toMatchObject({
+      code: "LINQ_SEND_FAILED",
+      deliveryMayHaveSucceeded: true,
+    });
+    await expect(sendHostedLinqChatMessage(input)).resolves.toMatchObject({
+      providerMessageIds: ["msg_text", "msg_link"],
+    });
+
+    expect(requestBodies.map((body) => (
+      body as { message?: { idempotency_key?: string } }
+    ).message?.idempotency_key)).toEqual([
+      "payment-message:evt_123",
+      "payment-message:evt_123",
+      "payment-message:evt_123:link",
+    ]);
+  });
 
   it("reconciles a lost rich-link acknowledgment with the same provider key", async () => {
     const requestBodies: unknown[] = [];

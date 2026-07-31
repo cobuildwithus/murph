@@ -4440,6 +4440,101 @@ describe('assistant outbox runtime', () => {
       .toMatchObject({ idempotencyKey: deliveryIdempotencyKey })
   })
 
+  it.each([
+    ['an ambiguous primary replay', 'primary replay acknowledgement was lost'],
+    ['an accepted-outcome callback failure', 'accepted outcome callback timed out'],
+  ])(
+    'keeps a Linq rich-link checkpoint non-confirmable through %s',
+    async (_label, ambiguousMessage) => {
+      const { vaultRoot } = await createAssistantVault(
+        'assistant-outbox-linq-link-sticky-checkpoint-',
+      )
+      const seeded = await createIntent(vaultRoot, {
+        channel: 'linq',
+        explicitTarget: 'thread-linq-link-sticky',
+        message: 'Use this payment link https://pay.example.test/session',
+        sessionId: 'session-linq-link-sticky',
+        turnId: 'turn-linq-link-sticky',
+      })
+      const partialFailure = Object.assign(
+        new Error('rich-link endpoint failed'),
+        {
+          code: 'ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY',
+          deliveryMayHaveSucceeded: true,
+          providerMessageId: 'linq-text-message',
+          providerMessageIds: ['linq-text-message'],
+          providerThreadId: 'thread-linq-link-sticky',
+          target: 'thread-linq-link-sticky',
+          targetKind: 'thread',
+        },
+      )
+      mockedDeliverAssistantMessageOverBinding.mockRejectedValueOnce(partialFailure)
+
+      const partial = await dispatchAssistantOutboxIntent({
+        force: true,
+        intentId: seeded.intentId,
+        now: new Date('2026-04-08T04:23:00.000Z'),
+        vault: vaultRoot,
+      })
+      const deliveryIdempotencyKey = mockedDeliverAssistantMessageOverBinding
+        .mock.calls[0]?.[0].idempotencyKey
+      expect(partial.intent).toMatchObject({
+        deliveryConfirmationPending: false,
+        status: 'retryable',
+      })
+
+      mockedDeliverAssistantMessageOverBinding.mockRejectedValueOnce(
+        Object.assign(new Error(ambiguousMessage), {
+          deliveryMayHaveSucceeded: true,
+        }),
+      )
+      const ambiguous = await dispatchAssistantOutboxIntent({
+        force: true,
+        intentId: seeded.intentId,
+        now: new Date('2026-04-08T04:24:00.000Z'),
+        vault: vaultRoot,
+      })
+
+      expect(ambiguous.intent).toMatchObject({
+        deliveryConfirmationPending: false,
+        status: 'retryable',
+      })
+      expect(ambiguous.intent.delivery).toMatchObject({
+        providerMessageIds: ['linq-text-message'],
+      })
+      expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(2)
+      expect(mockedDeliverAssistantMessageOverBinding.mock.calls[1]?.[0])
+        .toMatchObject({ idempotencyKey: deliveryIdempotencyKey })
+
+      mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+        delivery: createDelivery({
+          channel: 'linq',
+          idempotencyKey: deliveryIdempotencyKey,
+          providerMessageId: 'linq-link-message',
+          providerMessageIds: ['linq-text-message', 'linq-link-message'],
+          providerThreadId: 'thread-linq-link-sticky',
+          target: 'thread-linq-link-sticky',
+          targetKind: 'thread',
+        }),
+        deliveryDeduplicated: false,
+        deliveryTransportIdempotent: true,
+        outboxIntentId: null,
+        session: undefined,
+      })
+      const recovered = await dispatchAssistantOutboxIntent({
+        force: true,
+        intentId: seeded.intentId,
+        now: new Date('2026-04-08T04:25:00.000Z'),
+        vault: vaultRoot,
+      })
+
+      expect(recovered.intent.status).toBe('sent')
+      expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(3)
+      expect(mockedDeliverAssistantMessageOverBinding.mock.calls[2]?.[0])
+        .toMatchObject({ idempotencyKey: deliveryIdempotencyKey })
+    },
+  )
+
   it('abandons Linq media-only voice memo ambiguity without retrying', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-linq-voice-only-')
 

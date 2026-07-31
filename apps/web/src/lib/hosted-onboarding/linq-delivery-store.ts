@@ -2105,7 +2105,7 @@ async function recomputeHostedLinqDeliveryFromMessagesTx(input: {
   deliveryId: string;
   prisma: HostedLinqDeliveryClient;
 }): Promise<{
-  status: "accepted" | "delivered" | "failed";
+  status: "accepted" | "delivered" | "failed" | "sent_no_receipt_expected";
   terminalStatusChanged: boolean;
 }> {
   const delivery = await input.prisma.hostedLinqDelivery.findUnique({
@@ -2147,12 +2147,17 @@ async function recomputeHostedLinqDeliveryFromMessagesTx(input: {
     messages.length > 0
     && !incompletePartialDelivery
     && messages.every((message) => message.status === "delivered");
-  const status: "accepted" | "delivered" | "failed" =
+  const aggregateStatus: "accepted" | "delivered" | "failed" =
     failedMessages.length > 0 || incompletePartialDelivery
       ? "failed"
       : allMessagesDelivered
         ? "delivered"
         : "accepted";
+  const status =
+    aggregateStatus === "accepted"
+    && delivery.status === "sent_no_receipt_expected"
+      ? "sent_no_receipt_expected"
+      : aggregateStatus;
   const latestMessage = selectLatestHostedLinqDeliveryMessageProgress(messages);
   const latestFailedMessage =
     selectLatestHostedLinqDeliveryMessageProgress(failedMessages);

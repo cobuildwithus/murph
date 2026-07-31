@@ -82,6 +82,10 @@ export async function createHostedLinqChat(input: {
       retryable: true,
     });
   }
+  const primaryMessageId = requireHostedLinqPrimaryMessageIdForRichLink({
+    messageId: result.messageId,
+    operation: "chat create",
+  });
 
   let linkResult: HostedLinqSendResult;
   try {
@@ -95,11 +99,11 @@ export async function createHostedLinqChat(input: {
     throw createHostedLinqRichLinkPartialDeliveryFailure({
       chatId: result.chatId,
       error,
-      providerMessageIds: collectHostedLinqProviderMessageIds(result.messageId),
+      providerMessageIds: collectHostedLinqProviderMessageIds(primaryMessageId),
     });
   }
   const providerMessageIds = collectHostedLinqProviderMessageIds(
-    result.messageId,
+    primaryMessageId,
     linkResult.messageId,
   );
   if (providerMessageIds.length !== 2) {
@@ -189,6 +193,10 @@ export async function sendHostedLinqChatMessage(input: {
     message: split.message,
     timeoutMs: HOSTED_LINQ_MULTI_REQUEST_TIMEOUT_MS,
   });
+  const primaryMessageId = requireHostedLinqPrimaryMessageIdForRichLink({
+    messageId: primaryResult.messageId,
+    operation: "message send",
+  });
   let linkResult: HostedLinqSendResult;
   try {
     linkResult = await sendHostedLinqRichLinkWithTextFallback({
@@ -202,12 +210,12 @@ export async function sendHostedLinqChatMessage(input: {
       chatId: primaryResult.chatId ?? input.chatId,
       error,
       providerMessageIds: collectHostedLinqProviderMessageIds(
-        primaryResult.messageId,
+        primaryMessageId,
       ),
     });
   }
   const providerMessageIds = collectHostedLinqProviderMessageIds(
-    primaryResult.messageId,
+    primaryMessageId,
     linkResult.messageId,
   );
   if (providerMessageIds.length !== 2) {
@@ -349,6 +357,29 @@ function collectHostedLinqProviderMessageIds(
     }
   }
   return output;
+}
+
+function requireHostedLinqPrimaryMessageIdForRichLink(input: {
+  messageId: string | null;
+  operation: "chat create" | "message send";
+}): string {
+  const messageId = normalizeNullableString(input.messageId);
+  if (messageId) {
+    return messageId;
+  }
+
+  throw Object.assign(hostedOnboardingError({
+    code: "LINQ_SEND_FAILED",
+    details: {
+      failureStage: "http",
+    },
+    httpStatus: 502,
+    message:
+      `Linq ${input.operation} response was missing the primary message identity for a rich-link follow-up.`,
+    retryable: true,
+  }), {
+    deliveryMayHaveSucceeded: true as const,
+  });
 }
 
 function createHostedLinqRichLinkPartialDeliveryFailure(input: {

@@ -399,6 +399,10 @@ export async function sendLinqChatMessage(
     },
     dependencies,
   )
+  const primaryMessageId = requireLinqPrimaryMessageIdForRichLink({
+    messageId: primaryResponse.message?.id,
+    operation: 'send_message',
+  })
   let linkResponse: LinqMessageSendResponse
   try {
     linkResponse = await sendLinqChatRichLinkWithTextFallback(
@@ -414,7 +418,7 @@ export async function sendLinqChatMessage(
       error,
       idempotencyKey: input.idempotencyKey ?? null,
       providerMessageIds: collectLinqProviderMessageIds(
-        primaryResponse.message?.id,
+        primaryMessageId,
       ),
       providerThreadId: input.chatId,
       target: input.chatId,
@@ -422,7 +426,7 @@ export async function sendLinqChatMessage(
     })
   }
   const providerMessageIds = collectLinqProviderMessageIds(
-    primaryResponse.message?.id,
+    primaryMessageId,
     linkResponse.message?.id,
   )
   if (providerMessageIds.length !== 2) {
@@ -979,6 +983,10 @@ export async function createLinqChat(
     dependencies,
   )
   const chatId = requireLinqCreatedChatIdForRichLink(result)
+  const primaryMessageId = requireLinqPrimaryMessageIdForRichLink({
+    messageId: result.messageId,
+    operation: 'create_chat',
+  })
   let linkResponse: LinqMessageSendResponse
   try {
     linkResponse = await sendLinqChatRichLinkWithTextFallback(
@@ -993,7 +1001,7 @@ export async function createLinqChat(
     throw createLinqRichLinkPartialDeliveryFailure({
       error,
       idempotencyKey: input.idempotencyKey ?? null,
-      providerMessageIds: collectLinqProviderMessageIds(result.messageId),
+      providerMessageIds: collectLinqProviderMessageIds(primaryMessageId),
       providerThreadId: chatId,
       target: chatId,
       targetKind: 'thread',
@@ -1001,7 +1009,7 @@ export async function createLinqChat(
   }
   const linkMessageId = normalizeNullableString(linkResponse.message?.id ?? null)
   const providerMessageIds = collectLinqProviderMessageIds(
-    result.messageId,
+    primaryMessageId,
     linkMessageId,
   )
   if (providerMessageIds.length !== 2) {
@@ -1087,6 +1095,32 @@ function requireLinqCreatedChatIdForRichLink(result: CreateLinqChatResult): stri
       provider: 'linq',
       retryable: true,
     },
+  )
+}
+
+function requireLinqPrimaryMessageIdForRichLink(input: {
+  messageId: unknown
+  operation: 'create_chat' | 'send_message'
+}): string {
+  const messageId = normalizeNullableString(
+    typeof input.messageId === 'string' ? input.messageId : null,
+  )
+  if (messageId) {
+    return messageId
+  }
+
+  throw Object.assign(
+    new VaultCliError(
+      'LINQ_API_REQUEST_FAILED',
+      'Linq response was missing the primary message identity for a rich-link follow-up.',
+      {
+        failureStage: 'http',
+        operation: input.operation,
+        provider: 'linq',
+        retryable: true,
+      },
+    ),
+    { deliveryMayHaveSucceeded: true as const },
   )
 }
 

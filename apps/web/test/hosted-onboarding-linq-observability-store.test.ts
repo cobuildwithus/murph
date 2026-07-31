@@ -2935,6 +2935,51 @@ describe("hosted Linq observability stores", () => {
     );
   });
 
+  it("keeps a new two-part group accept out of missing-receipt status", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const acceptedAt = new Date("2026-03-26T12:00:01.000Z");
+    fixture.hostedLinqDeliveryFindUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        failedAt: null,
+        failureCode: null,
+        failureReason: null,
+        status: "sent_no_receipt_expected",
+      });
+    fixture.hostedLinqDeliveryMessageFindMany.mockResolvedValueOnce([
+      buildAcceptedOwnedDeliveryMessageState(),
+      buildAcceptedOwnedDeliveryMessageState(),
+    ]);
+
+    await recordHostedLinqRuntimeDeliveryOutcomeTx({
+      acceptedAt,
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      idempotencyKey: "assistant-outbox:intent_group_two_part",
+      linqChatId: "linq_chat_group",
+      messageIds: ["provider_message_group_text", "provider_message_group_link"],
+      prisma: fixture.prisma as never,
+      sourceRef: "intent_group_two_part",
+      targetKind: "thread",
+      threadIsDirect: false,
+      userId: "member_123",
+    });
+
+    expect(fixture.hostedLinqDeliveryCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "sent_no_receipt_expected",
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqDeliveryUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "sent_no_receipt_expected",
+        }),
+      }),
+    );
+  });
+
   it("does not create or project a runtime raw sender line that is not already known", async () => {
     const fixture = createObservabilityPrismaFixture();
 
@@ -3119,6 +3164,66 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedMailboxItemUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: { consumedAt: acceptedAt },
+      }),
+    );
+  });
+
+  it("keeps a recovered two-part group accept out of missing-receipt status", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const acceptedAt = new Date("2026-03-26T12:05:02.000Z");
+    const primaryMessageId = "linq_group_text_accepted";
+    const linkMessageId = "linq_group_link_recovered";
+    const primaryMessageLookupKey =
+      createHostedLinqMessageLookupKey(primaryMessageId);
+    fixture.hostedLinqDeliveryFindUnique
+      .mockResolvedValueOnce({
+        acceptedAt: null,
+        deliveredAt: null,
+        failedAt: new Date("2026-03-26T12:00:02.000Z"),
+        failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+        id: "hld_group_partial_link",
+        lastReceiptAt: null,
+        messageLookupKey: primaryMessageLookupKey,
+        skippedAt: null,
+        status: "failed",
+      })
+      .mockResolvedValueOnce({
+        failedAt: null,
+        failureCode: null,
+        failureReason: null,
+        status: "sent_no_receipt_expected",
+      });
+    fixture.hostedLinqDeliveryMessageFindMany.mockResolvedValueOnce([
+      buildAcceptedOwnedDeliveryMessageState(),
+      buildAcceptedOwnedDeliveryMessageState(),
+    ]);
+
+    await recordHostedLinqRuntimeDeliveryOutcomeTx({
+      acceptedAt,
+      attemptedAt: new Date("2026-03-26T12:05:01.000Z"),
+      idempotencyKey: "assistant-outbox:intent_group_partial_link",
+      linqChatId: "linq_chat_group",
+      messageIds: [primaryMessageId, linkMessageId],
+      prisma: fixture.prisma as never,
+      sourceRef: "intent_group_partial_link",
+      targetKind: "thread",
+      threadIsDirect: false,
+      userId: "member_123",
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          acceptedAt,
+          status: "sent_no_receipt_expected",
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqDeliveryUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "sent_no_receipt_expected",
+        }),
       }),
     );
   });
@@ -4652,6 +4757,57 @@ describe("owned multi-part Linq delivery receipts", () => {
     },
   );
 
+  it.each([
+    {
+      expectedStatus: "failed",
+      messages: [
+        buildOwnedDeliveryMessageState("delivered", "evt_group_primary_delivered"),
+        buildOwnedDeliveryMessageState("failed", "evt_group_link_failed"),
+      ],
+      receiptMessageId: "msg_group_link",
+      receiptType: "message.failed",
+    },
+    {
+      expectedStatus: "delivered",
+      messages: [
+        buildOwnedDeliveryMessageState("delivered", "evt_group_primary_delivered"),
+        buildOwnedDeliveryMessageState("delivered", "evt_group_link_delivered"),
+      ],
+      receiptMessageId: "msg_group_link",
+      receiptType: "message.delivered",
+    },
+  ] as const)(
+    "advances a no-receipt group parent to $expectedStatus when its children become terminal",
+    async ({ expectedStatus, messages, receiptMessageId, receiptType }) => {
+      const fixture = createOwnedDeliveryReceiptPrismaFixture([...messages], {
+        failedAt: null,
+        failureCode: null,
+        failureReason: null,
+        status: "sent_no_receipt_expected",
+      });
+
+      await applyHostedLinqDeliveryReceiptTx({
+        event: requireParsedProviderEvent(buildProviderEvent({
+          data: {
+            message_id: receiptMessageId,
+            phone_number: "+15550000000",
+            service: "iMessage",
+          },
+          eventId: `evt_${receiptMessageId}_${expectedStatus}`,
+          eventType: receiptType,
+        })),
+        prisma: fixture.prisma as never,
+      });
+
+      expect(fixture.hostedLinqDeliveryUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ status: expectedStatus }),
+          where: { id: "hld_owned_parts" },
+        }),
+      );
+    },
+  );
+
   it.each(["delivered", "failed"] as const)(
     "keeps an incomplete rich-link partial absorbing after its known child is %s",
     async (messageStatus) => {
@@ -4875,13 +5031,26 @@ function buildOwnedDeliveryMessageState(
   };
 }
 
+function buildAcceptedOwnedDeliveryMessageState() {
+  return {
+    deliveredAt: null,
+    failedAt: null,
+    failureCode: null,
+    failureReason: null,
+    lastProviderEventId: null,
+    lastReceiptAt: null,
+    service: null,
+    status: "accepted",
+  };
+}
+
 function createOwnedDeliveryReceiptPrismaFixture(
   messages: ReturnType<typeof buildOwnedDeliveryMessageState>[],
   delivery: {
     failedAt: Date | null;
     failureCode: string | null;
     failureReason: string | null;
-    status: "accepted" | "failed";
+    status: "accepted" | "failed" | "sent_no_receipt_expected";
   } = {
     failedAt: null,
     failureCode: null,

@@ -183,6 +183,101 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
+    it("preserves no-receipt status for new and recovered two-part group sends", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 4 });
+      const suffix = randomUUID();
+      const memberId = `hbm_rich_link_group_${suffix}`;
+      const newIdempotencyKey = `assistant-outbox:rich-link-group-new-${suffix}`;
+      const recoveredIdempotencyKey =
+        `assistant-outbox:rich-link-group-recovered-${suffix}`;
+      const newLookupKey =
+        createHostedLinqDeliveryIdempotencyLookupKey(newIdempotencyKey);
+      const recoveredLookupKey =
+        createHostedLinqDeliveryIdempotencyLookupKey(recoveredIdempotencyKey);
+
+      if (!newLookupKey || !recoveredLookupKey) {
+        await prisma.$disconnect();
+        throw new Error("Expected deterministic delivery lookup keys.");
+      }
+
+      try {
+        await prisma.hostedMember.create({ data: { id: memberId } });
+        await recordHostedLinqRuntimeDeliveryOutcomeTx({
+          acceptedAt: new Date("2026-07-29T18:00:02.000Z"),
+          attemptedAt: new Date("2026-07-29T18:00:01.000Z"),
+          idempotencyKey: newIdempotencyKey,
+          linqChatId: `chat-rich-link-group-new-${suffix}`,
+          messageIds: [
+            `msg-rich-link-group-new-primary-${suffix}`,
+            `msg-rich-link-group-new-link-${suffix}`,
+          ],
+          prisma,
+          sourceRef: `intent-rich-link-group-new-${suffix}`,
+          targetKind: "thread",
+          threadIsDirect: false,
+          userId: memberId,
+        });
+
+        const recoveredPrimaryMessageId =
+          `msg-rich-link-group-recovered-primary-${suffix}`;
+        await recordHostedLinqRuntimeDeliveryOutcomeTx({
+          attemptedAt: new Date("2026-07-29T18:00:03.000Z"),
+          failedAt: new Date("2026-07-29T18:00:04.000Z"),
+          failureCode: PARTIAL_FAILURE_CODE,
+          idempotencyKey: recoveredIdempotencyKey,
+          linqChatId: `chat-rich-link-group-recovered-${suffix}`,
+          messageIds: [recoveredPrimaryMessageId],
+          prisma,
+          sourceRef: `intent-rich-link-group-recovered-${suffix}`,
+          targetKind: "thread",
+          threadIsDirect: false,
+          userId: memberId,
+        });
+        await recordHostedLinqRuntimeDeliveryOutcomeTx({
+          acceptedAt: new Date("2026-07-29T18:00:06.000Z"),
+          attemptedAt: new Date("2026-07-29T18:00:05.000Z"),
+          idempotencyKey: recoveredIdempotencyKey,
+          linqChatId: `chat-rich-link-group-recovered-${suffix}`,
+          messageIds: [
+            recoveredPrimaryMessageId,
+            `msg-rich-link-group-recovered-link-${suffix}`,
+          ],
+          prisma,
+          sourceRef: `intent-rich-link-group-recovered-${suffix}`,
+          targetKind: "thread",
+          threadIsDirect: false,
+          userId: memberId,
+        });
+
+        await expect(prisma.hostedLinqDelivery.findMany({
+          orderBy: { idempotencyKey: "asc" },
+          select: {
+            id: true,
+            status: true,
+            _count: { select: { messages: true } },
+          },
+          where: {
+            idempotencyKey: { in: [newLookupKey, recoveredLookupKey] },
+          },
+        })).resolves.toEqual([
+          expect.objectContaining({
+            _count: { messages: 2 },
+            status: "sent_no_receipt_expected",
+          }),
+          expect.objectContaining({
+            _count: { messages: 2 },
+            status: "sent_no_receipt_expected",
+          }),
+        ]);
+      } finally {
+        await prisma.hostedLinqDelivery.deleteMany({
+          where: { idempotencyKey: { in: [newLookupKey, recoveredLookupKey] } },
+        });
+        await prisma.hostedMember.deleteMany({ where: { id: memberId } });
+        await prisma.$disconnect();
+      }
+    });
+
     it.each(partialCases)(
       "keeps a parent-only $template $identity partial absorbing after a $receiptStatus receipt",
       async ({ identity, receiptStatus, template }) => {
