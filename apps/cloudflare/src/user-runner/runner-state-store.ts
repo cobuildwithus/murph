@@ -362,6 +362,7 @@ export class RunnerStateStore {
   async clearWriteFenceForUserControl(userId: string): Promise<{
     attemptId: string | null;
     cleared: boolean;
+    runnerContainerName: string | null;
   }> {
     const meta = this.selectMetaRowSync();
     if (meta && meta.user_id !== userId) {
@@ -372,17 +373,48 @@ export class RunnerStateStore {
       return {
         attemptId: null,
         cleared: false,
+        runnerContainerName: normalizeRunnerContainerNameOrNull(
+          meta?.active_runner_container_name,
+        ),
       };
     }
 
     const attemptId = meta.active_attempt_id;
+    const runnerContainerName = normalizeRunnerContainerNameOrNull(
+      meta.active_runner_container_name,
+    ) ?? userId;
     this.clearActiveRunMetaSync(meta);
+    meta.active_runner_container_name = runnerContainerName;
     this.writeMetaRowSync(meta);
 
     return {
       attemptId,
       cleared: true,
+      runnerContainerName,
     };
+  }
+
+  async clearStoppedRunnerContainerForUserControl(input: {
+    runnerContainerName: string;
+    userId: string;
+  }): Promise<boolean> {
+    const meta = this.selectMetaRowSync();
+    if (meta && meta.user_id !== input.userId) {
+      throw new Error("Hosted runner Durable Object is bound to a different user.");
+    }
+
+    if (
+      !meta
+      || meta.active_attempt_id
+      || normalizeRunnerContainerNameOrNull(meta.active_runner_container_name)
+        !== input.runnerContainerName
+    ) {
+      return false;
+    }
+
+    meta.active_runner_container_name = null;
+    this.writeMetaRowSync(meta);
+    return true;
   }
 
   async readWriteFenceToken(): Promise<RunnerWriteFenceToken | null> {

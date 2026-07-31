@@ -27,6 +27,7 @@ import {
   deleteR2ObjectsWithPrefix,
   requireR2DeletionCapabilities,
 } from "./r2-delete.js";
+import { readActiveRuntimeRunnerContainerName } from "./runtime-container-wake.js";
 import type { RunnerStateStore } from "./runner-state-store.js";
 import type { DurableObjectStateLike } from "./types.js";
 import {
@@ -167,11 +168,25 @@ async function stopRunnerBeforeUserDataDeletion(input: {
   runnerContainerDestroyOk: boolean;
 }> {
   const preemption = await input.stateStore.clearWriteFenceForUserControl(input.userId);
-  const destroyed = await destroyHostedExecutionContainer({
-    runnerContainerName: resolveHostedExecutionRunnerContainerName({
+  const runnerContainerName = preemption.runnerContainerName
+    ? readActiveRuntimeRunnerContainerName({
+      activeRuntime: {
+        attemptId: preemption.attemptId ?? "user-data-deletion-stop",
+        leaseGeneration: "0",
+        userId: input.userId,
+      },
+      runnerContainerName: preemption.runnerContainerName,
+      runnerRuntimeEnvSource: input.runnerRuntimeEnvSource,
+    })
+    : resolveHostedExecutionRunnerContainerName({
       source: input.runnerRuntimeEnvSource,
       userId: input.userId,
-    }),
+    });
+  if (!runnerContainerName) {
+    throw new HostedRunnerUserDataDeletionRunnerStillActiveError();
+  }
+  const destroyed = await destroyHostedExecutionContainer({
+    runnerContainerName,
     runnerContainerNamespace: input.runnerContainerNamespace,
     userId: input.userId,
   });

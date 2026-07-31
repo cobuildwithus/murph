@@ -576,6 +576,7 @@ function createDeletionStateStore(input: {
   clearWriteFenceForUserControl(userId: string): Promise<{
     attemptId: string | null;
     cleared: boolean;
+    runnerContainerName: string | null;
   }>;
   deleteStateCallCount: number;
   deleteStateForUser(userId: string): Promise<{ deleted: boolean }>;
@@ -590,6 +591,7 @@ function createDeletionStateStore(input: {
       return {
         attemptId: null,
         cleared: false,
+        runnerContainerName: null,
       };
     },
     get deleteStateCallCount() {

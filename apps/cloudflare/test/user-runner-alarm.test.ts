@@ -193,6 +193,181 @@ describe("HostedUserRunner execution coordination", () => {
     expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
   });
 
+  it("destroys the exact prior-version runner recorded by the active fence", async () => {
+    const priorRunnerContainerName = `${TEST_USER_ID}--v-prior`;
+    const priorDestroyStarted = createDeferred<void>();
+    const releasePriorDestroy = createDeferred<void>();
+    const priorDestroyInstance = vi.fn(async () => {
+      priorDestroyStarted.resolve(undefined);
+      await releasePriorDestroy.promise;
+    });
+    const currentDestroyInstance = vi.fn(async () => {});
+    const { runner, runnerContainerNames, sql } = createRunnerHarness({
+      readHealthDataConsentState: () => "revoked",
+      runnerContainerStubForName(name, defaultStub) {
+        return {
+          ...defaultStub,
+          destroyInstance: name === priorRunnerContainerName
+            ? priorDestroyInstance
+            : currentDestroyInstance,
+        };
+      },
+      runnerRuntimeEnvSource: {
+        ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+        CF_VERSION_METADATA: { id: "current" },
+      },
+    });
+    await runner.bindUser(TEST_USER_ID);
+    writeRuntimeFenceForTest(sql, {
+      runnerContainerName: priorRunnerContainerName,
+    });
+
+    const reconciliation =
+      runner.reconcileRuntimeHealthDataConsentForUser(TEST_USER_ID);
+    await priorDestroyStarted.promise;
+    let reconciliationSettled = false;
+    void reconciliation.finally(() => {
+      reconciliationSettled = true;
+    });
+    await Promise.resolve();
+    expect(reconciliationSettled).toBe(false);
+
+    releasePriorDestroy.resolve(undefined);
+    await expect(reconciliation).resolves.toMatchObject({
+      activeInvocationPreempted: true,
+      consentState: "revoked",
+      processingAllowed: false,
+      runnerContainerDestroyOk: true,
+    });
+
+    expect(runnerContainerNames).toEqual([priorRunnerContainerName]);
+    expect(priorDestroyInstance).toHaveBeenCalledOnce();
+    expect(currentDestroyInstance).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
+    expect(readActiveRunnerContainerNameForTest(sql)).toBeNull();
+  });
+
+  it("retains the exact prior-version stop target until a failed destroy is retried", async () => {
+    const priorRunnerContainerName = `${TEST_USER_ID}--v-prior`;
+    const currentDestroyInstance = vi.fn(async () => {});
+    const priorDestroyInstance = vi.fn(async () => {
+      if (priorDestroyInstance.mock.calls.length === 1) {
+        throw new Error("prior runner destroy failed");
+      }
+    });
+    const { runner, runnerContainerNames, sql } = createRunnerHarness({
+      readHealthDataConsentState: () => "revoked",
+      runnerContainerStubForName(name, defaultStub) {
+        return {
+          ...defaultStub,
+          destroyInstance: name === priorRunnerContainerName
+            ? priorDestroyInstance
+            : currentDestroyInstance,
+        };
+      },
+      runnerRuntimeEnvSource: {
+        ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+        CF_VERSION_METADATA: { id: "current" },
+      },
+    });
+    await runner.bindUser(TEST_USER_ID);
+    writeRuntimeFenceForTest(sql, {
+      runnerContainerName: priorRunnerContainerName,
+    });
+
+    await expect(
+      runner.reconcileRuntimeHealthDataConsentForUser(TEST_USER_ID),
+    ).rejects.toThrow("health-data consent withdrawal");
+    expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
+    expect(readActiveRunnerContainerNameForTest(sql)).toBe(priorRunnerContainerName);
+
+    await expect(
+      runner.reconcileRuntimeHealthDataConsentForUser(TEST_USER_ID),
+    ).resolves.toMatchObject({
+      activeInvocationPreempted: false,
+      consentState: "revoked",
+      processingAllowed: false,
+      runnerContainerDestroyOk: true,
+    });
+
+    expect(runnerContainerNames).toEqual([
+      priorRunnerContainerName,
+      priorRunnerContainerName,
+    ]);
+    expect(priorDestroyInstance).toHaveBeenCalledTimes(2);
+    expect(currentDestroyInstance).not.toHaveBeenCalled();
+    expect(readActiveRunnerContainerNameForTest(sql)).toBeNull();
+  });
+
+  it("uses the unversioned legacy runner when an active fence has no stored target", async () => {
+    const legacyDestroyInstance = vi.fn(async () => {});
+    const currentDestroyInstance = vi.fn(async () => {});
+    const { runner, runnerContainerNames, sql } = createRunnerHarness({
+      readHealthDataConsentState: () => "revoked",
+      runnerContainerStubForName(name, defaultStub) {
+        return {
+          ...defaultStub,
+          destroyInstance: name === TEST_USER_ID
+            ? legacyDestroyInstance
+            : currentDestroyInstance,
+        };
+      },
+      runnerRuntimeEnvSource: {
+        ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+        CF_VERSION_METADATA: { id: "current" },
+      },
+    });
+    await runner.bindUser(TEST_USER_ID);
+    writeRuntimeFenceForTest(sql, { runnerContainerName: null });
+
+    await expect(
+      runner.reconcileRuntimeHealthDataConsentForUser(TEST_USER_ID),
+    ).resolves.toMatchObject({
+      activeInvocationPreempted: true,
+      consentState: "revoked",
+      processingAllowed: false,
+      runnerContainerDestroyOk: true,
+    });
+
+    expect(runnerContainerNames).toEqual([TEST_USER_ID]);
+    expect(legacyDestroyInstance).toHaveBeenCalledOnce();
+    expect(currentDestroyInstance).not.toHaveBeenCalled();
+    expect(readActiveRunnerContainerNameForTest(sql)).toBeNull();
+  });
+
+  it("destroys the current version runner when there is no active fence target", async () => {
+    const currentRunnerContainerName = `${TEST_USER_ID}--v-current`;
+    const currentDestroyInstance = vi.fn(async () => {});
+    const { runner, runnerContainerNames } = createRunnerHarness({
+      readHealthDataConsentState: () => "revoked",
+      runnerContainerStubForName(name, defaultStub) {
+        return {
+          ...defaultStub,
+          destroyInstance: name === currentRunnerContainerName
+            ? currentDestroyInstance
+            : vi.fn(async () => {}),
+        };
+      },
+      runnerRuntimeEnvSource: {
+        ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+        CF_VERSION_METADATA: { id: "current" },
+      },
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(
+      runner.reconcileRuntimeHealthDataConsentForUser(TEST_USER_ID),
+    ).resolves.toMatchObject({
+      activeInvocationPreempted: false,
+      consentState: "revoked",
+      processingAllowed: false,
+      runnerContainerDestroyOk: true,
+    });
+
+    expect(runnerContainerNames).toEqual([currentRunnerContainerName]);
+    expect(currentDestroyInstance).toHaveBeenCalledOnce();
+  });
+
   it("queues renewal behind an already-observed withdrawal stop", async () => {
     let consentState: "granted" | "revoked" = "revoked";
     let admissionReads = 0;
@@ -217,7 +392,7 @@ describe("HostedUserRunner execution coordination", () => {
       },
     });
     await runner.bindUser(TEST_USER_ID);
-    writeRuntimeFenceForTest(sql, { runnerContainerName: "runner-active" });
+    writeRuntimeFenceForTest(sql, { runnerContainerName: TEST_USER_ID });
 
     const withdrawal = runner.reconcileRuntimeHealthDataConsentForUser(TEST_USER_ID);
     await firstAdmissionStarted.promise;
@@ -5252,6 +5427,10 @@ function createRunnerHarness(input: {
   bucket?: MemoryEncryptedR2Bucket;
   destinationBucket?: MemoryEncryptedR2Bucket;
   destroyInstance?: HostedExecutionContainerStubLike["destroyInstance"];
+  runnerContainerStubForName?: (
+    name: string,
+    defaultStub: HostedExecutionContainerStubLike,
+  ) => HostedExecutionContainerStubLike;
   ensureReadyForProcessing?: HostedExecutionContainerStubLike["ensureReadyForProcessing"] | null;
   ensureProcessing?: HostedExecutionContainerStubLike["ensureProcessing"];
   invocationResults?: Array<Error | HostedWorkspaceInvocationResult | Promise<HostedWorkspaceInvocationResult>>;
@@ -5385,7 +5564,7 @@ function createRunnerHarness(input: {
   const namespace: HostedExecutionContainerNamespaceLike = {
     getByName(name) {
       runnerContainerNames.push(name);
-      return stub;
+      return input.runnerContainerStubForName?.(name, stub) ?? stub;
     },
   };
 
@@ -5911,6 +6090,16 @@ function clearRuntimeFenceForTest(sql: TestSqlStorageLike): void {
          active_workspace_version = NULL
      WHERE singleton = 1`,
   );
+}
+
+function readActiveRunnerContainerNameForTest(
+  sql: TestSqlStorageLike,
+): string | null {
+  return sql.exec<{ active_runner_container_name: string | null }>(
+    `SELECT active_runner_container_name
+     FROM runner_meta
+     WHERE singleton = 1`,
+  ).one().active_runner_container_name;
 }
 
 function readRunnerMeta(sql: TestSqlStorageLike): {

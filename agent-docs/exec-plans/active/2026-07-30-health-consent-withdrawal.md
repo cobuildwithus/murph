@@ -72,7 +72,7 @@ Updated: 2026-07-31
 2. [x] Implement the smallest current-owner correction and update durable docs.
 3. [x] Add or rebase focused unit, route, rendering, and orchestration coverage.
 4. [x] Run focused verification and direct desktop/mobile design-catalog proof.
-5. [ ] Commit and push the corrected candidate, run final ReviewGPT round 3,
+5. [ ] Commit and push the corrected candidate, run final ReviewGPT round 4,
    and prove the exact head in CI.
 6. [x] Replace the repeated consent-snapshot race with one serialized execution
    barrier at the existing Cloudflare write-fence owner and add interleaving
@@ -101,6 +101,12 @@ Updated: 2026-07-31
 - Keep export authorization and retained-replica selection route-owned. The
   Settings page must not project consent into the export control, and missing
   retained data must not wake a withdrawn runtime.
+- Reuse `active_runner_container_name` as the pending-stop pointer after a
+  user-control fence clear. Clear write authority immediately, retain and
+  validate the exact stored runner target through destroy failures, and erase
+  the pointer only after that exact target is confirmed destroyed. An active
+  legacy fence without a stored target resolves to the unversioned user runner;
+  only a genuinely absent fence uses the current Worker-version target.
 
 ## Review anomaly retrospective
 
@@ -172,6 +178,14 @@ Updated: 2026-07-31
   a consent-snapshot check-then-act race. The finding is accepted; merge and
   completion remain paused until the redesigned boundary and concurrency proof
   pass.
+- Final ReviewGPT round 3 found one accepted prior-version runner issue: the
+  stop path erased `active_runner_container_name` and then derived the current
+  Worker-version target, so a deploy-overlap withdrawal could acknowledge
+  success while the recorded older runner survived. The correction retains
+  the existing pointer until exact destruction succeeds and applies the same
+  retry-safe target to account-data deletion. Name-aware prior-version success,
+  fail-then-retry, legacy-null, and no-active-fence tests pass; final round 4 is
+  pending on the corrected pushed head.
 - The serialized Cloudflare barrier is implemented and covered by direct
   revoked admission plus withdrawal/renewal interleaving tests. The focused
   Cloudflare owner run passed 201 tests; hosted-execution and
@@ -201,6 +215,10 @@ Updated: 2026-07-31
   the isolated browser-vault rerun passed all 33 assertions. Changed-path
   ESLint and hosted-Web typecheck pass. Cloudflare, hosted-execution, and both
   shared control packages typecheck.
+- Latest Cloudflare correction proof passed 135 assertions across the hosted
+  user owner, user-data deletion, and runner-state store suites; Cloudflare
+  typecheck and `git diff --check` pass. The repository has no canonical root
+  ESLint command for these Cloudflare paths.
 - The required Fable UI double-check found and verified focused fixes for the
   export study's dialog context, source-review link hit geometry, retry-failure
   emphasis and focus retention, and missing ready/error/pending catalog states.
