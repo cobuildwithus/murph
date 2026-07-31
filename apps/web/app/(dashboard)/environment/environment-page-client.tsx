@@ -13,7 +13,7 @@ import {
   normalizeHabitatCityOrRegion,
 } from "@murphai/contracts";
 import Image from "next/image";
-import { ArrowRight, ShieldCheck } from "lucide-react";
+import { ArrowRight, LoaderCircle, ShieldCheck } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
@@ -47,6 +47,7 @@ const PRIORITY_ORDER = { high: 0, medium: 1, low: 2 } as const;
 const EMPTY_HABITAT_VALUES: HabitatValues = {};
 const EMPTY_HABITAT_SCENE = resolveHabitatScene(EMPTY_HABITAT_VALUES);
 const VOICE_REFRESH_INTERVAL_MS = 2_000;
+const VOICE_REFRESH_DELAYED_INTERVAL_MS = 10_000;
 const VOICE_REFRESH_WINDOW_MS = 2 * 60 * 1_000;
 
 export type VoiceRefreshState =
@@ -87,6 +88,8 @@ export default function EnvironmentPageClient({
     useState<VoiceRefreshState>({ status: "idle" });
   const checkedInitialVoiceProcessingRef = useRef(false);
   const initialVoiceProcessingCheckRef = useRef(0);
+  const voiceRefreshBaselineRef = useRef<string | null>(null);
+  const voiceRefreshStartedAtRef = useRef<number | null>(null);
   const values = useMemo(
     () => (client ? selectEnvironmentHabitatValues(client) : {}),
     [client],
@@ -115,6 +118,8 @@ export default function EnvironmentPageClient({
     displayedVoiceRefreshState.status === "processing" ||
     displayedVoiceRefreshState.status === "delayed";
   const onVoiceAccepted = useCallback(() => {
+    voiceRefreshBaselineRef.current = valuesSignature;
+    voiceRefreshStartedAtRef.current = Date.now();
     setVoiceRefreshState({
       baselineValues: valuesSignature,
       status: "processing",
@@ -136,6 +141,8 @@ export default function EnvironmentPageClient({
       }
       checkedInitialVoiceProcessingRef.current = true;
       if (processing === true) {
+        voiceRefreshBaselineRef.current = valuesSignature;
+        voiceRefreshStartedAtRef.current = Date.now();
         setVoiceRefreshState((current) =>
           current.status === "idle"
             ? {
@@ -154,18 +161,16 @@ export default function EnvironmentPageClient({
   }, [status, valuesSignature]);
 
   useEffect(() => {
-    if (voiceRefreshState.status !== "processing") {
+    if (
+      voiceRefreshState.status !== "processing"
+      && voiceRefreshState.status !== "delayed"
+    ) {
       return;
     }
     let cancelled = false;
-    const startedAt = Date.now();
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     const poll = async () => {
       if (cancelled) {
-        return;
-      }
-      if (Date.now() - startedAt >= VOICE_REFRESH_WINDOW_MS) {
-        setVoiceRefreshState({ status: "delayed" });
         return;
       }
       const processing = await readEnvironmentVoiceProcessingStatus();
@@ -180,11 +185,32 @@ export default function EnvironmentPageClient({
                 baselineValues: current.baselineValues,
                 status: "completed",
               }
+            : current.status === "delayed"
+              ? {
+                  baselineValues:
+                    voiceRefreshBaselineRef.current ?? valuesSignature,
+                  status: "completed",
+                }
             : current,
         );
         return;
       }
-      timeoutId = setTimeout(() => void poll(), VOICE_REFRESH_INTERVAL_MS);
+      if (
+        voiceRefreshState.status === "processing"
+        && Date.now() - (
+          voiceRefreshStartedAtRef.current ?? Date.now()
+        ) >= VOICE_REFRESH_WINDOW_MS
+      ) {
+        voiceRefreshBaselineRef.current = voiceRefreshState.baselineValues;
+        setVoiceRefreshState({ status: "delayed" });
+        return;
+      }
+      timeoutId = setTimeout(
+        () => void poll(),
+        voiceRefreshState.status === "delayed"
+          ? VOICE_REFRESH_DELAYED_INTERVAL_MS
+          : VOICE_REFRESH_INTERVAL_MS,
+      );
     };
     timeoutId = setTimeout(() => void poll(), VOICE_REFRESH_INTERVAL_MS);
     return () => {
@@ -193,7 +219,7 @@ export default function EnvironmentPageClient({
         clearTimeout(timeoutId);
       }
     };
-  }, [refresh, voiceRefreshState]);
+  }, [refresh, valuesSignature, voiceRefreshState]);
 
   if (status === "loading") {
     return (
@@ -246,6 +272,8 @@ export default function EnvironmentPageClient({
       <EnvironmentVoiceRefreshNotice
         state={displayedVoiceRefreshState}
         onCheckAgain={() => {
+          voiceRefreshBaselineRef.current = valuesSignature;
+          voiceRefreshStartedAtRef.current = Date.now();
           setVoiceRefreshState({
             baselineValues: valuesSignature,
             status: "processing",
@@ -614,7 +642,13 @@ export function EnvironmentVoiceRefreshNotice({
   if (state.status === "processing") {
     return (
       <Alert aria-live="polite">
-        <AlertTitle>Murph is processing your recording</AlertTitle>
+        <AlertTitle className="flex items-center gap-2">
+          <LoaderCircle
+            aria-hidden="true"
+            className="size-4 animate-spin text-primary motion-reduce:animate-none"
+          />
+          Murph is processing your recording
+        </AlertTitle>
         <AlertDescription>
           This report will refresh automatically when the clear facts are ready.
         </AlertDescription>
@@ -639,7 +673,13 @@ export function EnvironmentVoiceRefreshNotice({
   }
   return (
     <Alert aria-live="polite">
-      <AlertTitle>Murph is taking longer than usual</AlertTitle>
+      <AlertTitle className="flex items-center gap-2">
+        <LoaderCircle
+          aria-hidden="true"
+          className="size-4 animate-spin text-primary motion-reduce:animate-none"
+        />
+        Murph is taking longer than usual
+      </AlertTitle>
       <AlertDescription>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <span>

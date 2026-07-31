@@ -178,3 +178,51 @@ test("restores server-side processing state after the page is reopened", async (
     await rendered.cleanup();
   }
 });
+
+test("keeps checking after processing takes longer than two minutes", async () => {
+  vi.useFakeTimers();
+  mocks.refresh.mockClear();
+  const originalFetch = globalThis.fetch;
+  let processing = true;
+  const fetchMock = vi.fn(async () => Response.json({ processing }));
+  globalThis.fetch = fetchMock;
+  const rendered = await renderClientComponent(
+    createElement(EnvironmentPageClient, { contactAction: null }),
+    {
+      location: {
+        hash: "",
+        href: "https://local.withmurph.ai/environment",
+        origin: "https://local.withmurph.ai",
+        pathname: "/environment",
+        search: "",
+      },
+    },
+  );
+
+  try {
+    await act(async () => {
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(2 * 60 * 1_000);
+    });
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Murph is taking longer than usual/,
+    );
+    const callsAtDelay = fetchMock.mock.calls.length;
+
+    processing = false;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+
+    assert.ok(fetchMock.mock.calls.length > callsAtDelay);
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /The report was not updated/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    vi.useRealTimers();
+    await rendered.cleanup();
+  }
+});
