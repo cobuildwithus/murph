@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { lookupHostedMemberIdentityByPhoneNumber } from "../hosted-onboarding/hosted-member-identity-store";
 import { lookupHostedMemberByVerifiedEmailAddress } from "../hosted-onboarding/hosted-member-store";
@@ -11,9 +11,18 @@ import {
 import {
   markHostedLinqGroupJoinOfferHandledTx,
 } from "../hosted-onboarding/linq-provider-event-store";
+import { logHostedOnboardingDiagnostic } from "../hosted-onboarding/logging";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { createHostedExternalThreadIdentityLookupKeyReadCandidates } from "../hosted-onboarding/contact-privacy";
+import {
+  appendHostedLinqGroupReactionMailboxTx,
+  signalHostedLinqGroupReactionMailbox,
+  type HostedLinqGroupReactionMailboxAppend,
+} from "../hosted-onboarding/webhook-provider-linq-reaction-context";
+import {
+  readHostedThreadRouteByThreadIdentity,
+} from "../hosted-routing/thread-route-store";
 import {
   acceptHostedGroupOfferAffirmation,
   type HostedGroupOfferAffirmationKind,
@@ -116,12 +125,18 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     const regionSupportedForRemoval = isHostedGroupJoinOutreachSupportedRegion(
       participantPhoneNumber,
     );
+    let reactionMailboxAppend: HostedLinqGroupReactionMailboxAppend | null = null;
     try {
       const revoked = await input.prisma.$transaction(async (tx) => {
         const offer = await readHostedGroupJoinOfferTargetTx({
           channel: "linq",
           messageLookupKeyReadCandidates,
           threadIdentityLookupKeyReadCandidates,
+          tx,
+        });
+        reactionMailboxAppend = await appendAnonymousHostedGroupOfferReactionTx({
+          event: input.event,
+          expectedContainerMemberId: offer.runtimeMemberId,
           tx,
         });
         const revoked = await revokeHostedGroupJoinOutreachForRemovedReactionTx({
@@ -138,14 +153,16 @@ export async function handleHostedGroupJoinOfferReaction(input: {
         });
         return revoked;
       }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+      await signalHostedGroupOfferReactionBestEffort({
+        append: reactionMailboxAppend,
+        prisma: input.prisma,
+      });
       if (revoked.kind === "revoked") {
         return { status: "accepted", reason: "outreach_revoked" };
       }
       // This owner decided a canonical-offer reaction from a refused region, so
-      // the disposition has to be consumable. Reporting a plain
-      // `reaction_removed` would let the webhook fall through and stage this
-      // participant's phone into group-owned reaction context, which is exactly
-      // the group-visible disclosure the feature avoids.
+      // the disposition has to be consumable. Its durable room evidence is
+      // anonymous: no pre-member phone enters the group model.
       return skipHostedGroupJoinOfferReaction({
         reason: regionSupportedForRemoval
           ? "reaction_removed"
@@ -161,7 +178,9 @@ export async function handleHostedGroupJoinOfferReaction(input: {
 
   if (!member) {
     // Someone who does not use Murph yet: record durable intent to text them
-    // privately instead of dropping the reaction.
+    // privately instead of dropping the reaction. The same transaction records
+    // an anonymous room-evidence row, so the group model retains the reaction
+    // without receiving the pre-member phone number.
     const participantPhoneNumber = readHostedGroupJoinOfferReactionParticipantPhone(
       input.event.reactionFromHandle,
     );
@@ -169,6 +188,7 @@ export async function handleHostedGroupJoinOfferReaction(input: {
       return skipHostedGroupJoinOfferReaction({ reason: "non_phone_handle" });
     }
     let regionSupported = true;
+    let reactionMailboxAppend: HostedLinqGroupReactionMailboxAppend | null = null;
     try {
       await input.prisma.$transaction(async (tx) => {
         // Prove the reaction targeted the canonical join offer before deciding
@@ -180,8 +200,14 @@ export async function handleHostedGroupJoinOfferReaction(input: {
           threadIdentityLookupKeyReadCandidates,
           tx,
         });
+        reactionMailboxAppend = await appendAnonymousHostedGroupOfferReactionTx({
+          event: input.event,
+          expectedContainerMemberId: offer.runtimeMemberId,
+          tx,
+        });
         // A region with no derivable safe window can never be sent, so no durable
-        // intent is recorded for it.
+        // outreach intent is recorded for it. The anonymous reaction evidence
+        // remains valid because the exact canonical offer was proven above.
         regionSupported = isHostedGroupJoinOutreachSupportedRegion(
           participantPhoneNumber,
         );
@@ -212,6 +238,10 @@ export async function handleHostedGroupJoinOfferReaction(input: {
       }
       return skipHostedGroupJoinOfferReaction({ reason });
     }
+    await signalHostedGroupOfferReactionBestEffort({
+      append: reactionMailboxAppend,
+      prisma: input.prisma,
+    });
     return regionSupported
       ? { status: "accepted", reason: "outreach_enqueued" }
       : skipHostedGroupJoinOfferReaction({
@@ -227,6 +257,7 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     });
   }
 
+  let reactionMailboxAppend: HostedLinqGroupReactionMailboxAppend | null = null;
   const result = await acceptHostedGroupOfferAffirmation({
     affirmationEventId: input.event.eventId,
     channel: "linq",
@@ -234,18 +265,81 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     memberId: member.id,
     messageLookupKeyReadCandidates,
     now: input.event.providerCreatedAt,
-    onAcceptedTx: (tx) => markHostedLinqGroupJoinOfferHandledTx({
-      eventId: input.event.eventId,
-      handledAt: input.event.providerCreatedAt,
-      prisma: tx,
-    }),
+    onAcceptedTx: async (tx) => {
+      reactionMailboxAppend = await appendAnonymousHostedGroupOfferReactionTx({
+        event: input.event,
+        tx,
+      });
+      await markHostedLinqGroupJoinOfferHandledTx({
+        eventId: input.event.eventId,
+        handledAt: input.event.providerCreatedAt,
+        prisma: tx,
+      });
+    },
     prisma: input.prisma,
     ...(input.signal ? { signal: input.signal } : {}),
     threadIdentityLookupKeyReadCandidates,
   });
-  return result.status === "accepted"
-    ? { status: "accepted", reason: "accepted" }
-    : skipHostedGroupJoinOfferReaction({ reason: result.reason });
+  if (result.status === "accepted") {
+    await signalHostedGroupOfferReactionBestEffort({
+      append: reactionMailboxAppend,
+      prisma: input.prisma,
+    });
+    return { status: "accepted", reason: "accepted" };
+  }
+  return skipHostedGroupJoinOfferReaction({ reason: result.reason });
+}
+
+async function appendAnonymousHostedGroupOfferReactionTx(input: {
+  event: ParsedHostedLinqProviderEvent;
+  expectedContainerMemberId?: string;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedLinqGroupReactionMailboxAppend> {
+  const route = await readHostedThreadRouteByThreadIdentity({
+    channel: "linq",
+    prisma: input.tx,
+    threadId: input.event.linqChatId,
+  });
+  if (
+    !route
+    || (
+      input.expectedContainerMemberId
+      && route.containerMemberId !== input.expectedContainerMemberId
+    )
+  ) {
+    throw new Error("Hosted group offer reaction route could not be resolved.");
+  }
+  return appendHostedLinqGroupReactionMailboxTx({
+    actor: null,
+    event: input.event,
+    route,
+    tx: input.tx,
+  });
+}
+
+async function signalHostedGroupOfferReactionBestEffort(input: {
+  append: HostedLinqGroupReactionMailboxAppend | null;
+  prisma: PrismaClient;
+}): Promise<void> {
+  if (!input.append) {
+    return;
+  }
+  try {
+    await signalHostedLinqGroupReactionMailbox({
+      append: input.append,
+      prisma: input.prisma,
+    });
+  } catch (error) {
+    // The reaction row committed atomically with the offer decision. A later
+    // mailbox-wide wake imports it; do not turn an already-applied join,
+    // disclosure grant, or outreach decision into a provider-visible failure.
+    logHostedOnboardingDiagnostic(
+      "hosted-onboarding.group-offer-reaction-signal-failed",
+      {
+        errorName: error instanceof Error ? error.name : "UnknownError",
+      },
+    );
+  }
 }
 
 function readHostedGroupJoinOfferTargetSkipReason(
