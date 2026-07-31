@@ -1045,7 +1045,7 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
     expect(deviceConnectionFindMany).not.toHaveBeenCalled();
   });
 
-  it("filters inactive grantors while retaining every group member as missing", async () => {
+  it("filters inactive or explicitly revoked grantors while retaining every group member as missing", async () => {
     installCiphertexts({});
     const { hostedVaultShareFindMany, prisma } = createPrisma({ shares: [] });
 
@@ -1057,7 +1057,19 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
 
     expect(hostedVaultShareFindMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
-        grantor: expect.objectContaining({ suspendedAt: null }),
+        grantor: expect.objectContaining({
+          AND: expect.arrayContaining([
+            expect.objectContaining({ suspendedAt: null }),
+            {
+              consentGrants: {
+                none: {
+                  scope: "launch.health-data",
+                  status: "revoked",
+                },
+              },
+            },
+          ]),
+        }),
       }),
     }));
     expect(result.status).toBe("ok");
