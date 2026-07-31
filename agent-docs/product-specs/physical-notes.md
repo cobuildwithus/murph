@@ -50,6 +50,10 @@ replay idempotent, while `memberId + complimentaryOfferCode` atomically admits
 one complimentary note per direct member or synthetic group member. A definite
 provider rejection releases the promotional claim; an ambiguous outcome keeps
 the row pending and is never blindly resent after Lob's idempotency window.
+For paid notes, `starting` rows reserve their already-frozen provider cost under
+the same member lock used by allowance admission. Concurrent sends therefore
+cannot each spend the same remaining capacity, and no second balance owner is
+needed.
 
 ## Provider boundary
 

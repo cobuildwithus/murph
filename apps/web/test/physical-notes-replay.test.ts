@@ -123,14 +123,15 @@ describe("physical-note durable replay", () => {
       updateMany: vi.fn().mockResolvedValue({ count: 0 }),
     };
     let prisma: PrismaClient;
-    prisma = {
+    const prismaLike = {
       $transaction: vi.fn(async <T>(
         callback: (tx: Prisma.TransactionClient) => Promise<T>,
       ): Promise<T> => await callback(
-        prisma as unknown as Prisma.TransactionClient,
+        asPhysicalNoteTransactionClient(prisma),
       )),
       hostedPhysicalNote,
-    } as unknown as PrismaClient;
+    };
+    prisma = asPhysicalNotePrismaClient(prismaLike);
     const create = vi.fn<LobPhysicalNoteRuntime["create"]>();
     const runtime = { create } satisfies LobPhysicalNoteRuntime;
     const { createHostedPhysicalNote } = await import(
@@ -178,4 +179,18 @@ function buildRequestFingerprint(): string {
     .update("\0")
     .update(stableHostedPhysicalNoteRecipientJson(recipient))
     .digest("hex");
+}
+
+function asPhysicalNotePrismaClient(value: object): PrismaClient {
+  // Test-only boundary: this replay fixture implements only the delegates
+  // reached by the accepted-row path.
+  return value as PrismaClient;
+}
+
+function asPhysicalNoteTransactionClient(
+  prisma: PrismaClient,
+): Prisma.TransactionClient {
+  // Test-only boundary: the fake transaction intentionally reuses the same
+  // read/update delegates and omits nested transaction methods.
+  return prisma as Prisma.TransactionClient;
 }

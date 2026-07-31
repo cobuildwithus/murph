@@ -131,6 +131,10 @@ describe('assistant physical notes', () => {
       acceptedInputIds: [OTHER_INPUT_ID, APPROVAL_INPUT_ID],
       conversationScope: 'direct',
     })).toBe(APPROVAL_INPUT_ID)
+    expect(resolvePhysicalNoteExplicitOriginInputId({
+      acceptedInputIds: [APPROVAL_INPUT_ID],
+      conversationScope: 'unverified-external',
+    })).toBeNull()
   })
 
   it('keys the exact generated pixels, origin, and recipient', () => {

@@ -8,6 +8,9 @@ import {
 } from '@murphai/hosted-execution/physical-notes'
 
 import type {
+  AssistantConversationScope,
+} from '../../assistant/conversation-policy.js'
+import type {
   AssistantHostedImageCompletion,
 } from '../../assistant/hosted-image-completion.js'
 import type {
@@ -167,9 +170,12 @@ export function readPhysicalNoteDynamicToolRequest(input: {
 
 export function resolvePhysicalNoteExplicitOriginInputId(input: {
   acceptedInputIds: readonly string[]
-  conversationScope: 'direct' | 'group'
+  conversationScope: AssistantConversationScope
   messageRef?: string
 }): string | null {
+  if (input.conversationScope === 'unverified-external') {
+    return null
+  }
   if (input.conversationScope === 'group') {
     return input.messageRef
       && input.acceptedInputIds.includes(input.messageRef)

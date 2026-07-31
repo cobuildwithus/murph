@@ -221,6 +221,60 @@ describe("createHostedPhysicalNote", () => {
     });
   });
 
+  it("reserves known in-flight paid costs before another provider send", async () => {
+    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
+    const store = createPhysicalNoteStore();
+    await createHostedPhysicalNote({
+      ...buildRequest(10),
+      prisma: store.prisma,
+      runtime: createPhysicalNoteRuntime([
+        { kind: "accepted", providerLetterId: "ltr_free" },
+      ]).runtime,
+    });
+    mocks.readUsageGate.mockResolvedValue({
+      allowed: true,
+      remainingUsdMicros: COST_USD_MICROS,
+    });
+    const firstPaidResult = createDeferred<LobPhysicalNoteCreateResult>();
+    const firstPaidCreate = vi.fn<
+      LobPhysicalNoteRuntime["create"]
+    >(() => firstPaidResult.promise);
+    const firstPaidPromise = createHostedPhysicalNote({
+      ...buildRequest(11),
+      prisma: store.prisma,
+      runtime: { create: firstPaidCreate },
+    });
+    await vi.waitFor(() => {
+      expect(firstPaidCreate).toHaveBeenCalledOnce();
+    });
+
+    const blockedProvider = createPhysicalNoteRuntime([
+      { kind: "accepted", providerLetterId: "ltr_should_not_send" },
+    ]);
+    const blocked = await createHostedPhysicalNote({
+      ...buildRequest(12),
+      prisma: store.prisma,
+      runtime: blockedProvider.runtime,
+    });
+
+    expect(blocked).toEqual({
+      complimentary: false,
+      costUsdMicros: COST_USD_MICROS.toString(),
+      physicalNoteId: null,
+      status: "insufficient_usage",
+    });
+    expect(blockedProvider.create).not.toHaveBeenCalled();
+
+    firstPaidResult.resolve({
+      kind: "accepted",
+      providerLetterId: "ltr_first_paid",
+    });
+    await expect(firstPaidPromise).resolves.toMatchObject({
+      complimentary: false,
+      status: "accepted",
+    });
+  });
+
   it("replays an accepted request without another provider send", async () => {
     const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();
@@ -416,6 +470,25 @@ function createPhysicalNoteRuntime(
   return { create, runtime };
 }
 
+function createDeferred<T>(): {
+  promise: Promise<T>;
+  resolve(value: T): void;
+} {
+  let resolvePromise: ((value: T) => void) | null = null;
+  const promise = new Promise<T>((resolve) => {
+    resolvePromise = resolve;
+  });
+  return {
+    promise,
+    resolve(value) {
+      if (!resolvePromise) {
+        throw new Error("deferred promise is not initialized");
+      }
+      resolvePromise(value);
+    },
+  };
+}
+
 function createPhysicalNoteStore(
   initialRows: readonly HostedPhysicalNote[] = [],
 ): PhysicalNoteStore {
@@ -424,6 +497,24 @@ function createPhysicalNoteStore(
   );
 
   const hostedPhysicalNote = {
+    async aggregate(): Promise<{
+      _sum: { providerCostUsdMicros: bigint | null };
+    }> {
+      const providerCostUsdMicros = [...rows.values()]
+        .filter((row) =>
+          row.memberId === MEMBER_ID
+          && row.complimentaryOfferCode === null
+          && row.status === "starting"
+        )
+        .reduce((sum, row) => sum + row.providerCostUsdMicros, 0n);
+      return {
+        _sum: {
+          providerCostUsdMicros:
+            providerCostUsdMicros === 0n ? null : providerCostUsdMicros,
+        },
+      };
+    },
+
     async create(input: {
       data: PhysicalNoteCreateData;
     }): Promise<HostedPhysicalNote> {
@@ -504,16 +595,30 @@ function createPhysicalNoteStore(
     async $transaction<T>(
       callback: (tx: Prisma.TransactionClient) => Promise<T>,
     ): Promise<T> {
-      return await callback(prisma as unknown as Prisma.TransactionClient);
+      return await callback(asPhysicalNoteTransactionClient(prisma));
     },
     hostedPhysicalNote,
   };
-  prisma = prismaLike as unknown as PrismaClient;
+  prisma = asPhysicalNotePrismaClient(prismaLike);
 
   return {
     allRows: () => [...rows.values()].map(cloneRow),
     prisma,
   };
+}
+
+function asPhysicalNotePrismaClient(value: object): PrismaClient {
+  // Test-only boundary: the service exercises only the delegates implemented
+  // by createPhysicalNoteStore.
+  return value as PrismaClient;
+}
+
+function asPhysicalNoteTransactionClient(
+  prisma: PrismaClient,
+): Prisma.TransactionClient {
+  // Test-only boundary: this fake transaction exposes the same delegates as
+  // the fake client and intentionally omits nested transaction methods.
+  return prisma as Prisma.TransactionClient;
 }
 
 function matchesWhere(

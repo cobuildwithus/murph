@@ -114,11 +114,24 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
     });
     const complimentary = priorComplimentary === null;
     if (!complimentary) {
+      const pendingPaidNotes = await tx.hostedPhysicalNote.aggregate({
+        _sum: { providerCostUsdMicros: true },
+        where: {
+          complimentaryOfferCode: null,
+          memberId: input.memberId,
+          status: "starting",
+        },
+      });
+      const reservedUsdMicros =
+        pendingPaidNotes._sum.providerCostUsdMicros ?? 0n;
       const gate = await readHostedAiUsageGate({
         memberId: input.memberId,
         prisma: tx,
       });
-      if (!gate.allowed || gate.remainingUsdMicros < config.costUsdMicros) {
+      if (
+        !gate.allowed
+        || gate.remainingUsdMicros - reservedUsdMicros < config.costUsdMicros
+      ) {
         return { kind: "insufficient" as const };
       }
     }
