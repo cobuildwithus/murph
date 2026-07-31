@@ -54,4 +54,28 @@ Updated: 2026-07-31
 
 ## Verification
 
-- Pending.
+- Production was inspected only through aggregate read-only SQL: all 91
+  existing feedback rows were member-linked before this migration, and the
+  table has no inbound foreign keys. No feedback summary or member identifier
+  was selected.
+- Applying the actual migration inside a rolled-back temporary-table scenario
+  proved the member column becomes nullable, linked rows become anonymous, and
+  former member-derived feedback ids are replaced.
+- Focused Web Vitest passed 95 tests across the product-feedback service,
+  callback route, privacy migration, migration inventory, and account-data
+  service.
+- Product-feedback digest and cron tests passed independently after the current
+  base added that consumer.
+- Focused Assistant Engine Vitest passed 14 tests with 21 opt-in real-model
+  scenarios skipped; Hosted Execution Vitest passed 9 tests.
+- Web, Assistant Engine, and Hosted Execution typechecks passed. Prisma client
+  generation passed.
+- Complete provider-input capture through the pinned Codex App Server used
+  `gpt-5.6-terra`, low reasoning, production code mode, identical synthetic
+  direct/group inputs, and `gpt-tokenizer` 3.4.0 `o200k_harmony`. The direct
+  fixture measured 26,277 to 26,441 tokens and 120,664 to 121,545 bytes; the
+  group fixture measured 21,797 to 21,961 tokens and 100,865 to 101,746 bytes.
+  Both are +164 tokens and +881 bytes, wholly attributable to the feedback
+  summary-schema privacy/detail guidance. Two consecutive captures were
+  identical.
+- Exact-head CI and final ReviewGPT remain pending.
