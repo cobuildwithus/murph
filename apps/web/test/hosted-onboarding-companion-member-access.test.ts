@@ -68,6 +68,7 @@ const identity = {
     number: "+15550000000",
     verifiedAt: 1_785_456_000,
   },
+  telegram: null,
   userId: "did:privy:native-member",
   wallet: null,
 } as const;
