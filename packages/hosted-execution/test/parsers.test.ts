@@ -1633,7 +1633,7 @@ describe("parseHostedRuntimeGroupTool", () => {
       action: "set_chat_avatar",
       result: {
         providerErrorCode: 5006,
-        providerErrorMessage: "Content type mismatch for [redacted-url]",
+        providerErrorMessage: "The avatar image type was not accepted.",
         status: "unavailable",
         unavailableReason: "provider_unavailable",
       },
@@ -1641,7 +1641,7 @@ describe("parseHostedRuntimeGroupTool", () => {
       action: "set_chat_avatar",
       result: {
         providerErrorCode: 5006,
-        providerErrorMessage: "Content type mismatch for [redacted-url]",
+        providerErrorMessage: "The avatar image type was not accepted.",
         status: "unavailable",
         unavailableReason: "provider_unavailable",
       },
@@ -1670,6 +1670,18 @@ describe("parseHostedRuntimeGroupTool", () => {
       },
       {
         providerErrorMessage: "Failed to download image",
+        status: "unavailable",
+        unavailableReason: "provider_unavailable",
+      },
+      {
+        providerErrorCode: 5006,
+        providerErrorMessage: "Failed to download image",
+        status: "unavailable",
+        unavailableReason: "provider_unavailable",
+      },
+      {
+        providerErrorCode: 5008,
+        providerErrorMessage: "Unknown provider error",
         status: "unavailable",
         unavailableReason: "provider_unavailable",
       },

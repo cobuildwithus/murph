@@ -30,10 +30,21 @@ import {
 const CAPABILITY_SECRET = "private-media-capability-secret-fixture";
 const PREVIEW_DELIVERY_ORIGIN = "https://hosted-runner-staging.example.test";
 const USER_ID = "member_private_media_fixture";
+const JPEG_BYTES = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
 const PNG_BYTES = new Uint8Array([
   0x89, 0x50, 0x4e, 0x47,
   0x0d, 0x0a, 0x1a, 0x0a,
 ]);
+const WEBP_BYTES = new Uint8Array([
+  0x52, 0x49, 0x46, 0x46,
+  0x00, 0x00, 0x00, 0x00,
+  0x57, 0x45, 0x42, 0x50,
+]);
+
+const NON_PNG_PRIVATE_MEDIA_FORMATS = [
+  { bytes: JPEG_BYTES, contentType: "image/jpeg", extension: "jpg" },
+  { bytes: WEBP_BYTES, contentType: "image/webp", extension: "webp" },
+] as const;
 
 describe("hosted private media", () => {
   it("stores application-encrypted bytes and serves them through the opaque capability", async () => {
@@ -77,6 +88,45 @@ describe("hosted private media", () => {
       contentType: "image/png",
     });
   });
+
+  it.each(NON_PNG_PRIVATE_MEDIA_FORMATS)(
+    "mints and serves the MIME-derived .$extension filename for $contentType",
+    async ({ bytes, contentType, extension }) => {
+      const bucket = createPrivateMediaBucket();
+      const staged = await stageHostedPrivateMedia({
+        bucket: bucket.api,
+        bytes,
+        capabilitySecret: CAPABILITY_SECRET,
+        contentType,
+        deliveryOrigin: HOSTED_PRIVATE_MEDIA_DELIVERY_ORIGIN,
+        userId: USER_ID,
+      });
+      const url = new URL(staged.url);
+
+      expect(url.pathname.endsWith(`/group-avatar.${extension}`)).toBe(true);
+      expect(matchHostedPrivateMediaCapabilityPath(url.pathname)?.extension)
+        .toBe(extension);
+
+      const request = new Request(url);
+      const response = await handleDeclarativeRoute(privateMediaRoutes, {
+        env: {
+          BUNDLES: bucket.api,
+          HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET: CAPABILITY_SECRET,
+        },
+        request,
+        url,
+      });
+      expect(response?.status).toBe(200);
+      if (!response) {
+        throw new Error("Expected private media response.");
+      }
+      expect(response.headers.get("content-type")).toBe(contentType);
+      expect(response.headers.get("content-disposition")).toBe(
+        `inline; filename="group-avatar.${extension}"`,
+      );
+      expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
+    },
+  );
 
   it("caps a late retry at the existing object's R2 lifecycle boundary", async () => {
     const nowMs = Date.parse("2026-07-27T12:00:00.000Z");
@@ -346,6 +396,28 @@ describe("hosted private media", () => {
     }
     expect(legacy.status).toBe(200);
     expect(new Uint8Array(await legacy.arrayBuffer())).toEqual(PNG_BYTES);
+
+    const legacyHeadRequest = new Request(legacyUrl, { method: "HEAD" });
+    const legacyHead = await handleDeclarativeRoute(privateMediaRoutes, {
+      env,
+      request: legacyHeadRequest,
+      url: legacyUrl,
+    });
+    expect(legacyHead).not.toBeNull();
+    if (!legacyHead) {
+      throw new Error("Expected legacy private media HEAD response.");
+    }
+    expect(legacyHead.status).toBe(legacy.status);
+    for (const header of [
+      "cache-control",
+      "content-disposition",
+      "content-length",
+      "content-type",
+      "x-content-type-options",
+    ]) {
+      expect(legacyHead.headers.get(header)).toBe(legacy.headers.get(header));
+    }
+    expect((await legacyHead.arrayBuffer()).byteLength).toBe(0);
 
     const mismatchedExtension = new URL(staged.url);
     mismatchedExtension.pathname = mismatchedExtension.pathname.replace(

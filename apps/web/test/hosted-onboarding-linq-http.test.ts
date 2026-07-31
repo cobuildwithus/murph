@@ -1442,19 +1442,21 @@ describe("updateHostedLinqChatAvatar", () => {
     });
   });
 
-  it("preserves the documented Linq error code and a redacted bounded message", async () => {
+  it("maps an allowlisted Linq error code to fixed first-party diagnostics", async () => {
     const privateUrl =
       `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`;
-    const privatePhone = "+15550001111";
+    const privatePhone = "15550001111";
     const privateEmail = "member@example.test";
     const privateChatId = "550e8400-e29b-41d4-a716-446655440000";
+    const privateGroupChatId = "room-12345";
+    const privateParticipantId = "participant-67890";
     const traceId = "0123456789abcdef0123456789abcdef";
     vi.stubGlobal("fetch", vi.fn(async () => createJsonResponse({
       error: {
         code: 5006,
         doc_url: "https://docs.linqapp.com/error/codes/5xxx/5006/",
         message:
-          `Content type mismatch for ${privateUrl}; chat_id=${privateChatId}; phone=${privatePhone}; email=${privateEmail}; trace_id=${traceId}; authorization=Bearer private-token`,
+          `Participant ${privatePhone} failed for ${privateUrl}; chat_id=${privateChatId}; group_chat_id=${privateGroupChatId}; participant_id=${privateParticipantId}; email=${privateEmail}; trace_id=${traceId}; authorization: Basic dXNlcjpwYXNz`,
         status: 400,
       },
       success: false,
@@ -1471,7 +1473,7 @@ describe("updateHostedLinqChatAvatar", () => {
       details: {
         failureStage: "http",
         providerErrorCode: 5006,
-        providerErrorMessage: expect.stringContaining("Content type mismatch"),
+        providerErrorMessage: "The avatar image type was not accepted.",
         status: 400,
       },
       retryable: false,
@@ -1481,11 +1483,14 @@ describe("updateHostedLinqChatAvatar", () => {
     expect(serialized).not.toContain(privatePhone);
     expect(serialized).not.toContain(privateEmail);
     expect(serialized).not.toContain(privateChatId);
+    expect(serialized).not.toContain(privateGroupChatId);
+    expect(serialized).not.toContain(privateParticipantId);
     expect(serialized).not.toContain(traceId);
-    expect(serialized).not.toContain("private-token");
+    expect(serialized).not.toContain("dXNlcjpwYXNz");
+    expect(serialized).not.toContain("Participant");
   });
 
-  it("bounds the redacted Linq provider message to 240 characters", async () => {
+  it("ignores arbitrary provider prose for an allowlisted Linq error code", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => createJsonResponse({
       error: {
         code: 5007,
@@ -1502,9 +1507,10 @@ describe("updateHostedLinqChatAvatar", () => {
     }).catch((caught: unknown) => caught) as { details?: Record<string, unknown> };
 
     expect(error.details?.providerErrorCode).toBe(5007);
-    const message = String(error.details?.providerErrorMessage);
-    expect(message.length).toBeLessThanOrEqual(240);
-    expect(message.length).toBeGreaterThan(200);
+    expect(error.details?.providerErrorMessage).toBe(
+      "The avatar image could not be downloaded.",
+    );
+    expect(JSON.stringify(error)).not.toContain("provider detail");
   });
 
   it.each([
@@ -1556,6 +1562,10 @@ describe("updateHostedLinqChatAvatar", () => {
     },
     {
       error: { code: "5007", message: 123 },
+      success: false,
+    },
+    {
+      error: { code: 5008, message: "Unknown provider prose" },
       success: false,
     },
   ])("ignores fields outside the documented Linq error envelope", async (body) => {

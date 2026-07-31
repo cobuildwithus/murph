@@ -2978,7 +2978,7 @@ describe("murph.group dynamic tool", () => {
               action: "set_chat_avatar",
               result: {
                 providerErrorCode: 5006,
-                providerErrorMessage: "Content type mismatch for [redacted-url]",
+                providerErrorMessage: "The avatar image type was not accepted.",
                 status: "unavailable",
                 unavailableReason: "provider_unavailable",
               },
@@ -3013,7 +3013,7 @@ describe("murph.group dynamic tool", () => {
         action: "set_chat_avatar",
         result: {
           providerErrorCode: 5006,
-          providerErrorMessage: "Content type mismatch for [redacted-url]",
+          providerErrorMessage: "The avatar image type was not accepted.",
           status: "unavailable",
           unavailableReason: "provider_unavailable",
         },

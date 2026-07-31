@@ -8,8 +8,8 @@ import {
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
+  hostedRuntimeLinqProviderErrorMessageForCode,
   isHostedRuntimePrivateImageDeliveryUrl,
-  isHostedRuntimeLinqProviderErrorMessage,
   type HostedRuntimeGroupChatParticipant,
   type HostedRuntimeGroupParticipantDisplayName,
   type HostedRuntimeGroupCreateJoinLinkRequest,
@@ -1227,15 +1227,21 @@ function readHostedLinqAvatarProviderDiagnostics(error: unknown): {
     && code <= 9_999
       ? code
       : null;
-  const providerErrorMessage = isHostedRuntimeLinqProviderErrorMessage(message)
-    ? message
-    : null;
   if (providerErrorCode === null) {
+    return undefined;
+  }
+  const expectedMessage = hostedRuntimeLinqProviderErrorMessageForCode(
+    providerErrorCode,
+  );
+  const providerErrorMessage = message === expectedMessage
+    ? expectedMessage
+    : null;
+  if (providerErrorMessage === null) {
     return undefined;
   }
   return {
     providerErrorCode,
-    ...(providerErrorMessage === null ? {} : { providerErrorMessage }),
+    providerErrorMessage,
   };
 }
 

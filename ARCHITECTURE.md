@@ -1529,9 +1529,9 @@ makes any remaining object eligible for asynchronous deletion after 24 hours
 and is not a physical-deletion deadline. Neither cleanup path treats provider
 acceptance as fetch proof. That URL is ephemeral provider input, never the
 internal media representation, model output, outbox state, or log payload.
-For a non-2xx avatar mutation, Web may project only Linq's documented nested
-four-digit error code and a 240-character privacy-redacted message through the
-existing `provider_unavailable` tool result. Raw bodies, trace ids, private
+For a non-2xx avatar mutation, Web may project only an allowlisted Linq nested
+four-digit error code and its fixed first-party recovery message through the
+existing `provider_unavailable` tool result. Provider prose, raw bodies, trace ids, private
 identifiers, capability URLs, credentials, and headers never cross that
 boundary; transport, cancellation, and timeout failures remain generic.
 

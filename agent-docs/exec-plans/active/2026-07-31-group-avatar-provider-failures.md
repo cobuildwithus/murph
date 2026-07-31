@@ -11,8 +11,8 @@ Updated: 2026-07-31
 
 ## Success criteria
 
-- Non-2xx Linq avatar updates expose only a validated provider code and bounded,
-  redacted provider message; transport and timeout failures remain generic.
+- Non-2xx Linq avatar updates expose only an allowlisted provider code and its
+  fixed first-party recovery message; transport and timeout failures remain generic.
 - Strict hosted-execution parsing and the model-visible group-tool result carry
   the optional diagnostics without exposing provider bodies or private data.
 - Private-media staging mints an extension-bearing URL while the Worker and
@@ -42,8 +42,8 @@ Updated: 2026-07-31
 ## Risks and mitigations
 
 1. Risk: provider messages contain private or secret-bearing text.
-   Mitigation: accept only the documented envelope, redact unsafe token classes,
-   bound bytes and output characters, and cover known private shapes directly.
+   Mitigation: ignore provider prose and map only known avatar failure codes to
+   fixed first-party recovery text after bounding the response body.
 2. Risk: Web/Worker or Worker/container deploy skew rejects valid avatar fetches.
    Mitigation: consumers accept both shapes before canonical minting begins, and
    the Worker serves both throughout the compatibility window.
@@ -70,12 +70,19 @@ Updated: 2026-07-31
   as the only compatibility branch.
 - Treat the retained ChatGPT response as behavioral intent; reconstruct and prove
   the change against the current repository rather than assuming hidden edits.
+- Accept the specialist privacy finding by discarding provider prose entirely
+  and allowlisting fixed first-party messages for Linq codes 5006 and 5007.
+- Accept the specialist JPEG/WebP and extensionless-HEAD coverage patch after
+  test-only path/hunk inspection. Keep a real Linq fetch-and-apply mutation as
+  an explicit post-deploy smoke because this task has no authorized isolated
+  provider group or production mutation scope.
 
 ## Verification
 
 - Commands to select after tracing: focused Vitest files for each touched owner,
   relevant package/app typechecks, `git diff --check`, direct GET/HEAD parity and
-  redaction scenarios, required ReviewGPT gates, and exact-head GitHub Actions.
-- Expected outcomes: bounded diagnostics only on HTTP provider failures; generic
+  provider-prose exclusion scenarios, required ReviewGPT gates, and exact-head
+  GitHub Actions.
+- Expected outcomes: allowlisted diagnostics only on HTTP provider failures; generic
   transport/timeout results; both URL generations accepted; strict tamper rejection;
   matching GET/HEAD metadata; no capability value in route logs; green required gates.

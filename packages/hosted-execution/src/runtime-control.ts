@@ -1085,52 +1085,17 @@ export interface HostedRuntimeGroupSetChatAvatarRequest {
   groupChatIconUrl: string;
 }
 
-export const HOSTED_RUNTIME_LINQ_PROVIDER_ERROR_MESSAGE_MAX_LENGTH = 240;
-
-export function sanitizeHostedRuntimeLinqProviderErrorMessage(
-  value: string,
+export function hostedRuntimeLinqProviderErrorMessageForCode(
+  code: unknown,
 ): string | null {
-  const normalized = value
-    .replace(/\s+/gu, " ")
-    .trim()
-    .replace(/\bhttps?:\/\/[^\s)\]}>"']+/giu, "[redacted-url]")
-    .replace(/\/private-media\/v1\/[^\s)\]}>"']+/giu, "[redacted-url]")
-    .replace(
-      /\b(?:authorization|cookie|set-cookie|token|secret|password|passcode|api[_-]?key|(?:x[-_])?(?:trace|request)[-_]?id|chat[_-]?id|message[_-]?id|event[_-]?id|member[_-]?id|user[_-]?id|account[_-]?id)\b\s*[:=]\s*(?:Bearer\s+\S+|"[^"]*"|'[^']*'|\S+)/giu,
-      "[redacted]",
-    )
-    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/giu, "Bearer [redacted]")
-    .replace(
-      /(?:\+\d[\d().\s-]{7,}\d|\(\d{3}\)\s*\d{3}[-.\s]\d{4}\b|\b\d{3}[-.\s]\d{3}[-.\s]\d{4}\b)/gu,
-      "[redacted-phone]",
-    )
-    .replace(
-      /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/gu,
-      "[redacted-email]",
-    )
-    .replace(
-      /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/giu,
-      "[redacted-id]",
-    )
-    .replace(
-      /\b(?:chat|message|msg|event|trace|request|member|user|account)_[A-Za-z0-9_-]{4,}\b/giu,
-      "[redacted-id]",
-    )
-    .replace(/\b[A-Fa-f0-9]{32,}\b/gu, "[redacted-token]")
-    .replace(/\b[A-Za-z0-9_-]{32,}\b/gu, "[redacted-token]");
-  const bounded = [...normalized]
-    .slice(0, HOSTED_RUNTIME_LINQ_PROVIDER_ERROR_MESSAGE_MAX_LENGTH)
-    .join("")
-    .trim();
-  return bounded || null;
-}
-
-export function isHostedRuntimeLinqProviderErrorMessage(
-  value: unknown,
-): value is string {
-  return typeof value === "string"
-    && value.length > 0
-    && sanitizeHostedRuntimeLinqProviderErrorMessage(value) === value;
+  switch (code) {
+    case 5006:
+      return "The avatar image type was not accepted.";
+    case 5007:
+      return "The avatar image could not be downloaded.";
+    default:
+      return null;
+  }
 }
 
 export const HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN =

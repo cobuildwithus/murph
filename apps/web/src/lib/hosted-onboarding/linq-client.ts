@@ -7,8 +7,8 @@ import {
 import {
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
+  hostedRuntimeLinqProviderErrorMessageForCode,
   isHostedRuntimePrivateImageDeliveryUrl,
-  sanitizeHostedRuntimeLinqProviderErrorMessage,
 } from "@murphai/hosted-execution/runtime-control";
 import type { TextPart } from "@linqapp/sdk/resources";
 import type {
@@ -965,7 +965,6 @@ function readHostedLinqProviderErrorDiagnostics(payload: unknown): {
   }
 
   const code = Reflect.get(providerError, "code");
-  const message = Reflect.get(providerError, "message");
   const providerErrorCode = typeof code === "number"
     && Number.isSafeInteger(code)
     && code >= 1_000
@@ -975,12 +974,15 @@ function readHostedLinqProviderErrorDiagnostics(payload: unknown): {
   if (providerErrorCode === null) {
     return null;
   }
-  const providerErrorMessage = typeof message === "string"
-    ? sanitizeHostedRuntimeLinqProviderErrorMessage(message)
-    : null;
+  const providerErrorMessage = hostedRuntimeLinqProviderErrorMessageForCode(
+    providerErrorCode,
+  );
+  if (providerErrorMessage === null) {
+    return null;
+  }
   return {
     providerErrorCode,
-    ...(providerErrorMessage === null ? {} : { providerErrorMessage }),
+    providerErrorMessage,
   };
 }
 

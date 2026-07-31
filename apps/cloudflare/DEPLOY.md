@@ -587,7 +587,7 @@ dual-shape Web validation and Worker serving through the capability lifetime,
 and retain the runtime parser until warm containers have drained. Verify one
 canonical and one extensionless GET plus HEAD, matching response headers, an
 empty HEAD body, MIME/extension mismatch rejection, and the model-visible
-redacted Linq failure code/message. At the 2026-07-31 production snapshot only
+allowlisted Linq failure code/fixed message. At the 2026-07-31 production snapshot only
 six hosted groups could enter this owner-only avatar path; no per-action durable
 counter exists, so bound rollout exposure by observed avatar attempts rather
 than assuming one attempt per group.
