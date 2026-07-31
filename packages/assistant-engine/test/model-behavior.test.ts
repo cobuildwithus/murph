@@ -407,17 +407,61 @@ describe('assistant execution prompt contract', () => {
   })
 
   it('allows a loaded skill to split accepted durable input across bounded children', () => {
-    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      hostedRuntime: true,
+      ordinaryInboundTurn: true,
+    }))
     const groupPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       conversationScope: 'group',
+      hostedRuntime: true,
+      ordinaryInboundTurn: true,
+    }))
+    const nonHostedGroupPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      conversationScope: 'group',
+      hostedRuntime: false,
+      ordinaryInboundTurn: true,
+    }))
+    const scheduledPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      hostedRuntime: true,
+      scheduledOccurrenceAt: '2026-04-15T13:00:00.000Z',
+      turnTrigger: 'automation-cron',
+    }))
+    const autoReplyPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      hostedRuntime: true,
+      ordinaryInboundTurn: true,
+      turnTrigger: 'automation-auto-reply',
+    }))
+    const outputOnlyAutoReplyPrompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput({
+        hostedRuntime: true,
+        ordinaryInboundTurn: false,
+        turnTrigger: 'automation-auto-reply',
+      }),
+    )
+    const manualDeliveryPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      hostedRuntime: true,
+      turnTrigger: 'manual-deliver',
     }))
     const unverifiedPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       conversationScope: 'unverified-external',
+      hostedRuntime: true,
+      ordinaryInboundTurn: true,
     }))
 
     expect(prompt).toContain('Non-blocking delegation:')
     expect(groupPrompt).not.toContain('Non-blocking delegation:')
     expect(unverifiedPrompt).not.toContain('Non-blocking delegation:')
+    expect(prompt.match(/Late child results for ordinary inbound turns:/g) ?? [])
+      .toHaveLength(1)
+    expect(groupPrompt.match(/Late child results for ordinary inbound turns:/g) ?? [])
+      .toHaveLength(1)
+    expect(nonHostedGroupPrompt).not.toContain('Late child results')
+    expect(scheduledPrompt).not.toContain('Late child results')
+    expect(autoReplyPrompt.match(/Late child results for ordinary inbound turns:/g) ?? [])
+      .toHaveLength(1)
+    expect(outputOnlyAutoReplyPrompt).not.toContain('Late child results')
+    expect(manualDeliveryPrompt).not.toContain('Late child results')
+    expect(unverifiedPrompt).not.toContain('Late child results')
     expect(prompt).toContain(
       'A loaded skill may instead use the durably accepted current input or attachment as the source and delegate up to three independent persistence families',
     )
@@ -442,6 +486,30 @@ describe('assistant execution prompt contract', () => {
     )
     expect(prompt).toContain(
       'Children may outlive the reply.',
+    )
+    expect(prompt).toContain(
+      'On every later ordinary inbound turn, revisit each child you spawned that was still generating when you sent the spawning reply',
+    )
+    expect(prompt).toContain(
+      'Use a newly completed result at most once and only when it is still relevant.',
+    )
+    expect(prompt).toContain(
+      'Stop revisiting that child after using its result, or after it fails, is cancelled, or loses relevance.',
+    )
+    expect(prompt).toContain(
+      'do not call `wait_agent`, wait, or block the reply.',
+    )
+    expect(prompt).toContain(
+      'Never perform this recheck during a scheduled automation, maintenance, system-notification, or output-only turn.',
+    )
+    expect(groupPrompt).toContain(
+      'On every later ordinary inbound turn, revisit each child you spawned that was still generating when you sent the spawning reply',
+    )
+    expect(groupPrompt).toContain(
+      'Use a newly completed result at most once and only when it is still relevant.',
+    )
+    expect(groupPrompt).toContain(
+      'do not call `wait_agent`, wait, or block the reply.',
     )
     expect(prompt).toContain(
       'one short personable line may truthfully say the team is sorting or saving what the user shared',
