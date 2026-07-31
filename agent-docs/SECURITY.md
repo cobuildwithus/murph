@@ -270,8 +270,10 @@ Last verified: 2026-07-30
   Murph does not upgrade or broadly redisplay historical methods. A monthly
   group sponsorship binds one authenticated payer to one exact group and a
   $5/$10/$20 cap. Conversation text, room participation, amount selection, and
-  possession of a funding URL are never financial consent. Activation and every
-  cap increase require an explicit authenticated payer action. Automatic refill
+  possession of a funding URL are never financial consent. Current group
+  capacity is not payment authority and does not gate an explicit contribution
+  or activation. Activation and every cap increase require an explicit
+  authenticated payer action. Automatic refill
   authority is rechecked under the beneficiary lock against the exact
   authorization, anchored period, ordinal, payer, pending-plus-fulfilled cap
   headroom, and still-unbound purchase before provider confirmation. Only one

@@ -44,6 +44,18 @@ describe('assistant hosted low-usage skill', () => {
       'how to get more usage, what options exist, how to earn usage, or about a mission',
     )
     expect(normalizedSkill).toContain(
+      'A direct funding intent explicitly asks to fund, sponsor, contribute, pay to add usage, receive the funding link, or otherwise selects the paid path over earned options',
+    )
+    expect(normalizedSkill).toContain(
+      'A broad-options intent asks generically how to get or add more usage, get more Murph time, or keep the room going',
+    )
+    expect(normalizedSkill).toContain(
+      'Call `read_usage` only',
+    )
+    expect(normalizedSkill).toContain(
+      'Do not call `read_usage_referral` or add earned missions',
+    )
+    expect(normalizedSkill).toContain(
       'Do this even when current usage is `healthy`',
     )
     expect(normalizedSkill).toContain(
@@ -54,6 +66,9 @@ describe('assistant hosted low-usage skill', () => {
     )
     expect(normalizedSkill).toContain(
       'Do not answer with only the paid or funding path or make the sender ask again',
+    )
+    expect(normalizedSkill).toContain(
+      'A direct group funding intent explicitly selects the paid or funding path rather than asking generically for more usage',
     )
     expect(normalizedSkill).toContain(
       "use this turn's `read_usage_referral` result",
@@ -178,7 +193,7 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain('call `murph.group action="read_usage"` once before writing the')
     expect(skill).toContain('`murph.group action="read_usage_referral"` once')
     expect(normalizedSkill).toContain(
-      'In a hosted group, wait until someone engages with the link-free heads-up',
+      'In a hosted group, after someone accepts the link-free first heads-up',
     )
     expect(normalizedSkill).toContain(
       "pass that response's exact opaque accepted `message_ref`",
@@ -223,7 +238,9 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain('standing no-re-offer rule wins')
     expect(skill).toContain('Never switch it automatically')
     expect(normalizedSkill).toContain('If no funding URL is returned')
-    expect(normalizedSkill).toContain('share only that Murph is sponsored in the chat')
+    expect(normalizedSkill).toContain(
+      'share only the binary sponsored status unless the current request matches the direct or broad intent split above',
+    )
     expect(skill).toContain(
       'returned percentages and forecast as overall available AI usage',
     )
@@ -238,6 +255,24 @@ describe('assistant hosted low-usage skill', () => {
     )
     expect(skill).not.toContain('included-versus-purchased')
     expect(skill).not.toContain('Share only its')
+  })
+
+  it('separates explicit group funding from low-capacity urgency', async () => {
+    const skill = await readLowUsageSkill()
+    const normalizedSkill = skill.replace(/\s+/gu, ' ')
+
+    expect(normalizedSkill).toContain(
+      '`fundingNeeded` controls urgency, not whether a returned funding URL may be shared after an explicit request',
+    )
+    expect(normalizedSkill).toContain(
+      'a returned first-party funding URL is the private path for an additional one-time contribution',
+    )
+    expect(normalizedSkill).toContain(
+      'does not make explicit funding unavailable',
+    )
+    expect(normalizedSkill).not.toContain(
+      'Share a returned first-party funding URL only when `fundingNeeded` is true',
+    )
   })
 
   it('maps the member-facing Core plan without renaming hosted groups', async () => {

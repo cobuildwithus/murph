@@ -15,7 +15,10 @@ import {
 import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
 import { HostedDeviceSyncCallbackConfirmation } from "@/src/components/device-sync/hosted-device-sync-callback-confirmation";
 import { HomeExperimentCard } from "@/src/components/home/home-experiment-card";
-import { GroupUsageFundingCard } from "@/src/components/hosted-groups/group-usage-funding-card";
+import {
+  GroupUsageFundingActions,
+  GroupUsageFundingShell,
+} from "@/src/components/hosted-groups/group-usage-funding-shell";
 import { GroupSponsorshipDialog } from "@/src/components/hosted-groups/group-sponsorship-dialog";
 import { GroupSponsorshipManagementCard } from "@/src/components/hosted-groups/group-sponsorship-management-card";
 import { MetricCard } from "@/src/components/ui/metric-card";
@@ -865,11 +868,18 @@ export function ComponentsContent() {
               will build without showing empty scores or missing facts.
             </p>
             <EnvironmentEmptyState
-              contactAction={{
-                href: "sms:+15555550100?body=I%20want%20to%20update%20what%20you%20know%20about%20my%20home%20environment.",
-                kind: "text",
-                label: "Text Murph",
-              }}
+              contactOptions={[
+                {
+                  href: "sms:+15555550100?body=I%20want%20to%20update%20what%20you%20know%20about%20my%20home%20environment.",
+                  kind: "text",
+                  label: "Messages",
+                },
+                {
+                  href: "https://t.me/withmurph_bot",
+                  kind: "telegram",
+                  label: "Telegram",
+                },
+              ]}
             />
           </Section>
         </div>
@@ -887,7 +897,7 @@ export function ComponentsContent() {
               built only from facts Murph still does not know.
             </p>
             <EnvironmentCaptureCard
-              contactAction={null}
+              contactOptions={[]}
               coverage={70}
               known={21}
               script={DESIGN_ENVIRONMENT_GAP_SCRIPT}
@@ -906,7 +916,8 @@ export function ComponentsContent() {
             <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
               The open report keeps ownership after upload: processing,
               updated, no-clear-facts, and delayed recovery remain visible
-              without requiring a reload.
+              without requiring a reload. Processing stays animated, and the
+              delayed action rechecks the existing accepted job.
             </p>
             <div className="grid gap-4">
               <EnvironmentVoiceRefreshNotice
@@ -1440,6 +1451,7 @@ export function ComponentsContent() {
               <div className="mt-6">
                 <HostedUsageTopUpDialog
                   checkoutUrl="/api/design/usage-credit-preview"
+                  inert
                   offers={DESIGN_USAGE_OFFERS}
                   payerMemberId="design_usage_top_up_payer"
                   scope="personal"
@@ -1450,18 +1462,35 @@ export function ComponentsContent() {
               data-design-component="group-usage-funding"
               id="group-usage-funding-component"
             >
-              <GroupUsageFundingCard
-                action={
-                  <GroupSponsorshipDialog
-                    checkoutUrl="/api/design/usage-credit-preview"
-                    customizationAllowed
-                    mode="monthly"
-                    monthlyCapMinor={1_000}
-                    monthlyCapOptions={DESIGN_GROUP_MONTHLY_CAPS}
-                    offers={[DESIGN_GROUP_SPONSORSHIP_OFFERS[0]]}
-                    payerMemberId="design_usage_top_up_payer"
+              <GroupUsageFundingShell
+                action={(
+                  <GroupUsageFundingActions
+                    monthlyAction={(
+                      <GroupSponsorshipDialog
+                        checkoutUrl="/api/design/usage-credit-preview"
+                        customizationAllowed
+                        inert
+                        mode="monthly"
+                        monthlyCapMinor={1_000}
+                        monthlyCapOptions={DESIGN_GROUP_MONTHLY_CAPS}
+                        offers={[DESIGN_GROUP_SPONSORSHIP_OFFERS[0]]}
+                        payerMemberId="design_usage_top_up_payer"
+                      />
+                    )}
+                    oneTimeAction={(
+                      <GroupSponsorshipDialog
+                        checkoutUrl="/api/design/usage-credit-preview"
+                        customizationAllowed
+                        inert
+                        mode="one_time"
+                        offers={DESIGN_GROUP_SPONSORSHIP_OFFERS}
+                        payerMemberId="design_usage_top_up_payer"
+                        triggerSize="default"
+                        triggerVariant="link"
+                      />
+                    )}
                   />
-                }
+                )}
                 groupName="Sunday sleep crew"
               />
             </div>
@@ -1472,7 +1501,6 @@ export function ComponentsContent() {
             >
               <GroupSponsorshipManagementCard
                 endpoint="/api/design/group-sponsorship-management"
-                groupName="Sunday sleep crew"
                 inert
                 management={{
                   authorizationId: "hgsa_design_component",
@@ -1503,6 +1531,7 @@ export function ComponentsContent() {
               <div className="mt-6 flex flex-wrap gap-3">
                 <HostedUsageTopUpDialog
                   checkoutUrl="/api/design/usage-credit-preview"
+                  inert
                   offers={DESIGN_USAGE_OFFERS}
                   payerMemberId="design_usage_top_up_payer"
                   scope="family"
@@ -1517,6 +1546,7 @@ export function ComponentsContent() {
                     targetConflict: true,
                   }}
                   checkoutUrl="/api/design/usage-credit-preview"
+                  inert
                   offers={[]}
                   payerMemberId="design_usage_top_up_payer"
                   scope="family"

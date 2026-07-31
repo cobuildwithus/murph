@@ -115,7 +115,6 @@ test.each([
     GroupSponsorshipManagementCard,
     {
       endpoint: "/api/groups/fund/example/sponsorship",
-      groupName: "Sunday sleep crew",
       management: { ...baseManagement, status: initialStatus },
     },
   ));
@@ -160,7 +159,6 @@ test("binds a confirmed cap increase to the displayed authorization", async () =
     GroupSponsorshipManagementCard,
     {
       endpoint: "/api/groups/fund/example/sponsorship",
-      groupName: "Sunday sleep crew",
       management: baseManagement,
     },
   ));
@@ -180,7 +178,7 @@ test("binds a confirmed cap increase to the displayed authorization", async () =
     assert.equal(fetchMock.mock.calls.length, 0);
 
     const applyButton = [...rendered.container.querySelectorAll("button")]
-      .find((candidate) => candidate.textContent === "Apply monthly maximum");
+      .find((candidate) => candidate.textContent === "Confirm $20 limit");
     assert.ok(applyButton);
     await act(async () => {
       applyButton.click();
