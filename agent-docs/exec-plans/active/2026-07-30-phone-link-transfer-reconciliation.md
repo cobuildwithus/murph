@@ -71,6 +71,12 @@ Updated: 2026-07-30
    sorted-member-locked transaction that rechecks the source classifier and
    commits cleanup ownership, source deletion, target reconciliation, and
    target channel enqueue together.
+7. Risk: a phone writer admitted under the target's prior phone lock resolves
+   the target before transfer, then overwrites the transferred phone after
+   source deletion.
+   Mitigation: normalize, deduplicate, and lock both the prior target phone and
+   transferred phone in sorted order before either member row; prove both
+   transaction orderings against PostgreSQL.
 
 ## Tasks
 
@@ -81,8 +87,8 @@ Updated: 2026-07-30
 4. [x] Reconcile a provider-confirmed transfer by retiring only a proven unused
    source scaffold through the canonical account-deletion owner.
 5. [ ] Complete scoped verification, parent review, commit, push, and PR evidence.
-6. [ ] Run final ReviewGPT correction round with exact-head CI and resolve every
-   accepted finding.
+6. [ ] Resolve the five-round ReviewGPT cap after exact-head CI and live proof;
+   do not start round 6 without an explicit continuation decision.
 
 ## Decisions
 
@@ -97,6 +103,8 @@ Updated: 2026-07-30
 - Provider-confirmed transfer never merges accounts. It may delete only an
   exhaustively classified unused onboarding scaffold; any general product data
   or other activity requires support.
+- Transfer retirement locks every unique phone authority it crosses before
+  locking source and target member rows.
 - General account merging remains a separate product decision.
 
 ## Verification
@@ -107,9 +115,15 @@ Updated: 2026-07-30
   event matches its canonical owner, time bucket, workspace version, and
   deterministic event id.
 - Hosted-web typecheck, scoped lint, and `git diff --check` pass.
+- The current phone-lock remediation passes 115 focused unit/service tests and
+  four real PostgreSQL concurrency cases covering both transaction orderings,
+  a missing prior phone, and equivalent-number lock deduplication.
 - Focused review found and resolved null-to-null transfer cancellation: a
   declined new-phone transfer now closes quietly while a transient null during
   an existing-phone transfer remains retryable.
+- Final ReviewGPT round 5 found and reproduced a stale old-phone writer that
+  could cross source deletion. The dual-phone lock correction is pushed; the
+  five-round cap requires an explicit decision before any round 6.
 - Browser proof of the final already-transferred phone reconciliation remains
   pending.
 - Final parent review, exact-head review, and CI evidence remain pending.
