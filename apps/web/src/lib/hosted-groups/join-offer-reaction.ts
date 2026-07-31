@@ -307,10 +307,14 @@ async function appendAnonymousHostedGroupOfferReactionTx(input: {
   expectedContainerMemberId?: string;
   tx: Prisma.TransactionClient;
 }): Promise<HostedLinqGroupReactionMailboxAppend> {
+  const threadId = input.event.linqChatId;
+  if (!threadId) {
+    throw new TypeError("Hosted group offer reaction thread is missing.");
+  }
   const route = await readHostedThreadRouteByThreadIdentity({
     channel: "linq",
     prisma: input.tx,
-    threadId: input.event.linqChatId,
+    threadId,
   });
   if (
     !route
@@ -333,7 +337,8 @@ async function signalHostedGroupOfferReactionBestEffort(input: {
   append: HostedLinqGroupReactionMailboxAppend | null;
   prisma: PrismaClient;
 }): Promise<void> {
-  if (!input.append) {
+  const append = input.append;
+  if (!append) {
     return;
   }
   try {
@@ -341,7 +346,7 @@ async function signalHostedGroupOfferReactionBestEffort(input: {
       deadlineMs: createHostedPostCommitDeadline(undefined),
       operation: (signal) => signalHostedLinqGroupReactionMailbox({
         abortSignal: signal,
-        append: input.append!,
+        append,
         prisma: input.prisma,
       }),
     });
