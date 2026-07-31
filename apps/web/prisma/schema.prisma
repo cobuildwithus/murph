@@ -646,6 +646,7 @@ model HostedProductFeedback {
   member                      HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@index([memberId, createdAt])
+  @@index([createdAt, kind], map: "hosted_product_feedback_created_at_kind_idx")
   @@map("hosted_product_feedback")
 }
 
