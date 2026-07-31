@@ -1,6 +1,6 @@
 # Restore Family usage top-ups and reset the usage meter
 
-Status: active
+Status: completed
 Created: 2026-07-30
 Updated: 2026-07-30
 
@@ -166,3 +166,8 @@ Updated: 2026-07-30
     `HostedBillingSettings` regression now proves the return dialog is rendered
     without server-render I/O; the direct dialog regression separately proves
     it polls only the exact return. The affected suite passes 392 tests.
+  - The round-3 evidence retry passed with zero findings on the exact
+    test-and-doc head. Required GitHub Actions were green on that head, and the
+    parent final review found no remaining product, architecture, privacy, or
+    verification issue.
+Completed: 2026-07-30
