@@ -1814,10 +1814,6 @@ async function cancelHostedPrivyPhoneTransferAutoTrialForAccountDeletion(input: 
       HOSTED_PRIVY_PHONE_TRANSFER_STRIPE_AUTHORITY_REQUEST_OPTIONS,
     );
   } catch (error) {
-    const cancelErrorCode = safeErrorCode(error);
-    console.error(
-      `[hosted-privacy] Stripe auto-trial cancel failed during phone transfer (memberId=${input.memberId}, errorCode=${cancelErrorCode}).`,
-    );
     logHostedStripeFailure({
       error,
       operationName: "subscription.cancel.phone-transfer",
