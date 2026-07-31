@@ -87,7 +87,7 @@ cd apps/web && pnpm typecheck
 - Motion restrained — only for hierarchy or affordance.
 - Verify UI changes in browser (desktop + mobile) before handoff.
 - Every pull request that changes user-facing frontend UI must update the reviewable catalog with the real production component: use [localhost:3000/design?tab=components](http://localhost:3000/design?tab=components) for reusable components, or [localhost:3000/design?tab=sections](http://localhost:3000/design?tab=sections) for a complete page section or flow.
-- Include desktop and mobile screenshots captured from the applicable design-page tab in the pull request. Show each materially changed component or section and every state needed to judge the change.
+- Include desktop and mobile screenshots captured from the applicable design-page tab in the pull request. Use lossless PNG at 2x device scale or higher, crop to the changed component or section, and inspect the local and hosted images at native resolution so ordinary body copy is immediately legible. Show each materially changed component or section and every state needed to judge the change.
 - The `Frontend design proof` pull-request check enforces the catalog-file update and the required hosted screenshot links for user-facing UI diffs. Design-catalog-only changes are exempt so the catalog can be maintained independently.
 
 ## Docs to update

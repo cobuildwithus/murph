@@ -447,6 +447,35 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, /Resets Aug 1, 2026/);
   });
 
+  test("shows the active Family owner their own Add usage action", async () => {
+    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+      authenticated: true,
+      familyState: "owner",
+      usageStatus: buildUsageStatus({
+        accessKind: "family_sponsored",
+        planName: "Family",
+        remainingPercent: 0,
+        status: "exhausted",
+        usedPercent: 100,
+      }),
+      usageTopUpCheckoutUrl:
+        "/api/settings/billing/family/members/member_owner/usage-credit/checkout",
+      usageTopUpOffers: [{
+        amountLabel: "$5",
+        offerCode: "usage_5_usd",
+      }],
+      usageTopUpScope: "family",
+      usageTopUpTargetLabel: "you",
+    }));
+
+    assert.match(markup, />Add usage</);
+    assert.match(markup, /aria-label="Add usage for you"/);
+    assert.match(markup, /Add usage to continue/);
+  });
+
   test("shows exhausted overall usage without inventing a forecast", async () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
@@ -573,6 +602,9 @@ describe("HostedBillingSettings", () => {
         hostedAiUsage: {
           findFirst: vi.fn(async () => null),
         },
+        hostedUsageCreditEntry: {
+          findFirst: vi.fn(async () => null),
+        },
       } as never,
       publicBaseUrl: null,
     });
@@ -682,6 +714,40 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, /Choose an amount/);
     assert.doesNotMatch(markup, /Continue checkout/);
     assert.doesNotMatch(markup, /reconcil/iu);
+  });
+
+  test("mounts an exact return without offers or an active purchase", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const markup = renderToStaticMarkup(
+      createElement(HostedBillingSettings, {
+          authenticated: true,
+          payerMemberId: TEST_PAYER_MEMBER_ID,
+          usageStatus: buildUsageStatus(),
+          usageTopUpActivePurchase: null,
+          usageTopUpOffers: [],
+          usageTopUpPurchaseReturn: {
+            kind: "success",
+            purchaseId: "hucp_ownerreturn00000",
+          },
+          usageTopUpScope: "family",
+          usageTopUpTargetLabel: "you",
+        },
+      ),
+    );
+
+    assert.match(markup, /Confirming payment for you/);
+    assert.match(markup, /We’re confirming your payment/);
+    assert.doesNotMatch(
+      markup,
+      /Other checkout|unfinished checkout|another usage destination/i,
+    );
+    assert.equal(
+      mocks.requestHostedOnboardingJson.mock.calls.length,
+      0,
+      "server rendering must not perform purchase-status I/O",
+    );
   });
 
   test("offers Text Murph on a fulfilled top-up when a contact channel resolves", async () => {
