@@ -1,8 +1,11 @@
 "use client";
 
+import type { ReactNode } from "react";
 import {
   Area,
   AreaChart,
+  Bar,
+  BarChart,
   CartesianGrid,
   Line,
   LineChart,
@@ -18,8 +21,23 @@ import {
 } from "@/src/components/ui/chart";
 import type {
   HostedGrowthDailyPoint,
+  HostedGrowthMessagePoint,
   HostedGrowthSnapshotPoint,
 } from "@/src/lib/hosted-ops/growth-metrics";
+
+const totalMessagesChartConfig = {
+  totalMessages: {
+    color: "#7A8C6E",
+    label: "Total messages sent",
+  },
+} satisfies ChartConfig;
+
+const dailyMessagesChartConfig = {
+  messagesPerDay: {
+    color: "#7A8C6E",
+    label: "Messages sent per day",
+  },
+} satisfies ChartConfig;
 
 const acquisitionChartConfig = {
   newMembers: {
@@ -45,6 +63,7 @@ const revenueChartConfig = {
 
 interface GrowthChartsProps {
   dailySeries: HostedGrowthDailyPoint[];
+  messageSeries: HostedGrowthMessagePoint[];
   snapshotSeries: HostedGrowthSnapshotPoint[];
 }
 
@@ -57,7 +76,114 @@ export function GrowthCharts(input: GrowthChartsProps) {
 
   return (
     <div className="grid gap-4 xl:grid-cols-2">
-      <div className="rounded-xl border border-border/70 bg-card/90 p-5">
+      <div className="min-w-0 rounded-xl border border-border/70 bg-card/90 p-5">
+        <div className="flex flex-col gap-1">
+          <h3 className="font-serif text-lg font-semibold tracking-tight text-foreground">
+            Total messages sent
+          </h3>
+          <p className="text-sm leading-6 text-muted-foreground">
+            Cumulative hosted messages sent through each completed UTC day.
+          </p>
+        </div>
+        <ChartContainer
+          className="mt-4 h-64 w-full"
+          config={totalMessagesChartConfig}
+        >
+          <LineChart
+            accessibilityLayer
+            data={input.messageSeries}
+            margin={{ bottom: 0, left: 0, right: 8, top: 8 }}
+          >
+            <CartesianGrid
+              stroke="var(--color-border)"
+              strokeDasharray="3 3"
+              strokeOpacity={0.55}
+              vertical={false}
+            />
+            <XAxis
+              axisLine={false}
+              dataKey="date"
+              minTickGap={24}
+              tickFormatter={formatShortDate}
+              tickLine={false}
+            />
+            <YAxis
+              allowDecimals={false}
+              axisLine={false}
+              domain={["auto", "auto"]}
+              tickFormatter={formatCompactNumber}
+              tickLine={false}
+              width={44}
+            />
+            <ChartTooltip
+              content={<ChartTooltipContent labelFormatter={formatTooltipDate} />}
+              cursor={{ stroke: "var(--color-border)", strokeDasharray: "3 3" }}
+            />
+            <Line
+              connectNulls={false}
+              dataKey="totalMessages"
+              dot={false}
+              name="Total messages sent"
+              stroke="var(--color-totalMessages)"
+              strokeWidth={2}
+              type="monotone"
+            />
+          </LineChart>
+        </ChartContainer>
+      </div>
+
+      <div className="min-w-0 rounded-xl border border-border/70 bg-card/90 p-5">
+        <div className="flex flex-col gap-1">
+          <h3 className="font-serif text-lg font-semibold tracking-tight text-foreground">
+            Messages sent per day
+          </h3>
+          <p className="text-sm leading-6 text-muted-foreground">
+            Daily inbound messages plus tracked Linq replies, by UTC date.
+          </p>
+        </div>
+        <ChartContainer
+          className="mt-4 h-64 w-full"
+          config={dailyMessagesChartConfig}
+        >
+          <BarChart
+            accessibilityLayer
+            data={input.messageSeries}
+            margin={{ bottom: 0, left: 0, right: 8, top: 8 }}
+          >
+            <CartesianGrid
+              stroke="var(--color-border)"
+              strokeDasharray="3 3"
+              strokeOpacity={0.55}
+              vertical={false}
+            />
+            <XAxis
+              axisLine={false}
+              dataKey="date"
+              minTickGap={24}
+              tickFormatter={formatShortDate}
+              tickLine={false}
+            />
+            <YAxis
+              allowDecimals={false}
+              axisLine={false}
+              tickLine={false}
+              width={36}
+            />
+            <ChartTooltip
+              content={<ChartTooltipContent labelFormatter={formatTooltipDate} />}
+              cursor={{ fill: "var(--color-muted)", fillOpacity: 0.35 }}
+            />
+            <Bar
+              dataKey="messagesPerDay"
+              fill="var(--color-messagesPerDay)"
+              name="Messages sent per day"
+              radius={[3, 3, 0, 0]}
+            />
+          </BarChart>
+        </ChartContainer>
+      </div>
+
+      <div className="min-w-0 rounded-xl border border-border/70 bg-card/90 p-5">
         <div className="flex flex-col gap-1">
           <h3 className="font-serif text-lg font-semibold tracking-tight text-foreground">
             Acquisition
@@ -71,6 +197,7 @@ export function GrowthCharts(input: GrowthChartsProps) {
           config={acquisitionChartConfig}
         >
           <AreaChart
+            accessibilityLayer
             data={input.dailySeries}
             margin={{ bottom: 0, left: 0, right: 8, top: 8 }}
           >
@@ -94,7 +221,7 @@ export function GrowthCharts(input: GrowthChartsProps) {
               width={32}
             />
             <ChartTooltip
-              content={<ChartTooltipContent />}
+              content={<ChartTooltipContent labelFormatter={formatTooltipDate} />}
               cursor={{ stroke: "var(--color-border)", strokeDasharray: "3 3" }}
             />
             <Area
@@ -119,7 +246,7 @@ export function GrowthCharts(input: GrowthChartsProps) {
         </ChartContainer>
       </div>
 
-      <div className="rounded-xl border border-border/70 bg-card/90 p-5">
+      <div className="min-w-0 rounded-xl border border-border/70 bg-card/90 p-5">
         <div className="flex flex-col gap-1">
           <h3 className="font-serif text-lg font-semibold tracking-tight text-foreground">
             Revenue snapshots
@@ -133,6 +260,7 @@ export function GrowthCharts(input: GrowthChartsProps) {
           config={revenueChartConfig}
         >
           <LineChart
+            accessibilityLayer
             data={revenueSeries}
             margin={{ bottom: 0, left: 0, right: 8, top: 8 }}
           >
@@ -156,7 +284,7 @@ export function GrowthCharts(input: GrowthChartsProps) {
               width={32}
             />
             <ChartTooltip
-              content={<ChartTooltipContent />}
+              content={<ChartTooltipContent labelFormatter={formatTooltipDate} />}
               cursor={{ stroke: "var(--color-border)", strokeDasharray: "3 3" }}
             />
             <Line
@@ -188,4 +316,15 @@ function formatShortDate(value: string): string {
     month: "short",
     timeZone: "UTC",
   }).format(new Date(`${value}T00:00:00.000Z`));
+}
+
+function formatCompactNumber(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 1,
+    notation: "compact",
+  }).format(value);
+}
+
+function formatTooltipDate(value: ReactNode): string {
+  return typeof value === "string" ? formatShortDate(value) : "";
 }

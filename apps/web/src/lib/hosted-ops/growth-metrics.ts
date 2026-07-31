@@ -184,6 +184,12 @@ export interface HostedGrowthDailyPoint {
   trialStarts: number;
 }
 
+export interface HostedGrowthMessagePoint {
+  date: string;
+  messagesPerDay: number | null;
+  totalMessages: number | null;
+}
+
 export interface HostedGrowthSnapshotPoint {
   coveredMembers: number;
   date: string;
@@ -227,6 +233,7 @@ export interface HostedGrowthDashboard {
   };
   current: HostedGrowthCurrentMetrics;
   dailySeries: HostedGrowthDailyPoint[];
+  messageSeries: HostedGrowthMessagePoint[];
   mrrWowPercent: number | null;
   newMembers: {
     today: number;
@@ -460,6 +467,28 @@ export function buildDailyGrowthSeries(input: {
   }
 
   return Array.from(counts.values());
+}
+
+export function buildHostedGrowthMessageSeries(input: {
+  messagesBeforeSeries: number;
+  snapshots: HostedGrowthSnapshotRow[];
+}): HostedGrowthMessagePoint[] {
+  let totalMessages = input.messagesBeforeSeries;
+
+  return input.snapshots.map((snapshot) => {
+    const inboundMessages = snapshot.inboundMessagesPriorDay;
+    const outboundMessages = snapshot.outboundMessagesPriorDay;
+    totalMessages += (inboundMessages ?? 0) + (outboundMessages ?? 0);
+    const messagesPerDay = inboundMessages === null || outboundMessages === null
+      ? null
+      : inboundMessages + outboundMessages;
+
+    return {
+      date: formatUtcDateKey(addUtcDays(snapshot.snapshotDate, -1)),
+      messagesPerDay,
+      totalMessages: messagesPerDay === null ? null : totalMessages,
+    };
+  });
 }
 
 export function buildWeeklyGrowthRows(input: {
@@ -1032,6 +1061,7 @@ export async function readHostedGrowthDashboard(
     memberRows,
     rawTrialStartRows,
     snapshots,
+    messagesBeforeSeries,
     matureStarted,
     matureConverted,
     growthAggregate,
@@ -1086,6 +1116,17 @@ export async function readHostedGrowthDashboard(
         snapshotDate: {
           gte: dailyStart,
           lte: todayStart,
+        },
+      },
+    }),
+    prisma.hostedGrowthDailySnapshot.aggregate({
+      _sum: {
+        inboundMessagesPriorDay: true,
+        outboundMessagesPriorDay: true,
+      },
+      where: {
+        snapshotDate: {
+          lt: dailyStart,
         },
       },
     }),
@@ -1279,6 +1320,12 @@ export async function readHostedGrowthDashboard(
     }),
     current,
     dailySeries,
+    messageSeries: buildHostedGrowthMessageSeries({
+      messagesBeforeSeries: HOSTED_MESSAGE_VOLUME_BASE +
+        (messagesBeforeSeries._sum.inboundMessagesPriorDay ?? 0) +
+        (messagesBeforeSeries._sum.outboundMessagesPriorDay ?? 0),
+      snapshots,
+    }),
     mrrWowPercent: comparableSnapshot === null
       ? null
       : calculatePercentChange(current.mrrUsdCents, comparableSnapshot.mrrUsdCents),
