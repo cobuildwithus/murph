@@ -2035,22 +2035,38 @@ export async function showExperimentProgressCard(input: {
     query,
     vault: input.vault,
   })
-  const healthCommons = await loadHealthCommonsBiomarkerDirectionRuntime()
   const biomarkerKeys = [
     frontmatter.analysisPlan?.primaryBiomarkerKey ?? null,
     ...(frontmatter.analysisPlan?.secondaryBiomarkerKeys ?? []),
   ].filter((biomarkerKey): biomarkerKey is string => biomarkerKey !== null)
-  const biomarkerDesiredDirections = uniqueStrings(biomarkerKeys).flatMap((biomarkerKey) => {
-    const desiredDirection =
-      healthCommons.resolveGeneratedHealthCommonsBiomarkerDesiredDirection(
-        biomarkerKey,
+  const biomarkerDesiredDirections: Array<{
+    biomarkerKey: string
+    desiredDirection: HealthCommonsBiomarkerDesiredDirection
+  }> = []
+  const directionWarnings: string[] = []
+  if (biomarkerKeys.length > 0) {
+    try {
+      const healthCommons = await loadHealthCommonsBiomarkerDirectionRuntime()
+      for (const biomarkerKey of uniqueStrings(biomarkerKeys)) {
+        const desiredDirection =
+          healthCommons.resolveGeneratedHealthCommonsBiomarkerDesiredDirection(
+            biomarkerKey,
+          )
+        if (desiredDirection !== null) {
+          biomarkerDesiredDirections.push({ biomarkerKey, desiredDirection })
+        }
+      }
+    } catch (error) {
+      if (!isMissingHealthCommonsBiomarkerDirectionArtifactError(error)) {
+        throw error
+      }
+      directionWarnings.push(
+        'biomarker desired directions unavailable; mover sentiment shown as neutral',
       )
-    return desiredDirection === null
-      ? []
-      : [{ biomarkerKey, desiredDirection }]
-  })
+    }
+  }
 
-  const { card, warnings } = query.buildExperimentProgressCard(readModel, slug, {
+  const { card, warnings: cardWarnings } = query.buildExperimentProgressCard(readModel, slug, {
     asOf: input.asOf,
     biomarkerDesiredDirections,
     confounders: input.confounders,
@@ -2064,7 +2080,7 @@ export async function showExperimentProgressCard(input: {
     slug,
     asOf: card.asOf,
     card,
-    warnings,
+    warnings: [...directionWarnings, ...cardWarnings],
   }
 }
 
@@ -3556,6 +3572,16 @@ async function loadHealthCommonsBiomarkerDirectionRuntime(): Promise<
 > {
   return loadRuntimeModule<HealthCommonsBiomarkerDirectionRuntime>(
     '@murphai/health-commons/runtime',
+  )
+}
+
+function isMissingHealthCommonsBiomarkerDirectionArtifactError(
+  error: unknown,
+): boolean {
+  return (
+    error instanceof Error &&
+    'code' in error &&
+    error.code === 'ENOENT'
   )
 }
 
