@@ -395,14 +395,25 @@ function translateResponsesInputToChatMessages(input: {
   instructions: unknown;
 }): Record<string, unknown>[] {
   const messages: Record<string, unknown>[] = [];
+  let pendingAssistantContent: unknown;
   let pendingToolCalls: Record<string, unknown>[] = [];
-  const flushPendingToolCalls = (): void => {
-    if (pendingToolCalls.length === 0) return;
+  const flushPendingAssistantTurn = (): void => {
+    if (
+      pendingAssistantContent === undefined
+      && pendingToolCalls.length === 0
+    ) {
+      return;
+    }
     messages.push({
-      content: null,
+      content: pendingAssistantContent === undefined
+        ? null
+        : pendingAssistantContent,
       role: "assistant",
-      tool_calls: pendingToolCalls,
+      ...(pendingToolCalls.length > 0
+        ? { tool_calls: pendingToolCalls }
+        : {}),
     });
+    pendingAssistantContent = undefined;
     pendingToolCalls = [];
   };
   if (typeof input.instructions === "string" && input.instructions.trim()) {
@@ -423,10 +434,19 @@ function translateResponsesInputToChatMessages(input: {
       throw invalidRequest();
     }
     if (item.type === "message") {
-      flushPendingToolCalls();
+      const content = normalizeChatMessageContent(item.content);
+      const role = requireChatRole(item.role);
+      if (role === "assistant") {
+        pendingAssistantContent = mergeChatAssistantContent(
+          pendingAssistantContent,
+          content,
+        );
+        continue;
+      }
+      flushPendingAssistantTurn();
       messages.push({
-        content: normalizeChatMessageContent(item.content),
-        role: requireChatRole(item.role),
+        content,
+        role,
       });
       continue;
     }
@@ -462,7 +482,7 @@ function translateResponsesInputToChatMessages(input: {
       item.type === "function_call_output"
       || item.type === "custom_tool_call_output"
     ) {
-      flushPendingToolCalls();
+      flushPendingAssistantTurn();
       messages.push({
         content: normalizeToolOutput(item.output),
         role: "tool",
@@ -477,11 +497,33 @@ function translateResponsesInputToChatMessages(input: {
     ) {
       continue;
     }
-    flushPendingToolCalls();
+    flushPendingAssistantTurn();
     throw unsupportedTool();
   }
-  flushPendingToolCalls();
+  flushPendingAssistantTurn();
   return messages;
+}
+
+function mergeChatAssistantContent(
+  current: unknown,
+  next: unknown,
+): unknown {
+  if (current === undefined) return next;
+  if (typeof current === "string" && typeof next === "string") {
+    return `${current}${next}`;
+  }
+  return [
+    ...normalizeChatContentParts(current),
+    ...normalizeChatContentParts(next),
+  ];
+}
+
+function normalizeChatContentParts(value: unknown): unknown[] {
+  if (typeof value === "string") {
+    return value ? [{ text: value, type: "text" }] : [];
+  }
+  if (Array.isArray(value)) return value;
+  throw invalidRequest();
 }
 
 function normalizeChatMessageContent(value: unknown): unknown {

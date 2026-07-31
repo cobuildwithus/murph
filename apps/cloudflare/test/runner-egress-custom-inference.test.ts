@@ -527,7 +527,7 @@ describe("hosted custom inference egress", () => {
 
     expect(completedData).toBeTruthy();
     const completed = JSON.parse(completedData ?? "null") as {
-      response: { output: Array<{ type: string }> };
+      response: { output: Array<Record<string, unknown>> };
     };
     expect(completed.response.output.map((item) => item.type)).toEqual([
       "message",
@@ -536,6 +536,34 @@ describe("hosted custom inference egress", () => {
     expect(text).toContain('"output_index":0');
     expect(text).toContain('"output_index":1');
     expect(text).toContain('"arguments":"{\\"query\\":\\"weather\\"}"');
+    expect(JSON.parse(buildHostedCustomInferenceUpstreamRequestBody({
+      body: encodeJson({
+        input: [
+          ...completed.response.output,
+          {
+            call_id: "call_mixed_1",
+            output: "sunny",
+            type: "function_call_output",
+          },
+        ],
+        model: CUSTOM_MODEL_ALIAS,
+      }),
+      target: buildTarget({ protocol: "chat_completions" }),
+    })).messages).toEqual([
+      {
+        content: [{ text: "I will check. ", type: "text" }],
+        role: "assistant",
+        tool_calls: [{
+          function: {
+            arguments: '{"query":"weather"}',
+            name: "lookup",
+          },
+          id: "call_mixed_1",
+          type: "function",
+        }],
+      },
+      { content: "sunny", role: "tool", tool_call_id: "call_mixed_1" },
+    ]);
 
     const reverseResponse = await adaptHostedCustomInferenceUpstreamResponse({
       protocol: "chat_completions",
@@ -560,11 +588,36 @@ describe("hosted custom inference egress", () => {
       ?.slice("data: ".length);
     expect(reverseCompletedData).toBeTruthy();
     const reverseCompleted = JSON.parse(reverseCompletedData ?? "null") as {
-      response: { output: Array<{ type: string }> };
+      response: { output: Array<Record<string, unknown>> };
     };
     expect(reverseCompleted.response.output.map((item) => item.type)).toEqual([
       "function_call",
       "message",
+    ]);
+    expect(JSON.parse(buildHostedCustomInferenceUpstreamRequestBody({
+      body: encodeJson({
+        input: [
+          ...reverseCompleted.response.output,
+          {
+            call_id: "call_mixed_2",
+            output: "complete",
+            type: "function_call_output",
+          },
+        ],
+        model: CUSTOM_MODEL_ALIAS,
+      }),
+      target: buildTarget({ protocol: "chat_completions" }),
+    })).messages).toEqual([
+      {
+        content: [{ text: "I found it.", type: "text" }],
+        role: "assistant",
+        tool_calls: [{
+          function: { arguments: "{}", name: "lookup" },
+          id: "call_mixed_2",
+          type: "function",
+        }],
+      },
+      { content: "complete", role: "tool", tool_call_id: "call_mixed_2" },
     ]);
   });
 
