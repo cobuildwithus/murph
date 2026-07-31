@@ -96,22 +96,28 @@ with its network-denied memory-write profile. Reminder availability uses no
 model turn or separate automation: the existing hosted background automation
 pass deterministically scans active private automations that explicitly store
 `skip-when-busy`, `calendar-only`, and one exact Google Calendar or Outlook
-account binding. When the stored snapshot is missing or older than 24 hours,
+account binding; exact-time automations are ineligible. When the stored snapshot
+is missing or older than 24 hours,
 host code derives the exact account and current seven-day provider request,
 caps the result, reduces it to normalized busy timestamps, rereads the
 automation, and performs a version-fenced suffix replacement. Complete empty
 reads persist an empty snapshot so the same canonical `generatedAt` field also
 bounds refresh cadence without another scheduler or state owner. Ordinary
 user-authored saves and instruction patches strip the engine-owned suffix.
+Changing a reminder to an exact-time schedule atomically replaces
+`skip-when-busy` with `fixed` and removes its source, account, and snapshot.
 Scheduled delivery ignores it unless current policy/source/account
 authorization remains exact and the snapshot is canonical, unexpired, and
-covers an occurrence scheduled within 24 hours of generation. That snapshot is
+covers a non-exact-time occurrence scheduled within 24 hours of generation. The
+snapshot is host-only derived data and is stripped from the instruction prompt
+before any model-backed notification turn. That snapshot is
 a short derived-data lease: disconnect or provider revocation stops future
 refreshes but does not synchronously cancel already-derived busy timestamps.
 Policy removal or account replacement invalidates the lease immediately;
 provider failure, incomplete pagination, malformed or older evidence, and
 concurrent edits send normally. Raw calendar content never reaches a model,
-memory, automation instructions, or logs.
+memory, automation instructions, or logs, and normalized busy timestamps never
+reach a model prompt.
 
 Each synthetic hosted group runtime may additionally keep one assistant-authored
 `group-room-model` derived knowledge page. A twice-weekly managed automation

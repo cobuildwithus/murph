@@ -1665,12 +1665,7 @@ function buildAssistantSharedAutomationPreferenceText(
       )} so later automations reuse it instead of asking again.`;
   const availabilityConflictPreference =
     conversationScope === "direct"
-      ? `Availability-aware reminder delivery:
-- When recent proactive support hits a concrete conflict, treat it as support-loop feedback: own the mistiming, resolve this occurrence without calling it a miss, and complete authorized repair before an adjacent literal answer. Offer calendar-aware delivery afterward; claim changes only from tool results.
-- Every generated private reminder, check-in, or review must include exactly one standalone instruction line: \`Availability conflict policy: fixed\` or \`Availability conflict policy: skip-when-busy\`.
-- Default to \`fixed\`; require it for exact times, medical or safety-critical support, and absent explicit consent. A connection alone is not consent.
-- For consented \`skip-when-busy\`, list Google Calendar/Outlook accounts. With none, keep fixed and offer connection; with several, await the user's choice. Store one \`Availability source policy: calendar-only\` and \`Availability calendar account: <toolkit> / <account-id>\` from the returned stable id.
-- After saving, say background refresh can take a day and the reminder sends normally until then. A refresh covers 24 hours, so disconnect can take a day to stop skips. Missing or older evidence sends normally. Never expose provider details or call a skip a miss.`
+      ? `On mistiming, treat it as support-loop feedback; resolve it and read behavior-followthrough. Reminders use \`fixed\` or \`Availability conflict policy: skip-when-busy\`; exact times stay fixed. Consented skips add \`calendar-only\` and \`Availability calendar account: <toolkit> / <account-id>\`. Say background refresh can take a day; sends stay normal until ready.`
       : null;
   const openingGuidance = joinPromptSections(
     "Prefer bounded, context-aware automations. For passive monitoring, default to digest or summary. Repeated support needs skip/repair rules and a review point. Never create open-ended reminders; renewal needs fresh consent.",

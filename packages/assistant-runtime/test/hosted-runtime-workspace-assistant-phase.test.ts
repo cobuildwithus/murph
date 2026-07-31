@@ -222,6 +222,7 @@ vi.mock("../src/hosted-runtime/system-mailbox.ts", () => ({
 import {
   initializeVault,
   showAutomation,
+  splitAutomationAvailabilityConflictBlock,
   upsertAutomation,
 } from "@murphai/core";
 import {
@@ -2905,35 +2906,93 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   });
 
   it("runs deterministic reminder availability in the hosted background pass", async () => {
-    const connectedApps = { request: vi.fn() };
-    mocks.refreshReminderAvailability.mockResolvedValueOnce({
-      attempted: 1,
-      failed: 0,
-      refreshed: 1,
-    });
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-reminder-availability-"));
+    const vaultRoot = path.join(parentRoot, "vault");
+    const actualAssistantEngine = await vi.importActual<
+      typeof import("@murphai/assistant-engine")
+    >("@murphai/assistant-engine");
+    const connectedApps = {
+      request: vi.fn(async () => ({
+        result: {
+          data: {
+            items: [{
+              description: "Private provider content",
+              end: { dateTime: "2026-07-30T15:00:00.000Z" },
+              start: { dateTime: "2026-07-30T14:00:00.000Z" },
+              summary: "Private event title",
+            }],
+          },
+        },
+      })),
+    };
+    try {
+      await initializeVault({
+        createdAt: "2026-07-29T00:00:00.000Z",
+        vaultRoot,
+      });
+      await upsertAutomation({
+        continuityPolicy: "fresh",
+        instructions: [
+          "Send one flexible reminder.",
+          "Availability conflict policy: skip-when-busy",
+          "Availability source policy: calendar-only",
+          "Availability calendar account: googlecalendar / calendar-account",
+        ].join("\n"),
+        now: new Date("2026-07-29T00:00:00.000Z"),
+        route: {
+          channel: "linq",
+          deliveryTarget: "direct-thread",
+          identityId: null,
+          participantId: null,
+          threadId: null,
+          threadIsDirect: true,
+        },
+        schedule: { kind: "dailyLocal", localTime: "16:00" },
+        slug: "hosted-reminder-availability",
+        status: "active",
+        title: "Hosted reminder availability",
+        vaultRoot,
+      });
+      mocks.refreshReminderAvailability.mockImplementationOnce(
+        actualAssistantEngine.refreshReminderAvailability,
+      );
 
-    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      now: () => "2026-07-30T00:00:00.000Z",
-      runtimeConnectedApps: connectedApps,
-      vaultRoot: "/tmp/murph-hosted-vault",
-    }));
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        now: () => "2026-07-30T00:00:00.000Z",
+        runtimeConnectedApps: connectedApps,
+        vaultRoot,
+      }));
 
-    expect(mocks.refreshReminderAvailability).toHaveBeenCalledWith({
-      connectedApps,
-      now: new Date("2026-07-30T00:00:00.000Z"),
-      shouldYield: null,
-      signal: null,
-      vaultRoot: "/tmp/murph-hosted-vault",
-    });
-    expect(result).toEqual(expect.objectContaining({
-      checkpointReason: "assistant_runtime_commit",
-      progressed: true,
-      redactedStatus: expect.objectContaining({
-        reminderAvailabilityMaintenanceAttempted: 1,
-        reminderAvailabilityMaintenanceFailed: 0,
-        reminderAvailabilityMaintenanceRefreshed: 1,
-      }),
-    }));
+      expect(mocks.refreshReminderAvailability).toHaveBeenCalledWith({
+        connectedApps,
+        now: new Date("2026-07-30T00:00:00.000Z"),
+        shouldYield: null,
+        signal: null,
+        vaultRoot,
+      });
+      expect(result).toEqual(expect.objectContaining({
+        checkpointReason: "assistant_runtime_commit",
+        progressed: true,
+        redactedStatus: expect.objectContaining({
+          reminderAvailabilityMaintenanceAttempted: 1,
+          reminderAvailabilityMaintenanceFailed: 0,
+          reminderAvailabilityMaintenanceRefreshed: 1,
+        }),
+      }));
+      const reminder = await showAutomation({
+        slug: "hosted-reminder-availability",
+        vaultRoot,
+      });
+      expect(reminder).not.toBeNull();
+      expect(reminder?.instructions).not.toContain("Private event title");
+      expect(splitAutomationAvailabilityConflictBlock(
+        reminder?.instructions ?? "",
+      ).block).toContain(
+        "- 2026-07-30T14:00:00.000Z / 2026-07-30T15:00:00.000Z",
+      );
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true });
+    }
   });
 
   it("checkpoints a retry wake after logging partial managed setup failures", async () => {
@@ -4935,7 +4994,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       "Availability conflict snapshot:",
       "- generatedAt: 2026-07-30T03:15:00.000Z",
       "- expiresAt: 2026-08-06T03:15:00.000Z",
-      "- If one interval satisfies `busyStart <= scheduledOccurrenceAt < busyEnd`, return `skip` and send nothing. Do not mention calendar, event labels, or provider details.",
       "- 2026-07-30T14:00:00.000Z / 2026-07-30T15:00:00.000Z",
       "<!-- murph:availability-conflicts:end -->",
     ].join("\n");
@@ -5108,6 +5166,34 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           }
           return await automationTool.request({
             action: "patch",
+            lookup: "existing-reminder",
+            schedule: { at: "2026-08-01T13:00:00.000Z", kind: "at" },
+          });
+        },
+        turnEnvironment: null,
+      });
+      const exactReminder = await showAutomation({
+        slug: "existing-reminder",
+        vaultRoot,
+      });
+      expect(exactReminder).toEqual(expect.objectContaining({
+        schedule: { at: "2026-08-01T13:00:00.000Z", kind: "at" },
+      }));
+      expect(exactReminder?.instructions).toBe([
+        "Send the existing reminder.",
+        "Availability conflict policy: fixed",
+      ].join("\n"));
+
+      await operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [inputId],
+        operation: async (executionContext) => {
+          const automationTool = executionContext.hosted?.automationTool;
+          if (!automationTool) {
+            throw new Error("Expected scoped hosted automation tool.");
+          }
+          return await automationTool.request({
+            action: "patch",
             instructions: `${availabilityBase.replace(
               "Availability conflict policy: skip-when-busy",
               "Availability conflict policy: fixed",
@@ -5121,10 +5207,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         slug: "existing-reminder",
         vaultRoot,
       })).resolves.toMatchObject({
-        instructions: availabilityBase.replace(
-          "Availability conflict policy: skip-when-busy",
+        instructions: [
+          "Send the existing reminder.",
           "Availability conflict policy: fixed",
-        ),
+        ].join("\n"),
       });
     } finally {
       await rm(parentRoot, { force: true, recursive: true });

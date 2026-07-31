@@ -2,14 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import {
   AVAILABILITY_CONFLICT_BLOCK_END,
-  AVAILABILITY_CONFLICT_BLOCK_INSTRUCTION,
   AVAILABILITY_CONFLICT_BLOCK_START,
+  normalizeAutomationAvailabilityForSchedule,
   parseAutomationAvailabilityConflictBlock,
   readAutomationAvailabilityCalendarAuthorization,
   replaceAutomationAvailabilityConflictSnapshot,
   shouldSkipAutomationOccurrenceForAvailability,
   splitAutomationAvailabilityConflictBlock,
   stripAutomationAvailabilityConflictBlock,
+  stripAutomationAvailabilityConflictEvidenceForProvider,
 } from "../src/automation-availability.ts";
 
 const BASE_INSTRUCTIONS = [
@@ -24,7 +25,6 @@ const CONFLICT_BLOCK = [
   "Availability conflict snapshot:",
   "- generatedAt: 2026-07-30T03:00:00.000Z",
   "- expiresAt: 2026-08-06T03:00:00.000Z",
-  AVAILABILITY_CONFLICT_BLOCK_INSTRUCTION,
   "- 2026-07-30T14:00:00.000Z / 2026-07-30T15:00:00.000Z",
   "- 2026-07-31T14:00:00.000Z / 2026-07-31T15:00:00.000Z",
   AVAILABILITY_CONFLICT_BLOCK_END,
@@ -93,10 +93,12 @@ describe("automation availability conflicts", () => {
     expect(shouldSkipAutomationOccurrenceForAvailability({
       instructions,
       occurrenceAt: "2026-07-30T14:30:00.000Z",
+      scheduleKind: "dailyLocal",
     })).toBe(true);
     expect(shouldSkipAutomationOccurrenceForAvailability({
       instructions,
       occurrenceAt: "2026-07-30T15:00:00.000Z",
+      scheduleKind: "dailyLocal",
     })).toBe(false);
     expect(shouldSkipAutomationOccurrenceForAvailability({
       instructions: instructions.replace(
@@ -104,6 +106,7 @@ describe("automation availability conflicts", () => {
         "Availability conflict policy: fixed",
       ),
       occurrenceAt: "2026-07-30T14:30:00.000Z",
+      scheduleKind: "dailyLocal",
     })).toBe(false);
     expect(shouldSkipAutomationOccurrenceForAvailability({
       instructions: instructions.replace(
@@ -111,10 +114,40 @@ describe("automation availability conflicts", () => {
         "Availability source policy: removed",
       ),
       occurrenceAt: "2026-07-30T14:30:00.000Z",
+      scheduleKind: "dailyLocal",
     })).toBe(false);
     expect(shouldSkipAutomationOccurrenceForAvailability({
       instructions,
       occurrenceAt: "2026-07-31T14:30:00.000Z",
+      scheduleKind: "dailyLocal",
     })).toBe(false);
+    expect(shouldSkipAutomationOccurrenceForAvailability({
+      instructions,
+      occurrenceAt: "2026-07-30T14:30:00.000Z",
+      scheduleKind: "at",
+    })).toBe(false);
+  });
+
+  it("keeps snapshot evidence out of provider prompts even when malformed", () => {
+    const malformed = `${BASE_INSTRUCTIONS}\n\n${CONFLICT_BLOCK.replace(
+      AVAILABILITY_CONFLICT_BLOCK_END,
+      "incomplete evidence",
+    )}`;
+    expect(stripAutomationAvailabilityConflictEvidenceForProvider(malformed)).toBe(
+      BASE_INSTRUCTIONS,
+    );
+    expect(stripAutomationAvailabilityConflictEvidenceForProvider(
+      malformed.replace(`${AVAILABILITY_CONFLICT_BLOCK_START}\n`, ""),
+    )).toBe(BASE_INSTRUCTIONS);
+  });
+
+  it("normalizes exact-time reminders to fixed delivery without availability state", () => {
+    expect(normalizeAutomationAvailabilityForSchedule({
+      instructions: `${BASE_INSTRUCTIONS}\n\n${CONFLICT_BLOCK}`,
+      scheduleKind: "at",
+    })).toBe([
+      "Send one flexible reminder.",
+      "Availability conflict policy: fixed",
+    ].join("\n"));
   });
 });

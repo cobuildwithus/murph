@@ -9,11 +9,13 @@ import {
 import type {
   HostedRuntimeNewsletterToolResponse,
 } from '@murphai/hosted-execution/runtime-control'
+import type { AutomationScheduleKind } from '@murphai/contracts'
 import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import { resolveAssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   shouldSkipAutomationOccurrenceForAvailability,
+  stripAutomationAvailabilityConflictEvidenceForProvider,
 } from '@murphai/core'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import { normalizeAssistantExecutionContext } from './execution-context.js'
@@ -245,6 +247,7 @@ export interface AssistantNotificationInput
   notificationPromptProfile?: AssistantNotificationPromptProfile | null
   turnPolicy?: AssistantNotificationTurnPolicy | null
   responsePolicy?: AssistantNotificationResponsePolicy | null
+  scheduledAutomationScheduleKind?: AutomationScheduleKind | null
 }
 
 export interface AssistantNotificationResult {
@@ -364,6 +367,7 @@ export async function sendAssistantNotificationLocal(
         shouldSkipAutomationOccurrenceForAvailability({
           instructions: input.instructions,
           occurrenceAt: input.scheduledOccurrenceAt,
+          scheduleKind: input.scheduledAutomationScheduleKind,
         })
       ) {
         return withPostTurnDeliveryExpectations({
@@ -1264,7 +1268,10 @@ function buildAssistantNotificationMessageInput(
   input: AssistantNotificationInput,
   maintenanceEvidence: string | null,
 ): AssistantMessageInput {
-  const instructions = normalizeRequiredText(input.instructions, 'instructions')
+  const instructions = normalizeRequiredText(
+    stripAutomationAvailabilityConflictEvidenceForProvider(input.instructions),
+    'instructions',
+  )
   const maintenanceTurn = isAssistantNotificationMaintenanceExactSkip(input)
   const scheduledOccurrence = isAssistantNotificationScheduledOccurrence(input)
   const firstContactExactText =

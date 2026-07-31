@@ -359,12 +359,15 @@ never reads production feedback or enters Resend.
   fixed bounded Google Calendar and Outlook requests from the exact stored
   account, excludes raw provider content, rejects incomplete pagination and
   concurrent edits, persists empty freshness leases, filters ineligible
-  automations, and avoids another read for 24 hours. The notification suite
-  proves deterministic pre-provider skip behavior.
+  automations including exact-time reminders, and avoids another read for 24
+  hours. The notification suite proves deterministic pre-provider skip
+  behavior, exact-time fail-open delivery, and removal of canonical or malformed
+  snapshot evidence before provider admission.
   `packages/assistant-runtime/test/hosted-runtime-workspace-assistant-phase.test.ts`
-  proves the existing hosted background pass invokes deterministic reminder
-  availability without a provider/model turn and strips the owned suffix on an
-  ordinary policy change.
+  proves the existing hosted background pass performs the real deterministic
+  provider read and canonical write before checkpoint, and proves a
+  schedule-only scoped patch to exact time atomically converts availability to
+  fixed delivery without retaining its source, account, or snapshot.
   `packages/hosted-execution/test/assistant-permissions.test.ts` and
   `packages/assistant-runtime/test/hosted-runtime-codex-config.test.ts` prove
   one-shot memory maintenance writes only canonical memory infrastructure and
@@ -372,8 +375,8 @@ never reads production feedback or enters Resend.
   profile.
   `packages/core/test/automation-availability.test.ts` proves exact
   policy/source/account authorization, canonical populated and empty snapshot
-  parsing/removal, and fail-open delivery after revocation or 24-hour evidence
-  staleness.
+  parsing/removal, host-only prompt sanitation, exact-time normalization, and
+  fail-open delivery after revocation or 24-hour evidence staleness.
   `packages/core/test/markdown-documents.test.ts` proves stale observed
   automation updates cannot overwrite a newer definition.
   The latency-store proof also shows that terminal evidence carries an initial

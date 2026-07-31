@@ -199,6 +199,7 @@ function requireReminderAvailabilityAuthorization(
     : Date.parse(record.activeUntil)
   if (
     record.status !== 'active'
+    || record.schedule.kind === 'at'
     || record.route.threadIsDirect !== true
     || record.supportKind === 'weekly_digest'
     || record.tags.includes('runtime-maintenance')

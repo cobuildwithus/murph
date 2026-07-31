@@ -285,6 +285,11 @@ describe('reminder availability maintenance', () => {
       tags: ['runtime-maintenance'],
       vaultRoot,
     })
+    await createReminder({
+      automationId: 'automation_01K5A7B9C2D4E6F8G0H1J3K5MT',
+      schedule: { at: '2026-07-30T16:00:00.000Z', kind: 'at' },
+      vaultRoot,
+    })
     const connectedRequest = vi.fn()
 
     await expect(refreshReminderAvailability({
@@ -343,6 +348,7 @@ async function createReminder(input: {
   automationId?: string
   instructions?: string
   route?: typeof DIRECT_ROUTE
+  schedule?: { at: string; kind: 'at' }
   tags?: string[]
   vaultRoot: string
 }): Promise<void> {
@@ -356,7 +362,7 @@ async function createReminder(input: {
     instructions: input.instructions ?? BASE_INSTRUCTIONS,
     now: new Date('2026-07-29T12:00:00.000Z'),
     route: input.route ?? DIRECT_ROUTE,
-    schedule: { kind: 'dailyLocal', localTime: '16:00' },
+    schedule: input.schedule ?? { kind: 'dailyLocal', localTime: '16:00' },
     slug: `reminder-${automationId.slice(-2).toLowerCase()}`,
     status: 'active',
     tags: input.tags ?? [],

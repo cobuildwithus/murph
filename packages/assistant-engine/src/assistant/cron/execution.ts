@@ -923,6 +923,11 @@ export async function executeClaimedAssistantCronJob(
               })
             },
             instructions: buildAssistantCronExecutionInstructions(input.job),
+            scheduledAutomationScheduleKind:
+              input.job.kind === 'canonical'
+                && input.job.source.kind === 'automation'
+                ? input.job.source.schedule.kind
+                : null,
             deliveryDedupeToken: buildAssistantCronNotificationDedupeToken({
               job: claimedJob,
               trigger: input.trigger,

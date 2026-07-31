@@ -57,6 +57,7 @@ import {
 import { commitAuditedCanonicalWrite } from "./audited-write.ts";
 import { stageMarkdownDocumentWrite } from "./markdown-documents.ts";
 import type { FrontmatterObject } from "./types.ts";
+import { normalizeAutomationAvailabilityForSchedule } from "./automation-availability.ts";
 
 const AUTOMATIONS_DIRECTORY = VAULT_LAYOUT.automationsDirectory;
 const MAX_AUTOMATION_SUPPORT_SERIES_RECONCILIATION_RECORDS = 4_096;
@@ -1613,7 +1614,10 @@ async function upsertAutomationWithLatestRegistry(
     tags,
     createdAt,
     updatedAt,
-    instructions: normalizeAutomationInstructions(input.instructions),
+    instructions: normalizeAutomationAvailabilityForSchedule({
+      instructions: normalizeAutomationInstructions(input.instructions),
+      scheduleKind: schedule.kind,
+    }),
     relativePath: target.relativePath,
     markdown: "",
   };
@@ -1679,7 +1683,10 @@ export function buildAutomationMarkdownPreview(
     tags: normalizeAutomationTags(input.tags),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-    instructions: normalizeAutomationInstructions(input.instructions),
+    instructions: normalizeAutomationAvailabilityForSchedule({
+      instructions: normalizeAutomationInstructions(input.instructions),
+      scheduleKind: schedule.kind,
+    }),
     relativePath: `${AUTOMATIONS_DIRECTORY}/${slug}.md`,
     markdown: "",
   };

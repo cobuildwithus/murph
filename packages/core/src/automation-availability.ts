@@ -1,3 +1,5 @@
+import type { AutomationScheduleKind } from "@murphai/contracts";
+
 export const AVAILABILITY_CONFLICT_POLICY_FIXED =
   "Availability conflict policy: fixed";
 export const AVAILABILITY_CONFLICT_POLICY_SKIP_WHEN_BUSY =
@@ -10,8 +12,6 @@ export const AVAILABILITY_CONFLICT_BLOCK_START =
   "<!-- murph:availability-conflicts:start -->";
 export const AVAILABILITY_CONFLICT_BLOCK_END =
   "<!-- murph:availability-conflicts:end -->";
-export const AVAILABILITY_CONFLICT_BLOCK_INSTRUCTION =
-  "- If one interval satisfies `busyStart <= scheduledOccurrenceAt < busyEnd`, return `skip` and send nothing. Do not mention calendar, event labels, or provider details.";
 
 const MAX_BUSY_INTERVALS = 256;
 const MAX_SNAPSHOT_MS = 7 * 24 * 60 * 60 * 1_000;
@@ -109,6 +109,52 @@ export function stripAutomationAvailabilityConflictBlock(
   return splitAutomationAvailabilityConflictBlock(instructions).base;
 }
 
+export function stripAutomationAvailabilityConflictEvidenceForProvider(
+  instructions: string,
+): string {
+  const blockStart = instructions.indexOf(AVAILABILITY_CONFLICT_BLOCK_START);
+  const snapshotStart = instructions.indexOf("\n\nAvailability conflict snapshot:");
+  const blockEnd = instructions.indexOf(AVAILABILITY_CONFLICT_BLOCK_END);
+  const endBoundStart = blockEnd < 0
+    ? -1
+    : instructions.lastIndexOf("\n\n", blockEnd);
+  const evidenceStart = [blockStart, snapshotStart, endBoundStart]
+    .filter((index) => index >= 0)
+    .sort((left, right) => left - right)[0] ?? -1;
+  return evidenceStart < 0
+    ? instructions
+    : instructions.slice(0, evidenceStart).replace(/\s+$/u, "");
+}
+
+export function normalizeAutomationAvailabilityForSchedule(input: {
+  instructions: string;
+  scheduleKind: AutomationScheduleKind;
+}): string {
+  if (input.scheduleKind !== "at") {
+    return input.instructions;
+  }
+
+  const lines = stripAutomationAvailabilityConflictEvidenceForProvider(
+    input.instructions,
+  ).split(/\r?\n/gu);
+  let wroteFixedPolicy = false;
+  return lines.flatMap((line) => {
+    if (
+      line === AVAILABILITY_CONFLICT_POLICY_FIXED
+      || line === AVAILABILITY_CONFLICT_POLICY_SKIP_WHEN_BUSY
+      || line === AVAILABILITY_SOURCE_POLICY_CALENDAR_ONLY
+      || line.startsWith(AVAILABILITY_CALENDAR_ACCOUNT_PREFIX)
+    ) {
+      if (wroteFixedPolicy) {
+        return [];
+      }
+      wroteFixedPolicy = true;
+      return [AVAILABILITY_CONFLICT_POLICY_FIXED];
+    }
+    return [line];
+  }).join("\n").replace(/\s+$/u, "");
+}
+
 export function replaceAutomationAvailabilityConflictSnapshot(input: {
   busyIntervals: readonly AutomationAvailabilityBusyInterval[];
   expiresAt: string;
@@ -122,7 +168,6 @@ export function replaceAutomationAvailabilityConflictSnapshot(input: {
     "Availability conflict snapshot:",
     `- generatedAt: ${input.generatedAt}`,
     `- expiresAt: ${input.expiresAt}`,
-    AVAILABILITY_CONFLICT_BLOCK_INSTRUCTION,
     ...input.busyIntervals.map((interval) =>
       `- ${interval.start} / ${interval.end}`
     ),
@@ -144,11 +189,10 @@ export function parseAutomationAvailabilityConflictBlock(
 ): AutomationAvailabilityConflictSnapshot {
   const lines = block.split("\n");
   if (
-    lines.length < 6
-    || lines.length > MAX_BUSY_INTERVALS + 6
+    lines.length < 5
+    || lines.length > MAX_BUSY_INTERVALS + 5
     || lines[0] !== AVAILABILITY_CONFLICT_BLOCK_START
     || lines[1] !== "Availability conflict snapshot:"
-    || lines[4] !== AVAILABILITY_CONFLICT_BLOCK_INSTRUCTION
     || lines.at(-1) !== AVAILABILITY_CONFLICT_BLOCK_END
   ) {
     throw new AutomationAvailabilityConflictBlockError();
@@ -172,7 +216,7 @@ export function parseAutomationAvailabilityConflictBlock(
 
   const busyIntervals: AutomationAvailabilityBusyInterval[] = [];
   let previousEnd = Number.NEGATIVE_INFINITY;
-  for (const line of lines.slice(5, -1)) {
+  for (const line of lines.slice(4, -1)) {
     const match = /^- (\S+) \/ (\S+)$/u.exec(line);
     if (!match) {
       throw new AutomationAvailabilityConflictBlockError();
@@ -205,8 +249,13 @@ export function parseAutomationAvailabilityConflictBlock(
 export function shouldSkipAutomationOccurrenceForAvailability(input: {
   instructions: string;
   occurrenceAt: string | null | undefined;
+  scheduleKind: AutomationScheduleKind | null | undefined;
 }): boolean {
-  if (!readAutomationAvailabilityCalendarAuthorization(input.instructions)) {
+  if (
+    !input.scheduleKind
+    || input.scheduleKind === "at"
+    || !readAutomationAvailabilityCalendarAuthorization(input.instructions)
+  ) {
     return false;
   }
   const occurrenceAt = parseCanonicalIsoTimestampOrNull(input.occurrenceAt);
