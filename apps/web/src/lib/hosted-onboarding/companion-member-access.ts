@@ -27,11 +27,13 @@ import { resolveHostedPrivySessionFromBearerToken } from "./hosted-session";
  * request may create the canonical member and invite, but consent is checked
  * before trial activation or Junction authority is issued.
  */
-export async function requireHostedCompanionMemberAccessFromRequest(
-  request: Request,
-  prisma: PrismaClient = getPrisma(),
-): Promise<HostedMemberCoreState> {
-  const session = await resolveHostedPrivySessionFromBearerToken(request);
+export async function requireHostedCompanionMemberAccessFromRequest(input: {
+  prisma?: PrismaClient;
+  request: Request;
+  timeZone?: string | null;
+}): Promise<HostedMemberCoreState> {
+  const prisma = input.prisma ?? getPrisma();
+  const session = await resolveHostedPrivySessionFromBearerToken(input.request);
 
   if (!session) {
     throw hostedOnboardingError({
@@ -44,6 +46,7 @@ export async function requireHostedCompanionMemberAccessFromRequest(
   return ensureHostedCompanionMemberAccess({
     identity: session.identity,
     prisma,
+    ...(input.timeZone ? { timeZone: input.timeZone } : {}),
   });
 }
 
@@ -51,6 +54,7 @@ export async function ensureHostedCompanionMemberAccess(input: {
   identity: HostedPrivyIdentity;
   now?: Date;
   prisma?: PrismaClient;
+  timeZone?: string | null;
 }): Promise<HostedMemberCoreState> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
@@ -78,6 +82,7 @@ export async function ensureHostedCompanionMemberAccess(input: {
     identity: input.identity,
     now,
     prisma,
+    ...(input.timeZone ? { timeZone: input.timeZone } : {}),
   }).catch((error: unknown) => {
     throw remapHostedPrivyCompletionLagError(error);
   });
