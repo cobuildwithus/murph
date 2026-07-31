@@ -529,17 +529,20 @@ describe('assistant group-chat style guidance', () => {
     )
   })
 
-  it('distinguishes fresh native consent from rollout-compatible handled status', async () => {
+  it('distinguishes provider-timed native consent from handled status', async () => {
     const normalized = await readNormalizedGroupChatSkill()
 
     expect(normalized).toContain(
-      'does not prove UI was newly posted or is currently visible',
+      'the provider\'s canonical creation time for that exact message',
     )
     expect(normalized).toContain(
       '`recencyEvidence="eligible"`, the host newly posted the native consent message',
     )
     expect(normalized).toContain(
-      'When `recencyEvidence="unavailable"`, the result is rollout-compatible handled status only',
+      'When `recencyEvidence="unavailable"`, the result is handled status only',
+    )
+    expect(normalized).toContain(
+      'Link delivery has no canonical presentation receipt',
     )
     expect(normalized).toContain(
       'When that unverified native path is the turn\'s only useful user-facing outcome, call `murph.finish_without_reply`',

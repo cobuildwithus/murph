@@ -3107,9 +3107,9 @@ export function parseHostedRuntimeGroupToolResponse(
           "Hosted runtime group tool post_join_offer offerState is invalid.",
         );
       }
-      if ((offeredAt === undefined) !== (offerState === undefined)) {
+      if (offeredAt !== undefined && offerState === undefined) {
         throw new TypeError(
-          "Hosted runtime group tool post_join_offer recency evidence is incomplete.",
+          "Hosted runtime group tool post_join_offer offeredAt requires offerState.",
         );
       }
       return {
@@ -3118,7 +3118,10 @@ export function parseHostedRuntimeGroupToolResponse(
           status,
           group: parseHostedRuntimeGroupSummary(result.group),
           joinUrl: requireString(result.joinUrl, "Hosted runtime group tool post_join_offer joinUrl"),
-          ...(offerState === undefined ? {} : { offerState, offeredAt }),
+          ...(offerState === undefined ? {} : {
+            offerState,
+            ...(offeredAt === undefined ? {} : { offeredAt }),
+          }),
         },
       };
     }

@@ -78,7 +78,7 @@ describe('assistant group challenge buy-in guidance', () => {
       'a grant activated within the next 24 hours may also count as challenge buy-in.',
     )
     expect(challenge).toContain(
-      'Use this rule only when the tool returns `recencyEvidence="eligible"`.',
+      'Use this rule only when the tool returns `presentation="native"` with `recencyEvidence="eligible"`.',
     )
     expect(challenge).toContain(
       'canonical `grantedAt` that is at or after `offeredAt` and no later than 24 hours after it.',

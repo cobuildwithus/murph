@@ -383,7 +383,10 @@ describe('assistant group challenge diagnostics guidance', () => {
       'permission offer cannot connect a source, grant Apple Health or operating-system Steps access',
     )
     expect(challenge).toContain(
-      '`recencyEvidence="eligible"` plus canonical `offeredAt` proves only when that link was presented.',
+      'Its recency evidence is unavailable because final-reply delivery owns presentation timing.',
+    )
+    expect(challenge).toContain(
+      'Never use a scheduled link or a diagnostic-scope offer as challenge buy-in',
     )
     expect(challenge).toContain(
       'This scheduled surface returns `presentation="link"`; include the exact returned `joinUrl` once',

@@ -4202,29 +4202,22 @@ function groupAccessOfferModelResult(response: GroupAccessOfferHostResponse) {
       action: 'offer_access' as const,
       result: {
         joinUrl: response.result.joinUrl,
-        ...(response.result.offeredAt === undefined
-          ? { recencyEvidence: 'unavailable' as const }
-          : {
-              offeredAt: response.result.offeredAt,
-              recencyEvidence: 'eligible' as const,
-            }),
         presentation: 'link' as const,
+        recencyEvidence: 'unavailable' as const,
         status: 'ok' as const,
       },
     }
   }
   if (
     response.result.offerState === 'existing'
-    && response.result.offeredAt !== undefined
     && response.result.joinUrl !== undefined
   ) {
     return {
       action: 'offer_access' as const,
       result: {
         joinUrl: response.result.joinUrl,
-        offeredAt: response.result.offeredAt,
         presentation: 'link' as const,
-        recencyEvidence: 'eligible' as const,
+        recencyEvidence: 'unavailable' as const,
         status: 'ok' as const,
       },
     }

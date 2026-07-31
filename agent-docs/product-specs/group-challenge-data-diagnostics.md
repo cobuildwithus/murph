@@ -298,23 +298,25 @@ first-party customize page. Native consent grants only the disclosed snapshot.
 A returned link grants nothing until the member accepts the first-party page.
 The standings message itself never grants permission.
 
-Every successful access presentation may add canonical `offeredAt` evidence.
-A new native message remains `presentation="native"`; when Web finds a covering
-active native offer instead of posting another card, assistant-engine exposes
-the returned first-party URL as a fresh `presentation="link"` so the model never
-claims another native message appeared. Murph includes a returned `joinUrl`
-once in the same substantive response. Neither presentation proves acceptance.
-Missing additive rollout evidence remains handled but cannot support a recency
-inference.
+Only a newly posted native access message with canonical provider chronology
+adds `offeredAt` evidence. Its provider creation time survives an idempotent
+replay instead of minting a fresh window. When Web finds a covering active
+native offer instead of posting another card, assistant-engine exposes the
+returned first-party URL as `presentation="link"` so the model never claims
+another native message appeared. Standalone and scheduled links use the same
+presentation. Murph includes a returned `joinUrl` once in the substantive
+response, but link delivery has no canonical presentation receipt and therefore
+returns unavailable recency evidence. Neither presentation proves acceptance.
 
 For a finalized challenge, one recent exact-scope grant may count as the social
 entry action. The challenge page must record the exact participant and scope
-from a same-turn `not_granted` read, the tool's eligible `offeredAt`, unchanged
-metric/window/stakes, and a 24-hour deadline. A later exact-scope `grantedAt`
-counts only from `offeredAt` through that deadline. This is an intentional
-best-effort product rule: it narrows causal ambiguity but does not claim the
-grant is challenge-bound legal consent. Missing, older, late, unresolved, or
-terms-mismatched evidence requires ordinary explicit challenge confirmation.
+from a same-turn `not_granted` read, the newly posted native tool result's
+eligible `offeredAt`, unchanged metric/window/stakes, and a 24-hour deadline. A
+later exact-scope `grantedAt` counts only from `offeredAt` through that deadline.
+This is an intentional best-effort product rule: it narrows causal ambiguity
+but does not claim the grant is challenge-bound legal consent. Links, reused
+offers, and missing, older, late, unresolved, or terms-mismatched evidence
+require ordinary explicit challenge confirmation.
 For each participant whose same read showed `not_granted`, Murph still records
 that the offer action was handled so it is not retried. An explicit sharing
 decline excludes that participant from the scope decision. The scoring scope is
@@ -422,14 +424,15 @@ cross-member fanout, polling, a scheduler, or persisted rollout state.
   neither a recorded decline nor a prior handled offer action.
 - Missing or stale synced data, a disconnected source, or `needs-reconnect`
   produces ordinary-language recovery guidance and no access offer.
-- A scheduled link result exposes only the exact first-party `joinUrl`; it does
-  not prove acceptance. Murph records only that the participant-and-scope offer
-  action was handled so it is not retried.
+- A scheduled link result exposes only the exact first-party `joinUrl`; it has
+  unavailable recency evidence and does not prove acceptance. Murph records
+  only that the participant-and-scope offer action was handled so it is not
+  retried.
 - A covering active native offer returns a freshly presentable link instead of
   a false claim that another native message was posted.
-- A participant whose exact scope was `not_granted` becomes `in` only when the
-  later exact `grantedAt` falls inside the recorded eligible 24-hour window and
-  the challenge terms did not change.
+- A participant whose exact scope was `not_granted` becomes `in` only after a
+  newly posted native offer when the later exact `grantedAt` falls inside the
+  recorded eligible 24-hour window and the challenge terms did not change.
 - Missing rollout evidence, an old or late grant, or changed terms preserves the
   data grant but requires ordinary challenge confirmation.
 - No output exposes provider keys, account/device identifiers, raw errors,

@@ -1756,7 +1756,7 @@ describe("parseHostedRuntimeGroupTool", () => {
       },
     });
 
-    expect(() => parseHostedRuntimeGroupToolResponse({
+    expect(parseHostedRuntimeGroupToolResponse({
       action: "post_join_offer",
       result: {
         group: GROUP_SUMMARY,
@@ -1764,7 +1764,25 @@ describe("parseHostedRuntimeGroupTool", () => {
         offerState: "existing",
         status: "sent",
       },
-    })).toThrow(/recency evidence is incomplete/u);
+    })).toEqual({
+      action: "post_join_offer",
+      result: {
+        group: PARSED_GROUP_SUMMARY,
+        joinUrl: "https://example.com/groups/join/abc123",
+        offerState: "existing",
+        status: "sent",
+      },
+    });
+
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "post_join_offer",
+      result: {
+        group: GROUP_SUMMARY,
+        joinUrl: "https://example.com/groups/join/abc123",
+        offeredAt: "2026-07-31T12:00:00.000Z",
+        status: "sent",
+      },
+    })).toThrow(/offeredAt requires offerState/u);
 
     expect(() => parseHostedRuntimeGroupToolResponse({
       action: "post_join_offer",

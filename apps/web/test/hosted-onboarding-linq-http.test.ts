@@ -1280,7 +1280,10 @@ describe("sendHostedLinqChatMessage", () => {
       void init;
       return createJsonResponse({
         chat_id: "chat_123",
-        message: { id: "msg_offer" },
+        message: {
+          created_at: "2026-07-31T12:01:02Z",
+          id: "msg_offer",
+        },
       }, 200);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -1293,6 +1296,7 @@ describe("sendHostedLinqChatMessage", () => {
       message,
     })).resolves.toEqual({
       chatId: "chat_123",
+      messageCreatedAt: "2026-07-31T12:01:02.000Z",
       messageId: "msg_offer",
     });
 

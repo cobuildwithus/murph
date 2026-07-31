@@ -1666,7 +1666,6 @@ describe("handleHostedRuntimeGroupTool", () => {
       result: {
         group: groupSummaryWithOwnerEmailGrant(),
         joinUrl: "https://www.withmurph.ai/groups/join/abc123",
-        offeredAt: expect.any(String),
         status: "ok",
       },
     });
@@ -2604,6 +2603,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     mocks.shareMurphHostedLinqContactCardVcfToChat.mockResolvedValue({ status: "sent" });
     mocks.sendHostedLinqChatMessage.mockResolvedValue({
       chatId: "chat_group_1",
+      messageCreatedAt: "2026-07-31T12:01:00.000Z",
       messageId: "msg_offer_1",
     });
     mocks.updateHostedLinqChatAvatar.mockResolvedValue(undefined);
@@ -2915,7 +2915,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     });
   });
 
-  it("ignores arbitrary legacy copy and posts a canonical offer matching the stored snapshot", async () => {
+  it("posts the canonical snapshot with provider-owned recency chronology", async () => {
     mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx.mockResolvedValueOnce({
       group: groupSummaryWithOwnerEmailGrant(),
       joinCode: "abc123",
@@ -2943,7 +2943,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       result: {
         group: groupSummaryWithOwnerEmailGrant(),
         joinUrl: "https://www.withmurph.ai/groups/join/abc123",
-        offeredAt: expect.any(String),
+        offeredAt: "2026-07-31T12:01:00.000Z",
         offerState: "posted",
         status: "sent",
       },
@@ -2981,7 +2981,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
       groupId: GROUP_SUMMARY.id,
       message: { channel: "linq", messageId: "msg_offer_1" },
-      postedAt: expect.any(Date),
+      postedAt: new Date("2026-07-31T12:01:00.000Z"),
       projectionScopes: NEWSLETTER_DEFAULT_SCOPES,
       tx: fakeTx,
     });
@@ -2992,6 +2992,40 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         prisma: expect.any(Object),
       });
     expect(mocks.sendHostedLinqAttachmentMessage).not.toHaveBeenCalled();
+  });
+
+  it("omits recency evidence when the provider omits message chronology", async () => {
+    mocks.sendHostedLinqChatMessage.mockResolvedValueOnce({
+      chatId: "chat_group_1",
+      messageId: "msg_offer_without_time",
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "post_join_offer",
+        joinOffer: {
+          projectionScopes: [{ projectionKind: "steps-days.v0" }],
+        },
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toEqual({
+      action: "post_join_offer",
+      result: {
+        group: GROUP_SUMMARY,
+        joinUrl: "https://www.withmurph.ai/groups/join/abc123",
+        offerState: "posted",
+        status: "sent",
+      },
+    });
+
+    expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
+      groupId: GROUP_SUMMARY.id,
+      message: { channel: "linq", messageId: "msg_offer_without_time" },
+      postedAt: expect.any(Date),
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+      tx: fakeTx,
+    });
   });
 
   it("keeps the permissions link without promising or disclosing private outreach", async () => {
@@ -3115,7 +3149,6 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       result: {
         group: GROUP_SUMMARY,
         joinUrl: "https://www.withmurph.ai/groups/join/abc123",
-        offeredAt: expect.any(String),
         offerState: "existing",
         status: "sent",
       },

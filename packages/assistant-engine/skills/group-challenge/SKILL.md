@@ -87,12 +87,13 @@ scoring read needs no offer, the diagnostic read may prove and offer
 for `device-sync-status.v0` on its own evidence. One offer per turn either way.
 
 Avoid asking someone to perform two affirmative actions for the same challenge.
-When `offer_access` presents one exact scoring permission after the metric,
-window, and stakes have been stated, a grant activated within the next 24 hours
-may also count as challenge buy-in. Record the finalized terms, exact required
-scoring scope, returned `offeredAt`, and each eligible pending participant whose
-same-turn read showed that scope `not_granted`. Use this rule only when the tool
-returns `recencyEvidence="eligible"`. On a later challenge turn, call
+When `offer_access` newly posts one exact native scoring permission after the
+metric, window, and stakes have been stated, a grant activated within the next
+24 hours may also count as challenge buy-in. Record the finalized terms, exact
+required scoring scope, returned `offeredAt`, and each eligible pending
+participant whose same-turn read showed that scope `not_granted`. Use this rule
+only when the tool returns `presentation="native"` with
+`recencyEvidence="eligible"`. On a later challenge turn, call
 `read_shared` again with that exact scoring scope. Record a resolved participant
 as `in` only when the same exact projection now contains a canonical `grantedAt`
 that is at or after `offeredAt` and no later than 24 hours after it. This is the
@@ -433,11 +434,12 @@ the full rules.
    `recencyEvidence="eligible"` and canonical `offeredAt`, tell the room that
    accepting that displayed permission within 24 hours is the only action those
    participants need for both entry and sharing; store `offeredAt` and its
-   24-hour deadline. A native presentation is the new Murph permission message
-   already posted above the ordinary reply. A link presentation must include the
-   exact returned `joinUrl` once in that reply. When recency evidence is
-   unavailable, do not infer entry from a later grant; use one ordinary
-   challenge confirmation instead.
+   24-hour deadline. Only a native presentation can return eligible evidence;
+   it is the new Murph permission message already posted above the ordinary
+   reply. A link presentation must include the exact returned `joinUrl` once in
+   that reply, but its recency evidence is unavailable. In that case, do not
+   infer entry from a later grant; use one ordinary challenge confirmation
+   instead.
 
    On the next challenge turn after that offer, read the exact scoring scope
    again before asking anyone for confirmation. For each recorded, resolved
@@ -678,10 +680,10 @@ automation action rules with a `dailyLocal` schedule and
    This scheduled surface returns `presentation="link"`; include the exact
    returned `joinUrl` once in the same substantive standings response. Do not
    infer, announce, or append a companion message claiming native consent UI is
-   visible. `recencyEvidence="eligible"` plus canonical `offeredAt` proves only
-   when that link was presented. For a pending participant's exact scoring
-   scope, record that timestamp and 24-hour deadline for the one-action entry
-   rule above. Never use a diagnostic-scope offer as challenge buy-in.
+   visible. Its recency evidence is unavailable because final-reply delivery
+   owns presentation timing. Never use a scheduled link or a diagnostic-scope
+   offer as challenge buy-in; use one ordinary confirmation for a scoring-scope
+   grant instead.
    For each participant whose same read showed `not_granted`, record that the
    offer action was handled for that exact participant and scope so future
    standings do not retry or nag; never record that a card was visible. When

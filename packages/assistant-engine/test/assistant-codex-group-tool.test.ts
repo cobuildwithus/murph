@@ -2685,9 +2685,8 @@ describe("murph.group dynamic tool", () => {
       action: "offer_access",
       result: {
         joinUrl: "https://example.test/groups/join/exact",
-        offeredAt: "2026-07-31T12:00:00.000Z",
         presentation: "link",
-        recencyEvidence: "eligible",
+        recencyEvidence: "unavailable",
         status: "ok",
       },
     });
@@ -2740,6 +2739,15 @@ describe("murph.group dynamic tool", () => {
           status: "sent",
         },
       },
+      {
+        action: "post_join_offer",
+        result: {
+          group,
+          joinUrl: "https://example.test/groups/join/native-without-time",
+          offerState: "posted",
+          status: "sent",
+        },
+      },
     ];
     const groupRequest = vi.fn<GroupToolRequest>(async () => {
       const response = responses.shift();
@@ -2772,18 +2780,34 @@ describe("murph.group dynamic tool", () => {
       request,
       vaultRoot: null,
     });
+    const missingProviderTimeResult = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({ groupRequest }),
+      nextUsageOrdinal: () => 3,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
 
     expect(readGroupToolPayload(reusedResult)).toEqual({
       action: "offer_access",
       result: {
         joinUrl: "https://example.test/groups/join/reused",
-        offeredAt: "2026-07-31T12:02:00.000Z",
         presentation: "link",
-        recencyEvidence: "eligible",
+        recencyEvidence: "unavailable",
         status: "ok",
       },
     });
     expect(readGroupToolPayload(legacyResult)).toEqual({
+      action: "offer_access",
+      result: {
+        presentation: "native",
+        recencyEvidence: "unavailable",
+        status: "ok",
+      },
+    });
+    expect(readGroupToolPayload(missingProviderTimeResult)).toEqual({
       action: "offer_access",
       result: {
         presentation: "native",
@@ -2846,9 +2870,8 @@ describe("murph.group dynamic tool", () => {
       action: "offer_access",
       result: {
         joinUrl: "https://example.test/groups/join/host-selected",
-        offeredAt: "2026-07-31T12:03:00.000Z",
         presentation: "link",
-        recencyEvidence: "eligible",
+        recencyEvidence: "unavailable",
         status: "ok",
       },
     });
@@ -2961,9 +2984,8 @@ describe("murph.group dynamic tool", () => {
       action: "offer_access",
       result: {
         joinUrl: "https://example.test/join/offer",
-        offeredAt: "2026-07-31T12:04:00.000Z",
         presentation: "link",
-        recencyEvidence: "eligible",
+        recencyEvidence: "unavailable",
         status: "ok",
       },
     });

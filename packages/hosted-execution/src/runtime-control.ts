@@ -1503,7 +1503,7 @@ export type HostedRuntimeGroupToolResponse =
             status: "ok";
             group: HostedRuntimeGroupSummary;
             joinUrl: string;
-            /** Additive rollout evidence for the freshly returned link. */
+            /** Legacy additive evidence; consumers must not infer link delivery. */
             offeredAt?: string;
           }
         | { status: "unavailable"; unavailableReason: string; group: null };
@@ -1533,7 +1533,7 @@ export type HostedRuntimeGroupToolResponse =
              * a new native message was sent.
              */
             offerState?: "existing" | "posted";
-            /** Additive rollout evidence for this handled presentation. */
+            /** Provider chronology for a newly posted native message only. */
             offeredAt?: string;
           }
         | { status: "unavailable"; unavailableReason: string; group: null };

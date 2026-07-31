@@ -318,12 +318,13 @@ model.
 
 When the result is `status="ok"` with `presentation="native"` and
 `recencyEvidence="eligible"`, the host newly posted the native consent message
-and `offeredAt` is its canonical presentation time. The native message itself
-is already visible above the ordinary assistant reply, so do not duplicate its
-consent copy or return a link. When `recencyEvidence="unavailable"`, the result
-is rollout-compatible handled status only: do not claim a new or visible
-surface, and never use it as recency or participation evidence. When that
-unverified native path is the turn's only useful user-facing outcome, call
+and `offeredAt` is the provider's canonical creation time for that exact
+message. An idempotent replay keeps the original provider time instead of
+minting a fresh window. The native message itself is already visible above the
+ordinary assistant reply, so do not duplicate its consent copy or return a
+link. When `recencyEvidence="unavailable"`, the result is handled status only:
+do not use it as recency or participation evidence. When that unverified native
+path is the turn's only useful user-facing outcome, call
 `murph.finish_without_reply`; otherwise answer only the substantive question.
 On `status="unavailable"`, do not claim a consent surface exists.
 
@@ -333,8 +334,10 @@ the room to retry a native card. This is the normal first-party consent surface
 for SMS, Telegram, explicit standalone-link requests, and scheduled routes where
 the durable route does not preserve a Linq service subtype. It is also the
 freshly visible surface when Web safely reuses a covering native offer instead
-of posting another card. `recencyEvidence="eligible"` plus `offeredAt` proves
-only when this link was presented; it does not prove acceptance.
+of posting another card. Link delivery has no canonical presentation receipt,
+so it returns `recencyEvidence="unavailable"`: use the link for permission
+choices, but never use a later grant as challenge-entry evidence without one
+ordinary confirmation.
 
 iMessage and SMS otherwise share the same hosted-group workflow. Treat only
 explicit typed gaps as differences: `sms_reactions_unsupported` means an exact

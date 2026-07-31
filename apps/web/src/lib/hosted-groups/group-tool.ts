@@ -885,7 +885,6 @@ async function handleHostedRuntimeGroupCreateJoinLink(input: {
     result: {
       group: created.group,
       joinUrl,
-      offeredAt: now.toISOString(),
       status: "ok",
     },
   };
@@ -1093,7 +1092,6 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       result: {
         group: created.group,
         joinUrl,
-        offeredAt: now.toISOString(),
         offerState: "existing",
         status: "sent",
       },
@@ -1121,13 +1119,20 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   if (!sent.messageId) {
     return unavailable("provider_message_unavailable");
   }
+  const providerCreatedAtMs = sent.messageCreatedAt
+    ? Date.parse(sent.messageCreatedAt)
+    : Number.NaN;
+  const providerCreatedAt = Number.isFinite(providerCreatedAtMs)
+    ? new Date(providerCreatedAtMs)
+    : null;
+  const postedAt = providerCreatedAt ?? new Date();
 
   try {
     await prisma.$transaction(async (tx) => {
       await recordHostedGroupJoinOfferTx({
         groupId: created.group.id,
         message: { channel: "linq", messageId: sent.messageId },
-        postedAt: now,
+        postedAt,
         projectionScopes,
         tx,
       });
@@ -1153,8 +1158,10 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     result: {
       group: created.group,
       joinUrl,
-      offeredAt: now.toISOString(),
       offerState: "posted",
+      ...(providerCreatedAt
+        ? { offeredAt: providerCreatedAt.toISOString() }
+        : {}),
       status: "sent",
     },
   };
