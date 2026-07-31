@@ -27,7 +27,10 @@ Updated: 2026-07-30
   ledger, or mutable display-only reset state is introduced.
 - Focused billing/projection/component tests, typecheck/lint, design-catalog
   desktop/mobile proof, exact-head CI, preliminary specialist review, final
-  ReviewGPT, Claude UI review, and parent final review complete.
+  ReviewGPT, and parent final review complete.
+- Design-proof screenshots are lossless, captured at 2x device scale or higher,
+  cropped to the changed surface, legible at native resolution, and delivered
+  without an additional resolution reduction.
 
 ## Scope
 
@@ -37,6 +40,8 @@ Updated: 2026-07-30
   - Overall usage-percentage derivation from the latest canonical capacity
     epoch and its transport/UI coverage.
   - Existing `/design` catalog study and durable billing/product docs.
+  - Durable design-proof capture/upload guidance and its local uploader quality
+    gates.
 - Out of scope:
   - New offers, message-count entitlements, shared Family balances, transfers,
     recurring auto-refill, or direct purchase authority for sponsored members.
@@ -86,6 +91,9 @@ Updated: 2026-07-30
    changes.
 5. Run focused proof, browser evidence, required reviews, exact-head CI, parent
    final review, plan closure, and PR completion.
+6. Replace low-resolution PR evidence with focused high-resolution captures and
+   prevent future proof uploads from silently accepting blurry inputs or a
+   downscaling delivery variant.
 
 ## Decisions
 
@@ -94,6 +102,10 @@ Updated: 2026-07-30
   the latest fulfilled purchase grant. Referral credit does not reset the
   display window.
 - Group sponsorship remains message-estimate-based and is not changed.
+- Design proof uses lossless PNGs, a minimum 700-pixel capture width, and the
+  dedicated public `designproof` Cloudflare Images variant. That variant uses
+  `scale-down` with a 2400-by-2400 ceiling, so compliant captures retain their
+  pixel dimensions.
 
 ## Verification
 
@@ -109,9 +121,14 @@ Updated: 2026-07-30
 - Expected outcomes:
   - All focused and required checks pass; rendered proof shows the Family owner
     CTA, dollar-only chooser, and reset meter states without private data.
-  - Focused result: 200 tests passed across five relevant files, followed by 32
-    Settings-page tests after the explicit normal-entry regression assertion.
-  - Web typecheck and touched-file ESLint passed.
-  - Local `/design` proof passed at 1440px and 390px: the owner CTA and fresh
-    0%-used state were visible, the page had no horizontal overflow, and the
-    Family picker showed only dollar amounts plus one-time-credit labels.
+  - Focused product result: 255 tests passed across eight relevant Web files,
+    plus 12 related Web status/notice tests, 7 assistant-consumer tests, and 2
+    Cloudflare plan-usage port tests.
+  - Repository-tool tests passed (460 tests), the frontend design-proof guard
+    passed (10 tests), full workspace typecheck passed, and touched-file ESLint
+    passed.
+  - Local `/design` proof passed at desktop and mobile viewports: the owner CTA
+    and fresh 0%-used state were visible, and the Family picker showed only
+    dollar amounts plus the short `usage` label.
+  - Five replacement PNGs were visually inspected locally and after Cloudflare
+    Images delivery. Each delivered file retained its source pixel dimensions.
