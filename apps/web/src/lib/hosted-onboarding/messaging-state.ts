@@ -11,6 +11,8 @@ import {
 import { normalizePhoneNumber } from "./phone";
 
 interface HostedMemberMessagingIdentitySlice {
+  emailLinked?: boolean;
+  memberId?: string | null;
   phoneLookupKey?: string | null;
 }
 
@@ -26,6 +28,7 @@ interface HostedMemberMessagingRoutingSlice {
 
 export interface HostedMemberMessagingState {
   hasDirectMessagingChannel: boolean;
+  hasEmail: boolean;
   hasLinq: boolean;
   hasPhone: boolean;
   hasTelegram: boolean;
@@ -62,6 +65,7 @@ export function resolveHostedMemberMessagingState(input: {
     phoneLookupKey
     ?? normalizeMessagingIdentity(input.routing?.pendingLinqParticipantContact?.lookupKey);
   const telegramTarget = normalizeMessagingIdentity(input.routing?.telegramThreadId);
+  const hasEmail = input.identity?.emailLinked === true;
   const hasPhone = phoneLookupKey !== null;
   const hasLinq = hasPhone || (linqThreadId !== null && linqContactLookupKey !== null);
   const hasTelegram = telegramTarget !== null;
@@ -73,7 +77,8 @@ export function resolveHostedMemberMessagingState(input: {
     !hasTelegram && normalizeMessagingIdentity(input.routing?.telegramUserId) !== null;
 
   return {
-    hasDirectMessagingChannel: hasLinq || hasTelegram,
+    hasDirectMessagingChannel: hasEmail || hasLinq || hasTelegram,
+    hasEmail,
     hasLinq,
     hasPhone,
     hasTelegram,
@@ -91,9 +96,10 @@ export function isHostedMemberMessagingSetupRequired(input: {
 }): boolean {
   const messaging = resolveHostedMemberMessagingState(input);
 
-  // A linked Telegram account completes setup: the member has told us how to
-  // reach them. Waiting on their first inbound message is a delivery concern,
-  // surfaced as telegramAwaitingInbound, not a reason to hold up signup.
+  // Verified email is already a real Murph route. A linked Telegram account
+  // also completes setup even before its first inbound thread exists: the
+  // member has told us how to reach them, while delivery remains an independent
+  // concern surfaced as telegramAwaitingInbound.
   return !messaging.hasDirectMessagingChannel && !messaging.telegramAwaitingInbound;
 }
 
@@ -102,11 +108,17 @@ export function resolveHostedMemberChannels(input: {
   identity: HostedMemberMessagingIdentitySlice | null;
   routing: HostedMemberMessagingRoutingSlice | null;
 }): HostedExecutionMemberChannels {
-  const messaging = resolveHostedMemberMessagingState(input);
+  const messaging = resolveHostedMemberMessagingState({
+    identity: {
+      ...(input.identity ?? {}),
+      emailLinked: input.emailLinked,
+    },
+    routing: input.routing,
+  });
 
   return {
-    email: input.emailLinked,
-    linq: messaging.hasLinq || (input.emailLinked && Boolean(input.routing?.linqChatId)),
+    email: messaging.hasEmail,
+    linq: messaging.hasLinq || (messaging.hasEmail && Boolean(input.routing?.linqChatId)),
     telegram: messaging.hasTelegram,
   };
 }
