@@ -23,27 +23,43 @@ jobs:
           fetch-depth: 0
           ref: agent/physical-notes
 
-      - name: Wire Web source path
+      - name: Wire source contracts
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
 
-          path = Path('apps/web/tsconfig.json')
-          text = path.read_text()
-          mapping = '''      "@murphai/hosted-execution/physical-notes": [
+          web_tsconfig = Path('apps/web/tsconfig.json')
+          web_text = web_tsconfig.read_text()
+          web_mapping = '''      "@murphai/hosted-execution/physical-notes": [
                   "../../packages/hosted-execution/src/physical-notes.ts"
                 ],
           '''
-          if mapping not in text:
-              anchor = '''      "@murphai/hosted-execution/phone-calls": [
+          if web_mapping not in web_text:
+              web_anchor = '''      "@murphai/hosted-execution/phone-calls": [
                   "../../packages/hosted-execution/src/phone-calls.ts"
                 ],
           '''
-              if anchor not in text:
+              if web_anchor not in web_text:
                   raise SystemExit('hosted-execution phone-calls path anchor not found')
-              path.write_text(text.replace(anchor, anchor + mapping, 1))
+              web_tsconfig.write_text(web_text.replace(web_anchor, web_anchor + web_mapping, 1))
+
+          exports_test = Path('packages/hosted-execution/test/hosted-execution.test.ts')
+          exports_text = exports_test.read_text()
+          exports_expected = '''      "./phone-calls",
+                "./physical-notes",
+                "./plan-usage",
+          '''
+          if exports_expected not in exports_text:
+              exports_anchor = '''      "./phone-calls",
+                "./plan-usage",
+          '''
+              if exports_anchor not in exports_text:
+                  raise SystemExit('hosted-execution export allowlist anchor not found')
+              exports_test.write_text(
+                  exports_text.replace(exports_anchor, exports_expected, 1),
+              )
           PY
           git diff --check
 
@@ -85,7 +101,9 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git rm -f .github/agent-physical-notes-*
           git rm -f .github/workflows/agent-physical-notes-bootstrap.yml
-          git add apps/web/tsconfig.json
+          git add \
+            apps/web/tsconfig.json \
+            packages/hosted-execution/test/hosted-execution.test.ts
           git diff --cached --check
           git commit -m 'chore: finalize physical-note integration'
           git push origin HEAD:agent/physical-notes
