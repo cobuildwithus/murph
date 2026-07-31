@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import {
   buildHostedExecutionLinqConversationMessageWake,
   createHostedExecutionGroupReactionEventId,
@@ -10,6 +10,7 @@ import {
 
 import {
   readHostedThreadRouteByThreadIdentity,
+  type HostedThreadRouteSnapshot,
 } from "../hosted-routing/thread-route-store";
 import {
   signalHostedMailboxAppendRuntime,
@@ -29,6 +30,18 @@ import {
 } from "./group-reaction-mailbox";
 
 const HOSTED_LINQ_GROUP_REACTION_VALUE_MAX_CHARS = 256;
+
+type HostedLinqGroupReactionRoute = Pick<
+  HostedThreadRouteSnapshot,
+  "accountLookupKey" | "containerMemberId"
+>;
+
+export type HostedLinqGroupReactionMailboxAppend = {
+  containerMemberId: string;
+  item: Awaited<
+    ReturnType<typeof appendConsumedHostedGroupReactionMailboxEnvelopeTx>
+  >["item"];
+};
 
 export async function buildHostedLinqAffirmativeReactionMessageEvent(input: {
   event: ParsedHostedLinqProviderEvent;
@@ -120,41 +133,25 @@ export async function buildHostedLinqAffirmativeReactionMessageEvent(input: {
 }
 
 /**
- * Retains the historical function name for the webhook call site, but no longer
- * stages a lossy next-message hint. The verified provider event supplies the
- * actor and target id; the canonical thread route supplies group/runtime
- * authority. Target text is deliberately resolved later from the bounded
- * durable input/outbox spine, rather than read from a mutable provider message
- * during ingress. That keeps provider retries byte-identical and preserves the
- * room model's existing evidence window.
+ * Appends one provider-authenticated Linq reaction through the existing
+ * conversation mailbox. Canonical offer owners may pass `actor: null` after
+ * they have decided the reaction so a pre-member handle never enters
+ * group-visible room evidence. The blind contact lookup stays envelope-local
+ * for the existing identifier and crypto contracts.
  *
- * The reaction becomes an ordinary durable conversation mailbox item whose row
- * is marked consumed at ingress, so it is imported as context without ever
- * becoming a reply candidate or depending on a live roster re-read.
+ * Target text is deliberately absent here and resolved later from the bounded
+ * durable input/outbox spine. The same provider event therefore always rebuilds
+ * byte-identical mailbox content on retry.
  */
-export async function stageHostedLinqGroupReactionContext(input: {
+export async function appendHostedLinqGroupReactionMailboxTx(input: {
+  actor: string | null;
   event: ParsedHostedLinqProviderEvent;
-  prisma: PrismaClient;
-  signal?: AbortSignal;
-}): Promise<boolean> {
+  route: HostedLinqGroupReactionRoute;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedLinqGroupReactionMailboxAppend> {
   const eventContext = readHostedLinqReactionEventContext(input.event);
   if (!eventContext) {
-    return false;
-  }
-
-  const route = await readHostedThreadRouteByThreadIdentity({
-    channel: "linq",
-    prisma: input.prisma,
-    threadId: eventContext.chatId,
-  });
-  if (
-    !route
-    || !(await readActiveHostedMemberAccess({
-      memberId: route.containerMemberId,
-      prisma: input.prisma,
-    }))
-  ) {
-    return false;
+    throw new TypeError("Hosted Linq group reaction context is invalid.");
   }
 
   const occurredAt = input.event.providerCreatedAt.toISOString();
@@ -162,7 +159,7 @@ export async function stageHostedLinqGroupReactionContext(input: {
     input.event.eventId,
   );
   const reactionText = formatHostedExecutionGroupReactionEventText({
-    actor: eventContext.actor.value,
+    actor: input.actor,
     changes: [{
       operation: input.event.eventType === "reaction.removed"
         ? "removed"
@@ -175,8 +172,8 @@ export async function stageHostedLinqGroupReactionContext(input: {
     targetText: null,
   });
   const envelope = buildHostedExecutionLinqConversationMessageWake({
-    ...(route.accountLookupKey
-      ? { accountLookupKey: route.accountLookupKey }
+    ...(input.route.accountLookupKey
+      ? { accountLookupKey: input.route.accountLookupKey }
       : {}),
     contactKind: eventContext.actor.kind,
     contactLookupKey: eventContext.actor.lookupKey,
@@ -198,27 +195,87 @@ export async function stageHostedLinqGroupReactionContext(input: {
     occurredAt,
     routeAuthority: {
       channel: "linq",
-      containerMemberId: route.containerMemberId,
+      containerMemberId: input.route.containerMemberId,
       threadId: eventContext.chatId,
     },
-    userId: route.containerMemberId,
+    userId: input.route.containerMemberId,
   });
-  const appended = await input.prisma.$transaction(
-    (tx) => appendConsumedHostedGroupReactionMailboxEnvelopeTx({
-      envelope,
+  const appended = await appendConsumedHostedGroupReactionMailboxEnvelopeTx({
+    envelope,
+    tx: input.tx,
+  });
+  return {
+    containerMemberId: input.route.containerMemberId,
+    item: appended.item,
+  };
+}
+
+export async function signalHostedLinqGroupReactionMailbox(input: {
+  append: HostedLinqGroupReactionMailboxAppend;
+  prisma: PrismaClient;
+}): Promise<void> {
+  await signalHostedMailboxAppendRuntime({
+    expectedUserId: input.append.containerMemberId,
+    knownCheckpoint: {
+      lane: input.append.item.lane,
+      laneSeq: input.append.item.laneSeq,
+      userId: input.append.containerMemberId,
+    },
+    mailboxItemId: input.append.item.id,
+    prisma: input.prisma,
+  });
+}
+
+/**
+ * Retains the historical function name for the webhook call site, but no longer
+ * stages a lossy next-message hint. The verified provider event supplies the
+ * actor and target id; the canonical thread route supplies group/runtime
+ * authority. The shared append owner above keeps generic and operational Linq
+ * reactions on one durability contract.
+ *
+ * The reaction becomes an ordinary durable conversation mailbox item whose row
+ * is marked consumed at ingress, so it is imported as context without ever
+ * becoming a reply candidate or depending on a live roster re-read.
+ */
+export async function stageHostedLinqGroupReactionContext(input: {
+  event: ParsedHostedLinqProviderEvent;
+  prisma: PrismaClient;
+  signal?: AbortSignal;
+}): Promise<boolean> {
+  input.signal?.throwIfAborted();
+  const eventContext = readHostedLinqReactionEventContext(input.event);
+  if (!eventContext) {
+    return false;
+  }
+
+  const route = await readHostedThreadRouteByThreadIdentity({
+    channel: "linq",
+    prisma: input.prisma,
+    threadId: eventContext.chatId,
+  });
+  if (
+    !route
+    || !(await readActiveHostedMemberAccess({
+      memberId: route.containerMemberId,
+      prisma: input.prisma,
+    }))
+  ) {
+    return false;
+  }
+
+  const append = await input.prisma.$transaction(
+    (tx) => appendHostedLinqGroupReactionMailboxTx({
+      actor: eventContext.actor.value,
+      event: input.event,
+      route,
       tx,
     }),
     HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   );
 
-  await signalHostedMailboxAppendRuntime({
-    expectedUserId: route.containerMemberId,
-    knownCheckpoint: {
-      lane: appended.item.lane,
-      laneSeq: appended.item.laneSeq,
-      userId: route.containerMemberId,
-    },
-    mailboxItemId: appended.item.id,
+  input.signal?.throwIfAborted();
+  await signalHostedLinqGroupReactionMailbox({
+    append,
     prisma: input.prisma,
   });
   return true;
