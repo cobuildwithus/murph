@@ -1,6 +1,6 @@
 # Daily wrong-line redirect reminders
 
-Status: active
+Status: completed
 Created: 2026-07-31
 Updated: 2026-07-31
 
@@ -18,8 +18,8 @@ Updated: 2026-07-31
 - A wrong-conversation inbound on the next UTC day creates a fresh redirect
   effect, while replaying the same inbound remains stable.
 - A home-line change still creates a fresh redirect effect.
-- Every redirect variant names the current home number and clearly asks the
-  member to continue or resend there.
+- Every rendered redirect variant names the current home number and explicitly
+  asks the member to resend the unprocessed message there.
 - The redirect bank contains at least 100 unique rendered variants.
 - Focused tests and the `apps/web` typecheck pass.
 
@@ -69,9 +69,12 @@ Updated: 2026-07-31
   positives. Rendering now adds a direct no-transfer/resend sentence whenever
   an authored variant lacks an explicit send/resend construction, and the
   focused assertion matches only that concrete action.
-- The preliminary pass returned no patch artifact. The first final ReviewGPT
-  attempt failed during draft staging and produced no review verdict or final
-  round baseline; final round 1 must start fresh on the corrected pushed head.
+- The preliminary pass returned no patch artifact. Managed final ReviewGPT did
+  not establish a round baseline: two lanes failed during draft staging, one
+  lacked the required Pro model selector, and one encountered repeated target
+  navigation network changes. After all four lanes were exhausted, the routed
+  local cross-cutting deep-review fallback inspected the corrected exact head
+  and returned no findings.
 
 ## Verification
 
@@ -104,6 +107,15 @@ Updated: 2026-07-31
   No material product-experience evidence gap remains: the dispatch scenario
   proves the input is not enqueued and the reply is actionable, while existing
   provider-retry coverage owns delivery recovery.
-- Pending: corrected exact-head CI and final ReviewGPT gate for the
-  idempotency/external-egress change. The one substantive preliminary pass is
-  complete and its accepted findings are resolved locally.
+- PASS: corrected exact-head GitHub Actions, including app verification,
+  build/typecheck, coverage, CLI, design proof, overflow, and tracked-artifact
+  checks.
+- PASS: local cross-cutting deep review after all four managed ReviewGPT lanes
+  were exhausted. It traced verified timestamp normalization, planner exit,
+  effect identity, durable delivery claiming, route-authority revalidation,
+  rendering, provider send, and failure paths, and returned no findings.
+- ACCEPTED RESIDUAL: a genuinely delayed prior-day provider event can produce a
+  prior-day redirect near a fresh current-day redirect. This follows the chosen
+  provider-occurrence-day contract and bounded retry behavior; using processing
+  time instead would let the same webhook retry create a new effect at midnight.
+Completed: 2026-07-31
