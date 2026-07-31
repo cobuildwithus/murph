@@ -441,6 +441,35 @@ describe("browser vault session route", () => {
     });
   });
 
+  it("returns a truthful retained-replica error without waking withdrawn processing", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    mocks.readHostedHealthDataConsentState.mockResolvedValue("revoked");
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      createBrowserVaultSession: vi.fn(),
+    });
+
+    const response = await settingsVaultExportSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/settings/vault-export/session", {
+        authorization: {
+          signature: `0x${"11".repeat(65)}`,
+          token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
+        },
+        browserPublicKeyJwk: browser.publicKeyJwk,
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
+    expect(mocks.consumeSensitiveActionChallenge).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "BROWSER_VAULT_RETAINED_REPLICA_UNAVAILABLE",
+        message: expect.stringContaining("retained dashboard export"),
+        retryable: true,
+      },
+    });
+  });
+
   it("refuses Settings vault export sessions without consuming the challenge when the replica source state has moved", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
     const replicaRef = createReplicaRef();

@@ -8,7 +8,6 @@ const mocks = vi.hoisted(() => ({
   readHostedHealthDataConsentState: vi.fn(),
   revokeAllMealPhotoCaptureEnrollmentsForMember: vi.fn(),
   revokeHostedConsentScope: vi.fn(),
-  terminateHostedUserRuntimeWorkflowBestEffort: vi.fn(),
 }));
 
 vi.mock("@/src/lib/device-sync/public-ingress-service", () => ({
@@ -18,10 +17,6 @@ vi.mock("@/src/lib/device-sync/public-ingress-service", () => ({
 vi.mock("@/src/lib/device-sync/meal-photo-capture", () => ({
   revokeAllMealPhotoCaptureEnrollmentsForMember:
     mocks.revokeAllMealPhotoCaptureEnrollmentsForMember,
-}));
-vi.mock("@/src/lib/hosted-orchestration/workflow-termination", () => ({
-  terminateHostedUserRuntimeWorkflowBestEffort:
-    mocks.terminateHostedUserRuntimeWorkflowBestEffort,
 }));
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: () => ({ label: "test-prisma" }),
@@ -40,6 +35,7 @@ vi.mock("@/src/lib/legal/consent", async () => {
 
 import {
   cleanupWithdrawnHostedHealthDataConsent,
+  reconcileHostedHealthDataRuntimeConsent,
   withdrawHostedHealthDataConsent,
 } from "@/src/lib/hosted-privacy/health-data-consent-withdrawal";
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
@@ -70,12 +66,6 @@ describe("withdrawHostedHealthDataConsent", () => {
     mocks.revokeAllMealPhotoCaptureEnrollmentsForMember.mockResolvedValue({
       revokedCount: 1,
     });
-    mocks.terminateHostedUserRuntimeWorkflowBestEffort.mockResolvedValue({
-      configured: true,
-      errorCode: null,
-      notFound: false,
-      terminated: true,
-    });
   });
 
   it("returns the committed revocation without waiting for cleanup", async () => {
@@ -93,12 +83,10 @@ describe("withdrawHostedHealthDataConsent", () => {
     });
     expect(mocks.disconnectAllHostedDeviceSyncConnectionsForUser).not.toHaveBeenCalled();
     expect(mocks.revokeAllMealPhotoCaptureEnrollmentsForMember).not.toHaveBeenCalled();
-    expect(mocks.terminateHostedUserRuntimeWorkflowBestEffort).not.toHaveBeenCalled();
   });
 
-  it("terminates processing before best-effort provider cleanup", async () => {
+  it("runs both independently guarded provider cleanup owners", async () => {
     const request = new Request("https://app.example.test/api/legal/consent/revoke");
-    mocks.readHostedHealthDataConsentState.mockResolvedValueOnce("revoked");
 
     await cleanupWithdrawnHostedHealthDataConsent({
       memberId: "member_123",
@@ -106,10 +94,6 @@ describe("withdrawHostedHealthDataConsent", () => {
       request,
     });
 
-    expect(mocks.terminateHostedUserRuntimeWorkflowBestEffort).toHaveBeenCalledWith({
-      reason: "health-data-consent-withdrawn",
-      userId: "member_123",
-    });
     expect(mocks.disconnectAllHostedDeviceSyncConnectionsForUser).toHaveBeenCalledWith({
       request,
       userId: "member_123",
@@ -119,15 +103,14 @@ describe("withdrawHostedHealthDataConsent", () => {
       prisma,
     });
     expect(
-      mocks.terminateHostedUserRuntimeWorkflowBestEffort.mock.invocationCallOrder[0],
+      mocks.disconnectAllHostedDeviceSyncConnectionsForUser.mock.invocationCallOrder[0],
     ).toBeLessThan(
-      mocks.disconnectAllHostedDeviceSyncConnectionsForUser.mock.invocationCallOrder[0] ?? 0,
+      mocks.revokeAllMealPhotoCaptureEnrollmentsForMember.mock.invocationCallOrder[0] ?? 0,
     );
   });
 
   it("continues best-effort cleanup when a provider is unavailable", async () => {
     const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    mocks.readHostedHealthDataConsentState.mockResolvedValueOnce("revoked");
     mocks.disconnectAllHostedDeviceSyncConnectionsForUser.mockRejectedValueOnce(
       new Error("provider unavailable"),
     );
@@ -140,42 +123,6 @@ describe("withdrawHostedHealthDataConsent", () => {
 
     expect(mocks.revokeAllMealPhotoCaptureEnrollmentsForMember).toHaveBeenCalledTimes(1);
     expect(errorLog).toHaveBeenCalled();
-    errorLog.mockRestore();
-  });
-
-  it("does not run deferred cleanup after consent has been renewed", async () => {
-    mocks.readHostedHealthDataConsentState.mockResolvedValueOnce("granted");
-
-    await expect(cleanupWithdrawnHostedHealthDataConsent({
-      memberId: "member_123",
-      prisma,
-      request: new Request("https://app.example.test/api/legal/consent/revoke"),
-    })).resolves.toBeUndefined();
-
-    expect(mocks.terminateHostedUserRuntimeWorkflowBestEffort).not.toHaveBeenCalled();
-    expect(mocks.disconnectAllHostedDeviceSyncConnectionsForUser).not.toHaveBeenCalled();
-    expect(mocks.revokeAllMealPhotoCaptureEnrollmentsForMember).not.toHaveBeenCalled();
-  });
-
-  it("fails closed when deferred cleanup cannot confirm the revoked grant", async () => {
-    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    mocks.readHostedHealthDataConsentState.mockRejectedValueOnce(
-      new Error("consent unavailable"),
-    );
-
-    await expect(cleanupWithdrawnHostedHealthDataConsent({
-      memberId: "member_123",
-      prisma,
-      request: new Request("https://app.example.test/api/legal/consent/revoke"),
-    })).resolves.toBeUndefined();
-
-    expect(mocks.terminateHostedUserRuntimeWorkflowBestEffort).not.toHaveBeenCalled();
-    expect(mocks.disconnectAllHostedDeviceSyncConnectionsForUser).not.toHaveBeenCalled();
-    expect(mocks.revokeAllMealPhotoCaptureEnrollmentsForMember).not.toHaveBeenCalled();
-    expect(errorLog).toHaveBeenCalledWith(
-      "Hosted health-data consent withdrawal cleanup failed.",
-      expect.objectContaining({ operation: "consent state" }),
-    );
     errorLog.mockRestore();
   });
 
@@ -208,5 +155,59 @@ describe("withdrawHostedHealthDataConsent", () => {
 
     expect(mocks.revokeHostedConsentScope).not.toHaveBeenCalled();
     expect(mocks.disconnectAllHostedDeviceSyncConnectionsForUser).not.toHaveBeenCalled();
+  });
+});
+
+describe("reconcileHostedHealthDataRuntimeConsent", () => {
+  it("waits for the Cloudflare runtime consent barrier", async () => {
+    const reconcileRuntimeHealthDataConsent = vi.fn().mockResolvedValue({
+      activeInvocationPreempted: true,
+      consentState: "revoked",
+      processingAllowed: false,
+      runnerContainerDestroyAttempted: true,
+      runnerContainerDestroyOk: true,
+      userId: "member_123",
+    });
+
+    await expect(reconcileHostedHealthDataRuntimeConsent({
+      client: { reconcileRuntimeHealthDataConsent },
+      memberId: "member_123",
+    })).resolves.toMatchObject({
+      activeInvocationPreempted: true,
+      consentState: "revoked",
+      runnerContainerDestroyOk: true,
+    });
+    expect(reconcileRuntimeHealthDataConsent).toHaveBeenCalledWith("member_123");
+  });
+
+  it("fails closed when runtime control is not configured", async () => {
+    await expect(reconcileHostedHealthDataRuntimeConsent({
+      client: null,
+      memberId: "member_123",
+    })).rejects.toMatchObject({
+      code: "HOSTED_HEALTH_DATA_RUNTIME_CONTROL_NOT_CONFIGURED",
+      httpStatus: 503,
+    });
+  });
+
+  it("returns a safe retryable error when runtime reconciliation fails", async () => {
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const reconcileRuntimeHealthDataConsent = vi.fn().mockRejectedValue(
+      new Error("private upstream detail"),
+    );
+
+    await expect(reconcileHostedHealthDataRuntimeConsent({
+      client: { reconcileRuntimeHealthDataConsent },
+      memberId: "member_123",
+    })).rejects.toMatchObject({
+      code: "HOSTED_HEALTH_DATA_RUNTIME_CONSENT_RECONCILIATION_FAILED",
+      httpStatus: 503,
+      retryable: true,
+    });
+    expect(errorLog).toHaveBeenCalledWith(
+      "Hosted health-data runtime consent reconciliation failed.",
+      expect.not.objectContaining({ message: "private upstream detail" }),
+    );
+    errorLog.mockRestore();
   });
 });

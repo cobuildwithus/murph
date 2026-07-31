@@ -1,5 +1,7 @@
 import {
+  type HostedHealthDataConsentState,
   type HostedRunnerStatusResponse,
+  type HostedRuntimeHealthDataAdmissionResponse,
   type HostedRuntimeWebStatusResponse,
   type HostedWorkspaceReadResponse,
   type HostedWorkspaceState,
@@ -11,10 +13,12 @@ import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
+  parseHostedRuntimeHealthDataAdmissionResponse,
   parseHostedRuntimeWebStatusResponse,
   parseHostedWorkspaceReadResponse,
 } from "@murphai/hosted-execution/parsers";
 import {
+  HOSTED_RUNTIME_HEALTH_DATA_ADMISSION_PATH,
   HOSTED_RUNTIME_STATUS_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
@@ -74,6 +78,17 @@ import {
 
 export type { DurableObjectStateLike } from "./types.js";
 
+export interface HostedRuntimeHealthDataConsentReconcileResult {
+  activeInvocationPreempted: boolean;
+  consentState: HostedHealthDataConsentState;
+  processingAllowed: boolean;
+  runnerContainerDestroyAttempted: boolean;
+  runnerContainerDestroyOk: boolean;
+  userId: string;
+}
+
+const HOSTED_RUNTIME_WITHDRAWN_CONSENT_RETRY_MS = 60_000;
+
 export class HostedUserRunner {
   protected readonly stateStore: RunnerStateStore;
   protected readonly runtimeInvocation: RuntimeInvocationService;
@@ -85,6 +100,7 @@ export class HostedUserRunner {
   private readonly privateMediaCapabilitySecret: string | null;
   private readonly privateMediaDeliveryOrigin: string;
   private privateMediaMutationLock: Promise<void> | null = null;
+  private runtimeConsentMutationLock: Promise<void> | null = null;
   private readonly r2CutoverStatus: {
     coexisting: boolean;
     phase: "destination_active" | "source_active";
@@ -263,7 +279,47 @@ export class HostedUserRunner {
   async ensureRuntimeProcessingForUser(
     input: RuntimeProcessingInput,
   ): Promise<HostedRuntimeEnsureProcessingResponse> {
-    return await this.runtimeProcessing.ensureForUser(input);
+    return await this.withRuntimeConsentMutationLock(async () => {
+      const admission = await this.readHostedRuntimeHealthDataAdmissionFromWeb(
+        input.userId,
+      );
+      if (!admission.processingAllowed) {
+        return {
+          kind: "retry_later",
+          retryAt: new Date(
+            Date.now() + HOSTED_RUNTIME_WITHDRAWN_CONSENT_RETRY_MS,
+          ).toISOString(),
+        };
+      }
+      return await this.runtimeProcessing.ensureForUser(input);
+    });
+  }
+
+  async reconcileRuntimeHealthDataConsentForUser(
+    userId: string,
+  ): Promise<HostedRuntimeHealthDataConsentReconcileResult> {
+    return await this.withRuntimeConsentMutationLock(async () => {
+      const admission =
+        await this.readHostedRuntimeHealthDataAdmissionFromWeb(userId);
+      if (admission.processingAllowed) {
+        return {
+          activeInvocationPreempted: false,
+          consentState: admission.consentState,
+          processingAllowed: true,
+          runnerContainerDestroyAttempted: false,
+          runnerContainerDestroyOk: true,
+          userId,
+        };
+      }
+
+      return {
+        ...(await this.runtimeProcessing
+          .stopForHealthDataConsentWithdrawal(userId)),
+        consentState: admission.consentState,
+        processingAllowed: false,
+        userId,
+      };
+    });
   }
 
   async validateRuntimeWriteFence(input: {
@@ -298,6 +354,20 @@ export class HostedUserRunner {
         get: () => this.privateMediaMutationLock,
         set: (value) => {
           this.privateMediaMutationLock = value;
+        },
+      },
+      run,
+    );
+  }
+
+  private async withRuntimeConsentMutationLock<T>(
+    run: () => Promise<T>,
+  ): Promise<T> {
+    return withSerializedLock(
+      {
+        get: () => this.runtimeConsentMutationLock,
+        set: (value) => {
+          this.runtimeConsentMutationLock = value;
         },
       },
       run,
@@ -444,6 +514,38 @@ export class HostedUserRunner {
     }
     this.assertWorkspaceBelongsToRunnerUser(status.workspace, userId);
     return status;
+  }
+
+  private async readHostedRuntimeHealthDataAdmissionFromWeb(
+    userId: string,
+  ): Promise<HostedRuntimeHealthDataAdmissionResponse> {
+    const response = await fetchHostedExecutionWebControlPlaneResponse({
+      ...(this.env.hostedWebAllowHttpHosts
+        ? { allowHttpHosts: this.env.hostedWebAllowHttpHosts }
+        : {}),
+      baseUrl: this.readHostedWebControlBaseUrl(),
+      boundUserId: userId,
+      callbackSigning: this.env.webCallbackSigning,
+      method: "GET",
+      path: HOSTED_RUNTIME_HEALTH_DATA_ADMISSION_PATH,
+      timeoutMs: this.env.webControlTimeoutMs,
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `Hosted runtime health-data admission read failed with HTTP ${response.status}.`,
+      );
+    }
+
+    const admission = parseHostedRuntimeHealthDataAdmissionResponse(
+      await response.json(),
+    );
+    if (admission.userId !== userId) {
+      throw new Error(
+        "Hosted runtime health-data admission returned a different user.",
+      );
+    }
+    return admission;
   }
 
   private async readHostedWorkspaceFromWeb(

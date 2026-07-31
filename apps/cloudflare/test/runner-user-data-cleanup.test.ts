@@ -573,7 +573,7 @@ function createDeletionStateStore(input: {
   deleted?: boolean;
 } = {}): {
   assertStateForUser(userId: string): Promise<void>;
-  clearWriteFenceForUserDeletion(userId: string): Promise<{
+  clearWriteFenceForUserControl(userId: string): Promise<{
     attemptId: string | null;
     cleared: boolean;
   }>;
@@ -585,7 +585,7 @@ function createDeletionStateStore(input: {
     async assertStateForUser(userId) {
       expect(userId).toBe(USER_ID);
     },
-    async clearWriteFenceForUserDeletion(userId) {
+    async clearWriteFenceForUserControl(userId) {
       expect(userId).toBe(USER_ID);
       return {
         attemptId: null,

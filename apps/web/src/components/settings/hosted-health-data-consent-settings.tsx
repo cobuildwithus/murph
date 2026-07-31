@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useState, type Ref } from "react";
+import Link from "next/link";
+import { useCallback, useRef, useState, type Ref } from "react";
 import { ShieldCheck, ShieldOff } from "lucide-react";
 
 import { HostedLegalConsentCard } from "@/src/components/legal/hosted-legal-consent-card";
@@ -40,9 +41,14 @@ export function HostedHealthDataConsentSettings({
   const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [resumeOpen, setResumeOpen] = useState(false);
   const [pending, setPending] = useState(false);
+  const [resumePending, setResumePending] = useState(false);
+  const [statusPending, setStatusPending] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const cancelWithdrawalRef = useRef<HTMLButtonElement>(null);
   const presentation = resolveHealthDataConsentPresentation(status);
+  const handleResumePendingChange = useCallback((nextPending: boolean) => {
+    setResumePending(nextPending);
+  }, []);
 
   if (!authenticated) {
     return null;
@@ -82,62 +88,42 @@ export function HostedHealthDataConsentSettings({
     window.setTimeout(reloadCurrentHostedAuthDocument, 100);
   }
 
-  const paused = presentation === "paused";
-  const active = presentation === "active";
-  const unavailable = presentation === "unavailable";
+  async function handleStatusRetry() {
+    if (statusPending) {
+      return;
+    }
+
+    setStatusPending(true);
+    setErrorMessage(null);
+    try {
+      setStatus(await requestHostedOnboardingJson<HostedConsentStatus>({
+        url: "/api/legal/consent/status",
+      }));
+    } catch (error) {
+      setErrorMessage(readStatusError(error));
+    } finally {
+      setStatusPending(false);
+    }
+  }
 
   return (
     <>
-      <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-3 border-b border-border pb-4 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
-        {active ? (
-          <ShieldCheck
-            aria-hidden="true"
-            className="size-[18px] shrink-0 text-muted-foreground"
-            strokeWidth={1.6}
-          />
-        ) : (
-          <ShieldOff
-            aria-hidden="true"
-            className="size-[18px] shrink-0 text-muted-foreground"
-            strokeWidth={1.6}
-          />
-        )}
-        <div className="min-w-0">
-          <div className="font-serif text-base tracking-tight text-foreground">
-            Health data use
-          </div>
-          <p className="text-xs leading-5 text-muted-foreground">
-            {active
-              ? "Used to personalize Murph"
-              : paused
-                ? "Processing paused"
-                : presentation === "not-enabled"
-                  ? "Not enabled"
-                  : "Status unavailable"}
-          </p>
-        </div>
-        <Button
-          className={
-            active
-              ? "col-start-2 justify-self-end sm:col-start-auto"
-              : "col-span-2 w-full sm:col-span-1 sm:w-auto"
+      <HostedHealthDataConsentControl
+        errorMessage={errorMessage}
+        onAction={() => {
+          setErrorMessage(null);
+          if (presentation === "unavailable") {
+            void handleStatusRetry();
+          } else if (presentation === "active") {
+            setWithdrawOpen(true);
+          } else {
+            setResumeOpen(true);
           }
-          disabled={unavailable || pending}
-          onClick={() => {
-            setErrorMessage(null);
-            if (active) {
-              setWithdrawOpen(true);
-            } else {
-              setResumeOpen(true);
-            }
-          }}
-          size="default"
-          type="button"
-          variant={active ? "ghost" : "default"}
-        >
-          {active ? "Withdraw consent" : paused ? "Use Murph again" : "Review"}
-        </Button>
-      </div>
+        }}
+        pending={pending}
+        presentation={presentation}
+        statusPending={statusPending}
+      />
 
       <Dialog
         open={withdrawOpen}
@@ -165,10 +151,18 @@ export function HostedHealthDataConsentSettings({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={resumeOpen} onOpenChange={setResumeOpen}>
+      <Dialog
+        open={resumeOpen}
+        onOpenChange={(open) => {
+          if (!resumePending) {
+            setResumeOpen(open);
+          }
+        }}
+      >
         <DialogContent
+          aria-busy={resumePending}
           className="max-h-[calc(100dvh-2rem)] max-w-xl gap-6 overflow-y-auto p-6 md:p-7"
-          showCloseButton
+          showCloseButton={!resumePending}
         >
           <DialogHeader className="sr-only">
             <DialogTitle>Use Murph again</DialogTitle>
@@ -178,11 +172,101 @@ export function HostedHealthDataConsentSettings({
           </DialogHeader>
           <HostedHealthDataResumeConsent
             onAccepted={handleAccepted}
+            onActionPendingChange={handleResumePendingChange}
             status={status}
           />
         </DialogContent>
       </Dialog>
     </>
+  );
+}
+
+export function HostedHealthDataConsentControl({
+  errorMessage,
+  onAction,
+  pending,
+  presentation,
+  statusPending,
+}: {
+  errorMessage: string | null;
+  onAction: () => void;
+  pending: boolean;
+  presentation: HealthDataConsentPresentation;
+  statusPending: boolean;
+}) {
+  const active = presentation === "active";
+  const paused = presentation === "paused";
+  const unavailable = presentation === "unavailable";
+
+  return (
+    <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-3 border-b border-border pb-4 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
+      {active ? (
+        <ShieldCheck
+          aria-hidden="true"
+          className="size-[18px] shrink-0 text-muted-foreground"
+          strokeWidth={1.6}
+        />
+      ) : (
+        <ShieldOff
+          aria-hidden="true"
+          className="size-[18px] shrink-0 text-muted-foreground"
+          strokeWidth={1.6}
+        />
+      )}
+      <div className="min-w-0">
+        <div className="font-serif text-base tracking-tight text-foreground">
+          Health data use
+        </div>
+        <p
+          aria-live="polite"
+          className={`text-xs leading-5 ${
+            unavailable && errorMessage
+              ? "text-destructive"
+              : "text-muted-foreground"
+          }`}
+        >
+          {active
+            ? "Used to personalize Murph"
+            : paused
+              ? "Processing paused"
+              : presentation === "not-enabled"
+                ? "Not enabled"
+                : statusPending
+                  ? "Checking status..."
+                  : errorMessage ?? "Status unavailable"}
+        </p>
+        {active || paused ? (
+          <div className="py-2.5">
+            <Link
+              className="relative inline-flex self-start text-sm font-medium text-primary underline-offset-4 hover:underline before:absolute before:-inset-x-2 before:-inset-y-2.5 before:content-['']"
+              href="/connect"
+            >
+              {paused ? "Review source disconnections" : "Review or reconnect sources"}
+            </Link>
+          </div>
+        ) : null}
+      </div>
+      <Button
+        className={
+          active
+            ? "col-start-2 justify-self-end sm:col-start-auto"
+            : "col-span-2 w-full sm:col-span-1 sm:w-auto"
+        }
+        disabled={pending}
+        onClick={onAction}
+        size="default"
+        type="button"
+        variant={active ? "ghost" : "default"}
+      >
+        {active
+          ? "Withdraw consent"
+          : paused
+            ? "Use Murph again"
+            : unavailable
+              ? statusPending ? "Checking..." : "Retry status"
+              : "Review"}
+      </Button>
+    </div>
   );
 }
 
@@ -212,8 +296,9 @@ export function HostedHealthDataWithdrawalConfirmation({
           className="text-sm leading-6 text-muted-foreground"
           id="health-data-withdrawal-description"
         >
-          Murph will pause health data processing and disconnect your health
-          sources. Your account, existing data, and subscription will not be
+          Murph will pause health data processing. Murph will also try to
+          disconnect your health sources; you can review their status in Manage
+          wearables. Your account, existing data, and subscription will not be
           deleted.
         </p>
       </DialogHeader>
@@ -251,9 +336,11 @@ export function HostedHealthDataWithdrawalConfirmation({
 
 export function HostedHealthDataResumeConsent({
   onAccepted,
+  onActionPendingChange,
   status,
 }: {
   onAccepted: (status: HostedConsentStatus) => void;
+  onActionPendingChange?: (pending: boolean) => void;
   status: HostedConsentStatus | null;
 }) {
   return status ? (
@@ -261,6 +348,7 @@ export function HostedHealthDataResumeConsent({
       initialStatus={status}
       mode="compact"
       onAccepted={onAccepted}
+      onActionPendingChange={onActionPendingChange}
       preferredScope={HEALTH_DATA_SCOPE}
       source="settings-health-data-resume"
     />
@@ -289,4 +377,11 @@ function readWithdrawalError(error: unknown): string {
     return error.message;
   }
   return "Murph could not withdraw health data consent right now.";
+}
+
+function readStatusError(error: unknown): string {
+  if (error instanceof HostedOnboardingApiError && error.message) {
+    return error.message;
+  }
+  return "Status is still unavailable. Try again.";
 }

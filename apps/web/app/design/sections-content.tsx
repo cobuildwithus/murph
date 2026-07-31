@@ -22,6 +22,7 @@ import { ChangelogArchiveStudy } from "./changelog-archive-study";
 import { ClubsPageStudy } from "./clubs-page-study";
 import { ConnectSourceCardStudy } from "./connect-source-card-study";
 import { DeviceSyncCallbackStudy } from "./device-sync-callback-study";
+import { DataExportFlowStudy } from "./data-export-study";
 import { FamilyInviteJoinStudy } from "./family-invite-join-study";
 import { GroupJoinStudy } from "./group-join-study";
 import { GroupMemberPlanStudy } from "./group-member-plan-study";
@@ -147,6 +148,12 @@ export function SectionsContent() {
 
       <StudySection title="Settings health data consent withdrawal and return">
         <HealthDataConsentWithdrawalFlowStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Settings retained data export">
+        <DataExportFlowStudy />
       </StudySection>
 
       <Separator />

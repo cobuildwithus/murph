@@ -98,9 +98,10 @@ export const POST = withJsonError(async (request: Request) => {
   try {
     workspace = await readHostedWorkspace({ userId: auth.member.id });
   } catch {
-    if (!allowLatestAvailableReplica) {
-      scheduleBrowserVaultRefreshAfterResponse({ userId: auth.member.id });
+    if (allowLatestAvailableReplica) {
+      throw browserVaultRetainedReplicaUnavailableError();
     }
+    scheduleBrowserVaultRefreshAfterResponse({ userId: auth.member.id });
     throw browserVaultSessionNotFreshError();
   }
 
@@ -140,9 +141,10 @@ export const POST = withJsonError(async (request: Request) => {
       )
     )
   ) {
-    if (!allowLatestAvailableReplica) {
-      scheduleBrowserVaultRefreshAfterResponse({ userId: auth.member.id });
+    if (allowLatestAvailableReplica) {
+      throw browserVaultRetainedReplicaUnavailableError();
     }
+    scheduleBrowserVaultRefreshAfterResponse({ userId: auth.member.id });
     throw browserVaultSessionNotFreshError();
   }
 
@@ -164,9 +166,10 @@ export const POST = withJsonError(async (request: Request) => {
     });
   } catch (error) {
     if (error instanceof Error && error.message === "Hosted execution browser vault replica was not found.") {
-      if (!allowLatestAvailableReplica) {
-        scheduleBrowserVaultRefreshAfterResponse({ userId: auth.member.id });
+      if (allowLatestAvailableReplica) {
+        throw browserVaultRetainedReplicaUnavailableError();
       }
+      scheduleBrowserVaultRefreshAfterResponse({ userId: auth.member.id });
       throw browserVaultSessionNotFreshError();
     }
 
@@ -199,6 +202,15 @@ function browserVaultSessionNotFreshError() {
     code: "BROWSER_VAULT_SESSION_NOT_FRESH",
     httpStatus: 409,
     message: "Your vault is still being prepared. Try the export again in a moment.",
+    retryable: true,
+  });
+}
+
+function browserVaultRetainedReplicaUnavailableError() {
+  return hostedOnboardingError({
+    code: "BROWSER_VAULT_RETAINED_REPLICA_UNAVAILABLE",
+    httpStatus: 409,
+    message: "Murph does not have a retained dashboard export available yet. Try again later, or use Murph again to resume processing.",
     retryable: true,
   });
 }

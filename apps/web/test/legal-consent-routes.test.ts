@@ -10,12 +10,16 @@ const mocks = vi.hoisted(() => ({
   cleanupWithdrawnHostedHealthDataConsent: vi.fn(),
   getPrisma: vi.fn(),
   grantHostedOptionalFeatureConsent: vi.fn(),
+  readHostedHealthDataConsentState: vi.fn(),
+  readHostedRuntimeAiAccessDecision: vi.fn(),
   readHostedConsentStatus: vi.fn(),
+  reconcileHostedHealthDataRuntimeConsent: vi.fn(),
   recordHostedLaunchConsentDecline: vi.fn(),
   recordHostedLaunchRequiredConsent: vi.fn(),
   requirePrivyMemberAuth: vi.fn(),
   revokeHostedAppSessionFromRequest: vi.fn(),
   revokeHostedConsentScope: vi.fn(),
+  signalHostedRuntimeRecheckRuntime: vi.fn(),
   withdrawHostedHealthDataConsent: vi.fn(),
   prismaClient: {
     label: "test-prisma",
@@ -48,6 +52,7 @@ vi.mock("@/src/lib/legal/consent", async () => {
   return {
     ...actual,
     grantHostedOptionalFeatureConsent: mocks.grantHostedOptionalFeatureConsent,
+    readHostedHealthDataConsentState: mocks.readHostedHealthDataConsentState,
     readHostedConsentStatus: mocks.readHostedConsentStatus,
     recordHostedLaunchConsentDecline: mocks.recordHostedLaunchConsentDecline,
     recordHostedLaunchRequiredConsent: mocks.recordHostedLaunchRequiredConsent,
@@ -58,7 +63,17 @@ vi.mock("@/src/lib/legal/consent", async () => {
 vi.mock("@/src/lib/hosted-privacy/health-data-consent-withdrawal", () => ({
   cleanupWithdrawnHostedHealthDataConsent:
     mocks.cleanupWithdrawnHostedHealthDataConsent,
+  reconcileHostedHealthDataRuntimeConsent:
+    mocks.reconcileHostedHealthDataRuntimeConsent,
   withdrawHostedHealthDataConsent: mocks.withdrawHostedHealthDataConsent,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
+  readHostedRuntimeAiAccessDecision: mocks.readHostedRuntimeAiAccessDecision,
+}));
+
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedRuntimeRecheckRuntime: mocks.signalHostedRuntimeRecheckRuntime,
 }));
 
 type HostedConsentStatusRouteModule = typeof import("../app/api/legal/consent/status/route");
@@ -107,6 +122,14 @@ describe("legal consent routes", () => {
     mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
     mocks.requirePrivyMemberAuth.mockResolvedValue(memberAuth);
     mocks.readHostedConsentStatus.mockResolvedValue(currentStatus);
+    mocks.readHostedHealthDataConsentState.mockResolvedValue("missing");
+    mocks.readHostedRuntimeAiAccessDecision.mockResolvedValue({ allowed: true });
+    mocks.reconcileHostedHealthDataRuntimeConsent.mockResolvedValue({
+      consentState: "revoked",
+      processingAllowed: false,
+      stopped: true,
+      userId: "member_123",
+    });
     mocks.recordHostedLaunchConsentDecline.mockResolvedValue([
       "launch.legal",
       "launch.health-data",
@@ -118,6 +141,7 @@ describe("legal consent routes", () => {
     mocks.grantHostedOptionalFeatureConsent.mockResolvedValue(currentStatus);
     mocks.revokeHostedConsentScope.mockResolvedValue(currentStatus);
     mocks.withdrawHostedHealthDataConsent.mockResolvedValue(currentStatus);
+    mocks.signalHostedRuntimeRecheckRuntime.mockResolvedValue(undefined);
   });
 
   it("returns the current consent status for the authenticated hosted member", async () => {
@@ -202,6 +226,44 @@ describe("legal consent routes", () => {
       source: "hosted onboarding",
     });
     expect(mocks.grantHostedOptionalFeatureConsent).not.toHaveBeenCalled();
+    expect(mocks.reconcileHostedHealthDataRuntimeConsent).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
+  });
+
+  it("serializes renewed health-data consent behind the stop barrier before signaling runtime", async () => {
+    mocks.readHostedHealthDataConsentState.mockResolvedValueOnce("revoked");
+
+    const response = await consentAcceptRoute.POST(
+      new Request("https://join.example.test/api/legal/consent/accept", {
+        body: JSON.stringify({
+          acceptedDocumentVersions: {
+            "consumer-health-data-notice": "2026-07-23",
+          },
+          scope: "launch.health-data",
+          source: "settings-health-data-resume",
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.reconcileHostedHealthDataRuntimeConsent).toHaveBeenCalledWith({
+      memberId: "member_123",
+    });
+    expect(
+      mocks.reconcileHostedHealthDataRuntimeConsent.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.recordHostedLaunchRequiredConsent.mock.invocationCallOrder[0] ?? 0);
+    expect(
+      mocks.recordHostedLaunchRequiredConsent.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.signalHostedRuntimeRecheckRuntime.mock.invocationCallOrder[0] ?? 0);
+    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
+      prisma: mocks.prismaClient,
+      userId: "member_123",
+    });
   });
 
   it("records server-derived launch declines and revokes the authenticated session", async () => {
@@ -491,6 +553,14 @@ describe("legal consent routes", () => {
       prisma: mocks.prismaClient,
       source: "settings-health-data",
     });
+    expect(mocks.reconcileHostedHealthDataRuntimeConsent).toHaveBeenCalledWith({
+      memberId: "member_123",
+    });
+    expect(
+      mocks.withdrawHostedHealthDataConsent.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.reconcileHostedHealthDataRuntimeConsent.mock.invocationCallOrder[0] ?? 0,
+    );
     expect(mocks.after).toHaveBeenCalledWith(expect.any(Function));
     expect(mocks.cleanupWithdrawnHostedHealthDataConsent).not.toHaveBeenCalled();
     const cleanup = mocks.after.mock.calls[0]?.[0];
@@ -503,5 +573,35 @@ describe("legal consent routes", () => {
     });
     expect(mocks.revokeHostedConsentScope).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual(currentStatus);
+  });
+
+  it("does not schedule stale provider cleanup when concurrent renewal wins", async () => {
+    mocks.reconcileHostedHealthDataRuntimeConsent.mockResolvedValueOnce({
+      consentState: "granted",
+      processingAllowed: true,
+      stopped: false,
+      userId: "member_123",
+    });
+
+    const response = await consentRevokeRoute.POST(
+      new Request("https://join.example.test/api/legal/consent/revoke", {
+        body: JSON.stringify({
+          scope: "launch.health-data",
+          source: "settings-health-data",
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.after).not.toHaveBeenCalled();
+    expect(mocks.readHostedConsentStatus).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+    });
   });
 });

@@ -45,6 +45,7 @@ interface HostedLegalConsentCardProps {
   launchTitle?: string;
   mode?: HostedLegalConsentCardMode;
   onAccepted?: (status: HostedConsentStatus) => void | Promise<void>;
+  onActionPendingChange?: (pending: boolean) => void;
   onDecline?: () => void;
   onRequirementChange?: (required: boolean) => void;
   preferredScope?: HostedConsentScope;
@@ -87,6 +88,7 @@ function HostedLegalConsentCardState({
   launchTitle,
   mode = "panel",
   onAccepted,
+  onActionPendingChange,
   onDecline,
   onRequirementChange,
   preferredScope = "launch.legal",
@@ -181,6 +183,10 @@ function HostedLegalConsentCardState({
   );
   const actionPending = pending || acceptedHandoffPending;
   const canSubmit = isLaunchFlow || (isFeatureFlow && featureAccepted);
+
+  useEffect(() => {
+    onActionPendingChange?.(actionPending);
+  }, [actionPending, onActionPendingChange]);
 
   useEffect(() => {
     if (!status) return;

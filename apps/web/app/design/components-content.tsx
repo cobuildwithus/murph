@@ -145,6 +145,7 @@ import {
 } from "../(dashboard)/environment/environment-page-client";
 import type { EnvironmentVoiceScript } from "../(dashboard)/environment/environment-voice-script";
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
+import { DataExportControlStudy } from "./data-export-study";
 import { HealthDataConsentControlStudy } from "./health-data-consent-study";
 
 const DESIGN_ENVIRONMENT_GAP_SCRIPT: EnvironmentVoiceScript = {
@@ -2133,6 +2134,12 @@ export function ComponentsContent() {
 
         <Section title="Health data consent settings">
           <HealthDataConsentControlStudy />
+        </Section>
+
+        <Separator />
+
+        <Section title="Data export">
+          <DataExportControlStudy />
         </Section>
 
         <Separator />

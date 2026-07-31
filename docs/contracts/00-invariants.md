@@ -492,9 +492,13 @@ it has been explicitly elevated to a cross-cutting invariant.
 - Explicit hosted health-data withdrawal revokes processing authority before
   cleanup. AI and message admission, queued runtime usage, source connections,
   webhooks, scheduled sync, and companion processing independently reject that
-  state. Cleanup failure cannot restore authority, while an absent legacy grant
-  is not reinterpreted as withdrawal. Settings, latest-available export, and
-  account deletion remain available; renewed consent is the only processing
+  state. The withdrawal response waits for the per-user Cloudflare execution
+  barrier to serialize behind earlier ensures, re-read the Web-owned grant,
+  clear the write fence, and stop the runner; every later ensure re-reads that
+  grant before work. Renewal waits behind the earlier stop before committing a
+  new grant. Cleanup failure cannot restore authority, while an absent legacy
+  grant is not reinterpreted as withdrawal. Settings, latest-available export,
+  and account deletion remain available; renewed consent is the only processing
   restore path.
 
 ## Deployment Compatibility

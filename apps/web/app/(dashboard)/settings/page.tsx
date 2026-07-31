@@ -69,7 +69,6 @@ import {
 } from "@/src/lib/hosted-onboarding/runtime";
 import {
   readHostedConsentStatus,
-  resolveHostedHealthDataConsentState,
 } from "@/src/lib/legal/consent";
 import { getPrisma } from "@/src/lib/prisma";
 import { readHostedSecureApprovalStatus } from "@/src/lib/sensitive-actions/secure-approval-status";
@@ -176,11 +175,6 @@ export default async function SettingsPage({
     : null;
   const settingsSnapshot = settingsData?.settingsSnapshot ?? null;
   const consentStatus = settingsData?.consentStatus ?? null;
-  const healthDataConsentState = consentStatus
-    ? resolveHostedHealthDataConsentState(
-        consentStatus.scopes.flatMap((scope) => scope.grant ? [scope.grant] : []),
-      )
-    : "missing";
   const freshPrivySession = settingsData?.freshPrivySession ?? null;
   const familyOwner = settingsData?.familyOwner ?? null;
   const familyAccess = settingsData?.familyAccess ?? null;
@@ -626,7 +620,6 @@ export default async function SettingsPage({
               initialStatus={consentStatus}
             />
             <HostedDataPrivacySettings
-              allowLatestAvailableExport={healthDataConsentState === "revoked"}
               authenticated={authenticated}
               authorizationEnabled
             />
@@ -642,7 +635,6 @@ export default async function SettingsPage({
             initialStatus={consentStatus}
           />
           <HostedDataPrivacySettings
-            allowLatestAvailableExport={healthDataConsentState === "revoked"}
             authenticated={authenticated}
             authorizationEnabled={false}
           />

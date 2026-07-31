@@ -35,7 +35,7 @@ import {
 
 type HostedRunnerUserDataDeletionStateStore = Pick<
   RunnerStateStore,
-  "assertStateForUser" | "clearWriteFenceForUserDeletion" | "deleteStateForUser"
+  "assertStateForUser" | "clearWriteFenceForUserControl" | "deleteStateForUser"
 >;
 
 export interface HostedRunnerUserDataDeletionCompletedResult {
@@ -166,7 +166,7 @@ async function stopRunnerBeforeUserDataDeletion(input: {
   runnerContainerDestroyAttempted: boolean;
   runnerContainerDestroyOk: boolean;
 }> {
-  const preemption = await input.stateStore.clearWriteFenceForUserDeletion(input.userId);
+  const preemption = await input.stateStore.clearWriteFenceForUserControl(input.userId);
   const destroyed = await destroyHostedExecutionContainer({
     runnerContainerName: resolveHostedExecutionRunnerContainerName({
       source: input.runnerRuntimeEnvSource,

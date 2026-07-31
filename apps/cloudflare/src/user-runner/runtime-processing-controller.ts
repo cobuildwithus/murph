@@ -11,6 +11,7 @@ import type {
 
 import type { HostedExecutionEnvironment } from "../env.js";
 import {
+  destroyHostedExecutionContainer,
   type HostedExecutionContainerNamespaceLike,
 } from "../runner-container.js";
 import {
@@ -70,6 +71,12 @@ export type RuntimeProcessingInput = HostedRuntimeEnsureProcessingRequest & {
   orchestration?: RuntimeProcessingOrchestrationDiagnostics | null;
   userId: string;
 };
+
+export interface RuntimeHealthDataConsentStopResult {
+  activeInvocationPreempted: boolean;
+  runnerContainerDestroyAttempted: boolean;
+  runnerContainerDestroyOk: boolean;
+}
 
 type RuntimeProcessingOrchestrationDiagnostics = NonNullable<
   HostedRuntimeLatencyPhaseBreakdown["orchestration"]
@@ -176,6 +183,48 @@ export class RuntimeProcessingController {
       input: processingInput,
       runtimeWakeStartedAt,
     });
+  }
+
+  async stopForHealthDataConsentWithdrawal(
+    userId: string,
+  ): Promise<RuntimeHealthDataConsentStopResult> {
+    await this.input.stateStore.bindUser(userId);
+    const preemption =
+      await this.input.stateStore.clearWriteFenceForUserControl(userId);
+    const destroyed = await destroyHostedExecutionContainer({
+      runnerContainerName: resolveHostedExecutionRunnerContainerName({
+        source: this.input.runnerRuntimeEnvSource,
+        userId,
+      }),
+      runnerContainerNamespace: this.input.runnerContainerNamespace,
+      userId,
+    });
+
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        activeInvocationPreempted: preemption.cleared,
+        runnerContainerDestroyAttempted: destroyed.attempted,
+        runnerContainerDestroyOk: destroyed.ok,
+        workspaceAttemptId: preemption.attemptId,
+      },
+      level: destroyed.ok ? "info" : "error",
+      message: destroyed.ok
+        ? "Hosted runner stopped after health-data consent withdrawal."
+        : "Hosted runner could not stop after health-data consent withdrawal.",
+      phase: destroyed.ok ? "wake.running" : "failed",
+      userId,
+    });
+
+    if (!destroyed.ok) {
+      throw new HostedRuntimeHealthDataConsentStopError();
+    }
+
+    return {
+      activeInvocationPreempted: preemption.cleared,
+      runnerContainerDestroyAttempted: destroyed.attempted,
+      runnerContainerDestroyOk: destroyed.ok,
+    };
   }
 
   computeRuntimeProcessingRetryAt(reason: RuntimeProcessingRetryReason): string {
@@ -1057,6 +1106,13 @@ export class RuntimeProcessingController {
       return false;
     }
     return Date.now() - startedAtMs < RUNTIME_PROCESSING_STARTUP_GRACE_MS;
+  }
+}
+
+class HostedRuntimeHealthDataConsentStopError extends Error {
+  constructor() {
+    super("Hosted runner container cleanup failed after health-data consent withdrawal.");
+    this.name = "HostedRuntimeHealthDataConsentStopError";
   }
 }
 

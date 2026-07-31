@@ -66,7 +66,6 @@ const POST_DELETE_REDIRECT_DELAY_MS = 2_500;
 const POST_DELETE_REDIRECT_FALLBACK_MS = 8_000;
 
 export function HostedDataPrivacySettings(props: {
-  allowLatestAvailableExport?: boolean;
   authenticated: boolean;
   authorizationEnabled?: boolean;
 }) {
@@ -76,14 +75,12 @@ export function HostedDataPrivacySettings(props: {
 
   return (
     <HostedDataPrivacySettingsAuthorized
-      allowLatestAvailableExport={props.allowLatestAvailableExport === true}
       authenticated={props.authenticated}
     />
   );
 }
 
 function HostedDataPrivacySettingsAuthorized(props: {
-  allowLatestAvailableExport: boolean;
   authenticated: boolean;
 }) {
   const { authorize } = useSensitiveActionAuthorization();
@@ -156,19 +153,6 @@ function HostedDataPrivacySettingsAuthorized(props: {
         throw new Error("Your data isn't ready to export yet.");
       }
 
-      if (
-        !props.allowLatestAvailableExport
-        && (
-          result.freshness !== "fresh"
-          || result.refreshPending
-          || result.deviceSyncImportPending
-        )
-      ) {
-        throw new Error(
-          "Your data is still being prepared. Try the export again in a moment.",
-        );
-      }
-
       const blob = new Blob([JSON.stringify(result.client.replica, null, 2)], {
         type: VAULT_EXPORT_MIME_TYPE,
       });
@@ -178,7 +162,7 @@ function HostedDataPrivacySettingsAuthorized(props: {
       );
 
       closeExportDialog();
-      setExportSuccess("Your data export downloaded. Keep the file somewhere private and secure.");
+      setExportSuccess(formatVaultExportSuccess(result));
     } catch (requestError) {
       setExportDialogError(formatVaultExportError(requestError));
     } finally {
@@ -300,10 +284,7 @@ function HostedDataPrivacySettingsAuthorized(props: {
   return (
     <div className="flex flex-col gap-4">
       {exportSuccess ? (
-        <Alert role="status" aria-live="polite">
-          <AlertTitle>Export ready</AlertTitle>
-          <AlertDescription>{exportSuccess}</AlertDescription>
-        </Alert>
+        <HostedDataExportSuccess message={exportSuccess} />
       ) : null}
 
       <div className="divide-y divide-[rgba(196,168,130,0.25)]">
@@ -330,42 +311,19 @@ function HostedDataPrivacySettingsAuthorized(props: {
       <Dialog open={exportDialogOpen} onOpenChange={(open) => (open ? setExportDialogOpen(true) : closeExportDialog())}>
         <DialogContent
           aria-busy={exportPending}
+          aria-describedby="hosted-data-export-description"
+          aria-labelledby="hosted-data-export-title"
           className="max-h-[calc(100dvh-2rem)] max-w-md gap-6 overflow-y-auto p-6 md:p-7"
           showCloseButton={!exportPending}
         >
-          <DialogHeader className="pr-10">
-            <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-foreground">
-              Export your data
-            </DialogTitle>
-            <DialogDescription className="text-sm leading-6 text-muted-foreground">
-              Downloads a file with all your current dashboard data.
-            </DialogDescription>
-          </DialogHeader>
-          {exportDialogError ? (
-            <p role="alert" className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive">
-              {exportDialogError}
-            </p>
-          ) : null}
-          <div className="flex items-start gap-4 text-sm leading-relaxed text-foreground">
-            <Checkbox
-              id="hosted-data-export-acknowledge"
-              checked={acknowledgedSensitiveDownload}
-              onCheckedChange={setAcknowledgedSensitiveDownload}
-              className="size-7 shrink-0"
-            />
-            <label htmlFor="hosted-data-export-acknowledge" className="cursor-pointer">
-              This export may contain sensitive health data and private notes.
-            </label>
-          </div>
-          <div className="flex flex-col gap-2">
-            <Button type="button" size="xl" onClick={() => void handleExportConfirmed()} disabled={!exportReady} className="w-full">
-              <Download data-icon="inline-start" />
-              {exportPending ? "Preparing..." : "Download my data"}
-            </Button>
-            <Button type="button" size="xl" variant="ghost" onClick={closeExportDialog} disabled={exportPending} className="w-full">
-              Cancel
-            </Button>
-          </div>
+          <HostedDataExportDialogContent
+            acknowledgedSensitiveDownload={acknowledgedSensitiveDownload}
+            errorMessage={exportDialogError}
+            onAcknowledgedChange={setAcknowledgedSensitiveDownload}
+            onCancel={closeExportDialog}
+            onConfirm={() => void handleExportConfirmed()}
+            pending={exportPending}
+          />
         </DialogContent>
       </Dialog>
 
@@ -434,6 +392,95 @@ function HostedDataPrivacySettingsAuthorized(props: {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+export function HostedDataExportSuccess({ message }: { message: string }) {
+  return (
+    <Alert aria-live="polite" role="status">
+      <AlertTitle>Export ready</AlertTitle>
+      <AlertDescription>{message}</AlertDescription>
+    </Alert>
+  );
+}
+
+export function HostedDataExportDialogContent({
+  acknowledgedSensitiveDownload,
+  errorMessage,
+  onAcknowledgedChange,
+  onCancel,
+  onConfirm,
+  pending,
+}: {
+  acknowledgedSensitiveDownload: boolean;
+  errorMessage: string | null;
+  onAcknowledgedChange: (checked: boolean) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+  pending: boolean;
+}) {
+  return (
+    <>
+      <div className="space-y-2 pr-10">
+        <h2
+          className="font-serif text-2xl/7 font-semibold tracking-normal text-foreground"
+          id="hosted-data-export-title"
+        >
+          Export your data
+        </h2>
+        <p
+          className="text-sm leading-6 text-muted-foreground"
+          id="hosted-data-export-description"
+        >
+          Downloads the latest dashboard data Murph has retained. Recent changes
+          that have not finished processing may not be included.
+        </p>
+      </div>
+      {errorMessage ? (
+        <p
+          className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive"
+          role="alert"
+        >
+          {errorMessage}
+        </p>
+      ) : null}
+      <div className="flex items-start gap-4 text-sm leading-relaxed text-foreground">
+        <Checkbox
+          checked={acknowledgedSensitiveDownload}
+          className="size-7 shrink-0"
+          id="hosted-data-export-acknowledge"
+          onCheckedChange={onAcknowledgedChange}
+        />
+        <label
+          className="cursor-pointer"
+          htmlFor="hosted-data-export-acknowledge"
+        >
+          This export may contain sensitive health data and private notes.
+        </label>
+      </div>
+      <div className="flex flex-col gap-2">
+        <Button
+          className="w-full"
+          disabled={!acknowledgedSensitiveDownload || pending}
+          onClick={onConfirm}
+          size="xl"
+          type="button"
+        >
+          <Download data-icon="inline-start" />
+          {pending ? "Preparing..." : "Download my data"}
+        </Button>
+        <Button
+          className="w-full"
+          disabled={pending}
+          onClick={onCancel}
+          size="xl"
+          type="button"
+          variant="ghost"
+        >
+          Cancel
+        </Button>
+      </div>
+    </>
   );
 }
 
@@ -507,6 +554,18 @@ export function hasIncompleteHostedAccountDeletionCleanup(
     || !result.cloudflare.deleted;
 }
 
+export function formatVaultExportSuccess(result: {
+  deviceSyncImportPending: boolean;
+  freshness: "fresh" | "stale";
+  refreshPending: boolean;
+}): string {
+  return result.freshness !== "fresh"
+    || result.refreshPending
+    || result.deviceSyncImportPending
+    ? "Your latest retained data downloaded. Changes Murph had not processed before you withdrew consent may be absent. Keep the file somewhere private and secure."
+    : "Your data export downloaded. Keep the file somewhere private and secure.";
+}
+
 function buildVaultExportFilename(generatedAt: string): string {
   const safeTimestamp = sanitizeFilenameSegment(generatedAt);
   return safeTimestamp
@@ -527,6 +586,10 @@ function formatVaultExportError(error: unknown): string {
     return "Your data is still being prepared. Try the export again in a moment.";
   }
 
+  if (/retained dashboard export/iu.test(error.message)) {
+    return error.message;
+  }
+
   if (/HTTP 401/u.test(error.message)) {
     return "You've been signed out. Refresh the page and sign in again.";
   }
@@ -541,7 +604,7 @@ function formatVaultExportError(error: unknown): string {
 
   const normalizedMessage = normalizeBrowserVaultError(error);
   return normalizedMessage === "Your dashboard data is not available right now."
-    ? "Your export isn't ready yet. Try again once your dashboard finishes loading."
+    ? "Murph could not retrieve your retained export right now. Try again later."
     : normalizedMessage;
 }
 

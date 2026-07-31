@@ -116,7 +116,6 @@ const mocks = vi.hoisted(() => ({
       props.usageActivityDetail,
     )),
   HostedDataPrivacySettings: vi.fn((props: {
-    allowLatestAvailableExport?: boolean;
     authenticated: boolean;
   }) =>
     React.createElement("div", null, `Hosted data privacy settings ${String(props.authenticated)}`)),
@@ -983,12 +982,25 @@ test("SettingsPage reads the app session and persisted account settings into the
       secureApprovalStatus: { status: "configured" },
     }), undefined);
     expect(mocks.HostedDataPrivacySettings).toHaveBeenCalledWith(expect.objectContaining({
-      allowLatestAvailableExport: false,
       authenticated: true,
     }), undefined);
     expect(mocks.HostedHealthDataConsentSettings).toHaveBeenCalledWith({
       authenticated: true,
       initialStatus: GRANTED_HEALTH_DATA_CONSENT_STATUS,
+    }, undefined);
+
+    mocks.HostedDataPrivacySettings.mockClear();
+    mocks.HostedHealthDataConsentSettings.mockClear();
+    mocks.readHostedConsentStatus.mockRejectedValueOnce(new Error("consent read unavailable"));
+    renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
+
+    expect(mocks.HostedHealthDataConsentSettings).toHaveBeenCalledWith({
+      authenticated: true,
+      initialStatus: null,
+    }, undefined);
+    expect(mocks.HostedDataPrivacySettings).toHaveBeenCalledWith({
+      authenticated: true,
+      authorizationEnabled: true,
     }, undefined);
   } finally {
     if (originalPrivyAppId === undefined) {

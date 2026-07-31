@@ -127,6 +127,7 @@ vi.mock("@/src/components/ui/label", () => ({
 }));
 
 import {
+  formatVaultExportSuccess,
   hasIncompleteHostedAccountDeletionCleanup,
   HostedDataPrivacySettings,
 } from "@/src/components/settings/hosted-data-privacy-settings";
@@ -235,6 +236,20 @@ describe("HostedDataPrivacySettings", () => {
       root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
     });
 
+    assert.equal(
+      container.querySelector("#hosted-data-export-title")?.textContent,
+      "Export your data",
+    );
+    assert.match(
+      container.querySelector("#hosted-data-export-description")?.textContent ?? "",
+      /latest dashboard data Murph has retained/u,
+    );
+    assert.equal(
+      container.querySelector('[aria-labelledby="hosted-data-export-title"]')
+        ?.getAttribute("aria-describedby"),
+      "hosted-data-export-description",
+    );
+
     const button = findButton(container, "Download my data");
     assert.equal(button.disabled, true);
 
@@ -318,7 +333,7 @@ describe("HostedDataPrivacySettings", () => {
     ]);
   });
 
-  test("does not download the vault when the replica is stale or a refresh is still pending", async () => {
+  test("accepts the route-authorized latest retained replica without a page consent projection", async () => {
     mockHostedVaultExportFlowState();
     mocks.loadBrowserVaultReplica.mockResolvedValueOnce({
       client: {
@@ -368,65 +383,15 @@ describe("HostedDataPrivacySettings", () => {
     await clickButton(container, "Download my data", window);
 
     expect(mocks.loadBrowserVaultReplica).toHaveBeenCalledTimes(1);
-    expect(createObjectURL).not.toHaveBeenCalled();
-    expect(clickDownloadLink).not.toHaveBeenCalled();
-  });
-
-  test("downloads the latest available replica after consent withdrawal", async () => {
-    mockHostedVaultExportFlowState();
-    mocks.loadBrowserVaultReplica.mockResolvedValueOnce({
-      client: {
-        replica: createBrowserVaultReplicaForTest(),
-      },
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    expect(clickDownloadLink).toHaveBeenCalledTimes(1);
+    expect(formatVaultExportSuccess({
       deviceSyncImportPending: true,
       freshness: "stale",
       refreshPending: true,
-      replicaRef: {
-        dataVersion: "d".repeat(64),
-      },
-      state: "ready",
-    });
-
-    const { document, window } = loadLinkedom().parseHTML(
-      "<html><body><div id='root'></div></body></html>",
+    })).toContain(
+      "Changes Murph had not processed before you withdrew consent may be absent.",
     );
-    installGlobals(window, document);
-    const createObjectURL = vi.fn(() => "blob:vault-export");
-    const revokeObjectURL = vi.fn();
-    Object.defineProperty(window, "URL", {
-      configurable: true,
-      value: {
-        createObjectURL,
-        revokeObjectURL,
-      },
-    });
-    const clickDownloadLink = vi.fn();
-    Object.defineProperty(window.HTMLElement.prototype, "click", {
-      configurable: true,
-      value: clickDownloadLink,
-    });
-    const container = document.getElementById("root");
-    assert.ok(container);
-
-    const root: Root = createRoot(container);
-    cleanupRender = async () => {
-      await act(async () => {
-        root.unmount();
-      });
-    };
-
-    await act(async () => {
-      root.render(createElement(HostedDataPrivacySettings, {
-        allowLatestAvailableExport: true,
-        authenticated: true,
-      }));
-    });
-
-    await clickButton(container, "Download my data", window);
-
-    expect(mocks.loadBrowserVaultReplica).toHaveBeenCalledTimes(1);
-    expect(createObjectURL).toHaveBeenCalledTimes(1);
-    expect(clickDownloadLink).toHaveBeenCalledTimes(1);
   });
 
   test("sends the typed deletion confirmation phrase when the delete flow is submitted", async () => {

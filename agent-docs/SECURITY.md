@@ -12,9 +12,13 @@ Last verified: 2026-07-30
   `launch.health-data = revoked` grant. A missing legacy grant is not
   withdrawal. Write revocation before cleanup, and recheck it independently at
   AI, message, runtime-usage, health-source connection, webhook, scheduled
-  sync, and companion-processing boundaries. Cleanup failure must never restore
-  authority. Keep Settings, export, and deletion available without waking the
-  paused runtime; only renewed consent may restore processing.
+  sync, and companion-processing boundaries. The withdrawal response must wait
+  for the per-user Cloudflare execution barrier to serialize behind earlier
+  ensures, re-read the Web-owned grant, clear its write fence, and stop the
+  runner. Every later ensure re-reads the grant; renewal waits behind the stop
+  before granting. Cleanup failure must never restore authority. Keep Settings,
+  export, and deletion available without waking the paused runtime; only
+  renewed consent may restore processing.
 - Treat suspected breaches, unauthorized access, unauthorized disclosures, vendor incidents, and accidental tracking disclosures involving identifiable health data as FTC HBNR triage events; use `agent-docs/compliance/ftc-hbnr-incident-plan.md` before deciding that notice is not required.
 - Do not add third-party advertising pixels, retargeting SDKs, behavioral ad attribution, customer-list matching, tag-manager destinations, or analytics destinations that receive health data or health-context metadata; use `agent-docs/compliance/health-data-tracking-and-ads-rule.md` for any telemetry or marketing-tool review.
 - Hosted Web must keep the global `Referrer-Policy` at `strict-origin` or

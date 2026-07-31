@@ -1,12 +1,13 @@
 import "server-only";
 
 import type { PrismaClient } from "@prisma/client";
+import type { CloudflareHostedControlClient } from "@murphai/cloudflare-hosted-control/client";
 
 import { revokeAllMealPhotoCaptureEnrollmentsForMember } from "../device-sync/meal-photo-capture";
 import { disconnectAllHostedDeviceSyncConnectionsForUser } from "../device-sync/public-ingress-service";
+import { readHostedExecutionControlClientIfConfigured } from "../hosted-execution/control";
 import { formatHostedExecutionSafeLogErrorDetails } from "../hosted-execution/logging";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
-import { terminateHostedUserRuntimeWorkflowBestEffort } from "../hosted-orchestration/workflow-termination";
 import {
   HOSTED_HEALTH_DATA_CONSENT_SCOPE,
   readHostedConsentStatus,
@@ -52,23 +53,6 @@ export async function cleanupWithdrawnHostedHealthDataConsent(input: {
   prisma: PrismaClient;
   request: Request;
 }): Promise<void> {
-  let consentStillRevoked = false;
-  await runWithdrawalCleanup("consent state", async () => {
-    consentStillRevoked = await readHostedHealthDataConsentState({
-      memberId: input.memberId,
-      prisma: input.prisma,
-    }) === "revoked";
-  });
-  if (!consentStillRevoked) {
-    return;
-  }
-
-  // Stop in-flight processing first. Provider cleanup is intentionally
-  // best-effort and cannot change the already committed withdrawal result.
-  await terminateHostedUserRuntimeWorkflowBestEffort({
-    reason: "health-data-consent-withdrawn",
-    userId: input.memberId,
-  });
   await runWithdrawalCleanup("device connections", async () => {
     await disconnectAllHostedDeviceSyncConnectionsForUser({
       request: input.request,
@@ -81,6 +65,40 @@ export async function cleanupWithdrawnHostedHealthDataConsent(input: {
       prisma: input.prisma,
     });
   });
+}
+
+export async function reconcileHostedHealthDataRuntimeConsent(input: {
+  client?: Pick<CloudflareHostedControlClient, "reconcileRuntimeHealthDataConsent"> | null;
+  memberId: string;
+}) {
+  const client = input.client === undefined
+    ? readHostedExecutionControlClientIfConfigured()
+    : input.client;
+  if (!client) {
+    throw hostedOnboardingError({
+      code: "HOSTED_HEALTH_DATA_RUNTIME_CONTROL_NOT_CONFIGURED",
+      httpStatus: 503,
+      message: "Murph could not confirm the health data processing state. Try again.",
+      retryable: true,
+    });
+  }
+
+  try {
+    return await client.reconcileRuntimeHealthDataConsent(input.memberId);
+  } catch (error) {
+    console.error("Hosted health-data runtime consent reconciliation failed.", {
+      ...formatHostedExecutionSafeLogErrorDetails(error, {
+        code: "HOSTED_HEALTH_DATA_RUNTIME_CONSENT_RECONCILIATION_FAILED",
+      }),
+      operationMessage: "Hosted health-data runtime consent reconciliation failed.",
+    });
+    throw hostedOnboardingError({
+      code: "HOSTED_HEALTH_DATA_RUNTIME_CONSENT_RECONCILIATION_FAILED",
+      httpStatus: 503,
+      message: "Murph could not confirm the health data processing state. Try again.",
+      retryable: true,
+    });
+  }
 }
 
 async function runWithdrawalCleanup(

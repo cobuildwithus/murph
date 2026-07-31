@@ -102,25 +102,37 @@ work. An explicitly revoked exact message sender or shared-data grantor is
 excluded even when another group participant keeps the synthetic room runtime
 active.
 
-The route returns once revocation commits and schedules cleanup after the
-response. Cleanup terminates the member runtime first, then best-effort
-disconnects wearable sources and revokes active meal-photo enrollments. It
-re-checks the durable grant so delayed cleanup cannot undo renewed consent.
-Cleanup failure does not restore consent or resume processing; repeating
-withdrawal retries cleanup without appending another consent event. A missing
-legacy grant is a distinct state and cannot be turned into an explicit
-withdrawal by the withdrawal endpoint.
+After revocation commits, the route synchronously calls the Cloudflare
+per-user runner's health-data consent barrier. That barrier serializes with
+every runtime ensure, re-reads the Web-owned grant through a signed callback,
+clears the active write fence, and destroys the runner container before a
+revoked result can be acknowledged. Every later ensure performs the same
+current-grant read before starting or waking work. Withdrawal returns only
+after that stop succeeds.
+
+Provider cleanup remains separate and best effort after the response: the
+device-connection and meal-photo owners each re-read consent at their own
+mutation boundary so delayed cleanup cannot undo renewed consent. Cleanup
+failure does not restore consent or resume processing; repeating withdrawal
+retries cleanup without appending another consent event. A missing legacy grant
+is a distinct state and cannot be turned into an explicit withdrawal by the
+withdrawal endpoint.
 
 Withdrawal does not delete the member account, existing data, or subscription.
 Settings, account export, and account deletion remain available. Export uses
 the latest retained vault replica without asking the paused runtime to refresh
-it, even when that replica is older or marked dirty.
+it, even when that replica is older or marked dirty. The export route owns that
+authoritative decision; a stale Settings-page consent projection cannot reject
+a route-authorized retained replica. Copy must describe the artifact as the
+latest retained data and disclose that unprocessed changes may be absent.
 
 `Use Murph again` presents the existing health-data consent documents and
 records a new grant through the ordinary acceptance route. Processing authority
-returns only after that grant is durable. Provider credentials revoked during
-cleanup are not recreated automatically; the member reconnects those sources
-through the normal explicit source flow.
+returns only after that grant is durable. Renewal first waits behind any earlier
+Cloudflare stop barrier, commits the grant, and signals the existing Temporal
+workflow to re-check processing. Provider credentials revoked during cleanup
+are not recreated automatically; Settings links to the normal source-management
+flow so the member can review or reconnect them.
 
 ## Document updates and existing members
 

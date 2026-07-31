@@ -1217,9 +1217,18 @@ client-supplied platform labels are not audit authority.
 10. Hosted health-data processing authority is the current
 `hosted_consent_grant` row for `launch.health-data`. Only an explicit
 `revoked` row pauses processing; an absent legacy row is not withdrawal.
-Settings writes revocation before best-effort source, meal-photo, and runtime
-cleanup, so AI admission, message append, runtime usage, source connection,
+Settings writes revocation before the required runtime barrier and before
+best-effort source and meal-photo cleanup, so AI admission, message append,
+runtime usage, source connection,
 webhook, scheduled-sync, and companion boundaries fail closed independently.
+Before withdrawal succeeds, Web invokes a Vercel OIDC-authenticated Cloudflare
+control route whose per-user Durable Object operation serializes with every
+runtime ensure, re-reads the Web-owned grant through the signed callback, clears
+the execution write fence, and destroys the runner container. Every later
+ensure performs the same grant read before starting or waking work. Renewal
+waits behind that stop before committing its new grant, then signals the
+existing Temporal workflow. Cloudflare persists no consent projection or
+second product authority.
 Withdrawal retains the account, subscription, and stored data. Export reads the
 latest available retained vault replica without waking the paused runtime.
 Renewal reuses the existing consent documents and grant owner; disconnected

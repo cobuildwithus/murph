@@ -3,10 +3,12 @@
 import { useSearchParams } from "next/navigation";
 
 import {
+  HostedHealthDataConsentControl,
   HostedHealthDataConsentSettings,
   HostedHealthDataResumeConsent,
   HostedHealthDataWithdrawalConfirmation,
 } from "@/src/components/settings/hosted-health-data-consent-settings";
+import { HostedLaunchConsentPrompt } from "@/src/components/legal/hosted-legal-consent-card";
 import type {
   HostedConsentDocumentSnapshot,
   HostedConsentGrantSnapshot,
@@ -82,6 +84,24 @@ export function HealthDataConsentControlStudy() {
       <ConsentStateFrame label="Status unavailable">
         <HostedHealthDataConsentSettings authenticated initialStatus={null} />
       </ConsentStateFrame>
+      <ConsentStateFrame label="Checking status">
+        <HostedHealthDataConsentControl
+          errorMessage={null}
+          onAction={() => undefined}
+          pending={false}
+          presentation="unavailable"
+          statusPending
+        />
+      </ConsentStateFrame>
+      <ConsentStateFrame label="Status retry failed">
+        <HostedHealthDataConsentControl
+          errorMessage="Status is still unavailable. Try again."
+          onAction={() => undefined}
+          pending={false}
+          presentation="unavailable"
+          statusPending={false}
+        />
+      </ConsentStateFrame>
     </div>
   );
 }
@@ -91,7 +111,8 @@ export function HealthDataConsentWithdrawalFlowStudy() {
   const showWithdrawalError = preview === "health-data-withdrawal-error";
   const showWithdrawal =
     preview === "health-data-withdrawal" || showWithdrawalError;
-  const showResume = preview === "health-data-resume";
+  const showResumePending = preview === "health-data-resume-pending";
+  const showResume = preview === "health-data-resume" || showResumePending;
   const previewStatus = showWithdrawal
     ? DESIGN_ACTIVE_HEALTH_DATA_CONSENT_STATUS
     : DESIGN_WITHDRAWN_HEALTH_DATA_CONSENT_STATUS;
@@ -108,9 +129,11 @@ export function HealthDataConsentWithdrawalFlowStudy() {
         </p>
         <p className="mt-2 text-sm leading-6 text-muted-foreground">
           Use <span className="font-mono">study=health-data-withdrawal</span>,{" "}
-          <span className="font-mono">study=health-data-withdrawal-error</span>,
-          or <span className="font-mono">study=health-data-resume</span> to
-          preview each state.
+          <span className="font-mono">study=health-data-withdrawal-error</span>,{" "}
+          <span className="font-mono">study=health-data-resume</span>, or{" "}
+          <span className="font-mono">study=health-data-resume-pending</span> to
+          preview each dialog state. Status retry states appear in the
+          components study.
         </p>
       </div>
       <HostedHealthDataConsentSettings
@@ -129,6 +152,14 @@ export function HealthDataConsentWithdrawalFlowStudy() {
               onCancel={() => undefined}
               onConfirm={() => undefined}
               pending={false}
+            />
+          ) : showResumePending ? (
+            <HostedLaunchConsentPrompt
+              documents={DESIGN_HEALTH_DOCUMENTS}
+              mode="compact"
+              onContinue={() => undefined}
+              pending
+              variant="health-data"
             />
           ) : (
             <HostedHealthDataResumeConsent

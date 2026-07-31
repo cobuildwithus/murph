@@ -359,7 +359,7 @@ export class RunnerStateStore {
     };
   }
 
-  async clearWriteFenceForUserDeletion(userId: string): Promise<{
+  async clearWriteFenceForUserControl(userId: string): Promise<{
     attemptId: string | null;
     cleared: boolean;
   }> {

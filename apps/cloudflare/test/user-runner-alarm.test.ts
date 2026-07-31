@@ -13,6 +13,7 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
+  HOSTED_RUNTIME_HEALTH_DATA_ADMISSION_PATH,
   HOSTED_RUNTIME_LOG_PATH,
   HOSTED_RUNTIME_OWNER_RELEASED_PATH,
   HOSTED_RUNTIME_STATUS_PATH,
@@ -120,6 +121,123 @@ describe("HostedUserRunner execution coordination", () => {
     vi.clearAllMocks();
     mocks.emitHostedExecutionStructuredLog.mockReset();
     mocks.fetchHostedExecutionWebControlPlaneResponse.mockReset();
+  });
+
+  it("denies runtime processing when the authoritative consent read is revoked", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureReadyForProcessing = vi.fn();
+    const { runner, sql } = createRunnerHarness({
+      ensureReadyForProcessing,
+      readHealthDataConsentState: () => "revoked",
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "revoked-consent-attempt",
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:01:00.000Z",
+    });
+    expect(ensureReadyForProcessing).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
+  });
+
+  it("serializes withdrawal behind an admitted ensure and stops the stale start before acknowledging", async () => {
+    let consentState: "granted" | "revoked" = "granted";
+    let admissionReads = 0;
+    const firstAdmissionStarted = createDeferred<void>();
+    const releaseFirstAdmission = createDeferred<void>();
+    const destroyInstance = vi.fn(async () => {});
+    const { runner, sql } = createRunnerHarness({
+      destroyInstance,
+      readHealthDataConsentState: async () => {
+        const capturedState = consentState;
+        admissionReads += 1;
+        if (admissionReads === 1) {
+          firstAdmissionStarted.resolve(undefined);
+          await releaseFirstAdmission.promise;
+        }
+        return capturedState;
+      },
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    const ensure = runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "stale-admission-attempt",
+      userId: TEST_USER_ID,
+    });
+    await firstAdmissionStarted.promise;
+    consentState = "revoked";
+    const withdrawal = runner.reconcileRuntimeHealthDataConsentForUser(TEST_USER_ID);
+    let withdrawalSettled = false;
+    void withdrawal.finally(() => {
+      withdrawalSettled = true;
+    });
+    await Promise.resolve();
+    expect(withdrawalSettled).toBe(false);
+
+    releaseFirstAdmission.resolve(undefined);
+    await expect(ensure).resolves.toMatchObject({
+      kind: "runtime_processing_accepted",
+    });
+    await expect(withdrawal).resolves.toMatchObject({
+      activeInvocationPreempted: expect.any(Boolean),
+      consentState: "revoked",
+      processingAllowed: false,
+      runnerContainerDestroyAttempted: true,
+      runnerContainerDestroyOk: true,
+    });
+    expect(destroyInstance).toHaveBeenCalledOnce();
+    expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
+  });
+
+  it("queues renewal behind an already-observed withdrawal stop", async () => {
+    let consentState: "granted" | "revoked" = "revoked";
+    let admissionReads = 0;
+    const firstAdmissionStarted = createDeferred<void>();
+    const releaseFirstAdmission = createDeferred<void>();
+    const events: string[] = [];
+    const destroyInstance = vi.fn(async () => {
+      events.push("destroy");
+    });
+    const { runner, sql } = createRunnerHarness({
+      destroyInstance,
+      readHealthDataConsentState: async () => {
+        const capturedState = consentState;
+        admissionReads += 1;
+        if (admissionReads === 1) {
+          firstAdmissionStarted.resolve(undefined);
+          await releaseFirstAdmission.promise;
+        } else {
+          events.push("renewal-read");
+        }
+        return capturedState;
+      },
+    });
+    await runner.bindUser(TEST_USER_ID);
+    writeRuntimeFenceForTest(sql, { runnerContainerName: "runner-active" });
+
+    const withdrawal = runner.reconcileRuntimeHealthDataConsentForUser(TEST_USER_ID);
+    await firstAdmissionStarted.promise;
+    consentState = "granted";
+    const renewalBarrier = runner.reconcileRuntimeHealthDataConsentForUser(TEST_USER_ID);
+
+    releaseFirstAdmission.resolve(undefined);
+    await expect(withdrawal).resolves.toMatchObject({
+      activeInvocationPreempted: true,
+      consentState: "revoked",
+      processingAllowed: false,
+    });
+    await expect(renewalBarrier).resolves.toMatchObject({
+      activeInvocationPreempted: false,
+      consentState: "granted",
+      processingAllowed: true,
+      runnerContainerDestroyAttempted: false,
+    });
+    expect(events).toEqual(["destroy", "renewal-read"]);
+    expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
   });
 
   it("accepts one runtime-processing pass without reading status as a scheduler", async () => {
@@ -3239,16 +3357,12 @@ describe("HostedUserRunner execution coordination", () => {
       NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>
     >>;
     const firstWakeResult = createDeferred<EnsureProcessingResult>();
-    const secondWakeResult = createDeferred<EnsureProcessingResult>();
     const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
     let ensureCallIndex = 0;
     const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
       async () => {
-        const deferred = ensureCallIndex === 0
-          ? firstWakeResult
-          : secondWakeResult;
         ensureCallIndex += 1;
-        return await deferred.promise;
+        return await firstWakeResult.promise;
       },
     );
     const { invoke, runner, sql } = createRunnerHarness({
@@ -3273,7 +3387,8 @@ describe("HostedUserRunner execution coordination", () => {
       orchestrationAttemptId: "test-orchestration-attempt-converging-replacement",
       userId: TEST_USER_ID,
     });
-    await vi.waitFor(() => expect(ensureProcessing).toHaveBeenCalledTimes(2));
+    await Promise.resolve();
+    expect(ensureProcessing).toHaveBeenCalledOnce();
 
     vi.setSystemTime(new Date("2026-04-27T00:00:10.500Z"));
     firstWakeResult.resolve({
@@ -3286,10 +3401,6 @@ describe("HostedUserRunner execution coordination", () => {
     });
     expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
 
-    secondWakeResult.resolve({
-      kind: "start-required",
-      reason: "no-active-child",
-    });
     await expect(convergingReplacement).resolves.toMatchObject({
       action: "started",
       kind: "runtime_processing_accepted",
@@ -3315,7 +3426,7 @@ describe("HostedUserRunner execution coordination", () => {
     );
   });
 
-  it("converges on the current fence when a replacement CAS loses to another replacement", async () => {
+  it("serializes replacement attempts behind the winning current fence", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     type EnsureProcessingResult = Awaited<ReturnType<
@@ -3370,7 +3481,8 @@ describe("HostedUserRunner execution coordination", () => {
       orchestrationAttemptId: "test-orchestration-attempt-current-fence-convergence",
       userId: TEST_USER_ID,
     });
-    await vi.waitFor(() => expect(ensureProcessing).toHaveBeenCalledTimes(2));
+    await Promise.resolve();
+    expect(ensureProcessing).toHaveBeenCalledOnce();
 
     firstWakeResult.resolve({
       kind: "start-required",
@@ -3383,6 +3495,7 @@ describe("HostedUserRunner execution coordination", () => {
       runtimeAttemptId: expect.not.stringMatching(replacedToken.attemptId),
     });
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(ensureProcessing).toHaveBeenCalledTimes(2));
 
     vi.setSystemTime(new Date(Date.parse(FIXED_NOW) + 250));
     secondWakeResult.resolve({
@@ -3390,41 +3503,11 @@ describe("HostedUserRunner execution coordination", () => {
       reason: "no-active-child",
     });
     await expect(convergingReplacement).resolves.toMatchObject({
-      action: "already_running",
-      kind: "runtime_processing_accepted",
-      runtimeAttemptId: winner.kind === "runtime_processing_accepted"
-        ? winner.runtimeAttemptId
-        : null,
+      kind: "retry_later",
+      retryAt: expect.any(String),
     });
 
-    expect(ensureProcessing).toHaveBeenCalledTimes(3);
-    const convergedWakeOrchestration =
-      ensureProcessing.mock.calls[2]?.[0].activeRuntime?.orchestration;
-    expect(convergedWakeOrchestration).toMatchObject({
-      activeFenceObservedAtEpochMs: Date.parse(FIXED_NOW) + 250,
-      activeFenceTargetWasPriorVersion: false,
-      activeWakeStartedAtEpochMs: Date.parse(FIXED_NOW) + 250,
-      triggeredByWebDirect: true,
-      userRunnerEnsureStartedAtEpochMs: expect.any(Number),
-    });
-    expect(convergedWakeOrchestration).not.toHaveProperty("activeWakeAccepted");
-    expect(convergedWakeOrchestration).not.toHaveProperty("activeWakeElapsedMs");
-    expect(convergedWakeOrchestration).not.toHaveProperty(
-      "activeWakeFinishedAtEpochMs",
-    );
-    expect(convergedWakeOrchestration).not.toHaveProperty(
-      "activeWakeFoundNoActiveChild",
-    );
-    expect(convergedWakeOrchestration).not.toHaveProperty(
-      "replacementFenceClearStartedAtEpochMs",
-    );
-    expect(convergedWakeOrchestration).not.toHaveProperty("replacedStaleFence");
-    expect(convergedWakeOrchestration).not.toHaveProperty(
-      "replacementFenceClearedAtEpochMs",
-    );
-    expect(convergedWakeOrchestration).not.toHaveProperty(
-      "replacementFenceClearElapsedMs",
-    );
+    expect(ensureProcessing).toHaveBeenCalledTimes(2);
     expect(invoke).toHaveBeenCalledOnce();
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: winner.kind === "runtime_processing_accepted"
@@ -5174,6 +5257,11 @@ function createRunnerHarness(input: {
   invocationResults?: Array<Error | HostedWorkspaceInvocationResult | Promise<HostedWorkspaceInvocationResult>>;
   mailboxLag?: HostedRuntimeWebStatusResponse["mailboxLag"];
   onCryptoContextRead?: () => Promise<void> | void;
+  readHealthDataConsentState?: () =>
+    | "granted"
+    | "missing"
+    | "revoked"
+    | Promise<"granted" | "missing" | "revoked">;
   onOwnerReleased?: (input: { timeoutMs: number }) => Promise<void> | void;
   onStatusRead?: () => Promise<void> | void;
   onStorageList?: (input: { prefix?: string }) => Promise<void> | void;
@@ -5304,6 +5392,7 @@ function createRunnerHarness(input: {
   installWebControlResponses(input.workspace ?? createWorkspaceState(), {
     readMailboxLag: () => input.mailboxLag ?? [createMailboxLag()],
     onCryptoContextRead: input.onCryptoContextRead,
+    readHealthDataConsentState: input.readHealthDataConsentState,
     onStatusRead: input.onStatusRead,
     onOwnerReleased: input.onOwnerReleased,
     onWorkspaceRead: input.onWorkspaceRead,
@@ -5508,6 +5597,11 @@ function installWebControlResponses(
   workspace: HostedWorkspaceState | null,
   hooks: {
     onCryptoContextRead?: () => Promise<void> | void;
+    readHealthDataConsentState?: () =>
+      | "granted"
+      | "missing"
+      | "revoked"
+      | Promise<"granted" | "missing" | "revoked">;
     onWorkspaceRead?: (input: { timeoutMs: number }) => Promise<void> | void;
     onOwnerReleased?: (input: { timeoutMs: number }) => Promise<void> | void;
     onStatusRead?: () => Promise<void> | void;
@@ -5527,6 +5621,15 @@ function installWebControlResponses(
         return jsonResponse({
           fetchedAt: FIXED_NOW,
           workspace,
+        });
+      }
+
+      if (input.path === HOSTED_RUNTIME_HEALTH_DATA_ADMISSION_PATH) {
+        const consentState = await hooks.readHealthDataConsentState?.() ?? "granted";
+        return jsonResponse({
+          consentState,
+          processingAllowed: consentState !== "revoked",
+          userId: input.boundUserId,
         });
       }
 
