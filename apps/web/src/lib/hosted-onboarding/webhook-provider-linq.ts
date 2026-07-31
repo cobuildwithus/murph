@@ -1251,6 +1251,72 @@ export async function planHostedOnboardingLinqWebhook(input: {
     }
   }
 
+  const groupJoinContext = participantPhoneNumber
+    ? await readHostedGroupJoinOutreachReplyContextTx({
+        linqChatId: summary.chatId,
+        participantMemberId: existingMember?.id ?? null,
+        participantPhoneNumber,
+        recipientPhoneNumber,
+        replyToMessageId:
+          messageEvent.data.message.reply_to?.message_id ?? null,
+        sourceEventId: input.event.event_id,
+        tx: input.prisma,
+      })
+    : null;
+  const groupJoinMemberHomeRoute = existingMember && groupJoinContext
+    ? await readHostedMemberRoutingState({
+        memberId: existingMember.id,
+        prisma: input.prisma,
+      })
+    : null;
+  const groupJoinMemberHasHomeRoute = Boolean(
+    groupJoinMemberHomeRoute?.linqChatId
+      || groupJoinMemberHomeRoute?.linqRecipientPhone,
+  );
+
+  // An accepted opener is a narrow, reply-gated authority for this exact chat,
+  // participant, and group. Honor it before ordinary billing and home-route
+  // branches when the member already has a durable home route; route-free
+  // recipients retain the existing first-contact binding and recovery path.
+  if (
+    existingMember
+    && groupJoinContext
+    && groupJoinMemberHasHomeRoute
+  ) {
+    const dailyState = await incrementHostedLinqInboundDailyState({
+      memberId: existingMember.id,
+      occurredAt,
+      prisma: input.prisma,
+    });
+    const invite = await issueHostedInviteTx({
+      channel: "linq",
+      memberId: existingMember.id,
+      prisma: input.prisma,
+    });
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildSignupLinkResponse({
+        chatId: summary.chatId,
+        groupJoinCode: groupJoinContext.joinCode,
+        groupJoinOutreachId: groupJoinContext.outreachId,
+        inviteCode: invite.inviteCode,
+        inviteId: invite.id,
+        memberId: existingMember.id,
+        messageId: summary.messageId,
+        occurredAt,
+        service: messageEvent.data.service ?? null,
+        sourceEventId: input.event.event_id,
+        threadIsDirect: resolveHostedLinqThreadIsDirect(messageEvent),
+      }),
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        dailyInboundCount: dailyState.inboundCount,
+        existingMemberActive: Boolean(existingMemberEffectiveActive),
+        existingMemberMatch,
+        reason: "sent-signup-link",
+        routeStage: "routed-member-group-join-link",
+      }),
+    );
+  }
+
   // A member who already owns billing can never be onboarded as a first contact
   // on their own bound home chat: the pending-bind write would hit the home-route
   // race guard and 503 on every retry, forever. Answer from their access decision
@@ -1300,19 +1366,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
 
     }
   }
-
-  const groupJoinContext = participantPhoneNumber
-    ? await readHostedGroupJoinOutreachReplyContextTx({
-        linqChatId: summary.chatId,
-        participantMemberId: existingMember?.id ?? null,
-        participantPhoneNumber,
-        recipientPhoneNumber,
-        replyToMessageId:
-          messageEvent.data.message.reply_to?.message_id ?? null,
-        sourceEventId: input.event.event_id,
-        tx: input.prisma,
-      })
-    : null;
 
   if (existingMember && existingMemberEffectiveActive) {
     if (!groupJoinContext) {

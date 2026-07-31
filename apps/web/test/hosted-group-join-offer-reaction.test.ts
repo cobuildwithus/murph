@@ -331,6 +331,78 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     });
   });
 
+  it.each([
+    ["active", { active: true, suspendedAt: null, targetMembership: false }],
+    [
+      "suspended",
+      {
+        active: false,
+        suspendedAt: new Date("2026-03-20T00:00:00.000Z"),
+        targetMembership: false,
+      },
+    ],
+    [
+      "already in the target group",
+      { active: false, suspendedAt: null, targetMembership: true },
+    ],
+  ])(
+    "revokes exact pending outreach while the member is %s without creating a tombstone",
+    async (_state, options) => {
+      mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValueOnce({
+        core: {
+          id: "member_reactor",
+          suspendedAt: options.suspendedAt,
+        },
+        identity: {
+          phoneNumberVerifiedAt: new Date("2026-03-20T00:00:00.000Z"),
+        },
+      });
+      mocks.readActiveHostedMemberAccess.mockResolvedValue(options.active);
+      mocks.revokeHostedGroupJoinOutreachForRemovedReactionTx.mockResolvedValueOnce({
+        kind: "revoked",
+      });
+      const prisma = createPrismaStub({
+        memberSuspendedAt: options.suspendedAt,
+        targetMembership: options.targetMembership,
+      });
+
+      await expect(handleHostedGroupJoinOfferReaction({
+        event: parseReactionEvent({
+          eventType: "reaction.removed",
+          reactionType: "like",
+        }),
+        prisma,
+      })).resolves.toEqual({ reason: "outreach_revoked", status: "accepted" });
+
+      expect(mocks.revokeHostedGroupJoinOutreachForRemovedReactionTx)
+        .toHaveBeenCalledWith({
+          allowMissingRowTombstone: false,
+          now: new Date("2026-03-26T12:01:00.000Z"),
+          offerId: "hgrpjo_opaque",
+          participantPhoneNumber: "+15551234567",
+          tx: expect.anything(),
+        });
+    },
+  );
+
+  it("keeps an active member with no pending outreach tombstone-free", async () => {
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent({
+        eventType: "reaction.removed",
+        reactionType: "like",
+      }),
+      prisma,
+    })).resolves.toEqual({ reason: "reaction_removed", status: "ignored" });
+
+    expect(mocks.revokeHostedGroupJoinOutreachForRemovedReactionTx)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        allowMissingRowTombstone: false,
+      }));
+  });
+
   it("does not treat a removed Like as disclosure consent or a legacy join", async () => {
     const prisma = createPrismaStub();
 

@@ -179,6 +179,12 @@ import {
   drainOneHostedGroupJoinOutreach,
 } from "@/src/lib/hosted-groups/group-join-outreach-drain";
 import {
+  handleHostedGroupJoinOfferReaction,
+} from "@/src/lib/hosted-groups/join-offer-reaction";
+import {
+  readHostedGroupJoinOfferTargetTx,
+} from "@/src/lib/hosted-groups/group-store";
+import {
   HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE,
   HOSTED_GROUP_JOIN_OUTREACH_TEMPLATE,
   acquireHostedGroupJoinOutreachDrainLockTx,
@@ -187,6 +193,8 @@ import {
   readHostedGroupJoinOutreachReplyContextTx,
 } from "@/src/lib/hosted-groups/group-join-outreach-store";
 import {
+  createHostedExternalThreadIdentityLookupKey,
+  createHostedExternalThreadIdentityLookupKeyReadCandidates,
   createHostedLinqChatLookupKey,
   createHostedLinqChatLookupKeyReadCandidates,
   createHostedLinqMessageLookupKey,
@@ -200,6 +208,7 @@ import {
   buildHostedLinqInviteSignupEffectId,
 } from "@/src/lib/hosted-onboarding/linq-invite-signup-effect-id";
 import {
+  upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberHomeLinqRecipientPhoneTx,
 } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import {
@@ -216,6 +225,7 @@ import {
 } from "@/src/lib/hosted-onboarding/member-private-codecs";
 import {
   acquireHostedLinqParticipantPhoneLockTx,
+  createHostedLinqParticipantContact,
 } from "@/src/lib/hosted-onboarding/linq-participant-contact";
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
@@ -233,6 +243,7 @@ import {
 } from "@/src/lib/hosted-onboarding/webhook-service";
 import { deleteHostedAccountData } from "@/src/lib/hosted-privacy/account-data-service";
 import { createPrismaClient } from "@/src/lib/prisma";
+import { sha256Hex } from "@/src/lib/primitives";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
 const runPostgresProof =
@@ -1371,6 +1382,263 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
+    it("gives direct join ownership when activation commits before reaction admission", async () => {
+      const fixture = await createReactionAdmissionFixture();
+      const event = buildReactionAdmissionEvent({
+        eventId: `event-reaction-activation-first-${randomUUID()}`,
+        eventType: "reaction.added",
+        fixture,
+      });
+      await ingestReactionAdmissionEvent({ event, fixture });
+      await assertReactionAdmissionOfferTarget({ event, fixture });
+      let releaseActivation = () => {};
+      const activationMayCommit = new Promise<void>((resolve) => {
+        releaseActivation = resolve;
+      });
+      let reportActivationReady = () => {};
+      const activationReady = new Promise<void>((resolve) => {
+        reportActivationReady = resolve;
+      });
+      let activationPromise: Promise<unknown> | null = null;
+      let reactionPromise:
+        ReturnType<typeof handleHostedGroupJoinOfferReaction> | null = null;
+
+      try {
+        activationPromise = fixture.contenderPrisma.$transaction(async (tx) => {
+          await tx.hostedMember.update({
+            data: { billingStatus: HostedBillingStatus.active },
+            where: { id: fixture.participantMemberId },
+          });
+          reportActivationReady();
+          await activationMayCommit;
+        });
+        await activationReady;
+
+        let reactionSettled = false;
+        reactionPromise = handleHostedGroupJoinOfferReaction({
+          event,
+          prisma: fixture.reactionPrisma,
+        }).finally(() => {
+          reactionSettled = true;
+        });
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        expect(reactionSettled).toBe(false);
+
+        releaseActivation();
+        const [, reactionResult] = await withTimeout(
+          Promise.all([activationPromise, reactionPromise]),
+          10_000,
+        );
+        expect(reactionResult).toEqual({
+          reason: "accepted",
+          status: "accepted",
+        });
+        await expect(fixture.reactionPrisma.hostedGroupMember.findUnique({
+          select: { id: true },
+          where: {
+            groupId_memberId: {
+              groupId: fixture.groupId,
+              memberId: fixture.participantMemberId,
+            },
+          },
+        })).resolves.toEqual({ id: expect.any(String) });
+        await expect(fixture.reactionPrisma.hostedGroupJoinOutreach.count({
+          where: { offerId: fixture.offerId },
+        })).resolves.toBe(0);
+        await expect(fixture.reactionPrisma.hostedLinqProviderEvent.findUnique({
+          select: { groupJoinOfferHandledAt: true },
+          where: {
+            eventId: createHostedLinqProviderEventLookupKey(event.eventId),
+          },
+        })).resolves.toEqual({
+          groupJoinOfferHandledAt: expect.any(Date),
+        });
+      } finally {
+        releaseActivation();
+        await Promise.allSettled([
+          ...(activationPromise ? [activationPromise] : []),
+          ...(reactionPromise ? [reactionPromise] : []),
+        ]);
+        await cleanupReactionAdmissionFixture(fixture);
+      }
+    });
+
+    it("gives outreach ownership when reaction admission holds the member lock first", async () => {
+      const fixture = await createReactionAdmissionFixture();
+      const event = buildReactionAdmissionEvent({
+        eventId: `event-reaction-outreach-first-${randomUUID()}`,
+        eventType: "reaction.added",
+        fixture,
+      });
+      await ingestReactionAdmissionEvent({ event, fixture });
+      await assertReactionAdmissionOfferTarget({ event, fixture });
+      let releaseDrainLock = () => {};
+      const drainLockMayRelease = new Promise<void>((resolve) => {
+        releaseDrainLock = resolve;
+      });
+      let reportDrainLockReady = () => {};
+      const drainLockReady = new Promise<void>((resolve) => {
+        reportDrainLockReady = resolve;
+      });
+      let drainLockPromise: Promise<unknown> | null = null;
+      let reactionPromise:
+        ReturnType<typeof handleHostedGroupJoinOfferReaction> | null = null;
+      let activationPromise: Promise<unknown> | null = null;
+
+      try {
+        drainLockPromise = fixture.contenderPrisma.$transaction(async (tx) => {
+          await tx.$executeRaw`
+            SELECT pg_advisory_xact_lock(
+              hashtext('hosted_group_join_outreach'),
+              hashtext(${sha256Hex(
+                `${fixture.offerId}\0${fixture.participantPhone}`,
+              )})
+            )
+          `;
+          reportDrainLockReady();
+          await drainLockMayRelease;
+        });
+        await drainLockReady;
+
+        let reactionSettled = false;
+        reactionPromise = handleHostedGroupJoinOfferReaction({
+          event,
+          prisma: fixture.reactionPrisma,
+        }).finally(() => {
+          reactionSettled = true;
+        });
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        expect(reactionSettled).toBe(false);
+
+        let activationSettled = false;
+        activationPromise = fixture.contenderPrisma.hostedMember.update({
+          data: { billingStatus: HostedBillingStatus.active },
+          where: { id: fixture.participantMemberId },
+        }).finally(() => {
+          activationSettled = true;
+        });
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        expect(activationSettled).toBe(false);
+        await expect(fixture.reactionPrisma.hostedGroupJoinOutreach.count({
+          where: { offerId: fixture.offerId },
+        })).resolves.toBe(0);
+
+        releaseDrainLock();
+        const [, reactionResult] = await withTimeout(
+          Promise.all([drainLockPromise, reactionPromise, activationPromise])
+            .then(([, result]) => [undefined, result] as const),
+          10_000,
+        );
+        expect(reactionResult).toEqual({
+          reason: "outreach_enqueued",
+          status: "accepted",
+        });
+        await expect(fixture.reactionPrisma.hostedGroupJoinOutreach.count({
+          where: { offerId: fixture.offerId },
+        })).resolves.toBe(1);
+        await expect(fixture.reactionPrisma.hostedGroupMember.count({
+          where: {
+            groupId: fixture.groupId,
+            memberId: fixture.participantMemberId,
+          },
+        })).resolves.toBe(0);
+        await expect(fixture.reactionPrisma.hostedLinqProviderEvent.findUnique({
+          select: { groupJoinOfferHandledAt: true },
+          where: {
+            eventId: createHostedLinqProviderEventLookupKey(event.eventId),
+          },
+        })).resolves.toEqual({
+          groupJoinOfferHandledAt: expect.any(Date),
+        });
+      } finally {
+        releaseDrainLock();
+        await Promise.allSettled([
+          ...(drainLockPromise ? [drainLockPromise] : []),
+          ...(reactionPromise ? [reactionPromise] : []),
+          ...(activationPromise ? [activationPromise] : []),
+        ]);
+        await cleanupReactionAdmissionFixture(fixture);
+      }
+    });
+
+    it.each([
+      ["active", { billingStatus: HostedBillingStatus.active, suspendedAt: null }],
+      [
+        "suspended",
+        {
+          billingStatus: HostedBillingStatus.not_started,
+          suspendedAt: new Date("2026-07-28T16:01:00.000Z"),
+        },
+      ],
+    ])(
+      "revokes pending outreach while the member is temporarily %s",
+      async (_state, transition) => {
+        const fixture = await createReactionAdmissionFixture();
+        const addedEvent = buildReactionAdmissionEvent({
+          eventId: `event-reaction-added-${randomUUID()}`,
+          eventType: "reaction.added",
+          fixture,
+        });
+        const removedEvent = buildReactionAdmissionEvent({
+          eventId: `event-reaction-removed-${randomUUID()}`,
+          eventType: "reaction.removed",
+          fixture,
+        });
+        await ingestReactionAdmissionEvent({ event: addedEvent, fixture });
+        providerMocks.createHostedLinqChat.mockReset();
+
+        try {
+          await expect(handleHostedGroupJoinOfferReaction({
+            event: addedEvent,
+            prisma: fixture.reactionPrisma,
+          })).resolves.toEqual({
+            reason: "outreach_enqueued",
+            status: "accepted",
+          });
+          await fixture.reactionPrisma.hostedMember.update({
+            data: transition,
+            where: { id: fixture.participantMemberId },
+          });
+          await ingestReactionAdmissionEvent({ event: removedEvent, fixture });
+
+          await expect(handleHostedGroupJoinOfferReaction({
+            event: removedEvent,
+            prisma: fixture.reactionPrisma,
+          })).resolves.toEqual({
+            reason: "outreach_revoked",
+            status: "accepted",
+          });
+          await fixture.reactionPrisma.hostedMember.update({
+            data: {
+              billingStatus: HostedBillingStatus.not_started,
+              suspendedAt: null,
+            },
+            where: { id: fixture.participantMemberId },
+          });
+
+          await expect(drainOneHostedGroupJoinOutreach({
+            now: new Date("2026-07-28T16:02:00.000Z"),
+            prisma: fixture.reactionPrisma,
+          })).resolves.toEqual({ kind: "idle" });
+          expect(providerMocks.createHostedLinqChat).not.toHaveBeenCalled();
+          await expect(fixture.reactionPrisma.hostedLinqDelivery.findFirst({
+            select: { skipReason: true, status: true },
+            where: {
+              groupJoinOutreach: { is: { offerId: fixture.offerId } },
+              source: HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE,
+              template: HOSTED_GROUP_JOIN_OUTREACH_TEMPLATE,
+            },
+          })).resolves.toEqual({
+            skipReason: "reaction_removed",
+            status: "skipped",
+          });
+        } finally {
+          providerMocks.createHostedLinqChat.mockReset();
+          await cleanupReactionAdmissionFixture(fixture);
+        }
+      },
+    );
+
     it("keeps a pre-existing inactive member on the group-aware signup reply path", async () => {
       vi.stubEnv(
         "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
@@ -1449,6 +1717,134 @@ describe.skipIf(!runPostgresProof)(
         await cleanupOpenerRaceFixture(fixture);
       }
     });
+
+    it.each([
+      ["same", true],
+      ["different", false],
+    ])(
+      "honors an accepted opener reply in the %s chat without replacing a lapsed member's home route",
+      async (_chatRelationship, openerUsesHomeChat) => {
+        vi.stubEnv(
+          "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
+          "https://join.example.test",
+        );
+        const fixture = await createOpenerRaceFixture();
+        const participantMemberId =
+          await fixture.contenderPrisma.$transaction((tx) =>
+            createPhoneBoundMemberIdentityTx({
+              phoneNumber: fixture.participantPhone,
+              phoneNumberVerifiedAt: new Date("2026-07-20T00:00:00.000Z"),
+              tx,
+            })
+          );
+        const homeChatId = `chat-existing-member-home-${randomUUID()}`;
+        const openerChatId = openerUsesHomeChat
+          ? homeChatId
+          : `chat-existing-member-opener-${randomUUID()}`;
+        const homeLinePhone = createUniqueTestPhone("+1303");
+        const participantContact = createHostedLinqParticipantContact({
+          kind: "phone",
+          value: fixture.participantPhone,
+        });
+        if (!participantContact) {
+          throw new Error("Expected a phone participant contact.");
+        }
+        await fixture.contenderPrisma.hostedMember.update({
+          data: { billingStatus: HostedBillingStatus.paused },
+          where: { id: participantMemberId },
+        });
+        await fixture.contenderPrisma.$transaction((tx) =>
+          upsertHostedMemberHomeLinqBindingTx({
+            homeLineAssignedAt: new Date("2026-07-20T00:00:00.000Z"),
+            linqChatId: homeChatId,
+            memberId: participantMemberId,
+            participantContact,
+            prisma: tx,
+            recipientPhone: homeLinePhone,
+          })
+        );
+        const homeRouteBefore = await fixture.contenderPrisma.hostedMemberRouting
+          .findUnique({
+            select: {
+              linqChatLookupKey: true,
+              linqRecipientPhoneLookupKey: true,
+            },
+            where: { memberId: participantMemberId },
+          });
+        const openerMessageId = `message-existing-member-opener-${randomUUID()}`;
+        providerMocks.createHostedLinqChat
+          .mockReset()
+          .mockResolvedValue({
+            chatId: openerChatId,
+            messageId: openerMessageId,
+          });
+
+        try {
+          await expect(drainOneHostedGroupJoinOutreach({
+            now: fixture.now,
+            prisma: fixture.drainPrisma,
+          })).resolves.toEqual({
+            kind: "sent",
+            outreachId: fixture.outreachId,
+          });
+
+          const replyEvent = buildDirectReplyEvent({
+            chatId: openerChatId,
+            eventId: `event-existing-member-home-reply-${randomUUID()}`,
+            messageId: `message-existing-member-home-reply-${randomUUID()}`,
+            occurredAt: "2026-07-27T16:00:01.000Z",
+            participantPhone: fixture.participantPhone,
+            recipientPhone: fixture.linePhone,
+            replyToMessageId: openerMessageId,
+          });
+          const plan = await fixture.contenderPrisma.$transaction((tx) =>
+            planHostedOnboardingLinqWebhook({
+              event: replyEvent,
+              firstContactAdmissionDecision: {
+                confidence: 1,
+                kind: "allow",
+                source: "deterministic",
+              },
+              prisma: tx,
+              requireFirstContactAdmission: true,
+            })
+          );
+
+          expect(plan.response).toMatchObject({
+            joinUrl: expect.stringContaining(
+              `/groups/join/${fixture.joinCode}?invite=`,
+            ),
+            reason: "sent-signup-link",
+          });
+          const [signupLinkEffect] = plan.desiredSideEffects;
+          if (
+            !signupLinkEffect
+            || signupLinkEffect.payload.template !== "invite_signup"
+          ) {
+            throw new Error("Expected the group-aware signup effect.");
+          }
+          expect(signupLinkEffect.payload).toMatchObject({
+            chatId: openerChatId,
+            groupJoinCode: fixture.joinCode,
+            groupJoinOutreachId: fixture.outreachId,
+            memberId: participantMemberId,
+          });
+          await expect(
+            fixture.contenderPrisma.hostedMemberRouting.findUnique({
+              select: {
+                linqChatLookupKey: true,
+                linqRecipientPhoneLookupKey: true,
+              },
+              where: { memberId: participantMemberId },
+            }),
+          ).resolves.toEqual(homeRouteBefore);
+        } finally {
+          providerMocks.createHostedLinqChat.mockReset();
+          vi.unstubAllEnvs();
+          await cleanupOpenerRaceFixture(fixture);
+        }
+      },
+    );
 
     it("holds an immediate reply until the opener correlation commits", async () => {
       vi.stubEnv(
@@ -3133,6 +3529,235 @@ async function cleanupOpenerRaceFixture(
   await Promise.all([
     fixture.contenderPrisma.$disconnect(),
     fixture.drainPrisma.$disconnect(),
+  ]);
+}
+
+type ReactionAdmissionFixture = {
+  contenderPrisma: PrismaClient;
+  eventLookupKeys: string[];
+  groupId: string;
+  linePhone: string;
+  linePhoneLookupKey: string;
+  offerChatId: string;
+  offerId: string;
+  offerMessageId: string;
+  ownerMemberId: string;
+  participantMemberId: string;
+  participantPhone: string;
+  reactionPrisma: PrismaClient;
+  runtimeMemberId: string;
+};
+
+async function createReactionAdmissionFixture(): Promise<ReactionAdmissionFixture> {
+  const reactionPrisma = createPrismaClient({ databaseUrl, poolMax: 2 });
+  const contenderPrisma = createPrismaClient({ databaseUrl, poolMax: 2 });
+  const now = new Date("2026-07-28T16:00:00.000Z");
+  const ownerMemberId = `hbm_reaction_owner_${randomUUID()}`;
+  const runtimeMemberId = `hbm_reaction_runtime_${randomUUID()}`;
+  const groupId = `hgrp_reaction_race_${randomUUID()}`;
+  const offerId = `hgrpjo_reaction_race_${randomUUID()}`;
+  const offerChatId = `chat-reaction-race-${randomUUID()}`;
+  const offerMessageId = `message-reaction-race-${randomUUID()}`;
+  const offerMessageLookupKey = createHostedLinqMessageLookupKey(offerMessageId);
+  const threadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
+    channel: "linq",
+    threadId: offerChatId,
+  });
+  const participantPhone = createUniqueTestPhone("+1202");
+  const linePhone = createUniqueTestPhone("+1303");
+  const linePhoneLookupKey = createHostedPhoneLookupKey(linePhone);
+  if (
+    !offerMessageLookupKey
+    || !threadIdentityLookupKey
+    || !linePhoneLookupKey
+  ) {
+    throw new Error("Expected reaction-admission lookup keys.");
+  }
+
+  await reactionPrisma.hostedMember.createMany({
+    data: [
+      { billingStatus: HostedBillingStatus.active, id: ownerMemberId },
+      { id: runtimeMemberId },
+    ],
+  });
+  await reactionPrisma.hostedThreadContainer.create({
+    data: {
+      memberId: runtimeMemberId,
+      ownerMemberId,
+    },
+  });
+  await reactionPrisma.hostedGroup.create({
+    data: {
+      displayName: "Reaction Admission Group",
+      id: groupId,
+      joinCode: `join-reaction-race-${randomUUID()}`,
+      joinCodeCreatedAt: now,
+      ownerMemberId,
+      runtimeMemberId,
+    },
+  });
+  await reactionPrisma.hostedThreadRoute.create({
+    data: {
+      channel: "linq",
+      containerMemberId: runtimeMemberId,
+      pendingParticipantAddition: false,
+      threadIdentityLookupKey,
+      threadLookupKey: `reaction-race-thread-${randomUUID()}`,
+    },
+  });
+  await reactionPrisma.hostedGroupJoinOffer.create({
+    data: {
+      groupId,
+      id: offerId,
+      messageLookupKey: offerMessageLookupKey,
+      postedAt: now,
+      projectionKindsJson: [],
+    },
+  });
+  await upsertHostedLinqLineForPhoneTx({
+    observedAt: now,
+    phoneNumber: linePhone,
+    prisma: reactionPrisma,
+    source: "configured",
+  });
+  const participantMemberId = await reactionPrisma.$transaction((tx) =>
+    createPhoneBoundMemberIdentityTx({
+      phoneNumber: participantPhone,
+      phoneNumberVerifiedAt: new Date("2026-07-20T00:00:00.000Z"),
+      tx,
+    })
+  );
+  await reactionPrisma.hostedConsentGrant.createMany({
+    data: ["launch.legal", "launch.health-data"].map((scope) => ({
+      documentVersionsJson: {},
+      grantedAt: now,
+      memberId: participantMemberId,
+      scope,
+      source: "test",
+      status: "granted",
+    })),
+  });
+
+  return {
+    contenderPrisma,
+    eventLookupKeys: [],
+    groupId,
+    linePhone,
+    linePhoneLookupKey,
+    offerChatId,
+    offerId,
+    offerMessageId,
+    ownerMemberId,
+    participantMemberId,
+    participantPhone,
+    reactionPrisma,
+    runtimeMemberId,
+  };
+}
+
+function buildReactionAdmissionEvent(input: {
+  eventId: string;
+  eventType: "reaction.added" | "reaction.removed";
+  fixture: ReactionAdmissionFixture;
+}) {
+  const parsed = parseHostedLinqProviderEvent({
+    event: {
+      api_version: "v3",
+      created_at: "2026-07-28T16:00:00.000Z",
+      data: {
+        chat_id: input.fixture.offerChatId,
+        from_handle: {
+          handle: input.fixture.participantPhone,
+          service: "iMessage",
+        },
+        is_from_me: false,
+        line: { phone_number: input.fixture.linePhone },
+        message_id: input.fixture.offerMessageId,
+        reacted_at: "2026-07-28T16:00:01.000Z",
+        reaction_type: "love",
+      },
+      event_id: input.eventId,
+      event_type: input.eventType,
+      trace_id: `trace-${randomUUID()}`,
+      webhook_version: "2026-02-03",
+    } as Parameters<typeof parseHostedLinqProviderEvent>[0]["event"],
+  });
+  if (!parsed) {
+    throw new Error("Expected the reaction-admission event to parse.");
+  }
+  return parsed;
+}
+
+async function ingestReactionAdmissionEvent(input: {
+  event: ReturnType<typeof buildReactionAdmissionEvent>;
+  fixture: ReactionAdmissionFixture;
+}): Promise<void> {
+  const eventLookupKey = createHostedLinqProviderEventLookupKey(
+    input.event.eventId,
+  );
+  input.fixture.eventLookupKeys.push(eventLookupKey);
+  await input.fixture.reactionPrisma.$transaction((tx) =>
+    ingestHostedLinqProviderEventTx({
+      event: input.event,
+      prisma: tx,
+    })
+  );
+}
+
+async function assertReactionAdmissionOfferTarget(input: {
+  event: ReturnType<typeof buildReactionAdmissionEvent>;
+  fixture: ReactionAdmissionFixture;
+}): Promise<void> {
+  await expect(input.fixture.reactionPrisma.$transaction((tx) =>
+    readHostedGroupJoinOfferTargetTx({
+      channel: "linq",
+      messageLookupKeyReadCandidates:
+        input.event.messageLookupKeyReadCandidates,
+      threadIdentityLookupKeyReadCandidates:
+        createHostedExternalThreadIdentityLookupKeyReadCandidates({
+          channel: "linq",
+          threadId: input.event.linqChatId,
+        }),
+      tx,
+    })
+  )).resolves.toMatchObject({
+    groupId: input.fixture.groupId,
+    offerId: input.fixture.offerId,
+  });
+}
+
+async function cleanupReactionAdmissionFixture(
+  fixture: ReactionAdmissionFixture,
+): Promise<void> {
+  await fixture.reactionPrisma.hostedLinqAlert.deleteMany({
+    where: { eventId: { in: fixture.eventLookupKeys } },
+  });
+  await fixture.reactionPrisma.hostedLinqProviderEvent.deleteMany({
+    where: { eventId: { in: fixture.eventLookupKeys } },
+  });
+  await fixture.reactionPrisma.hostedGroup.deleteMany({
+    where: { id: fixture.groupId },
+  });
+  await fixture.reactionPrisma.hostedThreadContainer.deleteMany({
+    where: { memberId: fixture.runtimeMemberId },
+  });
+  await fixture.reactionPrisma.hostedMember.deleteMany({
+    where: {
+      id: {
+        in: [
+          fixture.ownerMemberId,
+          fixture.participantMemberId,
+          fixture.runtimeMemberId,
+        ],
+      },
+    },
+  });
+  await fixture.reactionPrisma.hostedLinqLine.deleteMany({
+    where: { phoneNumberLookupKey: fixture.linePhoneLookupKey },
+  });
+  await Promise.all([
+    fixture.contenderPrisma.$disconnect(),
+    fixture.reactionPrisma.$disconnect(),
   ]);
 }
 

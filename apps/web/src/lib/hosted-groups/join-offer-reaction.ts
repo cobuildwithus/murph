@@ -110,23 +110,14 @@ export async function handleHostedGroupJoinOfferReaction(input: {
   });
 
   if (input.event.eventType === "reaction.removed") {
-    // Only reply-gated outreach is revocable. Active members keep the existing
-    // no-op behavior because dropping a tapback does not undo an additive grant;
-    // an inactive verified phone member retains the same remove-before-add
-    // tombstone as someone who has not created a member identity yet.
-    const memberCanOwnOutreach = member
-      ? member.phoneIdentityVerified
-        && !member.suspendedAt
-        && !(await readActiveHostedMemberAccess({
-          memberId: member.id,
-          prisma: input.prisma,
-        }))
-      : true;
-    const participantPhoneNumber = memberCanOwnOutreach
-      ? readHostedGroupJoinOfferReactionParticipantPhone(
-          input.event.reactionFromHandle,
-        )
-      : null;
+    // Only reply-gated outreach is revocable. Current access controls whether a
+    // missing row may become a remove-before-add tombstone, but it must never
+    // hide an exact pending row: a later access or suspension transition cannot
+    // erase the participant's withdrawal.
+    const participantPhoneNumber =
+      readHostedGroupJoinOfferReactionParticipantPhone(
+        input.event.reactionFromHandle,
+      );
     if (!participantPhoneNumber) {
       return skipHostedGroupJoinOfferReaction({ reason: "reaction_removed" });
     }
@@ -142,8 +133,39 @@ export async function handleHostedGroupJoinOfferReaction(input: {
           threadIdentityLookupKeyReadCandidates,
           tx,
         });
+        let allowMissingRowTombstone = !member;
+        if (member) {
+          await lockHostedMemberRow(tx, member.id);
+          await lockHostedMemberSponsoredAccessRows(tx, member.id);
+          const currentMember = await tx.hostedMember.findUnique({
+            select: { suspendedAt: true },
+            where: { id: member.id },
+          });
+          const membership = currentMember
+            ? await tx.hostedGroupMember.findUnique({
+                select: { id: true },
+                where: {
+                  groupId_memberId: {
+                    groupId: offer.groupId,
+                    memberId: member.id,
+                  },
+                },
+              })
+            : null;
+          allowMissingRowTombstone = Boolean(
+            currentMember
+              && member.phoneIdentityVerified
+              && !currentMember.suspendedAt
+              && !membership
+              && !(await readActiveHostedMemberAccess({
+                memberId: member.id,
+                prisma: tx,
+              })),
+          );
+        }
         const revoked = await revokeHostedGroupJoinOutreachForRemovedReactionTx({
-          allowMissingRowTombstone: regionSupportedForRemoval,
+          allowMissingRowTombstone:
+            regionSupportedForRemoval && allowMissingRowTombstone,
           now: input.event.providerCreatedAt,
           offerId: offer.offerId,
           participantPhoneNumber,
