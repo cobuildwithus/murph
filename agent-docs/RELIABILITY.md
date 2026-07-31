@@ -657,15 +657,16 @@ Last verified: 2026-07-30
 - Tool-enabled assistant provider turns should disable automatic model retries once local side-effecting tools are in play, so bounded assistant/vault operations are never replayed implicitly by transport-layer retry. Bound tool execution failures should be returned to the model as structured tool results so the model can recover inside the same turn instead of aborting the provider turn.
 - Assistant product-feedback capture accepts at most one in-memory candidate during a successful provider turn. The assistant execution context can only hand that candidate to its hosted invocation synchronously; the existing web-control write remains at the foreground delivery owner and starts only after a current-turn member-channel send succeeds. Failed provider attempts discard their candidate, invocations without a successful foreground send may abandon it, feedback never counts as a provider side effect for transport retry safety, and persistence remains best-effort with a two-second maximum deadline, no retry queue, and no user-visible delivery state. The accepted-input-derived idempotency key remains the ambiguity fence when a timed-out post-reply write may already have reached Web.
 - The daily product-feedback digest is an internal read-and-email projection,
-  not another feedback or delivery-state owner. The hourly cron does no work
-  outside the 6pm Eastern hour, derives the prior 6pm-to-6pm window with
-  time-zone-aware day boundaries, and orders by `(createdAt, id)`. It reads one
-  overflow sentinel beyond the 200-row email cap, renders only the first 200
-  sanitized summaries, and states when more rows were omitted. An empty window
-  still sends the fixed empty digest so operators can distinguish no feedback
-  from an unconfigured job. Duplicate invocation reuses the same Eastern
-  day-keyed Resend idempotency key; a send error fails the cron request and may
-  be retried with that key, without adding a database claim, cursor, or retry
+  not another feedback or delivery-state owner. The ten-minute cron does no
+  work outside the 6pm Eastern hour, derives the prior 6pm-to-6pm window with
+  time-zone-aware day boundaries, and groups only the three allowlisted
+  product-feedback kinds into fixed count labels. That aggregate is bounded
+  independently of row volume and never reads the model-authored summary. An
+  empty window still sends the fixed empty digest, while missing configuration
+  fails before the database read so the cron stays observably unhealthy.
+  Every same-hour retry reuses the exact window and Eastern day-keyed Resend
+  idempotency key, so an ambiguous or transient database/provider failure gets
+  later bounded attempts without adding a database claim, cursor, or retry
   queue.
 - Exact-message targeting must preserve existing effect owners. Reply selection is side-effect free until normal delivery, while reactions keep the existing `message-reaction` operation and retry policy. The local service re-resolves the accepted input before either effect. For a reaction followed by `finish_without_reply`, the provider's already-recorded reaction patch—not a later mutable eligibility check—defers suppression evidence until the delivery outcome is known. A marked normal message persists `nativeReplyRequested: true` with its provider target, and both fields participate in outbox fingerprinting, equality, dedupe, and retry. Every `---` bubble from one response segment copies that same pair; unmarked automatic replies remain flat. Invalid or stale refs fail as recoverable tool results before any effect. A marked Linq send may not create a replacement direct chat, and a selected Linq voice-only response must fail before sending because the voice-memo endpoint cannot carry the reply target.
 - An authenticated non-direct group burst may cross sender and native reply-anchor changes only while exact positive causal succession, room/account/delivery/audience, projection readiness, reaction rules, and the 50-input bound still hold. It remains one provider turn and at most one normal reply, but every admitted input keeps separate sender/ref/text/attachment/reply-context prompt evidence plus separate journaling, checkpoint, answered-mailbox, and terminal evidence. Direct actor/anchor grouping is unchanged. When any Linq input carries an explicit anchor, resolve each explicit anchor independently and do not use the unanchored latest-reply fallback for that compound turn. Missing participant attribution blocks only an exact participant effect, never admission or the normal reply.

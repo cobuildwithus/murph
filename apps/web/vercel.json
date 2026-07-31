@@ -30,7 +30,7 @@
     },
     {
       "path": "/api/internal/hosted-execution/product-feedback/digest/cron",
-      "schedule": "0 * * * *"
+      "schedule": "*/10 * * * *"
     },
     {
       "path": "/api/internal/hosted-execution/retention/cron",

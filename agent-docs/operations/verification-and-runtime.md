@@ -346,8 +346,11 @@ service, authenticated cron route, shared operational-email config, production
 cron allowlist, Prisma schema/migration inventory, and Web typecheck. The
 service proof must exercise the Eastern daily window across both DST
 transitions, the dedicated recipient list, fixed empty digest, day-keyed
-idempotency key, summary-only bounded query, and explicit overflow marker.
-Routine tests inject the email transport and must not call Resend or read
+idempotency key, fixed three-kind aggregate that never reads free-form summary
+text, observable missing configuration, and a bounded same-hour retry. The
+direct scenario must compose the production sender against an isolated
+loopback Resend fake and prove identical request/key reuse plus one fake
+delivery after an ambiguous failure. Routine tests must not call Resend or read
 production feedback.
 
 For hosted assistant-provider choice, the truthful diff lane must cover

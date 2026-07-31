@@ -821,17 +821,18 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   activation side effects, and email paths must not persist provider payloads
   or expose recipients in logs.
 
-  A separate authenticated hourly Vercel cron performs work only during the
+  A separate authenticated ten-minute Vercel cron performs work only during the
   6pm Eastern hour and sends one daily internal product-feedback digest through
-  that existing Resend transport. Web reads only the already-sanitized
-  product-only summary column from its owned `HostedProductFeedback` rows over
-  the prior 6pm-to-6pm window. The indexed query is ordered by creation time and
-  id, reads at most 201 rows, renders at most 200 summaries, and makes overflow
-  explicit in the email without exposing member ids, internal feedback ids,
-  kinds, changelog metadata, health data, contact data, or raw conversation.
-  Recipients come from a dedicated environment allowlist, and the Eastern day
-  key is the Resend idempotency key. This adds no digest table, cursor,
-  scheduler, retry queue, or second feedback owner.
+  that existing Resend transport. Web groups its owned
+  `HostedProductFeedback` rows from the prior 6pm-to-6pm window by the three
+  server-allowlisted product-feedback kinds and renders only fixed server-owned
+  count labels. The indexed aggregate query never reads the model-authored
+  summary, member relation or id, internal feedback id, changelog metadata,
+  health data, contact data, or raw conversation. Recipients come from a
+  dedicated environment allowlist, and every same-hour attempt reuses the
+  Eastern day key as the Resend idempotency key. Missing configuration fails
+  before the database read. This adds no digest table, cursor, scheduler,
+  retry queue, or second feedback owner.
 
   Inbound hosted conversation traffic appends one canonical
   `conversation.message` mailbox item with provider/channel detail inside its

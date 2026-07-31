@@ -2389,10 +2389,10 @@ describe("hosted Prisma baseline migration", () => {
     );
 
     expect(migrationSql).toContain(
-      'CREATE INDEX CONCURRENTLY "hosted_product_feedback_created_at_id_idx"',
+      'CREATE INDEX CONCURRENTLY "hosted_product_feedback_created_at_kind_idx"',
     );
     expect(migrationSql).toContain(
-      'ON "hosted_product_feedback"("created_at", "id")',
+      'ON "hosted_product_feedback"("created_at", "kind")',
     );
   });
 });

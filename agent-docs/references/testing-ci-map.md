@@ -252,14 +252,15 @@ not enter evidence; and attachment-only input fails closed before provider work.
 Hosted product-feedback digest coverage is Web-owned and provider-free.
 `hosted-product-feedback-digest.test.ts` proves the Eastern 6pm-to-6pm window
 across both DST transitions, dedicated recipients, fixed empty digest,
-day-keyed Resend idempotency, summary-only ordered query, the 200-row body cap,
-and explicit overflow. `hosted-product-feedback-digest-cron.test.ts` proves
-Vercel cron auth happens before the service runs. The operational-email config
-suite proves the shared sender/transport can use a feature-specific recipient
-allowlist, while the privacy-foundation migration inventory and production
-migration guard keep the new index and approved hourly cron registration
-aligned. All email calls stay injected; routine CI never reads production
-feedback or enters Resend.
+day-keyed Resend idempotency, the fixed allowlisted-kind aggregate that never
+reads free-form summary text, observable missing configuration, and same-hour
+retry through the real production sender against an isolated loopback provider
+fake. `hosted-product-feedback-digest-cron.test.ts` proves Vercel cron auth
+happens before the service runs. The operational-email config suite proves the
+shared sender/transport can use a feature-specific recipient allowlist, while
+the privacy-foundation migration inventory and production migration guard keep
+the new index and approved ten-minute cron registration aligned. Routine CI
+never reads production feedback or enters Resend.
 
 ## Current CI Workflows
 

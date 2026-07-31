@@ -1419,7 +1419,7 @@ describe("hosted web production migration guard", () => {
       ),
       {
         path: "/api/internal/hosted-execution/product-feedback/digest/cron",
-        schedule: "0 * * * *",
+        schedule: "*/10 * * * *",
       },
     );
     assert.deepEqual(

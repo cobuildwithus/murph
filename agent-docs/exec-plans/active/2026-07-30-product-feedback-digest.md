@@ -7,16 +7,17 @@ Updated: 2026-07-30
 ## Goal
 
 - Deliver one privacy-bounded daily operator digest of hosted product-feedback
-  summaries through the existing operational Resend transport.
+  counts through the existing operational Resend transport.
 
 ## Success criteria
 
-- The digest contains only the already-sanitized product-only summary field and
-  never includes member identifiers, contact details, raw conversation text,
-  health data, provider payloads, or internal feedback ids.
+- The digest contains only fixed server-owned counts of the three allowlisted
+  product-feedback kinds and never reads or includes model-authored summary
+  text, member identifiers, contact details, raw conversation text, health
+  data, provider payloads, or internal feedback ids.
 - The daily read and email payload are explicitly bounded, deterministically
-  ordered, protected from duplicate retry delivery, and correct across Eastern
-  time-zone offset changes.
+  ordered, protected from duplicate retry delivery, retried within the 6pm
+  hour, and correct across Eastern time-zone offset changes.
 - The authenticated cron route, production cron allowlist, Prisma schema, and
   migration stay aligned.
 - Focused tests, typecheck, direct scenario proof, preliminary
@@ -39,24 +40,23 @@ Updated: 2026-07-30
 - Treat the supplied patch as behavioral intent rather than overwrite
   authority.
 - Reuse the existing Vercel cron authentication and Resend plain-text transport.
-- Preserve the hosted product-feedback summary sanitizer as the content
-  boundary; do not retrieve or render member relations or other private rows.
-- Prefer a bounded query and fail-closed overflow signal over a new cursor,
-  scheduler, delivery store, or reconciliation service.
+- Treat the allowlisted feedback kind as the only operator-disclosure-safe
+  projection; do not retrieve the model-authored summary, member relations, or
+  other private row content.
+- Prefer a bounded aggregate and same-hour idempotent attempts over a new
+  cursor, scheduler, delivery store, or reconciliation service.
 
 ## Risks and mitigations
 
 1. Risk: an unbounded daily query or email grows beyond safe runtime/provider
    limits.
-   Mitigation: impose an explicit row cap, detect overflow, and cover the bound
-   with focused tests.
+   Mitigation: group only the three allowlisted kinds and render fixed labels.
 2. Risk: feedback content leaks identity or health context through the digest.
-   Mitigation: select only the sanitized summary field, preserve its parser
-   contract, use a dedicated recipient allowlist, and document the exact
-   disclosure boundary.
+   Mitigation: never read free-form summary text; disclose only fixed counts to
+   a dedicated recipient allowlist.
 3. Risk: duplicate cron invocation sends duplicate mail.
    Mitigation: retain one deterministic day-keyed Resend idempotency key and
-   verify it directly.
+   verify ambiguous-failure retry through an isolated provider fake.
 4. Risk: the new cron or migration bypasses production guardrails.
    Mitigation: update the approved cron-path and migration inventories and run
    their focused tests.
@@ -86,6 +86,11 @@ Updated: 2026-07-30
   provider-visible prompt stack nor user-facing Web presentation.
 - The final ReviewGPT gate applies because external egress, cron idempotency,
   deploy configuration, and persisted schema are in scope.
+- Preliminary and final round-one review both found that free-form summaries
+  were not a mechanical disclosure boundary and that one hourly attempt had no
+  owned recovery. The accepted correction uses only the existing allowlisted
+  kind, fixed server labels, ten-minute same-hour wakes, and the existing
+  provider idempotency primitive.
 
 ## Verification
 
@@ -93,6 +98,6 @@ Updated: 2026-07-30
   email config, migration inventory, and approved production cron routes.
 - `pnpm --filter web typecheck`
 - `git diff --check`
-- Direct deterministic readback of the prior-day window, bounded overflow,
-  no-feedback behavior, dedicated recipient list, and day-keyed idempotency
-  key.
+- Direct deterministic readback of the prior-day fixed-kind aggregate,
+  no-feedback behavior, dedicated recipient list, missing-config failure, and
+  same-window/day-key retry through an isolated loopback provider fake.

@@ -4,26 +4,28 @@ import {
   addDaysToIsoDate,
   formatTimeZoneDateTimeParts,
 } from "@murphai/contracts";
+import {
+  HOSTED_PRODUCT_FEEDBACK_KINDS,
+  type HostedProductFeedbackKind,
+} from "@murphai/hosted-execution/runtime-control";
 
+import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { readHostedOperationalAlertEmailConfig } from "../hosted-onboarding/operational-alert-email-config";
 import { sendHostedResendPlainTextEmail } from "../hosted-onboarding/resend-plain-text-email";
 import { getPrisma } from "../prisma";
 
 export const HOSTED_PRODUCT_FEEDBACK_DIGEST_TIME_ZONE = "America/New_York";
 export const HOSTED_PRODUCT_FEEDBACK_DIGEST_SEND_HOUR = 18;
-export const HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS = 200;
 
 const HOSTED_PRODUCT_FEEDBACK_DIGEST_RECIPIENTS_ENV =
   "HOSTED_PRODUCT_FEEDBACK_DIGEST_EMAILS";
 const HOSTED_PRODUCT_FEEDBACK_DIGEST_SUBJECT = "Murph feedback";
 
 export type HostedProductFeedbackDigestBatch = {
-  summaries: string[];
-  truncated: boolean;
+  counts: Record<HostedProductFeedbackKind, number>;
 };
 
 export type HostedProductFeedbackDigestOutcome =
-  | "not_configured"
   | "outside_send_hour"
   | "sent";
 
@@ -32,7 +34,6 @@ export type HostedProductFeedbackDigestResult = {
   feedbackCount: number;
   outcome: HostedProductFeedbackDigestOutcome;
   timeZone: typeof HOSTED_PRODUCT_FEEDBACK_DIGEST_TIME_ZONE;
-  truncated: boolean;
   windowEndAt: string | null;
   windowStartAt: string | null;
 };
@@ -56,7 +57,6 @@ export async function runHostedProductFeedbackDigest(input: {
       feedbackCount: 0,
       outcome: "outside_send_hour",
       timeZone: HOSTED_PRODUCT_FEEDBACK_DIGEST_TIME_ZONE,
-      truncated: false,
       windowEndAt: null,
       windowStartAt: null,
     };
@@ -68,15 +68,11 @@ export async function runHostedProductFeedbackDigest(input: {
     HOSTED_PRODUCT_FEEDBACK_DIGEST_RECIPIENTS_ENV,
   );
   if (!emailConfig) {
-    return {
-      dayKey: window.dayKey,
-      feedbackCount: 0,
-      outcome: "not_configured",
-      timeZone: HOSTED_PRODUCT_FEEDBACK_DIGEST_TIME_ZONE,
-      truncated: false,
-      windowEndAt: window.endAt.toISOString(),
-      windowStartAt: window.startAt.toISOString(),
-    };
+    throw hostedOnboardingError({
+      code: "HOSTED_PRODUCT_FEEDBACK_DIGEST_NOT_CONFIGURED",
+      httpStatus: 503,
+      message: "Hosted product feedback digest email is not configured.",
+    });
   }
 
   const batch = await (
@@ -97,10 +93,9 @@ export async function runHostedProductFeedbackDigest(input: {
 
   return {
     dayKey: window.dayKey,
-    feedbackCount: batch.summaries.length,
+    feedbackCount: countHostedProductFeedbackDigestBatch(batch),
     outcome: "sent",
     timeZone: HOSTED_PRODUCT_FEEDBACK_DIGEST_TIME_ZONE,
-    truncated: batch.truncated,
     windowEndAt: window.endAt.toISOString(),
     windowStartAt: window.startAt.toISOString(),
   };
@@ -129,51 +124,76 @@ export async function readHostedProductFeedbackDigestBatch(input: {
   endAt: Date;
   startAt: Date;
 }): Promise<HostedProductFeedbackDigestBatch> {
-  const rows = await getPrisma().hostedProductFeedback.findMany({
-    orderBy: [
-      { createdAt: "asc" },
-      { id: "asc" },
-    ],
-    select: {
-      summary: true,
+  const groupedCounts = await getPrisma().hostedProductFeedback.groupBy({
+    by: ["kind"],
+    _count: {
+      _all: true,
     },
-    take: HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS + 1,
     where: {
       createdAt: {
         gte: input.startAt,
         lt: input.endAt,
       },
-      summary: {
-        not: null,
+      kind: {
+        in: [...HOSTED_PRODUCT_FEEDBACK_KINDS],
       },
     },
   });
+  const counts = createEmptyHostedProductFeedbackDigestCounts();
 
-  return {
-    summaries: rows
-      .slice(0, HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS)
-      .flatMap(({ summary }) =>
-        typeof summary === "string" && summary.length > 0 ? [summary] : []
-      ),
-    truncated: rows.length > HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS,
-  };
+  for (const groupedCount of groupedCounts) {
+    if (isHostedProductFeedbackKind(groupedCount.kind)) {
+      counts[groupedCount.kind] = groupedCount._count._all;
+    }
+  }
+
+  return { counts };
 }
 
 function formatHostedProductFeedbackDigest(
   batch: HostedProductFeedbackDigestBatch,
 ): string {
-  const lines = batch.summaries.map((summary) => `- ${summary}`);
+  const labels: Record<HostedProductFeedbackKind, string> = {
+    feature_interest: "Feature interest",
+    feature_request: "Feature requests",
+    frustration: "Product frustrations",
+  };
+  const lines = HOSTED_PRODUCT_FEEDBACK_KINDS.flatMap((kind) => {
+    const count = batch.counts[kind];
+    return count > 0 ? [`- ${labels[kind]}: ${count}`] : [];
+  });
 
   if (lines.length === 0) {
     lines.push("- No feedback logged.");
   }
-  if (batch.truncated) {
-    lines.push(
-      `- Additional feedback omitted from this email after the ${HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS}-item safety limit.`,
-    );
-  }
 
   return lines.join("\n");
+}
+
+function countHostedProductFeedbackDigestBatch(
+  batch: HostedProductFeedbackDigestBatch,
+): number {
+  return HOSTED_PRODUCT_FEEDBACK_KINDS.reduce(
+    (total, kind) => total + batch.counts[kind],
+    0,
+  );
+}
+
+function createEmptyHostedProductFeedbackDigestCounts(): Record<
+  HostedProductFeedbackKind,
+  number
+> {
+  return {
+    feature_interest: 0,
+    feature_request: 0,
+    frustration: 0,
+  };
+}
+
+function isHostedProductFeedbackKind(
+  value: string,
+): value is HostedProductFeedbackKind {
+  return HOSTED_PRODUCT_FEEDBACK_KINDS.some((kind) => kind === value);
 }
 
 function resolveHostedProductFeedbackDigestBoundary(dayKey: string): Date {

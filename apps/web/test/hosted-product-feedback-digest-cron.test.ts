@@ -21,7 +21,6 @@ describe("hosted product feedback digest cron", () => {
       feedbackCount: 2,
       outcome: "sent",
       timeZone: "America/New_York",
-      truncated: false,
       windowEndAt: "2026-07-30T22:00:00.000Z",
       windowStartAt: "2026-07-29T22:00:00.000Z",
     });
