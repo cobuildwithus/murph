@@ -153,6 +153,7 @@ function MissionRow(props: {
             <summary
               aria-label={`Details for ${mission.title}: ${mission.statusLabel}, ${mission.timingLabel}`}
               className="flex w-fit cursor-pointer list-none items-center gap-1.5 rounded-sm text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden"
+              role="button"
             >
               Details
               <ChevronDown

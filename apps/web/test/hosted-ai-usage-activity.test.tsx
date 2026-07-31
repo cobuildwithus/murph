@@ -495,7 +495,7 @@ describe("HostedAiUsageActivity", () => {
     assert.equal(markup.match(/>Details</gu)?.length, 2);
     assert.match(
       markup,
-      /aria-label="Details for Start an active group: In progress, Ends Aug 3, 2026"/,
+      /aria-label="Details for Start an active group: In progress, Ends Aug 3, 2026"[^>]*role="button"/,
     );
     assert.match(
       markup,
