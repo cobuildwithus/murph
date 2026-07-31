@@ -1,6 +1,6 @@
 # detailed-product-feedback
 
-Status: active
+Status: completed
 Created: 2026-07-30
 Updated: 2026-07-30
 
@@ -88,3 +88,8 @@ Updated: 2026-07-30
   behavior coverage and remove duplicated rubric text. Both corrections are in
   the current candidate; the preliminary pass is not rerun after a substantive
   result.
+- Exact implementation-head CI at
+  `f3bfb6e323b2b989cc5c6f87021f0d2729aa32db` passed, including assistant,
+  CLI, and platform coverage; release build/typecheck; app verification; host
+  matrices; artifact/privacy guards; and the corrected PR metadata gate.
+Completed: 2026-07-30
