@@ -20,6 +20,27 @@ const CARD: AssistantResponseCard = {
   },
 }
 
+const CARD_V2: AssistantResponseCard = {
+  kind: 'daily_nutrition',
+  version: 2,
+  localDate: '2026-07-28',
+  mealCount: 3,
+  totals: {
+    calories: { total: 1_490.25, mealCount: 3 },
+    proteinGrams: { total: 94.5, mealCount: 3 },
+    carbsGrams: { total: 193.125, mealCount: 3 },
+    fatGrams: { total: 34.75, mealCount: 3 },
+    fiberGrams: { total: 26.5, mealCount: 3 },
+  },
+  goals: {
+    calories: { target: 2_100, status: 'under_target' },
+    proteinGrams: { target: 100, status: 'on_target' },
+    carbsGrams: null,
+    fatGrams: { target: 40, status: 'on_target' },
+    fiberGrams: { target: 30, status: 'under_target' },
+  },
+}
+
 const IMAGE: AssistantResponseMedia = {
   alt: null,
   kind: 'image',
@@ -65,6 +86,10 @@ describe('murph.attach_response_card', () => {
   it('uses the strict card contract at the model-facing boundary', () => {
     expect(readCardToolRequest({ card: CARD })).toEqual({
       card: CARD,
+      kind: 'attach-response-card',
+    })
+    expect(readCardToolRequest({ card: CARD_V2 })).toEqual({
+      card: CARD_V2,
       kind: 'attach-response-card',
     })
     expect(readCardToolRequest({ card: CARD, extra: true })).toMatchObject({

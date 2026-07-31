@@ -110,17 +110,20 @@ describe('assistant automatic meal capture skill', () => {
     expect(skill).toContain('vault-cli meal closeout-work')
     expect(skill).toContain('oldest bounded batch')
     expect(skill).not.toContain('preceding 31 local days')
-    expect(skill).toContain('labels partial totals as partial')
+    expect(skill).toContain('partial totals as partial')
     expect(skill).toContain('each retained photo as pending closeout work')
     expect(skill).toContain('late import gets one dated catch-up')
     expect(skill).toContain('latest `recordedAt` is at or after')
     expect(skill).toContain('partial-cleanup failure loses no meal')
-    expect(skill).toContain(
-      'canonical `vault-cli meal totals --from <date> --to <date>` read',
+    expect(skill).toMatch(
+      /canonical\s+`vault-cli meal totals --from <date> --to <date>` read/,
     )
     expect(skill).toContain(
       'Run it immediately before any response-card attachment',
     )
+    expect(skill).toContain('vault-cli goal list\n   --status active --format json')
+    expect(skill).toContain('vault-cli goal show <goal-id> --format\n   json')
+    expect(skill).toContain('Never infer a target from the day\'s total')
     expect(skill).toContain(
       'When the run covers exactly one local date',
     )
@@ -128,18 +131,18 @@ describe('assistant automatic meal capture skill', () => {
     expect(skill).toContain('numerical output is permitted for the member')
     expect(skill).toContain('`murph.attach_response_card`')
     expect(skill).toContain(
-      '`card: { kind: "daily_nutrition", localDate: <the single selected date>',
+      '`card: { kind: "daily_nutrition", version: 2, localDate: <the single',
     )
     expect(skill).toContain('mealCount: <top-level mealCount>')
     expect(skill).toContain(
-      'totals: { calories, proteinGrams,\n   carbsGrams, fatGrams }',
+      'proteinGrams, carbsGrams, fatGrams, fiberGrams }, goals: { calories,',
     )
     expect(skill).toContain(
-      "Copy each included metric's complete\n   `{ total, mealCount }` pair unchanged",
+      "Copy every metric's\n   complete `{ total, mealCount }` pair unchanged",
     )
-    expect(skill).toContain(
-      'Omit\n   `fiberGrams`; it is outside the closed V1 card contract',
-    )
+    expect(skill).toContain('including `fiberGrams`')
+    expect(skill).toContain('There is no universal percentage\n   threshold')
+    expect(skill).toContain('Use `null` when no trustworthy target exists')
     expect(skill).toContain('Do not author a second nutrition summary')
     expect(skill).toMatch(/For\s+multi-date catch-up, missing calories/u)
     expect(skill).toMatch(
@@ -166,7 +169,7 @@ describe('assistant automatic meal capture skill', () => {
     )
   })
 
-  it('maps a representative canonical totals result into the closed V1 card', () => {
+  it('maps canonical totals and trusted goal context into the closed V2 card', () => {
     const canonicalTotals = {
       mealCount: 4,
       totals: {
@@ -180,6 +183,7 @@ describe('assistant automatic meal capture skill', () => {
     const expectedArgument = {
       card: {
         kind: 'daily_nutrition',
+        version: 2,
         localDate: '2026-07-28',
         mealCount: canonicalTotals.mealCount,
         totals: {
@@ -187,6 +191,14 @@ describe('assistant automatic meal capture skill', () => {
           proteinGrams: canonicalTotals.totals.proteinGrams,
           carbsGrams: canonicalTotals.totals.carbsGrams,
           fatGrams: canonicalTotals.totals.fatGrams,
+          fiberGrams: canonicalTotals.totals.fiberGrams,
+        },
+        goals: {
+          calories: null,
+          proteinGrams: { target: 150, status: 'on_target' },
+          carbsGrams: null,
+          fatGrams: null,
+          fiberGrams: { target: 30, status: 'under_target' },
         },
       },
     } as const
@@ -194,7 +206,9 @@ describe('assistant automatic meal capture skill', () => {
     expect(assistantResponseCardSchema.parse(expectedArgument.card)).toEqual(
       expectedArgument.card,
     )
-    expect(expectedArgument.card.totals).not.toHaveProperty('fiberGrams')
+    expect(expectedArgument.card.totals.fiberGrams).toBe(
+      canonicalTotals.totals.fiberGrams,
+    )
   })
 
   it('keeps a post-midnight retry anchored to its scheduled occurrence date', () => {

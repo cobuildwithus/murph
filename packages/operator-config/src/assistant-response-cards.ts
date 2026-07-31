@@ -4,6 +4,8 @@ import {
   assistantResponseCardSchema,
   type AssistantResponseCard,
   type DailyNutritionResponseCard,
+  type DailyNutritionResponseCardV1,
+  type DailyNutritionResponseCardV2,
   type NutritionCardMetric,
 } from '@murphai/contracts'
 import { z } from 'zod'
@@ -34,7 +36,12 @@ export const LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT =
 
 export type AppCardEnvelopeV1 = {
   schemaVersion: 1
-  card: AssistantResponseCard
+  card: DailyNutritionResponseCardV1
+}
+
+export type AppCardEnvelopeV2 = {
+  schemaVersion: 2
+  card: DailyNutritionResponseCardV2
 }
 
 export type LinqIMessageAppLayout = {
@@ -46,9 +53,16 @@ export type LinqIMessageAppLayout = {
 export {
   assistantResponseCardSchema,
   assistantResponseCardV1Bounds,
+  dailyNutritionResponseCardV1Schema,
+  dailyNutritionResponseCardV2Schema,
   dailyNutritionResponseCardSchema,
+  nutritionCardGoalStatusValues,
   type AssistantResponseCard,
   type DailyNutritionResponseCard,
+  type DailyNutritionResponseCardV1,
+  type DailyNutritionResponseCardV2,
+  type NutritionCardGoalSnapshot,
+  type NutritionCardGoalStatus,
   type NutritionCardMetric,
 } from '@murphai/contracts'
 
@@ -78,14 +92,20 @@ export function buildLinqIMessageAppLayout(
 
 export function encodeAppCardDataUrl(card: AssistantResponseCard): string {
   const parsed = assistantResponseCardSchema.parse(card)
-  const envelope: AppCardEnvelopeV1 = {
-    schemaVersion: 1,
-    card: parsed,
-  }
+  const envelope: AppCardEnvelopeV1 | AppCardEnvelopeV2 =
+    isDailyNutritionResponseCardV2(parsed)
+      ? {
+          schemaVersion: 2,
+          card: parsed,
+        }
+      : {
+          schemaVersion: 1,
+          card: parsed,
+        }
   const encoded = Buffer.from(JSON.stringify(envelope), 'utf8').toString('base64')
   const dataUrl = `${APP_CARD_DATA_URL_PREFIX}${encoded}`
   if (dataUrl.length >= APP_CARD_DATA_URL_MAX_LENGTH) {
-    throw new TypeError('The encoded app card exceeds the inline V1 size limit.')
+    throw new TypeError('The encoded app card exceeds the inline size limit.')
   }
   return dataUrl
 }
@@ -100,7 +120,7 @@ function renderDailyNutritionResponseCardText(
   }
   const metrics = [
     `about ${formatNutritionCardNumber(calorieTotal)} calories`,
-    ...renderAvailableMacroTotals(card),
+    ...renderAvailableNutritionTotals(card),
   ]
   const summary = `${formatNutritionCardDate(card.localDate)}: ${
     metrics.join(' · ')
@@ -109,7 +129,7 @@ function renderDailyNutritionResponseCardText(
   return partialLabel === null ? summary : `${summary} ${partialLabel}`
 }
 
-function renderAvailableMacroTotals(
+function renderAvailableNutritionTotals(
   card: DailyNutritionResponseCard,
 ): string[] {
   const metrics: Array<[NutritionCardMetric, string]> = [
@@ -117,6 +137,9 @@ function renderAvailableMacroTotals(
     [card.totals.carbsGrams, 'g carbs'],
     [card.totals.fatGrams, 'g fat'],
   ]
+  if (isDailyNutritionResponseCardV2(card)) {
+    metrics.push([card.totals.fiberGrams, 'g fiber'])
+  }
   return metrics.flatMap(([metric, unit]) =>
     metric.total === null
       ? []
@@ -129,22 +152,29 @@ function renderPartialNutritionLabel(
 ): string | null {
   const caloriesPartial =
     card.totals.calories.mealCount < card.mealCount
-  const macrosPartial = [
+  const nutritionMetrics = [
     card.totals.proteinGrams,
     card.totals.carbsGrams,
     card.totals.fatGrams,
-  ].some((metric) =>
+    ...(isDailyNutritionResponseCardV2(card)
+      ? [card.totals.fiberGrams]
+      : []),
+  ]
+  const nonCalorieNutritionPartial = nutritionMetrics.some((metric) =>
     metric.total === null || metric.mealCount < card.mealCount
   )
 
-  if (caloriesPartial && macrosPartial) {
-    return 'Some calorie and macro estimates were partial.'
+  const metricFamily = isDailyNutritionResponseCardV2(card)
+    ? 'nutrition'
+    : 'macro'
+  if (caloriesPartial && nonCalorieNutritionPartial) {
+    return `Some calorie and ${metricFamily} estimates were partial.`
   }
   if (caloriesPartial) {
     return 'Some calorie estimates were partial.'
   }
-  if (macrosPartial) {
-    return 'Some macro estimates were partial.'
+  if (nonCalorieNutritionPartial) {
+    return `Some ${metricFamily} estimates were partial.`
   }
   return null
 }
@@ -158,6 +188,12 @@ function formatNutritionCardDate(localDate: string): string {
   const month = Number(monthText)
   const day = Number(dayText)
   return `${NUTRITION_CARD_MONTHS[month - 1]} ${day}`
+}
+
+function isDailyNutritionResponseCardV2(
+  card: DailyNutritionResponseCard,
+): card is DailyNutritionResponseCardV2 {
+  return 'version' in card && card.version === 2
 }
 
 function createAssistantResponseCardJsonSchema() {

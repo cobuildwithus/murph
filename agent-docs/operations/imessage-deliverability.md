@@ -65,9 +65,9 @@ Read and apply this guide when touching any of these surfaces:
 
 ## Assistant response cards
 
-Response cards are optional outbox-owned presentation siblings of response media, not a direct-send surface or a separate delivery owner. The outbox continues to own the semantic message, target, status, receipt, retry, and idempotency lifecycle, and V1 prohibits a card from coexisting with media.
+Response cards are optional outbox-owned presentation siblings of response media, not a direct-send surface or a separate delivery owner. The outbox continues to own the semantic message, target, status, receipt, retry, and idempotency lifecycle, and a card cannot coexist with media.
 
-V1 card values are immutable message content. They are stored inline in the iMessage app message URL as versioned Base64-encoded JSON; encoding is not encryption. There is no persisted remote card state, fetch API, cleanup lifecycle, or card-specific queue. Linq capability failure or an ineligible route falls back to the same deterministic ordinary text through the existing channel delivery path. Preservation of the inline URL in `selectedMessage.url` remains a physical-device release gate for the paired iOS implementation.
+Card values are immutable message content. They are stored inline in the iMessage app message URL as versioned Base64-encoded JSON; encoding is not encryption. V1 remains a supported calorie/protein/carbs/fat compatibility input. V2 adds the exact canonical fiber total and nullable per-metric goal snapshots. Each non-null goal snapshot carries only an exact target copied from a current active canonical goal plus Murph's frozen semantic assessment. It is presentation for that message, not persisted goal progress or a new source of truth. A missing or untrusted target stays null and neutral. There is no persisted remote card state, fetch API, cleanup lifecycle, or card-specific queue. Linq capability failure or an ineligible route falls back to the same deterministic ordinary text through the existing channel delivery path. Preservation of the inline URL in `selectedMessage.url` remains a physical-device release gate for the paired iOS implementation.
 
 ## Implementation checklist
 

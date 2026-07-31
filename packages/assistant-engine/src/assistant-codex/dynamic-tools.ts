@@ -364,7 +364,7 @@ export const MURPH_ATTACH_RESPONSE_CARD_TOOL = {
   namespace: 'murph',
   name: 'attach_response_card',
   description:
-    'Attach the exact canonical totals from the immediately preceding single-date automatic meal-closeout read as one daily_nutrition card. Use only when numerical output is permitted for that member. The runtime renders the durable text and fallbacks, so do not repeat nutrition values in the final send_message text. This tool is available only to the managed private-direct closeout, does not send directly, and cannot be combined with response media.',
+    'Attach the exact canonical totals from the immediately preceding single-date automatic meal-closeout read as one daily_nutrition card. V2 includes fiber plus nullable goal snapshots copied only from current active canonical goals; each non-null snapshot freezes the exact target and Murph\'s context-aware status, without a universal threshold. Use only when numerical output is permitted for that member. The runtime renders the durable text and fallbacks, so do not repeat nutrition values in the final send_message text. This tool is available only to the managed private-direct closeout, does not send directly, and cannot be combined with response media.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
