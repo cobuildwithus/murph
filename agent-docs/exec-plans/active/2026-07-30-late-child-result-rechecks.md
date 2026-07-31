@@ -49,7 +49,7 @@ incorporates a newly completed result when it is still relevant.
 
 ## Verification log
 
-- Focused assistant-engine prompt suite: 70 tests passed.
+- Focused assistant-engine prompt suite: 71 tests passed.
 - Focused assistant-runtime Codex config suite: 42 tests passed and 2 opt-in
   tests skipped.
 - `@murphai/assistant-engine` and `@murphai/assistant-runtime` typechecks
