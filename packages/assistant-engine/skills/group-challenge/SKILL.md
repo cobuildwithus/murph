@@ -438,8 +438,8 @@ the full rules.
    it is the new Murph permission message already posted above the ordinary
    reply. A link presentation must include the exact returned `joinUrl` once in
    that reply, but its recency evidence is unavailable. In that case, do not
-   infer entry from a later grant; use one ordinary challenge confirmation
-   instead.
+   infer entry from a later grant or claim a new adjacent permission message;
+   use one ordinary challenge confirmation instead.
 
    On the next challenge turn after that offer, read the exact scoring scope
    again before asking anyone for confirmation. For each recorded, resolved

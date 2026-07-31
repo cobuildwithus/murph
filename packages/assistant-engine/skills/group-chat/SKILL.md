@@ -322,9 +322,10 @@ and `offeredAt` is the provider's canonical creation time for that exact
 message. An idempotent replay keeps the original provider time instead of
 minting a fresh window. The native message itself is already visible above the
 ordinary assistant reply, so do not duplicate its consent copy or return a
-link. When `recencyEvidence="unavailable"`, the result is handled status only:
-do not use it as recency or participation evidence. When that unverified native
-path is the turn's only useful user-facing outcome, call
+link. When `recencyEvidence="unavailable"`, the result is handled status only
+and may represent an older provider-idempotent replay: do not claim a new
+adjacent message or use it as recency or participation evidence. When that
+unverified native path is the turn's only useful user-facing outcome, call
 `murph.finish_without_reply`; otherwise answer only the substantive question.
 On `status="unavailable"`, do not claim a consent surface exists.
 

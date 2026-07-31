@@ -179,10 +179,11 @@ with every requested scope as `not_granted`, `granted` plus `missing`, or
 time as bounded authorization metadata; it is not causal consent proof. The
 challenge page may treat that grant as best-effort social entry only when the
 same participant/scope was recorded `not_granted`, the access tool returned an
-eligible provider creation time for a newly posted native offer, the grant
-activated within 24 hours after it, and the finalized metric, window, and
-stakes are unchanged. Link delivery, reused offers, and every missing, older,
-late, or mismatched case require ordinary confirmation. Health projection
+eligible provider creation time inside the current native send attempt, the
+grant activated within 24 hours after it, and the finalized metric, window,
+and stakes are unchanged. Link delivery, idempotent replay, reused offers, and
+every missing, older, late, or mismatched case require ordinary confirmation.
+Health projection
 delivery conditionally replaces the complete
 encrypted snapshot on the exact active share generation. Revoke and regrant
 clear it transactionally, and regrant rotates the share id. The explicit

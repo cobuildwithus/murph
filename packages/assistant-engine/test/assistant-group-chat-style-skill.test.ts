@@ -542,6 +542,9 @@ describe('assistant group-chat style guidance', () => {
       'When `recencyEvidence="unavailable"`, the result is handled status only',
     )
     expect(normalized).toContain(
+      'may represent an older provider-idempotent replay: do not claim a new adjacent message',
+    )
+    expect(normalized).toContain(
       'Link delivery has no canonical presentation receipt',
     )
     expect(normalized).toContain(

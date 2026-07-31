@@ -1102,6 +1102,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     joinUrl,
     projectionScopes,
   });
+  const providerSendStartedAt = new Date();
   let sent: Awaited<ReturnType<typeof sendHostedLinqChatMessage>>;
   try {
     sent = await sendHostedLinqChatMessage({
@@ -1116,6 +1117,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   } catch {
     return unavailable("send_failed");
   }
+  const providerSendCompletedAt = new Date();
   if (!sent.messageId) {
     return unavailable("provider_message_unavailable");
   }
@@ -1125,7 +1127,10 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   const providerCreatedAt = Number.isFinite(providerCreatedAtMs)
     ? new Date(providerCreatedAtMs)
     : null;
-  const postedAt = providerCreatedAt ?? new Date();
+  const providerCreatedDuringAttempt = providerCreatedAt !== null
+    && providerCreatedAt >= providerSendStartedAt
+    && providerCreatedAt <= providerSendCompletedAt;
+  const postedAt = providerCreatedAt ?? providerSendCompletedAt;
 
   try {
     await prisma.$transaction(async (tx) => {
@@ -1159,7 +1164,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       group: created.group,
       joinUrl,
       offerState: "posted",
-      ...(providerCreatedAt
+      ...(providerCreatedDuringAttempt
         ? { offeredAt: providerCreatedAt.toISOString() }
         : {}),
       status: "sent",

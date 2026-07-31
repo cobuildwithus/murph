@@ -298,15 +298,17 @@ first-party customize page. Native consent grants only the disclosed snapshot.
 A returned link grants nothing until the member accepts the first-party page.
 The standings message itself never grants permission.
 
-Only a newly posted native access message with canonical provider chronology
-adds `offeredAt` evidence. Its provider creation time survives an idempotent
-replay instead of minting a fresh window. When Web finds a covering active
-native offer instead of posting another card, assistant-engine exposes the
-returned first-party URL as `presentation="link"` so the model never claims
-another native message appeared. Standalone and scheduled links use the same
-presentation. Murph includes a returned `joinUrl` once in the substantive
-response, but link delivery has no canonical presentation receipt and therefore
-returns unavailable recency evidence. Neither presentation proves acceptance.
+Only a native access message whose canonical provider creation time falls
+inside the current send attempt adds `offeredAt` evidence. An idempotent replay
+retains its original provider time, is still durably bound, and returns
+unavailable recency evidence instead of claiming a new adjacent message or
+minting a fresh window. When Web finds a covering active native offer instead
+of posting another card, assistant-engine exposes the returned first-party URL
+as `presentation="link"` so the model never claims another native message
+appeared. Standalone and scheduled links use the same presentation. Murph
+includes a returned `joinUrl` once in the substantive response, but link
+delivery has no canonical presentation receipt and therefore returns
+unavailable recency evidence. Neither presentation proves acceptance.
 
 For a finalized challenge, one recent exact-scope grant may count as the social
 entry action. The challenge page must record the exact participant and scope
@@ -430,6 +432,8 @@ cross-member fanout, polling, a scheduler, or persisted rollout state.
   retried.
 - A covering active native offer returns a freshly presentable link instead of
   a false claim that another native message was posted.
+- A provider-idempotent replay outside the current send interval keeps its
+  durable message binding but cannot establish challenge-entry recency.
 - A participant whose exact scope was `not_granted` becomes `in` only after a
   newly posted native offer when the later exact `grantedAt` falls inside the
   recorded eligible 24-hour window and the challenge terms did not change.

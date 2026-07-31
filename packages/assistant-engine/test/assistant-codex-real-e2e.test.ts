@@ -3383,7 +3383,7 @@ function buildGroupPointOfViewCandidateProbe(): string {
     'A: Record the participant as `in` because the scope eventually became granted.',
     'B: Keep the grant valid but ask for one ordinary challenge confirmation because it missed the 24-hour window.',
     '',
-    '68. An offer was handled during rollout with `recencyEvidence="unavailable"`; five minutes later the exact scope is granted.',
+    '68. A native provider retry returned the same older message with `recencyEvidence="unavailable"`; five minutes later the exact scope is granted.',
     'A: Infer challenge entry from the quick grant anyway.',
     'B: Treat the grant as data authority only and ask for one ordinary challenge confirmation.',
     '',

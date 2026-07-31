@@ -89,6 +89,9 @@ describe('assistant group challenge buy-in guidance', () => {
     expect(challenge).toContain(
       'A grant without `grantedAt`, a grant before `offeredAt`, a grant more than 24 hours later, silence, an unresolved identity, unavailable recency evidence, or an offer followed by materially changed challenge terms does not establish buy-in.',
     )
+    expect(challenge).toContain(
+      'do not infer entry from a later grant or claim a new adjacent permission message',
+    )
     expect(challengeRaw.indexOf('Make the stakes real')).toBeLessThan(
       challengeRaw.indexOf('Resolve buy-in without duplicate asks'),
     )

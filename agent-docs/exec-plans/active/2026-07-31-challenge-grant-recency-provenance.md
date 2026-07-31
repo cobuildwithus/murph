@@ -61,6 +61,10 @@ Updated: 2026-07-31
    permission choices.
    Mitigation: keep link and reused-offer recency evidence unavailable; only a
    newly posted native message can use the one-action entry rule.
+4. Risk: after provider acceptance and a failed database binding, a same-key
+   retry can return the older provider message without posting another surface.
+   Mitigation: require provider creation time to fall inside the current send
+   attempt; bind older replays durably but keep entry recency unavailable.
 
 ## Tasks
 
@@ -83,6 +87,10 @@ Updated: 2026-07-31
   truthful delivery evidence and the generic join page did not isolate the
   challenge scope. Accept both findings by narrowing eligibility to newly
   posted native offers with provider chronology; add no schema or state owner.
+- Final ReviewGPT round 2 found that provider chronology alone did not prove a
+  message was created by the current attempt after a binding rollback. The
+  required retrospective continues with one fail-closed interval comparison at
+  the existing provider boundary; no replay lifecycle or new owner is added.
 - Reuse the existing provider message and grant timestamps; add no schema or
   state owner.
 

@@ -55,6 +55,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllEnvs();
 });
 
@@ -2601,11 +2602,11 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       messageId: "msg_1",
     });
     mocks.shareMurphHostedLinqContactCardVcfToChat.mockResolvedValue({ status: "sent" });
-    mocks.sendHostedLinqChatMessage.mockResolvedValue({
+    mocks.sendHostedLinqChatMessage.mockImplementation(() => Promise.resolve({
       chatId: "chat_group_1",
-      messageCreatedAt: "2026-07-31T12:01:00.000Z",
+      messageCreatedAt: new Date().toISOString(),
       messageId: "msg_offer_1",
-    });
+    }));
     mocks.updateHostedLinqChatAvatar.mockResolvedValue(undefined);
     mocks.updateHostedLinqChatDisplayName.mockResolvedValue(undefined);
   });
@@ -2916,6 +2917,13 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
   });
 
   it("posts the canonical snapshot with provider-owned recency chronology", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-31T12:01:00.000Z"));
+    mocks.sendHostedLinqChatMessage.mockResolvedValueOnce({
+      chatId: "chat_group_1",
+      messageCreatedAt: "2026-07-31T12:01:00.000Z",
+      messageId: "msg_offer_1",
+    });
     mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx.mockResolvedValueOnce({
       group: groupSummaryWithOwnerEmailGrant(),
       joinCode: "abc123",
@@ -3309,16 +3317,54 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.recordHostedGroupJoinOfferTx).not.toHaveBeenCalled();
   });
 
-  it("reuses one provider key and message binding across an unresolved retry", async () => {
+  it.each([
+    ["inside the original window", 60 * 60 * 1_000],
+    ["after the original window", 25 * 60 * 60 * 1_000],
+  ])("fails replayed provider chronology closed %s", async (_label, retryDelayMs) => {
     const requestedScopes = [{ projectionKind: "steps-days.v0" as const }];
     const request = {
       action: "post_join_offer" as const,
       joinOffer: { projectionScopes: requestedScopes },
       linqThread: LINQ_THREAD,
     };
+    const originalCreatedAt = new Date("2026-07-31T12:01:00.000Z");
+    vi.useFakeTimers();
+    vi.setSystemTime(originalCreatedAt);
+    mocks.sendHostedLinqChatMessage.mockResolvedValue({
+      chatId: "chat_group_1",
+      messageCreatedAt: originalCreatedAt.toISOString(),
+      messageId: "msg_offer_1",
+    });
+    mocks.recordHostedGroupJoinOfferTx.mockRejectedValueOnce(
+      new Error("transient binding failure"),
+    );
 
-    await handleHostedRuntimeGroupTool({ memberId: "member_container", request });
-    await handleHostedRuntimeGroupTool({ memberId: "member_container", request });
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request,
+    })).resolves.toEqual({
+      action: "post_join_offer",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "offer_binding_failed",
+      },
+    });
+
+    vi.setSystemTime(originalCreatedAt.getTime() + retryDelayMs);
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request,
+    })).resolves.toEqual({
+      action: "post_join_offer",
+      result: {
+        group: GROUP_SUMMARY,
+        joinUrl: "https://www.withmurph.ai/groups/join/abc123",
+        offerState: "posted",
+        status: "sent",
+      },
+    });
 
     const providerCalls = mocks.sendHostedLinqChatMessage.mock.calls;
     expect(providerCalls).toHaveLength(2);
@@ -3328,14 +3374,14 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenNthCalledWith(1, {
       groupId: GROUP_SUMMARY.id,
       message: { channel: "linq", messageId: "msg_offer_1" },
-      postedAt: expect.any(Date),
+      postedAt: originalCreatedAt,
       projectionScopes: requestedScopes,
       tx: fakeTx,
     });
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenNthCalledWith(2, {
       groupId: GROUP_SUMMARY.id,
       message: { channel: "linq", messageId: "msg_offer_1" },
-      postedAt: expect.any(Date),
+      postedAt: originalCreatedAt,
       projectionScopes: requestedScopes,
       tx: fakeTx,
     });

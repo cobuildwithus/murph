@@ -2743,7 +2743,7 @@ describe("murph.group dynamic tool", () => {
         action: "post_join_offer",
         result: {
           group,
-          joinUrl: "https://example.test/groups/join/native-without-time",
+          joinUrl: "https://example.test/groups/join/replayed-native",
           offerState: "posted",
           status: "sent",
         },
@@ -2780,7 +2780,7 @@ describe("murph.group dynamic tool", () => {
       request,
       vaultRoot: null,
     });
-    const missingProviderTimeResult = await executeMurphDynamicToolRequest({
+    const replayedProviderResult = await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl: fetch,
       hostedToolContext: createGroupHostedToolContext({ groupRequest }),
@@ -2807,7 +2807,7 @@ describe("murph.group dynamic tool", () => {
         status: "ok",
       },
     });
-    expect(readGroupToolPayload(missingProviderTimeResult)).toEqual({
+    expect(readGroupToolPayload(replayedProviderResult)).toEqual({
       action: "offer_access",
       result: {
         presentation: "native",

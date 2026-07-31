@@ -1527,13 +1527,13 @@ export type HostedRuntimeGroupToolResponse =
             group: HostedRuntimeGroupSummary;
             joinUrl: string;
             /**
-             * `posted` means this request sent a new native permission message.
+             * `posted` means the provider message was durably bound.
              * `existing` means Web reused a covering active offer; consumers
              * should present the returned first-party link instead of claiming
              * a new native message was sent.
              */
             offerState?: "existing" | "posted";
-            /** Provider chronology for a newly posted native message only. */
+            /** Provider chronology only when the message was created during this send attempt. */
             offeredAt?: string;
           }
         | { status: "unavailable"; unavailableReason: string; group: null };
