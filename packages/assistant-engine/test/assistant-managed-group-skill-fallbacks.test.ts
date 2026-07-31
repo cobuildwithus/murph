@@ -34,16 +34,40 @@ describe("managed hosted group skill boundary", () => {
       );
       expect(normalized).toContain(PUBLIC_FALLBACK_MARKER);
       expect(normalized).toContain(
-        "For an unattended or scheduled occurrence, perform no effect and return the resident delivery skip outcome without user-facing text; do not mutate the preserved automation.",
+        "return the resident delivery skip outcome without user-facing text only when its requested output requires",
+      );
+      expect(normalized).toContain(
+        "resident scheduled-tool, room-safety, and delivery contracts",
+      );
+      expect(normalized).toContain(
+        "Do not mutate a preserved automation solely because managed behavior is unavailable.",
       );
       expect(normalized).toContain(
         "Silence otherwise remains available only when the resident conversational-floor rules independently make the beat human-owned or unaddressed.",
+      );
+      expect(normalized).not.toContain(
+        "For an unattended or scheduled occurrence, perform no effect",
       );
       expect(raw).not.toContain("cobuildwithus/");
       expect(raw).not.toContain("trusted hosted build");
       expect(raw).not.toContain("materializ");
       expect(raw.length).toBeLessThan(2_000);
     }
+  });
+
+  it("keeps ordinary public group automations outside the managed fallback", async () => {
+    const raw = await readFile(
+      path.join(resolveAssistantSkillsRoot(), "group-chat", "SKILL.md"),
+      "utf8",
+    );
+    const normalized = raw.replace(/\s+/gu, " ");
+
+    expect(normalized).toContain(
+      "Ordinary public group reminders and check-ins continue under the resident scheduled-tool, room-safety, and delivery contracts.",
+    );
+    expect(normalized).toContain(
+      "only when its requested output requires the absent managed social-behavior policy",
+    );
   });
 
   it("keeps the exact managed group fallback set registered at stable slugs", () => {
@@ -111,7 +135,9 @@ describe("managed hosted group skill boundary", () => {
     expect(normalized).toContain(
       "return the resident delivery skip outcome without user-facing text",
     );
-    expect(normalized).toContain("do not mutate the preserved automation");
+    expect(normalized).toContain(
+      "Do not mutate a preserved automation solely because managed behavior is unavailable.",
+    );
     expect(normalized).not.toContain(
       "unless the public runtime contracts and current evidence support it",
     );

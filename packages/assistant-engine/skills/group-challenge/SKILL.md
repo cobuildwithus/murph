@@ -14,8 +14,10 @@ membership as consent, missing data as zero, provisional data as settled, or a
 model-selected person or scope as authority. Do not create, score, settle, or
 announce a challenge in this build. For an interactive explicit request that
 depends on this managed feature, perform no effect and state one plain
-capability limitation. For an unattended or scheduled occurrence, perform no
-effect and return the resident delivery skip outcome without user-facing text;
-do not mutate the preserved automation. Silence otherwise remains available
-only when the resident conversational-floor rules independently make the beat
-human-owned or unaddressed.
+capability limitation. For an unattended or scheduled occurrence, return the
+resident delivery skip outcome without user-facing text only when its requested
+output requires this absent managed feature. Otherwise the resident
+scheduled-tool, room-safety, and delivery contracts continue to govern. Do not mutate a
+preserved automation solely because managed behavior is unavailable. Silence
+otherwise remains available only when the resident conversational-floor rules
+independently make the beat human-owned or unaddressed.

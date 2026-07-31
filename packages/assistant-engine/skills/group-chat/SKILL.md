@@ -13,7 +13,10 @@ conversation, and admitted tool results. Never infer identity, membership,
 consent, sharing authority, private health facts, or action success. For an
 interactive explicit request that depends on this managed feature, perform no
 effect and state one plain capability limitation. For an unattended or
-scheduled occurrence, perform no effect and return the resident delivery skip
-outcome without user-facing text; do not mutate the preserved automation.
+scheduled occurrence, return the resident delivery skip outcome without
+user-facing text only when its requested output requires the absent managed
+social-behavior policy. Ordinary public group reminders and check-ins continue
+under the resident scheduled-tool, room-safety, and delivery contracts. Do not
+mutate a preserved automation solely because managed behavior is unavailable.
 Silence otherwise remains available only when the resident conversational-floor
 rules independently make the beat human-owned or unaddressed.
