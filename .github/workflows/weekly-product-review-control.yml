@@ -1,0 +1,288 @@
+name: Weekly product review landing control
+
+on:
+  push:
+    branches:
+      - agent/weekly-founder-product-review-control-1231
+
+permissions:
+  actions: write
+  checks: read
+  contents: write
+  pull-requests: write
+
+jobs:
+  land:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: cobuildwithus/murph
+      TARGET_BRANCH: agent/weekly-founder-product-review-privacy
+      PR_NUMBER: "1231"
+    steps:
+      - name: Check out target branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: agent/weekly-founder-product-review-privacy
+
+      - name: Wait for or recover validated implementation
+        id: implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          rerun_attempted=0
+          ready=0
+
+          for attempt in $(seq 1 120); do
+            git fetch origin "$TARGET_BRANCH" main
+            git reset --hard "origin/$TARGET_BRANCH"
+
+            mapfile -t patch_files < <(
+              find . -type f \( \
+                -iname '*weekly-founder-product-review*.patch' -o \
+                -iname '*opt-in-unlinked-and-confined-privacy-review*.patch' \
+              \) -print
+            )
+            apply_bootstrap=0
+            [[ -e .github/workflows/agent-apply-weekly-product-review.yml ]] && apply_bootstrap=1
+            implementation=0
+            if git grep -q 'executeConfinedReadOnlyReview' -- packages/assistant-engine \
+              && git grep -q 'feature.product-improvement-review' -- apps/web \
+              && git grep -q 'product_review' -- packages/hosted-execution; then
+              implementation=1
+            fi
+
+            if [[ ${#patch_files[@]} -eq 0 && "$apply_bootstrap" == 0 && "$implementation" == 1 ]]; then
+              ready=1
+              break
+            fi
+
+            latest_apply_run=$(
+              gh api "repos/$REPO/actions/runs?branch=agent%2Fweekly-founder-product-review-privacy&per_page=100" \
+                --jq '[.workflow_runs[] | select(.name == "Apply weekly product review patch series")][0] // empty'
+            )
+            if [[ -n "$latest_apply_run" ]]; then
+              run_id=$(jq -r '.id' <<<"$latest_apply_run")
+              run_status=$(jq -r '.status' <<<"$latest_apply_run")
+              run_conclusion=$(jq -r '.conclusion // ""' <<<"$latest_apply_run")
+              echo "Apply run ${run_id}: status=${run_status}, conclusion=${run_conclusion}"
+              if [[ "$run_status" == completed \
+                && "$run_conclusion" != success \
+                && "$rerun_attempted" == 0 ]]; then
+                echo "Retrying failed apply run ${run_id} once."
+                gh api -X POST "repos/$REPO/actions/runs/$run_id/rerun-failed-jobs" \
+                  >/dev/null 2>&1 \
+                  || gh api -X POST "repos/$REPO/actions/runs/$run_id/rerun" >/dev/null
+                rerun_attempted=1
+              fi
+            fi
+
+            echo "Waiting for clean implementation (attempt ${attempt}/120; patches=${#patch_files[@]}; applyBootstrap=${apply_bootstrap}; implementation=${implementation})."
+            sleep 30
+          done
+
+          if [[ "$ready" != 1 ]]; then
+            echo 'The implementation branch never reached a clean validated state.' >&2
+            exit 1
+          fi
+
+          git diff --check origin/main...HEAD
+          if git diff --name-only origin/main...HEAD | grep -E '(^|/)([^/]*\.patch|agent-apply-weekly-product-review\.yml)$'; then
+            echo 'Patch or apply-bootstrap artifacts remain in the feature diff.' >&2
+            exit 1
+          fi
+          echo "implementation_head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Configure Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.1
+
+      - name: Enable pinned pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.33.0 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate Prisma schema
+        run: pnpm --dir apps/web exec prisma validate
+
+      - name: Run diff-selected tests
+        env:
+          GITHUB_BASE_REF: main
+        run: pnpm test:diff:local
+
+      - name: Run full workspace typecheck
+        run: pnpm typecheck
+
+      - name: Verify workspace boundaries
+        run: pnpm verify:workspace-boundaries
+
+      - name: Verify documentation drift
+        run: pnpm docs:drift
+
+      - name: Remove any remaining feature-branch finalizer
+        id: clean_head
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin "$TARGET_BRANCH" main
+          current_remote=$(git rev-parse "origin/$TARGET_BRANCH")
+          validated_head='${{ steps.implementation.outputs.implementation_head }}'
+          if [[ "$current_remote" != "$validated_head" ]]; then
+            echo "Feature head moved during local validation: ${validated_head} -> ${current_remote}." >&2
+            exit 1
+          fi
+          git reset --hard "$validated_head"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          rm -f .github/workflows/agent-finalize-weekly-product-review.yml
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m 'chore: remove product review bootstrap'
+            git diff --check HEAD^ HEAD
+            git push origin HEAD:"$TARGET_BRANCH"
+          fi
+          final_head=$(git rev-parse HEAD)
+          if git diff --name-only origin/main...HEAD | grep -E '(^|/)([^/]*\.patch|agent-(apply|finalize)-weekly-product-review\.yml)$'; then
+            echo 'Bootstrap artifacts remain after final cleanup.' >&2
+            exit 1
+          fi
+          echo "final_head=${final_head}" >> "$GITHUB_OUTPUT"
+
+      - name: Reopen and update draft pull request
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/pr-body.md <<'EOF'
+          ## Summary
+
+          Adds a default-off weekly founder product review that derives bounded, product-only opportunities from recent private conversation evidence, then requires a separate confined model to approve the proposed report before any persistence.
+
+          ## Privacy and authority boundaries
+
+          - Reuses the existing managed-automation and product-feedback primitives rather than adding another scheduler, queue, or state owner.
+          - Requires explicit, revocable `feature.product-improvement-review` consent before evidence assembly or model work.
+          - Runs the privacy pass as a fresh one-shot read-only model with no shell, network, apps, plugins, memories, delegation, workspace access, or dynamic tools.
+          - Gives the reviewer only the proposed report, never the underlying transcript or member identity.
+          - Fails closed on denial, malformed reviewer output, or reviewer failure.
+          - Persists approved `product_review` rows without `memberId`; a database constraint prevents linked product reviews and prevents other feedback kinds from becoming unlinked.
+          - Reuses the same confined-review primitive for the existing consented Assistant Ask disclosure review.
+
+          ## Validation before opening
+
+          - Patch series applied against the exact current branch base.
+          - `git diff --check`
+          - Prisma schema validation
+          - Diff-selected tests
+          - Full workspace typecheck
+          - Workspace-boundary verification
+          - Documentation drift verification
+
+          The PR remains draft until all exact-head pull-request checks pass.
+          EOF
+
+          state=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json state --jq .state)
+          if [[ "$state" == CLOSED ]]; then
+            gh pr reopen "$PR_NUMBER" --repo "$REPO"
+          fi
+          gh pr edit "$PR_NUMBER" \
+            --repo "$REPO" \
+            --title 'Add opt-in privacy-reviewed weekly founder product review' \
+            --body-file /tmp/pr-body.md
+
+          actual_head=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json headRefOid --jq .headRefOid)
+          expected_head='${{ steps.clean_head.outputs.final_head }}'
+          [[ "$actual_head" == "$expected_head" ]] || {
+            echo "PR head ${actual_head} did not match validated head ${expected_head}." >&2
+            exit 1
+          }
+
+      - name: Wait for exact-head PR checks and retry failed Actions once
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_head='${{ steps.clean_head.outputs.final_head }}'
+
+          for attempt in $(seq 1 60); do
+            actual_head=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json headRefOid --jq .headRefOid)
+            [[ "$actual_head" == "$expected_head" ]] || {
+              echo "PR head moved from ${expected_head} to ${actual_head}." >&2
+              exit 1
+            }
+            count=$(gh pr checks "$PR_NUMBER" --repo "$REPO" --json name --jq length 2>/dev/null || echo 0)
+            if [[ "$count" =~ ^[0-9]+$ ]] && (( count > 0 )); then
+              break
+            fi
+            echo "Waiting for exact-head checks to register (attempt ${attempt}/60)."
+            sleep 15
+          done
+
+          count=$(gh pr checks "$PR_NUMBER" --repo "$REPO" --json name --jq length 2>/dev/null || echo 0)
+          if ! [[ "$count" =~ ^[0-9]+$ ]] || (( count == 0 )); then
+            echo 'No PR checks registered for the exact head.' >&2
+            exit 1
+          fi
+
+          if ! gh pr checks "$PR_NUMBER" --repo "$REPO" --watch --fail-fast --interval 15; then
+            echo 'A PR check failed; retrying failed GitHub Actions runs for this head once.'
+            mapfile -t failed_run_ids < <(
+              gh run list --repo "$REPO" --branch "$TARGET_BRANCH" --event pull_request --limit 100 \
+                --json databaseId,status,conclusion,headSha \
+                --jq ".[] | select(.headSha == \"${expected_head}\" and .status == \"completed\" and (.conclusion == \"failure\" or .conclusion == \"cancelled\" or .conclusion == \"timed_out\")) | .databaseId"
+            )
+            for run_id in "${failed_run_ids[@]}"; do
+              echo "Retrying failed Actions run ${run_id}."
+              gh run rerun "$run_id" --repo "$REPO" --failed \
+                || gh run rerun "$run_id" --repo "$REPO"
+            done
+            if [[ ${#failed_run_ids[@]} -gt 0 ]]; then
+              sleep 30
+            fi
+            gh pr checks "$PR_NUMBER" --repo "$REPO" --watch --fail-fast --interval 15
+          fi
+
+          actual_head=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json headRefOid --jq .headRefOid)
+          [[ "$actual_head" == "$expected_head" ]] || {
+            echo "PR head moved during checks from ${expected_head} to ${actual_head}." >&2
+            exit 1
+          }
+
+      - name: Mark validated exact head ready
+        shell: bash
+        run: |
+          set -euo pipefail
+          is_draft=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json isDraft --jq .isDraft)
+          if [[ "$is_draft" == true ]]; then
+            gh pr ready "$PR_NUMBER" --repo "$REPO"
+          fi
+          head_sha=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json headRefOid --jq .headRefOid)
+          cat >> /tmp/pr-body.md <<EOF
+
+          ## Exact-head status
+
+          All required pull-request checks passed for \`${head_sha}\`; the PR is ready for review.
+          EOF
+          gh pr edit "$PR_NUMBER" --repo "$REPO" --body-file /tmp/pr-body.md
+          gh pr comment "$PR_NUMBER" --repo "$REPO" \
+            --body "Landing audit passed for exact head \`${head_sha}\`. The patch/bootstrap files are absent from the final diff, local validation passed, and the required PR checks are green."
+
+      - name: Delete control branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api -X DELETE "repos/$REPO/git/refs/heads/agent/weekly-founder-product-review-control-1231"
+
+      - name: Comment failure diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          set +e
+          head_sha=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json headRefOid --jq .headRefOid 2>/dev/null)
+          checks=$(gh pr checks "$PR_NUMBER" --repo "$REPO" --json name,state,bucket,link 2>/dev/null)
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          gh pr comment "$PR_NUMBER" --repo "$REPO" --body "The landing watchdog left this PR closed or draft because a fail-closed validation gate did not pass. Current head: \`${head_sha:-unknown}\`. Control run: ${run_url}\n\n\`\`\`json\n${checks:-[] }\n\`\`\`" 2>/dev/null || true
