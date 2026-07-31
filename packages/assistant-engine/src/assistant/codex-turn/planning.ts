@@ -484,6 +484,15 @@ export async function resolveAssistantRouteTurnPlan(input: {
     privateInteractiveAudience &&
     input.profile.promptProfile === 'conversation' &&
     input.profile.toolProfile === 'provider-turn'
+  const ordinaryInboundTurn =
+    input.profile.promptProfile === 'conversation' &&
+    input.profile.toolProfile === 'provider-turn' &&
+    input.input.scheduledOccurrenceAt == null &&
+    (
+      input.input.turnTrigger == null ||
+      input.input.turnTrigger === 'manual-ask' ||
+      input.input.turnTrigger === 'automation-auto-reply'
+    )
   const shouldUseCommittedTranscriptHistory =
     input.profile.threadScope === 'session-thread' ||
     input.profile.promptProfile === 'assistant-ask-continuation' ||
@@ -738,6 +747,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
       ),
       onboardingGuidance: options.injectOnboardingGuidance,
       modelBehaviorProfile,
+      ordinaryInboundTurn,
       scheduledOccurrenceAt: input.input.scheduledOccurrenceAt ?? null,
       turnTrigger: input.input.turnTrigger ?? null,
     }, {

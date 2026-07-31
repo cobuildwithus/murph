@@ -2483,7 +2483,7 @@ How old are you and what's your gender?
       },
       {
         contract:
-          'If they ask to pause, leave onboarding open and let the existing managed onboarding follow-up automation own continuation.',
+          'If they ask to pause, leave onboarding open and let the finite managed next-day recovery occurrence decide whether continuation is timely.',
         section: parkSection,
         userMessage: 'Pause for now',
       },
@@ -2607,6 +2607,23 @@ How old are you and what's your gender?
     expect(compact).toContain(
       'If the last onboarding question is still unanswered, do not send a different setup question.',
     )
+    expect(raw).toContain('### Finite next-day recovery')
+    expect(compact).toContain(
+      'The occurrence may instead ask one natural, low-pressure question that lets the user choose whether to continue.',
+    )
+    expect(compact).toContain(
+      'Send or skip ends this scheduled recovery.',
+    )
+    expect(compact).toContain(
+      'do not run the completion command or otherwise mutate onboarding state',
+    )
+    expect(compact).toContain(
+      'Only a later foreground user reply may advance or complete onboarding through the canonical state owner.',
+    )
+    expect(compact).toContain(
+      'uses the ordinary scheduled notification skip and leaves onboarding state unchanged',
+    )
+    expect(compact).not.toContain('managed daily onboarding follow-up')
 
     expect(raw).not.toContain('roughly 9-10 short assistant messages')
     expect(raw).not.toContain('### 4. Establish the first ongoing support loop')

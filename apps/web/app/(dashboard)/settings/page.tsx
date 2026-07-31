@@ -414,7 +414,7 @@ export default async function SettingsPage({
       ? usageActivity
       : null;
 
-  return (
+  const settingsContent = (
     <div className="flex flex-col gap-12">
       <PageHeader
         eyebrow="Settings"
@@ -595,7 +595,7 @@ export default async function SettingsPage({
       </section>
 
       {privyAppId ? (
-        <HostedPrivyProvider appId={privyAppId} clientId={privyClientId}>
+        <>
           <section className="flex flex-col gap-4">
             <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
               Security
@@ -612,7 +612,7 @@ export default async function SettingsPage({
             </div>
             <HostedDataPrivacySettings authenticated={authenticated} authorizationEnabled />
           </section>
-        </HostedPrivyProvider>
+        </>
       ) : (
         <section id="data-privacy" className="flex scroll-mt-24 flex-col gap-4">
           <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
@@ -623,6 +623,12 @@ export default async function SettingsPage({
       )}
     </div>
   );
+
+  return privyAppId ? (
+    <HostedPrivyProvider appId={privyAppId} clientId={privyClientId}>
+      {settingsContent}
+    </HostedPrivyProvider>
+  ) : settingsContent;
 }
 
 async function readSettingsPageData(input: {

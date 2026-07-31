@@ -3443,10 +3443,17 @@ export async function executeMurphDynamicToolRequest(input: {
               })
             }
             const privateMedia = result.responseMedia?.[0] ?? null
-            return {
-              media: result.rpcSuccess && privateMedia?.kind === 'vault_image'
+            const generatedMedia =
+              result.rpcSuccess && privateMedia?.kind === 'vault_image'
                 ? privateMedia
-                : null,
+                : null
+            return {
+              failureDiagnostic: generatedMedia
+                ? null
+                : result.rpcSuccess
+                  ? 'image generation completed without deliverable private media'
+                  : result.rpcText,
+              media: generatedMedia,
               runtimeIssue: null,
               savedImageRef: result.savedImageRef ?? null,
             }

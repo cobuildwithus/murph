@@ -58,7 +58,7 @@ test("keeps processing through intermediate checkpoints until the voice job fini
   );
   globalThis.fetch = fetchMock;
   const rendered = await renderClientComponent(
-    createElement(EnvironmentPageClient, { contactAction: null }),
+    createElement(EnvironmentPageClient, { contactOptions: [] }),
     {
       location: {
         hash: "",
@@ -96,7 +96,7 @@ test("keeps processing through intermediate checkpoints until the voice job fini
 
     mocks.vault.workspaceVersion = "workspace-v2";
     await rendered.rerender(
-      createElement(EnvironmentPageClient, { contactAction: null }),
+      createElement(EnvironmentPageClient, { contactOptions: [] }),
     );
     assert.match(
       rendered.window.document.body.textContent ?? "",
@@ -138,7 +138,7 @@ test("restores server-side processing state after the page is reopened", async (
     createElement(
       StrictMode,
       null,
-      createElement(EnvironmentPageClient, { contactAction: null }),
+      createElement(EnvironmentPageClient, { contactOptions: [] }),
     ),
     {
       location: {
@@ -168,6 +168,69 @@ test("restores server-side processing state after the page is reopened", async (
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2_000);
     });
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /The report was not updated/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    vi.useRealTimers();
+    await rendered.cleanup();
+  }
+});
+
+test("keeps checking after processing takes longer than two minutes", async () => {
+  vi.useFakeTimers();
+  mocks.refresh.mockClear();
+  const originalFetch = globalThis.fetch;
+  let processing = true;
+  const fetchMock = vi.fn(async (
+    _input: string | URL | Request,
+    _init?: RequestInit,
+  ) => Response.json({ processing }));
+  globalThis.fetch = fetchMock;
+  const rendered = await renderClientComponent(
+    createElement(EnvironmentPageClient, { contactOptions: [] }),
+    {
+      location: {
+        hash: "",
+        href: "https://local.withmurph.ai/environment",
+        origin: "https://local.withmurph.ai",
+        pathname: "/environment",
+        search: "",
+      },
+    },
+  );
+
+  try {
+    await act(async () => {
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(2 * 60 * 1_000);
+    });
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Murph is taking longer than usual/,
+    );
+    const callsAtDelay = fetchMock.mock.calls.length;
+    const checkAgain = Array.from(
+      rendered.window.document.querySelectorAll("button"),
+    ).find((button) => button.textContent?.includes("Check again"));
+    assert.ok(checkAgain instanceof rendered.window.HTMLButtonElement);
+
+    await act(async () => {
+      checkAgain.click();
+      await Promise.resolve();
+    });
+    assert.ok(fetchMock.mock.calls.some(([input, init]) =>
+      input === "/api/environment/voice" && init?.method === "PATCH"
+    ));
+
+    processing = false;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+
+    assert.ok(fetchMock.mock.calls.length > callsAtDelay);
     assert.match(
       rendered.window.document.body.textContent ?? "",
       /The report was not updated/,

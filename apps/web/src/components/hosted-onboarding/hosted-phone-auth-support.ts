@@ -12,6 +12,8 @@ import { navigateHostedAuthRedirect } from "./hosted-auth-navigation";
 import { HostedOnboardingApiError, requestHostedOnboardingJson } from "./client-api";
 import type {
   HostedPhoneLinkPayload,
+  HostedPhoneLinkSyncExpectation,
+  HostedPhoneLinkSyncResult,
   HostedPhoneVerificationAttempt,
   HostedResolvedPhoneSubmission,
 } from "./hosted-phone-auth-types";
@@ -144,25 +146,42 @@ export async function finalizeHostedPrivyVerification(input: {
 }
 
 export async function finalizeHostedPhoneLink(input: {
+  expectation: HostedPhoneLinkSyncExpectation;
   onLinked?: (payload: HostedPhoneLinkPayload) => Promise<void> | void;
-}): Promise<void> {
-  const payload = await requestHostedPhoneLinkSyncWithRetry();
-  await input.onLinked?.(payload);
+}): Promise<HostedPhoneLinkSyncResult> {
+  const result = await requestHostedPhoneLinkSyncWithRetry(input.expectation);
+  if (result.status === "synced") {
+    await input.onLinked?.(result);
+  }
+  return result;
 }
 
-export async function requestHostedPhoneLinkSyncWithRetry(): Promise<HostedPhoneLinkPayload> {
+export async function requestHostedPhoneLinkSyncWithRetry(
+  expectation: HostedPhoneLinkSyncExpectation,
+): Promise<HostedPhoneLinkSyncResult> {
   let lastError: unknown = null;
 
-  for (const delayMs of [0, 500] as const) {
+  for (const [attemptIndex, delayMs] of [0, 250, 1_000].entries()) {
     if (delayMs > 0) {
       await waitForRetryDelay(delayMs);
     }
 
     try {
-      return await requestHostedOnboardingJson<HostedPhoneLinkPayload>({
+      const result = await requestHostedOnboardingJson<HostedPhoneLinkSyncResult>({
         method: "POST",
+        payload: expectation,
         url: "/api/settings/phone/sync",
       });
+
+      if (
+        result.status === "unchanged"
+        && expectation.kind === "changed-from"
+        && attemptIndex < 2
+      ) {
+        continue;
+      }
+
+      return result;
     } catch (error) {
       lastError = error;
 
@@ -189,6 +208,7 @@ function isRetryableHostedPhoneLinkError(error: unknown): boolean {
   return (
     error.retryable
     && (error.code === "PRIVY_ACCOUNT_NOT_READY"
+      || error.code === "PRIVY_USER_LOOKUP_FAILED"
       || error.code === "PRIVY_PHONE_NOT_READY")
   );
 }

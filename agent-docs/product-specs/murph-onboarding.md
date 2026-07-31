@@ -48,6 +48,10 @@ privacy, authorization, or provider boundaries.
 - Keep the existing `finish-onboarding-followup` managed automation as the one
   recovery and continuation mechanism. Do not add a second automation for
   context collection or split onboarding into competing lifecycle owners.
+  Reconciliation recognizes only the exact current seed, its immediate
+  predecessor, or the bounded original legacy seed; execution remains ordinary
+  scheduled send-or-skip work, so editable slug, tags, title, and instructions
+  confer no onboarding-state authority.
 - Keep the post-onboarding choice point separate from unfinished-onboarding
   recovery. It is one finite managed one-shot for members who answered
   onboarding, not another collection flow, recurring cadence, or profile.
@@ -523,10 +527,14 @@ decline for one skipped category.
 Onboarding may remain open indefinitely without blocking ordinary help. Do not
 claim completion until the command reports it.
 
-## Daily Continuation
+## Finite Scheduled Continuation
 
-The existing daily onboarding automation is a recovery path, not a category
-drip or a support-obligation resolver. It should read recent conversation and
+The onboarding follow-up automation is one finite recovery attempt, not a
+category drip or a support-obligation resolver. It is scheduled for the next
+local day in a stable per-member window from 1:30 PM through 2:29 PM, and its
+delivery authority closes at 3:00 PM on that same local day, reserving at least
+30 minutes for a healthy turn after the latest scheduled start. Its one-shot is
+consumed after either a send or a skip. It should read recent conversation and
 the resume snapshot, then do one of four things:
 
 1. return skip because onboarding is complete or declined; the existing
@@ -539,12 +547,23 @@ the resume snapshot, then do one of four things:
    question.
 
 If the last onboarding question is unanswered, do not rotate to another
-category or repeat it through the daily automation; skip quietly. Any promised
-proactive support continues through its dedicated canonical automation,
-including after onboarding closes. Honor requested timing and skip whenever
-there is no timely onboarding continuation. Every user-facing scheduled
-continuation includes exactly one easy question that invites a reply; a
-reflection-only scheduled message returns skip.
+category or repeat it. This single final attempt may instead use one natural,
+low-pressure reopening question that lets the member choose whether to
+continue. Skip after an explicit decline, a request not to follow up, or when
+the nudge would not be timely or useful. Any promised proactive support
+continues through its dedicated canonical automation, including after
+onboarding closes. Every user-facing scheduled continuation includes exactly
+one easy question that invites a reply; a reflection-only scheduled message
+returns skip. Normal member replies may continue open onboarding indefinitely,
+but they do not create another scheduled recovery attempt.
+
+The scheduled turn uses the ordinary notification send-or-skip contract and
+never invokes the completion command or otherwise mutates onboarding state.
+Evidence that the checkpoint is already answered, declined, deferred, or not
+useful to reopen produces an ordinary skip. Only a later foreground member
+reply may advance or complete onboarding through the canonical state owner.
+The same 3:00 PM cutoff prevents a queued or delayed outbound intent from
+entering the provider after the finite local window.
 
 ## Post-Onboarding Choice Point
 

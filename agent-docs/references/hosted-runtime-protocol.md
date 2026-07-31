@@ -156,6 +156,15 @@ may assign one independent canonical record family per child, with every write
 idempotently attributable to that source. A terminal lifecycle receipt remains
 advisory; canonical readback is completion proof. If the member needs the result
 in the current reply, the root keeps the work and uses normal progress updates.
+If the root replies while a child is still generating, every later ordinary
+inbound root turn checks again for completion. It incorporates a newly
+completed relevant result at most once; use, failure, cancellation, or loss of
+relevance ends that child's rechecks. Otherwise it replies without waiting and
+checks the unfinished child again on the next ordinary inbound turn. Scheduled
+automation, maintenance, system-notification, and output-only turns never
+perform this recheck. The recheck uses Codex's native parent-thread completion
+context rather than `wait_agent` and creates no queue, wake, or automatic
+follow-up.
 
 Hosted configuration admits one root plus at most three concurrent children
 per session. Independent roots may retain their own children inside the same
@@ -1313,7 +1322,18 @@ uses the existing receipt checkpoint against the latest workspace. After the
 private capture is ready, the runtime upserts one trusted system input containing
 its exact `vault_image` descriptor on the original route, registers that input
 with the ordinary pending assistant-input index, and notifies the existing wake
-signal. Normal foreground selection therefore keeps fresh conversation ahead of
+signal. When OpenAI rejects generation or editing, the same completion input
+keeps the legacy exact `{status:"failed"}` result envelope and carries one
+separate runtime-authored diagnostic line. New readers accept that line only
+from exact runtime-authored system provenance, normalize and bound it, and
+present it to Murph as untrusted provider evidence rather than instructions;
+the authenticated provenance applies only to the completion status. The queued
+completion turn may explain or propose a correction but cannot launch another
+image operation; a retry requires user authorization in a later turn. Old
+readers continue to understand the unchanged failed envelope. The diagnostic may contain only the adapter's bounded
+structured error message, code, request id, and fixed local context, never an
+authorization header, credential, raw response body, prompt payload, or image
+bytes. Normal foreground selection therefore keeps fresh conversation ahead of
 the completion and owns completion retry and terminal evidence. Provider
 completion starts the existing generic usage recorder without awaiting it, and
 image delivery never waits for accounting or diagnostic writes. When the model

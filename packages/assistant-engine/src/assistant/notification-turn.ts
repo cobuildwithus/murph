@@ -162,11 +162,12 @@ export type AssistantNotificationDecision = z.infer<
   typeof assistantNotificationDecisionSchema
 >
 
-export type AssistantNotificationTurnPolicy = {
-  kind: 'maintenance-exact-skip'
-  maintenanceProfile: AssistantMaintenanceProfile
-  privateSummary: string
-}
+export type AssistantNotificationTurnPolicy =
+  | {
+      kind: 'maintenance-exact-skip'
+      maintenanceProfile: AssistantMaintenanceProfile
+      privateSummary: string
+    }
 
 export type AssistantNotificationPromptProfile = 'creative-response'
 
@@ -575,7 +576,6 @@ export async function sendAssistantNotificationLocal(
             providerValidationErrorDetails,
           )
         }
-
         if (isAssistantNotificationMaintenanceExactSkip(input)) {
           try {
             assertAssistantMaintenanceNotificationDecision({

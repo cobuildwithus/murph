@@ -63,6 +63,175 @@ export interface ChangelogPage {
 
 const RAW_CHANGELOG_EDITIONS = [
   {
+    id: "2026-07-31",
+    publishedOn: "2026-07-31",
+    title: "A clearer view of home, stronger follow-through",
+    summary:
+      "Environment turns what Murph knows about your home into a private report and one-memo walkthrough. Group funding and access, link previews, reminders, usage, Venice replies, and delegated work all get clearer or more reliable paths.",
+    items: [
+      {
+        id: "private-environment-report",
+        kind: "feature",
+        priority: 5,
+        title: "See how your environment supports you",
+        summary:
+          "The new Environment page turns saved facts about sleep, air, light, recovery, and workspace into a private report with category notes, live local conditions, and an A–E audit once enough scoreable conditions are known.",
+        details:
+          "Missing or skipped facts never lower the grade, and optional equipment never counts against it. Each result explains what is known, what needs attention, and the next useful check.",
+        relevanceTags: ["environment", "sleep", "workspace", "context"],
+        sourcePullRequests: [573],
+        tryIt: {
+          href: "/environment",
+          label: "Open Environment",
+        },
+      },
+      {
+        id: "environment-voice-walkthrough",
+        kind: "feature",
+        priority: 5,
+        title: "Build the report with one voice memo",
+        summary:
+          "Walk Murph through five short topics in one recording. Murph privately extracts clear facts about your home and workspace, saves them to your vault, and refreshes the open report when processing finishes.",
+        details:
+          "A partial report asks only about useful missing details, while a complete report switches to a free-form update. Precise addresses are rejected, ambiguous details stay unknown, and the transcript is not added to conversation history.",
+        relevanceTags: ["environment", "voice", "privacy", "context"],
+        sourcePullRequests: [573],
+      },
+      {
+        id: "native-link-previews",
+        kind: "feature",
+        priority: 5,
+        title: "Links can arrive as native previews",
+        summary:
+          "In a supported existing chat, a reply with text or media followed by one HTTPS link can send the content first and the link as a native preview.",
+        details:
+          "A link-only reply can use one native link when it does not need a reply anchor. If the preview is definitively rejected, Murph sends the exact link as text, and retries preserve content that was already accepted.",
+        relevanceTags: ["imessage", "links", "messaging", "reliability"],
+        sourcePullRequests: [1110],
+      },
+      {
+        id: "family-owner-usage-topups",
+        kind: "feature",
+        priority: 5,
+        title: "Family owners can add usage for themselves",
+        summary:
+          "An active Family owner can choose Add usage from their own AI-usage row and select $5, $10, or $25 through the existing Family checkout.",
+        details:
+          "A fulfilled purchase starts a fresh display window at 0% used, and only later usage moves the meter. Each payment return stays with its exact owner or member surface instead of creating competing confirmations.",
+        relevanceTags: ["family", "billing", "usage", "settings"],
+        sourcePullRequests: [1198],
+      },
+      {
+        id: "group-access-across-channels",
+        kind: "feature",
+        priority: 5,
+        title: "Group access offers fit the current chat",
+        summary:
+          "A group can ask Murph to create or extend access through one action. Supported iMessage groups keep the native reaction path, while SMS, Telegram, scheduled turns, and standalone requests get the existing first-party link.",
+        details:
+          "Murph chooses the presentation from the trusted route, includes one usable access surface, and returns a truthful unavailable result when the route cannot be proven.",
+        relevanceTags: ["groups", "sharing", "imessage", "telegram"],
+        sourcePullRequests: [1184],
+      },
+      {
+        id: "fund-groups-at-any-capacity",
+        kind: "feature",
+        priority: 5,
+        title: "Fund a group whenever you choose",
+        summary:
+          "Anyone in an active hosted group can open its first-party funding page at any capacity. Unsponsored groups open monthly sponsorship, while other participants in sponsored groups can add a one-time contribution.",
+        details:
+          "An explicit request to fund, sponsor, contribute, or get the funding link no longer detours into referrals or claims that a healthy group needs funding. The active payer can manage sponsorship on the same page, and every payment still requires explicit confirmation and Stripe reconciliation.",
+        relevanceTags: ["groups", "funding", "usage", "billing"],
+        sourcePullRequests: [1207],
+      },
+      {
+        id: "one-shot-reminders-survive-restart",
+        kind: "improvement",
+        priority: 5,
+        title: "One-time reminders keep their place",
+        summary:
+          "A one-time reminder created near its scheduled minute now keeps a durable wake with the saved schedule, so ending or restarting the creating session cannot strand an active reminder.",
+        details:
+          "The current reply confirms the saved reminder without waiting on the best-effort wake signal. The scheduled message keeps its existing route, timing, and delivery checks.",
+        relevanceTags: ["reminders", "automations", "reliability", "messaging"],
+        sourcePullRequests: [1209],
+      },
+      {
+        id: "venice-tool-compatible-replies",
+        kind: "improvement",
+        priority: 5,
+        title: "Venice replies keep Murph's tools",
+        summary:
+          "Members who choose Venice can now receive Murph's normal tool-enabled reply instead of seeing typing end when the provider rejects the request shape.",
+        details:
+          "The model choice, tools, conversation, and delivery path stay the same. Murph translates only the exact supported tool envelope and rejects malformed or conflicting metadata before provider entry.",
+        relevanceTags: ["assistant", "models", "venice", "reliability"],
+        sourcePullRequests: [1200],
+      },
+      {
+        id: "core-member-plan-name",
+        kind: "improvement",
+        priority: 4,
+        title: "The direct member plan is now Core",
+        summary:
+          "Eligible group members now see Core in Settings, trial continuation, billing recovery, usage-limit messages, Clubs pricing, and private plan answers.",
+        details:
+          "Only the name changed. Core remains $3.50 per month with the same included usage, eligibility, billing transitions, assistant capability, and group continuity.",
+        relevanceTags: ["plans", "billing", "settings", "groups"],
+        sourcePullRequests: [1206],
+      },
+      {
+        id: "usage-referrals-stay-current",
+        kind: "improvement",
+        priority: 4,
+        title: "Usage says what remains and what is still moving",
+        summary:
+          "The usage meter now answers how much capacity remains, while waiting, active, final-checking, and reward-pending referrals stay in the current list until they are complete.",
+        details:
+          "A quiet Details row holds each referral's requirements and selection date. Only completed referrals and usage purchases move into History.",
+        relevanceTags: ["usage", "referrals", "settings", "accessibility"],
+        sourcePullRequests: [1194],
+      },
+      {
+        id: "safe-group-stakes",
+        kind: "improvement",
+        priority: 4,
+        title: "Safe group stakes keep their edge",
+        summary:
+          "Murph now judges a proposed group dare by the concrete act, so an ordinary timed stake or playful consequence can stay intact when it is safe and consensual.",
+        details:
+          "The wording alone does not trigger a veto. Real hazards, coercion, impairment, contraindications, or pressure through distress still get the narrow boundary they require.",
+        relevanceTags: ["groups", "challenges", "humor", "safety"],
+        sourcePullRequests: [1201],
+      },
+      {
+        id: "experiment-progress-cards-fail-soft",
+        kind: "improvement",
+        priority: 4,
+        title: "Experiment progress cards fail soft",
+        summary:
+          "Hosted experiment progress cards now keep rendering when optional biomarker-direction context is unavailable, using neutral mover sentiment instead of failing the whole request.",
+        details:
+          "The card visibly says when direction context was unavailable, and the same accessible description travels with the private image in supported iMessage and Telegram delivery.",
+        relevanceTags: ["experiments", "progress", "accessibility", "reliability"],
+        sourcePullRequests: [1208],
+      },
+      {
+        id: "delegated-work-before-blocker",
+        kind: "improvement",
+        priority: 4,
+        title: "Murph moves the work forward before asking",
+        summary:
+          "When you ask Murph to handle, choose, decide, or figure something out, it now completes everything useful that is independent of a blocker before asking for more input.",
+        details:
+          "If a texting reply still needs a decision-changing fact, Murph asks one highest-value question at the end. Delegation still cannot create new permission to spend, contact, publish, schedule, or take another external action.",
+        relevanceTags: ["assistant", "planning", "decisions", "conversation"],
+        sourcePullRequests: [1214],
+      },
+    ],
+  },
+  {
     id: "2026-07-30",
     publishedOn: "2026-07-30",
     title: "More ways through, less waiting around",
