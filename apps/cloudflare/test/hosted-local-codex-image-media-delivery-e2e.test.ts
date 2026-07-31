@@ -347,7 +347,7 @@ describe("hosted local Codex image media delivery e2e", () => {
     expect(readObservedLinqMessageParts(reuseCompletedSend)).toEqual([
       {
         type: "text",
-        value: reuseReplyText,
+        value: `${reuseReplyText}\n\nReused mobility setup`,
       },
       expect.objectContaining({
         attachment_id: expect.stringMatching(/^attachment_local_/u),
