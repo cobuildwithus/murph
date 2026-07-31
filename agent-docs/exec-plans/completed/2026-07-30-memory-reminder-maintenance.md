@@ -1,6 +1,6 @@
 # Memory and reminder maintenance
 
-Status: active
+Status: completed
 Created: 2026-07-30
 Updated: 2026-07-30
 
@@ -108,8 +108,8 @@ Updated: 2026-07-30
    automation tests.
 - [x] Update live architecture, security, and reliability owner docs for the new
    narrow maintenance boundary.
-- [ ] Run focused tests, typecheck, direct diff/privacy review, commit and push the
-   candidate, then complete ReviewGPT and CI gates.
+- [x] Run focused tests, typecheck, direct diff/privacy review, commit and push the
+  candidate, then complete ReviewGPT and CI gates.
 
 ## Decisions
 
@@ -170,14 +170,24 @@ Updated: 2026-07-30
     policy/typecheck suites pass locally. Deterministic foreground
     provider-input capture matches the pre-change baseline exactly: direct
     24,404 tokens / 111,676 bytes with 14 tools, and group 19,861 tokens /
-    91,336 bytes with 12 tools. Final diff review, corrected-head ReviewGPT,
-    and corrected-head CI remain.
+    91,336 bytes with 12 tools.
+  - Round 2 required an architecture retrospective for disconnect semantics.
+    The recorded decision keeps a truthful 24-hour derived-data lease instead
+    of adding a live connected-account check to every reminder. Focused prompt
+    and managed-automation proof passed 63 tests plus assistant-engine
+    typecheck.
+  - CI exposed the stable system-prompt byte budget after the truthful wording
+    change. The wording was compressed without changing the contract; the exact
+    prompt-budget regression and all 9 reminder-maintenance policy tests passed.
+  - Final ReviewGPT round 3 passed with no findings on the current executable
+    head. Exact-head GitHub Actions are fully green, and final diff/privacy
+    review passed.
 
 ## Current state
 
-- The first pushed candidate and PR are under review; both substantive review
-  stages returned findings against that immutable head.
-- The host-owned calendar-only remediation and focused local proof are complete.
-- Next: finish provider-input/diff/privacy proof, push the corrected head,
-  update the PR evidence, run final ReviewGPT correction review, and require
-  exact-head CI green.
+- The host-owned calendar-only implementation, bounded evidence-lease contract,
+  focused local proof, preliminary specialist remediation, final ReviewGPT
+  correction loop, exact-head CI, parent review, and privacy review are
+  complete.
+- The draft PR is ready for human review.
+Completed: 2026-07-30
