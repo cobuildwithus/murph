@@ -1021,6 +1021,12 @@ describe('assistant execution prompt contract', () => {
       'Those feeds are the only source of shipped-product truth',
     )
     expect(prompt).toContain(
+      'Keep product-update summaries link-free unless the user explicitly asks for a link',
+    )
+    expect(prompt).not.toContain(
+      "using each item's own title and link",
+    )
+    expect(prompt).toContain(
       'If a feed is unavailable, invalid, or empty for the window, say that plainly instead of guessing.',
     )
   })

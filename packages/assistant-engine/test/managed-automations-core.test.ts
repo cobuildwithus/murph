@@ -519,12 +519,26 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(productUpdatesRecord?.instructions).toContain('If an item lists a requires prerequisite')
     expect(productUpdatesRecord?.instructions).toContain('Drop items this conversation cannot actually do right now')
     expect(productUpdatesRecord?.instructions).toContain('Keep this scheduled note text-only')
+    expect(productUpdatesRecord?.instructions).toContain(
+      'The outbound note must be link-free',
+    )
+    expect(productUpdatesRecord?.instructions).toContain(
+      'no more than 28 words after the bullet marker',
+    )
+    expect(productUpdatesRecord?.instructions).toContain(
+      'open with one sentence of no more than 10 words',
+    )
+    expect(productUpdatesRecord?.instructions).toContain(
+      'Close with one invitation sentence of no more than 12 words',
+    )
+    expect(productUpdatesRecord?.instructions).not.toContain(
+      'canonical title, summary, URL, and tryIt fields',
+    )
     expect(productUpdatesRecord?.instructions).not.toContain('Choose 3-7 items')
     expect(productUpdatesRecord?.instructions).not.toContain('murph.attach_response_media')
     expect(productUpdatesRecord?.instructions).not.toContain('visual digest')
     expect(productUpdatesRecord?.instructions).not.toContain('links.digestCardTemplate')
     expect(productUpdatesRecord?.instructions).toContain('murph.submit_product_feedback')
-    expect(productUpdatesRecord?.instructions).toContain('if there is something else they wish Murph could do')
     expect(productUpdatesRecord?.instructions).toContain('clear inferred workflow friction')
     expect(productUpdatesRecord?.instructions).toContain('interest in shipped changelog or catalog items')
     expect(productUpdatesRecord?.instructions).toContain('Speculative:')
