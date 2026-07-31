@@ -292,7 +292,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Ops weekly growth compass with complete and retention-limited sender evidence">
+      <StudySection title="Ops weekly growth compass with message-volume history and retention-limited sender evidence">
         <GrowthScorecardStudy />
       </StudySection>
 
