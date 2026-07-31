@@ -1,6 +1,6 @@
 # Challenge grant recency provenance
 
-Status: active
+Status: completed
 Created: 2026-07-31
 Updated: 2026-07-31
 
@@ -111,3 +111,4 @@ Updated: 2026-07-31
   truthful, only a recent post-baseline grant after a newly posted native offer
   is eligible, and every missing/old/mismatched path requires ordinary
   confirmation.
+Completed: 2026-07-31
