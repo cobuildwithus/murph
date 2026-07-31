@@ -1,6 +1,6 @@
 # Fix hosted group-avatar provider failures
 
-Status: active
+Status: completed
 Created: 2026-07-31
 Updated: 2026-07-31
 
@@ -79,13 +79,16 @@ Updated: 2026-07-31
 - Accept final ReviewGPT's complexity-collapse finding: transport only the
   allowlisted code across Web-to-runtime, then derive its fixed recovery text
   once in the strict runtime parser for the model-visible result.
+- Final ReviewGPT correction round passed on the remediated head with no
+  qualifying findings; exact-head GitHub Actions were green before plan archival.
 
 ## Verification
 
-- Commands to select after tracing: focused Vitest files for each touched owner,
-  relevant package/app typechecks, `git diff --check`, direct GET/HEAD parity and
-  provider-prose exclusion scenarios, required ReviewGPT gates, and exact-head
-  GitHub Actions.
-- Expected outcomes: allowlisted diagnostics only on HTTP provider failures; generic
-  transport/timeout results; both URL generations accepted; strict tamper rejection;
-  matching GET/HEAD metadata; no capability value in route logs; green required gates.
+- Passed 327 focused Vitest cases across Web, Cloudflare, hosted-execution, and
+  assistant-engine; four relevant typechecks; changed-file Web ESLint;
+  `git diff --check`; and direct code-only diagnostic/strict-parser proof.
+- Preliminary specialist findings were resolved, the final correction round
+  passed, and every required exact-head GitHub Actions check was green.
+- Live Linq fetch-and-apply remains an explicit post-deploy smoke because this
+  task had no authorized isolated provider group or production mutation scope.
+Completed: 2026-07-31
