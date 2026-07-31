@@ -2,7 +2,10 @@ import "server-only";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
 import {
+  HOSTED_CUSTOM_INFERENCE_VERIFICATION_PROFILE,
+  buildHostedCustomInferenceModelAlias,
   requireHostedInferenceRevision,
+  type HostedAssistantCustomInferenceOverride,
   type HostedInferenceProtocol,
 } from "@murphai/hosted-execution/assistant-inference";
 
@@ -15,11 +18,12 @@ import {
   decryptHostedInferenceConnection,
   encryptHostedInferenceConnection,
 } from "./connection-crypto";
-import type {
-  HostedInferenceConnectionCandidate,
-  HostedInferenceConnectionResolved,
-  HostedInferenceConnectionSecret,
-  HostedInferenceConnectionView,
+import {
+  HOSTED_INFERENCE_SECRET_SCHEMA,
+  type HostedInferenceConnectionCandidate,
+  type HostedInferenceConnectionResolved,
+  type HostedInferenceConnectionSecret,
+  type HostedInferenceConnectionView,
 } from "./types";
 
 export const HOSTED_INFERENCE_CONNECTION_SELECT = {
@@ -47,6 +51,7 @@ export class HostedInferenceConnectionError extends Error {
     readonly code:
       | "HOSTED_INFERENCE_CONNECTION_CONFLICT"
       | "HOSTED_INFERENCE_CONNECTION_NOT_FOUND"
+      | "HOSTED_INFERENCE_CONNECTION_REVERIFICATION_REQUIRED"
       | "HOSTED_INFERENCE_PERSONAL_CHAT_REQUIRED"
       | "HOSTED_MEMBER_NOT_FOUND",
     message: string,
@@ -76,32 +81,34 @@ export async function readHostedInferenceConnectionView(input: {
     : null;
 }
 
+export async function readSelectedHostedInferenceConnectionOverride(input: {
+  memberId: string;
+  prisma?: HostedInferenceConnectionReadClient;
+}): Promise<HostedAssistantCustomInferenceOverride | null> {
+  const row = await readSelectedHostedInferenceConnectionRow(input);
+  return row ? projectHostedInferenceConnectionOverride(row) : null;
+}
+
 export async function readSelectedHostedInferenceConnection(input: {
+  expectedRevision?: number | null;
   memberId: string;
   prisma?: HostedInferenceConnectionReadClient;
 }): Promise<HostedInferenceConnectionResolved | null> {
   const prisma = input.prisma ?? getPrisma();
-  const member = await prisma.hostedMember.findUnique({
-    select: {
-      inferenceConnection: {
-        select: HOSTED_INFERENCE_CONNECTION_SELECT,
-      },
-      threadContainer: {
-        select: { memberId: true },
-      },
-    },
-    where: { id: input.memberId },
+  const row = await readSelectedHostedInferenceConnectionRow({
+    memberId: input.memberId,
+    prisma,
   });
-  if (!member?.inferenceConnection?.selected) {
+  if (!row) {
     return null;
   }
-  if (member.threadContainer !== null) {
-    throw personalChatRequiredError();
+  if (
+    input.expectedRevision !== undefined
+    && row.revision !== requireHostedInferenceRevision(input.expectedRevision)
+  ) {
+    throw connectionConflictError();
   }
-  return await projectHostedInferenceConnectionResolved({
-    prisma,
-    row: member.inferenceConnection,
-  });
+  return await projectHostedInferenceConnectionResolved({ prisma, row });
 }
 
 export async function replaceHostedInferenceConnection(input: {
@@ -109,7 +116,6 @@ export async function replaceHostedInferenceConnection(input: {
   expectedRevision: number | null;
   memberId: string;
   prisma?: PrismaClient;
-  verificationProfile: string;
   verifiedAt?: Date;
 }): Promise<HostedInferenceConnectionView> {
   const prisma = input.prisma ?? getPrisma();
@@ -145,7 +151,7 @@ export async function replaceHostedInferenceConnection(input: {
         revision,
         selected: false,
         supportsImages: input.candidate.supportsImages,
-        verificationProfile: input.verificationProfile,
+        verificationProfile: HOSTED_CUSTOM_INFERENCE_VERIFICATION_PROFILE,
         verifiedAt,
       },
       select: HOSTED_INFERENCE_CONNECTION_SELECT,
@@ -156,7 +162,7 @@ export async function replaceHostedInferenceConnection(input: {
         revision,
         selected: false,
         supportsImages: input.candidate.supportsImages,
-        verificationProfile: input.verificationProfile,
+        verificationProfile: HOSTED_CUSTOM_INFERENCE_VERIFICATION_PROFILE,
         verifiedAt,
       },
       where: { memberId: input.memberId },
@@ -170,7 +176,7 @@ export async function replaceHostedInferenceConnection(input: {
       endpointUrl: input.candidate.endpointUrl,
       model: input.candidate.model,
       protocol: input.candidate.protocol,
-      schema: "murph.hosted-inference-secret.v1",
+      schema: HOSTED_INFERENCE_SECRET_SCHEMA,
     },
   });
 }
@@ -197,6 +203,7 @@ export async function setHostedInferenceConnectionSelected(input: {
         "Save and verify a custom inference connection before selecting it.",
       );
     }
+    requireCurrentVerificationProfile(current);
     if (current.selected === input.selected) {
       return current;
     }
@@ -243,6 +250,32 @@ export async function deleteHostedInferenceConnection(input: {
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
+async function readSelectedHostedInferenceConnectionRow(input: {
+  memberId: string;
+  prisma?: HostedInferenceConnectionReadClient;
+}): Promise<HostedInferenceConnectionRow | null> {
+  const prisma = input.prisma ?? getPrisma();
+  const member = await prisma.hostedMember.findUnique({
+    select: {
+      inferenceConnection: {
+        select: HOSTED_INFERENCE_CONNECTION_SELECT,
+      },
+      threadContainer: {
+        select: { memberId: true },
+      },
+    },
+    where: { id: input.memberId },
+  });
+  if (!member?.inferenceConnection?.selected) {
+    return null;
+  }
+  if (member.threadContainer !== null) {
+    throw personalChatRequiredError();
+  }
+  requireCurrentVerificationProfile(member.inferenceConnection);
+  return member.inferenceConnection;
+}
+
 async function requirePersonalHostedInferenceMember(input: {
   memberId: string;
   prisma: HostedInferenceConnectionReadClient;
@@ -272,6 +305,19 @@ function personalChatRequiredError(): HostedInferenceConnectionError {
   );
 }
 
+function requireCurrentVerificationProfile(
+  row: Pick<HostedInferenceConnectionRow, "verificationProfile">,
+): void {
+  if (
+    row.verificationProfile !== HOSTED_CUSTOM_INFERENCE_VERIFICATION_PROFILE
+  ) {
+    throw new HostedInferenceConnectionError(
+      "HOSTED_INFERENCE_CONNECTION_REVERIFICATION_REQUIRED",
+      "Reverify the custom inference connection before using it with this Murph runtime.",
+    );
+  }
+}
+
 function assertExpectedRevision(input: {
   currentRevision: number | null;
   expectedRevision: number | null;
@@ -280,11 +326,15 @@ function assertExpectedRevision(input: {
     ? null
     : requireHostedInferenceRevision(input.expectedRevision);
   if (input.currentRevision !== expected) {
-    throw new HostedInferenceConnectionError(
-      "HOSTED_INFERENCE_CONNECTION_CONFLICT",
-      "The custom inference connection changed. Refresh Settings and try again.",
-    );
+    throw connectionConflictError();
   }
+}
+
+function connectionConflictError(): HostedInferenceConnectionError {
+  return new HostedInferenceConnectionError(
+    "HOSTED_INFERENCE_CONNECTION_CONFLICT",
+    "The custom inference connection changed. Refresh Settings and try again.",
+  );
 }
 
 async function projectHostedInferenceConnectionView(input: {
@@ -320,6 +370,19 @@ async function projectHostedInferenceConnectionResolved(input: {
     }),
     auth: secret.auth,
     endpointUrl: secret.endpointUrl,
+  };
+}
+
+function projectHostedInferenceConnectionOverride(
+  row: HostedInferenceConnectionRow,
+): HostedAssistantCustomInferenceOverride {
+  return {
+    contextWindowTokens: row.contextWindowTokens,
+    modelAlias: buildHostedCustomInferenceModelAlias(row.revision),
+    protocol: parseStoredProtocol(row.protocol),
+    revision: row.revision,
+    supportsImages: row.supportsImages,
+    verificationProfile: row.verificationProfile,
   };
 }
 
