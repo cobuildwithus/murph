@@ -1010,11 +1010,10 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('vault-cli group shared --kind')
     expect(raw).not.toContain('vault-cli group shared --scope')
     expect(raw).not.toContain('vault-cli group weekly --')
-    expect(raw).toMatch(/Whether `read_current` returns\s+`status="none"` or an existing group/u)
-    expect(raw).toMatch(/do not\s+create a hosted group or post a permission offer as part of challenge setup/u)
-    expect(raw).toMatch(/Explain any missing group setup or share naturally in the normal\s+group reply/u)
-    expect(raw).toMatch(/bounded proactive\s+standings behavior below begins only once the challenge is running/u)
-    expect(raw).toMatch(/Do not\s+tell the room to join again/u)
+    expect(raw).toMatch(/If `read_current` returns `status="none"`, do not create a hosted group as a\s+side effect of challenge kickoff/u)
+    expect(raw).toMatch(/call `murph\.group\s+action="offer_access"` exactly once from that scoring read with only the\s+exact scoring scope it proved `not_granted`/u)
+    expect(raw).toMatch(/record the offer as handled\s+only when the tool reports `status="ok"`/u)
+    expect(raw).toMatch(/pre-existing or generic grant, silence, an unresolved identity, or an\s+offer followed by materially changed challenge terms does not establish\s+buy-in/u)
     expect(raw).not.toContain('Mint the join link with `murph.group`')
     expect(raw).toContain(
       "under the developer prompt's shared\nautomation action rules",

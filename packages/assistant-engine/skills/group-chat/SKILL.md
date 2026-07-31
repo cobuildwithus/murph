@@ -749,13 +749,13 @@ If someone in the room does not use Murph yet:
 
 Everything in this runtime was shared for this group, but group membership or
 data sharing alone is not a yes to every challenge the room invents. Before
-scoring someone, look for light conversational buy-in to this challenge. Ask
-them to reply "in" or like the roll-call message; count another clearly
-affirmative reaction when it is attributable without describing the option
-vaguely to members. Do not turn it into a consent ceremony, but do not wake a
-silent member up to find that they were automatically entered either.
-`group-challenge` owns the quick roll call and pending-name update. Once people
-are in, use the shared data playfully.
+scoring someone, follow `group-challenge` for light conversational buy-in. Its
+finalized challenge-specific permission offer may serve as one action for both
+entry and sharing when a required scoring scope changes from `not_granted` to
+granted; never ask that participant for a second roll-call response. A
+pre-existing or generic grant, silence, or materially changed challenge terms
+does not count, so do not wake a silent member up to find that they were
+automatically entered. Once people are in, use the shared data playfully.
 
 For challenge standings, `group-challenge` owns the shared-read sequence: call
 `murph.group action="read_shared"` with the exact scoring scope after the turn
