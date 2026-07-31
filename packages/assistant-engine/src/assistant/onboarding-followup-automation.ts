@@ -37,7 +37,7 @@ export const MURPH_ONBOARDING_FOLLOWUP_AUTOMATION =
       localTime: '13:30',
     },
     jitterMinutes: 60,
-    activeUntilLocalTime: '14:30',
+    activeUntilLocalTime: '15:00',
     tags: [
       'assistant',
       'scheduled',
@@ -54,7 +54,7 @@ export const MURPH_ONBOARDING_FOLLOWUP_AUTOMATION =
       '',
       'If `onboarding.status` is `completed`, return skip. The managed-automation owner archives this follow-up deterministically.',
       '',
-      'If the onboarding skill says the visible and saved evidence satisfies answered completion, or shows an overall decline, run its required completion command and verify that the command output reports `completed`. If the command fails or onboarding remains open, send nothing and do not return a send-or-skip decision: fail this run so the same one-shot remains retryable only inside its active window. Return skip only after completion is durably confirmed.',
+      'For this scheduled occurrence only, do not run the onboarding completion command directly. If the onboarding skill says the visible and saved evidence satisfies answered completion or shows an overall decline, return skip with `onboardingAction: {"kind":"complete","reason":"user_answered"}` or `onboardingAction: {"kind":"complete","reason":"user_declined"}`. The notification boundary applies that action through the canonical onboarding owner and fails the run if completion does not commit.',
       '',
       'Otherwise use exactly the next unresolved step from the onboarding skill, including aspiration capture, explicit parking, foundation questions, contextual return, and its targeted-read rules for omitted, truncated, or errored evidence. If that step is only a reflection or parking transition, combine it with the next skill-approved question when the skill permits; otherwise return skip. Do not compress, reorder, or bypass that policy merely because this is a scheduled run.',
       '',
@@ -62,7 +62,7 @@ export const MURPH_ONBOARDING_FOLLOWUP_AUTOMATION =
       '',
       'Before sending, triple-check the snapshot and recent messages for an answer, skip, defer, decline, or a newer topic that should win. Follow the onboarding skill’s finite next-day recovery rule exactly. Do not re-ask known or resolved context, repeat an unanswered setup question, or rotate to another setup question. Honor requested timing and return skip after an explicit decline, a request not to follow up, or whenever the finite reopening question would not be timely or useful.',
       '',
-      "Output: send at most one brief, natural, low-pressure in-chat continuation. It must contain exactly one easy, reply-oriented question; otherwise return skip. Do not mention internal state, setup completion, final attempts, schedules, or this automation, and do not use a fixed script. The user's reply will be handled by the next normal Murph onboarding turn.",
+      "Output: send at most one brief, natural, low-pressure in-chat continuation. It must contain exactly one easy, reply-oriented question; otherwise return skip. When onboarding is still open and a skip should leave it open, include `onboardingAction: {\"kind\":\"leave_open\"}`. Do not mention internal state, setup completion, final attempts, schedules, or this automation, and do not use a fixed script. The user's reply will be handled by the next normal Murph onboarding turn.",
     ].join('\n'),
   } satisfies MurphOnboardingFollowupAutomationDefinition
 

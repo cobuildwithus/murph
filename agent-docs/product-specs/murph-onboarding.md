@@ -528,7 +528,8 @@ claim completion until the command reports it.
 The onboarding follow-up automation is one finite recovery attempt, not a
 category drip or a support-obligation resolver. It is scheduled for the next
 local day in a stable per-member window from 1:30 PM through 2:29 PM, and its
-delivery authority closes at 2:30 PM on that same local day. Its one-shot is
+delivery authority closes at 3:00 PM on that same local day, reserving at least
+30 minutes for a healthy turn after the latest scheduled start. Its one-shot is
 consumed after either a send or a skip. It should read recent conversation and
 the resume snapshot, then do one of four things:
 
@@ -552,11 +553,12 @@ one easy question that invites a reply; a reflection-only scheduled message
 returns skip. Normal member replies may continue open onboarding indefinitely,
 but they do not create another scheduled recovery attempt.
 
-If this occurrence attempts to complete onboarding, a failed command or a
-state read that still reports onboarding open is a retryable run failure, not a
-valid skip. It sends nothing and may retry only before the 2:30 PM authority
-cutoff. The same cutoff prevents a queued or delayed outbound intent from
-entering the provider after the promised local window.
+The scheduled turn does not invoke the completion command itself. It returns a
+structured completion action to the notification boundary, which applies the
+existing canonical onboarding write and treats a failed write as a retryable
+run failure. A valid skip that intentionally leaves onboarding open names that
+choice explicitly. The same 3:00 PM cutoff prevents a queued or delayed
+outbound intent from entering the provider after the finite local window.
 
 ## Post-Onboarding Choice Point
 

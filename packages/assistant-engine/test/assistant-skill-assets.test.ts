@@ -2614,7 +2614,10 @@ How old are you and what's your gender?
       'Send or skip ends this scheduled recovery.',
     )
     expect(compact).toContain(
-      'return no send-or-skip decision so the run fails and can retry only inside its finite active window.',
+      'The notification boundary applies completion through the same canonical state owner and fails the run if that write does not commit.',
+    )
+    expect(compact).toContain(
+      '`leave_open` for a valid silent skip while it remains open',
     )
     expect(compact).not.toContain('managed daily onboarding follow-up')
 

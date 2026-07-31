@@ -2415,7 +2415,7 @@ describe('applyMurphManagedAutomations', () => {
 
     expect(managedAutomationMocks.patchAutomation).toHaveBeenCalledWith(
       expect.objectContaining({
-        activeUntil: '2026-06-24T14:30:00.000Z',
+        activeUntil: '2026-06-24T15:00:00.000Z',
         continuityPolicy: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy,
         instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
         lookup: 'automation_onboarding_followup',
@@ -2436,7 +2436,7 @@ describe('applyMurphManagedAutomations', () => {
       .not.toHaveProperty('status')
     expect(managedAutomationMocks.records.get('automation_onboarding_followup'))
       .toMatchObject({
-        activeUntil: '2026-06-24T14:30:00.000Z',
+        activeUntil: '2026-06-24T15:00:00.000Z',
         route: existingRoute,
         schedule: {
           at: expect.stringMatching(
@@ -2482,7 +2482,7 @@ describe('applyMurphManagedAutomations', () => {
     )
     expect(managedAutomationMocks.records.get('automation_onboarding_followup'))
       .toMatchObject({
-        activeUntil: '2026-06-24T14:30:00.000Z',
+        activeUntil: '2026-06-24T15:00:00.000Z',
         route: defaultRoute,
         schedule: {
           at: expect.stringMatching(
@@ -2526,7 +2526,7 @@ describe('applyMurphManagedAutomations', () => {
       .not.toHaveProperty('schedule')
     expect(managedAutomationMocks.records.get('automation_onboarding_followup'))
       .toMatchObject({
-        activeUntil: '2026-06-24T14:30:00.000Z',
+        activeUntil: '2026-06-24T15:00:00.000Z',
         instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
         schedule: {
           at: scheduledAt,

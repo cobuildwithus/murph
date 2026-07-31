@@ -877,10 +877,12 @@ and do not ask another onboarding question. Do not use `user_declined` for one
 skipped category, and do not require a plan or support loop merely to use
 `user_answered`.
 
-During the finite next-day recovery occurrence, a completion command that
-fails or does not leave onboarding durably `completed` must not consume the
-one-shot as a valid skip. Send nothing and return no send-or-skip decision so
-the run fails and can retry only inside its finite active window.
+During the finite next-day recovery occurrence, do not run the completion
+command directly. Return the scheduled notification's structured
+`onboardingAction` instead: `complete` with `user_answered` or `user_declined`
+when onboarding should close, or `leave_open` for a valid silent skip while it
+remains open. The notification boundary applies completion through the same
+canonical state owner and fails the run if that write does not commit.
 
 ### Finite next-day recovery
 
@@ -898,7 +900,9 @@ re-enable, rotate, or reschedule another onboarding follow-up.
 - Return skip after an answer, completion, overall decline, request for no
   follow-up, explicit deferral whose timing should be honored, newer urgent or
   safety-sensitive context, or evidence too stale or incomplete to support a
-  useful reopening question.
+  useful reopening question. Use the scheduled notification's `complete`
+  action for answered completion or overall decline, and `leave_open` for the
+  other valid silent skips.
 - Send or skip ends this scheduled recovery. Any later member reply resumes
   through ordinary reply-driven onboarding, which remains open unless
   completion was durably recorded.
@@ -933,5 +937,6 @@ re-enable, rotate, or reschedule another onboarding follow-up.
   situation is urgent or safety-sensitive, the immediate task failed and needs
   attention, or the current health-data reply should stand alone.
 - Skip conditions suppress a visible question; they do not complete onboarding
-  or cancel an internal completion command when every criterion is already
-  satisfied.
+  or cancel the canonical completion operation when every criterion is already
+  satisfied. Use the structured scheduled action during the finite occurrence
+  and the direct command during ordinary reply-driven onboarding.

@@ -1583,7 +1583,7 @@ describe("executeHostedMailboxEvent", () => {
       vault: "/tmp/assistant-runtime-events",
     });
     expect(mocks.upsertAssistantCronAutomation).toHaveBeenCalledWith({
-      firstOccurrenceActiveUntilLocalTime: "14:30",
+      firstOccurrenceActiveUntilLocalTime: "15:00",
       firstOccurrencePolicy: "once-after-current-local-day",
       instructions: expect.stringContaining(
         "vault-cli assistant onboarding resume-context --format json",
@@ -1621,7 +1621,7 @@ describe("executeHostedMailboxEvent", () => {
       },
       {
         clause:
-          "If the onboarding skill says the visible and saved evidence satisfies answered completion, or shows an overall decline, run its required completion command and verify that the command output reports `completed`.",
+          "For this scheduled occurrence only, do not run the onboarding completion command directly.",
         state: "overall decline",
       },
       {
@@ -1670,7 +1670,10 @@ describe("executeHostedMailboxEvent", () => {
       "The skill is the single owner of conversation order, checkpoint meaning, persistence, and completion; do not create a second state machine in this automation.",
     );
     expect(seedInput?.instructions).toContain(
-      "If the command fails or onboarding remains open, send nothing and do not return a send-or-skip decision",
+      "The notification boundary applies that action through the canonical onboarding owner and fails the run if completion does not commit.",
+    );
+    expect(seedInput?.instructions).toContain(
+      'include `onboardingAction: {"kind":"leave_open"}`',
     );
     expect(seedInput?.instructions).not.toContain(
       "If a promised follow-through or next step in the member's agreed support loop is due, do that first.",

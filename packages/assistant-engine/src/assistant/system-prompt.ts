@@ -1434,9 +1434,13 @@ function buildAssistantDeliveryDecisionContractText(
 - Return exactly one JSON object and nothing else.
 - Use one of these shapes:
   {"kind":"skip","privateSummary":"..."}
+  {"kind":"skip","onboardingAction":{"kind":"complete","reason":"user_answered"},"privateSummary":"..."}
+  {"kind":"skip","onboardingAction":{"kind":"complete","reason":"user_declined"},"privateSummary":"..."}
+  {"kind":"skip","onboardingAction":{"kind":"leave_open"},"privateSummary":"..."}
   {"kind":"send_message","text":"...","privateSummary":"..."}
   {"kind":"send_message","text":"...","subject":"...","privateSummary":"..."}
 - \`text\` is the single final user-facing message. \`subject\` applies only to a new outbound email.
+- Include \`onboardingAction\` only when the engine-supplied scheduled onboarding task requires it.
 - \`privateSummary\` is an internal run note. The platform delivers the result; do not deliver or narrate it separately.`
   );
 }

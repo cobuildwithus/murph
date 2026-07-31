@@ -95,11 +95,33 @@ import {
 import {
   MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
 } from './onboarding-goal-checkin-automation.js'
-import { readAssistantOnboardingState } from './onboarding-state.js'
+import {
+  completeAssistantOnboarding,
+  readAssistantOnboardingState,
+} from './onboarding-state.js'
+
+const assistantNotificationOnboardingActionSchema = z.discriminatedUnion(
+  'kind',
+  [
+    z
+      .object({
+        kind: z.literal('complete'),
+        reason: z.enum(['user_answered', 'user_declined']),
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal('leave_open'),
+      })
+      .strict(),
+  ],
+)
 
 const assistantNotificationSkipDecisionSchema = z
   .object({
     kind: z.literal('skip'),
+    onboardingAction:
+      assistantNotificationOnboardingActionSchema.optional(),
     privateSummary: z.string().min(1),
   })
   .strict()
@@ -567,10 +589,9 @@ export async function sendAssistantNotificationLocal(
           )
         }
         try {
-          await assertAssistantOnboardingFollowupCompletionCommitted({
+          await applyAssistantOnboardingFollowupDecision({
             decision,
             input,
-            rawEvents: providerResult.rawEvents ?? [],
           })
         } catch (error) {
           throw annotateAssistantNotificationError(
@@ -1595,48 +1616,62 @@ function assistantMaintenanceRawEventsIncludeMutation(
   })
 }
 
-async function assertAssistantOnboardingFollowupCompletionCommitted(input: {
+async function applyAssistantOnboardingFollowupDecision(input: {
   decision: AssistantNotificationDecision
   input: AssistantNotificationInput
-  rawEvents: readonly unknown[]
 }): Promise<void> {
-  if (
-    input.input.turnPolicy?.kind !== 'onboarding-followup' ||
-    !assistantNotificationRawEventsAttemptedOnboardingCompletion(input.rawEvents)
-  ) {
+  if (input.input.turnPolicy?.kind !== 'onboarding-followup') {
     return
   }
 
   const onboardingState = await readAssistantOnboardingState(input.input.vault)
-  if (
-    onboardingState.status === 'completed' &&
-    input.decision.kind === 'skip'
-  ) {
+  if (onboardingState.status === 'completed') {
+    if (input.decision.kind === 'skip') {
+      return
+    }
+    throw new VaultCliError(
+      'ASSISTANT_ONBOARDING_COMPLETION_DECISION_INVALID',
+      'Completed onboarding requires the notification to return skip.',
+      { retryable: true },
+    )
+  }
+
+  if (input.decision.kind === 'send_message') {
     return
   }
 
+  const onboardingAction = input.decision.onboardingAction
+  if (!onboardingAction) {
+    throw new VaultCliError(
+      'ASSISTANT_ONBOARDING_OPEN_SKIP_UNCLASSIFIED',
+      'An onboarding follow-up skip must either complete onboarding or explicitly leave it open.',
+      { retryable: true },
+    )
+  }
+  if (onboardingAction.kind === 'leave_open') {
+    return
+  }
+
+  try {
+    const completed = await completeAssistantOnboarding({
+      reason: onboardingAction.reason,
+      vault: input.input.vault,
+    })
+    if (
+      completed.status === 'completed' &&
+      completed.completedReason === onboardingAction.reason
+    ) {
+      return
+    }
+  } catch {
+    // The canonical onboarding owner remains the only completion authority.
+  }
+
   throw new VaultCliError(
-    onboardingState.status === 'completed'
-      ? 'ASSISTANT_ONBOARDING_COMPLETION_DECISION_INVALID'
-      : 'ASSISTANT_ONBOARDING_COMPLETION_NOT_COMMITTED',
-    onboardingState.status === 'completed'
-      ? 'Onboarding completion committed but the notification did not return skip.'
-      : 'Onboarding completion was attempted but did not commit.',
+    'ASSISTANT_ONBOARDING_COMPLETION_NOT_COMMITTED',
+    'Onboarding completion did not commit.',
     { retryable: true },
   )
-}
-
-function assistantNotificationRawEventsAttemptedOnboardingCompletion(
-  rawEvents: readonly unknown[],
-): boolean {
-  return rawEvents.some((rawEvent) => {
-    const event = normalizeCodexEvent(rawEvent)
-    return event.kind === 'status_item' &&
-      event.itemType === 'command.execution' &&
-      /\bvault-cli\s+assistant\s+onboarding\s+complete(?:\s|$)/u.test(
-        event.commandLabel ?? '',
-      )
-  })
 }
 
 function isAssistantMaintenanceMutationCommand(

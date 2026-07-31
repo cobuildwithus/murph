@@ -1746,6 +1746,12 @@ describe('assistant user-facing wording guidance', () => {
 
     expect(prompt).toContain('Delivery adapter contract:')
     expect(prompt).toContain(
+      '{"kind":"skip","onboardingAction":{"kind":"leave_open"},"privateSummary":"..."}',
+    )
+    expect(prompt).toContain(
+      'Include `onboardingAction` only when the engine-supplied scheduled onboarding task requires it.',
+    )
+    expect(prompt).toContain(
       'No Markdown link syntax such as `[text](url)`',
     )
     expect(prompt).toContain(

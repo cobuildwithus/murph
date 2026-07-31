@@ -40,6 +40,10 @@ import {
 import {
   MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
 } from '../src/assistant/onboarding-goal-checkin-automation.ts'
+import {
+  completeAssistantOnboarding,
+  readAssistantOnboardingState,
+} from '../src/assistant/onboarding-state.ts'
 
 type CodexAssistantTarget = Extract<
   AssistantSession['target'],
@@ -4453,6 +4457,18 @@ describe('parseAssistantNotificationDecision', () => {
       kind: 'skip',
       privateSummary: 'No action',
     })
+    expect(
+      parseAssistantNotificationDecision(
+        '{"kind":"skip","onboardingAction":{"kind":"complete","reason":"user_answered"},"privateSummary":"Complete onboarding."}',
+      ),
+    ).toEqual({
+      kind: 'skip',
+      onboardingAction: {
+        kind: 'complete',
+        reason: 'user_answered',
+      },
+      privateSummary: 'Complete onboarding.',
+    })
   })
 
   test('rejects missing or invalid decision objects with stable errors', async () => {
@@ -4522,13 +4538,13 @@ function isTraceEventWithRawType(
   )
 }
 
-test('sendAssistantNotificationLocal keeps an onboarding follow-up retryable when completion did not commit', async () => {
+test('sendAssistantNotificationLocal rejects an unclassified skip after batched onboarding completion fails', async () => {
   const vault = await mkdtemp(path.join(tmpdir(), 'onboarding-followup-completion-'))
   try {
     const providerResult = createProviderResult({
       rawEvents: [
         createCodexCommandCompletedEvent(
-          'vault-cli assistant onboarding complete --reason user_answered',
+          'vault-cli batch --compact --format json --command \'["assistant","onboarding","complete","--reason","user_answered"]\'',
         ),
       ],
       response: JSON.stringify({
@@ -4553,7 +4569,195 @@ test('sendAssistantNotificationLocal keeps an onboarding follow-up retryable whe
       },
       vault,
     })).rejects.toMatchObject({
-      code: 'ASSISTANT_ONBOARDING_COMPLETION_NOT_COMMITTED',
+      code: 'ASSISTANT_ONBOARDING_OPEN_SKIP_UNCLASSIFIED',
+      context: {
+        retryable: true,
+      },
+      details: {
+        assistantNotificationStage: 'provider',
+      },
+    })
+    expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+    expect(deliverMessage).not.toHaveBeenCalled()
+  } finally {
+    await rm(vault, { force: true, recursive: true })
+  }
+})
+
+test('sendAssistantNotificationLocal applies structured onboarding completion through the canonical owner', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'onboarding-followup-owned-completion-'))
+  try {
+    const providerResult = createProviderResult({
+      response: JSON.stringify({
+        kind: 'skip',
+        onboardingAction: {
+          kind: 'complete',
+          reason: 'user_answered',
+        },
+        privateSummary: 'The saved evidence completes onboarding.',
+      }),
+    })
+    const {
+      deliverMessage,
+      mocks,
+      sendAssistantNotificationLocal,
+    } = await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-onboarding-followup-owned-completion',
+    })
+
+    await expect(sendAssistantNotificationLocal({
+      instructions: 'Complete onboarding or make one final continuation decision.',
+      scheduledOccurrenceAt: '2026-04-09T18:29:00.000Z',
+      turnPolicy: {
+        kind: 'onboarding-followup',
+      },
+      vault,
+    })).resolves.toMatchObject({
+      decision: {
+        kind: 'skip',
+        onboardingAction: {
+          kind: 'complete',
+          reason: 'user_answered',
+        },
+      },
+      response: null,
+    })
+    await expect(readAssistantOnboardingState(vault)).resolves.toMatchObject({
+      completedReason: 'user_answered',
+      status: 'completed',
+    })
+    expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledOnce()
+    expect(deliverMessage).not.toHaveBeenCalled()
+  } finally {
+    await rm(vault, { force: true, recursive: true })
+  }
+})
+
+test('sendAssistantNotificationLocal permits a classified skip that leaves onboarding open', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'onboarding-followup-leave-open-'))
+  try {
+    const providerResult = createProviderResult({
+      response: JSON.stringify({
+        kind: 'skip',
+        onboardingAction: {
+          kind: 'leave_open',
+        },
+        privateSummary: 'A newer urgent topic should stand alone.',
+      }),
+    })
+    const {
+      deliverMessage,
+      sendAssistantNotificationLocal,
+    } = await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-onboarding-followup-leave-open',
+    })
+
+    await expect(sendAssistantNotificationLocal({
+      instructions: 'Make one final continuation decision.',
+      scheduledOccurrenceAt: '2026-04-09T18:29:00.000Z',
+      turnPolicy: {
+        kind: 'onboarding-followup',
+      },
+      vault,
+    })).resolves.toMatchObject({
+      decision: {
+        kind: 'skip',
+        onboardingAction: {
+          kind: 'leave_open',
+        },
+      },
+      response: null,
+    })
+    await expect(readAssistantOnboardingState(vault)).resolves.toMatchObject({
+      status: 'open',
+    })
+    expect(deliverMessage).not.toHaveBeenCalled()
+  } finally {
+    await rm(vault, { force: true, recursive: true })
+  }
+})
+
+test('sendAssistantNotificationLocal accepts only skip after batched completion committed canonical state', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'onboarding-followup-batch-completed-'))
+  try {
+    await completeAssistantOnboarding({
+      completedAt: '2026-04-09T18:29:30.000Z',
+      reason: 'user_answered',
+      vault,
+    })
+    const providerResult = createProviderResult({
+      rawEvents: [
+        createCodexCommandCompletedEvent(
+          'vault-cli batch --compact --format json --command \'["assistant","onboarding","complete","--reason","user_answered"]\'',
+        ),
+      ],
+      response: JSON.stringify({
+        kind: 'skip',
+        privateSummary: 'Onboarding is already complete.',
+      }),
+    })
+    const {
+      deliverMessage,
+      sendAssistantNotificationLocal,
+    } = await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-onboarding-followup-batch-completed',
+    })
+
+    await expect(sendAssistantNotificationLocal({
+      instructions: 'Make one final continuation decision.',
+      scheduledOccurrenceAt: '2026-04-09T18:29:00.000Z',
+      turnPolicy: {
+        kind: 'onboarding-followup',
+      },
+      vault,
+    })).resolves.toMatchObject({
+      decision: {
+        kind: 'skip',
+      },
+      response: null,
+    })
+    expect(deliverMessage).not.toHaveBeenCalled()
+  } finally {
+    await rm(vault, { force: true, recursive: true })
+  }
+})
+
+test('sendAssistantNotificationLocal rejects a message after onboarding completed', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'onboarding-followup-completed-send-'))
+  try {
+    await completeAssistantOnboarding({
+      completedAt: '2026-04-09T18:29:30.000Z',
+      reason: 'user_answered',
+      vault,
+    })
+    const providerResult = createProviderResult({
+      response: JSON.stringify({
+        kind: 'send_message',
+        privateSummary: 'Prepared a continuation.',
+        text: 'Want to keep going?',
+      }),
+    })
+    const {
+      deliverMessage,
+      mocks,
+      sendAssistantNotificationLocal,
+    } = await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-onboarding-followup-completed-send',
+    })
+
+    await expect(sendAssistantNotificationLocal({
+      instructions: 'Make one final continuation decision.',
+      scheduledOccurrenceAt: '2026-04-09T18:29:00.000Z',
+      turnPolicy: {
+        kind: 'onboarding-followup',
+      },
+      vault,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_ONBOARDING_COMPLETION_DECISION_INVALID',
       context: {
         retryable: true,
       },

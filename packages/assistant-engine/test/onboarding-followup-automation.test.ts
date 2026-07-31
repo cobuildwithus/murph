@@ -33,15 +33,15 @@ describe('onboarding follow-up automation', () => {
     )
   })
 
-  it('closes every jitter slot at the end of the same local window', () => {
+  it('reserves at least 30 minutes after the latest jitter slot', () => {
     expect(resolveMurphOnboardingFollowupActiveUntil({
       scheduledAt: '2026-04-09T17:47:00.000Z',
       timeZone: 'America/New_York',
-    })).toBe('2026-04-09T18:30:00.000Z')
+    })).toBe('2026-04-09T19:00:00.000Z')
     expect(resolveMurphOnboardingFollowupActiveUntil({
-      scheduledAt: '2026-11-01T18:29:00.000Z',
+      scheduledAt: '2026-11-01T19:29:00.000Z',
       timeZone: 'America/New_York',
-    })).toBe('2026-11-01T19:30:00.000Z')
+    })).toBe('2026-11-01T20:00:00.000Z')
   })
 
   it('defines a single reply-oriented final attempt', () => {
@@ -53,7 +53,9 @@ describe('onboarding follow-up automation', () => {
     expect(MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions)
       .toContain('exactly one easy, reply-oriented question')
     expect(MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions)
-      .toContain('do not return a send-or-skip decision')
+      .toContain('do not run the onboarding completion command directly')
+    expect(MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions)
+      .toContain('onboardingAction: {"kind":"leave_open"}')
     expect(MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions)
       .toContain('finite next-day recovery rule')
   })
