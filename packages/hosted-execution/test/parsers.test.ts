@@ -2828,7 +2828,31 @@ describe("parseHostedRuntimeGroupTool", () => {
         status: "ok",
         usage: {
           fundingNeeded: false,
-          fundingUrl: null,
+          fundingUrl:
+            "https://www.withmurph.ai/groups/fund/group_join_code_1234",
+          sponsorshipStatus: "not_sponsored",
+        },
+      },
+    });
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "read_usage",
+      result: {
+        status: "ok",
+        usage: {
+          fundingNeeded: false,
+          fundingUrl:
+            "https://www.withmurph.ai/groups/fund/group_join_code_1234",
+          sponsorshipStatus: "not_sponsored",
+        },
+      },
+    })).toEqual({
+      action: "read_usage",
+      result: {
+        status: "ok",
+        usage: {
+          fundingNeeded: false,
+          fundingUrl:
+            "https://www.withmurph.ai/groups/fund/group_join_code_1234",
           sponsorshipStatus: "not_sponsored",
         },
       },

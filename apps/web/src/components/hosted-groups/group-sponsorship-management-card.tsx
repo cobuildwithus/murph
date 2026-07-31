@@ -5,7 +5,6 @@ import { useState } from "react";
 import { Button } from "@/src/components/ui/button";
 import { ChoiceCard } from "@/src/components/ui/choice-card";
 import {
-  FieldDescription,
   FieldLegend,
   FieldSet,
 } from "@/src/components/ui/field";
@@ -25,12 +24,10 @@ type MonthlyCapMinor = GroupSponsorshipManagementProjection["monthlyCapMinor"];
 
 export function GroupSponsorshipManagementCard({
   endpoint,
-  groupName,
   inert = false,
   management: initialManagement,
 }: {
   endpoint: string;
-  groupName: string;
   inert?: boolean;
   management: GroupSponsorshipManagementProjection;
 }) {
@@ -97,6 +94,8 @@ export function GroupSponsorshipManagementCard({
 
   const appliedMonthlyCapMinor =
     management.pendingMonthlyCapMinor ?? management.monthlyCapMinor;
+  const capChanged = selectedMonthlyCapMinor !== appliedMonthlyCapMinor;
+  const capIncrease = selectedMonthlyCapMinor > management.monthlyCapMinor;
 
   const applyCap = () => {
     if (selectedMonthlyCapMinor === appliedMonthlyCapMinor) {
@@ -119,49 +118,45 @@ export function GroupSponsorshipManagementCard({
 
   return (
     <section
-      className="space-y-6 rounded-2xl border border-border p-5 sm:p-6"
+      className="space-y-7"
       data-component="group-sponsorship-management"
     >
-      <div className="space-y-1.5">
+      <div className="space-y-2">
         <h2 className="font-serif text-xl font-semibold tracking-normal">
           Monthly sponsorship
         </h2>
-        <p className="text-sm leading-6 text-muted-foreground">
-          Private controls for your sponsorship of {groupName}. The group only
-          sees that Murph is sponsored.
+        <p className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
+          Private to you
         </p>
       </div>
 
-      <dl className="grid gap-4 rounded-2xl border border-border p-4 sm:grid-cols-2 lg:grid-cols-4">
+      <dl className="grid grid-cols-2 gap-x-8 gap-y-5 border-y border-border py-5 sm:grid-cols-3">
         <div>
-          <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Charged this period
+          <dt className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
+            This month
           </dt>
-          <dd className="mt-1 text-xl font-semibold tabular-nums">
+          <dd className="mt-1 font-serif text-2xl font-semibold tabular-nums">
             {formatMoney(management.chargedThisPeriodMinor)}
           </dd>
+          {management.pendingThisPeriodMinor > 0 ? (
+            <p className="mt-1 text-xs text-muted-foreground">
+              +{formatMoney(management.pendingThisPeriodMinor)} processing
+            </p>
+          ) : null}
         </div>
         <div>
-          <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Pending
+          <dt className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
+            Monthly limit
           </dt>
-          <dd className="mt-1 text-xl font-semibold tabular-nums">
-            {formatMoney(management.pendingThisPeriodMinor)}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Monthly maximum
-          </dt>
-          <dd className="mt-1 text-xl font-semibold tabular-nums">
+          <dd className="mt-1 font-serif text-2xl font-semibold tabular-nums">
             {formatMoney(management.monthlyCapMinor)}
           </dd>
         </div>
         <div>
-          <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Period ends
+          <dt className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
+            Resets
           </dt>
-          <dd className="mt-1 text-sm font-medium">
+          <dd className="mt-2 text-sm font-medium">
             {formatPeriodEnd(management.periodEnd)}
           </dd>
         </div>
@@ -171,13 +166,13 @@ export function GroupSponsorshipManagementCard({
         <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4">
           <p className="font-medium">Payment needs attention</p>
           <p className="mt-1 text-sm leading-6 text-muted-foreground">
-            Automatic refills are paused. Review the saved card or finish a
-            secure checkout to resume this sponsorship.
+            Automatic refills are paused until payment is fixed.
           </p>
           <Button
             type="button"
-            className="mt-4"
+            className="mt-3"
             disabled={busy || inert}
+            size="sm"
             onClick={() => void submit({ action: "recover" })}
           >
             Review payment
@@ -186,13 +181,8 @@ export function GroupSponsorshipManagementCard({
       ) : null}
 
       {management.status !== "pending_activation" ? (
-        <FieldSet disabled={busy || inert}>
-          <FieldLegend>Monthly maximum</FieldLegend>
-          <FieldDescription>
-            Select a maximum, then apply it. Increases require your confirmation.
-            A decrease below credit already charged or pending this period starts
-            next period.
-          </FieldDescription>
+        <FieldSet className="space-y-3" disabled={busy || inert}>
+          <FieldLegend>Monthly limit</FieldLegend>
           <RadioGroup
             value={String(selectedMonthlyCapMinor)}
             onValueChange={(value) => {
@@ -201,41 +191,54 @@ export function GroupSponsorshipManagementCard({
                 setSelectedMonthlyCapMinor(parsed);
               }
             }}
-            className="grid gap-3 sm:grid-cols-3"
+            className="grid grid-cols-3 gap-2"
           >
             {([500, 1_000, 2_000] as const).map((monthlyCapMinor) => (
               <ChoiceCard
+                className="[&>[data-slot=field]]:gap-1 [&>[data-slot=field]]:p-2 [&_[data-slot=field-content]]:gap-1 min-[360px]:[&>[data-slot=field]]:gap-1.5 min-[360px]:[&>[data-slot=field]]:p-3"
                 key={monthlyCapMinor}
                 id={`managed-group-sponsorship-cap-${monthlyCapMinor}`}
                 value={String(monthlyCapMinor)}
                 disabled={busy || inert}
-                title={formatMoney(monthlyCapMinor)}
-                description="maximum per month"
+                title={(
+                  <span className="font-serif text-lg font-semibold leading-none tabular-nums min-[360px]:text-xl sm:text-2xl">
+                    {formatMoney(monthlyCapMinor)}
+                  </span>
+                )}
+                description={(
+                  <span className="hidden text-xs font-medium text-muted-foreground min-[360px]:inline">
+                    per month
+                  </span>
+                )}
               />
             ))}
           </RadioGroup>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <Button
-              type="button"
-              disabled={
-                busy ||
-                inert ||
-                selectedMonthlyCapMinor === appliedMonthlyCapMinor
-              }
-              onClick={applyCap}
-            >
-              Apply monthly maximum
-            </Button>
-            {management.pendingMonthlyCapMinor !== null ? (
-              <p className="text-sm text-muted-foreground">
-                Next period’s maximum: {formatMoney(management.pendingMonthlyCapMinor)}
-              </p>
-            ) : null}
-          </div>
+          {capChanged || management.pendingMonthlyCapMinor !== null ? (
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              {capChanged ? (
+                <Button
+                  type="button"
+                  disabled={busy || inert}
+                  onClick={applyCap}
+                  size="sm"
+                >
+                  {capIncrease
+                    ? `Confirm ${formatMoney(selectedMonthlyCapMinor)} limit`
+                    : `Save ${formatMoney(selectedMonthlyCapMinor)} limit`}
+                </Button>
+              ) : null}
+              {management.pendingMonthlyCapMinor !== null ? (
+                <p className="text-sm text-muted-foreground">
+                  {formatMoney(management.pendingMonthlyCapMinor)} starts next
+                  month.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
         </FieldSet>
       ) : (
         <p className="text-sm leading-6 text-muted-foreground">
-          The fixed $5 activation purchase is still being confirmed.
+          The $5 activation is being confirmed.
         </p>
       )}
 
@@ -245,11 +248,12 @@ export function GroupSponsorshipManagementCard({
         </p>
       ) : null}
 
-      <div className="flex flex-col gap-3 border-t border-border pt-5 sm:flex-row">
+      <div className="flex flex-wrap items-center gap-1">
         {management.status === "active" ? (
           <Button
             type="button"
-            variant="outline"
+            size="sm"
+            variant="ghost"
             disabled={busy || inert}
             onClick={() => void submit({ action: "pause" })}
           >
@@ -258,7 +262,8 @@ export function GroupSponsorshipManagementCard({
         ) : management.status === "paused" ? (
           <Button
             type="button"
-            variant="outline"
+            size="sm"
+            variant="ghost"
             disabled={busy || inert}
             onClick={() => void submit({ action: "resume" })}
           >
@@ -267,6 +272,7 @@ export function GroupSponsorshipManagementCard({
         ) : null}
         <Button
           type="button"
+          size="sm"
           variant="ghost"
           disabled={busy || inert}
           onClick={() => {

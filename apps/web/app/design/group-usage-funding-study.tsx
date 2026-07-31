@@ -10,7 +10,10 @@ import type {
   HostedPlanUsageStatus,
 } from "@murphai/hosted-execution/plan-usage";
 
-import { GroupUsageFundingCard } from "@/src/components/hosted-groups/group-usage-funding-card";
+import {
+  GroupUsageFundingActions,
+  GroupUsageFundingShell,
+} from "@/src/components/hosted-groups/group-usage-funding-shell";
 import { GroupSponsorshipDialog } from "@/src/components/hosted-groups/group-sponsorship-dialog";
 import { GroupSponsorshipManagementCard } from "@/src/components/hosted-groups/group-sponsorship-management-card";
 import { HostedAiUsageActivity } from "@/src/components/settings/hosted-ai-usage-activity";
@@ -294,13 +297,19 @@ function GroupUsageFundingStudy() {
       <p className="text-center text-sm text-muted-foreground">
         Murph is sponsored in this chat.
       </p>
-      <GroupSponsorshipDialog
-        checkoutUrl="/api/design/usage-credit-preview"
-        customizationAllowed
-        mode="one_time"
-        offers={DESIGN_GROUP_SPONSORSHIP_OFFERS}
-        payerMemberId={DESIGN_PAYER_MEMBER_ID}
-        triggerVariant="outline"
+      <GroupUsageFundingActions
+        oneTimeAction={(
+          <GroupSponsorshipDialog
+            checkoutUrl="/api/design/usage-credit-preview"
+            customizationAllowed
+            inert
+            mode="one_time"
+            offers={DESIGN_GROUP_SPONSORSHIP_OFFERS}
+            payerMemberId={DESIGN_PAYER_MEMBER_ID}
+            triggerSize="default"
+            triggerVariant="link"
+          />
+        )}
       />
     </div>
   );
@@ -321,6 +330,7 @@ function GroupUsageFundingStudy() {
         checkoutUrl="/api/design/usage-credit-preview"
         customizationAllowed
         frozenSponsorship={null}
+        inert
         mode="one_time"
         offers={[]}
         payerMemberId={DESIGN_PAYER_MEMBER_ID}
@@ -340,29 +350,47 @@ function GroupUsageFundingStudy() {
         </p>
         <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
           Monthly sponsorship is the primary flow. It starts with one ordinary
-          $5 usage-credit purchase and permits later $5 refills only when the
-          group needs capacity, up to the payer&apos;s private monthly maximum.
-          One-time contribution remains a separate secondary action.
+          $5 usage-credit purchase at any capacity and permits later $5 refills
+          only when the group needs capacity, up to the payer&apos;s private
+          monthly maximum. One-time contribution remains a separate secondary
+          action.
         </p>
       </div>
 
       <DesignSponsorshipState
-        label="Activation"
+        label="Activation at any capacity"
         state="monthly-activation"
       >
-        <GroupUsageFundingCard
+        <GroupUsageFundingShell
           action={(
             <div inert>
-              <GroupSponsorshipDialog
-                key={activationPreviewOpen ? "open" : "closed"}
-                checkoutUrl="/api/design/usage-credit-preview"
-                customizationAllowed
-                initialOpen={activationPreviewOpen}
-                mode="monthly"
-                monthlyCapMinor={1_000}
-                monthlyCapOptions={DESIGN_GROUP_MONTHLY_CAPS}
-                offers={[DESIGN_GROUP_SPONSORSHIP_OFFERS[0]]}
-                payerMemberId={DESIGN_PAYER_MEMBER_ID}
+              <GroupUsageFundingActions
+                monthlyAction={(
+                  <GroupSponsorshipDialog
+                    key={activationPreviewOpen ? "open" : "closed"}
+                    checkoutUrl="/api/design/usage-credit-preview"
+                    customizationAllowed
+                    initialOpen={activationPreviewOpen}
+                    inert
+                    mode="monthly"
+                    monthlyCapMinor={1_000}
+                    monthlyCapOptions={DESIGN_GROUP_MONTHLY_CAPS}
+                    offers={[DESIGN_GROUP_SPONSORSHIP_OFFERS[0]]}
+                    payerMemberId={DESIGN_PAYER_MEMBER_ID}
+                  />
+                )}
+                oneTimeAction={(
+                  <GroupSponsorshipDialog
+                    checkoutUrl="/api/design/usage-credit-preview"
+                    customizationAllowed
+                    inert
+                    mode="one_time"
+                    offers={DESIGN_GROUP_SPONSORSHIP_OFFERS}
+                    payerMemberId={DESIGN_PAYER_MEMBER_ID}
+                    triggerSize="default"
+                    triggerVariant="link"
+                  />
+                )}
               />
             </div>
           )}
@@ -375,7 +403,7 @@ function GroupUsageFundingStudy() {
           label="Ordinary sponsored participant + one-time action"
           state="ordinary-sponsored-one-time"
         >
-          <GroupUsageFundingCard
+          <GroupUsageFundingShell
             action={<div inert>{oneTimeContribution}</div>}
             groupName="Sunday sleep crew"
           />
@@ -387,7 +415,6 @@ function GroupUsageFundingStudy() {
         >
           <GroupSponsorshipManagementCard
             endpoint={endpoint}
-            groupName="Sunday sleep crew"
             inert
             management={{
               authorizationId: "hgsa_design_active",
@@ -407,7 +434,6 @@ function GroupUsageFundingStudy() {
         >
           <GroupSponsorshipManagementCard
             endpoint={endpoint}
-            groupName="Sunday sleep crew"
             inert
             management={{
               authorizationId: "hgsa_design_paused",
@@ -427,7 +453,6 @@ function GroupUsageFundingStudy() {
         >
           <GroupSponsorshipManagementCard
             endpoint={endpoint}
-            groupName="Sunday sleep crew"
             inert
             management={{
               authorizationId: "hgsa_design_recovery",
@@ -445,7 +470,7 @@ function GroupUsageFundingStudy() {
           label="Sponsored-chat one-time purchase recovery"
           state="sponsored-one-time-recovery"
         >
-          <GroupUsageFundingCard
+          <GroupUsageFundingShell
             action={<div inert>{oneTimeRecovery()}</div>}
             groupName="Sunday sleep crew"
           />

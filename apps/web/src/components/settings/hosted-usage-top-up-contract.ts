@@ -48,12 +48,14 @@ interface HostedUsageTopUpDialogProps {
   deferTerminalRefreshUntilClose?: boolean;
   groupPaymentMode?: "monthly" | "one_time";
   initialOpen?: boolean;
+  inert?: boolean;
   offers: readonly HostedUsageTopUpOffer[];
   payerMemberId: string;
   purchaseReturn?: HostedUsageTopUpReturn | null;
   renderPurchaseDetails?: ReactNode;
   renderSelectionDetails?: (input: {
     disabled: boolean;
+    mobileStickyActionVisible: boolean;
     selectedOffer: HostedUsageTopUpOffer | null;
   }) => ReactNode;
   scope?: "family" | "group" | "personal";
