@@ -129,6 +129,48 @@ describe("Privy phone-transfer source retirement", () => {
     expect(fixture.prisma.hostedMember.updateMany).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["active + trial", HostedBillingStatus.active, "trial", true],
+    ["canceled + null", HostedBillingStatus.canceled, null, true],
+    ["incomplete + null", HostedBillingStatus.incomplete, null, true],
+    ["canceled + trial", HostedBillingStatus.canceled, "trial", false],
+    ["active + null", HostedBillingStatus.active, null, false],
+  ] as const)(
+    "enforces the exact automatic-trial lifecycle pair for %s",
+    async (
+      _label,
+      billingStatus,
+      currentBillingPhase,
+      isAccepted,
+    ) => {
+      const fixture = makeFixture({ autoTrial: true });
+      if (!fixture.billingSnapshot) {
+        throw new TypeError("Expected automatic-trial billing fixture.");
+      }
+      fixture.sourceMember.billingStatus = billingStatus;
+      fixture.sourceMember.suspendedAt =
+        billingStatus === HostedBillingStatus.active ? null : NOW;
+      fixture.sourceShape.billingStatus = billingStatus;
+      fixture.billingSnapshot.billingRef.currentBillingPhase =
+        currentBillingPhase;
+
+      if (isAccepted) {
+        await expect(prepare(fixture)).resolves.toEqual({
+          autoTrialBilling: {
+            stripeCustomerId: STRIPE_CUSTOMER_ID,
+            stripeSubscriptionId: STRIPE_SUBSCRIPTION_ID,
+          },
+          sourceMemberId: SOURCE_MEMBER_ID,
+        });
+        return;
+      }
+
+      await expect(prepare(fixture)).rejects.toMatchObject({
+        code: "PRIVY_PHONE_TRANSFER_REQUIRES_SUPPORT",
+      });
+    },
+  );
+
   it("rejects a non-canonical browser-vault refresh event", async () => {
     const fixture = makeFixture({ autoTrial: true });
     const activationEventId =
