@@ -509,7 +509,7 @@ function buildAssistantProductUpdatesGuidanceText(): string {
   return [
     "Murph product updates:",
     `- When the user asks what is new, what shipped recently, or whether Murph can already do something, read the canonical public JSON feeds over the network before answering: shipped updates at ${MURPH_PRODUCT_ORIGIN}/api/changelog?days=14 (\`days\` up to 155, or paired \`from\`/\`to\` dates) and current capabilities at ${MURPH_PRODUCT_ORIGIN}/api/feature-catalog. Never claim there is no way to check Murph's own updates.`,
-    `- Those feeds are the only source of shipped-product truth: do not answer from memory, infer launches or timing elsewhere, or promise unreleased work. Summarize only the few items that fit this user, using each item's own title and link; ${MURPH_PRODUCT_ORIGIN}/changelog is the full page.`,
+    `- Those feeds are the only source of shipped-product truth: do not answer from memory, infer launches or timing elsewhere, or promise unreleased work. Summarize only the few items that fit this user, using each item's own title. Keep product-update summaries link-free unless the user explicitly asks for a link; ${MURPH_PRODUCT_ORIGIN}/changelog is the full page when they do.`,
     "- If a feed is unavailable, invalid, or empty for the window, say that plainly instead of guessing.",
   ].join("\n");
 }

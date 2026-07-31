@@ -20,23 +20,21 @@ export const metadata: Metadata = createMurphPageMetadata({
 });
 
 export default async function EnvironmentPage() {
-  const contactAction = await resolveEnvironmentContactAction();
-  return <EnvironmentPageClient contactAction={contactAction} />;
+  const contactOptions = await resolveEnvironmentContactOptions();
+  return <EnvironmentPageClient contactOptions={contactOptions} />;
 }
 
-async function resolveEnvironmentContactAction() {
+async function resolveEnvironmentContactOptions() {
   try {
     const options = await resolveHostedMurphContactOptions({
       message: {
         body: "I want to update what you know about my home environment.",
       },
     });
-    return (
-      options.find(
-        (option) => option.kind === "text" || option.kind === "telegram",
-      ) ?? null
+    return options.filter(
+      (option) => option.kind === "text" || option.kind === "telegram",
     );
   } catch {
-    return null;
+    return [];
   }
 }
