@@ -1,6 +1,6 @@
 # Surface actionable OpenAI image edit failures to Murph
 
-Status: active
+Status: completed
 Created: 2026-07-30
 Updated: 2026-07-31
 
@@ -111,9 +111,10 @@ Updated: 2026-07-31
   passed across the image adapter/tool, dynamic hosted tool, trusted completion
   serialization, and resumed-turn event path.
 - Package-local assistant-engine and assistant-runtime typechecks passed.
-- A production-owner hosted-runtime route scenario passed with one original
-  Linq inbound, one image-provider attempt, a sent acknowledgement, detached
-  failed-completion staging, a resumed system turn, and a sent same-thread
+- A production-owner hosted-runtime route scenario passed with one already
+  routed Linq entrypoint mailbox input, one image-provider attempt, a sent
+  acknowledgement, detached failed-completion staging, a resumed system turn,
+  and a sent same-thread
   explanation. The final outbox intent had no media and omitted the raw provider
   code and request id. Together with the controlled OpenAI 400 dynamic-tool
   regression, this proves the bounded provider message reaches Murph and the
@@ -141,6 +142,15 @@ Updated: 2026-07-31
   accepted as documentation corrections: the test stages an already routed
   Linq mailbox input and also supplies ordinary invocation platform ports; it
   does not exercise the upstream Linq decoder or a live control plane.
+- After merging the latest default branch, the focused route's first cold,
+  contended run crossed its 15-second test guard after reaching the
+  acknowledgement and checkpoints. An immediate direct isolated rerun passed
+  in 9.96 seconds (1 passed, 264 skipped), and both assistant package
+  typechecks passed on the exact merged head.
+- Exact merged-head GitHub Actions passed: release build/typecheck, assistant,
+  platform, and CLI package coverage, app and fixture verification, both CLI
+  host matrices, runner permission sandbox, repo hygiene, frontend design
+  proof, viewport overflow, and Vercel.
 - Parent product-experience re-review after specialist remediation found no
   remaining product finding: the smallest complete experience is the existing
   truthful acknowledgement followed by a same-route plain-language failure
@@ -165,3 +175,4 @@ Updated: 2026-07-31
     instructions and all other provider-visible fields remain unchanged. The
     retained failure guidance is conditional resumed-turn context and does not
     enter an ordinary initial direct or group request.
+Completed: 2026-07-31
