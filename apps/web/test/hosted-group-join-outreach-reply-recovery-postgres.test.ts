@@ -1080,7 +1080,12 @@ describe.skipIf(!runPostgresProof)(
 
     it("serializes opener dispatch with phone-bound member creation in both orders", async () => {
       const memberFirst = await createOpenerRaceFixture();
-      providerMocks.createHostedLinqChat.mockReset();
+      providerMocks.createHostedLinqChat
+        .mockReset()
+        .mockResolvedValue({
+          chatId: `chat-member-first-${randomUUID()}`,
+          messageId: `message-member-first-${randomUUID()}`,
+        });
       let releaseMemberCommit = () => {};
       const memberMayCommit = new Promise<void>((resolve) => {
         releaseMemberCommit = resolve;
@@ -1128,11 +1133,10 @@ describe.skipIf(!runPostgresProof)(
           10_000,
         );
         expect(memberFirstDrainResult).toEqual({
-          kind: "skipped",
+          kind: "sent",
           outreachId: memberFirst.outreachId,
-          reason: "recipient_now_member",
         });
-        expect(providerMocks.createHostedLinqChat).not.toHaveBeenCalled();
+        expect(providerMocks.createHostedLinqChat).toHaveBeenCalledTimes(1);
       } finally {
         releaseMemberCommit();
         await Promise.allSettled([
@@ -1222,6 +1226,227 @@ describe.skipIf(!runPostgresProof)(
         ]);
         providerMocks.createHostedLinqChat.mockReset();
         await cleanupOpenerRaceFixture(openerFirst);
+      }
+    });
+
+    it("serializes opener dispatch with inactive-member activation in both orders", async () => {
+      const activationFirst = await createOpenerRaceFixture();
+      const activationFirstMemberId =
+        await activationFirst.contenderPrisma.$transaction((tx) =>
+          createPhoneBoundMemberIdentityTx({
+            phoneNumber: activationFirst.participantPhone,
+            phoneNumberVerifiedAt: new Date("2026-07-20T00:00:00.000Z"),
+            tx,
+          })
+        );
+      providerMocks.createHostedLinqChat.mockReset();
+      let releaseActivationCommit = () => {};
+      const activationMayCommit = new Promise<void>((resolve) => {
+        releaseActivationCommit = resolve;
+      });
+      let reportActivationReady = () => {};
+      const activationReady = new Promise<void>((resolve) => {
+        reportActivationReady = resolve;
+      });
+      let activationPromise: Promise<unknown> | null = null;
+
+      try {
+        activationPromise = activationFirst.contenderPrisma.$transaction(
+          async (tx) => {
+            await tx.hostedMember.update({
+              data: { billingStatus: HostedBillingStatus.active },
+              where: { id: activationFirstMemberId },
+            });
+            reportActivationReady();
+            await activationMayCommit;
+          },
+        );
+        await activationReady;
+
+        await expect(withTimeout(
+          drainOneHostedGroupJoinOutreach({
+            now: activationFirst.now,
+            prisma: activationFirst.drainPrisma,
+          }),
+          10_000,
+        )).resolves.toEqual({
+          kind: "deferred",
+          outreachId: activationFirst.outreachId,
+          reason: "recipient_state_in_flight",
+        });
+        expect(providerMocks.createHostedLinqChat).not.toHaveBeenCalled();
+
+        releaseActivationCommit();
+        await expect(withTimeout(
+          activationPromise,
+          10_000,
+        )).resolves.toBeUndefined();
+        await expect(drainOneHostedGroupJoinOutreach({
+          now: new Date(activationFirst.now.getTime() + 60_000),
+          prisma: activationFirst.drainPrisma,
+        })).resolves.toEqual({
+          kind: "skipped",
+          outreachId: activationFirst.outreachId,
+          reason: "recipient_now_active",
+        });
+        expect(providerMocks.createHostedLinqChat).not.toHaveBeenCalled();
+      } finally {
+        releaseActivationCommit();
+        await Promise.allSettled([
+          ...(activationPromise ? [activationPromise] : []),
+        ]);
+        await cleanupOpenerRaceFixture(activationFirst);
+      }
+
+      const openerFirst = await createOpenerRaceFixture();
+      const openerFirstMemberId =
+        await openerFirst.contenderPrisma.$transaction((tx) =>
+          createPhoneBoundMemberIdentityTx({
+            phoneNumber: openerFirst.participantPhone,
+            phoneNumberVerifiedAt: new Date("2026-07-20T00:00:00.000Z"),
+            tx,
+          })
+        );
+      let releaseProvider = () => {};
+      const providerMayContinue = new Promise<void>((resolve) => {
+        releaseProvider = resolve;
+      });
+      let reportProviderStarted = () => {};
+      const providerStarted = new Promise<void>((resolve) => {
+        reportProviderStarted = resolve;
+      });
+      providerMocks.createHostedLinqChat
+        .mockReset()
+        .mockImplementation(async () => {
+          reportProviderStarted();
+          await providerMayContinue;
+          return {
+            chatId: `chat-activation-race-${randomUUID()}`,
+            messageId: `message-activation-race-${randomUUID()}`,
+          };
+        });
+      let openerFirstDrain:
+        ReturnType<typeof drainOneHostedGroupJoinOutreach> | null = null;
+      let openerFirstActivation: Promise<unknown> | null = null;
+
+      try {
+        openerFirstDrain = drainOneHostedGroupJoinOutreach({
+          now: openerFirst.now,
+          prisma: openerFirst.drainPrisma,
+        });
+        await providerStarted;
+
+        let activationSettled = false;
+        openerFirstActivation = openerFirst.contenderPrisma.hostedMember.update({
+          data: { billingStatus: HostedBillingStatus.active },
+          where: { id: openerFirstMemberId },
+        }).finally(() => {
+          activationSettled = true;
+        });
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        expect(activationSettled).toBe(false);
+
+        releaseProvider();
+        const [drainResult] = await withTimeout(
+          Promise.all([openerFirstDrain, openerFirstActivation]),
+          10_000,
+        );
+        expect(drainResult).toEqual({
+          kind: "sent",
+          outreachId: openerFirst.outreachId,
+        });
+        expect(providerMocks.createHostedLinqChat).toHaveBeenCalledTimes(1);
+        await expect(openerFirst.drainPrisma.hostedMember.findUnique({
+          select: { billingStatus: true },
+          where: { id: openerFirstMemberId },
+        })).resolves.toEqual({ billingStatus: HostedBillingStatus.active });
+      } finally {
+        releaseProvider();
+        await Promise.allSettled([
+          ...(openerFirstDrain ? [openerFirstDrain] : []),
+          ...(openerFirstActivation ? [openerFirstActivation] : []),
+        ]);
+        providerMocks.createHostedLinqChat.mockReset();
+        await cleanupOpenerRaceFixture(openerFirst);
+      }
+    });
+
+    it("keeps a pre-existing inactive member on the group-aware signup reply path", async () => {
+      vi.stubEnv(
+        "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
+        "https://join.example.test",
+      );
+      const fixture = await createOpenerRaceFixture();
+      const participantMemberId =
+        await fixture.contenderPrisma.$transaction((tx) =>
+          createPhoneBoundMemberIdentityTx({
+            phoneNumber: fixture.participantPhone,
+            phoneNumberVerifiedAt: new Date("2026-07-20T00:00:00.000Z"),
+            tx,
+          })
+        );
+      const chatId = `chat-existing-member-reply-${randomUUID()}`;
+      const openerMessageId = `message-existing-member-opener-${randomUUID()}`;
+      providerMocks.createHostedLinqChat
+        .mockReset()
+        .mockResolvedValue({
+          chatId,
+          messageId: openerMessageId,
+        });
+
+      try {
+        await expect(drainOneHostedGroupJoinOutreach({
+          now: fixture.now,
+          prisma: fixture.drainPrisma,
+        })).resolves.toEqual({
+          kind: "sent",
+          outreachId: fixture.outreachId,
+        });
+
+        const replyEvent = buildDirectReplyEvent({
+          chatId,
+          eventId: `event-existing-member-reply-${randomUUID()}`,
+          messageId: `message-existing-member-reply-${randomUUID()}`,
+          occurredAt: "2026-07-27T16:00:01.000Z",
+          participantPhone: fixture.participantPhone,
+          recipientPhone: fixture.linePhone,
+          replyToMessageId: openerMessageId,
+        });
+        const plan = await fixture.contenderPrisma.$transaction((tx) =>
+          planHostedOnboardingLinqWebhook({
+            event: replyEvent,
+            firstContactAdmissionDecision: {
+              confidence: 1,
+              kind: "allow",
+              source: "deterministic",
+            },
+            prisma: tx,
+            requireFirstContactAdmission: true,
+          })
+        );
+
+        expect(plan.response).toMatchObject({
+          joinUrl: expect.stringContaining(
+            `/groups/join/${fixture.joinCode}?invite=`,
+          ),
+          reason: "sent-signup-link",
+        });
+        const [signupLinkEffect] = plan.desiredSideEffects;
+        if (
+          !signupLinkEffect
+          || signupLinkEffect.payload.template !== "invite_signup"
+        ) {
+          throw new Error("Expected the existing group-aware signup effect.");
+        }
+        expect(signupLinkEffect.payload).toMatchObject({
+          groupJoinCode: fixture.joinCode,
+          groupJoinOutreachId: fixture.outreachId,
+          memberId: participantMemberId,
+        });
+      } finally {
+        providerMocks.createHostedLinqChat.mockReset();
+        vi.unstubAllEnvs();
+        await cleanupOpenerRaceFixture(fixture);
       }
     });
 
@@ -2841,8 +3066,9 @@ async function createOpenerRaceFixture(): Promise<OpenerRaceFixture> {
 
 async function createPhoneBoundMemberIdentityTx(input: {
   phoneNumber: string;
+  phoneNumberVerifiedAt?: Date | null;
   tx: Prisma.TransactionClient;
-}): Promise<void> {
+}): Promise<string> {
   await acquireHostedLinqParticipantPhoneLockTx({
     phoneNumber: input.phoneNumber,
     tx: input.tx,
@@ -2870,8 +3096,10 @@ async function createPhoneBoundMemberIdentityTx(input: {
       maskedPhoneNumberHint: `*** ${input.phoneNumber.slice(-4)}`,
       memberId,
       phoneLookupKey,
+      phoneNumberVerifiedAt: input.phoneNumberVerifiedAt ?? null,
     },
   });
+  return memberId;
 }
 
 async function cleanupOpenerRaceFixture(

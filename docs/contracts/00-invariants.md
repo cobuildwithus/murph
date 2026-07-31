@@ -242,14 +242,18 @@ it has been explicitly elevated to a cross-cutting invariant.
   durable outcome. A persisted pending effect names its current validity
   predicate and is durably superseded instead of delivered when that predicate
   fails.
-- A pre-member group-join reaction accepted for proactive outreach is Web-owned
-  durable work. Its stable offer-and-participant identity collapses webhook
-  retry, duplicate reaction, and unlike/re-like delivery. Every refusal is typed
-  and durable: line health and capacity defer with a bounded next attempt, and a
-  condition whose inputs cannot change terminates instead of deferring, so no row
-  retries forever and none is dropped unrecorded. Pre-member contact data that a
-  reaction creates participates in the existing account-deletion and
-  group-deletion owners rather than outliving them.
+- A canonical group-join reaction accepted for reply-gated proactive outreach
+  is Web-owned durable work. The eligible phone participant either has no member
+  identity or is a verified, unsuspended member without active hosted access who
+  is not already in the target group. Active members stay on direct join;
+  suspended and existing target-group members are consumed without outreach. The
+  stable offer-and-participant identity collapses webhook retry, duplicate
+  reaction, and unlike/re-like delivery. Every refusal is typed and durable:
+  line health and capacity defer with a bounded next attempt, and a condition
+  whose inputs cannot change terminates instead of deferring, so no row retries
+  forever and none is dropped unrecorded. Contact data that a reaction creates
+  participates in the existing account-deletion and group-deletion owners rather
+  than outliving them.
 
 ## Authority, Ownership, And State
 

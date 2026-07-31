@@ -25,12 +25,21 @@ import {
 } from "./group-join-outreach-store";
 import { readHostedGroupJoinOfferTargetTx } from "./group-store";
 import { isHostedGroupJoinOutreachSupportedRegion } from "./group-join-outreach-window";
-import { isHostedOnboardingError } from "../hosted-onboarding/errors";
-import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
+import {
+  hostedOnboardingError,
+  isHostedOnboardingError,
+} from "../hosted-onboarding/errors";
+import {
+  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  lockHostedMemberRow,
+  lockHostedMemberSponsoredAccessRows,
+} from "../hosted-onboarding/shared";
 
 type HostedGroupJoinOfferReactionSkipReason =
   | HostedGroupOfferAffirmationSkipReason
+  | "already_group_member"
   | "member_inactive"
+  | "member_suspended"
   | "missing_reaction_context"
   | "non_phone_handle"
   | "recipient_region_unsupported"
@@ -101,14 +110,23 @@ export async function handleHostedGroupJoinOfferReaction(input: {
   });
 
   if (input.event.eventType === "reaction.removed") {
-    // Only the pre-member outreach this adapter owns is revocable. A member's
-    // removal keeps its previous no-op behavior: their grants are additive and
-    // dropping a tapback does not undo them.
-    const participantPhoneNumber = member
-      ? null
-      : readHostedGroupJoinOfferReactionParticipantPhone(
+    // Only reply-gated outreach is revocable. Active members keep the existing
+    // no-op behavior because dropping a tapback does not undo an additive grant;
+    // an inactive verified phone member retains the same remove-before-add
+    // tombstone as someone who has not created a member identity yet.
+    const memberCanOwnOutreach = member
+      ? member.phoneIdentityVerified
+        && !member.suspendedAt
+        && !(await readActiveHostedMemberAccess({
+          memberId: member.id,
+          prisma: input.prisma,
+        }))
+      : true;
+    const participantPhoneNumber = memberCanOwnOutreach
+      ? readHostedGroupJoinOfferReactionParticipantPhone(
           input.event.reactionFromHandle,
-        );
+        )
+      : null;
     if (!participantPhoneNumber) {
       return skipHostedGroupJoinOfferReaction({ reason: "reaction_removed" });
     }
@@ -218,13 +236,34 @@ export async function handleHostedGroupJoinOfferReaction(input: {
           reason: "recipient_region_unsupported",
         });
   }
+  const memberHasActiveAccess = member.suspendedAt
+    ? false
+    : await readActiveHostedMemberAccess({
+        memberId: member.id,
+        prisma: input.prisma,
+      });
   if (
     member.suspendedAt
-    || !(await readActiveHostedMemberAccess({ memberId: member.id, prisma: input.prisma }))
+    || (!memberHasActiveAccess && member.phoneIdentityVerified)
   ) {
-    return skipHostedGroupJoinOfferReaction({
-      reason: "member_inactive",
+    const outreachResult = await resolveHostedGroupJoinOutreachForMemberReaction({
+      eventId: input.event.eventId,
+      handledAt: input.event.providerCreatedAt,
+      memberId: member.id,
+      messageLookupKeyReadCandidates,
+      participantPhoneNumber:
+        readHostedGroupJoinOfferReactionParticipantPhone(
+          input.event.reactionFromHandle,
+        ),
+      prisma: input.prisma,
+      requestedAt: input.event.providerCreatedAt,
+      threadIdentityLookupKeyReadCandidates,
     });
+    if (outreachResult.status !== "active_member") {
+      return outreachResult;
+    }
+  } else if (!memberHasActiveAccess) {
+    return skipHostedGroupJoinOfferReaction({ reason: "member_inactive" });
   }
 
   const result = await acceptHostedGroupOfferAffirmation({
@@ -246,6 +285,118 @@ export async function handleHostedGroupJoinOfferReaction(input: {
   return result.status === "accepted"
     ? { status: "accepted", reason: "accepted" }
     : skipHostedGroupJoinOfferReaction({ reason: result.reason });
+}
+
+type HostedGroupJoinOutreachMemberReactionResult =
+  | HostedGroupJoinOfferReactionResult
+  | { status: "active_member" };
+
+async function resolveHostedGroupJoinOutreachForMemberReaction(input: {
+  eventId: string;
+  handledAt: Date;
+  memberId: string;
+  messageLookupKeyReadCandidates: readonly string[];
+  participantPhoneNumber: string | null;
+  prisma: PrismaClient;
+  requestedAt: Date;
+  threadIdentityLookupKeyReadCandidates: readonly string[];
+}): Promise<HostedGroupJoinOutreachMemberReactionResult> {
+  try {
+    return await input.prisma.$transaction(async (tx) => {
+      // The canonical offer lock comes first here, matching direct join.
+      const offer = await readHostedGroupJoinOfferTargetTx({
+        channel: "linq",
+        messageLookupKeyReadCandidates: input.messageLookupKeyReadCandidates,
+        threadIdentityLookupKeyReadCandidates:
+          input.threadIdentityLookupKeyReadCandidates,
+        tx,
+      });
+      await lockHostedMemberRow(tx, input.memberId);
+      await lockHostedMemberSponsoredAccessRows(tx, input.memberId);
+
+      const member = await tx.hostedMember.findUnique({
+        select: { suspendedAt: true },
+        where: { id: input.memberId },
+      });
+      if (!member) {
+        throw hostedOnboardingError({
+          code: "HOSTED_LINQ_MEMBER_IDENTITY_CHANGED",
+          httpStatus: 503,
+          message:
+            "Hosted member identity changed while resolving the reaction.",
+          retryable: true,
+        });
+      }
+      if (member.suspendedAt) {
+        await markHostedLinqGroupJoinOfferHandledTx({
+          eventId: input.eventId,
+          handledAt: input.handledAt,
+          prisma: tx,
+        });
+        return skipHostedGroupJoinOfferReaction({ reason: "member_suspended" });
+      }
+      if (await readActiveHostedMemberAccess({
+        memberId: input.memberId,
+        prisma: tx,
+      })) {
+        return { status: "active_member" };
+      }
+
+      const membership = await tx.hostedGroupMember.findUnique({
+        select: { id: true },
+        where: {
+          groupId_memberId: {
+            groupId: offer.groupId,
+            memberId: input.memberId,
+          },
+        },
+      });
+      if (membership) {
+        await markHostedLinqGroupJoinOfferHandledTx({
+          eventId: input.eventId,
+          handledAt: input.handledAt,
+          prisma: tx,
+        });
+        return skipHostedGroupJoinOfferReaction({
+          reason: "already_group_member",
+        });
+      }
+      if (!input.participantPhoneNumber) {
+        return skipHostedGroupJoinOfferReaction({ reason: "member_inactive" });
+      }
+      if (!isHostedGroupJoinOutreachSupportedRegion(
+        input.participantPhoneNumber,
+      )) {
+        await markHostedLinqGroupJoinOfferHandledTx({
+          eventId: input.eventId,
+          handledAt: input.handledAt,
+          prisma: tx,
+        });
+        return skipHostedGroupJoinOfferReaction({
+          reason: "recipient_region_unsupported",
+        });
+      }
+
+      await enqueueHostedGroupJoinOutreachTx({
+        offerId: offer.offerId,
+        participantPhoneNumber: input.participantPhoneNumber,
+        requestedAt: input.requestedAt,
+        tx,
+      });
+      await markHostedLinqGroupJoinOfferHandledTx({
+        eventId: input.eventId,
+        handledAt: input.handledAt,
+        prisma: tx,
+      });
+      return { status: "accepted", reason: "outreach_enqueued" };
+    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  } catch (error) {
+    const reason = readHostedGroupJoinOfferTargetSkipReason(error);
+    if (!reason) {
+      throw error;
+    }
+    return skipHostedGroupJoinOfferReaction({ reason });
+  }
 }
 
 function readHostedGroupJoinOfferTargetSkipReason(
@@ -287,22 +438,40 @@ function normalizeLookupKeyCandidates(values: readonly (string | null | undefine
 async function resolveHostedGroupJoinOfferReactionMember(input: {
   handle: string;
   prisma: PrismaClient;
-}): Promise<{ id: string; suspendedAt: Date | null } | null> {
-  const emailAddress = input.handle.includes("@") ? input.handle : null;
-  const lookup = emailAddress
-    ? await lookupHostedMemberByVerifiedEmailAddress({
-        address: emailAddress,
-        prisma: input.prisma,
-      })
-    : await lookupHostedMemberIdentityByPhoneNumber({
-        phoneNumber: normalizePhoneNumber(input.handle) ?? "",
-        prisma: input.prisma,
-      });
-  const member = lookup?.core ?? null;
-  if (!member) {
+}): Promise<{
+  id: string;
+  phoneIdentityVerified: boolean;
+  suspendedAt: Date | null;
+} | null> {
+  if (input.handle.includes("@")) {
+    const lookup = await lookupHostedMemberByVerifiedEmailAddress({
+      address: input.handle,
+      prisma: input.prisma,
+    });
+    return lookup
+      ? {
+          id: lookup.core.id,
+          phoneIdentityVerified: false,
+          suspendedAt: lookup.core.suspendedAt,
+        }
+      : null;
+  }
+
+  const phoneNumber = normalizePhoneNumber(input.handle);
+  if (!phoneNumber) {
     return null;
   }
-  return { id: member.id, suspendedAt: member.suspendedAt };
+  const lookup = await lookupHostedMemberIdentityByPhoneNumber({
+    phoneNumber,
+    prisma: input.prisma,
+  });
+  return lookup
+    ? {
+        id: lookup.core.id,
+        phoneIdentityVerified: lookup.identity.phoneNumberVerifiedAt !== null,
+        suspendedAt: lookup.core.suspendedAt,
+      }
+    : null;
 }
 
 function skipHostedGroupJoinOfferReaction(input: {
