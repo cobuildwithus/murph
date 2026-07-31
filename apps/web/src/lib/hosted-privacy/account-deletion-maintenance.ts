@@ -5,18 +5,14 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
  * `apps/cloudflare/R2_BUNDLES_ENAM_MIGRATION.md`.
  *
  * During that cutover two buckets hold the member's objects and either one can
- * still become the active bucket. The runtime deletion path only ever targets
- * the currently active bucket, so a deletion accepted inside the window could
- * leave data behind in the bucket that later becomes live. Rather than accept
- * a deletion we cannot complete everywhere, we decline it for the length of the
- * window.
+ * still become authoritative. Before destination activation and the
+ * dual-bucket deletion canary complete, a deletion cannot yet be proven
+ * everywhere. Rather than accept an incomplete deletion, the operation
+ * temporarily declines it.
  *
  * The flag is the only authority and the message makes no timing promise, not
- * even a relative one. The window runs from before the copy until OC
- * retirement, which the runbook permits as late as 24 hours after cutover and
- * may extend, so any duration we name can expire while the window is still
- * open. Recovery guidance is stated as a condition instead, which stays true
- * for as long as the window lasts.
+ * even a relative one. Recovery guidance is stated as a condition instead, so
+ * it stays true if migration or cutover validation takes longer than planned.
  *
  * Delete this module, its env var, and both call sites with the runbook once
  * the OC buckets are retired.

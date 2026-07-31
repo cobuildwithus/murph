@@ -21,11 +21,9 @@ import {
 } from "./deploy-automation/shared.ts";
 import {
   assertR2FixedBucketPair,
-  buildWranglerMigrationChildEnvironment,
-  createR2BundlesMigrationCommandRunner,
-  readR2BucketInfoWithWrangler,
+  createWranglerR2BucketInfoReader,
   type R2BucketInfo,
-} from "./r2-bundles-migration.ts";
+} from "./r2-fixed-buckets.ts";
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 type HostedDeployContext = "development" | "preview" | "production";
@@ -655,15 +653,7 @@ async function listHostedDeployR2BucketInvariantErrors(
 }
 
 function createDefaultR2BucketInfoReader(source: EnvSource): R2BucketInfoReader {
-  const runner = createR2BundlesMigrationCommandRunner();
-  const environment = buildWranglerMigrationChildEnvironment(source);
-  return async (bucketName) =>
-    await readR2BucketInfoWithWrangler({
-      bucketName,
-      environment,
-      label: "Hosted deploy R2 bucket-info check",
-      runner,
-    });
+  return createWranglerR2BucketInfoReader(source);
 }
 
 function listMissingRequiredEnvNames(
