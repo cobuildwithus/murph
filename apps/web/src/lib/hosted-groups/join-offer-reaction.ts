@@ -16,6 +16,10 @@ import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { createHostedExternalThreadIdentityLookupKeyReadCandidates } from "../hosted-onboarding/contact-privacy";
 import {
+  createHostedPostCommitDeadline,
+  waitForHostedPostCommitOperation,
+} from "../hosted-onboarding/bounded-post-commit";
+import {
   appendHostedLinqGroupReactionMailboxTx,
   signalHostedLinqGroupReactionMailbox,
   type HostedLinqGroupReactionMailboxAppend,
@@ -333,9 +337,13 @@ async function signalHostedGroupOfferReactionBestEffort(input: {
     return;
   }
   try {
-    await signalHostedLinqGroupReactionMailbox({
-      append: input.append,
-      prisma: input.prisma,
+    await waitForHostedPostCommitOperation({
+      deadlineMs: createHostedPostCommitDeadline(undefined),
+      operation: (signal) => signalHostedLinqGroupReactionMailbox({
+        abortSignal: signal,
+        append: input.append!,
+        prisma: input.prisma,
+      }),
     });
   } catch (error) {
     // The reaction row committed atomically with the offer decision. A later
