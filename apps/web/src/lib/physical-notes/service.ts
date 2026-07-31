@@ -36,6 +36,7 @@ import { recordHostedAiUsageRecords } from "../hosted-execution/usage";
 import { buildHostedLobPhysicalNoteUsageRecord } from "../hosted-execution/usage-lob";
 import {
   createLobPhysicalNoteRuntime,
+  type LobPhysicalNoteCreateResult,
   type LobPhysicalNoteRuntime,
 } from "./lob-runtime";
 
@@ -220,7 +221,7 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
     apiKey: config.apiKey,
     fromAddressId: config.fromAddressId,
   });
-  let providerResult;
+  let providerResult: LobPhysicalNoteCreateResult;
   try {
     await reassertGroupOrigin?.();
     input.signal?.throwIfAborted();
