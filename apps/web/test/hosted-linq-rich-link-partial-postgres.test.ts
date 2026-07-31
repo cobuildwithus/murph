@@ -27,6 +27,9 @@ import { parseHostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq";
 import {
   ingestHostedLinqProviderEventTx,
 } from "@/src/lib/hosted-onboarding/linq-provider-event-store";
+import {
+  readHostedIngressLatencyDashboard,
+} from "@/src/lib/hosted-runtime-latency/store";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 const PARTIAL_FAILURE_CODE =
@@ -278,6 +281,224 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
+    it("restores receipt policy after a newer receipt corrects a failed child", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 4 });
+      const suffix = randomUUID();
+      const memberId = `hbm_rich_link_receipt_policy_${suffix}`;
+      const phoneNumber = `+1202${randomInt(1_000_000, 10_000_000)}`;
+      const baseAt = new Date("2026-07-30T18:00:00.000Z");
+      const groupAcceptedAt = new Date(baseAt.getTime() + 1_000);
+      const directAcceptedAt = new Date(baseAt.getTime() + 2_000);
+      const cases = [
+        {
+          acceptedAt: groupAcceptedAt,
+          idempotencyKey: `assistant-outbox:rich-link-policy-group-${suffix}`,
+          kind: "group",
+          mailboxItemId: `hmi_rich_link_policy_group_${suffix}`,
+          messageIds: [
+            `msg-rich-link-policy-group-primary-${suffix}`,
+            `msg-rich-link-policy-group-link-${suffix}`,
+          ],
+          threadIsDirect: false,
+        },
+        {
+          acceptedAt: directAcceptedAt,
+          idempotencyKey: `assistant-outbox:rich-link-policy-direct-${suffix}`,
+          kind: "direct",
+          mailboxItemId: `hmi_rich_link_policy_direct_${suffix}`,
+          messageIds: [
+            `msg-rich-link-policy-direct-primary-${suffix}`,
+            `msg-rich-link-policy-direct-link-${suffix}`,
+          ],
+          threadIsDirect: true,
+        },
+      ] as const;
+      const deliveryIds: string[] = [];
+      const providerEventIds: string[] = [];
+
+      try {
+        await prisma.hostedMember.create({ data: { id: memberId } });
+        for (const [index, fixture] of cases.entries()) {
+          await prisma.hostedMailboxItem.create({
+            data: {
+              dedupeKey: `rich-link-receipt-policy:${fixture.kind}:${suffix}`,
+              id: fixture.mailboxItemId,
+              kind: "conversation.message",
+              lane: "conversation",
+              laneSeq: BigInt(index + 1),
+              occurredAt: fixture.acceptedAt,
+              payloadSchema: "murph.hosted-execution.conversation-message.v1",
+              userId: memberId,
+            },
+          });
+          const recorded = await recordHostedLinqRuntimeDeliveryOutcomeTx({
+            acceptedAt: fixture.acceptedAt,
+            attemptedAt: new Date(fixture.acceptedAt.getTime() - 500),
+            idempotencyKey: fixture.idempotencyKey,
+            linqChatId: `chat-rich-link-policy-${fixture.kind}-${suffix}`,
+            messageIds: fixture.messageIds,
+            prisma,
+            sourceRef: `intent-rich-link-policy-${fixture.kind}-${suffix}`,
+            targetKind: "thread",
+            threadIsDirect: fixture.threadIsDirect,
+            userId: memberId,
+          });
+          if (!recorded.deliveryId) {
+            throw new Error("Expected a recorded multi-part delivery.");
+          }
+          deliveryIds.push(recorded.deliveryId);
+        }
+        const groupDeliveryId = deliveryIds[0];
+        const directDeliveryId = deliveryIds[1];
+        if (!groupDeliveryId || !directDeliveryId) {
+          throw new Error("Expected both receipt-policy delivery owners.");
+        }
+        await prisma.hostedLinqDelivery.update({
+          data: { threadIsDirect: null },
+          where: { id: groupDeliveryId },
+        });
+
+        await prisma.hostedIngressLatencyTrace.create({
+          data: {
+            acceptedAt: groupAcceptedAt,
+            id: `hil_rich_link_policy_group_${suffix}`,
+            linqDeliveryId: groupDeliveryId,
+            mailboxItemId: cases[0].mailboxItemId,
+            mailboxLane: "conversation",
+            mailboxLaneSeq: 1n,
+            replyRuntimeAttemptId: `runtime-rich-link-policy-group-${suffix}`,
+            source: "linq",
+            userId: memberId,
+          },
+        });
+
+        for (const [caseIndex, fixture] of cases.entries()) {
+          const deliveryId = fixture.kind === "group"
+            ? groupDeliveryId
+            : directDeliveryId;
+          const chatId = `chat-rich-link-policy-${fixture.kind}-${suffix}`;
+          const failedEventId = `evt-rich-link-policy-${fixture.kind}-failed-${suffix}`;
+          const correctedEventId =
+            `evt-rich-link-policy-${fixture.kind}-corrected-${suffix}`;
+          providerEventIds.push(failedEventId, correctedEventId);
+          await ingestRuntimeDeliveryReceipt({
+            chatId,
+            eventId: failedEventId,
+            messageId: fixture.messageIds[0],
+            phoneNumber,
+            prisma,
+            receiptAt: new Date(baseAt.getTime() + 10_000 + caseIndex * 2_000),
+            status: "failed",
+          });
+          await expect(prisma.hostedLinqDelivery.findUnique({
+            select: { status: true },
+            where: { id: deliveryId },
+          })).resolves.toEqual({ status: "failed" });
+          await ingestRuntimeDeliveryReceipt({
+            chatId,
+            eventId: correctedEventId,
+            messageId: fixture.messageIds[0],
+            phoneNumber,
+            prisma,
+            receiptAt: new Date(baseAt.getTime() + 11_000 + caseIndex * 2_000),
+            status: "delivered",
+          });
+
+          await expect(prisma.hostedLinqDelivery.findUnique({
+            select: { status: true, threadIsDirect: true },
+            where: { id: deliveryId },
+          })).resolves.toEqual({
+            status: fixture.threadIsDirect
+              ? "accepted"
+              : "sent_no_receipt_expected",
+            threadIsDirect: fixture.threadIsDirect,
+          });
+
+          if (fixture.kind === "group") {
+            const groupDashboard = await readHostedIngressLatencyDashboard({
+              inFlightGraceMs: 0,
+              now: new Date(baseAt.getTime() + 30 * 60_000),
+              prisma,
+              source: "linq",
+              windowHours: 1,
+            });
+            expect(
+              groupDashboard.replyTraceQuality.acceptedMissingReceiptCount,
+            ).toBe(0);
+            await prisma.hostedIngressLatencyTrace.create({
+              data: {
+                acceptedAt: directAcceptedAt,
+                id: `hil_rich_link_policy_direct_${suffix}`,
+                linqDeliveryId: directDeliveryId,
+                mailboxItemId: cases[1].mailboxItemId,
+                mailboxLane: "conversation",
+                mailboxLaneSeq: 2n,
+                replyRuntimeAttemptId:
+                  `runtime-rich-link-policy-direct-${suffix}`,
+                source: "linq",
+                userId: memberId,
+              },
+            });
+          }
+        }
+
+        const directDashboard = await readHostedIngressLatencyDashboard({
+          inFlightGraceMs: 0,
+          now: new Date(baseAt.getTime() + 30 * 60_000),
+          prisma,
+          source: "linq",
+          windowHours: 1,
+        });
+        expect(
+          directDashboard.replyTraceQuality.acceptedMissingReceiptCount,
+        ).toBe(1);
+
+        for (const [caseIndex, fixture] of cases.entries()) {
+          const deliveredEventId =
+            `evt-rich-link-policy-${fixture.kind}-link-delivered-${suffix}`;
+          providerEventIds.push(deliveredEventId);
+          await ingestRuntimeDeliveryReceipt({
+            chatId: `chat-rich-link-policy-${fixture.kind}-${suffix}`,
+            eventId: deliveredEventId,
+            messageId: fixture.messageIds[1],
+            phoneNumber,
+            prisma,
+            receiptAt: new Date(baseAt.getTime() + 20_000 + caseIndex * 1_000),
+            status: "delivered",
+          });
+        }
+        await expect(prisma.hostedLinqDelivery.findMany({
+          orderBy: { id: "asc" },
+          select: { status: true },
+          where: { id: { in: deliveryIds } },
+        })).resolves.toEqual([
+          { status: "delivered" },
+          { status: "delivered" },
+        ]);
+      } finally {
+        await prisma.hostedLinqAlert.deleteMany({
+          where: { deliveryId: { in: deliveryIds } },
+        });
+        await prisma.hostedIngressLatencyTrace.deleteMany({
+          where: { userId: memberId },
+        });
+        await prisma.hostedLinqDelivery.deleteMany({
+          where: { id: { in: deliveryIds } },
+        });
+        const providerEventLookupKeys = providerEventIds
+          .map((eventId) => createHostedLinqProviderEventLookupKey(eventId))
+          .filter((eventId): eventId is string => eventId !== null);
+        await prisma.hostedLinqProviderEvent.deleteMany({
+          where: { eventId: { in: providerEventLookupKeys } },
+        });
+        await prisma.hostedMailboxItem.deleteMany({
+          where: { userId: memberId },
+        });
+        await prisma.hostedMember.deleteMany({ where: { id: memberId } });
+        await prisma.$disconnect();
+      }
+    });
+
     it.each(partialCases)(
       "keeps a parent-only $template $identity partial absorbing after a $receiptStatus receipt",
       async ({ identity, receiptStatus, template }) => {
@@ -498,25 +719,45 @@ async function ingestReceipt(
   fixture: PartialFixture,
   receiptStatus: "delivered" | "failed",
 ): Promise<void> {
+  await ingestRuntimeDeliveryReceipt({
+    chatId: fixture.chatId,
+    eventId: fixture.eventId,
+    messageId: fixture.messageId,
+    phoneNumber: fixture.phoneNumber,
+    prisma: fixture.prisma,
+    receiptAt: fixture.receiptAt,
+    status: receiptStatus,
+  });
+}
+
+async function ingestRuntimeDeliveryReceipt(input: {
+  chatId: string;
+  eventId: string;
+  messageId: string;
+  phoneNumber: string;
+  prisma: PrismaClient;
+  receiptAt: Date;
+  status: "delivered" | "failed";
+}): Promise<void> {
   const event = parseHostedLinqProviderEvent({
     event: parseHostedLinqWebhookEvent(JSON.stringify({
       api_version: "v3",
-      created_at: fixture.receiptAt.toISOString(),
+      created_at: input.receiptAt.toISOString(),
       data: {
-        ...(receiptStatus === "failed"
+        ...(input.status === "failed"
           ? {
               error: {
                 code: "30007",
                 message: "carrier filtered",
               },
             }
-          : { chat_id: fixture.chatId }),
-        message_id: fixture.messageId,
-        phone_number: fixture.phoneNumber,
+          : { chat_id: input.chatId }),
+        message_id: input.messageId,
+        phone_number: input.phoneNumber,
         service: "sms",
       },
-      event_id: fixture.eventId,
-      event_type: `message.${receiptStatus}`,
+      event_id: input.eventId,
+      event_type: `message.${input.status}`,
       trace_id: `trace-${randomUUID()}`,
       webhook_version: "2026-02-03",
     })),
@@ -525,7 +766,7 @@ async function ingestReceipt(
   if (!event) {
     throw new Error("Expected a terminal Hosted Linq receipt.");
   }
-  await fixture.prisma.$transaction((transaction) =>
+  await input.prisma.$transaction((transaction) =>
     ingestHostedLinqProviderEventTx({
       event,
       prisma: transaction,

@@ -1941,6 +1941,7 @@ model HostedLinqDelivery {
   phoneNumberLookupKey     String?  @map("phone_number_lookup_key")
   phoneNumberHint          String?  @map("phone_number_hint")
   targetKind               String?  @map("target_kind")
+  threadIsDirect           Boolean? @map("thread_is_direct")
   linqChatLookupKey        String?  @map("linq_chat_lookup_key")
   messageLookupKey         String?  @unique @map("message_lookup_key")
   messageIdSuffix          String?  @map("message_id_suffix")

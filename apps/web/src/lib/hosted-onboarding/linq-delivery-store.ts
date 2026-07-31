@@ -1014,6 +1014,8 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
     sourceRef: createHostedLinqDeliverySourceRefLookupKey(normalizeNullable(input.sourceRef)),
     targetKind: normalizeNullable(input.targetKind),
     template: null,
+    threadIsDirect:
+      typeof input.threadIsDirect === "boolean" ? input.threadIsDirect : null,
   };
 
   return await runHostedLinqDeliveryStoreTransaction(input.prisma, async (prisma) => {
@@ -1282,6 +1284,7 @@ async function updateHostedLinqRuntimeDeliveryOutcomeIfPreProviderTx(input: {
           threadIsDirect: input.threadIsDirect,
         }),
         targetKind: normalizeNullable(input.targetKind),
+        threadIsDirect: input.threadIsDirect,
       },
     });
     return updated.count === 1;
@@ -1324,6 +1327,7 @@ async function updateHostedLinqRuntimeDeliveryOutcomeIfPreProviderTx(input: {
       skipReason: null,
       status: "failed",
       targetKind: normalizeNullable(input.targetKind),
+      threadIsDirect: input.threadIsDirect,
     },
   });
   return updated.count === 1;
@@ -1334,7 +1338,7 @@ const HOSTED_LINQ_RUNTIME_GROUP_SENT_NO_RECEIPT_STATUS = "sent_no_receipt_expect
 function resolveHostedLinqRuntimeAcceptedStatus(input: {
   targetKind: string | null;
   threadIsDirect: boolean | null;
-}): string {
+}): "accepted" | "sent_no_receipt_expected" {
   return input.targetKind === "thread" && input.threadIsDirect === false
     ? HOSTED_LINQ_RUNTIME_GROUP_SENT_NO_RECEIPT_STATUS
     : "accepted";
@@ -2115,6 +2119,8 @@ async function recomputeHostedLinqDeliveryFromMessagesTx(input: {
       failureCode: true,
       failureReason: true,
       status: true,
+      targetKind: true,
+      threadIsDirect: true,
     },
   });
   if (!delivery) {
@@ -2153,11 +2159,17 @@ async function recomputeHostedLinqDeliveryFromMessagesTx(input: {
       : allMessagesDelivered
         ? "delivered"
         : "accepted";
-  const status =
-    aggregateStatus === "accepted"
-    && delivery.status === "sent_no_receipt_expected"
-      ? "sent_no_receipt_expected"
-      : aggregateStatus;
+  const legacyGroupPolicy =
+    delivery.status === HOSTED_LINQ_RUNTIME_GROUP_SENT_NO_RECEIPT_STATUS;
+  const threadIsDirect = delivery.threadIsDirect ?? (
+    legacyGroupPolicy ? false : null
+  );
+  const status = aggregateStatus === "accepted"
+    ? resolveHostedLinqRuntimeAcceptedStatus({
+        targetKind: delivery.targetKind ?? (legacyGroupPolicy ? "thread" : null),
+        threadIsDirect,
+      })
+    : aggregateStatus;
   const latestMessage = selectLatestHostedLinqDeliveryMessageProgress(messages);
   const latestFailedMessage =
     selectLatestHostedLinqDeliveryMessageProgress(failedMessages);
@@ -2188,6 +2200,7 @@ async function recomputeHostedLinqDeliveryFromMessagesTx(input: {
       retryAfterAt: null,
       service: latestMessage?.service ?? null,
       status,
+      threadIsDirect,
     },
   });
   return {

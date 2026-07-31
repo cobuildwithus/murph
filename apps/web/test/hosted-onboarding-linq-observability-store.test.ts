@@ -2930,6 +2930,7 @@ describe("hosted Linq observability stores", () => {
           acceptedAt,
           status: "sent_no_receipt_expected",
           targetKind: "thread",
+          threadIsDirect: false,
         }),
       }),
     );
