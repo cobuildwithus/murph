@@ -1094,6 +1094,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       result: {
         group: created.group,
         joinUrl,
+        offerState: "existing",
         status: "sent",
       },
     };
@@ -1103,6 +1104,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     joinUrl,
     projectionScopes,
   });
+  const providerSendStartedAt = new Date();
   let sent: Awaited<ReturnType<typeof sendHostedLinqChatMessage>>;
   try {
     sent = await sendHostedLinqChatMessage({
@@ -1117,16 +1119,37 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   } catch {
     return unavailable("send_failed");
   }
+  const providerSendCompletedAt = new Date();
   if (!sent.messageId) {
     return unavailable("provider_message_unavailable");
   }
+  const providerCreatedAtMs = sent.messageCreatedAt
+    ? Date.parse(sent.messageCreatedAt)
+    : Number.NaN;
+  const providerCreatedAt = Number.isFinite(providerCreatedAtMs)
+    ? new Date(providerCreatedAtMs)
+    : null;
+  const providerSendStartedAtSecond = Math.floor(
+    providerSendStartedAt.getTime() / 1_000,
+  );
+  const providerSendCompletedAtSecond = Math.floor(
+    providerSendCompletedAt.getTime() / 1_000,
+  );
+  const providerCreatedAtSecond = providerCreatedAt === null
+    ? null
+    : Math.floor(providerCreatedAt.getTime() / 1_000);
+  const providerCreatedDuringAttempt = providerCreatedAt !== null
+    && providerCreatedAtSecond !== null
+    && providerCreatedAtSecond >= providerSendStartedAtSecond
+    && providerCreatedAtSecond <= providerSendCompletedAtSecond;
+  const postedAt = providerCreatedAt ?? providerSendCompletedAt;
 
   try {
     await prisma.$transaction(async (tx) => {
       await recordHostedGroupJoinOfferTx({
         groupId: created.group.id,
         message: { channel: "linq", messageId: sent.messageId },
-        postedAt: now,
+        postedAt,
         projectionScopes,
         tx,
       });
@@ -1152,6 +1175,10 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     result: {
       group: created.group,
       joinUrl,
+      offerState: "posted",
+      ...(providerCreatedDuringAttempt
+        ? { offeredAt: providerCreatedAt.toISOString() }
+        : {}),
       status: "sent",
     },
   };

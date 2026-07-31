@@ -70,11 +70,17 @@ exact display name and projection scopes to the trusted runtime. The runtime
 selects `post_join_offer` only for an exact interactive iMessage route and uses
 `create_join_link` for SMS, Telegram, explicit standalone-link requests, and
 scheduled group routes whose durable Linq binding lacks a service subtype. The
-model receives only normalized `native` or `link` presentation semantics; Web
-continues to own group creation, consent copy, dedupe, join URLs, and grants. An
-explicit native offer is suppressed only by a covering active offer, never by
-the scopes already granted by current members, because access may be intended
-for a provider-room participant who has not joined the hosted group yet.
+model receives normalized `native` or `link` presentation semantics plus only
+the canonical presentation time needed for the bounded challenge recency rule;
+Web continues to own group creation, consent copy, dedupe, join URLs, and
+grants. A newly posted native offer remains native. When a covering active offer
+suppresses another provider message, the semantic facade returns its
+first-party URL as a freshly visible link instead of claiming a new card was
+sent. Missing additive rollout evidence is handled but never recency-eligible.
+An explicit native offer is suppressed only by a covering active offer, never
+by the scopes already granted by current members, because access may be
+intended for a provider-room participant who has not joined the hosted group
+yet.
 
 Challenge kickoff and later interactive identity repair stay inside that same
 model-triggered `read_shared` request. At request time, the runtime adds only
@@ -169,7 +175,16 @@ feature rather than embedded in the generic ownership boundary.
 Web then captures the current roster and exact active grants, decrypts the
 bounded encrypted snapshots owned by those share rows, and returns every member
 with every requested scope as `not_granted`, `granted` plus `missing`, or
-`available`. Health projection delivery conditionally replaces the complete
+`available`. A current exact-scope grant also returns its canonical activation
+time as bounded authorization metadata; it is not causal consent proof. The
+challenge page may treat that grant as best-effort social entry only when the
+same participant/scope was recorded `not_granted`, the access tool returned an
+eligible provider creation second inside the current native send attempt, the
+grant activated within 24 hours after it, and the finalized metric, window,
+and stakes are unchanged. Link delivery, idempotent replay, reused offers, and
+every missing, older, late, or mismatched case require ordinary confirmation.
+Health projection
+delivery conditionally replaces the complete
 encrypted snapshot on the exact active share generation. Revoke and regrant
 clear it transactionally, and regrant rotates the share id. The explicit
 `device-sync-status.v0` grant instead authorizes one live bounded Web derivation

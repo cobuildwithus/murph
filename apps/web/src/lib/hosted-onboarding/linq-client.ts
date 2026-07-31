@@ -40,6 +40,7 @@ const HOSTED_LINQ_ERROR_RESPONSE_MAX_BYTES = 16 * 1024;
 
 export type HostedLinqSendResult = {
   chatId: string | null;
+  messageCreatedAt?: string;
   messageId: string | null;
   providerMessageIds?: string[];
 };
@@ -281,14 +282,27 @@ async function sendHostedLinqMessageBody(input: {
   }
 
   const message = readHostedLinqJsonObjectField(response.payload, "message");
+  const messageCreatedAt = normalizeHostedLinqMessageCreatedAt(
+    readHostedLinqJsonField(message, "created_at"),
+  );
   return {
     chatId: normalizeNullableString(
       readHostedLinqJsonField(response.payload, "chat_id"),
     ),
+    ...(messageCreatedAt ? { messageCreatedAt } : {}),
     messageId: normalizeNullableString(
       readHostedLinqJsonField(message, "id"),
     ),
   };
+}
+
+function normalizeHostedLinqMessageCreatedAt(value: unknown): string | null {
+  const normalized = normalizeNullableString(value);
+  if (!normalized) {
+    return null;
+  }
+  const parsed = Date.parse(normalized);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
 }
 
 async function sendHostedLinqRichLinkWithTextFallback(input: {

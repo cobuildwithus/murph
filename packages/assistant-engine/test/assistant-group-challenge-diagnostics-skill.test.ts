@@ -328,17 +328,17 @@ describe('assistant group challenge diagnostics guidance', () => {
     expect(challenge).toContain(
       'Read the scoring scope on its own first.',
     )
-    // The proactive standings offer must not inherit the up-front all-scopes
+    // Evidence-gated challenge offers must not inherit the up-front all-scopes
     // rule: the runtime accepts only scopes the most recent read proved
     // not_granted and spends the turn's one attempt on any wider request.
     expect(challenge).toContain(
-      'That all-scopes rule does **not** apply to the evidence-gated standings offer.',
+      'That all-scopes rule does **not** apply to an evidence-gated challenge offer made from `read_shared`',
     )
     expect(challenge).toContain(
       'may name only the scopes the most recent read proved `not_granted`',
     )
     expect(challenge).toContain(
-      'Do not create a hosted group or post a permission offer as a side effect of challenge kickoff.',
+      'whether it is the one-action kickoff offer or a later standings offer.',
     )
     expect(challenge).toContain(
       'During later standings, Murph may proactively open the existing server-authored access flow',
@@ -350,13 +350,13 @@ describe('assistant group challenge diagnostics guidance', () => {
       'A handled action for one participant never suppresses an offer needed by another.',
     )
     expect(challenge).toContain(
-      'do not create a hosted group or post a permission offer as part of challenge setup.',
+      'If `read_current` returns `status="none"`, do not create a hosted group as a side effect of challenge kickoff.',
     )
     expect(challenge).toContain(
-      'Tell the affected participant they can ask you to open the group permission flow if they want to share it.',
+      'accepting that displayed permission within 24 hours is the only action those participants need for both entry and sharing',
     )
     expect(challenge).toContain(
-      'the bounded proactive standings behavior below begins only once the challenge is running.',
+      'exact scoring scope it proved `not_granted`',
     )
     expect(challenge).toContain(
       'When current evidence is `not_granted`, state the exact missing group share in ordinary language in this same standings response',
@@ -383,7 +383,10 @@ describe('assistant group challenge diagnostics guidance', () => {
       'permission offer cannot connect a source, grant Apple Health or operating-system Steps access',
     )
     expect(challenge).toContain(
-      'Treat `status="ok"` as an opaque handled result.',
+      'Its recency evidence is unavailable because final-reply delivery owns presentation timing.',
+    )
+    expect(challenge).toContain(
+      'Never use a scheduled link or a diagnostic-scope offer as challenge buy-in',
     )
     expect(challenge).toContain(
       'This scheduled surface returns `presentation="link"`; include the exact returned `joinUrl` once',
