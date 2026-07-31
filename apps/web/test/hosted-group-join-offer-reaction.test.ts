@@ -223,6 +223,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       prisma: expect.anything(),
     });
     expect(mocks.signalHostedLinqGroupReactionMailbox).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       append: expect.objectContaining({
         containerMemberId: "hbm_runtime",
       }),
@@ -536,6 +537,30 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       "hosted-onboarding.group-offer-reaction-signal-failed",
       { errorName: "Error" },
     );
+  });
+
+  it("bounds a stalled group reaction signal after the offer decision commits", async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.signalHostedLinqGroupReactionMailbox.mockReturnValueOnce(new Promise(() => {}));
+      const prisma = createPrismaStub();
+      const result = handleHostedGroupJoinOfferReaction({
+        event: parseReactionEvent({ reactionType: "like" }),
+        prisma,
+      });
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      await expect(result).resolves.toEqual({
+        reason: "accepted",
+        status: "accepted",
+      });
+      expect(mocks.logHostedOnboardingDiagnostic).toHaveBeenCalledWith(
+        "hosted-onboarding.group-offer-reaction-signal-failed",
+        { errorName: "TimeoutError" },
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("rolls back the offer decision when the reaction mailbox append fails", async () => {
