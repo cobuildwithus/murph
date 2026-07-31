@@ -2667,8 +2667,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       reason: "wake-appended-active-member",
     });
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
-    // Identity match + unified access read both run on the transaction client.
-    expect(transactionHostedMemberFindUnique).toHaveBeenCalledTimes(2);
+    // Initial access, exact post-lock admission, and the route-owner recheck all
+    // run on the transaction client.
+    expect(transactionHostedMemberFindUnique).toHaveBeenCalledTimes(3);
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
         tx: transactionClient,

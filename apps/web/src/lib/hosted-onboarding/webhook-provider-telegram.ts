@@ -236,11 +236,15 @@ export async function planHostedOnboardingTelegramWebhook(input: {
   }
 
   const accessNow = new Date();
-  if (!(await readHostedRuntimeAiAccessDecision({
+  const accessDecision = await readHostedRuntimeAiAccessDecision({
     memberId: existingMember.id,
     now: accessNow,
     prisma: input.prisma,
-  })).allowed) {
+  });
+  if (
+    !accessDecision.allowed
+    && accessDecision.reason === "health_data_consent_withdrawn"
+  ) {
     return buildIgnoredTelegramWebhookPlan("inactive-member");
   }
 
@@ -251,6 +255,10 @@ export async function planHostedOnboardingTelegramWebhook(input: {
       telegramThreadId: telegramMessage.threadId,
       telegramUserId: summary.senderTelegramUserId,
     });
+  }
+
+  if (!accessDecision.allowed) {
+    return buildIgnoredTelegramWebhookPlan("inactive-member");
   }
 
   let runtimeMemberId = existingMember.id;
