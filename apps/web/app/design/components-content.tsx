@@ -1171,7 +1171,7 @@ export function ComponentsContent() {
           <div inert>
             <HostedInferenceConnectionSettings
               chatCompletionsAvailable
-              configurationAvailable
+              configurationAvailable={false}
               initialConnection={null}
             />
           </div>

@@ -33,6 +33,13 @@ describe("hosted inference connection settings", () => {
     assert.match(markup, /Public HTTPS on port 443/u);
     assert.match(markup, /Responses API/u);
     assert.match(markup, /Bearer token/u);
+    assert.match(markup, />Inference mode</u);
+    assert.match(markup, />Custom connection details</u);
+    assert.match(
+      markup,
+      /aria-describedby="hosted-inference-images-description"/u,
+    );
+    assert.match(markup, /id="hosted-inference-images-description"/u);
     assert.doesNotMatch(markup, />Chat Completions</u);
   });
 
@@ -64,7 +71,7 @@ describe("hosted inference connection settings", () => {
     assert.match(markup, />4</u);
     assert.match(markup, /Jul 30, 2026/u);
     assert.match(markup, /12:00 PM UTC/u);
-    assert.match(markup, /class="normal-case"/u);
+    assert.match(markup, /normal-case \[overflow-wrap:anywhere\]/u);
     assert.doesNotMatch(markup, /type="password"/u);
     assert.doesNotMatch(markup, /https:\/\/inference\.example\.test/u);
   });
@@ -80,5 +87,10 @@ describe("hosted inference connection settings", () => {
     ));
 
     assert.match(markup, /disabled=""/u);
+    assert.match(markup, /data-disabled="true"/u);
+    assert.match(
+      markup,
+      /Inference choices are read-only until personal Murph access is active/u,
+    );
   });
 });

@@ -8,7 +8,7 @@ import {
   type HostedInferenceAuthKind,
   type HostedInferenceProtocol,
 } from "@murphai/hosted-execution/assistant-inference";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import {
   HostedOnboardingApiError,
@@ -19,9 +19,12 @@ import { Checkbox } from "@/src/components/ui/checkbox";
 import { ChoiceCard } from "@/src/components/ui/choice-card";
 import {
   Field,
+  FieldContent,
   FieldDescription,
   FieldGroup,
   FieldLabel,
+  FieldLegend,
+  FieldSet,
 } from "@/src/components/ui/field";
 import { Input } from "@/src/components/ui/input";
 import { RadioGroup } from "@/src/components/ui/radio-group";
@@ -108,6 +111,10 @@ export function HostedInferenceConnectionSettings(
     message: string;
     tone: "destructive" | "neutral";
   } | null>(null);
+  const confirmDeleteButtonRef = useRef<HTMLButtonElement>(null);
+  const connectionHeadingRef = useRef<HTMLHeadingElement>(null);
+  const protocolTriggerRef = useRef<HTMLButtonElement>(null);
+  const replaceButtonRef = useRef<HTMLButtonElement>(null);
   const disabled = pendingAction !== null || !props.configurationAvailable;
   const modeChanged = currentMode !== draftMode;
 
@@ -214,9 +221,10 @@ export function HostedInferenceConnectionSettings(
       setStatus({
         action: "connection",
         message:
-          "Verified and saved. Review the destination below, then choose Your endpoint to use it.",
+          "Verified and saved. This connection stays inactive until you select Your endpoint and save the inference mode.",
         tone: "neutral",
       });
+      requestAnimationFrame(() => connectionHeadingRef.current?.focus());
     } catch (error) {
       setStatus({
         action: "connection",
@@ -254,6 +262,7 @@ export function HostedInferenceConnectionSettings(
         message: "Connection deleted. Murph-managed inference remains active.",
         tone: "neutral",
       });
+      requestAnimationFrame(() => connectionHeadingRef.current?.focus());
     } catch (error) {
       setStatus({
         action: "connection",
@@ -282,38 +291,49 @@ export function HostedInferenceConnectionSettings(
         </p>
       </div>
 
-      <RadioGroup
-        className="grid gap-3 md:grid-cols-2"
-        disabled={disabled}
-        onValueChange={(value) => {
-          if (value !== "managed" && value !== "custom") return;
-          setDraftMode(value);
-          setStatus(null);
-          if (value === "custom" && !connection) setEditing(true);
-        }}
-        value={draftMode}
-      >
-        <ChoiceCard
-          description="Murph operates the model connection and usage."
-          id="assistant-inference-managed"
-          meta={currentMode === "managed" ? "Current" : "Available"}
-          title="Managed by Murph"
-          value="managed"
-        />
-        <ChoiceCard
-          description="Core conversation content goes to your verified endpoint."
-          id="assistant-inference-custom"
-          meta={connection
-            ? (
-                <span className="normal-case">
-                  {connection.endpointHost} · {connection.model}
-                </span>
-              )
-            : "Connection required"}
-          title="Your endpoint"
-          value="custom"
-        />
-      </RadioGroup>
+      {!props.configurationAvailable ? (
+        <p className="rounded-xl border border-border bg-muted/30 p-4 text-sm text-pretty text-muted-foreground">
+          Inference choices are read-only until personal Murph access is active.
+        </p>
+      ) : null}
+
+      <FieldSet className="w-full gap-3" disabled={disabled}>
+        <FieldLegend className="sr-only">Inference mode</FieldLegend>
+        <RadioGroup
+          className="grid gap-3 md:grid-cols-2"
+          disabled={disabled}
+          onValueChange={(value) => {
+            if (value !== "managed" && value !== "custom") return;
+            setDraftMode(value);
+            setStatus(null);
+            if (value === "custom" && !connection) setEditing(true);
+          }}
+          value={draftMode}
+        >
+          <ChoiceCard
+            description="Murph operates the model connection and usage."
+            disabled={disabled}
+            id="assistant-inference-managed"
+            meta={currentMode === "managed" ? "Current" : "Available"}
+            title="Managed by Murph"
+            value="managed"
+          />
+          <ChoiceCard
+            description="Core conversation content goes to your verified endpoint."
+            disabled={disabled}
+            id="assistant-inference-custom"
+            meta={connection
+              ? (
+                  <span className="normal-case [overflow-wrap:anywhere]">
+                    {connection.endpointHost} · {connection.model}
+                  </span>
+                )
+              : "Connection required"}
+            title="Your endpoint"
+            value="custom"
+          />
+        </RadioGroup>
+      </FieldSet>
 
       <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center">
         <Button
@@ -338,7 +358,11 @@ export function HostedInferenceConnectionSettings(
 
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <h3 className="text-sm font-semibold text-foreground">
+          <h3
+            className="rounded-sm text-sm font-semibold text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-background"
+            ref={connectionHeadingRef}
+            tabIndex={-1}
+          >
             Custom connection
           </h3>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -352,7 +376,9 @@ export function HostedInferenceConnectionSettings(
             onClick={() => {
               setEditing(true);
               setStatus(null);
+              requestAnimationFrame(() => protocolTriggerRef.current?.focus());
             }}
+            ref={replaceButtonRef}
             size="sm"
             type="button"
             variant="outline"
@@ -407,143 +433,157 @@ export function HostedInferenceConnectionSettings(
               current connection stays unchanged unless verification succeeds.
             </p>
           ) : null}
-          <FieldGroup className="grid gap-5 sm:grid-cols-2">
-            <Field>
-              <FieldLabel htmlFor="hosted-inference-protocol">
-                Protocol
-              </FieldLabel>
-              <Select
-                items={PROTOCOL_LABELS}
-                onValueChange={(value) => {
-                  if (value && isHostedInferenceProtocol(value)) {
-                    setProtocol(value);
+          <FieldSet className="gap-5" disabled={disabled}>
+            <FieldLegend className="sr-only">
+              Custom connection details
+            </FieldLegend>
+            <FieldGroup className="grid gap-5 sm:grid-cols-2">
+              <Field>
+                <FieldLabel htmlFor="hosted-inference-protocol">
+                  Protocol
+                </FieldLabel>
+                <Select
+                  items={PROTOCOL_LABELS}
+                  onValueChange={(value) => {
+                    if (value && isHostedInferenceProtocol(value)) {
+                      setProtocol(value);
+                    }
+                  }}
+                  value={protocol}
+                >
+                  <SelectTrigger
+                    id="hosted-inference-protocol"
+                    ref={protocolTriggerRef}
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="responses">Responses API</SelectItem>
+                    {props.chatCompletionsAvailable ? (
+                      <SelectItem value="chat_completions">
+                        Chat Completions
+                      </SelectItem>
+                    ) : null}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="hosted-inference-auth-kind">
+                  Authentication
+                </FieldLabel>
+                <Select
+                  items={AUTH_KIND_LABELS}
+                  onValueChange={(value) => {
+                    if (value && isHostedInferenceAuthKind(value)) {
+                      setAuthKind(value);
+                    }
+                  }}
+                  value={authKind}
+                >
+                  <SelectTrigger id="hosted-inference-auth-kind">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="bearer">Bearer token</SelectItem>
+                    <SelectItem value="api_key">api-key header</SelectItem>
+                    <SelectItem value="x_api_key">x-api-key header</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field className="sm:col-span-2">
+                <FieldLabel htmlFor="hosted-inference-endpoint">
+                  Exact operation URL
+                </FieldLabel>
+                <Input
+                  autoComplete="url"
+                  id="hosted-inference-endpoint"
+                  onChange={(event) => setEndpointUrl(event.target.value)}
+                  placeholder={
+                    protocol === "responses"
+                      ? "https://inference.example.com/v1/responses"
+                      : "https://inference.example.com/v1/chat/completions"
                   }
-                }}
-                value={protocol}
-              >
-                <SelectTrigger id="hosted-inference-protocol">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="responses">Responses API</SelectItem>
-                  {props.chatCompletionsAvailable ? (
-                    <SelectItem value="chat_completions">
-                      Chat Completions
-                    </SelectItem>
-                  ) : null}
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="hosted-inference-auth-kind">
-                Authentication
-              </FieldLabel>
-              <Select
-                items={AUTH_KIND_LABELS}
-                onValueChange={(value) => {
-                  if (value && isHostedInferenceAuthKind(value)) {
-                    setAuthKind(value);
+                  required
+                  type="url"
+                  value={endpointUrl}
+                />
+                <FieldDescription>
+                  Public HTTPS on port 443. Redirects and private-network
+                  destinations are rejected.
+                </FieldDescription>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="hosted-inference-model">
+                  Model ID
+                </FieldLabel>
+                <Input
+                  autoComplete="off"
+                  id="hosted-inference-model"
+                  onChange={(event) => setModel(event.target.value)}
+                  placeholder="provider-model-id"
+                  required
+                  value={model}
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="hosted-inference-context-window">
+                  Context window
+                </FieldLabel>
+                <Input
+                  id="hosted-inference-context-window"
+                  inputMode="numeric"
+                  max={HOSTED_INFERENCE_CONTEXT_WINDOW_MAX_TOKENS}
+                  min={HOSTED_INFERENCE_CONTEXT_WINDOW_MIN_TOKENS}
+                  onChange={(event) =>
+                    setContextWindowTokens(event.target.value)
                   }
-                }}
-                value={authKind}
-              >
-                <SelectTrigger id="hosted-inference-auth-kind">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="bearer">Bearer token</SelectItem>
-                  <SelectItem value="api_key">api-key header</SelectItem>
-                  <SelectItem value="x_api_key">x-api-key header</SelectItem>
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field className="sm:col-span-2">
-              <FieldLabel htmlFor="hosted-inference-endpoint">
-                Exact operation URL
-              </FieldLabel>
-              <Input
-                autoComplete="url"
-                id="hosted-inference-endpoint"
-                onChange={(event) => setEndpointUrl(event.target.value)}
-                placeholder={
-                  protocol === "responses"
-                    ? "https://inference.example.com/v1/responses"
-                    : "https://inference.example.com/v1/chat/completions"
-                }
-                required
-                type="url"
-                value={endpointUrl}
+                  required
+                  step={1}
+                  type="number"
+                  value={contextWindowTokens}
+                />
+                <FieldDescription>
+                  Configured value, not independently measured.
+                </FieldDescription>
+              </Field>
+              <Field className="sm:col-span-2">
+                <FieldLabel htmlFor="hosted-inference-secret">
+                  API credential
+                </FieldLabel>
+                <Input
+                  autoComplete="new-password"
+                  id="hosted-inference-secret"
+                  onChange={(event) => setSecret(event.target.value)}
+                  required
+                  type="password"
+                  value={secret}
+                />
+              </Field>
+            </FieldGroup>
+            <Field className="max-w-xl" orientation="horizontal">
+              <Checkbox
+                aria-describedby="hosted-inference-images-description"
+                checked={supportsImages}
+                id="hosted-inference-images"
+                onCheckedChange={setSupportsImages}
               />
-              <FieldDescription>
-                Public HTTPS on port 443. Redirects and private-network
-                destinations are rejected.
-              </FieldDescription>
+              <FieldContent>
+                <FieldLabel
+                  className="cursor-pointer"
+                  htmlFor="hosted-inference-images"
+                >
+                  Verify image input
+                </FieldLabel>
+                <FieldDescription
+                  className="text-xs/5"
+                  id="hosted-inference-images-description"
+                >
+                  Enable only when this model accepts image content. Murph fails
+                  explicitly if an image reaches a text-only endpoint.
+                </FieldDescription>
+              </FieldContent>
             </Field>
-            <Field>
-              <FieldLabel htmlFor="hosted-inference-model">
-                Model ID
-              </FieldLabel>
-              <Input
-                autoComplete="off"
-                id="hosted-inference-model"
-                onChange={(event) => setModel(event.target.value)}
-                placeholder="provider-model-id"
-                required
-                value={model}
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="hosted-inference-context-window">
-                Context window
-              </FieldLabel>
-              <Input
-                id="hosted-inference-context-window"
-                inputMode="numeric"
-                max={HOSTED_INFERENCE_CONTEXT_WINDOW_MAX_TOKENS}
-                min={HOSTED_INFERENCE_CONTEXT_WINDOW_MIN_TOKENS}
-                onChange={(event) =>
-                  setContextWindowTokens(event.target.value)
-                }
-                required
-                step={1}
-                type="number"
-                value={contextWindowTokens}
-              />
-              <FieldDescription>
-                Configured value, not independently measured.
-              </FieldDescription>
-            </Field>
-            <Field className="sm:col-span-2">
-              <FieldLabel htmlFor="hosted-inference-secret">
-                API credential
-              </FieldLabel>
-              <Input
-                autoComplete="new-password"
-                id="hosted-inference-secret"
-                onChange={(event) => setSecret(event.target.value)}
-                required
-                type="password"
-                value={secret}
-              />
-            </Field>
-          </FieldGroup>
-          <label
-            className="flex max-w-xl cursor-pointer items-start gap-3 text-sm text-foreground"
-            htmlFor="hosted-inference-images"
-          >
-            <Checkbox
-              checked={supportsImages}
-              id="hosted-inference-images"
-              onCheckedChange={setSupportsImages}
-            />
-            <span>
-              Verify image input
-              <span className="mt-0.5 block text-xs/5 text-muted-foreground">
-                Enable only when this model accepts image content. Murph fails
-                explicitly if an image reaches a text-only endpoint.
-              </span>
-            </span>
-          </label>
+          </FieldSet>
           <div className="flex flex-wrap items-center gap-2">
             <Button disabled={disabled} type="submit">
               {pendingAction === "connection" ? (
@@ -567,6 +607,7 @@ export function HostedInferenceConnectionSettings(
                   setEndpointUrl("");
                   setSecret("");
                   setStatus(null);
+                  requestAnimationFrame(() => replaceButtonRef.current?.focus());
                 }}
                 type="button"
                 variant="ghost"
@@ -588,6 +629,7 @@ export function HostedInferenceConnectionSettings(
               <Button
                 disabled={disabled}
                 onClick={() => void deleteConnection()}
+                ref={confirmDeleteButtonRef}
                 size="sm"
                 type="button"
                 variant="destructive"
@@ -610,7 +652,12 @@ export function HostedInferenceConnectionSettings(
           ) : (
             <Button
               disabled={disabled}
-              onClick={() => setConfirmDelete(true)}
+              onClick={() => {
+                setConfirmDelete(true);
+                requestAnimationFrame(() =>
+                  confirmDeleteButtonRef.current?.focus()
+                );
+              }}
               size="sm"
               type="button"
               variant="ghost"
@@ -624,6 +671,11 @@ export function HostedInferenceConnectionSettings(
       {status?.action === "connection" ? (
         <SettingsStatusLine message={status.message} tone={status.tone} />
       ) : null}
+      <SettingsStatusLine
+        className="sr-only min-h-0"
+        message={status?.tone === "destructive" ? null : status?.message ?? null}
+        tone="neutral"
+      />
     </div>
   );
 }
