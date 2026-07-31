@@ -108,6 +108,9 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
     if (!config) {
       return { kind: "unavailable" as const };
     }
+    if (isPhysicalNoteArtworkCapabilityExpiringSoon(input.artwork.expiresAt)) {
+      throw new TypeError("Physical-note artwork URL expires too soon.");
+    }
 
     const priorComplimentary = await tx.hostedPhysicalNote.findFirst({
       select: { id: true },
@@ -198,10 +201,11 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
   if (!config) {
     return toResponse(reservation.row, "pending");
   }
-
-  const artworkExpiresAt = new Date(input.artwork.expiresAt);
-  if (artworkExpiresAt.getTime() <= Date.now() + 60_000) {
-    throw new TypeError("Physical-note artwork URL expires too soon.");
+  if (
+    !reservation.created
+    && isPhysicalNoteArtworkCapabilityExpiringSoon(input.artwork.expiresAt)
+  ) {
+    return toResponse(reservation.row, "pending");
   }
 
   const runtime = input.runtime ?? createLobPhysicalNoteRuntime({
@@ -432,6 +436,12 @@ function toResponse(
 
 function createPhysicalNoteId(): string {
   return `hpn_${randomUUID().replaceAll("-", "")}`;
+}
+
+function isPhysicalNoteArtworkCapabilityExpiringSoon(
+  expiresAt: string,
+): boolean {
+  return new Date(expiresAt).getTime() <= Date.now() + 60_000;
 }
 
 function readEnv(name: string): string | null {
