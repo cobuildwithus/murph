@@ -23,10 +23,13 @@ describe("managed hosted group skill boundary", () => {
         path.join(resolveAssistantSkillsRoot(), slug, "SKILL.md"),
         "utf8",
       );
+      const normalized = raw.replace(/\s+/gu, " ");
 
       expect(raw).toContain(`name: ${slug}`);
-      expect(raw).toContain("private `cobuildwithus/murph-cloud` repository");
-      expect(raw).toContain(PUBLIC_FALLBACK_MARKER);
+      expect(normalized).toContain(
+        "private `cobuildwithus/murph-cloud` repository",
+      );
+      expect(normalized).toContain(PUBLIC_FALLBACK_MARKER);
       expect(raw.length).toBeLessThan(2_000);
     }
   });
