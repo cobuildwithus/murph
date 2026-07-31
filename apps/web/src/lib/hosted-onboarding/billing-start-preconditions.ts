@@ -3,8 +3,15 @@ import { projectHostedMemberRoutingState } from "./hosted-member-routing-store";
 import { isHostedMemberMessagingSetupRequired } from "./messaging-state";
 import type { HostedOnboardingReadClient } from "./shared";
 
+type HostedBillingMessagingIdentity = Exclude<
+  Parameters<typeof isHostedMemberMessagingSetupRequired>[0]["identity"],
+  null
+> & {
+  memberId?: string | null;
+};
+
 export async function assertHostedMemberBillingStartMessagingReady(input: {
-  identity: Parameters<typeof isHostedMemberMessagingSetupRequired>[0]["identity"];
+  identity: HostedBillingMessagingIdentity | null;
   prisma: HostedOnboardingReadClient;
   routing: Parameters<typeof projectHostedMemberRoutingState>[0] | null;
 }): Promise<void> {
