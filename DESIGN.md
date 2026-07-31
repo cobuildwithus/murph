@@ -225,10 +225,14 @@ with **Total messages sent**, a thin sage cumulative line seeded from the
 established historical base, and **Messages sent per day**, restrained sage
 bars for completed UTC days. Both derive from the existing daily growth
 snapshots. Shift each snapshot's prior-day counts onto the date when the
-messages occurred, leave legacy unknown counts as chart gaps rather than zeros,
-and state that the daily total combines inbound messages across supported
-channels with tracked Linq replies. Keep acquisition and revenue snapshots as
-the second chart row.
+messages occurred and always preserve the exact 30 completed-day UTC spine.
+Leave absent snapshots and legacy unknown counts as chart gaps rather than
+zeros. Once tracking has begun, an unavailable day also ends the exact
+cumulative line until the missing evidence is reconciled; later known daily
+bars may still render. State that the daily total combines inbound messages
+across supported channels with tracked Linq replies. Give each keyboard-enabled
+chart one visible focus surface named by its heading. Keep acquisition and
+revenue snapshots as the second chart row.
 
 ### Measured Biomarker Index
 On `/biomarkers`, device-derived reading rows lead in a flat full-width notebook

@@ -172,6 +172,10 @@ describe("hosted ops growth metrics", () => {
       trackedFulfilledUsageTopUps: 0,
     });
     mocks.hostedGrowthDailySnapshot.aggregate.mockResolvedValue({
+      _count: {
+        inboundMessagesPriorDay: 0,
+        outboundMessagesPriorDay: 0,
+      },
       _max: {
         snapshotDate: null,
       },
@@ -680,45 +684,71 @@ describe("hosted ops growth metrics", () => {
     expect(calculatePercentChange(6, 3)).toBe(100);
   });
 
-  it("builds cumulative and daily message points on the day messages occurred", () => {
+  it("preserves the 30-day message spine, known zeroes, and unavailable gaps", () => {
     const points = buildHostedGrowthMessageSeries({
       messagesBeforeSeries: 5_000,
       snapshots: [
         {
-          ...snapshotRow("2026-07-05", 2_800),
+          ...snapshotRow("2026-07-08", 2_800),
           inboundMessagesPriorDay: null,
           outboundMessagesPriorDay: null,
         },
         {
-          ...snapshotRow("2026-07-06", 2_900),
+          ...snapshotRow("2026-07-10", 2_900),
           inboundMessagesPriorDay: 42,
           outboundMessagesPriorDay: 57,
         },
         {
-          ...snapshotRow("2026-07-07", 3_000),
+          ...snapshotRow("2026-07-11", 2_900),
+          inboundMessagesPriorDay: 0,
+          outboundMessagesPriorDay: 0,
+        },
+        {
+          ...snapshotRow("2026-07-13", 3_000),
           inboundMessagesPriorDay: 51,
           outboundMessagesPriorDay: 63,
         },
       ],
+      trackingEstablishedBeforeSeries: false,
+      windowEnd: new Date("2026-07-31T12:00:00.000Z"),
     });
 
-    expect(points).toEqual([
-      {
-        date: "2026-07-04",
-        messagesPerDay: null,
-        totalMessages: null,
-      },
-      {
-        date: "2026-07-05",
-        messagesPerDay: 99,
-        totalMessages: 5_099,
-      },
-      {
-        date: "2026-07-06",
-        messagesPerDay: 114,
-        totalMessages: 5_213,
-      },
-    ]);
+    expect(points).toHaveLength(30);
+    expect(points.map((point) => point.date)).toEqual(
+      Array.from({ length: 30 }, (_, index) =>
+        `2026-07-${String(index + 1).padStart(2, "0")}`
+      ),
+    );
+    expect(points[0]).toEqual({
+      date: "2026-07-01",
+      messagesPerDay: null,
+      totalMessages: null,
+    });
+    expect(points[6]).toEqual({
+      date: "2026-07-07",
+      messagesPerDay: null,
+      totalMessages: null,
+    });
+    expect(points[8]).toEqual({
+      date: "2026-07-09",
+      messagesPerDay: 99,
+      totalMessages: 5_099,
+    });
+    expect(points[9]).toEqual({
+      date: "2026-07-10",
+      messagesPerDay: 0,
+      totalMessages: 5_099,
+    });
+    expect(points[10]).toEqual({
+      date: "2026-07-11",
+      messagesPerDay: null,
+      totalMessages: null,
+    });
+    expect(points[11]).toEqual({
+      date: "2026-07-12",
+      messagesPerDay: 114,
+      totalMessages: null,
+    });
   });
 
   it("seeds the dashboard message series from earlier snapshot history", async () => {
@@ -726,14 +756,30 @@ describe("hosted ops growth metrics", () => {
     queueCurrentMetricMocks();
     mocks.hostedMember.findMany.mockResolvedValueOnce([]);
     mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
-    mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([
-      {
-        ...snapshotRow("2026-07-06", 2_900),
-        inboundMessagesPriorDay: 42,
-        outboundMessagesPriorDay: 57,
-      },
-    ]);
+    mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce(
+      Array.from({ length: 30 }, (_, index) => {
+        const snapshotDate = addUtcDays(
+          new Date("2026-06-07T00:00:00.000Z"),
+          index,
+        );
+        const row = snapshotRow(
+          snapshotDate.toISOString().slice(0, 10),
+          2_900,
+        );
+        return index === 29
+          ? {
+              ...row,
+              inboundMessagesPriorDay: 42,
+              outboundMessagesPriorDay: 57,
+            }
+          : row;
+      }),
+    );
     mocks.hostedGrowthDailySnapshot.aggregate.mockResolvedValueOnce({
+      _count: {
+        inboundMessagesPriorDay: 1,
+        outboundMessagesPriorDay: 1,
+      },
       _sum: {
         inboundMessagesPriorDay: 300,
         outboundMessagesPriorDay: 200,
@@ -745,14 +791,22 @@ describe("hosted ops growth metrics", () => {
 
     const dashboard = await readHostedGrowthDashboard(now);
 
-    expect(dashboard.messageSeries).toEqual([
-      {
-        date: "2026-07-05",
-        messagesPerDay: 99,
-        totalMessages: HOSTED_MESSAGE_VOLUME_BASE + 599,
-      },
-    ]);
+    expect(dashboard.messageSeries).toHaveLength(30);
+    expect(dashboard.messageSeries[0]).toEqual({
+      date: "2026-06-06",
+      messagesPerDay: 0,
+      totalMessages: HOSTED_MESSAGE_VOLUME_BASE + 500,
+    });
+    expect(dashboard.messageSeries.at(-1)).toEqual({
+      date: "2026-07-05",
+      messagesPerDay: 99,
+      totalMessages: HOSTED_MESSAGE_VOLUME_BASE + 599,
+    });
     expect(mocks.hostedGrowthDailySnapshot.aggregate).toHaveBeenCalledWith({
+      _count: {
+        inboundMessagesPriorDay: true,
+        outboundMessagesPriorDay: true,
+      },
       _sum: {
         inboundMessagesPriorDay: true,
         outboundMessagesPriorDay: true,

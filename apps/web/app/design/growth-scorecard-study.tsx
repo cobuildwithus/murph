@@ -1,4 +1,8 @@
 import {
+  buildHostedGrowthMessageSeries,
+  type HostedGrowthMessageSnapshot,
+} from "@/src/lib/hosted-ops/growth-message-series";
+import {
   GrowthScorecard,
   type GrowthScorecardProps,
 } from "../(dashboard)/ops/growth/growth-scorecard";
@@ -10,20 +14,38 @@ const GROWTH_DATES = Array.from({ length: 30 }, (_, index) => {
 });
 
 const DAILY_MESSAGE_VOLUMES = GROWTH_DATES.map(
-  (_, index) => 58 + ((index * 17) % 83),
+  (_, index) => index === 14 ? 0 : 58 + ((index * 17) % 83),
 );
 const MESSAGE_TRACKING_START_INDEX = 8;
-const MESSAGE_SERIES = GROWTH_DATES.map((date, index) => ({
-  date,
-  messagesPerDay: index < MESSAGE_TRACKING_START_INDEX
-    ? null
-    : DAILY_MESSAGE_VOLUMES[index] ?? 0,
-  totalMessages: index < MESSAGE_TRACKING_START_INDEX
-    ? null
-    : 5_240 + DAILY_MESSAGE_VOLUMES
-      .slice(MESSAGE_TRACKING_START_INDEX, index + 1)
-      .reduce((sum, value) => sum + value, 0),
-}));
+const MISSING_TRACKED_MESSAGE_INDEX = 24;
+const MESSAGE_SNAPSHOTS = GROWTH_DATES
+  .slice(MESSAGE_TRACKING_START_INDEX - 1)
+  .flatMap((messageDate, relativeIndex) => {
+    const messageIndex = relativeIndex + MESSAGE_TRACKING_START_INDEX - 1;
+    if (messageIndex === MISSING_TRACKED_MESSAGE_INDEX) {
+      return [];
+    }
+    const snapshotDate = new Date(`${messageDate}T00:00:00.000Z`);
+    snapshotDate.setUTCDate(snapshotDate.getUTCDate() + 1);
+    const messages = DAILY_MESSAGE_VOLUMES[messageIndex] ?? 0;
+    const trackingAvailable = messageIndex >= MESSAGE_TRACKING_START_INDEX;
+
+    return [{
+      inboundMessagesPriorDay: trackingAvailable
+        ? Math.floor(messages * 0.45)
+        : null,
+      outboundMessagesPriorDay: trackingAvailable
+        ? messages - Math.floor(messages * 0.45)
+        : null,
+      snapshotDate,
+    } satisfies HostedGrowthMessageSnapshot];
+  });
+const MESSAGE_SERIES = buildHostedGrowthMessageSeries({
+  messagesBeforeSeries: 5_240,
+  snapshots: MESSAGE_SNAPSHOTS,
+  trackingEstablishedBeforeSeries: false,
+  windowEnd: new Date("2026-07-31T12:00:00.000Z"),
+});
 
 const DAILY_SERIES = GROWTH_DATES.map((date, index) => ({
   date,

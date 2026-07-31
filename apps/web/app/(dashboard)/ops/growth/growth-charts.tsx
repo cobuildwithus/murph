@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import {
   Area,
   AreaChart,
@@ -61,6 +61,9 @@ const revenueChartConfig = {
   },
 } satisfies ChartConfig;
 
+const interactiveChartClassName =
+  "mt-4 h-64 w-full rounded-sm has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring";
+
 interface GrowthChartsProps {
   dailySeries: HostedGrowthDailyPoint[];
   messageSeries: HostedGrowthMessagePoint[];
@@ -68,6 +71,11 @@ interface GrowthChartsProps {
 }
 
 export function GrowthCharts(input: GrowthChartsProps) {
+  const titleIdPrefix = useId().replace(/:/gu, "");
+  const totalMessagesTitleId = `${titleIdPrefix}-total-messages`;
+  const dailyMessagesTitleId = `${titleIdPrefix}-daily-messages`;
+  const acquisitionTitleId = `${titleIdPrefix}-acquisition`;
+  const revenueTitleId = `${titleIdPrefix}-revenue`;
   const revenueSeries = input.snapshotSeries.map((point) => ({
     date: point.date,
     mrrUsd: point.mrrUsdCents / 100,
@@ -78,19 +86,24 @@ export function GrowthCharts(input: GrowthChartsProps) {
     <div className="grid gap-4 xl:grid-cols-2">
       <div className="min-w-0 rounded-xl border border-border/70 bg-card/90 p-5">
         <div className="flex flex-col gap-1">
-          <h3 className="font-serif text-lg font-semibold tracking-tight text-foreground">
+          <h3
+            className="font-serif text-lg font-semibold tracking-tight text-foreground"
+            id={totalMessagesTitleId}
+          >
             Total messages sent
           </h3>
           <p className="text-sm leading-6 text-muted-foreground">
-            Cumulative hosted messages sent through each completed UTC day.
+            Cumulative hosted messages through each completed UTC day.
+            Unavailable history is left blank.
           </p>
         </div>
         <ChartContainer
-          className="mt-4 h-64 w-full"
+          className={interactiveChartClassName}
           config={totalMessagesChartConfig}
         >
           <LineChart
             accessibilityLayer
+            aria-labelledby={totalMessagesTitleId}
             data={input.messageSeries}
             margin={{ bottom: 0, left: 0, right: 8, top: 8 }}
           >
@@ -139,19 +152,24 @@ export function GrowthCharts(input: GrowthChartsProps) {
 
       <div className="min-w-0 rounded-xl border border-border/70 bg-card/90 p-5">
         <div className="flex flex-col gap-1">
-          <h3 className="font-serif text-lg font-semibold tracking-tight text-foreground">
+          <h3
+            className="font-serif text-lg font-semibold tracking-tight text-foreground"
+            id={dailyMessagesTitleId}
+          >
             Messages sent per day
           </h3>
           <p className="text-sm leading-6 text-muted-foreground">
             Daily inbound messages plus tracked Linq replies, by UTC date.
+            Unavailable days are left blank.
           </p>
         </div>
         <ChartContainer
-          className="mt-4 h-64 w-full"
+          className={interactiveChartClassName}
           config={dailyMessagesChartConfig}
         >
           <BarChart
             accessibilityLayer
+            aria-labelledby={dailyMessagesTitleId}
             data={input.messageSeries}
             margin={{ bottom: 0, left: 0, right: 8, top: 8 }}
           >
@@ -195,7 +213,10 @@ export function GrowthCharts(input: GrowthChartsProps) {
 
       <div className="min-w-0 rounded-xl border border-border/70 bg-card/90 p-5">
         <div className="flex flex-col gap-1">
-          <h3 className="font-serif text-lg font-semibold tracking-tight text-foreground">
+          <h3
+            className="font-serif text-lg font-semibold tracking-tight text-foreground"
+            id={acquisitionTitleId}
+          >
             Acquisition
           </h3>
           <p className="text-sm leading-6 text-muted-foreground">
@@ -203,11 +224,12 @@ export function GrowthCharts(input: GrowthChartsProps) {
           </p>
         </div>
         <ChartContainer
-          className="mt-4 h-64 w-full"
+          className={interactiveChartClassName}
           config={acquisitionChartConfig}
         >
           <AreaChart
             accessibilityLayer
+            aria-labelledby={acquisitionTitleId}
             data={input.dailySeries}
             margin={{ bottom: 0, left: 0, right: 8, top: 8 }}
           >
@@ -258,7 +280,10 @@ export function GrowthCharts(input: GrowthChartsProps) {
 
       <div className="min-w-0 rounded-xl border border-border/70 bg-card/90 p-5">
         <div className="flex flex-col gap-1">
-          <h3 className="font-serif text-lg font-semibold tracking-tight text-foreground">
+          <h3
+            className="font-serif text-lg font-semibold tracking-tight text-foreground"
+            id={revenueTitleId}
+          >
             Revenue snapshots
           </h3>
           <p className="text-sm leading-6 text-muted-foreground">
@@ -266,11 +291,12 @@ export function GrowthCharts(input: GrowthChartsProps) {
           </p>
         </div>
         <ChartContainer
-          className="mt-4 h-64 w-full"
+          className={interactiveChartClassName}
           config={revenueChartConfig}
         >
           <LineChart
             accessibilityLayer
+            aria-labelledby={revenueTitleId}
             data={revenueSeries}
             margin={{ bottom: 0, left: 0, right: 8, top: 8 }}
           >

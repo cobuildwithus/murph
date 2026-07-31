@@ -36,8 +36,15 @@ import {
   createHostedLinqParticipantContactLookupKeyReadCandidates,
   type HostedLinqParticipantContactKind,
 } from "@/src/lib/hosted-onboarding/linq-participant-contact";
+import {
+  buildHostedGrowthMessageSeries,
+  type HostedGrowthMessagePoint,
+} from "@/src/lib/hosted-ops/growth-message-series";
 import { HOSTED_MESSAGE_VOLUME_BASE } from "@/src/lib/message-volume";
 import { getPrisma } from "@/src/lib/prisma";
+
+export { buildHostedGrowthMessageSeries } from "@/src/lib/hosted-ops/growth-message-series";
+export type { HostedGrowthMessagePoint } from "@/src/lib/hosted-ops/growth-message-series";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const DAILY_SERIES_DAYS = 30;
@@ -182,12 +189,6 @@ export interface HostedGrowthDailyPoint {
   date: string;
   newMembers: number;
   trialStarts: number;
-}
-
-export interface HostedGrowthMessagePoint {
-  date: string;
-  messagesPerDay: number | null;
-  totalMessages: number | null;
 }
 
 export interface HostedGrowthSnapshotPoint {
@@ -467,28 +468,6 @@ export function buildDailyGrowthSeries(input: {
   }
 
   return Array.from(counts.values());
-}
-
-export function buildHostedGrowthMessageSeries(input: {
-  messagesBeforeSeries: number;
-  snapshots: HostedGrowthSnapshotRow[];
-}): HostedGrowthMessagePoint[] {
-  let totalMessages = input.messagesBeforeSeries;
-
-  return input.snapshots.map((snapshot) => {
-    const inboundMessages = snapshot.inboundMessagesPriorDay;
-    const outboundMessages = snapshot.outboundMessagesPriorDay;
-    totalMessages += (inboundMessages ?? 0) + (outboundMessages ?? 0);
-    const messagesPerDay = inboundMessages === null || outboundMessages === null
-      ? null
-      : inboundMessages + outboundMessages;
-
-    return {
-      date: formatUtcDateKey(addUtcDays(snapshot.snapshotDate, -1)),
-      messagesPerDay,
-      totalMessages: messagesPerDay === null ? null : totalMessages,
-    };
-  });
 }
 
 export function buildWeeklyGrowthRows(input: {
@@ -1120,6 +1099,10 @@ export async function readHostedGrowthDashboard(
       },
     }),
     prisma.hostedGrowthDailySnapshot.aggregate({
+      _count: {
+        inboundMessagesPriorDay: true,
+        outboundMessagesPriorDay: true,
+      },
       _sum: {
         inboundMessagesPriorDay: true,
         outboundMessagesPriorDay: true,
@@ -1325,6 +1308,10 @@ export async function readHostedGrowthDashboard(
         (messagesBeforeSeries._sum.inboundMessagesPriorDay ?? 0) +
         (messagesBeforeSeries._sum.outboundMessagesPriorDay ?? 0),
       snapshots,
+      trackingEstablishedBeforeSeries:
+        messagesBeforeSeries._count.inboundMessagesPriorDay > 0
+        && messagesBeforeSeries._count.outboundMessagesPriorDay > 0,
+      windowEnd: now,
     }),
     mrrWowPercent: comparableSnapshot === null
       ? null
