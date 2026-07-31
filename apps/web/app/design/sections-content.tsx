@@ -40,6 +40,7 @@ import {
 } from "./group-usage-funding-study";
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 import { EnvironmentProgressStudy } from "./environment-progress-study";
+import { EnvironmentPrintStudy } from "./environment-print-study";
 
 function StudySection({
   children,
@@ -146,6 +147,12 @@ export function SectionsContent() {
 
       <StudySection title="Environment progressive voice capture">
         <EnvironmentProgressStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Private Environment print report">
+        <EnvironmentPrintStudy />
       </StudySection>
 
       <Separator />
