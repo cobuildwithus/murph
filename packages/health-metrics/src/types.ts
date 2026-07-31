@@ -157,7 +157,14 @@ export type MetricSeriesDuplicatePolicy =
   | "latest-observed"
   | "selection-policy";
 
-export type MetricSeriesAggregation = "mean" | "median" | "min" | "max" | "sum" | "count";
+export type MetricSeriesAggregation =
+  | "count"
+  | "latest"
+  | "mean"
+  | "median"
+  | "min"
+  | "max"
+  | "sum";
 
 export interface MetricSeriesPoint {
   biomarkerKey?: string | null;

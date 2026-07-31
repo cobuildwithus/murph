@@ -54,6 +54,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
   HostedMember: [
     "id String @id",
     'assistantModelPreference String? @map("assistant_model_preference")',
+    'assistantProviderPreference String? @map("assistant_provider_preference")',
     'assistantPersona String? @map("assistant_persona")',
     'assistantPersonaCausalSeq BigInt? @map("assistant_persona_causal_seq")',
     'assistantReasoningEffortPreference String? @map("assistant_reasoning_effort_preference")',
@@ -72,6 +73,8 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'billingStatus HostedBillingStatus @default(not_started) @map("billing_status")',
     "codexAuthConnection HostedCodexAuthConnection?",
     'groupSponsorshipMomentsCreated HostedGroupSponsorshipMoment[] @relation("HostedGroupSponsorshipMomentCreator")',
+    'groupSponsorshipsPaid HostedGroupSponsorshipAuthorization[] @relation("HostedGroupSponsorshipAuthorizationPayer")',
+    'groupSponsorshipsReceived HostedGroupSponsorshipAuthorization[] @relation("HostedGroupSponsorshipAuthorizationBeneficiary")',
     "linqContactCardShares HostedLinqContactCardShare[]",
     "mealPhotoCaptureEnrollments HostedMealPhotoCaptureEnrollment[]",
     'pendingActivationTimeZone String? @map("pending_activation_time_zone")',
@@ -137,6 +140,8 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
   ],
   HostedMemberBillingRef: [
     'memberId String @unique @map("member_id")',
+    'stripeCheckoutSessionLookupKey String? @unique @map("stripe_checkout_session_lookup_key")',
+    'stripeCheckoutSessionIdEncrypted String? @map("stripe_checkout_session_id_encrypted")',
     'stripeCustomerLookupKey String? @unique @map("stripe_customer_lookup_key")',
     'stripeCustomerIdEncrypted String? @map("stripe_customer_id_encrypted")',
     'stripeSubscriptionLookupKey String? @unique @map("stripe_subscription_lookup_key")',
@@ -155,6 +160,9 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'pulseTrialPolicyVersion String? @map("pulse_trial_policy_version")',
     'currentTrialStartedAt DateTime? @map("current_trial_started_at")',
     'currentTrialEndsAt DateTime? @map("current_trial_ends_at")',
+    'checkoutAttemptId String? @map("checkout_attempt_id")',
+    'checkoutIntentHash String? @map("checkout_intent_hash")',
+    'checkoutCreatedAt DateTime? @map("checkout_created_at")',
     'createdAt DateTime @default(now()) @map("created_at")',
     'updatedAt DateTime @updatedAt @map("updated_at")',
   ],
@@ -638,6 +646,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedMemberAssistantProviderPreferenceMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260729043000_hosted_member_assistant_provider_preference/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const hostedMemberAssistantPersonalityMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260710130000_hosted_member_assistant_personality/migration.sql",
@@ -1002,10 +1017,22 @@ describe("hosted Prisma baseline migration", () => {
       "20260727040000_relax_hosted_usage_credit_detached_direct_proof",
       "20260727120000_hosted_member_checkout_session",
       "20260727190000_hosted_group_sponsorship_moment",
+      "20260727200000_hosted_member_checkout_attempt",
       "20260728030000_hosted_invite_instant_start_admission",
       "20260728030000_hosted_usage_referral_credit_entry_constraints",
       "20260728050000_rearm_hosted_mailbox_content_retention",
       "20260728190000_hosted_mailbox_source_message",
+      "20260729010000_hosted_account_cleanup_runtime_logs",
+      "20260729043000_hosted_member_assistant_provider_preference",
+      "20260729154500_hosted_linq_recent_message_load",
+      "20260729160000_hosted_linq_delivery_messages",
+      "20260729170000_hosted_thread_route_account_lookup_key",
+      "20260729180000_linq_provider_health_projection",
+      "20260729190000_composable_usage_referral_missions",
+      "20260730120000_hosted_capped_group_sponsorship",
+      "20260730170000_add_mailbox_ai_usage_denied_at",
+      "20260730180000_hosted_linq_delivery_thread_directness",
+      "20260731001500_add_hosted_product_feedback_created_at_index",
       "migration_lock.toml",
     ]);
     expect(deviceSyncSignalSourceProviderMigrationSql).toContain(
@@ -1620,6 +1647,18 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedMemberAssistantModelPreferenceMigrationSql).not.toContain(
       "DEFAULT",
     );
+    expect(hostedMemberAssistantProviderPreferenceMigrationSql).toContain(
+      'ALTER TABLE "hosted_member"',
+    );
+    expect(hostedMemberAssistantProviderPreferenceMigrationSql).toContain(
+      'ADD COLUMN "assistant_provider_preference" TEXT',
+    );
+    expect(hostedMemberAssistantProviderPreferenceMigrationSql).not.toContain(
+      "NOT NULL",
+    );
+    expect(hostedMemberAssistantProviderPreferenceMigrationSql).not.toContain(
+      "DEFAULT",
+    );
     expect(hostedLinqObservabilityMigrationSql).toContain('"skipped_at" TIMESTAMP(3)');
     expect(hostedLinqObservabilityMigrationSql).toContain('"skip_reason" TEXT');
     expect(hostedLinqEgressEngagementMigrationSql).not.toContain("raw_payload");
@@ -2227,6 +2266,59 @@ describe("hosted Prisma baseline migration", () => {
   });
 
 
+  it("keeps legacy Linq delivery health blocking until the post-drain lane", () => {
+    const schema = readFileSync(
+      new URL("../prisma/schema.prisma", import.meta.url),
+      "utf8",
+    );
+    const predeploySql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260729180000_linq_provider_health_projection/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const postDrainSql = readFileSync(
+      new URL(
+        "../prisma/contract-migrations/20260729183000_rebuild_linq_delivery_health_after_drain/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+
+    expect(predeploySql).toContain(
+      'ADD COLUMN "provider_service_updated_at" TIMESTAMP(3)',
+    );
+    expect(predeploySql).toContain(
+      'ADD COLUMN "provider_reputation_updated_at" TIMESTAMP(3)',
+    );
+    expect(predeploySql).not.toMatch(
+      /UPDATE "hosted_linq_line"\s+SET "health_status"/u,
+    );
+    expect(postDrainSql).toMatch(
+      /UPDATE "hosted_linq_line"\s+SET "health_status" = CASE/u,
+    );
+    expect(postDrainSql).toContain(
+      'WHEN "consecutive_failures" > 0',
+    );
+    expect(postDrainSql.indexOf(
+      '"provider_service_status" = UPPER("provider_status")',
+    )).toBeLessThan(postDrainSql.indexOf(
+      'SET "health_status" = CASE',
+    ));
+    expect(postDrainSql.indexOf(
+      '"provider_reputation_status" = UPPER("provider_status")',
+    )).toBeLessThan(postDrainSql.indexOf(
+      'SET "health_status" = CASE',
+    ));
+    expect(schema).toContain(
+      'providerServiceUpdatedAt   DateTime? @map("provider_service_updated_at")',
+    );
+    expect(schema).toContain(
+      'providerReputationUpdatedAt DateTime? @map("provider_reputation_updated_at")',
+    );
+  });
+
   it("keeps hosted-member data on the reviewed scalar schema contract", () => {
     const schema = readFileSync(
       new URL("../prisma/schema.prisma", import.meta.url),
@@ -2257,6 +2349,84 @@ describe("hosted Prisma baseline migration", () => {
         `${modelName} must stay scalar-only. Add a typed column or a dedicated owner table instead of a catch-all Json blob.`,
       ).toEqual([]);
     }
+  });
+
+  it("stores multi-part Linq receipt identities under one delivery without raw provider ids", () => {
+    const schema = readFileSync(
+      new URL("../prisma/schema.prisma", import.meta.url),
+      "utf8",
+    );
+    const migrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260729160000_hosted_linq_delivery_messages/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const messageModel = readPrismaModelBlock(
+      schema,
+      "HostedLinqDeliveryMessage",
+    );
+
+    expect(messageModel).toMatch(
+      /messageLookupKey\s+String\s+@unique\s+@map\("message_lookup_key"\)/u,
+    );
+    expect(messageModel).toMatch(
+      /delivery\s+HostedLinqDelivery\s+@relation\(fields: \[deliveryId\], references: \[id\], onDelete: Cascade\)/u,
+    );
+    expect(messageModel).not.toMatch(/\bmessageId\s+String\b/u);
+    expect(migrationSql).toContain(
+      'REFERENCES "hosted_linq_delivery"("id")',
+    );
+    expect(migrationSql).toContain("ON DELETE CASCADE");
+    expect(migrationSql).not.toMatch(/"message_id"\s+TEXT/u);
+  });
+
+  it("adds only nullable Checkout-attempt columns and their lookup index", () => {
+    const migrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260727200000_hosted_member_checkout_attempt/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+
+    expect(migrationSql).toContain(
+      'ADD COLUMN "checkout_attempt_id" TEXT',
+    );
+    expect(migrationSql).toContain(
+      'ADD COLUMN "checkout_created_at" TIMESTAMP(3)',
+    );
+    expect(migrationSql).toContain(
+      'ADD COLUMN "checkout_intent_hash" TEXT',
+    );
+    expect(migrationSql).toContain(
+      'ADD COLUMN "stripe_checkout_session_id_encrypted" TEXT',
+    );
+    expect(migrationSql).toContain(
+      'ADD COLUMN "stripe_checkout_session_lookup_key" TEXT',
+    );
+    expect(migrationSql).not.toContain("NOT NULL");
+    expect(migrationSql).toMatch(
+      /CREATE UNIQUE INDEX\s+"hosted_member_billing_ref_stripe_checkout_session_lookup_key_key"/u,
+    );
+  });
+
+  it("adds the product-feedback digest read index without blocking writes", () => {
+    const migrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260731001500_add_hosted_product_feedback_created_at_index/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+
+    expect(migrationSql).toContain(
+      'CREATE INDEX CONCURRENTLY "hosted_product_feedback_created_at_kind_idx"',
+    );
+    expect(migrationSql).toContain(
+      'ON "hosted_product_feedback"("created_at", "kind")',
+    );
   });
 });
 

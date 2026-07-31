@@ -19,6 +19,7 @@ export const HOSTED_USER_RUNTIME_STATUS_QUERY_NAME =
 export const HOSTED_RUNTIME_SIGNAL_KINDS = [
   "mailbox_appended",
   "runtime_recheck_requested",
+  "runtime_wake_requested",
 ] as const;
 
 export type HostedRuntimeSignalKind = (typeof HOSTED_RUNTIME_SIGNAL_KINDS)[number];
@@ -32,6 +33,9 @@ export type HostedRuntimeSignal =
     }
   | {
       kind: "runtime_recheck_requested";
+    }
+  | {
+      kind: "runtime_wake_requested";
     };
 
 export interface HostedRuntimeMailboxPointer {
@@ -163,6 +167,7 @@ export interface HostedRuntimeWorkflowState {
   lastRuntimeStatus: HostedRuntimeLastRuntimeStatus;
   latestMailboxPointer: HostedRuntimeMailboxPointer | null;
   mailboxSignalCount: number;
+  runtimeWakeRequested: boolean;
   signalVersion: number;
   userId: string;
 }

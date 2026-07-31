@@ -85,6 +85,7 @@ import {
   buildConversationHomeRedirectResponse,
   buildFallbackSignupLinkResponse,
   buildFamilyInviteAcceptedResponse,
+  buildGroupLineRecoveryResponse,
   buildIgnoredLinqWebhookPlan,
   buildQuotaReplyResponse,
   buildSignupLinkResponse,
@@ -92,6 +93,7 @@ import {
   HOSTED_LINQ_INACTIVE_MEMBER_NOTICE_REASON,
   hostedLinqFirstContactContainsBlockedContent,
   isHostedLinqDeliverableFirstContact,
+  isHostedLinqIMessageService,
   resolveHostedOnboardingLinqMessageContext,
 } from "./webhook-provider-linq-shared";
 import {
@@ -104,9 +106,11 @@ import {
 } from "./linq-home-routing";
 import {
   claimHostedLinqProactiveConversationCapacityTx,
-  hasActiveHostedLinqManagedLine,
+  readHostedLinqIncomingLineState,
 } from "./linq-line-store";
-import { resolveHostedLinqSignupWelcomeDailyLimit } from "./linq-routing-policy";
+import {
+  resolveHostedLinqSignupWelcomeDailyLimit,
+} from "./linq-routing-policy";
 import {
   createHostedEmailLookupKey,
   createHostedEmailLookupKeyReadCandidates,
@@ -159,7 +163,10 @@ import {
   bindArmedHostedUsageReferralToNewContainerTx,
   observeHostedUsageReferralInboundTx,
 } from "../hosted-growth/usage-referral";
-import type { HostedOnboardingReadClient } from "./shared";
+import {
+  lockHostedMemberRow,
+  type HostedOnboardingReadClient,
+} from "./shared";
 import {
   hasActiveHostedCryptoDomainRootsForUserTx,
 } from "../hosted-crypto/domain-root-store";
@@ -2360,14 +2367,14 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
     });
   }
 
-  let qualificationCandidateReferralId: string | null = null;
+  let qualificationCandidateReferralIds: string[] = [];
   if (!input.affirmativeReaction) {
     const eventKey = createHostedLinqMessageLookupKey(summary.messageId);
     const senderSubjectKey = participantContact.kind === "email"
       ? createHostedEmailLookupKey(participantContact.value)
       : createHostedPhoneLookupKey(participantContact.value);
     if (eventKey && senderSubjectKey) {
-      qualificationCandidateReferralId = (
+      qualificationCandidateReferralIds = (
         await observeHostedUsageReferralInboundTx({
           containerMemberId: input.route.containerMemberId,
           eventKey,
@@ -2376,15 +2383,15 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
           senderSubjectKey,
           tx: input.prisma,
         })
-      ).qualificationCandidateReferralId;
+      ).qualificationCandidateReferralIds;
     }
   }
 
   return logHostedLinqWebhookPlannerDecisionAndReturn(
     buildActiveMemberDirectPlan({
       desiredSideEffects: [],
-      ...(qualificationCandidateReferralId
-        ? { postCommitUsageReferralIds: [qualificationCandidateReferralId] }
+      ...(qualificationCandidateReferralIds.length > 0
+        ? { postCommitUsageReferralIds: qualificationCandidateReferralIds }
         : {}),
       response: {
         ignored: false,
@@ -2419,18 +2426,27 @@ type HostedLinqNewGroupAdmissionIgnoreReason =
   | "local-inbound-not-allowlisted"
   | "own-message"
   | "provision-unavailable"
+  | "recipient-line-hard-blocked"
   | "recipient-line-authority-unresolved"
+  | "recipient-line-conflicting"
+  | "recipient-line-degraded-unavailable"
   | "recipient-line-unmanaged"
+  | "recipient-line-not-assigned"
+  | "recipient-line-service-unavailable"
+  | "recipient-line-structurally-unavailable"
   | "sender-contact-unresolved"
   | "sender-identity-unresolved"
   | "sender-inactive";
 
 /**
  * Group chats with no explicit thread route stay ignored unless the sender is
- * an active member and the recipient resolves to an active managed Murph Linq
- * line; only then is the dedicated thread-container runtime provisioned and
- * the triggering message routed into it. The webhook recipient alone is never
- * line authority. Existing routes are handled before this admission path.
+ * an active member and the recipient resolves to either an assignable Murph
+ * Linq line or that member's exact assigned AT_RISK line; only then is the
+ * dedicated thread-container runtime provisioned and the triggering message
+ * routed into it. A hard-blocked assigned line never provisions the group: it
+ * plans a private recovery prompt to add a healthy backup number instead. The
+ * webhook recipient alone is never line authority. Existing routes are handled
+ * before this admission path.
  */
 async function planHostedLinqGroupChatWebhook(input: {
   affirmativeReaction?: boolean;
@@ -2450,9 +2466,10 @@ async function planHostedLinqGroupChatWebhook(input: {
   const ignored = (
     reason: HostedLinqNewGroupAdmissionIgnoreReason,
     existingMemberMatch: HostedLinqExistingMemberMatch = "none",
+    responseReason = "group-chat",
   ) =>
     logHostedLinqWebhookPlannerDecisionAndReturn(
-      buildIgnoredLinqWebhookPlan("group-chat"),
+      buildIgnoredLinqWebhookPlan(responseReason),
       buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
         existingMemberMatch,
         reason,
@@ -2512,11 +2529,103 @@ async function planHostedLinqGroupChatWebhook(input: {
     return ignored("sender-inactive", senderIdentityMatch);
   }
 
-  if (!(await hasActiveHostedLinqManagedLine({
+  const lineState = await readHostedLinqIncomingLineState({
     phoneNumberLookupKeys: input.threadRouteAccountLookupKeys,
     prisma: input.prisma,
-  }))) {
-    return ignored("recipient-line-unmanaged", senderIdentityMatch);
+  });
+
+  if (lineState.kind === "unmanaged") {
+    return ignored(
+      "recipient-line-unmanaged",
+      senderIdentityMatch,
+      "group-chat-line-unavailable",
+    );
+  }
+  if (lineState.kind === "conflicting") {
+    return ignored(
+      "recipient-line-conflicting",
+      senderIdentityMatch,
+      "group-chat-line-unavailable",
+    );
+  }
+  if (lineState.kind === "structurally_unavailable") {
+    return ignored(
+      "recipient-line-structurally-unavailable",
+      senderIdentityMatch,
+      "group-chat-line-unavailable",
+    );
+  }
+  if (lineState.kind === "degraded_unavailable") {
+    return ignored(
+      "recipient-line-degraded-unavailable",
+      senderIdentityMatch,
+      "group-chat-line-unavailable",
+    );
+  }
+  if (
+    (
+      lineState.kind === "at_risk"
+      || lineState.kind === "hard_blocked"
+    )
+    && !isHostedLinqIMessageService(messageEvent.data.service)
+  ) {
+    return ignored(
+      "recipient-line-service-unavailable",
+      senderIdentityMatch,
+      "group-chat-line-unavailable",
+    );
+  }
+  if (lineState.kind === "at_risk" || lineState.kind === "hard_blocked") {
+    await lockHostedMemberRow(input.prisma, sender.id);
+    await acquireHostedMemberHomeLinqRouteLockTx({
+      memberId: sender.id,
+      prisma: input.prisma,
+    });
+    if (
+      !(await readHostedRuntimeAiAccessDecision({
+        memberId: sender.id,
+        prisma: input.prisma,
+      })).allowed
+    ) {
+      return ignored("sender-inactive", senderIdentityMatch);
+    }
+    const senderAuthority = readHostedLinqHomeLineAuthority(
+      await readHostedMemberRoutingState({
+        memberId: sender.id,
+        prisma: input.prisma,
+      }),
+    );
+    if (
+      senderAuthority.kind === "none"
+      || senderAuthority.recipientPhone !== incomingRecipientPhone
+    ) {
+      return ignored(
+        "recipient-line-not-assigned",
+        senderIdentityMatch,
+        "group-chat-line-unavailable",
+      );
+    }
+
+    if (lineState.kind === "hard_blocked") {
+      return logHostedLinqWebhookPlannerDecisionAndReturn(
+        buildGroupLineRecoveryResponse({
+          incomingRecipientPhone,
+          memberId: sender.id,
+          occurredAt,
+          participantContact: {
+            kind: participantContact.kind,
+            value: participantContact.value,
+          },
+          sourceEventId: input.event.event_id,
+          threadId: summary.chatId,
+        }),
+        buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
+          existingMemberMatch: senderIdentityMatch,
+          reason: "recipient-line-hard-blocked",
+          routeStage: "new-group-line-recovery-planned",
+        }),
+      );
+    }
   }
 
   let createdContainerMemberId: string | null = null;
@@ -2539,6 +2648,8 @@ async function planHostedLinqGroupChatWebhook(input: {
       await bindArmedHostedUsageReferralToNewContainerTx({
         occurredAt: new Date(occurredAt),
         ownerMemberId: sender.id,
+        targetChannel: "linq",
+        targetLinqService: messageEvent.data.service ?? null,
         targetContainerMemberId: ensureResult.containerMemberId,
         tx: input.prisma,
       });

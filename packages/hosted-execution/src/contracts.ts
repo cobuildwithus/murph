@@ -89,6 +89,7 @@ export const HOSTED_EXECUTION_WAKE_KINDS = [
   "assistant.ask.completed",
   "clinical-records.sync-requested",
   "device-sync.wake",
+  "environment-voice.captured",
   "group-newsletter.email-needed",
   "meal-photo.captured",
   "vault-share.delivery",
@@ -132,6 +133,17 @@ export type HostedExecutionTelegramExternalThreadRouteAuthority =
   HostedExecutionExternalThreadRouteAuthority & {
     channel: "telegram";
   };
+
+/**
+ * Provider-authenticated sender evidence for one exact accepted group message.
+ * The assistant runtime derives this after reloading the opaque assistant
+ * input id; the model never supplies a canonical member id.
+ */
+export interface HostedExecutionAcceptedGroupMessageParticipant {
+  assistantInputId: string;
+  senderHandle: string;
+  source: "linq" | "telegram";
+}
 
 export interface HostedExecutionBaseEvent {
   kind: HostedExecutionEventKind;
@@ -390,6 +402,11 @@ export interface HostedExecutionTelegramMessage {
   messageId: string;
   replyContextPreview?: string | null;
   schema: typeof HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA;
+  /**
+   * Presentation-only display name from trusted Telegram ingress. Never
+   * identity, membership, routing, or effect authority.
+   */
+  senderDisplayName?: string | null;
   /**
    * Sending Telegram `@username`, carried only so the assistant can address
    * participants by name. Never identity authority: usernames are optional,
@@ -732,6 +749,33 @@ export interface HostedExecutionClinicalRecordsSyncRequestedWake
   runId: string;
 }
 
+export const HOSTED_EXECUTION_ENVIRONMENT_VOICE_MAX_BYTES = 3 * 1024 * 1024;
+
+export const HOSTED_EXECUTION_ENVIRONMENT_VOICE_CONTENT_TYPES = [
+  "audio/mp4",
+  "audio/ogg",
+  "audio/webm",
+] as const;
+
+export type HostedExecutionEnvironmentVoiceContentType =
+  (typeof HOSTED_EXECUTION_ENVIRONMENT_VOICE_CONTENT_TYPES)[number];
+
+export interface HostedExecutionEnvironmentVoiceCapturedPayload {
+  audioKey: string;
+  byteLength: number;
+  captureId: string;
+  capturedAt: string;
+  contentType: HostedExecutionEnvironmentVoiceContentType;
+  durationMs: number;
+  sha256: string;
+}
+
+export interface HostedExecutionEnvironmentVoiceCapturedWake
+  extends HostedExecutionBaseWake {
+  environmentVoice: HostedExecutionEnvironmentVoiceCapturedPayload;
+  kind: "environment-voice.captured";
+}
+
 export interface HostedExecutionGroupNewsletterEmailNeededWake extends HostedExecutionBaseWake {
   directRoute?: HostedExecutionDirectRoute | null;
   groupDisplayName: string | null;
@@ -791,6 +835,7 @@ export type HostedExecutionWake =
   | HostedExecutionAssistantAskCompletedWake
   | HostedExecutionClinicalRecordsSyncRequestedWake
   | HostedExecutionDeviceSyncWake
+  | HostedExecutionEnvironmentVoiceCapturedWake
   | HostedExecutionGroupNewsletterEmailNeededWake
   | HostedExecutionMealPhotoCapturedWake
   | HostedExecutionVaultShareDeliveryWake

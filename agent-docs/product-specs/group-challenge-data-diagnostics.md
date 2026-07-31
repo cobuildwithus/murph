@@ -1,6 +1,6 @@
 # Group Challenge Data Diagnostics
 
-Last verified: 2026-07-25
+Last verified: 2026-07-30
 
 Status: Implemented
 
@@ -92,17 +92,19 @@ the assistant-engine model boundary removes it and exposes only
 `participantId`, the consented display name, bounded `currentTurnHandles`, and
 requested projections.
 
-Interactive Linq group turns are actor-scoped. Import derives the blinded
-`actorId` from the same trimmed Linq sender value stored for the prompt;
-initial batching splits when that actor changes, and both pre-provider and live
-admission stop at a foreign group actor. Attribution authority therefore stays
-bound to the scanner-selected durable operation contexts instead of being
-widened by active steering. A later message from another participant remains
-pending for its own model turn.
+Interactive Linq group turns are room-scoped for batching while attribution
+remains message-scoped. Import derives blinded `actorId` and prompt sender
+evidence from the authenticated Linq sender, but an exact-successor burst may
+batch or steer across actor changes when the authenticated room, route,
+account, audience, projection, and reaction boundaries remain stable. Each
+admitted message keeps its own opaque ref and sender evidence; active steering
+therefore adds no whole-turn participant authority. Participant-specific
+effects must resolve the exact accepted message that requested them.
 
 When the model invokes `read_shared`—and only then—the runtime adds the bounded,
-deduplicated route-authorized iMessage handles from that operation scope. The
-same Web query selects current member phone and verified-email blind indexes.
+deduplicated route-authorized iMessage or SMS handles from that operation
+scope. The same Web query selects current member phone and verified-email blind
+indexes.
 It retains an input handle only when it matches exactly one current membership
 and returns it in that row's `currentTurnHandles` beside the
 membership-scoped `participantId`; ambiguous, unknown, unverified, and
@@ -214,8 +216,9 @@ Opening Murph and checking Apple Health Steps access are private
 troubleshooting options only. Murph must not describe either option, the
 connection status, or projection production as the cause of the missing Steps.
 
-Liking or hearting a group permission offer grants only the disclosed Murph
-group-sharing scopes. It cannot grant or change HealthKit authorization.
+Accepting a group permission offer through either its native provider gesture
+or first-party link grants only the disclosed Murph group-sharing scopes. It
+cannot grant or change HealthKit authorization.
 
 ## `device-sync-status.v0` privacy contract
 
@@ -269,38 +272,39 @@ data or proves the cause of a missing metric.
 
 At challenge kickoff, the exact scoring scope and `device-sync-status.v0` are
 workflow-specific scopes. Challenge kickoff does not create a hosted group or
-post an additive permission offer. Once a challenge is running, a scheduled
-standings turn may ask Web to post the existing additive offer only as a model
-tool call after `read_shared` reports an exact required scope as `not_granted`.
-Each included scope must have at least one affected participant for whom the
-challenge page records neither an explicit sharing decline for that exact
-scope nor a prior handled offer action for that exact participant and scope. A
-handled action for one participant never covers another participant.
+open an additive permission flow. Once a challenge is running, a scheduled
+standings turn may call the single model-facing `offer_access` action only after
+`read_shared` reports an exact required scope as `not_granted`. Each included
+scope must have at least one affected participant for whom the challenge page
+records neither an explicit sharing decline for that exact scope nor a prior
+handled offer action for that exact participant and scope. A handled action for
+one participant never covers another participant.
 
 The operation-local scheduled adapter accepts only scopes supported by that
-turn's missing-grant evidence and only one offer attempt. It rejects calls
-before the read, unobserved scopes, and every second attempt without calling
-Web. Web remains the durable authority for the canonical Like-or-heart sentence,
-frozen scope disclosure, recipient-safe delivery, active-offer/all-granted
-dedupe, and first-party customize link. Liking or hearting adds only that
-disclosed snapshot. The standings message itself never grants permission.
+turn's missing-grant evidence and only one offer attempt. It rejects calls before
+the read, unobserved scopes, and every second attempt without calling Web. The
+model never chooses between the lower-level `post_join_offer` and
+`create_join_link` wire operations. The trusted runtime uses native consent only
+when exact provider authority supports it; otherwise it requests the same
+first-party join page. Scheduled routes use the link presentation because their
+durable route does not preserve a Linq iMessage-versus-SMS subtype.
 
-A `sent` result is an opaque handled result: Web may have posted a card, reused
-an active one, or found that no card was needed because every current member
-already grants the requested scopes. Murph does not infer or announce that a
-card is visible or newly posted. For each participant whose same read showed
-`not_granted`, Murph records only that the offer action was handled for that
-exact participant and scope, without claiming a card was visible. If the turn
-also owes a substantive standings update, the assistant response stays focused
-on the standings. When the card is the only user-facing outcome, Murph finishes
-without an assistant reply. An explicit sharing decline is also
-recorded and excludes that participant from the scope decision. The scoring
-scope is never offered merely because its grant exists but current data is
-missing. Apart from the exact missing diagnostic grant above, stale,
-disconnected, reconnect, and other sync/device cases never enter the permission
-path.
-This extra member-facing card is limited to this explicitly approved challenge
-case under the automatic-message invariant.
+Web remains the durable authority for the canonical consent sentence, frozen
+scope disclosure, recipient-safe delivery, active-offer/all-granted dedupe, and
+first-party customize page. Native consent grants only the disclosed snapshot.
+A returned link grants nothing until the member accepts the first-party page.
+The standings message itself never grants permission.
+
+A semantic `status="ok"` from this scheduled adapter is an opaque handled link
+result. Murph includes the exact returned `joinUrl` once in the same substantive
+standings response; it does not imply that anyone accepted the page. For each
+participant whose same read showed `not_granted`, Murph records only that the
+offer action was handled for that exact participant and scope. An explicit
+sharing decline is also recorded and excludes that participant from the scope
+decision. The scoring scope is never offered merely because its grant exists
+but current data is missing. Apart from the exact missing diagnostic grant
+above, stale, disconnected, reconnect, and other sync/device cases never enter
+the permission path.
 
 ## Message shape
 
@@ -308,8 +312,9 @@ The standings update stays one conversational group message. It leads with
 completeness, then separates the ranked standings from named participants
 waiting on data. For example, the semantic shape is "partial standings: 2 of 5
 current," a ranked section, then a waiting section with one status/action per
-person. When eligible, Web's canonical permission card is a separate message;
-Murph never authors generic consent copy or tells members to react to standings.
+person. The scheduled link presentation is included once in that same
+substantive message. Murph never authors generic consent copy or tells members
+to react to standings.
 
 Names in the waiting section are operational status, not performance shaming.
 Each update may include the participant's current evidence-backed status and
@@ -387,14 +392,14 @@ cross-member fanout, polling, a scheduler, or persisted rollout state.
   options.
 - A three-day-old connection sync-job timestamp may be named literally but is
   not presented as health-data receipt or a proven cause.
-- Challenge kickoff never calls `post_join_offer` as a side effect.
-- A scheduled occurrence may call `post_join_offer` once after `read_shared`,
-  only for exact `not_granted` scopes with at least one affected participant who
-  has neither a recorded decline nor a prior handled offer action.
+- Challenge kickoff never calls `offer_access` as a side effect.
+- A scheduled occurrence may call `offer_access` once after `read_shared`, only
+  for exact `not_granted` scopes with at least one affected participant who has
+  neither a recorded decline nor a prior handled offer action.
 - Missing or stale synced data, a disconnected source, or `needs-reconnect`
-  produces ordinary-language recovery guidance and no permission card.
-- A `sent` result does not prove a card is visible or newly posted. Murph sends
-  no separate announcement and records only that the participant-and-scope
-  offer action was handled so it is not retried.
+  produces ordinary-language recovery guidance and no access offer.
+- A scheduled link result exposes only the exact first-party `joinUrl`; it does
+  not prove acceptance. Murph records only that the participant-and-scope offer
+  action was handled so it is not retried.
 - No output exposes provider keys, account/device identifiers, raw errors,
   health values, or private 1:1 context.

@@ -1,12 +1,16 @@
 import "server-only";
 
 import type { PrismaClient } from "@prisma/client";
+import type {
+  HostedExecutionAcceptedGroupMessageParticipant,
+} from "@murphai/hosted-execution/contracts";
 import {
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
   isHostedRuntimePrivateImageDeliveryUrl,
   type HostedRuntimeGroupChatParticipant,
+  type HostedRuntimeGroupParticipantDisplayName,
   type HostedRuntimeGroupCreateJoinLinkRequest,
   type HostedRuntimeGroupPostJoinOfferRequest,
   type HostedRuntimeGroupToolAction,
@@ -58,8 +62,10 @@ import {
 } from "../hosted-onboarding/shared";
 import { getHostedTelegramGroupTitle } from "../hosted-onboarding/telegram-client";
 import {
+  HOSTED_ADDRESS_BOOK_LOOKUP_MAX_HANDLES,
   HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS,
   readHostedOwnerAddressBookAdvisoryNames,
+  type HostedOwnerAddressBookAdvisoryNamesResult,
 } from "../hosted-address-book/projection";
 import { signalHostedRuntimeMaintenanceRuntime } from "../hosted-orchestration/signal-runtime";
 import {
@@ -101,6 +107,7 @@ import {
   readHostedGroupByRuntimeMemberId,
   readHostedGroupIdByRuntimeMemberId,
   readHostedGroupMembershipsForMember,
+  readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId,
   readHostedGroupSharedDataByRuntimeMemberId,
   recordHostedGroupJoinOfferTx,
   revokeHostedGroupMemberEmailShareTx,
@@ -114,6 +121,7 @@ import {
 import { sha256Hex } from "../primitives";
 import {
   lookupHostedGroupParticipantMemberByHandle,
+  lookupHostedGroupParticipantMemberByProviderEvidence,
 } from "./participant-member";
 
 export const HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX =
@@ -167,6 +175,7 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   read_chat_name: "participant_aware",
   read_chat_participants: "participant_aware",
   read_current: "participant_aware",
+  read_participant_display_names: "participant_aware",
   revoke_disclosure_grant: "personal_active",
   read_usage: "participant_aware",
   read_usage_referral: "participant_aware",
@@ -186,7 +195,7 @@ export async function handleHostedRuntimeGroupTool(input: {
   scheduleMailboxWake?: (input: {
     expectedUserId: string;
     mailboxItemId: string;
-  }) => void;
+  }) => Promise<void>;
 }): Promise<HostedRuntimeGroupToolResponse> {
   if (input.request.action === "ask") {
     const admission = await requestHostedGroupAssistantAsk({
@@ -197,7 +206,7 @@ export async function handleHostedRuntimeGroupTool(input: {
       question: input.request.question,
     });
     if (admission.mailboxWake) {
-      input.scheduleMailboxWake?.(admission.mailboxWake);
+      await input.scheduleMailboxWake?.(admission.mailboxWake);
     }
     return { action: "ask", result: admission.result };
   }
@@ -208,7 +217,7 @@ export async function handleHostedRuntimeGroupTool(input: {
       origin: input.request.origin,
     });
     if (admission.mailboxWake) {
-      input.scheduleMailboxWake?.(admission.mailboxWake);
+      await input.scheduleMailboxWake?.(admission.mailboxWake);
     }
     return { action: "ask_current_sender", result: admission.result };
   }
@@ -221,7 +230,7 @@ export async function handleHostedRuntimeGroupTool(input: {
       question: input.request.question,
     });
     if (admission.mailboxWake) {
-      input.scheduleMailboxWake?.(admission.mailboxWake);
+      await input.scheduleMailboxWake?.(admission.mailboxWake);
     }
     return { action: "ask_member", result: admission.result };
   }
@@ -314,7 +323,15 @@ export async function handleHostedRuntimeGroupTool(input: {
   if (input.request.action === "revoke_own_email_share") {
     return handleHostedRuntimeGroupRevokeOwnEmailShare({
       memberId: input.memberId,
+      participant: input.request.participant ?? null,
       selfOptOut: input.request.selfOptOut ?? null,
+    });
+  }
+
+  if (input.request.action === "read_participant_display_names") {
+    return handleHostedRuntimeGroupReadParticipantDisplayNames({
+      linqSenderHandles: input.request.linqSenderHandles,
+      memberId: input.memberId,
     });
   }
 
@@ -716,6 +733,7 @@ async function readHostedRuntimeGroupOwnerActiveAccess(input: {
 
 async function handleHostedRuntimeGroupRevokeOwnEmailShare(input: {
   memberId: string;
+  participant: HostedExecutionAcceptedGroupMessageParticipant | null;
   selfOptOut: HostedRuntimeGroupToolSelfOptOutContext | null;
 }): Promise<HostedRuntimeGroupToolResponse> {
   const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
@@ -726,17 +744,26 @@ async function handleHostedRuntimeGroupRevokeOwnEmailShare(input: {
   if (!await hasHostedRuntimeActiveAccess(input.memberId)) {
     return unavailable("runtime_inactive");
   }
-  if (!input.selfOptOut) {
+  if (!input.participant && !input.selfOptOut) {
     return unavailable("sender_unavailable");
   }
-
+  const selfOptOut = input.selfOptOut;
   const prisma = getPrisma();
-  let participant: Awaited<ReturnType<typeof lookupSelfOptOutParticipantMember>> | null;
+  let participant: Awaited<
+    ReturnType<typeof lookupHostedGroupParticipantMemberByProviderEvidence>
+  > | Awaited<ReturnType<typeof lookupSelfOptOutParticipantMember>> | null;
   try {
-    participant = await lookupSelfOptOutParticipantMember({
-      context: input.selfOptOut,
-      prisma,
-    });
+    participant = input.participant
+      ? await lookupHostedGroupParticipantMemberByProviderEvidence({
+          participant: input.participant,
+          prisma,
+        })
+      : selfOptOut
+        ? await lookupSelfOptOutParticipantMember({
+            context: selfOptOut,
+            prisma,
+          })
+        : null;
   } catch {
     return unavailable("membership_lookup_unavailable");
   }
@@ -748,13 +775,6 @@ async function handleHostedRuntimeGroupRevokeOwnEmailShare(input: {
   } catch {
     return unavailable("member_unavailable");
   }
-  if (!await readActiveHostedMemberAccess({
-    memberId: participant.core.id,
-    prisma,
-  })) {
-    return unavailable("member_unavailable");
-  }
-
   const now = new Date();
   const revoked = await prisma.$transaction(async (tx) => revokeHostedGroupMemberEmailShareTx({
     groupRuntimeMemberId: input.memberId,
@@ -1040,16 +1060,11 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       requestedVaultShareProjectionScopes: projectionScopes,
       tx,
     });
-    const offerPost = hasEveryHostedGroupMemberGrantedProjectionScopes(
-      result.group,
+    const offerPost = await prepareHostedGroupJoinOfferPostTx({
+      groupId: result.group.id,
       projectionScopes,
-    )
-      ? { kind: "not_needed" as const }
-      : await prepareHostedGroupJoinOfferPostTx({
-          groupId: result.group.id,
-          projectionScopes,
-          tx,
-        });
+      tx,
+    });
     if (offerPost.kind === "unavailable") {
       return { kind: "active_offer_state_unavailable" as const };
     }
@@ -1071,10 +1086,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   if (!joinUrl) {
     return unavailable("join_links_unavailable");
   }
-  if (
-    created.offerPost.kind === "active_offer"
-    || created.offerPost.kind === "not_needed"
-  ) {
+  if (created.offerPost.kind === "active_offer") {
     return {
       action: "post_join_offer",
       result: {
@@ -1141,31 +1153,6 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       status: "sent",
     },
   };
-}
-
-function hasEveryHostedGroupMemberGrantedProjectionScopes(
-  group: {
-    memberCount: number;
-    members: readonly {
-      grantedVaultShareProjectionScopes: readonly HostedVaultShareProjectionScope[];
-    }[];
-  },
-  projectionScopes: readonly HostedVaultShareProjectionScope[],
-): boolean {
-  if (group.members.length !== group.memberCount) {
-    return false;
-  }
-  const requestedScopeKeys = projectionScopes.map(
-    buildHostedVaultShareProjectionScopeKey,
-  );
-  return group.members.every((member) => {
-    const grantedScopeKeys = new Set(
-      member.grantedVaultShareProjectionScopes.map(
-        buildHostedVaultShareProjectionScopeKey,
-      ),
-    );
-    return requestedScopeKeys.every((scopeKey) => grantedScopeKeys.has(scopeKey));
-  });
 }
 
 async function handleHostedRuntimeGroupSetChatAvatar(input: {
@@ -1259,7 +1246,7 @@ function buildHostedGroupJoinOfferMessage(input: {
   // for everyone.
   return `Like or heart this message if these default sharing choices look right: ${
     renderHostedGroupJoinOfferScopeSentence(input.projectionScopes)
-  }. To choose different permissions, use ${input.joinUrl}.`;
+  }. Use ${input.joinUrl} to choose different permissions.`;
 }
 
 async function enqueueGroupOwnerNewsletterEmailNeededNudgeIfGrantedBestEffort(input: {
@@ -1570,7 +1557,8 @@ async function handleHostedRuntimeGroupReadChatParticipants(input: {
       prisma,
     });
   for (const participant of participants) {
-    const ownerAdvisoryName = ownerAdvisoryNames.get(participant.handle);
+    const ownerAdvisoryName =
+      ownerAdvisoryNames?.names.get(participant.handle);
     if (ownerAdvisoryName) {
       participant.ownerAdvisoryName = ownerAdvisoryName;
     }
@@ -1582,9 +1570,107 @@ async function handleHostedRuntimeGroupReadChatParticipants(input: {
   };
 }
 
+async function handleHostedRuntimeGroupReadParticipantDisplayNames(input: {
+  linqSenderHandles: readonly string[];
+  memberId: string;
+}): Promise<HostedRuntimeGroupToolResponse> {
+  const unavailable = (): HostedRuntimeGroupToolResponse => ({
+    action: "read_participant_display_names",
+    result: {
+      status: "unavailable",
+      unavailableReason: "participant_names_unavailable",
+    },
+  });
+
+  try {
+    const candidates =
+      await readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId({
+        linqSenderHandles: input.linqSenderHandles,
+        runtimeMemberId: input.memberId,
+      });
+    if (candidates.status !== "ok") {
+      return {
+        action: "read_participant_display_names",
+        result: candidates,
+      };
+    }
+
+    const participants: HostedRuntimeGroupParticipantDisplayName[] = [];
+    const nameMissSenderHandles: string[] = [];
+    const unresolvedPhoneHandles: string[] = [];
+    for (const candidate of candidates.candidates) {
+      if (candidate.profileDisplayName) {
+        participants.push({
+          displayName: candidate.profileDisplayName,
+          displayNameSource: "profile-name",
+          senderHandle: candidate.senderHandle,
+        });
+      } else if (
+        normalizePhoneNumber(candidate.senderHandle) === candidate.senderHandle
+      ) {
+        unresolvedPhoneHandles.push(candidate.senderHandle);
+      } else {
+        // Owner contacts are phone-only. Reaching this branch proves the exact
+        // current member/profile lookup succeeded and no applicable second
+        // source exists for this handle.
+        nameMissSenderHandles.push(candidate.senderHandle);
+      }
+    }
+
+    const contactLookupPhoneHandles = unresolvedPhoneHandles.slice(
+      0,
+      HOSTED_ADDRESS_BOOK_LOOKUP_MAX_HANDLES,
+    );
+    const ownerContactLookup = contactLookupPhoneHandles.length === 0
+      ? null
+      : await readHostedOwnerAddressBookAdvisoryNamesWithinDeadline({
+          containerMemberId: input.memberId,
+          phoneHandles: contactLookupPhoneHandles,
+          prisma: getPrisma(),
+        });
+    if (contactLookupPhoneHandles.length > 0 && ownerContactLookup === null) {
+      return unavailable();
+    }
+    for (const senderHandle of contactLookupPhoneHandles) {
+      const displayName = ownerContactLookup?.names.get(senderHandle);
+      if (displayName) {
+        participants.push({
+          displayName,
+          displayNameSource: "unverified-owner-contact",
+          senderHandle,
+        });
+      }
+    }
+    if (
+      ownerContactLookup
+      && ownerContactLookup.outcome === "no_contact_match"
+    ) {
+      const namedPhoneHandles = ownerContactLookup.names;
+      for (const senderHandle of contactLookupPhoneHandles) {
+        if (!namedPhoneHandles.has(senderHandle)) {
+          nameMissSenderHandles.push(senderHandle);
+        }
+      }
+    }
+
+    return {
+      action: "read_participant_display_names",
+      result: {
+        ...(nameMissSenderHandles.length === 0
+          ? {}
+          : { nameMissSenderHandles }),
+        participants,
+        status: "ok",
+      },
+    };
+  } catch {
+    return unavailable();
+  }
+}
+
 async function readHostedOwnerAddressBookAdvisoryNamesWithinDeadline(
   input: Parameters<typeof readHostedOwnerAddressBookAdvisoryNames>[0],
-): Promise<ReadonlyMap<string, string>> {
+): Promise<HostedOwnerAddressBookAdvisoryNamesResult | null> {
   const lookup = readHostedOwnerAddressBookAdvisoryNames(input).then(
     (result) => ({ kind: "completed" as const, result }),
     (error: unknown) => ({
@@ -1613,7 +1699,7 @@ async function readHostedOwnerAddressBookAdvisoryNamesWithinDeadline(
         outcome: terminal.result.outcome,
         requestedHandleCount: terminal.result.requestedHandleCount,
       });
-      return terminal.result.names;
+      return terminal.result;
     }
     if (terminal.kind === "failed") {
       console.warn("Hosted address-book advisory lookup unavailable.", {
@@ -1627,7 +1713,7 @@ async function readHostedOwnerAddressBookAdvisoryNamesWithinDeadline(
         outcome: "deadline_exceeded",
       });
     }
-    return new Map<string, string>();
+    return null;
   } finally {
     if (timeout !== undefined) {
       clearTimeout(timeout);

@@ -7,6 +7,8 @@ import type {
 } from "@murphai/assistant-runtime/hosted-email";
 import {
   HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH,
+  HOSTED_RUNTIME_LINQ_DELIVERY_BLOCK_CODES,
+  HOSTED_RUNTIME_LINQ_DELIVERY_POSTURES,
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
   HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
@@ -17,6 +19,9 @@ import { HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH } from "../runner-email-route.t
 import {
   buildHostedExecutionRunnerMealPhotoPath,
 } from "../runner-meal-photo-route.ts";
+import {
+  buildHostedExecutionRunnerEnvironmentVoicePath,
+} from "../runner-environment-voice-route.ts";
 import {
   HOSTED_EXECUTION_RUNNER_TELEGRAM_DOWNLOAD_FILE_PATH,
   HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH,
@@ -106,6 +111,48 @@ export function createCloudflareEffectsPort(input: {
 
   return {
     ...providerFileEffectsPort,
+    async deleteEnvironmentVoice(audioKey) {
+      const response = await fetchHostedResponse({
+        description: "Hosted environment voice delete",
+        fetchImpl: input.fetchImpl,
+        init: {
+          headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
+            description: "Hosted environment voice delete",
+            workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
+          }),
+          method: "DELETE",
+        },
+        timeoutMs: input.timeoutMs,
+        url: new URL(
+          buildHostedExecutionRunnerEnvironmentVoicePath(audioKey),
+          `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.effectsPort}/`,
+        ),
+      });
+      assertHostedOk(response, "Hosted environment voice delete");
+    },
+    async readEnvironmentVoice(audioKey) {
+      const response = await fetchHostedResponse({
+        description: "Hosted environment voice read",
+        fetchImpl: input.fetchImpl,
+        init: {
+          headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
+            description: "Hosted environment voice read",
+            workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
+          }),
+          method: "GET",
+        },
+        timeoutMs: input.timeoutMs,
+        url: new URL(
+          buildHostedExecutionRunnerEnvironmentVoicePath(audioKey),
+          `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.effectsPort}/`,
+        ),
+      });
+      if (response.status === 404) {
+        return null;
+      }
+      assertHostedOk(response, "Hosted environment voice read");
+      return new Uint8Array(await response.arrayBuffer());
+    },
     async deleteMealPhoto(mealPhotoKey) {
       const response = await fetchHostedResponse({
         description: "Hosted meal photo delete",
@@ -325,12 +372,30 @@ function parseHostedRuntimeLinqRecentInboundEngagementResult(
   const result: HostedRuntimeLinqRecentInboundEngagementResult = {};
   const response = value as {
     assistantAskFallbackRequired?: unknown;
+    deliveryBlockCode?: unknown;
+    deliveryPosture?: unknown;
     providerDispatchClaimed?: unknown;
     targetOverride?: unknown;
     threadIsDirect?: unknown;
   };
   if (typeof response.assistantAskFallbackRequired === "boolean") {
     result.assistantAskFallbackRequired = response.assistantAskFallbackRequired;
+  }
+  if (
+    typeof response.deliveryBlockCode === "string"
+    && (HOSTED_RUNTIME_LINQ_DELIVERY_BLOCK_CODES as readonly string[])
+      .includes(response.deliveryBlockCode)
+  ) {
+    result.deliveryBlockCode = response.deliveryBlockCode as
+      (typeof HOSTED_RUNTIME_LINQ_DELIVERY_BLOCK_CODES)[number];
+  }
+  if (
+    typeof response.deliveryPosture === "string"
+    && (HOSTED_RUNTIME_LINQ_DELIVERY_POSTURES as readonly string[])
+      .includes(response.deliveryPosture)
+  ) {
+    result.deliveryPosture = response.deliveryPosture as
+      (typeof HOSTED_RUNTIME_LINQ_DELIVERY_POSTURES)[number];
   }
   if (typeof response.providerDispatchClaimed === "boolean") {
     result.providerDispatchClaimed = response.providerDispatchClaimed;

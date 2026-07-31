@@ -1,15 +1,17 @@
 # Completion Workflow
 
-Last verified: 2026-07-29
+Last verified: 2026-07-30
 
 This workflow applies to repo code/docs/test/config changes after implementation is materially complete.
 Use `agent-docs/operations/agent-workflow-routing.md` to classify the task, choose the commit path, and decide whether plan mechanics apply.
 Use `agent-docs/operations/verification-and-runtime.md` to choose the truthful verification command set.
-Prompt, frontend, and coverage audits run together in one preliminary
+Product-experience, prompt, frontend, and coverage audits run together in one preliminary
 `completion-specialists` ReviewGPT pass against an exact pushed PR head. That
-pass replaces the three former local `prompt-review`, `frontend-review`, and
-`coverage-write` subagents. It runs before the parent's final review and before
-any separate final ReviewGPT gate.
+pass replaces the four former local `product-experience-review`,
+`prompt-review`, `frontend-review`, and `coverage-write` subagents. It runs
+before the parent's final review. When a separate final ReviewGPT gate also
+applies, final round 1 may start concurrently with the specialist pass against
+the same exact pushed candidate head.
 
 The preliminary pass is review-only with one narrow artifact exception:
 ReviewGPT may return `reviewgpt-coverage.patch` containing only tests, fixtures,
@@ -18,11 +20,11 @@ the artifact as untrusted intent, checks every path and hunk, applies it
 deliberately, and reruns the canonical verification command. ReviewGPT never
 mutates the checkout, commits, or pushes.
 
-The routed local `product-experience-review` and fallback `deep-review` passes
-remain local audit subagent passes. This workflow and `AGENTS.md` are standing
-permission to spawn those passes when their triggers apply. Required local
-audit subagents default to high reasoning and use xhigh for large, complex,
-high-risk, multi-owner, architecture, or trust-boundary reviews.
+The fallback `deep-review` remains the only routed local audit subagent pass.
+This workflow and `AGENTS.md` are standing permission to spawn that pass when
+its trigger applies and the final ReviewGPT gate will not run. It defaults to
+high reasoning and uses xhigh for large, complex, high-risk, multi-owner,
+architecture, or trust-boundary reviews.
 
 For every user-facing `apps/web` UI change, a Codex-native parent must also
 attempt the separate Claude Code UI double-check below while Claude credits are
@@ -31,31 +33,35 @@ lens, rendered browser proof, verification, parent final review, or a final
 ReviewGPT gate. Explicit Claude credit or quota exhaustion is recorded and does
 not add a local frontend-review fallback.
 
-**One later cross-cutting gate.** After preliminary specialist findings are
-resolved, ReviewGPT-eligible work uses the final PR-lane loop as the sole
-cross-cutting merge-readiness gate; do not also run local `deep-review`. When
-the final ReviewGPT gate will not run and the cross-cutting trigger applies, use
-local `deep-review` instead. The final gate's immutable round-one baseline starts
-only after preliminary remediation is complete, so its full-patch audit covers
-the resulting implementation rather than a specialist remediation delta.
+**One cross-cutting gate.** ReviewGPT-eligible work uses the final PR-lane loop
+as the sole cross-cutting merge-readiness gate; do not also run local
+`deep-review`. When the final ReviewGPT gate will not run and the cross-cutting
+trigger applies, use local `deep-review` instead. After focused local proof and
+the parent's candidate review, the final gate may establish its immutable
+round-one baseline concurrently with the preliminary specialist pass on the
+same exact pushed head. If either stage finds an accepted issue, later final
+rounds verify the combined remediation delta without resetting that baseline.
 
 Final review is not a spawned subagent pass. The parent runs an explicit local
-final review after the preliminary specialist pass and before the final
-ReviewGPT gate.
+final review after all accepted preliminary and final-gate findings are
+resolved.
 Removed 2026-06-12: the `simplify` and `task-finish-review` subagent passes. June 2026 transcript mining across Codex/Claude sessions and `audit-packages/` artifacts showed `simplify` produced no accepted findings, and `task-finish-review` produced mostly low-severity polish while the specialized passes caught the real local bugs and the post-completion PR ReviewGPT loop caught what the entire local stack missed. The parent-owned scope-and-shape check (step 2) owns simplification; `/simplify` remains available on demand. Removed 2026-07-14: the standalone `security-privacy-review` pass; security-sensitive changes trigger the one cross-cutting review gate instead.
 Replaced 2026-07-22: the separate local `prompt-review`, `frontend-review`, and
 write-capable `coverage-write` workers. Their lenses now run together in the
 preliminary `completion-specialists` ReviewGPT pass; bounded coverage proof may
 return as a patch artifact for parent-controlled application.
+Replaced 2026-07-29: the separate local `product-experience-review` worker. Its
+existing product-decision rubric now runs as a fourth conditional lens in that
+same preliminary exact-head ReviewGPT pass.
 
 ## Outcome and Completion Bar
 
 The outcome is the requested behavior or documentation change, landed at the
 smallest correct ownership boundary with truthful proof and no unresolved
 accepted review finding. Completion requires the routed verification, the
-preliminary specialist ReviewGPT pass when any lens applies, any required local
-`product-experience-review`, any required Claude Code UI double-check, parent
-final review, plan closure, and scoped commit. User-facing frontend UI
+preliminary specialist ReviewGPT pass when any lens applies, any required
+Claude Code UI double-check, parent final review, plan closure, and scoped
+commit. User-facing frontend UI
 work also requires the production component or section on the appropriate
 `/design` catalog tab and hosted desktop and mobile screenshots from that tab
 in the PR;
@@ -90,9 +96,9 @@ refactors or cross-owner changes. When any of those conditions are present, or
 the user explicitly requests ReviewGPT, run the normal PR loop.
 
 Skipping the final ReviewGPT gate does not skip the preliminary specialist
-ReviewGPT pass, a required local `product-experience-review` or `deep-review`,
-the parent final review, scoped verification, CI, merge-conflict proof, or the
-normal commit and PR requirements.
+ReviewGPT pass, a required local `deep-review`, the parent final review, scoped
+verification, CI, merge-conflict proof, or the normal commit and PR
+requirements.
 
 ## Product and Rendered Review Admission
 
@@ -105,15 +111,15 @@ journey's timing, delivery, permission, and recovery contract.
 
 | Changed dimension | Product-decision owner | Rendered-implementation route |
 | --- | --- | --- |
-| Any product-owned dimension, including one changed through a prompt | Run local `product-experience-review` | Add the preliminary prompt lens when prompt-primary; add the preliminary frontend lens and Claude UI double-check when `apps/web` presentation changes |
+| Any product-owned dimension, including one changed through a prompt | Run the product-experience lens in the preliminary specialist ReviewGPT pass | Add the prompt lens when prompt-primary; add the frontend lens and Claude UI double-check when `apps/web` presentation changes |
 | Prompt-primary change with no product-owned dimension | No product-decision review | Run the preliminary prompt lens only |
 | Meaning-preserving tiny static-copy correction | No product-decision review | Use the tiny copy-only fast path and Claude UI double-check |
 | Implementation-only presentation with no product-owned dimension | No product-decision review | Run the preliminary frontend lens and Claude UI double-check |
 
 Final ReviewGPT eligibility is independent and evaluated afterward. An
-exemption never waives an applicable preliminary lens or local specialist. The
-preliminary frontend lens, Claude UI check, and final ReviewGPT gate never
-become fallback product-decision owners.
+exemption never waives an applicable preliminary lens. The preliminary
+frontend lens, Claude UI check, and final ReviewGPT gate never become fallback
+product-decision owners.
 
 ## Sequence
 
@@ -132,33 +138,30 @@ become fallback product-decision owners.
 4. Decide the audit path required by the routed task class:
    - docs/process-only work normally skips completion audits unless the user explicitly asks for them
    - meaning-preserving `apps/web` typo, punctuation, grammar, or equivalent localization corrections may use the tiny copy-only fast path
-   - prompt-primary changes activate the prompt lens in the preliminary specialist ReviewGPT pass; when the prompt also changes a product-owned dimension, run local `product-experience-review`
+   - prompt-primary changes activate the prompt lens in the preliminary specialist ReviewGPT pass; when the prompt also changes a product-owned dimension, activate the product-experience lens too
    - user-facing `apps/web` UI changes outside the copy-only fast path activate the frontend lens and require redacted rendered desktop/mobile evidence in that pass
    - the coverage lens applies when the diff changes executable behavior or changes the tests, fixtures, configuration, or direct-proof scaffolding that establishes its proof; this does not depend on running a local coverage umbrella command
-   - any product-owned dimension separately adds local `product-experience-review`, especially for asynchronous, proactive, cross-actor, permission, latency, ordering, delivery, or recovery flows
-   - when the later cross-cutting conditions apply, select exactly one final gate: final ReviewGPT when eligible, otherwise local `deep-review`
+   - any product-owned dimension activates the product-experience lens, especially for asynchronous, proactive, cross-actor, permission, latency, ordering, delivery, or recovery flows
+   - when the cross-cutting conditions apply, select exactly one final gate: final ReviewGPT when eligible, otherwise local `deep-review`
 5. Once implementation is stable, run the focused local proof selected from the
    verification doc. Record the exact commands and outcomes. For PR-bound work,
    broad coverage remains pending until exact-head CI completes; for a direct
    shared-default push, run `pnpm verify:acceptance`.
-6. For user-visible, persisted-state, operational, or trust-boundary changes, capture at least one direct scenario check in addition to scripted tests. Every user-facing frontend UI change must render its real production component on `/design?tab=components`, or its composed page section or flow on `/design?tab=sections`, and capture desktop and mobile screenshots from that catalog surface for the PR. Prefer an attached in-app Browser when it is available; if no tab is attached or the connection is unusable, use the repository-installed Playwright runtime against the local design page. A missing in-app Browser attachment is not a completion blocker when Playwright can reach the catalog. When `product-experience-review` applies, run that local subagent now against the stable implementation and direct scenario evidence. For user-facing `apps/web` work, capture redacted desktop/mobile rendered evidence and complete the separate Claude Code UI double-check while credits are available; explicit credit exhaustion is recorded without adding a local frontend-review substitute.
+6. For user-visible, persisted-state, operational, or trust-boundary changes, capture at least one direct scenario check in addition to scripted tests. Every user-facing frontend UI change must render its real production component on `/design?tab=components`, or its composed page section or flow on `/design?tab=sections`, and capture desktop and mobile screenshots from that catalog surface for the PR. Prefer an attached in-app Browser when it is available; if no tab is attached or the connection is unusable, use the repository-installed Playwright runtime against the local design page. A missing in-app Browser attachment is not a completion blocker when Playwright can reach the catalog. Do not stop, ask the user to attach a browser, or report a screenshot blocker until the Playwright fallback has been attempted; if Playwright also fails, record its command and concrete failure. For user-facing `apps/web` work, capture redacted desktop/mobile rendered evidence and complete the separate Claude Code UI double-check while credits are available; explicit credit exhaustion is recorded without adding a local frontend-review substitute.
 7. Commit and push a review candidate from the task worktree, open or update the PR, and keep any active plan open. For plan-bearing work this is an intermediate scoped commit, not the final task commit; `scripts/finish-task` still owns plan closure later. Ensure the PR body contains the intent, applicable lens declarations, verification evidence, rendered-evidence manifest, and change-shape contract below.
-8. Run exactly one preliminary `completion-specialists` ReviewGPT pass against that pushed head using `agent-docs/operations/pr-reviewgpt-loop.md` § Preliminary Specialist Pass. This pass applies every relevant prompt, frontend, and coverage lens together and does not establish or advance the final ReviewGPT round baseline. A tooling/evidence `INVALID` result is corrected and retried as the same pass; a substantive result is one specialist pass, not three audits.
-9. Triage every preliminary finding locally. Download a returned `reviewgpt-coverage.patch` only from the exact owned review thread, inspect its full contents and paths, prove it touches only tests/fixtures/direct-proof scaffolding, run `git apply --check`, then apply it deliberately if accepted. Never pipe a downloaded artifact directly into `git apply`. Implement accepted prompt/frontend findings in the parent, rerun focused proof, commit, and push the resulting candidate. Do not rerun the preliminary pass merely because its findings caused corrections; the parent's final review and any applicable final ReviewGPT full-patch gate review the resulting diff.
-10. Run the final review locally as the parent agent after preliminary findings are resolved: re-read the full diff with fresh eyes, walk changed call paths, inspect any applied coverage patch in context, and check for remaining proof gaps, residual risks, and handoff completeness. Do not spawn a final-review subagent.
-11. Enter the review-resolution loop below for every required local or preliminary audit output. Completion means there are no unresolved accepted/actionable findings, not merely that a pass ran.
-12. Rerun the focused local checks affected by preliminary remediation, then
-    push so required CI evaluates the exact new PR head. If CI fails, diagnose
-    from the narrowest reproducer outward. For a direct shared-default push,
-    rerun `pnpm verify:acceptance` against the final reconciled candidate.
-13. Close any active execution plan and create the final scoped commit through the path chosen by the routing doc and `AGENTS.md`; push the resulting head. For plan-bearing work, use `scripts/finish-task <active-plan-path> "summary" <path>...` so the plan is archived. If overlapping dirty work blocks safe closure, archive the plan with `scripts/close-exec-plan.sh` and report the scoped-commit blocker.
-14. When the final ReviewGPT gate is selected, start its immutable round-one baseline only now, after preliminary remediation, parent final review, final verification, plan closure, and the resulting push. Follow `agent-docs/operations/pr-reviewgpt-loop.md` until the exact patch returns `ROUND_OUTCOME: PASS` with zero accepted findings. Run each final-gate round concurrently with CI. Use `Final ReviewGPT Eligibility` above for proportional exemptions; never combine this final gate with local `deep-review`.
+8. Prepare exactly one preliminary `completion-specialists` ReviewGPT pass against that pushed head using `agent-docs/operations/pr-reviewgpt-loop.md` § Preliminary Specialist Pass. This pass applies every relevant product-experience, prompt, frontend, and coverage lens together and does not establish or advance the final ReviewGPT round baseline. A tooling/evidence `INVALID` result is corrected and retried as the same pass; a substantive result is one specialist pass, not four audits.
+9. When the final ReviewGPT gate is selected, establish its immutable round-one baseline on the same exact pushed candidate head and launch the preliminary pass and final round 1 concurrently. When the final gate does not apply, launch the preliminary pass by itself. The candidate must already have focused local proof and a parent candidate review, but preliminary findings, plan closure, and the parent's final review do not need to finish before both ReviewGPT jobs start. Run both jobs concurrently with CI and keep their outputs and state separate.
+10. Triage every finding from both ReviewGPT stages locally. Download a returned `reviewgpt-coverage.patch` only from the exact owned specialist thread, inspect its full contents and paths, prove it touches only tests/fixtures/direct-proof scaffolding, run `git apply --check`, then apply it deliberately if accepted. Never pipe a downloaded artifact directly into `git apply`. Implement accepted findings in the parent, rerun focused proof, commit, and push one combined corrected candidate. When accepted product-experience remediation materially changes a product-owned dimension, the parent must reapply `agent-docs/prompts/product-experience-review.md` to that corrected pushed head and updated direct journey evidence, then record the refreshed product purpose verdict. This is a bounded parent revalidation, not another subagent or ReviewGPT invocation. Do not rerun the preliminary pass after a substantive result; use the final gate's correction-delta rounds to verify all behavior-bearing remediation, including specialist-driven fixes.
+11. Enter the review-resolution loop below. Completion means there are no unresolved accepted/actionable findings, not merely that both jobs ran. The applicable specialist result must be `SPECIALIST_OUTCOME: PASS` or have every accepted finding resolved, and the final gate must reach `ROUND_OUTCOME: PASS` with zero accepted findings.
+12. Rerun the focused local checks affected by remediation, then push so required CI evaluates the exact new PR head. If CI fails, diagnose from the narrowest reproducer outward. For a direct shared-default push, rerun `pnpm verify:acceptance` against the final reconciled candidate.
+13. Run the final review locally as the parent agent after findings from both ReviewGPT stages are resolved: re-read the full diff with fresh eyes, walk changed call paths, inspect any applied coverage patch in context, and check for remaining proof gaps, residual risks, and handoff completeness. Do not spawn a final-review subagent. If that review causes a behavior-bearing change, push it and run the required final correction-delta round.
+14. Close any active execution plan and create the final scoped commit through the path chosen by the routing doc and `AGENTS.md`; push the resulting head. For plan-bearing work, use `scripts/finish-task <active-plan-path> "summary" <path>...` so the plan is archived. If overlapping dirty work blocks safe closure, archive the plan with `scripts/close-exec-plan.sh` and report the scoped-commit blocker.
 15. For PR-lane work, the task is not complete until the PR branch has no merge conflicts with `main` or its configured base branch. Before final handoff, fetch the latest `main`/base branch and prove the PR head can merge cleanly, or update the branch by a normal merge/rebase, resolve any conflicts, rerun the required checks for the touched surfaces, and push the resolved head. Follow the ReviewGPT loop's base-update and patch-change rerun rules.
 16. An open PR remains active, so preserve its task worktree. If the current turn includes confirmed PR merge or closure, run `scripts/retire-worktree <path>` from another checkout before final handoff. The command is the mandatory task-worktree retirement gate defined in `agent-docs/operations/agent-workflow-routing.md`; preserve and report the checkout when it fails closed.
 17. Final handoff must report required-check results, direct scenario evidence,
-    the preliminary specialist lens verdicts and patch-artifact disposition, the
-    `product-experience-review` purpose verdict when that pass applies, and all
-    audit findings accepted, fixed, or rejected with reasons. For user-facing
+    the preliminary specialist lens verdicts, product-experience purpose
+    verdict when that lens applies, patch-artifact disposition, and all audit
+    findings accepted, fixed, or rejected with reasons. For user-facing
     `apps/web` work, also report whether the Claude UI check used Fable, Opus, or
     ended at explicit credit exhaustion. Green required checks remain the
     default completion bar; if a required check failed for a credibly unrelated
@@ -193,6 +196,12 @@ Required:
   why the change is necessary and name the regression proof. If none exist,
   write `None`. Do not hide a cross-cutting behavior change inside the ordinary
   file summary.
+- **Architecture and reuse.** Use four concrete bullets labeled `Existing
+  systems reused`, `New logic`, `New abstractions`, and `Complexity
+  intentionally avoided`. Describe the final diff rather than the work process.
+  If no abstraction was added, say so and explain which existing contract was
+  sufficient. Do not use a bare `None`, `N/A`, or placeholder. The pull-request
+  body workflow checks the rendered section on every PR.
 - **Hot reply path impact.** State whether the PR changes the
   `Foreground Reply Critical Path` defined in
   `docs/contracts/00-invariants.md`: durable acceptance of a current
@@ -228,15 +237,17 @@ Required:
   this measurement. If none of those surfaces changed, write `Not applicable`
   for both runtimes and explain why; do not claim a measured zero without
   rendering the complete provider-visible input.
-- **Preliminary specialist lenses.** Mark prompt, frontend, and coverage as
-  `applicable` or `not applicable` with one short reason each. For coverage,
-  name the focused local proof and the current exact-head CI status, including
-  `pending` when the preliminary pass starts concurrently with CI. For
-  frontend, name the redacted desktop/mobile rendered-evidence files packaged
-  for ReviewGPT and the states/viewports they prove; write `Not applicable`
-  only when the frontend lens does not trigger. Do not add the immutable
-  `ReviewGPT first-reviewed head` line until preliminary findings are resolved
-  and the separate final gate is ready to start.
+- **Preliminary specialist lenses.** Mark product experience, prompt, frontend,
+  and coverage as `applicable` or `not applicable` with one short reason each.
+  For product experience, state the intended outcome and name the direct
+  journey evidence or exact gap. For coverage, name the focused local proof and
+  the current exact-head CI status, including `pending` when the preliminary
+  pass starts concurrently with CI. For frontend, name the redacted
+  desktop/mobile rendered-evidence files packaged for ReviewGPT and the
+  states/viewports they prove; write `Not applicable` only when the frontend
+  lens does not trigger. Do not add the immutable `ReviewGPT first-reviewed
+  head` line until preliminary findings are resolved and the separate final
+  gate is ready to start.
 - **Change-shape breakdown.** Added and deleted lines from the base-to-head diff,
   classified as source, tests/fixtures, docs, config/tooling, and
   generated/other. State the classification rule, note binary files, and keep
@@ -248,8 +259,16 @@ Required:
   `/design?tab=components` or `/design?tab=sections` catalog surface and embed
   hosted desktop and mobile screenshots captured there. The screenshots must
   show every materially changed component or section and the states needed for
-  review. Keep screenshot binaries out of the repository. Capture them only in
-  an ignored local audit path, then upload them from the local machine through
+  review. Capture lossless PNGs at `deviceScaleFactor: 2` or higher: use a
+  desktop viewport at least 1440 CSS pixels wide and a 390 CSS-pixel mobile
+  viewport. Crop each capture to the changed component or section instead of
+  shrinking a long full-page catalog screenshot. The resulting file must be at
+  least 700 pixels wide and no more than 2400 pixels on either axis; use 3x
+  scale when a narrow mobile component crop would otherwise miss the width
+  floor. Inspect each local file at native resolution and confirm that body copy
+  is immediately legible before upload. Keep screenshot binaries out of the
+  repository. Capture them only in an ignored local audit path, then upload them
+  from the local machine through
   the [Cloudflare Images upload API](https://developers.cloudflare.com/api/resources/images/subresources/v1/methods/create/)
   using `CLOUDFLARE_IMAGES_ACCOUNT_ID` and a least-privilege `Images Write` API
   token supplied only as local `CLOUDFLARE_IMAGES_API_KEY`. Set
@@ -258,10 +277,13 @@ Required:
   preserves exported environment values and otherwise reads only those two
   settings from the invoking checkout and then the Git-discovered primary
   checkout, without copying or printing the credential. Embed each returned
-  public `https://imagedelivery.net/...` variant URL in the PR body, and confirm
-  the URL renders. Before printing it, the command performs a bounded HTTP
-  delivery check for a successful `image/*` response; this does not replace the
-  visual confirmation in the PR body. Retain the local capture only until
+  public `https://imagedelivery.net/.../designproof` variant URL in the PR body.
+  The command creates or validates that dedicated 2400-by-2400 `scale-down`
+  variant, rejects undersized or uncropped input, and performs a bounded HTTP
+  delivery check before printing the URL. Open each delivered URL at native
+  resolution and confirm that it retains the local file's legibility; the
+  automated response check does not replace visual confirmation. Retain the
+  local capture only until
   required review packaging is complete, then delete it. Never print, commit,
   persist in repository files, or pass the credential to ReviewGPT or another
   external reviewer; if the local credential is unavailable, report the
@@ -301,7 +323,7 @@ For every finding from a required audit pass:
 3. For accepted/actionable findings, fix the smallest correct surface at the right ownership boundary. If repeated findings cluster around one mechanism, pause tactical patching and simplify the mechanism, split or abandon the PR, or explicitly reject the collapse finding.
 4. After any review-driven code, test, config, or docs change, rerun the focused verification that proves the changed surface.
 5. Rerun an affected local or final-gate pass when the fix materially changes its risk surface:
-   - rerun `product-experience-review` when an accepted finding materially changes the user journey, timing, feedback, permission, delivery, recovery, or interaction economy it reviewed
+   - when accepted product-experience remediation materially changes a product-owned dimension, push the corrected candidate and have the parent reapply `agent-docs/prompts/product-experience-review.md` to that head and updated direct journey evidence, recording a refreshed product purpose verdict; this is required corrected-head revalidation, not a local subagent or another ReviewGPT run
    - rerun the selected Claude Code Fable or Opus UI reviewer when meaningful UI fixes land after its review
    - rerun the already selected cross-cutting gate when an accepted correctness or security finding drives a broad, cross-owner, state-machine, trust-boundary, or concrete exposure fix that materially changes its risk surface; never add or switch to the other cross-cutting gate
    - do not rerun the preliminary specialist ReviewGPT pass for substantive findings or its returned coverage patch; it is intentionally one combined pass, and the parent final review plus any applicable final ReviewGPT full-patch gate review the resulting correction
@@ -313,29 +335,30 @@ Stop the loop when every required audit finding is either fixed/proven or consci
 ## Preliminary Specialist Applicability
 
 The preliminary `completion-specialists` ReviewGPT pass applies at least one
-of three lenses. Prompt-primary work activates the prompt lens when all of the
-following are true:
+of four lenses. Product-owned work activates the product-experience lens under
+`Product and Rendered Review Admission`. Prompt-primary work activates the
+prompt lens when all of the following are true:
 
 1. The meaningful behavior change is prompt text, system/developer instructions, agent workflow prompts, tool descriptions, prompt assembly guidance, or regression tests that prove prompt content.
 2. Any non-prompt code changes are only mechanical support for prompt assembly, prompt export, or prompt regression proof.
 3. The change does not independently alter runtime behavior, schemas, persisted state, app/package APIs, auth/session authority, external ingress/egress, deploy surfaces, billing, frontend layout/interaction, or trust boundaries outside the prompt itself.
 
 Prompt-primary classification never suppresses `Product and Rendered Review
-Admission`: a prompt that changes a product-owned dimension also runs local
-`product-experience-review`. Merely mentioning sensitive topics, user-facing
-behavior, tools, retrieval, or validation does not activate that local pass,
-the frontend lens, the coverage lens, or the final cross-cutting gate. The
-preliminary prompt lens owns prompt-level privacy, security, safety, evidence,
-validation, simplicity, clarity, and instruction-conflict concerns.
+Admission`: a prompt that changes a product-owned dimension also activates the
+product-experience lens in the same preliminary pass. Merely mentioning
+sensitive topics, user-facing behavior, tools, retrieval, or validation does
+not activate the product-experience, frontend, or coverage lenses or the final
+cross-cutting gate. The preliminary prompt lens owns prompt-level privacy,
+security, safety, evidence, validation, simplicity, clarity, and
+instruction-conflict concerns.
 
-If the change is mixed, activate every other preliminary lens and local/final
-gate whose trigger independently applies. The prompt lens is not a substitute
-for reviewing real runtime, UI, persisted-state, deploy, or trust-boundary
-changes.
+If the change is mixed, activate every preliminary lens and final gate whose
+trigger independently applies. The prompt lens is not a substitute for
+reviewing real runtime, UI, persisted-state, deploy, or trust-boundary changes.
 
 ## When To Run Cross-Cutting Review
 
-Require one later cross-cutting review when the change is complex or sensitive
+Require one cross-cutting review when the change is complex or sensitive
 enough that the preliminary specialist pass may miss production bugs. Use the
 final ReviewGPT gate when eligible; otherwise use local `deep-review`. These
 routes are mutually exclusive for the same completed change.
@@ -353,14 +376,13 @@ a final bug hunt is satisfied by that gate and does not add local
 `deep-review`. If the final gate is opted out or unavailable and a condition
 above applies, use local `deep-review` instead and report the route change. Do
 not use either cross-cutting route as a replacement for the preliminary
-specialist pass or local `product-experience-review`. If none of the conditions
-above apply, skip the later cross-cutting review.
+specialist pass. If none of the conditions above apply, skip the later
+cross-cutting review.
 
 ## Tiny Copy-Only Fast Path
 
-Skip local `product-experience-review` and the preliminary specialist ReviewGPT
-pass for very small `apps/web` copy-only edits when all of the following are
-true:
+Skip the preliminary specialist ReviewGPT pass for very small `apps/web`
+copy-only edits when all of the following are true:
 
 1. The diff only changes static user-facing text.
 2. The correction preserves meaning and is limited to a typo, punctuation,
@@ -375,9 +397,9 @@ true:
 Use focused component/page tests, typecheck, `git diff --check`, and stale-string
 searches as appropriate. Semantic copy—including CTA, helper, onboarding,
 empty, error, success, permission, confirmation, or explanatory copy—leaves
-this fast path and runs `product-experience-review`. If the copy change touches
-claims about security, billing, medical outcomes, or product guarantees, use
-the normal review workflow.
+this fast path and activates the product-experience lens. If the copy change
+touches claims about security, billing, medical outcomes, or product
+guarantees, use the normal review workflow.
 
 The tiny copy-only fast path does not waive the Claude Code UI double-check for
 a Codex-native parent while Claude credits are available. If an attempted
@@ -407,23 +429,19 @@ Fable or Opus route only when a meaningful UI fix changes the reviewed surface.
 
 ## Audit Worker Rules
 
-- Codex-native agents spawn local subagents only for required
-  `product-experience-review` and fallback `deep-review` passes. Do not use
-  `codex exec` from Codex to satisfy them.
-- Claude and other non-Codex parents run those required local passes on Codex
+- Codex-native agents spawn a local subagent only for a required fallback
+  `deep-review` pass. Do not use `codex exec` from Codex to satisfy it.
+- Claude and other non-Codex parents run that required local pass on Codex
   `gpt-5.6-sol` through the local Codex CLI with high reasoning, using xhigh for
   large, complex, high-risk, multi-owner, architecture, or trust-boundary work.
   If the exact model, CLI, or auth is unavailable, report the limitation and use
   the explicitly documented parent-model fallback rather than silently selecting
   an older model.
-- `product-experience-review` is review-only and owns product decisions across
-  conversation, runtime, and web UI as defined in `Product and Rendered Review
-  Admission`.
 - `deep-review` is the review-only cross-cutting fallback when the separate final
   ReviewGPT gate will not run. It uses `murph-deep-review`, loads
   `feynman-auditor`, and follows changed files plus directly affected call paths.
-- The preliminary prompt, frontend, and coverage lenses are not local subagent
-  passes. Run them together only through the managed-browser
+- The preliminary product-experience, prompt, frontend, and coverage lenses are
+  not local subagent passes. Run them together only through the managed-browser
   `completion-specialists` ReviewGPT preset on an exact pushed head.
 - Every audit reports evidence-backed findings and has a valid zero-finding stop
   state. The parent verifies every finding against the real path and owns the
@@ -450,20 +468,6 @@ For each required local audit subagent, provide:
   commit helpers, or create commits.
 - Instruction to stay within the declared task and review boundaries and avoid unrelated worktree changes.
 
-For the required `product-experience-review` pass, also provide:
-
-- The intended user outcome, initiating and receiving actors, entry point, and
-  the smallest complete experience the implementation is meant to deliver.
-- The expected timing class, immediate feedback, continuation or wake owner,
-  terminal destination, permission boundary, and failure or recovery contract.
-- Production-faithful direct scenario evidence through the longest normal path,
-  or the exact evidence gap. Include rendered desktop/mobile states when the
-  journey has a frontend surface.
-- An explicit instruction to read
-  `agent-docs/prompts/product-experience-review.md`, remain review-only, and
-  return an evidence-backed purpose verdict with `NO FINDINGS` as a valid
-  result.
-
 For the required `deep-review` pass, also provide:
 
 - The exact files, packages, commits, or call paths in scope.
@@ -478,14 +482,18 @@ The preliminary specialist pass receives one exact pushed-head packet through
 `agent-docs/operations/pr-reviewgpt-loop.md`:
 
 - the PR intent contract and full current PR diff;
-- prompt, frontend, and coverage marked `applicable` or `not applicable` with
-  one reason each;
+- product experience, prompt, frontend, and coverage marked `applicable` or
+  `not applicable` with one reason each;
+- the intended user outcome, initiating and receiving actors, entry point,
+  timing class, feedback, continuation owner, terminal destination, permission
+  boundary, recovery contract, and direct journey evidence or exact gap when
+  the product-experience lens applies;
 - the exact focused local proof and current exact-head CI status;
 - the affected prompt stack and tool descriptions when the prompt lens applies;
 - redacted desktop/mobile rendered evidence for every touched frontend state and
   viewport when the frontend lens applies;
 - direct scenario evidence or the exact remaining gap;
-- the three lens references under `agent-docs/prompts/`; and
+- the four lens references under `agent-docs/prompts/`; and
 - explicit instruction that only one optional `reviewgpt-coverage.patch` may be
   returned and that it may touch only tests, fixtures, or direct-proof
   scaffolding.

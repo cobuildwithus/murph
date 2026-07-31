@@ -28,6 +28,35 @@ const baseConversationInput: AssistantSystemPromptInput = {
 }
 
 describe('assistant dynamic context prompt blocks', () => {
+  it('uses hosted direct current time without treating group time as personal', () => {
+    const hostedDirectLayers = buildAssistantSystemPromptLayers({
+      ...baseConversationInput,
+      conversationScope: 'direct',
+      hostedRuntime: true,
+    })
+    const hostedGroupLayers = buildAssistantSystemPromptLayers({
+      ...baseConversationInput,
+      conversationScope: 'group',
+      hostedRuntime: true,
+    })
+
+    expect(hostedDirectLayers.threadContextPrompt).toContain(
+      "use the user's current local time to adapt suggestions about meals, sleep, caffeine, and exercise",
+    )
+    expect(hostedGroupLayers.threadContextPrompt).toContain(
+      'The runtime member is a synthetic room container, not the human speaker',
+    )
+    expect(hostedGroupLayers.threadContextPrompt).not.toContain(
+      'use the user\'s current local time',
+    )
+    expect(
+      buildAssistantSystemPromptLayers({
+        ...baseConversationInput,
+        conversationScope: 'direct',
+      }).threadContextPrompt,
+    ).not.toContain('use the user\'s current local time')
+  })
+
   it.each(['direct', 'group'] as const)(
     'adds the conversational low-usage rule for hosted %s chats',
     (conversationScope) => {
@@ -53,9 +82,24 @@ describe('assistant dynamic context prompt blocks', () => {
       expect(layers.stableRouteCapabilityPrompt).toContain(
         'single final usage-segment contract only for an assistant-initiated heads-up',
       )
-      expect(layers.stableRouteCapabilityPrompt).toContain(
-        '`---` delimiter only when the channel reply-style guidance supports bubbles',
+      expect(layers.stableRouteCapabilityPrompt).not.toContain(
+        'with the `---` delimiter only when the channel reply-style guidance supports bubbles',
       )
+      if (conversationScope === 'group') {
+        expect(layers.stableRouteCapabilityPrompt).toContain(
+          'append the usage segment as the final paragraph of the one group text bubble and never use the `---` delimiter',
+        )
+        expect(layers.stableRouteCapabilityPrompt).not.toContain(
+          'assistant-initiated direct heads-up',
+        )
+      } else {
+        expect(layers.stableRouteCapabilityPrompt).toContain(
+          'use the `---` delimiter only when the active channel reply-style guidance expressly permits that delimiter',
+        )
+        expect(layers.stableRouteCapabilityPrompt).not.toContain(
+          'assistant-initiated group heads-up',
+        )
+      }
       expect(layers.stableRouteCapabilityPrompt).toContain(
         'Do not send a separate warning or repeat one already visible',
       )
@@ -72,10 +116,10 @@ describe('assistant dynamic context prompt blocks', () => {
         'never provide it for `group_not_supported` or `hosted_access_inactive`',
       )
       expect(layers.stableRouteCapabilityPrompt).toContain(
-        '`continue_pulse` is eligible only for a current active trial and keeps it scheduled to become Pulse at trial end without charging now',
+        'For a target-specific personal plan change, use only signed `change_plan`',
       )
       expect(layers.stableRouteCapabilityPrompt).toContain(
-        'conversion-pending or ended trials require the quoted `start_pulse_now` path and exact confirmation',
+        'never use an unquoted legacy subscription action',
       )
     },
   )
@@ -84,6 +128,11 @@ describe('assistant dynamic context prompt blocks', () => {
     const layers = buildAssistantSystemPromptLayers({
       ...baseConversationInput,
       conversationScope: 'direct',
+      hostedRuntime: true,
+    })
+    const groupLayers = buildAssistantSystemPromptLayers({
+      ...baseConversationInput,
+      conversationScope: 'group',
       hostedRuntime: true,
     })
     const skillsRoot = resolveAssistantSkillsRoot()
@@ -95,6 +144,11 @@ describe('assistant dynamic context prompt blocks', () => {
       layers.stableRouteCapabilityPrompt,
       lowUsageSkill,
       familySkill,
+    ].join('\n')
+    const assembledGroupFundingPrompt = [
+      groupLayers.staticCacheableCorePrompt,
+      groupLayers.stableRouteCapabilityPrompt,
+      lowUsageSkill,
     ].join('\n')
     const genericSettingsRoute = `${MURPH_PRODUCT_ORIGIN}/settings#subscription`
     const personalAddUsageRoute =
@@ -120,6 +174,18 @@ describe('assistant dynamic context prompt blocks', () => {
     expect(lowUsageSkill).not.toContain(genericSettingsRoute)
     expect(familySkill).not.toContain(genericSettingsRoute)
     expect(assembledBillingPrompt.split(genericSettingsRoute)).toHaveLength(2)
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'after someone directly asks to fund, sponsor, contribute, pay to add usage, or receive its funding link',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'after they ask generically how to get or add more usage, keep the room going, or accept an explanation of the group\'s usage options',
+    )
+    expect(assembledGroupFundingPrompt).not.toContain(
+      'on a trusted low-usage turn or after the group asks',
+    )
+    expect(lowUsageSkill.replace(/\s+/gu, ' ')).toContain(
+      'Never send it in the first assistant-initiated heads-up',
+    )
   })
 
   it('injects runtime dynamic context before the context snapshot on conversation turns', () => {

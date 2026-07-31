@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { HostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq";
 import {
+  createHostedLinqChatLookupKey,
   createHostedLinqChatLookupKeyReadCandidates,
+  createHostedLinqMessageLookupKey,
   createHostedPhoneLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
@@ -15,6 +17,7 @@ import {
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
   markHostedLinqDeliverySkippedTx,
+  readHostedLinqDeliveryProviderDispatchIntentsTx,
   recordHostedLinqDeliveryAttemptTx,
   recordHostedLinqRuntimeProviderDispatchFenceTx,
   recordHostedLinqRuntimeDeliveryOutcomeTx,
@@ -25,6 +28,11 @@ import {
   buildHostedLinqInviteSignupEffectIdMemberPrefix,
   parseHostedLinqInviteSignupEffectId,
 } from "@/src/lib/hosted-onboarding/linq-invite-signup-effect-id";
+import {
+  buildHostedLinqGroupLineRecoveryAttemptEffectId,
+  buildHostedLinqGroupLineRecoveryEffectId,
+  buildHostedLinqGroupLineRecoverySourceRef,
+} from "@/src/lib/hosted-onboarding/linq-group-line-recovery";
 import {
   ingestHostedLinqProviderEventTx,
   markHostedLinqGroupJoinOfferHandledTx,
@@ -1035,7 +1043,6 @@ describe("hosted Linq observability stores", () => {
           lastReceiptAt: providerCreatedAt,
         }),
         where: expect.objectContaining({
-          healthStatus: { notIn: ["degraded", "unhealthy"] },
           lastReceiptAt: providerCreatedAt,
           lastReceiptEventId: eventLookupKey,
         }),
@@ -1043,7 +1050,7 @@ describe("hosted Linq observability stores", () => {
     );
   });
 
-  it("preserves the stored line lookup key when the phone blind-index key rotated", async () => {
+  it("preserves the stored line lookup key for provider status after key rotation", async () => {
     const restore = configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v1",
       entries: OBSERVABILITY_TEST_KEYRING_ENTRIES,
@@ -1076,44 +1083,25 @@ describe("hosted Linq observability stores", () => {
         prisma: fixture.prisma as never,
       });
 
-      expect(fixture.hostedLinqLineFindMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: {
-            phoneNumberLookupKey: {
-              in: expect.arrayContaining([event.phoneNumberLookupKey, legacyLineLookupKey]),
-            },
-          },
-        }),
-      );
       expect(fixture.hostedLinqLineUpdate).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: {
-            phoneNumberLookupKey: legacyLineLookupKey,
-          },
+          where: { phoneNumberLookupKey: legacyLineLookupKey },
         }),
       );
-      expect(fixture.hostedLinqLineUpsert).not.toHaveBeenCalled();
-      expect(JSON.stringify(fixture.hostedLinqLineUpdate.mock.calls[0]?.[0]))
-        .not.toContain("+15550000000");
-      expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            phoneNumberLookupKey: legacyLineLookupKey,
-          }),
+      expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          providerReputationStatus: "CRITICAL",
         }),
-      );
+        where: expect.objectContaining({
+          phoneNumberLookupKey: legacyLineLookupKey,
+        }),
+      });
       expect(fixture.hostedLinqProviderEventCreateMany).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
-            eventId: createHostedLinqProviderEventLookupKey("evt_status_rotated_key"),
             phoneNumberLookupKey: legacyLineLookupKey,
-          }),
-        }),
-      );
-      expect(fixture.hostedLinqAlertCreateMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            phoneNumberLookupKey: legacyLineLookupKey,
+            providerReputationStatus: "CRITICAL",
+            providerServiceStatus: null,
           }),
         }),
       );
@@ -1122,7 +1110,7 @@ describe("hosted Linq observability stores", () => {
     }
   });
 
-  it("projects production-shape critical reputation status updates", async () => {
+  it("projects service and reputation independently without changing delivery health", async () => {
     const fixture = createObservabilityPrismaFixture();
     const event = requireParsedProviderEvent(buildProviderEvent({
       createdAt: "2026-03-26T11:59:59.000Z",
@@ -1131,8 +1119,6 @@ describe("hosted Linq observability stores", () => {
         new_reputation: "CRITICAL",
         new_status: "FLAGGED",
         phone_number: "+15550000000",
-        previous_reputation: "AT_RISK",
-        previous_status: "ACTIVE",
       },
       eventId: "evt_status_123",
       eventType: "phone_number.status_updated",
@@ -1141,24 +1127,41 @@ describe("hosted Linq observability stores", () => {
     await ingestHostedLinqProviderEventTx({
       event,
       prisma: fixture.prisma as never,
+      receivedAt: new Date("2026-03-26T12:00:01.000Z"),
     });
 
+    expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        providerReputationStatus: "CRITICAL",
+        providerReputationUpdatedAt: new Date("2026-03-26T12:00:00.000Z"),
+      }),
+      where: expect.objectContaining({
+        phoneNumberLookupKey: expect.any(String),
+      }),
+    });
+    expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        providerServiceStatus: "FLAGGED",
+        providerServiceUpdatedAt: new Date("2026-03-26T12:00:00.000Z"),
+      }),
+      where: expect.objectContaining({
+        phoneNumberLookupKey: expect.any(String),
+      }),
+    });
+    expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        providerLastSeenAt: new Date("2026-03-26T12:00:01.000Z"),
+        providerSeenAt: new Date("2026-03-26T12:00:01.000Z"),
+      }),
+      where: expect.objectContaining({
+        phoneNumberLookupKey: expect.any(String),
+      }),
+    });
     expect(fixture.hostedLinqProviderEventCreateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          eventId: createHostedLinqProviderEventLookupKey("evt_status_123"),
-          providerCreatedAt: new Date("2026-03-26T12:00:00.000Z"),
-          providerStatus: "CRITICAL",
-        }),
-      }),
-    );
-    expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          healthStatus: "unhealthy",
-          lastStatusEventId: createHostedLinqProviderEventLookupKey("evt_status_123"),
-          providerStatus: "CRITICAL",
-          providerUpdatedAt: new Date("2026-03-26T12:00:00.000Z"),
+          providerReputationStatus: "CRITICAL",
+          providerServiceStatus: "FLAGGED",
         }),
       }),
     );
@@ -1172,150 +1175,38 @@ describe("hosted Linq observability stores", () => {
     );
   });
 
-  it("does not change operator egress policy for healthy status updates", async () => {
+  it("projects webhook chat health without persisting participant content", async () => {
     const fixture = createObservabilityPrismaFixture();
-    const event = requireParsedProviderEvent(buildProviderEvent({
-      data: {
-        new_status: "ACTIVE",
-        phone_number: "+15550000000",
-      },
-      eventId: "evt_status_123",
-      eventType: "phone_number.status_updated",
-    }));
+    const rawEvent = buildMessageReceivedEvent({
+      direction: "inbound",
+      eventId: "evt_chat_health",
+      isFromMe: false,
+      messageId: "message_chat_health",
+    });
+    const data = rawEvent.data as Record<string, unknown>;
+    const chat = data.chat as Record<string, unknown>;
+    chat.health_status = {
+      status: "AT_RISK",
+      updated_at: "2026-03-26T12:00:00.000Z",
+    };
+    const event = requireParsedProviderEvent(rawEvent);
 
     await ingestHostedLinqProviderEventTx({
       event,
       prisma: fixture.prisma as never,
     });
 
-    const updateInput = fixture.hostedLinqLineUpdateMany.mock.calls[0]?.[0] as
-      | { data?: Record<string, unknown> }
-      | undefined;
-    expect(updateInput?.data).toMatchObject({
-      healthStatus: "healthy",
-      lastStatusEventId: createHostedLinqProviderEventLookupKey("evt_status_123"),
-      providerStatus: "ACTIVE",
-    });
-    expect(updateInput?.data).not.toHaveProperty("egressPolicy");
-  });
-
-  it("lets flagged status dominate healthy reputation in line projection", async () => {
-    const fixture = createObservabilityPrismaFixture();
-    const event = requireParsedProviderEvent(buildProviderEvent({
-      data: {
-        changed_at: "2026-03-26T12:00:00.000Z",
-        new_reputation: "HEALTHY",
-        new_status: "FLAGGED",
-        phone_number: "+15550000000",
-      },
-      eventId: "evt_status_flagged",
-      eventType: "phone_number.status_updated",
-    }));
-
-    await ingestHostedLinqProviderEventTx({
-      event,
-      prisma: fixture.prisma as never,
-    });
-
-    expect(fixture.hostedLinqProviderEventCreateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          eventId: createHostedLinqProviderEventLookupKey("evt_status_flagged"),
-          providerStatus: "FLAGGED",
-        }),
+    expect(fixture.hostedLinqChatHealthCreateMany).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        linqChatLookupKey: event.linqChatLookupKey,
+        phoneNumberLookupKey: event.phoneNumberLookupKey,
+        providerStatus: "AT_RISK",
+        providerUpdatedAt: new Date("2026-03-26T12:00:00.000Z"),
       }),
-    );
-    expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          healthStatus: "unhealthy",
-          providerStatus: "FLAGGED",
-        }),
-      }),
-    );
-  });
-
-  it("lets degraded status tighten same-timestamp healthy line state", async () => {
-    const fixture = createObservabilityPrismaFixture();
-    const event = requireParsedProviderEvent(buildProviderEvent({
-      data: {
-        changed_at: "2026-03-26T12:00:00.000Z",
-        new_reputation: "AT_RISK",
-        phone_number: "+15550000000",
-      },
-      eventId: "evt_status_older",
-      eventType: "phone_number.status_updated",
-    }));
-    const eventLookupKey = createHostedLinqProviderEventLookupKey("evt_status_older");
-
-    await ingestHostedLinqProviderEventTx({
-      event,
-      prisma: fixture.prisma as never,
+      skipDuplicates: true,
     });
-
-    expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: {
-          phoneNumberLookupKey: event.phoneNumberLookupKey,
-          OR: [
-            {
-              providerUpdatedAt: null,
-            },
-            {
-              providerUpdatedAt: {
-                lt: new Date("2026-03-26T12:00:00.000Z"),
-              },
-            },
-            {
-              healthStatus: { in: ["healthy", "unknown"] },
-              providerUpdatedAt: new Date("2026-03-26T12:00:00.000Z"),
-            },
-            {
-              healthStatus: "degraded",
-              providerUpdatedAt: new Date("2026-03-26T12:00:00.000Z"),
-              OR: [
-                { lastStatusEventId: null },
-                { lastStatusEventId: { lt: eventLookupKey } },
-              ],
-            },
-          ],
-        },
-      }),
-    );
-  });
-
-  it("lets disabled status tighten same-timestamp line state", async () => {
-    const fixture = createObservabilityPrismaFixture();
-    const event = requireParsedProviderEvent(buildProviderEvent({
-      data: {
-        changed_at: "2026-03-26T12:00:00.000Z",
-        new_reputation: "CRITICAL",
-        phone_number: "+15550000000",
-      },
-      eventId: "evt_status_critical",
-      eventType: "phone_number.status_updated",
-    }));
-
-    await ingestHostedLinqProviderEventTx({
-      event,
-      prisma: fixture.prisma as never,
-    });
-
-    expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          healthStatus: "unhealthy",
-        }),
-        where: expect.objectContaining({
-          OR: expect.arrayContaining([
-            {
-              healthStatus: { not: "unhealthy" },
-              providerUpdatedAt: new Date("2026-03-26T12:00:00.000Z"),
-            },
-          ]),
-        }),
-      }),
-    );
+    expect(JSON.stringify(fixture.hostedLinqChatHealthCreateMany.mock.calls))
+      .not.toContain("hello");
   });
 
   it("records attempts and later preserves provider ids as lookup keys on acceptance", async () => {
@@ -2269,6 +2160,24 @@ describe("hosted Linq observability stores", () => {
       },
     },
     {
+      label: "unidentifiable rich-link partial delivery",
+      row: {
+        acceptedAt: null,
+        attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+        deliveredAt: null,
+        failedAt: new Date("2026-03-26T12:00:01.000Z"),
+        failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+        id: "hld_partial_usage_notice",
+        lastReceiptAt: null,
+        messageLookupKey: null,
+        phoneNumberLookupKey: null,
+        retryAfterAt: null,
+        skippedAt: null,
+        source: "hosted_webhook_side_effect",
+        status: "failed",
+      },
+    },
+    {
       label: "terminal Telegram",
       row: {
         acceptedAt: null,
@@ -2682,6 +2591,234 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqDeliveryUpdateMany).not.toHaveBeenCalled();
   });
 
+  it("reclaims a stale group-line recovery row only when the pinned target matches", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const attemptedAt = new Date("2026-03-26T12:30:00.000Z");
+    const phoneNumber = "+15550100042";
+    const phoneNumberLookupKey = createHostedPhoneLookupKey(phoneNumber);
+    if (!phoneNumberLookupKey) {
+      throw new Error("Expected recovery line lookup key.");
+    }
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce(
+      buildGroupLineRecoveryDeliveryFixture({
+        attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+        phoneNumberLookupKey,
+      }),
+    );
+    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 1 });
+
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt,
+      idempotencyKey: "linq-group-line-recovery:exact",
+      phoneNumber,
+      prisma: fixture.prisma as never,
+      reclaimStalePreProviderAttempt: true,
+      source: "hosted_webhook_side_effect",
+      sourceRef: "event_group_recovery",
+      targetKind: "participant",
+      template: "group_line_recovery",
+    })).resolves.toEqual({
+      claimed: true,
+      id: "hld_group_line_recovery",
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          attemptedAt,
+          phoneNumberLookupKey,
+          sourceRef: createHostedLinqDeliverySourceRefLookupKey(
+            "event_group_recovery",
+          ),
+          status: "attempted",
+          targetKind: "participant",
+          template: "group_line_recovery",
+        }),
+        where: expect.objectContaining({
+          id: "hld_group_line_recovery",
+        }),
+      }),
+    );
+  });
+
+  it.each([
+    {
+      label: "sender line",
+      overrides: {
+        phoneNumberLookupKey: createHostedPhoneLookupKey("+15550100043"),
+      },
+    },
+    {
+      label: "source event",
+      overrides: {
+        sourceRef: createHostedLinqDeliverySourceRefLookupKey(
+          "other_event_group_recovery",
+        ),
+      },
+    },
+    {
+      label: "target kind",
+      overrides: {
+        targetKind: "thread",
+      },
+    },
+    {
+      label: "template",
+      overrides: {
+        template: "invite_signup",
+      },
+    },
+    {
+      label: "chat target",
+      overrides: {
+        linqChatLookupKey:
+          createHostedLinqChatLookupKeyReadCandidates("chat_other")[0],
+      },
+    },
+  ] as const)(
+    "rejects stale group-line recovery dispatch when the pinned $label differs",
+    async ({ overrides }) => {
+      const fixture = createObservabilityPrismaFixture();
+      fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce(
+        buildGroupLineRecoveryDeliveryFixture(overrides),
+      );
+
+      await expect(claimHostedLinqDeliveryProviderDispatchTx({
+        attemptedAt: new Date("2026-03-26T12:30:00.000Z"),
+        idempotencyKey: "linq-group-line-recovery:exact",
+        phoneNumber: "+15550100042",
+        prisma: fixture.prisma as never,
+        reclaimStalePreProviderAttempt: true,
+        source: "hosted_webhook_side_effect",
+        sourceRef: "event_group_recovery",
+        targetKind: "participant",
+        template: "group_line_recovery",
+      })).resolves.toEqual({
+        claimed: false,
+        id: "hld_group_line_recovery",
+        outcome: "incompatible",
+      });
+
+      expect(fixture.hostedLinqDeliveryUpdateMany).not.toHaveBeenCalled();
+      expect(fixture.hostedLinqDeliveryCreateMany).not.toHaveBeenCalled();
+    },
+  );
+
+  it("treats exact provider-correlated group-line recovery as completed", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce(
+      buildGroupLineRecoveryDeliveryFixture({
+        acceptedAt: new Date("2026-03-26T12:01:00.000Z"),
+        messageLookupKey: "hbid:linq-message:provider-message-123",
+        status: "accepted",
+      }),
+    );
+
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt: new Date("2026-03-26T12:30:00.000Z"),
+      idempotencyKey: "linq-group-line-recovery:exact",
+      phoneNumber: "+15550100042",
+      prisma: fixture.prisma as never,
+      reclaimStalePreProviderAttempt: true,
+      source: "hosted_webhook_side_effect",
+      sourceRef: "event_group_recovery",
+      targetKind: "participant",
+      template: "group_line_recovery",
+    })).resolves.toEqual({
+      claimed: false,
+      id: "hld_group_line_recovery",
+      outcome: "completed",
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).not.toHaveBeenCalled();
+    expect(fixture.hostedLinqDeliveryCreateMany).not.toHaveBeenCalled();
+  });
+
+  it("preserves safe recovery source identity and reads terminal attempt receipts", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const effectId = buildHostedLinqGroupLineRecoveryEffectId({
+      incomingRecipientPhone: "+15550100000",
+      memberId: "member-1",
+      threadId: "chat-group-1",
+    });
+    const secondAttemptEffectId =
+      buildHostedLinqGroupLineRecoveryAttemptEffectId({
+        attempt: 2,
+        effectId,
+      });
+    const sourceRef = buildHostedLinqGroupLineRecoverySourceRef({
+      effectId,
+      sourceEventId: "event-group-line-recovery-1",
+    });
+
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      idempotencyKey: effectId,
+      phoneNumber: "+15550100042",
+      prisma: fixture.prisma as never,
+      reclaimStalePreProviderAttempt: true,
+      source: "hosted_webhook_side_effect",
+      sourceRef,
+      targetKind: "participant",
+      template: "group_line_recovery",
+    })).resolves.toMatchObject({ claimed: true });
+    expect(fixture.hostedLinqDeliveryCreateMany).toHaveBeenCalledWith({
+      data: [expect.objectContaining({ sourceRef })],
+      skipDuplicates: true,
+    });
+
+    const firstLookupKey =
+      createHostedLinqDeliveryIdempotencyLookupKey(effectId);
+    const secondLookupKey =
+      createHostedLinqDeliveryIdempotencyLookupKey(secondAttemptEffectId);
+    if (!firstLookupKey || !secondLookupKey) {
+      throw new Error("Expected recovery attempt lookup keys.");
+    }
+    fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([
+      {
+        acceptedAt: new Date("2026-03-26T12:00:01.000Z"),
+        attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+        deliveredAt: null,
+        groupJoinOutreachId: null,
+        groupJoinReplyOccurredAt: null,
+        id: "hld_group_line_recovery",
+        idempotencyKey: firstLookupKey,
+        lastProviderEventId:
+          "hbidx:linq-provider-event:recovery-failed-1",
+        lastReceiptAt: new Date("2026-03-26T12:01:00.000Z"),
+        messageLookupKey: "hbid:linq-message:provider-message-123",
+        phoneNumberLookupKey: createHostedPhoneLookupKey("+15550100042"),
+        sourceRef,
+        status: "failed",
+        targetKind: "participant",
+        template: "group_line_recovery",
+      },
+    ]);
+
+    await expect(readHostedLinqDeliveryProviderDispatchIntentsTx({
+      idempotencyKeys: [effectId, secondAttemptEffectId],
+      prisma: fixture.prisma as never,
+    })).resolves.toEqual([
+      expect.objectContaining({
+        idempotencyLookupKey: firstLookupKey,
+        lastProviderEventId:
+          "hbidx:linq-provider-event:recovery-failed-1",
+        providerCorrelated: true,
+        sourceRef,
+        status: "failed",
+      }),
+    ]);
+    expect(fixture.hostedLinqDeliveryFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          idempotencyKey: {
+            in: [firstLookupKey, secondLookupKey],
+          },
+        },
+      }),
+    );
+  });
+
   it("records accepted Linq transcript fallback and consumes its answered mailbox rows", async () => {
     const fixture = createObservabilityPrismaFixture();
     const attemptedAt = new Date("2026-03-26T12:00:00.000Z");
@@ -2793,6 +2930,52 @@ describe("hosted Linq observability stores", () => {
           acceptedAt,
           status: "sent_no_receipt_expected",
           targetKind: "thread",
+          threadIsDirect: false,
+        }),
+      }),
+    );
+  });
+
+  it("keeps a new two-part group accept out of missing-receipt status", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const acceptedAt = new Date("2026-03-26T12:00:01.000Z");
+    fixture.hostedLinqDeliveryFindUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        failedAt: null,
+        failureCode: null,
+        failureReason: null,
+        status: "sent_no_receipt_expected",
+      });
+    fixture.hostedLinqDeliveryMessageFindMany.mockResolvedValueOnce([
+      buildAcceptedOwnedDeliveryMessageState(),
+      buildAcceptedOwnedDeliveryMessageState(),
+    ]);
+
+    await recordHostedLinqRuntimeDeliveryOutcomeTx({
+      acceptedAt,
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      idempotencyKey: "assistant-outbox:intent_group_two_part",
+      linqChatId: "linq_chat_group",
+      messageIds: ["provider_message_group_text", "provider_message_group_link"],
+      prisma: fixture.prisma as never,
+      sourceRef: "intent_group_two_part",
+      targetKind: "thread",
+      threadIsDirect: false,
+      userId: "member_123",
+    });
+
+    expect(fixture.hostedLinqDeliveryCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "sent_no_receipt_expected",
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqDeliveryUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "sent_no_receipt_expected",
         }),
       }),
     );
@@ -2861,6 +3044,189 @@ describe("hosted Linq observability stores", () => {
       }),
     );
     expect(fixture.hostedMailboxItemUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("records a failed runtime rich-link outcome with its accepted primary identity", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const failedAt = new Date("2026-03-26T12:00:02.000Z");
+    const answeredMailboxItemIds = ["mailbox_item_primary_answered"];
+
+    await expect(recordHostedLinqRuntimeDeliveryOutcomeTx({
+      answeredMailboxItemIds,
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      failedAt,
+      failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+      idempotencyKey: "assistant-outbox:intent_partial_link",
+      linqChatId: "linq_chat_123",
+      messageId: "linq_text_accepted",
+      messageIds: ["linq_text_accepted"],
+      prisma: fixture.prisma as never,
+      sourceRef: "intent_partial_link",
+      targetKind: "thread",
+      userId: "member_123",
+    })).resolves.toEqual({
+      deliveryId: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
+      recorded: true,
+    });
+
+    expect(fixture.hostedLinqDeliveryCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          failedAt,
+          messageIdSuffix: "cepted",
+          messageLookupKey:
+            createHostedLinqMessageLookupKey("linq_text_accepted"),
+          status: "failed",
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqDeliveryMessageCreateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: [
+          expect.objectContaining({
+            messageLookupKey:
+              createHostedLinqMessageLookupKey("linq_text_accepted"),
+            ordinal: 0,
+          }),
+        ],
+      }),
+    );
+    expect(fixture.hostedMailboxItemUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("supersedes only the matching rich-link checkpoint after both identities recover", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const acceptedAt = new Date("2026-03-26T12:05:02.000Z");
+    const primaryMessageId = "linq_text_accepted";
+    const linkMessageId = "linq_link_recovered";
+    const primaryMessageLookupKey =
+      createHostedLinqMessageLookupKey(primaryMessageId);
+    fixture.hostedLinqDeliveryFindUnique
+      .mockResolvedValueOnce({
+        acceptedAt: null,
+        deliveredAt: null,
+        failedAt: new Date("2026-03-26T12:00:02.000Z"),
+        failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+        id: "hld_partial_link",
+        lastReceiptAt: null,
+        messageLookupKey: primaryMessageLookupKey,
+        skippedAt: null,
+        status: "failed",
+      })
+      .mockResolvedValueOnce({
+        failedAt: null,
+        failureCode: null,
+        failureReason: null,
+        status: "accepted",
+      });
+
+    await expect(recordHostedLinqRuntimeDeliveryOutcomeTx({
+      acceptedAt,
+      answeredMailboxItemIds: ["mailbox_item_primary_answered"],
+      attemptedAt: new Date("2026-03-26T12:05:01.000Z"),
+      idempotencyKey: "assistant-outbox:intent_partial_link",
+      linqChatId: "linq_chat_123",
+      messageIds: [primaryMessageId, linkMessageId],
+      prisma: fixture.prisma as never,
+      sourceRef: "intent_partial_link",
+      targetKind: "thread",
+      userId: "member_123",
+    })).resolves.toEqual({
+      deliveryId: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
+      recorded: true,
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          acceptedAt,
+          failedAt: null,
+          failureCode: null,
+          status: "accepted",
+        }),
+        where: expect.objectContaining({
+          OR: expect.arrayContaining([
+            expect.objectContaining({
+              failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+              messageLookupKey: primaryMessageLookupKey,
+              status: "failed",
+            }),
+          ]),
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqDeliveryMessageCreateMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({ ordinal: 0 }),
+        expect.objectContaining({ ordinal: 1 }),
+      ],
+      skipDuplicates: true,
+    });
+    expect(fixture.hostedMailboxItemUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { consumedAt: acceptedAt },
+      }),
+    );
+  });
+
+  it("keeps a recovered two-part group accept out of missing-receipt status", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const acceptedAt = new Date("2026-03-26T12:05:02.000Z");
+    const primaryMessageId = "linq_group_text_accepted";
+    const linkMessageId = "linq_group_link_recovered";
+    const primaryMessageLookupKey =
+      createHostedLinqMessageLookupKey(primaryMessageId);
+    fixture.hostedLinqDeliveryFindUnique
+      .mockResolvedValueOnce({
+        acceptedAt: null,
+        deliveredAt: null,
+        failedAt: new Date("2026-03-26T12:00:02.000Z"),
+        failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+        id: "hld_group_partial_link",
+        lastReceiptAt: null,
+        messageLookupKey: primaryMessageLookupKey,
+        skippedAt: null,
+        status: "failed",
+      })
+      .mockResolvedValueOnce({
+        failedAt: null,
+        failureCode: null,
+        failureReason: null,
+        status: "sent_no_receipt_expected",
+      });
+    fixture.hostedLinqDeliveryMessageFindMany.mockResolvedValueOnce([
+      buildAcceptedOwnedDeliveryMessageState(),
+      buildAcceptedOwnedDeliveryMessageState(),
+    ]);
+
+    await recordHostedLinqRuntimeDeliveryOutcomeTx({
+      acceptedAt,
+      attemptedAt: new Date("2026-03-26T12:05:01.000Z"),
+      idempotencyKey: "assistant-outbox:intent_group_partial_link",
+      linqChatId: "linq_chat_group",
+      messageIds: [primaryMessageId, linkMessageId],
+      prisma: fixture.prisma as never,
+      sourceRef: "intent_group_partial_link",
+      targetKind: "thread",
+      threadIsDirect: false,
+      userId: "member_123",
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          acceptedAt,
+          status: "sent_no_receipt_expected",
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqDeliveryUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "sent_no_receipt_expected",
+        }),
+      }),
+    );
   });
 
   it("does not double-count outbound totals when the provider echo lands before runtime acceptance", async () => {
@@ -2960,7 +3326,7 @@ describe("hosted Linq observability stores", () => {
           lastReceiptAt: receiptAt,
         }),
         where: expect.objectContaining({
-          healthStatus: { notIn: ["degraded", "unhealthy"] },
+          phoneNumberLookupKey: "hbidx:phone:runtime-line",
         }),
       }),
     );
@@ -3083,7 +3449,13 @@ describe("hosted Linq observability stores", () => {
           acceptedAt: null,
           deliveredAt: null,
           idempotencyKey: deliveryIdempotencyLookupKey,
-          lastReceiptAt: null,
+          OR: expect.arrayContaining([
+            expect.objectContaining({
+              failedAt: null,
+              lastReceiptAt: null,
+              messageLookupKey: null,
+            }),
+          ]),
         }),
       }),
     );
@@ -3651,6 +4023,46 @@ describe("hosted Linq observability stores", () => {
     expect(updateData).not.toHaveProperty("attemptedAt");
   });
 
+  it("correlates a partial rich-link failure to its accepted primary message and chat", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      id: "hld_partial_link",
+    });
+
+    await markHostedLinqDeliverySendFailedTx({
+      failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+      idempotencyKey: "assistant-outbox:intent-partial-link",
+      linqChatId: "linq_chat_partial",
+      messageIds: ["linq_text_accepted"],
+      prisma: fixture.prisma as never,
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          linqChatLookupKey: createHostedLinqChatLookupKey("linq_chat_partial"),
+          messageLookupKey: createHostedLinqMessageLookupKey(
+            "linq_text_accepted",
+          ),
+          status: "failed",
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqDeliveryMessageCreateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: [
+          expect.objectContaining({
+            deliveryId: "hld_partial_link",
+            messageLookupKey: createHostedLinqMessageLookupKey(
+              "linq_text_accepted",
+            ),
+            ordinal: 0,
+          }),
+        ],
+      }),
+    );
+  });
+
   it("records a proven retryable Telegram failure on the exact delivery", async () => {
     const fixture = createObservabilityPrismaFixture();
     const expectedAttemptedAt = new Date("2026-03-26T12:00:00.000Z");
@@ -3695,12 +4107,31 @@ describe("hosted Linq observability stores", () => {
 
 describe("hosted Linq signup-link delivery attempts", () => {
   const BASE_EFFECT_ID = "linq-invite-signup:member_123:2026-03-26T00:00:00.000Z";
+  const EXACT_SOURCE_EFFECT_ID = buildHostedLinqInviteSignupEffectId({
+    groupJoinOutreachId: "hgrpjoa_opaque",
+    memberId: "member_123",
+    occurredAt: "2026-03-26T12:34:56.000Z",
+    sourceEventId: "evt_group_reply",
+  });
   const failedCorrelatedRow = (effectId: string) => ({
     acceptedAt: new Date("2026-03-26T12:00:00.000Z"),
     deliveredAt: null,
+    failureCode: "provider_rejected",
     idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(effectId),
     lastReceiptAt: new Date("2026-03-26T12:01:00.000Z"),
     messageLookupKey: "hbidx:linq-message:failed",
+    status: "failed",
+  });
+  const partialCorrelatedRow = (
+    effectId: string,
+    lastReceiptAt: Date | null = null,
+  ) => ({
+    acceptedAt: null,
+    deliveredAt: null,
+    failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+    idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(effectId),
+    lastReceiptAt,
+    messageLookupKey: "hbidx:linq-message:known-part",
     status: "failed",
   });
 
@@ -3729,17 +4160,11 @@ describe("hosted Linq signup-link delivery attempts", () => {
       memberId: "member_123",
       sourceEventDigest: null,
     });
-    const groupEffectId = buildHostedLinqInviteSignupEffectId({
-      groupJoinOutreachId: "hgrpjoa_opaque",
-      memberId: "member_123",
-      occurredAt: "2026-03-26T12:34:56.000Z",
-      sourceEventId: "evt_group_reply",
-    });
-    expect(groupEffectId).toMatch(
+    expect(EXACT_SOURCE_EFFECT_ID).toMatch(
       /^linq-invite-signup:member_123:2026-03-26T00:00:00\.000Z:e[0-9a-f]{32}$/u,
     );
     const parsedGroupEffect =
-      parseHostedLinqInviteSignupEffectId(groupEffectId);
+      parseHostedLinqInviteSignupEffectId(EXACT_SOURCE_EFFECT_ID);
     expect(parsedGroupEffect).toMatchObject({
       attempt: 1,
       dayUtc: "2026-03-26T00:00:00.000Z",
@@ -3751,7 +4176,7 @@ describe("hosted Linq signup-link delivery attempts", () => {
       memberId: "member_123",
       occurredAt: parsedGroupEffect?.dayUtc ?? "",
       sourceEventDigest: parsedGroupEffect?.sourceEventDigest,
-    })).toBe(`${groupEffectId}:a2`);
+    })).toBe(`${EXACT_SOURCE_EFFECT_ID}:a2`);
   });
 
   it("keeps the base attempt while no delivery row blocks it", async () => {
@@ -3775,21 +4200,112 @@ describe("hosted Linq signup-link delivery attempts", () => {
 
   it("advances only the failed exact-source group attempt", async () => {
     const fixture = createObservabilityPrismaFixture();
-    const groupEffectId = buildHostedLinqInviteSignupEffectId({
-      groupJoinOutreachId: "hgrpjoa_opaque",
-      memberId: "member_123",
-      occurredAt: "2026-03-26T12:34:56.000Z",
-      sourceEventId: "evt_group_reply",
-    });
     fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([
-      failedCorrelatedRow(groupEffectId),
+      failedCorrelatedRow(EXACT_SOURCE_EFFECT_ID),
     ]);
 
     await expect(resolveHostedLinqInviteSignupDispatchEffectIdTx({
-      effectId: groupEffectId,
+      effectId: EXACT_SOURCE_EFFECT_ID,
       prisma: fixture.prisma as never,
-    })).resolves.toBe(`${groupEffectId}:a2`);
+    })).resolves.toBe(`${EXACT_SOURCE_EFFECT_ID}:a2`);
   });
+
+  it.each([
+    {
+      effectId: BASE_EFFECT_ID,
+      label: "generic signup",
+    },
+    {
+      effectId: EXACT_SOURCE_EFFECT_ID,
+      label: "exact-source group signup",
+    },
+  ])(
+    "keeps a one-identity rich-link partial on the same $label attempt",
+    async ({ effectId }) => {
+      const fixture = createObservabilityPrismaFixture();
+      fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([
+        partialCorrelatedRow(effectId),
+      ]);
+
+      await expect(resolveHostedLinqInviteSignupDispatchEffectIdTx({
+        effectId,
+        prisma: fixture.prisma as never,
+      })).resolves.toBe(effectId);
+    },
+  );
+
+  it.each([
+    {
+      linqChatId: "chat_123",
+      phoneNumber: null,
+      targetKind: "thread",
+      template: "invite_signup",
+    },
+    {
+      linqChatId: null,
+      phoneNumber: "+15550000000",
+      targetKind: "participant",
+      template: "invite_signup_fallback",
+    },
+  ] as const)(
+    "does not claim repeated $template provider delivery after an incomplete rich-link partial",
+    async ({ linqChatId, phoneNumber, targetKind, template }) => {
+      const fixture = createObservabilityPrismaFixture();
+      fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([
+        partialCorrelatedRow(BASE_EFFECT_ID),
+      ]);
+      const effectId = await resolveHostedLinqInviteSignupDispatchEffectIdTx({
+        effectId: BASE_EFFECT_ID,
+        prisma: fixture.prisma as never,
+      });
+      expect(effectId).toBe(BASE_EFFECT_ID);
+
+      fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+        acceptedAt: null,
+        attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+        deliveredAt: null,
+        failedAt: new Date("2026-03-26T12:00:01.000Z"),
+        failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+        groupJoinOutreachId: null,
+        groupJoinReplyOccurredAt: null,
+        id: "hld_partial_signup",
+        lastReceiptAt: null,
+        linqChatLookupKey: linqChatId
+          ? createHostedLinqChatLookupKey(linqChatId)
+          : null,
+        messageLookupKey: "hbidx:linq-message:known-part",
+        phoneNumberLookupKey: phoneNumber
+          ? createHostedPhoneLookupKey(phoneNumber)
+          : null,
+        retryAfterAt: null,
+        skippedAt: null,
+        source: "hosted_webhook_side_effect",
+        sourceRef: BASE_EFFECT_ID,
+        status: "failed",
+        targetKind,
+        template,
+      });
+
+      await expect(claimHostedLinqDeliveryProviderDispatchTx({
+        attemptedAt: new Date("2026-03-26T12:05:00.000Z"),
+        idempotencyKey: effectId ?? undefined,
+        ...(linqChatId ? { linqChatId } : { phoneNumber }),
+        prisma: fixture.prisma as never,
+        reclaimStalePreProviderAttempt: true,
+        source: "hosted_webhook_side_effect",
+        sourceRef: BASE_EFFECT_ID,
+        targetKind,
+        template,
+      })).resolves.toEqual({
+        claimed: false,
+        id: "hld_partial_signup",
+        outcome: "completed",
+      });
+
+      expect(fixture.hostedLinqDeliveryCreateMany).not.toHaveBeenCalled();
+      expect(fixture.hostedLinqDeliveryUpdateMany).not.toHaveBeenCalled();
+    },
+  );
 
   it("keeps the same attempt after a synchronous send failure", async () => {
     const fixture = createObservabilityPrismaFixture();
@@ -4154,6 +4670,472 @@ describe("hosted Linq signup-link delivery attempts", () => {
   });
 });
 
+describe("owned multi-part Linq delivery receipts", () => {
+  it.each([
+    {
+      expectedStatus: "failed",
+      label: "primary delivered and link failed",
+      messages: [
+        buildOwnedDeliveryMessageState("delivered", "evt_primary_delivered"),
+        buildOwnedDeliveryMessageState("failed", "evt_link_failed"),
+      ],
+      receiptMessageId: "msg_link",
+      receiptType: "message.failed",
+    },
+    {
+      expectedStatus: "failed",
+      label: "primary failed and link delivered",
+      messages: [
+        buildOwnedDeliveryMessageState("failed", "evt_primary_failed"),
+        buildOwnedDeliveryMessageState("delivered", "evt_link_delivered"),
+      ],
+      receiptMessageId: "msg_primary",
+      receiptType: "message.failed",
+    },
+    {
+      expectedStatus: "delivered",
+      label: "both parts delivered",
+      messages: [
+        buildOwnedDeliveryMessageState("delivered", "evt_primary_delivered"),
+        buildOwnedDeliveryMessageState("delivered", "evt_link_delivered"),
+      ],
+      receiptMessageId: "msg_link",
+      receiptType: "message.delivered",
+    },
+  ])(
+    "derives the aggregate outcome when $label",
+    async ({
+      expectedStatus,
+      messages,
+      receiptMessageId,
+      receiptType,
+    }) => {
+      const fixture = createOwnedDeliveryReceiptPrismaFixture(messages);
+      const result = await applyHostedLinqDeliveryReceiptTx({
+        event: requireParsedProviderEvent(buildProviderEvent({
+          data: {
+            message_id: receiptMessageId,
+            phone_number: "+15550000000",
+            service: "iMessage",
+          },
+          eventId: `evt_${receiptMessageId}_${expectedStatus}`,
+          eventType: receiptType,
+        })),
+        prisma: fixture.prisma as never,
+      });
+
+      expect(result).toMatchObject({
+        advanced: true,
+        deliveryId: "hld_owned_parts",
+      });
+      expect(fixture.hostedLinqDeliveryUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: expectedStatus,
+          }),
+          where: { id: "hld_owned_parts" },
+        }),
+      );
+      if (expectedStatus === "failed") {
+        expect(fixture.hostedLinqDeliveryUpdate).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              deliveredAt: null,
+              failedAt: expect.any(Date),
+            }),
+          }),
+        );
+      } else {
+        expect(fixture.hostedLinqDeliveryUpdate).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              deliveredAt: expect.any(Date),
+              failedAt: null,
+            }),
+          }),
+        );
+      }
+    },
+  );
+
+  it.each([
+    {
+      expectedStatus: "failed",
+      messages: [
+        buildOwnedDeliveryMessageState("delivered", "evt_group_primary_delivered"),
+        buildOwnedDeliveryMessageState("failed", "evt_group_link_failed"),
+      ],
+      receiptMessageId: "msg_group_link",
+      receiptType: "message.failed",
+    },
+    {
+      expectedStatus: "delivered",
+      messages: [
+        buildOwnedDeliveryMessageState("delivered", "evt_group_primary_delivered"),
+        buildOwnedDeliveryMessageState("delivered", "evt_group_link_delivered"),
+      ],
+      receiptMessageId: "msg_group_link",
+      receiptType: "message.delivered",
+    },
+  ] as const)(
+    "advances a no-receipt group parent to $expectedStatus when its children become terminal",
+    async ({ expectedStatus, messages, receiptMessageId, receiptType }) => {
+      const fixture = createOwnedDeliveryReceiptPrismaFixture([...messages], {
+        failedAt: null,
+        failureCode: null,
+        failureReason: null,
+        status: "sent_no_receipt_expected",
+      });
+
+      await applyHostedLinqDeliveryReceiptTx({
+        event: requireParsedProviderEvent(buildProviderEvent({
+          data: {
+            message_id: receiptMessageId,
+            phone_number: "+15550000000",
+            service: "iMessage",
+          },
+          eventId: `evt_${receiptMessageId}_${expectedStatus}`,
+          eventType: receiptType,
+        })),
+        prisma: fixture.prisma as never,
+      });
+
+      expect(fixture.hostedLinqDeliveryUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ status: expectedStatus }),
+          where: { id: "hld_owned_parts" },
+        }),
+      );
+    },
+  );
+
+  it.each(["delivered", "failed"] as const)(
+    "keeps an incomplete rich-link partial absorbing after its known child is %s",
+    async (messageStatus) => {
+      const partialFailedAt = new Date("2026-03-26T11:59:59.000Z");
+      const partialFailureReason =
+        "Linq could not confirm both rich-link provider identities.";
+      const fixture = createOwnedDeliveryReceiptPrismaFixture(
+        [buildOwnedDeliveryMessageState(
+          messageStatus,
+          `evt_known_part_${messageStatus}`,
+        )],
+        {
+          failedAt: partialFailedAt,
+          failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+          failureReason: partialFailureReason,
+          status: "failed",
+        },
+      );
+
+      await applyHostedLinqDeliveryReceiptTx({
+        event: requireParsedProviderEvent(buildProviderEvent({
+          data: {
+            message_id: "msg_primary",
+            phone_number: "+15550000000",
+            service: "iMessage",
+          },
+          eventId: `evt_known_part_${messageStatus}`,
+          eventType: `message.${messageStatus}`,
+        })),
+        prisma: fixture.prisma as never,
+      });
+
+      expect(fixture.hostedLinqDeliveryUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            deliveredAt: null,
+            failedAt: partialFailedAt,
+            failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+            failureReason: partialFailureReason,
+            status: "failed",
+          }),
+          where: { id: "hld_owned_parts" },
+        }),
+      );
+    },
+  );
+
+  it.each(["delivered", "failed"] as const)(
+    "keeps a parent-only rich-link partial absorbing when its known provider message is %s",
+    async (messageStatus) => {
+      const fixture = createObservabilityPrismaFixture();
+      fixture.hostedLinqDeliveryFindFirst.mockResolvedValueOnce({
+        failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+        groupJoinOutreachId: null,
+        groupJoinReplyOccurredAt: null,
+        id: "hld_parent_only_partial",
+        idempotencyKey: "payment-message:evt_parent_only",
+        phoneNumberLookupKey: null,
+        sourceRef: null,
+        status: "failed",
+        template: null,
+      });
+
+      await expect(applyHostedLinqDeliveryReceiptTx({
+        event: requireParsedProviderEvent(buildProviderEvent({
+          data: {
+            message_id: "msg_known_partial",
+            phone_number: "+15550000000",
+            service: "iMessage",
+          },
+          eventId: `evt_parent_only_${messageStatus}`,
+          eventType: `message.${messageStatus}`,
+        })),
+        prisma: fixture.prisma as never,
+      })).resolves.toEqual({
+        advanced: false,
+        deliveryId: "hld_parent_only_partial",
+        phoneNumberLookupKey: null,
+        reopenOnboardingLink: null,
+        restoreOnboardingLink: null,
+      });
+
+      expect(fixture.hostedLinqDeliveryUpdateMany).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["delivered", "failed"] as const)(
+    "attaches a buffered %s receipt after recording an incomplete rich-link child without promoting the parent",
+    async (messageStatus) => {
+      const fixture = createObservabilityPrismaFixture();
+      const partialFailedAt = new Date("2026-03-26T11:59:59.000Z");
+      const partialFailureReason =
+        "Linq could not confirm both rich-link provider identities.";
+      const receiptAt = new Date("2026-03-26T12:00:00.000Z");
+      fixture.hostedLinqDeliveryFindUnique
+        .mockResolvedValueOnce({ id: "hld_partial_catchup" })
+        .mockResolvedValueOnce({
+          failedAt: partialFailedAt,
+          failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+          failureReason: partialFailureReason,
+          status: "failed",
+        });
+      fixture.hostedLinqDeliveryMessageFindFirst.mockResolvedValueOnce({
+        id: "hldm_partial_catchup",
+      });
+      fixture.hostedLinqDeliveryMessageUpdateMany.mockResolvedValueOnce({
+        count: 1,
+      });
+      fixture.hostedLinqDeliveryMessageFindMany.mockResolvedValueOnce([
+        buildOwnedDeliveryMessageState(
+          messageStatus,
+          `evt_buffered_${messageStatus}`,
+        ),
+      ]);
+      fixture.hostedLinqProviderEventFindMany.mockResolvedValueOnce([{
+        deliveryStatus: messageStatus,
+        eventId: `evt_buffered_${messageStatus}`,
+        failureCode: messageStatus === "failed" ? "provider_rejected" : null,
+        failureReason:
+          messageStatus === "failed" ? "Provider rejected message." : null,
+        phoneNumberLookupKey: null,
+        providerCreatedAt: receiptAt,
+        service: "iMessage",
+      }]);
+
+      await markHostedLinqDeliverySendFailedTx({
+        failedAt: partialFailedAt,
+        failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+        failureReason: partialFailureReason,
+        idempotencyKey: "payment-message:evt_partial_catchup",
+        linqChatId: "chat_partial_catchup",
+        messageIds: ["msg_known_partial"],
+        prisma: fixture.prisma as never,
+      });
+
+      expect(fixture.hostedLinqDeliveryMessageUpdateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: messageStatus,
+          }),
+          where: expect.objectContaining({
+            id: "hldm_partial_catchup",
+          }),
+        }),
+      );
+      expect(fixture.hostedLinqDeliveryUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            deliveredAt: null,
+            failedAt: partialFailedAt,
+            failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+            failureReason: partialFailureReason,
+            status: "failed",
+          }),
+          where: { id: "hld_partial_catchup" },
+        }),
+      );
+    },
+  );
+
+  it("records ordered primary and link identities with the link as the scalar owner key", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      groupJoinOutreachId: null,
+      groupJoinReplyOccurredAt: null,
+      id: "hld_owned_parts",
+      sourceRef: null,
+      template: null,
+    });
+    fixture.hostedLinqDeliveryMessageCreateMany.mockResolvedValueOnce({
+      count: 2,
+    });
+
+    await markHostedLinqDeliveryAcceptedTx({
+      idempotencyKey: "payment-message:evt_123",
+      linqChatId: "chat_123",
+      messageId: "msg_link",
+      messageIds: ["msg_primary", "msg_link"],
+      prisma: fixture.prisma as never,
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          messageLookupKey: createHostedLinqMessageLookupKey("msg_link"),
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqDeliveryMessageCreateMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          deliveryId: "hld_owned_parts",
+          messageLookupKey: createHostedLinqMessageLookupKey("msg_primary"),
+          ordinal: 0,
+        }),
+        expect.objectContaining({
+          deliveryId: "hld_owned_parts",
+          messageLookupKey: createHostedLinqMessageLookupKey("msg_link"),
+          ordinal: 1,
+        }),
+      ],
+      skipDuplicates: true,
+    });
+  });
+});
+
+function buildOwnedDeliveryMessageState(
+  status: "delivered" | "failed",
+  eventId: string,
+) {
+  const occurredAt = new Date("2026-03-26T12:00:00.000Z");
+  return {
+    deliveredAt: status === "delivered" ? occurredAt : null,
+    failedAt: status === "failed" ? occurredAt : null,
+    failureCode: status === "failed" ? "provider_rejected" : null,
+    failureReason: status === "failed" ? "Provider rejected message." : null,
+    lastProviderEventId: createHostedLinqProviderEventLookupKey(eventId),
+    lastReceiptAt: occurredAt,
+    service: "iMessage",
+    status,
+  };
+}
+
+function buildAcceptedOwnedDeliveryMessageState() {
+  return {
+    deliveredAt: null,
+    failedAt: null,
+    failureCode: null,
+    failureReason: null,
+    lastProviderEventId: null,
+    lastReceiptAt: null,
+    service: null,
+    status: "accepted",
+  };
+}
+
+function createOwnedDeliveryReceiptPrismaFixture(
+  messages: ReturnType<typeof buildOwnedDeliveryMessageState>[],
+  delivery: {
+    failedAt: Date | null;
+    failureCode: string | null;
+    failureReason: string | null;
+    status: "accepted" | "failed" | "sent_no_receipt_expected";
+  } = {
+    failedAt: null,
+    failureCode: null,
+    failureReason: null,
+    status: "accepted",
+  },
+) {
+  const hostedLinqDeliveryUpdate = vi.fn().mockResolvedValue({});
+  const prisma = {
+    $queryRaw: vi.fn().mockResolvedValue([]),
+    hostedLinqDelivery: {
+      findUnique: vi.fn().mockResolvedValue(delivery),
+      update: hostedLinqDeliveryUpdate,
+    },
+    hostedLinqDeliveryMessage: {
+      findFirst: vi.fn().mockResolvedValue({
+        delivery: {
+          groupJoinOutreachId: null,
+          groupJoinReplyOccurredAt: null,
+          id: "hld_owned_parts",
+          idempotencyKey: "payment-message:evt_123",
+          phoneNumberLookupKey: null,
+          sourceRef: null,
+          template: null,
+        },
+        id: "hldm_receipt_target",
+      }),
+      findMany: vi.fn().mockResolvedValue(messages),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    },
+  };
+  return {
+    hostedLinqDeliveryUpdate,
+    prisma,
+  };
+}
+
+function buildGroupLineRecoveryDeliveryFixture(overrides: Partial<{
+  acceptedAt: Date | null;
+  attemptedAt: Date;
+  deliveredAt: Date | null;
+  failureCode: string | null;
+  failedAt: Date | null;
+  groupJoinOutreachId: string | null;
+  groupJoinReplyOccurredAt: Date | null;
+  id: string;
+  lastReceiptAt: Date | null;
+  linqChatLookupKey: string | null;
+  messageLookupKey: string | null;
+  phoneNumberLookupKey: string | null;
+  retryAfterAt: Date | null;
+  skippedAt: Date | null;
+  source: string | null;
+  sourceRef: string | null;
+  status: string;
+  targetKind: string | null;
+  template: string | null;
+}> = {}) {
+  return {
+    acceptedAt: null,
+    attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+    deliveredAt: null,
+    failureCode: null,
+    failedAt: null,
+    groupJoinOutreachId: null,
+    groupJoinReplyOccurredAt: null,
+    id: "hld_group_line_recovery",
+    lastReceiptAt: null,
+    linqChatLookupKey: null,
+    messageLookupKey: null,
+    phoneNumberLookupKey: createHostedPhoneLookupKey("+15550100042"),
+    retryAfterAt: null,
+    skippedAt: null,
+    source: "hosted_webhook_side_effect",
+    sourceRef: createHostedLinqDeliverySourceRefLookupKey(
+      "event_group_recovery",
+    ),
+    status: "attempted",
+    targetKind: "participant",
+    template: "group_line_recovery",
+    ...overrides,
+  };
+}
+
 function createObservabilityPrismaFixture() {
   const transaction = vi.fn();
   const executeRaw = vi.fn().mockResolvedValue([]);
@@ -4170,6 +5152,14 @@ function createObservabilityPrismaFixture() {
   const hostedLinqDeliveryUpdate = vi.fn().mockResolvedValue(undefined);
   const hostedLinqDeliveryUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
   const hostedLinqDeliveryUpsert = vi.fn().mockResolvedValue({ id: "hld_123" });
+  const hostedLinqDeliveryMessageCreateMany =
+    vi.fn().mockResolvedValue({ count: 0 });
+  const hostedLinqDeliveryMessageFindFirst =
+    vi.fn().mockResolvedValue(null);
+  const hostedLinqDeliveryMessageFindMany =
+    vi.fn().mockResolvedValue([]);
+  const hostedLinqDeliveryMessageUpdateMany =
+    vi.fn().mockResolvedValue({ count: 0 });
   const hostedLinqLineFindMany = vi.fn().mockResolvedValue([]);
   const hostedLinqLineFindUnique = vi.fn().mockResolvedValue(null);
   const hostedLinqLineUpdate = vi.fn().mockImplementation((input: { where?: { phoneNumberLookupKey?: string } }) =>
@@ -4181,6 +5171,9 @@ function createObservabilityPrismaFixture() {
     Promise.resolve({
       phoneNumberLookupKey: input.create.phoneNumberLookupKey,
     }));
+  const hostedLinqChatHealthFindMany = vi.fn().mockResolvedValue([]);
+  const hostedLinqChatHealthCreateMany = vi.fn().mockResolvedValue({ count: 1 });
+  const hostedLinqChatHealthUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
   const hostedLinqProviderEventCreateMany = vi.fn().mockResolvedValue({ count: 1 });
   const hostedLinqProviderEventFindFirst = vi.fn().mockResolvedValue(null);
   const hostedLinqProviderEventFindMany = vi.fn().mockResolvedValue([]);
@@ -4201,6 +5194,11 @@ function createObservabilityPrismaFixture() {
     hostedLinqDailyState: {
       updateMany: hostedLinqDailyStateUpdateMany,
     },
+    hostedLinqChatHealth: {
+      createMany: hostedLinqChatHealthCreateMany,
+      findMany: hostedLinqChatHealthFindMany,
+      updateMany: hostedLinqChatHealthUpdateMany,
+    },
     hostedLinqDelivery: {
       create: hostedLinqDeliveryCreate,
       createMany: hostedLinqDeliveryCreateMany,
@@ -4210,6 +5208,12 @@ function createObservabilityPrismaFixture() {
       update: hostedLinqDeliveryUpdate,
       updateMany: hostedLinqDeliveryUpdateMany,
       upsert: hostedLinqDeliveryUpsert,
+    },
+    hostedLinqDeliveryMessage: {
+      createMany: hostedLinqDeliveryMessageCreateMany,
+      findFirst: hostedLinqDeliveryMessageFindFirst,
+      findMany: hostedLinqDeliveryMessageFindMany,
+      updateMany: hostedLinqDeliveryMessageUpdateMany,
     },
     hostedLinqLine: {
       findMany: hostedLinqLineFindMany,
@@ -4243,6 +5247,10 @@ function createObservabilityPrismaFixture() {
     hostedLinqDeliveryFindFirst,
     hostedLinqDeliveryFindMany,
     hostedLinqDeliveryFindUnique,
+    hostedLinqDeliveryMessageCreateMany,
+    hostedLinqDeliveryMessageFindFirst,
+    hostedLinqDeliveryMessageFindMany,
+    hostedLinqDeliveryMessageUpdateMany,
     hostedLinqDeliveryUpdate,
     hostedLinqDeliveryUpdateMany,
     hostedLinqDeliveryUpsert,
@@ -4251,6 +5259,9 @@ function createObservabilityPrismaFixture() {
     hostedLinqLineUpdate,
     hostedLinqLineUpdateMany,
     hostedLinqLineUpsert,
+    hostedLinqChatHealthCreateMany,
+    hostedLinqChatHealthFindMany,
+    hostedLinqChatHealthUpdateMany,
     hostedLinqProviderEventCreateMany,
     hostedLinqProviderEventFindFirst,
     hostedLinqProviderEventFindMany,

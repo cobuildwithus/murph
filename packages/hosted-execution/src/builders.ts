@@ -9,6 +9,7 @@ import type {
   HostedExecutionAssistantNotificationRequestedWake,
   HostedExecutionDeviceSyncWake,
   HostedExecutionDeviceSyncWakeEvent,
+  HostedExecutionEnvironmentVoiceCapturedWake,
   HostedExecutionGroupNewsletterEmailNeededWake,
   HostedExecutionEmailConversationMessagePayload,
   HostedExecutionLinqConversationMessagePayload,
@@ -374,6 +375,7 @@ function assertHostedExecutionTelegramConversationMessageWorkspaceTarget(input: 
     if (
       input.senderMemberId !== undefined
       || input.telegramMessage.from
+      || input.telegramMessage.senderDisplayName
       || input.telegramMessage.senderUsername
     ) {
       throw new TypeError(
@@ -856,6 +858,41 @@ export function buildHostedExecutionMealPhotoCapturedWake(input: {
       mealPhotoKey: input.mealPhotoKey,
       sha256: input.sha256,
     },
+    occurredAt: input.occurredAt,
+    userId: input.memberId,
+  };
+}
+
+export function buildHostedExecutionEnvironmentVoiceCapturedWake(input: {
+  audioKey: string;
+  byteLength: number;
+  captureId: string;
+  capturedAt: string;
+  contentType: HostedExecutionEnvironmentVoiceCapturedWake["environmentVoice"]["contentType"];
+  durationMs: number;
+  eventId: string;
+  memberId: string;
+  occurredAt: string;
+  sha256: string;
+}): HostedExecutionEnvironmentVoiceCapturedWake {
+  if (input.occurredAt !== input.capturedAt) {
+    throw new TypeError(
+      "Hosted environment voice wake occurredAt must match capturedAt.",
+    );
+  }
+
+  return {
+    eventId: input.eventId,
+    environmentVoice: {
+      audioKey: input.audioKey,
+      byteLength: input.byteLength,
+      captureId: input.captureId,
+      capturedAt: input.capturedAt,
+      contentType: input.contentType,
+      durationMs: input.durationMs,
+      sha256: input.sha256,
+    },
+    kind: "environment-voice.captured",
     occurredAt: input.occurredAt,
     userId: input.memberId,
   };

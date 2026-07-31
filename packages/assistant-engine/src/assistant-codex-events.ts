@@ -489,16 +489,22 @@ export function extractCodexContextCompactionProgressTextFromNormalized(
 export function extractCodexCompletedFinalAgentMessageTextFromNormalized(
   normalized: CodexNormalizedEvent,
 ): string | null {
-  if (
-    normalized.kind !== 'assistant_message' ||
-    normalized.itemState !== 'completed' ||
-    normalized.messagePhase === 'commentary'
-  ) {
+  if (!isCodexCompletedFinalAgentMessageItemFromNormalized(normalized)) {
     return null
   }
 
   const text = normalizeStreamingText(normalized.text)?.trim()
   return text && text.length > 0 ? text : null
+}
+
+export function isCodexCompletedFinalAgentMessageItemFromNormalized(
+  normalized: CodexNormalizedEvent,
+): normalized is Extract<CodexNormalizedEvent, { kind: 'assistant_message' }> {
+  return (
+    normalized.kind === 'assistant_message' &&
+    normalized.itemState === 'completed' &&
+    normalized.messagePhase !== 'commentary'
+  )
 }
 
 // Steered (mid-turn) user input is recorded by the Codex app-server as a

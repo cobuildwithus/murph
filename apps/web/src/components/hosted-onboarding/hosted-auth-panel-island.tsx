@@ -1,13 +1,66 @@
 "use client";
 
-import type { ComponentProps } from "react";
+import { track } from "@vercel/analytics";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ComponentProps,
+} from "react";
 
-import { HostedAuthPanel } from "./hosted-auth-panel";
+import { Button } from "@/src/components/ui/button";
+import { Spinner } from "@/src/components/ui/spinner";
+
+import {
+  HostedAuthPanel,
+  type HostedPrivyWaitReason,
+} from "./hosted-auth-panel";
 import { HostedPrivyProvider } from "./privy-provider";
 
-type HostedAuthPanelIslandProps = ComponentProps<typeof HostedAuthPanel>;
+const HOSTED_PRIVY_SLOW_READY_NOTICE_MS = 1_500;
+const HOSTED_PRIVY_READY_TIMEOUT_MS = 10_000;
+const HOSTED_PRIVY_RESTART_TIMEOUT_COUNT = 2;
 
-export function HostedAuthPanelIsland(props: HostedAuthPanelIslandProps) {
+type HostedAuthPanelProps = ComponentProps<typeof HostedAuthPanel>;
+type HostedPrivyReadinessEvent =
+  | "hosted_auth_privy_ready_restart"
+  | "hosted_auth_privy_ready_timeout";
+
+export function HostedPrivyReadinessState({
+  message = "Your selection is saved while secure sign in finishes loading.",
+  onRestart,
+  restartAvailable,
+}: {
+  message?: string;
+  onRestart: () => void;
+  restartAvailable: boolean;
+}) {
+  return (
+    <div
+      aria-atomic="true"
+      aria-live="polite"
+      role="status"
+      className="flex flex-wrap items-center gap-x-2 gap-y-1 px-1 text-xs leading-relaxed text-muted-foreground"
+    >
+      <Spinner aria-hidden="true" className="size-3.5 shrink-0" />
+      <span>{message}</span>
+      {restartAvailable ? (
+        <Button
+          className="h-auto p-0 text-xs"
+          onClick={onRestart}
+          size="xs"
+          type="button"
+          variant="link"
+        >
+          Restart sign in
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+export function HostedAuthPanelIsland(props: HostedAuthPanelProps) {
+  const [providerAttempt, setProviderAttempt] = useState(1);
   const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID?.trim();
   const clientId = process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID?.trim() || null;
 
@@ -20,8 +73,152 @@ export function HostedAuthPanelIsland(props: HostedAuthPanelIslandProps) {
   }
 
   return (
-    <HostedPrivyProvider appId={appId} clientId={clientId}>
-      <HostedAuthPanel {...props} />
+    <HostedPrivyProvider
+      appId={appId}
+      clientId={clientId}
+      key={providerAttempt}
+    >
+      <HostedAuthPanelWithinPrivy
+        {...props}
+        privyAttempt={providerAttempt}
+        onRestartPrivy={() => setProviderAttempt((current) => current + 1)}
+      />
     </HostedPrivyProvider>
   );
+}
+
+export function HostedAuthPanelWithinPrivy({
+  onRestartPrivy,
+  privyAttempt,
+  ...props
+}: HostedAuthPanelProps & {
+  onRestartPrivy: () => void;
+  privyAttempt: number;
+}) {
+  const [privyWaitReason, setPrivyWaitReason] =
+    useState<HostedPrivyWaitReason>(null);
+  const [restartRequested, setRestartRequested] = useState(false);
+
+  function handleRestart() {
+    setRestartRequested(true);
+    onRestartPrivy();
+  }
+
+  return (
+    <>
+      {!restartRequested ? (
+        <HostedAuthPanel
+          {...props}
+          onPrivyWaitChange={setPrivyWaitReason}
+        />
+      ) : null}
+      {!restartRequested && privyWaitReason !== null ? (
+        <HostedPrivyReadinessFeedback
+          attempt={privyAttempt}
+          key={privyWaitReason}
+          message={
+            privyWaitReason === "session"
+              ? "Secure sign in is checking your existing session."
+              : undefined
+          }
+          noticeImmediately={privyWaitReason === "session"}
+          onRestart={handleRestart}
+          reason={privyWaitReason}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function HostedPrivyReadinessFeedback({
+  attempt,
+  message,
+  noticeImmediately,
+  onRestart,
+  reason,
+}: {
+  attempt: number;
+  message?: string;
+  noticeImmediately: boolean;
+  onRestart: () => void;
+  reason: Exclude<HostedPrivyWaitReason, null>;
+}) {
+  const [noticeVisible, setNoticeVisible] = useState(noticeImmediately);
+  const [timeoutCount, setTimeoutCount] = useState(0);
+  const timeoutCountRef = useRef(0);
+
+  useEffect(() => {
+    if (noticeImmediately) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setNoticeVisible(true);
+    }, HOSTED_PRIVY_SLOW_READY_NOTICE_MS);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [noticeImmediately]);
+
+  useEffect(() => {
+    if (timeoutCount >= HOSTED_PRIVY_RESTART_TIMEOUT_COUNT) return;
+
+    const timeoutId = window.setTimeout(() => {
+      const nextTimeoutCount = timeoutCountRef.current + 1;
+      timeoutCountRef.current = nextTimeoutCount;
+      setTimeoutCount(nextTimeoutCount);
+      reportHostedPrivyReadiness(
+        "hosted_auth_privy_ready_timeout",
+        attempt,
+        reason,
+        nextTimeoutCount,
+      );
+    }, HOSTED_PRIVY_READY_TIMEOUT_MS);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [attempt, reason, timeoutCount]);
+
+  return noticeVisible ? (
+    <HostedPrivyReadinessState
+      message={message}
+      onRestart={() => {
+        reportHostedPrivyReadiness(
+          "hosted_auth_privy_ready_restart",
+          attempt,
+          reason,
+          timeoutCount,
+        );
+        onRestart();
+      }}
+      restartAvailable={
+        timeoutCount >= HOSTED_PRIVY_RESTART_TIMEOUT_COUNT
+      }
+    />
+  ) : null;
+}
+
+function reportHostedPrivyReadiness(
+  event: HostedPrivyReadinessEvent,
+  attempt: number,
+  reason: Exclude<HostedPrivyWaitReason, null>,
+  timeoutCount: number,
+) {
+  if (
+    window.location.pathname !== "/"
+    || window.location.search !== ""
+    || window.location.hash !== ""
+  ) {
+    return;
+  }
+
+  try {
+    track(event, {
+      attempt,
+      online:
+        typeof navigator.onLine === "boolean" ? navigator.onLine : "unknown",
+      reason,
+      timeoutCount,
+    });
+  } catch {
+    // Diagnostics are best-effort and must never block authentication recovery.
+  }
 }

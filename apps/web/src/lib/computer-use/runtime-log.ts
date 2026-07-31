@@ -12,7 +12,7 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 
 import { isHostedOnboardingError } from "../hosted-onboarding/errors";
-import { recordHostedRuntimeLog } from "../hosted-workspace/store";
+import { writeHostedRuntimeLogs } from "../hosted-runtime-log/write";
 import { shortHash } from "./ids";
 
 type HostedComputerToolOperation =
@@ -72,18 +72,21 @@ async function recordHostedComputerToolFailureBestEffort(input: {
 }): Promise<void> {
   try {
     const errorCode = readHostedComputerToolErrorCode(input.error);
-    await recordHostedRuntimeLog({
-      component: "assistant",
-      errorCode,
-      eventCode: HOSTED_COMPUTER_TOOL_FAILURE_EVENT_CODE,
-      level: "warn",
-      phase: "error",
-      redacted: buildHostedComputerToolFailureRedactedJson({
-        action: input.action,
-        error: input.error,
+    await writeHostedRuntimeLogs({
+      entries: [{
+        at: new Date().toISOString(),
+        component: "assistant",
         errorCode,
-        operation: input.operation,
-      }),
+        eventCode: HOSTED_COMPUTER_TOOL_FAILURE_EVENT_CODE,
+        level: "warn",
+        phase: "error",
+        redactedJson: buildHostedComputerToolFailureRedactedJson({
+          action: input.action,
+          error: input.error,
+          errorCode,
+          operation: input.operation,
+        }),
+      }],
       userId: input.memberId,
     });
   } catch (logError) {

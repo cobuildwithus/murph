@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
     sessionId: string | null;
   } | null,
   readHostedConsentStatus: vi.fn(),
+  readHostedFamilyBillingRecoveryForOwner: vi.fn(),
   readHostedMemberOwnsSubscription: vi.fn(),
   redirect: vi.fn((path: string) => {
     throw new Error(`NEXT_REDIRECT:${path}`);
@@ -96,6 +97,11 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
   readHostedMemberOwnsSubscription: mocks.readHostedMemberOwnsSubscription,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
+  readHostedFamilyBillingRecoveryForOwner:
+    mocks.readHostedFamilyBillingRecoveryForOwner,
+}));
+
 vi.mock("@/src/components/hosted-onboarding/phone-country-code-provider", () => ({
   PhoneCountryCodeProvider(input: { children: React.ReactNode }) {
     return createElement(
@@ -143,6 +149,7 @@ beforeEach(() => {
   mocks.joinInviteSuccessClientProps = null;
   mocks.resourceHintOrigins = null;
   mocks.getPrisma.mockReturnValue({ prisma: true });
+  mocks.readHostedFamilyBillingRecoveryForOwner.mockResolvedValue(null);
   mocks.readHostedMemberOwnsSubscription.mockResolvedValue(false);
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
@@ -155,6 +162,7 @@ beforeEach(() => {
     },
     linkedAccounts: [],
     session: {
+      privyUserId: "test-privy-user",
       identity: {
         phone: {
           number: "+15550100271",
@@ -243,8 +251,10 @@ test("JoinInvitePage builds a server model with the app-session member", async (
   expect(mocks.readHostedConsentStatus).not.toHaveBeenCalled();
   expect(mocks.joinInvitePageViewProps?.model).toMatchObject({
     awaitingInviteSessionResolution: false,
+    expectedPrivyUserId: "test-privy-user",
     inviteCode: "invite code",
     preview: false,
+    privySessionMatchesAppSession: true,
     status: {
       stage: "verify",
     },
@@ -273,6 +283,7 @@ test.each([
         updatedAt: new Date("2026-07-13T08:00:00.000Z"),
       },
       session: {
+        privyUserId: "test-privy-user",
         identity: null,
         linkedAccounts: [],
         verifiedPrivyUser: { id: "test-privy-user" },
@@ -309,6 +320,7 @@ test("JoinInvitePage leaves a suspended paused member in the blocked flow", asyn
       updatedAt: new Date("2026-07-20T08:00:00.000Z"),
     },
     session: {
+      privyUserId: "test-privy-user",
       identity: null,
       linkedAccounts: [],
       verifiedPrivyUser: { id: "test-privy-user" },
@@ -417,10 +429,93 @@ test("JoinInvitePage gates checkout on server-read launch consent", async () => 
   assert.match(markup, /data-consent-status="required"/);
 });
 
+test.each(["available", "checkout", "syncing"] as const)(
+  "JoinInvitePage derives %s Family recovery from the authenticated owner group",
+  async (familyBillingRecovery) => {
+    const { default: JoinInvitePage } = await import("../app/join/[inviteCode]/page");
+    mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
+      authenticated: true,
+      authenticatedMember: {
+        billingStatus: "not_started",
+        createdAt: new Date("2026-07-03T08:00:00.000Z"),
+        id: "member_family_owner",
+        suspendedAt: null,
+        updatedAt: new Date("2026-07-28T08:00:00.000Z"),
+      },
+      session: {
+        privyUserId: "test-privy-user",
+        identity: null,
+        linkedAccounts: [],
+        verifiedPrivyUser: { id: "test-privy-user" },
+      },
+    });
+    mocks.getHostedInviteStatus.mockResolvedValueOnce(createStatus({
+      session: {
+        authenticated: true,
+        expiresAt: null,
+        matchesInvite: true,
+      },
+      stage: "checkout",
+    }));
+    mocks.readHostedConsentStatus.mockResolvedValueOnce(createConsentStatus({
+      launchGranted: true,
+    }));
+    mocks.readHostedFamilyBillingRecoveryForOwner.mockResolvedValueOnce(
+      familyBillingRecovery,
+    );
+
+    renderToStaticMarkup(
+      await JoinInvitePage({
+        params: Promise.resolve({ inviteCode: "family-recovery-invite" }),
+        searchParams: Promise.resolve({ preview: undefined }),
+      }),
+    );
+
+    expect(mocks.readHostedFamilyBillingRecoveryForOwner).toHaveBeenCalledWith({
+      ownerMemberId: "member_family_owner",
+      prisma: { prisma: true },
+    });
+    expect(mocks.joinInvitePageViewProps?.model.familyBillingRecovery).toBe(
+      familyBillingRecovery,
+    );
+  },
+);
+
+test("JoinInvitePage keeps first-time checkout independent of Family recovery reads", async () => {
+  const { default: JoinInvitePage } = await import("../app/join/[inviteCode]/page");
+  mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
+    authenticated: false,
+    authenticatedMember: null,
+    session: null,
+  });
+  mocks.getHostedInviteStatus.mockResolvedValueOnce(createStatus({
+    session: {
+      authenticated: false,
+      expiresAt: null,
+      matchesInvite: false,
+    },
+    stage: "verify",
+  }));
+
+  renderToStaticMarkup(
+    await JoinInvitePage({
+      params: Promise.resolve({ inviteCode: "first-time-invite" }),
+      searchParams: Promise.resolve({ preview: undefined }),
+    }),
+  );
+
+  expect(mocks.readHostedFamilyBillingRecoveryForOwner).not.toHaveBeenCalled();
+  expect(mocks.joinInvitePageViewProps?.model.familyBillingRecovery).toBeNull();
+});
+
 test("JoinInvitePage projects linked accounts to a minimal Telegram setup seed", async () => {
   const { default: JoinInvitePage } = await import("../app/join/[inviteCode]/page");
   mocks.getHostedPrivySession.mockResolvedValueOnce({
-    identity: null,
+    identity: {
+      phone: null,
+      userId: "test-privy-user",
+      wallet: null,
+    },
     linkedAccounts: [
       {
         address: "hidden@example.test",
@@ -451,6 +546,7 @@ test("JoinInvitePage projects linked accounts to a minimal Telegram setup seed",
     },
     linkedAccounts: [],
     session: {
+      privyUserId: "test-privy-user",
       identity: null,
       linkedAccounts: [],
       verifiedPrivyUser: {
@@ -481,6 +577,52 @@ test("JoinInvitePage projects linked accounts to a minimal Telegram setup seed",
   expect(mocks.joinInvitePageViewProps?.model.telegramAccountForMessagingSetup).toEqual({
     telegramUserId: "telegram-test-user",
     username: "murph_test",
+  });
+});
+
+test("JoinInvitePage withholds Telegram seed when the fresh Privy user does not match", async () => {
+  const { default: JoinInvitePage } = await import("../app/join/[inviteCode]/page");
+  mocks.getHostedPrivySession.mockResolvedValueOnce({
+    identity: {
+      phone: null,
+      userId: "different-privy-user",
+      wallet: null,
+    },
+    linkedAccounts: [
+      {
+        id: "telegram-test-user",
+        type: "telegram",
+        username: "murph_test",
+      },
+    ],
+    verifiedPrivyUser: {
+      id: "different-privy-user",
+    },
+  });
+  mocks.getHostedInviteStatus.mockResolvedValueOnce(createStatus({
+    messagingSetupRequired: true,
+    session: {
+      authenticated: true,
+      expiresAt: null,
+      matchesInvite: true,
+    },
+    stage: "checkout",
+  }));
+  mocks.readHostedConsentStatus.mockResolvedValueOnce(createConsentStatus({
+    launchGranted: true,
+  }));
+
+  renderToStaticMarkup(
+    await JoinInvitePage({
+      params: Promise.resolve({ inviteCode: "invite-code" }),
+      searchParams: Promise.resolve({ preview: undefined }),
+    }),
+  );
+
+  expect(mocks.joinInvitePageViewProps?.model).toMatchObject({
+    expectedPrivyUserId: "test-privy-user",
+    privySessionMatchesAppSession: false,
+    telegramAccountForMessagingSetup: null,
   });
 });
 

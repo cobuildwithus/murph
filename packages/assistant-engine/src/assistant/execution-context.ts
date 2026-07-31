@@ -9,6 +9,10 @@ import type {
   HostedExecutionExternalThreadRouteAuthority,
 } from '@murphai/hosted-execution/contracts'
 import type {
+  HostedRuntimeLinqDeliveryBlockCode,
+  HostedRuntimeLinqDeliveryPosture,
+} from '@murphai/hosted-execution/routes'
+import type {
   AutomationAssistantTargetOverride,
   AutomationContinuityPolicy,
   AutomationSchedule,
@@ -37,6 +41,8 @@ import type {
   HostedRuntimeIMessageContactToolResponse,
   HostedRuntimeAssistantConfigurationControlRequest,
   HostedRuntimeAssistantConfigurationToolResponse,
+  HostedRuntimeGroupParticipantDisplayName,
+  HostedRuntimeGroupParticipantDisplayNameSource,
   HostedRuntimeGroupSharedMember,
   HostedRuntimeGroupSharedProjection,
   HostedRuntimeGroupSharedReadRequest,
@@ -53,6 +59,7 @@ import type {
 } from '@murphai/hosted-execution/phone-calls'
 import type {
   HostedPlanUsageStatus,
+  HostedPlanUsageToolRequest,
 } from '@murphai/hosted-execution/plan-usage'
 import type {
   HostedVaultShareSelectableProjectionScope,
@@ -240,7 +247,7 @@ export interface AssistantHostedFamilyPlanTool {
 }
 
 export interface AssistantHostedPlanUsageTool {
-  read(): Promise<HostedPlanUsageStatus>
+  read(request: HostedPlanUsageToolRequest): Promise<HostedPlanUsageStatus>
 }
 
 export interface AssistantHostedIMessageContactTool {
@@ -277,6 +284,7 @@ export interface AssistantHostedAssistantConfigurationTool {
 export interface AssistantHostedGroupTool {
   request(
     request: HostedRuntimeGroupToolRequest,
+    context?: { signal?: AbortSignal | null },
   ): Promise<HostedRuntimeGroupToolResponse>
 }
 
@@ -287,7 +295,12 @@ export interface AssistantHostedGroupPermissionOfferRequest {
 export interface AssistantHostedGroupPermissionOfferTool {
   request(
     request: AssistantHostedGroupPermissionOfferRequest,
-  ): Promise<Extract<HostedRuntimeGroupToolResponse, { action: 'post_join_offer' }>>
+  ): Promise<
+    Extract<
+      HostedRuntimeGroupToolResponse,
+      { action: 'create_join_link' | 'post_join_offer' }
+    >
+  >
 }
 
 export type AssistantHostedGroupSharedReadRequest =
@@ -298,6 +311,18 @@ export type AssistantHostedGroupSharedProjection =
 export type AssistantHostedGroupSharedMember = HostedRuntimeGroupSharedMember
 export type AssistantHostedGroupSharedReadResponse =
   HostedRuntimeGroupSharedReadResult
+
+export type AssistantGroupParticipantDisplayNameSource =
+  HostedRuntimeGroupParticipantDisplayNameSource
+export type AssistantGroupParticipantDisplayName =
+  HostedRuntimeGroupParticipantDisplayName
+
+export interface AssistantHostedGroupParticipantDisplayNameReader {
+  read(input: {
+    channel: 'linq'
+    senderHandles: readonly string[]
+  }): Promise<readonly AssistantGroupParticipantDisplayName[]>
+}
 
 export interface AssistantHostedGroupSharedReader {
   request(
@@ -395,6 +420,7 @@ export interface AssistantHostedExecutionContext {
   familyPlanTool?: AssistantHostedFamilyPlanTool | null
   imessageContactTool?: AssistantHostedIMessageContactTool | null
   personalizationTool?: AssistantHostedPersonalizationTool | null
+  groupParticipantDisplayNameReader?: AssistantHostedGroupParticipantDisplayNameReader | null
   groupPermissionOfferTool?: AssistantHostedGroupPermissionOfferTool | null
   groupSharedReader?: AssistantHostedGroupSharedReader | null
   groupTool?: AssistantHostedGroupTool | null
@@ -413,12 +439,15 @@ export interface AssistantHostedExecutionContext {
   phoneCalls?: AssistantPhoneCallPort | null
   publicInternetFetch?: typeof fetch | null
   resolveScheduledLinqRoute?(input: {
+    fromPhoneNumber?: string | null
     homeRouteFallbackAllowed: boolean
     signal?: AbortSignal | null
     target: string
     targetKind: 'explicit' | 'thread'
   }): Promise<{
     conversationThreadId?: string | null
+    deliveryBlockCode?: HostedRuntimeLinqDeliveryBlockCode | null
+    deliveryPosture?: HostedRuntimeLinqDeliveryPosture | null
     target: string
     threadIsDirect: boolean
   }>
@@ -433,6 +462,24 @@ export interface AssistantHostedExecutionContext {
 
 export interface AssistantExecutionContext {
   hosted: AssistantHostedExecutionContext | null
+}
+
+export function appendAssistantHostedDynamicContextPrompt(input: {
+  executionContext: AssistantExecutionContext
+  prompt: string | null
+}): AssistantExecutionContext {
+  if (!input.prompt || !input.executionContext.hosted) {
+    return input.executionContext
+  }
+  return {
+    hosted: {
+      ...input.executionContext.hosted,
+      dynamicContextPrompts: [
+        ...(input.executionContext.hosted.dynamicContextPrompts ?? []),
+        input.prompt,
+      ],
+    },
+  }
 }
 
 export function normalizeAssistantExecutionContext(
@@ -472,6 +519,10 @@ export function normalizeAssistantExecutionContext(
   const personalizationTool = normalizeAssistantPersonalizationTool(
     hosted?.personalizationTool,
   )
+  const groupParticipantDisplayNameReader =
+    normalizeAssistantGroupParticipantDisplayNameReader(
+      hosted?.groupParticipantDisplayNameReader,
+    )
   const groupPermissionOfferTool = normalizeAssistantGroupPermissionOfferTool(
     hosted?.groupPermissionOfferTool,
   )
@@ -520,6 +571,9 @@ export function normalizeAssistantExecutionContext(
       ...(familyPlanTool ? { familyPlanTool } : {}),
       ...(imessageContactTool ? { imessageContactTool } : {}),
       ...(personalizationTool ? { personalizationTool } : {}),
+      ...(groupParticipantDisplayNameReader
+        ? { groupParticipantDisplayNameReader }
+        : {}),
       ...(groupPermissionOfferTool ? { groupPermissionOfferTool } : {}),
       ...(groupSharedReader ? { groupSharedReader } : {}),
       ...(groupTool ? { groupTool } : {}),
@@ -777,6 +831,20 @@ function normalizeAssistantGroupTool(
 
   return {
     request: input.request.bind(input),
+  }
+}
+
+function normalizeAssistantGroupParticipantDisplayNameReader(
+  input:
+    | AssistantHostedExecutionContext['groupParticipantDisplayNameReader']
+    | undefined,
+): AssistantHostedGroupParticipantDisplayNameReader | undefined {
+  if (!input || typeof input.read !== 'function') {
+    return undefined
+  }
+
+  return {
+    read: input.read.bind(input),
   }
 }
 

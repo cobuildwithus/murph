@@ -4,6 +4,7 @@ This document covers the narrow Cloudflare deploy surface for hosted execution.
 
 - `apps/web` remains the canonical owner of hosted product facts and lifecycle state.
 - `apps/cloudflare` owns execution coordination, encrypted runtime blobs, the native runner container, and the public/internal execution routes described in [README.md](./README.md).
+- Private `cobuildwithus/murph-cloud` owns production/preview GitHub environments, the protected deployment workflow, and rollback operations. Public Murph retains the source, render helpers, and smoke contracts that workflow consumes, but no deploy workflow or production credentials.
 
 ## What The Deploy Flow Produces
 
@@ -19,11 +20,11 @@ That rendered surface is then used by:
 - `pnpm --dir apps/cloudflare deploy:worker`
 - `pnpm --dir apps/cloudflare deploy:smoke`
 
-The rendered deploy helper path is the canonical direct Wrangler deploy contract. The checked-in Wrangler scaffold remains useful for local development, but production deploys should use the rendered config so hosted email send bindings stay environment-specific and sender-restricted.
+The rendered deploy helper path is the canonical direct Wrangler deploy contract consumed from the private deployment workflow. The checked-in Wrangler scaffold remains useful for local development, but production deploys must run from private Murph Cloud and use the rendered config so hosted email send bindings stay environment-specific and sender-restricted.
 `deploy:worker:apply` validates the generated Wrangler config, worker secrets payload, and `.deploy/runner-bundle/` manifest before invoking Wrangler. The runner bundle manifest records the assembled workspace closure and source/bundle fingerprints. Production assembly now builds the runner bundle first and renders those exact fingerprints into the Worker config; applying after a stale hosted-local bundle, a smoke-mutated bundle, or a config rendered for another bundle fails before upload.
 The deploy helper also rejects generated config or secrets that no longer match the current environment, and rejects runner bundles assembled with `runner:bundle:assemble-only` so smoke-only build shortcuts cannot be uploaded as production artifacts.
 Docker runner smoke derives a separate `.deploy/runner-smoke-bundle/` from the validated production bundle and overlays smoke-only entrypoints there, so the production `.deploy/runner-bundle/` remains the deploy artifact after smoke.
-Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budgets and assembly-time probes: the in-container `vault-cli` binary (`scripts/runner-bundle/bundle-cli.ts`) and the container entrypoint itself (`scripts/runner-bundle/bundle-entrypoint.ts`, output `dist-bundled/`, run by the image CMD). The bundled entrypoint cuts cold-boot module loading from ~960 file reads to ~27 chunk reads on lazily pulled image layers; package resolvers that derive asset paths from their own module location are pinned to the installed package copies via Dockerfile ENV (`MURPH_ASSISTANT_SKILLS_ROOT`, `MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH`, `MURPH_HEALTH_COMMONS_PACKAGE_ROOT`). Health Commons stays installed in the runner bundle for its generated catalog payload, while its JS is inlined and assembly probes set the same package-root pin for bundled and unbundled parity.
+Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budgets and assembly-time probes: the in-container `vault-cli` binary (`scripts/runner-bundle/bundle-cli.ts`) and the container entrypoint itself (`scripts/runner-bundle/bundle-entrypoint.ts`, output `dist-bundled/`, run by the image CMD). The bundled entrypoint cuts cold-boot module loading from ~960 file reads to ~27 chunk reads on lazily pulled image layers; package resolvers that derive asset paths from their own module location are pinned to the installed package copies via Dockerfile ENV (`MURPH_ASSISTANT_SKILLS_ROOT`, `MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH`, `MURPH_HEALTH_COMMONS_PACKAGE_ROOT`). Health Commons stays installed in the runner bundle for its compact protocol and biomarker desired-direction artifacts, while its JS is inlined and assembly probes set the same package-root pin for bundled and unbundled parity. The web-only Health Commons artifact tree remains excluded.
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
@@ -40,8 +41,9 @@ Before deploying the Worker version that introduces
 - secrets `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID` and
   `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN` for a dedicated PlanetScale
   token with only the organization-level `read_metrics_endpoints` permission;
-- secret `HOSTED_DATABASE_ALERT_LINQ_CHAT_ID` for the existing operator chat;
-  and
+- secrets `HOSTED_DATABASE_ALERT_LINQ_CHAT_ID` and
+  `HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID` for two separate existing
+  direct operator chats whose sole external recipients are different; and
 - the already-required `LINQ_API_TOKEN`.
 
 Deploy Cloudflare only; no Web or database migration is involved. Wrangler
@@ -53,6 +55,10 @@ do not induce a production database failure or mutate a real counter for smoke.
 Confirm Workers Observability contains no configuration or collection failure
 codes. Rollback may leave the unused v4 namespace and samples in place; an older
 Worker does not schedule or address it, and no Web compatibility window exists.
+After the two-recipient Worker has admitted a pending page, do not roll back to
+the former single-recipient implementation: it can clear that page after only
+the primary provider operation. The two-recipient Worker is the rollback floor
+until alerts are disabled or the pending page has cleared.
 
 ## Device-Sync Wake Epoch Rollout
 
@@ -358,6 +364,54 @@ New runners may send an optional `lineLookupKey` solely for post-send
 line-health attribution; old Web ignores it, and new Web retains its existing
 fallback when an older supported runner omits it.
 
+## Group Usage Projection Privacy and Monthly Sponsorship Rollout
+
+The group-tool `read_usage` parser temporarily accepts the exact current
+privacy-safe response and the immediately preceding exact response. This
+read-side tolerance is only the first deployment step.
+
+1. Deploy the Cloudflare Worker and runner bundle first with
+   `container_rollout=immediate`. Require managed-container smoke to report the
+   new bundle fingerprint and drain older warm runners. During this phase, old
+   Web may still emit
+   `{capacityState,fundingUrl,periodEnd,remainingPercent?}`; the new runtime
+   validates that exact shape, derives only whether funding is needed, maps it
+   to `not_sponsored`, and discards the period and percentage.
+2. Apply the additive capped-sponsorship migration, then deploy the compatible
+   Web release. Confirm both the migration and new Web have converged before
+   enabling monthly authorization creation or automatic refill admission. Web
+   must emit only `{fundingNeeded,fundingUrl,sponsorshipStatus}` before the
+   feature is enabled.
+3. Smoke one unsponsored and one sponsored group read. The runtime and assistant
+   may learn only `not_sponsored` or `sponsored`; quantitative fields must not
+   reappear.
+
+The first monthly authorization is the old-Web rollback floor. The preceding
+Web reconciliation code cannot activate that authorization, so after the first
+one is created, do not restore the old Web producer and do not roll
+Cloudflare/runner below the dual-reader bundle. Recover with a forward fix on
+that schema and compatible Web/runtime bundle. Before the first authorization,
+Web may be rolled back only while monthly creation and refill admission remain
+disabled and the additive schema is retained.
+
+The legacy reader exists only for the bounded cutover window. Remove it after
+old Web is neither routable nor rollback-eligible, all pre-reader warm runners
+have drained, and production evidence shows no preceding-shape responses. This
+is a narrow read-side seam, not a permanent rollout framework, and it must never
+restore group percentages, period boundaries, or other quantitative accounting
+to runtime or assistant policy.
+
+The current projection separates urgency from capability: `fundingNeeded`
+controls assistant-initiated depletion messaging, while a non-null `fundingUrl`
+may be used after an explicit funding request at any capacity. For that behavior,
+deploy the Cloudflare runner bundle first, then Web. Old Web leaves a healthy
+group's URL null, so the first step is inert; old runners may ignore a healthy
+URL from new Web, so the opposite skew is incomplete but safe. After both
+deployments, smoke an explicit funding request in a healthy unsponsored group
+and confirm Murph returns the first-party link without claiming the room needs
+funding. Open the link and confirm both monthly sponsorship and one-time
+contribution are available.
+
 ## Thread Usage Crossing Notice Rollout
 
 The assistant runtime usage-record request has an additive, optional Linq group
@@ -400,7 +454,7 @@ Before the first deploy:
 2. Apply `apps/cloudflare/r2-bundles-lifecycle.json` to the real bundles buckets, or run the normal worker deploy path, which reapplies it before deploying the Worker.
 3. Decide the public Worker URL, either `*.workers.dev` or a custom domain.
 
-The checked-in lifecycle file contains three narrow backstops. Raw hosted-email blobs and their encrypted recovery refs under `hosted-email/messages/` become deletion-eligible after 24 hours. Application-encrypted Linq avatar-ingress objects under `hosted-private-media/images/` also become deletion-eligible after 24 hours. Retries reuse the deterministic object and cap capability expiry at that object's original lifecycle boundary; at or after the boundary, the mutation-locked `UserRunner` replaces the same deterministic key before returning another bounded capability. Account deletion synchronously deletes the member prefix. Encrypted automatic meal-photo staging under `hosted-meal-photos/images/` becomes deletion-eligible after 31 days, one day beyond canonical mailbox recovery retention; successful imports still delete those objects immediately after checkpoint. R2 deletes eligible objects asynchronously. The rest of the encrypted objects in `BUNDLES` remain owner-cleaned or durable by design.
+The checked-in lifecycle file contains four narrow backstops. Raw hosted-email blobs and their encrypted recovery refs under `hosted-email/messages/` become deletion-eligible after 24 hours. Application-encrypted Linq avatar-ingress objects under `hosted-private-media/images/` also become deletion-eligible after 24 hours. Retries reuse the deterministic object and cap capability expiry at that object's original lifecycle boundary; at or after the boundary, the mutation-locked `UserRunner` replaces the same deterministic key before returning another bounded capability. Application-encrypted Environment voice recordings under `hosted-environment-voice/audio/` become deletion-eligible after 24 hours; successful processing deletes them immediately after the updated vault checkpoint. Account deletion synchronously deletes each member prefix. Encrypted automatic meal-photo staging under `hosted-meal-photos/images/` becomes deletion-eligible after 31 days, one day beyond canonical mailbox recovery retention; successful imports still delete those objects immediately after checkpoint. R2 deletes eligible objects asynchronously. The rest of the encrypted objects in `BUNDLES` remain owner-cleaned or durable by design.
 
 ## Required GitHub Environment Vars
 
@@ -429,7 +483,15 @@ For production deploys, `HOSTED_WEB_BASE_URL` must exactly match the normalized
 origin in `HOSTED_WEB_PRODUCTION_BASE_URL`; production preflight also rejects
 HTTP, localhost, `host.docker.internal`, loopback, preview/development, and
 private-network Worker and hosted web origins, including DNS names
-that resolve to private-network addresses.
+that resolve to private-network addresses. When
+`DEVICE_SYNC_PUBLIC_BASE_URL` is set, it may include a callback path but its
+hostname must match `HOSTED_WEB_BASE_URL`; a separate callback host cannot
+receive the host-only hosted app-session and callback-proof cookies. Cloudflare
+preflight owns this explicit-override comparison only. When the override is
+unset, hosted Web build validation derives the effective callback from
+`HOSTED_ONBOARDING_PUBLIC_BASE_URL`, `HOSTED_WEB_BASE_URL`, then the Vercel
+production fallback and rejects a split host; Cloudflare does not claim to
+derive that Web-owned value.
 The single member-scoped computer-use profile change is a greenfield hard cut,
 not an old-Web/old-Worker compatibility rollout. Keep hosted computer-use
 traffic paused during the Web/Worker skew window and finish the Worker deploy
@@ -440,6 +502,29 @@ The Worker also enforces that fingerprint contract on the normal user path. Befo
 
 The production smoke also runs one real `gpt-5.6-terra` model turn inside the deployed runner container (`HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN=true`, set by the deploy workflow's `live_model_turn` input, default on). The container runs a single non-interactive `codex exec` in a scratch workspace with the injected-credential placeholder; the Worker egress intercept authorizes exactly one deploy-smoke fenced `POST /v1/responses` request for `gpt-5.6-terra` and injects the real Worker-owned `OPENAI_API_KEY`, so the smoke proves the rollout target's OpenAI auth, account availability, quota, request compatibility, and network path without the raw key ever entering the container. The container accepts the smoke only when Codex JSONL reports the final agent output as exactly `OK`. Cost posture: exactly one bounded model turn per production deploy; the flag is never set in per-PR CI or hosted-local E2E, so those paths are byte-for-byte unchanged.
 
+## Venice Provider Activation
+
+Venice is an optional core-inference provider, not a replacement for the fleet
+default or specialized tool providers. Configure the selected GitHub
+Environment with these four values as one group:
+
+- secret `VENICE_API_KEY`
+- vars `HOSTED_VENICE_LUNA_MODEL`, `HOSTED_VENICE_TERRA_MODEL`, and
+  `HOSTED_VENICE_SOL_MODEL`
+
+Deploy preflight rejects a partial group. Keep the hosted Web
+`HOSTED_VENICE_ENABLED` flag off while applying the nullable member migration
+and deploying the compatible Web reader. Then deploy Cloudflare and the runner
+with `container_rollout=immediate`, require the exact runner fingerprint, and
+exercise a controlled core turn that reaches Venice through the Worker
+intercept without exposing the key to the container. Only after that proof
+should Web enable the flag and redeploy so Settings can offer Venice.
+
+Rollback in the opposite exposure order: disable the Web flag and redeploy Web
+first, verify new workspace reads omit the Venice override, and only then
+remove the Venice secret/mappings or roll Cloudflare back. The nullable stored
+preference may remain; while the flag is off it resolves to OpenAI.
+
 ## Required GitHub Environment Secrets
 
 Set these in the selected GitHub environment as secrets:
@@ -449,6 +534,7 @@ Set these in the selected GitHub environment as secrets:
 - `CLOUDFLARE_IMAGES_SIGNING_KEY`
 - `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK`
 - `HOSTED_DATABASE_ALERT_LINQ_CHAT_ID`
+- `HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID`
 - `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN`
 - `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID`
 - `HOSTED_LOG_FINGERPRINT_SECRET`
@@ -467,6 +553,15 @@ hosted Web; the Worker and runner carry only the normalized semantic
 request/response. Deploy the compatible Web route and credential first, then
 Cloudflare/runtime. Roll back Cloudflare/runtime first so deploy skew fails
 closed as Labs unavailable instead of calling a removed Web route.
+
+For the first OpenAI/Venice provider-choice release, keep
+`HOSTED_VENICE_ENABLED` disabled until both Web and Cloudflare/runtime are
+deployed. A new runtime accepts the preceding provider-less assistant
+configuration response as OpenAI, so either deploy order preserves ordinary
+replies while the flag is closed. Deploy Web before enabling Venice, deploy
+Cloudflare/runtime immediately afterward with `container_rollout=immediate`,
+then enable the Web flag only after managed-container smoke reports the new
+runner fingerprint. Roll back by disabling the Web flag first.
 The Cloudflare automation private JWK is only used to unwrap the `cloudflare-automation-secret` recipient on signed ingress/runtime domain-root envelopes returned by hosted web.
 `OPENAI_API_KEY` is required by the standard Worker deploy preflight because the hosted assistant provider path expects Worker-owned OpenAI egress interception. The runner container still receives only an injected-credential placeholder; the raw key stays in the Worker.
 `HOSTED_LOG_FINGERPRINT_SECRET` is required so prompt-cache diagnostics can persist stable, Worker-owned request fingerprints without logging prompts, messages, request bodies, headers, or raw identifiers. It must stay out of hosted runtime env.
@@ -554,11 +649,16 @@ Hosted crypto authority metadata:
 
 Hosted assistant config:
 
-- `HOSTED_ASSISTANT_PROVIDER`
+- `HOSTED_ASSISTANT_PROVIDER`; keep the fleet default `openai`. A per-member
+  Venice selection arrives through the signed workspace projection rather than
+  this deploy default.
 - `HOSTED_ASSISTANT_MODEL`; worker deploy preflight requires an explicit allowance-priced direct OpenAI model slug. Supported slugs are `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`. Production deploys require `HOSTED_ASSISTANT_REASONING_EFFORT=low`.
 - `HOSTED_ASSISTANT_APPROVAL_POLICY`
 - `HOSTED_ASSISTANT_REASONING_EFFORT`
 - `HOSTED_ASSISTANT_SANDBOX`
+- Optional all-or-none Venice model mappings: `HOSTED_VENICE_LUNA_MODEL`,
+  `HOSTED_VENICE_TERRA_MODEL`, and `HOSTED_VENICE_SOL_MODEL`, paired with the
+  `VENICE_API_KEY` GitHub Environment secret.
 
 When changing hosted assistant model pricing or allowance enforcement, deploy the
 Cloudflare Worker/runner model config before or atomically with the hosted web
@@ -591,6 +691,18 @@ Opt-in runtime integrations:
 - `JUNCTION_RECONCILE_DAYS`
 - `JUNCTION_RECONCILE_INTERVAL_MS`
 - `JUNCTION_REQUEST_TIMEOUT_MS`
+
+`DEVICE_SYNC_PUBLIC_BASE_URL` is optional. When set, it may select a stable
+provider callback/webhook path on the hosted Web hostname, but it must not use a
+separate device-sync hostname. Both production and preview preflight reject the
+explicit split-host shape before render, secret sync, lifecycle mutation, or
+deploy. When it is unset, hosted Web build validation—not Cloudflare
+preflight—proves the derived callback hostname against every configured browser
+surface.
+Correct the callback hostname before either Web or Worker deployment, and ship
+the Web start/build guard with the Cloudflare preflight change. During a skewed
+rollout the Web start guard still fails closed before OAuth state or provider
+authorization; do not bypass it to recover an invalid split-host environment.
 
 Native parser binaries are owned by the runner image and passed to the hosted runtime through explicit parser toolchain config, not deploy-time env overrides. Hosted audio transcription has no in-image model: the parser toolchain points at the Worker-mediated `murph-transcribe.worker` host and the Worker calls the Workers AI `AI` binding (`@cf/openai/whisper-large-v3-turbo`).
 
@@ -814,7 +926,7 @@ anonymous pulls without exposing package credentials to PR-controlled commands.
 
 ## Preview Staging Lane
 
-The manual protected-main workflow has one non-production target: `preview`.
+The private protected-main workflow has one non-production target: `preview`.
 It uses the same generated config, secret renderer, Wrangler deploy, lifecycle
 application, and smoke owner as production, but attaches the existing GitHub
 `Preview` Environment. Do not add a second Wrangler config or deploy workflow.
@@ -834,14 +946,16 @@ Before the first preview Worker deploy:
    `HOSTED_WEB_PRODUCTION_BASE_URL` must be the production origin used only for
    the inequality guard. The Worker and Web origins must be distinct. If device
    sync is enabled, `DEVICE_SYNC_PUBLIC_BASE_URL` must be a public staging HTTPS
-   URL; its callback path is allowed, but its origin must not be production Web.
+   URL on the same hostname as preview `HOSTED_WEB_BASE_URL`; its callback path
+   is allowed, but a separate callback hostname is not.
 3. Create only the staging R2 bucket or buckets, with the required location,
    and issue the direct-R2 key against those buckets only. Apply the checked-in
    lifecycle rules before stateful use.
 4. Dispatch from protected `main`:
 
    ```bash
-   gh workflow run .github/workflows/deploy-cloudflare-hosted.yml \
+   gh workflow run deploy-cloudflare-hosted.yml \
+     --repo cobuildwithus/murph-cloud \
      --ref main \
      -f environment=preview \
      -f sync_worker_secrets=true \
@@ -856,7 +970,8 @@ Preflight runs before artifact rendering, secret sync, lifecycle changes, or
 Worker deployment and rejects a mismatched crypto/OIDC context, unscoped
 Worker or R2 name, non-staging Worker/Web origin, production Web alias, local
 or private-network origin, private-network DNS resolution, Worker/Web
-self-routing, or a non-staging device-sync callback. Preview deploys never run
+self-routing, or a device-sync callback whose hostname differs from hosted Web.
+Preview deploys never run
 the paid live-model deploy smoke; endpoint, managed-container, runner-bundle,
 assistant CLI, and immediate direct-R2 smoke still run.
 
@@ -884,12 +999,25 @@ That command:
 
 - runs deploy preflight inside the apply step before artifact validation and upload
 - renders the deploy config and worker secrets payload
-- assembles the runner bundle, building and packing the runner workspace closure with bounded parallelism (`MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY` and `MURPH_RUNNER_BUNDLE_PACK_CONCURRENCY`, both defaulting to `4`); runner-specific CLI and Health Commons tarballs keep the deployed `murph` / `vault-cli` and catalog surfaces without the public npm package's nested bundled workspace payload or web-only Health Commons artifacts
+- assembles the runner bundle, building and packing the runner workspace closure with bounded parallelism (`MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY` and `MURPH_RUNNER_BUNDLE_PACK_CONCURRENCY`, both defaulting to `4`); runner-specific CLI and Health Commons tarballs keep the deployed `murph` / `vault-cli`, compact protocol artifacts, and compact biomarker desired-direction projection without the public npm package's nested bundled workspace payload or web-only Health Commons artifacts
 - prepares the stable native runner base image with Docker's local cache; production deploy paths force that build from source, while hosted-local E2E lanes may reuse the GHCR-published runner base image when the source fingerprint matches the current checkout
 - deploys the Worker directly with Wrangler; production deploys currently default to immediate container rollout for the vault-share selector-scope migration, while non-production deploys default to gradual and build only the small app image layer from the prepared runner bundle
 
 The gradual container rollout keeps the production `RunnerContainer` `rollout_active_grace_period` at 300 seconds and rolls runner instances through `10`, `25`, `50`, then `100` percent. The isolated `DeploySmokeRunnerContainer` uses zero active grace and a single 100 percent step: it carries no user work, and smoke probes must not defer the image replacement they are trying to verify. The manual workflow exposes a `container_rollout` input; its production default is currently `immediate` because selector-scoped vault-share deliveries are unsafe under gradual runner rollout. Selecting `immediate` passes Wrangler's `--containers-rollout=immediate` flag and can interrupt active runner containers.
 During gradual rollout, Worker code and runner container state may disagree for the rollout window. A newly deployed Worker version can handle provider egress or internal-host traffic from an already-running warm runner process whose bundle, process env, or provider-credential shape was created before the deploy. Treat this as expected rollout behavior, not proof that traffic is reaching an old Worker version. Any PR that changes a Worker/container contract, runner env shape, hosted provider credential, internal host route, parser/toolchain path, or bundle-owned runtime assumption must document the compatibility window in its PR description and final `DEPLOYMENT CONCERNS:` handoff: whether old containers can safely talk to new Worker code, whether new containers can safely talk to old web/control-plane code, whether `container_rollout=immediate` is required, and which deploy-smoke or Workers Observability checks prove the fleet has converged.
+
+The accepted group-message participant rollout is Web-first. Deploy the Web
+release that accepts both new exact `groupRequester` / `participant` evidence
+and the legacy mailbox / self-opt-out fallbacks before deploying the Worker and
+runner that send only the new fields. Roll back Worker/runner first. After
+managed-container smoke proves the new runner fingerprint and all warm old
+runners have drained, the legacy Web-only fields may be removed in a separate
+contracting release. This order also covers optional group-speaker provenance:
+old runners may leave owner-contact labels unnamed when new Web emits the
+additive source field, but conversation and exact participant authorization
+remain available. After convergence, smoke one profile-name label, one
+unverified owner-contact label, and one participant-scoped action selected by
+an opaque accepted-message ref.
 
 The scheduled Linq authority release has a Web-first hard gate. Deploy and
 verify Web's concrete-target/directness response before deploying Cloudflare
@@ -959,9 +1087,9 @@ separate migration or forward runtime that removes the read-route dependency.
 
 Archived integration-ingest amendment receipts are a runner-bundle restore format change. The first production deploy that can emit `allowArchivedIntegrationIngestAmendment` hosted canonical write receipts must deploy Cloudflare/runner with `container_rollout=immediate`; Vercel/web has no ordering dependency for that change. Gradual container rollout is unsafe for the first deploy because warm old runner bundles can still restore a workspace checkpoint that carries a legacy or interrupted receipt-log ref without preserving the archived-amendment flag. New idle checkpoints snapshot the canonical vault state and omit pending receipt-log refs from committed workspace status, so the rollback floor only applies if a production workspace already has a committed archived-amendment receipt-log ref. After deployed managed-container smoke reports the new runner-bundle fingerprint, later ordinary deploys may return to gradual rollout. Post-deploy checks: run managed-container smoke and inspect hosted runtime restore logs for archived-ingest append-base mismatch or `INTEGRATION_INGEST_SHARD_ARCHIVED` errors.
 
-Before the production deploy job attaches the GitHub environment, protected-main-only Blacksmith predeploy gates run the hosted-local E2E checks. Worker deploy runs also run a Blacksmith runner smoke gate, which assembles the runner bundle from the same commit, prepares the stable base image, then runs the focused Cloudflare checks in parallel with `pnpm --dir apps/cloudflare runner:docker:smoke:prepared-base`. That smoke builds the app smoke image, overlays test entrypoints into an isolated `.deploy/runner-smoke-bundle/`, and executes the hosted runner inside Docker without production secrets.
-For `pnpm cf:deploy:immediate`, the workflow skips the slower E2E and runner smoke gates but still runs the protected-main hosted Codex auth regression with `MURPH_RUN_HOSTED_CODEX_AUTH_E2E=1`. It otherwise inherits the same deploy defaults as `pnpm cf:deploy`, including the configured runner idle TTL and the default hosted-email send binding behavior.
-The Blacksmith production deploy job verifies the protected-main checkout, assembles and validates `.deploy/runner-bundle/`, and prepares the stable native base image in the same job for every Worker deploy. Build steps do not receive production secrets. The job then renders env-specific deploy config and Worker secrets, dry-runs the generated Wrangler deploy bundle, deploys directly with Wrangler, and runs deployed endpoint smoke. Render-only workflow runs skip the runner build while still executing focused Cloudflare checks in the deploy job.
+Before the private production deploy job attaches the GitHub environment, protected-main-only Blacksmith predeploy gates run the hosted-local E2E checks against one immutable public Murph revision and the private worker. Worker deploy runs also run a Blacksmith runner smoke gate, which assembles the runner bundle from that revision, prepares the stable base image, then runs the focused Cloudflare checks in parallel with `pnpm --dir apps/cloudflare runner:docker:smoke:prepared-base`. That smoke builds the app smoke image, overlays test entrypoints into an isolated `.deploy/runner-smoke-bundle/`, and executes the hosted runner inside Docker without production secrets.
+The private workflow's explicit immediate path may skip the slower E2E and runner smoke gates only while retaining the protected-main hosted Codex auth regression with `MURPH_RUN_HOSTED_CODEX_AUTH_E2E=1`; normal production dispatches keep the full gates.
+The Blacksmith production deploy job verifies both protected-main checkouts, assembles and validates `.deploy/runner-bundle/`, and prepares the stable native base image in the same job for every Worker deploy. Build steps do not receive production secrets. The job then renders env-specific deploy config and Worker secrets, dry-runs the generated Wrangler deploy bundle, deploys directly with Wrangler, and runs deployed endpoint smoke. Render-only workflow runs skip the runner build while still executing focused Cloudflare checks in the deploy job.
 
 Gradual deploys run managed-container smoke with a longer retry window so Cloudflare has time to surface a container running the newly deployed version and expected runner-bundle fingerprint. The direct-R2 deployed smoke still runs only for `container_rollout=immediate`. The normal deploy path also proves the runner image with the protected-main runner smoke gate before the production environment attaches.
 

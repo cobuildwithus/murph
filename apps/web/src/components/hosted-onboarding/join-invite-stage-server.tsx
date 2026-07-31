@@ -15,12 +15,15 @@ import { Button } from "@/src/components/ui/button";
 import { PlanVisual } from "@/src/components/ui/plan-visual";
 import { ConsentSkeleton } from "@/src/components/legal/hosted-legal-consent-card";
 import { MurphAddToContactsButton } from "@/src/components/murph/murph-contact-card-picker";
+import { HostedFamilyStartButton } from "@/src/components/settings/hosted-family-start-button";
 import { ContactSupportAction } from "@/src/components/support/contact-support-action";
 import {
+  HOSTED_FAMILY_PLAN_DISPLAY,
   HOSTED_PULSE_TRIAL_DAYS,
   isHostedAutoPulseTrialEnabled,
   isHostedPulseTrialCheckoutEnabled,
 } from "@/src/lib/hosted-onboarding/billing-plans";
+import type { HostedFamilyBillingRecoveryState } from "@/src/lib/hosted-onboarding/family-plan";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 import { buildHostedTelegramBotLink } from "@/src/lib/hosted-onboarding/telegram";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
@@ -69,9 +72,19 @@ const EDGE_FEATURES = [
   "Early access to new features",
 ];
 
+const FAMILY_FEATURES = [
+  "2 to 6 people, one bill",
+  "Choose Pulse or Edge for each person",
+  "Each person keeps a private Murph",
+  "Family members' chats and health data stay private",
+];
+
 export function JoinInviteStageServer({ model }: { model: JoinInvitePageModel }) {
   const { status } = model;
-  const autoPulseTrialReady = isJoinInviteAutoPulseTrialReady(status);
+  const autoPulseTrialReady = isJoinInviteAutoPulseTrialReady(
+    status,
+    model.familyBillingRecovery,
+  );
 
   return (
     <>
@@ -113,21 +126,46 @@ export function JoinInviteStageServer({ model }: { model: JoinInvitePageModel })
         </div>
       ) : null}
 
+      {!model.launchConsent.gateActive
+      && status.stage === "checkout"
+      && model.familyBillingRecovery === "checkout" ? (
+        <JoinInviteFamilyCheckoutContinuationPanel />
+      ) : null}
+
+      {!model.launchConsent.gateActive
+      && status.stage === "checkout"
+      && model.familyBillingRecovery === "syncing" ? (
+        <JoinInviteFamilyBillingSyncPanel />
+      ) : null}
+
       {!model.launchConsent.gateActive && status.stage === "checkout" && autoPulseTrialReady ? (
         <JoinInviteAutoTrialIsland inviteCode={model.inviteCode} />
       ) : null}
 
-      {!model.launchConsent.gateActive && status.stage === "checkout" && !autoPulseTrialReady && status.messagingSetupRequired ? (
+      {!model.launchConsent.gateActive
+      && status.stage === "checkout"
+      && model.familyBillingRecovery !== "checkout"
+      && model.familyBillingRecovery !== "syncing"
+      && !autoPulseTrialReady
+      && status.messagingSetupRequired ? (
         <JoinInviteMessagingSetupPanel
           authenticated={status.session.authenticated}
+          expectedPrivyUserId={model.expectedPrivyUserId}
           initialTelegramAccount={model.telegramAccountForMessagingSetup}
+          privySessionMatchesAppSession={model.privySessionMatchesAppSession}
         />
       ) : null}
 
-      {!model.launchConsent.gateActive && status.stage === "checkout" && !autoPulseTrialReady && !status.messagingSetupRequired ? (
+      {!model.launchConsent.gateActive
+      && status.stage === "checkout"
+      && model.familyBillingRecovery !== "checkout"
+      && model.familyBillingRecovery !== "syncing"
+      && !autoPulseTrialReady
+      && !status.messagingSetupRequired ? (
         <JoinInviteCheckoutPanel
           billingReady={status.capabilities.billingReady}
           billingPlans={status.billing.plans}
+          familyBillingRecovery={model.familyBillingRecovery}
           inviteCode={model.inviteCode}
         />
       ) : null}
@@ -148,8 +186,10 @@ export function JoinInviteStageServer({ model }: { model: JoinInvitePageModel })
 
 export function isJoinInviteAutoPulseTrialReady(
   status: HostedInviteStatusPayload,
+  familyBillingRecovery: HostedFamilyBillingRecoveryState | null = null,
 ): boolean {
   return isHostedAutoPulseTrialEnabled() &&
+    familyBillingRecovery === null &&
     status.capabilities.billingReady &&
     !status.messagingSetupRequired &&
     status.billing.plans.some((plan) => plan.code === "launch_monthly");
@@ -249,28 +289,36 @@ function JoinInviteLaunchLegalConsentPanel({
 
 function JoinInviteMessagingSetupPanel({
   authenticated,
+  expectedPrivyUserId,
   initialTelegramAccount,
+  privySessionMatchesAppSession,
 }: {
   authenticated: boolean;
+  expectedPrivyUserId: string | null;
   initialTelegramAccount: JoinInviteTelegramAccountSeed | null;
+  privySessionMatchesAppSession: boolean;
 }) {
   return (
     <JoinInvitePanelCard>
       <JoinInviteMessagingSetupIsland
         authenticated={authenticated}
+        expectedPrivyUserId={expectedPrivyUserId}
         initialTelegramAccount={initialTelegramAccount}
+        privySessionMatchesAppSession={privySessionMatchesAppSession}
       />
     </JoinInvitePanelCard>
   );
 }
 
-function JoinInviteCheckoutPanel({
+export function JoinInviteCheckoutPanel({
   billingReady,
   billingPlans,
+  familyBillingRecovery = null,
   inviteCode,
 }: {
   billingReady: boolean;
   billingPlans: HostedInviteStatusPayload["billing"]["plans"];
+  familyBillingRecovery?: HostedFamilyBillingRecoveryState | null;
   inviteCode: string;
 }) {
   const pulsePlan = billingPlans.find((p) => p.code === "launch_monthly") ?? null;
@@ -281,7 +329,13 @@ function JoinInviteCheckoutPanel({
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,18rem),1fr))] gap-4">
+      <div
+        className={
+          familyBillingRecovery === "available"
+            ? "grid gap-4 sm:grid-cols-2"
+            : "grid grid-cols-[repeat(auto-fit,minmax(min(100%,18rem),1fr))] gap-4"
+        }
+      >
         <PricingTierCard
           tier="free"
           name="Pulse Trial"
@@ -338,6 +392,25 @@ function JoinInviteCheckoutPanel({
             />
           }
         />
+
+        {familyBillingRecovery === "available" ? (
+          <PricingTierCard
+            tier="family"
+            name="Family"
+            description="Private Murph accounts for the people closest to you."
+            price={`$${Math.round(
+              HOSTED_FAMILY_PLAN_DISPLAY.recurringAmountUsdCentsPerSeat / 100,
+            )}`}
+            priceUnit="/ person / month"
+            features={FAMILY_FEATURES}
+            cta={
+              <HostedFamilyStartButton
+                block
+                label="Restart Family"
+              />
+            }
+          />
+        ) : null}
       </div>
 
       <div className="text-center text-sm text-muted-foreground">
@@ -377,6 +450,66 @@ function JoinInviteCheckoutPanel({
   );
 }
 
+export function JoinInviteFamilyBillingSyncPanel() {
+  return (
+    <div
+      aria-busy="true"
+      aria-live="polite"
+      className="rounded-xl border border-border bg-card px-6 py-7 sm:px-8"
+      role="status"
+    >
+      <div className="flex items-start gap-4">
+        <span
+          aria-hidden
+          className="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
+        >
+          <RefreshCwIcon className="size-4" />
+        </span>
+        <div className="max-w-xl">
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            Family billing
+          </p>
+          <h3 className="mt-2 font-serif text-2xl font-semibold tracking-tight text-foreground">
+            Your Family plan is syncing
+          </h3>
+          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+            Stripe is confirming the plan. This page checks automatically and
+            will continue when Family access is ready.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function JoinInviteFamilyCheckoutContinuationPanel() {
+  return (
+    <div className="rounded-xl border border-border bg-card px-6 py-7 sm:px-8">
+      <div className="flex items-start gap-4">
+        <PlanVisual tier="pulse" />
+        <div className="min-w-0 flex-1">
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            Family checkout
+          </p>
+          <h3 className="mt-2 font-serif text-2xl font-semibold tracking-tight text-foreground">
+            Your Family checkout is still open
+          </h3>
+          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+            Continue to Stripe using the same secure checkout. Individual plans
+            stay unavailable while this Family checkout is open.
+          </p>
+          <div className="mt-5">
+            <HostedFamilyStartButton
+              block
+              label="Continue Family checkout"
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PricingTierCard({
   name,
   description,
@@ -392,12 +525,14 @@ function PricingTierCard({
   priceUnit: string;
   features: readonly string[];
   cta: ReactNode;
-  tier: "free" | "go" | "plus";
+  tier: "family" | "free" | "go" | "plus";
 }) {
   return (
     <div className="flex min-w-0 flex-col rounded-xl border border-border bg-background px-7 pt-6 pb-8">
       <div className="flex items-center gap-3">
-        <PlanVisual tier={tier === "go" ? "pulse" : tier === "plus" ? "edge" : "free"} />
+        <PlanVisual
+          tier={tier === "plus" ? "edge" : tier === "free" ? "free" : "pulse"}
+        />
         <h3 className="font-serif text-3xl font-normal tracking-tight text-foreground">
           {name}
         </h3>

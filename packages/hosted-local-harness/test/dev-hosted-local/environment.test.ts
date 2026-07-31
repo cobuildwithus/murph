@@ -1457,8 +1457,14 @@ describe("buildWranglerEnvFileText", () => {
         MURPH_HOSTED_LOCAL_PROFILE: "dev",
         MURPH_DATA_API_KEY: "local-data-api-key",
         OPENAI_API_KEY: "local-openai-key",
+        VENICE_API_KEY: "local-venice-key",
       }),
     ).toContain('OPENAI_API_KEY="local-openai-key"');
+    expect(
+      buildWranglerEnvFileText({
+        VENICE_API_KEY: "local-venice-key",
+      }),
+    ).toContain('VENICE_API_KEY="local-venice-key"');
     expect(
       buildWranglerEnvFileText({
         MURPH_DATA_API_KEY: "local-data-api-key",
@@ -1830,17 +1836,19 @@ describe("buildWranglerLocalDevConfig", () => {
     });
   });
 
-  it("declares Worker-owned data API and OpenAI credentials as local worker secrets", () => {
+  it("declares Worker-owned data API and provider credentials as local worker secrets", () => {
     const config = buildWranglerLocalDevConfig({
       HOSTED_ASSISTANT_PROVIDER: "openai",
       MURPH_DATA_API_KEY: "local-data-api-key",
       OPENAI_API_KEY: "local-openai-key",
+      VENICE_API_KEY: "local-venice-key",
     });
 
     expect(config.secrets).toEqual({
       required: expect.arrayContaining([
         "MURPH_DATA_API_KEY",
         "OPENAI_API_KEY",
+        "VENICE_API_KEY",
       ]),
     });
     expect(config.vars).toMatchObject({
@@ -1848,6 +1856,7 @@ describe("buildWranglerLocalDevConfig", () => {
     });
     expect(config.vars).not.toHaveProperty("MURPH_DATA_API_KEY");
     expect(config.vars).not.toHaveProperty("OPENAI_API_KEY");
+    expect(config.vars).not.toHaveProperty("VENICE_API_KEY");
   });
 
   it("declares the dev Codex subscription auth JSON as a local worker secret, never a config var", () => {

@@ -5,6 +5,10 @@ import type {
   HostedRuntimeNewsletterToolResponse,
   HostedRuntimeNewsletterScheduledAuthority,
 } from '@murphai/hosted-execution/runtime-control'
+import {
+  HOSTED_ASSISTANT_DEFAULT_PROVIDER,
+  HOSTED_ASSISTANT_VENICE_PROVIDER,
+} from '@murphai/hosted-execution/assistant-model'
 import type {
   HostedExecutionAssistantAskOrigin,
 } from '@murphai/hosted-execution/contracts'
@@ -118,6 +122,7 @@ export interface AssistantHostedToolContext {
   currentHostedDeliveryContext(): AssistantHostedDeliveryContext | null
   currentAssistantTarget?(): {
     model: string | null
+    provider: string | null
     reasoningEffort: string | null
   }
   currentHostedMailboxItemIds(): readonly string[]
@@ -172,6 +177,7 @@ export function createAssistantHostedToolContext(input: {
   recordNewsletterSendResult?: (
     result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
   ) => void
+  recordNewsletterPendingDeliveryIntentId?: (intentId: string) => void
   sendVaultFile?: (
     ref: string,
     toolCallId?: string | null,
@@ -206,6 +212,8 @@ export function createAssistantHostedToolContext(input: {
         automationAuthority: input.messageInput.outboxAutomationAuthority ?? null,
         authority: input.messageInput.scheduledAutomationAuthority ?? null,
         newsletterTool: newsletterPort,
+        recordPendingDeliveryIntentId:
+          input.recordNewsletterPendingDeliveryIntentId,
         sessionId: input.session.sessionId,
         turnId: input.newsletterOutbox.turnId,
         vault: input.newsletterOutbox.vault,
@@ -331,6 +339,10 @@ export function createAssistantHostedToolContext(input: {
       const session = readDeliveryContext().session
       return {
         model: session.providerOptions.model ?? null,
+        provider:
+          session.providerOptions.modelProvider === HOSTED_ASSISTANT_VENICE_PROVIDER
+            ? HOSTED_ASSISTANT_VENICE_PROVIDER
+            : HOSTED_ASSISTANT_DEFAULT_PROVIDER,
         reasoningEffort: session.providerOptions.reasoningEffort ?? null,
       }
     },

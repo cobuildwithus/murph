@@ -1,10 +1,11 @@
-# Hosted Plan Downgrades
+# Hosted Scheduled Plan Changes
 
-Last verified: 2026-07-26
+Last verified: 2026-07-30
 
 ## Goal
 
-Maintain a clean Edge-to-Pulse plan switch that relies on Stripe for billing state, timing, invoices, and future subscription changes.
+Maintain narrow direct-plan changes that rely on Stripe for billing state,
+timing, invoices, and future subscription changes.
 
 The product behavior is:
 
@@ -16,53 +17,88 @@ The product behavior is:
 
 ## Current State
 
-The app supports both the Pulse-to-Edge upgrade and the explicit Edge-to-Pulse
-scheduled switch:
+The app supports immediate upgrades and explicit renewal-bound changes:
 
-- `POST /api/settings/billing/upgrade-plan` accepts only `launch_edge_monthly`.
-- `upgradeHostedBillingPlan` is upgrade-shaped and only permits `launch_monthly -> launch_edge_monthly`.
-- `POST /api/settings/billing/switch-to-pulse` schedules `launch_edge_monthly -> launch_monthly` at the next renewal through `scheduleHostedBillingPlanSwitchToPulse`.
-- `/settings` computes and renders both upgrade and switch actions when the current billing state makes them eligible.
+- `POST /api/settings/billing/upgrade-plan` accepts Pulse or Edge targets.
+- `upgradeHostedBillingPlan` permits Group to Pulse or Edge and Pulse to Edge.
+- `POST /api/settings/billing/switch-plan` schedules an eligible Group or Pulse
+  target at the current paid period or active trial end.
+- the historical Edge-to-Pulse route and service remain compatibility delegates;
+- `/settings` computes and renders only transitions admitted by the shared
+  server policy.
 - `Manage subscription` opens Stripe Customer Portal for payment methods, invoices, and other Stripe-managed account work.
 
-The app-owned Edge-to-Pulse path is intentionally narrow; arbitrary plan
-transitions still stay out of scope.
+The transition graph is explicit. Arbitrary plan-code routing, reversal, and
+merging with foreign schedules stay out of scope.
 
 ## Hosted Assistant Configuration
 
-Active personal members can inspect and explicitly choose the assistant target
-that Murph should use on the next hosted turn:
+Active personal members and authenticated group-room runtimes can inspect and
+explicitly choose the assistant target that Murph should use on the next hosted
+turn:
 
+- OpenAI is the default core assistant provider. When the operator-controlled
+  Venice rollout flag is enabled, an active personal member may choose Venice
+  instead. The choice changes core assistant inference only; specialized tools
+  can continue to use their own managed providers.
+- Settings may state that Murph disables OpenAI response storage because the
+  direct Responses path sends `store: false`, which [disables Responses API
+  storage](https://developers.openai.com/api/docs/guides/migrate-to-responses#4-decide-when-to-use-statefulness).
+  This does not promise zero data retention: OpenAI separately documents
+  [abuse-monitoring, prompt-cache, and endpoint retention
+  controls](https://developers.openai.com/api/docs/guides/your-data#v1responses),
+  and third-party tools remain subject to their own retention policies.
+- Settings may call Venice privacy-first and state that Venice stores no prompts
+  or replies, consistent with [Venice's API privacy
+  documentation](https://docs.venice.ai/welcome/privacy). This is a
+  Venice-layer disclosure, not a Murph-enforced privacy mode: Murph does not
+  inspect or lock the operator-mapped model's privacy badge, and the setting
+  must not imply E2EE, TEE, or a broader upstream retention or training
+  guarantee.
 - Luna and Terra are available to every active personal member. Terra remains
   the default when no personal model override is stored.
 - Synthetic thread-container runtimes use Sol by default from the existing
-  thread-container relation. They have no writable or persisted model or
-  reasoning preference.
+  thread-container relation. An explicit current-room request may choose Luna,
+  Terra, or Sol for that room through `murph.assistant_configuration`. Group
+  provider and reasoning remain fixed to OpenAI and `low`; the tool never reads
+  or changes a participant's private configuration.
 - Settings keeps Luna and Terra editable for non-Edge personal members and
   explains that Sol requires paid Edge access. A paid Pulse member who is
   eligible for the direct upgrade sees the existing Edge upgrade action; other
   ineligible members see the Edge requirement without a billing action.
 - Only an active, unsuspended personal member with direct paid Edge access or an
-  active paid Family Edge assignment can choose Sol. Family Pulse assignments,
-  direct Pulse, and trials do not qualify. Synthetic thread-container members
-  receive their derived Sol target but cannot mutate or persist a preference.
-- The common reasoning choices are `low`, `medium`, `high`, and `xhigh`. `low`
-  is the default when no reasoning override is stored.
-- Postgres stores nullable non-default model and reasoning intent only for the
-  personal member. It is the only durable owner; the vault, hosted workspace
-  snapshot, and assistant runtime do not keep a second preference. The
-  thread-container Sol target remains derived rather than stored.
+  active paid Family Edge assignment can choose Sol for their personal runtime.
+  Family Pulse assignments, direct Pulse, and trials do not qualify. Synthetic
+  thread-container runtimes keep their existing relation-derived Sol default and
+  may choose any supported room model without reading personal plan state.
+- The common personal reasoning choices are `low`, `medium`, `high`, and
+  `xhigh`. `low` is both the personal default and the fixed group-room value.
+- Postgres stores nullable provider, model, and reasoning intent on the existing
+  `HostedMember` row. It remains the only durable owner; the vault, hosted
+  workspace snapshot, and assistant runtime do not keep a second preference.
+  For a personal member, a null model means Terra. For a synthetic
+  thread-container member, null means the relation-derived Sol default, while an
+  explicit Luna or Terra room choice uses the same existing model field. No
+  group-settings table, migration, or second state machine is added.
 - A scheduled switch to Pulse keeps Sol available until Stripe applies the
   Pulse phase and reconciliation changes the current billing state. After that
   boundary, Terra is effective while the stored Sol intent remains available
   for a later Edge reactivation.
-- The signed workspace read projects either an eligible personal member's
-  non-default model and reasoning effort or the relation-derived thread-container
-  Sol model to the runner at the next hosted invocation boundary. This is also
-  the activation boundary for changes made through Settings. An already-active
-  invocation can retain that snapshot through its bounded 180-second idle
-  window, so Settings states that an idle run can take up to three minutes to
-  close.
+- The signed workspace read projects an eligible personal member's provider,
+  model, and reasoning effort or a synthetic thread-container's resolved room
+  model to the runner at the next hosted invocation boundary. If Venice is
+  disabled, a stored personal Venice preference resolves to OpenAI without
+  deleting member intent. This remains the activation boundary for changes made
+  through Settings. After an effective provider change commits, Settings sends
+  a bounded payloadless Temporal runtime-wake signal. Temporal coalesces
+  duplicate provider wakes and asks the existing Cloudflare adapter to process
+  one even when reconciliation facts are idle. A warm invocation compares its
+  provider snapshot with the live Web-owned preference, checkpoints immediately
+  when they differ, and returns the existing immediate-recheck edge so a fresh
+  invocation adopts the saved provider before the next message. Signal failure
+  does not undo the durable save: the next invocation and the provider-entry
+  revalidation remain correctness backstops. Model-only and reasoning-only
+  changes keep the existing warm-invocation behavior.
 - A confirmed `murph.assistant_configuration` update is different: its
   authoritative full web response becomes an ephemeral target for the next
   separately accepted provider turn, including a follow-up serviced by the
@@ -72,22 +108,26 @@ that Murph should use on the next hosted turn:
   invocation always rereads the web-owned preference. At idle shutdown, a
   model or reasoning change does not replace the engine-owned warm thread.
   The next separately accepted turn resumes that same native Codex thread and
-  applies both settings on `turn/start`. Compaction usage is attributed from
+  applies the saved target on `turn/start`. Compaction usage is attributed from
   the model actually bound to the thread, never the future preference, and
   provider work is skipped when that bound model cannot be priced.
-- Configuration updates require an explicit personal-member choice. The
-  authenticated Settings form uses its normal session and CSRF boundary. An
-  assistant-driven update additionally requires eligible accepted user input
-  for that turn. The runtime forwards the terminal input id from its locally
-  revalidated bounded exact-successor provider batch, and web binds it to the
-  callback member plus one live conversation mailbox row inside the matching
-  field-level preference-write transaction. This low-risk preference update
-  does not require a passkey or browser handoff; missing or ambiguous input
-  authority fails closed.
+- Configuration updates require an explicit personal-member or current-room
+  choice. The authenticated Settings form uses its normal session and CSRF
+  boundary. An assistant-driven update additionally requires eligible accepted
+  user input for that turn. The runtime forwards the terminal input id from its
+  locally revalidated bounded exact-successor provider batch, and web binds it
+  to the callback member plus one live conversation mailbox row inside the
+  matching field-level preference-write transaction. For a group room, that
+  callback member is the existing synthetic thread-container member, so the
+  write is room-scoped without participant identity inference. This low-risk
+  preference update does not require a passkey or browser handoff; missing or
+  ambiguous input authority fails closed.
   Murph may suggest Luna or an Edge upgrade, but it must not switch model or
   reasoning effort automatically because usage is low or exhausted.
-- Changing the preference does not create a mailbox item, wake, queue, or a
-  second runtime state machine.
+- Changing a preference does not create a mailbox item, queue, or second runtime
+  state machine. An effective provider change from authenticated Settings sends
+  only `runtime_wake_requested`; unchanged, model-only, and reasoning-only saves
+  do not. Existing `runtime_recheck_requested` callers remain facts-only.
 
 Conversation style remains independently available through
 `murph.personalization`, which atomically reads or updates the private member's
@@ -133,6 +173,26 @@ before exhausted usage-bearing work reaches the runner; Temporal owns only the
 resulting orchestration state.
 
 ### Deployment And Compatibility
+
+Venice activation is an operator-gated addition to the established
+configuration rollout below:
+
+1. Apply the nullable `assistantProviderPreference` Postgres migration.
+2. Deploy Web with `HOSTED_VENICE_ENABLED` unset or disabled. This version can
+   store and parse the preference while continuing to project OpenAI.
+3. Configure the selected GitHub environment with `VENICE_API_KEY` and all
+   three fixed `HOSTED_VENICE_{LUNA,TERRA,SOL}_MODEL` variables, then deploy
+   Cloudflare and the runner with `container_rollout=immediate`. Deploy
+   preflight rejects a partial Venice group.
+4. Verify the exact runner fingerprint and a controlled Venice turn, then
+   enable `HOSTED_VENICE_ENABLED` in Web and redeploy Web to expose the choice.
+
+Rollback hides the choice first by disabling `HOSTED_VENICE_ENABLED` and
+redeploying Web. New invocations then project OpenAI even when a nullable
+Venice preference remains stored. Only after that Web state is serving may the
+Venice Worker secret or model mappings be removed or the Cloudflare bundle be
+rolled back. No backfill, second preference owner, or compatibility queue is
+required.
 
 Deploy this additive path in the following order:
 
@@ -183,35 +243,39 @@ longer projects the saved values returns execution to the platform-configured
 model and reasoning defaults without deleting member intent. This feature has
 no model-specific fallback or rollback path.
 
-Focused contract coverage proves old/no-field compatibility, personal-member
-Luna/Terra/Sol eligibility, the common reasoning values, same-invocation
-next-turn projection and default reset, the relation-derived thread-container
-Sol default, and private-member tone/voice reads and writes. The normal deploy
-keeps its managed-container fingerprint and live Terra smoke. An optional
-post-deploy canary may save one non-default target for an eligible personal
-member through the approved configuration flow, confirm a same-invocation
-follow-up reports it, update style through personalization, and verify usage
-retains both requested-model and served-model attribution.
+Focused contract coverage proves old/no-field compatibility, gated
+OpenAI/Venice resolution, personal-member Luna/Terra/Sol eligibility, the
+common reasoning values, same-invocation next-turn projection and default
+reset, the relation-derived thread-container Sol default plus explicit
+room-scoped Luna/Terra/Sol switching, fixed Venice model translation at the
+Worker boundary, and private-member tone/voice reads and writes. The normal
+deploy keeps its managed-container fingerprint and live OpenAI Terra smoke.
+Before the Web flag is enabled, a post-deploy canary must exercise one
+controlled Venice turn through the exact Worker/runner path. A later
+configuration canary may save one non-default target for an eligible personal
+member, confirm a same-invocation follow-up reports it, update style through
+personalization, and verify usage retains both requested-model and served-model
+attribution.
 
-## First-Version Scope
+## Current Scope
 
-Keep the implemented first version intentionally narrow.
+Keep the implemented transition graph intentionally narrow.
 
-The supported transition is:
+Supported scheduled transitions:
 
-- Edge paid subscription to Pulse at renewal.
+- active Pulse trial to eligible Group at trial end;
+- paid Pulse to eligible Group at renewal;
+- paid Edge to Pulse or eligible Group at renewal.
 
 Do not build:
 
-- a generic plan-transition engine
-- arbitrary `targetPlanCode` routing
+- an open-ended plan-transition engine
+- unvalidated `targetPlanCode` routing
 - in-app schedule reversal
 - Customer Portal plan switching
 - local timers or cron-based entitlement changes
 - switch-request entitlement, current plan, usage allowance, usage period, or
   runner-state updates
-
-Future plan changes can generalize after this path is proven in Stripe test clocks and production.
 
 ## Stripe Constraints
 
@@ -232,15 +296,18 @@ Relevant Stripe docs:
 
 ## Product Policy
 
-Supported transition:
+Supported scheduled transitions:
 
-- `launch_edge_monthly -> launch_monthly`
+- `launch_monthly -> launch_group_monthly` while trialing or paid;
+- `launch_edge_monthly -> launch_monthly`;
+- `launch_edge_monthly -> launch_group_monthly`.
 
 Unsupported transitions:
 
-- Pulse to Pulse
-- Edge to Edge
-- trial-state switches
+- same-plan changes
+- Group to a lower plan
+- trial-state switches other than Pulse trial to Group at trial end
+- Group selection without confirmed current membership
 - switches without a Stripe customer and subscription
 - switches while a conflicting Stripe schedule is already attached
 
@@ -395,9 +462,8 @@ Important schedule rules:
   and Temporal runtime signals happen only after subscription reconciliation
   observes Stripe's applied Pulse prices.
 
-First version supports only canonical hosted subscriptions with exactly the known hosted plan items:
-
-- one configured Edge recurring price
+The service supports only canonical hosted subscriptions with exactly one
+configured recurring Price for the current direct plan.
 
 Reject subscriptions with unknown active licensed items, duplicate known recurring items, non-month recurring intervals, unsupported quantities, or unmarked metered add-ons. Marked legacy hosted AI usage metered items may be dropped by the schedule update; do not silently preserve unknown add-ons into the future phase.
 

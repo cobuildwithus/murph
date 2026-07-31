@@ -57,22 +57,33 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // remain the guard against that regression, while the existing tolerances cover
 // ordinary small authored-code growth.
 //
-// The private-media and current hosted-alert integration measured 9,761,860B
-// total and an 8,009,225B static closure on 2026-07-28. The combined graph added
-// no forbidden boot input; production assembly below still fails closed if any
-// dimension exceeds its reviewed measurement plus the existing allowance.
-//
 // The native iMessage response-card contract, tool, outbox, and transport paths
 // measured 9,798,967B total on 2026-07-29. No forbidden subsystem entered the
-// boot graph. Advance only the measured total baseline and retain the existing
-// allowance and independent entry/static-closure caps.
+// boot graph. The later combined measurements below supersede that total while
+// retaining the response-card path in the reviewed graph.
 //
-// After merging the current hosted iMessage-contact and runtime-control graph,
-// the combined exact graph measured 9,836,081B total on 2026-07-29. No
-// forbidden subsystem entered the boot graph; advance only the total baseline.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_836_081 + 32_768;
+// Direct/group turn parity, exact-message participant authorization, private
+// media, hosted-alert integration, and open-ended experiment outcomes add
+// authored code to existing runner chunks without adding a forbidden boot
+// input. The combined 2026-07-29 macOS assembly measured an 8,117,894B static
+// closure while remaining within the reviewed total budget.
+//
+// Direct Group subscription handling, Linq group-line recovery, and the
+// rich-link retry-integrity guards extend the existing runner chunks without
+// adding a forbidden boot input. The combined 2026-07-30 macOS assembly
+// measured 9,979,011B. Ratchet the total baseline to that measurement and
+// retain the established 32KB allowance.
+//
+// Private Environment voice processing reuses the existing hosted-runtime,
+// parser, and vault paths, but keeps the capture-to-checkpoint handling in the
+// static runner graph. CI measured an 8,196,760B static closure and macOS
+// measured 9,894,078B total on 2026-07-30. After rebasing both changes together,
+// the final macOS assembly measured 9,971,103B total and an 8,295,095B static
+// closure. No forbidden subsystem entered the boot graph. Preserve that static
+// measurement alongside main's higher cross-platform total measurement.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_979_011 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_649_331;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_009_225;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_295_095;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:

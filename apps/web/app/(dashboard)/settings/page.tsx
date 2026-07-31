@@ -1,10 +1,14 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { HOSTED_ASSISTANT_TERRA_MODEL } from "@murphai/hosted-execution/assistant-model";
+import {
+  HOSTED_ASSISTANT_DEFAULT_PROVIDER,
+  HOSTED_ASSISTANT_TERRA_MODEL,
+} from "@murphai/hosted-execution/assistant-model";
 
 import { HostedPrivyProvider } from "@/src/components/hosted-onboarding/privy-provider";
 import { CustomizeMurphSettings } from "@/src/components/settings/customize-murph-settings";
 import { HostedAccountSettingsCards } from "@/src/components/settings/hosted-account-settings-cards";
+import { HostedAiUsageActivity } from "@/src/components/settings/hosted-ai-usage-activity";
 import { HostedAssistantModelSettings } from "@/src/components/settings/hosted-assistant-model-settings";
 import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-settings";
 import type {
@@ -13,7 +17,6 @@ import type {
 } from "@/src/components/settings/hosted-usage-top-up-dialog";
 import { HostedDataPrivacySettings } from "@/src/components/settings/hosted-data-privacy-settings";
 import { SettingsAuthRequired } from "./settings-auth-required";
-import { HostedFamilySelfUsageTopUpHost } from "@/src/components/settings/hosted-family-self-usage-top-up-host";
 import { HostedFamilySettings } from "@/src/components/settings/hosted-family-settings";
 import { HostedPasskeySettings } from "@/src/components/settings/hosted-passkey-settings";
 import { PulseTrialBillingContinuation } from "@/src/components/settings/hosted-start-paid-pulse-button";
@@ -25,12 +28,21 @@ import {
   withServerApprovedPrivyAccountHints,
 } from "@/src/lib/hosted-onboarding/account-settings-snapshot";
 import {
+  canScheduleHostedBillingPlanChange,
   canStartHostedPulseTrialPaidPlan,
   canSwitchHostedBillingPlanToPulse,
-  canUpgradeHostedBillingPlanToEdge,
+  canUpgradeHostedBillingPlan,
+  parseHostedBillingPlanCode,
 } from "@/src/lib/hosted-onboarding/billing-plans";
+import {
+  hasConfirmedHostedGroupMembership,
+  resolveVisibleHostedBillingPlanCodes,
+} from "@/src/lib/hosted-onboarding/billing-plan-eligibility";
+import { isHostedVeniceAssistantEnabled } from "@/src/lib/hosted-onboarding/assistant-model-preference";
 import { readHostedPulseTrialContinuationCookie } from "@/src/lib/hosted-onboarding/billing-pulse-trial-continuation";
 import {
+  HOSTED_START_PAID_GROUP_RETURN_PARAM,
+  HOSTED_START_PAID_GROUP_RETURN_VALUE,
   HOSTED_PULSE_TRIAL_CONTINUATION_ACTION_PARAM,
   HOSTED_PULSE_TRIAL_CONTINUATION_EXPIRES_PARAM,
   HOSTED_PULSE_TRIAL_CONTINUATION_PATH,
@@ -51,12 +63,15 @@ import {
   readHostedConfiguredUsageCreditOfferCodes,
   readHostedPersonalUsageCreditOfferCodes,
 } from "@/src/lib/hosted-onboarding/personal-usage-credit-eligibility";
+import {
+  isHostedBillingPlanSelectionAvailable,
+} from "@/src/lib/hosted-onboarding/runtime";
 import { getPrisma } from "@/src/lib/prisma";
 import { readHostedSecureApprovalStatus } from "@/src/lib/sensitive-actions/secure-approval-status";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
+import { readHostedAiUsageActivity } from "@/src/lib/hosted-execution/usage-activity";
 import { readHostedPersonalAiUsageStatus } from "@/src/lib/hosted-execution/usage-status";
 import {
-  estimateHostedUsageCreditMessages,
   filterHostedNonGroupUsageCreditOfferCodes,
   getHostedUsageCreditOfferDefinition,
   type HostedUsageCreditOfferCode,
@@ -80,6 +95,7 @@ type SettingsSearchParams = {
   expires?: string | string[] | undefined;
   signature?: string | string[] | undefined;
   startPulse?: string | string[] | undefined;
+  startGroup?: string | string[] | undefined;
   usageCheckout?: string | string[] | undefined;
   usageFamily?: string | string[] | undefined;
   usageMember?: string | string[] | undefined;
@@ -105,6 +121,10 @@ export default async function SettingsPage({
   const usageTopUpPurchaseReturn = readUsageTopUpPurchaseReturn(
     resolvedSearchParams,
   );
+  const groupPaymentMethodSaved =
+    readFirstSearchParamValue(
+      resolvedSearchParams[HOSTED_START_PAID_GROUP_RETURN_PARAM],
+    ) === HOSTED_START_PAID_GROUP_RETURN_VALUE;
   const { authenticated, authenticatedMember, session } =
     await getHostedDashboardPageAuthSnapshot();
   // Stripe sends the payment-method return here unsigned-in when the member
@@ -114,7 +134,7 @@ export default async function SettingsPage({
   const pulseTrialPaymentReturn = readPulseTrialPaymentReturn(resolvedSearchParams);
 
   if (!authenticated) {
-    if (pulseTrialPaymentReturn === null) {
+    if (pulseTrialPaymentReturn === null && !groupPaymentMethodSaved) {
       redirect("/");
     }
     return <SettingsAuthRequired />;
@@ -156,6 +176,9 @@ export default async function SettingsPage({
   const secureApprovalStatus =
     settingsData?.secureApprovalStatus ?? ({ status: "unavailable" } as const);
   const usageStatus = settingsData?.usageStatus ?? null;
+  const hasConfirmedGroupMembership =
+    settingsData?.hasConfirmedGroupMembership === true;
+  const usageActivity = settingsData?.usageActivity ?? null;
   const usageTopUpOfferCodes = settingsData?.usageTopUpOfferCodes ?? [];
   const usageTopUpActivePurchase = settingsData?.usageTopUpActivePurchase ?? null;
   const usageTopUpReturnTarget = settingsData?.usageTopUpReturnTarget ?? null;
@@ -163,10 +186,8 @@ export default async function SettingsPage({
   const billingRef = settingsSnapshot?.billingRef ?? null;
   const routing = settingsSnapshot?.routing ?? null;
   const activeFamilyOwner = familyOwner?.billingActive === true;
-  const familyOwnerUsageTopUpMember = resolveFamilyOwnerUsageTopUpMember({
-    requested: requestedFamilyOwnerUsageTopUp,
-    snapshot: familyOwner,
-  });
+  const familyOwnerUsageTopUpMember =
+    resolveActiveFamilyOwnerUsageTopUpMember(familyOwner);
   const sponsoredMember = familyAccess !== null && familyOwner === null;
   const usageTopUpOffers = usageTopUpActivePurchase
     ? []
@@ -226,18 +247,87 @@ export default async function SettingsPage({
     familyUsageTopUpPurchaseReturn
       ? usageTopUpReturnTarget?.beneficiaryMemberId ?? null
       : null;
+  const familyOwnerUsageTopUpAvailable =
+    familyOwnerUsageTopUpMember !== null;
+  const familyOwnerUsageTopUpPurchaseReturn =
+    familyOwnerUsageTopUpMember
+    && familyUsageTopUpPurchaseReturn
+    && usageTopUpReturnTarget?.beneficiaryMemberId ===
+      familyOwnerUsageTopUpMember.memberId
+      ? familyUsageTopUpPurchaseReturn
+      : null;
+  const familySettingsUsageTopUpPurchaseReturn =
+    familyOwnerUsageTopUpPurchaseReturn ? null : familyUsageTopUpPurchaseReturn;
+  const familySettingsUsageTopUpReturnMemberId =
+    familyOwnerUsageTopUpPurchaseReturn ? null : familyUsageTopUpReturnMemberId;
+  const billingUsageTopUpUsesFamilyOwner =
+    familyOwnerUsageTopUpAvailable
+    && usageTopUpActivePurchase?.target.kind !== "personal"
+    && personalUsageTopUpPurchaseReturn === null;
+  const billingUsageTopUpPurchaseReturn = billingUsageTopUpUsesFamilyOwner
+    ? familyOwnerUsageTopUpPurchaseReturn
+    : personalUsageTopUpPurchaseReturn;
+  const billingUsageTopUpActivePurchase = billingUsageTopUpPurchaseReturn
+    ? null
+    : billingUsageTopUpUsesFamilyOwner
+      ? familyOwnerUsageTopUpActivePurchase
+      : personalUsageTopUpActivePurchase;
+  const billingUsageTopUpOffers = billingUsageTopUpUsesFamilyOwner
+    ? familyUsageTopUpOffers
+    : usageTopUpOffers;
   const canStartFamily =
     authenticatedMember != null &&
     !activeFamilyOwner &&
     !sponsoredMember &&
     !authenticatedMember.suspendedAt;
-  const canUpgradeToEdge =
+  const currentPlanCode = parseHostedBillingPlanCode(
+    billingRef?.currentBillingPlanCode,
+  );
+  const scheduledPlanCode = parseHostedBillingPlanCode(
+    billingRef?.scheduledBillingPlanCode,
+  );
+  const hasScheduledPlanChange = scheduledPlanCode !== null;
+  const groupPlanConfigured = settingsData?.groupPlanAvailable === true;
+  const showGroupPlan = resolveVisibleHostedBillingPlanCodes({
+    currentPlanCode,
+    groupPlanConfigured,
+    hasConfirmedGroupMembership,
+    scheduledPlanCode,
+  }).includes("launch_group_monthly");
+  const canUpgradeToPulse =
+    !hasScheduledPlanChange &&
     authenticatedMember !== null &&
     hasHostedMemberOwnActiveBilling(authenticatedMember) &&
-    canUpgradeHostedBillingPlanToEdge({
+    canUpgradeHostedBillingPlan({
       currentBillingPhase: billingRef?.currentBillingPhase,
       currentBillingPlanCode: billingRef?.currentBillingPlanCode,
       currentCheckoutOffer: billingRef?.currentCheckoutOffer,
+      targetPlanCode: "launch_monthly",
+    });
+  const canUpgradeToEdge =
+    !hasScheduledPlanChange &&
+    authenticatedMember !== null &&
+    hasHostedMemberOwnActiveBilling(authenticatedMember) &&
+    canUpgradeHostedBillingPlan({
+      currentBillingPhase: billingRef?.currentBillingPhase,
+      currentBillingPlanCode: billingRef?.currentBillingPlanCode,
+      currentCheckoutOffer: billingRef?.currentCheckoutOffer,
+      targetPlanCode: "launch_edge_monthly",
+    });
+  const canSwitchToGroup =
+    !hasScheduledPlanChange &&
+    authenticatedMember !== null &&
+    groupPlanConfigured &&
+    hasConfirmedGroupMembership &&
+    canScheduleHostedBillingPlanChange({
+      billingStatus: authenticatedMember.billingStatus,
+      currentBillingPhase: billingRef?.currentBillingPhase,
+      currentBillingPlanCode: billingRef?.currentBillingPlanCode,
+      currentCheckoutOffer: billingRef?.currentCheckoutOffer,
+      stripeCustomerId: billingRef?.stripeCustomerId,
+      stripeSubscriptionId: billingRef?.stripeSubscriptionId,
+      suspendedAt: authenticatedMember.suspendedAt,
+      targetPlanCode: "launch_group_monthly",
     });
   const privySessionMatchesAppSession =
     freshPrivySession !== null && freshPrivySession.identity.userId === session?.privyUserId;
@@ -294,13 +384,42 @@ export default async function SettingsPage({
         userEmailAddress: account.email.address,
       })
     : [];
+  const usageMissionContactOption =
+    usageActivity?.missionsEnabled === true && account
+      ? resolveMurphContactOptions({
+          contactChannels: {
+            email: false,
+            telegram: Boolean(account.telegram.telegramUserId),
+            text: Boolean(account.phone.number),
+          },
+          message: {
+            body: "Hey Murph, what usage missions can I choose from?",
+          },
+          murphEmailAddress: account.email.murphEmailAddress ?? null,
+          murphPhoneNumber: routing?.linqRecipientPhone ?? null,
+          preferredKind: "text",
+          userEmailAddress: account.email.address,
+        })[0] ?? null
+      : null;
+  const canStartUsageMissions =
+    usageActivity?.missionsEnabled === true
+    && usageMissionContactOption !== null;
+  const visibleUsageActivity =
+    usageActivity
+    && (
+      canStartUsageMissions
+      || usageActivity.credits.length > 0
+      || usageActivity.missions.length > 0
+    )
+      ? usageActivity
+      : null;
 
   return (
     <div className="flex flex-col gap-12">
       <PageHeader
         eyebrow="Settings"
         title="Your account"
-        description="Plan, model, connected accounts, and data privacy."
+        description="Plan, AI usage, model, connected accounts, and data privacy."
       />
 
       <section id="subscription" className="flex scroll-mt-24 flex-col gap-4">
@@ -316,26 +435,36 @@ export default async function SettingsPage({
           authenticated={authenticated}
           billingStatus={authenticatedMember?.billingStatus}
           canStartFamily={canStartFamily}
+          canSwitchToGroup={canSwitchToGroup}
           familyState={activeFamilyOwner ? "owner" : sponsoredMember ? "sponsored" : "none"}
+          groupPaymentMethodSaved={groupPaymentMethodSaved}
           pulseTrialBillingContinuationPending={pulseTrialBillingContinuationPending}
-          canStartPaidPulse={canStartHostedPulseTrialPaidPlan({
-            billingStatus: authenticatedMember?.billingStatus,
-            currentBillingPhase: billingRef?.currentBillingPhase,
-            currentBillingPlanCode: billingRef?.currentBillingPlanCode,
-            currentCheckoutOffer: billingRef?.currentCheckoutOffer,
-            hasStripeCustomerId: Boolean(billingRef?.stripeCustomerId),
-            hasStripeSubscriptionId: Boolean(billingRef?.stripeSubscriptionId),
-            suspendedAt: authenticatedMember?.suspendedAt,
-          })}
+          canStartPaidPulse={
+            !hasScheduledPlanChange &&
+            canStartHostedPulseTrialPaidPlan({
+              billingStatus: authenticatedMember?.billingStatus,
+              currentBillingPhase: billingRef?.currentBillingPhase,
+              currentBillingPlanCode: billingRef?.currentBillingPlanCode,
+              currentCheckoutOffer: billingRef?.currentCheckoutOffer,
+              hasStripeCustomerId: Boolean(billingRef?.stripeCustomerId),
+              hasStripeSubscriptionId: Boolean(billingRef?.stripeSubscriptionId),
+              suspendedAt: authenticatedMember?.suspendedAt,
+            })
+          }
+          canUpgradeToPulse={canUpgradeToPulse}
           canUpgradeToEdge={canUpgradeToEdge}
-          canSwitchToPulse={canSwitchHostedBillingPlanToPulse({
-            billingStatus: authenticatedMember?.billingStatus,
-            currentBillingPhase: billingRef?.currentBillingPhase,
-            currentBillingPlanCode: billingRef?.currentBillingPlanCode,
-            stripeCustomerId: billingRef?.stripeCustomerId,
-            stripeSubscriptionId: billingRef?.stripeSubscriptionId,
-            suspendedAt: authenticatedMember?.suspendedAt,
-          })}
+          showGroupPlan={showGroupPlan}
+          canSwitchToPulse={
+            !hasScheduledPlanChange &&
+            canSwitchHostedBillingPlanToPulse({
+              billingStatus: authenticatedMember?.billingStatus,
+              currentBillingPhase: billingRef?.currentBillingPhase,
+              currentBillingPlanCode: billingRef?.currentBillingPlanCode,
+              stripeCustomerId: billingRef?.stripeCustomerId,
+              stripeSubscriptionId: billingRef?.stripeSubscriptionId,
+              suspendedAt: authenticatedMember?.suspendedAt,
+            })
+          }
           currentBillingPhase={billingRef?.currentBillingPhase}
           currentCheckoutOffer={billingRef?.currentCheckoutOffer}
           currentBillingPlanCode={billingRef?.currentBillingPlanCode}
@@ -344,11 +473,39 @@ export default async function SettingsPage({
           scheduledBillingEffectiveAt={billingRef?.scheduledBillingEffectiveAt}
           scheduledBillingPlanCode={billingRef?.scheduledBillingPlanCode}
           usageStatus={usageStatus}
-          usageTopUpActivePurchase={personalUsageTopUpActivePurchase}
+          usageTopUpActivePurchase={billingUsageTopUpActivePurchase}
+          usageTopUpCheckoutUrl={
+            billingUsageTopUpUsesFamilyOwner && familyOwnerUsageTopUpMember
+              ? `/api/settings/billing/family/members/${encodeURIComponent(familyOwnerUsageTopUpMember.memberId)}/usage-credit/checkout`
+              : undefined
+          }
           usageTopUpContactOptions={usageTopUpContactOptions}
-          usageTopUpInitialOpen={openPersonalUsageTopUp}
-          usageTopUpOffers={usageTopUpOffers}
-          usageTopUpPurchaseReturn={personalUsageTopUpPurchaseReturn}
+          usageTopUpInitialOpen={
+            billingUsageTopUpUsesFamilyOwner
+              ? requestedFamilyOwnerUsageTopUp || openPersonalUsageTopUp
+              : openPersonalUsageTopUp
+          }
+          usageTopUpOffers={billingUsageTopUpOffers}
+          usageTopUpPurchaseReturn={billingUsageTopUpPurchaseReturn}
+          usageTopUpScope={
+            billingUsageTopUpUsesFamilyOwner ? "family" : "personal"
+          }
+          usageTopUpTargetLabel={
+            billingUsageTopUpUsesFamilyOwner
+              ? "you"
+              : undefined
+          }
+          usageActivityDetail={visibleUsageActivity ? (
+            <section id="ai-usage" className="flex scroll-mt-24 flex-col gap-4">
+              <h2 className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                AI usage
+              </h2>
+              <HostedAiUsageActivity
+                activity={visibleUsageActivity}
+                missionContactOption={usageMissionContactOption}
+              />
+            </section>
+          ) : null}
         />
       </section>
 
@@ -359,11 +516,21 @@ export default async function SettingsPage({
         <HostedAssistantModelSettings
           canUpgradeToEdge={canUpgradeToEdge}
           configurationAvailable={account?.assistant?.configurationAvailable === true}
+          expectedCurrentPlanCode={
+            currentPlanCode === "launch_group_monthly"
+            || currentPlanCode === "launch_monthly"
+              ? currentPlanCode
+              : undefined
+          }
           initialDormantSolPreference={
             account?.assistant?.dormantSolPreference === true
           }
           initialModel={account?.assistant?.model ?? HOSTED_ASSISTANT_TERRA_MODEL}
+          initialProvider={
+            account?.assistant?.provider ?? HOSTED_ASSISTANT_DEFAULT_PROVIDER
+          }
           solAvailable={account?.assistant?.solAvailable === true}
+          veniceAvailable={isHostedVeniceAssistantEnabled()}
         />
       </section>
 
@@ -379,19 +546,9 @@ export default async function SettingsPage({
             usageTopUpActivePurchase={familyUsageTopUpActivePurchase}
             usageTopUpContactOptions={usageTopUpContactOptions}
             usageTopUpOffers={familyUsageTopUpOffers}
-            usageTopUpPurchaseReturn={familyUsageTopUpPurchaseReturn}
-            usageTopUpReturnMemberId={familyUsageTopUpReturnMemberId}
+            usageTopUpPurchaseReturn={familySettingsUsageTopUpPurchaseReturn}
+            usageTopUpReturnMemberId={familySettingsUsageTopUpReturnMemberId}
           />
-          {familyOwnerUsageTopUpMember ? (
-            <HostedFamilySelfUsageTopUpHost
-              activePurchase={familyOwnerUsageTopUpActivePurchase}
-              contactOptions={usageTopUpContactOptions}
-              memberId={familyOwnerUsageTopUpMember.memberId}
-              offers={familyUsageTopUpOffers}
-              payerMemberId={authenticatedMember.id}
-              targetLabel={familyOwnerUsageTopUpMember.label ?? "you"}
-            />
-          ) : null}
         </section>
       ) : null}
 
@@ -402,8 +559,10 @@ export default async function SettingsPage({
         {accountWithPrivyDisplay ? (
           <HostedAccountSettingsCards
             account={accountWithPrivyDisplay}
+            expectedPrivyUserId={session?.privyUserId ?? null}
             murphPhoneNumber={murphPhoneNumber}
             openEmailLink={openEmailLink}
+            privySessionMatchesAppSession={privySessionMatchesAppSession}
           />
         ) : null}
       </section>
@@ -495,10 +654,25 @@ async function readSettingsPageData(input: {
     memberId,
     prisma,
   });
+  const hasConfirmedGroupMembership =
+    await hasConfirmedHostedGroupMembership({
+      memberId,
+      prisma,
+    });
+  const groupPlanAvailable =
+    hasConfirmedGroupMembership
+    && await isHostedBillingPlanSelectionAvailable({
+      billingPlanCode: "launch_group_monthly",
+    });
   const usageStatus = await readHostedPersonalAiUsageStatus({
     memberId,
     prisma,
+    publicBaseUrl: null,
   });
+  const usageActivity = await readHostedAiUsageActivity({
+    memberId,
+    prisma,
+  }).catch(() => null);
   const usageTopUpOfferCodes = await readHostedPersonalUsageCreditOfferCodes({
     memberId,
     prisma,
@@ -531,9 +705,12 @@ async function readSettingsPageData(input: {
   return {
     familyAccess,
     familyOwner,
+    groupPlanAvailable,
+    hasConfirmedGroupMembership,
     freshPrivySession: await freshPrivySessionPromise,
     secureApprovalStatus: await secureApprovalStatusPromise,
     settingsSnapshot,
+    usageActivity,
     usageStatus,
     usageTopUpActivePurchase,
     usageTopUpOfferCodes,
@@ -541,22 +718,20 @@ async function readSettingsPageData(input: {
   };
 }
 
-function resolveFamilyOwnerUsageTopUpMember(input: {
-  requested: boolean;
-  snapshot: HostedFamilyOwnerSnapshot | null;
-}): HostedFamilyOwnerMemberRow | null {
+function resolveActiveFamilyOwnerUsageTopUpMember(
+  snapshot: HostedFamilyOwnerSnapshot | null,
+): HostedFamilyOwnerMemberRow | null {
   if (
-    !input.requested ||
-    !input.snapshot?.billingActive ||
-    input.snapshot.suspendedAt
+    !snapshot?.billingActive ||
+    snapshot.suspendedAt
   ) {
     return null;
   }
 
-  const matches = input.snapshot.members.filter(
+  const matches = snapshot.members.filter(
     (member) =>
       member.isOwner &&
-      member.memberId === input.snapshot?.ownerMemberId &&
+      member.memberId === snapshot.ownerMemberId &&
       member.status === "active",
   );
   return matches.length === 1 ? matches[0] ?? null : null;
@@ -641,7 +816,6 @@ function projectHostedUsageTopUpOffers(
 
     return {
       amountLabel: formatUsageTopUpAmount(offer.cashAmountMinor),
-      estimatedMessages: estimateHostedUsageCreditMessages(offer.cashAmountMinor),
       offerCode: offer.code,
     };
   });

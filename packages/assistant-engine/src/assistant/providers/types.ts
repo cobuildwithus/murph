@@ -124,6 +124,7 @@ export interface AssistantProviderTurn {
   authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
   abortSignal?: AbortSignal
   codexConfigOverrides?: readonly string[] | null
+  codexThreadConfig?: Readonly<Record<string, unknown>> | null
   conversationHistoryMessages?: ReadonlyArray<AssistantProviderConversationMessage>
   developerInstructions?: string | null
   dynamicTools: readonly AssistantProviderDynamicTool[]

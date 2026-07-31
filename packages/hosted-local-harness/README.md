@@ -25,6 +25,26 @@ pnpm hosted-local run -- pnpm --dir apps/cloudflare test:workers
 
 Root `pnpm dev` is a thin alias for `pnpm hosted-local up`.
 
+## External Temporal worker package
+
+Hosted-local keeps Web and Cloudflare in this checkout, but it can start the
+Temporal worker and its idempotent schedule setup from one sibling or absolute
+package directory:
+
+```bash
+MURPH_DEV_TEMPORAL_WORKER_PACKAGE_DIR=../murph-cloud/packages/hosted-orchestrator-temporal \
+  pnpm dev
+```
+
+The setting changes only the package directory passed to `pnpm --dir` for
+`temporal:worker` and `temporal:ensure-device-sync-reconciler-schedule`. The
+Temporal address, namespace, task queue, and signed Web/Cloudflare HTTP
+contracts remain unchanged. The private package is not mirrored into public
+Murph: when the setting is unset or blank, hosted-local fails before starting
+Temporal and points to this variable or `MURPH_DEV_TEMPORAL=disabled`. This
+keeps one canonical local entrypoint without a submodule, source mirror, or
+second orchestration path.
+
 ## Local web origin
 
 The hosted web app binds to `http://127.0.0.1:3000` by default. Telegram's

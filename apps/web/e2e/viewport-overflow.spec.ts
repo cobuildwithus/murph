@@ -146,6 +146,114 @@ for (const route of ROUTES) {
   }
 }
 
+test("home onboarding steps keep equal cards across dashboard widths", async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.route("**/*", (route) => {
+    if (isLoopbackUrl(route.request().url())) {
+      route.continue();
+    } else {
+      route.abort();
+    }
+  });
+
+  const response = await page.goto(
+    "/design?tab=sections#home-onboarding-steps",
+    { waitUntil: "load" },
+  );
+  expect(response?.status(), "onboarding study should respond 200").toBe(200);
+
+  const study = page.locator(
+    '[data-design-section="home-onboarding-steps"]',
+  );
+  const track = study.locator("[data-onboarding-steps]");
+  await expect(track).toBeVisible();
+
+  for (const viewportWidth of [1023, 1024, 1050, 1280, 1440] as const) {
+    await page.setViewportSize({ width: viewportWidth, height: 900 });
+    const dashboardContentWidth = viewportWidth - 256 - 112;
+    await study.evaluate((element, width) => {
+      element.style.maxWidth = `${width}px`;
+      element.style.width = `${width}px`;
+    }, dashboardContentWidth);
+    await page.evaluate(async () => {
+      await document.fonts?.ready;
+      await new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve)),
+      );
+    });
+
+    const layout = await track.evaluate((element, tolerance) => {
+      const cards = Array.from(
+        element.querySelectorAll<HTMLElement>("[data-onboarding-step]"),
+      );
+      const trackRect = element.getBoundingClientRect();
+      const measureCards = () => {
+        const withinTrack = (rect: DOMRect) =>
+          rect.left >= trackRect.left - tolerance
+          && rect.right <= trackRect.right + tolerance;
+        return {
+          actionsContained: cards.every((card) => {
+            const cardRect = card.getBoundingClientRect();
+            const actionRect = card.querySelector<HTMLElement>(
+              "a, button",
+            )?.getBoundingClientRect();
+            return Boolean(
+              actionRect
+              && actionRect.left >= cardRect.left - tolerance
+              && actionRect.right <= cardRect.right + tolerance,
+            );
+          }),
+          visibleCards: cards.filter((card) =>
+            withinTrack(card.getBoundingClientRect())
+          ).length,
+          widths: cards.map((card) => card.getBoundingClientRect().width),
+        };
+      };
+
+      element.scrollLeft = 0;
+      const start = measureCards();
+      element.scrollLeft = element.scrollWidth - element.clientWidth;
+      const end = measureCards();
+
+      return {
+        actionsContained: start.actionsContained,
+        clientWidth: element.clientWidth,
+        display: window.getComputedStyle(element).display,
+        documentOverflow:
+          document.documentElement.scrollWidth
+          - document.documentElement.clientWidth,
+        endVisibleCards: end.visibleCards,
+        maxCardWidthDelta:
+          Math.max(...start.widths) - Math.min(...start.widths),
+        scrollWidth: element.scrollWidth,
+        startVisibleCards: start.visibleCards,
+      };
+    }, OVERFLOW_TOLERANCE_PX);
+
+    expect(layout.documentOverflow).toBeLessThanOrEqual(OVERFLOW_TOLERANCE_PX);
+
+    if (viewportWidth < 1024) {
+      expect(layout.display).toBe("grid");
+      expect(layout.scrollWidth).toBeLessThanOrEqual(
+        layout.clientWidth + OVERFLOW_TOLERANCE_PX,
+      );
+      continue;
+    }
+
+    expect(layout.display).toBe("flex");
+    expect(layout.scrollWidth).toBeGreaterThan(layout.clientWidth);
+    expect(layout.maxCardWidthDelta).toBeLessThanOrEqual(
+      OVERFLOW_TOLERANCE_PX,
+    );
+    expect(layout.actionsContained).toBe(true);
+    expect(layout.startVisibleCards).toBe(3);
+    expect(layout.endVisibleCards).toBe(3);
+  }
+});
+
 test("clubs stays reachable through the global navigation at every breakpoint", async ({
   page,
 }) => {
@@ -289,9 +397,87 @@ for (const width of [768, 1280] as const) {
     const card = activeState.locator(
       '[aria-label="Pulse AI usage"]',
     );
-    const trigger = card.getByRole("button", { name: "Add usage" });
-    await expect(study.locator("[inert]")).toHaveCount(3);
+    const trigger = card.locator("button").filter({ hasText: "Add usage" });
+    const historyPreview = study.locator(
+      '[data-design-interaction="guidance-with-history"]',
+    );
+    const referralDetailsPreview = study.locator(
+      '[data-design-interaction="referral-details"]',
+    );
+    await expect(
+      study.locator('[data-design-state="exhausted-with-credit"] [inert]'),
+    ).toHaveCount(1);
+    await expect(
+      study.locator('[data-design-state="exhausted-without-credit"] [inert]'),
+    ).toHaveCount(1);
+    await expect(
+      study.locator('[data-design-state="trial-conversion"] [inert]'),
+    ).toHaveCount(1);
+    await expect(activeState.locator("[inert]")).toHaveCount(1);
+    await expect(activeState.getByText("Reward pending", { exact: true })).toBeVisible();
+    await expect(historyPreview).toHaveCount(1);
+    await expect(
+      historyPreview.getByText(
+        "Earn usage by inviting friends or adding Murph to a groupchat",
+      ),
+    ).toBeVisible();
+    await expect(historyPreview.getByText("Ask Murph", { exact: true })).toBeVisible();
+    expect(
+      await historyPreview.evaluate((element) =>
+        element.hasAttribute("inert"),
+      ),
+    ).toBe(false);
     await expect(trigger).toBeVisible();
+
+    const history = historyPreview.locator("details");
+    const historySummary = history.locator("summary");
+    await expect(history).not.toHaveAttribute("open", "");
+    await historySummary.click();
+    await expect(history).toHaveAttribute("open", "");
+    await historySummary.focus();
+    await page.keyboard.press("Enter");
+    await expect(history).not.toHaveAttribute("open", "");
+    await expect(
+      historyPreview.locator(
+        'a, button, input, select, textarea, summary, [tabindex]:not([tabindex="-1"])',
+      ),
+    ).toHaveCount(2);
+
+    const currentReferrals = referralDetailsPreview.getByRole("list", {
+      name: "Current usage referrals",
+    });
+    await expect(currentReferrals).toBeVisible();
+    const referralDetailNames = [
+      "Details for Start an active group: In progress, Ends Aug 3 at 12:00 PM UTC",
+      "Details for Start an active group: Checking final activity, Closed Jul 27 at 12:00 PM UTC",
+      "Details for Start an active group: Reward pending, Qualified Jul 25",
+    ];
+    for (const name of referralDetailNames) {
+      await expect(currentReferrals.getByRole("button", { name })).toHaveCount(1);
+    }
+    const referralDetailsSummary = currentReferrals.getByRole("button", {
+      name: referralDetailNames[0],
+    });
+    const referralDetails = referralDetailsSummary.locator("..");
+    await expect(referralDetails).not.toHaveAttribute("open", "");
+    await referralDetailsSummary.click();
+    await expect(referralDetails).toHaveAttribute("open", "");
+    await expect(
+      referralDetails.getByText(
+        "Start a fresh group and make it genuinely active, with multiple people actually talking.",
+      ),
+    ).toBeVisible();
+    await referralDetailsSummary.focus();
+    await page.keyboard.press("Enter");
+    await expect(referralDetails).not.toHaveAttribute("open", "");
+
+    const trialConversion = study.locator(
+      '[data-design-state="trial-conversion"]',
+    );
+    await expect(trialConversion.getByText("Free trial", { exact: true })).toBeVisible();
+    await expect(
+      trialConversion.locator("button").filter({ hasText: "Start Pulse plan" }),
+    ).toBeVisible();
 
     const layout = await page.evaluate(() => {
       const owner = document.querySelector(

@@ -29,6 +29,7 @@ import {
   handleHostedRunnerOpenAiOutbound,
   handleHostedRunnerOpenInternetOutbound,
   handleHostedRunnerTelegramOutbound,
+  handleHostedRunnerVeniceOutbound,
   handleHostedRunnerXaiOutbound,
   HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
   HOSTED_OPENAI_CACHE_DIAGNOSTIC_EVENT_CODE,
@@ -72,6 +73,9 @@ import {
 import {
   createHostedProviderEgressCredential,
 } from "../src/hosted-provider-egress-credential.ts";
+import {
+  HOSTED_VENICE_RESPONSES_MAX_BODY_BYTES,
+} from "../src/runner-egress-venice.ts";
 
 const WRITE_FENCE_HEADERS = {
   [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: "attempt_1",
@@ -302,6 +306,8 @@ describe("hostedRunnerIntercept", () => {
     expect(hostedRunnerIntercept).toBe(handleHostedRunnerOpenInternetOutbound);
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.openAi])
       .toBe(handleHostedRunnerOpenAiOutbound);
+    expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.venice])
+      .toBe(handleHostedRunnerVeniceOutbound);
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.elevenLabs])
       .toBe(handleHostedRunnerElevenLabsOutbound);
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.exa])
@@ -2281,6 +2287,190 @@ describe("hostedRunnerIntercept", () => {
         message: "Hosted runner provider egress completed.",
       }),
     );
+  });
+
+  it("injects Venice authorization and rewrites only the upstream model id", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeProviderEgressCredential = vi.fn(async (input: {
+      providerKind: string;
+      runnerContainerName: string;
+      userId: string;
+    }) => createProviderEgressCredentialValidationResult(input));
+    const credential = await createTestProviderEgressCredential({
+      providerKind: "venice",
+    });
+    const env = createInterceptEnv({
+      HOSTED_VENICE_LUNA_MODEL: "qwen3-4b",
+      HOSTED_VENICE_SOL_MODEL: "qwen3-vl-235b-a22b",
+      HOSTED_VENICE_TERRA_MODEL: "zai-org-glm-4.7",
+      VENICE_API_KEY: "venice-worker-secret",
+      validateRuntimeProviderEgressCredential,
+    });
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.venice.ai/api/v1/responses", {
+        body: JSON.stringify({
+          input: "hello",
+          model: "gpt-5.6-terra",
+          stream: true,
+        }),
+        headers: {
+          authorization: `Bearer ${credential}`,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+      env,
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(validateRuntimeProviderEgressCredential).toHaveBeenCalledWith({
+      providerKind: "venice",
+      runnerContainerName: RUNNER_CONTAINER_NAME,
+      userId: "member_123",
+    });
+    const forwarded = findFetchCall(fetchMock, "api.venice.ai")?.[0];
+    expect(forwarded).toBeInstanceOf(Request);
+    const forwardedRequest = forwarded as Request;
+    expect(forwardedRequest.url).toBe("https://api.venice.ai/api/v1/responses");
+    expect(forwardedRequest.headers.get("authorization")).toBe(
+      "Bearer venice-worker-secret",
+    );
+    expect(forwardedRequest.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
+    expect(forwardedRequest.headers.has(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(false);
+    await expect(forwardedRequest.json()).resolves.toEqual({
+      input: "hello",
+      model:
+        "zai-org-glm-4.7:include_venice_system_prompt=false&enable_web_search=off&enable_web_scraping=false",
+      stream: true,
+    });
+  });
+
+  it("normalizes Responses Lite tools before Venice upstream egress", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeProviderEgressCredential = vi.fn(async (input: {
+      providerKind: string;
+      runnerContainerName: string;
+      userId: string;
+    }) => createProviderEgressCredentialValidationResult(input));
+    const credential = await createTestProviderEgressCredential({
+      providerKind: "venice",
+    });
+    const env = createInterceptEnv({
+      HOSTED_VENICE_LUNA_MODEL: "qwen3-4b",
+      HOSTED_VENICE_SOL_MODEL: "qwen3-vl-235b-a22b",
+      HOSTED_VENICE_TERRA_MODEL: "zai-org-glm-4.7",
+      VENICE_API_KEY: "venice-worker-secret",
+      validateRuntimeProviderEgressCredential,
+    });
+    const responsesLiteTools = [{
+      name: "murph",
+      tools: [
+        { name: "connected_apps_manage" },
+        { name: "send_progress_update" },
+      ],
+      type: "namespace",
+    }];
+    const standardInput = [{
+      content: [{ text: "Show my connected apps.", type: "input_text" }],
+      role: "user",
+      type: "message",
+    }];
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.venice.ai/api/v1/responses", {
+        body: JSON.stringify({
+          input: [
+            {
+              role: "developer",
+              tools: responsesLiteTools,
+              type: "additional_tools",
+            },
+            ...standardInput,
+          ],
+          model: "gpt-5.6-terra",
+          parallel_tool_calls: false,
+          stream: true,
+          tool_choice: "auto",
+        }),
+        headers: {
+          authorization: `Bearer ${credential}`,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+      env,
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    const forwarded = findFetchCall(fetchMock, "api.venice.ai")?.[0];
+    expect(forwarded).toBeInstanceOf(Request);
+    const forwardedRequest = forwarded as Request;
+    await expect(forwardedRequest.json()).resolves.toEqual({
+      input: standardInput,
+      model:
+        "zai-org-glm-4.7:include_venice_system_prompt=false&enable_web_search=off&enable_web_scraping=false",
+      parallel_tool_calls: false,
+      stream: true,
+      tool_choice: "auto",
+      tools: responsesLiteTools,
+    });
+  });
+
+  it("rejects malformed and oversized Venice bodies before upstream", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeProviderEgressCredential = vi.fn(async (input: {
+      providerKind: string;
+      runnerContainerName: string;
+      userId: string;
+    }) => createProviderEgressCredentialValidationResult(input));
+    const credential = await createTestProviderEgressCredential({
+      providerKind: "venice",
+    });
+    const env = createInterceptEnv({
+      HOSTED_VENICE_LUNA_MODEL: "qwen3-4b",
+      HOSTED_VENICE_SOL_MODEL: "qwen3-vl-235b-a22b",
+      HOSTED_VENICE_TERRA_MODEL: "zai-org-glm-4.7",
+      VENICE_API_KEY: "venice-worker-secret",
+      validateRuntimeProviderEgressCredential,
+    });
+    const requestHeaders = {
+      authorization: `Bearer ${credential}`,
+      "content-type": "application/json",
+    };
+
+    const malformedResponse = await hostedRunnerIntercept(
+      new Request("https://api.venice.ai/api/v1/responses", {
+        body: "{malformed",
+        headers: requestHeaders,
+        method: "POST",
+      }),
+      env,
+      { containerId: "opaque-container-id" },
+    );
+    const oversizedResponse = await hostedRunnerIntercept(
+      new Request("https://api.venice.ai/api/v1/responses", {
+        body: "{}",
+        headers: {
+          ...requestHeaders,
+          "content-length": String(
+            HOSTED_VENICE_RESPONSES_MAX_BODY_BYTES + 1,
+          ),
+        },
+        method: "POST",
+      }),
+      env,
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(malformedResponse.status).toBe(403);
+    expect(oversizedResponse.status).toBe(413);
+    expect(findFetchCall(fetchMock, "api.venice.ai")).toBeUndefined();
   });
 
   it("injects OpenAI authorization for deploy-smoke egress while the live model turn fence is open", async () => {
@@ -7350,6 +7540,9 @@ function createInterceptEnv(input: {
   MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED?: string;
   MURPH_HOSTED_LOCAL_PROFILE?: string;
   OPENAI_API_KEY?: string;
+  HOSTED_VENICE_LUNA_MODEL?: string;
+  HOSTED_VENICE_SOL_MODEL?: string;
+  HOSTED_VENICE_TERRA_MODEL?: string;
   readActiveRuntimeUserFence?: () => Promise<WorkerActiveRuntimeUserFenceResult>;
   readDeploySmokeLiveModelTurnFence?: () => Promise<{
     active: boolean;
@@ -7358,6 +7551,7 @@ function createInterceptEnv(input: {
   TELEGRAM_API_BASE_URL?: string;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_FILE_BASE_URL?: string;
+  VENICE_API_KEY?: string;
   validateRuntimeWriteFence?: (input: {
     attemptId: string;
     generation: string;
@@ -7396,6 +7590,9 @@ function createInterceptEnv(input: {
       input.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED,
     MURPH_HOSTED_LOCAL_PROFILE: input.MURPH_HOSTED_LOCAL_PROFILE,
     OPENAI_API_KEY: input.OPENAI_API_KEY,
+    HOSTED_VENICE_LUNA_MODEL: input.HOSTED_VENICE_LUNA_MODEL,
+    HOSTED_VENICE_SOL_MODEL: input.HOSTED_VENICE_SOL_MODEL,
+    HOSTED_VENICE_TERRA_MODEL: input.HOSTED_VENICE_TERRA_MODEL,
     RUNNER_CONTAINER: {
       get: () => ({
         readActiveRuntimeUserFence:
@@ -7429,6 +7626,7 @@ function createInterceptEnv(input: {
     TELEGRAM_API_BASE_URL: input.TELEGRAM_API_BASE_URL,
     TELEGRAM_BOT_TOKEN: input.TELEGRAM_BOT_TOKEN,
     TELEGRAM_FILE_BASE_URL: input.TELEGRAM_FILE_BASE_URL,
+    VENICE_API_KEY: input.VENICE_API_KEY,
     XAI_API_KEY: input.XAI_API_KEY,
     USER_RUNNER: {
       getByName: () => ({

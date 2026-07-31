@@ -8,6 +8,7 @@ import { beforeEach, expect, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
   getHostedPrivySession: vi.fn(),
+  isHostedBillingPlanSelectionAvailable: vi.fn(),
   getPrisma: vi.fn(),
   readHostedPulseTrialContinuationCookie: vi.fn(),
   PulseTrialBillingContinuation: vi.fn((props: {
@@ -35,27 +36,48 @@ const mocks = vi.hoisted(() => ({
       null,
       `Hosted account settings ${String(props.murphPhoneNumber ?? "")}`,
     )),
-  resolveMurphContactOptions: vi.fn(
-    (input?: { message?: { body?: string | null } | null }) => [
-      input?.message?.body === "Hey Murph, I just added more usage."
-        ? {
-            href: "sms:+15550100001?body=Hey%20Murph%2C%20I%20just%20added%20more%20usage.",
-            kind: "text",
-            label: "Messages",
-          }
-        : {
-            href: "sms:+15550100001?body=voice%20test",
-            kind: "text",
-            label: "Messages",
-          },
-    ],
+  resolveMurphContactOptions: vi.fn((input?: {
+    contactChannels?: {
+      email?: boolean;
+      telegram?: boolean;
+      text?: boolean;
+    } | null;
+    message?: { body?: string | null } | null;
+  }) => {
+    if (input?.message?.body === "Hey Murph, I just added more usage.") {
+      return [{
+        href: "sms:+15550100001?body=Hey%20Murph%2C%20I%20just%20added%20more%20usage.",
+        kind: "text",
+        label: "Messages",
+      }];
+    }
+    if (
+      input?.message?.body
+        === "Hey Murph, what usage missions can I choose from?"
+    ) {
+      return [{
+        href: "sms:+15550100001?body=Hey%20Murph%2C%20what%20usage%20missions%20can%20I%20choose%20from%3F",
+        kind: "text",
+        label: "Messages",
+      }];
+    }
+    return [{
+      href: "sms:+15550100001?body=voice%20test",
+      kind: "text",
+      label: "Messages",
+    }];
+  }),
+  HostedAiUsageActivity: vi.fn(() =>
+    React.createElement("div", null, "Hosted AI usage activity")
   ),
   HostedAssistantModelSettings: vi.fn((props: {
     canUpgradeToEdge: boolean;
     configurationAvailable: boolean;
     initialDormantSolPreference: boolean;
     initialModel: string;
+    initialProvider: string;
     solAvailable: boolean;
+    veniceAvailable: boolean;
   }) =>
     React.createElement(
       "div",
@@ -66,28 +88,36 @@ const mocks = vi.hoisted(() => ({
     authenticated: boolean;
     canStartFamily?: boolean;
     canStartPaidPulse?: boolean;
+    canSwitchToGroup?: boolean;
+    canUpgradeToPulse?: boolean;
     canUpgradeToEdge?: boolean;
     currentBillingPhase?: unknown;
     currentCheckoutOffer?: unknown;
     currentBillingPlanCode?: unknown;
     familyState?: "none" | "owner" | "sponsored";
+    groupPaymentMethodSaved?: boolean;
     payerMemberId?: string | null;
     pulseTrialBillingContinuationPending?: boolean;
+    showGroupPlan?: boolean;
+    usageActivityDetail?: React.ReactNode;
     usageStatus?: unknown;
+    usageTopUpActivePurchase?: unknown;
+    usageTopUpCheckoutUrl?: string;
     usageTopUpInitialOpen?: boolean;
     usageTopUpOffers?: readonly unknown[];
     usageTopUpPurchaseReturn?: unknown;
+    usageTopUpScope?: "family" | "personal";
+    usageTopUpTargetLabel?: string;
   }) =>
     React.createElement(
       "div",
       null,
       `Hosted billing settings ${String(props.authenticated)} ${String(props.canUpgradeToEdge ?? false)} ${String(props.currentBillingPlanCode ?? "")}`,
+      props.usageActivityDetail,
     )),
   HostedDataPrivacySettings: vi.fn((props: { authenticated: boolean }) =>
     React.createElement("div", null, `Hosted data privacy settings ${String(props.authenticated)}`)),
   HostedFamilySettings: vi.fn(() => React.createElement("div", null, "Hosted family settings")),
-  HostedFamilySelfUsageTopUpHost: vi.fn(() =>
-    React.createElement("div", null, "Family owner usage top up")),
   HostedPasskeySettings: vi.fn((props: {
     authenticated: boolean;
     secureApprovalStatus: { status: string };
@@ -105,9 +135,13 @@ const mocks = vi.hoisted(() => ({
     hostedCodexAuthConnection: {
       findUnique: vi.fn(async () => null),
     },
+    hostedGroupMember: {
+      findFirst: vi.fn(async (): Promise<{ id: string } | null> => null),
+    },
   },
   readHostedAccountSettingsPageSnapshot: vi.fn(),
   readHostedActiveUsageCreditPurchaseForPayer: vi.fn(),
+  readHostedAiUsageActivity: vi.fn(),
   readHostedPersonalAiUsageStatus: vi.fn(),
   readHostedConfiguredUsageCreditOfferCodes: vi.fn(),
   readHostedPersonalUsageCreditOfferCodes: vi.fn(),
@@ -146,6 +180,10 @@ vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
 
+vi.mock("@/src/lib/hosted-execution/usage-activity", () => ({
+  readHostedAiUsageActivity: mocks.readHostedAiUsageActivity,
+}));
+
 vi.mock("@/src/lib/hosted-execution/usage-status", () => ({
   readHostedPersonalAiUsageStatus: mocks.readHostedPersonalAiUsageStatus,
 }));
@@ -165,6 +203,11 @@ vi.mock("@/src/lib/hosted-onboarding/account-settings-snapshot", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-session", () => ({
   getHostedPrivySession: mocks.getHostedPrivySession,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
+  isHostedBillingPlanSelectionAvailable:
+    mocks.isHostedBillingPlanSelectionAvailable,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/personal-usage-credit-eligibility", () => ({
@@ -190,6 +233,10 @@ vi.mock("@/src/components/hosted-onboarding/privy-provider", () => ({
   HostedPrivyProvider(input: { children: React.ReactNode }) {
     return React.createElement("div", null, input.children);
   },
+}));
+
+vi.mock("@/src/components/settings/hosted-ai-usage-activity", () => ({
+  HostedAiUsageActivity: mocks.HostedAiUsageActivity,
 }));
 
 vi.mock("@/src/components/settings/hosted-billing-settings", () => ({
@@ -222,10 +269,6 @@ vi.mock("@/src/components/settings/hosted-data-privacy-settings", () => ({
 
 vi.mock("@/src/components/settings/hosted-family-settings", () => ({
   HostedFamilySettings: mocks.HostedFamilySettings,
-}));
-
-vi.mock("@/src/components/settings/hosted-family-self-usage-top-up-host", () => ({
-  HostedFamilySelfUsageTopUpHost: mocks.HostedFamilySelfUsageTopUpHost,
 }));
 
 vi.mock("@/src/components/settings/hosted-passkey-settings", () => ({
@@ -269,6 +312,7 @@ function mockSettingsPageSnapshot(input: {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.isHostedBillingPlanSelectionAvailable.mockResolvedValue(true);
   mockSettingsPageSnapshot();
   mocks.readHostedFamilyAccessForMember.mockResolvedValue(null);
   mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(null);
@@ -279,6 +323,11 @@ beforeEach(() => {
     "usage_25_usd",
   ]);
   mocks.readHostedPersonalUsageCreditOfferCodes.mockResolvedValue([]);
+  mocks.readHostedAiUsageActivity.mockResolvedValue({
+    credits: [],
+    missions: [],
+    missionsEnabled: false,
+  });
   mocks.readHostedUsageCreditPurchaseTargetForPayer.mockResolvedValue({
     beneficiaryMemberId: "member_123",
     kind: "personal",
@@ -291,6 +340,7 @@ beforeEach(() => {
   });
   mocks.readHostedSecureApprovalStatus.mockResolvedValue({ status: "unavailable" });
   mocks.readHostedPulseTrialContinuationCookie.mockResolvedValue(null);
+  mocks.prisma.hostedGroupMember.findFirst.mockResolvedValue(null);
 });
 
 test("SettingsPage metadata uses the shared preview image", async () => {
@@ -372,6 +422,7 @@ test("SettingsPage redirects signed-out visitors before reading member settings"
   expect(mocks.readHostedFamilyAccessForMember).not.toHaveBeenCalled();
   expect(mocks.readHostedFamilyOwnerSnapshotForMember).not.toHaveBeenCalled();
   expect(mocks.readHostedActiveUsageCreditPurchaseForPayer).not.toHaveBeenCalled();
+  expect(mocks.readHostedAiUsageActivity).not.toHaveBeenCalled();
   expect(mocks.readHostedPersonalAiUsageStatus).not.toHaveBeenCalled();
   expect(mocks.readHostedPersonalUsageCreditOfferCodes).not.toHaveBeenCalled();
   expect(mocks.readHostedSecureApprovalStatus).not.toHaveBeenCalled();
@@ -399,8 +450,29 @@ test("SettingsPage keeps a signed-out Stripe payment return recoverable", async 
   // absent from the URL, so anyone could craft these parameters. Murph must not
   // vouch for a payment it has not checked.
   assert.match(markup, /One more step/);
-  assert.match(markup, /Sign in to verify and finish your Pulse update\./);
+  assert.match(markup, /Sign in to verify and finish your billing update\./);
   assert.doesNotMatch(markup, /card is saved/i);
+  expect(mocks.getPrisma).not.toHaveBeenCalled();
+});
+
+test("SettingsPage keeps a signed-out Core payment return recoverable", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: false,
+    authenticatedMember: null,
+    session: null,
+  });
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  const markup = renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({
+      startGroup: "payment_method_saved",
+    }),
+  }));
+
+  assert.match(markup, /One more step/);
+  assert.doesNotMatch(markup, /Payment method saved/);
+  assert.doesNotMatch(markup, /Core has not started/);
   expect(mocks.getPrisma).not.toHaveBeenCalled();
 });
 
@@ -545,6 +617,10 @@ test("SettingsPage reads the app session and persisted account settings into the
     "usage_10_usd",
     "usage_25_usd",
   ]);
+  mocks.prisma.hostedGroupMember.findFirst.mockResolvedValue({
+    id: "group_member_123",
+  });
+  mocks.isHostedBillingPlanSelectionAvailable.mockResolvedValue(false);
   mocks.getPrisma.mockReturnValue(mocks.prisma);
   mocks.getHostedPrivySession.mockResolvedValue({
     identity: {
@@ -632,6 +708,31 @@ test("SettingsPage reads the app session and persisted account settings into the
     usedPercent: 32,
   } as const;
   mocks.readHostedPersonalAiUsageStatus.mockResolvedValue(usageStatus);
+  const usageActivity = {
+    credits: [
+      {
+        addedLabel: "$10.00",
+        dateLabel: "Jul 24, 2026",
+        id: "credit_1",
+        sourceLabel: "Purchased by you",
+      },
+    ],
+    missions: [
+      {
+        destinationLabel: "the group",
+        id: "mission_1",
+        requirementsLabel: "Start a fresh group and get people talking.",
+        rewardLabel: "$3.50",
+        selectedLabel: "Jul 27, 2026",
+        status: "in_progress",
+        statusLabel: "In progress",
+        timingLabel: "Ends Aug 3, 2026",
+        title: "Start an active group",
+      },
+    ],
+    missionsEnabled: true,
+  } as const;
+  mocks.readHostedAiUsageActivity.mockResolvedValue(usageActivity);
 
   try {
     const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
@@ -647,15 +748,20 @@ test("SettingsPage reads the app session and persisted account settings into the
     }));
 
     assert.match(markup, /Hosted billing settings/);
+    assert.match(markup, /Hosted AI usage activity/);
     assert.match(markup, /Hosted assistant model gpt-5\.6-sol true/);
     assert.match(markup, /Hosted account settings \+15550100001/);
     assert.match(markup, /Manage wearables/);
     assert.match(markup, /href="\/connect"/);
     assert.match(markup, /Hosted passkey settings true configured/);
     assert.match(markup, /Hosted data privacy settings/);
-    assert.match(markup, /Your account/);
-    assert.match(markup, /Plan, model, connected accounts, and data privacy\./);
+    assert.match(markup, /<h1[^>]*>Your account<\/h1>/);
+    assert.match(markup, /Plan, AI usage, model, connected accounts, and data privacy\./);
     assert.match(markup, /id="subscription"/);
+    assert.match(markup, /id="ai-usage"/);
+    assert.match(markup, /<h2[^>]*>AI usage<\/h2>/);
+    assert.ok(markup.indexOf("Hosted billing settings") < markup.indexOf("id=\"ai-usage\""));
+    assert.ok(markup.indexOf("id=\"ai-usage\"") < markup.indexOf("Hosted assistant model"));
     assert.doesNotMatch(markup, /ChatGPT/);
     assert.doesNotMatch(markup, /Data sources/);
     for (const removedCopy of [
@@ -676,23 +782,21 @@ test("SettingsPage reads the app session and persisted account settings into the
       currentCheckoutOffer: "standard",
       currentBillingPlanCode: "launch_monthly",
       payerMemberId: "member_123",
+      showGroupPlan: false,
       usageStatus,
       usageTopUpActivePurchase: null,
       usageTopUpInitialOpen: true,
       usageTopUpOffers: [
         {
           amountLabel: "$5",
-          estimatedMessages: 100,
           offerCode: "usage_5_usd",
         },
         {
           amountLabel: "$10",
-          estimatedMessages: 200,
           offerCode: "usage_10_usd",
         },
         {
           amountLabel: "$25",
-          estimatedMessages: 500,
           offerCode: "usage_25_usd",
         },
       ],
@@ -704,9 +808,12 @@ test("SettingsPage reads the app session and persisted account settings into the
     expect(mocks.HostedAssistantModelSettings).toHaveBeenCalledWith({
       canUpgradeToEdge: true,
       configurationAvailable: true,
+      expectedCurrentPlanCode: "launch_monthly",
       initialDormantSolPreference: false,
       initialModel: "gpt-5.6-sol",
+      initialProvider: "openai",
       solAvailable: true,
+      veniceAvailable: false,
     }, undefined);
     expect(mocks.readHostedAccountSettingsPageSnapshot).toHaveBeenCalledWith({
       memberId: "member_123",
@@ -714,6 +821,15 @@ test("SettingsPage reads the app session and persisted account settings into the
     });
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
     expect(mocks.readHostedPersonalAiUsageStatus).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prisma,
+      publicBaseUrl: null,
+    });
+    expect(mocks.isHostedBillingPlanSelectionAvailable).toHaveBeenCalledTimes(1);
+    expect(mocks.isHostedBillingPlanSelectionAvailable).toHaveBeenCalledWith({
+      billingPlanCode: "launch_group_monthly",
+    });
+    expect(mocks.readHostedAiUsageActivity).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: mocks.prisma,
     });
@@ -784,6 +900,28 @@ test("SettingsPage reads the app session and persisted account settings into the
       murphPhoneNumber: "+15550100001",
       userEmailAddress: "verified@example.com",
     });
+    expect(mocks.resolveMurphContactOptions).toHaveBeenNthCalledWith(3, {
+      contactChannels: {
+        email: false,
+        telegram: true,
+        text: true,
+      },
+      message: {
+        body: "Hey Murph, what usage missions can I choose from?",
+      },
+      murphEmailAddress: null,
+      murphPhoneNumber: "+15550100001",
+      preferredKind: "text",
+      userEmailAddress: "verified@example.com",
+    });
+    expect(mocks.HostedAiUsageActivity).toHaveBeenCalledWith({
+      activity: usageActivity,
+      missionContactOption: {
+        href: "sms:+15550100001?body=Hey%20Murph%2C%20what%20usage%20missions%20can%20I%20choose%20from%3F",
+        kind: "text",
+        label: "Messages",
+      },
+    }, undefined);
     expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
       expect.objectContaining({
         usageTopUpContactOptions: [{
@@ -845,7 +983,7 @@ test("SettingsPage rejects repeated or malformed usage top-up query state", asyn
   );
 });
 
-test("SettingsPage opens only the authenticated active Family owner's own usage picker", async () => {
+test("SettingsPage surfaces and opens the authenticated active Family owner's own usage picker", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
   mocks.getHostedPrivySession.mockResolvedValue(null);
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
@@ -863,7 +1001,7 @@ test("SettingsPage opens only the authenticated active Family owner's own usage 
   const ownerMember = {
     isOwner: true,
     joinedAt: new Date("2026-07-01T12:00:00.000Z"),
-    label: null,
+    label: "Account owner",
     memberId: "member_123",
     pendingPlanCode: null,
     planCode: "launch_monthly",
@@ -885,42 +1023,385 @@ test("SettingsPage opens only the authenticated active Family owner's own usage 
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
   renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({}),
+  }));
+
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      usageTopUpInitialOpen: false,
+      usageTopUpOffers: expect.arrayContaining([
+        expect.objectContaining({ amountLabel: "$5" }),
+      ]),
+      usageTopUpScope: "family",
+      usageTopUpTargetLabel: "you",
+    }),
+    undefined,
+  );
+
+  mocks.HostedBillingSettings.mockClear();
+  renderToStaticMarkup(await SettingsPage({
     searchParams: Promise.resolve({ addUsage: "family" }),
   }));
 
-  expect(mocks.HostedFamilySelfUsageTopUpHost).toHaveBeenCalledWith({
-    activePurchase: null,
-    contactOptions: [{
-      href: "sms:+15550100001?body=Hey%20Murph%2C%20I%20just%20added%20more%20usage.",
-      kind: "text",
-      label: "Messages",
-    }],
-    memberId: "member_123",
-    offers: [
-      {
-        amountLabel: "$5",
-        estimatedMessages: 100,
-        offerCode: "usage_5_usd",
-      },
-      {
-        amountLabel: "$10",
-        estimatedMessages: 200,
-        offerCode: "usage_10_usd",
-      },
-      {
-        amountLabel: "$25",
-        estimatedMessages: 500,
-        offerCode: "usage_25_usd",
-      },
-    ],
-    payerMemberId: "member_123",
-    targetLabel: "you",
-  }, undefined);
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
-    expect.objectContaining({ usageTopUpInitialOpen: false }),
+    expect.objectContaining({
+      usageTopUpActivePurchase: null,
+      usageTopUpCheckoutUrl:
+        "/api/settings/billing/family/members/member_123/usage-credit/checkout",
+      usageTopUpInitialOpen: true,
+      usageTopUpOffers: [
+        {
+          amountLabel: "$5",
+          offerCode: "usage_5_usd",
+        },
+        {
+          amountLabel: "$10",
+          offerCode: "usage_10_usd",
+        },
+        {
+          amountLabel: "$25",
+          offerCode: "usage_25_usd",
+        },
+      ],
+      usageTopUpPurchaseReturn: null,
+      usageTopUpScope: "family",
+      usageTopUpTargetLabel: "you",
+    }),
+    undefined,
+  );
+
+  mocks.HostedBillingSettings.mockClear();
+  renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({ addUsage: "true" }),
+  }));
+
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      usageTopUpCheckoutUrl:
+        "/api/settings/billing/family/members/member_123/usage-credit/checkout",
+      usageTopUpInitialOpen: true,
+      usageTopUpScope: "family",
+      usageTopUpTargetLabel: "you",
+    }),
     undefined,
   );
 });
+
+test.each([
+  {
+    beneficiaryMemberId: "member_123",
+    checkoutKind: "success",
+    label: "successful owner-seat return",
+    ownerSurfaceOwnsReturn: true,
+  },
+  {
+    beneficiaryMemberId: "member_123",
+    checkoutKind: "cancel",
+    label: "canceled owner-seat return",
+    ownerSurfaceOwnsReturn: true,
+  },
+  {
+    beneficiaryMemberId: "member_family",
+    checkoutKind: "success",
+    label: "successful active-member return",
+    ownerSurfaceOwnsReturn: false,
+  },
+  {
+    beneficiaryMemberId: "member_family",
+    checkoutKind: "cancel",
+    label: "canceled active-member return",
+    ownerSurfaceOwnsReturn: false,
+  },
+  {
+    beneficiaryMemberId: "member_former",
+    checkoutKind: "success",
+    label: "successful former-member return",
+    ownerSurfaceOwnsReturn: false,
+  },
+  {
+    beneficiaryMemberId: "member_former",
+    checkoutKind: "cancel",
+    label: "canceled former-member return",
+    ownerSurfaceOwnsReturn: false,
+  },
+] as const)(
+  "SettingsPage gives one exact Family surface the $label",
+  async ({
+    beneficiaryMemberId,
+    checkoutKind,
+    ownerSurfaceOwnsReturn,
+  }) => {
+    mocks.getPrisma.mockReturnValue(mocks.prisma);
+    mocks.getHostedPrivySession.mockResolvedValue(null);
+    mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+      authenticated: true,
+      authenticatedMember: {
+        billingStatus: "active",
+        id: "member_123",
+        suspendedAt: null,
+      },
+      linkedAccounts: [],
+      session: {
+        privyUserId: "did:privy:user_123",
+      },
+    });
+    const familyOwner = {
+      billingActive: true,
+      billingStatus: "active",
+      displayName: null,
+      groupId: "hbag_abcdefghijklmnop",
+      invites: [],
+      members: [
+        {
+          isOwner: true,
+          label: null,
+          memberId: "member_123",
+          status: "active",
+        },
+        {
+          isOwner: false,
+          label: "Alex",
+          memberId: "member_family",
+          status: "active",
+        },
+      ],
+      ownerMemberId: "member_123",
+      plans: {},
+      seats: {},
+      suspendedAt: null,
+    };
+    mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(familyOwner);
+    mocks.readHostedActiveUsageCreditPurchaseForPayer.mockResolvedValue(null);
+    mocks.readHostedUsageCreditPurchaseTargetForPayer.mockResolvedValue({
+      beneficiaryMemberId,
+      familyGroupId: familyOwner.groupId,
+      kind: "family",
+    });
+
+    const { default: SettingsPage } = await import(
+      "../app/(dashboard)/settings/page"
+    );
+    renderToStaticMarkup(await SettingsPage({
+      searchParams: Promise.resolve({
+        usageCheckout: checkoutKind,
+        usageFamily: familyOwner.groupId,
+        usageMember: beneficiaryMemberId,
+        usagePurchase: "hucp_abcdefghijklmnop",
+      }),
+    }));
+    const expectedReturn = {
+      kind: checkoutKind,
+      purchaseId: "hucp_abcdefghijklmnop",
+    };
+
+    expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        usageTopUpPurchaseReturn: ownerSurfaceOwnsReturn
+          ? expectedReturn
+          : null,
+        usageTopUpScope: "family",
+        usageTopUpTargetLabel: "you",
+      }),
+      undefined,
+    );
+    expect(mocks.HostedFamilySettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        usageTopUpPurchaseReturn: ownerSurfaceOwnsReturn
+          ? null
+          : expectedReturn,
+        usageTopUpReturnMemberId: ownerSurfaceOwnsReturn
+          ? null
+          : beneficiaryMemberId,
+      }),
+      undefined,
+    );
+  },
+);
+
+test("SettingsPage keeps a delayed owner return separate from a newer member purchase", async () => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPrivySession.mockResolvedValue(null);
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "active",
+      id: "member_123",
+      suspendedAt: null,
+    },
+    linkedAccounts: [],
+    session: {
+      privyUserId: "did:privy:user_123",
+    },
+  });
+  const familyOwner = {
+    billingActive: true,
+    billingStatus: "active",
+    displayName: null,
+    groupId: "hbag_abcdefghijklmnop",
+    invites: [],
+    members: [
+      {
+        isOwner: true,
+        label: null,
+        memberId: "member_123",
+        status: "active",
+      },
+      {
+        isOwner: false,
+        label: "Family member",
+        memberId: "member_family",
+        status: "active",
+      },
+    ],
+    ownerMemberId: "member_123",
+    plans: {},
+    seats: {},
+    suspendedAt: null,
+  };
+  mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(familyOwner);
+  const newerMemberPurchase = {
+    offerCode: "usage_10_usd",
+    purchaseId: "hucp_memberactive0000",
+    retryAllowed: true,
+    status: "checkout_open",
+    target: {
+      beneficiaryMemberId: "member_family",
+      familyGroupId: familyOwner.groupId,
+      kind: "family",
+    },
+    url: "https://checkout.stripe.test/newer-member",
+  } as const;
+  mocks.readHostedActiveUsageCreditPurchaseForPayer.mockResolvedValue(
+    newerMemberPurchase,
+  );
+  mocks.readHostedUsageCreditPurchaseTargetForPayer.mockResolvedValue({
+    beneficiaryMemberId: "member_123",
+    familyGroupId: familyOwner.groupId,
+    kind: "family",
+  });
+
+  const { default: SettingsPage } = await import(
+    "../app/(dashboard)/settings/page"
+  );
+  renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({
+      usageCheckout: "success",
+      usageFamily: familyOwner.groupId,
+      usageMember: "member_123",
+      usagePurchase: "hucp_ownerreturn00000",
+    }),
+  }));
+
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      usageTopUpActivePurchase: null,
+      usageTopUpPurchaseReturn: {
+        kind: "success",
+        purchaseId: "hucp_ownerreturn00000",
+      },
+      usageTopUpScope: "family",
+      usageTopUpTargetLabel: "you",
+    }),
+    undefined,
+  );
+  expect(mocks.HostedFamilySettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      usageTopUpActiveMemberId: "member_family",
+      usageTopUpActivePurchase: newerMemberPurchase,
+      usageTopUpPurchaseReturn: null,
+      usageTopUpReturnMemberId: null,
+    }),
+    undefined,
+  );
+});
+
+test.each(["success", "cancel"] as const)(
+  "SettingsPage preserves an exact personal $1 return after the payer becomes a Family owner",
+  async (checkoutKind) => {
+    mocks.getPrisma.mockReturnValue(mocks.prisma);
+    mocks.getHostedPrivySession.mockResolvedValue(null);
+    mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+      authenticated: true,
+      authenticatedMember: {
+        billingStatus: "active",
+        id: "member_123",
+        suspendedAt: null,
+      },
+      linkedAccounts: [],
+      session: {
+        privyUserId: "did:privy:user_123",
+      },
+    });
+    mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue({
+      billingActive: true,
+      billingStatus: "active",
+      displayName: null,
+      groupId: "hbag_abcdefghijklmnop",
+      invites: [],
+      members: [
+        {
+          isOwner: true,
+          label: "Account owner",
+          memberId: "member_123",
+          status: "active",
+        },
+      ],
+      ownerMemberId: "member_123",
+      plans: {},
+      seats: {},
+      suspendedAt: null,
+    });
+    mocks.readHostedUsageCreditPurchaseTargetForPayer.mockResolvedValue({
+      beneficiaryMemberId: "member_123",
+      kind: "personal",
+    });
+    const activePurchase = {
+      offerCode: "usage_5_usd",
+      purchaseId: "hucp_abcdefghijklmnop",
+      retryAllowed: true,
+      status: "checkout_open",
+      target: {
+        beneficiaryMemberId: "member_123",
+        kind: "personal",
+      },
+      url: "https://checkout.stripe.test/session",
+    } as const;
+    mocks.readHostedActiveUsageCreditPurchaseForPayer.mockResolvedValue(
+      activePurchase,
+    );
+
+    const { default: SettingsPage } = await import(
+      "../app/(dashboard)/settings/page"
+    );
+    renderToStaticMarkup(await SettingsPage({
+      searchParams: Promise.resolve({
+        usageCheckout: checkoutKind,
+        usagePurchase: "hucp_abcdefghijklmnop",
+      }),
+    }));
+
+    expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        usageTopUpActivePurchase: null,
+        usageTopUpCheckoutUrl: undefined,
+        usageTopUpPurchaseReturn: {
+          kind: checkoutKind,
+          purchaseId: "hucp_abcdefghijklmnop",
+        },
+        usageTopUpScope: "personal",
+        usageTopUpTargetLabel: undefined,
+      }),
+      undefined,
+    );
+    expect(mocks.HostedFamilySettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        usageTopUpPurchaseReturn: null,
+        usageTopUpReturnMemberId: null,
+      }),
+      undefined,
+    );
+  },
+);
 
 test.each([
   {
@@ -986,7 +1467,6 @@ test.each([
     searchParams: Promise.resolve({ addUsage }),
   }));
 
-  expect(mocks.HostedFamilySelfUsageTopUpHost).not.toHaveBeenCalled();
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
     expect.objectContaining({ usageTopUpInitialOpen: false }),
     undefined,
@@ -1031,6 +1511,73 @@ test("SettingsPage keeps a frozen active purchase visible when current offers ar
     expect.objectContaining({
       usageTopUpActivePurchase: activePurchase,
       usageTopUpOffers: [],
+    }),
+    undefined,
+  );
+});
+
+test("SettingsPage keeps a frozen personal purchase recoverable after Family activation", async () => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPrivySession.mockResolvedValue(null);
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "active",
+      id: "member_123",
+      suspendedAt: null,
+    },
+    linkedAccounts: [],
+    session: {
+      privyUserId: "did:privy:user_123",
+    },
+  });
+  mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue({
+    billingActive: true,
+    billingStatus: "active",
+    displayName: null,
+    groupId: "hbag_abcdefghijklmnop",
+    invites: [],
+    members: [
+      {
+        isOwner: true,
+        label: null,
+        memberId: "member_123",
+        status: "active",
+      },
+    ],
+    ownerMemberId: "member_123",
+    plans: {},
+    seats: {},
+    suspendedAt: null,
+  });
+  const activePurchase = {
+    offerCode: "usage_10_usd",
+    purchaseId: "hucp_abcdefghijklmnop",
+    retryAllowed: true,
+    status: "checkout_open",
+    target: {
+      beneficiaryMemberId: "member_123",
+      kind: "personal",
+    },
+    url: "https://checkout.stripe.test/session",
+  } as const;
+  mocks.readHostedActiveUsageCreditPurchaseForPayer.mockResolvedValue(
+    activePurchase,
+  );
+
+  const { default: SettingsPage } = await import(
+    "../app/(dashboard)/settings/page"
+  );
+  renderToStaticMarkup(await SettingsPage());
+
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      usageTopUpActivePurchase: activePurchase,
+      usageTopUpCheckoutUrl: undefined,
+      usageTopUpOffers: [],
+      usageTopUpPurchaseReturn: null,
+      usageTopUpScope: "personal",
+      usageTopUpTargetLabel: undefined,
     }),
     undefined,
   );
@@ -1138,9 +1685,24 @@ test("SettingsPage keeps a former Family purchase status-only despite duplicate 
     groupId: "hbag_abcdefghijklmnop",
     invites: [],
     members: [
-      { label: null, memberId: "member_123" },
-      { label: "Alex", memberId: "member_current_a" },
-      { label: "Alex", memberId: "member_current_b" },
+      {
+        isOwner: true,
+        label: null,
+        memberId: "member_123",
+        status: "active",
+      },
+      {
+        isOwner: false,
+        label: "Alex",
+        memberId: "member_current_a",
+        status: "active",
+      },
+      {
+        isOwner: false,
+        label: "Alex",
+        memberId: "member_current_b",
+        status: "active",
+      },
     ],
     ownerMemberId: "member_123",
     plans: {},
@@ -1177,7 +1739,11 @@ test("SettingsPage keeps a former Family purchase status-only despite duplicate 
 
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
     expect.objectContaining({
-      usageTopUpActivePurchase: null,
+      usageTopUpActivePurchase: expect.objectContaining({
+        purchaseId: "hucp_abcdefghijklmnop",
+        retryAllowed: false,
+        targetConflict: true,
+      }),
       usageTopUpOffers: [],
       usageTopUpPurchaseReturn: null,
     }),
@@ -1361,7 +1927,7 @@ test("SettingsPage passes a pending Murph text line to account settings", async 
   }), undefined);
 });
 
-test("SettingsPage drops the voice-test chat link for an email-only member", async () => {
+test("SettingsPage omits an empty email-only invitation but preserves activity history", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
   mocks.getHostedPrivySession.mockResolvedValue(null);
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
@@ -1391,11 +1957,20 @@ test("SettingsPage drops the voice-test chat link for an email-only member", asy
       },
     },
   });
-  mocks.resolveMurphContactOptions.mockReturnValueOnce([{
-    href: "mailto:murph@mail.withmurph.ai?body=test",
-    kind: "email",
-    label: "Email",
-  }]);
+  mocks.readHostedAiUsageActivity.mockResolvedValue({
+    credits: [],
+    missions: [],
+    missionsEnabled: true,
+  });
+  mocks.resolveMurphContactOptions.mockImplementation((input) =>
+    input?.contactChannels?.email === true
+      ? [{
+          href: "mailto:murph@mail.withmurph.ai?body=test",
+          kind: "email",
+          label: "Email",
+        }]
+      : []
+  );
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
@@ -1404,6 +1979,74 @@ test("SettingsPage drops the voice-test chat link for an email-only member", asy
   expect(mocks.CustomizeMurphSettings).toHaveBeenCalledWith(expect.objectContaining({
     voiceTestContactOption: null,
   }), undefined);
+  expect(mocks.HostedAiUsageActivity).not.toHaveBeenCalled();
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      usageActivityDetail: null,
+    }),
+    undefined,
+  );
+  expect(mocks.resolveMurphContactOptions).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      contactChannels: {
+        email: false,
+        telegram: false,
+        text: false,
+      },
+      message: {
+        body: "Hey Murph, what usage missions can I choose from?",
+      },
+    }),
+  );
+
+  mocks.HostedAiUsageActivity.mockClear();
+  mocks.readHostedAiUsageActivity.mockResolvedValue({
+    credits: [{
+      addedLabel: "$5.00",
+      dateLabel: "Jul 29, 2026",
+      id: "credit_email_history",
+      sourceLabel: "Added for you",
+    }],
+    missions: [],
+    missionsEnabled: true,
+  });
+  renderToStaticMarkup(await SettingsPage());
+  expect(mocks.HostedAiUsageActivity).toHaveBeenCalledWith(
+    expect.objectContaining({
+      activity: expect.objectContaining({
+        credits: [expect.objectContaining({ id: "credit_email_history" })],
+      }),
+      missionContactOption: null,
+    }),
+    undefined,
+  );
+
+  mocks.HostedAiUsageActivity.mockClear();
+  mocks.readHostedAiUsageActivity.mockResolvedValue({
+    credits: [],
+    missions: [{
+      destinationLabel: "your Murph",
+      id: "mission_email_history",
+      requirementsLabel: "Complete the selected mission.",
+      rewardLabel: "$2.00",
+      selectedLabel: "Jul 20, 2026",
+      status: "completed",
+      statusLabel: "Completed",
+      timingLabel: "Earned Jul 27, 2026",
+      title: "Completed mission",
+    }],
+    missionsEnabled: true,
+  });
+  renderToStaticMarkup(await SettingsPage());
+  expect(mocks.HostedAiUsageActivity).toHaveBeenCalledWith(
+    expect.objectContaining({
+      activity: expect.objectContaining({
+        missions: [expect.objectContaining({ id: "mission_email_history" })],
+      }),
+      missionContactOption: null,
+    }),
+    undefined,
+  );
 });
 
 test("SettingsPage exposes Start Pulse recovery for a paused Pulse Trial subscription", async () => {
@@ -1444,6 +2087,48 @@ test("SettingsPage exposes Start Pulse recovery for a paused Pulse Trial subscri
     currentBillingPhase: null,
     currentBillingPlanCode: "launch_monthly",
     currentCheckoutOffer: "pulse_trial_7d",
+  }), undefined);
+});
+
+test("SettingsPage preserves the Group payment-method receipt and fresh start action", async () => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPrivySession.mockResolvedValue(null);
+  mocks.prisma.hostedGroupMember.findFirst.mockResolvedValue({ id: "membership_123" });
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "paused",
+      id: "member_123",
+      suspendedAt: null,
+    },
+    linkedAccounts: [],
+    session: {
+      privyUserId: "did:privy:user_123",
+    },
+  });
+  mockSettingsPageSnapshot({
+    billingRef: {
+      currentBillingPhase: null,
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
+      memberId: "member_123",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    },
+  });
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({
+      startGroup: "payment_method_saved",
+    }),
+  }));
+
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({
+    canStartPaidPulse: true,
+    groupPaymentMethodSaved: true,
+    showGroupPlan: true,
   }), undefined);
 });
 
@@ -1602,6 +2287,13 @@ test("SettingsPage awaits database-backed settings reads one at a time", async (
       status: "unavailable",
     }),
   );
+  mocks.readHostedAiUsageActivity.mockImplementation(
+    trackDatabaseRead("usageActivity", {
+      credits: [],
+      missions: [],
+      missionsEnabled: false,
+    }),
+  );
   mocks.readHostedPersonalUsageCreditOfferCodes.mockImplementation(
     trackDatabaseRead("usageTopUpOfferCodes", []),
   );
@@ -1630,6 +2322,7 @@ test("SettingsPage awaits database-backed settings reads one at a time", async (
       "familyOwner",
       "familyAccess",
       "usageStatus",
+      "usageActivity",
       "usageTopUpOfferCodes",
       "usageTopUpActivePurchase",
     ]);
@@ -1656,7 +2349,7 @@ test("SettingsPage awaits database-backed settings reads one at a time", async (
   }
 });
 
-test("SettingsPage falls back to empty offers, no purchase, and no Privy hints when those reads fail", async () => {
+test("SettingsPage preserves billing when optional usage and Privy reads fail", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
@@ -1677,6 +2370,9 @@ test("SettingsPage falls back to empty offers, no purchase, and no Privy hints w
   mocks.readHostedActiveUsageCreditPurchaseForPayer.mockRejectedValue(
     new Error("purchase lookup failed"),
   );
+  mocks.readHostedAiUsageActivity.mockRejectedValue(
+    new Error("usage activity unavailable"),
+  );
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
@@ -1693,6 +2389,7 @@ test("SettingsPage falls back to empty offers, no purchase, and no Privy hints w
     snapshot: EMPTY_ACCOUNT_SETTINGS,
     serverApprovedPrivyLinkedAccounts: null,
   });
+  expect(mocks.HostedAiUsageActivity).not.toHaveBeenCalled();
 });
 
 test("SettingsPage renders fallback values without reading settings data when the session has no member", async () => {

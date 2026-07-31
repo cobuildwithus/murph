@@ -322,7 +322,7 @@ describe('assistant channels runtime seam', () => {
     expect(body).toBeInstanceOf(FormData)
     const entries = Object.fromEntries((body as FormData).entries())
     expect(entries).toMatchObject({
-      caption: 'Private image',
+      caption: 'Private image\n\nPrivate generated image',
       chat_id: '123',
       message_thread_id: '9',
       reply_to_message_id: '42',
@@ -832,7 +832,7 @@ describe('assistant channels runtime seam', () => {
       'https://telegram.test/botbot-token/sendPhoto',
     )
     expect(readJsonBody(fetchImplementation.mock.calls[0]?.[1]?.body)).toMatchObject({
-      caption: 'Here is an example image.',
+      caption: 'Here is an example image.\n\nExample image',
       caption_entities: [
         {
           length: 7,
@@ -844,6 +844,68 @@ describe('assistant channels runtime seam', () => {
       message_thread_id: 9,
       photo: 'https://cdn.example.test/example.png',
       reply_to_message_id: 42,
+    })
+  })
+
+  it('preserves the image description through the existing Telegram caption overflow path', async () => {
+    const alternative = 'Direction context unavailable · mover sentiment is neutral.'
+    const message = 'x'.repeat(1_000)
+    const fetchImplementation = createQueuedFetch([
+      createTelegramResponse(200, {
+        ok: true,
+        result: {
+          message_id: 3001,
+        },
+      }),
+      createTelegramResponse(200, {
+        ok: true,
+        result: {
+          message_id: 3002,
+        },
+      }),
+    ])
+
+    await expect(
+      sendTelegramImageMessage(
+        {
+          media: [
+            {
+              alt: alternative,
+              kind: 'image',
+              source: 'test',
+              url: 'https://cdn.example.test/progress-card.png',
+            },
+          ],
+          message,
+          replyToMessageId: '42',
+          target: '123',
+        },
+        {
+          env: {
+            TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation,
+        },
+      ),
+    ).resolves.toMatchObject({
+      providerMessageId: '3002',
+      providerMessageIds: ['3001', '3002'],
+      target: '123',
+    })
+
+    const textRequest = readJsonBody(fetchImplementation.mock.calls[0]?.[1]?.body)
+    expect(textRequest).toMatchObject({
+      chat_id: '123',
+      reply_to_message_id: 42,
+      text: `${message}\n\n${alternative}`,
+    })
+    expect(String(textRequest.text).match(
+      /Direction context unavailable · mover sentiment is neutral\./gu,
+    )).toHaveLength(1)
+    expect(readJsonBody(fetchImplementation.mock.calls[1]?.[1]?.body)).toMatchObject({
+      chat_id: '123',
+      photo: 'https://cdn.example.test/progress-card.png',
     })
   })
 
@@ -1625,6 +1687,8 @@ describe('assistant channels runtime seam', () => {
 
   it('uploads private Linq image bytes and sends only the provider attachment id', async () => {
     const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47])
+    const fallbackDescription =
+      'Morning light experiment progress. Direction context unavailable · mover sentiment is neutral.'
     const loadVaultImage = vi.fn().mockResolvedValue(bytes)
     runtimeMocks.uploadLinqAttachment.mockResolvedValue({
       attachmentId: 'attachment_private_image',
@@ -1635,7 +1699,7 @@ describe('assistant channels runtime seam', () => {
 
     await expect(sendLinqMessage({
       media: [{
-        alt: 'Private generated chart',
+        alt: fallbackDescription,
         contentType: 'image/png',
         filename: 'generated-chart.png',
         kind: 'vault_image',
@@ -1644,7 +1708,7 @@ describe('assistant channels runtime seam', () => {
         sizeBytes: bytes.byteLength,
         source: 'gpt-image-2',
       }],
-      message: 'Generated chart',
+      message: 'Your progress card.',
       target: 'chat_private_image',
     }, {
       env: { LINQ_API_TOKEN: 'linq-token' },
@@ -1662,13 +1726,47 @@ describe('assistant channels runtime seam', () => {
     }, expect.objectContaining({
       env: { LINQ_API_TOKEN: 'linq-token' },
     }))
-    expect(runtimeMocks.sendLinqChatMessage).toHaveBeenCalledWith({
+    const request = runtimeMocks.sendLinqChatMessage.mock.calls.at(-1)?.[0]
+    expect(request).toMatchObject({
       chatId: 'chat_private_image',
       idempotencyKey: null,
       media: [{ attachmentId: 'attachment_private_image' }],
-      message: 'Generated chart',
+      message: `Your progress card.\n\n${fallbackDescription}`,
       replyToMessageId: null,
-    }, expect.any(Object))
+    })
+    expect(request?.message.match(
+      /Direction context unavailable · mover sentiment is neutral\./gu,
+    )).toHaveLength(1)
+  })
+
+  it('keeps an image description exactly once when the message already contains it', async () => {
+    const alternative = 'Direction context unavailable · mover sentiment is neutral.'
+    runtimeMocks.sendLinqChatMessage.mockResolvedValue({
+      message: { id: 'message_accessible_image' },
+    })
+
+    await sendLinqMessage({
+      media: [{
+        alt: alternative,
+        kind: 'image',
+        source: 'test',
+        url: 'https://cdn.example.test/progress-card.png',
+      }],
+      message: `Your progress card.\n\n${alternative}`,
+      target: 'chat_accessible_image',
+    }, {
+      env: { LINQ_API_TOKEN: 'linq-token' },
+    })
+
+    const request = runtimeMocks.sendLinqChatMessage.mock.calls.at(-1)?.[0]
+    expect(request).toMatchObject({
+      chatId: 'chat_accessible_image',
+      media: [{ url: 'https://cdn.example.test/progress-card.png' }],
+      message: `Your progress card.\n\n${alternative}`,
+    })
+    expect(request?.message.match(
+      /Direction context unavailable · mover sentiment is neutral\./gu,
+    )).toHaveLength(1)
   })
 
   it('uploads trusted vault-file bytes and sends the attachment without a caption', async () => {

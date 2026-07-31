@@ -36,23 +36,6 @@ const mocks = vi.hoisted(() => ({
   sendHostedLinqReadReceipt: vi.fn(),
   stageHostedLinqGroupParticipantContext: vi.fn(),
   stageHostedLinqGroupReactionContext: vi.fn(),
-  nudgeHostedAssistantRunnerUserBestEffortResult: vi.fn(async (
-    input: { context?: string; timeoutMs?: number; userId: string },
-  ) => {
-    void input;
-    return {
-      accepted: true,
-      alarmScheduled: false,
-      configured: true,
-      errorCode: null,
-      immediateDriveStarted: false,
-      inFlight: false,
-      nextAlarmAtPresent: false,
-      usageGateDenied: false,
-    };
-  }),
-  nudgeHostedRunnerUserBestEffort: vi.fn(),
-  nudgeHostedRunnerUserBestEffortResult: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
   upsertHostedMemberHomeLinqBindingTx: vi.fn(),
   upsertHostedMemberPendingLinqBindingTx: vi.fn(),
@@ -80,15 +63,6 @@ vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
 
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
-}));
-
-vi.mock("@/src/lib/hosted-runner/control", () => ({
-  nudgeHostedRunnerUserBestEffort: mocks.nudgeHostedRunnerUserBestEffort,
-  nudgeHostedRunnerUserBestEffortResult: mocks.nudgeHostedRunnerUserBestEffortResult,
-}));
-
-vi.mock("@/src/lib/hosted-runner/assistant-nudge", () => ({
-  nudgeHostedAssistantRunnerUserBestEffortResult: mocks.nudgeHostedAssistantRunnerUserBestEffortResult,
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
@@ -271,28 +245,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       ok: true,
       status: 204,
     });
-    mocks.nudgeHostedRunnerUserBestEffort.mockResolvedValue({
-      accepted: true,
-      alarmScheduled: false,
-      configured: true,
-      errorCode: null,
-      immediateDriveStarted: false,
-      inFlight: false,
-      nextAlarmAtPresent: false,
-    });
-    mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValue({
-      accepted: true,
-      alarmScheduled: false,
-      configured: true,
-      errorCode: null,
-      immediateDriveStarted: false,
-      inFlight: false,
-      nextAlarmAtPresent: false,
-    });
-    mocks.nudgeHostedAssistantRunnerUserBestEffortResult.mockImplementation(async (input) => ({
-      ...await mocks.nudgeHostedRunnerUserBestEffortResult(input),
-      usageGateDenied: false,
-    }));
     mocks.checkHostedAiUsageGate.mockResolvedValue({
       allowed: true,
       billingPlanCode: "launch_monthly",
@@ -361,7 +313,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     );
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
     expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
   });
 
@@ -401,7 +352,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(prisma.hostedLinqDelivery.updateMany).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
     expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
   });
 
@@ -642,7 +592,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     );
     expect(mocks.stageHostedLinqGroupReactionContext).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
   });
 
   it("routes an affirmative private-chat reaction through the ordinary message planner", async () => {
@@ -835,10 +784,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedAssistantRunnerUserBestEffortResult)
-      .not.toHaveBeenCalled();
   });
 
   it("does not restage duplicate non-join reaction context", async () => {
@@ -1026,7 +971,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     );
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
   });
 
   it("records Linq line status updates as alerts without product sends or wake handoff", async () => {
@@ -1037,9 +981,11 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       handleHostedOnboardingLinqWebhook({
         rawBody: buildLinqProviderWebhookBody({
           data: {
+            changed_at: "2026-03-26T12:00:00.000Z",
+            new_reputation: "AT_RISK",
+            new_status: "FLAGGED",
             phone_number: "+15550000000",
             reason: "carrier review",
-            status: "flagged",
           },
           eventId: "evt_status_123",
           eventType: "phone_number.status_updated",
@@ -1056,12 +1002,19 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(prisma.hostedLinqLine.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          healthStatus: "unhealthy",
-          providerReason: "[redacted]",
-          providerStatus: "flagged",
+          providerServiceStatus: "FLAGGED",
         }),
       }),
     );
+    expect(prisma.hostedLinqLine.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          providerReputationStatus: "AT_RISK",
+        }),
+      }),
+    );
+    expect(prisma.hostedLinqLine.updateMany.mock.calls.at(-1)?.[0].data)
+      .not.toHaveProperty("healthStatus");
     expect(prisma.hostedLinqAlert.createMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -1074,7 +1027,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     );
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
   });
 
   it("consumes an unsupported-region join reaction without staging group work", async () => {
@@ -1230,7 +1182,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       mocks.markHostedLinqOnboardingLinkNoticeSent.mock.invocationCallOrder[0],
     );
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
   });
 
   it("honors an earlier group outreach after the phone becomes an active member", async () => {
@@ -1616,8 +1567,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
         }),
       }),
     });
-    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
@@ -1903,7 +1852,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
@@ -2126,6 +2074,7 @@ function createPrismaStub() {
     hostedThreadRoute: {
       findFirst: vi.fn().mockResolvedValue(null),
       findMany: vi.fn().mockResolvedValue([]),
+      groupBy: vi.fn().mockResolvedValue([]),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
   } as const;

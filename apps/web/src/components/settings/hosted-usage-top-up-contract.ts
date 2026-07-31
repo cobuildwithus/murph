@@ -19,7 +19,6 @@ type HostedUsageTopUpSelectionConflict = "offer" | "sponsorship";
 interface HostedUsageTopUpOffer {
   offerCode: string;
   amountLabel: string;
-  estimatedMessages: number;
 }
 
 interface HostedUsageTopUpActivePurchase {
@@ -47,13 +46,16 @@ interface HostedUsageTopUpDialogProps {
   checkoutUrl?: string;
   contactOptions?: readonly MurphContactOption[];
   deferTerminalRefreshUntilClose?: boolean;
+  groupPaymentMode?: "monthly" | "one_time";
   initialOpen?: boolean;
+  inert?: boolean;
   offers: readonly HostedUsageTopUpOffer[];
   payerMemberId: string;
   purchaseReturn?: HostedUsageTopUpReturn | null;
   renderPurchaseDetails?: ReactNode;
   renderSelectionDetails?: (input: {
     disabled: boolean;
+    mobileStickyActionVisible: boolean;
     selectedOffer: HostedUsageTopUpOffer | null;
   }) => ReactNode;
   scope?: "family" | "group" | "personal";
@@ -289,14 +291,17 @@ function readStatusContent(input: {
 
   switch (input.status) {
     case "fulfilled":
-      return content(
-        "Usage added",
-        input.scope === "group"
-          ? "This group's available usage has been updated."
-          : input.scope === "family" && input.targetLabel
-            ? `The available usage for ${input.targetLabel} has been updated.`
-          : "Your available usage has been updated.",
-      );
+      return input.scope === "group"
+        ? content(
+            "This group has more Murph",
+            "Your contribution landed. The group has more room to talk.",
+          )
+        : content(
+            "Usage added",
+            input.scope === "family" && input.targetLabel
+              ? `The available usage for ${input.targetLabel} has been updated.`
+              : "Your available usage has been updated.",
+          );
     case "expired":
       return content("Checkout canceled", "Checkout canceled. No usage was added.");
     case "payment_failed":

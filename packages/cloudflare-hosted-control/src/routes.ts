@@ -8,11 +8,25 @@ export const CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_KEY_HEADER =
   "x-murph-meal-photo-key";
 export const CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_SHA256_HEADER =
   "x-murph-meal-photo-sha256";
+export const CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_CAPTURE_ID_HEADER =
+  "x-murph-environment-voice-capture-id";
+export const CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_KEY_HEADER =
+  "x-murph-environment-voice-key";
+export const CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_SHA256_HEADER =
+  "x-murph-environment-voice-sha256";
 
 export const CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS = {
   browserVaultSession: {
     method: "POST",
     suffix: "browser-vault/session",
+  },
+  environmentVoiceStage: {
+    method: "POST",
+    suffix: "environment-voice/stage",
+  },
+  environmentVoiceDelete: {
+    method: "DELETE",
+    suffix: "environment-voice/delete",
   },
   mealPhotoStage: {
     method: "POST",
@@ -71,6 +85,24 @@ export function buildCloudflareHostedControlMealPhotoStagePath(userId: string): 
 
 export function buildCloudflareHostedControlMealPhotoDeletePath(userId: string): string {
   return buildCloudflareHostedControlUserRoutePath("mealPhotoDelete", userId);
+}
+
+export function buildCloudflareHostedControlEnvironmentVoiceStagePath(
+  userId: string,
+): string {
+  return buildCloudflareHostedControlUserRoutePath(
+    "environmentVoiceStage",
+    userId,
+  );
+}
+
+export function buildCloudflareHostedControlEnvironmentVoiceDeletePath(
+  userId: string,
+): string {
+  return buildCloudflareHostedControlUserRoutePath(
+    "environmentVoiceDelete",
+    userId,
+  );
 }
 
 export function matchCloudflareHostedControlUserRoutePath(

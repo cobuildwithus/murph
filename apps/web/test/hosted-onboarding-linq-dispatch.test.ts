@@ -82,44 +82,6 @@ const mocks = vi.hoisted(() => {
     readHostedRuntimeAiAccessDecision: vi.fn<HostedRuntimeAiAccessDecisionReader>(),
     incrementHostedLinqInboundDailyState: vi.fn(),
     incrementHostedLinqOutboundDailyState: vi.fn(),
-    nudgeHostedRunnerUserBestEffort: vi.fn(async () => ({
-      accepted: true,
-      alarmScheduled: false,
-      configured: true,
-      errorCode: null,
-      immediateDriveStarted: false,
-      inFlight: false,
-      nextAlarmAtPresent: false,
-    })),
-    nudgeHostedAssistantRunnerUserBestEffortResult: vi.fn(async (
-      input: { context?: string; timeoutMs?: number; userId: string },
-    ) => {
-      void input;
-      return {
-        accepted: true,
-        alarmScheduled: false,
-        configured: true,
-        errorCode: null,
-        immediateDriveStarted: false,
-        inFlight: false,
-        nextAlarmAtPresent: false,
-        usageGateDenied: false,
-      };
-    }),
-    nudgeHostedRunnerUserBestEffortResult: vi.fn(async (
-      input?: { context?: string; timeoutMs?: number; userId: string },
-    ) => {
-      void input;
-      return {
-        accepted: true,
-        alarmScheduled: false,
-        configured: true,
-        errorCode: null,
-        immediateDriveStarted: false,
-        inFlight: false,
-        nextAlarmAtPresent: false,
-      };
-    }),
     checkHostedAiUsageGate: vi.fn(async (): Promise<HostedAiUsageGateDecision> => ({
       allowed: true,
       billingPlanCode: "launch_monthly",
@@ -291,16 +253,6 @@ vi.mock("@/src/lib/hosted-onboarding/linq-contact-card-share", () => ({
     input.service?.trim().toLowerCase() === "imessage",
   shareMurphHostedLinqNativeContactCardToChat:
     mocks.shareMurphHostedLinqNativeContactCardToChat,
-}));
-
-vi.mock("@/src/lib/hosted-runner/control", () => ({
-  nudgeHostedRunnerBestEffort: vi.fn(async () => "wake"),
-  nudgeHostedRunnerUserBestEffort: mocks.nudgeHostedRunnerUserBestEffort,
-  nudgeHostedRunnerUserBestEffortResult: mocks.nudgeHostedRunnerUserBestEffortResult,
-}));
-
-vi.mock("@/src/lib/hosted-runner/assistant-nudge", () => ({
-  nudgeHostedAssistantRunnerUserBestEffortResult: mocks.nudgeHostedAssistantRunnerUserBestEffortResult,
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", async () => {
@@ -583,6 +535,7 @@ type PrismaFixtureBase = {
   hostedThreadRoute?: {
     findFirst?: MockedFunction;
     findMany?: MockedFunction;
+    groupBy?: MockedFunction;
     updateMany?: MockedFunction;
   };
   hostedUsageReferral?: {
@@ -650,28 +603,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.hostedOnboardingEnvironment.linqLocalAllowedInboundPhoneNumbers = undefined;
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "off";
     mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+44"];
-    mocks.nudgeHostedRunnerUserBestEffort.mockResolvedValue({
-      accepted: true,
-      alarmScheduled: false,
-      configured: true,
-      errorCode: null,
-      immediateDriveStarted: false,
-      inFlight: false,
-      nextAlarmAtPresent: false,
-    });
-    mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValue({
-      accepted: true,
-      alarmScheduled: false,
-      configured: true,
-      errorCode: null,
-      immediateDriveStarted: false,
-      inFlight: false,
-      nextAlarmAtPresent: false,
-    });
-    mocks.nudgeHostedAssistantRunnerUserBestEffortResult.mockImplementation(async (input) => ({
-      ...await mocks.nudgeHostedRunnerUserBestEffortResult(input),
-      usageGateDenied: false,
-    }));
     mocks.checkHostedAiUsageGate.mockResolvedValue({
       allowed: true,
       billingPlanCode: "launch_monthly",
@@ -1212,8 +1143,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         "hosted-onboarding.webhook.linq.chat-classification",
         { outcome: "canonical-direct" },
       );
-      expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
-      expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
       expectHostedLinqPointerSignalAccepted();
       expect(response).not.toHaveProperty("wakeUserId");
       expect(readHostedWebhookReceiptUpdateManyMock(prisma)).not.toHaveBeenCalled();
@@ -1808,7 +1737,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalled();
     expectHostedLinqReadReceiptSent();
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expectHostedLinqPointerSignalAccepted();
   });
 
@@ -1961,7 +1889,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(serializedEnvelope).not.toContain("cdn.linq.example.test");
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalled();
     expectHostedLinqReadReceiptSent();
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expectHostedLinqPointerSignalAccepted("evt_attachments_before_text");
   });
 
@@ -2031,7 +1958,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalled();
     expectHostedLinqReadReceiptSent();
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expectHostedLinqPointerSignalAccepted("evt_oversized_parts");
   });
 
@@ -2109,7 +2035,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(serializedEnvelope).toContain("some content truncated");
     expect(serializedEnvelope).not.toContain("cdn.example.test");
     expectHostedLinqReadReceiptSent();
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expectHostedLinqPointerSignalAccepted("evt_link_compaction");
   });
 
@@ -2218,8 +2143,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       reason: "wake-appended-active-member",
     });
 
-    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expectHostedLinqPointerSignalAccepted("evt_required_nudge_failed");
     expectHostedLinqReadReceiptSent();
     expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
@@ -2623,7 +2546,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_evt_direct_nudge_read_receipt",
     });
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
     expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2637,15 +2559,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   });
 
   it("fails webhook success when Temporal signaling fails after mailbox append", async () => {
-    mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValueOnce({
-      accepted: false,
-      alarmScheduled: false,
-      configured: false,
-      errorCode: null,
-      immediateDriveStarted: false,
-      inFlight: false,
-      nextAlarmAtPresent: false,
-    });
     mocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(new Error("Temporal unavailable"));
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
@@ -2685,7 +2598,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_evt_ingress_read_receipt_skipped",
     });
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
     expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2778,7 +2690,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(readHostedWebhookSideEffectUpsertCalls(transactionClient)).toEqual([]);
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expectHostedLinqReadReceiptSent();
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expectHostedLinqPointerSignalAccepted();
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith({
       memberId: "member_123",
@@ -3006,7 +2917,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     })).rejects.toThrow("mailbox append failed");
 
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
   });
 
   it("does not bind an active member home route when no fallback Linq line is assignable", async () => {
@@ -7679,7 +7589,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
   });
 
-  it("keeps member-initiated first contact on the incoming line at the proactive quota", async () => {
+  it("keeps member-initiated first contact on the incoming line when weighted planning prefers a paced-out fallback", async () => {
     const incomingLinePhone = "+15550000000";
     const fallbackLinePhone = "+15550100001";
     const incomingLineLookupKey = createHostedPhoneLookupKey(incomingLinePhone);
@@ -7698,7 +7608,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       input.where?.linqHomeLineAssignedAt
         ? [{
             linqRecipientPhoneLookupKey: incomingLineLookupKey,
-            _count: { _all: 1 },
+            _count: { _all: 500 },
           }]
         : []
     );
@@ -7732,7 +7642,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
             phoneNumber: incomingLinePhone,
           },
           {
+            maxNewConversationsPerDay: 1,
             phoneNumber: fallbackLinePhone,
+            proactiveConversationCount: 1,
+            proactiveConversationDayUtc: startOfUtcDayForTest(new Date()),
           },
         ],
       }),
@@ -9238,7 +9151,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         }),
       }),
     );
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expectHostedLinqPointerSignalAccepted("evt_ai_usage_limit");
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expectHostedLinqReadReceiptSent();
@@ -9381,7 +9293,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       expectHostedLinqPointerSignalAccepted("evt_ai_usage_limit_current_chat");
       expectHostedLinqReadReceiptSent("chat_current_inbound");
     }
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
@@ -10989,11 +10900,13 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
       value: {
         findFirst: vi.fn().mockResolvedValue(null),
         findMany: vi.fn().mockResolvedValue([]),
+        groupBy: vi.fn().mockResolvedValue([]),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
     });
   } else {
     prisma.hostedThreadRoute.findFirst ??= vi.fn().mockResolvedValue(null);
+    prisma.hostedThreadRoute.groupBy ??= vi.fn().mockResolvedValue([]);
     prisma.hostedThreadRoute.updateMany ??= vi.fn().mockResolvedValue({ count: 1 });
   }
   if (!prisma.hostedUsageReferral?.findUnique) {

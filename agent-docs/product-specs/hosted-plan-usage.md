@@ -1,6 +1,6 @@
 # Hosted Plan Usage And Subscription Actions
 
-Last verified: 2026-07-27
+Last verified: 2026-07-30
 Status: Implemented current-state contract
 
 ## Goal
@@ -71,7 +71,8 @@ The available projection keeps these access states distinct:
 
 | Access | Display plan | Period | Thresholded recommendation |
 | --- | --- | --- | --- |
-| Direct trial | Pulse Trial | Trial | Start Pulse |
+| Direct trial | Pulse Trial | Trial | Continue with Group when eligible, otherwise Pulse |
+| Direct paid Group | Group | Monthly | Upgrade to Pulse |
 | Direct paid Pulse | Pulse | Monthly | Add usage when configured and eligible |
 | Direct paid Edge | Edge | Monthly | Add usage when configured and eligible |
 | Sponsored member | Family | Monthly | None |
@@ -94,21 +95,25 @@ their stored limit.
 
 Usage is cost-weighted capacity across models and modalities. It is not a token
 count or cash balance. Used and remaining percentages are bounded integers that
-sum to 100. Their denominator is current-period spend plus every unit of
+sum to 100. The display window starts at the current allowance period or, when
+later, the beneficiary's latest fulfilled purchase grant in that period. Its
+denominator is counted usage since that window began plus every unit of
 effective capacity still available from the plan and generic usage credit. A
-fulfilled top-up can therefore move the percentage backward immediately.
-Settings still exposes neither the exact usage-credit balance nor the internal
-included-allowance value. At a monthly reset, period spend returns to zero, the
-plan allowance replenishes, and unused usage credit remains available. The
-operation that crosses effective capacity may finish, but subsequent
-usage-bearing work blocks and accepted conversation input remains pending.
+fulfilled top-up therefore starts a fresh 0%-used display; later counted usage
+advances that meter. Settings still exposes neither the exact usage-credit
+balance nor the internal included-allowance value. At a monthly reset, period
+spend returns to zero, the plan allowance replenishes, and unused usage credit
+remains available. The operation that crosses effective capacity may finish,
+but subsequent usage-bearing work blocks and accepted conversation input
+remains pending.
 
 For paid access, the included monthly usage value is exactly 80% of the
 server-owned recurring amount for that member's billing mode and tier. Direct
-Pulse and Edge therefore include $6.40 and $16.00 from their $8 and $20 prices.
-Family-sponsored Pulse and Edge members separately receive $5.60 and $15.20
-from their $7 and $19 seat prices. Discounts, taxes, prorations, trials, and
-usage credit do not redefine this catalog-owned allowance.
+Group, Pulse, and Edge therefore include $2.80, $6.40, and $16.00 from their
+$3.50, $8, and $20 prices. Family-sponsored Pulse and Edge members separately
+receive $5.60 and $15.20 from their $7 and $19 seat prices. Discounts, taxes,
+prorations, trials, and usage credit do not redefine this catalog-owned
+allowance.
 An authoritative paid billing period that is already open keeps the higher
 included limit granted before this policy change. The price-derived allowance
 starts on its next paid period; an actual plan, Family tier, or
@@ -119,42 +124,48 @@ current bounds. It skips calendar fallbacks because their temporary key can be
 replaced by a delayed billing projection without a renewal. Existing allowance,
 spend, and future periods remain untouched.
 
-A forecast requires at least 24 hours of counted usage. It uses the same
-overall effective capacity as the percentage and is shown only when the
-observed pace projects exhaustion before the current period ends. The forecast
-is conservative and optional; the product must not invent one when the
+A forecast requires at least 24 hours of counted usage in the current display
+window. It uses the same overall effective capacity as the percentage and is
+shown only when that window's observed pace projects exhaustion before the
+current period ends. The forecast is conservative and optional; the product
+must not invent one when the
 projection omits it.
 
 ## Actions
 
 `apps/web` may return `recommendedAction` only when all available usage is
 exhausted, the forecast projects exhaustion, or at least 80% of overall
-available usage is used. Trial access may recommend **Start Pulse now** with the
-current monthly price. An eligible direct paid Pulse or Edge member may receive
-**Add usage**, which opens the authenticated fixed-pack Settings dialog. Pulse's
-Edge upgrade remains on the plan card. Family and group contexts do not receive
-a top-up recommendation.
+available usage is used. Trial access may recommend continuing with Group at
+trial end when current membership makes that plan eligible; otherwise it may
+recommend **Start Pulse now**. Paid Group may recommend Pulse. An eligible
+direct paid Pulse or Edge member may receive **Add usage**, which opens the
+authenticated fixed-pack Settings dialog. Group does not expose personal
+top-ups. Plan changes remain on the plan card. Family and group contexts do not
+receive a personal top-up recommendation.
 
 An explicit request for the personal top-up page is not a recommendation. After
 a current `paid` read, the assistant may provide
 `/settings?addUsage=true#subscription` even below the proactive threshold.
 
 An opted-in `subscriptionActionQuote` answers a different question: what are
-the current terms for the exact start-now or upgrade choice the member asked
-about? Web resolves that quote even below the usage threshold and without a
-Settings URL. The quote contains the bounded action and current catalog label,
-not a URL. It may be null when the action is ineligible. It is neither a
-recommendation nor consent, and it does not weaken the explicit-confirmation
-rule.
+the current terms for the exact plan and timing the member asked about? Web
+resolves that quote even below the usage threshold and without a Settings URL.
+The signed quote binds the bounded action, member, target plan, timing, exact
+catalog price, expiry, and current billing-state fingerprint. It may be null
+when the action is ineligible. It is neither a recommendation nor consent, and
+it does not weaken the explicit-confirmation rule.
 
 Home and `murph.plan_usage` render only `recommendedAction`. Settings may expose
 **Add usage** at any utilization for an eligible direct paid member, using the
-same server-projected offers. Subscription actions still use the existing
-server-authorized billing route; **Add usage** uses the authenticated one-time
-Checkout route described in the top-up spec. Assistant policy uses a matching
-`subscriptionActionQuote` only to disclose current terms before seeking an
-explicit choice. The read-only `murph.plan_usage` tool cannot start checkout,
-upgrade a plan, grant credit, or claim that a billing change happened.
+same server-projected offers. Settings does not render `change_plan` from the
+usage projection or ask that projection to resolve subscription actions; its
+plan cards own those choices and confirmations.
+Subscription actions still use the existing server-authorized billing route;
+**Add usage** uses the authenticated one-time Checkout route described in the
+top-up spec. Assistant policy uses a matching `subscriptionActionQuote` only to
+disclose current terms before seeking an explicit choice. The read-only
+`murph.plan_usage` tool cannot start checkout, upgrade a plan, grant credit, or
+claim that a billing change happened.
 
 Family Settings may expose the same fixed-pack dialog beside each active member
 to the current active owner. That owner pays through the Family billing
@@ -174,19 +185,22 @@ Family change happened. It must not provide the private management handoff for
 
 ### Private Conversation Actions
 
-`murph.subscription` is a narrow mutation surface for three choices:
+`murph.subscription` is a narrow mutation surface for:
 
-- keep an active Pulse trial scheduled to continue at its natural end;
-- end the trial and start Pulse now; or
-- upgrade an active paid Pulse plan to Edge.
+- keeping an active Pulse trial scheduled to continue as Pulse;
+- ending the trial and starting Pulse now;
+- scheduling an eligible active trial to continue as Group;
+- immediately upgrading Group to Pulse or Edge, or Pulse to Edge; and
+- scheduling Pulse or Edge to change to an eligible lower direct plan at
+  renewal.
 
 These are member-directed actions, not extensions of the read projection's
-`recommendedAction`. A recommendation is never consent. Before an immediate
-start or upgrade, the assistant needs a `subscriptionActionQuote` whose action
-matches the proposed choice, states the returned label, and then gets explicit
-confirmation. When that quote is absent, the assistant does not guess and uses
-the neutral Settings handoff. Continuing a currently active trial does not
-charge now and does not require a start-now quote or recommendation.
+`recommendedAction`. A recommendation is never consent. Before `change_plan`,
+the assistant needs a current `subscriptionActionQuote` whose target and timing
+match the proposed choice, states the returned exact-price label, and then gets
+explicit confirmation. When that quote is absent, the assistant does not guess
+and uses the neutral Settings handoff. The legacy Pulse actions remain bounded
+compatibility entrypoints.
 
 The tool is available only in a private personal conversation with current
 eligible accepted member input. Assistant policy permits a call only after the
@@ -380,15 +394,27 @@ inventing a billing menu:
   private Settings handoff; a sponsored non-owner is told that the Family
   owner must make the change, while Family Edge has no higher current tier; and
 - a hosted group gets a proactive first heads-up: on the first trusted
-  low-usage turn the assistant calls `murph.group action="read_usage"` once and
-  may include the returned state, the integer percent of the current period's
-  usage remaining, and the first-party funding URL in the heads-up segment,
-  matching the room's tone; a `healthy` read suppresses the heads-up entirely.
+  low-usage turn the assistant calls `murph.group action="read_usage"` once.
+  A sponsored group receives only the binary acknowledgment that Murph is
+  sponsored in the chat; payer identity, cap, charges, balance, percentages,
+  message counts, and refill events stay private. For an unsponsored group with
+  `fundingNeeded: false`, the heads-up is suppressed. When funding is needed,
+  the segment stays conversational, link-free, and route-neutral: it calls the
+  shared capacity "Murph time," says Murph may pause for the room, and asks
+  whether they want Murph to check the options without naming or counting any
+  path. It never frames each text as a unit being purchased or spent. After
+  someone asks for the options, asks for more Murph time, asks how to keep the
+  room going, or accepts the quick path, the assistant reads the options for
+  that responding sender, using the exact accepted request-bearing message as
+  participant authority rather than inferring one sender from the whole grouped
+  turn. It refreshes current usage as needed, presents every returned earned
+  and sponsored path, and includes a returned first-party funding URL only when
+  `fundingNeeded` is true, after the sponsored path instead of leading with it.
   Playful payer nomination is allowed, but who actually paid, purchase status,
-  and amounts stay private, and the assistant never promises a URL the read
-  did not return. For a group without an owner-created join code, the funding
-  URL carries a signed funding-only locator that grants no enrollment or
-  sharing, so the URL is normally present without any write.
+  and amounts stay private, and the assistant never promises a URL the read did
+  not return. For a group without an owner-created join code, the funding URL
+  carries a signed funding-only locator that grants no enrollment or sharing,
+  so the URL is normally present without any write.
 
 For an explicit Family member-usage management request, the assistant first
 calls `murph.family_plan action="read_status"`. It may provide
@@ -418,14 +444,20 @@ or payer identity.
 
 Group low usage follows the same next-turn context path as personal usage: it
 never creates a standalone message, and the prompt asks Murph to finish the
-current request before mentioning the low capacity casually. A deterministic
-group exhaustion notice may use only the exact originating external-thread
-target after Web re-authorizes its persisted thread authority; no personal-home
-fallback is valid for an accepted group conversation. At delivery time Web
-rechecks the exhausted state and may append the group's funding link, using
-the owner join code when one exists or the signed funding-only locator when
-none does. The notice does not name a payer, claim that payment occurred, or
-add a separate scheduler or money-prompt lifecycle.
+current request before mentioning the low capacity casually as "Murph time"
+and without a link. After someone asks for options, asks for more Murph time,
+or asks how to keep the room going, a current read may supply the funding link
+as part of the sponsored path; the assistant does not lead with it. Message
+counts stay out of unsolicited and general-options copy; Murph gives the exact
+server-returned approximate count only when someone asks how much a path adds
+or a post-action confirmation requires it. A deterministic group exhaustion
+notice may use only the exact originating external-thread target after Web
+re-authorizes its persisted thread authority; no personal-home fallback is
+valid for an accepted group conversation. At delivery time Web rechecks the exhausted state and may append
+the group's funding link, using the owner join code when one exists or the
+signed funding-only locator when none does. The notice does not name a payer,
+claim that payment occurred, or add a separate scheduler or money-prompt
+lifecycle.
 
 ## Non-Goals
 
@@ -433,12 +465,12 @@ The subscription-action surface adds one nullable action claim to the existing
 mailbox row. The composed usage system adds no second admission gate, persisted
 forecast, billing queue, cron, trial-ending webhook, automatic nudge, group
 wallet or usage account, automatic model switch, custom card form, App Clip,
-or mini app. It does not add a general Stripe API tool: the subscription action contract
-exposes only the three current web-owned operations above, and personal and
+or mini app. It does not add a general Stripe API tool: the contract exposes
+only transitions admitted by the current web-owned plan policy. Personal and
 Family-member usage top-ups remain authenticated Stripe-hosted Settings
-handoffs. Group funding
-uses the existing join code and synthetic member through an authenticated
-fixed-pack page; anonymous funding remains unimplemented.
+handoffs. Group funding uses the existing join code and synthetic member
+through an authenticated fixed-pack page; anonymous funding remains
+unimplemented.
 
 ## Deployment
 

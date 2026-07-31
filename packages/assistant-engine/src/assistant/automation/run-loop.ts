@@ -9,6 +9,7 @@ import {
   processDueAssistantCronJobsLocal as processDueAssistantCronJobs,
 } from '../cron.js'
 import {
+  appendAssistantHostedDynamicContextPrompt,
   normalizeAssistantExecutionContext,
   type AssistantExecutionContext,
 } from '../execution-context.js'
@@ -914,7 +915,7 @@ export async function runAssistantAutomationPass(
         signal: input.signal,
       })
       if (finalInputRefreshResult.reason !== 'ingested_input') {
-        executionContext = appendHostedDynamicContextPrompt({
+        executionContext = appendAssistantHostedDynamicContextPrompt({
           executionContext,
           prompt: dynamicContextPrompt,
         })
@@ -1085,25 +1086,6 @@ export async function runAssistantAutomationPass(
     progressed,
     replies,
     routing: scanResult.routing,
-  }
-}
-
-function appendHostedDynamicContextPrompt(input: {
-  executionContext: AssistantExecutionContext
-  prompt: string | null
-}): AssistantExecutionContext {
-  if (!input.prompt || !input.executionContext.hosted) {
-    return input.executionContext
-  }
-
-  return {
-    hosted: {
-      ...input.executionContext.hosted,
-      dynamicContextPrompts: [
-        ...(input.executionContext.hosted.dynamicContextPrompts ?? []),
-        input.prompt,
-      ],
-    },
   }
 }
 

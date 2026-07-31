@@ -11,10 +11,11 @@ import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
 import {
-  calculateHostedGroupUsageRemainingPercent,
   classifyHostedGroupUsageCapacity,
-  type HostedGroupUsageCapacityState,
 } from "./group-usage-capacity";
+import {
+  readHostedGroupSponsorshipPublicState,
+} from "./group-sponsorship-authorization";
 
 // A group funding locator is either the group's owner-created opaque join
 // code, or, for a group chat that never minted one, a signed funding-only
@@ -39,10 +40,11 @@ export interface HostedGroupUsageFundingTarget {
 }
 
 export interface HostedGroupUsageStatus {
-  capacityState: HostedGroupUsageCapacityState;
+  /** Whether an assistant-initiated low-capacity funding prompt is timely. */
+  fundingNeeded: boolean;
+  /** Current explicit funding capability, independent of urgency. */
   fundingUrl: string | null;
-  periodEnd: string;
-  remainingPercent: number;
+  sponsorshipStatus: "not_sponsored" | "sponsored";
 }
 
 // Accepts the full funding-locator namespace: an owner-created join code or
@@ -126,6 +128,18 @@ export async function readHostedGroupUsageStatus(input: {
     return null;
   }
 
+  const sponsorshipStatus = await readHostedGroupSponsorshipPublicState({
+    beneficiaryMemberId: input.runtimeMemberId,
+    prisma,
+  });
+
+  const capacityState = classifyHostedGroupUsageCapacity({
+    limitUsdMicros: decision.limitUsdMicros,
+    remainingUsdMicros: decision.remainingUsdMicros,
+  });
+  const fundingNeeded =
+    sponsorshipStatus === "not_sponsored" && capacityState !== "healthy";
+
   // A group without an owner-created join code (including one with no
   // HostedGroup row at all) still gets a funding URL through the signed
   // funding-only locator.
@@ -133,18 +147,11 @@ export async function readHostedGroupUsageStatus(input: {
     ?? buildHostedGroupUsageFundingLocatorForRuntimeMember(input.runtimeMemberId);
 
   return {
-    capacityState: classifyHostedGroupUsageCapacity({
-      limitUsdMicros: decision.limitUsdMicros,
-      remainingUsdMicros: decision.remainingUsdMicros,
-    }),
+    fundingNeeded,
     fundingUrl: locator
       ? buildHostedGroupUsageFundingUrl({ joinCode: locator })
       : null,
-    periodEnd: decision.periodEnd.toISOString(),
-    remainingPercent: calculateHostedGroupUsageRemainingPercent({
-      limitUsdMicros: decision.limitUsdMicros,
-      remainingUsdMicros: decision.remainingUsdMicros,
-    }),
+    sponsorshipStatus,
   };
 }
 

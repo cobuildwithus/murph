@@ -156,6 +156,12 @@ test("MurphPersonaPicker saves the selected persona, voice, and tone atomically"
     });
     await clickControlContaining(rendered, "Continue");
     assert.match(rendered.container.textContent ?? "", /Pick Murph’s tone/u);
+    const toneOptions = rendered.container.querySelector(
+      "[data-persona-picker-step='tone'] fieldset > div",
+    );
+    assert.ok(toneOptions instanceof rendered.window.HTMLElement);
+    assert.ok(toneOptions.classList.contains("flex"));
+    assert.ok(toneOptions.classList.contains("flex-col"));
     await clickControlContaining(rendered, "Casual");
     await clickControlContaining(rendered, "Continue");
 
@@ -375,6 +381,10 @@ test("MurphPersonaPicker constrains its desktop dialog and left-aligns the subti
     assert.match(step.className, /min-w-0/u);
     assert.match(step.className, /overflow-x-hidden/u);
     assert.match(description.className, /text-left/u);
+    await clickControlContaining(rendered, "Continue");
+    await clickControlContaining(rendered, "Continue");
+    await clickControlContaining(rendered, "Continue");
+    assert.equal(dialog.style.width, "42rem");
   } finally {
     await rendered.cleanup();
   }

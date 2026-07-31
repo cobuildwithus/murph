@@ -3190,6 +3190,9 @@ describe("hosted-member-store", () => {
       currentBillingPhase: "pulse_trial",
       currentBillingPlanCode: "launch_monthly",
       currentCheckoutOffer: "pulse_trial",
+      currentPeriodEnd: null,
+      scheduledBillingEffectiveAt: null,
+      scheduledBillingPlanCode: null,
       stripeCustomerLookupKey: "hbidx:stripe-customer:v1:abc123",
       stripeSubscriptionLookupKey: "hbidx:stripe-subscription:v1:def456",
     });
@@ -3208,8 +3211,11 @@ describe("hosted-member-store", () => {
       currentBillingPhase: "pulse_trial",
       currentBillingPlanCode: "launch_monthly",
       currentCheckoutOffer: "pulse_trial",
+      currentPeriodEnd: null,
       hasStripeCustomerId: true,
       hasStripeSubscriptionId: true,
+      scheduledBillingEffectiveAt: null,
+      scheduledBillingPlanCode: null,
     });
     expect(findUnique).toHaveBeenCalledWith({
       where: {
@@ -3219,6 +3225,9 @@ describe("hosted-member-store", () => {
         currentBillingPhase: true,
         currentBillingPlanCode: true,
         currentCheckoutOffer: true,
+        currentPeriodEnd: true,
+        scheduledBillingEffectiveAt: true,
+        scheduledBillingPlanCode: true,
         stripeCustomerLookupKey: true,
         stripeSubscriptionLookupKey: true,
       },
@@ -3665,6 +3674,101 @@ describe("hosted-member-store", () => {
         memberId: true,
       },
     });
+  });
+
+  it("preserves attempt A and Session S when the invoice.paid billing write binds subscription X first", async () => {
+    // applyStripeInvoicePaid reaches this existing ref owner through
+    // writeHostedMemberStripeBillingTx without owning Checkout-attempt fields.
+    const checkoutCreatedAt = new Date("2026-07-27T12:00:00.000Z");
+    const invoicePaidAt = new Date("2026-07-27T12:01:00.000Z");
+    const stripeCheckoutSessionIdEncrypted = await encryptHostedWebNullableString({
+      field: "hosted-member-billing-ref.stripe-checkout-session-id",
+      memberId: "member_123",
+      value: "cs_S",
+    });
+    const stripeCustomerIdEncrypted = await encryptHostedWebNullableString({
+      field: "hosted-member-billing-ref.stripe-customer-id",
+      memberId: "member_123",
+      value: "cus_X",
+    });
+    const stripeSubscriptionIdEncrypted = await encryptHostedWebNullableString({
+      field: "hosted-member-billing-ref.stripe-subscription-id",
+      memberId: "member_123",
+      value: "sub_X",
+    });
+    const findMany = vi.fn().mockResolvedValue([]);
+    const upsert = vi.fn().mockResolvedValue({
+      checkoutAttemptId: "attempt_A",
+      checkoutCreatedAt,
+      checkoutIntentHash: "intent_A",
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "standard",
+      lastStripeEventCreatedAt: invoicePaidAt,
+      memberId: "member_123",
+      stripeCheckoutSessionIdEncrypted,
+      stripeCheckoutSessionLookupKey: "hbidx:stripe-checkout-session:v1:S",
+      stripeCustomerIdEncrypted,
+      stripeCustomerLookupKey: "hbidx:stripe-customer:v1:X",
+      stripeSubscriptionIdEncrypted,
+      stripeSubscriptionLookupKey: "hbidx:stripe-subscription:v1:X",
+      stripeSubscriptionScheduleIdEncrypted: null,
+      stripeSubscriptionScheduleLookupKey: null,
+    });
+    const prisma = {
+      $queryRaw: createMemberRowLockQueryRaw(),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({ suspendedAt: null }),
+      },
+      hostedMemberBillingRef: {
+        findMany,
+        upsert,
+      },
+    } as never;
+
+    await expect(writeHostedMemberStripeBillingRefTx({
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "standard",
+      memberId: "member_123",
+      stripeCustomerId: "cus_X",
+      stripeEventCreatedAt: invoicePaidAt,
+      stripeSubscriptionId: "sub_X",
+      tx: prisma,
+    })).resolves.toMatchObject({
+      checkoutAttemptId: "attempt_A",
+      checkoutCreatedAt,
+      checkoutIntentHash: "intent_A",
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_monthly",
+      lastStripeEventCreatedAt: invoicePaidAt,
+      stripeCheckoutSessionId: "cs_S",
+      stripeCustomerId: "cus_X",
+      stripeSubscriptionId: "sub_X",
+    });
+
+    const updateData = upsert.mock.calls[0]?.[0]?.update;
+    expect(updateData).toEqual(expect.objectContaining({
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "standard",
+      lastStripeEventCreatedAt: invoicePaidAt,
+      stripeCustomerLookupKey: expect.stringMatching(
+        /^hbidx:stripe-customer:v1:/u,
+      ),
+      stripeSubscriptionLookupKey: expect.stringMatching(
+        /^hbidx:stripe-subscription:v1:/u,
+      ),
+    }));
+    for (const field of [
+      "checkoutAttemptId",
+      "checkoutCreatedAt",
+      "checkoutIntentHash",
+      "stripeCheckoutSessionIdEncrypted",
+      "stripeCheckoutSessionLookupKey",
+    ]) {
+      expect(updateData).not.toHaveProperty(field);
+    }
   });
 
   it("persists Stripe billing plan and period markers from reconciliation", async () => {
@@ -4140,6 +4244,7 @@ function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember
     assistantHumor: null,
     assistantHumorCausalSeq: null,
     assistantModelPreference: null,
+    assistantProviderPreference: null,
     assistantReasoningEffortPreference: null,
     assistantPush: null,
     assistantPushCausalSeq: null,

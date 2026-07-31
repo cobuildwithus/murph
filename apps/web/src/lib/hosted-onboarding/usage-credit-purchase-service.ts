@@ -3,6 +3,7 @@ import type Stripe from "stripe";
 import {
   HostedUsageCreditPurchaseStatus,
   type HostedUsageCreditPurchase,
+  type Prisma,
   type PrismaClient,
 } from "@prisma/client";
 
@@ -12,9 +13,13 @@ import {
   createHostedStripePriceLookupKey,
 } from "./contact-privacy";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
+import { hasHostedMemberOwnActiveBilling } from "./entitlement";
 import { ensureHostedMemberStripeCustomer } from "./hosted-member-stripe-customer";
 import { readHostedMemberStripeBillingRef } from "./hosted-member-billing-store";
+import { readHostedMemberBillingSnapshot } from "./hosted-member-store";
 import {
+  hasHostedAccountGroupAccess,
+  readHostedAccountGroupStripeBillingRef,
   resolveHostedFamilyUsageCreditCheckoutTargetTx,
   type HostedFamilyUsageCreditCheckoutTarget,
 } from "./family-plan";
@@ -51,6 +56,7 @@ import {
   projectHostedUsageCreditPurchaseStatusResult,
   projectHostedUsageCreditPurchaseTarget,
   type HostedUsageCreditCheckoutResult,
+  type HostedUsageCreditPurchaseTargetProjection,
 } from "./usage-credit-purchase-status-service";
 import {
   assertHostedUsageCreditStripePriceMatchesPurchase,
@@ -67,14 +73,27 @@ import {
   requireHostedUsageCreditPurchasePayerMemberId,
 } from "./usage-credit-purchase-stripe";
 import { logHostedStripeFailure } from "./stripe-error-log";
-import { tryChargeHostedUsageCreditSavedCard } from
-  "./usage-credit-saved-card-payment";
+import {
+  tryChargeHostedUsageCreditSavedCard,
+  type HostedUsageCreditSavedCardBillingAuthority,
+} from "./usage-credit-saved-card-payment";
+import { readHostedAiUsageGate } from "../hosted-execution/usage-allowance";
+import {
+  classifyHostedGroupUsageCapacity,
+} from "../hosted-groups/group-usage-capacity";
 import {
   buildHostedGroupUsageFundingPath,
   normalizeHostedGroupUsageFundingLocator,
   readHostedGroupUsageFundingLocatorRuntimeMemberId,
   readHostedGroupUsageFundingTargetByLocator,
 } from "../hosted-groups/group-usage-funding";
+import {
+  createHostedGroupSponsorshipAuthorizationTx,
+  parseHostedGroupSponsorshipMonthlyCapMinor,
+  prepareHostedGroupSponsorshipRecoveryTx,
+  type HostedGroupSponsorshipMonthlyCapMinor,
+  type HostedGroupSponsorshipPaymentAuthority,
+} from "../hosted-groups/group-sponsorship-authorization";
 import {
   assertHostedGroupSponsorshipRequestMatchesTx,
   createHostedGroupSponsorshipMomentTx,
@@ -162,11 +181,15 @@ interface HostedPersonalUsageCreditCheckoutInput
   memberId: string;
 }
 
+export type HostedGroupSponsorshipCheckoutKind = "monthly" | "one_time";
+
 interface HostedGroupUsageCreditCheckoutInput
   extends HostedUsageCreditCheckoutCommonInput {
   joinCode: string;
+  monthlyCapMinor?: HostedGroupSponsorshipMonthlyCapMinor;
   payerMemberId: string;
   sponsorship?: HostedGroupSponsorshipDraft | null;
+  sponsorshipKind?: HostedGroupSponsorshipCheckoutKind;
 }
 
 interface HostedFamilyUsageCreditCheckoutInput
@@ -177,9 +200,11 @@ interface HostedFamilyUsageCreditCheckoutInput
 
 export interface HostedGroupSponsorshipCheckoutRequest {
   clientRequestKey: string;
+  monthlyCapMinor: HostedGroupSponsorshipMonthlyCapMinor | null;
   offerCode: HostedGroupSponsorshipOfferCode;
   recoveryOnly: boolean;
   sponsorship: HostedGroupSponsorshipDraft | null;
+  sponsorshipKind: HostedGroupSponsorshipCheckoutKind;
 }
 
 type HostedUsageCreditCheckoutTarget =
@@ -254,9 +279,11 @@ export function parseHostedGroupSponsorshipCheckoutRequest(
   if (
     keys.some((key) =>
       key !== "clientRequestKey" &&
+      key !== "monthlyCapMinor" &&
       key !== "offerCode" &&
       key !== "recoveryOnly" &&
-      key !== "sponsorship"
+      key !== "sponsorship" &&
+      key !== "sponsorshipKind"
     ) ||
     !keys.includes("clientRequestKey") ||
     !keys.includes("offerCode")
@@ -282,11 +309,37 @@ export function parseHostedGroupSponsorshipCheckoutRequest(
       message: "Choose an available group sponsorship offer.",
     });
   }
+  const sponsorshipKind = value.sponsorshipKind === undefined
+    ? "one_time"
+    : value.sponsorshipKind;
+  if (sponsorshipKind !== "monthly" && sponsorshipKind !== "one_time") {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_SPONSORSHIP_KIND_INVALID",
+      httpStatus: 400,
+      message: "Choose monthly sponsorship or a one-time contribution.",
+    });
+  }
+  const monthlyCapMinor = sponsorshipKind === "monthly"
+    ? parseHostedGroupSponsorshipMonthlyCapMinor(value.monthlyCapMinor)
+    : null;
+  if (
+    (sponsorshipKind === "monthly" &&
+      (monthlyCapMinor === null || offerCode !== "usage_5_usd")) ||
+    (sponsorshipKind === "one_time" && value.monthlyCapMinor !== undefined)
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_SPONSORSHIP_CAP_INVALID",
+      httpStatus: 400,
+      message: "Monthly sponsorship starts with $5 and needs a $5, $10, or $20 maximum.",
+    });
+  }
   return {
     clientRequestKey: base.clientRequestKey,
+    monthlyCapMinor,
     offerCode,
     recoveryOnly: base.recoveryOnly,
     sponsorship: parseHostedGroupSponsorshipDraft(value.sponsorship),
+    sponsorshipKind,
   };
 }
 
@@ -341,6 +394,8 @@ export async function createHostedGroupUsageCreditCheckout(
     clientRequestKey: input.clientRequestKey,
     ...(stripeCustomerId ? { groupStripeCustomerId: stripeCustomerId } : {}),
     groupSponsorship: input.sponsorship ?? null,
+    groupSponsorshipKind: input.sponsorshipKind ?? "one_time",
+    groupSponsorshipMonthlyCapMinor: input.monthlyCapMinor ?? null,
     now: input.now,
     offerCode: input.offerCode,
     prisma,
@@ -381,6 +436,8 @@ export async function createHostedFamilyMemberUsageCreditCheckout(
 async function createHostedUsageCreditCheckoutForTarget(input: {
   clientRequestKey: string;
   groupSponsorship?: HostedGroupSponsorshipDraft | null;
+  groupSponsorshipKind?: HostedGroupSponsorshipCheckoutKind;
+  groupSponsorshipMonthlyCapMinor?: HostedGroupSponsorshipMonthlyCapMinor | null;
   groupStripeCustomerId?: string;
   now?: Date;
   offerCode: HostedUsageCreditOfferCode;
@@ -391,6 +448,9 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
   const resolution = await prisma.$transaction(async (tx) => {
+    if (input.target.kind === "group") {
+      await lockHostedMemberRow(tx, input.target.beneficiaryMemberId);
+    }
     await lockHostedMemberRow(tx, input.target.payerMemberId);
     const payer = await tx.hostedMember.findUnique({
       select: {
@@ -481,6 +541,21 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
         };
       }
       if (input.target.kind === "group") {
+        if (!(await hostedGroupSponsorshipCheckoutSelectionMatchesTx({
+          monthlyCapMinor: input.groupSponsorshipMonthlyCapMinor ?? null,
+          purchase: recoveredPurchase,
+          sponsorshipKind: input.groupSponsorshipKind ?? "one_time",
+          tx,
+        }))) {
+          return {
+            kind: "purchase" as const,
+            purchase: recoveredPurchase,
+            recovered: true,
+            requestKeyMatched: true,
+            selectionConflict: "sponsorship" as const,
+            targetConflict: false,
+          };
+        }
         const sponsorshipInput = {
           draft: input.groupSponsorship ?? null,
           purchaseId: recoveredPurchase.id,
@@ -536,6 +611,10 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
 
     const existingActive = await tx.hostedUsageCreditPurchase.findFirst({
       where: {
+        OR: [
+          { groupSponsorshipAuthorizationId: null },
+          { groupSponsorshipChargeOrdinal: 0 },
+        ],
         payerMemberId: target.payerMemberId,
         status: {
           in: [...HOSTED_USAGE_CREDIT_NONTERMINAL_PURCHASE_STATUSES],
@@ -558,6 +637,21 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
           };
         }
         if (target.kind === "group") {
+          if (!(await hostedGroupSponsorshipCheckoutSelectionMatchesTx({
+            monthlyCapMinor: input.groupSponsorshipMonthlyCapMinor ?? null,
+            purchase: existingActive,
+            sponsorshipKind: input.groupSponsorshipKind ?? "one_time",
+            tx,
+          }))) {
+            return {
+              kind: "purchase" as const,
+              purchase: existingActive,
+              recovered: true,
+              requestKeyMatched: false,
+              selectionConflict: "sponsorship" as const,
+              targetConflict: false,
+            };
+          }
           await assertHostedGroupSponsorshipRequestMatchesTx({
             draft: input.groupSponsorship ?? null,
             purchaseId: existingActive.id,
@@ -642,6 +736,16 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
       authorizedOfferCodes = readHostedConfiguredGroupSponsorshipOfferCodes({
         configuredOfferCodes: readHostedConfiguredUsageCreditOfferCodes(),
       });
+      if (
+        (input.groupSponsorshipKind ?? "one_time") === "monthly" &&
+        (
+          input.offerCode !== "usage_5_usd" ||
+          input.groupSponsorshipMonthlyCapMinor === null ||
+          input.groupSponsorshipMonthlyCapMinor === undefined
+        )
+      ) {
+        throw buildHostedUsageCreditNotEligibleError("group");
+      }
       stripeCustomerId = input.groupStripeCustomerId;
     } else {
       if (!familyTarget || target.groupId !== familyTarget.groupId) {
@@ -699,6 +803,23 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
       createHostedStripeCustomerLookupKey(stripeCustomerId),
       "customer",
     );
+    const sponsorshipAuthorization =
+      target.kind === "group" &&
+        (input.groupSponsorshipKind ?? "one_time") === "monthly"
+        ? await (async () => {
+            const monthlyCapMinor = input.groupSponsorshipMonthlyCapMinor;
+            if (monthlyCapMinor === null || monthlyCapMinor === undefined) {
+              throw buildHostedUsageCreditNotEligibleError("group");
+            }
+            return createHostedGroupSponsorshipAuthorizationTx({
+              beneficiaryMemberId: target.beneficiaryMemberId,
+              monthlyCapMinor,
+              now,
+              payerMemberId: target.payerMemberId,
+              tx,
+            });
+          })()
+        : null;
 
     const created = await tx.hostedUsageCreditPurchase.create({
       data: {
@@ -711,6 +832,15 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
         clientRequestKey: input.clientRequestKey,
         createdAt: now,
         grantUsdMicros: offer.grantUsdMicros,
+        ...(sponsorshipAuthorization
+          ? {
+              groupSponsorshipAuthorizationId:
+                sponsorshipAuthorization.authorizationId,
+              groupSponsorshipChargeOrdinal: 0,
+              groupSponsorshipPeriodStartedAt:
+                sponsorshipAuthorization.periodStartedAt,
+            }
+          : {}),
         id: purchaseId,
         offerCode: offer.code,
         payerMemberId: target.payerMemberId,
@@ -834,7 +964,32 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
   }
 }
 
-async function continueHostedUsageCreditCheckout(input: {
+async function hostedGroupSponsorshipCheckoutSelectionMatchesTx(input: {
+  monthlyCapMinor: HostedGroupSponsorshipMonthlyCapMinor | null;
+  purchase: HostedUsageCreditPurchase;
+  sponsorshipKind: HostedGroupSponsorshipCheckoutKind;
+  tx: Prisma.TransactionClient;
+}): Promise<boolean> {
+  const automaticAuthorizationId = input.purchase.groupSponsorshipAuthorizationId;
+  const isMonthlyActivation = Boolean(
+    automaticAuthorizationId &&
+    input.purchase.groupSponsorshipChargeOrdinal === 0 &&
+    input.purchase.groupSponsorshipPeriodStartedAt,
+  );
+  if (input.sponsorshipKind === "one_time") {
+    return !isMonthlyActivation && automaticAuthorizationId == null;
+  }
+  if (!isMonthlyActivation || input.monthlyCapMinor === null) {
+    return false;
+  }
+  const authorization = await input.tx.hostedGroupSponsorshipAuthorization.findUnique({
+    select: { monthlyCapMinor: true },
+    where: { id: automaticAuthorizationId! },
+  });
+  return authorization?.monthlyCapMinor === input.monthlyCapMinor;
+}
+
+export async function continueHostedUsageCreditCheckout(input: {
   now: Date;
   prisma: PrismaClient;
   purchase: HostedUsageCreditPurchase;
@@ -893,9 +1048,46 @@ async function continueHostedUsageCreditCheckout(input: {
     purchase,
     stripe,
   });
+  const stripeCustomerId = typeof checkoutRequest.customer === "string"
+    ? checkoutRequest.customer
+    : null;
+  if (!stripeCustomerId) {
+    throw buildHostedUsageCreditInvariantError("purchase_customer_missing");
+  }
+  const billingAuthority =
+    canStartSavedCardPayment &&
+      !purchase.stripePaymentIntentLookupKey &&
+      policyVersion === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION
+      ? await resolveHostedUsageCreditSavedCardBillingAuthority({
+          payerMemberId: requireHostedUsageCreditPurchasePayerMemberId(purchase),
+          prisma: input.prisma,
+          purchase,
+          stripeCustomerId,
+          target,
+        })
+      : target.kind === "group"
+        ? (() => {
+            const automaticSponsorship =
+              buildHostedGroupSponsorshipPaymentAuthority({
+                mode: "payer_recovery",
+                purchase,
+              });
+            return {
+              ...(automaticSponsorship ? { automaticSponsorship } : {}),
+              kind: "group" as const,
+            };
+          })()
+        : target.kind === "family"
+          ? {
+              familyGroupId: target.familyGroupId,
+              kind: "family" as const,
+              subscription: null,
+            }
+          : { kind: "personal" as const, subscription: null };
   let checkoutPurchase = purchase;
   if (canStartSavedCardPayment || canRetrySavedCardPayment) {
     const directPaymentPurchase = await tryChargeHostedUsageCreditSavedCard({
+      billingAuthority,
       checkoutRequest,
       now: input.now,
       policyVersion,
@@ -965,6 +1157,160 @@ async function continueHostedUsageCreditCheckout(input: {
   return finalProjection.checkout;
 }
 
+export async function recoverHostedGroupSponsorshipUsageCreditCheckout(input: {
+  authorizationId: string;
+  beneficiaryMemberId: string;
+  now?: Date;
+  payerMemberId: string;
+  prisma?: PrismaClient;
+}): Promise<HostedUsageCreditCheckoutResult | null> {
+  const prisma = input.prisma ?? getPrisma();
+  const now = input.now ?? new Date();
+  const prepared = await prisma.$transaction(async (tx) => {
+    await lockHostedMemberRow(tx, input.beneficiaryMemberId);
+    await lockHostedMemberRow(tx, input.payerMemberId);
+    const decision = await readHostedAiUsageGate({
+      memberId: input.beneficiaryMemberId,
+      now,
+      prisma: tx,
+    });
+    if (
+      decision.allowanceSource !== "thread_container" ||
+      (!decision.allowed && decision.reason !== "ai_usage_limit_exceeded")
+    ) {
+      throw hostedOnboardingError({
+        code: "HOSTED_GROUP_SPONSORSHIP_RECOVERY_UNAVAILABLE",
+        httpStatus: 409,
+        message: "This sponsorship recovery is no longer available.",
+      });
+    }
+    const capacityState = classifyHostedGroupUsageCapacity({
+      limitUsdMicros: decision.limitUsdMicros,
+      remainingUsdMicros: decision.remainingUsdMicros,
+    });
+    const checkoutExpiresAt = new Date(
+      now.getTime() + HOSTED_USAGE_CREDIT_CHECKOUT_EXPIRY_DURATION_MS,
+    );
+    const recovery = await prepareHostedGroupSponsorshipRecoveryTx({
+      authorizationId: input.authorizationId,
+      beneficiaryMemberId: input.beneficiaryMemberId,
+      capacityState,
+      checkoutExpiresAt,
+      now,
+      payerMemberId: input.payerMemberId,
+      tx,
+    });
+    if (recovery.kind === "reactivated") {
+      return recovery;
+    }
+    const purchase = await tx.hostedUsageCreditPurchase.findUnique({
+      where: { id: recovery.purchaseId },
+    });
+    if (!purchase) {
+      throw buildHostedUsageCreditInvariantError(
+        "group_sponsorship_recovery_purchase_missing",
+      );
+    }
+    return { kind: "purchase" as const, purchase };
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+
+  if (prepared.kind === "reactivated") {
+    return null;
+  }
+  return continueHostedUsageCreditCheckout({
+    now,
+    prisma,
+    purchase: prepared.purchase,
+  });
+}
+
+export function buildHostedGroupSponsorshipPaymentAuthority(input: {
+  mode: HostedGroupSponsorshipPaymentAuthority["mode"];
+  purchase: Pick<
+    HostedUsageCreditPurchase,
+    | "beneficiaryMemberId"
+    | "groupSponsorshipAuthorizationId"
+    | "groupSponsorshipChargeOrdinal"
+    | "groupSponsorshipPeriodStartedAt"
+  >;
+}): HostedGroupSponsorshipPaymentAuthority | null {
+  if (
+    !input.purchase.groupSponsorshipAuthorizationId ||
+    input.purchase.groupSponsorshipChargeOrdinal === null ||
+    input.purchase.groupSponsorshipChargeOrdinal <= 0 ||
+    !input.purchase.groupSponsorshipPeriodStartedAt
+  ) {
+    return null;
+  }
+  return {
+    authorizationId: input.purchase.groupSponsorshipAuthorizationId,
+    beneficiaryMemberId: input.purchase.beneficiaryMemberId,
+    chargeOrdinal: input.purchase.groupSponsorshipChargeOrdinal,
+    mode: input.mode,
+    periodStartedAt: input.purchase.groupSponsorshipPeriodStartedAt,
+  };
+}
+
+async function resolveHostedUsageCreditSavedCardBillingAuthority(input: {
+  payerMemberId: string;
+  prisma: PrismaClient;
+  purchase: HostedUsageCreditPurchase;
+  stripeCustomerId: string;
+  target: HostedUsageCreditPurchaseTargetProjection;
+}): Promise<HostedUsageCreditSavedCardBillingAuthority> {
+  if (input.target.kind === "group") {
+    const automaticSponsorship =
+      buildHostedGroupSponsorshipPaymentAuthority({
+        mode: "payer_recovery",
+        purchase: input.purchase,
+      });
+    return automaticSponsorship
+      ? { automaticSponsorship, kind: "group" }
+      : { kind: "group" };
+  }
+  if (input.target.kind === "family") {
+    const billingRef = await readHostedAccountGroupStripeBillingRef({
+      groupId: input.target.familyGroupId,
+      prisma: input.prisma,
+    });
+    return {
+      familyGroupId: input.target.familyGroupId,
+      kind: "family",
+      subscription:
+        billingRef?.stripeCustomerId === input.stripeCustomerId &&
+        billingRef.stripeSubscriptionId &&
+        hasHostedAccountGroupAccess(billingRef.group)
+          ? {
+              billingStatus: billingRef.group.billingStatus,
+              lastStripeEventCreatedAt:
+                billingRef.lastStripeEventCreatedAt ?? null,
+              stripeSubscriptionId: billingRef.stripeSubscriptionId,
+              suspendedAt: billingRef.group.suspendedAt,
+            }
+          : null,
+    };
+  }
+  const member = await readHostedMemberBillingSnapshot({
+    memberId: input.payerMemberId,
+    prisma: input.prisma,
+  });
+  return {
+    kind: "personal",
+    subscription:
+      member?.billingRef?.stripeCustomerId === input.stripeCustomerId &&
+      member.billingRef.stripeSubscriptionId &&
+      hasHostedMemberOwnActiveBilling(member.core)
+        ? {
+            billingStatus: member.core.billingStatus,
+            lastStripeEventCreatedAt:
+              member.billingRef.lastStripeEventCreatedAt ?? null,
+            stripeSubscriptionId: member.billingRef.stripeSubscriptionId,
+            suspendedAt: member.core.suspendedAt,
+          }
+        : null,
+  };
+}
+
 async function projectHostedUsageCreditCheckoutForCurrentTarget(input: {
   now: Date;
   prisma: PrismaClient;
@@ -1005,7 +1351,11 @@ async function prepareHostedUsageCreditPurchaseForCheckout(input: {
   const payerMemberId = requireHostedUsageCreditPurchasePayerMemberId(
     input.purchase,
   );
+  const target = projectHostedUsageCreditPurchaseTarget(input.purchase);
   return input.prisma.$transaction(async (tx) => {
+    if (target.kind === "group") {
+      await lockHostedMemberRow(tx, target.beneficiaryMemberId);
+    }
     await lockHostedMemberRow(tx, payerMemberId);
     const current = await tx.hostedUsageCreditPurchase.findUnique({
       where: { id: input.purchase.id },
@@ -1076,7 +1426,11 @@ async function bindHostedUsageCreditCheckoutSession(input: {
     "checkout_session",
   );
 
+  const target = projectHostedUsageCreditPurchaseTarget(input.purchase);
   return input.prisma.$transaction(async (tx) => {
+    if (target.kind === "group") {
+      await lockHostedMemberRow(tx, target.beneficiaryMemberId);
+    }
     await lockHostedMemberRow(tx, payerMemberId);
     const current = await tx.hostedUsageCreditPurchase.findUnique({
       where: { id: input.purchase.id },
@@ -1174,7 +1528,10 @@ function buildHostedUsageCreditCheckoutReturnUrl(input: {
   if (input.target.kind === "personal") {
     url.hash = "subscription";
   } else if (input.target.kind === "family") {
-    url.hash = "family";
+    url.hash =
+      input.target.payerMemberId === input.target.beneficiaryMemberId
+        ? "subscription"
+        : "family";
   }
   return url.toString();
 }

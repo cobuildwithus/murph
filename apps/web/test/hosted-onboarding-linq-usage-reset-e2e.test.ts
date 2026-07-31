@@ -77,24 +77,6 @@ const mocks = vi.hoisted(() => {
     lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
     lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
     lookupHostedMemberRoutingByPendingLinqParticipantContact: vi.fn(),
-    nudgeHostedRunnerUserBestEffortResult: vi.fn(async (
-      input?: {
-        context?: string;
-        timeoutMs?: number;
-        userId: string;
-      },
-    ) => {
-      void input;
-      return {
-        accepted: true,
-        alarmScheduled: false,
-        configured: true,
-        errorCode: null,
-        immediateDriveStarted: false,
-        inFlight: false,
-        nextAlarmAtPresent: false,
-      };
-    }),
     readHostedMailboxItemByDedupeKey: vi.fn(async () => null),
     readHostedMailboxItemOwnerById: vi.fn(async (input: { mailboxItemId: string }) => ({
       id: input.mailboxItemId,
@@ -194,12 +176,6 @@ vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", async () => {
     incrementHostedLinqOutboundDailyState: mocks.incrementHostedLinqOutboundDailyState,
   };
 });
-
-vi.mock("@/src/lib/hosted-runner/control", () => ({
-  nudgeHostedRunnerBestEffort: vi.fn(async () => "wake"),
-  nudgeHostedRunnerUserBestEffort: vi.fn(),
-  nudgeHostedRunnerUserBestEffortResult: mocks.nudgeHostedRunnerUserBestEffortResult,
-}));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
@@ -352,6 +328,7 @@ type UsageResetPrismaFixture = {
   };
   hostedThreadRoute: {
     findMany: MockedFunction;
+    groupBy: MockedFunction;
     updateMany: MockedFunction;
   };
 };
@@ -409,15 +386,6 @@ describe("hosted Linq usage reset e2e", () => {
     mocks.incrementHostedLinqOutboundDailyState.mockResolvedValue(makeHostedLinqDailyState({
       outboundCount: 1,
     }));
-    mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValue({
-      accepted: true,
-      alarmScheduled: false,
-      configured: true,
-      errorCode: null,
-      immediateDriveStarted: false,
-      inFlight: false,
-      nextAlarmAtPresent: false,
-    });
     mocks.sendHostedLinqChatMessage.mockResolvedValue({
       chatId: CHAT_ID,
       messageId: "provider_msg_usage_reset",
@@ -496,7 +464,6 @@ describe("hosted Linq usage reset e2e", () => {
       }),
       tx: usage.prisma,
     });
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       abortSignal: expect.any(AbortSignal),
       expectedUserId: MEMBER_ID,
@@ -576,7 +543,6 @@ describe("hosted Linq usage reset e2e", () => {
       tx: usage.prisma,
     });
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       abortSignal: expect.any(AbortSignal),
       expectedUserId: MEMBER_ID,
@@ -792,6 +758,7 @@ function createUsageResetPrismaFixture(input: {
     },
     hostedThreadRoute: {
       findMany: vi.fn().mockResolvedValue([]),
+      groupBy: vi.fn().mockResolvedValue([]),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
   };

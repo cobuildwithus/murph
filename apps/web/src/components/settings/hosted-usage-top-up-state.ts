@@ -128,8 +128,9 @@ function createHostedUsageTopUpState(input: {
   initialOpen: boolean;
   purchaseReturn: HostedUsageTopUpReturn | null;
 }): HostedUsageTopUpState {
+  const activePurchase = input.purchaseReturn ? null : input.activePurchase;
   const purchaseId =
-    input.purchaseReturn?.purchaseId ?? input.activePurchase?.purchaseId ?? null;
+    input.purchaseReturn?.purchaseId ?? activePurchase?.purchaseId ?? null;
   if (!purchaseId) {
     return {
       open: input.initialOpen,
@@ -138,30 +139,30 @@ function createHostedUsageTopUpState(input: {
   }
   const status = input.purchaseReturn
     ? null
-    : input.activePurchase?.status ?? null;
+    : activePurchase?.status ?? null;
   return {
     open: input.purchaseReturn !== null || input.initialOpen,
     screen: {
       ...createPurchaseScreen(purchaseId),
-      cancelAllowed: input.activePurchase?.cancelAllowed === true,
+      cancelAllowed: activePurchase?.cancelAllowed === true,
       checkoutUrl:
         status === "checkout_open" &&
-        input.activePurchase?.targetConflict !== true &&
-        input.activePurchase?.url
-          ? readOptionalCheckoutUrl(input.activePurchase.url)
+        activePurchase?.targetConflict !== true &&
+        activePurchase?.url
+          ? readOptionalCheckoutUrl(activePurchase.url)
           : null,
       restartAt:
         status === "reconciling"
-          ? readOptionalRestartAt(input.activePurchase?.restartAt)
+          ? readOptionalRestartAt(activePurchase?.restartAt)
           : null,
       retryOfferCode:
         (status === "reconciling" || status === "payment_pending") &&
-        input.activePurchase?.targetConflict !== true &&
-        input.activePurchase?.retryAllowed
-          ? input.activePurchase.offerCode
+        activePurchase?.targetConflict !== true &&
+        activePurchase?.retryAllowed
+          ? activePurchase.offerCode
           : null,
       status,
-      targetConflict: input.activePurchase?.targetConflict === true,
+      targetConflict: activePurchase?.targetConflict === true,
     },
   };
 }

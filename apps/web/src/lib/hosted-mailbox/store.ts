@@ -26,6 +26,7 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 import type {
   HostedExecutionConversationMessageWake,
+  HostedExecutionEnvironmentVoiceCapturedWake,
   HostedExecutionMealPhotoCapturedWake,
   HostedExecutionWake,
 } from "@murphai/hosted-execution/contracts";
@@ -35,9 +36,11 @@ import type {
 import { parseHostedEmailThreadTarget } from "@murphai/runtime-state";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
+import {
+  formatHostedExecutionSafeLogErrorDetails,
+} from "../hosted-execution/logging";
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
-import { recordHostedRuntimeLogTx } from "../hosted-workspace/store";
 import { advanceHostedMailboxLaneConsumedSeq } from "./lane-counter-store";
 import {
   createHostedAssistantInputLookupKey,
@@ -138,6 +141,51 @@ export interface FetchHostedRuntimeMailboxProjectionResult {
   consumedSeqByLane: HostedMailboxLaneConsumed[];
   items: HostedMailboxItemRecord[];
   maxSeqByLane: HostedMailboxLaneHighWater[];
+}
+
+export async function tryMarkHostedMailboxConversationAiUsageDenied(input: {
+  afterConversationLaneSeq: bigint;
+  prisma?: HostedMailboxStoreClient;
+  throughConversationLaneSeq: bigint;
+  userId: string;
+}): Promise<boolean> {
+  try {
+    if (
+      input.afterConversationLaneSeq < 0n
+      || input.throughConversationLaneSeq < 0n
+    ) {
+      throw new TypeError("Hosted mailbox conversation sequence window is invalid.");
+    }
+    if (
+      input.throughConversationLaneSeq <= input.afterConversationLaneSeq
+    ) {
+      return false;
+    }
+    const prisma = input.prisma ?? getPrisma();
+    const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
+    const marked = await prisma.$executeRaw(Prisma.sql`
+      UPDATE hosted_mailbox_item
+      SET ai_usage_denied_at = GREATEST(
+        created_at,
+        statement_timestamp() AT TIME ZONE 'UTC'
+      )
+      WHERE user_id = ${userId}
+        AND lane = 'conversation'
+        AND lane_seq > ${input.afterConversationLaneSeq}
+        AND lane_seq <= ${input.throughConversationLaneSeq}
+        AND consumed_at IS NULL
+        AND ai_usage_denied_at IS NULL
+    `);
+
+    return marked > 0;
+  } catch (error) {
+    console.warn("Hosted mailbox usage-denial mark failed.", {
+      ...formatHostedExecutionSafeLogErrorDetails(error, {
+        code: "HOSTED_MAILBOX_USAGE_DENIAL_MARK_FAILED",
+      }),
+    });
+    return false;
+  }
 }
 
 interface HostedRuntimeMailboxProjectionRow {
@@ -290,7 +338,7 @@ async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
       payloadHash,
       payloadSchema,
     });
-    await recordHostedMailboxDedupeConflictLogTx({
+    recordHostedMailboxDedupeConflictLog({
       dedupeConflict,
       existing,
       kind,
@@ -298,15 +346,6 @@ async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
       payloadBytes,
       payloadHash,
       payloadSchema,
-      tx: input.tx,
-      userId,
-    });
-    await recordHostedMailboxAppendLogTx({
-      outcome: "duplicate",
-      item: existing,
-      payloadStorage: existing.payloadRef ? "ref" : "inline",
-      tx: input.tx,
-      userId,
     });
 
     return {
@@ -432,7 +471,7 @@ async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
       payloadHash,
       payloadSchema,
     });
-    await recordHostedMailboxDedupeConflictLogTx({
+    recordHostedMailboxDedupeConflictLog({
       dedupeConflict,
       existing: concurrentExisting,
       kind,
@@ -440,15 +479,6 @@ async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
       payloadBytes,
       payloadHash,
       payloadSchema,
-      tx: input.tx,
-      userId,
-    });
-    await recordHostedMailboxAppendLogTx({
-      outcome: "duplicate",
-      item: concurrentExisting,
-      payloadStorage: concurrentExisting.payloadRef ? "ref" : "inline",
-      tx: input.tx,
-      userId,
     });
 
     return {
@@ -471,14 +501,6 @@ async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
       },
     });
   }
-
-  await recordHostedMailboxAppendLogTx({
-    outcome: "inserted",
-    item,
-    payloadStorage: payloadStorage.storage,
-    tx: input.tx,
-    userId,
-  });
 
   return {
     duplicate: false,
@@ -597,6 +619,56 @@ export async function appendHostedMealPhotoMailboxEnvelopeTx(input: {
     ...appended,
     claimedMealPhotoKey: canonicalEnvelope.mealPhoto.mealPhotoKey,
   };
+}
+
+export async function appendHostedEnvironmentVoiceMailboxEnvelopeTx(input: {
+  envelope: HostedExecutionEnvironmentVoiceCapturedWake;
+  tx: HostedMailboxMutationTx;
+}): Promise<AppendHostedMailboxItemResult & { claimedAudioKey: string }> {
+  await acquireHostedMailboxDedupeAppendLockTx({
+    dedupeKey: input.envelope.eventId,
+    tx: input.tx,
+    userId: input.envelope.userId,
+  });
+  const existing = await readHostedMailboxWakeByDedupeKey({
+    dedupeKey: input.envelope.eventId,
+    prisma: input.tx,
+    userId: input.envelope.userId,
+  });
+  const canonicalEnvelope =
+    existing?.kind === "environment-voice.captured"
+    && hasSameEnvironmentVoiceCapture(existing, input.envelope)
+      ? existing
+      : input.envelope;
+  const appended = await appendHostedMailboxEnvelopeTx({
+    envelope: canonicalEnvelope,
+    tx: input.tx,
+  });
+  return {
+    ...appended,
+    claimedAudioKey: canonicalEnvelope.environmentVoice.audioKey,
+  };
+}
+
+function hasSameEnvironmentVoiceCapture(
+  existing: HostedExecutionEnvironmentVoiceCapturedWake,
+  requested: HostedExecutionEnvironmentVoiceCapturedWake,
+): boolean {
+  return existing.eventId === requested.eventId
+    && existing.userId === requested.userId
+    && existing.occurredAt === requested.occurredAt
+    && existing.environmentVoice.byteLength
+      === requested.environmentVoice.byteLength
+    && existing.environmentVoice.captureId
+      === requested.environmentVoice.captureId
+    && existing.environmentVoice.capturedAt
+      === requested.environmentVoice.capturedAt
+    && existing.environmentVoice.contentType
+      === requested.environmentVoice.contentType
+    && existing.environmentVoice.durationMs
+      === requested.environmentVoice.durationMs
+    && existing.environmentVoice.sha256
+      === requested.environmentVoice.sha256;
 }
 
 function hasSameMealPhotoCapture(
@@ -1454,6 +1526,44 @@ export async function readHostedMailboxWakeAfterDedupeLockTx(input: {
   });
 }
 
+export async function hasPendingHostedEnvironmentVoiceMailboxItemTx(input: {
+  tx: HostedMailboxMutationTx;
+  userId: string;
+}): Promise<boolean> {
+  return await hasPendingHostedEnvironmentVoiceMailboxItem({
+    prisma: input.tx,
+    userId: input.userId,
+  });
+}
+
+export async function hasPendingHostedEnvironmentVoiceMailboxItem(input: {
+  prisma?: HostedMailboxStoreClient;
+  userId: string;
+}): Promise<boolean> {
+  const prisma = input.prisma ?? getPrisma();
+  const laneCounter = await prisma.hostedMailboxLaneCounter.findUnique({
+    select: { consumedSeq: true },
+    where: {
+      userId_lane: {
+        lane: "system",
+        userId: input.userId,
+      },
+    },
+  });
+  const item = await prisma.hostedMailboxItem.findFirst({
+    select: { id: true },
+    where: {
+      kind: "environment-voice.captured",
+      lane: "system",
+      laneSeq: {
+        gt: laneCounter?.consumedSeq ?? 0n,
+      },
+      userId: input.userId,
+    },
+  });
+  return item !== null;
+}
+
 export async function hasHostedMailboxItemByKind(input: {
   kind: HostedMailboxKind | string;
   prisma?: HostedMailboxStoreClient;
@@ -1754,6 +1864,7 @@ export type HostedMailboxSubscriptionActionClaimResult =
 
 export async function claimHostedMailboxConversationSubscriptionAction(input: {
   action: HostedRuntimeSubscriptionAction;
+  actionClaim?: string;
   assistantInputId: string;
   memberId: string;
   prisma?: HostedMailboxStoreClient;
@@ -1777,17 +1888,26 @@ export async function claimHostedMailboxConversationSubscriptionAction(input: {
 
 async function claimHostedMailboxConversationSubscriptionActionTx(input: {
   action: HostedRuntimeSubscriptionAction;
+  actionClaim?: string;
   assistantInputId: string;
   memberId: string;
   tx: HostedMailboxMutationTx;
 }): Promise<HostedMailboxSubscriptionActionClaimResult | null> {
   const assistantInputId = normalizeNullableString(input.assistantInputId);
   const memberId = normalizeNullableString(input.memberId);
+  const actionClaim = normalizeNullableString(
+    input.actionClaim ?? input.action,
+  );
   const assistantInputLookupKeys = assistantInputId
     ? createHostedAssistantInputLookupKeyReadCandidates(assistantInputId)
     : [];
 
-  if (assistantInputLookupKeys.length === 0 || !memberId) {
+  if (
+    assistantInputLookupKeys.length === 0
+    || !memberId
+    || !actionClaim
+    || actionClaim.length > 512
+  ) {
     return null;
   }
 
@@ -1817,7 +1937,7 @@ async function claimHostedMailboxConversationSubscriptionActionTx(input: {
   if (!row || rows.length !== 1) {
     return null;
   }
-  if (row.subscriptionActionClaim === input.action) {
+  if (row.subscriptionActionClaim === actionClaim) {
     return "replayed";
   }
   if (row.subscriptionActionClaim !== null) {
@@ -1826,7 +1946,7 @@ async function claimHostedMailboxConversationSubscriptionActionTx(input: {
 
   const claimed = await input.tx.hostedMailboxItem.updateMany({
     data: {
-      subscriptionActionClaim: input.action,
+      subscriptionActionClaim: actionClaim,
     },
     where: {
       ...authorityWhere,
@@ -1847,7 +1967,7 @@ async function claimHostedMailboxConversationSubscriptionActionTx(input: {
       id: row.id,
     },
   });
-  if (raced?.subscriptionActionClaim === input.action) {
+  if (raced?.subscriptionActionClaim === actionClaim) {
     return "replayed";
   }
   return raced?.subscriptionActionClaim ? "conflict" : null;
@@ -2034,37 +2154,7 @@ function normalizeHostedMailboxSourceMessageLookupKeys(
   ))].sort();
 }
 
-async function recordHostedMailboxAppendLogTx(input: {
-  outcome: "duplicate" | "inserted";
-  item: HostedMailboxItemRow;
-  payloadStorage: "inline" | "ref";
-  tx: HostedMailboxMutationTx;
-  userId: string;
-}): Promise<void> {
-  const inserted = input.outcome === "inserted";
-  await recordHostedRuntimeLogTx({
-    component: "mailbox",
-    eventCode: "mailbox.appended",
-    level: "info",
-    mailboxLane: input.item.lane,
-    mailboxSeqEnd: input.item.laneSeq,
-    mailboxSeqStart: input.item.laneSeq,
-    phase: "import",
-    redacted: {
-      bytes: input.item.payloadBytes ?? null,
-      dedupeKeyPresent: true,
-      duplicate: !inserted,
-      inserted,
-      kind: input.item.kind,
-      schema: input.item.payloadSchema,
-      storage: input.payloadStorage,
-    },
-    tx: input.tx,
-    userId: input.userId,
-  });
-}
-
-async function recordHostedMailboxDedupeConflictLogTx(input: {
+function recordHostedMailboxDedupeConflictLog(input: {
   dedupeConflict: boolean;
   existing: HostedMailboxItemRow;
   kind: HostedMailboxKind;
@@ -2072,36 +2162,42 @@ async function recordHostedMailboxDedupeConflictLogTx(input: {
   payloadBytes: number;
   payloadHash: string | null;
   payloadSchema: string;
-  tx: HostedMailboxMutationTx;
-  userId: string;
-}): Promise<void> {
+}): void {
   if (!input.dedupeConflict) {
     return;
   }
 
-  await recordHostedRuntimeLogTx({
+  // The mailbox row is already the durable append authority. Keep only this
+  // rare mismatch in platform logs, with content-free metadata, so optional
+  // diagnostics cannot add work to or abort the canonical transaction.
+  console.warn(
+    "Hosted mailbox dedupe conflict.",
+    summarizeHostedMailboxDedupeConflictForLog(input),
+  );
+}
+
+function summarizeHostedMailboxDedupeConflictForLog(input: {
+  existing: HostedMailboxItemRow;
+  kind: HostedMailboxKind;
+  lane: HostedMailboxLane;
+  payloadBytes: number;
+  payloadHash: string | null;
+  payloadSchema: string;
+}) {
+  return {
     component: "mailbox",
     eventCode: "mailbox.dedupe_conflict",
-    level: "warn",
-    mailboxLane: input.existing.lane,
-    mailboxSeqEnd: input.existing.laneSeq,
-    mailboxSeqStart: input.existing.laneSeq,
-    phase: "import",
-    redacted: {
-      existingBytes: input.existing.payloadBytes ?? null,
-      existingHasHash: input.existing.payloadHash != null,
-      existingKind: input.existing.kind,
-      existingLane: input.existing.lane,
-      existingSchema: input.existing.payloadSchema,
-      requestedBytes: input.payloadBytes,
-      requestedHasHash: input.payloadHash != null,
-      requestedKind: input.kind,
-      requestedLane: input.lane,
-      requestedSchema: input.payloadSchema,
-    },
-    tx: input.tx,
-    userId: input.userId,
-  });
+    existingBytes: input.existing.payloadBytes ?? null,
+    existingHasHash: input.existing.payloadHash != null,
+    existingKind: input.existing.kind,
+    existingLane: input.existing.lane,
+    existingSchema: input.existing.payloadSchema,
+    requestedBytes: input.payloadBytes,
+    requestedHasHash: input.payloadHash != null,
+    requestedKind: input.kind,
+    requestedLane: input.lane,
+    requestedSchema: input.payloadSchema,
+  };
 }
 
 export async function hydrateHostedMailboxItemTx(input: {

@@ -2,7 +2,7 @@
 
 Status: Implemented
 
-Last verified: 2026-07-21
+Last verified: 2026-07-29
 
 ## Decision
 
@@ -13,13 +13,15 @@ an authenticated group Murph receives one trusted invocation
 it asks one current member's private Murph one bounded question
 under that member's exact active disclosure grant
 the private Murph proposes one answer
-one fresh outgoing reviewer either allows those exact bytes or denies them
+one fresh outgoing reviewer either allows that bounded answer or denies it
+the caller group Murph turns an allowed answer into the room-facing reply
 ```
 
 Consent, invocation, and delivery are separate authorities. The grant is standing,
 revocable consent. An accepted group input or a claimed scheduled automation
 occurrence supplies one request's causal and replay identity. An accepted-input
-answer is delivered exactly to its group conversation. A scheduled occurrence
+answer returns as untrusted input to the bound group Murph's output-only
+continuation. A scheduled occurrence
 may read an answer only by repeating the exact ask in that same live Codex turn;
 it does not create a later continuation or delivery.
 
@@ -82,17 +84,18 @@ replaces the reviewed answer with fixed non-disclosing text before delivery.
 6. The member's private runtime runs one read-only candidate pass against its
    restored workspace. A separate fresh-context pass reviews only the immutable
    permission text, incoming question, and proposed answer.
-7. An accepted-input answer returns to the originating group conversation
-   byte-for-byte through the existing outbox. In a scheduled occurrence, Codex
+7. An accepted-input answer wakes the originating group runtime immediately and
+   enters one isolated output-only continuation. That group Murph receives the
+   reviewed answer as quoted untrusted data plus its existing room history, so
+   it can resolve references and write the actual user-facing reply without
+   another private read or any tool access. Its outbox intent retains the
+   completion id, expiry, and route proof. In a scheduled occurrence, Codex
    starts every selected ask first, then uses ordinary shell waits and exact
    replay to poll each accepted `ask_member` call until it returns `completed`
    or `unavailable`. The existing request expiry bounds the loop. Web returns
-   `status="completed"` with the reviewed result only after the ordinary cron
-   owner revalidates the current canonical automation and non-direct route before
-   the tool call, and Web revalidates every live disclosure authority. An
-   `unavailable` result ends that request without an answer. Completion
-   never wakes the group runtime, starts a second provider turn, or creates an
-   outbox delivery, and no callback is held open while the member runtime works.
+   `status="completed"` only after revalidating every live disclosure authority.
+   An `unavailable` result ends that request without an answer. Scheduled
+   completion still never wakes the group runtime or creates a later delivery.
    The answer is untrusted data, not consent for an external action, and every
    other available Murph tool still applies its existing independent authority
    checks.
@@ -148,7 +151,8 @@ group.
 - Web revalidates the exact group, personal runtime, membership generation,
   grant generation, permission digest, origin, expiry, and runtime fence at
   admission, immediately before the personal read, and immediately before
-  completion append. Reviewed exact delivery atomically carries that completion
+  completion append. Reviewed completion delivery atomically carries that
+  completion
   mailbox id, deterministic delivery key, and authority expiry into the
   existing outbox. Before expiry the final Linq egress transaction repeats the
   paired request and grant authority check before claiming provider dispatch.
@@ -231,6 +235,9 @@ The sole model safety gate is the outgoing reviewer:
   repairs an answer.
 - It allows only when every type of information disclosed by the answer is
   clearly inside the permission. Ambiguity denies.
+- The caller continuation receives only the allowed answer, the already-public
+  question, and its own conversation history. It has no member vault or target
+  tools and is instructed not to invent or infer additional private facts.
 - Invalid output, refusal, timeout, provider failure, revocation, stale
   authority, or failed completion revalidation fails closed. A denied candidate
   is never written to Murph durable state or operational logs, delivered, or
@@ -238,7 +245,7 @@ The sole model safety gate is the outgoing reviewer:
 
 This keeps the user-facing permission text as the single disclosure policy. It
 does not introduce an incoming classifier, prompt-injection service, policy
-DSL, rewrite loop, or chain of reviewers.
+DSL, rewrite loop, checkpoint gate, or chain of reviewers.
 
 ## Explicit non-goals
 

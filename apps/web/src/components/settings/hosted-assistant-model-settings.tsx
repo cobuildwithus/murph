@@ -1,12 +1,18 @@
 "use client";
 
 import {
+  HOSTED_ASSISTANT_DEFAULT_PROVIDER,
   HOSTED_ASSISTANT_LUNA_MODEL,
+  HOSTED_ASSISTANT_OPENAI_PROVIDER,
   HOSTED_ASSISTANT_SOL_MODEL,
   HOSTED_ASSISTANT_TERRA_MODEL,
+  HOSTED_ASSISTANT_VENICE_PROVIDER,
   isHostedAssistantProductModel,
+  isHostedAssistantProvider,
   type HostedAssistantProductModel,
+  type HostedAssistantProvider,
 } from "@murphai/hosted-execution/assistant-model";
+import Image from "next/image";
 import { useState } from "react";
 
 import {
@@ -17,11 +23,21 @@ import { Badge } from "@/src/components/ui/badge";
 import { Button } from "@/src/components/ui/button";
 import { ChoiceCard } from "@/src/components/ui/choice-card";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/src/components/ui/dialog";
+import {
   FieldDescription,
   FieldLegend,
   FieldSet,
 } from "@/src/components/ui/field";
-import { RadioGroup } from "@/src/components/ui/radio-group";
+import {
+  RadioGroup,
+  RadioGroupItem,
+} from "@/src/components/ui/radio-group";
 import { Spinner } from "@/src/components/ui/spinner";
 
 import {
@@ -34,6 +50,7 @@ import { UpgradeToEdgeButton } from "./hosted-plan-upgrade-button";
 
 const ASSISTANT_MODEL_SETTINGS_URL = "/api/settings/assistant-model";
 const SOL_REQUIRES_EDGE_ERROR_CODE = "ASSISTANT_MODEL_SOL_REQUIRES_EDGE";
+const VENICE_UNAVAILABLE_ERROR_CODE = "ASSISTANT_PROVIDER_VENICE_UNAVAILABLE";
 
 const MODEL_OPTIONS = [
   {
@@ -65,10 +82,43 @@ const MODEL_OPTIONS = [
   usage: string;
 }>;
 
+const PROVIDER_OPTIONS = [
+  {
+    description: "No chat history saved.",
+    logo: {
+      height: 180,
+      src: "/brand-logos/assistant-providers/openai-light.svg",
+      width: 180,
+    },
+    name: "OpenAI",
+    provider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
+  },
+  {
+    description: "Privacy-first inference.",
+    logo: {
+      height: 356,
+      src: "/brand-logos/assistant-providers/venice-light.svg",
+      width: 319,
+    },
+    name: "Venice",
+    provider: HOSTED_ASSISTANT_VENICE_PROVIDER,
+  },
+] as const satisfies ReadonlyArray<{
+  description: string;
+  logo: {
+    height: number;
+    src: string;
+    width: number;
+  };
+  name: string;
+  provider: HostedAssistantProvider;
+}>;
+
 interface AssistantModelSettingsResponse {
   dormantSolPreference: boolean;
   model: HostedAssistantProductModel;
   ok: true;
+  provider?: HostedAssistantProvider;
   solAvailable: boolean;
   updated: boolean;
 }
@@ -76,79 +126,279 @@ interface AssistantModelSettingsResponse {
 interface HostedAssistantModelSettingsProps {
   canUpgradeToEdge: boolean;
   configurationAvailable: boolean;
+  expectedCurrentPlanCode?: "launch_group_monthly" | "launch_monthly";
   initialDormantSolPreference: boolean;
   initialModel: HostedAssistantProductModel;
+  initialProvider?: HostedAssistantProvider;
   solAvailable: boolean;
+  veniceAvailable?: boolean;
+}
+
+interface AssistantProviderDialogProps {
+  onOpenChange: (open: boolean) => void;
+  onProviderChange: (provider: HostedAssistantProvider) => void;
+  open: boolean;
+  provider: HostedAssistantProvider;
+}
+
+interface AssistantProviderSummaryProps {
+  currentProvider: HostedAssistantProvider;
+  disabled?: boolean;
+  draftProvider: HostedAssistantProvider;
+  onChangeClick: () => void;
+}
+
+export function AssistantProviderSummary({
+  currentProvider,
+  disabled = false,
+  draftProvider,
+  onChangeClick,
+}: AssistantProviderSummaryProps) {
+  const currentProviderName = readProviderName(currentProvider);
+  const draftProviderName = readProviderName(draftProvider);
+  const hasPendingChange = currentProvider !== draftProvider;
+
+  return (
+    <div className="flex w-full items-center gap-2 px-1">
+      <p className="text-sm text-muted-foreground">
+        {hasPendingChange ? (
+          <>
+            Core replies switch to{" "}
+            <span className="font-medium text-foreground">
+              {draftProviderName}
+            </span>{" "}
+            after Save.
+          </>
+        ) : (
+          <>
+            New core replies use{" "}
+            <span className="font-medium text-foreground">
+              {currentProviderName}
+            </span>
+            .
+          </>
+        )}
+      </p>
+      <Button
+        aria-label={
+          hasPendingChange
+            ? `Change model provider. Core replies will switch to ${draftProviderName} after Save.`
+            : `Change model provider. New core replies use ${currentProviderName}.`
+        }
+        className="text-muted-foreground"
+        disabled={disabled}
+        onClick={onChangeClick}
+        size="xs"
+        type="button"
+        variant="ghost"
+      >
+        Change
+      </Button>
+    </div>
+  );
+}
+
+export function AssistantProviderDialog({
+  onOpenChange,
+  onProviderChange,
+  open,
+  provider,
+}: AssistantProviderDialogProps) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[min(27rem,calc(100vw-2rem))] gap-5 overflow-y-auto border border-border/80 bg-popover p-5 text-popover-foreground ring-border sm:max-w-[27rem] sm:p-6">
+        <DialogHeader className="gap-1.5 pr-9">
+          <DialogTitle className="font-serif text-xl/7 font-semibold tracking-normal">
+            Choose provider
+          </DialogTitle>
+          <DialogDescription className="max-w-[38ch] text-sm/6">
+            Murph uses this provider after you save.
+          </DialogDescription>
+        </DialogHeader>
+        <RadioGroup
+          aria-label="Model provider"
+          className="gap-2"
+          value={provider}
+          onValueChange={(value) => {
+            if (!isHostedAssistantProvider(value)) {
+              return;
+            }
+            onProviderChange(value);
+            onOpenChange(false);
+          }}
+        >
+          {PROVIDER_OPTIONS.map((option) => {
+            const titleId = `assistant-provider-${option.provider}-title`;
+            const descriptionId =
+              `assistant-provider-${option.provider}-description`;
+            return (
+              <label
+                className="flex min-h-[4.5rem] cursor-pointer items-center gap-3 rounded-2xl border border-border/70 bg-background/40 px-3 py-2.5 text-left transition-colors hover:bg-muted/45 has-[[data-checked]]:border-primary/35 has-[[data-checked]]:bg-primary/[0.035] has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring"
+                htmlFor={`assistant-provider-${option.provider}`}
+                key={option.provider}
+              >
+                <span className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-border/60 bg-white/80">
+                  <Image
+                    alt=""
+                    aria-hidden="true"
+                    className="size-8 object-contain [color-scheme:light]"
+                    height={option.logo.height}
+                    src={option.logo.src}
+                    width={option.logo.width}
+                  />
+                </span>
+                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span
+                    className="text-sm font-medium text-foreground"
+                    id={titleId}
+                  >
+                    {option.name}
+                  </span>
+                  <span
+                    className="text-xs/5 text-muted-foreground"
+                    id={descriptionId}
+                  >
+                    {option.description}
+                  </span>
+                </span>
+                <RadioGroupItem
+                  aria-describedby={descriptionId}
+                  aria-labelledby={titleId}
+                  className="size-5"
+                  id={`assistant-provider-${option.provider}`}
+                  value={option.provider}
+                />
+              </label>
+            );
+          })}
+        </RadioGroup>
+        <p className="px-1 text-xs/5 text-pretty text-muted-foreground">
+          This only changes core replies. Image generation, voice, search, and
+          other tools still use their specialized providers.
+        </p>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 export function HostedAssistantModelSettings(
   props: HostedAssistantModelSettingsProps,
 ) {
+  const initialProvider = props.initialProvider ?? HOSTED_ASSISTANT_DEFAULT_PROVIDER;
   return (
     <HostedAssistantModelSettingsForm
-      key={`${props.initialModel}:${String(props.initialDormantSolPreference)}:${String(props.solAvailable)}:${String(props.configurationAvailable)}:${String(props.canUpgradeToEdge)}`}
+      key={`${props.initialModel}:${initialProvider}:${String(props.initialDormantSolPreference)}:${String(props.solAvailable)}:${String(props.configurationAvailable)}:${String(props.canUpgradeToEdge)}:${String(props.veniceAvailable === true)}`}
       {...props}
+      initialProvider={initialProvider}
     />
   );
 }
 
 function HostedAssistantModelSettingsForm(
-  props: HostedAssistantModelSettingsProps,
+  props: HostedAssistantModelSettingsProps & {
+    initialProvider: HostedAssistantProvider;
+  },
 ) {
   const [currentModel, setCurrentModel] = useState(props.initialModel);
   const [draftModel, setDraftModel] = useState(props.initialModel);
+  const [currentProvider, setCurrentProvider] = useState(props.initialProvider);
+  const [draftProvider, setDraftProvider] = useState(props.initialProvider);
   const [dormantSolPreference, setDormantSolPreference] = useState(
     props.initialDormantSolPreference,
   );
   const [solAvailable, setSolAvailable] = useState(props.solAvailable);
+  const [veniceAvailable, setVeniceAvailable] = useState(
+    props.veniceAvailable === true,
+  );
+  const [providerDialogOpen, setProviderDialogOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [status, setStatus] = useState<{
     message: string;
-    tone: "destructive" | "neutral" | "success";
+    tone: "destructive" | "neutral";
   } | null>(null);
+  const [saveAnnouncement, setSaveAnnouncement] = useState<string | null>(null);
   const controlsDisabled = isSaving || !props.configurationAvailable;
-  const hasChanges = draftModel !== currentModel || dormantSolPreference;
+  const hasChanges =
+    draftModel !== currentModel
+    || draftProvider !== currentProvider
+    || dormantSolPreference;
 
   async function saveModel() {
     setIsSaving(true);
     setStatus(null);
+    setSaveAnnouncement(null);
 
     try {
+      const modelChanged = draftModel !== currentModel;
+      const providerChanged = draftProvider !== currentProvider;
+      const replaceDormantSol = dormantSolPreference && !providerChanged;
       const response = await requestHostedOnboardingJson<AssistantModelSettingsResponse>({
         method: "POST",
-        payload: { model: draftModel },
+        payload: {
+          ...(modelChanged || replaceDormantSol
+            ? { model: draftModel }
+            : {}),
+          ...(veniceAvailable && providerChanged
+            ? { provider: draftProvider }
+            : {}),
+        },
         url: ASSISTANT_MODEL_SETTINGS_URL,
       });
 
       if (
         !isHostedAssistantProductModel(response.model)
+        || (
+          veniceAvailable
+            ? !isHostedAssistantProvider(response.provider)
+            : response.provider !== undefined
+              && !isHostedAssistantProvider(response.provider)
+        )
         || typeof response.dormantSolPreference !== "boolean"
         || typeof response.solAvailable !== "boolean"
       ) {
         throw new Error("Assistant model response was invalid.");
       }
 
+      const provider = isHostedAssistantProvider(response.provider)
+        ? response.provider
+        : draftProvider;
       setCurrentModel(response.model);
       setDraftModel(response.model);
+      setCurrentProvider(provider);
+      setDraftProvider(provider);
       setDormantSolPreference(response.dormantSolPreference);
       setSolAvailable(response.solAvailable);
-      setStatus({
-        message: `${readModelName(response.model)} is now Murph’s default.`,
-        tone: "success",
-      });
+      setSaveAnnouncement(
+        response.dormantSolPreference
+          ? `Saved. New core replies use ${readProductModelName(response.model)} through ${readProviderName(provider)} while Edge is paused; Sol remains saved.`
+          : `Saved. ${readProductModelName(response.model)} through ${readProviderName(provider)} is your default.`,
+      );
     } catch (error) {
       const solNoLongerAvailable =
         error instanceof HostedOnboardingApiError &&
         error.code === SOL_REQUIRES_EDGE_ERROR_CODE;
+      const veniceNoLongerAvailable =
+        error instanceof HostedOnboardingApiError &&
+        error.code === VENICE_UNAVAILABLE_ERROR_CODE;
       if (solNoLongerAvailable) {
         setDraftModel(currentModel);
         setSolAvailable(false);
       }
+      if (veniceNoLongerAvailable) {
+        setCurrentProvider(HOSTED_ASSISTANT_OPENAI_PROVIDER);
+        setDraftProvider(HOSTED_ASSISTANT_OPENAI_PROVIDER);
+        setVeniceAvailable(false);
+        setProviderDialogOpen(false);
+      }
       setStatus({
         message: solNoLongerAvailable
           ? `Your Edge access changed. Murph will keep using ${readModelName(currentModel)}.`
+          : veniceNoLongerAvailable
+            ? "Venice is no longer available. Murph will keep using OpenAI."
           : "We couldn’t save this change. Try again.",
-        tone: solNoLongerAvailable ? "neutral" : "destructive",
+        tone: solNoLongerAvailable || veniceNoLongerAvailable
+          ? "neutral"
+          : "destructive",
       });
     } finally {
       setIsSaving(false);
@@ -170,7 +420,9 @@ function HostedAssistantModelSettingsForm(
 
       {!props.configurationAvailable ? (
         <p className="w-full rounded-xl border border-border bg-muted/30 p-4 text-sm text-pretty text-muted-foreground">
-          Model choices are read-only until personal Murph access is active.
+          {veniceAvailable
+            ? "Provider and model choices are read-only until personal Murph access is active."
+            : "Model choices are read-only until personal Murph access is active."}
         </p>
       ) : null}
 
@@ -209,6 +461,7 @@ function HostedAssistantModelSettingsForm(
             const current = option.model === currentModel;
             const badge = readModelOptionBadge({
               current,
+              dormantSolPreference,
               model: option.model,
               selected,
               unavailable,
@@ -238,13 +491,39 @@ function HostedAssistantModelSettingsForm(
         </RadioGroup>
       </FieldSet>
 
+      {veniceAvailable ? (
+        <>
+          <AssistantProviderSummary
+            currentProvider={currentProvider}
+            disabled={controlsDisabled}
+            draftProvider={draftProvider}
+            onChangeClick={() => setProviderDialogOpen(true)}
+          />
+          <AssistantProviderDialog
+            onOpenChange={setProviderDialogOpen}
+            onProviderChange={(provider) => {
+              setDraftProvider(provider);
+              setStatus(null);
+            }}
+            open={providerDialogOpen}
+            provider={draftProvider}
+          />
+        </>
+      ) : null}
+
       {props.configurationAvailable && !solAvailable ? (
         <div className="flex w-full flex-col items-start gap-3 px-1 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-pretty text-muted-foreground">
             Sol requires an active Edge plan.
           </p>
           {props.canUpgradeToEdge ? (
-            <UpgradeToEdgeButton>Upgrade to Edge</UpgradeToEdgeButton>
+            <UpgradeToEdgeButton
+              expectedCurrentPlanCode={
+                props.expectedCurrentPlanCode ?? "launch_monthly"
+              }
+            >
+              Upgrade to Edge
+            </UpgradeToEdgeButton>
           ) : null}
         </div>
       ) : null}
@@ -258,10 +537,16 @@ function HostedAssistantModelSettingsForm(
           {isSaving ? <Spinner aria-hidden="true" /> : null}
           {isSaving ? "Saving…" : "Save change"}
         </Button>
+        {status ? (
+          <SettingsStatusLine
+            message={status.message}
+            tone={status.tone}
+          />
+        ) : null}
         <SettingsStatusLine
-          message={status?.message ?? null}
-          tone={status?.tone ?? "neutral"}
-          className="sm:whitespace-nowrap"
+          className="sr-only min-h-0"
+          message={saveAnnouncement}
+          tone="neutral"
         />
       </div>
     </form>
@@ -270,12 +555,17 @@ function HostedAssistantModelSettingsForm(
 
 function readModelOptionBadge(input: {
   current: boolean;
+  dormantSolPreference: boolean;
   model: HostedAssistantProductModel;
   selected: boolean;
   unavailable: boolean;
 }): React.ReactNode {
   if (input.current) {
-    return <ModelOptionBadge>Current</ModelOptionBadge>;
+    return (
+      <ModelOptionBadge>
+        {input.dormantSolPreference ? "Active" : "Default"}
+      </ModelOptionBadge>
+    );
   }
 
   if (input.selected) {
@@ -305,11 +595,16 @@ function ModelOptionBadge({ children }: { children: React.ReactNode }) {
 }
 
 function readModelName(model: HostedAssistantProductModel): string {
-  if (model === HOSTED_ASSISTANT_LUNA_MODEL) {
-    return "GPT-5.6 Luna";
-  }
+  return `GPT-5.6 ${readProductModelName(model)}`;
+}
 
-  return model === HOSTED_ASSISTANT_SOL_MODEL
-    ? "GPT-5.6 Sol"
-    : "GPT-5.6 Terra";
+function readProductModelName(model: HostedAssistantProductModel): string {
+  if (model === HOSTED_ASSISTANT_LUNA_MODEL) {
+    return "Luna";
+  }
+  return model === HOSTED_ASSISTANT_SOL_MODEL ? "Sol" : "Terra";
+}
+
+function readProviderName(provider: HostedAssistantProvider): string {
+  return provider === HOSTED_ASSISTANT_VENICE_PROVIDER ? "Venice" : "OpenAI";
 }

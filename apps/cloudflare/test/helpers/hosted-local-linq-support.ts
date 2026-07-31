@@ -109,6 +109,11 @@ export interface HostedLocalLinqStub {
     matchRequest: ObservedLinqRequestMatcher;
     responseCount?: number;
   }): void;
+  armNextPreAcceptDefinitiveSendFailure(input: {
+    expectedPath: string;
+    matchRequest: ObservedLinqRequestMatcher;
+    responseCount?: number;
+  }): void;
   armNextPreAcceptRetryableSendFailure(input: {
     expectedPath: string;
     matchRequest: ObservedLinqRequestMatcher;
@@ -129,6 +134,7 @@ export interface HostedLocalLinqStub {
   createCreateChatRequestMatcher(userId: string): ObservedLinqRequestMatcher;
   listObservedMessageIds(chatId: string): string[];
   observedRequests: ObservedLinqRequest[];
+  readObservedMessageLink(request: ObservedLinqRequest): string | null;
   readObservedMessageText(request: ObservedLinqRequest): string | null;
   requireObservedChatId(userId: string): string;
   requireLatestObservedMessageId(chatId: string): string;
@@ -240,6 +246,7 @@ export async function startHostedLocalLinqStub(input: {
   let attachmentDownloadBaseUrl = "";
   let attachmentDownloadContainerBaseUrl = "";
   let nextPostAcceptLostAcknowledgment: HostedLocalLinqArmedSendFailure | null = null;
+  let nextPreAcceptDefinitiveSendFailure: HostedLocalLinqArmedSendFailure | null = null;
   let nextPreAcceptRetryableSendFailure: HostedLocalLinqArmedSendFailure | null = null;
   let nextRequestDelay: HostedLocalLinqArmedRequestDelay | null = null;
   let postAcceptLostAcknowledgmentAcceptedMessage: HostedLocalLinqAcceptedMessage | null = null;
@@ -344,6 +351,21 @@ export async function startHostedLocalLinqStub(input: {
       if (!isObservedLinqMessagePayload(parsedBody)) {
         writeJsonResponse(response, 400, {
           error: "Expected a Linq send-message payload with a valid text or media part.",
+        });
+        return;
+      }
+
+      if (
+        consumeHostedLocalLinqArmedSendFailure(
+          nextPreAcceptDefinitiveSendFailure,
+          observedRequest,
+        )
+      ) {
+        if (nextPreAcceptDefinitiveSendFailure?.remainingResponses === 0) {
+          nextPreAcceptDefinitiveSendFailure = null;
+        }
+        writeJsonResponse(response, 400, {
+          error: "Synthetic hosted-local definitive Linq send failure.",
         });
         return;
       }
@@ -575,6 +597,25 @@ export async function startHostedLocalLinqStub(input: {
         remainingResponses: responseCount,
       };
     },
+    armNextPreAcceptDefinitiveSendFailure: ({
+      expectedPath,
+      matchRequest,
+      responseCount = 1,
+    }) => {
+      if (nextPreAcceptDefinitiveSendFailure) {
+        throw new Error("A pre-accept Linq definitive-send control is already armed.");
+      }
+      if (!Number.isSafeInteger(responseCount) || responseCount < 1) {
+        throw new Error(
+          "A pre-accept Linq definitive-send control requires a positive response count.",
+        );
+      }
+      nextPreAcceptDefinitiveSendFailure = {
+        expectedPath,
+        matchRequest,
+        remainingResponses: responseCount,
+      };
+    },
     armNextPreAcceptRetryableSendFailure: ({
       expectedPath,
       matchRequest,
@@ -623,6 +664,7 @@ export async function startHostedLocalLinqStub(input: {
     },
     listObservedMessageIds: (chatId) => [...(observedMessageIdsByChat.get(chatId) ?? [])],
     observedRequests,
+    readObservedMessageLink: readObservedLinqMessageLink,
     readObservedMessageText: readObservedLinqMessageText,
     requireObservedChatId: (userId) => {
       const recipientPhoneNumber = buildLinqRecipientPhoneNumber(userId);
@@ -734,6 +776,7 @@ export function buildHostedLinqInboundEvent(
     messageId?: string;
     parts?: HostedLinqInboundPartInput[];
     recipientUserId?: string;
+    replyToMessageId?: string;
     service?: string;
     text?: string;
   } = {},
@@ -773,6 +816,13 @@ export function buildHostedLinqInboundEvent(
       message: {
         id: input.messageId ?? `msg_local_${userId}`,
         parts,
+        ...(input.replyToMessageId
+          ? {
+              reply_to: {
+                message_id: input.replyToMessageId,
+              },
+            }
+          : {}),
       },
       recipient_handle: {
         handle: buildLinqHomePhoneNumber(recipientUserId),
@@ -1012,6 +1062,12 @@ function isObservedLinqMessagePayload(payload: Record<string, unknown> | null): 
         && typeof part.value === "string"
         && part.value.trim().length > 0;
     }
+    if (part.type === "link") {
+      return parts.length === 1
+        && "value" in part
+        && typeof part.value === "string"
+        && part.value.startsWith("https://");
+    }
     if (part.type !== "media") {
       return false;
     }
@@ -1025,6 +1081,30 @@ function isObservedLinqMessagePayload(payload: Record<string, unknown> | null): 
       && part.url.trim().length > 0
     );
   });
+}
+
+function readObservedLinqMessageLink(request: ObservedLinqRequest): string | null {
+  const parsed = parseObservedLinqJson(request.body);
+  const message = parsed?.message;
+
+  if (!message || typeof message !== "object") {
+    return null;
+  }
+
+  const parts = "parts" in message ? message.parts : null;
+  if (!Array.isArray(parts) || parts.length !== 1) {
+    return null;
+  }
+
+  const part = parts[0];
+  return part
+      && typeof part === "object"
+      && "type" in part
+      && part.type === "link"
+      && "value" in part
+      && typeof part.value === "string"
+    ? part.value
+    : null;
 }
 
 function readObservedLinqMessageText(request: ObservedLinqRequest): string | null {

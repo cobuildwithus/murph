@@ -341,6 +341,8 @@ describe("hosted Linq egress authority", () => {
       target: "chat-stale-home",
       targetKind: "explicit",
     })).resolves.toEqual({
+      linePhoneNumberLookupKey:
+        createRequiredPhoneLookupKey(homeLinePhone),
       targetOverride: {
         conversationThreadId: expectedRoute.threadId,
         target: "chat-current-home",
@@ -1362,6 +1364,125 @@ describe("hosted Linq egress authority", () => {
     expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
   });
 
+  it("returns recovery posture for an at-risk existing chat without claiming dispatch", async () => {
+    const prisma = createPrismaStub({ homeChatId: "chat-home" });
+    prisma.hostedLinqChatHealth.findFirst.mockResolvedValueOnce({
+      linqChatLookupKey: createRequiredLinqChatLookupKey("chat-home"),
+      phoneNumberLookupKey: "line-health",
+      providerObservedAt: new Date("2026-07-29T16:00:00.000Z"),
+      providerStatus: "AT_RISK",
+      providerUpdatedAt: new Date("2026-07-29T15:59:00.000Z"),
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const response = await postHostedLinqEgressEngagement(
+      new Request("https://internal.example.test/engagement", {
+        body: JSON.stringify({
+          authorityCheckOnly: true,
+          target: "chat-home",
+          targetKind: "thread",
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      deliveryPosture: "recover",
+      ok: true,
+      threadIsDirect: true,
+    });
+    expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
+  });
+
+  it("returns a typed block before the existing provider-dispatch claim", async () => {
+    const prisma = createPrismaStub({ homeChatId: "chat-home" });
+    prisma.hostedLinqChatHealth.findFirst.mockResolvedValueOnce({
+      linqChatLookupKey: createRequiredLinqChatLookupKey("chat-home"),
+      phoneNumberLookupKey: "line-health",
+      providerObservedAt: new Date("2026-07-29T16:00:00.000Z"),
+      providerStatus: "OPTED_OUT",
+      providerUpdatedAt: new Date("2026-07-29T15:59:00.000Z"),
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const response = await postHostedLinqEgressEngagement(
+      new Request("https://internal.example.test/engagement", {
+        body: JSON.stringify({
+          authorityCheckOnly: false,
+          idempotencyKey: "assistant-outbox:health-block",
+          target: "chat-home",
+          targetKind: "thread",
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      deliveryBlockCode: "chat_opted_out",
+      ok: true,
+      threadIsDirect: true,
+    });
+    expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
+    expect(mocks.assertHostedAssistantAskCompletionDeliveryAuthorityTx)
+      .not.toHaveBeenCalled();
+  });
+
+  it("uses the persisted direct-route line when chat attribution and sender are absent", async () => {
+    const homeLinePhone = "+15550100009";
+    const homeLineLookupKey = createRequiredPhoneLookupKey(homeLinePhone);
+    const prisma = createPrismaStub({
+      homeChatId: "chat-home",
+      homeLinePhone,
+    });
+    prisma.hostedLinqChatHealth.findFirst.mockResolvedValueOnce({
+      linqChatLookupKey: createRequiredLinqChatLookupKey("chat-home"),
+      phoneNumberLookupKey: null,
+      providerObservedAt: new Date("2026-07-29T16:00:00.000Z"),
+      providerStatus: "HEALTHY",
+      providerUpdatedAt: new Date("2026-07-29T15:59:00.000Z"),
+    });
+    prisma.hostedLinqLine.findFirst.mockResolvedValueOnce({
+      egressPolicy: "enabled",
+      healthStatus: "healthy",
+      phoneNumberLookupKey: homeLineLookupKey,
+      providerReputationStatus: "HEALTHY",
+      providerServiceStatus: "FLAGGED",
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const response = await postHostedLinqEgressEngagement(
+      new Request("https://internal.example.test/engagement", {
+        body: JSON.stringify({
+          authorityCheckOnly: false,
+          idempotencyKey: "assistant-outbox:route-line-health-block",
+          target: "chat-home",
+          targetKind: "thread",
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      deliveryBlockCode: "line_flagged",
+      ok: true,
+      threadIsDirect: true,
+    });
+    expect(prisma.hostedLinqLine.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          phoneNumberLookupKey: { in: [homeLineLookupKey] },
+        },
+      }),
+    );
+    expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
+  });
+
   it("reports an already-active provider claim without erasing its state", async () => {
     const attemptedAt = new Date("2026-06-01T12:00:00.000Z");
     const prisma = createPrismaStub({
@@ -1509,11 +1630,29 @@ function createPrismaStub(input: {
         ? [buildHostedLinqRouteRow(input.threadRouteContainerMemberId)]
         : []),
     },
+    hostedLinqChatHealth: {
+      findFirst: vi.fn().mockResolvedValue({
+        linqChatLookupKey: "chat-default",
+        phoneNumberLookupKey: "line-default",
+        providerObservedAt: new Date("2026-07-29T16:00:00.000Z"),
+        providerStatus: "HEALTHY",
+        providerUpdatedAt: new Date("2026-07-29T15:59:00.000Z"),
+      }),
+    },
     hostedLinqDelivery: {
       create: vi.fn().mockResolvedValue({ id: "delivery-1" }),
       createMany: vi.fn().mockResolvedValue({ count: 1 }),
       findUnique: vi.fn().mockResolvedValue(null),
       updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+    hostedLinqLine: {
+      findFirst: vi.fn().mockResolvedValue({
+        egressPolicy: "enabled",
+        healthStatus: "healthy",
+        phoneNumberLookupKey: "line-default",
+        providerReputationStatus: "HEALTHY",
+        providerServiceStatus: "ACTIVE",
+      }),
     },
   };
   const transaction = vi.fn(async (

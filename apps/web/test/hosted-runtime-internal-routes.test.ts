@@ -15,6 +15,7 @@ const MAILBOX_ITEM_2_PAYLOAD_REF = "hosted-mailbox-payload:mailbox_item_2";
 const UNSAFE_SENTINEL = "UNSAFE_CONTENT_SENTINEL";
 
 const mocks = vi.hoisted(() => ({
+  after: vi.fn<(task: () => Promise<void> | void) => void>(),
   checkpointHostedWorkspace: vi.fn(),
   fetchHostedMailboxItemsAfterLaneCursors: vi.fn(),
   fetchHostedMailboxPayload: vi.fn(),
@@ -22,6 +23,8 @@ const mocks = vi.hoisted(() => ({
   hostedRuntimeMailboxMemberFindUnique: vi.fn(),
   hostedThreadContainerParticipantFindFirst: vi.fn(),
   getPrisma: vi.fn(),
+  isHostedRuntimeLogDatabaseConfigured: vi.fn(),
+  listDedicatedHostedRuntimeLogs: vi.fn(),
   listHostedRuntimeLogs: vi.fn(),
   publishLatestBrowserVaultReplicaRef: vi.fn(),
   claimHostedAcceptedAttemptFailureRecheck: vi.fn(),
@@ -37,11 +40,17 @@ const mocks = vi.hoisted(() => ({
   recordHostedIngressAssistantMilestone: vi.fn(),
   recordHostedIngressProviderStarted: vi.fn(),
   recordHostedIngressRuntimeMilestone: vi.fn(),
+  tryMarkHostedMailboxConversationAiUsageDenied: vi.fn(),
   recordHostedRuntimeLogs: vi.fn(),
   requireHostedCloudflareCallbackJsonRequest: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
   resolveHostedRuntimeAiUsageGate: vi.fn(),
   signalHostedRuntimeRecheckRuntime: vi.fn(),
+}));
+
+vi.mock("next/server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/server")>()),
+  after: mocks.after,
 }));
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
@@ -58,6 +67,8 @@ vi.mock("@/src/lib/hosted-mailbox/store", async (importOriginal) => ({
   readHostedMailboxConsumedSeqByLane: mocks.readHostedMailboxConsumedSeqByLane,
   readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
   readHostedMailboxMaxSeqByLane: mocks.readHostedMailboxMaxSeqByLane,
+  tryMarkHostedMailboxConversationAiUsageDenied:
+    mocks.tryMarkHostedMailboxConversationAiUsageDenied,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
@@ -65,6 +76,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/assistant-model-preference", () => ({
+  isHostedVeniceAssistantEnabled: () =>
+    process.env.HOSTED_VENICE_ENABLED === "1",
   readHostedMemberAssistantModelPreference:
     mocks.readHostedMemberAssistantModelPreference,
 }));
@@ -90,6 +103,17 @@ vi.mock("@/src/lib/hosted-workspace/store", () => ({
     mocks.claimHostedAcceptedAttemptFailureRecheck,
   readHostedWorkspace: mocks.readHostedWorkspace,
   recordHostedRuntimeLogs: mocks.recordHostedRuntimeLogs,
+}));
+
+vi.mock("@/src/lib/hosted-runtime-log/database", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/src/lib/hosted-runtime-log/database")>()),
+  isHostedRuntimeLogDatabaseConfigured:
+    mocks.isHostedRuntimeLogDatabaseConfigured,
+}));
+
+vi.mock("@/src/lib/hosted-runtime-log/store", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/src/lib/hosted-runtime-log/store")>()),
+  listHostedRuntimeLogs: mocks.listDedicatedHostedRuntimeLogs,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -161,6 +185,7 @@ describe("hosted runtime internal web routes", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    delete process.env.HOSTED_VENICE_ENABLED;
     mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValue(
       buildRuntimeMailboxAccessRecord(),
     );
@@ -235,10 +260,13 @@ describe("hosted runtime internal web routes", () => {
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
       status: "allowed",
     });
+    mocks.tryMarkHostedMailboxConversationAiUsageDenied.mockResolvedValue(false);
     mocks.signalHostedRuntimeRecheckRuntime.mockResolvedValue({
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_routes_1",
     });
+    mocks.isHostedRuntimeLogDatabaseConfigured.mockReturnValue(false);
+    mocks.listDedicatedHostedRuntimeLogs.mockResolvedValue([]);
   });
 
   it("signals a facts recheck after an authenticated runtime owner release", async () => {
@@ -1099,6 +1127,9 @@ describe("hosted runtime internal web routes", () => {
       conversationUsageStatus: "low",
       items: [expect.objectContaining({ id: "mailbox_item_low" })],
     });
+    expect(
+      mocks.tryMarkHostedMailboxConversationAiUsageDenied,
+    ).not.toHaveBeenCalled();
   });
 
   it("rejects conversation mailbox items when the AI usage gate denies runtime consumption", async () => {
@@ -1155,6 +1186,14 @@ describe("hosted runtime internal web routes", () => {
     expect(response.status).toBe(403);
     expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
       mode: "read_first",
+      userId: "member_routes_1",
+    });
+    expect(
+      mocks.tryMarkHostedMailboxConversationAiUsageDenied,
+    ).toHaveBeenCalledWith({
+      afterConversationLaneSeq: 11n,
+      prisma: expect.objectContaining({ kind: "prisma" }),
+      throughConversationLaneSeq: 12n,
       userId: "member_routes_1",
     });
   });
@@ -1597,10 +1636,31 @@ describe("hosted runtime internal web routes", () => {
     });
   });
 
+  it("omits a stored Venice override while the rollout gate is disabled", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({ version: "4" }));
+    mocks.readHostedMemberAssistantModelPreference.mockResolvedValueOnce({
+      hostedAssistantProviderOverride: "venice",
+      model: "gpt-5.6-terra",
+      reasoningEffort: "low",
+      solAvailable: false,
+    });
+
+    const response = await workspaceRoute.GET(new Request(
+      "https://join.example.test/api/internal/hosted-workspace",
+      { method: "GET" },
+    ));
+    const payload = parseHostedWorkspaceReadResponse(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(payload.hostedAssistantProviderOverride).toBeUndefined();
+  });
+
   it("reads workspace state and checkpoints with the workspace CAS fence", async () => {
+    process.env.HOSTED_VENICE_ENABLED = "1";
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({ version: "4" }));
     mocks.readHostedMemberAssistantModelPreference.mockResolvedValueOnce({
       hostedAssistantModelOverride: "gpt-5.6-sol",
+      hostedAssistantProviderOverride: "venice",
       hostedAssistantReasoningEffortOverride: "high",
       model: "gpt-5.6-sol",
       reasoningEffort: "high",
@@ -1635,6 +1695,7 @@ describe("hosted runtime internal web routes", () => {
     expect(parseHostedWorkspaceReadResponse(await readResponse.json()))
       .toMatchObject({
         hostedAssistantModelOverride: "gpt-5.6-sol",
+        hostedAssistantProviderOverride: "venice",
         hostedAssistantReasoningEffortOverride: "high",
         workspace: {
         userId: "member_routes_1",
@@ -1853,6 +1914,8 @@ describe("hosted runtime internal web routes", () => {
             version: "5",
           },
         });
+      expect(mocks.after).toHaveBeenCalledTimes(1);
+      await mocks.after.mock.calls[0]?.[0]();
       expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
         userId: "member_routes_1",
       });
@@ -1861,8 +1924,15 @@ describe("hosted runtime internal web routes", () => {
     }
   });
 
-  it("signals a runtime recheck after checkpointing a due workspace wake", async () => {
+  it("returns a due workspace checkpoint before running its recheck signal", async () => {
     const nextWakeAt = "2026-04-25T23:59:00.000Z";
+    let resolveSignal!: () => void;
+    mocks.signalHostedRuntimeRecheckRuntime.mockImplementationOnce(
+      async () =>
+        await new Promise<void>((resolve) => {
+          resolveSignal = resolve;
+        }),
+    );
     mocks.checkpointHostedWorkspace.mockResolvedValue({
       status: "updated",
       workspace: buildWorkspaceRecord({
@@ -1896,9 +1966,15 @@ describe("hosted runtime internal web routes", () => {
           version: "5",
         },
       });
+    expect(mocks.after).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
+
+    const signalTask = mocks.after.mock.calls[0]?.[0]();
     expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
       userId: "member_routes_1",
     });
+    resolveSignal();
+    await signalTask;
   });
 
   it("does not fail checkpointing when the wake recheck signal is unavailable", async () => {
@@ -1942,6 +2018,8 @@ describe("hosted runtime internal web routes", () => {
             version: "5",
           },
         });
+      expect(mocks.after).toHaveBeenCalledTimes(1);
+      await mocks.after.mock.calls[0]?.[0]();
       expect(warnSpy).toHaveBeenCalledWith(
         "Hosted workspace wake recheck signal failed after checkpoint.",
         {
@@ -2849,6 +2927,108 @@ describe("hosted runtime internal web routes", () => {
     expect(JSON.stringify(payload)).not.toMatch(/payloadCiphertext|message|email|phone|token/u);
   });
 
+  it("merges isolated and legacy runtime-log windows in global recency order", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord());
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([]);
+    mocks.isHostedRuntimeLogDatabaseConfigured.mockReturnValue(true);
+    mocks.listHostedRuntimeLogs.mockResolvedValue([
+      buildRuntimeLogRecord({
+        at: "2026-04-26T00:00:00.000Z",
+        id: "runtime_log_legacy",
+      }),
+    ]);
+    mocks.listDedicatedHostedRuntimeLogs.mockResolvedValue([
+      buildRuntimeLogRecord({
+        at: "2026-04-26T00:00:01.000Z",
+        id: "runtime_log_isolated",
+      }),
+    ]);
+
+    const response = await runtimeStatusRoute.GET(new Request(
+      "https://join.example.test/api/internal/hosted-runtime/status?logLimit=2",
+      { method: "GET" },
+    ));
+    const payload = parseHostedRuntimeWebStatusResponse(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(payload.recentLogs?.map((entry) => entry.at)).toEqual([
+      "2026-04-26T00:00:01.000Z",
+      "2026-04-26T00:00:00.000Z",
+    ]);
+    expect(mocks.listDedicatedHostedRuntimeLogs).toHaveBeenCalledWith({
+      limit: 2,
+      userId: "member_routes_1",
+    });
+  });
+
+  it("marks the runtime-log window unavailable when isolated reads fail", async () => {
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord());
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([]);
+    mocks.isHostedRuntimeLogDatabaseConfigured.mockReturnValue(true);
+    mocks.listHostedRuntimeLogs.mockResolvedValue([
+      buildRuntimeLogRecord({ id: "runtime_log_legacy" }),
+    ]);
+    mocks.listDedicatedHostedRuntimeLogs.mockRejectedValueOnce(
+      new Error("isolated database unavailable"),
+    );
+
+    const response = await runtimeStatusRoute.GET(new Request(
+      "https://join.example.test/api/internal/hosted-runtime/status?logLimit=1",
+      { method: "GET" },
+    ));
+    const payload = parseHostedRuntimeWebStatusResponse(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(payload.recentLogs).toBeUndefined();
+    expect(mocks.listHostedRuntimeLogs).toHaveBeenCalledWith({
+      limit: 1,
+      userId: "member_routes_1",
+    });
+    expect(consoleWarn).toHaveBeenCalledWith(
+      "Hosted runtime status isolated-log read failed.",
+      expect.objectContaining({
+        errorCode: "HOSTED_RUNTIME_STATUS_LOG_READ_FAILED",
+      }),
+    );
+    consoleWarn.mockRestore();
+  });
+
+  it("returns an empty runtime-log window only after both stores succeed", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord());
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([]);
+    mocks.isHostedRuntimeLogDatabaseConfigured.mockReturnValue(true);
+    mocks.listHostedRuntimeLogs.mockResolvedValue([]);
+    mocks.listDedicatedHostedRuntimeLogs.mockResolvedValue([]);
+
+    const response = await runtimeStatusRoute.GET(new Request(
+      "https://join.example.test/api/internal/hosted-runtime/status?logLimit=1",
+      { method: "GET" },
+    ));
+    const payload = parseHostedRuntimeWebStatusResponse(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(payload.recentLogs).toEqual([]);
+    expect(mocks.listHostedRuntimeLogs).toHaveBeenCalledOnce();
+    expect(mocks.listDedicatedHostedRuntimeLogs).toHaveBeenCalledOnce();
+  });
+
+  it("skips both runtime-log databases when status requests no diagnostics", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord());
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([]);
+
+    const response = await runtimeStatusRoute.GET(new Request(
+      "https://join.example.test/api/internal/hosted-runtime/status?logLimit=0",
+      { method: "GET" },
+    ));
+    const payload = parseHostedRuntimeWebStatusResponse(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(payload.recentLogs).toEqual([]);
+    expect(mocks.listHostedRuntimeLogs).not.toHaveBeenCalled();
+    expect(mocks.listDedicatedHostedRuntimeLogs).not.toHaveBeenCalled();
+  });
+
   it("rejects partial numeric hosted runtime status log limits", async () => {
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       redactedStatusJson: null,
@@ -2961,6 +3141,35 @@ function buildWorkspaceRecord(
     updatedAt: FIXED_NOW,
     userId: "member_routes_1",
     version: "4",
+    ...overrides,
+  };
+}
+
+function buildRuntimeLogRecord(
+  overrides: Partial<{
+    at: string;
+    id: string;
+  }> = {},
+) {
+  return {
+    at: FIXED_NOW,
+    attemptId: "attempt_1",
+    checkpointVersion: "5",
+    component: "workspace" as const,
+    createdAt: FIXED_NOW,
+    errorCode: null,
+    eventCode: "checkpoint.committed" as const,
+    id: "runtime_log_1",
+    leaseGeneration: "2",
+    level: "info" as const,
+    mailboxLane: null,
+    mailboxSeqEnd: null,
+    mailboxSeqStart: null,
+    outboxIntentRef: null,
+    phase: "checkpoint" as const,
+    redactedJson: null,
+    userId: "member_routes_1",
+    workspaceVersion: "5",
     ...overrides,
   };
 }

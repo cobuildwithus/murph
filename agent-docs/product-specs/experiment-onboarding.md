@@ -1,6 +1,6 @@
 # Experiment Onboarding
 
-Last verified: 2026-07-25
+Last verified: 2026-07-29
 
 ## Current State
 
@@ -54,8 +54,20 @@ The onboarding block must not duplicate fields already owned by canonical protoc
 ## Start Drafts Today, Start Intents Later
 
 - Today, a hosted `Run Experiment` click opens channel-specific draft/contact options for the user to send, such as text, email, or Telegram.
-- The draft includes a structured `Protocol reference` containing the exact protocol key, page revision, and run-spec revision. It starts a protocol-aware onboarding conversation in the user's configured channel but creates no private state by itself.
-- The reference is untrusted user input. The assistant resolves the key, preserves both supplied revisions as compare-and-swap expectations, and continues to apply this contract's safety and setup rules.
+- The draft contains one human-readable sentence naming the experiment. It does
+  not expose protocol keys, field names, or revision hashes. It starts a
+  protocol-aware onboarding conversation in the user's configured channel but
+  creates no private state by itself.
+- The sentence is untrusted user input. The assistant resolves the name or alias
+  through Health Commons discovery and requires one unique exact title or alias
+  match. That match is authoritative; a discovery `starterCandidate`,
+  canonical starter, or same-family variant cannot replace it without explicit
+  user agreement. The assistant then uses the exact page's current revision
+  pair as compare-and-swap expectations while continuing to apply this
+  contract's safety and setup rules.
+- Legacy drafts or copied messages may still contain a structured
+  `Protocol reference`. Preserve both supplied revisions for those messages;
+  never replace them with the newly resolved current pair.
 - A persisted short-lived start intent is the desired future contract. When that exists, it should carry the structured onboarding block plus the exact protocol revision instead of relying on a prefilled sentence as durable state.
 
 ## Revision-Preserving Handoff
@@ -63,20 +75,63 @@ The onboarding block must not duplicate fields already owned by canonical protoc
 Before Murph writes a private run, it should already know the exact Health Commons page it is using.
 
 - Read the protocol page before planning.
-- Pass both supplied revision ids through the dry run and real protocol-backed start. They are compare-and-swap expectations, not revision overrides. If either differs from the current protocol, stop and ask the member to refresh or reopen it rather than silently starting another revision.
+- For a name-first draft, pass both revision ids returned by the exact resolved
+  protocol page through the dry run and real protocol-backed start. They are
+  compare-and-swap expectations, not revision overrides. If the runnable
+  contract changes before creation, explain the material change and revisit
+  affected setup rather than silently starting another revision.
+- For a legacy structured reference, pass both supplied revision ids through the
+  dry run and real start. If either differs from the current protocol, stop and
+  ask the member to refresh or reopen it rather than substituting the current
+  revision.
+- If the selected protocol is no longer public or runnable, it is unavailable,
+  not a refreshable revision mismatch. A planned or paused private run remains
+  unchanged and cannot activate. Explain the withdrawal in the originating
+  conversation and offer a currently runnable alternative. If the member
+  accepts, start that alternative as a distinct experiment with a new id and
+  lineage; never rewrite the withdrawn run's protocol references, effective
+  snapshot, run plan, or analysis plan in place. Mark the old run `abandoned`
+  only after the member separately agrees. The five protected values remain
+  immutable after that status change. Never direct the member back to a page
+  that is intentionally no longer public.
+- If a title-only public Start draft has zero current exact matches, reply in
+  the same conversation that the named experiment is not currently available,
+  that no run was created, and which current alternatives remain runnable.
+  Reserve clarification for multiple exact matches or genuinely ambiguous
+  text; never require the member to rediscover a title that is no longer
+  public.
 - Preserve `commonsProtocolRef.key`, `commonsProtocolRef.pageRevisionId`, `commonsProtocolRef.runSpecRevisionId`, and the selected `testPlanId` in the richer private run record. Store a private `protocolRef` only when the run uses a saved private adaptation.
 - Treat `runSpecRevisionId` as the hash of the runnable contract: protocol dose, safety, test plans, measurement plan, and compact experiment-onboarding deltas. Copy edits, generic assistant-policy wording, vault-read behavior, or narrative body changes may change `pageRevisionId` without changing `runSpecRevisionId`.
 - The private run should store user choices and assistant support policy separately from public protocol copy.
 - For lab-backed runs, store and explain baseline evidence separately from the run baseline or pre-intervention window. A pre-existing lab panel may be the baseline evidence even when the runnable protocol has a prospective run-in window for adherence, logistics, or confounder control.
 - Completed outcome cards, shares, and community contributions must remain traceable back to this exact runnable contract.
 
-## Capturable Session Outcomes
+## Capturable Outcomes
 
 A run must be able to capture its promised primary outcome before it starts.
 
+- New runs store one first-class `analysisPlan.primaryOutcome`. Canonical
+  catalog membership enriches a metric with known aliases, units, validation,
+  and interpretation; it is not an experiment allowlist. Legacy
+  `primaryBiomarkerKey` records remain readable through the compatibility path,
+  but a plan must never persist both as competing sources of truth.
+- A numeric outcome declares a stable metric key, label, comparison reducer,
+  and one capture route: an ordinary measurement, a declared session field, or
+  an already-registered deterministic derived metric. A custom measurement may
+  use an open metric key and unit without catalog enrollment.
+- A structured-review outcome declares bounded baseline and follow-up text,
+  photo, or document evidence. Deterministic closeout preserves a
+  review-ready evidence receipt; it does not claim the evidence was interpreted
+  or manufacture a score or percentage change.
 - `runPlan.logging.sessionFields` declares the stable ids that an `intervention_session` may record. Logged `fields` values are typed strings, finite numbers, booleans, or `null`; undeclared ids are rejected.
 - The typed CLI accepts repeated `--field id=value` entries and rejects duplicate ids. Recognized subjective metrics, including bedtime delay, sleep-onset latency, sleepiness, sleep quality, arousal, and soreness measures, also enforce their metric-specific type and range.
-- Every primary biomarker must resolve to a canonical health metric. When it is a session-captured subjective metric, the run must declare exactly one recognized matching session field; unsupported or uncapturable primary outcomes block start and analysis readiness.
+- A session-field primary outcome must identify exactly one declared matching
+  field. Canonical session metrics retain their metric-specific validation;
+  custom fields use the saved outcome definition. Missing, duplicate, or
+  contradictory capture declarations block start and analysis readiness.
+- Derived outcomes may select only existing deterministic metric points or
+  registered reducers. Experiment setup does not execute user-authored
+  formulas.
 - Only fields on sessions linked to this experiment contribute subjective metric points. A session can confirm adherence and supply outcome evidence at the same time; do not create a second adherence event for the same action.
 
 ## Reminder Policy
@@ -96,7 +151,7 @@ A run must be able to capture its promised primary outcome before it starts.
 - An eligible run with saved `assistantSupport.notificationStyle: send_scheduled_summary` may receive one private visual progress card with concise text on intervention day four. It celebrates completed work first and treats sparse or unchanged metric data as a caveat rather than a reason to suppress the recap.
 - The morning after an on-schedule intervention ends, deterministic runtime code persists the outcome whether or not the member consented to messages. That internal closeout is consumed before an assistant turn and must not send anything.
 - With saved scheduled-summary consent, the same closeout may continue into a finite final review: attach one private visual progress card, congratulate the member, summarize the result with confidence and confounders in concise text, and ask whether to repeat it, adapt it, or leave it alone. If private card delivery fails, a short voice memo may replace it on a supported channel. Revoked consent suppresses the message without suppressing outcome persistence. Runs that end early receive neither lifecycle message nor an on-schedule closeout.
-- Public progress-card URLs are retired. The legacy GET route fails closed, while `vault-cli experiment progress-card` renders a deterministic PNG into `raw/captures/**` and returns a hash-bound `vault_image` descriptor. Automation attaches that descriptor through the existing private provider delivery path; reversible health data must never enter a URL.
+- Public progress-card URLs are retired. The legacy GET route fails closed, while `vault-cli experiment progress-card` renders a deterministic PNG into `raw/captures/**` and returns a hash-bound `vault_image` descriptor. Automation selects that private ref through the existing response-media tool; the trusted attachment boundary reloads it and derives the descriptor used by provider delivery rather than trusting model-relayed byte metadata. Reversible health data must never enter a URL.
 - The explicit browser results-card action remains available. Opening its
   dialog sends bounded private card data in an authenticated same-origin POST
   body, receives a `private, no-store` PNG, and converts that response to a

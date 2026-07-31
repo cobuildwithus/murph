@@ -6,30 +6,40 @@ import {
   BiomarkerReferenceContextStudy,
 } from "@/src/components/biomarkers/biomarker-design-studies";
 import { AsksGridSection } from "@/src/components/homepage/asks-section";
+import { FaqSection } from "@/src/components/homepage/faq-section";
 import { HeroClocksIn } from "@/src/components/homepage/hero-clocks-in";
 import { HowItWorksSection } from "@/src/components/homepage/how-it-works-section";
 import { DEFAULT_MURPH_HEADSHOT } from "@/src/components/homepage/murph-headshot-avatar";
 import { PersonasSection } from "@/src/components/homepage/personas-section";
 import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser-section";
 import { TogetherSection } from "@/src/components/homepage/together-section";
+import { ModelProviderSecuritySection } from "@/src/components/security/model-provider-security-section";
+import { HostedAssistantModelSettings } from "@/src/components/settings/hosted-assistant-model-settings";
 import { Separator } from "@/src/components/ui/separator";
 import { AccountDeletionMaintenanceStudy } from "./account-deletion-maintenance-study";
 import { AccountExitReasonStudy } from "./account-exit-reason-study";
 import { ChangelogArchiveStudy } from "./changelog-archive-study";
 import { ClubsPageStudy } from "./clubs-page-study";
 import { ConnectSourceCardStudy } from "./connect-source-card-study";
+import { DeviceSyncCallbackStudy } from "./device-sync-callback-study";
 import { FamilyInviteJoinStudy } from "./family-invite-join-study";
 import { GroupJoinStudy } from "./group-join-study";
+import { GroupMemberPlanStudy } from "./group-member-plan-study";
 import { GrowthScorecardStudy } from "./growth-scorecard-study";
 import { HomeLoadStateStudy } from "./home-load-state-study";
+import { HomeOnboardingStepsStudy } from "./home-onboarding-steps-study";
+import { HomepageAuthWarmRuntimeStudy } from "./homepage-auth-warm-runtime-study";
+import { JoinFamilyBillingRecoveryStudy } from "./join-family-billing-recovery-study";
 import { PersonaOnboardingStudy } from "./persona-onboarding-study";
 import { PulseTrialBillingContinuationStudy } from "./pulse-trial-billing-continuation-study";
 import { SettingsAuthRequiredStudy } from "./settings-auth-required-study";
+import { StructuredReviewResultsStudy } from "./structured-review-results-study";
 import {
   GroupUsageFundingStudy,
   PersonalUsageCreditOwnerStudy,
 } from "./group-usage-funding-study";
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
+import { EnvironmentProgressStudy } from "./environment-progress-study";
 
 function StudySection({
   children,
@@ -78,8 +88,64 @@ export function SectionsContent() {
 
       <Separator />
 
+      <StudySection title="Homepage authentication readiness and phone handoff">
+        <HomepageAuthWarmRuntimeStudy />
+      </StudySection>
+
+      <Separator />
+
       <StudySection title="Homepage security and privacy">
         <SecurityTeaserSection />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Homepage model provider FAQ">
+        <div
+          data-design-section="homepage-model-provider-faq"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <FaqSection veniceAvailable />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Security model provider choice">
+        <div
+          data-design-section="security-model-provider-choice"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <ModelProviderSecuritySection />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Settings model choice with compact provider and save controls">
+        <div
+          id="settings-model-provider-save-controls"
+          data-design-section="settings-compact-provider-control"
+          inert
+        >
+          <HostedAssistantModelSettings
+            canUpgradeToEdge={false}
+            configurationAvailable
+            initialDormantSolPreference={false}
+            initialModel="gpt-5.6-terra"
+            initialProvider="venice"
+            solAvailable
+            veniceAvailable
+          />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Environment progressive voice capture">
+        <EnvironmentProgressStudy />
       </StudySection>
 
       <Separator />
@@ -117,12 +183,14 @@ export function SectionsContent() {
       <Separator />
 
       <StudySection title="Changelog archive edition">
-        <ChangelogArchiveStudy />
+        <div data-design-section="changelog-archive">
+          <ChangelogArchiveStudy />
+        </div>
       </StudySection>
 
       <Separator />
 
-      <StudySection title="Persona onboarding">
+      <StudySection title="Persona onboarding with stacked tone samples">
         <PersonaOnboardingStudy />
       </StudySection>
 
@@ -134,8 +202,20 @@ export function SectionsContent() {
 
       <Separator />
 
+      <StudySection title="Family billing recovery on Join">
+        <JoinFamilyBillingRecoveryStudy />
+      </StudySection>
+
+      <Separator />
+
       <StudySection title="Connect source card actions">
         <ConnectSourceCardStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Device connection callback confirmation and failure">
+        <DeviceSyncCallbackStudy />
       </StudySection>
 
       <Separator />
@@ -158,6 +238,12 @@ export function SectionsContent() {
 
       <Separator />
 
+      <StudySection title="Core member plan">
+        <GroupMemberPlanStudy />
+      </StudySection>
+
+      <Separator />
+
       <StudySection title="Account deletion during migration maintenance">
         <AccountDeletionMaintenanceStudy />
       </StudySection>
@@ -170,19 +256,25 @@ export function SectionsContent() {
 
       <Separator />
 
+      <StudySection title="Home onboarding steps">
+        <HomeOnboardingStepsStudy />
+      </StudySection>
+
+      <Separator />
+
       <StudySection title="Group join message invites, actions, and sharing consents">
         <GroupJoinStudy />
       </StudySection>
 
       <Separator />
 
-      <StudySection title="Group usage funding and top-up follow-up">
+      <StudySection title="Always-available group sponsorship and contribution">
         <GroupUsageFundingStudy />
       </StudySection>
 
       <Separator />
 
-      <StudySection title="Overall AI usage and fulfilled top-up">
+      <StudySection title="Overall AI usage, purchase reset, Family owner action, credits, and referrals">
         <PersonalUsageCreditOwnerStudy />
       </StudySection>
 
@@ -190,6 +282,12 @@ export function SectionsContent() {
 
       <StudySection title="Private experiment results share">
         <ExperimentResultsShareStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Private structured-review result">
+        <StructuredReviewResultsStudy />
       </StudySection>
 
       <Separator />

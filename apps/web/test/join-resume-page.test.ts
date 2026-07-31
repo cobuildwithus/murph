@@ -83,6 +83,38 @@ describe("/join session resume page", () => {
     expect(mocks.redirect).toHaveBeenCalledWith("/join/resume%20invite");
   });
 
+  it("preserves a Family success Session for immediate verified reconciliation", async () => {
+    const member = createHostedMember({
+      billingStatus: HostedBillingStatus.not_started,
+    });
+    mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+      authenticated: true,
+      authenticatedMember: member,
+      session: {
+        expiresAt: new Date("2026-06-25T00:00:00.000Z"),
+        member,
+        privyUserId: "did:privy:user_123",
+        sessionId: "hws_123",
+      },
+    });
+
+    await expect(renderJoinResumePage({
+      family_checkout: "success",
+      session_id: "cs_test_familySuccess123",
+    })).rejects.toThrow(
+      "NEXT_REDIRECT:/join/resume%20invite/success?session_id=cs_test_familySuccess123",
+    );
+
+    expect(mocks.issueHostedInvite).toHaveBeenCalledWith({
+      channel: "web",
+      memberId: "member_123",
+    });
+    expect(mocks.readActiveHostedMemberAccess).not.toHaveBeenCalled();
+    expect(mocks.redirect).toHaveBeenCalledWith(
+      "/join/resume%20invite/success?session_id=cs_test_familySuccess123",
+    );
+  });
+
   it("redirects active members home without issuing an invite", async () => {
     const member = createHostedMember();
     mocks.getHostedPageAuthSnapshot.mockResolvedValue({
@@ -217,9 +249,14 @@ describe("/join session resume page", () => {
   });
 });
 
-async function renderJoinResumePage() {
+async function renderJoinResumePage(searchParams: {
+  family_checkout?: string | string[];
+  session_id?: string | string[];
+} = {}) {
   const { default: JoinResumePage } = await import("../app/join/page");
-  return JoinResumePage();
+  return JoinResumePage({
+    searchParams: Promise.resolve(searchParams),
+  });
 }
 
 function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember {
@@ -231,6 +268,7 @@ function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember
     assistantHumor: null,
     assistantHumorCausalSeq: null,
     assistantModelPreference: null,
+    assistantProviderPreference: null,
     assistantReasoningEffortPreference: null,
     assistantPush: null,
     assistantPushCausalSeq: null,

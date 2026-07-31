@@ -112,6 +112,21 @@ const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
     "20260728030000_hosted_usage_referral_credit_entry_constraints",
     new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
   ],
+  [
+    "20260729190000_composable_usage_referral_missions",
+    // The replacement indexes are created first. Dropping the old indexes
+    // only relaxes cardinality, so both the old and new application remain
+    // valid throughout the Vercel deploy window.
+    new Set(["DROP INDEX"]),
+  ],
+  [
+    "20260730120000_hosted_capped_group_sponsorship",
+    // The new sponsorship columns are nullable, so every old writer produces
+    // the all-null shape accepted by the NOT VALID check. The replacement
+    // active-payer index is created before the old, stricter index is dropped;
+    // removing it only permits independent automatic refill purchases.
+    new Set(["ADD CONSTRAINT CHECK", "DROP INDEX"]),
+  ],
 ]);
 
 const incompatiblePredeploySqlPatterns = [

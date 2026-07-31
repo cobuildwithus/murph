@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   claimHostedLinqProactiveConversationCapacityTx: vi.fn(),
   countHostedMemberHomeLinqBindingsByRecipientPhone: vi.fn(),
   listHostedLinqAssignableHomeLines: vi.fn(),
+  readHostedLinqRecentMessageEffectCountsTx: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
   upsertHostedMemberHomeLinqBindingTx: vi.fn(),
   upsertHostedMemberHomeLinqRecipientPhoneTx: vi.fn(),
@@ -28,10 +29,57 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   upsertHostedMemberHomeLinqRecipientPhoneTx: mocks.upsertHostedMemberHomeLinqRecipientPhoneTx,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/linq-line-planning-load", () => ({
+  buildHostedLinqAssignmentPlanningMessages: (snapshot: {
+    byRecipientPhone: ReadonlyMap<string, { plannedMessages: number }>;
+    unprojectedGroupThreadCount: number;
+  }) => new Map(
+    [...snapshot.byRecipientPhone].map(([recipientPhone, load]) => [
+      recipientPhone,
+      load.plannedMessages + snapshot.unprojectedGroupThreadCount * 25,
+    ]),
+  ),
+  readHostedLinqLinePlanningLoadSnapshot: vi.fn(async (input: {
+    excludedActiveMemberId?: string | null;
+    lines: ReadonlyArray<{
+      phoneNumber: string;
+    }>;
+    now: Date;
+    prisma: unknown;
+  }) => {
+    const activeMembers =
+      await mocks.countHostedMemberHomeLinqBindingsByRecipientPhone({
+        ...(input.excludedActiveMemberId
+          ? { excludedMemberId: input.excludedActiveMemberId }
+          : {}),
+        now: input.now,
+        prisma: input.prisma,
+        recipientPhones: input.lines.map((line) => line.phoneNumber),
+      });
+    return {
+      byRecipientPhone: new Map(input.lines.map((line) => {
+        const activeMemberCount = activeMembers.get(line.phoneNumber) ?? 0;
+        return [
+          line.phoneNumber,
+          {
+            activeDirectMemberCount: activeMemberCount,
+            plannedMessages: activeMemberCount * 10,
+            provisionedGroupThreadCount: 0,
+          },
+        ] as const;
+      })),
+      projectionCoverageComplete: true,
+      unprojectedGroupThreadCount: 0,
+    };
+  }),
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/linq-line-store", () => ({
   claimHostedLinqProactiveConversationCapacityTx:
     mocks.claimHostedLinqProactiveConversationCapacityTx,
   listHostedLinqAssignableHomeLines: mocks.listHostedLinqAssignableHomeLines,
+  readHostedLinqRecentMessageEffectCountsTx:
+    mocks.readHostedLinqRecentMessageEffectCountsTx,
 }));
 
 import {
@@ -361,6 +409,7 @@ describe("reserveHostedLinqHomeLineFromPoolTx", () => {
     mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(new Map());
     mocks.claimHostedLinqProactiveConversationCapacityTx.mockResolvedValue(true);
     mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([]);
+    mocks.readHostedLinqRecentMessageEffectCountsTx.mockResolvedValue(new Map());
   });
 
   it("reserves the preferred line when it is healthy and under quota", async () => {
@@ -384,6 +433,40 @@ describe("reserveHostedLinqHomeLineFromPoolTx", () => {
     });
 
     expect(mocks.listHostedLinqAssignableHomeLines).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses recent message load when selecting a genuinely new home line", async () => {
+    const busyLine = buildLine("+15550100001");
+    const quietLine = buildLine("+15550100002");
+    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([
+      busyLine,
+      quietLine,
+    ]);
+    mocks.readHostedLinqRecentMessageEffectCountsTx.mockResolvedValue(new Map([
+      [busyLine.phoneNumberLookupKey, 9_000],
+      [quietLine.phoneNumberLookupKey, 100],
+    ]));
+
+    await expect(
+      reserveHostedLinqHomeLineFromPoolTx({
+        preferredRecipientPhone: null,
+        prisma: {} as never,
+      }),
+    ).resolves.toMatchObject({
+      kind: "reserved",
+      reservation: {
+        line: quietLine,
+      },
+    });
+
+    expect(mocks.readHostedLinqRecentMessageEffectCountsTx).toHaveBeenCalledWith({
+      lineLookupKeys: [
+        busyLine.phoneNumberLookupKey,
+        quietLine.phoneNumberLookupKey,
+      ],
+      now: expect.any(Date),
+      prisma: {},
+    });
   });
 
   it("keeps the preferred line for member-initiated routing at the proactive quota", async () => {
@@ -413,6 +496,46 @@ describe("reserveHostedLinqHomeLineFromPoolTx", () => {
     expect(mocks.claimHostedLinqProactiveConversationCapacityTx).not.toHaveBeenCalled();
   });
 
+  it("keeps a healthy contacted line when planning would prefer a paced-out fallback", async () => {
+    const preferredLine = buildLine("+15550100001", {
+      maxNewConversationsPerDay: 1,
+      proactiveConversationCount: 1,
+      proactiveConversationDayUtc: startOfUtcDay(new Date()),
+    });
+    const fallbackLine = buildLine("+15550100002", {
+      maxNewConversationsPerDay: 1,
+      proactiveConversationCount: 1,
+      proactiveConversationDayUtc: startOfUtcDay(new Date()),
+    });
+    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([
+      preferredLine,
+      fallbackLine,
+    ]);
+    mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(
+      new Map([
+        [preferredLine.phoneNumber, 500],
+        [fallbackLine.phoneNumber, 1],
+      ]),
+    );
+
+    await expect(
+      reserveHostedLinqHomeLineFromPoolTx({
+        preferredRecipientPhone: preferredLine.phoneNumber,
+        prisma: {} as never,
+      }),
+    ).resolves.toMatchObject({
+      kind: "reserved",
+      reservation: {
+        line: preferredLine,
+        proactiveConversationReserved: false,
+      },
+    });
+
+    expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone)
+      .not.toHaveBeenCalled();
+    expect(mocks.claimHostedLinqProactiveConversationCapacityTx).not.toHaveBeenCalled();
+  });
+
   it("selects a fallback without claiming capacity during inbound routing", async () => {
     const fallbackLine = buildLine("+15550100002", {
       maxNewConversationsPerDay: 10,
@@ -435,6 +558,7 @@ describe("reserveHostedLinqHomeLineFromPoolTx", () => {
     });
 
     expect(mocks.claimHostedLinqProactiveConversationCapacityTx).not.toHaveBeenCalled();
+    expect(mocks.readHostedLinqRecentMessageEffectCountsTx).not.toHaveBeenCalled();
   });
 
   it("keeps inbound routing available when every fallback is at its proactive limit", async () => {
@@ -493,6 +617,7 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(new Map());
     mocks.claimHostedLinqProactiveConversationCapacityTx.mockResolvedValue(true);
     mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([]);
+    mocks.readHostedLinqRecentMessageEffectCountsTx.mockResolvedValue(new Map());
     mocks.readHostedMemberRoutingState.mockResolvedValue(null);
     mocks.upsertHostedMemberHomeLinqBindingTx.mockResolvedValue(undefined);
     mocks.upsertHostedMemberHomeLinqRecipientPhoneTx.mockResolvedValue(undefined);
@@ -700,7 +825,6 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
   it("preserves an existing direct route assignment while reserving welcome capacity", async () => {
     const assignedAt = new Date("2026-06-29T14:15:00.000Z");
     const line = buildLine("+15550100001", {
-      activeMemberLimit: 1,
       maxNewConversationsPerDay: 1,
     });
     mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([line]);
@@ -988,8 +1112,8 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
 
   it("assigns the pooled home line and builds a first-contact welcome route when there is no reusable pending thread", async () => {
     mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([
-      buildLine("+15550100001", { activeMemberLimit: 3 }),
-      buildLine("+15550100002", { activeMemberLimit: 3 }),
+      buildLine("+15550100001"),
+      buildLine("+15550100002"),
     ]);
     mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(
       new Map([
@@ -1302,6 +1426,7 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
     mocks.acquireHostedMemberHomeLinqRouteLockTx.mockResolvedValue(undefined);
     mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(new Map());
     mocks.claimHostedLinqProactiveConversationCapacityTx.mockResolvedValue(true);
+    mocks.readHostedLinqRecentMessageEffectCountsTx.mockResolvedValue(new Map());
     mocks.readHostedMemberRoutingState.mockResolvedValue(null);
   });
 
@@ -1564,7 +1689,6 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
   it("reuses an existing same-phone route claim when the chat id changes", async () => {
     const assignedAt = new Date("2026-06-30T14:15:00.000Z");
     const line = buildLine("+15550100001", {
-      activeMemberLimit: 1,
       maxNewConversationsPerDay: 1,
     });
     mocks.readHostedMemberRoutingState.mockResolvedValue({
@@ -1693,7 +1817,6 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
 
   it("preserves a migrated same-phone route claim without consuming capacity", async () => {
     const line = buildLine("+15550100001", {
-      activeMemberLimit: 1,
       maxNewConversationsPerDay: 1,
     });
     mocks.readHostedMemberRoutingState.mockResolvedValue({
@@ -1769,7 +1892,6 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
   it("preserves an existing direct route assignment when binding the provider chat", async () => {
     const assignedAt = new Date("2026-06-29T14:15:00.000Z");
     const line = buildLine("+15550100001", {
-      activeMemberLimit: 1,
       maxNewConversationsPerDay: 1,
     });
     mocks.readHostedMemberRoutingState.mockResolvedValue({
@@ -1810,7 +1932,6 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
 function buildLine(
   phoneNumber: string,
   overrides: Partial<{
-    activeMemberLimit: number | null;
     assignmentWeight: number;
     maxNewConversationsPerDay: number | null;
     proactiveConversationCount: number | null;
@@ -1818,7 +1939,6 @@ function buildLine(
   }> = {},
 ) {
   return {
-    activeMemberLimit: overrides.activeMemberLimit ?? null,
     assignmentWeight: overrides.assignmentWeight ?? 100,
     maxNewConversationsPerDay: overrides.maxNewConversationsPerDay ?? null,
     phoneNumber,

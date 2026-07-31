@@ -22,7 +22,7 @@ describe("sleep workflow content", () => {
     catalog = await buildHealthCommonsCatalog({ contentRoot });
   });
 
-  it("keeps observation workflows non-runnable and gives runnable workflows capturable outcomes", () => {
+  it("keeps observation workflows non-runnable and retains capturable outcomes on the bedtime draft", () => {
     const entities = new Map(catalog.entities.map((entity) => [entity.key, entity]));
 
     for (const key of [
@@ -74,7 +74,7 @@ describe("sleep workflow content", () => {
     );
     expect(bedtimeTransition).toMatchObject({
       entityType: "protocol_variant",
-      status: "field-testing",
+      status: "draft",
       testPlans: [
         {
           baselineDays: 14,

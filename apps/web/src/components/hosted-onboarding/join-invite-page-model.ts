@@ -14,6 +14,10 @@ import { redirect } from "next/navigation";
 import { getHostedInviteStatus } from "@/src/lib/hosted-onboarding/invite-service";
 import { getHostedPrivySession } from "@/src/lib/hosted-onboarding/hosted-session";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
+import {
+  readHostedFamilyBillingRecoveryForOwner,
+  type HostedFamilyBillingRecoveryState,
+} from "@/src/lib/hosted-onboarding/family-plan";
 import { getPrisma } from "@/src/lib/prisma";
 import {
   readHostedConsentStatus,
@@ -39,9 +43,12 @@ export type JoinInviteLaunchConsentState =
 
 export interface JoinInvitePageModel {
   awaitingInviteSessionResolution: boolean;
+  expectedPrivyUserId: string | null;
+  familyBillingRecovery: HostedFamilyBillingRecoveryState | null;
   inviteCode: string;
   launchConsent: JoinInviteLaunchConsentState;
   preview: boolean;
+  privySessionMatchesAppSession: boolean;
   status: HostedInviteStatusPayload;
   telegramAccountForMessagingSetup: JoinInviteTelegramAccountSeed | null;
 }
@@ -64,6 +71,8 @@ export async function buildJoinInvitePageModel(input: {
     const status = buildJoinInvitePreviewStatus(previewStage, input.inviteCode);
     return {
       awaitingInviteSessionResolution: false,
+      expectedPrivyUserId: null,
+      familyBillingRecovery: null,
       inviteCode: input.inviteCode,
       launchConsent: {
         gateActive: false,
@@ -71,6 +80,7 @@ export async function buildJoinInvitePageModel(input: {
         status: "preview",
       },
       preview: true,
+      privySessionMatchesAppSession: false,
       status,
       telegramAccountForMessagingSetup: null,
     };
@@ -112,10 +122,27 @@ export async function buildJoinInvitePageModel(input: {
   ) {
     redirect(HOSTED_APP_SUBSCRIPTION_PATH);
   }
+  const familyBillingRecovery =
+    !launchConsent.gateActive
+    && authSnapshot.authenticatedMember
+    && status.stage === "checkout"
+    && status.session.authenticated
+    && status.session.matchesInvite
+      ? await readHostedFamilyBillingRecoveryForOwner({
+          ownerMemberId: authSnapshot.authenticatedMember.id,
+          prisma: getPrisma(),
+        })
+      : null;
+  const expectedPrivyUserId = authSnapshot.session?.privyUserId ?? null;
+  const privySessionMatchesAppSession =
+    freshPrivySession !== null
+    && expectedPrivyUserId !== null
+    && freshPrivySession.identity.userId === expectedPrivyUserId;
   const telegramAccountForMessagingSetup =
     !launchConsent.gateActive
     && status.stage === "checkout"
     && status.messagingSetupRequired
+    && privySessionMatchesAppSession
       ? sanitizeJoinInviteTelegramAccountSeed(extractHostedPrivyTelegramAccount({
           linkedAccounts: freshPrivySession?.linkedAccounts ?? [],
         }))
@@ -123,9 +150,12 @@ export async function buildJoinInvitePageModel(input: {
 
   return {
     awaitingInviteSessionResolution: !hasResolvedHostedInviteVerification(status),
+    expectedPrivyUserId,
+    familyBillingRecovery,
     inviteCode: input.inviteCode,
     launchConsent,
     preview: false,
+    privySessionMatchesAppSession,
     status,
     telegramAccountForMessagingSetup,
   };

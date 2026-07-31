@@ -67,6 +67,29 @@ it has been explicitly elevated to a cross-cutting invariant.
   that Codex cannot accept through thread or turn RPC. Workspace invocation
   abort/preemption must synchronously stop the exact owned App Server before
   the invocation slot can be reused.
+- `packages/assistant-engine` is the sole resident App Server process owner.
+  Process readiness is a memoized property of that exact process and is
+  separate from turn reservation: after the first fresh auto-reply-enabled
+  pre-pass Linq or Telegram input candidate is staged, process-only
+  initialization may start without reserving a turn, and a matching turn
+  synchronously reserves that exact process before joining the same readiness
+  work. Email, self-authored Linq, bootstrap, system, maintenance, replay, and
+  active-turn imports do not admit preparation. The existing engine-owned
+  slot-transition lock serializes inspect, exact teardown, publication or
+  reservation, and workspace-boundary admission; initialization readiness itself
+  runs outside that lock. Do not add a second warm-slot lifecycle, lock owner,
+  startup scheduler, or speculative turn owner.
+  Initialization alone is not prior-turn reuse: the first foreground turn keeps
+  first-turn request and event scoping until one real turn completes.
+- Process-only initialization never starts or resumes a thread, starts a turn,
+  invokes provider or account operations, assembles dynamic tools, compacts a
+  thread, or launches a child. Failure or cancellation is only a missed
+  optimization: it rejects every pending App Server RPC, stops the exact
+  process, and leaves accepted work eligible for the ordinary fresh-process
+  path. A stale readiness completion from a stopped or replaced process cannot
+  publish, clear, reserve, or replace a newer process.
+  Speculative preparation never evicts a healthy claimable resident with another
+  launch identity; only authoritative foreground acquisition may replace it.
 - Prompts, session/thread/turn ids, delivery routes, and invocation-scoped
   automation or device authority are request facts, not App Server launch
   identity or ambient child-process authority. Expose invocation-scoped
@@ -98,6 +121,23 @@ it has been explicitly elevated to a cross-cutting invariant.
   and fails closed. Explicit workspace invocation abort/preemption interrupts
   the wait and synchronously tears down that exact process before workspace or
   invocation ownership is released.
+- Before checkpoint construction, the runtime closes and joins asynchronous
+  preparation admission. Unreserved process initialization that is still
+  pending is then cancelled and its exact process is awaited through teardown.
+  Invocation release uses the exact-process handle returned by preparation and
+  must not cancel a later replacement admitted by another caller.
+  The slot owner marks the full checkpoint boundary active, so new resident
+  preparation declines and warm foreground or account acquisition begun while
+  it is active fails busy instead of queueing a replacement behind the
+  boundary. A caller that already obtained a slot-transition ticket retains
+  FIFO priority, so the boundary observes that process or fails busy rather
+  than overtaking it. The checkpoint holds the existing slot-transition lock
+  only through its exact-process check and any pending-preinitialization
+  teardown or ready-process reservation. The potentially long background-work
+  wait runs outside the lock under that reservation.
+  An already-ready idle resident process remains governed by the ordinary warm
+  App Server checkpoint contract; preparation does not create another
+  checkpoint owner.
 
 ## Foreground Reply Critical Path
 
@@ -282,16 +322,25 @@ it has been explicitly elevated to a cross-cutting invariant.
   handling progress.
 - Explicit owner or provider causal identifiers take precedence over
   positional, "latest," grouping, watermark, and time-window heuristics. Work
-  with distinct causal anchors must not be merged into one turn.
+  with distinct ordering anchors must not be merged into one turn. A
+  provider-native reply target is per-message semantic context, not an ordering
+  anchor for an authenticated non-direct group room.
 - When one wake exposes a bounded sequence of already-durable, replyable
-  messages that share one conversation and native reply anchor and have
-  exact-successor positive causal identifiers, process that sequence as one
-  assistant turn. An initially empty pre-provider selection may acquire that
-  whole sequence during its required refresh; selection freezes when it first
-  becomes nonempty and always before provider start. A gap, legacy or missing
-  causal identifier, changed anchor or conversation, overflow, or post-freeze
-  arrival starts a later turn; terminal evidence covers every admitted input
-  so restart repair cannot resend the reply.
+  messages with exact-successor positive causal identifiers, process as one
+  assistant turn either one direct conversation with one actor and native reply
+  anchor or one authenticated non-direct provider room with stable route,
+  account, audience, projection-readiness, and reaction boundaries. Preserve
+  every admitted group message's sender, opaque message reference, content,
+  attachments, and native reply context separately. Initial selection freezes
+  before provider start. Exact successors may then join through the existing
+  live-steering path only until the first completed assistant response; initial
+  plus live input is capped at 50 messages, and overflow or later input remains
+  pending for the next ordinary turn. Every completed assistant text or media
+  segment remains part of the turn and is delivered; no audience-specific
+  last-response-wins rule may discard it. A gap, legacy or missing causal
+  identifier, changed direct anchor or actor, or changed room boundary starts a
+  later turn; terminal evidence covers every admitted input so restart repair
+  cannot resend the reply.
 - Accepted-turn membership remains authoritative during restart recovery. If
   terminal evidence proves only an oldest contiguous handled prefix while a
   post-freeze successor is also pending, repair and retire exactly that prefix,
@@ -375,9 +424,9 @@ it has been explicitly elevated to a cross-cutting invariant.
   conversation history, private context, resume mutation, tools, network, or
   delegated work. Provider, webhook, and other external values remain
   untrusted data, and the platform alone owns final delivery.
-  Its restrictive provider launch configuration uses the existing one-shot
-  process path and must not replace the resident ordinary-turn App Server or
-  terminate valid detached background work.
+  Its restrictive configuration belongs to a fresh ephemeral thread on the
+  resident App Server. It must not change provider process launch identity,
+  replace the resident process, or persist a resumable notification thread.
 - Provider shapes come from a pinned canonical SDK or published typed contract.
   A bespoke boundary needs a documented reason and exact-shape tests. On the
   foreground path, an external call may fail or delay a reply only when the
@@ -400,6 +449,15 @@ it has been explicitly elevated to a cross-cutting invariant.
 - Safety, reliability, privacy, authentication, and review fixes preserve the
   authorized success path for existing critical flows. Disabling, silently
   dropping, or degrading the flow is a product decision, not a technical fix.
+- A live monthly group sponsorship is a payer authorization, not a Stripe
+  subscription and not a message bundle. It stores only payer, beneficiary,
+  status, $5/$10/$20 cap, and anchored period. Current-period committed spend is
+  derived from exact-$5 `HostedUsageCreditPurchase` rows in fulfilled or pending
+  states; `HostedUsageCreditEntry` is the only balance and unused credit carries
+  forward. One live authorization per group is database-enforced. Refill
+  admission occurs only inside the existing beneficiary serialization boundary,
+  provider work is post-commit, Stripe reconciliation alone grants credit, and
+  group-visible projections reveal only sponsored versus unsponsored.
 - Purchased hosted usage credit belongs to its beneficiary, not its payer. A
   payer deletion must first resolve nonterminal payment state and must not
   delete fulfilled credit owned by a surviving beneficiary. Terminal

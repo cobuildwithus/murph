@@ -8,6 +8,7 @@ import {
   experimentAnalysisPlanSchema,
   experimentAssistantSupportSchema,
   experimentExpectedDirectionsSchema,
+  experimentPrimaryOutcomeSchema,
   effectiveProtocolSnapshotSchema,
   experimentOutcomeSchema,
   experimentFrontmatterSchema,
@@ -20,6 +21,8 @@ import {
   jsonObjectSchema,
   protocolRefSchema,
   safeParseContract,
+  type ExperimentOutcomeStatistic,
+  type ExperimentPrimaryOutcome,
   type HealthCommonsBiomarkerDesiredDirection,
   type HealthCommonsExperimentOnboardingPositiveDisposition,
   type ExperimentFrontmatter,
@@ -27,8 +30,12 @@ import {
 } from '@murphai/contracts'
 import {
   assessExperimentPrimaryMetricCapture,
+  isRegisteredExperimentMetricSource,
+  resolveExperimentMetricIdentity,
+  resolveExperimentPrimaryOutcome,
   resolveExperimentAdherenceTargets,
   resolveExperimentSessionMetricSpec,
+  summarizeExperimentOutcomeEvidencePlan,
   validateExperimentSessionMetricValue,
 } from '@murphai/query'
 import { z } from 'zod'
@@ -385,6 +392,13 @@ export interface ApplyExperimentOnboardingRecordInput
   confounderField?: readonly string[]
   stopCondition?: readonly string[]
   primaryBiomarkerKey?: string
+  primaryOutcomeKey?: string
+  primaryOutcomeKind?: ExperimentPrimaryOutcome['kind']
+  primaryOutcomeLabel?: string
+  primaryOutcomeSessionField?: string
+  primaryOutcomeSourceMetricKey?: string
+  primaryOutcomeUnit?: string
+  comparisonStatistic?: ExperimentOutcomeStatistic
   secondaryBiomarkerKey?: readonly string[]
   desiredDirection?: z.infer<typeof experimentSignalDirectionSchema>
   expectedDirection?: readonly string[]
@@ -570,7 +584,10 @@ async function assertHealthCommonsProtocolStartAllowed(input: {
     )
   }
 
-  const protocol = await resolveCurrentHealthCommonsProtocol(input.commonsProtocolRef)
+  const protocol = await resolveCurrentHealthCommonsProtocol(
+    input.commonsProtocolRef,
+    `Health Commons protocol ${input.commonsProtocolRef.key} is no longer available to start. Choose a currently runnable protocol instead.`,
+  )
   if (input.status === 'active') {
     assertHealthCommonsProtocolSafetyAllowsActivation({
       protocol,
@@ -587,7 +604,10 @@ async function assertHealthCommonsProtocolActivationAllowed(input: {
     return
   }
 
-  const protocol = await resolveCurrentHealthCommonsProtocol(input.commonsProtocolRef)
+  const protocol = await resolveCurrentHealthCommonsProtocol(
+    input.commonsProtocolRef,
+    `Health Commons protocol ${input.commonsProtocolRef.key} is no longer available to activate. This experiment remains unchanged. Start any currently runnable alternative as a new experiment; never replace this run's protocol lineage. Mark this run abandoned only after the member separately agrees.`,
+  )
   assertHealthCommonsProtocolSafetyAllowsActivation({
     protocol,
     onboarding: input.onboarding,
@@ -596,19 +616,12 @@ async function assertHealthCommonsProtocolActivationAllowed(input: {
 
 async function resolveCurrentHealthCommonsProtocol(
   reference: CommonsProtocolRefValue,
+  unavailableMessage: string,
 ): Promise<HealthCommonsProtocolActivationRecord> {
-  const runtime = await loadRuntimeModule<HealthCommonsProtocolActivationRuntime>(
-    '@murphai/health-commons/runtime',
-  )
-  const protocol = runtime
-    .getGeneratedHealthCommonsProtocolRunSpecReader()
-    .findByLookup(reference.key)
+  const protocol = await findCurrentHealthCommonsProtocol(reference)
 
   if (!protocol) {
-    throw new VaultCliError(
-      'invalid_payload',
-      `Health Commons protocol ${reference.key} is not currently runnable. Refresh or reopen the protocol before starting this experiment.`,
-    )
+    throw new VaultCliError('invalid_payload', unavailableMessage)
   }
 
   if (
@@ -628,6 +641,17 @@ async function resolveCurrentHealthCommonsProtocol(
   }
 
   return protocol
+}
+
+async function findCurrentHealthCommonsProtocol(
+  reference: CommonsProtocolRefValue,
+): Promise<HealthCommonsProtocolActivationRecord | null> {
+  const runtime = await loadRuntimeModule<HealthCommonsProtocolActivationRuntime>(
+    '@murphai/health-commons/runtime',
+  )
+  return runtime
+    .getGeneratedHealthCommonsProtocolRunSpecReader()
+    .findByLookup(reference.key)
 }
 
 function assertHealthCommonsProtocolSafetyAllowsActivation(input: {
@@ -951,44 +975,92 @@ function hydrateRunPlanAdherenceTargets(
   })
 }
 
-function assertActiveExperimentPrimaryMetricIsCapturable(input: {
+async function assertActiveExperimentPrimaryOutcomeIsCapturable(input: {
+  vault: string
   status: ExperimentStatusValue
   runPlan: ExperimentRunPlanValue | undefined
   analysisPlan: ExperimentAnalysisPlanValue | undefined
-}) {
+}): Promise<void> {
   if (input.status !== 'active') {
     return
   }
-
-  const capture = assessExperimentPrimaryMetricCapture({
-    primaryBiomarkerKey: input.analysisPlan?.primaryBiomarkerKey,
-    sessionFields: input.runPlan?.logging?.sessionFields,
-  })
-  if (capture.issue === null) {
+  const primaryOutcome = resolveExperimentPrimaryOutcome(input.analysisPlan)
+  if (!primaryOutcome) {
+    throw new VaultCliError(
+      'invalid_payload',
+      'Active experiments require a primary outcome identity before the run starts.',
+    )
+  }
+  if (primaryOutcome.kind === 'structured_review') {
+    const evidence = summarizeExperimentOutcomeEvidencePlan(
+      input.analysisPlan,
+      primaryOutcome.key,
+    )
+    if (!evidence.completePlan) {
+      throw new VaultCliError(
+        'invalid_payload',
+        'Active structured-review experiments require bounded baseline and follow-up evidence.',
+      )
+    }
     return
   }
 
-  if (capture.issue === 'missing_primary_biomarker') {
+  const sessionFields = input.runPlan?.logging?.sessionFields ?? []
+  const capture = primaryOutcome.capture
+  if (capture.kind === 'session_field') {
+    if (
+      sessionFields.filter(
+        (fieldId) => fieldId === capture.fieldId,
+      ).length === 1
+    ) {
+      return
+    }
     throw new VaultCliError(
       'invalid_payload',
-      'Active experiments require a supported primary biomarker before the run starts.',
+      `Active experiments with session-field outcome ${primaryOutcome.key} must declare ${capture.fieldId} exactly once.`,
+    )
+  }
+  if (capture.kind === 'derived_metric') {
+    if (isRegisteredExperimentMetricSource(capture.sourceMetricKey)) {
+      return
+    }
+
+    const query = await loadExperimentJournalVaultQueryRuntime()
+    const metricKey = resolveExperimentMetricIdentity(
+      capture.sourceMetricKey,
+    ).metricKey
+    let points: Awaited<ReturnType<QueryRuntimeModule['listMetricPoints']>>
+    try {
+      points = await query.listMetricPoints(input.vault, {
+        limit: 1,
+        metricKey,
+      })
+    } catch (error) {
+      throw toVaultMetadataCliError(error)
+    }
+    if (points.length > 0) {
+      return
+    }
+    throw new VaultCliError(
+      'invalid_payload',
+      `Active experiment derived outcome source ${capture.sourceMetricKey} has no registered metric producer or existing metric points.`,
     )
   }
 
-  if (capture.issue === 'unsupported_primary_biomarker') {
-    throw new VaultCliError(
-      'invalid_payload',
-      `Primary biomarker ${capture.canonicalBiomarkerKey ?? 'unknown'} is not supported for active experiment analysis.`,
-      { primaryBiomarkerKey: capture.canonicalBiomarkerKey },
-    )
+  const captureAssessment = assessExperimentPrimaryMetricCapture({
+    primaryBiomarkerKey: primaryOutcome.key,
+    sessionFields,
+  })
+  if (captureAssessment.issue === null) {
+    return
   }
 
   throw new VaultCliError(
     'invalid_payload',
-    `Active experiments with primary biomarker ${capture.canonicalBiomarkerKey ?? 'unknown'} must declare exactly one matching session field.`,
+    `Active experiments with primary outcome ${captureAssessment.canonicalBiomarkerKey ?? 'unknown'} must declare exactly one matching session field.`,
     {
-      primaryBiomarkerKey: capture.canonicalBiomarkerKey,
-      matchingSessionFieldIds: capture.matchingSessionFieldIds,
+      primaryBiomarkerKey: captureAssessment.canonicalBiomarkerKey,
+      matchingSessionFieldIds: captureAssessment.matchingSessionFieldIds,
     },
   )
 }
@@ -1104,7 +1176,8 @@ export async function startExperimentFromPlanRecord(input: StartExperimentFromPl
       )
     }
 
-    assertActiveExperimentPrimaryMetricIsCapturable({
+    await assertActiveExperimentPrimaryOutcomeIsCapturable({
+      vault: input.vault,
       status: preflight.data.status,
       runPlan: preflight.data.runPlan,
       analysisPlan: preflight.data.analysisPlan,
@@ -1266,6 +1339,41 @@ export async function updateExperimentRecord(input: {
         nextProtocolRef,
         frontmatter.protocolRef,
       )
+      const nextRunPlan = input.runPlan === undefined
+        ? frontmatter.runPlan
+        : input.runPlan ?? undefined
+      const changesRunPlan = !isDeepStrictEqual(
+        nextRunPlan,
+        frontmatter.runPlan,
+      )
+      const nextAnalysisPlan = input.analysisPlan === undefined
+        ? frontmatter.analysisPlan
+        : input.analysisPlan ?? undefined
+      const changesAnalysisPlan = !isDeepStrictEqual(
+        nextAnalysisPlan,
+        frontmatter.analysisPlan,
+      )
+      const nextStatus = input.status ?? frontmatter.status
+      const preservesActiveRunPlanTuning =
+        frontmatter.status === 'active' && nextStatus === 'active'
+      const changesWithdrawnProtectedState =
+        changesCommonsProtocolRef ||
+        changesProtocolRef ||
+        changesEffectiveProtocolSnapshot ||
+        (
+          !preservesActiveRunPlanTuning &&
+          (changesRunPlan || changesAnalysisPlan)
+        )
+      if (
+        changesWithdrawnProtectedState &&
+        frontmatter.commonsProtocolRef &&
+        !(await findCurrentHealthCommonsProtocol(frontmatter.commonsProtocolRef))
+      ) {
+        throw new VaultCliError(
+          'invalid_payload',
+          'This experiment is linked to a withdrawn Health Commons protocol, so its protocol lineage, effective snapshot, run plan, and analysis plan cannot be changed in place. Start the alternative as a new experiment; this saved run remains unchanged. Abandonment changes status only and must be a separate member decision.',
+        )
+      }
       if (
         frontmatter.status !== 'planned' &&
         (
@@ -1279,13 +1387,6 @@ export async function updateExperimentRecord(input: {
           'Only a planned experiment may change its protocol lineage or effective snapshot. Start a new experiment to use a different revision.',
         )
       }
-      const nextStatus = input.status ?? frontmatter.status
-      const nextRunPlan = input.runPlan === undefined
-        ? frontmatter.runPlan
-        : input.runPlan ?? undefined
-      const nextAnalysisPlan = input.analysisPlan === undefined
-        ? frontmatter.analysisPlan
-        : input.analysisPlan ?? undefined
       const nextActivationOnboarding = changesCommonsProtocolRef
         ? input.onboarding ?? undefined
         : input.onboarding === undefined
@@ -1306,7 +1407,8 @@ export async function updateExperimentRecord(input: {
         })
       }
 
-      assertActiveExperimentPrimaryMetricIsCapturable({
+      await assertActiveExperimentPrimaryOutcomeIsCapturable({
+        vault: input.vault,
         status: nextStatus,
         runPlan: nextRunPlan,
         analysisPlan: nextAnalysisPlan,
@@ -1933,26 +2035,45 @@ export async function showExperimentProgressCard(input: {
     query,
     vault: input.vault,
   })
-  const healthCommons = await loadHealthCommonsBiomarkerDirectionRuntime()
   const biomarkerKeys = [
     frontmatter.analysisPlan?.primaryBiomarkerKey ?? null,
     ...(frontmatter.analysisPlan?.secondaryBiomarkerKeys ?? []),
   ].filter((biomarkerKey): biomarkerKey is string => biomarkerKey !== null)
-  const biomarkerDesiredDirections = uniqueStrings(biomarkerKeys).flatMap((biomarkerKey) => {
-    const desiredDirection =
-      healthCommons.resolveGeneratedHealthCommonsBiomarkerDesiredDirection(
-        biomarkerKey,
+  const biomarkerDesiredDirections: Array<{
+    biomarkerKey: string
+    desiredDirection: HealthCommonsBiomarkerDesiredDirection
+  }> = []
+  const directionWarnings: string[] = []
+  let moverSentimentContext: 'direction_unavailable' | null = null
+  if (biomarkerKeys.length > 0) {
+    try {
+      const healthCommons = await loadHealthCommonsBiomarkerDirectionRuntime()
+      for (const biomarkerKey of uniqueStrings(biomarkerKeys)) {
+        const desiredDirection =
+          healthCommons.resolveGeneratedHealthCommonsBiomarkerDesiredDirection(
+            biomarkerKey,
+          )
+        if (desiredDirection !== null) {
+          biomarkerDesiredDirections.push({ biomarkerKey, desiredDirection })
+        }
+      }
+    } catch (error) {
+      if (!isMissingHealthCommonsBiomarkerDirectionArtifactError(error)) {
+        throw error
+      }
+      directionWarnings.push(
+        'biomarker desired directions unavailable; mover sentiment shown as neutral',
       )
-    return desiredDirection === null
-      ? []
-      : [{ biomarkerKey, desiredDirection }]
-  })
+      moverSentimentContext = 'direction_unavailable'
+    }
+  }
 
-  const { card, warnings } = query.buildExperimentProgressCard(readModel, slug, {
+  const { card, warnings: cardWarnings } = query.buildExperimentProgressCard(readModel, slug, {
     asOf: input.asOf,
     biomarkerDesiredDirections,
     confounders: input.confounders,
     metricPoints,
+    moverSentimentContext,
   })
 
   return {
@@ -1962,7 +2083,7 @@ export async function showExperimentProgressCard(input: {
     slug,
     asOf: card.asOf,
     card,
-    warnings,
+    warnings: [...directionWarnings, ...cardWarnings],
   }
 }
 
@@ -2574,6 +2695,16 @@ function collectExperimentMetricKeys(
 ): string[] {
   const metricKeys = new Set<string>()
   const analysisPlan = frontmatter.analysisPlan
+  const primaryOutcome = resolveExperimentPrimaryOutcome(analysisPlan)
+  if (primaryOutcome?.kind === 'metric') {
+    const primaryMetricKey =
+      primaryOutcome.capture.kind === 'derived_metric'
+        ? resolveExperimentMetricKey(query, primaryOutcome.capture.sourceMetricKey)
+        : resolveExperimentBiomarkerMetricKey(query, primaryOutcome.key)
+    if (primaryMetricKey) {
+      metricKeys.add(primaryMetricKey)
+    }
+  }
   for (const biomarkerKey of [
     analysisPlan?.primaryBiomarkerKey,
     ...(analysisPlan?.secondaryBiomarkerKeys ?? []),
@@ -2606,9 +2737,14 @@ function collectExperimentAnchorMetricKeys(
   frontmatter: ExperimentFrontmatter,
 ): Set<string> {
   const metricKeys = new Set<string>()
+  const primaryOutcome = resolveExperimentPrimaryOutcome(frontmatter.analysisPlan)
   for (const anchor of frontmatter.analysisPlan?.measurementAnchors ?? []) {
     for (const biomarkerKey of anchor.biomarkerKeys) {
-      const metricKey = resolveExperimentBiomarkerMetricKey(query, biomarkerKey)
+      const metricKey =
+        primaryOutcome?.kind === 'metric' &&
+        biomarkerKey.trim().toLowerCase() === primaryOutcome.key
+          ? resolveExperimentMetricKey(query, primaryOutcome.metricKey)
+          : resolveExperimentBiomarkerMetricKey(query, biomarkerKey)
       if (metricKey) {
         metricKeys.add(metricKey)
       }
@@ -3008,13 +3144,34 @@ function buildAnalysisPlanForOnboardingApply(
   input: ApplyExperimentOnboardingRecordInput,
   existing: ExperimentFrontmatterValue['analysisPlan'],
 ): ExperimentAnalysisPlanValue | undefined {
-  const patch: Partial<ExperimentAnalysisPlanValue> = {}
-
-  if (input.primaryBiomarkerKey !== undefined) {
-    patch.primaryBiomarkerKey = normalizeHealthCommonsKeyOption(
-      input.primaryBiomarkerKey,
-      'primary-biomarker-key',
+  if (
+    input.primaryOutcomeKey !== undefined &&
+    input.primaryBiomarkerKey !== undefined
+  ) {
+    throw new VaultCliError(
+      'invalid_option',
+      'experiment edit accepts either --primary-outcome-key or the legacy --primary-biomarker-key, not both.',
     )
+  }
+  const patch: Partial<ExperimentAnalysisPlanValue> = {}
+  const normalizedPrimaryKey = input.primaryBiomarkerKey === undefined
+    ? undefined
+    : normalizeHealthCommonsKeyOption(
+        input.primaryBiomarkerKey,
+        'primary-biomarker-key',
+      )
+
+  if (normalizedPrimaryKey !== undefined && existing?.primaryOutcome === undefined) {
+    patch.primaryBiomarkerKey = normalizedPrimaryKey
+  }
+
+  const primaryOutcome = buildPrimaryOutcomeForOnboardingApply(
+    input,
+    existing?.primaryOutcome,
+    normalizedPrimaryKey ?? existing?.primaryBiomarkerKey,
+  )
+  if (primaryOutcome !== undefined) {
+    patch.primaryOutcome = primaryOutcome
   }
 
   const secondaryBiomarkerKeys = normalizeHealthCommonsKeyListOption(
@@ -3062,12 +3219,127 @@ function buildAnalysisPlanForOnboardingApply(
     return undefined
   }
 
-  return experimentAnalysisPlanSchema.parse(
-    compactObject({
-      ...(existing ?? {}),
-      ...patch,
-    }),
-  )
+  const next = compactObject({
+    ...(existing ?? {}),
+    ...patch,
+  })
+  if (primaryOutcome !== undefined) {
+    delete next.primaryBiomarkerKey
+  }
+  return experimentAnalysisPlanSchema.parse(next)
+}
+
+function buildPrimaryOutcomeForOnboardingApply(
+  input: ApplyExperimentOnboardingRecordInput,
+  existing: ExperimentPrimaryOutcome | undefined,
+  legacyKey: string | undefined,
+): ExperimentPrimaryOutcome | undefined {
+  const touched =
+    input.primaryOutcomeKey !== undefined ||
+    (input.primaryBiomarkerKey !== undefined && existing !== undefined) ||
+    input.primaryOutcomeKind !== undefined ||
+    input.primaryOutcomeLabel !== undefined ||
+    input.comparisonStatistic !== undefined ||
+    input.primaryOutcomeSessionField !== undefined ||
+    input.primaryOutcomeSourceMetricKey !== undefined ||
+    input.primaryOutcomeUnit !== undefined
+  if (!touched) {
+    return undefined
+  }
+
+  const kind = input.primaryOutcomeKind ?? existing?.kind ?? 'metric'
+  const key =
+    input.primaryOutcomeKey === undefined
+      ? input.primaryBiomarkerKey === undefined
+        ? existing?.key ?? legacyKey
+        : normalizeHealthCommonsKeyOption(
+            input.primaryBiomarkerKey,
+            'primary-biomarker-key',
+          )
+      : normalizeHealthCommonsKeyOption(
+          input.primaryOutcomeKey,
+          'primary-outcome-key',
+        )
+  if (!key) {
+    throw new VaultCliError(
+      'invalid_option',
+      'A configured primary outcome requires --primary-outcome-key as its stable outcome key.',
+    )
+  }
+  const label =
+    input.primaryOutcomeLabel === undefined
+      ? existing?.label
+      : normalizeRequiredTextOption(
+          input.primaryOutcomeLabel,
+          'primary-outcome-label',
+        )
+  if (kind === 'structured_review') {
+    if (
+      input.comparisonStatistic !== undefined ||
+      input.primaryOutcomeSessionField !== undefined ||
+      input.primaryOutcomeSourceMetricKey !== undefined ||
+      input.primaryOutcomeUnit !== undefined
+    ) {
+      throw new VaultCliError(
+        'invalid_option',
+        'Comparison and metric-capture options are only valid for metric outcomes.',
+      )
+    }
+    return experimentPrimaryOutcomeSchema.parse(
+      compactObject({ kind, key, label }),
+    )
+  }
+
+  if (
+    input.primaryOutcomeSessionField !== undefined &&
+    input.primaryOutcomeSourceMetricKey !== undefined
+  ) {
+    throw new VaultCliError(
+      'invalid_option',
+      'A metric outcome cannot use both a session field and a derived source metric.',
+    )
+  }
+  if (
+    input.primaryOutcomeUnit !== undefined &&
+    input.primaryOutcomeSessionField === undefined
+  ) {
+    throw new VaultCliError(
+      'invalid_option',
+      '--primary-outcome-unit requires --primary-outcome-session-field.',
+    )
+  }
+  const existingStatistic = existing?.kind === 'metric' ? existing.statistic : undefined
+  const existingCapture = existing?.kind === 'metric' ? existing.capture : undefined
+  const capture = input.primaryOutcomeSessionField !== undefined
+    ? {
+        kind: 'session_field' as const,
+        fieldId: normalizeStableIdOption(
+          input.primaryOutcomeSessionField,
+          'primary-outcome-session-field',
+        ),
+        unit: input.primaryOutcomeUnit === undefined
+          ? undefined
+          : normalizeRequiredTextOption(
+              input.primaryOutcomeUnit,
+              'primary-outcome-unit',
+            ),
+      }
+    : input.primaryOutcomeSourceMetricKey !== undefined
+      ? {
+          kind: 'derived_metric' as const,
+          sourceMetricKey: normalizeRequiredTextOption(
+            input.primaryOutcomeSourceMetricKey,
+            'primary-outcome-source-metric-key',
+          ),
+        }
+      : existingCapture
+  return experimentPrimaryOutcomeSchema.parse(compactObject({
+    kind,
+    key,
+    label,
+    statistic: input.comparisonStatistic ?? existingStatistic,
+    capture,
+  }))
 }
 
 function buildRunPlanDatePatch(input: ApplyExperimentOnboardingRecordInput) {
@@ -3303,6 +3575,16 @@ async function loadHealthCommonsBiomarkerDirectionRuntime(): Promise<
 > {
   return loadRuntimeModule<HealthCommonsBiomarkerDirectionRuntime>(
     '@murphai/health-commons/runtime',
+  )
+}
+
+function isMissingHealthCommonsBiomarkerDirectionArtifactError(
+  error: unknown,
+): boolean {
+  return (
+    error instanceof Error &&
+    'code' in error &&
+    error.code === 'ENOENT'
   )
 }
 

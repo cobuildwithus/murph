@@ -21,6 +21,7 @@ import {
   HOSTED_WEB_TURBOPACK_BUILD_MEMORY_LIMIT_BYTES,
   HOSTED_WEB_WORKFLOW_OPTIONS,
   WORKSPACE_SOURCE_PACKAGE_NAMES,
+  assertHostedBrowserDeviceSyncCallbackHostnameConfiguration,
   buildHostedWebClientEnv,
   buildHostedWebNextConfig,
   buildHostedWebTurbopackConfig,
@@ -540,6 +541,56 @@ test("resolveHostedPrivyOrigin falls back to the Vercel production URL when no h
   );
 });
 
+test("hosted Web accepts a path-capable device callback on every configured app-session hostname", () => {
+  assert.doesNotThrow(() => {
+    assertHostedBrowserDeviceSyncCallbackHostnameConfiguration(createProcessEnv({
+      DEVICE_SYNC_PUBLIC_BASE_URL: "https://app.example.com/custom/device-sync",
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://app.example.com",
+      HOSTED_WEB_BASE_URL: "https://app.example.com",
+    }));
+  });
+});
+
+test("hosted Web rejects a device callback on a different HOSTED_WEB_BASE_URL hostname", () => {
+  assert.throws(
+    () => assertHostedBrowserDeviceSyncCallbackHostnameConfiguration(createProcessEnv({
+      DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.com/api/device-sync",
+      HOSTED_WEB_BASE_URL: "https://app.example.com",
+    })),
+    /effective hosted browser device callback from DEVICE_SYNC_PUBLIC_BASE_URL must use the HOSTED_WEB_BASE_URL hostname/u,
+  );
+});
+
+test("hosted Web rejects a callback that cannot return to the configured onboarding session hostname", () => {
+  assert.throws(
+    () => assertHostedBrowserDeviceSyncCallbackHostnameConfiguration(createProcessEnv({
+      DEVICE_SYNC_PUBLIC_BASE_URL: "https://app.example.com/api/device-sync",
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://join.example.com",
+      HOSTED_WEB_BASE_URL: "https://app.example.com",
+    })),
+    /effective hosted browser device callback from DEVICE_SYNC_PUBLIC_BASE_URL must use the HOSTED_ONBOARDING_PUBLIC_BASE_URL hostname/u,
+  );
+});
+
+test("hosted Web rejects an implicit callback derived from a split onboarding hostname", () => {
+  assert.throws(
+    () => assertHostedBrowserDeviceSyncCallbackHostnameConfiguration(createProcessEnv({
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://join.example.com",
+      HOSTED_WEB_BASE_URL: "https://app.example.com",
+    })),
+    /effective hosted browser device callback from HOSTED_ONBOARDING_PUBLIC_BASE_URL must use the HOSTED_WEB_BASE_URL hostname/u,
+  );
+});
+
+test("hosted Web accepts an implicit callback when every browser surface shares one hostname", () => {
+  assert.doesNotThrow(
+    () => assertHostedBrowserDeviceSyncCallbackHostnameConfiguration(createProcessEnv({
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://app.example.com",
+      HOSTED_WEB_BASE_URL: "https://app.example.com",
+    })),
+  );
+});
+
 test("resolveHostedPrivyOrigins adds the base-domain fallback for common hosted-web subdomains", () => {
   assert.deepEqual(
     resolveHostedPrivyOrigins(createProcessEnv({
@@ -665,9 +716,14 @@ test("buildHostedWebSecurityHeaders adds production-only HSTS alongside the CSP 
     "Permissions-Policy",
     "Strict-Transport-Security",
   ]);
+  assert.equal(productionHeaderValues.get("Referrer-Policy"), "strict-origin");
   assert.equal(productionHeaderValues.get("Cross-Origin-Opener-Policy"), "same-origin-allow-popups");
   assert.equal(productionHeaderValues.get("Origin-Agent-Cluster"), "?1");
   assert.equal(productionHeaderValues.get("X-DNS-Prefetch-Control"), "off");
+  assert.equal(
+    productionHeaderValues.get("Permissions-Policy"),
+    "camera=(), geolocation=(), microphone=(self)",
+  );
 
   const testHeaders = buildHostedWebSecurityHeaders(createProcessEnv({
     NODE_ENV: "test",
@@ -687,9 +743,14 @@ test("buildHostedWebSecurityHeaders adds production-only HSTS alongside the CSP 
     "X-Frame-Options",
     "Permissions-Policy",
   ]);
+  assert.equal(testHeaderValues.get("Referrer-Policy"), "strict-origin");
   assert.equal(testHeaderValues.get("Cross-Origin-Opener-Policy"), "same-origin-allow-popups");
   assert.equal(testHeaderValues.get("Origin-Agent-Cluster"), "?1");
   assert.equal(testHeaderValues.get("X-DNS-Prefetch-Control"), "off");
+  assert.equal(
+    testHeaderValues.get("Permissions-Policy"),
+    "camera=(), geolocation=(), microphone=(self)",
+  );
 });
 
 test("next.config serves global security headers and stricter Murph Safe referrer privacy", async () => {
@@ -710,6 +771,13 @@ test("next.config serves global security headers and stricter Murph Safe referre
       "X-Frame-Options",
       "Permissions-Policy",
     ],
+  );
+  assert.deepEqual(
+    routes[0]?.headers.find((header) => header.key === "Referrer-Policy"),
+    {
+      key: "Referrer-Policy",
+      value: "strict-origin",
+    },
   );
   assert.equal(routes[1]?.source, "/search/:path*");
   assert.deepEqual(routes[1]?.headers, [

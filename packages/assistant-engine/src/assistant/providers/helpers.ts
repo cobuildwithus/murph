@@ -609,14 +609,16 @@ const ASSISTANT_TURN_PROFILE_SHELL_WRAPPER_PREFIX_PATTERN =
 // terms, vault paths), so the label stops at the binary name.
 const ASSISTANT_TURN_PROFILE_SUBCOMMAND_HEAD_BINARIES = new Set(['vault-cli', 'murph'])
 // Codex also emits a best-effort parsed commandActions array. Use only these
-// fixed executable names when shell-wrapper quoting makes the raw command fail
-// closed; never persist an action argument, path, query, or arbitrary head.
+// fixed executable names to retain an ordered compound-command chain or when
+// shell-wrapper quoting makes the raw command fail closed; never persist an
+// action argument, path, query, or arbitrary head.
 const ASSISTANT_TURN_PROFILE_STRUCTURED_COMMAND_HEAD_BINARIES = new Set([
   'cat',
   'grep',
   'head',
   'jq',
   'murph',
+  'node',
   'printf',
   'rg',
   'sed',
@@ -703,9 +705,12 @@ export function buildAssistantCodexTurnProfileJson(input: {
     return null
   }
 
-  const tools = [...toolsByLabel.values()].sort(
-    (left, right) => right.outputChars - left.outputChars,
-  )
+  const tools = [...toolsByLabel.values()].sort((left, right) => {
+    const durationDelta = right.durationMs - left.durationMs
+    return durationDelta !== 0
+      ? durationDelta
+      : right.outputChars - left.outputChars
+  })
 
   return {
     modelContextWindow,
@@ -803,32 +808,52 @@ function buildAssistantTurnProfileCommandLabel(
   }
 
   if (labelTokens.length > 0) {
-    return truncateAssistantTurnProfileLabel(labelTokens.join(' '))
+    const rawLabel = labelTokens.join(' ')
+    const structuredHeads =
+      readAssistantTurnProfileStructuredCommandHeads(commandActions)
+    if (
+      structuredHeads.length > 1
+      && structuredHeads[0] === labelTokens[0]
+    ) {
+      return truncateAssistantTurnProfileLabel(
+        [rawLabel, ...structuredHeads.slice(1)].join(' '),
+      )
+    }
+    return truncateAssistantTurnProfileLabel(rawLabel)
   }
 
-  return readAssistantTurnProfileStructuredCommandHead(commandActions) ?? 'command'
+  const structuredHeads =
+    readAssistantTurnProfileStructuredCommandHeads(commandActions)
+  return structuredHeads.length > 0
+    ? truncateAssistantTurnProfileLabel(structuredHeads.join(' '))
+    : 'command'
 }
 
-function readAssistantTurnProfileStructuredCommandHead(
+function readAssistantTurnProfileStructuredCommandHeads(
   value: unknown,
-): string | null {
+): string[] {
   if (!Array.isArray(value) || value.length === 0) {
-    return null
+    return []
   }
 
-  const firstAction = readAssistantProviderRecord(value[0])
-  const command = readAssistantProviderString(firstAction?.command)
-  const head = command?.split(/\s/u, 1)[0] ?? null
-  if (
-    !head
-    || head.includes('/')
-    || !ASSISTANT_TURN_PROFILE_SAFE_TOKEN_PATTERN.test(head)
-    || !ASSISTANT_TURN_PROFILE_STRUCTURED_COMMAND_HEAD_BINARIES.has(head)
-  ) {
-    return null
+  const heads: string[] = []
+  for (const action of value) {
+    const command = readAssistantProviderString(
+      readAssistantProviderRecord(action)?.command,
+    )
+    const head = command?.split(/\s/u, 1)[0] ?? null
+    if (
+      !head
+      || head.includes('/')
+      || !ASSISTANT_TURN_PROFILE_SAFE_TOKEN_PATTERN.test(head)
+      || !ASSISTANT_TURN_PROFILE_STRUCTURED_COMMAND_HEAD_BINARIES.has(head)
+    ) {
+      return []
+    }
+    heads.push(head)
   }
 
-  return head
+  return heads
 }
 
 // Strip one `bash -lc <script>` wrapper layer so the inner head binary can be
@@ -1206,11 +1231,11 @@ export interface CodexSubagentTokenUsageSample {
 // sendInput, wait, resume — covering freshly spawned and reused children) or
 // by a subAgentActivity item's agentThreadId (multi-agent V2, which emits
 // activity items instead of collab tool calls) become drafts. The model is
-// attributed from V1 spawn items, the only ones that carry it; V2 children
-// inherit the parent model by default, so evidence without a model falls
-// back to parentModel. Warm processes are reused across threads, so a
-// foreign thread id alone is not proof of a subagent — a stale flush from a
-// previous thread must never mint a usage row.
+// attributed directly from V1 spawn items or optional V2 activity evidence;
+// same-model children without explicit evidence inherit parentModel. Warm
+// processes are reused across threads, so a foreign thread id alone is not
+// proof of a subagent — a stale flush from a previous thread must never mint a
+// usage row.
 export function extractCodexSubagentUsageDrafts(input: {
   modelProvider: string | null
   ordinalStart: number
@@ -1245,8 +1270,7 @@ export function extractCodexSubagentUsageDrafts(input: {
       continue
     }
 
-    const model =
-      spawnModelByThreadId.get(threadId) ?? input.parentModel ?? null
+    const model = spawnModelByThreadId.get(threadId) ?? input.parentModel ?? null
     const inputTokens = readAssistantProviderInteger(
       delta,
       'inputTokens',
@@ -1326,8 +1350,9 @@ export function resolveCodexAssistantProviderTokenPricingBasis(input: {
 // call item (V1: spawnAgent, sendInput, wait, resumeAgent, ...) or
 // subAgentActivity item (V2) is a key — that membership is what authorizes
 // billing a foreign thread's usage, covering both freshly spawned children
-// and reused existing children. The effective model is only known from V1
-// spawn items and may be null otherwise.
+// and reused existing children. V1 spawn items carry the effective model
+// directly. V2 activity may carry the effective model in newer protocol
+// versions; when absent, the child inherits the parent model.
 function readCodexCollabSpawnModelsByThread(
   rawEvents: readonly unknown[],
 ): Map<string, string | null> {
@@ -1382,14 +1407,18 @@ function readCodexCollabToolCallFromEvent(rawEvent: unknown): {
   // Multi-agent V2 emits subAgentActivity items (started/interacted/
   // interrupted) instead of collab tool calls; any of them names the child
   // thread this parent turn engaged, which is exactly the spawn evidence the
-  // billing gate needs. V2 activity items carry no model.
+  // billing gate needs. Newer protocol versions may also carry the effective
+  // child model on that activity.
   if (itemType === 'subAgentActivity' || itemType === 'sub_agent_activity') {
     const agentThreadId = readAssistantProviderString(
       item.agentThreadId,
       item.agent_thread_id,
     )
     return agentThreadId
-      ? { receiverThreadIds: [agentThreadId], spawnModel: null }
+      ? {
+          receiverThreadIds: [agentThreadId],
+          spawnModel: readAssistantProviderString(item.model) ?? null,
+        }
       : null
   }
   if (itemType !== 'collabAgentToolCall') {

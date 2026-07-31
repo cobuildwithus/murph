@@ -24,6 +24,7 @@ import {
   verifyVercelProductionDeploymentProtection,
 } from "../scripts/resolve-vercel-production-alias-sha";
 import {
+  hostedRuntimeLogProductionMigrationCommand,
   hostedWebProductionLinqLineSyncCommand,
   hostedWebProductionMigrationCommand,
   hostedWebProductionPrismaGenerateCommand,
@@ -108,6 +109,10 @@ describe("hosted web production migration guard", () => {
 
     assert.equal(result, "ran");
     assert.deepEqual(calls, [
+      {
+        command: hostedRuntimeLogProductionMigrationCommand.command,
+        args: ["--dir", "apps/web", "runtime-logs:migrate:deploy"],
+      },
       {
         command: hostedWebProductionMigrationCommand.command,
         args: ["--dir", "apps/web", "prisma:migrate:deploy"],
@@ -279,6 +284,79 @@ describe("hosted web production migration guard", () => {
           '  DROP CONSTRAINT "hosted_usage_credit_entry_amount_direction_valid",',
           '  ADD CONSTRAINT "hosted_usage_credit_entry_amount_direction_valid"',
           '    CHECK ("amount_usd_micros" <> 0) NOT VALID;',
+          'DROP TABLE "hosted_member";',
+        ].join("\n"),
+      );
+
+      const destructiveMigrations =
+        await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir);
+
+      assert.deepEqual(
+        destructiveMigrations.map(({ migrationId: id, reason }) => ({
+          migrationId: id,
+          reason,
+        })),
+        [{
+          migrationId,
+          reason: "DROP TABLE",
+        }],
+      );
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
+  test("limits the composable referral index relaxation to its proved DDL", async () => {
+    const migrationsDir = await mkdtemp(
+      path.join(tmpdir(), "hosted-web-prisma-migrations-"),
+    );
+    const migrationId =
+      "20260729190000_composable_usage_referral_missions";
+
+    try {
+      await writeMigrationSql(
+        migrationsDir,
+        migrationId,
+        [
+          'DROP INDEX "hosted_usage_referral_target_container_key";',
+          'DROP INDEX "hosted_usage_referral_one_armed_per_referrer";',
+          'DROP TABLE "hosted_member";',
+        ].join("\n"),
+      );
+
+      const destructiveMigrations =
+        await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir);
+
+      assert.deepEqual(
+        destructiveMigrations.map(({ migrationId: id, reason }) => ({
+          migrationId: id,
+          reason,
+        })),
+        [{
+          migrationId,
+          reason: "DROP TABLE",
+        }],
+      );
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
+  test("limits capped sponsorship predeploy compatibility to its proved DDL", async () => {
+    const migrationsDir = await mkdtemp(
+      path.join(tmpdir(), "hosted-web-prisma-migrations-"),
+    );
+    const migrationId = "20260730120000_hosted_capped_group_sponsorship";
+
+    try {
+      await writeMigrationSql(
+        migrationsDir,
+        migrationId,
+        [
+          'ALTER TABLE "hosted_usage_credit_purchase"',
+          '  ADD CONSTRAINT "sponsorship_shape"',
+          '    CHECK ("group_sponsorship_authorization_id" IS NULL) NOT VALID;',
+          'DROP INDEX "hosted_usage_credit_purchase_active_payer_key";',
           'DROP TABLE "hosted_member";',
         ].join("\n"),
       );
@@ -663,6 +741,13 @@ describe("hosted web production migration guard", () => {
       migrations.some(
         ({ id }) =>
           id === "20260728031000_resynchronize_hosted_usage_credit_purchase_grants",
+      ),
+      true,
+    );
+    assert.equal(
+      migrations.some(
+        ({ id }) =>
+          id === "20260729183000_rebuild_linq_delivery_health_after_drain",
       ),
       true,
     );
@@ -1317,13 +1402,26 @@ describe("hosted web production migration guard", () => {
     const cronPaths = (vercelJson.crons ?? []).map((cron) => cron.path).sort();
 
     assert.deepEqual(cronPaths, [
+      "/api/internal/hosted-execution/product-feedback/digest/cron",
       "/api/internal/hosted-execution/retention/cron",
       "/api/internal/hosted-growth/snapshot/cron",
       "/api/internal/hosted-growth/usage-referral/cron",
       "/api/internal/hosted-onboarding/linq/contact-card/cron",
+      "/api/internal/hosted-onboarding/linq/health/cron",
       "/api/internal/hosted-onboarding/stripe/cron",
       "/api/internal/hosted-runtime/latency-alert/cron",
     ]);
+    assert.deepEqual(
+      (vercelJson.crons ?? []).find(
+        (cron) =>
+          cron.path
+            === "/api/internal/hosted-execution/product-feedback/digest/cron",
+      ),
+      {
+        path: "/api/internal/hosted-execution/product-feedback/digest/cron",
+        schedule: "*/10 * * * *",
+      },
+    );
     assert.deepEqual(
       (vercelJson.crons ?? []).find(
         (cron) =>
@@ -1335,24 +1433,6 @@ describe("hosted web production migration guard", () => {
       },
     );
     assert.ok(!cronPaths.includes("/api/internal/device-sync/dirty-sweeper/cron"));
-  });
-
-  test("Render worker startup ensures the Temporal device-sync schedule", async () => {
-    const renderYaml = await readFile(
-      path.resolve(appRoot, "..", "..", "render.yaml"),
-      "utf8",
-    );
-
-    const ensureCommand =
-      "temporal:ensure-device-sync-reconciler-schedule:prod";
-    const workerCommand = "temporal:worker:prod";
-
-    assert.match(renderYaml, new RegExp(ensureCommand, "u"));
-    assert.match(renderYaml, new RegExp(workerCommand, "u"));
-    assert.ok(
-      renderYaml.indexOf(ensureCommand) < renderYaml.indexOf(workerCommand),
-      "Render startup must ensure the Temporal Schedule before starting the worker.",
-    );
   });
 
   test("generates Prisma before direct local Next dev starts", async () => {

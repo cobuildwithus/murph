@@ -78,6 +78,7 @@ import {
 } from "@murphai/operator-config/assistant-cli-contracts";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import {
+  createAssistantDeliveryBlockedError,
   createAssistantDeliveryTerminalError,
 } from "@murphai/operator-config/assistant/delivery-failure";
 
@@ -115,6 +116,10 @@ import {
   requireHostedProviderFetch,
   requireHostedProviderFetchDependencies,
 } from "./provider-fetch.ts";
+import {
+  recordHostedAssistantMilestonesBestEffort,
+  type HostedAssistantMilestoneTraceContext,
+} from "./assistant-latency-trace.ts";
 
 const HOSTED_MAX_BACKGROUND_DELIVERY_EFFECTS = 1;
 // Bounds due approval reconciliation so a backlog cannot stall delivery with
@@ -993,6 +998,8 @@ function hostedAssistantReplyTargetsSignupWelcomeRecipient(
 }
 
 const HOSTED_SIGNUP_WELCOME_DELIVERY_IDEMPOTENCY_PREFIX = "signup-welcome:";
+const HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE =
+  "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY";
 
 function isHostedSignupWelcomeDeliveryPayload(
   payload: HostedAssistantDeliveryPayload,
@@ -1667,6 +1674,7 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
     "assertLinqRecentInboundEngagement" | "recordLinqDeliveryOutcome" | "sendEmail"
   > | null;
   forwardedEnv?: Readonly<Record<string, string>>;
+  latencyTrace?: Omit<HostedAssistantMilestoneTraceContext, "assistantInputIds"> | null;
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   platformEnv?: Readonly<Record<string, string>>;
@@ -1706,6 +1714,24 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
       effectsPort: input.effectsPort ?? null,
       linqEnv,
       linqDeliveryContexts,
+      onProviderAccepted: ({
+        acceptedAssistantInputIds,
+        acceptedAt,
+      }) => {
+        recordHostedAssistantMilestonesBestEffort({
+          context:
+            input.latencyTrace && acceptedAssistantInputIds.length > 0
+              ? {
+                  ...input.latencyTrace,
+                  assistantInputIds: acceptedAssistantInputIds,
+                }
+              : null,
+          milestones: [{
+            at: acceptedAt.toISOString(),
+            milestone: "progress_update_accepted",
+          }],
+        });
+      },
       providerFetch: input.providerFetch ?? null,
       publicInternetFetch: input.publicInternetFetch ?? null,
       signal: input.signal ?? null,
@@ -2411,8 +2437,14 @@ async function resolveHostedDirectEmailRecipientAtProviderEntry(input: {
     normalizeHostedAssistantDeliveryChannel(payload.channel)?.toLowerCase()
       !== "email"
     || payload.threadIsDirect !== true
-    || input.targetKind !== "explicit"
   ) {
+    return input.target;
+  }
+
+  const hostedEmailThreadTarget = input.targetKind === "thread"
+    ? parseHostedEmailThreadTarget(input.target)
+    : null;
+  if (hostedEmailThreadTarget?.targetKind === "group") {
     return input.target;
   }
 
@@ -2425,15 +2457,27 @@ async function resolveHostedDirectEmailRecipientAtProviderEntry(input: {
       { retryable: true },
     ));
   }
-  const target = (await resolveRecipient({ signal: input.signal }))?.trim() ?? "";
-  if (!target) {
+  const recipient =
+    (await resolveRecipient({ signal: input.signal }))?.trim() ?? "";
+  if (!recipient) {
     throw markHostedDeliveryPreProviderRetryable(new VaultCliError(
       "ASSISTANT_EMAIL_AUDIENCE_AUTHORITY_UNAVAILABLE",
       "Hosted direct email delivery requires current verified-email authority before provider work.",
       { retryable: true },
     ));
   }
-  return target;
+  if (input.targetKind === "explicit") {
+    return recipient;
+  }
+  if (!hostedEmailThreadTarget) {
+    return input.target;
+  }
+
+  return serializeHostedEmailThreadTarget({
+    ...hostedEmailThreadTarget,
+    cc: [],
+    to: [recipient],
+  });
 }
 
 function isHostedAssistantReactionOnlyEffect(
@@ -3440,6 +3484,10 @@ function createHostedAssistantLinqSendDependency(input: {
   intentId?: string | null;
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   linqEnv: NodeJS.ProcessEnv;
+  onProviderAccepted?: (input: {
+    acceptedAssistantInputIds: readonly string[];
+    acceptedAt: Date;
+  }) => void;
   onProviderDispatchEntered?: () => void;
   providerFetch: typeof fetch | null;
   publicInternetFetch?: typeof fetch | null;
@@ -3667,6 +3715,33 @@ function createHostedAssistantLinqSendDependency(input: {
       if (!attemptedAt) {
         throw error;
       }
+      const partialRichLinkResult =
+        readHostedAssistantLinqRichLinkPartialDeliveryResult(error);
+      if (partialRichLinkResult) {
+        await recordHostedAssistantLinqDeliveryOutcomeOrQueueBestEffort({
+          effectsPort: input.effectsPort ?? null,
+          outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
+            attemptedAt,
+            answeredMailboxItemIds: [],
+            deliveryContext,
+            directRecipientPhoneNumber: originalParticipantRecipientPhoneNumber,
+            failedAt: new Date(),
+            failureCode: readHostedAssistantLinqDeliveryFailureCode(error),
+            failureReason: null,
+            fromPhoneNumber,
+            idempotencyKey,
+            intentId: input.intentId ?? null,
+            providerTarget,
+            providerThreadId: partialRichLinkResult.providerThreadId ?? null,
+            result: partialRichLinkResult,
+            target: providerTarget,
+            targetKind: providerTargetKind,
+            threadIsDirect:
+              input.threadIsDirect ?? deliveryContext?.threadIsDirect ?? null,
+          }),
+        });
+        throw markHostedDeliveryMayHaveSucceeded(error);
+      }
       if (isHostedLinqProviderOutcomeAmbiguous(error)) {
         throw markHostedDeliveryMayHaveSucceeded(error);
       }
@@ -3693,10 +3768,15 @@ function createHostedAssistantLinqSendDependency(input: {
       });
       throw error;
     }
+    const acceptedAt = new Date();
+    input.onProviderAccepted?.({
+      acceptedAssistantInputIds: request.acceptedAssistantInputIds ?? [],
+      acceptedAt,
+    });
     await recordHostedAssistantLinqDeliveryOutcomeOrQueueBestEffort({
       effectsPort: input.effectsPort ?? null,
       outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
-        acceptedAt: new Date(),
+        acceptedAt,
         attemptedAt: requireHostedLinqProviderAttemptedAt(attemptedAt),
         answeredMailboxItemIds: request.answeredMailboxItemIds ?? [],
         deliveryContext,
@@ -4131,6 +4211,9 @@ function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
     intentId: input.intentId,
     lineLookupKey: input.deliveryContext?.routeAuthority?.accountLookupKey ?? null,
     providerMessageId: input.result?.providerMessageId ?? null,
+    ...(input.result?.providerMessageIds?.length
+      ? { providerMessageIds: [...input.result.providerMessageIds] }
+      : {}),
     providerTarget: input.targetKind === "participant" ? null : input.providerTarget,
     providerThreadId: input.result?.providerThreadId ?? input.providerThreadId,
     target: input.targetKind === "participant" ? null : input.target,
@@ -4160,7 +4243,15 @@ async function recordHostedAssistantLinqDeliveryOutcomeOrQueueBestEffort(input: 
 function shouldRequireHostedAssistantLinqDeliveryOutcomeWrite(
   outcome: HostedRuntimeLinqDeliveryOutcomeRequest,
 ): boolean {
-  if (!outcome.acceptedAt) {
+  const richLinkPartial = Boolean(outcome.failedAt)
+    && outcome.failureCode
+      === HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE;
+  if (richLinkPartial) {
+    return true;
+  }
+
+  const providerAccepted = Boolean(outcome.acceptedAt);
+  if (!providerAccepted) {
     return false;
   }
   if (outcome.answeredMailboxItemIds?.length) {
@@ -4337,6 +4428,75 @@ function readHostedAssistantLinqDeliveryFailureCode(error: unknown): string {
     : "HOSTED_LINQ_PROVIDER_SEND_FAILED";
 }
 
+function readHostedAssistantLinqRichLinkPartialDeliveryResult(
+  error: unknown,
+): HostedRuntimeLinqSendResponse | null {
+  if (
+    typeof error !== "object"
+    || error === null
+    || !("code" in error)
+    || error.code !== HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE
+  ) {
+    return null;
+  }
+  const providerMessageIds: string[] = [];
+  if ("providerMessageIds" in error && Array.isArray(error.providerMessageIds)) {
+    for (const value of error.providerMessageIds) {
+      const messageId = typeof value === "string" ? value.trim() : "";
+      if (messageId && !providerMessageIds.includes(messageId)) {
+        providerMessageIds.push(messageId);
+      }
+    }
+  }
+  const providerMessageId = readHostedAssistantLinqPartialDeliveryString(
+    error,
+    "providerMessageId",
+  ) ?? providerMessageIds.at(-1) ?? null;
+  if (
+    providerMessageId
+    && !providerMessageIds.includes(providerMessageId)
+  ) {
+    providerMessageIds.push(providerMessageId);
+  }
+  return {
+    providerMessageId,
+    ...(providerMessageIds.length > 0 ? { providerMessageIds } : {}),
+    providerThreadId: readHostedAssistantLinqPartialDeliveryString(
+      error,
+      "providerThreadId",
+    ),
+    target: readHostedAssistantLinqPartialDeliveryString(error, "target"),
+    targetKind: readHostedAssistantLinqPartialDeliveryTargetKind(error),
+  };
+}
+
+function readHostedAssistantLinqPartialDeliveryString(
+  error: object,
+  key: "providerMessageId" | "providerThreadId" | "target",
+): string | null {
+  const value =
+    key === "providerMessageId" && "providerMessageId" in error
+      ? error.providerMessageId
+      : key === "providerThreadId" && "providerThreadId" in error
+        ? error.providerThreadId
+        : key === "target" && "target" in error
+          ? error.target
+          : null;
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function readHostedAssistantLinqPartialDeliveryTargetKind(
+  error: object,
+): HostedRuntimeProviderTargetKind | null {
+  if (!("targetKind" in error)) {
+    return null;
+  }
+  const value = error.targetKind;
+  return value === "explicit" || value === "participant" || value === "thread"
+    ? value
+    : null;
+}
+
 function requireHostedLinqProviderAttemptedAt(value: Date | null): Date {
   if (!value) {
     throw new Error("Hosted Linq provider returned before dispatch entry.");
@@ -4422,6 +4582,29 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
     throw error;
   }
   const normalized = normalizeHostedAssistantLinqEngagementResult(result);
+  if (input.authorityCheckOnly !== true && normalized.deliveryBlockCode) {
+    const code = `ASSISTANT_LINQ_EGRESS_${
+      normalized.deliveryBlockCode.toUpperCase()
+    }`;
+    if (normalized.deliveryBlockCode === "chat_opted_out") {
+      throw createAssistantDeliveryTerminalError(
+        code,
+        "Hosted Linq delivery is blocked because this chat opted out.",
+      );
+    }
+    throw createAssistantDeliveryBlockedError(
+      code,
+      "Hosted Linq delivery is blocked by current line or chat health.",
+      {
+        blockKind: normalized.deliveryBlockCode,
+        resume: normalized.deliveryBlockCode === "operator_disabled"
+          ? "manual_ops"
+          : normalized.deliveryBlockCode === "chat_critical"
+            ? "recipient_inbound"
+            : "line_health_change",
+      },
+    );
+  }
   if (
     input.authorityCheckOnly !== true
     && normalized.assistantAskFallbackRequired !== true
@@ -4471,6 +4654,12 @@ function normalizeHostedAssistantLinqEngagementResult(
   if (typeof result?.assistantAskFallbackRequired === "boolean") {
     normalized.assistantAskFallbackRequired =
       result.assistantAskFallbackRequired;
+  }
+  if (result?.deliveryBlockCode) {
+    normalized.deliveryBlockCode = result.deliveryBlockCode;
+  }
+  if (result?.deliveryPosture) {
+    normalized.deliveryPosture = result.deliveryPosture;
   }
   if (typeof result?.providerDispatchClaimed === "boolean") {
     normalized.providerDispatchClaimed = result.providerDispatchClaimed;

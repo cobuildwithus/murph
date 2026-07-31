@@ -11,13 +11,13 @@ import {
 } from "@murphai/hosted-execution";
 import {
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
-  HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
   HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
   type HostedRuntimeGroupToolLinqThreadContext,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
   type HostedRuntimeGroupToolSelfOptOutContext,
   type HostedRuntimeProductFeedbackRecord,
+  type HostedRuntimeUsageReferralSourceContext,
   type HostedWorkspaceCheckpointReason,
   type HostedRuntimeRedactedJson,
   type HostedRuntimeRedactedObject,
@@ -85,6 +85,7 @@ import {
   type AssistantCurrentDeliveryRoute,
   getAssistantAutomationRouteDeliverabilityIssue,
   normalizeAssistantRouteString,
+  resolveAssistantDeliveryRouteConversationKey,
   resolveAssistantDeliveryRouteWithCurrentRoute,
 } from "@murphai/operator-config/assistant/current-delivery-route";
 
@@ -127,6 +128,7 @@ import {
   type HostedDeviceSyncStatusPromptReconnectTarget,
 } from "./device-sync-status-prompt.ts";
 import {
+  createHostedGroupParticipantDisplayNameReader,
   createHostedGroupSharedReader,
   normalizeHostedGroupSharedProjectionScopes,
 } from "./group-shared-reader.ts";
@@ -317,15 +319,18 @@ export type HostedWorkspaceRuntimeAssistantPhase = (
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ) => Promise<HostedWorkspaceRunnerAssistantPhaseResult>;
 
+type HostedUsageReferralLinqService = "imessage" | "rcs" | "sms";
+
 /**
  * The chat-scoped murph.group actions need the raw Linq chat id and the
  * thread-route egress authority, which live only in wake-derived delivery
  * contexts (the web DB stores hashed lookup keys). Inject them here so the
  * model never supplies its own thread target.
  *
- * Current-turn sender evidence is injected the same way and for the same
- * reason: it must come from the accepted inputs for this operation, never from
- * the model.
+ * Aggregate current-turn sender handles used by shared reads are injected the
+ * same way. Participant-specific effects arrive with exact accepted-message
+ * evidence already resolved by assistant-engine, so this wrapper does not
+ * infer one owner from the whole turn.
  */
 export function createHostedGroupToolWithCurrentTurnContext(input: {
   currentDeliveryRoute?: AssistantCurrentDeliveryRoute | null;
@@ -333,31 +338,24 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
   groupEmailIngress?: boolean;
   groupToolPort: NonNullable<HostedRuntimePlatform["groupToolPort"]>;
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
+  linqService?: HostedUsageReferralLinqService | null;
   telegramSenderHandles?: readonly string[];
 }): NonNullable<HostedRuntimePlatform["groupToolPort"]> {
   const emailIngressPresent = input.groupEmailIngress === true
     || (input.emailDeliveryContexts?.length ?? 0) > 0;
   return {
-    async request(request) {
+    async request(request, context) {
+      const forwardRequest = (forwardedRequest: HostedRuntimeGroupToolRequest) =>
+        context
+          ? input.groupToolPort.request(forwardedRequest, context)
+          : input.groupToolPort.request(forwardedRequest);
       if (
         emailIngressPresent
         && request.action !== "read_current"
         && request.action !== "read_usage"
         && request.action !== "read_shared"
-        && request.action !== "revoke_own_email_share"
       ) {
         return buildHostedGroupEmailRestrictedActionUnavailable(request);
-      }
-      if (request.action === "revoke_own_email_share") {
-        if (emailIngressPresent) {
-          return await input.groupToolPort.request({ action: request.action });
-        }
-        const selfOptOut = resolveHostedGroupToolSelfOptOutContext({
-          linqDeliveryContexts: input.linqDeliveryContexts,
-        });
-        return await input.groupToolPort.request(
-          selfOptOut ? { action: request.action, selfOptOut } : { action: request.action },
-        );
       }
       if (request.action === "read_shared") {
         const sharedReadRequest = {
@@ -372,7 +370,7 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
               linqDeliveryContexts: input.linqDeliveryContexts,
               telegramSenderHandles: input.telegramSenderHandles ?? [],
             });
-        return await input.groupToolPort.request({
+        return await forwardRequest({
           ...sharedReadRequest,
           ...senderHandles,
         });
@@ -382,59 +380,194 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
         || request.action === "arm_usage_referral"
         || request.action === "cancel_usage_referral"
       ) {
+        const participant = request.action === "read_usage_referral"
+          ? request.participant
+          : null;
         const senderHandles = emailIngressPresent
           ? {}
+          : participant?.source === "linq"
+          ? { linqSenderHandles: [participant.senderHandle] }
+          : participant?.source === "telegram"
+          ? { telegramSenderHandles: [participant.senderHandle] }
           : resolveHostedGroupToolSenderHandles({
               linqDeliveryContexts: input.linqDeliveryContexts,
               telegramSenderHandles: input.telegramSenderHandles ?? [],
             });
         const sourceContext = resolveHostedUsageReferralSourceContext(
           input.currentDeliveryRoute,
+          input.linqService,
         );
-        const referralRequest = request.action === "arm_usage_referral"
-          ? {
+        const referralRequest = request.action === "read_usage_referral"
+          ? { action: request.action }
+          : request.action === "arm_usage_referral"
+            ? {
+              action: request.action,
+              policyCodes: request.policyCodes,
+            }
+            : {
               action: request.action,
               policyCode: request.policyCode,
-            }
-          : { action: request.action };
-        return await input.groupToolPort.request({
+            };
+        return await forwardRequest({
           ...referralRequest,
           ...senderHandles,
-          ...(request.action === "arm_usage_referral"
+          ...(request.action !== "cancel_usage_referral"
             ? sourceContext
             : {}),
         });
       }
       if (
-        request.action !== "read_chat_participants"
-        && request.action !== "update_display_name"
+        request.action === "read_chat_participants"
+      ) {
+        const linqRoute = resolveHostedGroupToolLinqRouteContext(
+          input.linqDeliveryContexts,
+        );
+        return await forwardRequest(
+          linqRoute
+            ? { ...request, linqThread: linqRoute.thread }
+            : request,
+        );
+      }
+      if (request.action === "post_join_offer") {
+        const linqRoute = resolveHostedGroupToolLinqRouteContext(
+          input.linqDeliveryContexts,
+        );
+        if (linqRoute?.service === "imessage") {
+          return await forwardRequest({
+            ...request,
+            linqThread: linqRoute.thread,
+          });
+        }
+        if (
+          linqRoute?.service === "sms"
+          || isHostedGroupToolTelegramGroupRoute(input.currentDeliveryRoute)
+        ) {
+          return await forwardRequest(
+            buildHostedGroupJoinLinkFallbackRequest(request),
+          );
+        }
+        return await forwardRequest(request);
+      }
+      if (
+        request.action !== "update_display_name"
         && request.action !== "post_disclosure_request"
-        && request.action !== "post_join_offer"
         && request.action !== "preflight_set_chat_avatar"
         && request.action !== "set_chat_avatar"
         && request.action !== "share_contact_card"
       ) {
-        return await input.groupToolPort.request(request);
+        return await forwardRequest(request);
       }
-      const linqThread = resolveHostedGroupToolLinqThreadContext(
+      const linqRoute = resolveHostedGroupToolLinqRouteContext(
         input.linqDeliveryContexts,
-        request.action === "read_chat_participants"
-          ? "imessage_or_sms"
-          : "imessage_only",
       );
-      return await input.groupToolPort.request(
-        linqThread ? { ...request, linqThread } : request,
-      );
+      if (linqRoute?.service === "imessage") {
+        return await forwardRequest({
+          ...request,
+          linqThread: linqRoute.thread,
+        });
+      }
+      return linqRoute?.service === "sms"
+        ? buildHostedGroupSmsUnsupportedResponse(request)
+        : await forwardRequest(request);
     },
   };
 }
 
+function isHostedGroupToolTelegramGroupRoute(
+  route: AssistantCurrentDeliveryRoute | null | undefined,
+): boolean {
+  return normalizeAssistantRouteString(route?.channel)?.toLowerCase()
+      === "telegram"
+    && route?.threadIsDirect === false;
+}
+
+function buildHostedGroupJoinLinkFallbackRequest(
+  request: Extract<HostedRuntimeGroupToolRequest, { action: "post_join_offer" }>,
+): Extract<HostedRuntimeGroupToolRequest, { action: "create_join_link" }> {
+  const joinOffer = request.joinOffer;
+  if (!joinOffer) {
+    return { action: "create_join_link" };
+  }
+  const joinLink = {
+    ...(joinOffer.displayName
+      ? { displayName: joinOffer.displayName }
+      : {}),
+    ...(joinOffer.projectionScopes?.length
+      ? {
+        requestedVaultShareProjectionScopes: [
+          ...joinOffer.projectionScopes,
+        ],
+      }
+      : joinOffer.projectionKinds?.length
+        ? {
+          requestedVaultShareProjectionKinds: [
+            ...joinOffer.projectionKinds,
+          ],
+        }
+        : {}),
+  };
+  return Object.keys(joinLink).length > 0
+    ? { action: "create_join_link", joinLink }
+    : { action: "create_join_link" };
+}
+
+type HostedRuntimeGroupSmsUnsupportedRequest = Extract<
+  HostedRuntimeGroupToolRequest,
+  {
+    action:
+      | "post_disclosure_request"
+      | "preflight_set_chat_avatar"
+      | "set_chat_avatar"
+      | "share_contact_card"
+      | "update_display_name";
+  }
+>;
+
+function buildHostedGroupSmsUnsupportedResponse(
+  request: HostedRuntimeGroupSmsUnsupportedRequest,
+): HostedRuntimeGroupToolResponse {
+  switch (request.action) {
+    case "update_display_name":
+      return {
+        action: request.action,
+        result: {
+          group: null,
+          status: "unavailable",
+          unavailableReason: "sms_chat_customization_unsupported",
+        },
+      };
+    case "preflight_set_chat_avatar":
+    case "set_chat_avatar":
+      return {
+        action: request.action,
+        result: {
+          status: "unavailable",
+          unavailableReason: "sms_chat_customization_unsupported",
+        },
+      };
+    case "share_contact_card":
+      return {
+        action: request.action,
+        result: {
+          status: "unavailable",
+          unavailableReason: "sms_attachments_unsupported",
+        },
+      };
+    case "post_disclosure_request":
+      return {
+        action: request.action,
+        result: {
+          status: "unavailable",
+          unavailableReason: "sms_reactions_unsupported",
+        },
+      };
+  }
+}
+
 function resolveHostedUsageReferralSourceContext(
   route: AssistantCurrentDeliveryRoute | null | undefined,
-): Pick<
-  Extract<HostedRuntimeGroupToolRequest, { action: "arm_usage_referral" }>,
-  "sourceConversation"
-> {
+  linqService: HostedUsageReferralLinqService | null | undefined,
+): HostedRuntimeUsageReferralSourceContext {
   const channel = normalizeAssistantRouteString(route?.channel)?.toLowerCase();
   const threadId = normalizeAssistantRouteString(route?.threadId);
   if (
@@ -448,6 +581,7 @@ function resolveHostedUsageReferralSourceContext(
   return {
     sourceConversation: {
       channel,
+      ...(channel === "linq" && linqService ? { linqService } : {}),
       threadId,
       threadIsDirect: route.threadIsDirect,
     },
@@ -461,8 +595,7 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
       action:
         | "read_current"
         | "read_shared"
-        | "read_usage"
-        | "revoke_own_email_share";
+        | "read_usage";
     }
   >,
 ): HostedRuntimeGroupToolResponse {
@@ -497,12 +630,18 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
         action: request.action,
         result: { participants: null, status: "unavailable", unavailableReason },
       };
+    case "read_participant_display_names":
+      return {
+        action: request.action,
+        result: { status: "unavailable", unavailableReason },
+      };
     case "preflight_set_chat_avatar":
     case "set_chat_avatar":
     case "share_contact_card":
     case "leave_membership":
     case "post_disclosure_request":
     case "revoke_disclosure_grant":
+    case "revoke_own_email_share":
       return {
         action: request.action,
         result: { status: "unavailable", unavailableReason },
@@ -519,29 +658,6 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
         },
       };
   }
-}
-
-function resolveHostedGroupToolSelfOptOutContext(input: {
-  linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
-}): HostedRuntimeGroupToolSelfOptOutContext | null {
-  const eligible = new Map<string, HostedRuntimeGroupToolSelfOptOutContext>();
-  // Hosted email reply aliases authenticate the route, not the human From
-  // header. Do not turn parsed From into self-opt-out authority.
-  for (const context of input.linqDeliveryContexts) {
-    if (context.threadIsDirect !== false) {
-      continue;
-    }
-    const senderHandle = context.directRecipientPhoneNumber?.trim();
-    if (!senderHandle) {
-      continue;
-    }
-    eligible.set(JSON.stringify(["linq", senderHandle]), {
-      senderHandle,
-      source: "linq",
-    });
-  }
-
-  return eligible.size === 1 ? [...eligible.values()][0] ?? null : null;
 }
 
 /**
@@ -578,19 +694,20 @@ function resolveHostedGroupToolLinqSenderHandles(
 ): string[] {
   // Use only route-authorized Linq group inputs. Hosted email reply aliases
   // authenticate a route, not the human From header, and never enter here.
-  const linqThread = resolveHostedGroupToolLinqThreadContext(contexts);
-  if (!linqThread) {
+  const linqRoute = resolveHostedGroupToolLinqRouteContext(contexts);
+  if (!linqRoute) {
     return [];
   }
   const eligible = new Set<string>();
   for (const context of contexts) {
     const authority = context.routeAuthority;
+    const service = normalizeHostedGroupToolLinqService(context.service);
     if (
       !authority
-      || authority.channel !== linqThread.authority.channel
-      || authority.containerMemberId !== linqThread.authority.containerMemberId
-      || authority.threadId !== linqThread.authority.threadId
-      || context.service?.trim().toLowerCase() !== "imessage"
+      || authority.channel !== linqRoute.thread.authority.channel
+      || authority.containerMemberId !== linqRoute.thread.authority.containerMemberId
+      || authority.threadId !== linqRoute.thread.authority.threadId
+      || service !== linqRoute.service
       || context.threadIsDirect !== false
     ) {
       continue;
@@ -608,52 +725,77 @@ function resolveHostedGroupToolLinqSenderHandles(
   return [...eligible].slice(0, HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX);
 }
 
-function resolveHostedGroupToolLinqThreadContext(
+type HostedGroupToolLinqService = "imessage" | "sms";
+
+type HostedGroupToolLinqRouteContext = {
+  service: HostedGroupToolLinqService;
+  thread: HostedRuntimeGroupToolLinqThreadContext;
+};
+
+function resolveHostedGroupToolLinqRouteContext(
   contexts: readonly HostedAssistantLinqDeliveryContext[],
-  serviceScope: "imessage_only" | "imessage_or_sms" = "imessage_only",
-): HostedRuntimeGroupToolLinqThreadContext | null {
-  const eligible = new Map<string, HostedRuntimeGroupToolLinqThreadContext>();
+): HostedGroupToolLinqRouteContext | null {
+  const eligible = new Map<string, HostedGroupToolLinqRouteContext>();
+  let hasInvalidAuthoritativeCandidate = false;
   for (const context of contexts) {
     const authority = context.routeAuthority;
-    const service = context.service?.trim().toLowerCase();
+    if (!authority || context.threadIsDirect === true) {
+      continue;
+    }
+    if (context.threadIsDirect !== false) {
+      hasInvalidAuthoritativeCandidate = true;
+      continue;
+    }
+    const service = normalizeHostedGroupToolLinqService(context.service);
     if (
-      !authority
+      !service
+      || authority.channel !== "linq"
+      || authority.containerMemberId.trim().length === 0
       || authority.threadId.trim().length === 0
-      || (
-        service !== "imessage"
-        && (serviceScope !== "imessage_or_sms" || service !== "sms")
-      )
-      || context.threadIsDirect !== false
     ) {
+      hasInvalidAuthoritativeCandidate = true;
       continue;
     }
     const routeKey = JSON.stringify([
       authority.channel,
       authority.containerMemberId,
       authority.threadId,
+      service,
     ]);
     if (!eligible.has(routeKey)) {
       eligible.set(routeKey, {
-        authority: {
-          ...(authority.accountLookupKey === undefined
-            ? {}
-            : { accountLookupKey: authority.accountLookupKey }),
-          channel: authority.channel,
-          containerMemberId: authority.containerMemberId,
-          threadId: authority.threadId,
+        service,
+        thread: {
+          authority: {
+            ...(authority.accountLookupKey === undefined
+              ? {}
+              : { accountLookupKey: authority.accountLookupKey }),
+            channel: authority.channel,
+            containerMemberId: authority.containerMemberId,
+            threadId: authority.threadId,
+          },
+          chatId: authority.threadId,
         },
-        chatId: authority.threadId,
       });
     }
   }
 
-  // Two distinct route-authorized threads in one turn (for example around a
-  // provider chat re-key) make the target ambiguous; fail closed and let the
-  // web handler answer linq_thread_unavailable.
-  if (eligible.size !== 1) {
+  // An incomplete candidate, service mismatch, or second authorized route
+  // makes the provider target ambiguous. Fail closed rather than choosing
+  // iMessage or SMS by iteration order during a provider re-key or mixed batch.
+  if (hasInvalidAuthoritativeCandidate || eligible.size !== 1) {
     return null;
   }
   return [...eligible.values()][0] ?? null;
+}
+
+function normalizeHostedGroupToolLinqService(
+  service: string | null | undefined,
+): HostedGroupToolLinqService | null {
+  const normalized = service?.trim().toLowerCase();
+  return normalized === "imessage" || normalized === "sms"
+    ? normalized
+    : null;
 }
 
 function resolveHostedInitialLinqDeliveryContexts(
@@ -708,7 +850,10 @@ function createHostedAssistantAutomationOperationScope(
           && route?.threadIsDirect === false,
         groupToolPort: input.runtime.platform.groupToolPort ?? null,
         linqDeliveryContexts: durableContext.linqDeliveryContexts,
+        linqService: durableContext.linqService,
+        runtimeMemberId: input.request.userId,
         telegramSenderHandles: durableContext.telegramSenderHandles,
+        vaultRoot: input.restored.vaultRoot,
       });
       const scopedExecutionContext = scopeHostedAutomationToolToAssistantOperation({
         executionContext: groupScopedExecutionContext,
@@ -729,14 +874,16 @@ async function resolveHostedAssistantInputIdsOperationContext(input: {
   vaultRoot: string;
 }): Promise<{
   linqDeliveryContexts: HostedAssistantLinqDeliveryContext[];
+  linqService: HostedUsageReferralLinqService | null;
   route: AssistantCurrentDeliveryRoute | null;
   telegramSenderHandles: string[];
 }> {
   const routes: AssistantCurrentDeliveryRoute[] = [];
   const linqDeliveryContexts: HostedAssistantLinqDeliveryContext[] = [];
+  const linqServices: Array<HostedUsageReferralLinqService | null> = [];
   const telegramSenderHandles: string[] = [];
   if (input.inputIds.length === 0) {
-    return { linqDeliveryContexts, route: null, telegramSenderHandles };
+    return { linqDeliveryContexts, linqService: null, route: null, telegramSenderHandles };
   }
   for (const inputId of input.inputIds) {
     try {
@@ -749,9 +896,17 @@ async function resolveHostedAssistantInputIdsOperationContext(input: {
         replyTarget: event?.replyTarget ?? null,
       });
       if (!route || typeof route.threadIsDirect !== "boolean") {
-        return { linqDeliveryContexts: [], route: null, telegramSenderHandles: [] };
+        return {
+          linqDeliveryContexts: [],
+          linqService: null,
+          route: null,
+          telegramSenderHandles: [],
+        };
       }
       routes.push(route);
+      if (normalizeAssistantRouteString(route.channel)?.toLowerCase() === "linq") {
+        linqServices.push(readHostedAssistantInputUsageReferralLinqService(event));
+      }
       const linqDeliveryContext = readHostedAssistantInputLinqDeliveryContext({
         event,
         memberId: input.memberId,
@@ -764,18 +919,61 @@ async function resolveHostedAssistantInputIdsOperationContext(input: {
         telegramSenderHandles.push(telegramSenderHandle);
       }
     } catch {
-      return { linqDeliveryContexts: [], route: null, telegramSenderHandles: [] };
+      return {
+        linqDeliveryContexts: [],
+        linqService: null,
+        route: null,
+        telegramSenderHandles: [],
+      };
     }
   }
   const route = resolveUnambiguousCurrentDeliveryRoute(routes);
   if (!route || typeof route.threadIsDirect !== "boolean") {
-    return { linqDeliveryContexts: [], route: null, telegramSenderHandles: [] };
+    return {
+      linqDeliveryContexts: [],
+      linqService: null,
+      route: null,
+      telegramSenderHandles: [],
+    };
   }
   return {
     linqDeliveryContexts,
+    linqService: resolveUnambiguousHostedUsageReferralLinqService(linqServices),
     route,
     telegramSenderHandles,
   };
+}
+
+function readHostedAssistantInputUsageReferralLinqService(
+  event: AssistantInputEventRecord | null,
+): HostedUsageReferralLinqService | null {
+  const sourceMetadata = event?.sourceMetadata;
+  if (
+    !event
+    || sourceMetadata?.kind !== "linq"
+    || event.conversation?.source !== "linq"
+    || typeof event.conversation.threadIsDirect !== "boolean"
+    || event.replyTarget?.channel !== "linq"
+  ) {
+    return null;
+  }
+  const service = normalizeAssistantRouteString(sourceMetadata.service)?.toLowerCase();
+  return service === "imessage" || service === "rcs" || service === "sms"
+    ? service
+    : null;
+}
+
+function resolveUnambiguousHostedUsageReferralLinqService(
+  services: readonly (HostedUsageReferralLinqService | null)[],
+): HostedUsageReferralLinqService | null {
+  let resolved: HostedUsageReferralLinqService | null = null;
+  for (const service of services) {
+    if (!service || (resolved && resolved !== service)) {
+      return null;
+    }
+    resolved = service;
+  }
+  return resolved;
 }
 
 /**
@@ -843,7 +1041,10 @@ function scopeHostedGroupToolToAssistantOperation(input: {
   groupEmailIngress: boolean;
   groupToolPort: NonNullable<HostedRuntimePlatform["groupToolPort"]> | null;
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
+  linqService: HostedUsageReferralLinqService | null;
+  runtimeMemberId: string;
   telegramSenderHandles?: readonly string[];
+  vaultRoot: string;
 }): AssistantExecutionContext {
   const scopedGroupToolPort = input.groupToolPort
     ? createHostedGroupToolWithCurrentTurnContext({
@@ -852,6 +1053,7 @@ function scopeHostedGroupToolToAssistantOperation(input: {
         groupEmailIngress: input.groupEmailIngress,
         groupToolPort: input.groupToolPort,
         linqDeliveryContexts: input.linqDeliveryContexts,
+        linqService: input.linqService,
         telegramSenderHandles: input.telegramSenderHandles ?? [],
       })
     : null;
@@ -860,13 +1062,36 @@ function scopeHostedGroupToolToAssistantOperation(input: {
     groupSharedReadAvailable: input.groupSharedReadAvailable,
     groupToolPort: scopedGroupToolPort,
   });
-  if (!sharedScopedExecutionContext.hosted || !scopedGroupToolPort) {
+  if (!sharedScopedExecutionContext.hosted) {
     return sharedScopedExecutionContext;
   }
+  const routeChannel = normalizeAssistantRouteString(
+    input.currentDeliveryRoute?.channel,
+  )?.toLowerCase();
+  const routeConversationKey =
+    routeChannel === "linq"
+    && input.currentDeliveryRoute?.threadIsDirect === false
+      ? resolveAssistantDeliveryRouteConversationKey({
+          ...input.currentDeliveryRoute,
+          channel: routeChannel,
+        })
+      : null;
+  const groupParticipantDisplayNameReader =
+    input.groupSharedReadAvailable && routeConversationKey && input.groupToolPort
+      ? createHostedGroupParticipantDisplayNameReader({
+          groupToolPort: input.groupToolPort,
+          routeConversationKey,
+          runtimeMemberId: input.runtimeMemberId,
+          vaultRoot: input.vaultRoot,
+        })
+      : null;
   return {
     hosted: {
       ...sharedScopedExecutionContext.hosted,
-      groupTool: scopedGroupToolPort,
+      ...(groupParticipantDisplayNameReader
+        ? { groupParticipantDisplayNameReader }
+        : {}),
+      ...(scopedGroupToolPort ? { groupTool: scopedGroupToolPort } : {}),
     },
   };
 }
@@ -927,18 +1152,10 @@ function createHostedScheduledGroupTools(input: {
     return null;
   }
 
-  // Linq can post a provider-side join offer. Telegram instead uses the normal
-  // create_join_link result in the assistant's ordinary chat reply.
-  if (channel === "telegram") {
-    return {
-      groupSharedReader: createHostedGroupSharedReader({
-        groupToolPort: input.groupToolPort,
-      }),
-      groupTool: input.groupToolPort,
-    };
-  }
-
-  // This state belongs to one scheduled Linq model operation. It proves a
+  // Scheduled routes deliberately use the first-party link on both Linq and
+  // Telegram. The durable automation route does not preserve whether a Linq
+  // thread is iMessage or SMS, and the link is the common consent surface.
+  // This state belongs to one scheduled group model operation. It proves a
   // missing grant from the model-triggered read and prevents repeated offers.
   const observedNotGrantedScopeKeys = new Set<string>();
   let permissionOfferAttempted = false;
@@ -988,22 +1205,12 @@ function createHostedScheduledGroupTools(input: {
 
       try {
         const response = await input.groupToolPort.request({
-          action: "post_join_offer",
-          joinOffer: {
-            messageTemplate:
-              HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
-            projectionScopes,
-          },
-          linqThread: {
-            authority: {
-              channel: "linq",
-              containerMemberId,
-              threadId: target,
-            },
-            chatId: target,
+          action: "create_join_link",
+          joinLink: {
+            requestedVaultShareProjectionScopes: projectionScopes,
           },
         });
-        return response.action === "post_join_offer"
+        return response.action === "create_join_link"
           ? response
           : buildHostedScheduledGroupPermissionOfferUnavailable();
       } catch {
@@ -1021,10 +1228,10 @@ function createHostedScheduledGroupTools(input: {
 
 function buildHostedScheduledGroupPermissionOfferUnavailable(): Extract<
   HostedRuntimeGroupToolResponse,
-  { action: "post_join_offer" }
+  { action: "create_join_link" }
 > {
   return {
-    action: "post_join_offer",
+    action: "create_join_link",
     result: {
       group: null,
       status: "unavailable",
@@ -1445,6 +1652,12 @@ export async function runHostedWorkspaceAssistantPhase(
     resolveHostedClinicalRecordsConnectLinkTool(input.runtime.platform.clinicalRecordsPort);
   const initialLinqDeliveryContexts = resolveHostedInitialLinqDeliveryContexts(input);
   const initialAssistantInputIds = readHostedInitialAssistantInputIds(input);
+  const initialLinqLatencyTraceContext = {
+    assistantInputIds: initialAssistantInputIds,
+    latencyTracePort: input.runtime.platform.latencyTracePort,
+    runtimeAttemptId: input.request.attemptId,
+    source: "linq" as const,
+  };
   const productFeedbackCandidates = new Map<
     string,
     HostedRuntimeProductFeedbackRecord
@@ -1486,6 +1699,11 @@ export async function runHostedWorkspaceAssistantPhase(
         progressDeliveryDependencies: createHostedAssistantProgressDeliveryDependencies({
           effectsPort: input.runtime.platform.effectsPort,
           forwardedEnv: input.runtime.forwardedEnv,
+          latencyTrace: {
+            latencyTracePort: input.runtime.platform.latencyTracePort,
+            runtimeAttemptId: input.request.attemptId,
+            source: "linq",
+          },
           linqDeliveryContexts: initialLinqDeliveryContexts,
           platformEnv: input.runtime.platformEnv,
           providerFetch: input.runtime.platform.providerFetch ?? null,
@@ -1496,12 +1714,7 @@ export async function runHostedWorkspaceAssistantPhase(
         }),
         channelTypingDependencies: createHostedAssistantChannelTypingDependencies({
           forwardedEnv: input.runtime.forwardedEnv,
-          latencyTraceContext: {
-            assistantInputIds: initialAssistantInputIds,
-            latencyTracePort: input.runtime.platform.latencyTracePort,
-            runtimeAttemptId: input.request.attemptId,
-            source: "linq",
-          },
+          latencyTraceContext: initialLinqLatencyTraceContext,
           linqDeliveryContexts: initialLinqDeliveryContexts,
           platformEnv: input.runtime.platformEnv,
           providerFetch: input.runtime.platform.providerFetch ?? null,
@@ -1596,6 +1809,7 @@ export async function runHostedWorkspaceAssistantPhase(
           return authority;
         },
         resolveScheduledLinqRoute: async ({
+          fromPhoneNumber,
           homeRouteFallbackAllowed,
           signal,
           target,
@@ -1612,6 +1826,7 @@ export async function runHostedWorkspaceAssistantPhase(
           }
           const authority = await assertEngagement({
             authorityCheckOnly: true,
+            ...(fromPhoneNumber ? { fromPhoneNumber } : {}),
             homeRouteFallbackAllowed,
             target,
             targetKind,
@@ -1627,6 +1842,12 @@ export async function runHostedWorkspaceAssistantPhase(
             authority.targetOverride?.conversationThreadId?.trim() ?? "";
           return {
             ...(conversationThreadId ? { conversationThreadId } : {}),
+            ...(authority.deliveryBlockCode
+              ? { deliveryBlockCode: authority.deliveryBlockCode }
+              : {}),
+            ...(authority.deliveryPosture
+              ? { deliveryPosture: authority.deliveryPosture }
+              : {}),
             target: authority.targetOverride?.target ?? target,
             threadIsDirect: authority.threadIsDirect,
           };

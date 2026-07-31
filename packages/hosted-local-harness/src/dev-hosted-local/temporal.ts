@@ -43,6 +43,10 @@ const LOCAL_TEMPORAL_CLI_ENV_CLEARANCE_NAMES = [
 ] as const;
 const EXTERNAL_SCHEDULE_ENSURE_OPT_IN_ENV =
   "MURPH_DEV_TEMPORAL_ALLOW_EXTERNAL_SCHEDULE_ENSURE";
+const HOSTED_LOCAL_TEMPORAL_WORKER_PACKAGE_DIR_ENV =
+  "MURPH_DEV_TEMPORAL_WORKER_PACKAGE_DIR";
+const MISSING_HOSTED_LOCAL_TEMPORAL_WORKER_PACKAGE_MESSAGE =
+  "Hosted-local Temporal requires an external worker package. Set MURPH_DEV_TEMPORAL_WORKER_PACKAGE_DIR or set MURPH_DEV_TEMPORAL=disabled.";
 
 export interface HostedLocalTemporalRuntime {
   address: string;
@@ -81,6 +85,22 @@ export function buildHostedLocalTemporalRuntimeEnv(input: {
   };
 }
 
+export function resolveHostedLocalTemporalWorkerPackageDir(
+  source: Readonly<Record<string, string | undefined>> = process.env,
+): string | null {
+  return source[HOSTED_LOCAL_TEMPORAL_WORKER_PACKAGE_DIR_ENV]?.trim() || null;
+}
+
+export function requireHostedLocalTemporalWorkerPackageDir(
+  source: Readonly<Record<string, string | undefined>> = process.env,
+): string {
+  const packageDir = resolveHostedLocalTemporalWorkerPackageDir(source);
+  if (!packageDir) {
+    throw new Error(MISSING_HOSTED_LOCAL_TEMPORAL_WORKER_PACKAGE_MESSAGE);
+  }
+  return packageDir;
+}
+
 export async function startHostedLocalTemporalRuntime(input: {
   abortSignal?: AbortSignal;
   cloudflareHostedControlBaseUrl: string;
@@ -105,6 +125,9 @@ export async function startHostedLocalTemporalRuntime(input: {
   }
 
   const address = resolveHostedLocalTemporalAddress(input);
+  const temporalWorkerPackageDir = requireHostedLocalTemporalWorkerPackageDir(
+    input.env,
+  );
   const cloudflareHostedControlBaseUrl = normalizeHostedLocalClientBaseUrl(
     input.cloudflareHostedControlBaseUrl,
   );
@@ -178,6 +201,7 @@ export async function startHostedLocalTemporalRuntime(input: {
     })) {
       await ensureHostedLocalDeviceSyncReconcilerSchedule({
         env: temporalRuntimeEnv,
+        packageDir: temporalWorkerPackageDir,
         signal: input.abortSignal,
       });
       throwIfAbortSignalAborted(input.abortSignal);
@@ -186,7 +210,7 @@ export async function startHostedLocalTemporalRuntime(input: {
     workerProcess = spawnChildProcess(
       "temporal-worker",
       "pnpm",
-      ["--dir", "packages/hosted-orchestrator-temporal", "temporal:worker"],
+      ["--dir", temporalWorkerPackageDir, "temporal:worker"],
       temporalRuntimeEnv,
       {
         pipeOutput: input.pipeOutput,
@@ -227,11 +251,12 @@ export async function startHostedLocalTemporalRuntime(input: {
 
 async function ensureHostedLocalDeviceSyncReconcilerSchedule(input: {
   env: NodeJS.ProcessEnv;
+  packageDir: string;
   signal?: AbortSignal;
 }): Promise<void> {
   await runCommand("pnpm", [
     "--dir",
-    "packages/hosted-orchestrator-temporal",
+    input.packageDir,
     "temporal:ensure-device-sync-reconciler-schedule",
   ], {
     cwd: repoRoot,

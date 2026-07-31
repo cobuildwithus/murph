@@ -1,6 +1,7 @@
 import { normalizePhoneNumber } from "./phone";
 import type { HostedLinqAssignableHomeLine } from "./linq-line-store";
 
+export const HOSTED_LINQ_PLANNING_LOAD_TARGET_MESSAGES = 5_000;
 export const HOSTED_LINQ_SIGNUP_WELCOME_HARD_CAP_PER_UTC_DAY = 50;
 
 export type HostedLinqActiveRouteDecision =
@@ -19,11 +20,12 @@ export type HostedLinqActiveRouteDecision =
     };
 
 export function chooseHostedLinqHomeLine(input: {
-  activeMembersByRecipientPhone: ReadonlyMap<string, number>;
   ignoreDailyNewConversationLimit?: boolean;
   lines: readonly HostedLinqAssignableHomeLine[];
   newAssignmentsByRecipientPhone: ReadonlyMap<string, number>;
+  plannedMessagesByRecipientPhone: ReadonlyMap<string, number>;
   preferredRecipientPhone: string | null;
+  recentMessageEffectsByLineLookupKey: ReadonlyMap<string, number>;
 }): HostedLinqAssignableHomeLine | null {
   const preferredRecipientPhone = normalizePhoneNumber(input.preferredRecipientPhone);
   const dailyCandidates = input.lines.filter((line) =>
@@ -33,35 +35,58 @@ export function chooseHostedLinqHomeLine(input: {
       newAssignmentsByRecipientPhone: input.newAssignmentsByRecipientPhone,
     }),
   );
-  const candidatesUnderActiveTarget = dailyCandidates.filter((line) =>
-    isHostedLinqHomeLineUnderActiveTarget({
-      activeMembersByRecipientPhone: input.activeMembersByRecipientPhone,
-      line,
-    }),
+  const candidatesUnderPlanningTarget = dailyCandidates.filter((line) =>
+    (input.plannedMessagesByRecipientPhone.get(line.phoneNumber) ?? 0)
+      < HOSTED_LINQ_PLANNING_LOAD_TARGET_MESSAGES
   );
-  const candidates =
-    candidatesUnderActiveTarget.length > 0
-      ? candidatesUnderActiveTarget
-      : dailyCandidates;
+  const candidates = candidatesUnderPlanningTarget.length > 0
+    ? candidatesUnderPlanningTarget
+    : dailyCandidates;
 
-  if (preferredRecipientPhone) {
+  // Preserve a contacted/sticky line only while it remains below the soft
+  // assignment target. Once every eligible line is at or above target, the
+  // contract is least-loaded fallback rather than preferred-line override.
+  if (candidatesUnderPlanningTarget.length > 0 && preferredRecipientPhone) {
     const preferred = candidates.find((line) => line.phoneNumber === preferredRecipientPhone);
     if (preferred) {
       return preferred;
     }
   }
 
+  const allCandidatesAtOrAbovePlanningTarget =
+    candidatesUnderPlanningTarget.length === 0;
+
   return [...candidates].sort((left, right) => {
+    const leftPlanned =
+      input.plannedMessagesByRecipientPhone.get(left.phoneNumber) ?? 0;
+    const rightPlanned =
+      input.plannedMessagesByRecipientPhone.get(right.phoneNumber) ?? 0;
+
+    // When every line is already above the advisory target, preserve the
+    // weighted-planning contract by falling back to the least-planned line.
+    if (
+      allCandidatesAtOrAbovePlanningTarget
+      && leftPlanned !== rightPlanned
+    ) {
+      return leftPlanned - rightPlanned;
+    }
+
+    const leftRecent =
+      input.recentMessageEffectsByLineLookupKey.get(left.phoneNumberLookupKey) ?? 0;
+    const rightRecent =
+      input.recentMessageEffectsByLineLookupKey.get(right.phoneNumberLookupKey) ?? 0;
+    if (leftRecent !== rightRecent) {
+      return leftRecent - rightRecent;
+    }
+
+    if (!allCandidatesAtOrAbovePlanningTarget && leftPlanned !== rightPlanned) {
+      return leftPlanned - rightPlanned;
+    }
+
     const leftDaily = input.newAssignmentsByRecipientPhone.get(left.phoneNumber) ?? 0;
     const rightDaily = input.newAssignmentsByRecipientPhone.get(right.phoneNumber) ?? 0;
     if (leftDaily !== rightDaily) {
       return leftDaily - rightDaily;
-    }
-
-    const leftActive = input.activeMembersByRecipientPhone.get(left.phoneNumber) ?? 0;
-    const rightActive = input.activeMembersByRecipientPhone.get(right.phoneNumber) ?? 0;
-    if (leftActive !== rightActive) {
-      return leftActive - rightActive;
     }
 
     if (left.assignmentWeight !== right.assignmentWeight) {
@@ -73,10 +98,11 @@ export function chooseHostedLinqHomeLine(input: {
 }
 
 export function chooseHostedLinqSignupWelcomeLine(input: {
-  activeMembersByRecipientPhone: ReadonlyMap<string, number>;
   lines: readonly HostedLinqAssignableHomeLine[];
   newAssignmentsByRecipientPhone: ReadonlyMap<string, number>;
+  plannedMessagesByRecipientPhone: ReadonlyMap<string, number>;
   preferredRecipientPhone: string | null;
+  recentMessageEffectsByLineLookupKey: ReadonlyMap<string, number>;
 }): HostedLinqAssignableHomeLine | null {
   const selected = chooseHostedLinqHomeLine({
     ...input,
@@ -176,17 +202,6 @@ export function resolveHostedLinqActiveRouteDecision(input: {
   return {
     kind: "bind_home",
   };
-}
-
-function isHostedLinqHomeLineUnderActiveTarget(input: {
-  activeMembersByRecipientPhone: ReadonlyMap<string, number>;
-  line: HostedLinqAssignableHomeLine;
-}): boolean {
-  return !(
-    input.line.activeMemberLimit !== null
-    && (input.activeMembersByRecipientPhone.get(input.line.phoneNumber) ?? 0)
-      >= input.line.activeMemberLimit
-  );
 }
 
 function isHostedLinqHomeLineUnderDailyLimit(input: {

@@ -36,7 +36,8 @@ these conditions hold:
 1. destination writes are active;
 2. every source-active Worker and Durable Object is drained;
 3. every OC-targeting direct PUT URL and bounded upload is expired;
-4. final create-only delta passes are complete;
+4. the final source-active create-only invocation completed every internal
+   convergence cycle;
 5. the copier is permanently stopped; and
 6. two final directional convergence reads pass.
 
@@ -207,18 +208,82 @@ pnpm --dir apps/cloudflare r2:bundles:online-copy -- \
   --phase source_active \
   --immutable-keys-audited \
   --confirm-destination "$DESTINATION_BUCKET" \
+  --copier-exclusive \
+  --hold-for-source-put-drain \
   --apply
 ```
 
-Rerun while OC remains live. A concurrent new OC object simply appears in the
-next pass. An ETag change for an approved immutable key blocks the operation
-and must be investigated.
+`--copier-exclusive` is an operator assertion, not a distributed lock. Use one
+controlled credential and one operator shell for this bucket pair. Never
+overlap apply invocations across terminals, hosts, CI, or automation. The one
+acknowledged process retains the source keys it observes, re-inventories after
+each copy cycle, and continues internally when concurrent OC writes appear.
+An ETag change for an approved immutable key blocks the operation and must be
+investigated.
 
-### 5. Stop and prove the copier quiescent
+That provenance exists only in the live process. A later process must reject
+every source-active destination-only eligible object because it cannot
+distinguish clean prior churn from an ambiguous late commit.
 
-Stop admitting copy work and allow the command to exit normally. It awaits all
-bounded in-flight requests before returning. If the process crashes, wait out
-the request bound and rerun the source-active read-only check.
+`--hold-for-source-put-drain` makes the production-cutover process pause at its
+first temporary zero-source-only observation without discarding provenance.
+Continue with step 6 while that exact process waits. A timing-only rehearsal
+must omit this flag; if it exits with destination-only churn, keep that
+destination as rehearsal evidence only and never restart copying into it.
+
+CopyObject has two narrow recovery cases:
+
+1. The initial request allows one additional attempt only when the first
+   built-in-fetch rejection is a `TypeError` whose direct cause code is
+   `UND_ERR_CONNECT_TIMEOUT`, proving that the failed connection attempt never
+   reached the server.
+2. After the terminal response body is fully drained, exactly HTTP `500`
+   enters one reconciliation path. Cloudflare documents `500 InternalError` as
+   retryable, and R2's direct S3 reads are strongly consistent:
+   [error codes](https://developers.cloudflare.com/r2/api/error-codes/) and
+   [consistency model](https://developers.cloudflare.com/r2/reference/consistency/).
+   The copier HEADs the destination and source and requires the planned ETag
+   and byte size for every object that exists. An exact destination plus exact
+   source proves the first request committed and returns without another PUT.
+   An absent destination plus exact source permits exactly one further raw
+   create-only CopyObject with the same source and destination conditions. That
+   recovery attempt does not use or reset the pre-connect retry wrapper. R2
+   permits only [one write per second to the same object key](https://developers.cloudflare.com/r2/platform/limits/),
+   so the copier establishes a one-second recovery-not-before deadline after
+   the first `500` body drains, performs the reconciliation HEADs during that
+   interval, and waits any remaining time before the recovery PUT.
+
+The single HTTP `500` recovery accepts only a successful response or `412`,
+then the ordinary destination and source HEAD validation runs again. A second
+`404`, `500`, `429`, `503`, other HTTP response, redirect, socket or transport
+failure, or response-body failure is terminal. A body failure on the first
+`500`, failed reconciliation HEAD, missing or changed source, or conflicting
+destination is also terminal without a recovery PUT.
+Every other first-attempt terminal HTTP response, redirect, socket failure, and
+response-body failure keeps its existing terminal one-shot behavior. No PUT is
+allowed after the single HTTP `500` recovery attempt; when the initial
+pre-connect retry was used, this still caps the sequence at three raw fetch
+calls while only two could have reached R2.
+
+R2's destination and source CopyObject conditions are not atomic with one
+another, so these identity checks cannot be removed:
+[conditional CopyObject extensions](https://developers.cloudflare.com/r2/api/s3/extensions/).
+After any unresolved outcome, keep copy admission closed, preserve the
+destination as quarantine evidence, and never resume, reuse, delete, or promote
+it. Rebook the rehearsal or migration with a fresh empty destination after the
+failure is understood.
+
+### 5. Complete normally or audit an abnormal stop
+
+On normal production-cutover exit, the command has received the exact drain
+confirmation, awaited every bounded worker request, completed all internally
+required cycles, and performed coherent final source/destination inventory
+validation. That is the source-active copy proof; do not launch a separate
+read-only process afterward because its intentionally fresh provenance must
+distrust clean destination-only churn from the completed process.
+
+Only if the process crashes or a CopyObject result is ambiguous, wait out the
+request bound and run the strict source-active read-only audit:
 
 Run without `--apply`:
 
@@ -232,12 +297,39 @@ pnpm --dir apps/cloudflare r2:bundles:online-copy -- \
 In `source_active`, an eligible ENAM object absent from OC blocks promotion.
 The online command cannot prune it. Because ENAM is still writer-exclusive,
 abandon the destination using separately reviewed destination-only credentials
-or investigate the specific ordinary-delete race before rebooking.
+or investigate the specific ordinary-delete race before rebooking. Never use
+this abnormal-stop audit to bless a destination-only object.
 
-### 6. Fence writes and promote
+### 6. Fence writes, drain OC PUT capability, and finish copying
 
-Briefly pause new workspace writes and direct-PUT ticket issuance. Reads remain
-available. Drain current write invocations, then deploy the same bridge with:
+Pause new workspace writes and direct-PUT ticket issuance. Reads remain
+available. Drain current write invocations. Record the last instant at which
+any source-active version could issue an OC PUT ticket, then wait the enforced
+ten-minute URL lifetime and the conservative ten-minute upload bound. Require
+no in-flight write invocation and no new OC direct-PUT issuance or completion
+during the final quiet interval.
+
+The source-active apply invocation from step 4 must remain the sole copier
+through this drain. When it logs that temporary convergence is waiting for the
+OC PUT drain, complete every proof above, then type the exact process prompt:
+
+```text
+SOURCE_PUT_DRAINED <source-bucket> <destination-bucket>
+```
+
+This is the existing operator drain assertion delivered late to the exact
+provenance-bearing process, not a new persistence owner. The command then
+re-reads active owners before and after both R2 inventories. If ownership or a
+canonical checkpoint changes during those reads, it retries the coherent pair
+inside the same invocation. It copies every delayed source delta in another
+cycle and exits only after the post-confirmation pair has zero source-only
+objects. Revoke the copy credential before promotion.
+
+No CopyObject request may be issued after this point.
+
+### 7. Promote and validate
+
+Deploy the same bridge with:
 
 ```text
 HOSTED_R2_CUTOVER_PHASE=destination_active
@@ -255,34 +347,14 @@ While write admission remains fenced, prove:
 4. ENAM binding PUT/HEAD/GET/delete smokes pass; and
 5. source fallback occurs only for an actual ENAM miss.
 
-Before releasing writes, rollback is the source-active phase plus immediate
-redeploy. Releasing normal write admission is the forward-only commit point.
-After release, repair forward; never return to OC-only reads.
+### 8. Keep post-promotion copy disabled
 
-### 7. Drain OC direct PUT capability
-
-Record the last instant at which any source-active version could issue an OC
-PUT ticket. Wait the enforced ten-minute URL lifetime and the conservative
-ten-minute upload bound. Require no source-active protocol observation and no
-new OC direct-PUT issuance or completion during the final quiet interval.
-
-Bucket-affine completion continues to accept an OC upload issued before the
-phase switch. Destination-active reads find it through OC fallback until the
-next create-only delta pass copies it.
-
-### 8. Run destination-active deltas
-
-Run the same acknowledged apply command with:
-
-```text
---phase destination_active
-```
-
-ENAM-native objects are expected and are never pruned. Continue until no
-eligible OC object is source-only.
-
-Stop the copier permanently, wait out any uncertain process request bound, and
-revoke its credential.
+The online command rejects `--apply --phase destination_active`. An ambiguous
+CopyObject could otherwise commit after ordinary dual-bucket garbage
+collection and recreate an object that directional convergence cannot
+distinguish from a legitimate ENAM-native write. If any eligible OC object is
+still source-only after promotion, keep write admission closed and investigate
+the violated source-drain or final-pass proof. Do not resume the copier.
 
 ### 9. Prove final eligible convergence
 
@@ -301,6 +373,11 @@ pnpm --dir apps/cloudflare r2:bundles:online-copy -- \
 
 The proof is directional: every currently eligible OC object must exist
 identically in ENAM. ENAM-only production writes are valid and are not drift.
+
+Only after both reads pass may normal write admission resume. Before that
+release, rollback is the source-active phase plus immediate redeploy. Releasing
+normal write admission is the forward-only commit point. After release, repair
+forward; never return to OC-only reads.
 
 ### 10. Re-enable account deletion
 

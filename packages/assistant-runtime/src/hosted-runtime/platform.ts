@@ -80,11 +80,16 @@ import type {
   HostedWorkspaceSnapshotV2Ref,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 import type {
+  HostedRuntimeLinqDeliveryBlockCode,
+  HostedRuntimeLinqDeliveryPosture,
+} from "@murphai/hosted-execution/routes";
+import type {
   HostedPhoneCallStartRequest,
   HostedPhoneCallStartResponse,
 } from "@murphai/hosted-execution/phone-calls";
 import type {
   HostedPlanUsageStatus,
+  HostedPlanUsageToolRequest,
 } from "@murphai/hosted-execution/plan-usage";
 import type {
   HostedRuntimeSubscriptionControlRequest,
@@ -297,6 +302,8 @@ export interface HostedRuntimeLinqTargetOverride {
 
 export interface HostedRuntimeLinqRecentInboundEngagementResult {
   assistantAskFallbackRequired?: boolean | null;
+  deliveryBlockCode?: HostedRuntimeLinqDeliveryBlockCode | null;
+  deliveryPosture?: HostedRuntimeLinqDeliveryPosture | null;
   providerDispatchClaimed?: boolean | null;
   targetOverride?: HostedRuntimeLinqTargetOverride | null;
   threadIsDirect?: boolean | null;
@@ -326,6 +333,7 @@ export interface HostedRuntimeLinqDeliveryOutcomeRequest {
   intentId?: string | null;
   lineLookupKey?: string | null;
   providerMessageId?: string | null;
+  providerMessageIds?: string[] | null;
   providerTarget?: string | null;
   providerThreadId?: string | null;
   target: string | null;
@@ -358,6 +366,8 @@ type HostedRuntimeEffectsPortBase = {
     request: HostedRuntimeTelegramGetFileRequest,
     context?: { signal?: AbortSignal | null },
   ): Promise<HostedRuntimeTelegramFile | null>;
+  deleteEnvironmentVoice?(audioKey: string): Promise<void>;
+  readEnvironmentVoice?(audioKey: string): Promise<Uint8Array | null>;
   deleteMealPhoto?(mealPhotoKey: string): Promise<void>;
   readMealPhoto?(mealPhotoKey: string): Promise<Uint8Array | null>;
   readRawEmailMessage(rawMessageKey: string): Promise<Uint8Array | null>;
@@ -464,7 +474,7 @@ export interface HostedRuntimeFamilyPlanToolPort {
 }
 
 export interface HostedRuntimePlanUsageToolPort {
-  read(): Promise<HostedPlanUsageStatus>;
+  read(request: HostedPlanUsageToolRequest): Promise<HostedPlanUsageStatus>;
 }
 
 export interface HostedRuntimeIMessageContactToolPort {
@@ -496,6 +506,7 @@ export interface HostedRuntimeAssistantPersonalizationToolPort {
 export interface HostedRuntimeGroupToolPort {
   request(
     request: HostedRuntimeGroupToolRequest,
+    context?: { signal?: AbortSignal | null },
   ): Promise<HostedRuntimeGroupToolResponse>;
 }
 

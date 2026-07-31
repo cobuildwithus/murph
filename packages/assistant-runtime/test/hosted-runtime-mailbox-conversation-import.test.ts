@@ -412,7 +412,8 @@ describe("hosted mailbox conversation import adapter", () => {
       onConversationActivityObserved() {
         order.push("activity-callback");
       },
-      onConversationInputStaged() {
+      onConversationInputStaged(channel) {
+        assert.equal(channel, "linq");
         order.push("staged-callback");
       },
       runtime: createRuntime(),
@@ -458,6 +459,63 @@ describe("hosted mailbox conversation import adapter", () => {
       controller.close();
       await importPromise.catch(() => undefined);
     }
+  });
+
+  test("does not offer process preparation for self-authored Linq input", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-self-input-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const decodedWake = createConversationWake({
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: "chat_self_input",
+          from: "redacted-self-sentinel",
+          isFromMe: true,
+          messageId: "msg_self_input",
+          parts: [
+            {
+              type: "text",
+              value: "self-authored message",
+            },
+          ],
+          threadIsDirect: true,
+        },
+        phoneLookupKey: "redacted-self-sentinel",
+      },
+    });
+    let activityCallbackCount = 0;
+    let preparationCallbackCount = 0;
+
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        return {
+          captureId: null,
+          metrics: {
+            nextWakeAt: null,
+            parserProcessed: 0,
+          },
+        };
+      },
+      async prepareWakeContext() {},
+      item: createResolvedConversationMailboxItem({
+        dedupeKey: decodedWake.eventId,
+        id: "mailbox_item_self_input",
+      }),
+      onConversationActivityObserved() {
+        activityCallbackCount += 1;
+      },
+      onConversationInputStaged() {
+        preparationCallbackCount += 1;
+      },
+      runtime: createRuntime(),
+      vaultRoot,
+    });
+
+    assert.equal(outcome.status, "imported");
+    assert.equal(activityCallbackCount, 1);
+    assert.equal(preparationCallbackCount, 0);
   });
 
   test("does not notify active turn input early for durably consumed replay imports", async () => {
@@ -1779,7 +1837,7 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(candidates.inputs[0]?.event.groupReactionContext, undefined);
   });
 
-  test("uses Telegram sender for group actor scoping and prompt attribution", async () => {
+  test("uses Telegram sender for blinded actor identity and prompt attribution", async () => {
     const parentRoot = await mkdtemp(
       path.join(tmpdir(), "murph-hosted-input-telegram-group-"),
     );
@@ -1798,6 +1856,7 @@ describe("hosted mailbox conversation import adapter", () => {
           from: "1234567890",
           messageId: "tg_group_identity",
           schema: "murph.hosted-telegram-message.v1",
+          senderDisplayName: "Alice Example",
           senderUsername: "alice_example",
           text: "hello group",
           threadId: "chat_group_telegram",
@@ -1847,6 +1906,12 @@ describe("hosted mailbox conversation import adapter", () => {
         ? event.sourceMetadata.senderHandle
         : null,
       "1234567890",
+    );
+    assert.equal(
+      event.sourceMetadata?.kind === "telegram"
+        ? event.sourceMetadata.senderDisplayName
+        : null,
+      "Alice Example",
     );
     assert.equal(
       event.sourceMetadata?.kind === "telegram"
@@ -1905,6 +1970,10 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(event.conversation?.threadIsDirect, true);
     assert.equal(
       Object.hasOwn(event.sourceMetadata ?? {}, "senderHandle"),
+      false,
+    );
+    assert.equal(
+      Object.hasOwn(event.sourceMetadata ?? {}, "senderDisplayName"),
       false,
     );
     assert.equal(

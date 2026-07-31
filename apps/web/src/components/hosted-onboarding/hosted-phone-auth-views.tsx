@@ -4,6 +4,8 @@ import type { FormEvent } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
 import { MurphPulseLoader } from "@/src/components/ui/murph-pulse-loader";
+import type { PhoneNumberInputChangeMetadata } from "@/src/components/ui/phone-number-input";
+import { Spinner } from "@/src/components/ui/spinner";
 
 import {
   HostedCodeEntryStep,
@@ -12,7 +14,6 @@ import {
 import { HostedUseDifferentNumberButton } from "./hosted-phone-auth-use-different-number-button";
 import type {
   HostedAuthenticatedPhoneAuthView,
-  HostedPhoneAuthIntent,
   HostedPhoneAuthPendingAction,
   HostedPhoneCountryOption,
   HostedPhoneVerificationAttempt,
@@ -23,11 +24,11 @@ interface SharedFlowProps {
   code: string;
   disableSignup?: boolean;
   disabled: boolean;
-  intent: HostedPhoneAuthIntent;
   pendingAction: HostedPhoneAuthPendingAction;
   phoneFieldDescription?: string | null;
   phoneFieldLabel?: string | null;
   phoneInputAutoFocus?: boolean;
+  phoneInputDisabled: boolean;
   phoneCountryOptions: HostedPhoneCountryOption[];
   phoneNumber: string;
   sendCodeDisabled: boolean;
@@ -36,7 +37,10 @@ interface SharedFlowProps {
   size?: "default" | "compact";
   onCodeChange: (value: string) => void;
   onPhoneCountryChange: (code: string) => void;
-  onPhoneNumberChange: (value: string) => void;
+  onPhoneNumberChange: (
+    value: string,
+    metadata?: PhoneNumberInputChangeMetadata,
+  ) => void;
   onResendCode: () => void;
   onSubmitPhoneEntry: (event: FormEvent<HTMLFormElement>) => void;
   onUseDifferentNumber: () => void;
@@ -109,7 +113,6 @@ export function HostedPhoneAuthFlow(props: SharedFlowProps) {
         code={props.code}
         disableSignup={props.disableSignup}
         disabled={props.disabled}
-        intent={props.intent}
         pendingAction={props.pendingAction}
         secondaryActionSize={props.secondaryActionSize}
         size={props.size}
@@ -123,10 +126,10 @@ export function HostedPhoneAuthFlow(props: SharedFlowProps) {
 
   return (
     <HostedPhoneEntryStep
-      intent={props.intent}
       phoneFieldDescription={props.phoneFieldDescription}
       phoneFieldLabel={props.phoneFieldLabel}
       phoneInputAutoFocus={props.phoneInputAutoFocus}
+      phoneInputDisabled={props.phoneInputDisabled}
       pendingAction={props.pendingAction}
       phoneCountryOptions={props.phoneCountryOptions}
       phoneNumber={props.phoneNumber}
@@ -177,13 +180,19 @@ export function HostedAuthenticatedPhoneAuthState({
         <AlertTitle>You already started logging in or signing up.</AlertTitle>
         <div className="mt-3 flex flex-wrap gap-3">
           <Button
+            aria-busy={pendingAction === "continue"}
             type="button"
             onClick={onContinue}
             disabled={disabled}
             size="lg"
             className="w-full"
           >
-            Continue
+            {pendingAction === "continue" ? (
+              <>
+                <Spinner aria-hidden="true" />
+                Finishing...
+              </>
+            ) : "Continue"}
           </Button>
           <HostedUseDifferentNumberButton
             disabled={disabled}

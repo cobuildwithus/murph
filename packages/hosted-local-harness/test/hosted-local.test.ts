@@ -22,18 +22,6 @@ import {
 import { hostedLocalHarnessRepoRoot as repoRoot } from "../src/repo.ts";
 
 describe("hosted-local harness", () => {
-  function expectCodexCliInstallContract(workflow: string): void {
-    expect(workflow).toContain("- name: Install Codex CLI");
-    expect(workflow).toContain(
-      "sed -n 's/^ARG CODEX_CLI_VERSION=//p' Dockerfile.cloudflare-hosted-runner-base | tail -n 1",
-    );
-    expect(workflow).toContain(
-      'npm install --prefix "${npm_prefix}" --global --omit=dev --no-audit --no-fund --ignore-scripts "@openai/codex@${codex_cli_version}"',
-    );
-    expect(workflow).toContain('echo "${npm_prefix}/bin" >> "$GITHUB_PATH"');
-    expect(workflow).toContain('"${npm_prefix}/bin/codex" --version');
-  }
-
   test("keeps root hosted-local scripts canonical", async () => {
     const rootPackage = JSON.parse(
       await readFile(path.join(repoRoot, "package.json"), "utf8"),
@@ -101,6 +89,14 @@ describe("hosted-local harness", () => {
       "apps/cloudflare/test/hosted-local-linq-group-route-drift-e2e.test.ts",
     );
     expect(
+      resolveHostedLocalE2eScenarios("linq-group-ios-app-download")[0],
+    ).toEqual({
+      file:
+        "apps/cloudflare/test/hosted-local-linq-group-ios-app-download-e2e.test.ts",
+      manualOnly: true,
+      name: "linq-group-ios-app-download",
+    });
+    expect(
       resolveHostedLocalE2eScenarios("linq-home-line-reroute-retry")[0]?.file,
     ).toBe(
       "apps/cloudflare/test/hosted-local-linq-home-line-reroute-retry-e2e.test.ts",
@@ -165,6 +161,8 @@ describe("hosted-local harness", () => {
     expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).toContain(
       "linq-group-route-drift",
     );
+    expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name))
+      .not.toContain("linq-group-ios-app-download");
     expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).toContain(
       "linq-home-line-reroute-retry",
     );
@@ -244,52 +242,6 @@ describe("hosted-local harness", () => {
       file: "apps/cloudflare/test/hosted-local-linq-same-wake-batching-e2e.test.ts",
       name: "linq-same-wake-batching",
     });
-  });
-
-  test("keeps the Junction replay scenario on the shared hosted E2E artifact lane", async () => {
-    const workflow = await readFile(
-      path.join(repoRoot, ".github", "workflows", "cloudflare-hosted-e2e.yml"),
-      "utf8",
-    );
-
-    expect(workflow).toContain(
-      "scenarios: device-sync-junction-wearable-direct-resource-replay",
-    );
-    expect(workflow).toContain("timeoutMinutes: 35");
-    expect(resolveHostedLocalE2eScenarios("device-sync-junction-wearable-direct-resource-replay")[0]?.file).toBe(
-      "apps/cloudflare/test/hosted-local-device-sync-junction-wearable-direct-resource-replay-e2e.test.ts",
-    );
-    expect(workflow).toContain(
-      "HOSTED_DEVICE_ROUTING_INDEX_KEY: 0101010101010101010101010101010101010101010101010101010101010101",
-    );
-    expectCodexCliInstallContract(workflow);
-    expect(workflow).toContain(".artifacts/hosted-local/**/state.json");
-    expect(existsSync(path.join(
-      repoRoot,
-      ".github",
-      "workflows",
-      "cloudflare-hosted-device-sync-e2e.yml",
-    ))).toBe(false);
-  });
-
-  test("keeps Cloudflare hosted E2E jobs provisioned with Codex CLI", async () => {
-    const workflow = await readFile(
-      path.join(repoRoot, ".github", "workflows", "cloudflare-hosted-e2e.yml"),
-      "utf8",
-    );
-
-    expect(workflow).toContain('pnpm hosted-local e2e "${scenarios[@]}" --no-bundle');
-    expect(workflow).toContain([
-      "- name: Linq reminder + onboarding follow-up E2E",
-      '            fastGate: "1"',
-    ].join("\n"));
-    expect(workflow).toContain([
-      "- name: Hosted foreground reply priority E2E",
-      '            fastGate: "1"',
-      "            slug: foreground-reply-priority",
-      "            scenarios: foreground-reply-priority",
-    ].join("\n"));
-    expectCodexCliInstallContract(workflow);
   });
 
   test("keeps diagnostic hosted-local E2E scenarios opt-in", () => {

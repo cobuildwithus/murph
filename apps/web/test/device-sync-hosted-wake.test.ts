@@ -49,7 +49,6 @@ const mocks = vi.hoisted(() => {
     prisma: {
       $transaction: vi.fn(),
     },
-    nudgeHostedRunnerUserBestEffortResult: vi.fn(),
     signalHostedDeviceSyncMailboxRuntime: vi.fn(),
     appendHostedMailboxEnvelopeTx: vi.fn(async (input: {
       envelope: { eventId: string; userId: string };
@@ -88,10 +87,6 @@ vi.mock("@/src/lib/prisma", () => ({
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
-}));
-
-vi.mock("@/src/lib/hosted-runner/control", () => ({
-  nudgeHostedRunnerUserBestEffortResult: mocks.nudgeHostedRunnerUserBestEffortResult,
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
@@ -500,15 +495,6 @@ describe("hosted device-sync wakes", () => {
     });
     mocks.prismaTx.deviceSyncSignal.create.mockResolvedValue({ id: 8 });
     mocks.completeWebhookTrace.mockResolvedValue(true);
-    mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValue({
-      accepted: true,
-      alarmScheduled: false,
-      configured: true,
-      errorCode: null,
-      immediateDriveStarted: false,
-      inFlight: false,
-      nextAlarmAtPresent: false,
-    });
     mocks.signalHostedDeviceSyncMailboxRuntime.mockResolvedValue({
       signalAccepted: true,
       workflowId: "hosted-user-runtime:user-123",
@@ -608,6 +594,36 @@ describe("hosted device-sync wakes", () => {
 
     expect(controlPlane.publicIngressBaseUrl).toBe("http://localhost:3000/api/device-sync");
     expect(controlPlane.allowedReturnOrigins).toEqual(["http://localhost:3000"]);
+  });
+
+  it("forwards the required hosted callback owner to shared public ingress", async () => {
+    const handleConnectionCallback = vi.fn().mockResolvedValue({
+      account: buildHostedConnection(),
+      returnTo: null,
+    });
+    mocks.createDeviceSyncPublicIngress.mockReturnValueOnce({
+      describeProviders: vi.fn(() => []),
+      handleConnectionCallback,
+    });
+    const ingress = createHostedDeviceSyncPublicIngressService(
+      new Request(
+        "https://control.example.test/api/device-sync/oauth/oura/callback?code=abc&state=xyz&scope=read%3Asleep",
+      ),
+    );
+
+    await ingress.handleConnectionCallback("oura", {
+      expectedOwnerId: "member_a",
+    });
+
+    expect(handleConnectionCallback).toHaveBeenCalledWith(expect.objectContaining({
+      code: "abc",
+      error: null,
+      errorDescription: null,
+      expectedOwnerId: "member_a",
+      provider: "oura",
+      scope: "read:sleep",
+      state: "xyz",
+    }));
   });
 
   it("uses explicit companion connect intent as the only lifecycle-changing SDK path", async () => {
@@ -1546,7 +1562,6 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.createSignal).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });
 
   it("leaves a reconnect alone after atomically observing a disconnected credential-less epoch", async () => {
@@ -1678,7 +1693,6 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.createSignal).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });
 
   it("rejects companion HRV after disconnect intent commits and while provider revoke is pending", async () => {
@@ -1865,6 +1879,121 @@ describe("hosted device-sync wakes", () => {
       providerConfigKey: "hosted-provider-config",
       userId: "user-123",
     });
+  });
+
+  it("preserves established Junction siblings and blocks a new source until target cleanup succeeds", async () => {
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/connect-sources/garmin/start", {
+        method: "POST",
+      }),
+    );
+    let currentConnection = buildHostedConnection({
+      displayName: "Junction",
+      externalAccountId: "junction-user-established",
+      provider: "junction",
+      scopes: [],
+      setupPhase: "source_confirmed",
+    });
+    const storedConnection = buildProviderConfigStoredConnection({
+      displayName: "Junction",
+      externalAccountId: "junction-user-established",
+      provider: "junction",
+      scopes: [],
+      setupPhase: "source_confirmed",
+    });
+    const revokeSourceAccess = vi.fn()
+      .mockRejectedValueOnce(new Error("provider cleanup unavailable"))
+      .mockResolvedValueOnce(undefined);
+    mocks.registryGet.mockReturnValue({
+      connectionHandler: {
+        revokeSourceAccess,
+      },
+    });
+    mocks.listConnectionsForUser.mockImplementation(async () => [currentConnection]);
+    mocks.getConnectionForUser.mockImplementation(async () => currentConnection);
+    mocks.getStoredConnectionAccountForUser.mockResolvedValue(storedConnection);
+    mocks.syncDurableConnectionState.mockImplementation(async (connection) => {
+      currentConnection = connection;
+    });
+
+    await expect(
+      controlPlane.prepareConnectionStart("user-123", {
+        connectSourceId: "fitbit",
+        connectTarget: "fitbit",
+        label: "Fitbit",
+        provider: "junction",
+        sourceProviderSlug: "fitbit",
+      }),
+    ).rejects.toMatchObject({
+      code: "JUNCTION_PENDING_LINK_CLEANUP_FAILED",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(currentConnection).toEqual(expect.objectContaining({
+      setupPhase: "source_confirmed",
+      status: "active",
+    }));
+    expect(revokeSourceAccess).toHaveBeenCalledWith(storedConnection, "fitbit");
+    expect(mocks.upsertConnectionSource).not.toHaveBeenCalled();
+
+    await expect(
+      controlPlane.prepareConnectionStart("user-123", {
+        connectSourceId: "fitbit",
+        connectTarget: "fitbit",
+        label: "Fitbit",
+        provider: "junction",
+        sourceProviderSlug: "fitbit",
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(revokeSourceAccess).toHaveBeenCalledTimes(2);
+    expect(mocks.upsertConnectionSource).toHaveBeenCalledWith(
+      expect.objectContaining({
+        connectionId: currentConnection.id,
+        sourceProviderSlug: "fitbit",
+        status: "disconnected",
+      }),
+    );
+    expect(mocks.clearStoredProviderConfigCredential).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when Junction target cleanup authority is unavailable", async () => {
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/connect-sources/fitbit/start", {
+        method: "POST",
+      }),
+    );
+    const connection = buildHostedConnection({
+      displayName: "Junction",
+      externalAccountId: "junction-user-established",
+      provider: "junction",
+      scopes: [],
+      setupPhase: "source_confirmed",
+    });
+    mocks.listConnectionsForUser.mockResolvedValue([connection]);
+    mocks.getStoredConnectionAccountForUser.mockResolvedValue(
+      buildProviderConfigStoredConnection(connection),
+    );
+    mocks.registryGet.mockReturnValue({
+      connectionHandler: {},
+    });
+
+    await expect(
+      controlPlane.prepareConnectionStart("user-123", {
+        connectSourceId: "fitbit",
+        connectTarget: "fitbit",
+        label: "Fitbit",
+        provider: "junction",
+        sourceProviderSlug: "fitbit",
+      }),
+    ).rejects.toMatchObject({
+      code: "JUNCTION_PENDING_LINK_CLEANUP_FAILED",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(mocks.upsertConnectionSource).not.toHaveBeenCalled();
   });
 
   it("fails closed when revoked provider-config credential cleanup loses its fence", async () => {
@@ -2288,7 +2417,7 @@ describe("hosted device-sync wakes", () => {
       new Request("https://control.example.test/api/device-sync/oauth/oura/callback?code=abc&state=xyz"),
     );
 
-    await controlPlane.handleOAuthCallback("oura");
+    await controlPlane.handleOAuthCallback("oura", { expectedOwnerId: "user-123" });
 
     expect(mocks.withConnectionMutationLock).toHaveBeenCalledWith("dsc_123", expect.any(Function));
     expect(mocks.getConnectionForUser).toHaveBeenCalledWith(
@@ -2412,13 +2541,19 @@ describe("hosted device-sync wakes", () => {
     ["a newer connection epoch", buildHostedConnection({
       connectedAt: "2026-03-26T12:01:00.000Z",
     })],
-  ])("does not persist a late connection-established wake over %s", async (_label, current) => {
+  ])("rejects a late callback over %s without admitting work", async (_label, current) => {
     mocks.getConnectionForUser.mockResolvedValue(current);
     const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/oauth/oura/callback?code=abc&state=xyz"),
     );
 
-    await controlPlane.handleOAuthCallback("oura");
+    await expect(
+      controlPlane.handleOAuthCallback("oura", { expectedOwnerId: "user-123" }),
+    ).rejects.toMatchObject({
+      code: "CONNECTION_ESTABLISHMENT_STALE",
+      httpStatus: 409,
+      retryable: false,
+    });
 
     expect(mocks.withConnectionMutationLock).toHaveBeenCalledWith("dsc_123", expect.any(Function));
     expect(mocks.getConnectionForUser).toHaveBeenCalledWith(
@@ -2429,6 +2564,52 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.upsertConnectionSource).not.toHaveBeenCalled();
     expect(mocks.createSignal).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+  });
+
+  it("rejects callback establishment when the connection owner is missing", async () => {
+    mocks.getConnectionOwnerId.mockResolvedValue(null);
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/oauth/oura/callback?code=abc&state=xyz"),
+    );
+
+    await expect(
+      controlPlane.handleOAuthCallback("oura", { expectedOwnerId: "user-123" }),
+    ).rejects.toMatchObject({
+      code: "CONNECTION_ESTABLISHMENT_STALE",
+      httpStatus: 409,
+      retryable: false,
+    });
+
+    expect(mocks.withConnectionMutationLock).not.toHaveBeenCalled();
+    expect(mocks.upsertConnectionSource).not.toHaveBeenCalled();
+    expect(mocks.createSignal).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+  });
+
+  it("rejects a conflicting connection-established mailbox identity", async () => {
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValueOnce({
+      dedupeConflict: true,
+      duplicate: true,
+      inserted: false,
+      item: {
+        id: "mailbox_conflict",
+        userId: "user-123",
+      },
+    });
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/oauth/oura/callback?code=abc&state=xyz"),
+    );
+
+    await expect(
+      controlPlane.handleOAuthCallback("oura", { expectedOwnerId: "user-123" }),
+    ).rejects.toMatchObject({
+      code: "CONNECTION_ESTABLISHMENT_WORK_CONFLICT",
+      httpStatus: 409,
+      retryable: false,
+    });
+
+    expect(mocks.createSignal).toHaveBeenCalled();
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
   });
 
@@ -2486,7 +2667,7 @@ describe("hosted device-sync wakes", () => {
       new Request("https://control.example.test/api/device-sync/connect/junction/callback?state=xyz"),
     );
 
-    await controlPlane.handleConnectionCallback("junction");
+    await controlPlane.handleConnectionCallback("junction", { expectedOwnerId: "user-123" });
 
     expect(mocks.upsertConnectionSource).toHaveBeenCalledWith({
       connectionId: "dsc_junction",
@@ -2591,9 +2772,9 @@ describe("hosted device-sync wakes", () => {
       new Request("https://control.example.test/api/device-sync/oauth/junction/callback?code=abc&state=xyz"),
     );
 
-    await controlPlane.handleOAuthCallback("junction");
-    await controlPlane.handleOAuthCallback("junction");
-    await controlPlane.handleOAuthCallback("junction");
+    await controlPlane.handleOAuthCallback("junction", { expectedOwnerId: "user-123" });
+    await controlPlane.handleOAuthCallback("junction", { expectedOwnerId: "user-123" });
+    await controlPlane.handleOAuthCallback("junction", { expectedOwnerId: "user-123" });
 
     expect(upsertedSourceKeys).toHaveLength(3);
     expect(upsertedSourceKeys[0]?.sourceProviderSlug).toBe("garmin");
@@ -2614,7 +2795,9 @@ describe("hosted device-sync wakes", () => {
       new Request("https://control.example.test/api/device-sync/oauth/oura/callback?code=abc&state=xyz"),
     );
 
-    await expect(controlPlane.handleOAuthCallback("oura")).resolves.toEqual({
+    await expect(
+      controlPlane.handleOAuthCallback("oura", { expectedOwnerId: "user-123" }),
+    ).resolves.toEqual({
       connection: {
         id: "dsc_123",
       },
@@ -2782,7 +2965,6 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_123",
     });
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });
 
   it("terminally supersedes webhook work when reconnect replaces its observed epoch before dirty-state commit", async () => {
@@ -2824,6 +3006,89 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.createSignal).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+  });
+
+  it("retries webhook work when setup becomes pending before dirty-state commit", async () => {
+    mocks.getConnectionForUser.mockResolvedValueOnce(buildHostedConnection({
+      setupExpiresAt: "2026-03-26T12:15:00.000Z",
+      setupPhase: "pending_link",
+    }));
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/webhooks/oura", {
+        body: JSON.stringify({
+          event: "sleep.updated",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    await expect(controlPlane.handleWebhook("oura")).rejects.toMatchObject({
+      code: "WEBHOOK_ACCOUNT_NOT_READY",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
+    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
+    expect(mocks.createSignal).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+  });
+
+  it("retries source-attributed webhook work when the target disconnects before dirty-state commit", async () => {
+    mocks.getConnectionForUser.mockResolvedValueOnce(buildHostedConnection({
+      provider: "junction",
+      setupPhase: "source_confirmed",
+    }));
+    mocks.listConnectionSources.mockResolvedValueOnce([{
+      connectionId: "dsc_123",
+      sourceProviderSlug: "fitbit",
+      status: "disconnected",
+    }]);
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: getPrisma(),
+    });
+
+    await expect(
+      handleHostedDeviceSyncWebhookAccepted({
+        account: {
+          connectedAt: "2026-03-26T12:00:00.000Z",
+          id: "dsc_123",
+          provider: "junction",
+        },
+        claimToken: "claim-token",
+        now: "2026-03-26T12:00:00.000Z",
+        store,
+        traceId: "trace_123",
+        webhook: {
+          acceptanceMode: "durable_webhook_work",
+          eventType: "activity.updated",
+          jobs: [{
+            kind: "resource",
+            payload: {
+              resource: "activity",
+              sourceProviderSlug: "fitbit",
+            },
+          }],
+          sourceProviderSlug: "fitbit",
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "WEBHOOK_SOURCE_NOT_READY",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(mocks.listConnectionSources).toHaveBeenCalledWith({
+      connectionId: "dsc_123",
+      sourceProviderSlug: "fitbit",
+    }, mocks.prismaTx);
+    expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
+    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
   });
 
   it("resolves the companion lane, stages a compact RMSSD job, and wakes the runtime", async () => {
@@ -3496,7 +3761,6 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.completeWebhookTrace).toHaveBeenCalledTimes(1);
     expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledTimes(1);
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });
 
   it("requests another mailbox wake in the same wall-clock bucket after prior work is clean", async () => {
@@ -3578,7 +3842,6 @@ describe("hosted device-sync wakes", () => {
 
     expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(2);
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledTimes(2);
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });
 
   it("rejects hosted webhook bodies above the shared device-sync limit before ingress parsing", async () => {
@@ -3626,7 +3889,6 @@ describe("hosted device-sync wakes", () => {
 
     expect(mocks.createSignal).not.toHaveBeenCalled();
     expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
   });
@@ -3654,7 +3916,6 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.createSignal).not.toHaveBeenCalled();
     expect(mocks.upsertDirtyConnection).toHaveBeenCalledTimes(1);
     expect(mocks.completeWebhookTrace).toHaveBeenCalledTimes(1);
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
   });
@@ -3781,7 +4042,6 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_123",
     });
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });
 
   it("does not suppress Junction daily data webhook payloads when dirty state would already be pending", async () => {
@@ -4215,7 +4475,6 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_123",
     });
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });
 
   it("keeps hosted webhook traces retryable when ingress hooks cannot resolve an owner", async () => {
@@ -4253,7 +4512,6 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
     expect(mocks.createSignal).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
   });
 
@@ -4348,7 +4606,6 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_123",
     });
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });
 
 });

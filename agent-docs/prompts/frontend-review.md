@@ -7,15 +7,20 @@ Use this review-only frontend lens for user-facing `apps/web` changes inside
 the preliminary `completion-specialists` ReviewGPT pass or the separate Claude
 Code UI double-check.
 
-The separate `product-experience-review` owns the irreducible purpose, complete
-cross-surface journey, timing and delivery, and whether words, actions, choices,
-or screens can be removed. This pass owns rendered implementation quality,
-responsive behavior, accessibility, and design-system execution; do not
-duplicate subjective product-taste findings or decide the copy, state selection,
-action count, or whether an element exists.
+The product-experience lens in the same preliminary ReviewGPT pass owns the
+irreducible purpose, complete cross-surface journey, timing and delivery, and
+whether words, actions, choices, or screens can be removed. This lens owns
+rendered implementation quality, responsive behavior, accessibility, and
+design-system execution; do not duplicate subjective product-taste findings or
+decide the copy, state selection, action count, or whether an element exists.
 
 Outcome:
 Determine whether the declared product experience renders faithfully, visually coherently, responsively, accessibly, and with a maintainable frontend implementation.
+
+Aim for a result Steve Jobs would be proud of: the simplest complete
+implementation of the declared experience. Flag implementation or decorative
+complexity only when it can be removed without changing product-owned copy,
+actions, states, elements, behavior, accessibility, responsiveness, or recovery.
 
 Success criteria:
 - Every finding is tied to reachable rendered or code evidence and user impact.

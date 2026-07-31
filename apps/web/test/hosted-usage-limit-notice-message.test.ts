@@ -16,6 +16,10 @@ vi.mock("@/src/lib/hosted-groups/group-usage-funding", () => ({
 }));
 
 import { projectHostedAiUsageLimitNoticeForDelivery } from "@/src/lib/hosted-execution/usage-limit-notice-message";
+import {
+  HOSTED_SPONSORED_GROUP_PAUSE_MESSAGE,
+  renderUserFacingMessage,
+} from "@/src/lib/hosted-messages/user-facing-messages";
 
 describe("projectHostedAiUsageLimitNoticeForDelivery", () => {
   beforeEach(() => {
@@ -25,10 +29,10 @@ describe("projectHostedAiUsageLimitNoticeForDelivery", () => {
   it("asks the room to fund the group while it is exhausted", async () => {
     const prisma = { kind: "prisma" } as never;
     mocks.readHostedGroupUsageStatus.mockResolvedValue({
-      capacityState: "exhausted",
+      fundingNeeded: true,
       fundingUrl:
         "https://www.withmurph.ai/groups/fund/group_join_code_1234",
-      periodEnd: "2026-08-01T00:00:00.000Z",
+      sponsorshipStatus: "not_sponsored",
     });
 
     const projected = await projectHostedAiUsageLimitNoticeForDelivery({
@@ -48,46 +52,18 @@ describe("projectHostedAiUsageLimitNoticeForDelivery", () => {
     expect(mocks.readHostedPersonalAiUsageStatus).not.toHaveBeenCalled();
   });
 
-  it("rotates the group funding ask across periods for the same member", async () => {
+  it("keeps the group funding ask deterministic without exposing a period", async () => {
     const message = "I'm out for the whole room until my time resets.";
-    const asks = new Set<string>();
-
-    for (const periodEnd of [
-      "2026-08-01T00:00:00.000Z",
-      "2026-09-01T00:00:00.000Z",
-      "2026-10-01T00:00:00.000Z",
-      "2026-11-01T00:00:00.000Z",
-      "2026-12-01T00:00:00.000Z",
-    ]) {
-      mocks.readHostedGroupUsageStatus.mockResolvedValue({
-        capacityState: "exhausted",
-        fundingUrl:
-          "https://www.withmurph.ai/groups/fund/group_join_code_1234",
-        periodEnd,
-      });
-
-      asks.add((await projectHostedAiUsageLimitNoticeForDelivery({
-        memberId: "member_group_runtime",
-        message,
-        noticeCode: "thread_usage_limit_reached",
-        prisma: {} as never,
-      })).slice(message.length));
-    }
-
-    expect(asks.size).toBeGreaterThan(1);
-  });
-
-  it("holds the group funding ask steady within one period", async () => {
     mocks.readHostedGroupUsageStatus.mockResolvedValue({
-      capacityState: "exhausted",
+      fundingNeeded: true,
       fundingUrl:
         "https://www.withmurph.ai/groups/fund/group_join_code_1234",
-      periodEnd: "2026-08-01T00:00:00.000Z",
+      sponsorshipStatus: "not_sponsored",
     });
 
     const project = async () => projectHostedAiUsageLimitNoticeForDelivery({
       memberId: "member_group_runtime",
-      message: "I'm out for the whole room until my time resets.",
+      message,
       noticeCode: "thread_usage_limit_reached",
       prisma: {} as never,
     });
@@ -95,12 +71,37 @@ describe("projectHostedAiUsageLimitNoticeForDelivery", () => {
     expect(await project()).toBe(await project());
   });
 
+  it("replaces the real production reset notice with one neutral sponsored pause", async () => {
+    mocks.readHostedGroupUsageStatus.mockResolvedValue({
+      fundingNeeded: false,
+      fundingUrl: null,
+      sponsorshipStatus: "sponsored",
+    });
+    const productionNotice = renderUserFacingMessage({
+      context: {},
+      key: "linq.ai_usage.thread_limit_reached",
+      seed: "member_group_runtime",
+    }).text;
+
+    const projected = await projectHostedAiUsageLimitNoticeForDelivery({
+      memberId: "member_group_runtime",
+      message: productionNotice,
+      noticeCode: "thread_usage_limit_reached",
+      prisma: {} as never,
+    });
+
+    expect(projected).toBe(HOSTED_SPONSORED_GROUP_PAUSE_MESSAGE);
+    expect(projected).not.toBe(productionNotice);
+    expect(projected).not.toMatch(
+      /payer|sponsor|\$|percent|remaining|message|conserve|reset|month|fund/iu,
+    );
+  });
+
   it("leaves a stale group notice unchanged after capacity recovers", async () => {
     mocks.readHostedGroupUsageStatus.mockResolvedValue({
-      capacityState: "healthy",
-      fundingUrl:
-        "https://www.withmurph.ai/groups/fund/group_join_code_1234",
-      periodEnd: "2026-08-01T00:00:00.000Z",
+      fundingNeeded: false,
+      fundingUrl: null,
+      sponsorshipStatus: "not_sponsored",
     });
 
     await expect(projectHostedAiUsageLimitNoticeForDelivery({

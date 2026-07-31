@@ -1,6 +1,6 @@
 # Product Specs Index
 
-Last verified: 2026-07-27
+Last verified: 2026-07-29
 
 | Path | Purpose | Status |
 | --- | --- | --- |
@@ -10,6 +10,7 @@ Last verified: 2026-07-27
 | `agent-docs/product-specs/pulse-trial-start-paid-pulse.md` | Implemented exhausted Pulse Trial conversion to paid Pulse through Stripe trial-end billing. | Active |
 | `agent-docs/product-specs/hosted-plan-downgrades.md` | Edge-to-Pulse renewal switches, the billing-gated Edge assistant-model choice, downgrade behavior, deployment compatibility, and the enforced composed usage boundary with separate group funding. | Active |
 | `agent-docs/product-specs/hosted-plan-usage.md` | Web-owned overall available-usage projection and enforced included-plus-generic-credit blocking, including forecast, server-selected actions, group privacy boundaries, and personal or exact Family-member Settings handoffs. | Active |
+| `agent-docs/product-specs/hosted-group-member-plan.md` | Private $3.50 Core subscription for confirmed hosted-group members, with an internal Group billing identity, Pulse runtime capability, $2.80 included personal AI usage, trial continuation, signed billing actions, and public-checkout exclusion. | Active |
 | `agent-docs/product-specs/labs-discovery.md` | Live read-only lab catalog and ZIP collection-site discovery through private Murph and the authenticated unlinked `/labs` page, with provider-neutral member-facing language. | Implemented |
 | `agent-docs/product-specs/measured-biomarker-index.md` | Curated device-first Biomarkers index over preserved private lab history, with explicit identity admission, no catch-all Other section, and closed health-area notebook disclosures. | Implemented |
 | `agent-docs/product-specs/hosted-usage-topups.md` | Implemented fixed $5/$10/$25 personal, exact Family-member, and hosted-group funding with current-policy saved-card reuse, Checkout fallback, authenticated payer-and-target-scoped lost-response recovery, canonical purchase/referral credit entries, and purchase-only refund/dispute reversal; fulfilled top-ups immediately refresh the overall usage bar. | Active |
@@ -33,6 +34,7 @@ Last verified: 2026-07-27
 | `agent-docs/product-specs/shared-message-targeting.md` | One accepted-message reference and resolver shared by optional native replies and exact-message reactions in private and group conversations. | Implemented |
 | `agent-docs/product-specs/group-chat-social-dynamics.md` | Human-first group-chat psychology, floor ownership, setup-to-human handoff, arrival-to-resident tapering, participation boundaries, and comedy authority. | Implemented |
 | `agent-docs/product-specs/group-health-newsletter.md` | Recurring group health newsletter emailed from a group chat: cron automation in the group vault, tone flavors, a reusable default-at-join email-sharing grant, and Cloudflare `HOSTED_EMAIL` delivery with web-side address resolution. | Specified |
+| `agent-docs/product-specs/group-challenge-formats-and-scorecards.md` | Individual, team, and collective challenge formats; one-to-five model-interpreted additive components; bounded shared-read composition; deterministic CLI scoring; and page-owned cumulative settlement. | Implemented |
 | `agent-docs/product-specs/group-challenge-data-diagnostics.md` | Truthful partial group-challenge standings plus an explicit bounded device-sync status share for evidence-backed recovery guidance. | Implemented |
 | `agent-docs/product-specs/personal-group-awareness.md` | Personal Murph read access to the member's hosted-group memberships, requested permissions, active self grants, and owner-authorized permission links. | Implemented |
 | `agent-docs/product-specs/consented-group-disclosure.md` | Exact per-member group disclosure consent with one private read-only candidate and one fresh outgoing reviewer. | Implemented |

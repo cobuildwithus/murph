@@ -45,6 +45,16 @@ type PrivyCompleteRouteModule = typeof import("../app/api/hosted-onboarding/priv
 
 let privyCompleteRoute: PrivyCompleteRouteModule;
 
+const launchConsentStatus = {
+  documents: [],
+  generatedAt: "2026-07-29T12:00:00.000Z",
+  launchGranted: false,
+  launchScopes: [],
+  ok: true,
+  schema: "murph.hosted-consent-status.v1",
+  scopes: [],
+} as const;
+
 describe("hosted onboarding Privy completion route", () => {
   beforeAll(async () => {
     privyCompleteRoute = await import("../app/api/hosted-onboarding/privy/complete/route");
@@ -70,9 +80,7 @@ describe("hosted onboarding Privy completion route", () => {
       cookie: "murph-session=session-token; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000",
       sessionId: "hws_123",
     });
-    mocks.readHostedConsentStatus.mockResolvedValue({
-      launchGranted: false,
-    });
+    mocks.readHostedConsentStatus.mockResolvedValue(launchConsentStatus);
     mocks.requirePrivyCompletionSession.mockResolvedValue({
       identity: {
         phone: {
@@ -109,6 +117,7 @@ describe("hosted onboarding Privy completion route", () => {
       inviteCode: "invite_123",
       joinUrl: "/join/invite_123",
       launchConsentGranted: false,
+      launchConsentStatus,
       messagingSetupRequired: false,
       ok: true,
       stage: "checkout",
@@ -162,6 +171,7 @@ describe("hosted onboarding Privy completion route", () => {
       inviteCode: "invite_123",
       joinUrl: "/join/invite_123",
       launchConsentGranted: false,
+      launchConsentStatus,
       messagingSetupRequired: false,
       ok: true,
       stage: "active",
@@ -297,6 +307,7 @@ describe("hosted onboarding Privy completion route", () => {
     });
     mocks.getHostedInviteStatus.mockResolvedValueOnce(createInviteStatus("active"));
     mocks.readHostedConsentStatus.mockResolvedValueOnce({
+      ...launchConsentStatus,
       launchGranted: true,
     });
 
@@ -335,11 +346,13 @@ describe("hosted onboarding Privy completion route", () => {
     );
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
+    const payload = await response.json();
+    expect(payload).toMatchObject({
       launchConsentGranted: false,
       ok: true,
       stage: "checkout",
     });
+    expect(payload).not.toHaveProperty("launchConsentStatus");
     expect(mocks.issueHostedAppSession).toHaveBeenCalledWith({
       memberId: "member_123",
       privyUserId: "did:privy:user_123",

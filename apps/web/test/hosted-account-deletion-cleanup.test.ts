@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   deleteHostedPrivyUser: vi.fn(),
+  deleteHostedRuntimeLogDataForUsers: vi.fn(),
   deleteHostedRunnerUserDataBestEffort: vi.fn(),
   getHostedOnboardingStripe: vi.fn(),
   getHostedWebCryptoConfig: vi.fn(),
@@ -26,6 +27,11 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   getHostedOnboardingStripe: mocks.getHostedOnboardingStripe,
 }));
 
+vi.mock("@/src/lib/hosted-runtime-log/store", () => ({
+  deleteHostedRuntimeLogDataForUsers:
+    mocks.deleteHostedRuntimeLogDataForUsers,
+}));
+
 import {
   drainHostedAccountDeletionCleanupBatch,
   persistHostedAccountDeletionCleanupTx,
@@ -35,6 +41,7 @@ import {
 
 const KMS_KEY_NAME =
   "projects/test/locations/global/keyRings/test/cryptoKeys/account-cleanup";
+const KMS_KEY_VERSION_NAME = `${KMS_KEY_NAME}/cryptoKeyVersions/7`;
 
 beforeEach(() => {
   vi.useRealTimers();
@@ -61,6 +68,7 @@ beforeEach(() => {
   mocks.deleteHostedRunnerUserDataBestEffort.mockResolvedValue(
     makeCloudflareDeletionResult({ deleted: true }),
   );
+  mocks.deleteHostedRuntimeLogDataForUsers.mockResolvedValue(0);
   mocks.deleteHostedPrivyUser.mockResolvedValue(true);
   mocks.getHostedOnboardingStripe.mockReturnValue({
     customers: {
@@ -72,6 +80,10 @@ beforeEach(() => {
 describe("hosted account deletion cleanup", () => {
   it("encrypts only the identifiers needed for cleanup with receipt-bound AAD", async () => {
     const now = new Date("2026-07-26T18:00:00.000Z");
+    mocks.kmsEncrypt.mockImplementationOnce(async (input: { plaintext: Uint8Array }) => ({
+      ciphertext: Buffer.from(input.plaintext).toString("base64"),
+      keyName: KMS_KEY_VERSION_NAME,
+    }));
     const cleanup = await prepareHostedAccountDeletionCleanup({
       now,
       privyUserId: "privy_user_1",
@@ -95,6 +107,71 @@ describe("hosted account deletion cleanup", () => {
       stripeCustomerIds: ["cus_1"],
     });
     expect(cleanup.payloadCiphertext).not.toContain("privy_user_1");
+    expect(cleanup.kmsKeyName).toBe(KMS_KEY_NAME);
+  });
+
+  it("repairs a legacy versioned KMS receipt before provider cleanup starts", async () => {
+    const store = new CleanupStore();
+    const now = new Date("2026-07-26T18:00:00.000Z");
+    const deleteStripeCustomer = vi.fn(async () => ({ deleted: true }));
+    mocks.getHostedOnboardingStripe.mockReturnValue({
+      customers: { del: deleteStripeCustomer },
+    });
+    const prepared = await createCleanup(store, now, {
+      privyUserId: "privy_user_1",
+      stripeCustomerIds: ["cus_1"],
+    });
+    if (!store.row) {
+      throw new Error("Expected a persisted cleanup receipt.");
+    }
+    store.row = { ...store.row, kmsKeyName: KMS_KEY_VERSION_NAME };
+
+    await expect(runHostedAccountDeletionCleanup({
+      cleanupId: prepared.id,
+      now,
+      prisma: store.prisma as never,
+    })).resolves.toMatchObject({ cleanupPending: false });
+
+    expect(mocks.kmsDecrypt).toHaveBeenCalledWith(expect.objectContaining({
+      keyName: KMS_KEY_NAME,
+    }));
+    expect(mocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledTimes(1);
+    expect(mocks.deleteHostedRuntimeLogDataForUsers).toHaveBeenCalledTimes(1);
+    expect(mocks.deleteHostedPrivyUser).toHaveBeenCalledTimes(1);
+    expect(deleteStripeCustomer).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed on malformed persisted KMS resource names", async () => {
+    const store = new CleanupStore();
+    const now = new Date("2026-07-26T18:00:00.000Z");
+    const prepared = await createCleanup(store, now, {
+      privyUserId: "privy_user_1",
+      stripeCustomerIds: ["cus_1"],
+    });
+    if (!store.row) {
+      throw new Error("Expected a persisted cleanup receipt.");
+    }
+    store.row = {
+      ...store.row,
+      kmsKeyName: `${KMS_KEY_NAME}/cryptoKeyVersions/latest`,
+    };
+
+    await expect(runHostedAccountDeletionCleanup({
+      cleanupId: prepared.id,
+      now,
+      prisma: store.prisma as never,
+    })).rejects.toThrow(/CryptoKey or CryptoKeyVersion resource name/u);
+
+    expect(mocks.kmsDecrypt).not.toHaveBeenCalled();
+    expect(mocks.deleteHostedRunnerUserDataBestEffort).not.toHaveBeenCalled();
+    expect(mocks.deleteHostedPrivyUser).not.toHaveBeenCalled();
+    expect(mocks.getHostedOnboardingStripe).not.toHaveBeenCalled();
+    expect(store.row).toMatchObject({
+      attemptCount: 1,
+      lastErrorCode: "TypeError",
+      leaseToken: null,
+    });
+    expect(store.row?.nextAttemptAt.getTime()).toBeGreaterThan(now.getTime());
   });
 
   it("persists target progress and retries only unfinished targets", async () => {
@@ -130,6 +207,7 @@ describe("hosted account deletion cleanup", () => {
     expect(store.row).toMatchObject({
       cloudflareCompletedAt: null,
       privyCompletedAt: now,
+      runtimeLogsCompletedAt: now,
       stripeCompletedAt: now,
     });
     expect(
@@ -150,6 +228,11 @@ describe("hosted account deletion cleanup", () => {
 
     expect(store.row).toBeNull();
     expect(mocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledTimes(2);
+    expect(mocks.deleteHostedRuntimeLogDataForUsers).toHaveBeenCalledTimes(1);
+    expect(mocks.deleteHostedRuntimeLogDataForUsers).toHaveBeenCalledWith({
+      timeoutMs: expect.any(Number),
+      userIds: ["member_1"],
+    });
     expect(deleteStripeCustomer).toHaveBeenCalledTimes(1);
     expect(mocks.deleteHostedPrivyUser).toHaveBeenCalledTimes(1);
   });
@@ -176,6 +259,41 @@ describe("hosted account deletion cleanup", () => {
       },
     });
     expect(store.row).not.toBeNull();
+  });
+
+  it("keeps isolated runtime-log deletion pending and retries only that target", async () => {
+    const store = new CleanupStore();
+    const now = new Date("2026-07-26T18:00:00.000Z");
+    mocks.deleteHostedRuntimeLogDataForUsers
+      .mockRejectedValueOnce(new Error("isolated database unavailable"))
+      .mockResolvedValueOnce(0);
+    const prepared = await createCleanup(store, now);
+
+    await expect(runHostedAccountDeletionCleanup({
+      cleanupId: prepared.id,
+      now,
+      prisma: store.prisma as never,
+    })).resolves.toMatchObject({
+      cleanupPending: true,
+    });
+    expect(store.row).toMatchObject({
+      cloudflareCompletedAt: now,
+      runtimeLogsCompletedAt: null,
+    });
+
+    const retryAt = store.row?.nextAttemptAt;
+    expect(retryAt).toBeInstanceOf(Date);
+    await expect(runHostedAccountDeletionCleanup({
+      cleanupId: prepared.id,
+      now: retryAt,
+      prisma: store.prisma as never,
+    })).resolves.toMatchObject({
+      cleanupPending: false,
+    });
+
+    expect(mocks.deleteHostedRuntimeLogDataForUsers).toHaveBeenCalledTimes(2);
+    expect(mocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledTimes(1);
+    expect(store.row).toBeNull();
   });
 
   it("treats already-absent vendor records as completed", async () => {
@@ -491,6 +609,7 @@ interface CleanupRow {
   payloadCiphertext: string;
   privyCompletedAt: Date | null;
   privyUserLookupKey: string | null;
+  runtimeLogsCompletedAt: Date | null;
   stripeCompletedAt: Date | null;
   updatedAt: Date;
 }

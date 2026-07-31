@@ -52,6 +52,7 @@ test("upgrades an authenticated hosted member to Edge", async () => {
   const response = await billingUpgradeRoute.POST(
     new Request("https://join.example.test/api/settings/billing/upgrade-plan", {
       body: JSON.stringify({
+        expectedCurrentPlanCode: "launch_monthly",
         targetPlanCode: "launch_edge_monthly",
       }),
       headers: {
@@ -69,11 +70,42 @@ test("upgrades an authenticated hosted member to Edge", async () => {
   expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
   expect(mocks.requireHostedAppSessionFromRequest).toHaveBeenCalledWith(expect.any(Request));
   expect(mocks.upgradeHostedBillingPlan).toHaveBeenCalledWith({
+    expectedCurrentPlanCode: "launch_monthly",
     memberId: "member_123",
     prisma: {
       label: "test-prisma",
     },
     targetPlanCode: "launch_edge_monthly",
+  });
+});
+
+test("upgrades an authenticated Group member to Pulse", async () => {
+  mocks.upgradeHostedBillingPlan.mockResolvedValueOnce({
+    billingPlanCode: "launch_monthly",
+    status: "upgraded",
+  });
+
+  const response = await billingUpgradeRoute.POST(
+    new Request("https://join.example.test/api/settings/billing/upgrade-plan", {
+      body: JSON.stringify({
+        expectedCurrentPlanCode: "launch_group_monthly",
+        targetPlanCode: "launch_monthly",
+      }),
+      headers: {
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    }),
+  );
+
+  expect(response.status).toBe(200);
+  expect(mocks.upgradeHostedBillingPlan).toHaveBeenCalledWith({
+    expectedCurrentPlanCode: "launch_group_monthly",
+    memberId: "member_123",
+    prisma: {
+      label: "test-prisma",
+    },
+    targetPlanCode: "launch_monthly",
   });
 });
 
@@ -165,7 +197,7 @@ test("rejects unsupported target plan payloads", async () => {
   const response = await billingUpgradeRoute.POST(
     new Request("https://join.example.test/api/settings/billing/upgrade-plan", {
       body: JSON.stringify({
-        targetPlanCode: "launch_monthly",
+        targetPlanCode: "launch_group_monthly",
       }),
       headers: {
         origin: "https://join.example.test",
@@ -179,6 +211,28 @@ test("rejects unsupported target plan payloads", async () => {
   await expect(response.json()).resolves.toMatchObject({
     error: {
       code: "HOSTED_BILLING_PLAN_UPGRADE_TARGET_INVALID",
+    },
+  });
+});
+
+test("rejects an upgrade without the displayed source plan", async () => {
+  const response = await billingUpgradeRoute.POST(
+    new Request("https://join.example.test/api/settings/billing/upgrade-plan", {
+      body: JSON.stringify({
+        targetPlanCode: "launch_edge_monthly",
+      }),
+      headers: {
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    }),
+  );
+
+  expect(response.status).toBe(400);
+  expect(mocks.upgradeHostedBillingPlan).not.toHaveBeenCalled();
+  await expect(response.json()).resolves.toMatchObject({
+    error: {
+      code: "HOSTED_BILLING_PLAN_UPGRADE_SOURCE_INVALID",
     },
   });
 });

@@ -1,6 +1,6 @@
 # Hosted Family Plan
 
-Last verified: 2026-07-25
+Last verified: 2026-07-28
 
 ## Purpose
 
@@ -116,6 +116,12 @@ Member plan swaps use Stripe prorations on the next invoice: upgrades add the
 prorated difference and downgrades add the corresponding credit. The owner sees
 the target per-person monthly price before confirming.
 
+Explicit capacity changes use `always_invoice` for both increases and
+reductions so Stripe records the resulting charge or credit on an invoice.
+Increases also fail if immediate payment cannot complete. A reduction must not
+use `proration_behavior: "none"` because that silently discards the owner's
+mid-cycle credit.
+
 Core invariant:
 
 ```ts
@@ -129,6 +135,12 @@ lifecycle. It does not add a Family wallet, shared balance, transfer, catalog,
 ledger, webhook path, or accounting owner. The browser chooses an active member
 row and submits only the existing opaque offer code and request key to that
 row's authenticated same-origin route.
+
+For the active owner's own seat, the Settings AI-usage row exposes that same
+Family-targeted dialog directly, including when usage is exhausted. The stable
+`/settings?addUsage=family#family` handoff opens this visible dialog after
+revalidating the current owner row. Other Family members remain selected from
+their authenticated management surface.
 
 Web authorizes the payer as the current active group owner, resolves the exact
 selected beneficiary from that owner's active roster, rejects suspended or
@@ -146,6 +158,19 @@ every other Family member's Add usage
 action is hidden. A request for a different member cannot resume, retry, or
 follow the existing checkout URL; it may only inspect or cancel the payer's
 frozen purchase and refresh the server projection.
+
+The frozen target also owns Settings recovery when the payer's billing mode
+changes. In particular, a personal purchase started before direct-to-Family
+conversion keeps its personal Checkout URL, retry capability, polling, and
+return owner until it becomes terminal. A new owner-seat Family purchase
+returns to `#subscription`, where its meter and dialog live; another member's
+Family purchase returns to `#family`. Target reconstruction continues to read
+older owner-seat Family URLs that used `#family`.
+
+An exact returned purchase exclusively owns its dialog state. A newer active
+purchase for another beneficiary stays on that beneficiary's frozen-target
+surface and cannot supply conflict, capability, or completion fields to the
+returned purchase.
 
 Once a beneficiary leaves the active roster, the former-member purchase remains
 inspectable and cancelable but is never payable from Settings: the server does
@@ -247,13 +272,90 @@ only the 42 candidate-generation calls now run before the transaction. The
 per-domain advisory locks are transaction-scoped, so post-commit prewarm work
 inside the same transaction also extends their lifetime.
 
-An actively sponsored member cannot start a separate direct checkout. If a
-direct checkout opened before Family acceptance completes afterward, checkout
-and subscription reconciliation must leave it unbound and cancel that
-superseded subscription after the database transaction. A Family conversion
-may clear an owner's prior direct billing reference only when it names the same
-Stripe subscription that became the Family subscription; never erase a
-different subscription reference.
+A live Family owner—an active sponsorship, a bound subscription, or any
+persisted checkout attempt—prevents a member from starting a separate direct
+checkout. An exact expired-Session event clears only the matching Family
+attempt. Family reconciliation projects Stripe `canceled`
+and `incomplete_expired` subscriptions into the existing terminal canceled
+group status, clears the current Family subscription/item binding, and keeps the
+customer plus event freshness watermark so both direct and Family checkout can
+recover without allowing an older event to reclaim billing. An older unbound
+attempt remains an ambiguous claim and requires support rather than permitting
+a blind second provider start. A directly paid beneficiary is not claimed
+because active Family reconciliation deliberately skips that member.
+
+If a direct checkout opened before Family billing claimed the member and
+completes afterward, reconciliation leaves it unbound and cancels that
+superseded subscription after the database transaction. An already accepted
+direct subscription remains the owner when its Checkout, subscription, or
+invoice event is replayed after a later Family attempt. When that exact
+subscription has since been handed to the Family group, its immutable direct
+Checkout replay is a no-op: the current Family group subscription binding
+proves that it is the same provider identity, so reconciliation neither
+recreates individual billing nor cancels/refunds the Family subscription. A
+different direct subscription remains a cleanup candidate. Duplicate cleanup
+automatically refunds only one provable paid invoice and completes only after
+Stripe reports the full refund `succeeded`; balance credits, credit notes,
+partial or pending refunds, multiple paid invoices, and multiple payment
+allocations remain retryable or require support instead of guessed accounting.
+A Family conversion may clear an owner's prior direct billing reference only
+when it names the same Stripe subscription that became the Family subscription;
+never erase a different subscription reference.
+
+## Non-obvious Affected Surfaces
+
+Terminal direct-to-Family reconciliation changes the owner's own billing status
+to `not_started`, so dashboard authentication intentionally redirects Settings
+returns to `/join`. The matched authenticated invite flow must distinguish this
+existing canceled Family group from ordinary first-time onboarding. With no
+current Family Checkout claim, `/join` offers the existing Family Checkout
+action beside the individual plans. With a current Family attempt, it offers one
+Family continuation action through the existing idempotent Checkout route and
+withholds individual Checkout actions. A bound Family subscription shows
+persistent syncing feedback until reconciliation closes the claim. Existing
+invite-status polling also refreshes these server-derived states, so an
+authoritatively expired Session returns to plan choice and a reconciled
+subscription advances the journey. Ordinary members without a canceled owner
+group retain the existing Pulse and Edge onboarding journey.
+
+A persisted attempt remains a billing claim until Stripe proves its exact bound
+Session expired. The existing Family action retrieves a bound Session: it
+revalidates the exact attempt and Session under the owner lock after provider
+I/O, resumes an open Session, synchronously applies a completed Session through
+the existing reconciliation owner, and clears then restarts only an exact
+expired Session. If active or terminal subscription reconciliation wins during
+provider I/O, the continuation action preserves that authoritative result
+instead of rebinding stale Checkout state. A delayed expiry event remains scoped
+to the old attempt and Session key. An unbound attempt may reuse its original
+idempotency key only within the existing 24-hour safe-replay window; after that
+window it fails closed to support because a previous provider start is
+ambiguous. Once Checkout binds a subscription, that binding continues to claim
+the member even while the canceled group awaits subscription reconciliation;
+authoritative terminal reconciliation clears the binding and releases the
+claim.
+
+Cancel returns through Settings and dashboard auth to the resumable `/join`
+state. Success instead carries the bounded Stripe Session ID through `/join` to
+the existing invite success surface, which verifies Session ownership and
+reconciles it while the owner is present rather than showing the continuation
+action while webhook processing is delayed. The short Family Checkout redirect
+branches on Stripe Session status: `open` requires a provider URL, `complete`
+preserves the claim and enters that verified success surface, and only exact
+`expired` clears the matching attempt. Missing URLs, unknown status, and
+retrieval ambiguity preserve the claim and fail retryably. A `complete` Session
+that does not yet expose its subscription identity also keeps the exact attempt
+and Session binding while success polling waits; only the same completion with
+the canonical subscription identity may replace that claim with the
+subscription binding.
+
+Regression coverage follows the production boundaries: terminal-before-active
+Stripe reconciliation releases the exact direct binding, dashboard auth returns
+the owner to `/join`, the server model derives recovery from the owner group,
+the rendered surface posts Family continuation to the existing Settings billing
+route, the provider request keeps its idempotency key and Settings cancel return,
+bound Session status is authoritative for resume/reconcile/restart,
+and invite-status polling rereads the server projection while Checkout or
+reconciliation remains pending.
 
 ## Invite Issuance
 

@@ -10,11 +10,15 @@ import {
   parseAssistantUsageRecord,
 } from "../assistant-usage.ts";
 import {
+  HOSTED_ASSISTANT_DEFAULT_PROVIDER,
   isHostedAssistantProductModel,
+  isHostedAssistantProvider,
   isHostedAssistantReasoningEffort,
   parseHostedAssistantModelOverride,
+  parseHostedAssistantProviderOverride,
   parseHostedAssistantReasoningEffortOverride,
   type HostedAssistantProductModel,
+  type HostedAssistantProvider,
   type HostedAssistantReasoningEffort,
 } from "../assistant-model.ts";
 import {
@@ -23,6 +27,7 @@ import {
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
   HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
+  type HostedExecutionAcceptedGroupMessageParticipant,
 } from "../contracts.ts";
 import {
   parseHostedExecutionAssistantAskBoundedText as parseHostedRuntimeGroupAskBoundedText,
@@ -157,6 +162,7 @@ import {
   type HostedRuntimeGroupUpdateDisplayNameRequest,
   type HostedRuntimeGroupToolLinqThreadContext,
   type HostedRuntimeGroupMembershipSummary,
+  type HostedRuntimeGroupParticipantDisplayNameSource,
   type HostedRuntimeGroupMemberAskResult,
   type HostedRuntimeGroupMemberSummary,
   type HostedRuntimeGroupSharedMember,
@@ -1188,6 +1194,24 @@ export function parseHostedRuntimeGroupToolRequest(
       ),
     };
   }
+  if (action === "read_participant_display_names") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "linqSenderHandles"]),
+      "Hosted runtime group tool read_participant_display_names request",
+    );
+    return {
+      action,
+      linqSenderHandles: parseHostedRuntimeGroupBoundedHandles(
+        record.linqSenderHandles,
+        {
+          allowEmpty: false,
+          label:
+            "Hosted runtime group tool read_participant_display_names request linqSenderHandles",
+        },
+      ),
+    };
+  }
   if (action === "read_shared") {
     assertAllowedObjectKeys(
       record,
@@ -1209,18 +1233,50 @@ export function parseHostedRuntimeGroupToolRequest(
       ),
     };
   }
-  if (
-    action === "read_usage_referral"
-    || action === "cancel_usage_referral"
-  ) {
+  if (action === "read_usage_referral") {
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "linqSenderHandles", "telegramSenderHandles"]),
+      new Set([
+        "action",
+        "linqSenderHandles",
+        "participant",
+        "sourceConversation",
+        "telegramSenderHandles",
+      ]),
       `Hosted runtime group tool ${action} request`,
     );
     return {
       action,
+      ...(record.participant !== undefined && record.participant !== null
+        ? {
+          participant: parseHostedRuntimeGroupToolParticipant(
+            record.participant,
+            "Hosted runtime group tool read_usage_referral request participant",
+          ),
+        }
+        : {}),
       ...parseHostedRuntimeGroupSenderHandlesRequest(record),
+      ...parseHostedRuntimeUsageReferralSourceContext(record),
+    };
+  }
+  if (action === "cancel_usage_referral") {
+    assertAllowedObjectKeys(
+      record,
+      new Set([
+        "action",
+        "linqSenderHandles",
+        "policyCode",
+        "telegramSenderHandles",
+      ]),
+      "Hosted runtime group tool cancel_usage_referral request",
+    );
+    return {
+      action,
+      ...parseHostedRuntimeGroupSenderHandlesRequest(record),
+      policyCode: parseHostedRuntimeUsageReferralPolicyCode(
+        record.policyCode,
+        "Hosted runtime group tool cancel_usage_referral request policyCode",
+      ),
     };
   }
   if (action === "arm_usage_referral") {
@@ -1229,20 +1285,40 @@ export function parseHostedRuntimeGroupToolRequest(
       new Set([
         "action",
         "linqSenderHandles",
-        "policyCode",
+        "policyCodes",
         "sourceConversation",
         "telegramSenderHandles",
       ]),
       "Hosted runtime group tool arm_usage_referral request",
     );
+    const policyCodeValues = requireArray(
+      record.policyCodes,
+      "Hosted runtime group tool arm_usage_referral request policyCodes",
+    );
+    if (
+      policyCodeValues.length < 1
+      || policyCodeValues.length > HOSTED_USAGE_REFERRAL_POLICY_CODES.length
+    ) {
+      throw new TypeError(
+        `Hosted runtime group tool arm_usage_referral request policyCodes must contain between 1 and ${HOSTED_USAGE_REFERRAL_POLICY_CODES.length} entries.`,
+      );
+    }
+    const policyCodes = policyCodeValues.map((policyCode, index) =>
+      parseHostedRuntimeUsageReferralPolicyCode(
+        policyCode,
+        `Hosted runtime group tool arm_usage_referral request policyCodes[${index}]`,
+      )
+    );
+    if (new Set(policyCodes).size !== policyCodes.length) {
+      throw new TypeError(
+        "Hosted runtime group tool arm_usage_referral request policyCodes must have unique entries.",
+      );
+    }
     return {
       action,
       ...parseHostedRuntimeGroupSenderHandlesRequest(record),
       ...parseHostedRuntimeUsageReferralSourceContext(record),
-      policyCode: parseHostedRuntimeUsageReferralPolicyCode(
-        record.policyCode,
-        "Hosted runtime group tool arm_usage_referral request policyCode",
-      ),
+      policyCodes,
     };
   }
   if (
@@ -1390,19 +1466,38 @@ export function parseHostedRuntimeGroupToolRequest(
   if (action === "revoke_own_email_share") {
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "selfOptOut"]),
+      new Set(["action", "participant", "selfOptOut"]),
       "Hosted runtime group tool revoke_own_email_share request",
     );
-    if (record.selfOptOut === undefined || record.selfOptOut === null) {
-      return { action };
+    if (
+      record.participant !== undefined
+      && record.participant !== null
+      && record.selfOptOut !== undefined
+      && record.selfOptOut !== null
+    ) {
+      throw new TypeError(
+        "Hosted runtime group tool revoke_own_email_share request has conflicting participant authorities.",
+      );
     }
-    return {
-      action,
-      selfOptOut: parseHostedRuntimeGroupToolSelfOptOutContext(
-        record.selfOptOut,
-        "Hosted runtime group tool revoke_own_email_share request selfOptOut",
-      ),
-    };
+    if (record.participant !== undefined && record.participant !== null) {
+      return {
+        action,
+        participant: parseHostedRuntimeGroupToolParticipant(
+          record.participant,
+          "Hosted runtime group tool revoke_own_email_share request participant",
+        ),
+      };
+    }
+    if (record.selfOptOut !== undefined && record.selfOptOut !== null) {
+      return {
+        action,
+        selfOptOut: parseHostedRuntimeGroupToolSelfOptOutContext(
+          record.selfOptOut,
+          "Hosted runtime group tool revoke_own_email_share request selfOptOut",
+        ),
+      };
+    }
+    return { action };
   }
   throw new TypeError("Hosted runtime group tool action is not supported.");
 }
@@ -1527,6 +1622,43 @@ function parseHostedRuntimeGroupJoinOfferMessageTemplate(value: unknown): string
   return template;
 }
 
+function parseHostedRuntimeGroupToolParticipant(
+  value: unknown,
+  label: string,
+): HostedExecutionAcceptedGroupMessageParticipant {
+  const record = requireObject(value, label);
+  assertAllowedObjectKeys(
+    record,
+    new Set(["assistantInputId", "senderHandle", "source"]),
+    label,
+  );
+  const source = requireString(record.source, `${label} source`);
+  if (source !== "linq" && source !== "telegram") {
+    throw new TypeError("Hosted runtime group tool participant source is not supported.");
+  }
+  const assistantInputId = requireString(
+    record.assistantInputId,
+    `${label} assistantInputId`,
+  );
+  if (!/^ain_[0-9a-f]{32}$/u.test(assistantInputId)) {
+    throw new TypeError("Hosted runtime group tool participant assistantInputId is invalid.");
+  }
+  const senderHandle = requireString(
+    record.senderHandle,
+    `${label} senderHandle`,
+  ).trim();
+  if (senderHandle.length === 0 || senderHandle.length > 512) {
+    throw new TypeError(
+      "Hosted runtime group tool participant senderHandle is invalid.",
+    );
+  }
+  return {
+    assistantInputId,
+    senderHandle,
+    source,
+  };
+}
+
 function parseHostedRuntimeGroupToolSelfOptOutContext(
   value: unknown,
   label: string,
@@ -1535,7 +1667,9 @@ function parseHostedRuntimeGroupToolSelfOptOutContext(
   assertAllowedObjectKeys(record, new Set(["senderHandle", "source"]), label);
   const source = requireString(record.source, `${label} source`);
   if (source !== "email" && source !== "linq") {
-    throw new TypeError("Hosted runtime group tool self opt-out source is not supported.");
+    throw new TypeError(
+      "Hosted runtime group tool self opt-out source is not supported.",
+    );
   }
   return {
     senderHandle: requireString(record.senderHandle, `${label} senderHandle`),
@@ -1555,7 +1689,7 @@ function parseHostedRuntimeUsageReferralSourceContext(
   );
   assertAllowedObjectKeys(
     source,
-    new Set(["channel", "threadId", "threadIsDirect"]),
+    new Set(["channel", "linqService", "threadId", "threadIsDirect"]),
     "Hosted runtime usage referral source conversation",
   );
   const channel = requireString(
@@ -1567,9 +1701,31 @@ function parseHostedRuntimeUsageReferralSourceContext(
       "Hosted runtime usage referral source conversation channel is invalid.",
     );
   }
+  const linqService = source.linqService === undefined
+    ? null
+    : requireString(
+        source.linqService,
+        "Hosted runtime usage referral source conversation linqService",
+      );
+  if (
+    linqService !== null
+    && (
+      channel !== "linq"
+      || (
+        linqService !== "imessage"
+        && linqService !== "rcs"
+        && linqService !== "sms"
+      )
+    )
+  ) {
+    throw new TypeError(
+      "Hosted runtime usage referral source conversation linqService is invalid.",
+    );
+  }
   return {
     sourceConversation: {
       channel,
+      ...(linqService === null ? {} : { linqService }),
       threadId: parseHostedRuntimeUsageReferralBlindedIdentifier(
         source.threadId,
         "Hosted runtime usage referral source conversation threadId",
@@ -1739,6 +1895,109 @@ function parseHostedRuntimeGroupDisplayName(
     throw new TypeError(`${label} is too long.`);
   }
   return displayName;
+}
+
+function parseHostedRuntimeGroupParticipantDisplayNamesResult(
+  value: unknown,
+): Extract<
+  HostedRuntimeGroupToolResponse,
+  { action: "read_participant_display_names" }
+>["result"] {
+  const label =
+    "Hosted runtime group tool read_participant_display_names response result";
+  const result = requireObject(value, label);
+  const status = requireString(result.status, `${label} status`);
+  if (status === "unavailable") {
+    assertAllowedObjectKeys(
+      result,
+      new Set(["status", "unavailableReason"]),
+      `${label} unavailable`,
+    );
+    return {
+      status,
+      unavailableReason: requireString(
+        result.unavailableReason,
+        `${label} unavailableReason`,
+      ),
+    };
+  }
+  if (status !== "ok") {
+    throw new TypeError(`${label} status is invalid.`);
+  }
+  assertAllowedObjectKeys(
+    result,
+    new Set(["nameMissSenderHandles", "participants", "status"]),
+    label,
+  );
+  const entries = requireArray(result.participants, `${label} participants`);
+  if (entries.length > HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX) {
+    throw new TypeError(
+      `${label} participants must contain at most ${HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX} entries.`,
+    );
+  }
+  const senderHandles = new Set<string>();
+  const participants = entries.map((entry, index) => {
+    const participantLabel = `${label} participants[${index}]`;
+    const participant = requireObject(entry, participantLabel);
+    assertAllowedObjectKeys(
+      participant,
+      new Set(["displayName", "displayNameSource", "senderHandle"]),
+      participantLabel,
+    );
+    const displayName = parseHostedRuntimeGroupDisplayName(
+      participant.displayName,
+      `${participantLabel} displayName`,
+    );
+    if (displayName === null) {
+      throw new TypeError(`${participantLabel} displayName must not be null.`);
+    }
+    const senderHandle = parseHostedRuntimeGroupAskBoundedText({
+      label: `${participantLabel} senderHandle`,
+      maxCodePoints: HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
+      value: participant.senderHandle,
+    });
+    if (senderHandles.has(senderHandle)) {
+      throw new TypeError(`${label} senderHandles must be unique.`);
+    }
+    senderHandles.add(senderHandle);
+    const displayNameSource = participant.displayNameSource === undefined
+      ? "profile-name"
+      : parseHostedRuntimeGroupParticipantDisplayNameSource(
+        participant.displayNameSource,
+        `${participantLabel} displayNameSource`,
+      );
+    return { displayName, displayNameSource, senderHandle };
+  });
+  const nameMissSenderHandles = result.nameMissSenderHandles === undefined
+    ? undefined
+    : parseHostedRuntimeGroupBoundedHandles(result.nameMissSenderHandles, {
+        allowEmpty: true,
+        label: `${label} nameMissSenderHandles`,
+      });
+  if (
+    nameMissSenderHandles?.some((senderHandle) =>
+      senderHandles.has(senderHandle)
+    )
+  ) {
+    throw new TypeError(
+      `${label} nameMissSenderHandles must not overlap participants.`,
+    );
+  }
+  return {
+    ...(nameMissSenderHandles === undefined ? {} : { nameMissSenderHandles }),
+    participants,
+    status,
+  };
+}
+
+function parseHostedRuntimeGroupParticipantDisplayNameSource(
+  value: unknown,
+  label: string,
+): HostedRuntimeGroupParticipantDisplayNameSource {
+  if (value === "profile-name" || value === "unverified-owner-contact") {
+    return value;
+  }
+  throw new TypeError(`${label} is invalid.`);
 }
 
 function readHostedRuntimeGroupKind(value: unknown): HostedRuntimeGroupKind | null {
@@ -2417,51 +2676,102 @@ export function parseHostedRuntimeGroupToolResponse(
         result.usage,
         "Hosted runtime group tool read_usage usage",
       );
+      // Temporary rolling-deploy seam. Remove only after no deployed or
+      // rollback-eligible Web build emits the immediately preceding shape and
+      // every pre-reader warm runner has drained; see apps/cloudflare/DEPLOY.md.
+      const isLegacyUsageProjection = [
+        "capacityState",
+        "periodEnd",
+        "remainingPercent",
+      ].some((key) => Object.prototype.hasOwnProperty.call(usage, key));
+      if (isLegacyUsageProjection) {
+        assertAllowedObjectKeys(
+          usage,
+          new Set([
+            "capacityState",
+            "fundingUrl",
+            "periodEnd",
+            "remainingPercent",
+          ]),
+          "Hosted runtime group tool read_usage legacy usage",
+        );
+        const capacityState = requireString(
+          usage.capacityState,
+          "Hosted runtime group tool read_usage legacy capacityState",
+        );
+        if (
+          capacityState !== "healthy"
+          && capacityState !== "low"
+          && capacityState !== "exhausted"
+        ) {
+          throw new TypeError(
+            "Hosted runtime group tool read_usage legacy capacityState is invalid.",
+          );
+        }
+        const periodEnd = requireString(
+          usage.periodEnd,
+          "Hosted runtime group tool read_usage legacy periodEnd",
+        );
+        const periodEndDate = new Date(periodEnd);
+        if (
+          !Number.isFinite(periodEndDate.getTime())
+          || periodEndDate.toISOString() !== periodEnd
+        ) {
+          throw new TypeError(
+            "Hosted runtime group tool read_usage legacy periodEnd must be canonical.",
+          );
+        }
+        const remainingPercent = usage.remainingPercent === undefined
+          ? undefined
+          : requireNonNegativeInteger(
+              usage.remainingPercent,
+              "Hosted runtime group tool read_usage legacy remainingPercent",
+            );
+        if (remainingPercent !== undefined && remainingPercent > 100) {
+          throw new TypeError(
+            "Hosted runtime group tool read_usage legacy remainingPercent must be at most 100.",
+          );
+        }
+        const fundingUrl = readNullableString(
+          usage.fundingUrl,
+          "Hosted runtime group tool read_usage legacy fundingUrl",
+        );
+        return {
+          action,
+          result: {
+            status,
+            usage: {
+              fundingNeeded: capacityState !== "healthy",
+              fundingUrl,
+              sponsorshipStatus: "not_sponsored",
+            },
+          },
+        };
+      }
       assertAllowedObjectKeys(
         usage,
         new Set([
-          "capacityState",
+          "fundingNeeded",
           "fundingUrl",
-          "periodEnd",
-          "remainingPercent",
+          "sponsorshipStatus",
         ]),
         "Hosted runtime group tool read_usage usage",
       );
-      const capacityState = requireString(
-        usage.capacityState,
-        "Hosted runtime group tool read_usage capacityState",
+      const sponsorshipStatus = requireString(
+        usage.sponsorshipStatus,
+        "Hosted runtime group tool read_usage sponsorshipStatus",
       );
       if (
-        capacityState !== "healthy"
-        && capacityState !== "low"
-        && capacityState !== "exhausted"
+        sponsorshipStatus !== "not_sponsored"
+        && sponsorshipStatus !== "sponsored"
       ) {
         throw new TypeError(
-          "Hosted runtime group tool read_usage capacityState is invalid.",
+          "Hosted runtime group tool read_usage sponsorshipStatus is invalid.",
         );
       }
-      const periodEnd = requireString(
-        usage.periodEnd,
-        "Hosted runtime group tool read_usage periodEnd",
-      );
-      const periodEndDate = new Date(periodEnd);
-      if (
-        !Number.isFinite(periodEndDate.getTime())
-        || periodEndDate.toISOString() !== periodEnd
-      ) {
+      if (typeof usage.fundingNeeded !== "boolean") {
         throw new TypeError(
-          "Hosted runtime group tool read_usage periodEnd must be a canonical timestamp.",
-        );
-      }
-      const remainingPercent = usage.remainingPercent === undefined
-        ? undefined
-        : requireNonNegativeInteger(
-            usage.remainingPercent,
-            "Hosted runtime group tool read_usage remainingPercent",
-          );
-      if (remainingPercent !== undefined && remainingPercent > 100) {
-        throw new TypeError(
-          "Hosted runtime group tool read_usage remainingPercent must be at most 100.",
+          "Hosted runtime group tool read_usage fundingNeeded must be boolean.",
         );
       }
       return {
@@ -2469,13 +2779,12 @@ export function parseHostedRuntimeGroupToolResponse(
         result: {
           status,
           usage: {
-            capacityState,
+            fundingNeeded: usage.fundingNeeded,
             fundingUrl: readNullableString(
               usage.fundingUrl,
               "Hosted runtime group tool read_usage fundingUrl",
             ),
-            periodEnd,
-            ...(remainingPercent === undefined ? {} : { remainingPercent }),
+            sponsorshipStatus,
           },
         },
       };
@@ -2503,6 +2812,15 @@ export function parseHostedRuntimeGroupToolResponse(
         },
       };
     }
+  }
+
+  if (action === "read_participant_display_names") {
+    return {
+      action,
+      result: parseHostedRuntimeGroupParticipantDisplayNamesResult(
+        record.result,
+      ),
+    };
   }
 
   if (
@@ -2882,9 +3200,29 @@ function parseHostedRuntimeUsageReferralSnapshot(
   const record = requireObject(value, label);
   assertAllowedObjectKeys(
     record,
-    new Set(["active", "availablePolicies", "trialCreditNotice"]),
+    new Set(["activeMissions", "availablePolicies", "trialCreditNotice"]),
     label,
   );
+  const activeMissionValues = requireArray(
+    record.activeMissions,
+    `${label} activeMissions`,
+  );
+  if (activeMissionValues.length > HOSTED_USAGE_REFERRAL_POLICY_CODES.length) {
+    throw new TypeError(`${label} activeMissions has too many entries.`);
+  }
+  const activePolicies = new Set<HostedUsageReferralPolicyCode>();
+  const activeMissions = activeMissionValues.map((value, index) => {
+    const mission = parseHostedRuntimeUsageReferralMissionSnapshot(
+      value,
+      `${label} activeMissions[${index}]`,
+    );
+    if (activePolicies.has(mission.policyCode)) {
+      throw new TypeError(`${label} activeMissions must have unique policies.`);
+    }
+    activePolicies.add(mission.policyCode);
+    return mission;
+  });
+
   const availablePolicyValues = requireArray(
     record.availablePolicies,
     `${label} availablePolicies`,
@@ -2908,6 +3246,9 @@ function parseHostedRuntimeUsageReferralSnapshot(
     if (seenPolicies.has(code)) {
       throw new TypeError(`${label} availablePolicies must be unique.`);
     }
+    if (activePolicies.has(code)) {
+      throw new TypeError(`${label} policy cannot be both active and available.`);
+    }
     seenPolicies.add(code);
     return {
       code,
@@ -2928,12 +3269,16 @@ function parseHostedRuntimeUsageReferralSnapshot(
         `${label} trialCreditNotice`,
       );
 
-  if (record.active === null) {
-    return { active: null, availablePolicies, trialCreditNotice };
-  }
-  const active = requireObject(record.active, `${label} active`);
+  return { activeMissions, availablePolicies, trialCreditNotice };
+}
+
+function parseHostedRuntimeUsageReferralMissionSnapshot(
+  value: unknown,
+  label: string,
+): HostedRuntimeUsageReferralSnapshot["activeMissions"][number] {
+  const mission = requireObject(value, label);
   assertAllowedObjectKeys(
-    active,
+    mission,
     new Set([
       "destinationKind",
       "expiresAt",
@@ -2941,47 +3286,40 @@ function parseHostedRuntimeUsageReferralSnapshot(
       "rewardLabel",
       "state",
     ]),
-    `${label} active`,
+    label,
   );
   const destinationKind = requireString(
-    active.destinationKind,
-    `${label} active destinationKind`,
+    mission.destinationKind,
+    `${label} destinationKind`,
   );
   if (destinationKind !== "group" && destinationKind !== "personal") {
-    throw new TypeError(`${label} active destinationKind is invalid.`);
+    throw new TypeError(`${label} destinationKind is invalid.`);
   }
-  const state = requireString(active.state, `${label} active state`);
+  const state = requireString(mission.state, `${label} state`);
   if (state !== "armed" && state !== "target_bound") {
-    throw new TypeError(`${label} active state is invalid.`);
+    throw new TypeError(`${label} state is invalid.`);
   }
-  const expiresAt = requireString(
-    active.expiresAt,
-    `${label} active expiresAt`,
-  );
+  const expiresAt = requireString(mission.expiresAt, `${label} expiresAt`);
   const expiresAtDate = new Date(expiresAt);
   if (
     !Number.isFinite(expiresAtDate.getTime())
     || expiresAtDate.toISOString() !== expiresAt
   ) {
-    throw new TypeError(`${label} active expiresAt must be a canonical timestamp.`);
+    throw new TypeError(`${label} expiresAt must be a canonical timestamp.`);
   }
 
   return {
-    active: {
-      destinationKind,
-      expiresAt,
-      policyCode: parseHostedRuntimeUsageReferralPolicyCode(
-        active.policyCode,
-        `${label} active policyCode`,
-      ),
-      rewardLabel: parseHostedRuntimeUsageReferralLabel(
-        active.rewardLabel,
-        `${label} active rewardLabel`,
-      ),
-      state,
-    },
-    availablePolicies,
-    trialCreditNotice,
+    destinationKind,
+    expiresAt,
+    policyCode: parseHostedRuntimeUsageReferralPolicyCode(
+      mission.policyCode,
+      `${label} policyCode`,
+    ),
+    rewardLabel: parseHostedRuntimeUsageReferralLabel(
+      mission.rewardLabel,
+      `${label} rewardLabel`,
+    ),
+    state,
   };
 }
 
@@ -3975,7 +4313,7 @@ export function parseHostedRuntimeAssistantConfigurationToolRequest(
 
   assertAllowedObjectKeys(
     record,
-    new Set(["action", "model", "reasoningEffort"]),
+    new Set(["action", "model", "provider", "reasoningEffort"]),
     "Hosted runtime assistant configuration tool update request",
   );
   const model = record.model === undefined
@@ -3990,18 +4328,32 @@ export function parseHostedRuntimeAssistantConfigurationToolRequest(
         record.reasoningEffort,
         "Hosted runtime assistant configuration tool reasoningEffort",
       );
+  const provider = record.provider === undefined
+    ? undefined
+    : parseHostedRuntimeAssistantProvider(
+        record.provider,
+        "Hosted runtime assistant configuration tool provider",
+      );
   if (model === undefined) {
+    if (provider !== undefined) {
+      return reasoningEffort === undefined
+        ? { action, provider }
+        : { action, provider, reasoningEffort };
+    }
     if (reasoningEffort === undefined) {
       throw new TypeError(
-        "Hosted runtime assistant configuration update requires a model or reasoning effort.",
+        "Hosted runtime assistant configuration update requires a model, provider, or reasoning effort.",
       );
     }
     return { action, reasoningEffort };
   }
 
-  return reasoningEffort === undefined
-    ? { action, model }
-    : { action, model, reasoningEffort };
+  return {
+    action,
+    model,
+    ...(provider === undefined ? {} : { provider }),
+    ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+  };
 }
 
 export function parseHostedRuntimeAssistantConfigurationControlRequest(
@@ -4031,7 +4383,7 @@ export function parseHostedRuntimeAssistantConfigurationControlRequest(
 
   assertAllowedObjectKeys(
     record,
-    new Set(["action", "assistantInputId", "model", "reasoningEffort"]),
+    new Set(["action", "assistantInputId", "model", "provider", "reasoningEffort"]),
     "Hosted runtime assistant configuration control update request",
   );
   const assistantInputId = requireString(
@@ -4054,11 +4406,27 @@ function parseHostedRuntimeAssistantConfigurationChanges(
   record: Record<string, unknown>,
   label: string,
 ):
-  | { model: HostedAssistantProductModel; reasoningEffort?: HostedAssistantReasoningEffort }
-  | { model?: never; reasoningEffort: HostedAssistantReasoningEffort } {
+  | {
+      model: HostedAssistantProductModel;
+      provider?: HostedAssistantProvider;
+      reasoningEffort?: HostedAssistantReasoningEffort;
+    }
+  | {
+      model?: never;
+      provider: HostedAssistantProvider;
+      reasoningEffort?: HostedAssistantReasoningEffort;
+    }
+  | {
+      model?: never;
+      provider?: never;
+      reasoningEffort: HostedAssistantReasoningEffort;
+    } {
   const model = record.model === undefined
     ? undefined
     : parseHostedRuntimeAssistantProductModel(record.model, `${label} model`);
+  const provider = record.provider === undefined
+    ? undefined
+    : parseHostedRuntimeAssistantProvider(record.provider, `${label} provider`);
   const reasoningEffort = record.reasoningEffort === undefined
     ? undefined
     : parseHostedRuntimeAssistantReasoningEffort(
@@ -4066,14 +4434,23 @@ function parseHostedRuntimeAssistantConfigurationChanges(
         `${label} reasoningEffort`,
       );
   if (model === undefined) {
+    if (provider !== undefined) {
+      return reasoningEffort === undefined
+        ? { provider }
+        : { provider, reasoningEffort };
+    }
     if (reasoningEffort === undefined) {
-      throw new TypeError(`${label} update requires a model or reasoning effort.`);
+      throw new TypeError(
+        `${label} update requires a model, provider, or reasoning effort.`,
+      );
     }
     return { reasoningEffort };
   }
-  return reasoningEffort === undefined
-    ? { model }
-    : { model, reasoningEffort };
+  return {
+    model,
+    ...(provider === undefined ? {} : { provider }),
+    ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+  };
 }
 
 export function parseHostedRuntimeAssistantConfigurationToolResponse(
@@ -4155,10 +4532,12 @@ function parseHostedRuntimeAssistantConfigurationSnapshot(
     record,
     new Set([
       "availableModels",
+      "availableProviders",
       "availableReasoningEfforts",
       "configurationAvailable",
       "dormantSolPreference",
       "model",
+      "provider",
       "reasoningEffort",
       "solAvailable",
       ...options.extraKeys,
@@ -4172,6 +4551,28 @@ function parseHostedRuntimeAssistantConfigurationSnapshot(
     model,
     "Hosted runtime assistant configuration available model",
   ));
+  const configurationAvailable = requireBoolean(
+    record.configurationAvailable,
+    "Hosted runtime assistant configuration configurationAvailable",
+  );
+  const hasAvailableProviders = Object.hasOwn(record, "availableProviders");
+  const hasProvider = Object.hasOwn(record, "provider");
+  if (hasAvailableProviders !== hasProvider) {
+    throw new TypeError(
+      "Hosted runtime assistant configuration provider fields must be supplied together.",
+    );
+  }
+  const availableProviders = hasAvailableProviders
+    ? requireArray(
+        record.availableProviders,
+        "Hosted runtime assistant configuration availableProviders",
+      ).map((provider) => parseHostedRuntimeAssistantProvider(
+        provider,
+        "Hosted runtime assistant configuration available provider",
+      ))
+    : configurationAvailable
+      ? [HOSTED_ASSISTANT_DEFAULT_PROVIDER]
+      : [];
   const availableReasoningEfforts = requireArray(
     record.availableReasoningEfforts,
     "Hosted runtime assistant configuration availableReasoningEfforts",
@@ -4182,11 +4583,9 @@ function parseHostedRuntimeAssistantConfigurationSnapshot(
 
   return {
     availableModels,
+    availableProviders,
     availableReasoningEfforts,
-    configurationAvailable: requireBoolean(
-      record.configurationAvailable,
-      "Hosted runtime assistant configuration configurationAvailable",
-    ),
+    configurationAvailable,
     dormantSolPreference: requireBoolean(
       record.dormantSolPreference,
       "Hosted runtime assistant configuration dormantSolPreference",
@@ -4195,6 +4594,12 @@ function parseHostedRuntimeAssistantConfigurationSnapshot(
       record.model,
       "Hosted runtime assistant configuration model",
     ),
+    provider: hasProvider
+      ? parseHostedRuntimeAssistantProvider(
+          record.provider,
+          "Hosted runtime assistant configuration provider",
+        )
+      : HOSTED_ASSISTANT_DEFAULT_PROVIDER,
     reasoningEffort: parseHostedRuntimeAssistantReasoningEffort(
       record.reasoningEffort,
       "Hosted runtime assistant configuration reasoningEffort",
@@ -4204,6 +4609,13 @@ function parseHostedRuntimeAssistantConfigurationSnapshot(
       "Hosted runtime assistant configuration solAvailable",
     ),
   };
+}
+
+function parseHostedRuntimeAssistantProvider(value: unknown, label: string) {
+  if (!isHostedAssistantProvider(value)) {
+    throw new TypeError(`${label} is not supported.`);
+  }
+  return value;
 }
 
 function parseHostedRuntimeAssistantProductModel(value: unknown, label: string) {
@@ -5412,6 +5824,9 @@ export function parseHostedWorkspaceReadResponse(value: unknown): HostedWorkspac
   const hostedAssistantModelOverride = parseHostedAssistantModelOverride(
     record.hostedAssistantModelOverride,
   );
+  const hostedAssistantProviderOverride = parseHostedAssistantProviderOverride(
+    record.hostedAssistantProviderOverride,
+  );
   const hostedAssistantReasoningEffortOverride =
     parseHostedAssistantReasoningEffortOverride(
       record.hostedAssistantReasoningEffortOverride,
@@ -5421,6 +5836,9 @@ export function parseHostedWorkspaceReadResponse(value: unknown): HostedWorkspac
     fetchedAt: requireString(record.fetchedAt, "Hosted workspace read response fetchedAt"),
     ...(hostedAssistantModelOverride
       ? { hostedAssistantModelOverride }
+      : {}),
+    ...(hostedAssistantProviderOverride
+      ? { hostedAssistantProviderOverride }
       : {}),
     ...(hostedAssistantReasoningEffortOverride
       ? { hostedAssistantReasoningEffortOverride }

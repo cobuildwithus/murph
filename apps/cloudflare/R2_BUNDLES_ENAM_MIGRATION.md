@@ -669,6 +669,10 @@ Repeat until the read-only proof passes with no divergence in either direction.
 
 ## 6. Switch and read back all configuration
 
+Run the GitHub variable commands from the private Murph Cloud checkout or set
+`GH_REPO=cobuildwithus/murph-cloud`; production deploy configuration no longer
+lives in public Murph.
+
 Capture the three current production values and prove the active source before
 changing anything:
 
@@ -693,7 +697,15 @@ gh variable set HOSTED_R2_PRESIGN_BUCKET_NAME --env production --body "$DESTINAT
 test "$(gh variable get CF_BUNDLES_BUCKET --env production)" = "$DESTINATION_BUCKET"
 test "$(gh variable get CF_BUNDLES_PREVIEW_BUCKET --env production)" = "$PREVIEW_DESTINATION_BUCKET"
 test "$(gh variable get HOSTED_R2_PRESIGN_BUCKET_NAME --env production)" = "$DESTINATION_BUCKET"
-pnpm cf:deploy:immediate
+gh workflow run deploy-cloudflare-hosted.yml \
+  --repo cobuildwithus/murph-cloud \
+  --ref main \
+  -f environment=production \
+  -f sync_worker_secrets=true \
+  -f deploy_worker=true \
+  -f container_rollout=immediate \
+  -f live_model_turn=true \
+  -f skip_predeploy_e2e=true
 ```
 
 Do not use a gradual rollout. Wait for the exact workflow run to finish; it must
@@ -738,8 +750,9 @@ operator-owned member while all other ingress stays fenced:
 2. let it write the first durable ENAM checkpoint, require both recorded values
    to advance, prove the new object readable in ENAM, and prove no work remains
    in flight;
-3. redeploy the same protected `main` SHA and unchanged ENAM configuration with
-   `pnpm cf:deploy:immediate`;
+3. redeploy the same protected private `main` SHA and unchanged ENAM
+   configuration through the private workflow with
+   `container_rollout=immediate` and `skip_predeploy_e2e=true`;
 4. require a new Worker version at 100%, distinct from the first cutover
    version, with the same expected head and container fingerprint; and
 5. wake exactly the same member again. Runner names include the Worker version,

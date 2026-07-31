@@ -574,6 +574,27 @@ test("UsageLimitBanner omits thread-container notices from the personal dashboar
   assert.equal(markup, "");
 });
 
+test("UsageLimitBanner names the member plan Core while preserving group continuity", async () => {
+  const { UsageLimitBanner } = await import(
+    "../src/components/home/usage-limit-banner"
+  );
+
+  const markup = renderToStaticMarkup(createElement(UsageLimitBanner, {
+    noticeCode: "group_upgrade_pulse",
+    recommendedAction: {
+      kind: "change_plan",
+      label: "Choose Core",
+      targetPlanCode: "launch_group_monthly",
+      url: "https://example.test/settings#subscription",
+    },
+  }));
+
+  assert.match(markup, /included Core usage/u);
+  assert.match(markup, /Core keeps you connected/u);
+  assert.match(markup, /group activity stays current/u);
+  assert.doesNotMatch(markup, /included Group usage/u);
+});
+
 test("HomePage shows blocked Edge usage with an add-usage action", async () => {
   mocks.readHostedAiUsageGate.mockResolvedValueOnce({
     allowed: false,

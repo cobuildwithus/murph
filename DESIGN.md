@@ -182,6 +182,18 @@ Every component lives on cream paper, wears warm hairline borders, and speaks in
 - **Ghost / text:** slate text, no background, underline on hover. For low-priority links.
 - **Hover / Focus:** primary shifts from sage-dark to sage. Focus ring uses `--ring` (`#7a8c6e`) at 2px offset 2px.
 
+### Experiment Start Channel Picker
+When more than one connected channel can continue a public experiment start,
+use one compact dialog rather than a stack of large destination cards. Lead
+with a mono `START EXPERIMENT · {N}-DAY PROTOCOL` line, then show the full
+Fraunces protocol title without truncation and one sentence explaining that
+Murph prepares a reviewable message. Channel links are flat 64–72px rows with
+one muted icon tile, channel name, plain-language destination description, and
+a right chevron. Do not repeat the protocol inside a nested card, add
+availability counts, or show redundant channel badges. End with the quiet
+review-before-send reminder. On phones the dialog sits above the safe-area edge;
+on larger screens it centers at no more than 540px wide.
+
 ### Cards
 - **Corner Style:** rounded-lg (10–12px).
 - **Background:** `rgba(255, 252, 246, 0.9)` — translucent card surface, warmer than cream.
@@ -360,23 +372,69 @@ full card remains one predictable radio target. Stack on narrow screens and use
 a compact grid only when the options are true peers. Do not use choice cards as
 navigation or as a substitute for ordinary buttons.
 
-### Group Usage Funding
-Use `GroupUsageFundingCard` as the public entry surface for one-time group usage
-credit. Lead with the group name, one concise sentence explaining that the
-credit belongs to the group, and one primary action. Do not add a decorative
-status badge; retain `Open Murph` as the quiet secondary action.
+### Device Connection Callback
 
-Use `GroupSponsorshipDialog` for amount selection. Present the fixed offers as
-large choice cards, then one primary **Sponsor ~200 messages · $10** action and
-a plain cancel action. Explain once that the contribution is one-time, Murph
-uses a saved card when available, and Stripe handles card entry or verification
-when needed. Do not imply that selecting an amount charges the card; only the
-explicit primary action authorizes the contribution. Keep the alias, note, and
-eligible temporary running bit behind one optional disclosure, and state the
-server-owned bit duration beside that field. Stack amount cards and actions on
-narrow screens, preserve visible focus and selection states, and render the
-production components on both the Components and Sections tabs of `/design`
-for review.
+Provider return is a quiet, full-height confirmation page built from the shared
+Card primitives. Use one mono kicker, one serif decision heading, one short
+safety instruction, and explicit primary/secondary actions. The callback GET
+never mutates: the primary button is the member's visible completion act. The
+failure state removes that action, says that nothing was connected, and offers
+one route back to Connect. Keep both states readable at narrow mobile widths,
+with 44px-or-larger controls and no provider-supplied copy.
+
+### Group Usage Funding
+An authenticated group funding link opens its relevant funding control
+immediately: monthly sponsorship for an unsponsored chat, one-time contribution
+for an already sponsored chat, or payment recovery when a purchase is in
+progress. Use `GroupUsageFundingShell` only as the quiet reopen surface beneath
+that control. Do not add a second sales card, decorative status badge, duplicate
+headline, or explanatory paragraph. Retain `Back to Murph` as the quiet
+secondary action.
+
+Use `GroupSponsorshipDialog` for the primary monthly choice. Present $5, $10,
+and $20 as visually prominent monthly maximums. On desktop, use the shared
+choice cards. On phones, use a near-full-height bottom drawer with one large
+circular cap slider. The handle follows a pointer anywhere around the arc and
+snaps to the nearest available maximum on release; Arrow keys and Home/End
+provide the same three-stop selection. Keep the opening explanation to
+`Choose your monthly sponsorship limit.` The explicit sponsor action authorizes
+the initial $5 activation purchase, whose amount is shown before payment;
+selecting a maximum alone does not charge the card. Keep both funding actions
+available at every current group-capacity state; capacity changes urgency and
+automatic refill timing, not the ability to fund. Keep an explicit one-time
+contribution as the secondary action. Dollar amounts are cost-weighted usage
+credit, never an owned or promised number of messages. Every cap increase
+requires fresh payer confirmation. Keep the alias, note, and eligible temporary
+running bit in one collapsible `Add a note` section, open by default, and attach
+them only to the activation or one-time purchase, never to automatic refills.
+Optional text fields use the sage focus border without an outer glow. The
+drawer body owns overflow while the sponsor action stays available at the safe
+area edge, so expanded note fields never become unreachable. Preserve visible
+focus and selection states. Render the production activation,
+active-management, near-cap/recovery, paused, and one-time states at desktop and
+mobile sizes on `/design` with controls inert, including content rendered
+through a dialog or drawer portal.
+
+When group funding is fulfilled, switch from the payment-status composition to
+one confident success hierarchy: a compact sage confirmation mark and mono
+`NICE ONE` label, the Fraunces headline `This group has more Murph`, one
+sentence confirming that the contribution is ready, then a warm-divider handoff
+to **Open Messages**. State that Messages opens without a group deep link and
+the member must choose the group. Do not repeat the confirmation in a bordered
+status card, keep payment-pending copy visible, invent an amount, or add
+celebration graphics. Once fulfillment is verified, do not carry frozen sponsor
+details or their payment-recovery instructions into the success receipt.
+
+### Hosted AI Usage Activity
+On authenticated Settings, keep this read-only surface mission-first and
+compact. Do not add an explanatory hero or use a wide ledger table. Each
+mission row shows its title, status, concise deadline, reward, and reward owner;
+keep qualification requirements and selection date in one native `details`
+disclosure. Follow with flat purchase-credit history rows showing source, date,
+and added amount, plus one short clarification that the amounts are not the
+current balance. Keep the existing Murph conversation handoff beside the
+Missions heading, and hide it when the member has no supported conversation
+route or new missions are disabled.
 
 ### Spinner
 Use the shared `Spinner` for compact pending feedback inside buttons or beside a

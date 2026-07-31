@@ -16,6 +16,7 @@ import {
   HOSTED_ASSISTANT_LUNA_MODEL,
   HOSTED_ASSISTANT_MODEL_OVERRIDES,
   HOSTED_ASSISTANT_PRODUCT_MODELS,
+  HOSTED_ASSISTANT_PROVIDERS,
   HOSTED_ASSISTANT_REASONING_EFFORT_OVERRIDES,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
   HOSTED_ASSISTANT_SOL_MODEL,
@@ -195,6 +196,7 @@ describe("hosted runtime control contracts", () => {
       "assistant.ask.completed",
       "clinical-records.sync-requested",
       "device-sync.wake",
+      "environment-voice.captured",
       "group-newsletter.email-needed",
       "meal-photo.captured",
       "vault-share.delivery",
@@ -382,6 +384,12 @@ describe("hosted runtime control contracts", () => {
         reasoningEffort,
       })).toEqual({ action: "update", reasoningEffort });
     }
+    for (const provider of HOSTED_ASSISTANT_PROVIDERS) {
+      expect(parseHostedRuntimeAssistantConfigurationToolRequest({
+        action: "update",
+        provider,
+      })).toEqual({ action: "update", provider });
+    }
     expect(parseHostedRuntimeAssistantConfigurationToolRequest({
       action: "update",
       model: HOSTED_ASSISTANT_LUNA_MODEL,
@@ -394,7 +402,7 @@ describe("hosted runtime control contracts", () => {
 
     expect(() => parseHostedRuntimeAssistantConfigurationToolRequest({
       action: "update",
-    })).toThrow(/requires a model or reasoning effort/u);
+    })).toThrow(/requires a model, provider, or reasoning effort/u);
     expect(() => parseHostedRuntimeAssistantConfigurationToolRequest({
       action: "read",
       model: HOSTED_ASSISTANT_LUNA_MODEL,
@@ -405,6 +413,15 @@ describe("hosted runtime control contracts", () => {
     })).toThrow(/not supported/u);
 
     const assistantInputId = `ain_${"c".repeat(32)}`;
+    expect(parseHostedRuntimeAssistantConfigurationControlRequest({
+      action: "update",
+      assistantInputId,
+      provider: "venice",
+    })).toEqual({
+      action: "update",
+      assistantInputId,
+      provider: "venice",
+    });
     expect(parseHostedRuntimeAssistantConfigurationControlRequest({
       action: "update",
       assistantInputId,
@@ -482,10 +499,12 @@ describe("hosted runtime control contracts", () => {
 
     const snapshot = {
       availableModels: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
+      availableProviders: ["openai", "venice"] as const,
       availableReasoningEfforts: [...HOSTED_ASSISTANT_REASONING_EFFORTS],
       configurationAvailable: true,
       dormantSolPreference: false,
       model: HOSTED_ASSISTANT_TERRA_MODEL,
+      provider: "openai" as const,
       reasoningEffort: "low" as const,
       solAvailable: false,
     };
@@ -496,6 +515,29 @@ describe("hosted runtime control contracts", () => {
       action: "read",
       result: snapshot,
     });
+    const {
+      availableProviders: _legacyAvailableProviders,
+      provider: _legacyProvider,
+      ...legacySnapshot
+    } = snapshot;
+    expect(parseHostedRuntimeAssistantConfigurationToolResponse({
+      action: "read",
+      result: legacySnapshot,
+    })).toEqual({
+      action: "read",
+      result: {
+        ...legacySnapshot,
+        availableProviders: ["openai"],
+        provider: "openai",
+      },
+    });
+    expect(() => parseHostedRuntimeAssistantConfigurationToolResponse({
+      action: "read",
+      result: {
+        ...snapshot,
+        provider: undefined,
+      },
+    })).toThrow(/provider is not supported/u);
     expect(parseHostedRuntimeAssistantConfigurationToolResponse({
       action: "update",
       result: {
@@ -1269,7 +1311,7 @@ describe("hosted runtime control contracts", () => {
       event: {
         assistantInputIds: ["input_1", "input_2"],
         at: "2026-04-26T00:00:01.500Z",
-        milestone: "first_codex_text_observed",
+        milestone: "progress_update_accepted",
         runtimeAttemptId: "attempt_1",
         source: "linq",
         type: "assistant_milestone",
@@ -1278,6 +1320,25 @@ describe("hosted runtime control contracts", () => {
       event: {
         assistantInputIds: ["input_1", "input_2"],
         at: "2026-04-26T00:00:01.500Z",
+        milestone: "progress_update_accepted",
+        runtimeAttemptId: "attempt_1",
+        source: "linq",
+        type: "assistant_milestone",
+      },
+    });
+    expect(parseHostedRuntimeLatencyTraceRequest({
+      event: {
+        assistantInputIds: ["input_1", "input_2"],
+        at: "2026-04-26T00:00:01.600Z",
+        milestone: "first_codex_text_observed",
+        runtimeAttemptId: "attempt_1",
+        source: "linq",
+        type: "assistant_milestone",
+      },
+    })).toEqual({
+      event: {
+        assistantInputIds: ["input_1", "input_2"],
+        at: "2026-04-26T00:00:01.600Z",
         milestone: "first_codex_text_observed",
         runtimeAttemptId: "attempt_1",
         source: "linq",
@@ -1792,6 +1853,45 @@ describe("hosted runtime control contracts", () => {
     expect(idempotent).toEqual({
       changed: false,
       value: merged.value,
+    });
+
+    const earlierProgressMerged = mergeHostedRuntimeLatencyPhaseBreakdownJson({
+      existing: {
+        assistant: {
+          progressUpdateAcceptedAtEpochMs: 1_777_000_030_000,
+        },
+        schemaVersion: 1,
+      },
+      incoming: {
+        assistant: {
+          progressUpdateAcceptedAtEpochMs: 1_777_000_029_999,
+        },
+        schemaVersion: 1,
+      },
+      phases: ["assistant"],
+    });
+
+    expect(earlierProgressMerged).toEqual({
+      changed: true,
+      value: {
+        assistant: {
+          progressUpdateAcceptedAtEpochMs: 1_777_000_029_999,
+        },
+        schemaVersion: 1,
+      },
+    });
+    expect(mergeHostedRuntimeLatencyPhaseBreakdownJson({
+      existing: earlierProgressMerged.value,
+      incoming: {
+        assistant: {
+          progressUpdateAcceptedAtEpochMs: 1_777_000_030_001,
+        },
+        schemaVersion: 1,
+      },
+      phases: ["assistant"],
+    })).toEqual({
+      changed: false,
+      value: earlierProgressMerged.value,
     });
 
     const providerMerged = mergeHostedRuntimeLatencyPhaseBreakdownJson({

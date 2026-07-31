@@ -1,11 +1,11 @@
 # iOS address-book advisory names
 
-Last verified: 2026-07-28
+Last verified: 2026-07-30
 
 ## Product boundary
 
 The iOS companion may offer one optional Contacts step after Apple Health.
-Sharing lets Murph use a familiar, unverified first-name label for a
+Sharing lets Murph use a familiar address-book display name for a
 phone participant in a group owned by the sharing member, whether or not that
 participant already uses Murph.
 Skipping makes no permission request and performs no backend mutation.
@@ -103,15 +103,16 @@ provider handle with a decrypted label. KMS IAM, provider/session retention,
 and application compromise remain security boundaries and must not be
 described otherwise.
 
-There are two route-authorized consumers. The primary consumer is the existing
+There are three route-authorized consumers. The primary consumer is the existing
 `read_chat_participants` operation:
 
 1. Read and reconcile the truthful live Linq iMessage or SMS group roster.
 2. Select at most 16 canonical phone handles while retaining each handle's
    durable activation result independently.
 3. Resolve only the human group owner's enabled projection.
-4. Return each remaining single label or explicit multi-label alternative as
-   `unverifiedOwnerContactLabel`.
+4. Carry each remaining single label or explicit multi-label alternative as
+   internal `ownerAdvisoryName` and expose it to the model as participant
+   `displayName`.
 5. Treat KMS, consent, storage, timeout, or decryption failure as an empty
    optional overlay; never degrade the truthful roster.
 
@@ -122,44 +123,72 @@ replacement: the route-authorized live group read is the access boundary for an
 already-enabled projection, regardless of the owner's current personal or
 sponsored billing access.
 
-The model sees the label only for the current tool result and is explicitly
-told that it is untrusted presentation text with no identity, membership,
-consent, routing, instruction, or persistence authority.
+Across all three model-facing consumers, Murph is explicitly told to trust a
+label as the participant's familiar conversational name, use it naturally when
+helpful, and avoid unsolicited uncertainty or provenance disclaimers. If
+someone asks how Murph knows one of these address-book names, Murph truthfully
+identifies the group owner's shared address book as the source. That
+presentation trust grants no identity, matching, membership, consent, routing,
+instruction, or persistence authority. A ` / ` value remains explicit
+alternatives rather than permission to choose one.
 
-The second consumer is an exact provider-authenticated Linq
+The second consumer is the automatic authenticated Linq transcript speaker-
+label read. After durable ingress, the runtime batches the current turn's
+unique sender handles through `read_participant_display_names`. Web first
+requires an exact unique current joined, unsuspended membership and reads only
+that membership's authorized `profile-name.v0` snapshot. A profile name wins.
+Only a canonical phone with no member match, or one unsuspended match without a
+profile name, may reach the existing set-based owner advisory-name reader;
+ambiguous or suspended matches stay unnamed. Web returns no member or
+participant id. The runner may reuse only the presentation result through its
+operation memo and bounded snapshot-excluded file cache; the cache never
+becomes profile, contact, membership, or effect authority. Full cache,
+deadline, and rollout semantics live in
+`agent-docs/references/hosted-runtime-protocol.md`.
+The model-facing prompt renders the owner-contact result as
+`Address-book name (display only):`; its internal source remains
+`unverified-owner-contact` so presentation trust cannot erase provenance.
+
+The third consumer is an exact provider-authenticated Linq
 `participant.added` or `participant.removed` event for an existing active routed
 group. Web normalizes the event's phone handle, first proves that the matching
 hosted identity does not have active Murph activation evidence, and then may
 consult the human group owner's projection. A successful label is included
-with the canonical handle and change action in the route's bounded encrypted
-transient group-event buffer. The participant transaction takes the chat lock
+with the canonical handle and change action as an `address-book name` in the
+route's bounded encrypted transient group-event buffer. The participant
+transaction takes the chat lock
 before ledger insertion and staging, and the locked route rejects the Linq
 account's own lookup key when `is_me` is absent. The next ordinary admitted
 group message consumes that buffer and presents it to the model as weak
-context, never as a message authored by the participant. Provider-event ledger
-rows retain no handle or label. Lookup or crypto failure leaves additions with
-their existing anonymous fallback hint and leaves removals without detailed
-context; neither event wakes Murph or sends anything.
+context, never as a message authored by the participant. Only the parenthetical
+name in a complete server-generated participant-change entry is a trusted
+address-book name. Text after a reaction entry's `reaction on:` marker remains
+untrusted even when it imitates that form. Provider-event ledger rows retain no
+handle or label. Lookup or crypto failure leaves additions with their existing
+anonymous fallback hint and leaves removals without detailed context; neither
+event wakes Murph or sends anything.
 For a registered participant, the label remains only the owner's private
 presentation hint: it does not replace or modify that participant's Murph
 identity, and `hasOwnMurph` remains a separate durable-activation fact.
 
-SMS admission is limited to `read_chat_participants`. Its model-facing result is
-a roster read, but its Web owner also runs the existing best-effort Linq
-participant reconciliation. That reconciliation renews or creates bounded
-participant-derived access rows for resolved active participants and marks
-absent projected participants removed. The rows are seven-day runtime-access
-leases for the synthetic group container. This is the same container-liveness
-projection used by iMessage groups and by Linq group provisioning and inbound
-renewal; it grants no identity, consent, invite, delivery, or sharing authority.
+The roster read is shared by route-authorized iMessage and SMS groups. Its Web
+owner also runs the existing best-effort Linq participant reconciliation. That
+reconciliation renews or creates bounded participant-derived access rows for
+resolved active participants and marks absent projected participants removed.
+The rows are seven-day runtime-access leases for the synthetic group container.
+This is the same container-liveness projection used by Linq group provisioning
+and inbound renewal; it grants no identity, consent, invite, delivery, or
+sharing authority.
 
-The group skill may call this operation automatically on Murph's first ordinary
-reply in a room. If it then requests contact-card sharing, the runtime withholds
-the SMS thread context. Web returns `linq_thread_unavailable` before any
-contact-card provider call, and the assistant continues the same reply without
-claiming that a card was shared. Display-name and avatar changes, join offers,
-disclosure requests, contact-card sharing, and every other chat effect remain
-iMessage-only.
+iMessage and SMS use the same model-facing hosted-group access action. The
+trusted runtime posts native reaction consent only when the current provider
+supports it; otherwise it creates the same first-party permission request and
+returns its join URL for the ordinary reply. SMS sender evidence is valid for
+the same current-turn shared-data attribution as iMessage sender evidence.
+Provider-specific gaps remain typed and narrow: SMS cannot currently attach the
+VCF contact card, post a reaction-based disclosure request, or mutate the chat
+title or avatar. Those results are capability limits, never a generic thread or
+permission-service outage.
 
 The advisory-name lookup itself does not write a canonical profile, participant
 authority, or separate advisory-name state. The roster operation's existing
@@ -192,6 +221,13 @@ retention.
 
 ## Rollout
 
+The conversational-name update does not change the Web-to-runner wire contract.
+Deploy the runner prompt and model projection first, then deploy Web's
+participant-event wording. Either order is schema-compatible, but runner-first
+avoids a window where Web says `address-book name` while the old model contract
+still asks Murph to distrust it. Verify both a labeled roster read and a labeled
+participant event after both planes are live.
+
 For the multi-label extension, deploy Web acceptance before distributing an iOS
 build that may emit ` / `. Old iOS builds continue sending the existing
 single-label subset, and the updated Web parser accepts both forms. Rolling Web
@@ -216,8 +252,9 @@ or compatibility service for this emergency window.
 8. Enable `HOSTED_ADDRESS_BOOK_ADVISORY_NAMES_ENABLED=1` and exercise one
    labeled `read_chat_participants` result end to end.
 
-Rolling back SMS roster admission stops new SMS-triggered roster refreshes but
-does not erase participant-access rows already reconciled by that operation.
+Rolling back SMS group-route admission stops new SMS-triggered roster refreshes,
+current-sender attribution, and first-party access-link selection, but does not
+erase participant-access rows already reconciled by the roster operation.
 Those rows remain subject to the existing removal and seven-day lease rules;
 group provisioning and authenticated participant inbound can still maintain
 them through their canonical Linq paths.

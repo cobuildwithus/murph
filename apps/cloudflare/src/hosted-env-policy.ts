@@ -61,13 +61,14 @@ const RUNNER_SECRET_PROCESS_CONTROL_KEY_SET = new Set<string>(
   RUNNER_SECRET_PROCESS_CONTROL_KEYS,
 );
 const HOSTED_RUNNER_OPENAI_ASSISTANT_PROVIDER = "openai";
+const HOSTED_RUNNER_VENICE_ASSISTANT_PROVIDER = "venice";
 const HOSTED_RUNNER_OPENAI_API_KEY_ENV = "OPENAI_API_KEY";
 const HOSTED_RUNNER_MURPH_DATA_API_KEY_ENV = "MURPH_DATA_API_KEY";
 const HOSTED_RUNNER_PROVIDER_INTERCEPT_INJECTED_ENV_KEYS =
   HOSTED_ASSISTANT_WORKER_SECRET_ENV_NAMES;
 const HOSTED_RUNNER_INTERCEPT_INJECTED_ENV_KEYS = new Set([
   ...HOSTED_RUNNER_PROVIDER_INTERCEPT_INJECTED_ENV_KEYS,
-  HOSTED_RUNNER_OPENAI_API_KEY_ENV,
+  ...HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES,
   HOSTED_RUNNER_MURPH_DATA_API_KEY_ENV,
 ]);
 
@@ -316,6 +317,10 @@ export function isHostedRunnerSupportedAssistantProvider(
 
 export function isHostedRunnerOpenAiProvider(value: unknown): boolean {
   return isHostedRunnerSupportedAssistantProvider(value);
+}
+
+export function isHostedRunnerVeniceProvider(value: unknown): boolean {
+  return normalizeStringEnvValue(value) === HOSTED_RUNNER_VENICE_ASSISTANT_PROVIDER;
 }
 
 export function hasHostedRunnerModelCredential(input: {

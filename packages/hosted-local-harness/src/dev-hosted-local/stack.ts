@@ -94,6 +94,7 @@ import {
 } from "./stripe.ts";
 import {
   buildHostedLocalTemporalRuntimeEnv,
+  requireHostedLocalTemporalWorkerPackageDir,
   startHostedLocalTemporalRuntime,
   type HostedLocalTemporalRuntime,
 } from "./temporal.ts";
@@ -214,6 +215,9 @@ export async function startHostedLocalDevStack(input: {
   removeHostedLocalWebAuthorityFromProcessEnvironment();
   const initialProcessEnv = { ...initialEnv } satisfies NodeJS.ProcessEnv;
   const config = resolveHostedLocalDevConfig(initialEnv);
+  if (config.temporal.mode !== "disabled") {
+    requireHostedLocalTemporalWorkerPackageDir(initialEnv);
+  }
   assertHostedLocalWorktreeRuntimePreconditions(initialEnv);
   assertHostedLocalE2eIsolation(initialEnv, config);
   const tempDirOverride = initialEnv.MURPH_DEV_TEMP_DIR?.trim() || null;
@@ -2107,7 +2111,6 @@ const HOSTED_LOCAL_HOST_ONLY_CODEX_ENV_NAMES = [
   HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
   "HF_TOKEN",
-  "VENICE_API_KEY",
   "XAI_API_KEY",
 ] as const;
 

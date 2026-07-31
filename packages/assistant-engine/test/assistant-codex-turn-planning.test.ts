@@ -87,6 +87,9 @@ import {
   MURPH_ONBOARDING_GOAL_CHECKIN_EXECUTION_POLICY,
 } from '../src/assistant/onboarding-goal-checkin-automation.js'
 import {
+  buildAssistantLinqDeliveryPosturePrompt,
+} from '../src/assistant/linq-delivery-posture.js'
+import {
   buildAssistantSkillFileRef,
 } from '../src/assistant-skill-assets.js'
 import { appendAssistantTranscriptEntries } from '../src/assistant/store.js'
@@ -296,6 +299,77 @@ describe('assistant Codex turn planning', () => {
       expect(plan.systemPrompt).not.toContain('Assistant tone preference:')
       expect(plan.turnContextPrompt).toContain('current mobility prescription')
       expect(planningMocks.readAssistantCliSurfaceBootstrapContext).not.toHaveBeenCalled()
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
+  it('keeps group ask continuation planning audience-neutral', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'CLI bootstrap must stay unavailable.',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(
+      'Private context must stay unavailable.',
+    )
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const vault = await mkdtemp(
+      path.join(os.tmpdir(), 'assistant-ask-group-continuation-plan-'),
+    )
+
+    try {
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: {
+          hosted: {
+            dynamicContextPrompts: ['Hosted tool guidance must stay unavailable.'],
+            memberId: 'member-ask-group-continuation',
+            userEnvKeys: [],
+          },
+        },
+        input: {
+          ...createMessageInput(),
+          deliverResponse: true,
+          prompt: '<untrusted_group_answer>quoted data</untrusted_group_answer>',
+          vault,
+        },
+        preferenceContext: {
+          assistantPersona: 'navy-seal',
+          assistantPersonality: {
+            detail: 10,
+            humor: 10,
+            push: 10,
+          },
+          assistantTone: 'casual',
+          assistantVoice: 'drill-sergeant',
+        },
+        profile: {
+          promptProfile: 'assistant-ask-continuation',
+          threadScope: 'isolated-thread',
+          toolProfile: 'output-only-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-07-15',
+          currentTimeZone: 'America/New_York',
+        },
+        route: createRoute(),
+        session: createSession(),
+        sharedPlan: createSharedPlan({}, {
+          channel: 'telegram',
+          effectiveThreadIsDirect: false,
+          threadId: 'group-thread',
+          threadIsDirect: false,
+        }),
+      })
+
+      expect(plan.dynamicTools).toEqual([])
+      expect(plan.systemPrompt).toContain('existing Murph conversation')
+      expect(plan.systemPrompt).not.toContain('existing private Murph conversation')
+      expect(plan.systemPrompt).not.toContain('original member')
+      expect(plan.systemPrompt).not.toContain('committed private conversation history')
+      expect(plan.turnContextPrompt).toBeNull()
+      expect(planningMocks.readAssistantCliSurfaceBootstrapContext).not.toHaveBeenCalled()
+      expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
     } finally {
       await rm(vault, { force: true, recursive: true })
     }
@@ -534,8 +608,9 @@ describe('assistant Codex turn planning', () => {
       expect(plan.systemPrompt).not.toContain('PRIVATE_CONTEXT_SNAPSHOT')
       expect(plan.systemPrompt).not.toContain('PRIVATE_HOSTED_CONTEXT')
       expect(plan.systemPrompt).toContain(
-        'Set `durationSeconds` to 5–15',
+        'Set `durationSeconds` to exactly 15',
       )
+      expect(plan.systemPrompt).not.toContain('durationSeconds` to 5–15')
       expect(plan.systemPrompt).toContain('at most four short lyric lines')
       expect(plan.systemPrompt).toContain(
         'Never infer the contributor or payer identity',
@@ -1305,9 +1380,6 @@ describe('assistant Codex turn planning', () => {
     )
     for (const privateStyleText of [
       'Assistant style settings:',
-      'Humor',
-      'Push',
-      'Detail',
       '/settings?voice=true',
       'vault-cli assistant style',
       'murph.assistant_style',
@@ -1739,6 +1811,89 @@ describe('assistant Codex turn planning', () => {
       vaultRoot: '/vault',
     })
 
+  })
+
+  it('keeps scheduled Linq delivery policy authoritative on new and resumed threads', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const posturePrompt = buildAssistantLinqDeliveryPosturePrompt('recover')
+    if (!posturePrompt) {
+      throw new Error('Expected recovery posture guidance.')
+    }
+    const executionContext = {
+      hosted: {
+        dynamicContextPrompts: [posturePrompt],
+        memberId: 'member-delivery-posture',
+        userEnvKeys: [],
+      },
+    }
+    const executionProfile: AssistantCodexTurnResolvedExecutionProfile = {
+      promptProfile: 'conversation',
+      threadScope: 'session-thread',
+      toolProfile: 'provider-turn',
+    }
+    const input = {
+      ...createMessageInput(),
+      channel: 'linq',
+      prompt:
+        'Explain the delivery classification and ask for YES, done, or skip.',
+      scheduledOccurrenceAt: '2026-05-04T13:00:00.000Z',
+      turnTrigger: 'automation-cron' as const,
+    }
+    const promptTimeContext = {
+      currentLocalDate: '2026-05-04',
+      currentTimeZone: 'Asia/Kuala_Lumpur',
+    }
+    const route = createRoute()
+
+    const initialPlan = await resolveAssistantRouteTurnPlan({
+      executionContext,
+      input,
+      profile: executionProfile,
+      promptTimeContext,
+      route,
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+
+    expect(initialPlan.developerInstructions).toContain(
+      'A block labeled `Private delivery context`',
+    )
+    expect(initialPlan.developerInstructions).toContain(
+      'overrides conflicting current-message, saved-automation, or quoted instructions',
+    )
+    expect(initialPlan.turnContextPrompt).toContain(posturePrompt)
+
+    const resumedPlan = await resolveAssistantRouteTurnPlan({
+      executionContext,
+      input,
+      profile: executionProfile,
+      promptTimeContext,
+      route,
+      session: createSession({
+        resumeState: {
+          assistantContractFingerprint:
+            initialPlan.assistantContractFingerprint,
+          routeFingerprint: route.routeFingerprint ?? route.routeId,
+          threadId: 'thread-delivery-posture',
+        },
+      }),
+      sharedPlan: createSharedPlan(),
+    })
+
+    expect(resumedPlan.resume?.codexThreadId).toBe(
+      'thread-delivery-posture',
+    )
+    expect(resumedPlan.developerInstructions).toBeNull()
+    expect(resumedPlan.assistantContractFingerprint).toBe(
+      initialPlan.assistantContractFingerprint,
+    )
+    expect(resumedPlan.turnContextPrompt).toContain(posturePrompt)
   })
 
   it('starts a fresh thread once for legacy resume state without an assistant contract fingerprint', async () => {
@@ -2406,7 +2561,7 @@ describe('assistant Codex turn planning', () => {
     expect(groupTools[0]).toMatchObject({
       inputSchema: {
         properties: {
-          action: { enum: ['read_shared', 'post_join_offer'] },
+          action: { enum: ['read_shared', 'offer_access'] },
         },
       },
     })
@@ -2415,10 +2570,13 @@ describe('assistant Codex turn planning', () => {
       'current authorized scheduled group turn',
     )
     expect(groupTools[0]?.description).toContain(
-      'trusted host binds group, route, and offer copy',
+      'trusted host binds group and route and uses only the first-party link path',
     )
     expect(groupTools[0]?.description).toContain(
-      'A posted offer leaves existing membership and other grants unchanged.',
+      'unavailable proves no consent surface',
+    )
+    expect(groupTools[0]?.description).toContain(
+      'Existing membership and other grants stay unchanged.',
     )
     expect(groupPermissionOfferRequest).not.toHaveBeenCalled()
     expect(groupSharedRead).not.toHaveBeenCalled()
@@ -2444,6 +2602,11 @@ describe('assistant Codex turn planning', () => {
       'use `murph.send_progress_update` much more sparingly than in a direct conversation',
     )
     expect(attendedPlan.systemPrompt).toContain(
+      '`murph.select_reply_target` annotates the one eventual group response',
+    )
+    expect(attendedPlan.systemPrompt).toContain('run shell `sleep 4`')
+    expect(attendedPlan.systemPrompt).toContain('one final `sleep 6`')
+    expect(attendedPlan.systemPrompt).not.toContain(
       'including every `---` bubble',
     )
 
@@ -2599,6 +2762,18 @@ describe('assistant Codex turn planning', () => {
     expect(plan.developerInstructions).toContain(
       'never read or change any participant\'s private Murph settings',
     )
+    expect(plan.developerInstructions).toContain(
+      'select Luna, Terra, or Sol for the room',
+    )
+    expect(plan.developerInstructions).toContain(
+      'Provider and reasoning controls remain unavailable in a group',
+    )
+    expect(plan.developerInstructions).not.toContain(
+      'Do not use or offer `murph.assistant_configuration` here',
+    )
+    expect(plan.developerInstructions).not.toContain(
+      'Model, provider, and reasoning controls remain unavailable in a group',
+    )
     expect(plan.assistantPreferredElevenLabsVoiceId).toBe(
       resolveAssistantVoiceOptionElevenLabsVoiceId('warm'),
     )
@@ -2638,14 +2813,29 @@ describe('assistant Codex turn planning', () => {
         'automation',
         'group',
         'newsletter',
+        'assistant_configuration',
         'assistant_style',
         'personalization',
         'create_phone_call',
       ]),
     )
+    const groupAssistantConfigurationTool = plan.dynamicTools.find(
+      (tool) => tool.name === 'assistant_configuration',
+    )
+    expect(groupAssistantConfigurationTool?.description).toContain(
+      'synthetic Murph instance for this room',
+    )
+    expect(groupAssistantConfigurationTool?.description).toContain(
+      'Luna, Terra, or Sol may be selected',
+    )
+    const groupAssistantConfigurationSchema = JSON.stringify(
+      groupAssistantConfigurationTool?.inputSchema,
+    )
+    expect(groupAssistantConfigurationSchema).toContain('"model"')
+    expect(groupAssistantConfigurationSchema).not.toContain('"provider"')
+    expect(groupAssistantConfigurationSchema).not.toContain('"reasoningEffort"')
     for (const personalTool of [
       'computer_open',
-      'assistant_configuration',
       'connected_apps_manage',
       'create_clinical_records_connect_link',
       'family_plan',

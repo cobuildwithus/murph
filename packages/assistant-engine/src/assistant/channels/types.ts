@@ -153,6 +153,7 @@ export interface AssistantChannelDependencies {
   >
   telegramVoiceMemoRuntime?: TelegramRuntimeDependencies
   sendLinq?: (input: {
+    acceptedAssistantInputIds?: readonly string[] | null
     answeredMailboxItemIds?: readonly string[] | null
     card?: AssistantResponseCard | null
     directRecipientPhoneNumber?: string | null

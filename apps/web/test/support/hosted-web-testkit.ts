@@ -21,6 +21,7 @@ export {
 import type { HostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/contracts";
 import type { HostedExecutionSnapshotRef } from "@murphai/hosted-execution/contracts";
 import type { HostedExecutionWake } from "@murphai/hosted-execution/contracts";
+import type { HostedAssistantProvider } from "@murphai/hosted-execution/assistant-model";
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 
 import { createHostedWebSmokeEnvironment } from "../../next-artifacts";
@@ -45,6 +46,10 @@ const hostedTemporalClientModuleSpecifier = new URL(
 ).href;
 const hostedSignalRuntimeModuleSpecifier = new URL(
   "../../src/lib/hosted-orchestration/signal-runtime.ts",
+  import.meta.url,
+).href;
+const hostedAssistantModelPreferenceModuleSpecifier = new URL(
+  "../../src/lib/hosted-onboarding/assistant-model-preference.ts",
   import.meta.url,
 ).href;
 const hostedUsageCreditModuleSpecifier = new URL(
@@ -451,8 +456,14 @@ export interface HostedWebTestkitDeps {
   prisma: HostedTestPrismaClient;
 }
 
+type HostedRuntimeTemporalTestClient = HostedRuntimeTemporalSignalClient & {
+  connection?: {
+    close(): Promise<void>;
+  };
+};
+
 export interface HostedWebSignalTestkitDeps extends HostedWebTestkitDeps {
-  temporalSignalClient: HostedRuntimeTemporalSignalClient | null;
+  temporalSignalClient: HostedRuntimeTemporalTestClient | null;
 }
 
 interface HostedTemporalClientModule {
@@ -489,6 +500,27 @@ interface HostedRuntimeSignalModule {
   }): Promise<{
     signalAccepted: true;
     workflowId: string;
+  }>;
+  signalHostedRuntimeWakeRuntime(input: {
+    client?: HostedRuntimeTemporalSignalClient | null;
+    environment?: NodeJS.ProcessEnv;
+    prisma?: HostedTestPrismaClient;
+    userId: string;
+  }): Promise<{
+    signalAccepted: true;
+    workflowId: string;
+  }>;
+}
+
+interface HostedAssistantModelPreferenceModule {
+  updateHostedMemberAssistantConfigurationTx(input: {
+    memberId: string;
+    prisma: unknown;
+    provider: HostedAssistantProvider;
+  }): Promise<{
+    effectiveProviderUpdated: boolean;
+    provider: HostedAssistantProvider;
+    updated: boolean;
   }>;
 }
 
@@ -1479,6 +1511,61 @@ export async function signalHostedRuntimeRecheckRuntimeForTest(input: {
   });
 }
 
+export async function queryHostedRuntimeWorkflowForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  queryName: string;
+  workflowId: string;
+}): Promise<unknown> {
+  return withHostedWebSignalTestkitDeps(input.environment, async (deps) => {
+    const handle = deps.temporalSignalClient?.workflow.getHandle?.(
+      input.workflowId,
+    );
+    if (!handle) {
+      throw new Error("Hosted runtime Temporal query client is not configured.");
+    }
+    return await handle.query(input.queryName);
+  });
+}
+
+export async function signalHostedRuntimeWakeRuntimeForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  userId: string;
+}): Promise<{
+  signalAccepted: true;
+  workflowId: string;
+}> {
+  return withHostedWebSignalTestkitDeps(input.environment, async (deps) => {
+    const signalModule = await loadHostedRuntimeSignalModule();
+    return await signalModule.signalHostedRuntimeWakeRuntime({
+      client: deps.temporalSignalClient,
+      environment: deps.environment,
+      prisma: deps.prisma,
+      userId: input.userId,
+    });
+  });
+}
+
+export async function updateHostedMemberAssistantProviderForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  provider: HostedAssistantProvider;
+  userId: string;
+}): Promise<{
+  effectiveProviderUpdated: boolean;
+  provider: HostedAssistantProvider;
+  updated: boolean;
+}> {
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const preferenceModule = await loadHostedAssistantModelPreferenceModule();
+    return await deps.prisma.$transaction(async (tx) =>
+      await preferenceModule.updateHostedMemberAssistantConfigurationTx({
+        memberId: input.userId,
+        prisma: tx,
+        provider: input.provider,
+      })
+    );
+  });
+}
+
 export async function createHostedWebTestkitDeps(
   source: NodeJS.ProcessEnv = process.env,
 ): Promise<HostedWebTestkitDeps> {
@@ -1537,7 +1624,11 @@ async function withHostedWebSignalTestkitDeps<T>(
   try {
     return await callback(deps);
   } finally {
-    await deps.prisma.$disconnect();
+    try {
+      await deps.temporalSignalClient?.connection?.close();
+    } finally {
+      await deps.prisma.$disconnect();
+    }
   }
 }
 
@@ -1593,6 +1684,14 @@ async function loadHostedTemporalClientModule(): Promise<HostedTemporalClientMod
 
 async function loadHostedRuntimeSignalModule(): Promise<HostedRuntimeSignalModule> {
   return await import(hostedSignalRuntimeModuleSpecifier) as HostedRuntimeSignalModule;
+}
+
+async function loadHostedAssistantModelPreferenceModule(): Promise<
+  HostedAssistantModelPreferenceModule
+> {
+  return await import(
+    hostedAssistantModelPreferenceModuleSpecifier
+  ) as HostedAssistantModelPreferenceModule;
 }
 
 async function loadHostedUsageCreditModule(): Promise<HostedUsageCreditModule> {
