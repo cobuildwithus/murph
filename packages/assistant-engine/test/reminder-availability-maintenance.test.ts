@@ -306,17 +306,8 @@ describe('reminder availability maintenance', () => {
 
   it('keeps ordinary reminder repair guidance user-facing and fail-open', async () => {
     const layers = buildAssistantSystemPromptLayers(createPromptInput())
-    expect(layers.stableRouteCapabilityPrompt).toContain(
-      'treat it as support-loop feedback',
-    )
-    expect(layers.stableRouteCapabilityPrompt).toContain(
-      'Availability conflict policy: skip-when-busy',
-    )
-    expect(layers.stableRouteCapabilityPrompt).toContain(
+    expect(layers.stableRouteCapabilityPrompt).not.toContain(
       'Availability calendar account: <toolkit> / <account-id>',
-    )
-    expect(layers.stableRouteCapabilityPrompt).toContain(
-      'background refresh can take a day',
     )
     const skill = await readFile(
       path.join(
@@ -327,9 +318,12 @@ describe('reminder availability maintenance', () => {
       'utf8',
     )
     expect(skill).toContain('### Repair a mistimed interruption')
+    expect(skill).toContain('treat it as feedback about the')
+    expect(skill).toContain('Availability conflict policy: skip-when-busy')
     expect(skill).toContain(
       'Availability calendar account: <toolkit> / <account-id>',
     )
+    expect(skill).toContain('policy in the background, usually within a day')
     expect(skill).toMatch(/the reminder sends\s+normally until one succeeds/u)
   })
 })
