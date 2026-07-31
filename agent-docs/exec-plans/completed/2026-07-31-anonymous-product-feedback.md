@@ -1,6 +1,6 @@
 # anonymous-product-feedback
 
-Status: active
+Status: completed
 Created: 2026-07-31
 Updated: 2026-07-31
 
@@ -80,18 +80,28 @@ Updated: 2026-07-31
 - Complete provider-input capture through the pinned Codex App Server used
   `gpt-5.6-terra`, low reasoning, production code mode, identical synthetic
   inputs, 16 representative direct tools, 13 representative group tools, and
-  `gpt-tokenizer` 3.4.0 `o200k_harmony`. Against current `origin/main`, the
-  direct fixture measured 30,062 to 30,242 tokens and 138,301 to 138,862 bytes
-  (+180 tokens, +0.5988%, +561 bytes); the group fixture measured 26,557 to
-  26,737 tokens and 122,700 to 123,261 bytes (+180 tokens, +0.6778%, +561
-  bytes). The shorter no-prose instruction contributes -19 tokens/-100 bytes;
+  `gpt-tokenizer` 3.4.0 `o200k_harmony`. The complete content-candidate capture
+  plus the current base-only prompt-line merge measured the direct fixture at
+  30,078 to 30,258 tokens and 138,389 to 138,950 bytes (+180 tokens, +0.5984%,
+  +561 bytes); the group fixture measured 26,573 to 26,753 tokens and 122,788
+  to 123,349 bytes (+180 tokens, +0.6774%, +561 bytes). The base-only change
+  was one exact rendered system-prompt line and added 16 tokens/88 bytes to
+  both sides when measured with its newline boundaries. The shorter no-prose
+  instruction contributes -19 tokens/-100 bytes;
   the closed enum schema and Codex-generated declaration contribute +199
   tokens/+661 bytes; other provider-visible input contributes zero. The
   capture excluded only `client_metadata` and `prompt_cache_key` and normalized
   temporary paths identically. Each reconstructed base replacement was
   asserted to occur exactly once.
-- The original exact-head CI passed. Exact-head CI and ReviewGPT correction
-  verification remain pending.
+- The original exact-head CI passed. Correction-verification ReviewGPT round 2
+  inspected the exact content candidate with the requested Pro model, returned
+  `ROUND_OUTCOME: PASS`, and reported no qualifying findings. It confirmed the
+  closed payload, independent Web parsing/catalog validation, identity discard,
+  server-built summary, two-phase historical/drain cleanup, and fail-closed
+  rolling deployment. Every required CI check passed on that exact candidate.
+- Main advanced after the zero-finding review. Its automatic conflict-free
+  merge changes no authored PR diff and is review-exempt under the base-only
+  rule; final exact-head CI remains for the archived-plan commit.
 - The remediation passed 451 Hosted Execution tests and 2,247 Cloudflare tests;
   162 focused assistant guidance/tool tests plus the durable-handoff,
   reconnect, and real-model-definition cases; and 130 focused Web privacy,
@@ -101,3 +111,4 @@ Updated: 2026-07-31
   synthetic linked free-text row, then simulated an old Web writer and applied
   the exact post-drain contract migration. Both passes preserved row counts,
   cleared member linkage and summaries, and replaced old ids.
+Completed: 2026-07-31
