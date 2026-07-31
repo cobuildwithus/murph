@@ -18,7 +18,7 @@ function GroupUsageFundingActions({
   oneTimeAction,
 }: GroupUsageFundingActionsProps) {
   return (
-    <div className="space-y-0">
+    <div>
       {monthlyAction}
       {oneTimeAction}
     </div>
@@ -30,7 +30,7 @@ function GroupUsageFundingShell({
   groupName,
 }: GroupUsageFundingShellProps) {
   return (
-    <section className="mx-auto w-full max-w-xl">
+    <section className="mx-auto w-full">
       <h1 className="sr-only">Support Murph in {groupName}</h1>
       {action}
       <div className="mt-3 text-center">

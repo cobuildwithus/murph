@@ -195,18 +195,18 @@ export function GroupSponsorshipManagementCard({
           >
             {([500, 1_000, 2_000] as const).map((monthlyCapMinor) => (
               <ChoiceCard
-                className="[&>[data-slot=field]]:gap-1.5 [&>[data-slot=field]]:p-3 [&_[data-slot=field-content]]:gap-1"
+                className="[&>[data-slot=field]]:gap-1 [&>[data-slot=field]]:p-2 [&_[data-slot=field-content]]:gap-1 min-[360px]:[&>[data-slot=field]]:gap-1.5 min-[360px]:[&>[data-slot=field]]:p-3"
                 key={monthlyCapMinor}
                 id={`managed-group-sponsorship-cap-${monthlyCapMinor}`}
                 value={String(monthlyCapMinor)}
                 disabled={busy || inert}
                 title={(
-                  <span className="font-serif text-2xl font-semibold leading-none tabular-nums">
+                  <span className="font-serif text-lg font-semibold leading-none tabular-nums min-[360px]:text-xl sm:text-2xl">
                     {formatMoney(monthlyCapMinor)}
                   </span>
                 )}
                 description={(
-                  <span className="text-xs font-medium text-muted-foreground">
+                  <span className="hidden text-xs font-medium text-muted-foreground min-[360px]:inline">
                     per month
                   </span>
                 )}

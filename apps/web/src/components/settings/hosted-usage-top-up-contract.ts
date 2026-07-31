@@ -55,6 +55,7 @@ interface HostedUsageTopUpDialogProps {
   renderPurchaseDetails?: ReactNode;
   renderSelectionDetails?: (input: {
     disabled: boolean;
+    mobileStickyActionVisible: boolean;
     selectedOffer: HostedUsageTopUpOffer | null;
   }) => ReactNode;
   scope?: "family" | "group" | "personal";

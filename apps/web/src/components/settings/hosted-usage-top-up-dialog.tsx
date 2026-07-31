@@ -457,6 +457,10 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
             )}
             {props.renderSelectionDetails?.({
               disabled: hasAttempt || !controller.requestIdentityReady,
+              mobileStickyActionVisible:
+                props.scope === "group" &&
+                groupPaymentMode === "monthly" &&
+                !selectionNeedsRecovery,
               selectedOffer: controller.selectedOffer,
             })}
             <FieldError>{controller.requestIdentityError}</FieldError>

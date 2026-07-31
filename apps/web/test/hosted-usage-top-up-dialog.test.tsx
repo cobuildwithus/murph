@@ -238,7 +238,7 @@ vi.mock("@/src/components/ui/collapsible", () => ({
       "data-default-open": defaultOpen ? "true" : "false",
     }),
   CollapsibleContent: (props: HTMLAttributes<HTMLDivElement>) =>
-    createElement("div", props),
+    createElement("div", { ...props, "data-slot": "collapsible-content" }),
   CollapsibleTrigger: ({
     children,
     render,
@@ -699,6 +699,11 @@ test("keeps the private monthly maximum out of the public sponsorship moment", a
     assert.ok(
       rendered.container.querySelector('[data-default-open="true"]'),
     );
+    const noteContent = rendered.container
+      .querySelector("#group-sponsor-message")
+      ?.closest('[data-slot="collapsible-content"]');
+    assert.ok(noteContent);
+    assert.equal(noteContent.classList.contains("max-md:pb-24"), true);
     const capSlider = rendered.container.querySelector<HTMLElement>(
       '[role="slider"][aria-valuetext="Up to $5 per month"]',
     );
@@ -853,6 +858,11 @@ test("keeps mobile monthly payment recovery below the open note fields", async (
     assert.ok(selection);
     assert.ok(details);
     assert.ok(recovery);
+    const noteContent = rendered.container
+      .querySelector("#group-sponsor-message")
+      ?.closest('[data-slot="collapsible-content"]');
+    assert.ok(noteContent);
+    assert.equal(noteContent.classList.contains("max-md:pb-24"), false);
     assert.equal(
       selection.classList.contains("max-md:min-h-full"),
       true,
@@ -863,6 +873,36 @@ test("keeps mobile monthly payment recovery below the open note fields", async (
     assert.ok(
       selectionChildren.indexOf(details) < selectionChildren.indexOf(recovery),
     );
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("does not reserve mobile sticky-action space for one-time group contributions", async () => {
+  mocks.isMobile.mockReturnValue(true);
+  const { GroupSponsorshipDialog } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(GroupSponsorshipDialog, {
+      checkoutUrl:
+        "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
+      customizationAllowed: true,
+      initialOpen: true,
+      mode: "one_time",
+      monthlyCapOptions: groupSponsorshipMonthlyCaps(),
+      offers: groupSponsorshipOffers(),
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    const noteContent = rendered.container
+      .querySelector("#group-sponsor-message")
+      ?.closest('[data-slot="collapsible-content"]');
+    assert.ok(noteContent);
+    assert.equal(noteContent.classList.contains("max-md:pb-24"), false);
   } finally {
     await rendered.cleanup();
   }
