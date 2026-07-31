@@ -169,7 +169,7 @@ describe("hosted image generation", () => {
       async run(_signal, persistCanonicalWrite) {
         await heldImage;
         const savedImageRef = await persistCanonicalWrite(async () =>
-          "raw/generated/sunrise.webp"
+          privateMedia.ref
         );
         return {
           media: privateMedia,
@@ -293,7 +293,8 @@ describe("hosted image generation", () => {
     assert.ok(envelope?.[1]);
     assert.deepEqual(JSON.parse(envelope[1]), {
       media: [privateMedia],
-      savedImageRef: "raw/generated/sunrise.webp",
+      originAssistantInputId: origin.inputId,
+      savedImageRef: privateMedia.ref,
       status: "ready",
     });
     assert.equal(await controller.stageCompleted(), 0);

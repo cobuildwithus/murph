@@ -85,6 +85,10 @@ import type {
   HostedPhoneCallStartResponse,
 } from "@murphai/hosted-execution/phone-calls";
 import type {
+  HostedPhysicalNoteSendRequest,
+  HostedPhysicalNoteSendResponse,
+} from "@murphai/hosted-execution/physical-notes";
+import type {
   HostedPlanUsageStatus,
   HostedPlanUsageToolRequest,
 } from "@murphai/hosted-execution/plan-usage";
@@ -521,6 +525,15 @@ export interface HostedRuntimePhoneCallPort {
   ): Promise<HostedPhoneCallStartResponse>;
 }
 
+export interface HostedRuntimePhysicalNotePort {
+  send(
+    request: HostedPhysicalNoteSendRequest,
+    context?: {
+      signal?: AbortSignal | null;
+    },
+  ): Promise<HostedPhysicalNoteSendResponse>;
+}
+
 export interface HostedRuntimeMailboxPort {
   fetch(request: HostedMailboxFetchRequest): Promise<HostedMailboxFetchResponse>;
   fetchPayload(
@@ -664,6 +677,7 @@ export interface HostedRuntimePlatform {
   mailboxPort?: HostedRuntimeMailboxPort | null;
   newsletterToolPort?: HostedRuntimeNewsletterToolPort | null;
   planUsageToolPort?: HostedRuntimePlanUsageToolPort | null;
+  physicalNotes?: HostedRuntimePhysicalNotePort | null;
   privateImageUrlPublisher?: AssistantHostedPrivateImageUrlPublisher | null;
   subscriptionToolPort?: HostedRuntimeSubscriptionToolPort | null;
   phoneCalls?: HostedRuntimePhoneCallPort | null;

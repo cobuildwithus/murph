@@ -58,6 +58,10 @@ import type {
   HostedPhoneCallStartResponse,
 } from '@murphai/hosted-execution/phone-calls'
 import type {
+  HostedPhysicalNoteSendRequest,
+  HostedPhysicalNoteSendResponse,
+} from '@murphai/hosted-execution/physical-notes'
+import type {
   HostedPlanUsageStatus,
   HostedPlanUsageToolRequest,
 } from '@murphai/hosted-execution/plan-usage'
@@ -345,6 +349,15 @@ export interface AssistantPhoneCallPort {
   ): Promise<HostedPhoneCallStartResponse>
 }
 
+export interface AssistantPhysicalNotePort {
+  send(
+    request: HostedPhysicalNoteSendRequest,
+    context?: {
+      signal?: AbortSignal | null
+    },
+  ): Promise<HostedPhysicalNoteSendResponse>
+}
+
 export type AssistantPrivateImageContentType =
   | 'image/jpeg'
   | 'image/png'
@@ -427,6 +440,7 @@ export interface AssistantHostedExecutionContext {
   labsTool?: AssistantHostedLabsTool | null
   newsletterTool?: AssistantHostedNewsletterTool | null
   planUsageTool?: AssistantHostedPlanUsageTool | null
+  physicalNotes?: AssistantPhysicalNotePort | null
   privateImageUrlPublisher?: AssistantHostedPrivateImageUrlPublisher | null
   subscriptionTool?: AssistantHostedSubscriptionTool | null
   dynamicContextPrompts?: readonly string[] | null
@@ -537,6 +551,7 @@ export function normalizeAssistantExecutionContext(
     hosted?.subscriptionTool,
   )
   const phoneCalls = normalizeAssistantPhoneCallPort(hosted?.phoneCalls)
+  const physicalNotes = normalizeAssistantPhysicalNotePort(hosted?.physicalNotes)
   const privateImageUrlPublisher = normalizeAssistantPrivateImageUrlPublisher(
     hosted?.privateImageUrlPublisher,
   )
@@ -580,6 +595,7 @@ export function normalizeAssistantExecutionContext(
       ...(labsTool ? { labsTool } : {}),
       ...(newsletterTool ? { newsletterTool } : {}),
       ...(planUsageTool ? { planUsageTool } : {}),
+      ...(physicalNotes ? { physicalNotes } : {}),
       ...(privateImageUrlPublisher ? { privateImageUrlPublisher } : {}),
       ...(subscriptionTool ? { subscriptionTool } : {}),
       ...(typeof hosted?.materializeWorkspaceArtifacts === 'function'
@@ -722,6 +738,18 @@ function normalizeAssistantPhoneCallPort(
 
   return {
     start: input.start.bind(input),
+  }
+}
+
+function normalizeAssistantPhysicalNotePort(
+  input: AssistantHostedExecutionContext['physicalNotes'] | undefined,
+): AssistantPhysicalNotePort | undefined {
+  if (!input || typeof input.send !== 'function') {
+    return undefined
+  }
+
+  return {
+    send: input.send.bind(input),
   }
 }
 

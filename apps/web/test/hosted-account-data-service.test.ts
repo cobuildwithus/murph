@@ -144,6 +144,7 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_computer_run",
   "prisma.hosted_computer_handoff",
   "prisma.hosted_phone_call",
+  "prisma.hosted_physical_note",
   "prisma.hosted_runtime_log",
   "prisma.hosted_user_crypto_envelope",
   "prisma.hosted_user_crypto_audit",

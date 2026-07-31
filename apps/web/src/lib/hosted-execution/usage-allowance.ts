@@ -59,6 +59,11 @@ import {
 import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
 import { settleHostedUsageCreditForUsageTx } from "./usage-credits";
 import {
+  HOSTED_LOB_USAGE_PRICING_SOURCE,
+  HOSTED_LOB_USAGE_PRICING_VERSION,
+  matchHostedLobPhysicalNoteUsageRecord,
+} from "./usage-lob";
+import {
   HOSTED_RETELL_USAGE_COST_KEY,
   HOSTED_RETELL_USAGE_PRICING_SOURCE,
   HOSTED_RETELL_USAGE_PRICING_VERSION,
@@ -580,6 +585,31 @@ function resolveHostedAiUsageAllowancePricingDecision(
   const tokenPricingBasis =
     normalizeAssistantUsageTokenPricingBasis(record.tokenPricingBasis);
 
+  const lobPhysicalNote = matchHostedLobPhysicalNoteUsageRecord(record);
+  if (lobPhysicalNote !== null) {
+    assertHostedAiUsageLobPhysicalNoteTokenPricingBasis(tokenPricingBasis);
+    return {
+      kind: "priced",
+      priced: {
+        costUsdMicros: counted ? lobPhysicalNote.providerCostUsdMicros : 0n,
+        counted,
+        pricingSnapshot: {
+          credentialSource,
+          providerCost: {
+            providerCostUsdMicros:
+              lobPhysicalNote.providerCostUsdMicros.toString(),
+            providerPricingVersion:
+              lobPhysicalNote.providerPricingVersion,
+          },
+          pricingSource: HOSTED_LOB_USAGE_PRICING_SOURCE,
+          schema: "murph.hosted-ai-usage-allowance-pricing.v1",
+          tokenPricingBasis,
+        },
+        pricingVersion: HOSTED_LOB_USAGE_PRICING_VERSION,
+      },
+    };
+  }
+
   const retellMatch = matchHostedAiUsageRetellPhoneCallRecord(record);
   if (retellMatch !== null) {
     assertHostedAiUsageRetellTokenPricingBasis(tokenPricingBasis);
@@ -802,6 +832,11 @@ function validateHostedAiUsageAllowanceDeniedTokenPricingBasis(
 ): AssistantUsageTokenPricingBasis {
   const tokenPricingBasis =
     normalizeAssistantUsageTokenPricingBasis(record.tokenPricingBasis);
+
+  if (matchHostedLobPhysicalNoteUsageRecord(record) !== null) {
+    assertHostedAiUsageLobPhysicalNoteTokenPricingBasis(tokenPricingBasis);
+    return tokenPricingBasis;
+  }
 
   if (matchHostedAiUsageRetellPhoneCallRecord(record) !== null) {
     assertHostedAiUsageRetellTokenPricingBasis(tokenPricingBasis);
@@ -2392,6 +2427,16 @@ function assertHostedAiUsageAllowanceOpenAiImageTokenPricingBasis(
   if (basis !== "standard") {
     throw new TypeError(
       "OpenAI image hosted AI usage must use standard token pricing basis.",
+    );
+  }
+}
+
+function assertHostedAiUsageLobPhysicalNoteTokenPricingBasis(
+  basis: AssistantUsageTokenPricingBasis,
+): void {
+  if (basis !== "standard") {
+    throw new TypeError(
+      "Lob physical-note hosted usage must use standard token pricing basis.",
     );
   }
 }
