@@ -18,7 +18,7 @@ Key decisions:
 - Add direct packed-package coverage that resolves a known desired direction from the extracted runner artifact and direct use-case coverage for missing-asset neutral recovery.
 
 State:
-- ReviewGPT round 3 found that SVG accessibility metadata and private-image alt text were discarded by PNG rasterization and the Linq/Telegram provider mappings. The accepted correction keeps the card as disclosure owner and makes the existing media description effective at those delivery boundaries.
+- Done. The hosted runner carries the compact biomarker direction artifact, missing-only recovery returns an understandable neutral card, malformed data remains fail-closed, and image delivery preserves the fallback description.
 
 Done:
 - Reproduced the incompatible current contracts: hosted packaging omits and rejects `generated/web/**`, while progress-card composition reads `generated/web/browse/biomarkers.json` through the pinned package root.
@@ -42,12 +42,16 @@ Done:
 - Final ReviewGPT round 3 found one valid accessibility gap: neither production image adapter forwarded the media description after SVG-to-PNG conversion.
 - Added one shared channel-runtime rule that appends nonempty image descriptions once to the existing Linq message or Telegram caption, while preserving the vault-file no-caption rule. Official provider contracts expose captions/messages but no native image-alt field.
 - Passed the assistant channel and hosted callback suites (257 tests), the renderer suite (2 tests), assistant-engine/assistant-runtime/CLI typechecks, prepared-runtime build, regenerated-schema check, and exact CLI package-shape verifier.
+- Corrected the existing Linq recovery expectation and added direct Telegram caption-overflow proof; the focused channel/provider suites pass (66 tests).
+- Final ReviewGPT round 4 returned `PASS` with no qualifying findings on the exact pushed head and explicitly closed the Linq/Telegram accessibility finding, including deduplication, overflow, recovery, healthy-card, malformed-data, vault-file, and prompt-freshness paths.
+- Required GitHub Actions are green on the exact current head, including the full CLI, assistant, platform, app-verification, runner-sandbox, hygiene, and host-matrix lanes.
+- Parent final review re-read every changed source path, walked missing/healthy/malformed and provider-delivery paths, found no remaining accepted finding, and proved the current PR head merges cleanly with the latest fetched `origin/main`.
 
 Now:
-- Commit and push the channel-boundary accessibility correction, update the PR evidence, then start the exact-head final remediation review with CI.
+- Complete; archive this plan with the final scoped commit.
 
 Next:
-- Require clean exact-head ReviewGPT and CI, perform the parent final review, then archive this plan.
+- Preserve the task worktree while the draft PR remains open.
 
 Open questions (UNCONFIRMED if needed):
 - None blocking implementation.
@@ -66,9 +70,13 @@ Working set (files/ids/commands):
 - `packages/assistant-engine/src/assistant/channels/runtime.ts`
 - `packages/assistant-engine/test/assistant-channels-runtime.test.ts`
 - `packages/assistant-runtime/test/hosted-runtime-callbacks.test.ts`
+- `packages/assistant-runtime/test/hosted-provider-effects.test.ts`
 - `apps/cloudflare/scripts/runner-bundle/workspace-artifacts.ts`
 - `apps/cloudflare/scripts/deploy-artifacts.ts`
 - `apps/cloudflare/test/runner-bundle-workspace-artifacts.test.ts`
 - `apps/cloudflare/test/deploy-artifacts.test.ts`
 - `agent-docs/product-specs/health-commons.md`
 - Focused package and Cloudflare Vitest commands selected from `agent-docs/operations/verification-and-runtime.md`
+Status: completed
+Updated: 2026-07-30
+Completed: 2026-07-30
