@@ -7,6 +7,7 @@ import {
 } from "@/src/lib/hosted-messages/user-facing-messages";
 
 const USER_FACING_MESSAGE_MIN_VARIANT_COUNT = 20;
+const HOME_REDIRECT_MIN_VARIANT_COUNT = 100;
 
 /**
  * The thread notice has room for personality, but every variant still has to
@@ -85,6 +86,12 @@ describe("user-facing message variants", () => {
     }
   });
 
+  it("keeps at least 100 distinct wrong-line redirect variants", () => {
+    expect(collectRenderedTexts("linq.home_redirect").size).toBeGreaterThanOrEqual(
+      HOME_REDIRECT_MIN_VARIANT_COUNT,
+    );
+  });
+
   it("selects variants deterministically from the caller seed", () => {
     const input = {
       context: TEST_CONTEXT_BY_KEY["linq.invite_signup"],
@@ -130,6 +137,15 @@ describe("user-facing message variants", () => {
       "linq.ai_usage.thread_limit_funding",
       "https://www.withmurph.ai/groups/fund/test-code",
     );
+  });
+
+  it("tells the member to move every wrong-line conversation", () => {
+    for (const text of collectRenderedTexts("linq.home_redirect")) {
+      expect(text).toMatch(
+        /continue|keep|message|move|resend|save|send|shift|switch|text|use/iu,
+      );
+      expect(text).not.toMatch(/https?:\/\//iu);
+    }
   });
 
   it("identifies Murph in every phone signup invite", () => {
