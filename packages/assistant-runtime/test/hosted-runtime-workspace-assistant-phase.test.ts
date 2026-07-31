@@ -554,6 +554,7 @@ beforeEach(() => {
   mocks.refreshReminderAvailability.mockResolvedValue({
     attempted: 0,
     failed: 0,
+    nextRefreshAt: null,
     refreshed: 0,
   });
   mocks.prepareHostedAssistantAutomationForWake.mockResolvedValue(
@@ -2972,6 +2973,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       });
       expect(result).toEqual(expect.objectContaining({
         checkpointReason: "assistant_runtime_commit",
+        nextWakeAt: "2026-07-30T23:00:00.000Z",
         progressed: true,
         redactedStatus: expect.objectContaining({
           reminderAvailabilityMaintenanceAttempted: 1,
@@ -2993,6 +2995,139 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     } finally {
       await rm(parentRoot, { force: true, recursive: true });
     }
+  });
+
+  it("preempts an in-flight reminder availability read without logging a provider failure", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-reminder-availability-abort-"));
+    const vaultRoot = path.join(parentRoot, "vault");
+    const backgroundController = new AbortController();
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    let foregroundWaiting = false;
+    let markRequestStarted: () => void = () => undefined;
+    const requestStarted = new Promise<void>((resolve) => {
+      markRequestStarted = resolve;
+    });
+    const connectedApps: NonNullable<
+      HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["connectedApps"]
+    > = {
+      request: vi.fn(async (_request, context) => {
+        const signal = context?.signal ?? null;
+        expect(signal).toBe(backgroundController.signal);
+        markRequestStarted();
+        return await new Promise<never>((_resolve, reject) => {
+          const rejectFromAbort = () => reject(signal?.reason);
+          if (!signal) {
+            reject(new Error("Expected a background maintenance signal."));
+          } else if (signal.aborted) {
+            rejectFromAbort();
+          } else {
+            signal.addEventListener("abort", rejectFromAbort, { once: true });
+          }
+        });
+      }),
+    };
+    const actualAssistantEngine = await vi.importActual<
+      typeof import("@murphai/assistant-engine")
+    >("@murphai/assistant-engine");
+    try {
+      await initializeVault({
+        createdAt: "2026-07-29T00:00:00.000Z",
+        vaultRoot,
+      });
+      await upsertAutomation({
+        continuityPolicy: "fresh",
+        instructions: [
+          "Send one flexible reminder.",
+          "Availability conflict policy: skip-when-busy",
+          "Availability source policy: calendar-only",
+          "Availability calendar account: googlecalendar / calendar-account",
+        ].join("\n"),
+        now: new Date("2026-07-29T00:00:00.000Z"),
+        route: {
+          channel: "linq",
+          deliveryTarget: "direct-thread",
+          identityId: null,
+          participantId: null,
+          threadId: null,
+          threadIsDirect: true,
+        },
+        schedule: { kind: "dailyLocal", localTime: "16:00" },
+        slug: "hosted-reminder-availability-abort",
+        status: "active",
+        title: "Hosted reminder availability abort",
+        vaultRoot,
+      });
+      mocks.refreshReminderAvailability.mockImplementationOnce(
+        actualAssistantEngine.refreshReminderAvailability,
+      );
+
+      const phasePromise = runHostedWorkspaceAssistantPhase(createPhaseInput({
+        backgroundMaintenanceSignal: backgroundController.signal,
+        logRequests,
+        now: () => "2026-07-30T00:00:00.000Z",
+        runtimeConnectedApps: connectedApps,
+        shouldYieldBackgroundMaintenance: () => foregroundWaiting,
+        vaultRoot,
+      }));
+      await requestStarted;
+      foregroundWaiting = true;
+      backgroundController.abort(
+        new DOMException(
+          "Foreground conversation input preempted background maintenance.",
+          "AbortError",
+        ),
+      );
+
+      await expect(phasePromise).resolves.toEqual(expect.objectContaining({
+        checkpointReason: "assistant_runtime_commit",
+        nextWakeAt: "2026-07-30T00:00:00.000Z",
+        progressed: true,
+        redactedStatus: expect.objectContaining({
+          reminderAvailabilityMaintenanceYielded: true,
+        }),
+      }));
+      expect(
+        logRequests.flatMap((request) => request.entries).some((entry) =>
+          entry.redactedJson?.reminderAvailabilityMaintenanceFailed === true
+        ),
+      ).toBe(false);
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("falls back to the runtime shutdown signal for reminder availability", async () => {
+    const shutdownController = new AbortController();
+    const shutdownReason = new DOMException(
+      "Synthetic hosted runtime shutdown.",
+      "AbortError",
+    );
+    let markRefreshStarted: () => void = () => undefined;
+    const refreshStarted = new Promise<void>((resolve) => {
+      markRefreshStarted = resolve;
+    });
+    mocks.refreshReminderAvailability.mockImplementationOnce(async (input) => {
+      expect(input.signal).toBe(shutdownController.signal);
+      markRefreshStarted();
+      return await new Promise<never>((_resolve, reject) => {
+        const rejectFromAbort = () => reject(input.signal?.reason);
+        if (!input.signal) {
+          reject(new Error("Expected the runtime shutdown signal."));
+        } else if (input.signal.aborted) {
+          rejectFromAbort();
+        } else {
+          input.signal.addEventListener("abort", rejectFromAbort, { once: true });
+        }
+      });
+    });
+
+    const phasePromise = runHostedWorkspaceAssistantPhase(createPhaseInput({
+      signal: shutdownController.signal,
+    }));
+    await refreshStarted;
+    shutdownController.abort(shutdownReason);
+
+    await expect(phasePromise).rejects.toBe(shutdownReason);
   });
 
   it("checkpoints a retry wake after logging partial managed setup failures", async () => {
@@ -16304,6 +16439,7 @@ function createPhaseWorkspace(input: {
 function createPhaseInput(input: {
   acceptedAssistantInputCausalSeq?: string;
   assistantAutomationScheduleChanged?: HostedWorkspaceRuntimeAssistantPhaseInput["assistantAutomationScheduleChanged"];
+  backgroundMaintenanceSignal?: HostedWorkspaceRuntimeAssistantPhaseInput["backgroundMaintenanceSignal"];
   foregroundCausalOnly?: boolean;
   clearAssistantAutomationScheduleChanged?: HostedWorkspaceRuntimeAssistantPhaseInput["clearAssistantAutomationScheduleChanged"];
   assistantInputIds?: string[];
@@ -16352,6 +16488,7 @@ function createPhaseInput(input: {
   runtimeEnv?: Record<string, string>;
   operatorHomeRoot?: string;
   shouldYieldBackgroundMaintenance?: HostedWorkspaceRuntimeAssistantPhaseInput["shouldYieldBackgroundMaintenance"];
+  signal?: HostedWorkspaceRuntimeAssistantPhaseInput["signal"];
   runtimeActionApprovalPort?: NonNullable<
     HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["actionApprovalPort"]
   >;
@@ -16375,6 +16512,7 @@ function createPhaseInput(input: {
         : {}
     ),
     assistantAutomationScheduleChanged: input.assistantAutomationScheduleChanged,
+    backgroundMaintenanceSignal: input.backgroundMaintenanceSignal,
     foregroundCausalOnly: input.foregroundCausalOnly,
     clearAssistantAutomationScheduleChanged:
       input.clearAssistantAutomationScheduleChanged,
@@ -16549,6 +16687,7 @@ function createPhaseInput(input: {
     },
     runtimeEnv: input.runtimeEnv ?? {},
     shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance,
+    signal: input.signal,
     workspace: input.workspace ?? null,
   };
 }

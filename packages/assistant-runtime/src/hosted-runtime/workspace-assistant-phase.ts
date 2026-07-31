@@ -2639,16 +2639,38 @@ async function refreshHostedReminderAvailabilityBestEffort(input: {
     return null;
   }
 
+  const nowMs = resolveHostedAssistantPhaseNowMs(input.input);
+  const maintenanceSignal = input.input.backgroundMaintenanceSignal
+    ?? input.input.signal
+    ?? null;
   let result: Awaited<ReturnType<typeof refreshReminderAvailability>>;
   try {
     result = await refreshReminderAvailability({
       connectedApps: input.input.runtime.platform.connectedApps ?? null,
-      now: new Date(resolveHostedAssistantPhaseNowMs(input.input)),
+      now: new Date(nowMs),
       shouldYield: input.input.shouldYieldBackgroundMaintenance ?? null,
-      signal: input.input.signal ?? null,
+      signal: maintenanceSignal,
       vaultRoot: input.input.restored.vaultRoot,
     });
   } catch (error) {
+    input.input.signal?.throwIfAborted();
+    if (
+      maintenanceSignal?.aborted
+      && input.input.shouldYieldBackgroundMaintenance?.() === true
+    ) {
+      return {
+        checkpointReason: "assistant_runtime_commit",
+        nextWakeAt: new Date(
+          nowMs + HOSTED_MANAGED_AUTOMATION_SETUP_RETRY_DELAY_MS,
+        ).toISOString(),
+        nextWakeReason: "assistant",
+        progressed: true,
+        redactedStatus: {
+          reminderAvailabilityMaintenanceYielded: true,
+        },
+      };
+    }
+    maintenanceSignal?.throwIfAborted();
     const failure = buildHostedRuntimeFailureDiagnostics(
       error,
       "Hosted reminder availability maintenance failed.",
@@ -2697,20 +2719,18 @@ async function refreshHostedReminderAvailabilityBestEffort(input: {
       platform: input.input.runtime.platform,
     });
   }
-  if (result.refreshed === 0) {
+  const nextWakeAt = result.yielded === true
+    ? new Date(
+      nowMs + HOSTED_MANAGED_AUTOMATION_SETUP_RETRY_DELAY_MS,
+    ).toISOString()
+    : result.nextRefreshAt;
+  if (result.refreshed === 0 && nextWakeAt === null) {
     return null;
   }
 
   return {
     checkpointReason: "assistant_runtime_commit",
-    ...(result.yielded === true
-      ? {
-          nextWakeAt: new Date(
-            resolveHostedAssistantPhaseNowMs(input.input)
-              + HOSTED_MANAGED_AUTOMATION_SETUP_RETRY_DELAY_MS,
-          ).toISOString(),
-        }
-      : {}),
+    ...(nextWakeAt ? { nextWakeAt, nextWakeReason: "assistant" } : {}),
     progressed: true,
     redactedStatus: {
       reminderAvailabilityMaintenanceAttempted: result.attempted,

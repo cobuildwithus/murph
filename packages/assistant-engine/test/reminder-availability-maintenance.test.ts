@@ -6,6 +6,7 @@ import {
   parseAutomationAvailabilityConflictBlock,
   patchAutomation,
   showAutomation,
+  shouldSkipAutomationOccurrenceForAvailability,
   splitAutomationAvailabilityConflictBlock,
   upsertAutomation,
 } from '@murphai/core'
@@ -81,6 +82,7 @@ describe('reminder availability maintenance', () => {
     })).resolves.toEqual({
       attempted: 1,
       failed: 0,
+      nextRefreshAt: '2026-07-30T23:00:00.000Z',
       refreshed: 1,
     })
     expect(connectedRequest).toHaveBeenCalledWith({
@@ -119,7 +121,7 @@ describe('reminder availability maintenance', () => {
     })
   })
 
-  it('persists an empty freshness lease and avoids another read for 24 hours', async () => {
+  it('refreshes an empty freshness lease before its 24-hour delivery limit', async () => {
     const vaultRoot = await createVaultRoot()
     await createReminder({ vaultRoot })
     const connectedRequest = vi.fn(async () => ({
@@ -133,23 +135,76 @@ describe('reminder availability maintenance', () => {
     })
     await expect(refreshReminderAvailability({
       connectedApps: { request: connectedRequest },
-      now: new Date('2026-07-30T23:59:00.000Z'),
+      now: new Date('2026-07-30T22:59:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
       attempted: 0,
       failed: 0,
+      nextRefreshAt: '2026-07-30T23:00:00.000Z',
       refreshed: 0,
     })
+    await expect(refreshReminderAvailability({
+      connectedApps: { request: connectedRequest },
+      now: new Date('2026-07-30T23:00:00.000Z'),
+      vaultRoot,
+    })).resolves.toEqual({
+      attempted: 1,
+      failed: 0,
+      nextRefreshAt: '2026-07-31T22:00:00.000Z',
+      refreshed: 1,
+    })
 
-    expect(connectedRequest).toHaveBeenCalledTimes(1)
+    expect(connectedRequest).toHaveBeenCalledTimes(2)
     const stored = await requireReminder(vaultRoot)
     const { block } = splitAutomationAvailabilityConflictBlock(
       stored.instructions,
     )
     expect(parseAutomationAvailabilityConflictBlock(block ?? '')).toMatchObject({
       busyIntervals: [],
-      generatedAt: '2026-07-30T00:00:00.000Z',
+      generatedAt: '2026-07-30T23:00:00.000Z',
     })
+  })
+
+  it('keeps a weekly weekend conflict covered with deterministic pre-expiry wakes', async () => {
+    const vaultRoot = await createVaultRoot()
+    await createReminder({
+      schedule: { expression: '0 15 * * 0', kind: 'cron' },
+      vaultRoot,
+    })
+    const connectedRequest = vi.fn(async () => ({
+      result: {
+        data: {
+          items: [{
+            end: { dateTime: '2026-08-02T16:00:00.000Z' },
+            start: { dateTime: '2026-08-02T15:00:00.000Z' },
+          }],
+        },
+      },
+    }))
+
+    for (const [now, nextRefreshAt] of [
+      ['2026-07-31T03:00:00.000Z', '2026-08-01T02:00:00.000Z'],
+      ['2026-08-01T02:00:00.000Z', '2026-08-02T01:00:00.000Z'],
+      ['2026-08-02T01:00:00.000Z', '2026-08-03T00:00:00.000Z'],
+    ] as const) {
+      await expect(refreshReminderAvailability({
+        connectedApps: { request: connectedRequest },
+        now: new Date(now),
+        vaultRoot,
+      })).resolves.toEqual({
+        attempted: 1,
+        failed: 0,
+        nextRefreshAt,
+        refreshed: 1,
+      })
+    }
+
+    const reminder = await requireReminder(vaultRoot)
+    expect(shouldSkipAutomationOccurrenceForAvailability({
+      instructions: reminder.instructions,
+      occurrenceAt: '2026-08-02T15:00:00.000Z',
+      scheduleKind: reminder.schedule.kind,
+    })).toBe(true)
   })
 
   it('uses the fixed Outlook request and accepts explicit UTC datetimes', async () => {
@@ -228,11 +283,16 @@ describe('reminder availability maintenance', () => {
     })).resolves.toEqual({
       attempted: 1,
       failed: 1,
+      nextRefreshAt: '2026-07-30T23:00:00.000Z',
       refreshed: 0,
     })
-    expect((await requireReminder(partialVaultRoot)).instructions).toBe(
-      BASE_INSTRUCTIONS,
-    )
+    const partialReminder = await requireReminder(partialVaultRoot)
+    expect(partialReminder.instructions).toBe(BASE_INSTRUCTIONS)
+    expect(shouldSkipAutomationOccurrenceForAvailability({
+      instructions: partialReminder.instructions,
+      occurrenceAt: '2026-07-30T16:00:00.000Z',
+      scheduleKind: partialReminder.schedule.kind,
+    })).toBe(false)
 
     const changedVaultRoot = await createVaultRoot()
     await createReminder({ vaultRoot: changedVaultRoot })
@@ -253,6 +313,7 @@ describe('reminder availability maintenance', () => {
     })).resolves.toEqual({
       attempted: 1,
       failed: 1,
+      nextRefreshAt: '2026-07-30T23:00:00.000Z',
       refreshed: 0,
     })
     expect((await requireReminder(changedVaultRoot)).instructions).toContain(
@@ -299,6 +360,7 @@ describe('reminder availability maintenance', () => {
     })).resolves.toEqual({
       attempted: 0,
       failed: 0,
+      nextRefreshAt: null,
       refreshed: 0,
     })
     expect(connectedRequest).not.toHaveBeenCalled()
@@ -342,7 +404,9 @@ async function createReminder(input: {
   automationId?: string
   instructions?: string
   route?: typeof DIRECT_ROUTE
-  schedule?: { at: string; kind: 'at' }
+  schedule?:
+    | { at: string; kind: 'at' }
+    | { expression: string; kind: 'cron' }
   tags?: string[]
   vaultRoot: string
 }): Promise<void> {

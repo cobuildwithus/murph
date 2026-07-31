@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-07-29
+Last verified: 2026-07-31
 
 ## Accepted-Message Targeting
 
@@ -97,12 +97,17 @@ model turn or separate automation: the existing hosted background automation
 pass deterministically scans active private automations that explicitly store
 `skip-when-busy`, `calendar-only`, and one exact Google Calendar or Outlook
 account binding; exact-time automations are ineligible. When the stored snapshot
-is missing or older than 24 hours,
+is missing or reaches its 23-hour refresh deadline,
 host code derives the exact account and current seven-day provider request,
 caps the result, reduces it to normalized busy timestamps, rereads the
 automation, and performs a version-fenced suffix replacement. Complete empty
 reads persist an empty snapshot so the same canonical `generatedAt` field also
-bounds refresh cadence without another scheduler or state owner. Ordinary
+bounds refresh cadence. The pass returns the earliest next refresh deadline to
+the existing workspace checkpoint and Temporal timer owner, leaving one hour of
+headroom before delivery rejects 24-hour-old evidence without adding another
+scheduler or state owner. Foreground conversation admission aborts an in-flight
+calendar read through the existing background-maintenance signal; runtime
+shutdown remains the fallback cancellation signal. Ordinary
 user-authored saves and instruction patches strip the engine-owned suffix.
 Changing a reminder to an exact-time schedule atomically replaces
 `skip-when-busy` with `fixed` and removes its source, account, and snapshot.

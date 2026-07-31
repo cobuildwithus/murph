@@ -1,6 +1,6 @@
 # Testing And CI Map
 
-Last verified: 2026-07-30
+Last verified: 2026-07-31
 
 ## Current Repo Checks
 
@@ -359,13 +359,17 @@ never reads production feedback or enters Resend.
   fixed bounded Google Calendar and Outlook requests from the exact stored
   account, excludes raw provider content, rejects incomplete pagination and
   concurrent edits, persists empty freshness leases, filters ineligible
-  automations including exact-time reminders, and avoids another read for 24
-  hours. The notification suite proves deterministic pre-provider skip
+  automations including exact-time reminders, rearms refreshes at 23 hours, and
+  keeps a later weekly conflict inside the 24-hour delivery lease. The
+  notification suite proves deterministic pre-provider skip
   behavior, exact-time fail-open delivery, and removal of canonical or malformed
   snapshot evidence before provider admission.
   `packages/assistant-runtime/test/hosted-runtime-workspace-assistant-phase.test.ts`
   proves the existing hosted background pass performs the real deterministic
-  provider read and canonical write before checkpoint, and proves a
+  provider read and canonical write before checkpoint, returns the next refresh
+  deadline for the existing durable wake owner, aborts an in-flight read on
+  foreground preemption without logging a provider failure, preserves runtime
+  shutdown cancellation as the fallback, and proves a
   schedule-only scoped patch to exact time atomically converts availability to
   fixed delivery without retaining its source, account, or snapshot.
   `packages/hosted-execution/test/assistant-permissions.test.ts` and

@@ -17,6 +17,7 @@ import type {
 } from './connected-apps-port.js'
 
 const REMINDER_AVAILABILITY_WINDOW_MS = 7 * 24 * 60 * 60 * 1_000
+const REMINDER_AVAILABILITY_REFRESH_INTERVAL_MS = 23 * 60 * 60 * 1_000
 const REMINDER_AVAILABILITY_MAX_BUSY_INTERVALS = 256
 const REMINDER_AVAILABILITY_MAX_REFRESHES_PER_PASS = 100
 const GOOGLE_CALENDAR_READ_TOOL = 'GOOGLECALENDAR_EVENTS_LIST'
@@ -40,6 +41,7 @@ export interface RefreshReminderAvailabilityInput {
 export interface RefreshReminderAvailabilityResult {
   attempted: number
   failed: number
+  nextRefreshAt: string | null
   refreshed: number
   yielded?: true
 }
@@ -50,6 +52,7 @@ export async function refreshReminderAvailability(
   const result: RefreshReminderAvailabilityResult = {
     attempted: 0,
     failed: 0,
+    nextRefreshAt: null,
     refreshed: 0,
   }
   if (input.shouldYield?.() === true) {
@@ -61,29 +64,47 @@ export async function refreshReminderAvailability(
     status: 'active',
     vaultRoot: input.vaultRoot,
   })
-  const due = records.items
-    .filter((record) => isReminderAvailabilityRefreshDue(record, now))
-    .slice(0, REMINDER_AVAILABILITY_MAX_REFRESHES_PER_PASS)
+  const nowMs = now.getTime()
+  const candidates = records.items.flatMap((record) => {
+    const refreshAtMs = resolveReminderAvailabilityRefreshAtMs(record, now)
+    return refreshAtMs === null ? [] : [{ record, refreshAtMs }]
+  })
+  const dueCandidates = candidates
+    .filter((candidate) => candidate.refreshAtMs <= nowMs)
+  const due = dueCandidates.slice(0, REMINDER_AVAILABILITY_MAX_REFRESHES_PER_PASS)
+  let nextRefreshAtMs = candidates.reduce<number | null>(
+    (earliest, candidate) => candidate.refreshAtMs > nowMs
+      ? Math.min(earliest ?? candidate.refreshAtMs, candidate.refreshAtMs)
+      : earliest,
+    null,
+  )
   if (due.length === 0) {
-    return result
+    return withReminderAvailabilityNextRefreshAt(result, nextRefreshAtMs)
   }
   if (!input.connectedApps) {
-    return {
+    nextRefreshAtMs = Math.min(
+      nextRefreshAtMs ?? Number.POSITIVE_INFINITY,
+      nowMs + REMINDER_AVAILABILITY_REFRESH_INTERVAL_MS,
+    )
+    return withReminderAvailabilityNextRefreshAt({
       ...result,
       attempted: due.length,
       failed: due.length,
-    }
+    }, nextRefreshAtMs)
   }
 
   const window = buildReminderAvailabilityWindow(now)
   for (const candidate of due) {
     if (input.shouldYield?.() === true) {
-      return { ...result, yielded: true }
+      return {
+        ...withReminderAvailabilityNextRefreshAt(result, nowMs),
+        yielded: true,
+      }
     }
     result.attempted += 1
     try {
       await refreshOneReminderAvailability({
-        candidate,
+        candidate: candidate.record,
         connectedApps: input.connectedApps,
         now,
         signal: input.signal ?? null,
@@ -95,8 +116,15 @@ export async function refreshReminderAvailability(
       input.signal?.throwIfAborted()
       result.failed += 1
     }
+    nextRefreshAtMs = Math.min(
+      nextRefreshAtMs ?? Number.POSITIVE_INFINITY,
+      nowMs + REMINDER_AVAILABILITY_REFRESH_INTERVAL_MS,
+    )
   }
-  return result
+  if (dueCandidates.length > due.length && result.refreshed > 0) {
+    nextRefreshAtMs = nowMs
+  }
+  return withReminderAvailabilityNextRefreshAt(result, nextRefreshAtMs)
 }
 
 async function refreshOneReminderAvailability(input: {
@@ -164,29 +192,42 @@ async function refreshOneReminderAvailability(input: {
   })
 }
 
-function isReminderAvailabilityRefreshDue(
+function resolveReminderAvailabilityRefreshAtMs(
   record: AutomationRecord,
   now: Date,
-): boolean {
+): number | null {
   try {
     requireReminderAvailabilityAuthorization(record, now)
   } catch {
-    return false
+    return null
   }
   try {
     const { block } = splitAutomationAvailabilityConflictBlock(
       record.instructions,
     )
     if (!block) {
-      return true
+      return now.getTime()
     }
-    parseAutomationAvailabilityConflictBlock(block, {
+    const snapshot = parseAutomationAvailabilityConflictBlock(block, {
       enforceFreshGeneratedAt: true,
       now,
     })
-    return false
+    return Date.parse(snapshot.generatedAt)
+      + REMINDER_AVAILABILITY_REFRESH_INTERVAL_MS
   } catch {
-    return true
+    return now.getTime()
+  }
+}
+
+function withReminderAvailabilityNextRefreshAt(
+  result: RefreshReminderAvailabilityResult,
+  nextRefreshAtMs: number | null,
+): RefreshReminderAvailabilityResult {
+  return {
+    ...result,
+    nextRefreshAt: nextRefreshAtMs === null
+      ? null
+      : new Date(nextRefreshAtMs).toISOString(),
   }
 }
 
