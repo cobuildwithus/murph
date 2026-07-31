@@ -1,6 +1,6 @@
 # How Murph Talks
 
-Last verified: 2026-07-24
+Last verified: 2026-08-01
 Status: Implemented for persona-first onboarding, personal Settings, hosted mailbox handoff, prompt style, voice memo default resolution, supervisor-run preview generation, private conversational controls, room-owned hosted Linq group controls, and the conversational-only Unhinged dial
 
 ## Product Contract
@@ -21,6 +21,8 @@ Tone and voice appear during the hosted first visit and under **How Murph talks*
 Unhinged is conversational-only. It has no first-visit step and no Settings row, and the browser `POST /api/settings/assistant-style` route rejects it; the only way to change it is to ask Murph in conversation, which uses `murph.assistant_style`. It scales how much Murph self-censors its own style and how much edgy, crude, or adult-flavored latitude it takes among clearly consenting adults. It never changes safety, truth, privacy, consent, authority, tool access, or notification cadence.
 
 An authenticated hosted Linq group may change all six controls conversationally, but those choices belong to that room's Murph runtime and have no separate web UI.
+
+Reply casing is an interpretation of Tone, not a seventh stored control. When a member is clearly asking how Murph should write its replies, requests to capitalize, use normal or standard capitalization, use sentence case, or stop writing in lowercase select `formal`; requests to write in lowercase select `casual`. Private chats and authenticated hosted Linq groups both persist the choice through `murph.personalization`; group writes remain room-owned and begin on a later turn.
 
 The first-visit sequence is the four-step Murph personality picker:
 
