@@ -18,7 +18,7 @@ A canonical affirmative Linq group-join reaction has exactly one owner. Active m
 1. Reused the canonical-offer transaction and existing outreach row for verified inactive phone members; suspension, active access, and target-group membership are rechecked under the member and sponsored-access locks before enqueue or terminal consumption.
 2. Added explicit suspended and already-target-group outcomes and consumed them in the webhook before group-runtime fallthrough.
 3. Retained the global and participant-phone drain fences. The drain now tries an existing recipient's member row without waiting across the account-deletion lock order, defers one minute when another authority owns it, and otherwise skips only suspended, active, or target-group recipients.
-4. Kept the existing opener and group-aware signup copy. An accepted opener reply from a member with a persisted home route now takes precedence over generic billing and home-route responses, returns the group-aware link in the correlated chat, and leaves the durable home route unchanged.
+4. Kept the existing opener and group-aware signup copy. A qualifying, non-blocked accepted-opener reply from a member with a persisted home route now takes precedence over generic billing and home-route responses, returns the group-aware link in the correlated chat, and leaves the durable home route unchanged. Existing SMS opt-out and blocked-content authority remains first.
 5. Reaction removal now asks the existing revocation owner about an exact pending row regardless of the member's current access, suspension, or target-membership state. Only a currently eligible recipient can create a missing-row tombstone.
 6. No schema, queue, dependency, migration, or outbound copy was added.
 
@@ -36,6 +36,7 @@ A canonical affirmative Linq group-join reaction has exactly one owner. Active m
 - Drain coverage includes inactive send, suspended, active, target member, and in-flight recipient-authority states.
 - PostgreSQL coverage invokes the real reaction-admission owner and proves activation-first direct join versus reaction-first outreach, one handled provider outcome, and one durable owner.
 - PostgreSQL reply coverage exercises route-free dormant members plus lapsed members whose accepted opener is in either their persisted home chat or a different direct chat, and proves the persisted home route remains unchanged.
+- PostgreSQL recipient-control coverage exercises all supported standalone SMS opt-out commands in both persisted-route relationships and proves they create no invite or outbound effect and do not mutate the home route.
 - PostgreSQL removal coverage proves temporary active and suspended states cannot erase a withdrawal or permit a later provider send.
 
 ## Verification
@@ -44,14 +45,19 @@ A canonical affirmative Linq group-join reaction has exactly one owner. Active m
   first-head reviews found two material routing/revocation gaps and one missing
   PostgreSQL ownership proof; the correction pass addresses all three in the
   existing owners.
+- Final correction round 2 reproduced a correction-induced opt-out precedence
+  regression and required the repeated-mechanism retrospective. The PR records
+  the decision to keep one explicit order in the existing planner: recipient
+  control, exact opener correlation, then generic billing/home routing. The
+  production PostgreSQL reproduction failed before and passes after that fix.
 - The patch applies cleanly to current `main`, and `git diff --check` passes.
 - Focused Vitest passes all 253 reaction, webhook, drain, and ordinary Linq
   dispatch tests.
-- The isolated real-PostgreSQL suite passes all 24 reaction-admission,
+- The isolated real-PostgreSQL suite passes all 26 reaction-admission,
   member-creation, activation, opener, routing, reply-correlation, revocation,
-  and deletion-fence cases.
+  recipient-control, and deletion-fence cases.
 - Hosted-web typecheck and targeted ESLint pass.
-- Pending: corrected exact-head PR CI, final ReviewGPT correction review, and
+- Pending: the new exact-head PR CI, final ReviewGPT correction review, and
   parent final review.
 
 ## Progress

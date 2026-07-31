@@ -1846,6 +1846,145 @@ describe.skipIf(!runPostgresProof)(
       },
     );
 
+    it.each([
+      ["same", true],
+      ["different", false],
+    ])(
+      "keeps SMS opt-out ahead of an accepted opener in the %s persisted-route relationship",
+      async (_chatRelationship, openerUsesHomeChat) => {
+        vi.stubEnv(
+          "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
+          "https://join.example.test",
+        );
+        const fixture = await createOpenerRaceFixture();
+        const participantMemberId =
+          await fixture.contenderPrisma.$transaction((tx) =>
+            createPhoneBoundMemberIdentityTx({
+              phoneNumber: fixture.participantPhone,
+              phoneNumberVerifiedAt: new Date("2026-07-20T00:00:00.000Z"),
+              tx,
+            })
+          );
+        const homeChatId = `chat-opt-out-home-${randomUUID()}`;
+        const openerChatId = openerUsesHomeChat
+          ? homeChatId
+          : `chat-opt-out-opener-${randomUUID()}`;
+        const homeLinePhone = createUniqueTestPhone("+1303");
+        const participantContact = createHostedLinqParticipantContact({
+          kind: "phone",
+          value: fixture.participantPhone,
+        });
+        if (!participantContact) {
+          throw new Error("Expected a phone participant contact.");
+        }
+        await fixture.contenderPrisma.hostedMember.update({
+          data: { billingStatus: HostedBillingStatus.paused },
+          where: { id: participantMemberId },
+        });
+        await fixture.contenderPrisma.$transaction((tx) =>
+          upsertHostedMemberHomeLinqBindingTx({
+            homeLineAssignedAt: new Date("2026-07-20T00:00:00.000Z"),
+            linqChatId: homeChatId,
+            memberId: participantMemberId,
+            participantContact,
+            prisma: tx,
+            recipientPhone: homeLinePhone,
+          })
+        );
+        const homeRouteBefore = await fixture.contenderPrisma.hostedMemberRouting
+          .findUnique({
+            select: {
+              linqChatLookupKey: true,
+              linqRecipientPhoneLookupKey: true,
+            },
+            where: { memberId: participantMemberId },
+          });
+        const inviteCountBefore = await fixture.contenderPrisma.hostedInvite.count({
+          where: { memberId: participantMemberId },
+        });
+        const dailyStateCountBefore =
+          await fixture.contenderPrisma.hostedLinqDailyState.count({
+            where: { memberId: participantMemberId },
+          });
+        const openerMessageId = `message-opt-out-opener-${randomUUID()}`;
+        providerMocks.createHostedLinqChat
+          .mockReset()
+          .mockResolvedValue({
+            chatId: openerChatId,
+            messageId: openerMessageId,
+          });
+
+        try {
+          await expect(drainOneHostedGroupJoinOutreach({
+            now: fixture.now,
+            prisma: fixture.drainPrisma,
+          })).resolves.toEqual({
+            kind: "sent",
+            outreachId: fixture.outreachId,
+          });
+
+          for (const messageText of [
+            "STOP",
+            "UNSUBSCRIBE",
+            "CANCEL",
+            "END",
+            "QUIT",
+            "OPT OUT",
+          ]) {
+            const replyEvent = buildDirectReplyEvent({
+              chatId: openerChatId,
+              eventId: `event-opt-out-reply-${randomUUID()}`,
+              messageId: `message-opt-out-reply-${randomUUID()}`,
+              messageText,
+              occurredAt: "2026-07-27T16:00:01.000Z",
+              participantPhone: fixture.participantPhone,
+              recipientPhone: fixture.linePhone,
+              replyToMessageId: openerMessageId,
+            });
+            const plan = await fixture.contenderPrisma.$transaction((tx) =>
+              planHostedOnboardingLinqWebhook({
+                event: replyEvent,
+                firstContactAdmissionDecision: {
+                  confidence: 1,
+                  kind: "allow",
+                  source: "deterministic",
+                },
+                prisma: tx,
+                requireFirstContactAdmission: true,
+              })
+            );
+
+            expect(plan.response, messageText).toMatchObject({
+              ignored: true,
+              ok: true,
+              reason: "blocked-first-contact-content",
+            });
+            expect(plan.desiredSideEffects, messageText).toEqual([]);
+          }
+
+          await expect(fixture.contenderPrisma.hostedInvite.count({
+            where: { memberId: participantMemberId },
+          })).resolves.toBe(inviteCountBefore);
+          await expect(fixture.contenderPrisma.hostedLinqDailyState.count({
+            where: { memberId: participantMemberId },
+          })).resolves.toBe(dailyStateCountBefore);
+          await expect(
+            fixture.contenderPrisma.hostedMemberRouting.findUnique({
+              select: {
+                linqChatLookupKey: true,
+                linqRecipientPhoneLookupKey: true,
+              },
+              where: { memberId: participantMemberId },
+            }),
+          ).resolves.toEqual(homeRouteBefore);
+        } finally {
+          providerMocks.createHostedLinqChat.mockReset();
+          vi.unstubAllEnvs();
+          await cleanupOpenerRaceFixture(fixture);
+        }
+      },
+    );
+
     it("holds an immediate reply until the opener correlation commits", async () => {
       vi.stubEnv(
         "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
@@ -4038,6 +4177,7 @@ function buildDirectReplyEvent(input: {
   chatId: string;
   eventId: string;
   messageId: string;
+  messageText?: string;
   occurredAt: string;
   participantPhone: string;
   recipientPhone: string | null;
@@ -4063,7 +4203,7 @@ function buildDirectReplyEvent(input: {
       },
       direction: "inbound",
       id: input.messageId,
-      parts: [{ type: "text", value: "yes" }],
+      parts: [{ type: "text", value: input.messageText ?? "yes" }],
       ...(input.replyToMessageId
         ? {
             reply_to: {

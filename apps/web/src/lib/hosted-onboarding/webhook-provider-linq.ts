@@ -1283,6 +1283,24 @@ export async function planHostedOnboardingLinqWebhook(input: {
     && groupJoinContext
     && groupJoinMemberHasHomeRoute
   ) {
+    // A correlation proves which opener owns a qualifying reply; it never
+    // overrides recipient control. Keep that decision inside this one ordered
+    // branch so opt-out wins before the group link, which wins before generic
+    // billing and home-route handling below.
+    if (hostedLinqFirstContactContainsBlockedContent({
+      event: messageEvent,
+      participantContact,
+    })) {
+      return logHostedLinqWebhookPlannerDecisionAndReturn(
+        buildIgnoredLinqWebhookPlan("blocked-first-contact-content"),
+        buildHostedLinqWebhookPlannerDetails(input.event, context, {
+          existingMemberActive: existingMemberEffectiveActive,
+          existingMemberMatch,
+          reason: "blocked-first-contact-content",
+          routeStage: "ignored-group-join-blocked-first-contact-content",
+        }),
+      );
+    }
     const dailyState = await incrementHostedLinqInboundDailyState({
       memberId: existingMember.id,
       occurredAt,
