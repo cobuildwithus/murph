@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   isThreadContainerDestination: vi.fn(),
   lockMember: vi.fn(),
+  readActiveAccess: vi.fn(),
   readUsageGate: vi.fn(),
   recordUsage: vi.fn(),
   requireDestination: vi.fn(),
@@ -42,6 +43,7 @@ vi.mock("@/src/lib/hosted-groups/participant-action-authority", () => ({
 }));
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
   assertActiveHostedMemberAccessAllowed: mocks.assertActiveAccess,
+  readActiveHostedMemberAccess: mocks.readActiveAccess,
 }));
 vi.mock("@/src/lib/hosted-onboarding/shared", () => ({
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS: {},
@@ -90,6 +92,7 @@ beforeEach(() => {
   });
   mocks.isThreadContainerDestination.mockReturnValue(false);
   mocks.lockMember.mockResolvedValue(undefined);
+  mocks.readActiveAccess.mockResolvedValue(true);
   mocks.requireDestination.mockResolvedValue({
     conversationShape: "direct-member",
   });
