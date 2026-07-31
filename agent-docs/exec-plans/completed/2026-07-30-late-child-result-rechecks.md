@@ -1,6 +1,6 @@
 # Late Child Result Rechecks
 
-Status: active
+Status: completed
 Branch: `agent/late-child-result-rechecks`
 
 ## Outcome
@@ -82,3 +82,5 @@ incorporates a newly completed result when it is still relevant.
   identically. The delta is entirely the new assembled late-child instruction;
   Codex-generated multi-agent usage guidance, tool definitions, and schemas are
   unchanged.
+Updated: 2026-07-31
+Completed: 2026-07-31
