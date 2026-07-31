@@ -56,6 +56,32 @@ describe("Lob physical-note runtime", () => {
     });
   });
 
+  it("does not enter provider transport when the caller is already aborted", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const fetchImpl = vi.fn<typeof fetch>();
+    const runtime = createLobPhysicalNoteRuntime({
+      apiKey: "test_key",
+      fetchImpl,
+      fromAddressId: "adr_from",
+    });
+
+    await expect(runtime.create({
+      artworkUrl: "https://media.example.test/artwork",
+      idempotencyKey: "hpn_aborted",
+      noteId: "hpn_aborted",
+      recipient: {
+        addressLine1: "123 Main St",
+        city: "Atlanta",
+        name: "Sam",
+        postalCode: "30308",
+        state: "GA",
+      },
+      signal: controller.signal,
+    })).rejects.toMatchObject({ name: "AbortError" });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("keeps network and server failures ambiguous", async () => {
     const runtime = createLobPhysicalNoteRuntime({
       apiKey: "test_key",
