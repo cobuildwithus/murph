@@ -2239,6 +2239,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         });
       },
       signal: imageGenerationSignal,
+      shutdownSignal: options.shutdownSignal ?? null,
       vaultRoot: restored.vaultRoot,
       withCanonicalWritePersistence,
     });

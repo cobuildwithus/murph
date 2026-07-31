@@ -392,6 +392,7 @@ describe("hosted image generation", () => {
       notifyReady,
       onStarted: () => undefined,
       signal: shutdown.signal,
+      shutdownSignal: shutdown.signal,
       vaultRoot,
       withCanonicalWritePersistence: async (run) => await run(),
     });

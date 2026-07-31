@@ -48,6 +48,7 @@ export function createHostedImageGenerationController(input: {
   onStarted(): void;
   recordRuntimeIssue?(issue: AssistantRuntimeIssueInput): void;
   signal?: AbortSignal | null;
+  shutdownSignal?: AbortSignal | null;
   vaultRoot: string;
   withCanonicalWritePersistence<T>(run: () => Promise<T>): Promise<T>;
 }): HostedImageGenerationController {
@@ -126,7 +127,7 @@ export function createHostedImageGenerationController(input: {
       });
     }
   };
-  input.signal?.addEventListener(
+  input.shutdownSignal?.addEventListener(
     "abort",
     completeActiveOperationsAsFailed,
     { once: true },
@@ -155,7 +156,7 @@ export function createHostedImageGenerationController(input: {
         });
       }
       input.onStarted();
-      if (input.signal?.aborted) {
+      if (input.shutdownSignal?.aborted) {
         completeActiveOperationsAsFailed();
         return "started";
       }
@@ -165,9 +166,15 @@ export function createHostedImageGenerationController(input: {
           if (closeController.signal.aborted) {
             return;
           }
+          if (runSignal.aborted && input.shutdownSignal?.aborted !== true) {
+            return;
+          }
           completeOperation(request.operationId, result);
         } catch {
           if (closeController.signal.aborted) {
+            return;
+          }
+          if (runSignal.aborted && input.shutdownSignal?.aborted !== true) {
             return;
           }
           completeOperation(request.operationId, {
@@ -191,7 +198,7 @@ export function createHostedImageGenerationController(input: {
   return {
     launcher,
     async close() {
-      input.signal?.removeEventListener(
+      input.shutdownSignal?.removeEventListener(
         "abort",
         completeActiveOperationsAsFailed,
       );
