@@ -88,7 +88,7 @@ const webpBytes = new Uint8Array([
 const EARLIER_ASSISTANT_INPUT_ID = `ain_${"1".repeat(32)}`;
 const FRESH_ASSISTANT_INPUT_ID = `ain_${"2".repeat(32)}`;
 const SIGNED_PRIVATE_IMAGE_URL =
-  `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`;
+  `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`;
 
 describe("murph.group dynamic tool", () => {
   it("advertises the supported actions", () => {
@@ -2951,6 +2951,75 @@ describe("murph.group dynamic tool", () => {
       expect(groupRequest).toHaveBeenNthCalledWith(
         2,
         { action: "set_chat_avatar", groupChatIconUrl: SIGNED_PRIVATE_IMAGE_URL },
+      );
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("shows bounded provider diagnostics for a rejected group avatar update", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "assistant-codex-group-avatar-"));
+    try {
+      await mkdir(join(vaultRoot, "raw", "inbox"), { recursive: true });
+      await writeFile(
+        join(vaultRoot, "raw", "inbox", "avatar.png"),
+        Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+          "base64",
+        ),
+      );
+      const groupRequest = vi.fn<GroupToolRequest>(async (request) =>
+        request.action === "preflight_set_chat_avatar"
+          ? {
+              action: "preflight_set_chat_avatar",
+              result: { status: "ok" },
+            }
+          : {
+              action: "set_chat_avatar",
+              result: {
+                providerErrorCode: 5006,
+                providerErrorMessage: "The avatar image type was not accepted.",
+                status: "unavailable",
+                unavailableReason: "provider_unavailable",
+              },
+            });
+      const request = readMurphDynamicToolRequest(groupToolCall({
+        action: "set_chat_avatar",
+        avatarSource: "image_ref",
+        imageRef: "raw/inbox/avatar.png",
+      }));
+      if (!request || request.kind !== "group") {
+        throw new Error("Expected group request.");
+      }
+
+      const result = await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext: createGroupHostedToolContext({
+          groupRequest,
+          privateImageUrlPublish: async () => ({
+            expiresAt: "2033-05-18T03:33:20.000Z",
+            url: SIGNED_PRIVATE_IMAGE_URL,
+          }),
+        }),
+        nextUsageOrdinal: () => 1,
+        progressDelivery: null,
+        request,
+        vaultRoot,
+      });
+
+      expect(result.rpcResult.success).toBe(true);
+      expect(readGroupToolPayload(result)).toEqual({
+        action: "set_chat_avatar",
+        result: {
+          providerErrorCode: 5006,
+          providerErrorMessage: "The avatar image type was not accepted.",
+          status: "unavailable",
+          unavailableReason: "provider_unavailable",
+        },
+      });
+      expect(JSON.stringify(readGroupToolPayload(result))).not.toContain(
+        "murph-hosted.cobuildwithus.workers.dev",
       );
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });

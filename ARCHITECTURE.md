@@ -1517,17 +1517,30 @@ deterministic application-encrypted object under the member's opaque
 private-media R2 prefix through the existing per-user `UserRunner`, where the
 write-fence check and staging serialize with account deletion under one
 mutation lock, and returns a one-day AES-GCM capability on Murph's fixed Worker
-origin for the immediate Linq mutation. Deletion that owns the lock first
+origin for the immediate Linq mutation. The canonical URL ends in
+`group-avatar.<ext>`, where the extension is derived from the verified MIME
+type. The Worker serves both that path and the already-shipped extensionless
+path during rolling deployment and rollback, supports GET and HEAD with the
+same successful content headers, and returns no HEAD body. Deletion that owns the lock first
 clears the fence so queued staging fails; staging that owns it first completes
-before deletion sweeps the object and reports completion. The public GET route
+before deletion sweeps the object and reports completion. The public GET/HEAD route
 decrypts and hash/size/signature-verifies the object, responds with
 `private, no-store`, and reveals no member id, object key, storage namespace, or
-image hash in the URL. Retry reuses the same object without refreshing its R2
+image hash in the URL. An extension-bearing request must match the decrypted
+MIME type. Web and runtime validators accept both Worker URL generations before
+the Worker begins canonical minting; rollback reverts minting first and retains
+dual-shape serving and validation through the one-day capability lifetime plus
+the warm-container drain window. Retry reuses the same object without refreshing its R2
 age. Account deletion synchronously sweeps the member prefix; the R2 lifecycle
 makes any remaining object eligible for asynchronous deletion after 24 hours
 and is not a physical-deletion deadline. Neither cleanup path treats provider
 acceptance as fetch proof. That URL is ephemeral provider input, never the
 internal media representation, model output, outbox state, or log payload.
+For a non-2xx avatar mutation, Web may project only an allowlisted Linq nested
+four-digit error code and its fixed first-party recovery message through the
+existing `provider_unavailable` tool result. Provider prose, raw bodies, trace ids, private
+identifiers, capability URLs, credentials, and headers never cross that
+boundary; transport, cancellation, and timeout failures remain generic.
 
 Hosted Exa egress is narrower than the path allowlist alone: before injecting
 the Worker-owned key, `apps/cloudflare` must validate the exact bounded

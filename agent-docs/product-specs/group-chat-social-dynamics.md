@@ -17,10 +17,14 @@ of the value.
 
 Group-avatar mutation remains available without making member or generated
 images public. Murph preflights the current Linq chat authority, resolves or
-generates the canonical bytes in the member vault, and asks the Worker to
-upload them to Cloudflare Images with signed delivery required. Only the
-short-lived signed URL crosses Linq's URL-only avatar boundary; it is never
-shown to the model or stored as Murph media.
+generates the canonical bytes in the member vault, and asks the Worker to stage
+them as one application-encrypted R2 object. Only the opaque, at-most-one-day
+Worker capability crosses Linq's URL-only avatar boundary; its canonical path
+uses a MIME-derived filename while the already-shipped extensionless path
+remains valid during rollout and rollback. The capability is never shown to the
+model or stored as Murph media. A known Linq HTTP rejection may return only its
+allowlisted code and fixed first-party recovery text; provider prose stays out
+of the assistant result.
 
 ## Working psychological model
 
