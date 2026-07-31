@@ -81,7 +81,7 @@ import {
 } from '../src/assistant-codex/dynamic-tools/generate-song.js'
 import {
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
-  MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+  MURPH_REMINDER_AVAILABILITY_MAINTENANCE_AUTOMATION_ID,
 } from '../src/assistant/managed-automations.js'
 import {
   MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
@@ -670,9 +670,9 @@ describe('assistant Codex turn planning', () => {
       executionContext,
       input: {
         ...createMessageInput(),
-        maintenanceProfile: 'member-memory',
+        maintenanceProfile: 'member-reminders',
         scheduledInvocationAuthority: {
-          automationId: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+          automationId: MURPH_REMINDER_AVAILABILITY_MAINTENANCE_AUTOMATION_ID,
           occurrenceAt: '2026-05-03T19:00:00.000Z',
         },
       },
@@ -694,12 +694,7 @@ describe('assistant Codex turn planning', () => {
     expect(maintenancePlan.systemPrompt).not.toContain('device sync pending')
     expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
     expect(maintenancePlan.systemPrompt).toContain('Maintenance execution rules:')
-    expect(maintenancePlan.systemPrompt).toContain(
-      'Never save medical or health details, credentials, identifiers of any kind',
-    )
-    expect(maintenancePlan.systemPrompt).toContain(
-      'deduplication and update targeting only',
-    )
+    expect(maintenancePlan.systemPrompt).toContain('Do not read or write memory')
     expect(maintenancePlan.systemPrompt).toContain('`murph.maintenance`')
     expect(maintenancePlan.systemPrompt).toContain('`vault-cli automation list`')
     expect(maintenancePlan.systemPrompt).not.toContain('meals')

@@ -17,6 +17,7 @@ export const ASSISTANT_GROUP_ROOM_MODEL_EVIDENCE_HEADING =
 
 export type AssistantMaintenanceProfile =
   | 'member-memory'
+  | 'member-reminders'
   | 'group-room-model'
 
 interface AssistantMaintenanceEvidenceLimits {
@@ -78,6 +79,11 @@ export async function buildAssistantMaintenanceConversationEvidence(input: {
   vault: string
 }): Promise<string> {
   const profile = input.profile ?? 'member-memory'
+  if (profile === 'member-reminders') {
+    throw new Error(
+      'Reminder maintenance does not admit conversation evidence.',
+    )
+  }
   const limits = resolveAssistantMaintenanceEvidenceLimits(profile)
   const since = input.now.getTime() - ASSISTANT_MAINTENANCE_EVIDENCE_WINDOW_MS
   let candidates: AssistantMaintenanceEvidenceMessage[]

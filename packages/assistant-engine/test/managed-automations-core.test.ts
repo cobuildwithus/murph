@@ -20,6 +20,7 @@ import {
   MURPH_MANAGED_AUTOMATIONS,
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+  MURPH_REMINDER_AVAILABILITY_MAINTENANCE_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
   MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
@@ -909,7 +910,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     })
   })
 
-  it('creates hosted overnight memory-first reminder maintenance through the canonical automation registry', async () => {
+  it('creates separate hosted memory and reminder maintenance through the canonical automation registry', async () => {
     const vaultRoot = await createVaultRoot()
 
     await expect(applyMurphManagedAutomations({
@@ -921,7 +922,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       },
       vaultRoot,
     })).resolves.toEqual({
-      created: 6,
+      created: 7,
       skipped: 0,
       updated: 0,
     })
@@ -938,7 +939,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       route: defaultRoute,
       schedule: {
         kind: 'cron',
-        expression: '0 3 * * *',
+        expression: '0 3 * * 1,3,5',
       },
       slug: 'overnight-memory-consolidation',
       status: 'active',
@@ -946,17 +947,15 @@ describe('applyMurphManagedAutomations core integration', () => {
         'murph-managed:overnight-memory-consolidation',
         'runtime-maintenance',
       ]),
-      title: 'Overnight memory and reminder maintenance',
+      title: 'Overnight memory consolidation',
     })
     const automation = await showAutomation({
       automationId: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
       vaultRoot,
     })
     if (automation === null) {
-      throw new Error('Expected overnight memory and reminder maintenance automation')
+      throw new Error('Expected overnight memory maintenance automation')
     }
-    expect(automation.instructions).toContain('Phase 1 — memory consolidation:')
-    expect(automation.instructions).toContain('Phase 2 — flexible reminder conflict audit:')
     expect(automation.instructions).toContain(
       'engine-supplied "Conversation evidence" section',
     )
@@ -964,10 +963,25 @@ describe('applyMurphManagedAutomations core integration', () => {
       'bounded committed user and assistant conversation messages from the last 7 days',
     )
     expect(automation.instructions).toContain('supplied conversation evidence')
-    expect(automation.instructions).toContain('vault-cli automation list --status active')
-    expect(automation.instructions).toContain('`murph.maintenance`')
+    expect(automation.instructions).not.toContain('vault-cli automation list --status active')
+    expect(automation.instructions).not.toContain('`murph.maintenance`')
     expect(automation.instructions).toContain('Do not read transcript files or session storage')
     expect(automation.instructions).toContain('Do not save assistant speculation')
+    await expect(showAutomation({
+      automationId: MURPH_REMINDER_AVAILABILITY_MAINTENANCE_AUTOMATION_ID,
+      vaultRoot,
+    })).resolves.toMatchObject({
+      automationId: MURPH_REMINDER_AVAILABILITY_MAINTENANCE_AUTOMATION_ID,
+      continuityPolicy: 'fresh',
+      route: defaultRoute,
+      schedule: {
+        kind: 'cron',
+        expression: '15 3 * * *',
+      },
+      slug: 'reminder-availability-maintenance',
+      status: 'active',
+      title: 'Reminder availability maintenance',
+    })
   })
 
   it('creates managed health automations for hosted email targets without a local sender identity', async () => {

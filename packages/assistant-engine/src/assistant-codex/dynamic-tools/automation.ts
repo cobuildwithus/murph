@@ -295,7 +295,7 @@ function serializeAutomationToolResponse(
         source: response.source,
       }
       break
-    case 'patch_maintenance_instructions':
+    case 'replace_maintenance_conflicts':
       payload = {
         action: response.action,
         automationId: response.automationId,

@@ -402,11 +402,14 @@ user-directed time, medication or clinician-directed support, safety-critical
 support, or any automation without explicit calendar-aware-delivery consent.
 Use `skip-when-busy` only after the user explicitly accepts calendar-aware
 delivery for this support or grants a durable general preference. Calendar
-connection alone is not consent. A `skip-when-busy` automation must also
-include exactly one source line: `Availability source policy: calendar-only`
-by default, or
-`Availability source policy: calendar-and-travel-confirmations` only after
-separate explicit acceptance of email or travel-confirmation use.
+connection alone is not consent. Before changing the policy, list configured
+Google Calendar and Outlook accounts. With none, keep the reminder fixed and
+offer the connection step. With more than one, keep it fixed until the user
+chooses one. A `skip-when-busy` automation must include exactly one source
+line, `Availability source policy: calendar-only`, plus one exact account line,
+`Availability calendar account: <toolkit> / <account-id>`, using the selected
+account's returned stable id. After saving, explain that protection begins
+after the next overnight refresh; do not claim it is already active.
 
 Automation instructions should not include:
 - fixed copy to repeat every time
@@ -501,8 +504,9 @@ support loop, not as a miss or a motivation problem.
 - A clear acceptance authorizes the stated scope only. Save a durable preference
   only when the user grants a broad ongoing preference, and patch eligible
   support instructions to `Availability conflict policy: skip-when-busy`.
-  Use `Availability source policy: calendar-only` unless the user separately
-  accepts travel-confirmation reads.
+  Bind it to one exact eligible calendar account with
+  `Availability source policy: calendar-only` and
+  `Availability calendar account: <toolkit> / <account-id>`.
 - Do not save a one-off meeting or flight as durable memory unless the user
   describes a recurring pattern or a bounded period that will remain useful.
 

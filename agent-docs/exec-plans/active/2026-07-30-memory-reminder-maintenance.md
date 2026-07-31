@@ -8,10 +8,10 @@ Updated: 2026-07-30
 
 - When a person says a proactive reminder arrived during a concrete conflict,
   Murph resolves that occurrence without guilt or pressure and can, with
-  explicit consent, make flexible private reminders skip obvious calendar or
-  separately authorized travel conflicts.
-- Keep the overnight memory owner memory-first while reusing canonical
-  automation and connected-app boundaries for a bounded seven-day audit.
+  explicit consent and exact account selection, make flexible private reminders
+  skip obvious Google Calendar or Outlook conflicts.
+- Keep memory consolidation isolated from a later read-only reminder refresh
+  while reusing canonical automation and connected-app boundaries.
 
 ## Success criteria
 
@@ -23,8 +23,10 @@ Updated: 2026-07-30
 - Only the exact built-in member maintenance occurrence can access the narrow
   maintenance tool, and that tool cannot create automations, change lifecycle,
   schedule, route, status, tags, title, or account connections.
-- Connected evidence remains untrusted and is reduced to expiring busy
-  intervals without persisting provider content.
+- The model can name only an eligible automation. Host code owns the exact
+  account, current seven-day provider request, result reduction, and fenced
+  suffix replacement; raw provider content never reaches the model or
+  persistence.
 - Focused assistant-engine tests and typecheck pass, exact-head CI is green,
   required ReviewGPT specialist/final gates have no unresolved findings, and
   the final diff contains no personal identifiers.
@@ -34,10 +36,11 @@ Updated: 2026-07-30
 - In scope:
   - Assistant prompt and `behavior-followthrough` guidance for mistimed support
     and explicit reminder availability policy.
-  - Exact member-maintenance dynamic-tool exposure, connected-app reads, and
-    instruction-only automation repair.
-  - Nightly memory-first managed maintenance instructions and focused
-    assistant-engine regression tests.
+  - Exact reminder-maintenance dynamic-tool exposure, host-built calendar
+    reads, version-fenced owned-suffix replacement, and deterministic
+    pre-provider skip execution.
+  - Separate nightly memory and reminder maintenance instructions plus focused
+    core, assistant-engine, and assistant-runtime regression tests.
   - Durable architecture, security, and reliability documentation required by
     the new maintenance trust boundary.
 - Out of scope:
@@ -57,8 +60,9 @@ Updated: 2026-07-30
     prompt text alone.
   - Keep all provider reads bounded to one unambiguous account and seven days.
 - Product/process constraints:
-  - Calendar connection is not consent. Email/travel reads require separate
-    explicit consent.
+  - Calendar connection is not consent. The foreground interaction must obtain
+    explicit opt-in and store one exact active Google Calendar or Outlook
+    account; missing or ambiguous selection remains fixed.
   - Exact-time, medical, clinician-directed, and safety-critical support stays
     fixed.
   - The current reminder occurrence is handled before optional integration
@@ -68,11 +72,11 @@ Updated: 2026-07-30
 
 ## Risks and mitigations
 
-1. Risk: Untrusted calendar or email content influences durable automation
+1. Risk: Untrusted calendar content influences durable automation
    instructions.
-   Mitigation: Expose only read operations plus an instruction-only patch,
-   require exact maintenance authority at execution, preserve all non-owned
-   instruction bytes, and persist only bounded busy intervals.
+   Mitigation: Expose one lookup-only composite refresh, build the provider
+   request in host code, reduce raw results to timestamps before model output,
+   and let the scheduled owner construct and fence the owned suffix.
 2. Risk: A maintenance turn mutates an ineligible or safety-critical
    automation.
    Mitigation: Require the explicit `skip-when-busy` line, exclude fixed,
@@ -80,12 +84,17 @@ Updated: 2026-07-30
    mutation shape in code and tests.
 3. Risk: Reminder maintenance failure interferes with canonical memory work or
    foreground replies.
-   Mitigation: Run memory consolidation first, treat later failure as
-   independent, keep the work in the existing silent finite maintenance lane,
-   and retain foreground preemption.
+   Mitigation: Use a separate later exact-id read-only turn, keep both jobs in
+   the existing silent finite maintenance lane, and retain foreground
+   preemption.
 4. Risk: Daily maintenance increases provider load or proactive send volume.
    Mitigation: Skip connected-app work when no eligible reminder exists, issue
    no user-facing message, and patch only changed instructions.
+5. Risk: Revoked policy, changed account, failed refresh, or stale evidence
+   suppresses a reminder.
+   Mitigation: Ordinary instruction writes strip the owned suffix; refresh
+   revalidates the source/account/version after the read; delivery requires
+   exact current authorization and canonical evidence no older than 24 hours.
 
 ## Tasks
 
@@ -106,14 +115,20 @@ Updated: 2026-07-30
   to current `origin/main`.
 - Keep availability truth inside canonical automation instructions as one
   expiring engine-owned block rather than adding a new persisted state owner.
-- Admit only an explicit provider read-tool allowlist. Outlook calendar and
-  email share one toolkit, so toolkit prefixes alone cannot enforce source or
-  read-only boundaries.
-- Run the model under the one-shot, network-denied
-  `murph-member-memory-maintenance` permission profile. It may read the vault
-  and write only canonical memory plus the audit, staging, and lock
-  infrastructure those canonical writes require; reminder mutation stays
-  behind the scheduled hosted owner.
+- Support calendar conflicts only in this change; delete travel/email
+  interpretation rather than sharing raw message content with a vault-capable
+  model.
+- Use one model-visible `refresh_calendar_availability` action with only an
+  automation lookup. Host code chooses the exact Google Calendar or Outlook
+  action and account, derives the current seven-day window, caps and normalizes
+  the result, then submits it to the scheduled owner with the pre-read
+  automation version.
+- Keep the existing memory automation and permission profile unchanged. Add a
+  separate network-denied reminder maintenance turn that can read only
+  `bank/automations` and has no memory authority.
+- A clean empty read removes the old block. Failed or incomplete refreshes
+  leave instructions unchanged, but delivery ignores evidence more than 24
+  hours old so failure remains fail-open.
 
 ## Verification
 
@@ -139,10 +154,23 @@ Updated: 2026-07-30
   - `git diff --check` and added-line identifier/secret scans passed.
   - The branch rebased cleanly onto the latest `origin/main`; the full focused
     matrix above passed again on the rebased candidate.
+  - Preliminary specialist ReviewGPT and final round 1 independently found the
+    generic connected-app/model authority and missing account/revocation
+    binding unsafe. The replacement design removes model-supplied provider
+    queries and instruction patches, separates memory authority, binds one
+    exact calendar account, and makes revocation/staleness fail open.
+  - Post-remediation focused core, assistant-engine, and assistant-runtime
+    policy/typecheck suites pass locally. Deterministic foreground
+    provider-input capture matches the pre-change baseline exactly: direct
+    24,404 tokens / 111,676 bytes with 14 tools, and group 19,861 tokens /
+    91,336 bytes with 12 tools. Final diff review, corrected-head ReviewGPT,
+    and corrected-head CI remain.
 
 ## Current state
 
-- Implementation and focused local proof are complete.
-- Next: create the exact candidate commit and PR, then run the preliminary
-  product/prompt/coverage specialist review and final ReviewGPT concurrently
-  with required CI.
+- The first pushed candidate and PR are under review; both substantive review
+  stages returned findings against that immutable head.
+- The host-owned calendar-only remediation and focused local proof are complete.
+- Next: finish provider-input/diff/privacy proof, push the corrected head,
+  update the PR evidence, run final ReviewGPT correction review, and require
+  exact-head CI green.

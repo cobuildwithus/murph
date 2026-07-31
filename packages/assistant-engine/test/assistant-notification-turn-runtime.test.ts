@@ -12,6 +12,11 @@ import type {
 import { createAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import {
+  AVAILABILITY_CONFLICT_BLOCK_END,
+  AVAILABILITY_CONFLICT_BLOCK_INSTRUCTION,
+  AVAILABILITY_CONFLICT_BLOCK_START,
+} from '@murphai/core'
 import type { AssistantChannelAdapter } from '../src/assistant/channel-adapters.ts'
 import type { CodexThreadIdentity } from '../src/assistant/codex-thread-route.ts'
 import type {
@@ -41,7 +46,7 @@ import {
   MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
 } from '../src/assistant/onboarding-goal-checkin-automation.ts'
 import {
-  MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+  MURPH_REMINDER_AVAILABILITY_MAINTENANCE_AUTOMATION_ID,
 } from '../src/assistant/managed-automations.ts'
 
 type CodexAssistantTarget = Extract<
@@ -98,9 +103,58 @@ afterEach(() => {
   vi.doUnmock('../src/assistant/service-turn-routes.js')
   vi.doUnmock('../src/assistant/turns.js')
   vi.doUnmock('../src/assistant/channel-adapters.js')
+  vi.doUnmock('../src/assistant/channel-typing.js')
   vi.doUnmock('../src/assistant/turn-lock.js')
   vi.doUnmock('../src/assistant/response-media.js')
   vi.doUnmock('../src/assistant/first-contact.js')
+})
+
+test('sendAssistantNotificationLocal deterministically skips only an authorized busy occurrence before provider delivery', async () => {
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'summary',
+      text: 'This must not be delivered.',
+    }),
+  })
+  const {
+    deliverMessage,
+    mocks,
+    sendAssistantNotificationLocal,
+  } = await loadNotificationTurnHarness({
+    providerResult,
+    turnId: 'turn-availability-conflict-skip',
+  })
+  const instructions = [
+    'Send one flexible reminder.',
+    'Availability conflict policy: skip-when-busy',
+    'Availability source policy: calendar-only',
+    'Availability calendar account: googlecalendar / calendar-account',
+    '',
+    AVAILABILITY_CONFLICT_BLOCK_START,
+    'Availability conflict snapshot:',
+    '- generatedAt: 2026-07-30T03:00:00.000Z',
+    '- expiresAt: 2026-08-06T03:00:00.000Z',
+    AVAILABILITY_CONFLICT_BLOCK_INSTRUCTION,
+    '- 2026-07-30T14:00:00.000Z / 2026-07-30T15:00:00.000Z',
+    AVAILABILITY_CONFLICT_BLOCK_END,
+  ].join('\n')
+
+  const result = await sendAssistantNotificationLocal({
+    executionContext: { hosted: null },
+    instructions,
+    scheduledOccurrenceAt: '2026-07-30T14:30:00.000Z',
+    vault: '/vaults/availability-conflict-skip',
+  })
+
+  expect(result).toMatchObject({
+    decision: {
+      kind: 'skip',
+    },
+    response: null,
+  })
+  expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
+  expect(deliverMessage).not.toHaveBeenCalled()
 })
 
 test('sendAssistantNotificationLocal persists the turn before outbound delivery and forwards the dedupe token', async () => {
@@ -2591,13 +2645,13 @@ test('sendAssistantNotificationLocal gives hosted capabilities only to scheduled
     executionContext,
     instructions: 'Run private maintenance.',
     scheduledInvocationAuthority: {
-      automationId: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+      automationId: MURPH_REMINDER_AVAILABILITY_MAINTENANCE_AUTOMATION_ID,
       occurrenceAt: '2026-07-18T14:00:00.000Z',
     },
     scheduledOccurrenceAt: '2026-07-18T14:00:00.000Z',
     turnPolicy: {
       kind: 'maintenance-exact-skip',
-      maintenanceProfile: 'member-memory',
+      maintenanceProfile: 'member-reminders',
       privateSummary: 'No notification required.',
     },
     vault: '/vaults/notification-device-scope',
@@ -2614,13 +2668,13 @@ test('sendAssistantNotificationLocal gives hosted capabilities only to scheduled
     },
     instructions: 'Run private maintenance without its exact owner.',
     scheduledInvocationAuthority: {
-      automationId: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+      automationId: MURPH_REMINDER_AVAILABILITY_MAINTENANCE_AUTOMATION_ID,
       occurrenceAt: '2026-07-19T14:00:00.000Z',
     },
     scheduledOccurrenceAt: '2026-07-19T14:00:00.000Z',
     turnPolicy: {
       kind: 'maintenance-exact-skip',
-      maintenanceProfile: 'member-memory',
+      maintenanceProfile: 'member-reminders',
       privateSummary: 'No notification required.',
     },
     vault: '/vaults/notification-device-scope',

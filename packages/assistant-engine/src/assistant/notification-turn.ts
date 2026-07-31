@@ -12,6 +12,9 @@ import type {
 import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import { resolveAssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import {
+  shouldSkipAutomationOccurrenceForAvailability,
+} from '@murphai/core'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import { normalizeAssistantExecutionContext } from './execution-context.js'
 import { resolveAssistantExecutionDefaultTarget } from './execution-context.js'
@@ -96,7 +99,7 @@ import {
   MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
 } from './onboarding-goal-checkin-automation.js'
 import {
-  MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+  MURPH_REMINDER_AVAILABILITY_MAINTENANCE_AUTOMATION_ID,
 } from './managed-automations.js'
 
 const assistantNotificationSkipDecisionSchema = z
@@ -269,7 +272,9 @@ export async function sendAssistantNotificationLocal(
   })
   // Built before the turn lock so evidence reads never extend the window in
   // which fresh foreground input waits on lock admission.
-  const maintenanceEvidence = isAssistantNotificationMaintenanceExactSkip(input)
+  const maintenanceEvidence =
+    isAssistantNotificationMaintenanceExactSkip(input)
+    && input.turnPolicy?.maintenanceProfile !== 'member-reminders'
     ? await buildAssistantMaintenanceConversationEvidence({
         now: new Date(),
         profile: requireAssistantNotificationMaintenanceProfile(input),
@@ -360,6 +365,22 @@ export async function sendAssistantNotificationLocal(
         })
       }
 
+      if (
+        shouldSkipAutomationOccurrenceForAvailability({
+          instructions: input.instructions,
+          occurrenceAt: input.scheduledOccurrenceAt,
+        })
+      ) {
+        return withPostTurnDeliveryExpectations({
+          decision: {
+            kind: 'skip',
+            privateSummary: 'Scheduled occurrence overlaps an authorized calendar conflict.',
+          },
+          response: null,
+          session: resolved.session,
+        })
+      }
+
       const responsePolicy: AssistantNotificationResponsePolicy =
         input.responsePolicy ?? { kind: 'allow_send_or_skip' }
       if (responsePolicy.kind === 'require_send_exact_text') {
@@ -378,9 +399,9 @@ export async function sendAssistantNotificationLocal(
       const turnId = createAssistantTurnId()
       const memberMaintenanceHostedToolsAuthorized =
         isAssistantNotificationMaintenanceExactSkip(input) &&
-        input.turnPolicy?.maintenanceProfile === 'member-memory' &&
+        input.turnPolicy?.maintenanceProfile === 'member-reminders' &&
         input.scheduledInvocationAuthority?.automationId ===
-          MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID
+          MURPH_REMINDER_AVAILABILITY_MAINTENANCE_AUTOMATION_ID
       const hostedExecutionContext =
         isAssistantNotificationScheduledOccurrence(input) &&
         (

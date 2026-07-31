@@ -2959,8 +2959,7 @@ export async function executeMurphDynamicToolRequest(input: {
         request: input.request,
       })
     }
-    case 'member-maintenance-automation':
-    case 'member-maintenance-connected-apps':
+    case 'member-maintenance-calendar-refresh':
       return await executeMemberMaintenanceDynamicTool({
         abortSignal: input.abortSignal ?? null,
         automationTool: input.hostedToolContext?.automationTool ?? null,

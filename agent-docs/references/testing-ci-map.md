@@ -342,18 +342,26 @@ not enter evidence; and attachment-only input fails closed before provider work.
   `packages/assistant-runtime/test/hosted-runtime-maintenance.test.ts` proves
   that projection uses the existing nonblocking assistant-milestone port.
   `packages/assistant-engine/test/assistant-member-maintenance-policy.test.ts`
-  proves the exact member-maintenance tool remains default-off, source-bound,
-  read-only, and isolated from group maintenance. The managed-automation,
-  planning, notification, and cron suites prove exact-id nightly admission and
-  memory-first prompt behavior.
+  proves the exact reminder-maintenance tool remains default-off, accepts only
+  one automation lookup, builds fixed bounded Google Calendar and Outlook
+  requests, excludes raw provider content, rejects incomplete pagination, and
+  keeps memory, reminder, and group authority isolated. The managed-automation,
+  planning, notification, and cron suites prove separate exact-id nightly
+  admission plus deterministic pre-provider skip behavior.
   `packages/assistant-runtime/test/hosted-runtime-workspace-assistant-phase.test.ts`
-  proves the hosted automation owner rejects fixed, unauthorized-source,
-  non-preserving, and provider-text-shaped maintenance requests while accepting
-  one canonical expiring timestamp suffix idempotently.
+  proves the scheduled owner rejects fixed or unauthorized automations, stale
+  versions, changed account bindings, and malformed or excessive timestamps;
+  accepts one canonical version-fenced replacement idempotently; removes the
+  suffix after a complete empty read; and strips it on an ordinary policy
+  change.
   `packages/hosted-execution/test/assistant-permissions.test.ts` and
   `packages/assistant-runtime/test/hosted-runtime-codex-config.test.ts` prove
-  the one-shot member-maintenance profile writes only canonical memory
-  infrastructure and disables network access.
+  one-shot memory maintenance writes only canonical memory infrastructure and
+  disables network access, while reminder maintenance can read only canonical
+  automation definitions and also has no network.
+  `packages/core/test/automation-availability.test.ts` proves exact
+  policy/source/account authorization, canonical suffix parsing/removal, and
+  fail-open delivery after revocation or 24-hour evidence staleness.
   `packages/core/test/markdown-documents.test.ts` proves stale observed
   automation updates cannot overwrite a newer definition.
   The latency-store proof also shows that terminal evidence carries an initial

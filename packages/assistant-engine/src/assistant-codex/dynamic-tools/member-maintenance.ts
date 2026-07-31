@@ -1,8 +1,7 @@
 import { z } from 'zod'
 
-import {
-  hostedConnectedAppsAccountSelectorSchema,
-  hostedConnectedAppsToolSlugSchema,
+import type {
+  HostedConnectedAppsRequest,
 } from '@murphai/hosted-execution/connected-apps'
 
 import type {
@@ -14,133 +13,31 @@ import type {
 import type {
   SafeToolCallValidationDigest,
 } from '../../assistant/tool-validation-digest.js'
-import {
-  executeConnectedAppsDynamicTool,
-  type ConnectedAppsDynamicToolRequest,
-} from './connected-apps.js'
 import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
 
 const maintenanceAutomationLookupSchema = z.string().trim().min(1).max(191)
-const maintenanceAutomationInstructionsSchema = z.string().min(1).max(50_000)
-const maintenanceSourceSchema = z.enum([
-  'calendar',
-  'travel-confirmations',
-])
-const maintenanceToolkitSchema = z.enum([
-  'gmail',
-  'googlecalendar',
-  'outlook',
-])
-const MAINTENANCE_CALENDAR_READ_TOOL_SLUGS = new Set([
-  'GOOGLECALENDAR_EVENTS_LIST',
-  'GOOGLECALENDAR_EVENTS_LIST_ALL_CALENDARS',
-  'GOOGLECALENDAR_LIST_EVENTS',
-  'OUTLOOK_GET_CALENDAR_VIEW',
-  'OUTLOOK_LIST_EVENTS',
-  'OUTLOOK_LIST_USER_CALENDARS_EVENTS',
-  'OUTLOOK_LIST_USER_CALENDAR_VIEW',
-  'OUTLOOK_OUTLOOK_LIST_EVENTS',
-])
-const MAINTENANCE_TRAVEL_CONFIRMATION_READ_TOOL_SLUGS = new Set([
-  'GMAIL_FETCH_EMAILS',
-  'GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID',
-  'GMAIL_FETCH_MESSAGE_BY_THREAD_ID',
-  'OUTLOOK_GET_MESSAGE',
-  'OUTLOOK_LIST_MESSAGES',
-  'OUTLOOK_OUTLOOK_LIST_MESSAGES',
-])
-const maintenanceConnectedArgumentsSchema = z.discriminatedUnion('action', [
-  z.object({
-    action: z.literal('list_connected_accounts'),
-    lookup: maintenanceAutomationLookupSchema,
-    source: maintenanceSourceSchema,
-    toolkit: maintenanceToolkitSchema,
-  }).strict(),
-  z.object({
-    action: z.literal('search_connected_tools'),
-    lookup: maintenanceAutomationLookupSchema,
-    query: z.string().trim().min(1).max(2_000),
-    source: maintenanceSourceSchema,
-    toolkits: z.array(maintenanceToolkitSchema).length(1),
-  }).strict(),
-  z.object({
-    account: hostedConnectedAppsAccountSelectorSchema,
-    action: z.literal('execute_connected_read'),
-    arguments: z.record(z.string(), z.unknown()).default({}),
-    lookup: maintenanceAutomationLookupSchema,
-    source: maintenanceSourceSchema,
-    toolSlug: hostedConnectedAppsToolSlugSchema,
-  }).strict(),
-])
-const memberMaintenanceArgumentsSchema = z.union([
-  maintenanceConnectedArgumentsSchema,
-  z.object({
-    action: z.literal('patch_automation_instructions'),
-    instructions: maintenanceAutomationInstructionsSchema,
-    lookup: maintenanceAutomationLookupSchema,
-  }).strict(),
-]).superRefine((value, context) => {
-  if (value.action === 'patch_automation_instructions') {
-    return
-  }
-  if (value.action === 'list_connected_accounts') {
-    if (!isMaintenanceSourceToolkit(value.source, value.toolkit)) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Toolkit does not match the authorized maintenance source.',
-        path: ['toolkit'],
-      })
-    }
-    return
-  }
-  if (value.action === 'search_connected_tools') {
-    for (const [index, toolkit] of value.toolkits.entries()) {
-      if (!isMaintenanceSourceToolkit(value.source, toolkit)) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'Toolkit does not match the authorized maintenance source.',
-          path: ['toolkits', index],
-        })
-      }
-    }
-    return
-  }
-  if (!isMaintenanceSourceToolSlug(value.source, value.toolSlug)) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: 'Tool slug does not match the authorized maintenance source.',
-      path: ['toolSlug'],
-    })
-  }
-})
+const MEMBER_MAINTENANCE_MAX_WINDOW_MS = 7 * 24 * 60 * 60 * 1_000
+const MEMBER_MAINTENANCE_MAX_BUSY_INTERVALS = 256
+const GOOGLE_CALENDAR_READ_TOOL = 'GOOGLECALENDAR_EVENTS_LIST'
+const OUTLOOK_CALENDAR_READ_TOOL = 'OUTLOOK_GET_CALENDAR_VIEW'
+
+const memberMaintenanceArgumentsSchema = z.object({
+  action: z.literal('refresh_calendar_availability'),
+  lookup: maintenanceAutomationLookupSchema,
+}).strict()
 
 export const MURPH_MEMBER_MAINTENANCE_TOOL = {
   namespace: 'murph',
   name: 'maintenance',
   description:
-    'Exact-managed-automation-only tool for silent overnight member maintenance. It can list one calendar or travel-confirmation account type, search that source for read-only tools, execute one exact read, or replace only an eligible automation’s instructions. Every connected read is bound to the eligible automation that authorizes its source. It cannot connect, rename, or disconnect accounts; create automations; execute writes; or change schedules, status, routes, titles, tags, support ownership, or lifecycle fields.',
+    'Exact-managed-automation-only tool for silent calendar conflict maintenance. It atomically refreshes one eligible automation from one host-built seven-day calendar read for its exact stored account. The host reduces provider data to busy timestamps and owns the fenced suffix replacement. The tool cannot inspect calendar content, choose an account, read email, manage connections, create automations, or change schedules, status, routes, titles, tags, support ownership, or lifecycle fields.',
   inputSchema: z.toJSONSchema(memberMaintenanceArgumentsSchema, { io: 'input' }),
 } as const
 
-type MaintenanceConnectedRequest = Exclude<
-  ConnectedAppsDynamicToolRequest,
-  { kind: 'invalid-connected-apps-arguments' }
->
-
 export type MemberMaintenanceDynamicToolRequest =
   | {
-      kind: 'member-maintenance-connected-apps'
+      kind: 'member-maintenance-calendar-refresh'
       lookup: string
-      request: MaintenanceConnectedRequest
-      source: 'calendar' | 'travel-confirmations'
-    }
-  | {
-      kind: 'member-maintenance-automation'
-      request: {
-        action: 'patch_maintenance_instructions'
-        instructions: string
-        lookup: string
-      }
     }
   | {
       kind: 'invalid-member-maintenance-arguments'
@@ -157,18 +54,7 @@ export function readMemberMaintenanceDynamicToolRequest(input: {
 
   const parsed = parseDynamicToolArguments({
     schema: memberMaintenanceArgumentsSchema,
-    schemaRootKeys: [
-      'account',
-      'action',
-      'arguments',
-      'instructions',
-      'lookup',
-      'query',
-      'source',
-      'toolkit',
-      'toolkits',
-      'toolSlug',
-    ],
+    schemaRootKeys: ['action', 'lookup'],
     toolName: 'murph.maintenance',
     value: input.arguments,
   })
@@ -179,56 +65,9 @@ export function readMemberMaintenanceDynamicToolRequest(input: {
     }
   }
 
-  switch (parsed.args.action) {
-    case 'list_connected_accounts':
-      return {
-        kind: 'member-maintenance-connected-apps',
-        lookup: parsed.args.lookup,
-        request: {
-          args: {
-            action: 'list',
-            toolkit: parsed.args.toolkit,
-          },
-          kind: 'connected-apps-manage',
-        },
-        source: parsed.args.source,
-      }
-    case 'search_connected_tools':
-      return {
-        kind: 'member-maintenance-connected-apps',
-        lookup: parsed.args.lookup,
-        request: {
-          args: {
-            query: parsed.args.query,
-            toolkits: parsed.args.toolkits,
-          },
-          kind: 'connected-apps-search',
-        },
-        source: parsed.args.source,
-      }
-    case 'execute_connected_read':
-      return {
-        kind: 'member-maintenance-connected-apps',
-        lookup: parsed.args.lookup,
-        request: {
-          args: {
-            account: parsed.args.account,
-            arguments: parsed.args.arguments,
-            toolSlug: parsed.args.toolSlug,
-          },
-          kind: 'connected-apps-execute',
-        },
-        source: parsed.args.source,
-      }
-    case 'patch_automation_instructions':
-      return {
-        kind: 'member-maintenance-automation',
-        request: {
-          action: 'patch_maintenance_instructions',
-          instructions: parsed.args.instructions,
-          lookup: parsed.args.lookup,
-        },
-      }
+  return {
+    kind: 'member-maintenance-calendar-refresh',
+    lookup: parsed.args.lookup,
   }
 }
 
@@ -261,76 +100,224 @@ export async function executeMemberMaintenanceDynamicTool(input: {
   }
 
   try {
-    if (input.request.kind === 'member-maintenance-automation') {
-      const response = await input.automationTool.request(
-        input.request.request,
-        { signal: input.abortSignal ?? null },
-      )
-      if (response.action !== 'patch_maintenance_instructions') {
-        return maintenanceTextResult(
-          false,
-          'member maintenance returned an unexpected result',
-        )
-      }
-      return maintenanceTextResult(true, JSON.stringify({
-        action: response.action,
-        automationId: response.automationId,
-        changed: response.changed,
-        lookupId: response.lookupId,
-        status: response.status,
-      }))
-    }
-
     if (!input.connectedApps) {
       return maintenanceTextResult(
         false,
         'connected apps are unavailable without hosted connected-app transport',
       )
     }
+    const window = buildMaintenanceCalendarWindow()
     const authorization = await input.automationTool.request({
       action: 'authorize_maintenance_source',
       lookup: input.request.lookup,
-      source: input.request.source,
+      source: 'calendar',
     }, {
       signal: input.abortSignal ?? null,
     })
     if (
       authorization.action !== 'authorize_maintenance_source'
       || authorization.authorized !== true
-      || authorization.source !== input.request.source
+      || authorization.source !== 'calendar'
     ) {
       return maintenanceTextResult(
         false,
-        'the automation did not authorize that maintenance source',
+        'the automation did not authorize calendar maintenance',
       )
     }
-    return await executeConnectedAppsDynamicTool({
-      abortSignal: input.abortSignal ?? null,
-      connectedApps: input.connectedApps,
-      request: input.request.request,
+
+    const response = await input.connectedApps.request(
+      buildMaintenanceCalendarRequest({
+        account: authorization.account,
+        toolkit: authorization.toolkit,
+        window,
+      }),
+      { signal: input.abortSignal ?? null },
+    )
+    const busyIntervals = readMaintenanceBusyIntervals({
+      result: response.result,
+      toolkit: authorization.toolkit,
+      window,
     })
+    if (!busyIntervals) {
+      return maintenanceTextResult(
+        false,
+        'calendar maintenance returned incomplete or unsupported availability data',
+      )
+    }
+    const replacement = await input.automationTool.request({
+      account: authorization.account,
+      action: 'replace_maintenance_conflicts',
+      busyIntervals,
+      expectedUpdatedAt: authorization.expectedUpdatedAt,
+      expiresAt: window.endIso,
+      generatedAt: window.startIso,
+      lookup: input.request.lookup,
+      source: 'calendar',
+      toolkit: authorization.toolkit,
+    }, {
+      signal: input.abortSignal ?? null,
+    })
+    if (replacement.action !== 'replace_maintenance_conflicts') {
+      return maintenanceTextResult(
+        false,
+        'member maintenance returned an unexpected result',
+      )
+    }
+    return maintenanceTextResult(true, JSON.stringify({
+      action: replacement.action,
+      automationId: replacement.automationId,
+      changed: replacement.changed,
+      lookupId: replacement.lookupId,
+      status: replacement.status,
+    }))
   } catch {
     return maintenanceTextResult(false, 'member maintenance operation is unavailable')
   }
 }
 
-function isMaintenanceSourceToolkit(
-  source: 'calendar' | 'travel-confirmations',
-  toolkit: 'gmail' | 'googlecalendar' | 'outlook',
-): boolean {
-  return source === 'calendar'
-    ? toolkit === 'googlecalendar' || toolkit === 'outlook'
-    : toolkit === 'gmail' || toolkit === 'outlook'
+interface MaintenanceCalendarWindow {
+  endIso: string
+  endMs: number
+  startIso: string
+  startMs: number
 }
 
-function isMaintenanceSourceToolSlug(
-  source: 'calendar' | 'travel-confirmations',
-  toolSlug: string,
-): boolean {
-  const normalized = toolSlug.toUpperCase()
-  return source === 'calendar'
-    ? MAINTENANCE_CALENDAR_READ_TOOL_SLUGS.has(normalized)
-    : MAINTENANCE_TRAVEL_CONFIRMATION_READ_TOOL_SLUGS.has(normalized)
+function buildMaintenanceCalendarWindow(): MaintenanceCalendarWindow {
+  const startMs = Date.now()
+  const endMs = startMs + MEMBER_MAINTENANCE_MAX_WINDOW_MS
+  return {
+    endIso: new Date(endMs).toISOString(),
+    endMs,
+    startIso: new Date(startMs).toISOString(),
+    startMs,
+  }
+}
+
+function buildMaintenanceCalendarRequest(input: {
+  account: string
+  toolkit: 'googlecalendar' | 'outlook'
+  window: MaintenanceCalendarWindow
+}): HostedConnectedAppsRequest {
+  return input.toolkit === 'googlecalendar'
+    ? {
+        input: {
+          account: input.account,
+          arguments: {
+            calendarId: 'primary',
+            maxResults: MEMBER_MAINTENANCE_MAX_BUSY_INTERVALS,
+            orderBy: 'startTime',
+            showDeleted: false,
+            singleEvents: true,
+            timeMax: input.window.endIso,
+            timeMin: input.window.startIso,
+          },
+          toolSlug: GOOGLE_CALENDAR_READ_TOOL,
+        },
+        operation: 'execute',
+      }
+    : {
+        input: {
+          account: input.account,
+          arguments: {
+            endDateTime: input.window.endIso,
+            startDateTime: input.window.startIso,
+          },
+          toolSlug: OUTLOOK_CALENDAR_READ_TOOL,
+        },
+        operation: 'execute',
+      }
+}
+
+function readMaintenanceBusyIntervals(input: {
+  result: unknown
+  toolkit: 'googlecalendar' | 'outlook'
+  window: MaintenanceCalendarWindow
+}): Array<{ end: string; start: string }> | null {
+  const envelope = asRecord(input.result)
+  const data = asRecord(envelope?.data)
+  if (!envelope || !data) {
+    return null
+  }
+  if (
+    typeof data.nextPageToken === 'string'
+    || typeof data['@odata.nextLink'] === 'string'
+  ) {
+    return null
+  }
+  const items = input.toolkit === 'googlecalendar'
+    ? data.items
+    : data.value
+  if (!Array.isArray(items) || items.length > MEMBER_MAINTENANCE_MAX_BUSY_INTERVALS) {
+    return null
+  }
+
+  const intervals: Array<{ endMs: number; startMs: number }> = []
+  for (const item of items) {
+    const record = asRecord(item)
+    if (!record) {
+      return null
+    }
+    if (
+      input.toolkit === 'googlecalendar'
+      && (
+        record.status === 'cancelled'
+        || record.transparency === 'transparent'
+      )
+    ) {
+      continue
+    }
+    if (input.toolkit === 'outlook' && record.showAs === 'free') {
+      continue
+    }
+    const start = readProviderDateTime(record.start)
+    const end = readProviderDateTime(record.end)
+    if (!start || !end || start >= end) {
+      return null
+    }
+    const startMs = Math.max(start, input.window.startMs)
+    const endMs = Math.min(end, input.window.endMs)
+    if (startMs < endMs) {
+      intervals.push({ endMs, startMs })
+    }
+  }
+
+  intervals.sort((left, right) =>
+    left.startMs - right.startMs || left.endMs - right.endMs
+  )
+  const merged: Array<{ endMs: number; startMs: number }> = []
+  for (const interval of intervals) {
+    const previous = merged.at(-1)
+    if (previous && interval.startMs <= previous.endMs) {
+      previous.endMs = Math.max(previous.endMs, interval.endMs)
+    } else {
+      merged.push({ ...interval })
+    }
+  }
+  return merged.map((interval) => ({
+    end: new Date(interval.endMs).toISOString(),
+    start: new Date(interval.startMs).toISOString(),
+  }))
+}
+
+function readProviderDateTime(value: unknown): number | null {
+  const record = asRecord(value)
+  let candidate = typeof record?.dateTime === 'string'
+    ? record.dateTime
+    : null
+  if (candidate && !/(?:Z|[+-]\d{2}:\d{2})$/u.test(candidate)) {
+    candidate = record?.timeZone === 'UTC' ? `${candidate}Z` : null
+  }
+  if (!candidate) {
+    return null
+  }
+  const parsed = Date.parse(candidate)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
 }
 
 function maintenanceTextResult(success: boolean, text: string) {

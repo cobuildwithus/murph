@@ -4,6 +4,7 @@ import {
   buildMurphGroupReadPermissionProfileTomlLines,
   buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines,
   buildMurphMemberMemoryMaintenancePermissionProfileTomlLines,
+  buildMurphMemberReminderMaintenancePermissionProfileTomlLines,
 } from "../src/assistant-permissions.ts";
 
 describe("group-read Codex permissions", () => {
@@ -68,6 +69,25 @@ describe("group-read Codex permissions", () => {
       '"**/.env.*" = "deny"',
       "",
       "[permissions.murph-member-memory-maintenance.network]",
+      "enabled = false",
+      "",
+    ]);
+  });
+
+  it("confines silent reminder maintenance reads to canonical automations", () => {
+    expect(
+      buildMurphMemberReminderMaintenancePermissionProfileTomlLines(),
+    ).toEqual([
+      "# Silent reminder maintenance may read only canonical automation definitions.",
+      "[permissions.murph-member-reminder-maintenance.filesystem]",
+      '":minimal" = "read"',
+      "glob_scan_max_depth = 4",
+      "",
+      '[permissions.murph-member-reminder-maintenance.filesystem.":workspace_roots"]',
+      '"." = "deny"',
+      '"bank/automations" = "read"',
+      "",
+      "[permissions.murph-member-reminder-maintenance.network]",
       "enabled = false",
       "",
     ]);

@@ -197,12 +197,21 @@ export type AssistantHostedAutomationToolRequest =
   | {
       action: 'authorize_maintenance_source'
       lookup: string
-      source: 'calendar' | 'travel-confirmations'
+      source: 'calendar'
     }
   | {
-      action: 'patch_maintenance_instructions'
-      instructions: string
+      account: string
+      action: 'replace_maintenance_conflicts'
+      busyIntervals: readonly {
+        end: string
+        start: string
+      }[]
+      expectedUpdatedAt: string
+      expiresAt: string
+      generatedAt: string
       lookup: string
+      source: 'calendar'
+      toolkit: 'googlecalendar' | 'outlook'
     }
 
 export type AssistantHostedAutomationToolResponse =
@@ -224,12 +233,15 @@ export type AssistantHostedAutomationToolResponse =
     }
   | {
       action: 'authorize_maintenance_source'
+      account: string
       automationId: string
       authorized: true
-      source: 'calendar' | 'travel-confirmations'
+      expectedUpdatedAt: string
+      source: 'calendar'
+      toolkit: 'googlecalendar' | 'outlook'
     }
   | {
-      action: 'patch_maintenance_instructions'
+      action: 'replace_maintenance_conflicts'
       automationId: string
       changed: boolean
       lookupId: string

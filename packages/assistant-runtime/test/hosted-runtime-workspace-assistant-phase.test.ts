@@ -4374,6 +4374,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       "Send one flexible reminder about the planned task.",
       "Availability conflict policy: skip-when-busy",
       "Availability source policy: calendar-only",
+      "Availability calendar account: googlecalendar / calendar-account",
       "Preserve trailing space here. ",
     ].join("\n");
 
@@ -4449,11 +4450,19 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         "Availability conflict snapshot:",
         `- generatedAt: ${generatedAt.toISOString()}`,
         `- expiresAt: ${expiresAt.toISOString()}`,
-        "- If one interval satisfies `busyStart <= scheduledOccurrenceAt < busyEnd`, return `skip` and send nothing. Do not mention calendar, email, event labels, or provider details.",
+        "- If one interval satisfies `busyStart <= scheduledOccurrenceAt < busyEnd`, return `skip` and send nothing. Do not mention calendar, event labels, or provider details.",
         `- ${busyStart.toISOString()} / ${busyEnd.toISOString()}`,
         "<!-- murph:availability-conflicts:end -->",
       ].join("\n");
       const replacement = `${eligible.record.instructions}\n\n${block}`;
+      const authorization = await automationTool.request({
+        action: "authorize_maintenance_source",
+        lookup: eligible.record.automationId,
+        source: "calendar",
+      });
+      if (authorization.action !== "authorize_maintenance_source") {
+        throw new Error("Expected maintenance source authorization.");
+      }
 
       await expect(automationTool.request({
         action: "save",
@@ -4463,87 +4472,89 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       })).rejects.toThrow(
         "Only member maintenance automation operations are available.",
       );
-      await expect(automationTool.request({
+      expect(authorization).toEqual({
         action: "authorize_maintenance_source",
-        lookup: eligible.record.automationId,
-        source: "calendar",
-      })).resolves.toEqual({
-        action: "authorize_maintenance_source",
+        account: "calendar-account",
         automationId: eligible.record.automationId,
         authorized: true,
+        expectedUpdatedAt: eligible.record.updatedAt,
         source: "calendar",
+        toolkit: "googlecalendar",
       });
-      await expect(automationTool.request({
-        action: "authorize_maintenance_source",
-        lookup: eligible.record.automationId,
-        source: "travel-confirmations",
-      })).rejects.toThrow(
-        "Automation does not explicitly authorize travel-confirmation maintenance.",
-      );
       await expect(automationTool.request({
         action: "authorize_maintenance_source",
         lookup: fixed.record.automationId,
         source: "calendar",
       })).rejects.toThrow(
-        "Automation does not explicitly authorize skip-when-busy maintenance.",
+        "Automation does not explicitly authorize calendar-bound skip-when-busy maintenance.",
       );
       await expect(automationTool.request({
-        action: "patch_maintenance_instructions",
-        instructions: replacement.replace(
-          "Send one flexible reminder",
-          "Rewrite the reminder",
-        ),
+        account: authorization.account,
+        action: "replace_maintenance_conflicts",
+        busyIntervals: [{
+          end: busyEnd.toISOString(),
+          start: busyStart.toISOString(),
+        }],
+        expectedUpdatedAt: "2000-01-01T00:00:00.000Z",
+        expiresAt: expiresAt.toISOString(),
+        generatedAt: generatedAt.toISOString(),
         lookup: eligible.record.automationId,
+        source: "calendar",
+        toolkit: authorization.toolkit,
       })).rejects.toThrow(
-        "Maintenance must preserve every instruction byte outside its owned conflict block.",
+        "Automation availability authority changed during calendar refresh.",
       );
       await expect(automationTool.request({
-        action: "patch_maintenance_instructions",
-        instructions: replacement.replace(
-          `${busyStart.toISOString()} / ${busyEnd.toISOString()}`,
-          `${busyStart.toISOString()} / private event label`,
-        ),
+        account: "different-account",
+        action: "replace_maintenance_conflicts",
+        busyIntervals: [{
+          end: busyEnd.toISOString(),
+          start: busyStart.toISOString(),
+        }],
+        expectedUpdatedAt: authorization.expectedUpdatedAt,
+        expiresAt: expiresAt.toISOString(),
+        generatedAt: generatedAt.toISOString(),
         lookup: eligible.record.automationId,
+        source: "calendar",
+        toolkit: authorization.toolkit,
       })).rejects.toThrow(
-        "Availability conflict block is malformed, stale, or outside its seven-day bound.",
+        "Automation availability authority changed during calendar refresh.",
       );
       const excessiveIntervals = Array.from({ length: 257 }, (_, index) => {
         const start = new Date(generatedAt.getTime() + index * 60_000);
         const end = new Date(start.getTime() + 30_000);
-        return `- ${start.toISOString()} / ${end.toISOString()}`;
+        return { end: end.toISOString(), start: start.toISOString() };
       });
       await expect(automationTool.request({
-        action: "patch_maintenance_instructions",
-        instructions: `${eligible.record.instructions}\n\n${[
-          "<!-- murph:availability-conflicts:start -->",
-          "Availability conflict snapshot:",
-          `- generatedAt: ${generatedAt.toISOString()}`,
-          `- expiresAt: ${expiresAt.toISOString()}`,
-          "- If one interval satisfies `busyStart <= scheduledOccurrenceAt < busyEnd`, return `skip` and send nothing. Do not mention calendar, email, event labels, or provider details.",
-          ...excessiveIntervals,
-          "<!-- murph:availability-conflicts:end -->",
-        ].join("\n")}`,
+        account: authorization.account,
+        action: "replace_maintenance_conflicts",
+        busyIntervals: excessiveIntervals,
+        expectedUpdatedAt: authorization.expectedUpdatedAt,
+        expiresAt: expiresAt.toISOString(),
+        generatedAt: generatedAt.toISOString(),
         lookup: eligible.record.automationId,
+        source: "calendar",
+        toolkit: authorization.toolkit,
       })).rejects.toThrow(
         "Availability conflict block is malformed, stale, or outside its seven-day bound.",
       );
       await expect(automationTool.request({
-        action: "patch_maintenance_instructions",
-        instructions: replacement,
+        account: authorization.account,
+        action: "replace_maintenance_conflicts",
+        busyIntervals: [{
+          end: busyEnd.toISOString(),
+          start: busyStart.toISOString(),
+        }],
+        expectedUpdatedAt: authorization.expectedUpdatedAt,
+        expiresAt: expiresAt.toISOString(),
+        generatedAt: generatedAt.toISOString(),
         lookup: eligible.record.automationId,
+        source: "calendar",
+        toolkit: authorization.toolkit,
       })).resolves.toMatchObject({
-        action: "patch_maintenance_instructions",
+        action: "replace_maintenance_conflicts",
         automationId: eligible.record.automationId,
         changed: true,
-      });
-      await expect(automationTool.request({
-        action: "patch_maintenance_instructions",
-        instructions: replacement,
-        lookup: eligible.record.automationId,
-      })).resolves.toMatchObject({
-        action: "patch_maintenance_instructions",
-        automationId: eligible.record.automationId,
-        changed: false,
       });
 
       await expect(showAutomation({
@@ -4556,6 +4567,52 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         status: "active",
         supportKind: "reminder",
         tags: eligible.record.tags,
+      });
+
+      const refreshedAuthorization = await automationTool.request({
+        action: "authorize_maintenance_source",
+        lookup: eligible.record.automationId,
+        source: "calendar",
+      });
+      if (refreshedAuthorization.action !== "authorize_maintenance_source") {
+        throw new Error("Expected refreshed maintenance authorization.");
+      }
+      await expect(automationTool.request({
+        account: refreshedAuthorization.account,
+        action: "replace_maintenance_conflicts",
+        busyIntervals: [{
+          end: busyEnd.toISOString(),
+          start: busyStart.toISOString(),
+        }],
+        expectedUpdatedAt: refreshedAuthorization.expectedUpdatedAt,
+        expiresAt: expiresAt.toISOString(),
+        generatedAt: generatedAt.toISOString(),
+        lookup: eligible.record.automationId,
+        source: "calendar",
+        toolkit: refreshedAuthorization.toolkit,
+      })).resolves.toMatchObject({
+        action: "replace_maintenance_conflicts",
+        changed: false,
+      });
+      await expect(automationTool.request({
+        account: refreshedAuthorization.account,
+        action: "replace_maintenance_conflicts",
+        busyIntervals: [],
+        expectedUpdatedAt: refreshedAuthorization.expectedUpdatedAt,
+        expiresAt: expiresAt.toISOString(),
+        generatedAt: generatedAt.toISOString(),
+        lookup: eligible.record.automationId,
+        source: "calendar",
+        toolkit: refreshedAuthorization.toolkit,
+      })).resolves.toMatchObject({
+        action: "replace_maintenance_conflicts",
+        changed: true,
+      });
+      await expect(showAutomation({
+        automationId: eligible.record.automationId,
+        vaultRoot,
+      })).resolves.toMatchObject({
+        instructions: eligible.record.instructions,
       });
     } finally {
       await rm(parentRoot, { force: true, recursive: true });
@@ -5088,6 +5145,21 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-automation-retarget-"));
     const vaultRoot = path.join(parentRoot, "vault");
     const inputId = "ain_11111111111111111111111111111111";
+    const availabilityBase = [
+      "Send the existing reminder.",
+      "Availability conflict policy: skip-when-busy",
+      "Availability source policy: calendar-only",
+      "Availability calendar account: googlecalendar / calendar-account",
+    ].join("\n");
+    const availabilityBlock = [
+      "<!-- murph:availability-conflicts:start -->",
+      "Availability conflict snapshot:",
+      "- generatedAt: 2026-07-30T03:15:00.000Z",
+      "- expiresAt: 2026-08-06T03:15:00.000Z",
+      "- If one interval satisfies `busyStart <= scheduledOccurrenceAt < busyEnd`, return `skip` and send nothing. Do not mention calendar, event labels, or provider details.",
+      "- 2026-07-30T14:00:00.000Z / 2026-07-30T15:00:00.000Z",
+      "<!-- murph:availability-conflicts:end -->",
+    ].join("\n");
     try {
       await initializeVault({
         createdAt: "2026-04-27T00:00:00.000Z",
@@ -5099,7 +5171,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           reasoningEffort: "medium",
         },
         continuityPolicy: "preserve",
-        instructions: "Send the existing reminder.",
+        instructions: `${availabilityBase}\n\n${availabilityBlock}`,
         route: {
           channel: "telegram",
           deliveryTarget: "telegram_existing_chat",
@@ -5246,6 +5318,35 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           threadIsDirect: true,
         }),
       }));
+
+      await operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [inputId],
+        operation: async (executionContext) => {
+          const automationTool = executionContext.hosted?.automationTool;
+          if (!automationTool) {
+            throw new Error("Expected scoped hosted automation tool.");
+          }
+          return await automationTool.request({
+            action: "patch",
+            instructions: `${availabilityBase.replace(
+              "Availability conflict policy: skip-when-busy",
+              "Availability conflict policy: fixed",
+            )}\n\n${availabilityBlock}`,
+            lookup: "existing-reminder",
+          });
+        },
+        turnEnvironment: null,
+      });
+      await expect(showAutomation({
+        slug: "existing-reminder",
+        vaultRoot,
+      })).resolves.toMatchObject({
+        instructions: availabilityBase.replace(
+          "Availability conflict policy: skip-when-busy",
+          "Availability conflict policy: fixed",
+        ),
+      });
     } finally {
       await rm(parentRoot, { force: true, recursive: true });
     }
