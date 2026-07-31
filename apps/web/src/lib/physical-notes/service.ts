@@ -17,7 +17,6 @@ import {
 } from "@murphai/hosted-execution/physical-notes";
 
 import { assertHostedGroupParticipantActionOriginHasOwnMurph } from "../hosted-groups/participant-action-authority";
-import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import {
   assertActiveHostedMemberAccessAllowed,
   readActiveHostedMemberAccess,
@@ -36,7 +35,6 @@ import { recordHostedAiUsageRecords } from "../hosted-execution/usage";
 import { buildHostedLobPhysicalNoteUsageRecord } from "../hosted-execution/usage-lob";
 import {
   createLobPhysicalNoteRuntime,
-  type LobPhysicalNoteCreateResult,
   type LobPhysicalNoteRuntime,
 } from "./lob-runtime";
 
@@ -89,6 +87,45 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
     originAssistantInputId: input.originAssistantInputId,
     recipient,
   });
+  const existing = await prisma.hostedPhysicalNote.findUnique({
+    where: {
+      memberId_requestKey: {
+        memberId: input.memberId,
+        requestKey: input.requestKey,
+      },
+    },
+  });
+  if (existing) {
+    const replay = await resolveHostedPhysicalNoteReplay({
+      memberId: input.memberId,
+      prisma,
+      requestFingerprint,
+      row: existing,
+    });
+    if (replay) {
+      return replay;
+    }
+    if (!config) {
+      return toResponse(existing, "pending");
+    }
+  } else if (!config) {
+    return unavailableResponse();
+  }
+
+  if (!config) {
+    throw new Error("Hosted physical-note configuration invariant failed.");
+  }
+  const artworkExpiresAt = new Date(input.artwork.expiresAt);
+  if (artworkExpiresAt.getTime() <= Date.now() + 60_000) {
+    throw new TypeError("Physical-note artwork URL expires too soon.");
+  }
+  const runtime = input.runtime ?? createLobPhysicalNoteRuntime({
+    apiKey: config.apiKey,
+    fromAddressId: config.fromAddressId,
+  });
+  await reassertGroupOrigin?.();
+  input.signal?.throwIfAborted();
+
   const reservation = await prisma.$transaction(async (tx) => {
     await lockHostedMemberRow(tx, input.memberId);
     if (!await readActiveHostedMemberAccess({
@@ -112,15 +149,8 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
       if (existing.requestFingerprint !== requestFingerprint) {
         throw new Error("Hosted physical-note request key collision.");
       }
-      return { kind: "row" as const, created: false, row: existing };
+      return { kind: "row" as const, row: existing };
     }
-    if (!config) {
-      return { kind: "unavailable" as const };
-    }
-    if (isPhysicalNoteArtworkCapabilityExpiringSoon(input.artwork.expiresAt)) {
-      throw new TypeError("Physical-note artwork URL expires too soon.");
-    }
-
     const priorComplimentary = await tx.hostedPhysicalNote.findFirst({
       select: { id: true },
       where: {
@@ -130,20 +160,24 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
     });
     const complimentary = priorComplimentary === null;
     if (!complimentary) {
+      const gate = await readHostedAiUsageGate({
+        memberId: input.memberId,
+        prisma: tx,
+      });
       const pendingPaidNotes = await tx.hostedPhysicalNote.aggregate({
         _sum: { providerCostUsdMicros: true },
         where: {
           complimentaryOfferCode: null,
+          createdAt: {
+            gte: gate.periodStart,
+            lt: gate.periodEnd,
+          },
           memberId: input.memberId,
           status: "starting",
         },
       });
       const reservedUsdMicros =
         pendingPaidNotes._sum.providerCostUsdMicros ?? 0n;
-      const gate = await readHostedAiUsageGate({
-        memberId: input.memberId,
-        prisma: tx,
-      });
       if (
         !gate.allowed
         || gate.remainingUsdMicros - reservedUsdMicros < config.costUsdMicros
@@ -157,7 +191,6 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
 
     return {
       kind: "row" as const,
-      created: true,
       row: await tx.hostedPhysicalNote.create({
         data: {
           complimentaryOfferCode: complimentary
@@ -176,9 +209,6 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
     };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
-  if (reservation.kind === "unavailable") {
-    return unavailableResponse();
-  }
   if (reservation.kind === "insufficient") {
     return {
       complimentary: false,
@@ -188,65 +218,21 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
     };
   }
 
-  if (reservation.row.status === "accepted") {
-    const accepted = await finalizeHostedPhysicalNoteAcceptance({
-      acceptedAt: reservation.row.acceptedAt ?? new Date(),
-      memberId: input.memberId,
-      noteId: reservation.row.id,
-      prisma,
-      providerLetterId: requireProviderLetterId(reservation.row),
-    });
-    return toResponse(accepted, "accepted");
-  }
-  if (reservation.row.status === "failed") {
-    return toResponse(reservation.row, "failed");
-  }
-  if (
-    !reservation.created
-    && Date.now() - reservation.row.createdAt.getTime() >= REPLAY_WINDOW_MS
-  ) {
-    return toResponse(reservation.row, "pending");
-  }
-  if (!config) {
-    return toResponse(reservation.row, "pending");
-  }
-  if (
-    !reservation.created
-    && isPhysicalNoteArtworkCapabilityExpiringSoon(input.artwork.expiresAt)
-  ) {
-    return toResponse(reservation.row, "pending");
-  }
-
-  const runtime = input.runtime ?? createLobPhysicalNoteRuntime({
-    apiKey: config.apiKey,
-    fromAddressId: config.fromAddressId,
+  const replay = await resolveHostedPhysicalNoteReplay({
+    memberId: input.memberId,
+    prisma,
+    requestFingerprint,
+    row: reservation.row,
   });
-  let providerResult: LobPhysicalNoteCreateResult;
-  try {
-    await reassertGroupOrigin?.();
-    input.signal?.throwIfAborted();
-    providerResult = await runtime.create({
-      artworkUrl: input.artwork.url,
-      idempotencyKey: reservation.row.id,
-      noteId: reservation.row.id,
-      recipient,
-      signal: input.signal,
-    });
-  } catch (error) {
-    if (
-      reservation.created
-      && (
-        input.signal?.aborted === true
-        || (isHostedOnboardingError(error) && !error.retryable)
-      )
-    ) {
-      await markHostedPhysicalNoteFailed({
-        noteId: reservation.row.id,
-        prisma,
-      });
-    }
-    throw error;
+  if (replay) {
+    return replay;
   }
+  const providerResult = await runtime.create({
+    artworkUrl: input.artwork.url,
+    idempotencyKey: reservation.row.id,
+    noteId: reservation.row.id,
+    recipient,
+  });
 
   if (providerResult.kind === "ambiguous_failure") {
     const current = await prisma.hostedPhysicalNote.findUniqueOrThrow({
@@ -296,6 +282,33 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
     providerLetterId: providerResult.providerLetterId,
   });
   return toResponse(accepted, "accepted");
+}
+
+async function resolveHostedPhysicalNoteReplay(input: {
+  memberId: string;
+  prisma: PrismaClient;
+  requestFingerprint: string;
+  row: HostedPhysicalNote;
+}): Promise<HostedPhysicalNoteSendResponse | null> {
+  if (input.row.requestFingerprint !== input.requestFingerprint) {
+    throw new Error("Hosted physical-note request key collision.");
+  }
+  if (input.row.status === "accepted") {
+    const accepted = await finalizeHostedPhysicalNoteAcceptance({
+      acceptedAt: input.row.acceptedAt ?? new Date(),
+      memberId: input.memberId,
+      noteId: input.row.id,
+      prisma: input.prisma,
+      providerLetterId: requireProviderLetterId(input.row),
+    });
+    return toResponse(accepted, "accepted");
+  }
+  if (input.row.status === "failed") {
+    return toResponse(input.row, "failed");
+  }
+  return Date.now() - input.row.createdAt.getTime() >= REPLAY_WINDOW_MS
+    ? toResponse(input.row, "pending")
+    : null;
 }
 
 async function finalizeHostedPhysicalNoteAcceptance(input: {
@@ -448,12 +461,6 @@ function toResponse(
 
 function createPhysicalNoteId(): string {
   return `hpn_${randomUUID().replaceAll("-", "")}`;
-}
-
-function isPhysicalNoteArtworkCapabilityExpiringSoon(
-  expiresAt: string,
-): boolean {
-  return new Date(expiresAt).getTime() <= Date.now() + 60_000;
 }
 
 function readEnv(name: string): string | null {

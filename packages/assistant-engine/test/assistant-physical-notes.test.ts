@@ -18,6 +18,9 @@ import {
 import type {
   AssistantHostedToolContext,
 } from '../src/assistant/hosted-tool-context.js'
+import type {
+  AssistantAcceptedMessageTargetAuthorizer,
+} from '../src/assistant/message-target-selection.js'
 
 const APPROVAL_INPUT_ID = `ain_${'c'.repeat(32)}`
 const OTHER_INPUT_ID = `ain_${'d'.repeat(32)}`
@@ -34,6 +37,10 @@ const RECIPIENT = {
   state: 'GA',
 }
 const tempRoots: string[] = []
+const authorizeApprovalInput: AssistantAcceptedMessageTargetAuthorizer =
+  async (input) => input.messageRef === APPROVAL_INPUT_ID
+    ? { targetInputId: APPROVAL_INPUT_ID }
+    : null
 
 afterEach(async () => {
   await Promise.all(tempRoots.splice(0).map((root) =>
@@ -59,7 +66,7 @@ describe('assistant physical notes', () => {
       'provide the exact image_ref and image_sha256',
     )
     expect(MURPH_SEND_PHYSICAL_NOTE_TOOL.description).toContain(
-      'exact message_ref from the participant approving the send',
+      'exact message_ref approving the send in the current turn',
     )
   })
 
@@ -127,6 +134,23 @@ describe('assistant physical notes', () => {
 
     expect(readPhysicalNoteDynamicToolRequest({
       arguments: {
+        image_ref: 'raw/captures/generated.jpeg',
+        image_sha256: 'a'.repeat(64),
+        to: {
+          address_line1: '123 Main St',
+          city: 'Atlanta',
+          name: 'Sam',
+          postal_code: '30308',
+          state: 'GA',
+        },
+      },
+      tool: MURPH_SEND_PHYSICAL_NOTE_TOOL.name,
+    })).toMatchObject({
+      kind: 'invalid-physical-note-arguments',
+    })
+
+    expect(readPhysicalNoteDynamicToolRequest({
+      arguments: {
         message_ref: APPROVAL_INPUT_ID,
         to: {
           address_line1: '123 Main St',
@@ -142,7 +166,7 @@ describe('assistant physical notes', () => {
     })
   })
 
-  it('binds a later group send to the exact accepted approving input', () => {
+  it('binds every later send to the exact accepted approving input', () => {
     expect(resolvePhysicalNoteExplicitOriginInputId({
       acceptedInputIds: [OTHER_INPUT_ID, APPROVAL_INPUT_ID],
       conversationScope: 'group',
@@ -160,6 +184,11 @@ describe('assistant physical notes', () => {
     expect(resolvePhysicalNoteExplicitOriginInputId({
       acceptedInputIds: [OTHER_INPUT_ID, APPROVAL_INPUT_ID],
       conversationScope: 'direct',
+    })).toBeNull()
+    expect(resolvePhysicalNoteExplicitOriginInputId({
+      acceptedInputIds: [OTHER_INPUT_ID, APPROVAL_INPUT_ID],
+      conversationScope: 'direct',
+      messageRef: APPROVAL_INPUT_ID,
     })).toBe(APPROVAL_INPUT_ID)
     expect(resolvePhysicalNoteExplicitOriginInputId({
       acceptedInputIds: [APPROVAL_INPUT_ID],
@@ -167,44 +196,18 @@ describe('assistant physical notes', () => {
     })).toBeNull()
   })
 
-  it('keys the exact generated pixels, origin, and recipient', () => {
-    const completion = {
-      contentType: 'image/jpeg' as const,
-      imageRef: 'raw/captures/generated.jpeg',
-      imageSha256: 'b'.repeat(64),
-      originAssistantInputId: `ain_${'a'.repeat(32)}`,
-      sizeBytes: 123,
-    }
-    const recipient = {
-      addressLine1: '123 Main St',
-      city: 'Atlanta',
-      name: 'Sam',
-      postalCode: '30308',
-      state: 'GA',
-    }
+  it('keys only the exact authorized effect so changed content collides downstream', () => {
+    const originAssistantInputId = `ain_${'a'.repeat(32)}`
     const first = createPhysicalNoteRequestKey({
-      completion,
-      recipient,
+      originAssistantInputId,
     })
 
     expect(first).toMatch(/^physical_note_[0-9a-f]{64}$/u)
     expect(createPhysicalNoteRequestKey({
-      completion,
-      recipient,
+      originAssistantInputId,
     })).toBe(first)
     expect(createPhysicalNoteRequestKey({
-      completion: {
-        ...completion,
-        imageSha256: 'c'.repeat(64),
-      },
-      recipient,
-    })).not.toBe(first)
-    expect(createPhysicalNoteRequestKey({
-      completion,
-      recipient: {
-        ...recipient,
-        addressLine1: '456 Other St',
-      },
+      originAssistantInputId: `ain_${'d'.repeat(32)}`,
     })).not.toBe(first)
   })
 
@@ -226,6 +229,8 @@ describe('assistant physical notes', () => {
     }))
 
     const result = await executeMurphDynamicToolRequest({
+      authorizeAcceptedMessageTarget: authorizeApprovalInput,
+      deliveryContextOrdinal: 0,
       env: {},
       fetchImpl: fetch,
       hostedToolContext: createHostedToolContext({
@@ -238,6 +243,7 @@ describe('assistant physical notes', () => {
         imageRef: IMAGE_REF,
         imageSha256: IMAGE_SHA256,
         kind: 'send-physical-note',
+        messageRef: APPROVAL_INPUT_ID,
         recipient: RECIPIENT,
       },
       vaultRoot,
@@ -259,12 +265,7 @@ describe('assistant physical notes', () => {
       originAssistantInputId: APPROVAL_INPUT_ID,
       recipient: RECIPIENT,
       requestKey: createPhysicalNoteRequestKey({
-        completion: {
-          imageRef: IMAGE_REF,
-          imageSha256: IMAGE_SHA256,
-          originAssistantInputId: APPROVAL_INPUT_ID,
-        },
-        recipient: RECIPIENT,
+        originAssistantInputId: APPROVAL_INPUT_ID,
       }),
     }, {
       signal: null,
@@ -272,6 +273,9 @@ describe('assistant physical notes', () => {
     expect(result.rpcResult).toMatchObject({ success: true })
     expect(result.rpcResult.contentItems[0]?.text).toContain(
       '"status":"accepted"',
+    )
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      '"costUsdMicros":"250000"',
     )
   })
 
@@ -281,6 +285,8 @@ describe('assistant physical notes', () => {
     const send = vi.fn()
 
     const result = await executeMurphDynamicToolRequest({
+      authorizeAcceptedMessageTarget: authorizeApprovalInput,
+      deliveryContextOrdinal: 0,
       env: {},
       fetchImpl: fetch,
       hostedToolContext: createHostedToolContext({
@@ -293,6 +299,7 @@ describe('assistant physical notes', () => {
         imageRef: IMAGE_REF,
         imageSha256: 'f'.repeat(64),
         kind: 'send-physical-note',
+        messageRef: APPROVAL_INPUT_ID,
         recipient: RECIPIENT,
       },
       vaultRoot,
@@ -316,6 +323,8 @@ describe('assistant physical notes', () => {
     }))
 
     const result = await executeMurphDynamicToolRequest({
+      authorizeAcceptedMessageTarget: authorizeApprovalInput,
+      deliveryContextOrdinal: 0,
       env: {},
       fetchImpl: fetch,
       hostedToolContext: createHostedToolContext({
@@ -333,6 +342,7 @@ describe('assistant physical notes', () => {
         imageRef: IMAGE_REF,
         imageSha256: IMAGE_SHA256,
         kind: 'send-physical-note',
+        messageRef: APPROVAL_INPUT_ID,
         recipient: RECIPIENT,
       },
       vaultRoot,

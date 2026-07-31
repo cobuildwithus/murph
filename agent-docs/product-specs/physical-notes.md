@@ -25,18 +25,24 @@ wallet or credit type.
 
 The assistant composes two existing-style primitives:
 
-1. `murph.generate_image` creates and saves one private portrait image.
+1. `murph.generate_image` creates and saves one private portrait image. Mail
+   flows pass the exact accepted `message_ref`; generic image generations remain
+   composable but cannot authorize an automatic physical send.
 2. The existing hosted image completion re-enters the same Codex conversation as
    a trusted system input. No note workflow, polling loop, scheduler, automation,
    or second continuation owner is added.
 3. `murph.send_physical_note` materializes and hashes the exact saved image,
    publishes a short-lived private capability, and asks Web to submit it to Lob.
 
-On the immediate completion turn the send tool infers the trusted image and the
-originating accepted request. When Murph showed the artwork first, a later
-user-authored send turn may provide the exact trusted vault ref and SHA-256;
-runtime code re-reads the private bytes and binds the irreversible effect to the
-fresh accepted input.
+On the immediate completion turn the send tool infers the trusted image only
+when its completion carries that exact accepted origin. When Murph showed the
+artwork first, a later user-authored send turn provides the exact trusted vault
+ref, SHA-256, and current approving `message_ref`; runtime code re-reads the
+private bytes and independently reauthorizes the exact input in direct and group
+conversations. The image-launch turn sends a short acknowledgement rather than
+silently ending. If graceful runtime shutdown interrupts generation, the
+existing completion channel durably stages one failed result so a restart can
+tell the conversation instead of losing the continuation.
 
 ## Ownership and persistence
 
@@ -46,26 +52,27 @@ complimentary offer code, configured provider cost, pricing version, and
 timestamps. It never stores the postal address, image URL, artwork, prompt, or
 note text.
 
-A new send validates that its private artwork capability has enough lifetime
-before reserving either the complimentary claim or paid capacity. Accepted
-replays resolve from the durable row even after that temporary capability
-expires; an existing uncertain send remains pending rather than being rewritten.
+The exact authorized input derives the request key. The artwork and recipient
+remain in the separate request fingerprint, so reusing one approval with changed
+content is a collision rather than a second effect. Before inserting a row, Web
+validates the artwork lifetime, constructs the provider runtime, reasserts final
+group authority, and observes caller cancellation. Accepted replays resolve
+from the durable row even after the temporary artwork capability expires; an
+existing uncertain send remains pending rather than being rewritten. Web then
+admits a new provider effect under the member lock.
 
-The row is inserted before the provider call. `memberId + requestKey` makes exact
-replay idempotent, while `memberId + complimentaryOfferCode` atomically admits
-one complimentary note per direct member or synthetic group member. A definite
-provider rejection releases the promotional claim; an ambiguous outcome keeps
-the row pending and is never blindly resent after Lob's idempotency window.
-For paid notes, `starting` rows reserve their already-frozen provider cost under
-the same member lock used by allowance admission. Concurrent sends therefore
-cannot each spend the same remaining capacity, and no second balance owner is
-needed.
+`memberId + complimentaryOfferCode` atomically admits one complimentary note per
+direct member or synthetic group member. A definite provider rejection releases
+the promotional claim; an ambiguous outcome keeps the row pending and is never
+blindly resent after Lob's idempotency window. Once admitted, the provider call
+uses its own bounded timeout rather than caller cancellation, preventing a
+durable reservation with no matching provider attempt.
 
-A reservation created by the current attempt is released when the caller is
-confirmed aborted before provider dispatch or when final participant authority
-is rejected nonretryably. After provider transport is entered, a missing or
-uncertain response remains pending because Lob may already have accepted the
-request.
+For paid notes, `starting` rows from the current allowance period reserve their
+already-frozen provider cost under the same member lock used by allowance
+admission. Older ambiguous rows remain auditable but do not reduce a new
+period's capacity. Concurrent sends therefore cannot each spend the same
+remaining capacity, and no second balance owner is needed.
 
 ## Provider boundary
 

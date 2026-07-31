@@ -387,6 +387,7 @@ export interface AssistantHostedImageGenerationLauncher {
   launch(input: {
     operationId: string
     originAssistantInputId: string
+    originAssistantInputIdExact: boolean
     scopeId?: string | null
     run(
       signal: AbortSignal,

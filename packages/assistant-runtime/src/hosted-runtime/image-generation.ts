@@ -17,6 +17,7 @@ interface CompletedImageGeneration {
   completedAt: string;
   operationId: string;
   originAssistantInputId: string;
+  originAssistantInputIdExact: boolean;
   result: AssistantHostedImageGenerationResult;
   scopeId: string | null;
 }
@@ -51,7 +52,7 @@ export function createHostedImageGenerationController(input: {
   withCanonicalWritePersistence<T>(run: () => Promise<T>): Promise<T>;
 }): HostedImageGenerationController {
   const closeController = new AbortController();
-  const signal = input.signal
+  const runSignal = input.signal
     ? AbortSignal.any([input.signal, closeController.signal])
     : closeController.signal;
   const completed: CompletedImageGeneration[] = [];
@@ -62,6 +63,12 @@ export function createHostedImageGenerationController(input: {
     scopeId: string;
   }>();
   const operations = new Set<string>();
+  const activeOperations = new Map<string, {
+    operationId: string;
+    originAssistantInputId: string;
+    originAssistantInputIdExact: boolean;
+    scopeId: string | null;
+  }>();
   const pendingScopes = new Map<string, {
     operationId: string;
     status: "pending" | "queued";
@@ -85,6 +92,45 @@ export function createHostedImageGenerationController(input: {
         input.notifyReady();
       }),
     );
+  const completeOperation = (
+    operationId: string,
+    result: AssistantHostedImageGenerationResult,
+  ): void => {
+    const operation = activeOperations.get(operationId);
+    if (!operation) {
+      return;
+    }
+    activeOperations.delete(operationId);
+    completed.push({
+      completedAt: new Date().toISOString(),
+      operationId,
+      originAssistantInputId: operation.originAssistantInputId,
+      originAssistantInputIdExact: operation.originAssistantInputIdExact,
+      result,
+      scopeId: operation.scopeId,
+    });
+    if (operation.scopeId) {
+      pendingScopes.set(operation.scopeId, {
+        operationId,
+        status: "queued",
+      });
+    }
+    input.notifyReady();
+  };
+  const completeActiveOperationsAsFailed = (): void => {
+    for (const operationId of [...activeOperations.keys()]) {
+      completeOperation(operationId, {
+        media: null,
+        runtimeIssue: null,
+        savedImageRef: null,
+      });
+    }
+  };
+  input.signal?.addEventListener(
+    "abort",
+    completeActiveOperationsAsFailed,
+    { once: true },
+  );
 
   const launcher: AssistantHostedImageGenerationLauncher = {
     launch(request) {
@@ -96,6 +142,12 @@ export function createHostedImageGenerationController(input: {
         return "already-pending";
       }
       operations.add(request.operationId);
+      activeOperations.set(request.operationId, {
+        operationId: request.operationId,
+        originAssistantInputId: request.originAssistantInputId,
+        originAssistantInputIdExact: request.originAssistantInputIdExact,
+        scopeId,
+      });
       if (scopeId) {
         pendingScopes.set(scopeId, {
           operationId: request.operationId,
@@ -103,48 +155,26 @@ export function createHostedImageGenerationController(input: {
         });
       }
       input.onStarted();
+      if (input.signal?.aborted) {
+        completeActiveOperationsAsFailed();
+        return "started";
+      }
       const task = (async () => {
         try {
-          const result = await request.run(signal, persistCanonicalWrite);
-          if (signal.aborted) {
+          const result = await request.run(runSignal, persistCanonicalWrite);
+          if (closeController.signal.aborted) {
             return;
           }
-          completed.push({
-            completedAt: new Date().toISOString(),
-            operationId: request.operationId,
-            originAssistantInputId: request.originAssistantInputId,
-            result,
-            scopeId,
-          });
-          if (scopeId) {
-            pendingScopes.set(scopeId, {
-              operationId: request.operationId,
-              status: "queued",
-            });
-          }
-          input.notifyReady();
+          completeOperation(request.operationId, result);
         } catch {
-          if (signal.aborted) {
+          if (closeController.signal.aborted) {
             return;
           }
-          completed.push({
-            completedAt: new Date().toISOString(),
-            operationId: request.operationId,
-            originAssistantInputId: request.originAssistantInputId,
-            result: {
-              media: null,
-              runtimeIssue: null,
-              savedImageRef: null,
-            },
-            scopeId,
+          completeOperation(request.operationId, {
+            media: null,
+            runtimeIssue: null,
+            savedImageRef: null,
           });
-          if (scopeId) {
-            pendingScopes.set(scopeId, {
-              operationId: request.operationId,
-              status: "queued",
-            });
-          }
-          input.notifyReady();
         }
       })();
       tasks.add(task);
@@ -159,6 +189,10 @@ export function createHostedImageGenerationController(input: {
   return {
     launcher,
     async close() {
+      input.signal?.removeEventListener(
+        "abort",
+        completeActiveOperationsAsFailed,
+      );
       closeController.abort();
       const abortReason = new Error("Hosted image generation closed.");
       for (const pending of canonicalWrites.splice(0)) {
@@ -169,6 +203,7 @@ export function createHostedImageGenerationController(input: {
       acceptedCompletionInputIds.clear();
       completionInputScopes.clear();
       pendingScopes.clear();
+      activeOperations.clear();
     },
     async flushCanonicalWrites(persist) {
       let flushed = 0;
@@ -288,6 +323,8 @@ async function stageImageGenerationCompletion(input: {
     .digest("hex")}`;
   const text = renderAssistantHostedImageCompletionSystemText({
     originAssistantInputId: input.completion.originAssistantInputId,
+    originAssistantInputIdExact:
+      input.completion.originAssistantInputIdExact,
     result: input.completion.result,
   });
   const event = await upsertAssistantInputEvent({

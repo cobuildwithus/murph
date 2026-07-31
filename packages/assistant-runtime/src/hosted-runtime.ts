@@ -3396,6 +3396,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           runtimeWakeSignal: options.runtimeWakeSignal ?? null,
           shutdownSignal: options.shutdownSignal ?? null,
         });
+        if (options.shutdownSignal?.aborted === true) {
+          await flushImageGenerationWork();
+        }
         if (dirtyWaitResult.kind === "external_wake") {
           const latencySeed = createHostedRuntimeWakeLatencySeed(
             dirtyWaitResult.notification,

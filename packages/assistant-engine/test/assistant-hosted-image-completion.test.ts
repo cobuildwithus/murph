@@ -9,6 +9,7 @@ describe('hosted image completion', () => {
   it('binds the saved image to its originating accepted input', () => {
     const text = renderAssistantHostedImageCompletionSystemText({
       originAssistantInputId: `ain_${'a'.repeat(32)}`,
+      originAssistantInputIdExact: true,
       result: {
         media: {
           alt: null,
@@ -30,6 +31,7 @@ describe('hosted image completion', () => {
       imageRef: 'raw/captures/generated.jpeg',
       imageSha256: 'b'.repeat(64),
       originAssistantInputId: `ain_${'a'.repeat(32)}`,
+      originAssistantInputIdExact: true,
       sizeBytes: 123,
     })
   })
@@ -56,9 +58,34 @@ describe('hosted image completion', () => {
     expect(parseAssistantHostedImageCompletionText(text)).toBeNull()
   })
 
+  it('treats legacy completions without exact authority as non-exact', () => {
+    const text = [
+      '<hosted_image_result>',
+      JSON.stringify({
+        media: [{
+          contentType: 'image/jpeg',
+          filename: 'generated.jpeg',
+          kind: 'vault_image',
+          ref: 'raw/captures/generated.jpeg',
+          sha256: 'b'.repeat(64),
+          sizeBytes: 123,
+        }],
+        originAssistantInputId: `ain_${'a'.repeat(32)}`,
+        savedImageRef: 'raw/captures/generated.jpeg',
+        status: 'ready',
+      }),
+      '</hosted_image_result>',
+    ].join('')
+
+    expect(parseAssistantHostedImageCompletionText(text)).toMatchObject({
+      originAssistantInputIdExact: false,
+    })
+  })
+
   it('does not instruct downstream image actions after generation fails', () => {
     const text = renderAssistantHostedImageCompletionSystemText({
       originAssistantInputId: `ain_${'c'.repeat(32)}`,
+      originAssistantInputIdExact: false,
       result: {
         media: null,
         runtimeIssue: {

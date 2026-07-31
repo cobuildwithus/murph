@@ -101,6 +101,9 @@ import {
   type AssistantHostedGroupSharedRecord,
   type AssistantWorkspaceArtifactMaterializer,
 } from '../assistant/execution-context.js'
+import type {
+  AssistantConversationScope,
+} from '../assistant/conversation-policy.js'
 import {
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS,
@@ -420,6 +423,12 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
           minLength: 1,
           maxLength: 1024,
         },
+      },
+      message_ref: {
+        type: 'string',
+        pattern: '^ain_[0-9a-f]{32}$',
+        description:
+          'Exact current Message ref authorizing an irreversible continuation that will consume this image, such as mailing a physical note. Omit for ordinary image generation.',
       },
     },
     required: ['prompt'],
@@ -1487,6 +1496,9 @@ const generateImageArgumentsSchema = z
       .describe(GENERATE_IMAGE_REFERENCE_IMAGE_REFS_DESCRIPTION)
       .default([]),
     size: z.enum(['1024x1024', '1024x1536', '1536x1024']).default('1024x1024'),
+    message_ref: z.string().regex(
+      new RegExp(ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN, 'u'),
+    ).optional(),
   })
   .strict()
 
@@ -2143,6 +2155,7 @@ export type MurphDynamicToolRequest =
   | {
       kind: 'generate-image'
       args: GenerateImageToolArgs
+      messageRef?: string
       toolCallId?: string
     }
   | {
@@ -2457,6 +2470,7 @@ export function readMurphDynamicToolRequest(
       return {
         kind: 'generate-image',
         args: parsed.args,
+        ...(parsed.messageRef ? { messageRef: parsed.messageRef } : {}),
         ...(request.toolCallId ? { toolCallId: request.toolCallId } : {}),
       }
     }
@@ -3130,7 +3144,7 @@ export async function executeMurphDynamicToolRequest(input: {
         const userActionScope = hasExplicitArtwork
           ? hostedToolContext.currentUserActionScope?.() ?? null
           : null
-        const explicitOriginAssistantInputId = userActionScope
+        const explicitOriginCandidate = userActionScope
           ? resolvePhysicalNoteExplicitOriginInputId({
               acceptedInputIds: userActionScope.acceptedInputIds,
               conversationScope: userActionScope.conversationScope,
@@ -3139,8 +3153,18 @@ export async function executeMurphDynamicToolRequest(input: {
                 : {}),
             })
           : null
-        originAssistantInputId = trustedCompletion?.originAssistantInputId
-          ?? explicitOriginAssistantInputId
+        const explicitOriginAssistantInputId = explicitOriginCandidate
+          && userActionScope
+          ? await authorizeDynamicToolEffectOrigin({
+              authorizer: input.authorizeAcceptedMessageTarget ?? null,
+              conversationScope: userActionScope.conversationScope,
+              deliveryContextOrdinal: input.deliveryContextOrdinal ?? null,
+              messageRef: explicitOriginCandidate,
+            })
+          : null
+        originAssistantInputId = trustedCompletion?.originAssistantInputIdExact
+          ? trustedCompletion.originAssistantInputId
+          : explicitOriginAssistantInputId
           ?? null
         const imageRef = trustedCompletion?.imageRef
           ?? input.request.imageRef
@@ -3157,8 +3181,8 @@ export async function executeMurphDynamicToolRequest(input: {
           return toolTextResult(
             false,
             hasExplicitArtwork
-              ? 'sending previously previewed physical-note artwork requires fresh user input, the exact trusted generated-image ref and SHA-256, and in groups the exact approving Message ref'
-              : 'physical-note sending requires the current trusted hosted image completion',
+              ? 'sending previously previewed physical-note artwork requires fresh user input, the exact trusted generated-image ref and SHA-256, and the exact approving Message ref'
+              : 'physical-note sending requires a current trusted hosted image completion bound to the exact authorizing Message ref',
           )
         }
 
@@ -3214,11 +3238,6 @@ export async function executeMurphDynamicToolRequest(input: {
       }
 
       try {
-        const completion = {
-          imageRef: artwork.sourceRef,
-          imageSha256: artwork.sha256,
-          originAssistantInputId,
-        }
         const result = await physicalNotes.send({
           artwork: {
             expiresAt: published.expiresAt,
@@ -3227,10 +3246,7 @@ export async function executeMurphDynamicToolRequest(input: {
           },
           originAssistantInputId,
           recipient: input.request.recipient,
-          requestKey: createPhysicalNoteRequestKey({
-            completion,
-            recipient: input.request.recipient,
-          }),
+          requestKey: createPhysicalNoteRequestKey({ originAssistantInputId }),
         }, {
           signal: input.abortSignal ?? null,
         })
@@ -3241,6 +3257,7 @@ export async function executeMurphDynamicToolRequest(input: {
               true,
               JSON.stringify({
                 complimentary: result.complimentary,
+                costUsdMicros: result.costUsdMicros,
                 note:
                   'Lob accepted the exact generated artwork for printing. Do not attach the image unless it adds conversational value. Say it is headed to print, not delivered.',
                 physicalNoteId: result.physicalNoteId,
@@ -3528,18 +3545,35 @@ export async function executeMurphDynamicToolRequest(input: {
         return toolTextResult(false, 'image generation cannot be combined with a voice memo')
       }
 
-      const providerRequestOrdinal = input.nextUsageOrdinal()
       const captureIdempotencyKey = buildGeneratedImageCaptureIdempotencyKey({
         toolCallId: readGeneratedImageToolCallId(input.request),
         scope: 'generate-image',
       })
       const imageGenerationLauncher =
         input.hostedToolContext?.imageGenerationLauncher ?? null
-      const originAssistantInputId =
-        input.hostedToolContext?.currentAssistantInputId?.() ?? null
-      const imageGenerationScopeId =
-        input.hostedToolContext?.currentUserActionScope?.()?.originSessionId
+      const userActionScope =
+        input.hostedToolContext?.currentUserActionScope?.() ?? null
+      const explicitOriginAssistantInputId = input.request.messageRef
+        && userActionScope?.acceptedInputIds.includes(input.request.messageRef)
+        ? await authorizeDynamicToolEffectOrigin({
+            authorizer: input.authorizeAcceptedMessageTarget ?? null,
+            conversationScope: userActionScope.conversationScope,
+            deliveryContextOrdinal: input.deliveryContextOrdinal ?? null,
+            messageRef: input.request.messageRef,
+          })
+        : null
+      if (input.request.messageRef && !explicitOriginAssistantInputId) {
+        return toolTextResult(
+          false,
+          'image generation for a later irreversible effect requires the exact accepted Message ref authorizing that effect',
+        )
+      }
+      const originAssistantInputId = explicitOriginAssistantInputId
+        ?? input.hostedToolContext?.currentAssistantInputId?.()
         ?? null
+      const originAssistantInputIdExact = explicitOriginAssistantInputId !== null
+      const imageGenerationScopeId = userActionScope?.originSessionId ?? null
+      const providerRequestOrdinal = input.nextUsageOrdinal()
       const operationId =
         captureIdempotencyKey
         ?? `murph.dynamic-tool.generate-image:${originAssistantInputId}:${providerRequestOrdinal}`
@@ -3551,6 +3585,7 @@ export async function executeMurphDynamicToolRequest(input: {
         const launch = imageGenerationLauncher.launch({
           operationId,
           originAssistantInputId,
+          originAssistantInputIdExact,
           scopeId: imageGenerationScopeId,
           run: async (signal, persistCanonicalWrite) => {
             const result = await executeGenerateImageTool({
@@ -5962,7 +5997,7 @@ function parseSendProgressUpdateArguments(
 function parseGenerateImageArguments(
   value: unknown,
 ):
-  | { ok: true; args: GenerateImageToolArgs }
+  | { ok: true; args: GenerateImageToolArgs; messageRef?: string }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
   const parsed = generateImageArgumentsSchema.safeParse(value)
   if (!parsed.success) {
@@ -5977,8 +6012,10 @@ function parseGenerateImageArguments(
       }),
     }
   }
+  const { message_ref: messageRef, ...args } = parsed.data
   return {
-    args: parsed.data,
+    args,
+    ...(messageRef ? { messageRef } : {}),
     ok: true,
   }
 }
@@ -6555,6 +6592,32 @@ async function authorizeDynamicToolParticipant(input: {
     return null
   }
   return target.participant
+}
+
+async function authorizeDynamicToolEffectOrigin(input: {
+  authorizer: AssistantAcceptedMessageTargetAuthorizer | null
+  conversationScope: AssistantConversationScope
+  deliveryContextOrdinal: number | null
+  messageRef: string
+}): Promise<string | null> {
+  if (input.conversationScope === 'unverified-external') {
+    return null
+  }
+  if (input.conversationScope === 'group') {
+    const participant = await authorizeDynamicToolParticipant({
+      authorizer: input.authorizer,
+      deliveryContextOrdinal: input.deliveryContextOrdinal,
+      messageRef: input.messageRef,
+    })
+    return participant?.assistantInputId ?? null
+  }
+  const target = await authorizeDynamicToolMessageTarget({
+    action: 'native-reply',
+    authorizer: input.authorizer,
+    deliveryContextOrdinal: input.deliveryContextOrdinal,
+    messageRef: input.messageRef,
+  })
+  return target?.targetInputId ?? null
 }
 
 function parseComputerArguments<TArgs>(input: {

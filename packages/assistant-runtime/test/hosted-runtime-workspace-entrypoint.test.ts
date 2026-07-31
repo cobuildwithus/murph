@@ -18289,6 +18289,7 @@ describe("hosted workspace runtime entrypoint", () => {
                   phaseInput.imageGenerationLauncher?.launch({
                     operationId: "image_operation_evidence_retry_1",
                     originAssistantInputId: assistantInputId,
+                    originAssistantInputIdExact: false,
                     scopeId: "session_image_evidence_retry",
                     async run() {
                       imageProviderInvocationCount += 1;
@@ -18322,6 +18323,7 @@ describe("hosted workspace runtime entrypoint", () => {
                   phaseInput.imageGenerationLauncher?.launch({
                     operationId: "image_operation_evidence_retry_2",
                     originAssistantInputId: assistantInputId,
+                    originAssistantInputIdExact: false,
                     scopeId: "session_image_evidence_retry",
                     async run() {
                       imageProviderInvocationCount += 1;
@@ -18346,6 +18348,7 @@ describe("hosted workspace runtime entrypoint", () => {
                   phaseInput.imageGenerationLauncher?.launch({
                     operationId: "image_operation_evidence_retry_2",
                     originAssistantInputId: assistantInputId,
+                    originAssistantInputIdExact: false,
                     scopeId: "session_image_evidence_retry",
                     async run() {
                       imageProviderInvocationCount += 1;

@@ -64,6 +64,8 @@ vi.mock("@/src/lib/hosted-execution/usage", () => ({
 const MEMBER_ID = "member_physical_note";
 const COST_USD_MICROS = 250_000n;
 const COMPLIMENTARY_OFFER_CODE = "physical-note-v1";
+const DEFAULT_PERIOD_START = new Date(Date.now() - 60 * 60 * 1_000);
+const DEFAULT_PERIOD_END = new Date(Date.now() + 60 * 60 * 1_000);
 
 type PhysicalNoteWhere = Partial<Pick<
   HostedPhysicalNote,
@@ -99,6 +101,7 @@ type PhysicalNoteUpdateData = Partial<Pick<
 interface PhysicalNoteStore {
   allRows(): HostedPhysicalNote[];
   prisma: PrismaClient;
+  setCreatedAt(id: string, createdAt: Date): void;
 }
 
 beforeEach(() => {
@@ -122,6 +125,8 @@ beforeEach(() => {
   mocks.readActiveAccess.mockResolvedValue(true);
   mocks.readUsageGate.mockResolvedValue({
     allowed: true,
+    periodEnd: DEFAULT_PERIOD_END,
+    periodStart: DEFAULT_PERIOD_START,
     remainingUsdMicros: 1_000_000n,
   });
   mocks.recordUsage.mockResolvedValue(undefined);
@@ -147,6 +152,7 @@ describe("createHostedPhysicalNote", () => {
       ...request,
       prisma: store.prisma,
       runtime: provider.runtime,
+      signal: new AbortController().signal,
     });
 
     expect(response).toEqual({
@@ -237,6 +243,8 @@ describe("createHostedPhysicalNote", () => {
     });
     mocks.readUsageGate.mockResolvedValue({
       allowed: true,
+      periodEnd: DEFAULT_PERIOD_END,
+      periodStart: DEFAULT_PERIOD_START,
       remainingUsdMicros: COST_USD_MICROS,
     });
     const firstPaidResult = createDeferred<LobPhysicalNoteCreateResult>();
@@ -326,7 +334,27 @@ describe("createHostedPhysicalNote", () => {
     expect(store.allRows()).toEqual([]);
   });
 
-  it("releases a new group reservation when final participant authority is denied", async () => {
+  it("rejects expiring artwork before reserving provider authority", async () => {
+    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
+    const store = createPhysicalNoteStore();
+    const provider = createPhysicalNoteRuntime([
+      { kind: "accepted", providerLetterId: "ltr_unexpected" },
+    ]);
+
+    await expect(createHostedPhysicalNote({
+      ...buildRequest(32),
+      artwork: {
+        ...buildRequest(32).artwork,
+        expiresAt: new Date(Date.now() + 30_000).toISOString(),
+      },
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    })).rejects.toThrow("Physical-note artwork URL expires too soon.");
+    expect(provider.create).not.toHaveBeenCalled();
+    expect(store.allRows()).toEqual([]);
+  });
+
+  it("does not create a group reservation when final participant authority is denied", async () => {
     const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const provider = createPhysicalNoteRuntime([
@@ -361,16 +389,44 @@ describe("createHostedPhysicalNote", () => {
     });
     expect(mocks.assertGroupOrigin).toHaveBeenCalledTimes(2);
     expect(provider.create).not.toHaveBeenCalled();
-    expect(store.allRows()).toEqual([
-      expect.objectContaining({
-        complimentaryOfferCode: null,
-        providerLetterId: null,
-        status: "failed",
-      }),
-    ]);
+    expect(store.allRows()).toEqual([]);
   });
 
-  it("releases a new reservation when the caller aborts before provider dispatch", async () => {
+  it("checks cancellation after final group authority and before reserving", async () => {
+    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
+    const store = createPhysicalNoteStore();
+    const provider = createPhysicalNoteRuntime([
+      { kind: "accepted", providerLetterId: "ltr_unexpected" },
+    ]);
+    const controller = new AbortController();
+    mocks.isThreadContainerDestination.mockReturnValue(true);
+    mocks.requireDestination.mockResolvedValue({
+      conversationShape: "thread-container",
+      externalThreadRouteAuthority: {
+        accountLookupKey: "group_account",
+        channel: "linq",
+        containerMemberId: MEMBER_ID,
+        threadId: "thread_physical_note",
+      },
+    });
+    mocks.assertGroupOrigin
+      .mockResolvedValueOnce(MEMBER_ID)
+      .mockImplementationOnce(async () => {
+        controller.abort();
+        return MEMBER_ID;
+      });
+
+    await expect(createHostedPhysicalNote({
+      ...buildRequest(33),
+      prisma: store.prisma,
+      runtime: provider.runtime,
+      signal: controller.signal,
+    })).rejects.toMatchObject({ name: "AbortError" });
+    expect(provider.create).not.toHaveBeenCalled();
+    expect(store.allRows()).toEqual([]);
+  });
+
+  it("finishes dispatch when caller cancellation arrives after admission begins", async () => {
     const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const provider = createPhysicalNoteRuntime([
@@ -387,14 +443,17 @@ describe("createHostedPhysicalNote", () => {
       prisma: store.prisma,
       runtime: provider.runtime,
       signal: controller.signal,
-    })).rejects.toMatchObject({ name: "AbortError" });
+    })).resolves.toMatchObject({
+      complimentary: true,
+      status: "accepted",
+    });
 
-    expect(provider.create).not.toHaveBeenCalled();
+    expect(provider.create).toHaveBeenCalledOnce();
     expect(store.allRows()).toEqual([
       expect.objectContaining({
-        complimentaryOfferCode: null,
-        providerLetterId: null,
-        status: "failed",
+        complimentaryOfferCode: COMPLIMENTARY_OFFER_CODE,
+        providerLetterId: "ltr_unexpected",
+        status: "accepted",
       }),
     ]);
   });
@@ -529,6 +588,48 @@ describe("createHostedPhysicalNote", () => {
     expect(mocks.recordUsage).not.toHaveBeenCalled();
   });
 
+  it("reserves paid notes only against the current allowance period", async () => {
+    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
+    const store = createPhysicalNoteStore();
+    const provider = createPhysicalNoteRuntime([
+      { kind: "accepted", providerLetterId: "ltr_period_free" },
+      { kind: "ambiguous_failure" },
+      { kind: "accepted", providerLetterId: "ltr_period_paid" },
+    ]);
+    mocks.readUsageGate.mockResolvedValue({
+      allowed: true,
+      periodEnd: DEFAULT_PERIOD_END,
+      periodStart: DEFAULT_PERIOD_START,
+      remainingUsdMicros: COST_USD_MICROS,
+    });
+
+    await createHostedPhysicalNote({
+      ...buildRequest(40),
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    });
+    const oldPending = await createHostedPhysicalNote({
+      ...buildRequest(41),
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    });
+    expect(oldPending.status).toBe("pending");
+    store.setCreatedAt(
+      oldPending.physicalNoteId!,
+      new Date(DEFAULT_PERIOD_START.getTime() - 1),
+    );
+
+    await expect(createHostedPhysicalNote({
+      ...buildRequest(42),
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    })).resolves.toMatchObject({
+      complimentary: false,
+      status: "accepted",
+    });
+    expect(provider.create).toHaveBeenCalledTimes(3);
+  });
+
   it("does not reserve or send a paid note when remaining usage is insufficient", async () => {
     const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();
@@ -543,6 +644,8 @@ describe("createHostedPhysicalNote", () => {
     });
     mocks.readUsageGate.mockResolvedValueOnce({
       allowed: true,
+      periodEnd: DEFAULT_PERIOD_END,
+      periodStart: DEFAULT_PERIOD_START,
       remainingUsdMicros: COST_USD_MICROS - 1n,
     });
 
@@ -635,7 +738,11 @@ function createPhysicalNoteStore(
   );
 
   const hostedPhysicalNote = {
-    async aggregate(): Promise<{
+    async aggregate(input: {
+      where: {
+        createdAt?: { gte: Date; lt: Date };
+      };
+    }): Promise<{
       _sum: { providerCostUsdMicros: bigint | null };
     }> {
       const providerCostUsdMicros = [...rows.values()]
@@ -643,6 +750,13 @@ function createPhysicalNoteStore(
           row.memberId === MEMBER_ID
           && row.complimentaryOfferCode === null
           && row.status === "starting"
+          && (
+            !input.where.createdAt
+            || (
+              row.createdAt >= input.where.createdAt.gte
+              && row.createdAt < input.where.createdAt.lt
+            )
+          )
         )
         .reduce((sum, row) => sum + row.providerCostUsdMicros, 0n);
       return {
@@ -741,6 +855,13 @@ function createPhysicalNoteStore(
   return {
     allRows: () => [...rows.values()].map(cloneRow),
     prisma,
+    setCreatedAt(id, createdAt) {
+      const row = rows.get(id);
+      if (!row) {
+        throw new Error(`missing physical note ${id}`);
+      }
+      rows.set(id, { ...row, createdAt });
+    },
   };
 }
 

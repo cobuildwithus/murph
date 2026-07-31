@@ -53,6 +53,8 @@ describe.skipIf(!runPostgresProof)(
       vi.stubEnv("LOB_PHYSICAL_NOTE_PRICING_VERSION", "lob-test-v1");
       mocks.readUsageGate.mockResolvedValue({
         allowed: true,
+        periodEnd: new Date(Date.now() + 60 * 60 * 1_000),
+        periodStart: new Date(Date.now() - 60 * 60 * 1_000),
         remainingUsdMicros: 1_000_000n,
       });
       mocks.recordUsage.mockResolvedValue(undefined);

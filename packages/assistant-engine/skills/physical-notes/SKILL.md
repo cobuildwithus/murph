@@ -11,11 +11,13 @@ the mail. The product is one US-only, one-artwork-page, color First Class note.
 ## Compose with the existing primitives
 
 1. Collect one complete US recipient address and enough intent to make the note.
-2. Call `murph.generate_image` with portrait size `1024x1536`, JPEG output, and
-   high quality. The generated image is the complete expressive page.
-3. After generation starts, call `murph.finish_without_reply`. The existing
-   hosted image completion will wake this conversation when the saved image is
-   ready; do not poll, sleep, schedule, or create an automation.
+2. Call `murph.generate_image` with portrait size `1024x1536`, JPEG output,
+   high quality, and the exact current authorizing message as `message_ref`.
+   The generated image is the complete expressive page.
+3. After generation starts, send one short truthful acknowledgement, such as
+   “I’m making it now; I’ll confirm here if the printer accepts it.” The
+   existing hosted image completion will wake this conversation when the saved
+   image is ready; do not poll, sleep, schedule, or create an automation.
 4. On that trusted completion turn, call `murph.send_physical_note` with only
    the recipient address. Trusted runtime code automatically binds the exact
    saved image and originating user message.
@@ -23,10 +25,10 @@ the mail. The product is one US-only, one-artwork-page, color First Class note.
    trusted `ref` and `sha256` from the completion. After a later explicit send
    request, call `murph.send_physical_note` with those exact values as
    `image_ref` and `image_sha256`; runtime code re-reads and verifies the vault
-   bytes before mailing. In a group, also pass the exact current approving
-   message as `message_ref`; do not infer approval from another participant or
-   from whichever message happened to arrive last. Never invent or alter any
-   of these values.
+   bytes before mailing. Also pass the exact current approving message as
+   `message_ref`; do not infer approval from another participant or from
+   whichever message happened to arrive last. Never invent or alter any of
+   these values.
 
 Do not attach or preview the image merely because it exists. When the
 originating request already said to mail it and the address is complete, send
@@ -65,7 +67,8 @@ the address or send intent is incomplete.
 
 Treat tool results literally:
 
-- `accepted` means accepted for printing, not delivered;
+- `accepted` means accepted for printing, not delivered; when the result is
+  paid rather than complimentary, state the returned Murph-time cost;
 - `pending` means do not retry or claim mailing success;
 - `insufficient_usage` means explain that the free note was used and more
   Murph time is needed;

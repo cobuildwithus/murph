@@ -16,11 +16,13 @@ export interface AssistantHostedImageCompletion {
   imageRef: string
   imageSha256: string
   originAssistantInputId: string
+  originAssistantInputIdExact: boolean
   sizeBytes: number
 }
 
 export function renderAssistantHostedImageCompletionSystemText(input: {
   originAssistantInputId: string
+  originAssistantInputIdExact: boolean
   result: AssistantHostedImageGenerationResult
 }): string {
   const ready = input.result.media !== null
@@ -28,11 +30,13 @@ export function renderAssistantHostedImageCompletionSystemText(input: {
     ? {
         media: [input.result.media],
         originAssistantInputId: input.originAssistantInputId,
+        originAssistantInputIdExact: input.originAssistantInputIdExact,
         savedImageRef: input.result.savedImageRef,
         status: 'ready',
       }
     : {
         originAssistantInputId: input.originAssistantInputId,
+        originAssistantInputIdExact: input.originAssistantInputIdExact,
         status: 'failed',
       }
   return [
@@ -88,6 +92,7 @@ export function parseAssistantHostedImageCompletionText(
     imageRef: media.ref,
     imageSha256: media.sha256,
     originAssistantInputId,
+    originAssistantInputIdExact: value.originAssistantInputIdExact === true,
     sizeBytes: media.sizeBytes,
   }
 }

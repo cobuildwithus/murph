@@ -11,9 +11,6 @@ import type {
   AssistantConversationScope,
 } from '../../assistant/conversation-policy.js'
 import type {
-  AssistantHostedImageCompletion,
-} from '../../assistant/hosted-image-completion.js'
-import type {
   SafeToolCallValidationDigest,
 } from '../../assistant/tool-validation-digest.js'
 import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
@@ -53,6 +50,13 @@ const physicalNoteArgumentsSchema = z.object({
       path: ['message_ref'],
     })
   }
+  if (value.image_ref !== undefined && value.message_ref === undefined) {
+    context.addIssue({
+      code: 'custom',
+      message: 'message_ref is required with an earlier generated image.',
+      path: ['message_ref'],
+    })
+  }
 })
 
 export const MURPH_SEND_PHYSICAL_NOTE_TOOL = {
@@ -60,8 +64,8 @@ export const MURPH_SEND_PHYSICAL_NOTE_TOOL = {
   name: 'send_physical_note',
   description: [
     'Before creating or mailing a physical note, read $MURPH_ASSISTANT_SKILLS_ROOT/physical-notes/SKILL.md.',
-    'On the trusted hosted image-completion turn, omit image_ref, image_sha256, and message_ref so runtime code binds the exact generated image and originating request automatically.',
-    'When a generated note was intentionally shown first and a person later says to send it, provide the exact image_ref and image_sha256 from that trusted completion; both are required together and runtime code re-reads and verifies the private vault bytes. In a group, also provide the exact message_ref from the participant approving the send in the current turn.',
+    'On a trusted hosted image-completion turn whose generation was launched with the exact authorizing message_ref, omit image_ref, image_sha256, and message_ref so runtime code binds the exact generated image and request automatically.',
+    'When a generated note was intentionally shown first and a person later says to send it, provide the exact image_ref and image_sha256 from that trusted completion plus the exact message_ref approving the send in the current turn. Runtime code re-reads and verifies the private vault bytes and exact accepted input.',
     'When the originating user already explicitly asked Murph to mail the note and supplied a complete US address, call this tool automatically after generation finishes; showing or attaching the image first is optional, not required.',
     'Do not call for a draft-only request, an incomplete address, bulk mail, an international address, impersonation, threats, harassment, fraud, or illegal content.',
     'The server decides whether the note is complimentary and computes any Murph-time cost. Never claim acceptance until this tool reports accepted.',
@@ -87,7 +91,7 @@ export const MURPH_SEND_PHYSICAL_NOTE_TOOL = {
         type: 'string',
         pattern: '^ain_[0-9a-f]{32}$',
         description:
-          'Exact current Message ref from the participant approving a later send of previously previewed artwork. Required in groups when image_ref and image_sha256 are supplied; omit on the automatic image-completion turn.',
+          'Exact current Message ref approving a later send of previously previewed artwork. Required whenever image_ref and image_sha256 are supplied; omit on the automatic image-completion turn.',
       },
       to: {
         type: 'object',
@@ -176,39 +180,19 @@ export function resolvePhysicalNoteExplicitOriginInputId(input: {
   if (input.conversationScope === 'unverified-external') {
     return null
   }
-  if (input.conversationScope === 'group') {
-    return input.messageRef
-      && input.acceptedInputIds.includes(input.messageRef)
-      ? input.messageRef
-      : null
-  }
-  const inputId = input.acceptedInputIds.at(-1) ?? null
-  return inputId && ACCEPTED_INPUT_ID_PATTERN.test(inputId)
-    ? inputId
+  return input.messageRef
+    && input.acceptedInputIds.includes(input.messageRef)
+    ? input.messageRef
     : null
 }
 
 export function createPhysicalNoteRequestKey(input: {
-  completion: Pick<
-    AssistantHostedImageCompletion,
-    'imageRef' | 'imageSha256' | 'originAssistantInputId'
-  >
-  recipient: HostedPhysicalNoteRecipient
+  originAssistantInputId: string
 }): string {
   const digest = createHash('sha256')
     .update(JSON.stringify({
-      imageRef: input.completion.imageRef,
-      imageSha256: input.completion.imageSha256,
-      originAssistantInputId: input.completion.originAssistantInputId,
-      recipient: {
-        addressLine1: input.recipient.addressLine1,
-        addressLine2: input.recipient.addressLine2 ?? null,
-        city: input.recipient.city,
-        name: input.recipient.name,
-        postalCode: input.recipient.postalCode,
-        state: input.recipient.state,
-      },
-      schema: 'murph.send-physical-note.request-key.v1',
+      originAssistantInputId: input.originAssistantInputId,
+      schema: 'murph.send-physical-note.request-key.v2',
     }))
     .digest('hex')
   return `physical_note_${digest}`
