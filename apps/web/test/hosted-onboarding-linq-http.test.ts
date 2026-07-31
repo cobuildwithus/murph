@@ -1425,7 +1425,7 @@ describe("updateHostedLinqChatAvatar", () => {
     await expect(updateHostedLinqChatAvatar({
       chatId: "chat_123",
       groupChatIconUrl:
-        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
     })).resolves.toBeUndefined();
 
     const firstCall = fetchMock.mock.calls[0];
@@ -1438,8 +1438,137 @@ describe("updateHostedLinqChatAvatar", () => {
     expect(expectRequestInit(init).method).toBe("PUT");
     expect(readJsonRequestBody(init)).toEqual({
       group_chat_icon:
-        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
     });
+  });
+
+  it("preserves the documented Linq error code and a redacted bounded message", async () => {
+    const privateUrl =
+      `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`;
+    const privatePhone = "+15550001111";
+    const privateEmail = "member@example.test";
+    const privateChatId = "550e8400-e29b-41d4-a716-446655440000";
+    const traceId = "0123456789abcdef0123456789abcdef";
+    vi.stubGlobal("fetch", vi.fn(async () => createJsonResponse({
+      error: {
+        code: 5006,
+        doc_url: "https://docs.linqapp.com/error/codes/5xxx/5006/",
+        message:
+          `Content type mismatch for ${privateUrl}; chat_id=${privateChatId}; phone=${privatePhone}; email=${privateEmail}; trace_id=${traceId}; authorization=Bearer private-token`,
+        status: 400,
+      },
+      success: false,
+      trace_id: traceId,
+    }, 400)));
+
+    const error = await updateHostedLinqChatAvatar({
+      chatId: "chat_123",
+      groupChatIconUrl: privateUrl,
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({
+      code: "LINQ_SEND_FAILED",
+      details: {
+        failureStage: "http",
+        providerErrorCode: 5006,
+        providerErrorMessage: expect.stringContaining("Content type mismatch"),
+        status: 400,
+      },
+      retryable: false,
+    });
+    const serialized = JSON.stringify(error);
+    expect(serialized).not.toContain(privateUrl);
+    expect(serialized).not.toContain(privatePhone);
+    expect(serialized).not.toContain(privateEmail);
+    expect(serialized).not.toContain(privateChatId);
+    expect(serialized).not.toContain(traceId);
+    expect(serialized).not.toContain("private-token");
+  });
+
+  it("bounds the redacted Linq provider message to 240 characters", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => createJsonResponse({
+      error: {
+        code: 5007,
+        message: "provider detail ".repeat(40),
+        status: 400,
+      },
+      success: false,
+    }, 400)));
+
+    const error = await updateHostedLinqChatAvatar({
+      chatId: "chat_123",
+      groupChatIconUrl:
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
+    }).catch((caught: unknown) => caught) as { details?: Record<string, unknown> };
+
+    expect(error.details?.providerErrorCode).toBe(5007);
+    const message = String(error.details?.providerErrorMessage);
+    expect(message.length).toBeLessThanOrEqual(240);
+    expect(message.length).toBeGreaterThan(200);
+  });
+
+  it.each([
+    {
+      label: "non-JSON",
+      response: () => new Response("not-json", { status: 400 }),
+    },
+    {
+      label: "oversized",
+      response: () => createJsonResponse({
+        error: {
+          code: 5007,
+          message: "x".repeat(20 * 1024),
+          status: 400,
+        },
+        success: false,
+      }, 400),
+    },
+  ])("keeps $label Linq error bodies out of diagnostics", async ({ response }) => {
+    vi.stubGlobal("fetch", vi.fn(async () => response()));
+
+    await expect(updateHostedLinqChatAvatar({
+      chatId: "chat_123",
+      groupChatIconUrl:
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
+    })).rejects.toMatchObject({
+      details: {
+        failureStage: "http",
+        status: 400,
+      },
+    });
+
+    const error = await updateHostedLinqChatAvatar({
+      chatId: "chat_123",
+      groupChatIconUrl:
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
+    }).catch((caught: unknown) => caught) as { details?: Record<string, unknown> };
+    expect(error.details).not.toHaveProperty("providerErrorCode");
+    expect(error.details).not.toHaveProperty("providerErrorMessage");
+  });
+
+  it.each([
+    {
+      error: { code: 5007, message: "Failed to download image" },
+    },
+    {
+      error: { code: 50_007, message: "Failed to download image" },
+      success: false,
+    },
+    {
+      error: { code: "5007", message: 123 },
+      success: false,
+    },
+  ])("ignores fields outside the documented Linq error envelope", async (body) => {
+    vi.stubGlobal("fetch", vi.fn(async () => createJsonResponse(body, 400)));
+
+    const error = await updateHostedLinqChatAvatar({
+      chatId: "chat_123",
+      groupChatIconUrl:
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
+    }).catch((caught: unknown) => caught) as { details?: Record<string, unknown> };
+
+    expect(error.details).not.toHaveProperty("providerErrorCode");
+    expect(error.details).not.toHaveProperty("providerErrorMessage");
   });
 
   it("accepts only the current preview Worker origin", async () => {

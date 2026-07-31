@@ -10,6 +10,7 @@ import type {
 import {
   HOSTED_PRIVATE_MEDIA_DELIVERY_ORIGIN,
   HOSTED_PRIVATE_MEDIA_LIFETIME_SECONDS,
+  matchHostedPrivateMediaCapabilityPath,
   readHostedPrivateMedia,
   stageHostedPrivateMedia,
 } from "../src/private-media.ts";
@@ -49,22 +50,24 @@ describe("hosted private media", () => {
     });
 
     expect(staged.url).toMatch(
-      new RegExp(`^${HOSTED_PRIVATE_MEDIA_DELIVERY_ORIGIN.replace(/\./gu, "\\.")}/private-media/v1/v1\\.`),
+      new RegExp(`^${HOSTED_PRIVATE_MEDIA_DELIVERY_ORIGIN.replace(/\./gu, "\\.")}/private-media/v1/v1\\..+/group-avatar\\.png\\?exp=`),
     );
     expect(staged.url).not.toContain(USER_ID);
     expect(staged.url).not.toContain(staged.objectKey);
     expect(
       redactWorkerRoutePathname(new URL(staged.url).pathname),
-    ).toBe("/private-media/v1/<REDACTED_CAPABILITY>");
+    ).toBe("/private-media/v1/<REDACTED_CAPABILITY>/group-avatar.png");
     expect(bucket.put).toHaveBeenCalledOnce();
     expect(new TextDecoder().decode(bucket.objects[0]?.[1])).not.toContain(
       Buffer.from(PNG_BYTES).toString("base64"),
     );
 
     const url = new URL(staged.url);
+    const matched = matchHostedPrivateMediaCapabilityPath(url.pathname);
+    expect(matched).not.toBeNull();
     const media = await readHostedPrivateMedia({
       bucket: bucket.api,
-      capability: url.pathname.split("/").at(-1) ?? "",
+      capability: matched?.capability ?? "",
       capabilitySecret: CAPABILITY_SECRET,
       expiresAtUnixSeconds: Number(url.searchParams.get("exp")),
       nowMs,
@@ -140,18 +143,22 @@ describe("hosted private media", () => {
     );
 
     const firstUrl = new URL(first.url);
+    const firstMatch = matchHostedPrivateMediaCapabilityPath(firstUrl.pathname);
     await expect(readHostedPrivateMedia({
       bucket: bucket.api,
-      capability: firstUrl.pathname.split("/").at(-1) ?? "",
+      capability: firstMatch?.capability ?? "",
       capabilitySecret: CAPABILITY_SECRET,
       expiresAtUnixSeconds: Number(firstUrl.searchParams.get("exp")),
       nowMs: boundaryMs,
     })).resolves.toBeNull();
 
     const refreshedUrl = new URL(refreshed.url);
+    const refreshedMatch = matchHostedPrivateMediaCapabilityPath(
+      refreshedUrl.pathname,
+    );
     await expect(readHostedPrivateMedia({
       bucket: bucket.api,
-      capability: refreshedUrl.pathname.split("/").at(-1) ?? "",
+      capability: refreshedMatch?.capability ?? "",
       capabilitySecret: CAPABILITY_SECRET,
       expiresAtUnixSeconds: Number(refreshedUrl.searchParams.get("exp")),
       nowMs: boundaryMs,
@@ -243,7 +250,8 @@ describe("hosted private media", () => {
       userId: USER_ID,
     });
     const url = new URL(staged.url);
-    const capability = url.pathname.split("/").at(-1) ?? "";
+    const capability =
+      matchHostedPrivateMediaCapabilityPath(url.pathname)?.capability ?? "";
     const expiresAtUnixSeconds = Number(url.searchParams.get("exp"));
 
     await expect(readHostedPrivateMedia({
@@ -269,7 +277,7 @@ describe("hosted private media", () => {
     })).resolves.toBeNull();
   });
 
-  it("serves only valid GET capabilities with no-store response headers", async () => {
+  it("serves canonical GET and HEAD requests with matching headers and no HEAD body", async () => {
     const bucket = createPrivateMediaBucket();
     const staged = await stageHostedPrivateMedia({
       bucket: bucket.api,
@@ -299,6 +307,59 @@ describe("hosted private media", () => {
     expect(response.headers.get("content-type")).toBe("image/png");
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(PNG_BYTES);
 
+    const headRequest = new Request(staged.url, { method: "HEAD" });
+    const head = await handleDeclarativeRoute(privateMediaRoutes, {
+      env,
+      request: headRequest,
+      url: new URL(headRequest.url),
+    });
+    expect(head).not.toBeNull();
+    if (!head) {
+      throw new Error("Expected private media HEAD response.");
+    }
+    expect(head.status).toBe(response.status);
+    for (const header of [
+      "cache-control",
+      "content-disposition",
+      "content-length",
+      "content-type",
+      "x-content-type-options",
+    ]) {
+      expect(head.headers.get(header)).toBe(response.headers.get(header));
+    }
+    expect((await head.arrayBuffer()).byteLength).toBe(0);
+
+    const legacyUrl = new URL(staged.url);
+    legacyUrl.pathname = legacyUrl.pathname.replace(
+      /\/group-avatar\.png$/u,
+      "",
+    );
+    const legacyRequest = new Request(legacyUrl);
+    const legacy = await handleDeclarativeRoute(privateMediaRoutes, {
+      env,
+      request: legacyRequest,
+      url: legacyUrl,
+    });
+    expect(legacy).not.toBeNull();
+    if (!legacy) {
+      throw new Error("Expected legacy private media response.");
+    }
+    expect(legacy.status).toBe(200);
+    expect(new Uint8Array(await legacy.arrayBuffer())).toEqual(PNG_BYTES);
+
+    const mismatchedExtension = new URL(staged.url);
+    mismatchedExtension.pathname = mismatchedExtension.pathname.replace(
+      /\.png$/u,
+      ".jpg",
+    );
+    const mismatchRequest = new Request(mismatchedExtension);
+    const mismatch = await handleDeclarativeRoute(privateMediaRoutes, {
+      env,
+      request: mismatchRequest,
+      url: mismatchedExtension,
+    });
+    expect(mismatch?.status).toBe(404);
+
     const wrongMethodRequest = new Request(staged.url, { method: "POST" });
     const wrongMethod = await handleDeclarativeRoute(privateMediaRoutes, {
       env,
@@ -323,6 +384,16 @@ describe("hosted private media", () => {
       throw new Error("Expected invalid-capability response.");
     }
     expect(invalid.status).toBe(404);
+
+    const tampered = new URL(staged.url);
+    tampered.pathname = tampered.pathname.replace(/v1\./u, "v1.x");
+    const tamperedRequest = new Request(tampered);
+    const tamperedResponse = await handleDeclarativeRoute(privateMediaRoutes, {
+      env,
+      request: tamperedRequest,
+      url: tampered,
+    });
+    expect(tamperedResponse).toBeNull();
   });
 
   it("leaves no object when the encrypted R2 write fails before URL return", async () => {
