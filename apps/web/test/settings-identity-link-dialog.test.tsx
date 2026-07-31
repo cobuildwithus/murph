@@ -12,11 +12,14 @@ const mocks = vi.hoisted(() => ({
   privyLogout: vi.fn(),
   privyProvider: vi.fn((props: { children: ReactNode }) =>
     createElement("div", null, props.children)),
+  reportPhoneDiagnostic: vi.fn(),
   refresh: vi.fn(),
+  useHostedPhoneLinkDiagnostics: vi.fn(),
   usePrivy: vi.fn(),
   useUser: vi.fn(),
   phoneSettingsProps: [] as Array<{
     autoOpen?: boolean;
+    diagnosticReporterFactory?: unknown;
     onAborted?: () => void;
   }>,
   telegramCardProps: [] as Array<{
@@ -35,6 +38,10 @@ vi.mock("@/src/components/hosted-onboarding/auth-dialog-provider", () => ({
   useAuth: () => ({
     openAuthDialog: mocks.openAuthDialog,
   }),
+}));
+
+vi.mock("@/src/components/settings/hosted-phone-link-diagnostics", () => ({
+  useHostedPhoneLinkDiagnostics: mocks.useHostedPhoneLinkDiagnostics,
 }));
 
 vi.mock("next/navigation", () => ({
@@ -70,11 +77,13 @@ vi.mock("@/src/components/ui/dialog", () => ({
 vi.mock("@/src/components/settings/hosted-phone-settings", () => ({
   HostedPhoneSettings(props: {
     autoOpen?: boolean;
+    diagnosticReporterFactory?: unknown;
     onAborted?: () => void;
     onLinked?: (payload: { mode: string }) => void;
   }) {
     mocks.phoneSettingsProps.push({
       autoOpen: props.autoOpen,
+      diagnosticReporterFactory: props.diagnosticReporterFactory,
       onAborted: props.onAborted,
     });
 
@@ -152,6 +161,7 @@ beforeEach(() => {
     ready: true,
   });
   mocks.privyLogout.mockResolvedValue(undefined);
+  mocks.useHostedPhoneLinkDiagnostics.mockReturnValue(mocks.reportPhoneDiagnostic);
   mocks.useUser.mockReturnValue({
     user: {
       id: "privy-user-a",
@@ -224,6 +234,16 @@ describe("HostedSettingsIdentityLinkDialog", () => {
       expect(container.textContent).toContain("Link phone child");
       expect(mocks.phoneSettingsProps).toHaveLength(1);
       expect(mocks.phoneSettingsProps[0]?.autoOpen).toBe(true);
+      expect(mocks.phoneSettingsProps[0]?.diagnosticReporterFactory).toBe(
+        mocks.reportPhoneDiagnostic,
+      );
+      expect(mocks.useHostedPhoneLinkDiagnostics).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operation: "link",
+          showLinkForm: true,
+          surface: "settings",
+        }),
+      );
       expect(mocks.privyProvider).not.toHaveBeenCalled();
 
       const handOffButton = Array.from(container.querySelectorAll("button")).find(
@@ -329,6 +349,16 @@ describe("HostedSettingsIdentityLinkDialog", () => {
       expect(container.textContent).not.toContain("Privy hand-off child");
       expect(container.textContent).not.toContain("Link telegram child");
       expect(mocks.telegramCardProps).toEqual([]);
+      if (initialMode === "phone") {
+        expect(mocks.phoneSettingsProps).toEqual([]);
+        expect(mocks.useHostedPhoneLinkDiagnostics).toHaveBeenCalledWith(
+          expect.objectContaining({
+            serverSessionMatches: false,
+            showLinkForm: true,
+            surface: "settings",
+          }),
+        );
+      }
 
       const signInAgainButton = Array.from(container.querySelectorAll("button")).find(
         (candidate) => candidate.textContent?.includes("Sign in again"),

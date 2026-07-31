@@ -26,10 +26,12 @@ type SyncExpectation =
   | { kind: "exact"; phoneNumber: string };
 
 const mocks = vi.hoisted(() => ({
+  createDiagnosticReporter: vi.fn(),
   finalizeHostedPhoneLink: vi.fn(),
   linkAccountCallbacks: null as LinkAccountCallbacks | null,
   linkPhone: vi.fn(),
   providerPhoneNumber: null as string | null,
+  reportDiagnostic: vi.fn(),
   transferPhoneNumber: null as string | null,
   useLinkAccount: vi.fn(),
   updateAccountCallbacks: null as UpdateAccountCallbacks | null,
@@ -53,8 +55,10 @@ let cleanupRender: (() => Promise<void>) | null = null;
 describe("HostedPhoneSettings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.createDiagnosticReporter.mockReturnValue(mocks.reportDiagnostic);
     mocks.linkAccountCallbacks = null;
     mocks.providerPhoneNumber = null;
+    mocks.reportDiagnostic.mockReset();
     mocks.transferPhoneNumber = null;
     mocks.updateAccountCallbacks = null;
     mocks.useUser.mockImplementation(() => ({
@@ -145,6 +149,7 @@ describe("HostedPhoneSettings", () => {
     const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
     const { cleanup, container } = await renderClientComponent(
       createElement(HostedPhoneSettings, {
+        diagnosticReporterFactory: mocks.createDiagnosticReporter,
         onLinked,
       }),
     );
@@ -184,6 +189,13 @@ describe("HostedPhoneSettings", () => {
       },
       onLinked: expect.any(Function),
     });
+    expect(mocks.reportDiagnostic.mock.calls).toEqual(expect.arrayContaining([
+      ["provider_started"],
+      ["provider_succeeded"],
+      ["sync_started"],
+      ["sync_succeeded"],
+    ]));
+    expect(mocks.createDiagnosticReporter).toHaveBeenCalledWith("link");
 
     await act(async () => {
       mocks.linkAccountCallbacks?.onSuccess?.({
@@ -199,6 +211,69 @@ describe("HostedPhoneSettings", () => {
       await Promise.resolve();
     });
     expect(mocks.finalizeHostedPhoneLink).toHaveBeenCalledTimes(1);
+    expect(mocks.reportDiagnostic).toHaveBeenCalledTimes(4);
+    expect(mocks.reportDiagnostic.mock.calls.filter(
+      ([event]) => event === "provider_succeeded",
+    )).toHaveLength(1);
+    expect(mocks.reportDiagnostic.mock.calls.filter(
+      ([event]) => event === "sync_succeeded",
+    )).toHaveLength(1);
+  });
+
+  it("opens Privy without waiting for diagnostic delivery", async () => {
+    const pendingDiagnostic = new Promise<void>(() => {});
+    mocks.reportDiagnostic.mockReturnValueOnce(pendingDiagnostic);
+    const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedPhoneSettings, {
+        diagnosticReporterFactory: mocks.createDiagnosticReporter,
+      }),
+    );
+    cleanupRender = cleanup;
+
+    await act(async () => {
+      findButton(container, "Verify phone")?.dispatchEvent(new Event("click", { bubbles: true }));
+    });
+
+    expect(mocks.linkPhone).toHaveBeenCalledTimes(1);
+  });
+
+  it("creates a fresh diagnostic chain when a cancelled attempt is retried", async () => {
+    const firstAttempt = vi.fn();
+    const secondAttempt = vi.fn();
+    mocks.createDiagnosticReporter
+      .mockReturnValueOnce(firstAttempt)
+      .mockReturnValueOnce(secondAttempt);
+    const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedPhoneSettings, {
+        diagnosticReporterFactory: mocks.createDiagnosticReporter,
+      }),
+    );
+    cleanupRender = cleanup;
+
+    await act(async () => {
+      findButton(container, "Verify phone")?.dispatchEvent(new Event("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      mocks.linkAccountCallbacks?.onError?.("exited_link_flow", {
+        linkMethod: "sms",
+      });
+    });
+    await act(async () => {
+      findButton(container, "Verify phone")?.dispatchEvent(new Event("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(mocks.createDiagnosticReporter).toHaveBeenNthCalledWith(1, "link");
+    expect(mocks.createDiagnosticReporter).toHaveBeenNthCalledWith(2, "link");
+    expect(firstAttempt.mock.calls).toEqual([
+      ["provider_started"],
+      ["provider_cancelled", { detailCode: "exited_link_flow" }],
+    ]);
+    expect(secondAttempt.mock.calls).toEqual([["provider_started"]]);
+    expect(mocks.linkPhone).toHaveBeenCalledTimes(2);
   });
 
   it("auto-opens Privy's phone flow once and treats an ordinary exit as cancellation", async () => {
@@ -207,6 +282,7 @@ describe("HostedPhoneSettings", () => {
     const { cleanup, container } = await renderClientComponent(
       createElement(HostedPhoneSettings, {
         autoOpen: true,
+        diagnosticReporterFactory: mocks.createDiagnosticReporter,
         onAborted,
       }),
       { requireButton: false },
@@ -226,6 +302,45 @@ describe("HostedPhoneSettings", () => {
 
     expect(onAborted).toHaveBeenCalledTimes(1);
     expect(mocks.finalizeHostedPhoneLink).not.toHaveBeenCalled();
+    expect(mocks.reportDiagnostic).toHaveBeenCalledWith("provider_cancelled", {
+      detailCode: "exited_link_flow",
+    });
+  });
+
+  it("records an ordinary update exit without starting Murph sync", async () => {
+    const onAborted = vi.fn();
+    mocks.providerPhoneNumber = "+15550100001";
+    const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedPhoneSettings, {
+        diagnosticReporterFactory: mocks.createDiagnosticReporter,
+        initialPhoneNumber: "+15550100001",
+        onAborted,
+      }),
+    );
+    cleanupRender = cleanup;
+
+    await act(async () => {
+      findButton(container, "Verify a new phone")?.dispatchEvent(
+        new Event("click", { bubbles: true }),
+      );
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      expect(mocks.updatePhone).toHaveBeenCalledTimes(1);
+    });
+
+    await act(async () => {
+      mocks.updateAccountCallbacks?.onError?.("exited_update_flow", {
+        linkMethod: "sms",
+      });
+    });
+
+    expect(onAborted).toHaveBeenCalledTimes(1);
+    expect(mocks.finalizeHostedPhoneLink).not.toHaveBeenCalled();
+    expect(mocks.reportDiagnostic).toHaveBeenCalledWith("provider_cancelled", {
+      detailCode: "exited_update_flow",
+    });
   });
 
   it("repairs a completed provider transfer without reopening Privy", async () => {

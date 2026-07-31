@@ -1676,6 +1676,8 @@ export function ComponentsContent() {
             Existing phone accounts use the same surface for replacement.
             Support-required conflicts offer both retry and a direct email
             action without putting account identifiers in the message.
+            Privacy-safe lifecycle diagnostics observe these states without
+            changing any rendered state or action.
           </p>
           <div className="grid gap-4 sm:grid-cols-2" inert>
             <div className="space-y-3 rounded-xl border border-border bg-card p-5">

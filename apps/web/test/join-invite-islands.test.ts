@@ -35,6 +35,8 @@ const mocks = vi.hoisted(() => ({
   hostedPhoneAuthProps: null as Record<string, unknown> | null,
   hostedPhoneSettingsProps: null as Record<string, unknown> | null,
   connectTelegramProps: null as Record<string, unknown> | null,
+  reportPhoneDiagnostic: vi.fn(),
+  useHostedPhoneLinkDiagnostics: vi.fn(),
   usePrivy: vi.fn(),
   useUser: vi.fn(),
   useHostedInviteStatusRefresh: vi.fn(),
@@ -50,6 +52,10 @@ vi.mock("next/navigation", () => ({
 vi.mock("@privy-io/react-auth", () => ({
   usePrivy: mocks.usePrivy,
   useUser: mocks.useUser,
+}));
+
+vi.mock("@/src/components/settings/hosted-phone-link-diagnostics", () => ({
+  useHostedPhoneLinkDiagnostics: mocks.useHostedPhoneLinkDiagnostics,
 }));
 
 vi.mock("@/src/components/settings/hosted-phone-settings", () => ({
@@ -157,6 +163,7 @@ beforeEach(() => {
   mocks.hostedEmailAuthProps = null;
   mocks.hostedPhoneAuthProps = null;
   mocks.hostedPhoneSettingsProps = null;
+  mocks.useHostedPhoneLinkDiagnostics.mockReturnValue(mocks.reportPhoneDiagnostic);
   mocks.usePrivy.mockReturnValue({
     authenticated: true,
     logout: mocks.privyLogout,
@@ -652,8 +659,16 @@ test("JoinInviteMessagingSetupIsland shows Privy phone linking and Telegram conn
   expect(container.querySelector('[data-connect-telegram="true"]')).toBeTruthy();
   expect(container.textContent).toContain("OR");
   expect(mocks.hostedPhoneSettingsProps).toMatchObject({
+    diagnosticReporterFactory: mocks.reportPhoneDiagnostic,
     onLinked: expect.any(Function),
   });
+  expect(mocks.useHostedPhoneLinkDiagnostics).toHaveBeenCalledWith(
+    expect.objectContaining({
+      operation: "link",
+      showLinkForm: true,
+      surface: "join_invite",
+    }),
+  );
   expect(mocks.hostedPhoneSettingsProps).not.toHaveProperty("authenticated");
   expect(mocks.hostedPhoneSettingsProps).not.toHaveProperty("expectedPrivyUserId");
   expect(mocks.hostedPhoneSettingsProps).not.toHaveProperty(

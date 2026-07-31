@@ -17,6 +17,7 @@ import type { HostedAccountSettingsSnapshot } from "@/src/lib/hosted-onboarding/
 
 import { HostedEmailPrivyLinkHandOff } from "./hosted-email-privy-link-hand-off";
 import { HostedEmailSettings } from "./hosted-email-settings";
+import { useHostedPhoneLinkDiagnostics } from "./hosted-phone-link-diagnostics";
 import { HostedPhoneSettings } from "./hosted-phone-settings";
 import { formatMaskedPhoneNumber } from "./hosted-settings-utils";
 import { HostedTelegramCardSettings } from "./hosted-telegram-card-settings";
@@ -104,6 +105,18 @@ function HostedSettingsIdentityMutationContent({
     && privySessionMatchesAppSession
     && expectedPrivyUserId !== null
     && user?.id === expectedPrivyUserId;
+  const createPhoneDiagnosticReporter = useHostedPhoneLinkDiagnostics({
+    appAuthenticated: true,
+    clientUserMatchesExpected: expectedPrivyUserId !== null && user?.id === expectedPrivyUserId,
+    clientUserPresent: Boolean(user?.id),
+    expectedUserPresent: expectedPrivyUserId !== null,
+    operation: user?.phone?.number ? "update" : "link",
+    privyAuthenticated: authenticated,
+    privyReady: ready,
+    serverSessionMatches: privySessionMatchesAppSession,
+    showLinkForm: initialMode === "phone",
+    surface: "settings",
+  });
   const hasExisting = initialMode === "phone"
     ? Boolean(account.phone.number)
     : initialMode === "email"
@@ -168,6 +181,7 @@ function HostedSettingsIdentityMutationContent({
     return (
       <HostedPhoneSettings
         autoOpen
+        diagnosticReporterFactory={createPhoneDiagnosticReporter}
         initialPhoneNumber={account.phone.number}
         onAborted={() => onOpenChange(false)}
         onLinked={onSynced}

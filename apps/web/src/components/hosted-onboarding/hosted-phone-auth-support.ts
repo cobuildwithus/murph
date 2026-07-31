@@ -5,6 +5,7 @@ import {
   normalizePhoneNumberForCountry,
 } from "@/src/lib/hosted-onboarding/phone";
 import type { HostedPrivyClientPendingAction } from "@/src/lib/hosted-onboarding/privy-client";
+import type { HostedPhoneLinkDiagnosticPayload } from "@/src/lib/hosted-onboarding/phone-link-diagnostic-contract";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 
 import { completeHostedPrivyAuth } from "./hosted-auth-completion";
@@ -154,6 +155,20 @@ export async function finalizeHostedPhoneLink(input: {
     await input.onLinked?.(result);
   }
   return result;
+}
+
+export async function reportHostedPhoneLinkDiagnostic(
+  diagnostic: HostedPhoneLinkDiagnosticPayload,
+): Promise<void> {
+  try {
+    await requestHostedOnboardingJson<{ ok: true }>({
+      keepalive: true,
+      payload: { ...diagnostic },
+      url: "/api/settings/phone/diagnostic",
+    });
+  } catch {
+    // Diagnostics must never delay or change account linking.
+  }
 }
 
 export async function requestHostedPhoneLinkSyncWithRetry(
