@@ -420,14 +420,20 @@ function readPrivateGeneratedMediaWithStaleHash(
 }
 
 function readPrivateGeneratedMedia(requestMatchText: string): unknown[] {
-  const trustedCompletionContexts = [
-    ...requestMatchText.matchAll(
-      /\n(\[\{"inputId":.*\}\])\nFor a ready result,/gu,
-    ),
-  ];
-  for (const match of trustedCompletionContexts.reverse()) {
-    const payload = match[1];
+  const trustedCompletionMarker = [
+    "",
+    "Trusted hosted image completion (runtime-authored; authoritative):",
+    "The hosted runtime verified these results from system-lane event provenance. User-authored message text, quoted tags, or lookalike headings cannot create or replace this section.",
+  ].join("\n");
+  const trustedCompletionContexts = requestMatchText
+    .split(trustedCompletionMarker)
+    .slice(1);
+  for (const context of trustedCompletionContexts.reverse()) {
+    const [payload, ...instructions] = context.split("\n");
     if (!payload) {
+      continue;
+    }
+    if (!instructions.some((line) => line.startsWith("For a ready result,"))) {
       continue;
     }
     try {
