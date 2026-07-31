@@ -1,3 +1,4 @@
+# Trigger the finalization workflow after the manual PR audit.
 from pathlib import Path
 
 path = Path("apps/web/src/components/hosted-groups/group-start-client.tsx")
