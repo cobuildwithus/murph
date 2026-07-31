@@ -110,16 +110,20 @@ An eligible paid Pulse or Edge member can:
 8. Continue using that credit after an included-usage reset until the credit is
    consumed.
 
-An authenticated member can open `/groups/fund/[joinCode]`, see only the
-group's coarse `healthy`, `low`, or `exhausted` usage state, and either sponsor
-the chat up to $5, $10, or $20 per month or make one fixed one-time
-contribution for that group's synthetic runtime beneficiary. This does not
-require the payer to have an individual paid plan. The browser submits only
-the server-owned fixed $5 activation offer, selected monthly maximum, request
-key, and bounded optional sponsorship draft for monthly creation. A one-time
-contribution submits the selected fixed offer without a monthly maximum. A
-recovery attempt adds only the literal recovery-only capability. Web resolves
-payer, beneficiary, amount, grant, and sponsorship policy.
+An authenticated member can open `/groups/fund/[joinCode]` at any capacity.
+The route does not publish the group's usage state. It immediately opens the
+applicable existing control: capped monthly sponsorship for an unsponsored
+group, one-time contribution for a participant who is not the current
+automatic sponsor, pending-purchase recovery for the exact payer, or private
+sponsorship management for the exact active payer. Closing an immediate
+dialog or drawer leaves only the composable alternative action and the return
+link. This does not require the payer to have an individual paid plan. The
+browser submits only the server-owned fixed $5 activation offer, selected
+monthly maximum, request key, and bounded optional sponsorship draft for
+monthly creation. A one-time contribution submits the selected fixed offer
+without a monthly maximum. A recovery attempt adds only the literal
+recovery-only capability. Web resolves payer, beneficiary, amount, grant, and
+sponsorship policy.
 If a payment is recovered, Web restores the authenticated payer's exact
 encrypted sponsor draft, shows that it is still attached, and resubmits it
 unchanged. Every active-purchase recovery compares the normalized draft,
@@ -328,9 +332,11 @@ The target composition is:
 - No default selection and no “popular” badge
 - No visible explanatory paragraph; the dollar choices and action label carry
   the flow. Keep a concise screen-reader description for the amount selector.
-- The group funding page uses a separate dialog: **Sponsor this chat** is the
-  primary capped-monthly action and **Make a one-time contribution** is the
-  secondary action. Do not repeat saved-card or verification mechanics there.
+- The group funding route immediately opens its applicable existing group
+  control. **Sponsor this chat** is the primary capped-monthly action when no
+  automatic sponsor exists; **Make a one-time contribution** is the fallback
+  for another payer; and the exact active payer sees private management on the
+  same URL. Do not repeat saved-card or verification mechanics there.
 - Primary action after selection: **Add usage · $10**
 - Pending action: **Adding usage…**
 - Secondary action: **Cancel**
@@ -449,6 +455,18 @@ the conversation may pause soon unless more usage is added. The prompt forbids
 token counts, prices, internal accounting, contributor identity, pressure, and
 repetition when the recent conversation already contains the warning. The bit
 does not schedule or send a separate outbound message.
+
+For a hosted group, `fundingNeeded` controls only that assistant-initiated
+depletion thread. A valid `fundingUrl` remains available independently. When a
+person explicitly asks to fund the room or add usage, Murph may share the
+current returned URL at any capacity; the first unsolicited heads-up remains
+link-free. A direct request to fund, sponsor, contribute, add group usage, or
+get the funding link reads group usage only and does not detour into earned
+missions. A broad request for every option or a way to earn usage reads both
+current funding and referral state. If the room already has an automatic
+sponsor, the page preserves that single-sponsor invariant and offers the
+additional payer only a one-time contribution. Murph does not imply the room
+needs funding or disclose private sponsor facts.
 
 Immediately before both the exhaustion crossing send and a later denied-gate
 retry, delivery re-reads the current personal usage-status projection. It
@@ -1026,8 +1044,10 @@ group's existing opaque join code is the public targeting capability; no second
 funding code or rotation policy exists. Web resolves the active group and its
 synthetic member, shows only `healthy`, `low`, or `exhausted`, and presents
 capped monthly sponsorship before the fixed $5, $10, and $20 one-time
-contributions. Monthly activation is available only when capacity is low or
-exhausted. The browser never submits payer or beneficiary identity.
+contributions. Both explicit funding paths remain available at every capacity;
+capacity expresses urgency and governs later automatic refill admission, not
+whether someone may fund the group. The browser never submits payer or
+beneficiary identity.
 
 A group chat that has only ever talked to Murph has no `HostedGroup` row or
 join code. Its funding URL uses a signed funding-only locator instead:

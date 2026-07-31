@@ -24,6 +24,9 @@ import {
   executeHostedAssistantAskCompletedWake,
 } from "./events/assistant-ask-completion.ts";
 import {
+  executeHostedEnvironmentVoiceWake,
+} from "./events/environment-voice.ts";
+import {
   createNoopMailboxEffect,
   type HostedMailboxOutcome,
 } from "./events/mailbox-outcome.ts";
@@ -65,7 +68,7 @@ export async function executeHostedMailboxEvent(input: {
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
     "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
-  >;
+  > & Partial<Pick<NormalizedHostedAssistantRuntimeConfig, "parserToolchain">>;
   runtimeEnv: Readonly<Record<string, string>>;
   signal?: AbortSignal | null;
   vaultRoot: string;
@@ -149,7 +152,7 @@ async function handleHostedMailboxEvent(input: {
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
     "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
-  >;
+  > & Partial<Pick<NormalizedHostedAssistantRuntimeConfig, "parserToolchain">>;
   runtimeEnv: Readonly<Record<string, string>>;
   signal: AbortSignal | null;
   shouldYieldAssistantAskCompletion?: (() => boolean) | null;
@@ -196,7 +199,7 @@ async function executeHostedSystemWake(input: {
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
     "commitTimeoutMs" | "platform" | "platformEnv" | "resolvedConfig"
-  >;
+  > & Partial<Pick<NormalizedHostedAssistantRuntimeConfig, "parserToolchain">>;
   runtimeEnv: Readonly<Record<string, string>>;
   signal: AbortSignal | null;
   shouldYieldAssistantAskCompletion?: (() => boolean) | null;
@@ -336,6 +339,19 @@ async function executeHostedSystemWake(input: {
         nextWakeAt: nextWake.at,
         ...(nextWake.reason ? { nextWakeReason: nextWake.reason } : {}),
         postCheckpointRecord: deviceSyncMetrics.postCheckpointRecord ?? null,
+      });
+    case "environment-voice.captured":
+      return await executeHostedEnvironmentVoiceWake({
+        executionContext: input.executionContext,
+        runtime: input.runtime,
+        signal: input.signal,
+        turnEnvironment: createHostedAssistantTurnEnvironment({
+          operatorHomeRoot: input.operatorHomeRoot,
+          runtimeEnv: input.runtimeEnv,
+          vaultRoot: input.vaultRoot,
+        }),
+        vaultRoot: input.vaultRoot,
+        wake: input.wake,
       });
     case "runtime.manual-requested":
     case "runtime.pending-effects-reconcile-requested":

@@ -7,6 +7,7 @@ import {
   getHabitatIndicatorDefinition,
   HABITAT_CATALOG,
   HABITAT_DECLINED_VALUE,
+  normalizeHabitatCityOrRegion,
   validateHabitatIndicatorValue,
 } from "../src/index.ts";
 import { habitatFrontmatterSchema } from "../src/zod.ts";
@@ -73,6 +74,22 @@ describe("habitat catalog", () => {
     expect(expectedHabitatAspectRelativePath("sleep-environment")).toBe(
       "bank/habitat/sleep-environment.md",
     );
+  });
+
+  it("accepts city-level context and refuses address-shaped location text", () => {
+    expect(normalizeHabitatCityOrRegion("  Warsaw, Poland  ")).toBe(
+      "Warsaw, Poland",
+    );
+    expect(normalizeHabitatCityOrRegion("Île-de-France")).toBe(
+      "Île-de-France",
+    );
+    expect(
+      normalizeHabitatCityOrRegion(
+        "123 Main Street, apartment 4, Warsaw 00-001",
+      ),
+    ).toBeNull();
+    expect(normalizeHabitatCityOrRegion("Baker Street, London")).toBeNull();
+    expect(normalizeHabitatCityOrRegion("52.2297, 21.0122")).toBeNull();
   });
 });
 

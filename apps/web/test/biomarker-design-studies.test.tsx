@@ -111,7 +111,7 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain("Biomarker preparing state");
   expect(sectionsMarkup).toContain("Biomarker index");
   expect(sectionsMarkup).toContain(
-    "Capped monthly group sponsorship and one-time contribution",
+    "Always-available group sponsorship and contribution",
   );
   expect(sectionsMarkup).toContain(
     "Overall AI usage, purchase reset, Family owner action, credits, and referrals",
@@ -125,7 +125,8 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain('data-design-study="biomarker-boundary-result"');
   expect(sectionsMarkup).toContain('data-design-study="group-usage-funding"');
   expect(sectionsMarkup).toContain("Sunday sleep crew");
-  expect(sectionsMarkup).toContain("Keep Murph going");
+  expect(sectionsMarkup).toContain("Support Murph in Sunday sleep crew");
+  expect(sectionsMarkup).not.toContain("Keep Murph going");
   expect(sectionsMarkup).toContain("Sponsor this chat");
   expect(sectionsMarkup).toContain('data-design-state="monthly-activation"');
   expect(sectionsMarkup).toContain('data-design-state="ordinary-sponsored-one-time"');
@@ -173,11 +174,11 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(componentsMarkup).toContain(
     'data-design-component="group-sponsorship-management"',
   );
-  expect(componentsMarkup).toContain("Charged this period");
-  expect(componentsMarkup).toContain("Pending");
-  expect(componentsMarkup).toContain("Apply monthly maximum");
+  expect(componentsMarkup).toContain("This month");
+  expect(componentsMarkup).toContain("Monthly limit");
   expect(componentsMarkup).toContain("Sunday sleep crew");
-  expect(componentsMarkup).toContain("Keep Murph going");
+  expect(componentsMarkup).toContain("Support Murph in Sunday sleep crew");
+  expect(componentsMarkup).not.toContain("Keep Murph going");
   expect(componentsMarkup).toContain("Sponsor this chat");
   expect(componentsMarkup).toMatch(
     /data-slot="radio-group-item"[^>]*class="[^"]*sr-only/u,

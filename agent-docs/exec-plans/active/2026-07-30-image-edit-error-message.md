@@ -121,9 +121,11 @@ Updated: 2026-07-31
 - Final ReviewGPT round 2 correctly rejected the first route test because it
   manually launched the image task, authored both outbox intents, marked them
   sent, and supplied terminal evidence. The remediation replaces that bypass
-  with one production-owner test that restores the vault image, imports the
-  original Linq input, runs the normal assistant/image-completion/outbox phases,
-  and fakes only the Codex, OpenAI, and Linq provider protocols. The clean
+  with one production-owner test that restores the vault image, stages one
+  Linq-routed entrypoint mailbox input, and runs the normal assistant,
+  image-completion, and outbox phases. Test platform ports supply the mailbox,
+  workspace, snapshot, and checkpoint boundaries, while the Codex, OpenAI, and
+  Linq protocols remain controlled. The clean
   focused case passed, the full hosted workspace entrypoint file passed all 265
   tests, and the assistant-runtime typecheck passed.
 - Round 3 anomaly retrospective: the requirement and production architecture
@@ -132,6 +134,13 @@ Updated: 2026-07-31
   retry, or runtime owner. Continuing is warranted because the two-turn
   detached completion and same-route Linq delivery are one indivisible final
   owner path that the previous test did not exercise.
+- Final ReviewGPT round 3 passed. It confirmed that the production assistant,
+  dynamic image tool, detached controller, completion staging, pending-input
+  wake, route-derived outbox, Linq authority preflight, and Linq transport must
+  cooperate for the scenario to pass. Its two body-discrepancy notes were
+  accepted as documentation corrections: the test stages an already routed
+  Linq mailbox input and also supplies ordinary invocation platform ports; it
+  does not exercise the upstream Linq decoder or a live control plane.
 - Parent product-experience re-review after specialist remediation found no
   remaining product finding: the smallest complete experience is the existing
   truthful acknowledgement followed by a same-route plain-language failure

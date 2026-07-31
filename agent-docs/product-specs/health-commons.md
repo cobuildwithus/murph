@@ -195,8 +195,17 @@ Generated entities carry:
 The full catalog is a build-time generator structure, not a runtime artifact.
 Runtime surfaces should consume scoped generated artifacts instead of a monolith:
 web route bundles/projections for public pages, compact protocol index/run-spec/
-family-graph artifacts for CLI and hosted protocol reads, and separate source
-indexes only for tools that explicitly need source lookup.
+family-graph artifacts for CLI and hosted protocol reads, the compact
+`biomarker-desired-directions.json` projection for progress-card sentiment, and
+separate source indexes only for tools that explicitly need source lookup.
+Hosted runner packaging must include that compact direction projection without
+shipping the web artifact tree. A missing direction projection is auxiliary
+availability loss: progress cards remain available with neutral mover sentiment
+and a visible caveat on the private card itself. Raster delivery preserves the
+same accessible description: when an image channel has no native alt-text
+field, its adapter appends the media description once to the existing reply or
+photo caption. The command also returns the exact warning for diagnostics.
+Malformed direction data remains a hard error.
 
 Private runs, outcome cards, and future contributions should store commons references by key and revision instead of copying protocol prose. Future aggregate community summaries must be traceable back to the exact protocol revisions they summarize.
 

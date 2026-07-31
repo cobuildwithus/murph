@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { afterEach, test } from "vitest";
 
@@ -11,6 +12,7 @@ import { listMetricPoints } from "@murphai/query";
 import {
   analyzeExperimentOutcomeRecord,
   showExperimentProgress,
+  showExperimentProgressCard,
 } from "../src/usecases/experiment-journal-vault.ts";
 
 const createdVaultRoots: string[] = [];
@@ -788,6 +790,67 @@ test("experiment progress usecases read metrics from the query metric projection
   assert.equal(adherenceOnlyProgress.progress.adherence.expectedSessionsByNow, 3);
   assert.equal(adherenceOnlyProgress.progress.adherence.status, "met_target");
 
+});
+
+test("experiment progress cards stay available when biomarker direction assets are missing", async () => {
+  const vaultRoot = await createExperimentMetricProjectionVault();
+  const emptyPackageRoot = await mkdtemp(
+    path.join(tmpdir(), "murph-health-commons-missing-directions-"),
+  );
+  createdVaultRoots.push(emptyPackageRoot);
+  const previousPackageRoot =
+    process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT;
+  process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT = emptyPackageRoot;
+
+  try {
+    const result = await showExperimentProgressCard({
+      asOf: "2026-06-06",
+      lookup: "sleep-efficiency",
+      vault: vaultRoot,
+    });
+
+    assert.equal(result.card.movers.length, 1);
+    assert.equal(result.card.movers[0]?.sentiment, "neutral");
+    assert.equal(
+      result.card.moverSentimentContext,
+      "direction_unavailable",
+    );
+    assert.ok(
+      result.warnings.includes(
+        "biomarker desired directions unavailable; mover sentiment shown as neutral",
+      ),
+    );
+  } finally {
+    if (previousPackageRoot === undefined) {
+      delete process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT;
+    } else {
+      process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT = previousPackageRoot;
+    }
+  }
+
+  process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT = fileURLToPath(
+    new URL("../../health-commons", import.meta.url),
+  );
+  try {
+    const packagedResult = await showExperimentProgressCard({
+      asOf: "2026-06-06",
+      lookup: "sleep-efficiency",
+      vault: vaultRoot,
+    });
+    assert.equal(packagedResult.card.movers[0]?.sentiment, "positive");
+    assert.equal(packagedResult.card.moverSentimentContext, null);
+    assert.ok(
+      !packagedResult.warnings.includes(
+        "biomarker desired directions unavailable; mover sentiment shown as neutral",
+      ),
+    );
+  } finally {
+    if (previousPackageRoot === undefined) {
+      delete process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT;
+    } else {
+      process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT = previousPackageRoot;
+    }
+  }
 });
 
 test("experiment progress usecases keep anchored lab metrics outside run windows", async () => {

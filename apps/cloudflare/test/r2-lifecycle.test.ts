@@ -46,7 +46,7 @@ describe("r2 lifecycle helpers", () => {
 });
 
 describe("R2 transient lifecycle rules", () => {
-  it("expires email and private media after 24 hours and meal photos after 31 days", () => {
+  it("expires email, private media, and environment voice after 24 hours and meal photos after 31 days", () => {
     const config = JSON.parse(
       readFileSync(new URL("../r2-bundles-lifecycle.json", import.meta.url), "utf8"),
     ) as {
@@ -68,9 +68,10 @@ describe("R2 transient lifecycle rules", () => {
       ]),
     );
 
-    expect(config.rules).toHaveLength(3);
+    expect(config.rules).toHaveLength(4);
     expect(maxAgeByPrefix.get("hosted-email/messages/")).toBe(86_400);
     expect(maxAgeByPrefix.get("hosted-private-media/images/")).toBe(86_400);
+    expect(maxAgeByPrefix.get("hosted-environment-voice/audio/")).toBe(86_400);
     expect(maxAgeByPrefix.get("hosted-meal-photos/images/")).toBe(2_678_400);
     expect(maxAgeByPrefix.has("transient/hosted-email/threads/")).toBe(false);
     expect(maxAgeByPrefix.has("transient/execution-journal/")).toBe(false);

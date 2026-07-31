@@ -4,6 +4,7 @@ import {
   expectedHabitatAspectRelativePath,
   getHabitatIndicatorDefinition,
   habitatFrontmatterSchema,
+  normalizeHabitatCityOrRegion,
   requireHabitatAspectDefinition,
   validateHabitatIndicatorValue,
 } from "@murphai/contracts";
@@ -205,6 +206,19 @@ function assertValidStoredIndicatorUpdates(
       throw new VaultError(
         "HABITAT_FRONTMATTER_INVALID",
         issue,
+        { aspect, indicatorId },
+      );
+    }
+    if (
+      aspect === "home-location"
+      && indicatorId === "location"
+      && value !== null
+      && value !== "declined"
+      && normalizeHabitatCityOrRegion(value) === null
+    ) {
+      throw new VaultError(
+        "HABITAT_FRONTMATTER_INVALID",
+        "Location must be a city or approximate region, not a precise address.",
         { aspect, indicatorId },
       );
     }
