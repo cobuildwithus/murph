@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -49,6 +50,12 @@ const RESEARCHED_HEALTH_TOPIC_SKILL_SLUGS = [
   'gut-digestion',
   'general-eye-health',
 ] as const
+
+const managedGroupSkillsArePublicFallbacks = readFileSync(
+  path.join(resolveAssistantSkillsRoot(), 'group-chat', 'SKILL.md'),
+  'utf8',
+).includes('This public fallback intentionally contains no managed')
+const managedGroupSkillIt = managedGroupSkillsArePublicFallbacks ? it.skip : it
 
 type AssistantSkillMetadata = {
   readonly description: string
@@ -226,22 +233,27 @@ describe('assistant skill assets', () => {
     )
   })
 
-  it('keeps private and shared activity interpretation in their owners', async () => {
-    const load = async (slug: string) => {
-      const skill = ASSISTANT_SKILLS.find((candidate) => candidate.slug === slug)
-      if (!skill) throw new Error(`Missing registered skill: ${slug}`)
-      return (await readSkillFile(skill)).replace(/\s+/gu, ' ')
-    }
-    const [daily, shared] = await Promise.all([
-      load('daily-activity'),
-      load('group-chat'),
-    ])
+  it('keeps private activity interpretation in its owner', async () => {
+    const dailySkill = ASSISTANT_SKILLS.find(
+      (candidate) => candidate.slug === 'daily-activity',
+    )
+    if (!dailySkill) throw new Error('Missing registered skill: daily-activity')
+    const daily = (await readSkillFile(dailySkill)).replace(/\s+/gu, ' ')
 
     expect(daily).toMatch(
       /wearables day <date>.+wearables activity list.+canonical workout-day rollup/u,
     )
     expect(daily).toContain('current-local-day totals as provisional and say "so far."')
     expect(daily).toContain('not proof of failed provider sync or import')
+  })
+
+  managedGroupSkillIt('keeps shared activity interpretation in its owner', async () => {
+    const groupChatSkill = ASSISTANT_SKILLS.find(
+      (candidate) => candidate.slug === 'group-chat',
+    )
+    if (!groupChatSkill) throw new Error('Missing registered skill: group-chat')
+    const shared = (await readSkillFile(groupChatSkill)).replace(/\s+/gu, ' ')
+
     expect(shared).toContain('its cause is unverified')
     expect(shared).toContain('current-local-day value as provisional: say "so far"')
   })
@@ -691,7 +703,7 @@ describe('assistant skill assets', () => {
     expect(nutritionText).not.toContain('### GI comfort and performance')
   })
 
-  it('keeps group newsletter setup and opt-out behavior in the group-chat skill', async () => {
+  managedGroupSkillIt('keeps group newsletter setup and opt-out behavior in the group-chat skill', async () => {
     const groupChatSkill = ASSISTANT_SKILLS.find((skill) => skill.slug === 'group-chat')
     expect(groupChatSkill).toBeTruthy()
     if (!groupChatSkill) return
@@ -837,7 +849,7 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('Never call an SMS room\niMessage')
   })
 
-  it('keeps the new-group contact handoff natural and reactive', async () => {
+  managedGroupSkillIt('keeps the new-group contact handoff natural and reactive', async () => {
     const groupChatSkill = ASSISTANT_SKILLS.find((skill) => skill.slug === 'group-chat')
     expect(groupChatSkill).toBeTruthy()
     if (!groupChatSkill) return
@@ -866,7 +878,7 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('the shape of "')
   })
 
-  it('polls scheduled member asks to a terminal result in the current turn', async () => {
+  managedGroupSkillIt('polls scheduled member asks to a terminal result in the current turn', async () => {
     const groupChatSkill = ASSISTANT_SKILLS.find((skill) => skill.slug === 'group-chat')
     expect(groupChatSkill).toBeTruthy()
     if (!groupChatSkill) return
@@ -885,7 +897,7 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('resumes that same current\nautomation')
   })
 
-  it('registers a dedicated group newsletter editorial skill', async () => {
+  managedGroupSkillIt('registers a dedicated group newsletter editorial skill', async () => {
     const newsletterSkill = ASSISTANT_SKILLS.find(
       (skill) => skill.slug === 'group-newsletter',
     )
@@ -944,7 +956,7 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('best total this month')
   })
 
-  it('keeps group challenge guidance aligned with selectable scoring projections', async () => {
+  managedGroupSkillIt('keeps group challenge guidance aligned with selectable scoring projections', async () => {
     const groupChallengeSkill = ASSISTANT_SKILLS.find(
       (skill) => skill.slug === 'group-challenge',
     )
@@ -995,8 +1007,10 @@ describe('assistant skill assets', () => {
     expect(raw).toMatch(/Never author generic\s+permission copy or tell someone to Like the standings\./u)
     expect(raw).toMatch(/explicitly says they do not want to share a scope, record that\s+choice and do\s+not offer, repeat, or nag/u)
     expect(raw).toMatch(/grant\s+Apple Health or\s+operating-system Steps access/u)
-    expect(raw).toContain('Treat `status="ok"` as an opaque handled result')
-    expect(raw).toMatch(/This scheduled surface\s+returns `presentation="link"`; include the exact returned `joinUrl` once[\s\S]*Do not infer, announce, or append a\s+companion message claiming native consent UI is visible/u)
+    expect(raw).toMatch(/Its recency evidence is unavailable because final-reply delivery\s+owns presentation timing/u)
+    expect(raw).toMatch(/Never use a scheduled link or a diagnostic-scope\s+offer as challenge buy-in/u)
+    expect(raw).toMatch(/This scheduled surface\s+returns `presentation="link"`; include the exact\s+returned `joinUrl` once/u)
+    expect(raw).toMatch(/Do not\s+infer, announce, or append a companion message claiming native consent UI is\s+visible/u)
     expect(raw).toMatch(/record that the\s+offer action was handled for that exact participant and scope/u)
     expect(raw).not.toContain('When native consent is the only user-facing outcome')
     expect(raw).not.toContain('If the returned group proves')
@@ -1010,11 +1024,10 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('vault-cli group shared --kind')
     expect(raw).not.toContain('vault-cli group shared --scope')
     expect(raw).not.toContain('vault-cli group weekly --')
-    expect(raw).toMatch(/Whether `read_current` returns\s+`status="none"` or an existing group/u)
-    expect(raw).toMatch(/do not\s+create a hosted group or post a permission offer as part of challenge setup/u)
-    expect(raw).toMatch(/Explain any missing group setup or share naturally in the normal\s+group reply/u)
-    expect(raw).toMatch(/bounded proactive\s+standings behavior below begins only once the challenge is running/u)
-    expect(raw).toMatch(/Do not\s+tell the room to join again/u)
+    expect(raw).toMatch(/If `read_current` returns `status="none"`, do not create a hosted group as a\s+side effect of challenge kickoff/u)
+    expect(raw).toMatch(/Call `murph\.group\s+action="offer_access"` exactly once from that scoring read\s+with only the exact scoring scope it proved `not_granted`/u)
+    expect(raw).toMatch(/record the offer as\s+handled only when the tool reports `status="ok"`/u)
+    expect(raw).toMatch(/grant without `grantedAt`, a grant before `offeredAt`, a grant more\s+than 24 hours later, silence, an unresolved identity, unavailable recency\s+evidence, or an offer followed by materially changed challenge terms does not\s+establish buy-in/u)
     expect(raw).not.toContain('Mint the join link with `murph.group`')
     expect(raw).toContain(
       "under the developer prompt's shared\nautomation action rules",
@@ -2483,7 +2496,7 @@ How old are you and what's your gender?
       },
       {
         contract:
-          'If they ask to pause, leave onboarding open and let the existing managed onboarding follow-up automation own continuation.',
+          'If they ask to pause, leave onboarding open and let the finite managed next-day recovery occurrence decide whether continuation is timely.',
         section: parkSection,
         userMessage: 'Pause for now',
       },
@@ -2607,6 +2620,23 @@ How old are you and what's your gender?
     expect(compact).toContain(
       'If the last onboarding question is still unanswered, do not send a different setup question.',
     )
+    expect(raw).toContain('### Finite next-day recovery')
+    expect(compact).toContain(
+      'The occurrence may instead ask one natural, low-pressure question that lets the user choose whether to continue.',
+    )
+    expect(compact).toContain(
+      'Send or skip ends this scheduled recovery.',
+    )
+    expect(compact).toContain(
+      'do not run the completion command or otherwise mutate onboarding state',
+    )
+    expect(compact).toContain(
+      'Only a later foreground user reply may advance or complete onboarding through the canonical state owner.',
+    )
+    expect(compact).toContain(
+      'uses the ordinary scheduled notification skip and leaves onboarding state unchanged',
+    )
+    expect(compact).not.toContain('managed daily onboarding follow-up')
 
     expect(raw).not.toContain('roughly 9-10 short assistant messages')
     expect(raw).not.toContain('### 4. Establish the first ongoing support loop')

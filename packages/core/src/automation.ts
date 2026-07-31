@@ -57,6 +57,7 @@ import {
 import { commitAuditedCanonicalWrite } from "./audited-write.ts";
 import { stageMarkdownDocumentWrite } from "./markdown-documents.ts";
 import type { FrontmatterObject } from "./types.ts";
+import { normalizeAutomationAvailabilityForSchedule } from "./automation-availability.ts";
 
 const AUTOMATIONS_DIRECTORY = VAULT_LAYOUT.automationsDirectory;
 const MAX_AUTOMATION_SUPPORT_SERIES_RECONCILIATION_RECORDS = 4_096;
@@ -142,6 +143,7 @@ export interface UpsertAutomationResult {
 export interface PatchAutomationInput {
   activeUntil?: string | null;
   continuityPolicy?: AutomationContinuityPolicy;
+  expectedUpdatedAt?: string;
   instructions?: string;
   lookup: string;
   now?: Date;
@@ -1017,6 +1019,15 @@ export async function patchAutomation(
     if (!existingRecord) {
       throw new VaultError("VAULT_AUTOMATION_MISSING", "Automation was not found.");
     }
+    if (
+      input.expectedUpdatedAt !== undefined
+      && input.expectedUpdatedAt !== existingRecord.updatedAt
+    ) {
+      throw new VaultError(
+        "VAULT_AUTOMATION_CONFLICT",
+        "Automation changed before the patch could be applied.",
+      );
+    }
     return upsertAutomationWithLatestRegistry({
       activeUntil:
         input.activeUntil === undefined
@@ -1461,7 +1472,13 @@ export async function advanceAutomationDeviceActivityCursor(
 }
 
 function assertAutomationPatchHasChanges(input: PatchAutomationInput): void {
-  const { lookup: _lookup, now: _now, vaultRoot: _vaultRoot, ...patch } = input;
+  const {
+    expectedUpdatedAt: _expectedUpdatedAt,
+    lookup: _lookup,
+    now: _now,
+    vaultRoot: _vaultRoot,
+    ...patch
+  } = input;
   if (Object.values(patch).some((value) => value !== undefined)) {
     return;
   }
@@ -1597,7 +1614,10 @@ async function upsertAutomationWithLatestRegistry(
     tags,
     createdAt,
     updatedAt,
-    instructions: normalizeAutomationInstructions(input.instructions),
+    instructions: normalizeAutomationAvailabilityForSchedule({
+      instructions: normalizeAutomationInstructions(input.instructions),
+      scheduleKind: schedule.kind,
+    }),
     relativePath: target.relativePath,
     markdown: "",
   };
@@ -1663,7 +1683,10 @@ export function buildAutomationMarkdownPreview(
     tags: normalizeAutomationTags(input.tags),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-    instructions: normalizeAutomationInstructions(input.instructions),
+    instructions: normalizeAutomationAvailabilityForSchedule({
+      instructions: normalizeAutomationInstructions(input.instructions),
+      scheduleKind: schedule.kind,
+    }),
     relativePath: `${AUTOMATIONS_DIRECTORY}/${slug}.md`,
     markdown: "",
   };

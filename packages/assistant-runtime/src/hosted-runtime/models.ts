@@ -165,6 +165,11 @@ export type HostedSystemMailboxPostCheckpointRecord =
       records: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[];
     }
   | {
+      audioKey: string;
+      kind: "environment-voice.audio-delete";
+      nextWakeAt?: null;
+    }
+  | {
       attemptId: string;
       kind: "codex-auth.updated";
       nextWakeAt?: null;
@@ -182,6 +187,7 @@ export type HostedMailboxLane =
   | "conversation-message"
   | "clinical-records"
   | "device-sync"
+  | "environment-voice"
   | "member-activated"
   | "member-channels-updated"
   | "member-preferences-updated"

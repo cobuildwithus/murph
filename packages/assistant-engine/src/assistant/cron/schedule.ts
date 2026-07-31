@@ -178,6 +178,45 @@ export function computeAssistantCronNextRunAt(
   }
 }
 
+export function computeAssistantCronFirstRunAfterCurrentLocalDay(input: {
+  after: Date
+  schedule: {
+    kind: 'dailyLocal'
+    localTime: string
+    timeZone: string
+  }
+}): string {
+  const first = computeAssistantCronNextRunAt(input.schedule, input.after)
+  if (!first) {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_INVALID_SCHEDULE',
+      'The assistant cron schedule does not produce a future run time.',
+    )
+  }
+
+  const currentDayKey = formatTimeZoneDateTimeParts(
+    input.after,
+    input.schedule.timeZone,
+  ).dayKey
+  const firstDayKey = formatTimeZoneDateTimeParts(
+    first,
+    input.schedule.timeZone,
+  ).dayKey
+  if (firstDayKey !== currentDayKey) {
+    return first
+  }
+
+  const next = computeAssistantCronNextRunAt(input.schedule, new Date(first))
+  if (!next) {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_INVALID_SCHEDULE',
+      'The assistant cron schedule does not produce a deferred future run time.',
+    )
+  }
+
+  return next
+}
+
 export function findNextAssistantCronOccurrence(
   expression: string,
   after: Date,

@@ -41,10 +41,10 @@ export async function projectHostedAiUsageLimitNoticeForDelivery(input: {
         return input.message;
       }
       /**
-       * Only this branch knows the group can actually be funded right now, so
-       * it owns the ask. A live monthly sponsorship suppresses this branch,
+       * Only this branch knows a public funding ask is timely right now, so it
+       * owns the ask. A live monthly sponsorship suppresses this branch,
        * leaving only the neutral group pause notice without payer or amount
-       * details.
+       * details. Explicit funding capability is projected separately.
        */
       const funding = renderUserFacingMessage({
         context: { fundingUrl: fundingUrl.toString() },

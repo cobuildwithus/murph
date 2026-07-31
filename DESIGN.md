@@ -220,6 +220,20 @@ an affected WAU or MAU with `At least`, explain the private evidence retirement
 in the supporting copy, and withhold a week-over-week rate when either compared
 window is incomplete.
 
+Follow the scorecard with the existing two-column chart grid. Lead that grid
+with **Total messages sent**, a thin sage cumulative line seeded from the
+established historical base, and **Messages sent per day**, restrained sage
+bars for completed UTC days. Both derive from the existing daily growth
+snapshots. Shift each snapshot's prior-day counts onto the date when the
+messages occurred and always preserve the exact 30 completed-day UTC spine.
+Leave absent snapshots and legacy unknown counts as chart gaps rather than
+zeros. Once tracking has begun, an unavailable day also ends the exact
+cumulative line until the missing evidence is reconciled; later known daily
+bars may still render. State that the daily total combines inbound messages
+across supported channels with tracked Linq replies. Give each keyboard-enabled
+chart one visible focus surface named by its heading. Keep acquisition and
+revenue snapshots as the second chart row.
+
 ### Measured Biomarker Index
 On `/biomarkers`, device-derived reading rows lead in a flat full-width notebook
 band bracketed by warm one-pixel rules. Do not wrap that band in a rounded card
@@ -383,10 +397,13 @@ one route back to Connect. Keep both states readable at narrow mobile widths,
 with 44px-or-larger controls and no provider-supplied copy.
 
 ### Group Usage Funding
-Use `GroupUsageFundingCard` as the public entry surface for one-time group usage
-credit. Lead with the group name, one concise sentence explaining that the
-credit belongs to the group, and one primary action. Do not add a decorative
-status badge; retain `Open Murph` as the quiet secondary action.
+An authenticated group funding link opens its relevant funding control
+immediately: monthly sponsorship for an unsponsored chat, one-time contribution
+for an already sponsored chat, or payment recovery when a purchase is in
+progress. Use `GroupUsageFundingShell` only as the quiet reopen surface beneath
+that control. Do not add a second sales card, decorative status badge, duplicate
+headline, or explanatory paragraph. Retain `Back to Murph` as the quiet
+secondary action.
 
 Use `GroupSponsorshipDialog` for the primary monthly choice. Present $5, $10,
 and $20 as visually prominent monthly maximums. On desktop, use the shared
@@ -396,7 +413,9 @@ snaps to the nearest available maximum on release; Arrow keys and Home/End
 provide the same three-stop selection. Keep the opening explanation to
 `Choose your monthly sponsorship limit.` The explicit sponsor action authorizes
 the initial $5 activation purchase, whose amount is shown before payment;
-selecting a maximum alone does not charge the card. Keep an explicit one-time
+selecting a maximum alone does not charge the card. Keep both funding actions
+available at every current group-capacity state; capacity changes urgency and
+automatic refill timing, not the ability to fund. Keep an explicit one-time
 contribution as the secondary action. Dollar amounts are cost-weighted usage
 credit, never an owned or promised number of messages. Every cap increase
 requires fresh payer confirmation. Keep the alias, note, and eligible temporary
@@ -405,9 +424,10 @@ them only to the activation or one-time purchase, never to automatic refills.
 Optional text fields use the sage focus border without an outer glow. The
 drawer body owns overflow while the sponsor action stays available at the safe
 area edge, so expanded note fields never become unreachable. Preserve visible
-focus and selection states, and render the production activation,
+focus and selection states. Render the production activation,
 active-management, near-cap/recovery, paused, and one-time states at desktop and
-mobile sizes on `/design` with controls inert.
+mobile sizes on `/design` with controls inert, including content rendered
+through a dialog or drawer portal.
 
 When group funding is fulfilled, switch from the payment-status composition to
 one confident success hierarchy: a compact sage confirmation mark and mono
