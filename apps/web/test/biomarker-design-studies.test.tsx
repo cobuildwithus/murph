@@ -114,7 +114,7 @@ test("design page routes the biomarker studies through the dedicated sections ta
     "Capped monthly group sponsorship and one-time contribution",
   );
   expect(sectionsMarkup).toContain(
-    "Overall AI usage, purchase reset, Family owner action, credits, and missions",
+    "Overall AI usage, purchase reset, Family owner action, credits, and referrals",
   );
   expect(sectionsMarkup).toContain("Biomarker result detail");
   expect(sectionsMarkup).toContain("Biomarker reference context");

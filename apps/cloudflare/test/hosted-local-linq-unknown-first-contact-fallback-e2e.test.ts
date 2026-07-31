@@ -29,6 +29,7 @@ const incomingChatId = `chat_unknown_linq_first_contact_${runId}`;
 const linqApiToken = "linq-local-unknown-first-contact-token";
 const linqWebhookSecret = "linq-local-unknown-first-contact-webhook-secret";
 const inboundText = "Hey Murph, can you help me get started?";
+const hostedPublicBaseUrl = "https://hosted.local.test";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -58,6 +59,11 @@ describe("hosted local Linq unknown first-contact fallback e2e", () => {
       requiredRunnerEnvProfile: "linq",
       scenarioLabel: "Local hosted Linq unknown first-contact fallback e2e",
       streamLogs: streamDevLogs,
+      webProcessEnvOverrides: {
+        DEVICE_SYNC_PUBLIC_BASE_URL: `${hostedPublicBaseUrl}/api/device-sync`,
+        HOSTED_ONBOARDING_PUBLIC_BASE_URL: hostedPublicBaseUrl,
+        HOSTED_WEB_BASE_URL: hostedPublicBaseUrl,
+      },
     });
   }, 300_000);
 
@@ -130,7 +136,19 @@ describe("hosted local Linq unknown first-contact fallback e2e", () => {
       throw new Error("Expected the fallback line signup chat to be observed.");
     }
     expect(signupCreateChat.authorizationStatus).toBe("expected");
-    expect(signupCreateChat.body).toContain(responseBody.joinUrl);
+    expect(responseBody.joinUrl).toMatch(/^https:\/\/hosted\.local\.test\//u);
+    const signupText = requireLinqStub().readObservedMessageText(signupCreateChat);
+    expect(signupText).toEqual(expect.any(String));
+    expect(signupText).not.toContain(responseBody.joinUrl);
+    expect(signupText).not.toMatch(/https?:\/\//iu);
+    const signupLinkMessages = requireLinqStub().observedRequests.filter(
+      (request) =>
+        request.method === "POST"
+        && /^\/chats\/[^/]+\/messages$/u.test(request.url)
+        && requireLinqStub().readObservedMessageLink(request) === responseBody.joinUrl,
+    );
+    expect(signupLinkMessages).toHaveLength(1);
+    expect(signupLinkMessages[0]?.authorizationStatus).toBe("expected");
     expect(requireLinqStub().countObservedSends(createChatPath)).toBe(
       totalCreateChatBaseline + 1,
     );

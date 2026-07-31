@@ -9566,7 +9566,8 @@ describe("hosted runtime callbacks", () => {
       NonNullable<ReturnType<typeof createHostedRuntimeEffectsPortStub>["recordLinqDeliveryOutcome"]>
     >(async () => undefined);
     mocks.sendLinqMessage.mockResolvedValueOnce({
-      providerMessageId: "linq_message_sent",
+      providerMessageId: "linq_link_message",
+      providerMessageIds: ["linq_text_message", "linq_link_message"],
       providerThreadId: "linq_chat_123",
       target: "linq_chat_123",
       targetKind: "participant" as const,
@@ -9588,6 +9589,7 @@ describe("hosted runtime callbacks", () => {
           channel: "linq",
           idempotencyKey: "signup-welcome:member_123",
           providerMessageId: delivery.providerMessageId,
+          providerMessageIds: delivery.providerMessageIds,
           providerThreadId: delivery.providerThreadId,
           target: delivery.target,
           targetKind: delivery.targetKind,
@@ -9648,7 +9650,8 @@ describe("hosted runtime callbacks", () => {
       NonNullable<ReturnType<typeof createHostedRuntimeEffectsPortStub>["recordLinqDeliveryOutcome"]>
     >(async () => undefined);
     mocks.sendLinqMessage.mockResolvedValueOnce({
-      providerMessageId: "linq_message_sent",
+      providerMessageId: "linq_link_message",
+      providerMessageIds: ["linq_text_message", "linq_link_message"],
       providerThreadId: "linq_chat_123",
       target: "linq_chat_123",
       targetKind: "participant" as const,
@@ -9670,6 +9673,7 @@ describe("hosted runtime callbacks", () => {
           channel: "linq",
           idempotencyKey: "signup-welcome:member_123",
           providerMessageId: delivery.providerMessageId,
+          providerMessageIds: delivery.providerMessageIds,
           providerThreadId: delivery.providerThreadId,
           target: delivery.target,
           targetKind: delivery.targetKind,
@@ -9702,7 +9706,8 @@ describe("hosted runtime callbacks", () => {
         fromPhoneNumber: "+15550100099",
         idempotencyKey: "signup-welcome:member_123",
         intentId: "intent_123",
-        providerMessageId: "linq_message_sent",
+        providerMessageId: "linq_link_message",
+        providerMessageIds: ["linq_text_message", "linq_link_message"],
         providerTarget: null,
         providerThreadId: "linq_chat_123",
         target: null,
@@ -10390,6 +10395,173 @@ describe("hosted runtime callbacks", () => {
     expect(recordedOutcome).not.toContain("provider_msg_private");
     expect(recordedOutcome).not.toContain("+15550109999");
     expect(recordedOutcome).not.toContain("private reply text");
+  });
+
+  it("persists a recoverable Linq rich-link checkpoint before the retry settles", async () => {
+    const answeredMailboxItemIds = ["mailbox_item_answered_1"];
+    const effect = createEffect({
+      answeredMailboxItemIds,
+      bindingDeliveryTarget: "linq_chat_123",
+      channel: "linq",
+      explicitTarget: "linq_chat_123",
+      message: "Complete payment https://pay.example.test/session",
+      transportIdempotent: false,
+    });
+    const providerError = Object.assign(
+      new Error("Linq rich-link delivery failed after primary acceptance."),
+      {
+        code: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+        deliveryMayHaveSucceeded: true,
+        providerMessageId: "linq_text_accepted",
+        providerMessageIds: ["linq_text_accepted"],
+        providerThreadId: "linq_chat_123",
+        target: "linq_chat_123",
+        targetKind: "thread",
+      },
+    );
+    let releaseDeliveryOutcome: () => void = () => {};
+    const deliveryOutcomeReleased = new Promise<void>((resolve) => {
+      releaseDeliveryOutcome = resolve;
+    });
+    let markDeliveryOutcomeStarted: () => void = () => {};
+    const deliveryOutcomeStarted = new Promise<void>((resolve) => {
+      markDeliveryOutcomeStarted = resolve;
+    });
+    const recordDeliveryOutcome = vi.fn<
+      NonNullable<ReturnType<typeof createHostedRuntimeEffectsPortStub>["recordLinqDeliveryOutcome"]>
+    >(async () => {
+      markDeliveryOutcomeStarted();
+      await deliveryOutcomeReleased;
+    });
+    mocks.sendLinqMessage.mockRejectedValueOnce(providerError);
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      try {
+        await dependencies.sendLinq({
+          answeredMailboxItemIds,
+          idempotencyKey: "assistant-outbox:intent_123",
+          message: "Complete payment https://pay.example.test/session",
+          replyToMessageId: null,
+          target: "linq_chat_123",
+          targetKind: "thread",
+        });
+      } catch {
+        return createDispatchResult({
+          answeredMailboxItemIds,
+          delivery: createDelivery({
+            channel: "linq",
+            providerMessageId: "linq_text_accepted",
+            providerMessageIds: ["linq_text_accepted"],
+            providerThreadId: "linq_chat_123",
+            target: "linq_chat_123",
+            targetKind: "thread",
+          }),
+          status: "retryable",
+        }, {
+          code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+          message: "Provider delivery requires deterministic recovery.",
+        });
+      }
+
+      throw new Error("Expected Linq rich-link send to fail.");
+    });
+
+    let deliverySettled = false;
+    const deliveryPromise = drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      }),
+      forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      platformEnv: {},
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    }).finally(() => {
+      deliverySettled = true;
+    });
+
+    await deliveryOutcomeStarted;
+    await flushHostedRuntimeCallbackTestMicrotasks();
+    expect(deliverySettled).toBe(false);
+    releaseDeliveryOutcome();
+    const outcomes = await deliveryPromise;
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryStatus: "retryable",
+        retryable: true,
+      }),
+    ]);
+    expect(recordDeliveryOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        failedAt: expect.stringMatching(/Z$/u),
+        failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+        providerMessageId: "linq_text_accepted",
+        providerMessageIds: ["linq_text_accepted"],
+        providerThreadId: "linq_chat_123",
+      }),
+      { signal: expect.any(AbortSignal) },
+    );
+    expect(recordDeliveryOutcome.mock.calls[0]?.[0])
+      .not.toHaveProperty("answeredMailboxItemIds");
+  });
+
+  it("surfaces rich-link checkpoint recording failure before scheduling recovery", async () => {
+    const answeredMailboxItemIds = ["mailbox_item_answered_1"];
+    const providerError = Object.assign(
+      new Error("Linq rich-link delivery failed after primary acceptance."),
+      {
+        code: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+        deliveryMayHaveSucceeded: true,
+        providerMessageId: "linq_text_accepted",
+        providerMessageIds: ["linq_text_accepted"],
+        providerThreadId: "linq_chat_123",
+        target: "linq_chat_123",
+        targetKind: "thread",
+      },
+    );
+    const recordDeliveryOutcome = vi.fn<
+      NonNullable<ReturnType<typeof createHostedRuntimeEffectsPortStub>["recordLinqDeliveryOutcome"]>
+    >(async () => {
+      throw new Error("web callback unavailable");
+    });
+    mocks.sendLinqMessage.mockRejectedValueOnce(providerError);
+    const dependencies = createHostedAssistantProgressDeliveryDependencies({
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      }),
+      forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      providerFetch: vi.fn<typeof fetch>(),
+    });
+    const sendLinq = dependencies.sendLinq;
+    assert.ok(sendLinq);
+
+    await expect(sendLinq({
+      answeredMailboxItemIds,
+      idempotencyKey: "assistant-outbox:intent_123",
+      message: "Complete payment https://pay.example.test/session",
+      replyToMessageId: null,
+      target: "linq_chat_123",
+      targetKind: "thread",
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_LINQ_DELIVERY_OUTCOME_RECORD_FAILED",
+      context: expect.objectContaining({ retryable: true }),
+      deliveryMayHaveSucceeded: true,
+    });
+    expect(recordDeliveryOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        failedAt: expect.stringMatching(/Z$/u),
+        failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+        providerMessageIds: ["linq_text_accepted"],
+      }),
+      { signal: expect.any(AbortSignal) },
+    );
+    expect(recordDeliveryOutcome.mock.calls[0]?.[0])
+      .not.toHaveProperty("answeredMailboxItemIds");
   });
 
   it("checks egress authority for signup welcome Linq sends into existing threads", async () => {
