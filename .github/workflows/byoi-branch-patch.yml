@@ -6,6 +6,8 @@ on:
       - agent/bring-your-own-inference
     paths:
       - scripts/apply-byoi-branch-patch.py
+      - scripts/apply-byoi-runtime-pinning.py
+      - scripts/apply-byoi-custom-provider.py
       - .github/workflows/byoi-branch-patch.yml
 
 permissions:
@@ -33,6 +35,8 @@ jobs:
           set -euo pipefail
           test "${GITHUB_REF_NAME}" = "agent/bring-your-own-inference"
           python3 scripts/apply-byoi-branch-patch.py
+          python3 scripts/apply-byoi-runtime-pinning.py
+          python3 scripts/apply-byoi-custom-provider.py
           git diff --check
 
       - name: Commit patch result
@@ -46,5 +50,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add --all
-          git commit -m "feat(web): add custom inference persistence"
+          git commit -m "feat(runtime): pin and proxy custom inference"
           git push origin HEAD:agent/bring-your-own-inference
