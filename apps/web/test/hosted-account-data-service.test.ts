@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const serviceMocks = vi.hoisted(() => ({
+  buildHostedPrivySessionState: vi.fn(),
   connectedAppsClient: {
     deleteAccount: vi.fn(),
     disconnectAccount: vi.fn(),
@@ -11,17 +12,21 @@ const serviceMocks = vi.hoisted(() => ({
   createHostedDeviceSyncRegistry: vi.fn(),
   deleteHostedPrivyUser: vi.fn(),
   deleteHostedRunnerUserDataBestEffort: vi.fn(),
+  enqueueHostedMemberChannelsUpdatedForActiveMemberTx: vi.fn(),
   getHostedOnboardingStripe: vi.fn(),
   pendingHostedAccountDeletionCleanupResult: vi.fn(),
   persistHostedAccountDeletionCleanupTx: vi.fn(),
   prepareHostedAccountDeletionCleanup: vi.fn(),
   readHostedConnectedAppsConfig: vi.fn(),
+  readHostedPrivyUserById: vi.fn(),
+  reconcileHostedPrivyIdentityOnMemberTx: vi.fn(),
   runHostedAccountDeletionCleanup: vi.fn(),
   assertHostedUsageCreditPurchasesReadyForAccountDeletionTx: vi.fn(),
   closeHostedUsageCreditPurchasesForAccountDeletion: vi.fn(),
   assertHostedPhoneCallsReadyForAccountDeletionTx: vi.fn(),
   deleteHostedPhoneCallsForAccountDeletion: vi.fn(),
   terminateHostedUserRuntimeWorkflowBestEffort: vi.fn(),
+  prepareHostedPrivyPhoneTransferSourceRetirementTx: vi.fn(),
 }));
 
 vi.mock("@/src/lib/connected-apps/composio", async (importOriginal) => ({
@@ -45,6 +50,27 @@ vi.mock("@/src/lib/device-sync/providers", () => ({
 vi.mock("@/src/lib/hosted-onboarding/privy", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/src/lib/hosted-onboarding/privy")>()),
   deleteHostedPrivyUser: serviceMocks.deleteHostedPrivyUser,
+  readHostedPrivyUserById: serviceMocks.readHostedPrivyUserById,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/privy-user", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/src/lib/hosted-onboarding/privy-user")>()),
+  buildHostedPrivySessionState: serviceMocks.buildHostedPrivySessionState,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/member-channel-sync", () => ({
+  enqueueHostedMemberChannelsUpdatedForActiveMemberTx:
+    serviceMocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
+  reconcileHostedPrivyIdentityOnMemberTx:
+    serviceMocks.reconcileHostedPrivyIdentityOnMemberTx,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/privy-phone-transfer-retirement", () => ({
+  prepareHostedPrivyPhoneTransferSourceRetirementTx:
+    serviceMocks.prepareHostedPrivyPhoneTransferSourceRetirementTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", async (importOriginal) => ({
@@ -105,6 +131,7 @@ import {
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 import {
   deleteHostedAccountData,
+  deleteHostedPrivyPhoneTransferSourceAccountData,
   HOSTED_ACCOUNT_DATA_STORE_COVERAGE,
   parseHostedAccountDeletionRequest,
 } from "@/src/lib/hosted-privacy/account-data-service";
@@ -192,6 +219,25 @@ const VALID_DELETION_MODES = new Set([
 
 beforeEach(() => {
   vi.stubEnv("KERNEL_API_KEY", "");
+  serviceMocks.buildHostedPrivySessionState.mockReset();
+  serviceMocks.buildHostedPrivySessionState.mockReturnValue({
+    identity: {
+      phone: {
+        number: "+15551234567",
+        verifiedAt: new Date("2026-07-30T12:00:00.000Z"),
+      },
+      telegram: null,
+      userId: "did:privy:target",
+    },
+    linkedAccounts: [{
+      phoneNumber: "+15551234567",
+      type: "phone",
+      verifiedAt: "2026-07-30T12:00:00.000Z",
+    }],
+    verifiedPrivyUser: {
+      id: "did:privy:target",
+    },
+  });
   serviceMocks.connectedAppsClient.deleteAccount.mockReset();
   serviceMocks.connectedAppsClient.deleteAccount.mockResolvedValue(undefined);
   serviceMocks.connectedAppsClient.disconnectAccount.mockReset();
@@ -206,6 +252,10 @@ beforeEach(() => {
   });
   serviceMocks.deleteHostedPrivyUser.mockReset();
   serviceMocks.deleteHostedPrivyUser.mockResolvedValue(true);
+  serviceMocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx.mockReset();
+  serviceMocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx.mockResolvedValue({
+    mailboxItemId: "mailbox_target",
+  });
   serviceMocks.deleteHostedRunnerUserDataBestEffort.mockReset();
   serviceMocks.deleteHostedRunnerUserDataBestEffort.mockResolvedValue(makeCloudflareDeletionResult());
   serviceMocks.getHostedOnboardingStripe.mockReset();
@@ -255,6 +305,17 @@ beforeEach(() => {
     baseUrl: "https://backend.composio.test",
     maxAccountsPerToolkit: 5,
     toolkits: ["gmail", "googlecalendar"],
+  });
+  serviceMocks.readHostedPrivyUserById.mockReset();
+  serviceMocks.readHostedPrivyUserById.mockResolvedValue({
+    id: "did:privy:target",
+  });
+  serviceMocks.reconcileHostedPrivyIdentityOnMemberTx.mockReset();
+  serviceMocks.reconcileHostedPrivyIdentityOnMemberTx.mockResolvedValue(undefined);
+  serviceMocks.prepareHostedPrivyPhoneTransferSourceRetirementTx.mockReset();
+  serviceMocks.prepareHostedPrivyPhoneTransferSourceRetirementTx.mockResolvedValue({
+    autoTrialBilling: null,
+    sourceMemberId: "member_123",
   });
   serviceMocks.assertHostedUsageCreditPurchasesReadyForAccountDeletionTx.mockReset();
   serviceMocks.assertHostedUsageCreditPurchasesReadyForAccountDeletionTx.mockResolvedValue(
@@ -421,6 +482,89 @@ describe("HOSTED_ACCOUNT_DATA_STORE_COVERAGE", () => {
 
 
 describe("deleteHostedAccountData", () => {
+  it("atomically retires the transfer source and attaches the target after fresh Privy proof", async () => {
+    const order: string[] = [];
+    serviceMocks.readHostedPrivyUserById.mockImplementation(async () => {
+      order.push("privy:read");
+      return { id: "did:privy:target" };
+    });
+    serviceMocks.prepareHostedPrivyPhoneTransferSourceRetirementTx.mockImplementation(
+      async () => {
+        order.push("transfer:recheck");
+        return {
+          autoTrialBilling: null,
+          sourceMemberId: "member_123",
+        };
+      },
+    );
+    serviceMocks.persistHostedAccountDeletionCleanupTx.mockImplementation(async () => {
+      order.push("persist:cleanup");
+    });
+    serviceMocks.reconcileHostedPrivyIdentityOnMemberTx.mockImplementation(async () => {
+      order.push("target:reconcile");
+    });
+    serviceMocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx.mockImplementation(
+      async () => {
+        order.push("target:enqueue");
+        return { mailboxItemId: "mailbox_target" };
+      },
+    );
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      onTransaction: () => order.push("prisma"),
+      operationOrder: order,
+    });
+
+    const result = await deleteHostedPrivyPhoneTransferSourceAccountData({
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+      retirement: {
+        autoTrialBilling: null,
+        sourceMemberId: "member_123",
+      },
+      targetMember: {
+        billingStatus: "active",
+        createdAt: new Date("2026-07-30T12:00:00.000Z"),
+        id: "member_target",
+        suspendedAt: null,
+        updatedAt: new Date("2026-07-30T12:00:00.000Z"),
+      },
+      targetPrivyUserId: "did:privy:target",
+      transfer: {
+        phoneNumber: "+15551234567",
+        sourceMemberId: "member_123",
+        sourcePrivyUserId: "did:privy:source",
+      },
+    });
+
+    const finalTransactionStart = order.lastIndexOf("prisma");
+    const finalTransactionOrder = order.slice(finalTransactionStart + 1);
+    expect(order.indexOf("privy:read")).toBeGreaterThan(order.indexOf("prisma"));
+    expect(order.indexOf("privy:read")).toBeLessThan(finalTransactionStart);
+    expect(finalTransactionOrder.slice(0, 6)).toEqual([
+      "executeRaw",
+      "executeRaw:phone:+15551234567",
+      "queryRaw",
+      "queryRaw:member_123",
+      "queryRaw",
+      "queryRaw:member_target",
+    ]);
+    expect(finalTransactionOrder.indexOf("transfer:recheck")).toBeGreaterThan(
+      finalTransactionOrder.indexOf("queryRaw:member_target"),
+    );
+    expect(finalTransactionOrder.indexOf("persist:cleanup")).toBeLessThan(
+      finalTransactionOrder.indexOf("delete:hostedMember"),
+    );
+    expect(finalTransactionOrder.indexOf("delete:hostedMember")).toBeLessThan(
+      finalTransactionOrder.indexOf("target:reconcile"),
+    );
+    expect(finalTransactionOrder.indexOf("target:reconcile")).toBeLessThan(
+      finalTransactionOrder.indexOf("target:enqueue"),
+    );
+    expect(result.channelSyncDispatch).toEqual({
+      mailboxItemId: "mailbox_target",
+    });
+  });
+
   it("keeps the deletion fence when durable cleanup ownership cannot be prepared", async () => {
     const onTransaction = vi.fn();
     const hostedMemberUpdateCalls: unknown[] = [];

@@ -8,6 +8,10 @@ import {
 import { useEffect, useRef, useState } from "react";
 
 import { finalizeHostedPhoneLink } from "@/src/components/hosted-onboarding/hosted-phone-auth-support";
+import {
+  ContactSupportAction,
+  shouldShowContactSupportAction,
+} from "@/src/components/support/contact-support-action";
 import { Button } from "@/src/components/ui/button";
 import {
   Dialog,
@@ -28,6 +32,7 @@ import { toErrorMessage } from "./hosted-settings-utils";
 
 export function HostedPhoneSettings(props: {
   autoOpen?: boolean;
+  initialPhoneNumber?: string | null;
   onAborted?: () => void;
   onLinked?: (payload: HostedPhoneLinkPayload) => Promise<void> | void;
 }) {
@@ -39,22 +44,31 @@ export function HostedPhoneSettings(props: {
   const accountTransferPendingRef = useRef(false);
   const autoOpenStartedRef = useRef(false);
   const pendingSyncExpectationRef = useRef<HostedPhoneLinkSyncExpectation | null>(null);
+  const providerAttemptSequenceRef = useRef(0);
+  const providerLaunchAttemptRef = useRef<number | null>(null);
   const providerPhoneBaselineRef = useRef<string | null>(null);
   const providerCompletionHandledRef = useRef(false);
 
   const shouldUpdatePhone = Boolean(privyUser?.phone?.number);
-
   const { linkPhone } = useLinkAccount({
     onError: (error, details) => {
       if (details && details.linkMethod !== "sms") {
         return;
       }
 
-      handleProviderError(error, "exited_link_flow");
+      const providerAttempt = providerLaunchAttemptRef.current;
+      if (providerAttempt !== null) {
+        handleProviderError(providerAttempt, error, "exited_link_flow");
+      }
     },
     onSuccess: (params) => {
-      if (params.linkMethod === "sms" && params.linkedAccount.type === "phone") {
-        void handlePrivyPhoneLinked({
+      const providerAttempt = providerLaunchAttemptRef.current;
+      if (
+        providerAttempt !== null
+        && params.linkMethod === "sms"
+        && params.linkedAccount.type === "phone"
+      ) {
+        void handlePrivyPhoneLinked(providerAttempt, {
           kind: "exact",
           phoneNumber: params.linkedAccount.number,
         });
@@ -67,11 +81,19 @@ export function HostedPhoneSettings(props: {
         return;
       }
 
-      handleProviderError(error, "exited_update_flow");
+      const providerAttempt = providerLaunchAttemptRef.current;
+      if (providerAttempt !== null) {
+        handleProviderError(providerAttempt, error, "exited_update_flow");
+      }
     },
     onSuccess: (params) => {
-      if (params.updateMethod === "sms" && params.updatedAccount.type === "phone") {
-        void handlePrivyPhoneLinked({
+      const providerAttempt = providerLaunchAttemptRef.current;
+      if (
+        providerAttempt !== null
+        && params.updateMethod === "sms"
+        && params.updatedAccount.type === "phone"
+      ) {
+        void handlePrivyPhoneLinked(providerAttempt, {
           kind: "exact",
           phoneNumber: params.updatedAccount.number,
         });
@@ -117,17 +139,32 @@ export function HostedPhoneSettings(props: {
     }
   }
 
-  async function handlePrivyPhoneLinked(expectation: HostedPhoneLinkSyncExpectation) {
-    if (providerCompletionHandledRef.current) {
+  async function handlePrivyPhoneLinked(
+    providerAttempt: number,
+    expectation: HostedPhoneLinkSyncExpectation,
+  ) {
+    if (
+      providerLaunchAttemptRef.current !== providerAttempt
+      || providerCompletionHandledRef.current
+    ) {
       return;
     }
 
     providerCompletionHandledRef.current = true;
     accountTransferPendingRef.current = false;
+    providerLaunchAttemptRef.current = null;
     await syncPrivyPhone(expectation);
   }
 
-  function handleProviderError(error: unknown, exitedFlowError: string) {
+  function handleProviderError(
+    providerAttempt: number,
+    error: unknown,
+    exitedFlowError: string,
+  ) {
+    if (providerLaunchAttemptRef.current !== providerAttempt) {
+      return;
+    }
+
     if (error === "account_transfer_required") {
       accountTransferPendingRef.current = true;
       setErrorMessage(null);
@@ -135,6 +172,7 @@ export function HostedPhoneSettings(props: {
     }
 
     if (error === exitedFlowError) {
+      providerLaunchAttemptRef.current = null;
       setIsLinking(false);
 
       if (providerCompletionHandledRef.current) {
@@ -143,10 +181,11 @@ export function HostedPhoneSettings(props: {
 
       if (accountTransferPendingRef.current) {
         accountTransferPendingRef.current = false;
-        void handlePrivyPhoneLinked({
+        pendingSyncExpectationRef.current = {
           kind: "changed-from",
           phoneNumber: providerPhoneBaselineRef.current,
-        });
+        };
+        void syncPrivyPhone(pendingSyncExpectationRef.current);
         return;
       }
 
@@ -155,6 +194,7 @@ export function HostedPhoneSettings(props: {
     }
 
     accountTransferPendingRef.current = false;
+    providerLaunchAttemptRef.current = null;
     setIsLinking(false);
     setErrorMessage(toPhoneLinkErrorMessage(error));
   }
@@ -171,43 +211,37 @@ export function HostedPhoneSettings(props: {
 
     accountTransferPendingRef.current = false;
     providerCompletionHandledRef.current = false;
+    const providerPhoneNumber = privyUser?.phone?.number ?? null;
+    if (
+      providerPhoneNumber
+      && providerPhoneNumber !== (props.initialPhoneNumber ?? null)
+    ) {
+      const repairExpectation: HostedPhoneLinkSyncExpectation = {
+        kind: "exact",
+        phoneNumber: providerPhoneNumber,
+      };
+      pendingSyncExpectationRef.current = repairExpectation;
+      await syncPrivyPhone(repairExpectation);
+      return;
+    }
+
+    const providerAttempt = providerAttemptSequenceRef.current + 1;
+    providerAttemptSequenceRef.current = providerAttempt;
+    providerPhoneBaselineRef.current = providerPhoneNumber;
+    providerLaunchAttemptRef.current = providerAttempt;
     setIsLinking(true);
-
-    let preparation: Awaited<ReturnType<typeof finalizeHostedPhoneLink>>;
     try {
-      preparation = await finalizeHostedPhoneLink({
-        expectation: {
-          kind: "prepare",
-        },
-        onLinked: handleLinked,
-      });
-    } catch (error) {
-      setIsLinking(false);
-      setErrorMessage(toPhoneLinkErrorMessage(error));
-      return;
-    }
-
-    if (preparation.status === "synced") {
-      setIsLinking(false);
-      return;
-    }
-    if (preparation.status === "unchanged") {
-      setIsLinking(false);
-      props.onAborted?.();
-      return;
-    }
-
-    providerPhoneBaselineRef.current = preparation.phoneNumber;
-
-    try {
-      if (preparation.phoneNumber) {
+      if (providerPhoneNumber) {
         updatePhone();
       } else {
         linkPhone();
       }
     } catch (error) {
-      setIsLinking(false);
-      setErrorMessage(toPhoneLinkErrorMessage(error));
+      if (providerLaunchAttemptRef.current === providerAttempt) {
+        providerLaunchAttemptRef.current = null;
+        setIsLinking(false);
+        setErrorMessage(toPhoneLinkErrorMessage(error));
+      }
     }
   }
 
@@ -223,6 +257,7 @@ export function HostedPhoneSettings(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.autoOpen]);
 
+  const isBusy = isLinking || isSyncing;
   const statusTone = errorMessage ? "destructive" : successMessage ? "success" : "neutral";
   const statusMessage =
     errorMessage
@@ -232,7 +267,6 @@ export function HostedPhoneSettings(props: {
       : isLinking
         ? "Opening secure phone verification…"
         : null);
-
   if (props.autoOpen) {
     return (
       <HostedPhonePrivyHandOffStatus
@@ -248,7 +282,7 @@ export function HostedPhoneSettings(props: {
   return (
     <div className="space-y-5">
       <HostedPhoneLinkAction
-        disabled={isLinking || isSyncing}
+        disabled={isBusy}
         isChangeFlow={shouldUpdatePhone}
         isLinking={isLinking}
         isSyncing={isSyncing}
@@ -256,7 +290,28 @@ export function HostedPhoneSettings(props: {
       />
 
       <SettingsStatusLine message={statusMessage} tone={statusTone} />
+      <HostedPhoneSupportAction errorMessage={errorMessage} />
     </div>
+  );
+}
+
+function HostedPhoneSupportAction({
+  errorMessage,
+}: {
+  errorMessage: string | null;
+}) {
+  if (!shouldShowContactSupportAction(errorMessage)) {
+    return null;
+  }
+
+  return (
+    <ContactSupportAction
+      body="Hi Murph support,\n\nI need help linking a phone number to my Murph account."
+      className="min-h-12 w-full border-border bg-transparent text-foreground hover:bg-muted"
+      subject="Help linking my phone"
+    >
+      Contact support
+    </ContactSupportAction>
   );
 }
 
@@ -292,28 +347,36 @@ function HostedPhonePrivyHandOffStatus({
               {errorMessage}
             </DialogDescription>
           </DialogHeader>
-          <Button
-            type="button"
-            size="xl"
-            className="w-full"
-            disabled={isLinking || isSyncing}
-            onClick={onRetry}
-          >
-            Try again
-          </Button>
+          <div className="grid gap-3">
+            <Button
+              type="button"
+              size="xl"
+              className="w-full"
+              disabled={isLinking || isSyncing}
+              onClick={onRetry}
+            >
+              Try again
+            </Button>
+            <HostedPhoneSupportAction errorMessage={errorMessage} />
+          </div>
         </DialogContent>
       </Dialog>
     );
   }
 
   // Privy's modal is the only visible surface while its link/update flow is
-  // active. Murph appears only for the brief launch and post-verification sync.
+  // active. Murph appears only for launch and post-verification reconciliation.
   if (isLinking) {
     return null;
   }
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/10 supports-backdrop-filter:backdrop-blur-xs">
+    <div
+      aria-labelledby="hosted-phone-hand-off-status"
+      aria-modal="true"
+      role="dialog"
+      className="fixed inset-0 z-50 grid place-items-center bg-black/10 supports-backdrop-filter:backdrop-blur-xs"
+    >
       <div
         aria-busy="true"
         aria-live="polite"
@@ -321,7 +384,11 @@ function HostedPhonePrivyHandOffStatus({
         className="flex flex-col items-center gap-4 text-sm text-muted-foreground"
       >
         <MurphPulseLoader className="h-16 w-auto" />
-        <span>{isSyncing ? "Saving your phone…" : "Opening secure window…"}</span>
+        <span id="hosted-phone-hand-off-status">
+          {isSyncing
+            ? "Saving your phone…"
+            : "Preparing secure phone verification…"}
+        </span>
       </div>
     </div>
   );

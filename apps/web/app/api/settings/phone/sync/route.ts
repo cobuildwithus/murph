@@ -2,7 +2,13 @@ import { getPrisma } from "@/src/lib/prisma";
 import {
   signalHostedMailboxAppendRuntime,
 } from "@/src/lib/hosted-orchestration/signal-runtime";
-import { readHostedPhoneHint } from "@/src/lib/hosted-onboarding/contact-privacy";
+import {
+  deleteHostedPrivyPhoneTransferSourceAccountData,
+} from "@/src/lib/hosted-privacy/account-data-service";
+import {
+  hostedPhoneLookupKeyMatchesValue,
+  readHostedPhoneHint,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import {
   assertHostedMemberNotSuspended,
@@ -13,11 +19,19 @@ import { jsonOk, readOptionalJsonObject, withJsonError } from "@/src/lib/hosted-
 import {
   enqueueHostedMemberChannelsUpdatedForActiveMemberTx,
 } from "@/src/lib/hosted-onboarding/member-channel-sync";
-import { reconcileHostedPrivyIdentityOnMemberTx } from "@/src/lib/hosted-onboarding/member-identity-service";
+import {
+  reconcileHostedPrivyIdentityOnMemberTx,
+} from "@/src/lib/hosted-onboarding/member-identity-service";
+import {
+  prepareHostedPrivyPhoneTransferSourceRetirementTx,
+  readHostedPrivyPhoneTransferProof,
+} from "@/src/lib/hosted-onboarding/privy-phone-transfer-retirement";
 import { normalizePhoneNumber } from "@/src/lib/hosted-onboarding/phone";
 import { readHostedPrivyUserById } from "@/src/lib/hosted-onboarding/privy";
 import { buildHostedPrivySessionState } from "@/src/lib/hosted-onboarding/privy-user";
+import { retrieveHostedPulseTrialCleanupTarget } from "@/src/lib/hosted-onboarding/pulse-trial-subscription-cleanup";
 import { requireFreshPrivyMemberAuthForHostedAppSession } from "@/src/lib/hosted-onboarding/request-auth";
+import { requireHostedStripeBillingPlanConfig } from "@/src/lib/hosted-onboarding/runtime";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
 
 export const POST = withJsonError(async (request: Request) => {
@@ -37,43 +51,112 @@ export const POST = withJsonError(async (request: Request) => {
     expectation,
     phoneNumber,
   });
+  traceHostedPhoneSync("provider-session-read", {
+    expectationKind: expectation.kind,
+    providerPhonePresent: Boolean(phoneNumber),
+  });
+
+  if (!phoneNumber) {
+    if (
+      expectation.kind === "changed-from"
+      && expectation.phoneNumber === null
+    ) {
+      return jsonOk({
+        status: "unchanged" as const,
+      });
+    }
+    throwPhoneNotReady();
+  }
 
   const prisma = getPrisma();
+  const currentIdentity = await readHostedMemberIdentity({
+    memberId: auth.member.id,
+    prisma,
+  });
+  const currentPhoneNumber = normalizePhoneNumber(currentIdentity?.phoneNumber);
+  const currentProjectionAligned = isHostedPhoneProjectionAligned({
+    currentIdentity,
+    identity: providerSession.identity,
+    phoneNumber,
+  });
+
+  if (
+    expectation.kind === "changed-from"
+    && phoneNumber === expectation.phoneNumber
+    && currentProjectionAligned
+  ) {
+    return jsonOk({
+      status: "unchanged" as const,
+    });
+  }
+  if (phoneNumber === currentPhoneNumber && currentProjectionAligned) {
+    return jsonOk(buildSyncedPhoneResult(phoneNumber, false));
+  }
+
+  const phoneTransfer = await readHostedPrivyPhoneTransferProof({
+    identity: providerSession.identity,
+    memberId: auth.member.id,
+    prisma,
+  });
+  traceHostedPhoneSync("transfer-proof-read", {
+    transferRequired: Boolean(phoneTransfer),
+  });
   const now = new Date();
+  if (phoneTransfer) {
+    const retirement = await prisma.$transaction((tx) =>
+      prepareHostedPrivyPhoneTransferSourceRetirementTx({
+        identity: providerSession.identity,
+        member: auth.member,
+        now,
+        prisma: tx,
+        transfer: phoneTransfer,
+      }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    traceHostedPhoneSync("source-classified", {
+      sourceKind: retirement.autoTrialBilling ? "auto-trial" : "not-started",
+    });
+    if (retirement.autoTrialBilling) {
+      await assertHostedPhoneTransferAutoTrialRetirementAuthority({
+        ...retirement.autoTrialBilling,
+        sourceMemberId: retirement.sourceMemberId,
+      });
+      traceHostedPhoneSync("billing-authority-confirmed", {
+        sourceKind: "auto-trial",
+      });
+    }
+    const deletion =
+      await deleteHostedPrivyPhoneTransferSourceAccountData({
+        prisma,
+        request,
+        retirement,
+        targetMember: auth.member,
+        targetPrivyUserId: appSession.privyUserId,
+        transfer: phoneTransfer,
+      });
+    traceHostedPhoneSync("transfer-committed", {
+      channelSyncQueued: deletion.channelSyncDispatch !== null,
+    });
+    if (deletion.channelSyncDispatch) {
+      await signalHostedMailboxAppendBestEffort({
+        expectedUserId: auth.member.id,
+        mailboxItemId: deletion.channelSyncDispatch.mailboxItemId,
+      });
+    }
+    return jsonOk(buildSyncedPhoneResult(
+      phoneNumber,
+      deletion.channelSyncDispatch !== null,
+    ));
+  }
+
   const syncResult = await prisma.$transaction(async (tx) => {
-    const currentIdentity = await readHostedMemberIdentity({
+    const transactionIdentity = await readHostedMemberIdentity({
       memberId: auth.member.id,
       prisma: tx,
     });
-    const currentPhoneNumber = normalizePhoneNumber(currentIdentity?.phoneNumber);
-
-    if (expectation.kind === "prepare") {
-      if (!phoneNumber || phoneNumber === currentPhoneNumber) {
-        return {
-          channelSyncDispatch: null,
-          result: {
-            phoneNumber,
-            status: "ready" as const,
-          },
-        };
-      }
-    } else if (
-      expectation.kind === "changed-from"
-      && phoneNumber === expectation.phoneNumber
-    ) {
-      return {
-        channelSyncDispatch: null,
-        result: {
-          status: "unchanged" as const,
-        },
-      };
-    }
-
-    if (!phoneNumber) {
-      throwPhoneNotReady();
-    }
-
-    if (phoneNumber === currentPhoneNumber) {
+    if (isHostedPhoneProjectionAligned({
+      currentIdentity: transactionIdentity,
+      identity: providerSession.identity,
+      phoneNumber,
+    })) {
       return {
         channelSyncDispatch: null,
         result: buildSyncedPhoneResult(phoneNumber, false),
@@ -112,8 +195,73 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
+  traceHostedPhoneSync("projection-reconciled", {
+    channelSyncQueued: syncResult.channelSyncDispatch !== null,
+  });
   return jsonOk(syncResult.result);
 });
+
+function traceHostedPhoneSync(
+  phase: string,
+  details: Record<string, boolean | string>,
+): void {
+  if (process.env.MURPH_DEV_PHONE_SYNC_TRACE !== "1") {
+    return;
+  }
+
+  console.info("Hosted settings phone sync trace.", {
+    ...details,
+    phase,
+  });
+}
+
+function isHostedPhoneProjectionAligned(input: {
+  currentIdentity: Awaited<ReturnType<typeof readHostedMemberIdentity>>;
+  identity: ReturnType<typeof buildHostedPrivySessionState>["identity"];
+  phoneNumber: string;
+}): boolean {
+  return Boolean(
+    input.currentIdentity
+    && input.currentIdentity.phoneNumber === input.phoneNumber
+    && input.currentIdentity.phoneNumberVerifiedAt
+    && input.currentIdentity.privyUserId === input.identity.userId
+    && input.currentIdentity.phoneLookupKey
+    && hostedPhoneLookupKeyMatchesValue(
+      input.phoneNumber,
+      input.currentIdentity.phoneLookupKey,
+    )
+  );
+}
+
+async function assertHostedPhoneTransferAutoTrialRetirementAuthority(input: {
+  sourceMemberId: string;
+  stripeCustomerId: string;
+  stripeSubscriptionId: string;
+}): Promise<void> {
+  const { priceId, stripe } = requireHostedStripeBillingPlanConfig({
+    billingPlanCode: "launch_monthly",
+  });
+  const subscription = await retrieveHostedPulseTrialCleanupTarget({
+    expectedCustomerId: input.stripeCustomerId,
+    memberId: input.sourceMemberId,
+    priceId,
+    stripe,
+    subscriptionId: input.stripeSubscriptionId,
+  });
+  if (
+    subscription
+    && subscription.status !== "trialing"
+    && subscription.status !== "canceled"
+    && subscription.status !== "incomplete_expired"
+  ) {
+    throw hostedOnboardingError({
+      code: "PRIVY_PHONE_TRANSFER_REQUIRES_SUPPORT",
+      httpStatus: 409,
+      message:
+        "That phone belongs to another Murph account with saved activity. Contact support to reconcile it safely.",
+    });
+  }
+}
 
 type PhoneSyncExpectation =
   | {
@@ -123,18 +271,9 @@ type PhoneSyncExpectation =
   | {
       kind: "exact";
       phoneNumber: string;
-    }
-  | {
-      kind: "prepare";
     };
 
 function readPhoneSyncExpectation(body: Record<string, unknown>): PhoneSyncExpectation {
-  if (body.kind === "prepare") {
-    return {
-      kind: "prepare",
-    };
-  }
-
   if (body.kind === "exact") {
     const phoneNumber = normalizePhoneNumber(
       typeof body.phoneNumber === "string" ? body.phoneNumber : null,

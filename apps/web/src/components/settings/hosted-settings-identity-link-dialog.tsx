@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
 
 import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
-import { HostedPrivyProvider } from "@/src/components/hosted-onboarding/privy-provider";
 import { Button } from "@/src/components/ui/button";
 import {
   Dialog,
@@ -40,7 +39,6 @@ export function HostedSettingsIdentityLinkDialog({
   const router = useRouter();
   const { openAuthDialog } = useAuth();
   const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID?.trim();
-  const clientId = process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID?.trim() || null;
 
   const closeAndRefresh = () => {
     onOpenChange(false);
@@ -66,17 +64,15 @@ export function HostedSettingsIdentityLinkDialog({
   }
 
   return (
-    <HostedPrivyProvider appId={appId} clientId={clientId}>
-      <HostedSettingsIdentityMutationContent
-        account={account}
-        expectedPrivyUserId={expectedPrivyUserId}
-        initialMode={initialMode}
-        onClientAuthRequired={promptClientAuth}
-        onOpenChange={onOpenChange}
-        onSynced={closeAndRefresh}
-        privySessionMatchesAppSession={privySessionMatchesAppSession}
-      />
-    </HostedPrivyProvider>
+    <HostedSettingsIdentityMutationContent
+      account={account}
+      expectedPrivyUserId={expectedPrivyUserId}
+      initialMode={initialMode}
+      onClientAuthRequired={promptClientAuth}
+      onOpenChange={onOpenChange}
+      onSynced={closeAndRefresh}
+      privySessionMatchesAppSession={privySessionMatchesAppSession}
+    />
   );
 }
 
@@ -172,6 +168,7 @@ function HostedSettingsIdentityMutationContent({
     return (
       <HostedPhoneSettings
         autoOpen
+        initialPhoneNumber={account.phone.number}
         onAborted={() => onOpenChange(false)}
         onLinked={onSynced}
       />

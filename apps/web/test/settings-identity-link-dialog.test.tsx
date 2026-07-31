@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   onOpenChange: vi.fn(),
   openAuthDialog: vi.fn(),
   privyLogout: vi.fn(),
+  privyProvider: vi.fn((props: { children: ReactNode }) =>
+    createElement("div", null, props.children)),
   refresh: vi.fn(),
   usePrivy: vi.fn(),
   useUser: vi.fn(),
@@ -42,9 +44,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/src/components/hosted-onboarding/privy-provider", () => ({
-  HostedPrivyProvider(props: { children: ReactNode }) {
-    return createElement("div", null, props.children);
-  },
+  HostedPrivyProvider: mocks.privyProvider,
 }));
 
 vi.mock("@/src/components/ui/dialog", () => ({
@@ -224,6 +224,7 @@ describe("HostedSettingsIdentityLinkDialog", () => {
       expect(container.textContent).toContain("Link phone child");
       expect(mocks.phoneSettingsProps).toHaveLength(1);
       expect(mocks.phoneSettingsProps[0]?.autoOpen).toBe(true);
+      expect(mocks.privyProvider).not.toHaveBeenCalled();
 
       const handOffButton = Array.from(container.querySelectorAll("button")).find(
         (candidate) => candidate.textContent?.includes("Link phone child"),

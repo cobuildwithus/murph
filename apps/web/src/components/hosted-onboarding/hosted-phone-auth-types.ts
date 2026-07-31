@@ -35,16 +35,9 @@ export type HostedPhoneLinkSyncExpectation =
   | {
       kind: "exact";
       phoneNumber: string;
-    }
-  | {
-      kind: "prepare";
     };
 
 export type HostedPhoneLinkSyncResult =
-  | {
-      phoneNumber: string | null;
-      status: "ready";
-    }
   | {
       status: "unchanged";
     }

@@ -23,8 +23,7 @@ type UpdateAccountCallbacks = {
 
 type SyncExpectation =
   | { kind: "changed-from"; phoneNumber: string | null }
-  | { kind: "exact"; phoneNumber: string }
-  | { kind: "prepare" };
+  | { kind: "exact"; phoneNumber: string };
 
 const mocks = vi.hoisted(() => ({
   finalizeHostedPhoneLink: vi.fn(),
@@ -90,13 +89,6 @@ describe("HostedPhoneSettings", () => {
         phoneNumberHint: string;
       }) => Promise<void> | void;
     }) => {
-      if (input.expectation.kind === "prepare") {
-        return {
-          phoneNumber: mocks.providerPhoneNumber,
-          status: "ready",
-        };
-      }
-
       if (
         input.expectation.kind === "changed-from"
         && input.expectation.phoneNumber === mocks.transferPhoneNumber
@@ -144,9 +136,11 @@ describe("HostedPhoneSettings", () => {
     expect(container.textContent).not.toContain("Not connected");
     expect(container.querySelector('[aria-live="polite"]')).toBeTruthy();
     expect(container.querySelector('[aria-live="polite"]')?.textContent).toBe("");
+    expect(mocks.useLinkAccount).toHaveBeenCalled();
+    expect(mocks.useUpdateAccount).toHaveBeenCalled();
   });
 
-  it("prepares, links, and syncs the exact linked phone once", async () => {
+  it("opens Privy directly and syncs the exact linked phone once", async () => {
     const onLinked = vi.fn();
     const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
     const { cleanup, container } = await renderClientComponent(
@@ -183,13 +177,7 @@ describe("HostedPhoneSettings", () => {
     await vi.waitFor(() => {
       expect(onLinked).toHaveBeenCalledTimes(1);
     });
-    expect(mocks.finalizeHostedPhoneLink).toHaveBeenNthCalledWith(1, {
-      expectation: {
-        kind: "prepare",
-      },
-      onLinked: expect.any(Function),
-    });
-    expect(mocks.finalizeHostedPhoneLink).toHaveBeenNthCalledWith(2, {
+    expect(mocks.finalizeHostedPhoneLink).toHaveBeenCalledWith({
       expectation: {
         kind: "exact",
         phoneNumber: "+15550100002",
@@ -210,7 +198,7 @@ describe("HostedPhoneSettings", () => {
       });
       await Promise.resolve();
     });
-    expect(mocks.finalizeHostedPhoneLink).toHaveBeenCalledTimes(2);
+    expect(mocks.finalizeHostedPhoneLink).toHaveBeenCalledTimes(1);
   });
 
   it("auto-opens Privy's phone flow once and treats an ordinary exit as cancellation", async () => {
@@ -237,30 +225,17 @@ describe("HostedPhoneSettings", () => {
     });
 
     expect(onAborted).toHaveBeenCalledTimes(1);
-    expect(mocks.finalizeHostedPhoneLink).toHaveBeenCalledTimes(1);
+    expect(mocks.finalizeHostedPhoneLink).not.toHaveBeenCalled();
   });
 
-  it("repairs an interrupted provider-to-Murph sync before opening Privy", async () => {
+  it("repairs a completed provider transfer without reopening Privy", async () => {
     const onLinked = vi.fn();
     mocks.providerPhoneNumber = "+15550100002";
-    mocks.finalizeHostedPhoneLink.mockImplementationOnce(async (input: {
-      onLinked?: (payload: {
-        phoneNumber: string;
-        phoneNumberHint: string;
-      }) => Promise<void> | void;
-    }) => {
-      const result = {
-        phoneNumber: "+15550100002",
-        phoneNumberHint: "*** 0002",
-        status: "synced",
-      } as const;
-      await input.onLinked?.(result);
-      return result;
-    });
     const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
     const { cleanup } = await renderClientComponent(
       createElement(HostedPhoneSettings, {
         autoOpen: true,
+        initialPhoneNumber: null,
         onLinked,
       }),
       { requireButton: false },
@@ -270,15 +245,97 @@ describe("HostedPhoneSettings", () => {
     await vi.waitFor(() => {
       expect(onLinked).toHaveBeenCalledTimes(1);
     });
+    expect(mocks.finalizeHostedPhoneLink).toHaveBeenCalledWith({
+      expectation: {
+        kind: "exact",
+        phoneNumber: "+15550100002",
+      },
+      onLinked: expect.any(Function),
+    });
+    expect(mocks.useLinkAccount).toHaveBeenCalled();
+    expect(mocks.useUpdateAccount).toHaveBeenCalled();
     expect(mocks.linkPhone).not.toHaveBeenCalled();
     expect(mocks.updatePhone).not.toHaveBeenCalled();
   });
 
-  it("uses Privy's update-phone flow from the authoritative preparation baseline", async () => {
+  it("retries a completed provider transfer save without reopening Privy", async () => {
+    const onLinked = vi.fn();
+    mocks.providerPhoneNumber = "+15550100002";
+    let exactAttempts = 0;
+    mocks.finalizeHostedPhoneLink.mockImplementation(async (input: {
+      expectation: SyncExpectation;
+      onLinked?: (payload: {
+        phoneNumber: string;
+        phoneNumberHint: string;
+      }) => Promise<void> | void;
+    }) => {
+      exactAttempts += 1;
+      if (exactAttempts === 1) {
+        throw new Error("save unavailable");
+      }
+      const result = {
+        phoneNumber: "+15550100002",
+        phoneNumberHint: "*** 0002",
+        status: "synced",
+      } as const;
+      await input.onLinked?.(result);
+      return result;
+    });
+    const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedPhoneSettings, {
+        initialPhoneNumber: null,
+        onLinked,
+      }),
+    );
+    cleanupRender = cleanup;
+
+    await act(async () => {
+      findButton(container, "Verify a new phone")?.dispatchEvent(
+        new Event("click", { bubbles: true }),
+      );
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain("save unavailable");
+    });
+    expect(mocks.finalizeHostedPhoneLink).toHaveBeenNthCalledWith(1, {
+      expectation: {
+        kind: "exact",
+        phoneNumber: "+15550100002",
+      },
+      onLinked: expect.any(Function),
+    });
+
+    await act(async () => {
+      findButton(container, "Verify a new phone")?.dispatchEvent(
+        new Event("click", { bubbles: true }),
+      );
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => {
+      expect(onLinked).toHaveBeenCalledTimes(1);
+    });
+    expect(mocks.finalizeHostedPhoneLink).toHaveBeenNthCalledWith(2, {
+      expectation: {
+        kind: "exact",
+        phoneNumber: "+15550100002",
+      },
+      onLinked: expect.any(Function),
+    });
+    expect(mocks.linkPhone).not.toHaveBeenCalled();
+    expect(mocks.updatePhone).not.toHaveBeenCalled();
+  });
+
+  it("uses Privy's update-phone flow when Murph and Privy agree on the current phone", async () => {
     mocks.providerPhoneNumber = "+15550100001";
     const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
     const { cleanup, container } = await renderClientComponent(
-      createElement(HostedPhoneSettings, {}),
+      createElement(HostedPhoneSettings, {
+        initialPhoneNumber: "+15550100001",
+      }),
     );
     cleanupRender = cleanup;
 
@@ -399,7 +456,7 @@ describe("HostedPhoneSettings", () => {
     await vi.waitFor(() => {
       expect(onAborted).toHaveBeenCalledTimes(1);
     });
-    expect(mocks.finalizeHostedPhoneLink).toHaveBeenCalledTimes(2);
+    expect(mocks.finalizeHostedPhoneLink).toHaveBeenCalledTimes(1);
     expect(mocks.linkPhone).toHaveBeenCalledTimes(1);
   });
 
@@ -410,6 +467,7 @@ describe("HostedPhoneSettings", () => {
     const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
     const { cleanup, container } = await renderClientComponent(
       createElement(HostedPhoneSettings, {
+        initialPhoneNumber: "+15550100001",
         onAborted,
       }),
     );
@@ -452,7 +510,9 @@ describe("HostedPhoneSettings", () => {
     mocks.transferPhoneNumber = "+15550100002";
     const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
     const { cleanup, container } = await renderClientComponent(
-      createElement(HostedPhoneSettings, {}),
+      createElement(HostedPhoneSettings, {
+        initialPhoneNumber: "+15550100001",
+      }),
     );
     cleanupRender = cleanup;
 
@@ -477,7 +537,7 @@ describe("HostedPhoneSettings", () => {
     });
 
     await vi.waitFor(() => {
-      expect(mocks.finalizeHostedPhoneLink).toHaveBeenCalledTimes(2);
+      expect(mocks.finalizeHostedPhoneLink).toHaveBeenCalledTimes(1);
     });
     expect(mocks.updatePhone).toHaveBeenCalledTimes(1);
     expect(mocks.linkPhone).not.toHaveBeenCalled();
@@ -494,12 +554,6 @@ describe("HostedPhoneSettings", () => {
         phoneNumberHint: string;
       }) => Promise<void> | void;
     }) => {
-      if (input.expectation.kind === "prepare") {
-        return {
-          phoneNumber: "+15550100001",
-          status: "ready",
-        };
-      }
       transferSyncAttempts += 1;
       if (transferSyncAttempts === 1) {
         throw new Error("save unavailable");
@@ -514,7 +568,9 @@ describe("HostedPhoneSettings", () => {
     });
     const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
     const { cleanup, container } = await renderClientComponent(
-      createElement(HostedPhoneSettings, {}),
+      createElement(HostedPhoneSettings, {
+        initialPhoneNumber: "+15550100001",
+      }),
     );
     cleanupRender = cleanup;
 
@@ -548,7 +604,14 @@ describe("HostedPhoneSettings", () => {
     });
 
     await vi.waitFor(() => {
-      expect(mocks.finalizeHostedPhoneLink).toHaveBeenCalledTimes(3);
+      expect(mocks.finalizeHostedPhoneLink).toHaveBeenCalledTimes(2);
+    });
+    expect(mocks.finalizeHostedPhoneLink).toHaveBeenNthCalledWith(1, {
+      expectation: {
+        kind: "changed-from",
+        phoneNumber: "+15550100001",
+      },
+      onLinked: expect.any(Function),
     });
     expect(mocks.finalizeHostedPhoneLink).toHaveBeenNthCalledWith(2, {
       expectation: {
@@ -557,15 +620,99 @@ describe("HostedPhoneSettings", () => {
       },
       onLinked: expect.any(Function),
     });
-    expect(mocks.finalizeHostedPhoneLink).toHaveBeenNthCalledWith(3, {
+    expect(mocks.updatePhone).toHaveBeenCalledTimes(1);
+    expect(mocks.linkPhone).not.toHaveBeenCalled();
+  });
+
+  it("retries an ambiguous exact sync without reopening Privy", async () => {
+    const onLinked = vi.fn();
+    let exactSyncAttempts = 0;
+    mocks.finalizeHostedPhoneLink.mockImplementation(async (input: {
+      expectation: SyncExpectation;
+      onLinked?: (payload: {
+        phoneNumber: string;
+        phoneNumberHint: string;
+      }) => Promise<void> | void;
+    }) => {
+      if (input.expectation.kind !== "exact") {
+        return {
+          status: "unchanged",
+        };
+      }
+
+      exactSyncAttempts += 1;
+      if (exactSyncAttempts === 1) {
+        throw new Error("save unavailable");
+      }
+
+      const result = {
+        phoneNumber: input.expectation.phoneNumber,
+        phoneNumberHint: "*** 0002",
+        status: "synced",
+      } as const;
+      await input.onLinked?.(result);
+      return result;
+    });
+    const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedPhoneSettings, {
+        onLinked,
+      }),
+    );
+    cleanupRender = cleanup;
+
+    await act(async () => {
+      findButton(container, "Verify phone")?.dispatchEvent(
+        new Event("click", { bubbles: true }),
+      );
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      expect(mocks.linkPhone).toHaveBeenCalledTimes(1);
+    });
+    await act(async () => {
+      mocks.linkAccountCallbacks?.onSuccess?.({
+        linkedAccount: {
+          number: "+15550100002",
+          type: "phone",
+        },
+        linkMethod: "sms",
+        user: {
+          linkedAccounts: [],
+        },
+      });
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain("save unavailable");
+    });
+
+    await act(async () => {
+      findButton(container, "Verify phone")?.dispatchEvent(
+        new Event("click", { bubbles: true }),
+      );
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => {
+      expect(onLinked).toHaveBeenCalledTimes(1);
+    });
+    expect(mocks.finalizeHostedPhoneLink).toHaveBeenNthCalledWith(1, {
       expectation: {
-        kind: "changed-from",
-        phoneNumber: "+15550100001",
+        kind: "exact",
+        phoneNumber: "+15550100002",
       },
       onLinked: expect.any(Function),
     });
-    expect(mocks.updatePhone).toHaveBeenCalledTimes(1);
-    expect(mocks.linkPhone).not.toHaveBeenCalled();
+    expect(mocks.finalizeHostedPhoneLink).toHaveBeenNthCalledWith(2, {
+      expectation: {
+        kind: "exact",
+        phoneNumber: "+15550100002",
+      },
+      onLinked: expect.any(Function),
+    });
+    expect(mocks.linkPhone).toHaveBeenCalledTimes(1);
+    expect(mocks.updatePhone).not.toHaveBeenCalled();
   });
 
   it("explains a terminal provider phone ownership conflict", async () => {
@@ -593,7 +740,11 @@ describe("HostedPhoneSettings", () => {
     expect(container.textContent).toContain(
       "That phone number belongs to another account. Sign in to that account or contact support.",
     );
-    expect(mocks.finalizeHostedPhoneLink).toHaveBeenCalledTimes(1);
+    const supportLink = container.querySelector('a[href^="mailto:support@withmurph.ai"]');
+    expect(supportLink?.textContent).toContain("Contact support");
+    expect(supportLink?.getAttribute("href")).toContain("subject=Help+linking+my+phone");
+    expect(supportLink?.getAttribute("href")).not.toContain("privy-user-a");
+    expect(mocks.finalizeHostedPhoneLink).not.toHaveBeenCalled();
   });
 
   it("does not infer an update flow from linked-account projections alone", async () => {

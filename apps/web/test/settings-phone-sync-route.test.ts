@@ -4,17 +4,23 @@ import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
   buildHostedPrivySessionState: vi.fn(),
+  deleteHostedPrivyPhoneTransferSourceAccountData: vi.fn(),
   enqueueHostedMemberChannelsUpdatedForActiveMemberTx: vi.fn(),
   getPrisma: vi.fn(),
+  hostedPhoneLookupKeyMatchesValue: vi.fn(),
+  prepareHostedPrivyPhoneTransferSourceRetirementTx: vi.fn(),
   prismaClient: {
     label: "test-prisma",
     $transaction: vi.fn(),
   },
   readHostedMemberIdentity: vi.fn(),
   readHostedPhoneHint: vi.fn(),
+  readHostedPrivyPhoneTransferProof: vi.fn(),
   readHostedPrivyUserById: vi.fn(),
   reconcileHostedPrivyIdentityOnMemberTx: vi.fn(),
+  requireHostedStripeBillingPlanConfig: vi.fn(),
   requireFreshPrivyMemberAuthForHostedAppSession: vi.fn(),
+  retrieveHostedPulseTrialCleanupTarget: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
 }));
 
@@ -23,7 +29,13 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/contact-privacy", () => ({
+  hostedPhoneLookupKeyMatchesValue: mocks.hostedPhoneLookupKeyMatchesValue,
   readHostedPhoneHint: mocks.readHostedPhoneHint,
+}));
+
+vi.mock("@/src/lib/hosted-privacy/account-data-service", () => ({
+  deleteHostedPrivyPhoneTransferSourceAccountData:
+    mocks.deleteHostedPrivyPhoneTransferSourceAccountData,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
@@ -32,6 +44,12 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
   reconcileHostedPrivyIdentityOnMemberTx: mocks.reconcileHostedPrivyIdentityOnMemberTx,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/privy-phone-transfer-retirement", () => ({
+  prepareHostedPrivyPhoneTransferSourceRetirementTx:
+    mocks.prepareHostedPrivyPhoneTransferSourceRetirementTx,
+  readHostedPrivyPhoneTransferProof: mocks.readHostedPrivyPhoneTransferProof,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
@@ -60,6 +78,13 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   getHostedOnboardingEnvironment: () => ({
     publicBaseUrl: "https://join.example.test",
   }),
+  requireHostedStripeBillingPlanConfig:
+    mocks.requireHostedStripeBillingPlanConfig,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/pulse-trial-subscription-cleanup", () => ({
+  retrieveHostedPulseTrialCleanupTarget:
+    mocks.retrieveHostedPulseTrialCleanupTarget,
 }));
 
 type SettingsPhoneSyncRouteModule = typeof import("../app/api/settings/phone/sync/route");
@@ -85,6 +110,7 @@ describe("settings phone sync route", () => {
     mocks.readHostedMemberIdentity.mockResolvedValue({
       phoneNumber: null,
     });
+    mocks.hostedPhoneLookupKeyMatchesValue.mockReturnValue(true);
     mocks.readHostedPrivyUserById.mockResolvedValue({
       id: "did:privy:user_123",
     });
@@ -101,7 +127,25 @@ describe("settings phone sync route", () => {
         id: "did:privy:user_123",
       },
     });
+    mocks.readHostedPrivyPhoneTransferProof.mockResolvedValue(null);
     mocks.reconcileHostedPrivyIdentityOnMemberTx.mockResolvedValue(undefined);
+    mocks.prepareHostedPrivyPhoneTransferSourceRetirementTx.mockResolvedValue({
+      autoTrialBilling: null,
+      sourceMemberId: "member_unused",
+    });
+    mocks.deleteHostedPrivyPhoneTransferSourceAccountData.mockResolvedValue({
+      channelSyncDispatch: {
+        mailboxItemId: "mailbox_item_channels_phone_123",
+      },
+      deletion: {
+        cleanupPending: false,
+      },
+    });
+    mocks.requireHostedStripeBillingPlanConfig.mockReturnValue({
+      priceId: "price_launch_monthly",
+      stripe: {},
+    });
+    mocks.retrieveHostedPulseTrialCleanupTarget.mockResolvedValue(null);
     mocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx.mockResolvedValue({
       mailboxItemId: "mailbox_item_channels_phone_123",
     });
@@ -188,36 +232,151 @@ describe("settings phone sync route", () => {
     });
   });
 
-  it("returns the authoritative provider baseline without writing when preparation is aligned", async () => {
-    mocks.readHostedMemberIdentity.mockResolvedValue({
+  it("reconciles a provider-confirmed phone transfer from an unused signup scaffold", async () => {
+    const transfer = {
       phoneNumber: "+14155552671",
-    });
+      sourceMemberId: "member_unused",
+      sourcePrivyUserId: "did:privy:user_unused",
+    };
+    mocks.readHostedPrivyPhoneTransferProof.mockResolvedValue(transfer);
 
     const response = await postSync({
-      kind: "prepare",
+      kind: "exact",
+      phoneNumber: "+14155552671",
     });
 
     expect(response.status).toBe(200);
     expect(mocks.reconcileHostedPrivyIdentityOnMemberTx).not.toHaveBeenCalled();
-    expect(mocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx).not.toHaveBeenCalled();
-    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toEqual({
+    expect(
+      mocks.prepareHostedPrivyPhoneTransferSourceRetirementTx,
+    ).toHaveBeenCalledWith({
+      identity: {
+        phone: {
+          number: "+14155552671",
+        },
+        telegram: null,
+        userId: "did:privy:user_123",
+      },
+      member: {
+        billingStatus: "active",
+        id: "member_123",
+        suspendedAt: null,
+      },
+      now: expect.any(Date),
+      prisma: mocks.prismaClient,
+      transfer,
+    });
+    expect(
+      mocks.deleteHostedPrivyPhoneTransferSourceAccountData,
+    ).toHaveBeenCalledWith({
+      prisma: mocks.prismaClient,
+      request: expect.any(Request),
+      retirement: {
+        autoTrialBilling: null,
+        sourceMemberId: "member_unused",
+      },
+      targetMember: {
+        billingStatus: "active",
+        id: "member_123",
+        suspendedAt: null,
+      },
+      targetPrivyUserId: "did:privy:user_123",
+      transfer,
+    });
+    await expect(response.json()).resolves.toMatchObject({
       phoneNumber: "+14155552671",
-      status: "ready",
+      status: "synced",
     });
   });
 
-  it("repairs a stale Murph projection during preparation without opening Privy again", async () => {
-    mocks.readHostedMemberIdentity.mockResolvedValue({
-      phoneNumber: "+14155550000",
+  it("rechecks auto-trial Stripe authority before retiring the source scaffold", async () => {
+    const transfer = {
+      phoneNumber: "+14155552671",
+      sourceMemberId: "member_unused",
+      sourcePrivyUserId: "did:privy:user_unused",
+    };
+    mocks.readHostedPrivyPhoneTransferProof.mockResolvedValue(transfer);
+    mocks.prepareHostedPrivyPhoneTransferSourceRetirementTx.mockResolvedValue({
+      autoTrialBilling: {
+        stripeCustomerId: "cus_unused",
+        stripeSubscriptionId: "sub_unused",
+      },
+      sourceMemberId: "member_unused",
+    });
+    mocks.retrieveHostedPulseTrialCleanupTarget.mockResolvedValue({
+      status: "trialing",
     });
 
     const response = await postSync({
-      kind: "prepare",
+      kind: "exact",
+      phoneNumber: "+14155552671",
+    });
+
+    expect(response.status).toBe(200);
+    expect(mocks.retrieveHostedPulseTrialCleanupTarget).toHaveBeenCalledWith({
+      expectedCustomerId: "cus_unused",
+      memberId: "member_unused",
+      priceId: "price_launch_monthly",
+      stripe: {},
+      subscriptionId: "sub_unused",
+    });
+    expect(
+      mocks.deleteHostedPrivyPhoneTransferSourceAccountData,
+    ).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed when the source auto-trial subscription gained paid authority", async () => {
+    const transfer = {
+      phoneNumber: "+14155552671",
+      sourceMemberId: "member_unused",
+      sourcePrivyUserId: "did:privy:user_unused",
+    };
+    mocks.readHostedPrivyPhoneTransferProof.mockResolvedValue(transfer);
+    mocks.prepareHostedPrivyPhoneTransferSourceRetirementTx.mockResolvedValue({
+      autoTrialBilling: {
+        stripeCustomerId: "cus_unused",
+        stripeSubscriptionId: "sub_unused",
+      },
+      sourceMemberId: "member_unused",
+    });
+    mocks.retrieveHostedPulseTrialCleanupTarget.mockResolvedValue({
+      status: "active",
+    });
+
+    const response = await postSync({
+      kind: "exact",
+      phoneNumber: "+14155552671",
+    });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "PRIVY_PHONE_TRANSFER_REQUIRES_SUPPORT",
+      },
+    });
+    expect(
+      mocks.deleteHostedPrivyPhoneTransferSourceAccountData,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("repairs an incomplete canonical projection even when the phone text already matches", async () => {
+    mocks.readHostedMemberIdentity.mockResolvedValue({
+      phoneNumber: "+14155552671",
+      phoneNumberVerifiedAt: null,
+      phoneLookupKey: "phone_lookup",
+      privyUserId: "did:privy:user_123",
+    });
+
+    const response = await postSync({
+      kind: "exact",
+      phoneNumber: "+14155552671",
     });
 
     expect(response.status).toBe(200);
     expect(mocks.reconcileHostedPrivyIdentityOnMemberTx).toHaveBeenCalledTimes(1);
+    expect(
+      mocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx,
+    ).toHaveBeenCalledTimes(1);
     await expect(response.json()).resolves.toMatchObject({
       phoneNumber: "+14155552671",
       status: "synced",
@@ -225,6 +384,12 @@ describe("settings phone sync route", () => {
   });
 
   it("treats an unchanged transfer baseline as a quiet cancellation", async () => {
+    mocks.readHostedMemberIdentity.mockResolvedValue({
+      phoneNumber: "+14155552671",
+      phoneNumberVerifiedAt: new Date("2026-04-06T10:00:00.000Z"),
+      phoneLookupKey: "phone_lookup",
+      privyUserId: "did:privy:user_123",
+    });
     const response = await postSync({
       kind: "changed-from",
       phoneNumber: "+14155552671",
@@ -299,7 +464,7 @@ describe("settings phone sync route", () => {
     });
   });
 
-  it("returns a null baseline for a phone-less provider account", async () => {
+  it("treats an unchanged phone-less transfer as a quiet cancellation", async () => {
     mocks.buildHostedPrivySessionState.mockReturnValue({
       identity: {
         phone: null,
@@ -315,14 +480,15 @@ describe("settings phone sync route", () => {
     });
 
     const response = await postSync({
-      kind: "prepare",
+      kind: "changed-from",
+      phoneNumber: null,
     });
 
     expect(response.status).toBe(200);
+    expect(mocks.readHostedMemberIdentity).not.toHaveBeenCalled();
     expect(mocks.reconcileHostedPrivyIdentityOnMemberTx).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
-      phoneNumber: null,
-      status: "ready",
+      status: "unchanged",
     });
   });
 
@@ -361,7 +527,8 @@ describe("settings phone sync route", () => {
     });
 
     const response = await postSync({
-      kind: "prepare",
+      kind: "exact",
+      phoneNumber: "+14155552671",
     });
 
     expect(response.status).toBe(403);
@@ -384,7 +551,8 @@ describe("settings phone sync route", () => {
     );
 
     const response = await postSync({
-      kind: "prepare",
+      kind: "exact",
+      phoneNumber: "+14155552671",
     });
 
     expect(response.status).toBe(409);

@@ -156,6 +156,49 @@ describe("hosted phone auth support", () => {
     expect(mocks.waitForRetryDelay).toHaveBeenCalledWith(250);
   });
 
+  it("retries a transient provider user lookup with the identical exact expectation", async () => {
+    const { HostedOnboardingApiError } = await import(
+      "@/src/components/hosted-onboarding/client-api"
+    );
+    const { requestHostedPhoneLinkSyncWithRetry } = await import(
+      "@/src/components/hosted-onboarding/hosted-phone-auth-support"
+    );
+    mocks.requestHostedOnboardingJson
+      .mockRejectedValueOnce(new HostedOnboardingApiError({
+        code: "PRIVY_USER_LOOKUP_FAILED",
+        message: "Provider lookup is temporarily unavailable.",
+        retryable: true,
+      }))
+      .mockResolvedValueOnce({
+        phoneNumber: "+14155552671",
+        phoneNumberHint: "+1 415 555 2671",
+        status: "synced",
+      });
+    const expectation = {
+      kind: "exact",
+      phoneNumber: "+14155552671",
+    } as const;
+
+    await expect(requestHostedPhoneLinkSyncWithRetry(expectation)).resolves.toEqual({
+      phoneNumber: "+14155552671",
+      phoneNumberHint: "+1 415 555 2671",
+      status: "synced",
+    });
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(1, {
+      method: "POST",
+      payload: expectation,
+      url: "/api/settings/phone/sync",
+    });
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(2, {
+      method: "POST",
+      payload: expectation,
+      url: "/api/settings/phone/sync",
+    });
+    expect(mocks.waitForRetryDelay).toHaveBeenCalledWith(250);
+  });
+
   it("retries Telegram completion lag with the Telegram auth intent", async () => {
     const { HostedOnboardingApiError } = await import(
       "@/src/components/hosted-onboarding/client-api"

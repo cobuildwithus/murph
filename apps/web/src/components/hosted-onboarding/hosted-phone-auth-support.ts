@@ -208,6 +208,7 @@ function isRetryableHostedPhoneLinkError(error: unknown): boolean {
   return (
     error.retryable
     && (error.code === "PRIVY_ACCOUNT_NOT_READY"
+      || error.code === "PRIVY_USER_LOOKUP_FAILED"
       || error.code === "PRIVY_PHONE_NOT_READY")
   );
 }
