@@ -46,6 +46,13 @@ type HostedInferenceConnectionRow = Prisma.HostedInferenceConnectionGetPayload<{
 
 type HostedInferenceConnectionReadClient = PrismaClient | Prisma.TransactionClient;
 
+type HostedInferenceConnectionSelectionReadClient = {
+  hostedMember: Pick<
+    Prisma.TransactionClient["hostedMember"],
+    "findUnique"
+  >;
+};
+
 export class HostedInferenceConnectionError extends Error {
   constructor(
     readonly code:
@@ -83,7 +90,7 @@ export async function readHostedInferenceConnectionView(input: {
 
 export async function readSelectedHostedInferenceConnectionOverride(input: {
   memberId: string;
-  prisma?: HostedInferenceConnectionReadClient;
+  prisma?: HostedInferenceConnectionSelectionReadClient;
 }): Promise<HostedAssistantCustomInferenceOverride | null> {
   const row = await readSelectedHostedInferenceConnectionRow(input);
   return row ? projectHostedInferenceConnectionOverride(row) : null;
@@ -252,7 +259,7 @@ export async function deleteHostedInferenceConnection(input: {
 
 async function readSelectedHostedInferenceConnectionRow(input: {
   memberId: string;
-  prisma?: HostedInferenceConnectionReadClient;
+  prisma?: HostedInferenceConnectionSelectionReadClient;
 }): Promise<HostedInferenceConnectionRow | null> {
   const prisma = input.prisma ?? getPrisma();
   const member = await prisma.hostedMember.findUnique({
