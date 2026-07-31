@@ -103,6 +103,32 @@ describe('murph.attach_response_card', () => {
     })).toMatchObject({
       kind: 'invalid-response-card-arguments',
     })
+
+    const contradictoryCard = {
+      ...CARD_V2,
+      totals: {
+        ...CARD_V2.totals,
+        calories: { total: 2_300, mealCount: 3 },
+      },
+      goals: {
+        ...CARD_V2.goals,
+        calories: { target: 2_000, status: 'under_target' },
+      },
+    }
+    expect(readCardToolRequest({ card: contradictoryCard })).toMatchObject({
+      kind: 'invalid-response-card-arguments',
+    })
+    expect(readCardToolRequest({
+      card: {
+        ...contradictoryCard,
+        goals: {
+          ...contradictoryCard.goals,
+          calories: { target: 2_000, status: 'over_target' },
+        },
+      },
+    })).toMatchObject({
+      kind: 'attach-response-card',
+    })
   })
 
   it('rejects group use and a second card without echoing nutrition values', async () => {

@@ -121,9 +121,22 @@ describe('assistant automatic meal capture skill', () => {
     expect(skill).toContain(
       'Run it immediately before any response-card attachment',
     )
-    expect(skill).toContain('vault-cli goal list\n   --status active --format json')
-    expect(skill).toContain('vault-cli goal show <goal-id> --format\n   json')
-    expect(skill).toContain('Never infer a target from the day\'s total')
+    expect(skill).toContain(
+      'vault-cli goal list\n   --status active --limit 200 --format json',
+    )
+    expect(skill).toContain(
+      'vault-cli goal show\n   <goal-id> --format json',
+    )
+    expect(skill).toContain(
+      'If the list\n   returns 200 records, its bounded result may be incomplete',
+    )
+    expect(skill).toContain(
+      'exactly one qualifying\n   active record unambiguously names that daily nutrition metric',
+    )
+    expect(skill).toContain(
+      'multiple matches (even if their values agree)',
+    )
+    expect(skill).toContain("Never infer a target\n   from the day's total")
     expect(skill).toContain(
       'When the run covers exactly one local date',
     )
@@ -141,8 +154,13 @@ describe('assistant automatic meal capture skill', () => {
       "Copy every metric's\n   complete `{ total, mealCount }` pair unchanged",
     )
     expect(skill).toContain('including `fiberGrams`')
-    expect(skill).toContain('There is no universal percentage\n   threshold')
-    expect(skill).toContain('Use `null` when no trustworthy target exists')
+    expect(skill).toContain('There is no universal\n   percentage threshold')
+    expect(skill).toContain(
+      'A metric whose total is missing or whose\n   `mealCount` is below the top-level `mealCount` must use `unavailable`',
+    )
+    expect(skill).toContain(
+      'Use `null` when no trustworthy\n   target exists; never fabricate one',
+    )
     expect(skill).toContain('Do not author a second nutrition summary')
     expect(skill).toMatch(/For\s+multi-date catch-up, missing calories/u)
     expect(skill).toMatch(
@@ -195,10 +213,10 @@ describe('assistant automatic meal capture skill', () => {
         },
         goals: {
           calories: null,
-          proteinGrams: { target: 150, status: 'on_target' },
+          proteinGrams: { target: 150, status: 'unavailable' },
           carbsGrams: null,
           fatGrams: null,
-          fiberGrams: { target: 30, status: 'under_target' },
+          fiberGrams: { target: 30, status: 'unavailable' },
         },
       },
     } as const

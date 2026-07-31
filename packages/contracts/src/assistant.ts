@@ -143,20 +143,45 @@ function addNutritionCardMealCountIssues(
   }
 }
 
-function addNutritionCardGoalAvailabilityIssue(
+function addNutritionCardGoalConsistencyIssue(
   metricName: string,
+  cardMealCount: number,
   metric: NutritionCardMetric,
   goal: NutritionCardGoalSnapshot | null,
   context: z.RefinementCtx,
 ): void {
+  if (goal === null) {
+    return;
+  }
+
+  if (metric.total === null || metric.mealCount < cardMealCount) {
+    if (goal.status === "unavailable") {
+      return;
+    }
+    context.addIssue({
+      code: "custom",
+      message:
+        "A missing or partial metric can only have an unavailable goal status.",
+      path: ["goals", metricName, "status"],
+    });
+    return;
+  }
+
+  if (goal.status === "unavailable" || goal.status === "on_target") {
+    return;
+  }
+
+  const pointsOver =
+    goal.status === "over_target" || goal.status === "far_over_target";
+  const pointsUnder =
+    goal.status === "under_target" || goal.status === "far_under_target";
   if (
-    metric.total === null &&
-    goal !== null &&
-    goal.status !== "unavailable"
+    (metric.total < goal.target && pointsOver) ||
+    (metric.total > goal.target && pointsUnder)
   ) {
     context.addIssue({
       code: "custom",
-      message: "A missing metric can only have an unavailable goal status.",
+      message: "Goal status cannot point opposite the total and target.",
       path: ["goals", metricName, "status"],
     });
   }
@@ -239,32 +264,37 @@ export const dailyNutritionResponseCardV2Schema: z.ZodType<
   .strict()
   .superRefine((card, context) => {
     addNutritionCardMealCountIssues(card, context);
-    addNutritionCardGoalAvailabilityIssue(
+    addNutritionCardGoalConsistencyIssue(
       "calories",
+      card.mealCount,
       card.totals.calories,
       card.goals.calories,
       context,
     );
-    addNutritionCardGoalAvailabilityIssue(
+    addNutritionCardGoalConsistencyIssue(
       "proteinGrams",
+      card.mealCount,
       card.totals.proteinGrams,
       card.goals.proteinGrams,
       context,
     );
-    addNutritionCardGoalAvailabilityIssue(
+    addNutritionCardGoalConsistencyIssue(
       "carbsGrams",
+      card.mealCount,
       card.totals.carbsGrams,
       card.goals.carbsGrams,
       context,
     );
-    addNutritionCardGoalAvailabilityIssue(
+    addNutritionCardGoalConsistencyIssue(
       "fatGrams",
+      card.mealCount,
       card.totals.fatGrams,
       card.goals.fatGrams,
       context,
     );
-    addNutritionCardGoalAvailabilityIssue(
+    addNutritionCardGoalConsistencyIssue(
       "fiberGrams",
+      card.mealCount,
       card.totals.fiberGrams,
       card.goals.fiberGrams,
       context,

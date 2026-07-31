@@ -19,6 +19,10 @@ Updated: 2026-07-31
 - A goal snapshot contains only a target and Murph's frozen semantic assessment;
   the native renderer does not invent thresholds.
 - Missing or untrusted goals stay absent and render neutrally.
+- A target is frozen only when the complete bounded active-goal result contains
+  exactly one qualifying record for its daily metric and unit.
+- Missing or partial metrics cannot carry a colored assessment, and directional
+  statuses cannot contradict the frozen total and target.
 - The existing private-direct closeout, outbox, Linq capability fallback, SMS
   fallback, and immutable inline URL behavior remain unchanged.
 - The paired iOS extension renders V1 and V2 offline from
@@ -45,6 +49,9 @@ Updated: 2026-07-31
 - Copy meal totals exactly from the immediately preceding canonical read.
 - Read only current active canonical goals when considering a target; never
   fabricate a target or infer one from the day's total.
+- Fail closed to null targets when the bounded goal result is saturated or a
+  metric has zero, multiple, range-like, conflicting, wrong-unit, or
+  wrong-window candidates.
 - Treat goal status as a frozen presentation assessment, not canonical goal
   progress or future product truth.
 
@@ -75,3 +82,9 @@ Updated: 2026-07-31
   host builds embed the Messages extension.
 - Five synthetic Studio fixtures were captured from the production renderer
   across goal, selection, missing-goal, dark-mode, and accessibility states.
+- Final ReviewGPT round 4 found two accepted correctness gaps: the active-goal
+  list did not prove completeness or uniqueness, and the V2 schema permitted a
+  status opposite its frozen total and target. The backend owner and paired iOS
+  decoder now fail closed for both cases, including partial metrics; focused
+  backend tests pass across three suites with 16 tests, and the iOS extension
+  suite passes with 29 tests.

@@ -252,6 +252,62 @@ describe('assistant response cards', () => {
     })
   })
 
+  it('rejects contradictory or complete-looking status for untrusted totals', () => {
+    const invalidGoals = [
+      {
+        totals: {
+          ...COMPLETE_CARD_V2.totals,
+          calories: { total: 2_300, mealCount: 3 },
+        },
+        goals: {
+          ...COMPLETE_CARD_V2.goals,
+          calories: { target: 2_000, status: 'under_target' },
+        },
+      },
+      {
+        totals: {
+          ...COMPLETE_CARD_V2.totals,
+          proteinGrams: { total: 80, mealCount: 3 },
+        },
+        goals: {
+          ...COMPLETE_CARD_V2.goals,
+          proteinGrams: { target: 120, status: 'far_over_target' },
+        },
+      },
+      {
+        totals: {
+          ...COMPLETE_CARD_V2.totals,
+          fiberGrams: { total: 20, mealCount: 2 },
+        },
+        goals: {
+          ...COMPLETE_CARD_V2.goals,
+          fiberGrams: { target: 30, status: 'under_target' },
+        },
+      },
+    ] as const
+
+    for (const invalid of invalidGoals) {
+      expect(() => assistantResponseCardSchema.parse({
+        ...COMPLETE_CARD_V2,
+        ...invalid,
+      })).toThrow()
+    }
+
+    for (const status of ['on_target', 'unavailable'] as const) {
+      expect(() => assistantResponseCardSchema.parse({
+        ...COMPLETE_CARD_V2,
+        totals: {
+          ...COMPLETE_CARD_V2.totals,
+          proteinGrams: { total: 100, mealCount: 3 },
+        },
+        goals: {
+          ...COMPLETE_CARD_V2.goals,
+          proteinGrams: { target: 100, status },
+        },
+      })).not.toThrow()
+    }
+  })
+
   it('round-trips the minified V2 envelope with fiber and frozen goal context', () => {
     const dataUrl = encodeAppCardDataUrl(COMPLETE_CARD_V2)
     expect(dataUrl.length).toBeLessThan(4_096)
