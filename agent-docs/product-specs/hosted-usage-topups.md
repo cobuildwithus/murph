@@ -436,6 +436,15 @@ token counts, prices, internal accounting, contributor identity, pressure, and
 repetition when the recent conversation already contains the warning. The bit
 does not schedule or send a separate outbound message.
 
+For a hosted group, `fundingNeeded` controls only that assistant-initiated
+depletion thread. A valid `fundingUrl` remains available independently. When a
+person explicitly asks to fund the room or add usage, Murph may share the
+current returned URL at any capacity; the first unsolicited heads-up remains
+link-free. If the room already has an automatic sponsor, the page preserves
+that single-sponsor invariant and offers the additional payer only a one-time
+contribution. Murph does not imply the room needs funding or disclose private
+sponsor facts.
+
 Immediately before both the exhaustion crossing send and a later denied-gate
 retry, delivery re-reads the current personal usage-status projection. It
 appends the canonical first-party **Add usage** action only when the recommended
@@ -1012,8 +1021,10 @@ group's existing opaque join code is the public targeting capability; no second
 funding code or rotation policy exists. Web resolves the active group and its
 synthetic member, shows only `healthy`, `low`, or `exhausted`, and presents
 capped monthly sponsorship before the fixed $5, $10, and $20 one-time
-contributions. Monthly activation is available only when capacity is low or
-exhausted. The browser never submits payer or beneficiary identity.
+contributions. Both explicit funding paths remain available at every capacity;
+capacity expresses urgency and governs later automatic refill admission, not
+whether someone may fund the group. The browser never submits payer or
+beneficiary identity.
 
 A group chat that has only ever talked to Murph has no `HostedGroup` row or
 join code. Its funding URL uses a signed funding-only locator instead:

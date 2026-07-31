@@ -304,6 +304,39 @@ describe("hosted group funding page", () => {
     );
   });
 
+  it("offers monthly sponsorship while an unsponsored group is healthy", async () => {
+    mocks.readHostedGroupUsageStatus.mockResolvedValueOnce({
+      fundingNeeded: false,
+      fundingUrl:
+        "https://www.withmurph.ai/groups/fund/group_join_code_1234",
+      sponsorshipStatus: "not_sponsored",
+    });
+
+    const markup = renderToStaticMarkup(await GroupFundingPage({
+      params: Promise.resolve({ joinCode: "group_join_code_1234" }),
+    }));
+
+    assert.match(markup, /top-up:group/u);
+    assert.doesNotMatch(markup, /becomes available when capacity runs low/iu);
+    const monthlyProps = mocks.HostedUsageTopUpDialog.mock.calls[0]?.[0];
+    expect(monthlyProps).toEqual(expect.objectContaining({
+      offers: [expect.objectContaining({ offerCode: "usage_5_usd" })],
+      scope: "group",
+    }));
+    const buildCheckoutPayload = monthlyProps?.buildCheckoutPayload as
+      | ((input: { clientRequestKey: string; offerCode: string }) => unknown)
+      | undefined;
+    expect(buildCheckoutPayload?.({
+      clientRequestKey: "request_monthly",
+      offerCode: "usage_5_usd",
+    })).toEqual(expect.objectContaining({
+      clientRequestKey: "request_monthly",
+      monthlyCapMinor: 500,
+      offerCode: "usage_5_usd",
+      sponsorshipKind: "monthly",
+    }));
+  });
+
   it("shows only the authenticated payer their private sponsorship management projection", async () => {
     mocks.readHostedGroupUsageStatus.mockResolvedValueOnce({
       fundingNeeded: false,

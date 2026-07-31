@@ -40,7 +40,9 @@ export interface HostedGroupUsageFundingTarget {
 }
 
 export interface HostedGroupUsageStatus {
+  /** Whether an assistant-initiated low-capacity funding prompt is timely. */
   fundingNeeded: boolean;
+  /** Current explicit funding capability, independent of urgency. */
   fundingUrl: string | null;
   sponsorshipStatus: "not_sponsored" | "sponsored";
 }
@@ -130,19 +132,13 @@ export async function readHostedGroupUsageStatus(input: {
     beneficiaryMemberId: input.runtimeMemberId,
     prisma,
   });
-  if (sponsorshipStatus === "sponsored") {
-    return {
-      fundingNeeded: false,
-      fundingUrl: null,
-      sponsorshipStatus,
-    };
-  }
 
   const capacityState = classifyHostedGroupUsageCapacity({
     limitUsdMicros: decision.limitUsdMicros,
     remainingUsdMicros: decision.remainingUsdMicros,
   });
-  const fundingNeeded = capacityState !== "healthy";
+  const fundingNeeded =
+    sponsorshipStatus === "not_sponsored" && capacityState !== "healthy";
 
   // A group without an owner-created join code (including one with no
   // HostedGroup row at all) still gets a funding URL through the signed
@@ -152,7 +148,7 @@ export async function readHostedGroupUsageStatus(input: {
 
   return {
     fundingNeeded,
-    fundingUrl: fundingNeeded && locator
+    fundingUrl: locator
       ? buildHostedGroupUsageFundingUrl({ joinCode: locator })
       : null,
     sponsorshipStatus,

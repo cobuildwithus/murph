@@ -396,7 +396,9 @@ snaps to the nearest available maximum on release; Arrow keys and Home/End
 provide the same three-stop selection. Keep the opening explanation to
 `Choose your monthly sponsorship limit.` The explicit sponsor action authorizes
 the initial $5 activation purchase, whose amount is shown before payment;
-selecting a maximum alone does not charge the card. Keep an explicit one-time
+selecting a maximum alone does not charge the card. Keep both funding actions
+available at every current group-capacity state; capacity changes urgency and
+automatic refill timing, not the ability to fund. Keep an explicit one-time
 contribution as the secondary action. Dollar amounts are cost-weighted usage
 credit, never an owned or promised number of messages. Every cap increase
 requires fresh payer confirmation. Keep the alias, note, and eligible temporary

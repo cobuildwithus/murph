@@ -973,7 +973,9 @@ export interface HostedRuntimeGroupSummary {
 }
 
 export interface HostedRuntimeGroupUsageStatus {
+  /** Whether an assistant-initiated low-capacity funding prompt is timely. */
   fundingNeeded: boolean;
+  /** Current explicit funding capability, independent of urgency. */
   fundingUrl: string | null;
   sponsorshipStatus: "not_sponsored" | "sponsored";
 }

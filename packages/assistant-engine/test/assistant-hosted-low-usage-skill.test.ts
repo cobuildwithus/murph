@@ -223,7 +223,9 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain('standing no-re-offer rule wins')
     expect(skill).toContain('Never switch it automatically')
     expect(normalizedSkill).toContain('If no funding URL is returned')
-    expect(normalizedSkill).toContain('share only that Murph is sponsored in the chat')
+    expect(normalizedSkill).toContain(
+      'share only the binary sponsored status unless the current sender explicitly asks to fund or add usage',
+    )
     expect(skill).toContain(
       'returned percentages and forecast as overall available AI usage',
     )
@@ -238,6 +240,24 @@ describe('assistant hosted low-usage skill', () => {
     )
     expect(skill).not.toContain('included-versus-purchased')
     expect(skill).not.toContain('Share only its')
+  })
+
+  it('separates explicit group funding from low-capacity urgency', async () => {
+    const skill = await readLowUsageSkill()
+    const normalizedSkill = skill.replace(/\s+/gu, ' ')
+
+    expect(normalizedSkill).toContain(
+      '`fundingNeeded` controls urgency, not whether a returned funding URL may be shared after an explicit request',
+    )
+    expect(normalizedSkill).toContain(
+      'a returned first-party funding URL may be shared as the private path for an additional one-time contribution',
+    )
+    expect(normalizedSkill).toContain(
+      'does not make explicit funding unavailable',
+    )
+    expect(normalizedSkill).not.toContain(
+      'Share a returned first-party funding URL only when `fundingNeeded` is true',
+    )
   })
 
   it('preserves explicit billing confirmation and payment truth', async () => {

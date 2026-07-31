@@ -515,6 +515,39 @@ describe("parseHostedGroupSponsorshipCheckoutRequest", () => {
 });
 
 describe("createHostedUsageCreditCheckout", () => {
+  it("starts monthly group sponsorship without consulting current capacity", async () => {
+    const fake = createFakePrisma();
+    mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
+      buildStripeSession(request)
+    );
+
+    await expect(createHostedGroupUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      joinCode: "group_join_code_1234",
+      monthlyCapMinor: 1_000,
+      now: NOW,
+      offerCode: "usage_5_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+      sponsorshipKind: "monthly",
+    })).resolves.toMatchObject({ status: "checkout_open" });
+
+    expect([...fake.sponsorshipAuthorizations.values()]).toEqual([
+      expect.objectContaining({
+        beneficiaryMemberId: "member_group_runtime",
+        monthlyCapMinor: 1_000,
+        payerMemberId: MEMBER_ID,
+        status: "pending_activation",
+      }),
+    ]);
+    expect(onlyPurchase(fake.purchases)).toMatchObject({
+      cashAmountMinor: 500,
+      groupSponsorshipAuthorizationId: expect.stringMatching(/^hgsa_/u),
+      groupSponsorshipChargeOrdinal: 0,
+      offerCode: "usage_5_usd",
+    });
+  });
+
   it("charges the Family customer and freezes the selected member as beneficiary", async () => {
     const fake = createFakePrisma();
     mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
@@ -5706,6 +5739,22 @@ function createFakePrisma(input: {
   };
   const prisma = {
     hostedGroupSponsorshipAuthorization: {
+      create: vi.fn(async (query: { data: Record<string, unknown> }) => {
+        const record: Record<string, unknown> = {
+          canceledAt: null,
+          pendingMonthlyCapMinor: null,
+          recoveryStartedAt: null,
+          ...query.data,
+        };
+        sponsorshipAuthorizations.set(String(record.id), record);
+        return record;
+      }),
+      findFirst: vi.fn(async (query: {
+        where: Record<string, unknown>;
+      }) =>
+        [...sponsorshipAuthorizations.values()].find((authorization) =>
+          matchesPurchaseWhere(authorization, query.where)
+        ) ?? null),
       findUnique: vi.fn(async (query: {
         select?: Record<string, boolean>;
         where: { id: string };

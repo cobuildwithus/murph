@@ -317,14 +317,15 @@ function GroupUsageFundingStudy() {
         </p>
         <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
           Monthly sponsorship is the primary flow. It starts with one ordinary
-          $5 usage-credit purchase and permits later $5 refills only when the
-          group needs capacity, up to the payer&apos;s private monthly maximum.
-          One-time contribution remains a separate secondary action.
+          $5 usage-credit purchase at any capacity and permits later $5 refills
+          only when the group needs capacity, up to the payer&apos;s private
+          monthly maximum. One-time contribution remains a separate secondary
+          action.
         </p>
       </div>
 
       <DesignSponsorshipState
-        label="Activation"
+        label="Activation at any capacity"
         state="monthly-activation"
       >
         <GroupUsageFundingCard

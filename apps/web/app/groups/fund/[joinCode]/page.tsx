@@ -246,28 +246,19 @@ export default async function GroupFundingPage({
               oneTimeContributionAction
             ) : oneTimeOffers.length > 0 ? (
               <div className="space-y-3">
-                {usageStatus.fundingNeeded ? (
-                  <>
-                    <GroupSponsorshipDialog
-                      checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
-                      customizationAllowed={customizationAllowed}
-                      mode="monthly"
-                      monthlyCapOptions={monthlyCapOptions}
-                      offers={monthlyOffer}
-                      payerMemberId={member.id}
-                      purchaseReturn={purchaseReturn}
-                    />
-                    <p className="text-center text-xs leading-5 text-muted-foreground">
-                      Starts with $5. Murph adds another $5 only when this group
-                      needs it, up to the maximum you choose.
-                    </p>
-                  </>
-                ) : (
-                  <p className="text-center text-xs leading-5 text-muted-foreground">
-                    This group has enough usage credit right now. Monthly
-                    sponsorship becomes available when capacity runs low.
-                  </p>
-                )}
+                <GroupSponsorshipDialog
+                  checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
+                  customizationAllowed={customizationAllowed}
+                  mode="monthly"
+                  monthlyCapOptions={monthlyCapOptions}
+                  offers={monthlyOffer}
+                  payerMemberId={member.id}
+                  purchaseReturn={purchaseReturn}
+                />
+                <p className="text-center text-xs leading-5 text-muted-foreground">
+                  Starts with $5. Murph adds another $5 only when this group
+                  needs it, up to the maximum you choose.
+                </p>
                 {oneTimeContributionAction}
               </div>
             ) : (

@@ -811,21 +811,6 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
             if (monthlyCapMinor === null || monthlyCapMinor === undefined) {
               throw buildHostedUsageCreditNotEligibleError("group");
             }
-            const decision = await readHostedAiUsageGate({
-              memberId: target.beneficiaryMemberId,
-              now,
-              prisma: tx,
-            });
-            if (
-              decision.allowanceSource !== "thread_container" ||
-              (!decision.allowed && decision.reason !== "ai_usage_limit_exceeded") ||
-              classifyHostedGroupUsageCapacity({
-                limitUsdMicros: decision.limitUsdMicros,
-                remainingUsdMicros: decision.remainingUsdMicros,
-              }) === "healthy"
-            ) {
-              throw buildHostedUsageCreditNotEligibleError("group");
-            }
             return createHostedGroupSponsorshipAuthorizationTx({
               beneficiaryMemberId: target.beneficiaryMemberId,
               monthlyCapMinor,
