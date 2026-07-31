@@ -526,6 +526,9 @@ describe('applyMurphManagedAutomations core integration', () => {
       'no more than 28 words after the bullet marker',
     )
     expect(productUpdatesRecord?.instructions).toContain(
+      'preserve required prerequisites, availability limits, and approval or confirmation boundaries',
+    )
+    expect(productUpdatesRecord?.instructions).toContain(
       'open with one sentence of no more than 10 words',
     )
     expect(productUpdatesRecord?.instructions).toContain(

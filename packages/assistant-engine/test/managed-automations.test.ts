@@ -1022,6 +1022,7 @@ describe('applyMurphManagedAutomations', () => {
     expect(seed.instructions).toContain('Keep this scheduled note text-only')
     expect(seed.instructions).toContain('The outbound note must be link-free')
     expect(seed.instructions).toContain('no more than 28 words after the bullet marker')
+    expect(seed.instructions).toContain('preserve required prerequisites, availability limits, and approval or confirmation boundaries')
     expect(seed.instructions).toContain('open with one sentence of no more than 10 words')
     expect(seed.instructions).toContain('Close with one invitation sentence of no more than 12 words')
     expect(seed.instructions).not.toContain('canonical title, summary, URL, and tryIt fields')

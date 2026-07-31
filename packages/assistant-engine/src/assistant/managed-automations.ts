@@ -631,7 +631,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '- If `append-section` reports that the section already exists, another run already recorded today\'s note: read that section and, if its recorded kind and item ids still clear the current bar, compose and send a note for those exact items; otherwise return `{"kind":"skip","privateSummary":"No product note cleared the send bar."}`. Do not append again and do not switch kinds.',
       '- Keep this scheduled note text-only. Do not create, attach, or send images or response media.',
       '- The outbound note must be link-free. Never include URLs, Markdown links, bare domains, or link labels such as "read more".',
-      '- Use exactly one bullet per selected item. Each bullet must be one sentence and no more than 28 words after the bullet marker, including the title. State the benefit directly; omit extra color, caveats, and repeated personalization.',
+      '- Use exactly one bullet per selected item. Each bullet must be one sentence and no more than 28 words after the bullet marker, including the title. State the benefit directly; omit optional color and repeated personalization, but preserve required prerequisites, availability limits, and approval or confirmation boundaries.',
       '- If the ledger page was missing before this run, open with one sentence of no more than 10 words saying Murph occasionally shares what is new or useful.',
       '- Close with one invitation sentence of no more than 12 words.',
       '- If sending nothing, return `{"kind":"skip","privateSummary":"No product note cleared the send bar."}` and do not append to the ledger.',
