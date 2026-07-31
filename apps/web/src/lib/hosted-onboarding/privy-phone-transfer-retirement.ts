@@ -33,7 +33,7 @@ import {
 } from "./privy";
 import { lockHostedMemberRow } from "./shared";
 import {
-  isHostedBrowserVaultRefreshRuntimeControlEvent,
+  HOSTED_BROWSER_VAULT_REFRESH_RUNTIME_CONTROL_EVENT_ID_PREFIX,
 } from "../hosted-orchestration/browser-vault-refresh-control";
 import { getPrisma } from "../prisma";
 
@@ -405,14 +405,16 @@ async function classifyHostedPrivyPhoneTransferSourceScaffoldTx(input: {
     || !source.billingRef
     || !source.hostedWorkspace
     || !source.routing
-    || hasUnexpectedHostedPrivyPhoneTransferRelationCount(source._count, {
-      consentEvents: 2,
-      consentGrants: 2,
-      hostedCryptoAudits: 4,
-      hostedCryptoEnvelopes: 4,
-      hostedMailboxItems: 3,
-      hostedMailboxLaneCounters: 2,
-    })
+    || hasUnexpectedHostedPrivyPhoneTransferRelationCount(
+      source._count,
+      {
+        consentEvents: 2,
+        consentGrants: 2,
+        hostedCryptoAudits: 4,
+        hostedCryptoEnvelopes: 4,
+      },
+      HOSTED_PRIVY_PHONE_TRANSFER_RUNTIME_OWNED_RELATIONS,
+    )
   ) {
     throwHostedPrivyPhoneTransferSourceNotDisposable();
   }
@@ -556,12 +558,31 @@ function hasHostedPrivyPhoneTransferSourceCoreCustomization(
   );
 }
 
+/**
+ * Relations the hosted runtime writes on its own as soon as a member
+ * activates (workspace boots, activation mailbox processing, telemetry,
+ * usage-period bookkeeping). Their row counts carry no signal about
+ * member-contributed material, so the disposable census ignores them and
+ * relies on the detailed mailbox scaffold checks instead.
+ */
+const HOSTED_PRIVY_PHONE_TRANSFER_RUNTIME_OWNED_RELATIONS: ReadonlySet<string> =
+  new Set([
+    "aiUsage",
+    "hostedAiUsagePeriods",
+    "hostedMailboxItems",
+    "hostedMailboxLaneCounters",
+    "hostedMailboxPayloads",
+    "hostedRuntimeLogs",
+    "linqDailyStates",
+  ]);
+
 function hasUnexpectedHostedPrivyPhoneTransferRelationCount(
   counts: Record<string, number>,
   expectedNonZero: Readonly<Record<string, number>>,
+  ignored?: ReadonlySet<string>,
 ): boolean {
   return Object.entries(counts).some(([name, count]) =>
-    count !== (expectedNonZero[name] ?? 0)
+    !ignored?.has(name) && count !== (expectedNonZero[name] ?? 0)
   );
 }
 
@@ -786,19 +807,19 @@ async function assertHostedPrivyPhoneTransferAutoTrialScaffoldTx(input: {
       },
     }),
   ]);
-  const workspaceVersion = workspace?.version.toString() ?? "";
-
   if (
     !isHostedPrivyPhoneTransferAutoTrialRoutingScaffold({
       phoneNumber: input.phoneNumber,
       routing,
     })
-    || !isHostedPrivyPhoneTransferAutoTrialWorkspaceScaffold(workspace)
+    // The workspace lifecycle (version, snapshot, checkpoint, wake
+    // scheduling) is runtime-owned and advances within seconds of
+    // activation, so only its existence is part of the scaffold.
+    || !workspace
     || !isHostedPrivyPhoneTransferAutoTrialMailboxScaffold({
       items: mailboxItems,
       memberId: input.memberId,
       stripeSubscriptionId: billingRef.stripeSubscriptionId,
-      workspaceVersion,
     })
     || !isHostedPrivyPhoneTransferAutoTrialMailboxCounters(
       mailboxLaneCounters,
@@ -914,26 +935,6 @@ function isHostedPrivyPhoneTransferAutoTrialRoutingScaffold(input: {
   );
 }
 
-function isHostedPrivyPhoneTransferAutoTrialWorkspaceScaffold(
-  workspace: Awaited<
-    ReturnType<Prisma.TransactionClient["hostedWorkspace"]["findUnique"]>
-  >,
-): boolean {
-  return Boolean(
-    workspace
-    && workspace.version === 0n
-    && !workspace.snapshotRef
-    && !workspace.browserVaultReplicaRef
-    && !workspace.nextWakeAt
-    && !workspace.nextWakeReason
-    && !workspace.inboxMediaRetentionWakeAt
-    && !workspace.inboxMediaRetentionSignalAttemptedAt
-    && !workspace.acceptedAttemptFailureRecheckClaimedAt
-    && !workspace.redactedStatusJson
-    && !workspace.checkpointedAt
-  );
-}
-
 function isHostedPrivyPhoneTransferAutoTrialMailboxScaffold(input: {
   items: ReadonlyArray<{
     causalSeq: bigint | null;
@@ -948,45 +949,40 @@ function isHostedPrivyPhoneTransferAutoTrialMailboxScaffold(input: {
   }>;
   memberId: string;
   stripeSubscriptionId: string;
-  workspaceVersion: string;
 }): boolean {
   const sourceEventId = `auto-pulse-trial:${input.stripeSubscriptionId}`;
   const activationEventId =
     `member.activated:hosted.auto_pulse_trial.enrolled:${input.memberId}:${sourceEventId}`;
-  const expected = [
-    {
-      dedupeKey: activationEventId,
-      kind: "member.activated",
-    },
-    {
-      dedupeKey:
-        `assistant.notification.requested:signup-welcome:${input.memberId}:${activationEventId}`,
-      kind: "assistant.notification.requested",
-    },
-    {
-      kind: "runtime.browser-vault-refresh-requested",
-    },
-  ];
-  return input.items.length === expected.length
-    && input.items.every((item, index) =>
-      item.kind === expected[index]?.kind
-      && (
-        index === 2
-          ? isHostedBrowserVaultRefreshRuntimeControlEvent({
-              eventId: item.dedupeKey,
-              occurredAt: item.occurredAt,
-              userId: input.memberId,
-              workspaceVersion: input.workspaceVersion,
-            })
-          : item.dedupeKey === expected[index]?.dedupeKey
+  const welcomeEventId =
+    `assistant.notification.requested:signup-welcome:${input.memberId}:${activationEventId}`;
+  const [activation, welcome, ...runtimeControls] = input.items;
+  // The runtime consumes activation events and enqueues additional
+  // browser-vault refresh control events on its own, so consumption state
+  // and the number of trailing control events carry no member signal. Any
+  // conversation-lane item or unexpected kind is member-attributable and
+  // stays fail-closed.
+  return Boolean(
+    activation
+    && activation.kind === "member.activated"
+    && activation.dedupeKey === activationEventId
+    && activation.laneSeq === 1n
+    && activation.causalSeq === 1n
+    && welcome
+    && welcome.kind === "assistant.notification.requested"
+    && welcome.dedupeKey === welcomeEventId
+    && welcome.laneSeq === 2n
+    && welcome.causalSeq === 2n
+    && runtimeControls.every((item) =>
+      item.kind === "runtime.browser-vault-refresh-requested"
+      && item.dedupeKey.startsWith(
+        HOSTED_BROWSER_VAULT_REFRESH_RUNTIME_CONTROL_EVENT_ID_PREFIX,
       )
-      && item.lane === "system"
-      && item.laneSeq === BigInt(index + 1)
-      && item.causalSeq === BigInt(index + 1)
+    )
+    && input.items.every((item) =>
+      item.lane === "system"
       && item.payloadSchema === "murph.hosted-mailbox-item.v1"
-      && !item.consumedAt
-      && !item.contentRetiredAt
-    );
+    ),
+  );
 }
 
 function isHostedPrivyPhoneTransferAutoTrialMailboxCounters(
@@ -996,11 +992,23 @@ function isHostedPrivyPhoneTransferAutoTrialMailboxCounters(
     nextSeq: bigint;
   }>,
 ): boolean {
-  return counters.length === 2
-    && counters.every((counter) =>
-      (counter.lane === "causal" || counter.lane === "system")
-      && counter.nextSeq === 4n
-      && counter.consumedSeq === 0n
+  const causal = counters.filter((counter) => counter.lane === "causal");
+  const system = counters.filter((counter) => counter.lane === "system");
+  const conversation = counters.filter((counter) =>
+    counter.lane === "conversation"
+  );
+  // Causal/system counters advance as the runtime enqueues and consumes
+  // its own control events. The conversation counter is the durable
+  // record that a member conversation input ever existed: the runtime
+  // creates it eagerly at nextSeq 1, and any enqueued conversation
+  // message moves it past 1 forever.
+  return counters.length === causal.length + system.length + conversation.length
+    && causal.length === 1
+    && system.length === 1
+    && conversation.length <= 1
+    && [...causal, ...system].every((counter) => counter.nextSeq >= 4n)
+    && conversation.every((counter) =>
+      counter.nextSeq === 1n && counter.consumedSeq === 0n
     );
 }
 
