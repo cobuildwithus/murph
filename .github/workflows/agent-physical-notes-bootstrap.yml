@@ -32,6 +32,7 @@ jobs:
           cat .github/agent-physical-notes-base.patch.gz.part* > /tmp/physical-notes-base.patch.gz
           cat .github/agent-physical-notes-corrections.patch.gz.part* > /tmp/physical-notes-corrections.patch.gz
           gzip -dc /tmp/physical-notes-base.patch.gz > /tmp/physical-notes-base.patch
+          gzip -dc /tmp/physical-notes-corrections.patch.gz > /tmp/physical-notes-corrections.patch
           gzip -dc .github/agent-physical-notes-current.py.gz > /tmp/apply_physical_notes_current.py
           gzip -dc .github/agent-physical-notes-send-block.txt.gz > /tmp/new_send_physical_note_block.txt
 
@@ -42,7 +43,9 @@ jobs:
             --exclude='packages/assistant-engine/src/assistant/execution-context.ts' \
             --exclude='packages/assistant-runtime/src/hosted-runtime/platform.ts' \
             /tmp/physical-notes-base.patch
-          gzip -dc /tmp/physical-notes-corrections.patch.gz | git apply --verbose
+          git apply --verbose \
+            --exclude='packages/assistant-engine/src/assistant-codex/dynamic-tools.ts' \
+            /tmp/physical-notes-corrections.patch
           python /tmp/apply_physical_notes_current.py
           git diff --check
 
