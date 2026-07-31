@@ -590,7 +590,6 @@ function createPhysicalNoteStore(
     },
   };
 
-  let prisma: PrismaClient;
   const prismaLike = {
     async $transaction<T>(
       callback: (tx: Prisma.TransactionClient) => Promise<T>,
@@ -599,7 +598,7 @@ function createPhysicalNoteStore(
     },
     hostedPhysicalNote,
   };
-  prisma = asPhysicalNotePrismaClient(prismaLike);
+  const prisma = asPhysicalNotePrismaClient(prismaLike);
 
   return {
     allRows: () => [...rows.values()].map(cloneRow),

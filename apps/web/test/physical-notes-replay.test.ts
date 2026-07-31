@@ -122,7 +122,6 @@ describe("physical-note durable replay", () => {
       findUniqueOrThrow: vi.fn().mockResolvedValue(row),
       updateMany: vi.fn().mockResolvedValue({ count: 0 }),
     };
-    let prisma: PrismaClient;
     const prismaLike = {
       $transaction: vi.fn(async <T>(
         callback: (tx: Prisma.TransactionClient) => Promise<T>,
@@ -131,7 +130,7 @@ describe("physical-note durable replay", () => {
       )),
       hostedPhysicalNote,
     };
-    prisma = asPhysicalNotePrismaClient(prismaLike);
+    const prisma = asPhysicalNotePrismaClient(prismaLike);
     const create = vi.fn<LobPhysicalNoteRuntime["create"]>();
     const runtime = { create } satisfies LobPhysicalNoteRuntime;
     const { createHostedPhysicalNote } = await import(
