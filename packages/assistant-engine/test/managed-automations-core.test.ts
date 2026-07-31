@@ -1131,8 +1131,8 @@ describe('applyMurphManagedAutomations core integration', () => {
 
     await upsertAutomation({
       automationId: 'automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FC',
-      continuityPolicy: 'preserve',
-      instructions: 'old onboarding follow-up instructions',
+      continuityPolicy: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy,
+      instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
       now: new Date('2026-06-23T12:00:00.000Z'),
       route: existingRoute,
       schedule: {
@@ -1141,14 +1141,9 @@ describe('applyMurphManagedAutomations core integration', () => {
       },
       slug: 'finish-onboarding-followup',
       status: 'paused',
-      summary: 'Old onboarding follow-up summary.',
-      tags: [
-        'assistant',
-        'scheduled',
-        'murph-managed',
-        'murph-managed:onboarding-followup',
-      ],
-      title: 'Old onboarding follow-up',
+      summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
+      tags: [...MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags],
+      title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
       vaultRoot,
     })
 
