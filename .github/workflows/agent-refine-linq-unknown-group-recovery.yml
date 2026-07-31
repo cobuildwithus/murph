@@ -79,19 +79,29 @@ jobs:
       - name: Generate Prisma client
         run: pnpm --dir apps/web prisma:generate
 
-      - name: Focused tests
-        run: |
-          pnpm --dir apps/web exec vitest run \
-            --config vitest.workspace.ts \
-            --no-coverage \
-            test/hosted-group-start-handoff.test.ts \
-            test/hosted-group-start-recovery-route.test.ts \
-            test/hosted-linq-group-setup.test.ts \
-            test/hosted-member-routing-pending-group.test.ts \
-            test/hosted-onboarding-linq-thread-route.test.ts \
-            test/hosted-onboarding-linq-transport.test.ts \
-            test/join-invite-islands.test.ts \
-            test/join-invite-success-client.test.ts
+      - name: Test group-start handoff
+        run: pnpm --dir apps/web exec vitest run --config vitest.workspace.ts --no-coverage test/hosted-group-start-handoff.test.ts
+
+      - name: Test group-start recovery route
+        run: pnpm --dir apps/web exec vitest run --config vitest.workspace.ts --no-coverage test/hosted-group-start-recovery-route.test.ts
+
+      - name: Test Linq group setup
+        run: pnpm --dir apps/web exec vitest run --config vitest.workspace.ts --no-coverage test/hosted-linq-group-setup.test.ts
+
+      - name: Test pending group routing
+        run: pnpm --dir apps/web exec vitest run --config vitest.workspace.ts --no-coverage test/hosted-member-routing-pending-group.test.ts
+
+      - name: Test Linq thread routing
+        run: pnpm --dir apps/web exec vitest run --config vitest.workspace.ts --no-coverage test/hosted-onboarding-linq-thread-route.test.ts
+
+      - name: Test Linq transport
+        run: pnpm --dir apps/web exec vitest run --config vitest.workspace.ts --no-coverage test/hosted-onboarding-linq-transport.test.ts
+
+      - name: Test invite islands
+        run: pnpm --dir apps/web exec vitest run --config vitest.workspace.ts --no-coverage test/join-invite-islands.test.ts
+
+      - name: Test invite success handoff
+        run: pnpm --dir apps/web exec vitest run --config vitest.workspace.ts --no-coverage test/join-invite-success-client.test.ts
 
       - name: Typecheck
         run: pnpm --dir apps/web typecheck
