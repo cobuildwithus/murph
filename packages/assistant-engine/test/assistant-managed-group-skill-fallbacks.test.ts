@@ -71,4 +71,22 @@ describe("managed hosted group skill boundary", () => {
       "group-challenge still owns formation, buy-in, consent, durable state, scheduling, diagnostics, and close-out",
     );
   });
+
+  it("fails closed when the managed challenge policy is absent", async () => {
+    const raw = await readFile(
+      path.join(resolveAssistantSkillsRoot(), "group-challenge", "SKILL.md"),
+      "utf8",
+    );
+    const normalized = raw.replace(/\s+/gu, " ");
+
+    expect(normalized).toContain(
+      "Do not create, score, settle, or announce a challenge in this build.",
+    );
+    expect(normalized).toContain(
+      "managed group challenges are unavailable rather than approximating them",
+    );
+    expect(normalized).not.toContain(
+      "unless the public runtime contracts and current evidence support it",
+    );
+  });
 });
