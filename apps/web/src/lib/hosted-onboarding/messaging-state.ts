@@ -12,7 +12,6 @@ import { normalizePhoneNumber } from "./phone";
 
 interface HostedMemberMessagingIdentitySlice {
   emailLinked?: boolean;
-  memberId?: string | null;
   phoneLookupKey?: string | null;
 }
 
