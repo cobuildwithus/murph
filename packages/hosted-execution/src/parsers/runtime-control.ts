@@ -10,6 +10,9 @@ import {
   parseAssistantUsageRecord,
 } from "../assistant-usage.ts";
 import {
+  parseHostedAssistantCustomInferenceOverride,
+} from "../assistant-inference.ts";
+import {
   HOSTED_ASSISTANT_DEFAULT_PROVIDER,
   isHostedAssistantProductModel,
   isHostedAssistantProvider,
@@ -5821,6 +5824,13 @@ export function parseHostedWorkspaceState(value: unknown): HostedWorkspaceState 
 
 export function parseHostedWorkspaceReadResponse(value: unknown): HostedWorkspaceReadResponse {
   const record = requireObject(value, "Hosted workspace read response");
+  const hostedAssistantCustomInferenceOverride =
+    record.hostedAssistantCustomInferenceOverride === undefined
+      || record.hostedAssistantCustomInferenceOverride === null
+      ? null
+      : parseHostedAssistantCustomInferenceOverride(
+          record.hostedAssistantCustomInferenceOverride,
+        );
   const hostedAssistantModelOverride = parseHostedAssistantModelOverride(
     record.hostedAssistantModelOverride,
   );
@@ -5834,6 +5844,9 @@ export function parseHostedWorkspaceReadResponse(value: unknown): HostedWorkspac
 
   return {
     fetchedAt: requireString(record.fetchedAt, "Hosted workspace read response fetchedAt"),
+    ...(hostedAssistantCustomInferenceOverride
+      ? { hostedAssistantCustomInferenceOverride }
+      : {}),
     ...(hostedAssistantModelOverride
       ? { hostedAssistantModelOverride }
       : {}),
