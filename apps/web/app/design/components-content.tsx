@@ -909,7 +909,8 @@ export function ComponentsContent() {
             <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
               The open report keeps ownership after upload: processing,
               updated, no-clear-facts, and delayed recovery remain visible
-              without requiring a reload.
+              without requiring a reload. Processing stays animated, and the
+              delayed action rechecks the existing accepted job.
             </p>
             <div className="grid gap-4">
               <EnvironmentVoiceRefreshNotice
