@@ -126,10 +126,11 @@ export async function buildHostedLinqAffirmativeReactionMessageEvent(input: {
 
 /**
  * Retains the historical function name for the webhook call site, but no longer
- * stages a lossy next-message hint. Every authenticated non-affirmative group
- * reaction is now an ordinary durable conversation mailbox item whose row is
- * marked consumed at ingress, so it is imported as context without ever
- * becoming a reply candidate.
+ * stages a lossy next-message hint. The verified provider event supplies the
+ * actor and target; the canonical thread route supplies group/runtime authority.
+ * The reaction becomes an ordinary durable conversation mailbox item whose row
+ * is marked consumed at ingress, so it is imported as context without ever
+ * becoming a reply candidate or depending on a live roster re-read.
  */
 export async function stageHostedLinqGroupReactionContext(input: {
   event: ParsedHostedLinqProviderEvent;
@@ -153,15 +154,6 @@ export async function stageHostedLinqGroupReactionContext(input: {
       prisma: input.prisma,
     }))
   ) {
-    return false;
-  }
-
-  const chat = await readHostedLinqReactionCanonicalChat({
-    actor: eventContext.actor,
-    chatId: eventContext.chatId,
-    ...(input.signal ? { signal: input.signal } : {}),
-  });
-  if (!chat || chat.isGroup !== true) {
     return false;
   }
 
@@ -189,7 +181,9 @@ export async function stageHostedLinqGroupReactionContext(input: {
     targetText,
   });
   const envelope = buildHostedExecutionLinqConversationMessageWake({
-    accountLookupKey: chat.accountLookupKey,
+    ...(route.accountLookupKey
+      ? { accountLookupKey: route.accountLookupKey }
+      : {}),
     contactKind: eventContext.actor.kind,
     contactLookupKey: eventContext.actor.lookupKey,
     eventId: reactionEventId,
