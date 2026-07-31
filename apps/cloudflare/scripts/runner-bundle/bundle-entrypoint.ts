@@ -76,7 +76,12 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // the final macOS assembly measured 9,971,103B total and an 8,295,095B static
 // closure. No forbidden subsystem entered the boot graph. Preserve that static
 // measurement alongside main's higher cross-platform total measurement.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_979_011 + 32_768;
+//
+// Physical notes extend the existing dynamic-tool, hosted-runtime, and Web-port
+// paths without adding a forbidden boot input. Linux CI measured 10,012,825B
+// total on 2026-07-31. Ratchet the total baseline to that measurement and retain
+// the established 32KB allowance.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_012_825 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_649_331;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_295_095;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
