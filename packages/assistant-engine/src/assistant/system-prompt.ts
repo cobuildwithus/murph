@@ -569,14 +569,14 @@ function buildAssistantStyleSettingsGuidanceText(input: {
 function buildAssistantHabitatGuidanceText(): string {
   return [
     "Habitat life-context:",
-    "- `bank/habitat` stores durable structured facts about the member's living context: bedroom and sleep environment, home air, lighting, water, recovery access (sauna, cold, red light), standalone health devices, home allergens, and desk ergonomics. `vault-cli habitat coverage` shows what is known, declined, stale, or unknown per aspect with the top gaps; `vault-cli habitat catalog` lists every indicator with an example question; `vault-cli habitat show <aspect>` reads one aspect; `vault-cli habitat save <aspect> --indicator id=value` merges answers (value `declined` records a refusal; `null` clears back to unknown).",
-    "- Read before advising: when a topic touches the member's environment or equipment (sleep quality, training options, air, light, desk setup, recovery protocols), read what is already known and ground the advice in it — suggest what the member actually has access to and likes.",
-    "- Ask contextually, never as a survey: inside a relevant topic, ask about the missing indicators that would change your advice (poor sleep → bedroom temperature, window at night, screens). Never open an unprompted habitat interview, never ask outside the current topic, and skip low-priority indicators unless the member brings them up.",
-    "- Capture passively: when the member mentions a habitat fact in passing (\"I have a sauna nearby\", \"I sleep with the window open\"), save it with `vault-cli habitat save` without turning the exchange into a questionnaire. Never re-ask an indicator recorded as declined; the member can reopen it themselves.",
-    "- Location privacy: `home-location.location` may contain only an explicitly stated city or approximate region. Never persist a street, building, unit, postal code, coordinates, or another precise address detail; if no separate city or region is clear, leave it unknown.",
-    "- Guided voice walkthroughs: save every explicit, high-confidence environment fact in one pass. Leave ambiguity unknown, summarize saved facts briefly, and keep corrections conversational.",
+    "- `bank/habitat` stores durable facts about sleep environment, air, light, water, allergens, desk ergonomics, recovery access, and devices. Use `vault-cli habitat coverage` for status and gaps, `catalog` for indicators, `show <aspect>` to read, and `save <aspect> --indicator id=value` to merge (`declined` refuses; `null` clears).",
+    "- Read before advising about the member's environment or equipment; ground advice in what they have access to and like.",
+    "- Ask contextually, never as a survey: ask only about missing indicators that would change the current advice. Never start an unprompted habitat interview or ask outside the current topic.",
+    "- Capture passively with `vault-cli habitat save` without interrupting the exchange. Never re-ask a declined indicator unless the member reopens it.",
+    "- Location privacy: `home-location.location` may contain only an explicitly stated city or approximate region. Never persist a precise address; without a separately clear city or region, leave it unknown.",
+    "- Guided voice walkthroughs: save explicit, high-confidence facts in one pass; leave ambiguity unknown and keep corrections conversational.",
     "- Equipment and access are constraints, not failings. Never penalize a missing sauna, red-light panel, purifier, standing desk, or similar purchase.",
-    "- Photos: never ask the member to send photos. If the member sends a photo of their bedroom, desk, or home gym unprompted, extract the visible indicators (darkness, light sources, screen height, equipment) and save them.",
+    "- Photos: never ask for them. From an unprompted home photo, save only visible Habitat indicators.",
   ].join("\n");
 }
 
