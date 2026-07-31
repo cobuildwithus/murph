@@ -1,0 +1,93 @@
+name: Bootstrap managed group skill test cutover
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - agent/private-group-assistant-skills-cutover
+
+permissions:
+  contents: write
+
+jobs:
+  bootstrap:
+    if: ${{ github.event_name == 'push' || github.head_ref == 'agent/private-group-assistant-skills-cutover' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out cutover branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: agent/private-group-assistant-skills-cutover
+
+      - name: Move direct private-text assertions out of public coverage
+        shell: bash
+        run: |
+          set -euo pipefail
+          python <<'PY'
+          from pathlib import Path
+
+          path = Path("packages/assistant-engine/test/assistant-skill-assets.test.ts")
+          source = path.read_text(encoding="utf-8")
+          old = """  it('keeps private and shared activity interpretation in their owners', async () => {
+    const load = async (slug: string) => {
+      const skill = ASSISTANT_SKILLS.find((candidate) => candidate.slug === slug)
+      if (!skill) throw new Error(`Missing registered skill: ${slug}`)
+      return (await readSkillFile(skill)).replace(/\\s+/gu, ' ')
+    }
+    const [daily, shared] = await Promise.all([
+      load('daily-activity'),
+      load('group-chat'),
+    ])
+
+    expect(daily).toMatch(
+      /wearables day <date>.+wearables activity list.+canonical workout-day rollup/u,
+    )
+    expect(daily).toContain('current-local-day totals as provisional and say \"so far.\"')
+    expect(daily).toContain('not proof of failed provider sync or import')
+    expect(shared).toContain('its cause is unverified')
+    expect(shared).toContain('current-local-day value as provisional: say \"so far\"')
+  })
+"""
+          new = """  it('keeps private activity interpretation in its public owner', async () => {
+    const skill = ASSISTANT_SKILLS.find(
+      (candidate) => candidate.slug === 'daily-activity',
+    )
+    if (!skill) throw new Error('Missing registered skill: daily-activity')
+    const daily = (await readSkillFile(skill)).replace(/\\s+/gu, ' ')
+
+    expect(daily).toMatch(
+      /wearables day <date>.+wearables activity list.+canonical workout-day rollup/u,
+    )
+    expect(daily).toContain('current-local-day totals as provisional and say \"so far.\"')
+    expect(daily).toContain('not proof of failed provider sync or import')
+  })
+"""
+          if old not in source:
+              if new not in source:
+                  raise SystemExit("Expected mixed public/private skill assertion was not found")
+          else:
+              path.write_text(source.replace(old, new), encoding="utf-8")
+          PY
+
+          git rm -f \
+            packages/assistant-engine/test/assistant-group-challenge-buy-in-skill.test.ts \
+            packages/assistant-engine/test/assistant-group-challenge-diagnostics-skill.test.ts \
+            packages/assistant-engine/test/assistant-group-challenge-scorecards-skill.test.ts \
+            packages/assistant-engine/test/assistant-groupchat-comedy-skill.test.ts
+
+      - name: Commit test ownership cutover when needed
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add packages/assistant-engine/test
+          if git diff --cached --quiet; then
+            echo "Managed group skill test cutover is already applied."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Move managed group skill text pins out of public tests"
+          git push origin HEAD:agent/private-group-assistant-skills-cutover
