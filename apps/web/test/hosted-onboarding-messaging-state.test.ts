@@ -138,7 +138,7 @@ describe("hosted member messaging authority", () => {
     });
   });
 
-  it("treats verified email as setup-complete without inventing another delivery route", () => {
+  it("treats verified email as setup-complete without inventing a direct chat", () => {
     const input = {
       identity: {
         emailLinked: true,
@@ -149,7 +149,7 @@ describe("hosted member messaging authority", () => {
     const messaging = resolveHostedMemberMessagingState(input);
 
     expect(messaging).toMatchObject({
-      hasDirectMessagingChannel: true,
+      hasDirectMessagingChannel: false,
       hasEmail: true,
       hasLinq: false,
       hasPhone: false,
