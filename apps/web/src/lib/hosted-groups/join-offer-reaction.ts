@@ -14,6 +14,9 @@ import {
 import { logHostedOnboardingDiagnostic } from "../hosted-onboarding/logging";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
+import {
+  createHostedLinqParticipantContact,
+} from "../hosted-onboarding/linq-participant-contact";
 import { createHostedExternalThreadIdentityLookupKeyReadCandidates } from "../hosted-onboarding/contact-privacy";
 import {
   createHostedPostCommitDeadline,
@@ -151,16 +154,16 @@ export async function handleHostedGroupJoinOfferReaction(input: {
           threadIdentityLookupKeyReadCandidates,
           tx,
         });
-        if (!member) {
-          // Only a pre-member removal is consumed here, so only it needs the
-          // anonymous room-evidence row. A member's removal keeps its webhook
-          // fallthrough, which records the attributed envelope instead.
-          reactionMailboxAppend = await appendAnonymousHostedGroupOfferReactionTx({
-            event: input.event,
-            expectedContainerMemberId: offer.runtimeMemberId,
-            tx,
-          });
-        }
+        // Every decided canonical removal leaves durable room evidence in the
+        // same transaction that marks the provider event handled: once handled,
+        // webhook retry never replays the reaction projection, so a
+        // handled-then-stage split would lose the removal across a restart.
+        reactionMailboxAppend = await appendHostedGroupOfferReactionRoomEvidenceTx({
+          actor: member ? input.event.reactionFromHandle : null,
+          event: input.event,
+          expectedContainerMemberId: offer.runtimeMemberId,
+          tx,
+        });
         let allowMissingRowTombstone = !member;
         if (member) {
           await lockHostedMemberRow(tx, member.id);
@@ -213,16 +216,11 @@ export async function handleHostedGroupJoinOfferReaction(input: {
       if (revoked.kind === "revoked") {
         return { status: "accepted", reason: "outreach_revoked" };
       }
-      if (member) {
-        // A member's removal that revokes nothing stays on its previous
-        // webhook fallthrough: grants are additive, and the group model
-        // records the attributed removal there.
-        return skipHostedGroupJoinOfferReaction({ reason: "reaction_removed" });
-      }
-      if (regionSupportedForRemoval) {
-        // The canonical owner already retained this removal. Make that decision
-        // terminal so the shared webhook cannot append a second actor-attributed
-        // envelope under the same provider event id.
+      if (member || regionSupportedForRemoval) {
+        // The canonical owner already retained this removal as durable room
+        // evidence. Make that decision terminal so the shared webhook cannot
+        // append a second actor-attributed envelope under the same provider
+        // event id.
         return { status: "accepted", reason: "reaction_recorded" };
       }
       // This owner decided a canonical-offer reaction from a refused region, so
@@ -263,7 +261,8 @@ export async function handleHostedGroupJoinOfferReaction(input: {
           threadIdentityLookupKeyReadCandidates,
           tx,
         });
-        reactionMailboxAppend = await appendAnonymousHostedGroupOfferReactionTx({
+        reactionMailboxAppend = await appendHostedGroupOfferReactionRoomEvidenceTx({
+          actor: null,
           event: input.event,
           expectedContainerMemberId: offer.runtimeMemberId,
           tx,
@@ -322,8 +321,7 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     || (!memberHasActiveAccess && member.phoneIdentityVerified)
   ) {
     const outreachResult = await resolveHostedGroupJoinOutreachForMemberReaction({
-      eventId: input.event.eventId,
-      handledAt: input.event.providerCreatedAt,
+      event: input.event,
       memberId: member.id,
       messageLookupKeyReadCandidates,
       participantPhoneNumber:
@@ -331,7 +329,6 @@ export async function handleHostedGroupJoinOfferReaction(input: {
           input.event.reactionFromHandle,
         ),
       prisma: input.prisma,
-      requestedAt: input.event.providerCreatedAt,
       threadIdentityLookupKeyReadCandidates,
     });
     if (outreachResult.status !== "active_member") {
@@ -350,7 +347,8 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     messageLookupKeyReadCandidates,
     now: input.event.providerCreatedAt,
     onAcceptedTx: async (tx) => {
-      reactionMailboxAppend = await appendAnonymousHostedGroupOfferReactionTx({
+      reactionMailboxAppend = await appendHostedGroupOfferReactionRoomEvidenceTx({
+        actor: null,
         event: input.event,
         tx,
       });
@@ -374,11 +372,24 @@ export async function handleHostedGroupJoinOfferReaction(input: {
   return skipHostedGroupJoinOfferReaction({ reason: result.reason });
 }
 
-async function appendAnonymousHostedGroupOfferReactionTx(input: {
+async function appendHostedGroupOfferReactionRoomEvidenceTx(input: {
+  // Pre-member handles must stay `null` so no pre-member phone enters
+  // group-visible room evidence; a member's handle is already group-known and
+  // may attribute the retained reaction.
+  actor: string | null;
   event: ParsedHostedLinqProviderEvent;
   expectedContainerMemberId?: string;
   tx: Prisma.TransactionClient;
 }): Promise<HostedLinqGroupReactionMailboxAppend> {
+  // Normalize exactly like the shared webhook staging path: both owners write
+  // under one idempotency key per provider event, so the attributed actor must
+  // stay byte-identical across whichever owner appends first.
+  const actor = input.actor === null
+    ? null
+    : createHostedLinqParticipantContact({
+        kind: input.actor.includes("@") ? "email" : "phone",
+        value: input.actor,
+      })?.value ?? null;
   const threadId = input.event.linqChatId;
   if (!threadId) {
     throw new TypeError("Hosted group offer reaction thread is missing.");
@@ -398,7 +409,7 @@ async function appendAnonymousHostedGroupOfferReactionTx(input: {
     throw new Error("Hosted group offer reaction route could not be resolved.");
   }
   return appendHostedLinqGroupReactionMailboxTx({
-    actor: null,
+    actor,
     event: input.event,
     route,
     tx: input.tx,
@@ -440,17 +451,24 @@ type HostedGroupJoinOutreachMemberReactionResult =
   | { status: "active_member" };
 
 async function resolveHostedGroupJoinOutreachForMemberReaction(input: {
-  eventId: string;
-  handledAt: Date;
+  event: ParsedHostedLinqProviderEvent;
   memberId: string;
   messageLookupKeyReadCandidates: readonly string[];
   participantPhoneNumber: string | null;
   prisma: PrismaClient;
-  requestedAt: Date;
   threadIdentityLookupKeyReadCandidates: readonly string[];
 }): Promise<HostedGroupJoinOutreachMemberReactionResult> {
+  let reactionMailboxAppend: HostedLinqGroupReactionMailboxAppend | null = null;
+  const markHandledTx = (tx: Prisma.TransactionClient) =>
+    markHostedLinqGroupJoinOfferHandledTx({
+      eventId: input.event.eventId,
+      handledAt: input.event.providerCreatedAt,
+      prisma: tx,
+    });
   try {
-    return await input.prisma.$transaction(async (tx) => {
+    const resolved = await input.prisma.$transaction(async (
+      tx,
+    ): Promise<HostedGroupJoinOutreachMemberReactionResult> => {
       // The canonical offer lock comes first here, matching direct join.
       const offer = await readHostedGroupJoinOfferTargetTx({
         channel: "linq",
@@ -461,6 +479,18 @@ async function resolveHostedGroupJoinOutreachForMemberReaction(input: {
       });
       await lockHostedMemberRow(tx, input.memberId);
       await lockHostedMemberSponsoredAccessRows(tx, input.memberId);
+      // Every terminal decision below marks the provider event handled, and a
+      // handled event is never replayed into the reaction projection. The
+      // durable room-evidence row therefore commits in this same transaction,
+      // attributed because a member's handle is already group-known.
+      const retainReactionEvidenceTx = async () => {
+        reactionMailboxAppend = await appendHostedGroupOfferReactionRoomEvidenceTx({
+          actor: input.event.reactionFromHandle,
+          event: input.event,
+          expectedContainerMemberId: offer.runtimeMemberId,
+          tx,
+        });
+      };
 
       const member = await tx.hostedMember.findUnique({
         select: { suspendedAt: true },
@@ -476,11 +506,8 @@ async function resolveHostedGroupJoinOutreachForMemberReaction(input: {
         });
       }
       if (member.suspendedAt) {
-        await markHostedLinqGroupJoinOfferHandledTx({
-          eventId: input.eventId,
-          handledAt: input.handledAt,
-          prisma: tx,
-        });
+        await retainReactionEvidenceTx();
+        await markHandledTx(tx);
         return skipHostedGroupJoinOfferReaction({ reason: "member_suspended" });
       }
       if (await readActiveHostedMemberAccess({
@@ -500,11 +527,8 @@ async function resolveHostedGroupJoinOutreachForMemberReaction(input: {
         },
       });
       if (membership) {
-        await markHostedLinqGroupJoinOfferHandledTx({
-          eventId: input.eventId,
-          handledAt: input.handledAt,
-          prisma: tx,
-        });
+        await retainReactionEvidenceTx();
+        await markHandledTx(tx);
         return skipHostedGroupJoinOfferReaction({
           reason: "already_group_member",
         });
@@ -515,11 +539,8 @@ async function resolveHostedGroupJoinOutreachForMemberReaction(input: {
       if (!isHostedGroupJoinOutreachSupportedRegion(
         input.participantPhoneNumber,
       )) {
-        await markHostedLinqGroupJoinOfferHandledTx({
-          eventId: input.eventId,
-          handledAt: input.handledAt,
-          prisma: tx,
-        });
+        await retainReactionEvidenceTx();
+        await markHandledTx(tx);
         return skipHostedGroupJoinOfferReaction({
           reason: "recipient_region_unsupported",
         });
@@ -528,16 +549,18 @@ async function resolveHostedGroupJoinOutreachForMemberReaction(input: {
       await enqueueHostedGroupJoinOutreachTx({
         offerId: offer.offerId,
         participantPhoneNumber: input.participantPhoneNumber,
-        requestedAt: input.requestedAt,
+        requestedAt: input.event.providerCreatedAt,
         tx,
       });
-      await markHostedLinqGroupJoinOfferHandledTx({
-        eventId: input.eventId,
-        handledAt: input.handledAt,
-        prisma: tx,
-      });
+      await retainReactionEvidenceTx();
+      await markHandledTx(tx);
       return { status: "accepted", reason: "outreach_enqueued" };
     }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    await signalHostedGroupOfferReactionBestEffort({
+      append: reactionMailboxAppend,
+      prisma: input.prisma,
+    });
+    return resolved;
   } catch (error) {
     const reason = readHostedGroupJoinOfferTargetSkipReason(error);
     if (!reason) {

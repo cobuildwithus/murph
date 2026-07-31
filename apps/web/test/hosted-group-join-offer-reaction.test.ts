@@ -440,10 +440,16 @@ describe("handleHostedGroupJoinOfferReaction", () => {
           participantPhoneNumber: "+15551234567",
           tx: expect.anything(),
         });
+      expect(mocks.appendHostedLinqGroupReactionMailboxTx).toHaveBeenCalledWith({
+        actor: "+15551234567",
+        event: expect.anything(),
+        route: expect.objectContaining({ containerMemberId: "hbm_runtime" }),
+        tx: expect.anything(),
+      });
     },
   );
 
-  it("keeps an active member with no pending outreach tombstone-free", async () => {
+  it("makes an active member's non-revoking removal terminal after attributed retention", async () => {
     mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
     const prisma = createPrismaStub();
 
@@ -453,12 +459,19 @@ describe("handleHostedGroupJoinOfferReaction", () => {
         reactionType: "like",
       }),
       prisma,
-    })).resolves.toEqual({ reason: "reaction_removed", status: "ignored" });
+    })).resolves.toEqual({ reason: "reaction_recorded", status: "accepted" });
 
     expect(mocks.revokeHostedGroupJoinOutreachForRemovedReactionTx)
       .toHaveBeenCalledWith(expect.objectContaining({
         allowMissingRowTombstone: false,
       }));
+    expect(mocks.appendHostedLinqGroupReactionMailboxTx).toHaveBeenCalledWith({
+      actor: "+15551234567",
+      event: expect.anything(),
+      route: expect.objectContaining({ containerMemberId: "hbm_runtime" }),
+      tx: expect.anything(),
+    });
+    expect(mocks.signalHostedLinqGroupReactionMailbox).toHaveBeenCalledTimes(1);
   });
 
   it("does not treat a removed Like as disclosure consent or a legacy join", async () => {
@@ -470,10 +483,45 @@ describe("handleHostedGroupJoinOfferReaction", () => {
         reactionType: "like",
       }),
       prisma,
-    })).resolves.toEqual({ reason: "reaction_removed", status: "ignored" });
+    })).resolves.toEqual({ reason: "reaction_recorded", status: "accepted" });
 
     expect(mocks.acceptHostedGroupDisclosurePermissionReactionTx).not.toHaveBeenCalled();
     expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+  });
+
+  it("rolls back a member removal when the attributed evidence append fails", async () => {
+    mocks.appendHostedLinqGroupReactionMailboxTx.mockRejectedValueOnce(
+      new Error("mailbox unavailable"),
+    );
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent({
+        eventType: "reaction.removed",
+        reactionType: "like",
+      }),
+      prisma,
+    })).rejects.toThrow("mailbox unavailable");
+
+    expect(mocks.revokeHostedGroupJoinOutreachForRemovedReactionTx).not.toHaveBeenCalled();
+    expect(mocks.markHostedLinqGroupJoinOfferHandledTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedLinqGroupReactionMailbox).not.toHaveBeenCalled();
+  });
+
+  it("rolls back member outreach consumption when the evidence append fails", async () => {
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
+    mocks.appendHostedLinqGroupReactionMailboxTx.mockRejectedValueOnce(
+      new Error("mailbox unavailable"),
+    );
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent({ reactionType: "like" }),
+      prisma,
+    })).rejects.toThrow("mailbox unavailable");
+
+    expect(mocks.markHostedLinqGroupJoinOfferHandledTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedLinqGroupReactionMailbox).not.toHaveBeenCalled();
   });
 
   it("durably enqueues first outreach and anonymous room evidence for a nonmember phone reaction", async () => {
@@ -541,6 +589,13 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       handledAt: new Date("2026-03-26T12:01:00.000Z"),
       prisma: expect.anything(),
     });
+    expect(mocks.appendHostedLinqGroupReactionMailboxTx).toHaveBeenCalledWith({
+      actor: "+15551234567",
+      event: expect.anything(),
+      route: expect.objectContaining({ containerMemberId: "hbm_runtime" }),
+      tx: expect.anything(),
+    });
+    expect(mocks.signalHostedLinqGroupReactionMailbox).toHaveBeenCalledTimes(1);
     expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
   });
 
@@ -587,6 +642,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
 
     expect(mocks.readHostedGroupJoinOfferTargetTx).not.toHaveBeenCalled();
     expect(mocks.markHostedLinqGroupJoinOfferHandledTx).not.toHaveBeenCalled();
+    expect(mocks.appendHostedLinqGroupReactionMailboxTx).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedGroupJoinOutreachTx).not.toHaveBeenCalled();
     expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
   });
@@ -607,6 +663,13 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     });
 
     expect(mocks.markHostedLinqGroupJoinOfferHandledTx).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedLinqGroupReactionMailboxTx).toHaveBeenCalledWith({
+      actor: "+353871234567",
+      event: expect.anything(),
+      route: expect.objectContaining({ containerMemberId: "hbm_runtime" }),
+      tx: expect.anything(),
+    });
+    expect(mocks.signalHostedLinqGroupReactionMailbox).toHaveBeenCalledTimes(1);
     expect(mocks.enqueueHostedGroupJoinOutreachTx).not.toHaveBeenCalled();
     expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
   });
@@ -631,6 +694,13 @@ describe("handleHostedGroupJoinOfferReaction", () => {
 
     expect(mocks.readHostedGroupJoinOfferTargetTx).toHaveBeenCalledTimes(1);
     expect(mocks.markHostedLinqGroupJoinOfferHandledTx).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedLinqGroupReactionMailboxTx).toHaveBeenCalledWith({
+      actor: "+15551234567",
+      event: expect.anything(),
+      route: expect.objectContaining({ containerMemberId: "hbm_runtime" }),
+      tx: expect.anything(),
+    });
+    expect(mocks.signalHostedLinqGroupReactionMailbox).toHaveBeenCalledTimes(1);
     expect(mocks.enqueueHostedGroupJoinOutreachTx).not.toHaveBeenCalled();
     expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
   });
@@ -648,6 +718,13 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     });
 
     expect(mocks.markHostedLinqGroupJoinOfferHandledTx).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedLinqGroupReactionMailboxTx).toHaveBeenCalledWith({
+      actor: "+15551234567",
+      event: expect.anything(),
+      route: expect.objectContaining({ containerMemberId: "hbm_runtime" }),
+      tx: expect.anything(),
+    });
+    expect(mocks.signalHostedLinqGroupReactionMailbox).toHaveBeenCalledTimes(1);
     expect(mocks.enqueueHostedGroupJoinOutreachTx).not.toHaveBeenCalled();
     expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
   });

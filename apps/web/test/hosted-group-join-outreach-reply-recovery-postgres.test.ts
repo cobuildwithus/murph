@@ -218,6 +218,9 @@ import {
   sendHostedLinqChatMessage as sendHostedLinqChatMessageOverHttp,
 } from "@/src/lib/hosted-onboarding/linq-client";
 import { parseHostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq";
+import {
+  createHostedExecutionGroupReactionEventId,
+} from "@murphai/hosted-execution";
 import { ingestHostedLinqProviderEventTx } from "@/src/lib/hosted-onboarding/linq-provider-event-store";
 import { parseHostedLinqProviderEvent } from "@/src/lib/hosted-onboarding/linq-provider-events";
 import {
@@ -1608,6 +1611,30 @@ describe.skipIf(!runPostgresProof)(
             reason: "outreach_revoked",
             status: "accepted",
           });
+          // Both member reactions must survive as consumed durable room
+          // evidence: the terminal owner decisions mark the provider events
+          // handled, after which webhook retry never replays the projection.
+          const reactionEvidence =
+            await fixture.reactionPrisma.hostedMailboxItem.findMany({
+              select: { consumedAt: true, dedupeKey: true },
+              where: {
+                dedupeKey: {
+                  in: [
+                    createHostedExecutionGroupReactionEventId(
+                      addedEvent.eventId,
+                    ),
+                    createHostedExecutionGroupReactionEventId(
+                      removedEvent.eventId,
+                    ),
+                  ],
+                },
+                userId: fixture.runtimeMemberId,
+              },
+            });
+          expect(reactionEvidence).toHaveLength(2);
+          expect(
+            reactionEvidence.every((row) => row.consumedAt !== null),
+          ).toBe(true);
           await fixture.reactionPrisma.hostedMember.update({
             data: {
               billingStatus: HostedBillingStatus.not_started,
