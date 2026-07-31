@@ -249,6 +249,19 @@ quoted message; rendered transcript structure is ignored; attachment
 descriptors, extracted text, filenames, stored paths, and lifecycle metadata do
 not enter evidence; and attachment-only input fails closed before provider work.
 
+Hosted product-feedback digest coverage is Web-owned and provider-free.
+`hosted-product-feedback-digest.test.ts` proves the Eastern 6pm-to-6pm window
+across both DST transitions, dedicated recipients, fixed empty digest,
+day-keyed Resend idempotency, the fixed allowlisted-kind aggregate that never
+reads free-form summary text, observable missing configuration, and same-hour
+retry through the real production sender against an isolated loopback provider
+fake. `hosted-product-feedback-digest-cron.test.ts` proves Vercel cron auth
+happens before the service runs. The operational-email config suite proves the
+shared sender/transport can use a feature-specific recipient allowlist, while
+the privacy-foundation migration inventory and production migration guard keep
+the new index and approved ten-minute cron registration aligned. Routine CI
+never reads production feedback or enters Resend.
+
 ## Current CI Workflows
 
 - Linux CI `apps/web verify` invocations default to wrapping the hosted-web production

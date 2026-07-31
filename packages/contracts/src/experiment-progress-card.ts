@@ -77,6 +77,10 @@ export const experimentProgressCardSchema = z
       })
       .strict(),
     weeks: z.array(cardWeekSchema).min(1).max(EXPERIMENT_PROGRESS_CARD_MAX_WEEKS),
+    moverSentimentContext: z
+      .literal("direction_unavailable")
+      .nullable()
+      .default(null),
     movers: z.array(cardMoverSchema).max(EXPERIMENT_PROGRESS_CARD_MAX_MOVERS).default([]),
     confounders: z
       .array(cardConfounderSchema)

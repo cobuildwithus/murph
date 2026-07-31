@@ -21,6 +21,7 @@ const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const temporaryDirectories: string[] = [];
 const finnishDrySaunaProtocolKey = "protocol_variant:dry-sauna/murph-finnish-standard-3x-week";
 const healthCommonsRuntimeArtifactNames = [
+  "biomarker-desired-directions.json",
   "protocol-index.json",
   "protocol-run-specs.json",
   "protocol-family-graph.json",
@@ -378,7 +379,7 @@ describe("runner bundle runtime artifact staging", () => {
     ).rejects.toThrow("Failed to pack @murphai/runtime-state.");
   });
 
-  it("packs the Health Commons runtime and compact protocol artifacts for hosted runner installs", async () => {
+  it("packs the compact Health Commons runtime artifacts for hosted runner installs", async () => {
     const tarballsDir = await mkdtemp(path.join(tmpdir(), "murph-runner-pack-"));
 
     temporaryDirectories.push(tarballsDir);
@@ -415,7 +416,9 @@ describe("runner bundle runtime artifact staging", () => {
     }
     expect(entries).not.toContain("package/generated/catalog.json");
     expect(entries).toContain("package/package.json");
-    expect(entries).not.toContain("package/generated/web/routes/index.json");
+    expect(
+      entries.some((entry) => entry.startsWith("package/generated/web/")),
+    ).toBe(false);
     expect(entries.some((entry) => entry.startsWith("package/content/"))).toBe(false);
 
     const extractDir = path.join(tarballsDir, "health-commons-extract");
@@ -428,6 +431,7 @@ describe("runner bundle runtime artifact staging", () => {
       "package/generated/protocol-index.json",
       "package/generated/protocol-run-specs.json",
       "package/generated/protocol-family-graph.json",
+      "package/generated/biomarker-desired-directions.json",
     ]);
     const protocolIndexRaw = await readFile(
       path.join(extractDir, "package", "generated", "protocol-index.json"),
@@ -441,9 +445,21 @@ describe("runner bundle runtime artifact staging", () => {
       path.join(extractDir, "package", "generated", "protocol-family-graph.json"),
       "utf8",
     );
+    const biomarkerDesiredDirectionsRaw = await readFile(
+      path.join(
+        extractDir,
+        "package",
+        "generated",
+        "biomarker-desired-directions.json",
+      ),
+      "utf8",
+    );
     const protocolIndex: unknown = JSON.parse(protocolIndexRaw);
     const protocolRunSpecs: unknown = JSON.parse(protocolRunSpecsRaw);
     const protocolFamilyGraph: unknown = JSON.parse(protocolFamilyGraphRaw);
+    const biomarkerDesiredDirections: unknown = JSON.parse(
+      biomarkerDesiredDirectionsRaw,
+    );
 
     expect(findProtocolArtifactEntry(protocolIndex, finnishDrySaunaProtocolKey)).toMatchObject({
       entityType: "protocol_variant",
@@ -464,6 +480,15 @@ describe("runner bundle runtime artifact staging", () => {
     expect(findProtocolFamilyGraphEdge(protocolFamilyGraph, finnishDrySaunaProtocolKey)).toMatchObject({
       targetKey: "experiment_family:dry-sauna",
       type: "parent_family",
+    });
+    expect(
+      findBiomarkerDesiredDirectionEntry(
+        biomarkerDesiredDirections,
+        "biomarker:resting-heart-rate",
+      ),
+    ).toEqual({
+      desiredDirection: "lower_or_stable",
+      key: "biomarker:resting-heart-rate",
     });
   });
 
@@ -782,6 +807,15 @@ async function readOptionalText(filePath: string): Promise<string> {
 async function writeMinimalHealthCommonsRuntimeArtifacts(generatedDir: string): Promise<void> {
   await mkdir(generatedDir, { recursive: true });
   await writeFile(
+    path.join(generatedDir, "biomarker-desired-directions.json"),
+    `${JSON.stringify({
+      biomarkers: [],
+      catalogHash: "sha256:test",
+      schemaVersion: "murph.commons.biomarker-desired-directions.v1",
+    })}\n`,
+    "utf8",
+  );
+  await writeFile(
     path.join(generatedDir, "protocol-index.json"),
     `${JSON.stringify({
       catalogHash: "sha256:test",
@@ -818,6 +852,20 @@ function findProtocolArtifactEntry(artifact: unknown, key: string): Record<strin
   }
 
   return artifact.protocols.find((entity) =>
+    isRecord(entity) &&
+      entity.key === key
+  ) ?? null;
+}
+
+function findBiomarkerDesiredDirectionEntry(
+  artifact: unknown,
+  key: string,
+): Record<string, unknown> | null {
+  if (!isRecord(artifact) || !Array.isArray(artifact.biomarkers)) {
+    return null;
+  }
+
+  return artifact.biomarkers.find((entity) =>
     isRecord(entity) &&
       entity.key === key
   ) ?? null;

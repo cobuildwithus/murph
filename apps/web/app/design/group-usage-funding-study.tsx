@@ -4,7 +4,6 @@ import {
   useEffect,
   useState,
   type ReactNode,
-  type SyntheticEvent,
 } from "react";
 import type {
   HostedPlanUsageAvailableStatus,
@@ -131,6 +130,18 @@ const DESIGN_AI_USAGE_ACTIVITY: HostedAiUsageActivitySnapshot = {
       title: "Start an active group",
     },
     {
+      destinationLabel: "the group",
+      id: "design-mission-reward-pending",
+      requirementsLabel:
+        "Start a fresh group and make it genuinely active, with multiple people actually talking.",
+      rewardLabel: "$3.50",
+      selectedLabel: "Jul 18, 2026",
+      status: "reward_pending",
+      statusLabel: "Reward pending",
+      timingLabel: "Qualified Jul 25",
+      title: "Start an active group",
+    },
+    {
       destinationLabel: "your Murph",
       id: "design-mission-new-person",
       requirementsLabel:
@@ -195,6 +206,12 @@ const DESIGN_AI_USAGE_DISABLED_HISTORY: HostedAiUsageActivitySnapshot = {
     },
   ],
   missionsEnabled: false,
+};
+
+const DESIGN_AI_USAGE_HISTORY_INTERACTION: HostedAiUsageActivitySnapshot = {
+  credits: DESIGN_AI_USAGE_DISABLED_HISTORY.credits,
+  missions: DESIGN_AI_USAGE_DISABLED_HISTORY.missions,
+  missionsEnabled: true,
 };
 
 const DESIGN_PERSONAL_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
@@ -477,7 +494,6 @@ function PersonalUsageCreditOwnerStudy() {
           Overall usage with active referrals and history
         </p>
         <PersonalUsageCreditState
-          allowHistoryInteraction
           label="Overall usage active"
           state="active-with-credit"
           usageStatus={DESIGN_PERSONAL_USAGE_STATUS}
@@ -493,6 +509,33 @@ function PersonalUsageCreditOwnerStudy() {
             </section>
           }
         />
+      </div>
+      <div
+        className="grid gap-6 lg:grid-cols-2"
+        data-design-state="usage-activity-interactions"
+      >
+        <section className="flex flex-col gap-3">
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            Referral details interaction
+          </p>
+          <div data-design-interaction="referral-details">
+            <HostedAiUsageActivity
+              activity={DESIGN_AI_USAGE_ACTIVITY}
+              missionContactOption={null}
+            />
+          </div>
+        </section>
+        <section className="flex flex-col gap-3">
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            Guidance with history interaction
+          </p>
+          <div data-design-interaction="guidance-with-history">
+            <HostedAiUsageActivity
+              activity={DESIGN_AI_USAGE_HISTORY_INTERACTION}
+              missionContactOption={DESIGN_USAGE_MISSION_CONTACT_OPTION}
+            />
+          </div>
+        </section>
       </div>
       <PersonalUsageCreditState
         label="Plan usage exhausted, credit remains"
@@ -533,6 +576,7 @@ function PersonalUsageCreditOwnerStudy() {
         </div>
       </div>
       <PersonalUsageCreditState
+        billingState="pulse-trial"
         canStartPaidPulse
         label="Pulse trial ended"
         state="trial-conversion"
@@ -578,7 +622,7 @@ function PersonalUsageCreditOwnerStudy() {
 }
 
 function PersonalUsageCreditState(props: {
-  allowHistoryInteraction?: boolean;
+  billingState?: "paid" | "pulse-trial";
   canStartPaidPulse?: boolean;
   label: string;
   state: string;
@@ -594,23 +638,21 @@ function PersonalUsageCreditState(props: {
         {props.label}
       </p>
       <div
-        data-design-interaction={
-          props.allowHistoryInteraction ? "history-only" : undefined
-        }
-        inert={props.allowHistoryInteraction ? undefined : true}
-        onClickCapture={
-          props.allowHistoryInteraction ? blockNonHistoryPreviewAction : undefined
-        }
-        onSubmitCapture={
-          props.allowHistoryInteraction ? blockNonHistoryPreviewAction : undefined
-        }
+        inert
       >
         <HostedBillingSettings
           authenticated
           billingStatus="active"
           canStartPaidPulse={props.canStartPaidPulse}
-          currentBillingPhase="paid"
+          currentBillingPhase={
+            props.billingState === "pulse-trial" ? "trial" : "paid"
+          }
           currentBillingPlanCode="launch_monthly"
+          currentCheckoutOffer={
+            props.billingState === "pulse-trial"
+              ? "pulse_trial_7d"
+              : "standard"
+          }
           payerMemberId={DESIGN_PAYER_MEMBER_ID}
           usageActivityDetail={props.usageActivityDetail}
           usageStatus={props.usageStatus}
@@ -619,19 +661,6 @@ function PersonalUsageCreditState(props: {
       </div>
     </div>
   );
-}
-
-function blockNonHistoryPreviewAction(event: SyntheticEvent<HTMLDivElement>) {
-  const target = event.target;
-  if (
-    target instanceof Element &&
-    target.closest("[data-hosted-ai-usage-activity] details")
-  ) {
-    return;
-  }
-
-  event.preventDefault();
-  event.stopPropagation();
 }
 
 export {
