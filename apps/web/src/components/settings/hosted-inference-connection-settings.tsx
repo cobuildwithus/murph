@@ -113,6 +113,7 @@ export function HostedInferenceConnectionSettings(
   } | null>(null);
   const confirmDeleteButtonRef = useRef<HTMLButtonElement>(null);
   const connectionHeadingRef = useRef<HTMLHeadingElement>(null);
+  const deleteConnectionButtonRef = useRef<HTMLButtonElement>(null);
   const protocolTriggerRef = useRef<HTMLButtonElement>(null);
   const replaceButtonRef = useRef<HTMLButtonElement>(null);
   const disabled = pendingAction !== null || !props.configurationAvailable;
@@ -623,10 +624,14 @@ export function HostedInferenceConnectionSettings(
         <div className="flex flex-wrap items-center gap-2">
           {confirmDelete ? (
             <>
-              <span className="mr-1 text-sm text-muted-foreground">
+              <span
+                className="mr-1 text-sm text-muted-foreground"
+                id="hosted-inference-delete-description"
+              >
                 Delete the saved endpoint and credential?
               </span>
               <Button
+                aria-describedby="hosted-inference-delete-description"
                 disabled={disabled}
                 onClick={() => void deleteConnection()}
                 ref={confirmDeleteButtonRef}
@@ -641,7 +646,12 @@ export function HostedInferenceConnectionSettings(
               </Button>
               <Button
                 disabled={disabled}
-                onClick={() => setConfirmDelete(false)}
+                onClick={() => {
+                  setConfirmDelete(false);
+                  requestAnimationFrame(() =>
+                    deleteConnectionButtonRef.current?.focus()
+                  );
+                }}
                 size="sm"
                 type="button"
                 variant="ghost"
@@ -658,6 +668,7 @@ export function HostedInferenceConnectionSettings(
                   confirmDeleteButtonRef.current?.focus()
                 );
               }}
+              ref={deleteConnectionButtonRef}
               size="sm"
               type="button"
               variant="ghost"
