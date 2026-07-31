@@ -29,6 +29,7 @@ import {
 const HOSTED_LEGACY_DEVICE_SYNC_PLATFORM_ENV_KEYS =
   new Set<string>(HOSTED_SHARED_DEVICE_SYNC_PLATFORM_ENV_NAMES);
 const HOSTED_PRIVATE_MEDIA_DELIVERY_ORIGIN_ENV = "CF_PUBLIC_BASE_URL";
+const HOSTED_PHYSICAL_NOTES_ENABLED_ENV = "HOSTED_PHYSICAL_NOTES_ENABLED";
 
 export function buildHostedRunnerJobRuntime(input: {
   commitTimeoutMs?: number | null;
@@ -124,16 +125,19 @@ export function buildHostedRunnerContainerPlatformEnv(
     rewriteLoopbackUrlsForContainer?: boolean;
   } = {},
 ): Record<string, string> {
-  const privateMediaDeliveryOrigin = buildHostedRunnerPlatformEnv(
-    source,
-    options,
-  )[HOSTED_PRIVATE_MEDIA_DELIVERY_ORIGIN_ENV];
+  const platformEnv = buildHostedRunnerPlatformEnv(source, options);
+  const privateMediaDeliveryOrigin =
+    platformEnv[HOSTED_PRIVATE_MEDIA_DELIVERY_ORIGIN_ENV];
+  const physicalNotesEnabled = platformEnv[HOSTED_PHYSICAL_NOTES_ENABLED_ENV];
   return {
     ...(privateMediaDeliveryOrigin
       ? {
           [HOSTED_PRIVATE_MEDIA_DELIVERY_ORIGIN_ENV]:
             privateMediaDeliveryOrigin,
         }
+      : {}),
+    ...(physicalNotesEnabled
+      ? { [HOSTED_PHYSICAL_NOTES_ENABLED_ENV]: physicalNotesEnabled }
       : {}),
     ...buildHostedRunnerLegacyDeviceSyncPlatformEnv(source, options),
     ...buildHostedRunnerChannelPlatformEnv(source, options),
