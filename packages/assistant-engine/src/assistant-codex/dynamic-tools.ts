@@ -221,6 +221,7 @@ import {
   createPhysicalNoteRequestKey,
   MURPH_SEND_PHYSICAL_NOTE_TOOL,
   readPhysicalNoteDynamicToolRequest,
+  resolvePhysicalNoteExplicitOriginInputId,
   type PhysicalNoteDynamicToolRequest,
 } from './dynamic-tools/physical-notes.js'
 export { MURPH_SEND_PHYSICAL_NOTE_TOOL } from './dynamic-tools/physical-notes.js'
@@ -3126,8 +3127,17 @@ export async function executeMurphDynamicToolRequest(input: {
         const userActionScope = hasExplicitArtwork
           ? hostedToolContext.currentUserActionScope?.() ?? null
           : null
+        const explicitOriginAssistantInputId = userActionScope
+          ? resolvePhysicalNoteExplicitOriginInputId({
+              acceptedInputIds: userActionScope.acceptedInputIds,
+              conversationScope: userActionScope.conversationScope,
+              ...(input.request.messageRef
+                ? { messageRef: input.request.messageRef }
+                : {}),
+            })
+          : null
         originAssistantInputId = trustedCompletion?.originAssistantInputId
-          ?? userActionScope?.acceptedInputIds.at(-1)
+          ?? explicitOriginAssistantInputId
           ?? null
         const imageRef = trustedCompletion?.imageRef
           ?? input.request.imageRef
@@ -3144,7 +3154,7 @@ export async function executeMurphDynamicToolRequest(input: {
           return toolTextResult(
             false,
             hasExplicitArtwork
-              ? 'sending previously previewed physical-note artwork requires fresh user input and the exact trusted generated-image ref and SHA-256'
+              ? 'sending previously previewed physical-note artwork requires fresh user input, the exact trusted generated-image ref and SHA-256, and in groups the exact approving Message ref'
               : 'physical-note sending requires the current trusted hosted image completion',
           )
         }
