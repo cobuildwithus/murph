@@ -6,7 +6,7 @@ import { createHostedDeviceSyncPublicIngressService } from "@/src/lib/device-syn
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
 import { readOptionalJsonObject } from "@/src/lib/http";
 import {
-  requireHostedCompanionMemberAccessFromRequest,
+  requireHostedCompanionMemberIdFromRequest,
 } from "@/src/lib/hosted-onboarding/companion-member-access";
 import { resolveHostedSignupTimeZone } from "@/src/lib/hosted-onboarding/time-zone-hint";
 import { getPrisma } from "@/src/lib/prisma";
@@ -31,14 +31,14 @@ export const POST = withJsonError(async (request: Request) => {
   });
 
   const prisma = getPrisma();
-  const member = await requireHostedCompanionMemberAccessFromRequest({
+  const memberId = await requireHostedCompanionMemberIdFromRequest({
     prisma,
     request,
     ...(timeZone ? { timeZone } : {}),
   });
   const publicIngress = createHostedDeviceSyncPublicIngressService(request);
   const session = await publicIngress.createSdkSignInSession(
-    member.id,
+    memberId,
     COMPANION_DEVICE_SYNC_PROVIDER,
     connectionIntent,
   );
