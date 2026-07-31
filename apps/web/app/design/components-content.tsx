@@ -868,11 +868,18 @@ export function ComponentsContent() {
               will build without showing empty scores or missing facts.
             </p>
             <EnvironmentEmptyState
-              contactAction={{
-                href: "sms:+15555550100?body=I%20want%20to%20update%20what%20you%20know%20about%20my%20home%20environment.",
-                kind: "text",
-                label: "Text Murph",
-              }}
+              contactOptions={[
+                {
+                  href: "sms:+15555550100?body=I%20want%20to%20update%20what%20you%20know%20about%20my%20home%20environment.",
+                  kind: "text",
+                  label: "Messages",
+                },
+                {
+                  href: "https://t.me/withmurph_bot",
+                  kind: "telegram",
+                  label: "Telegram",
+                },
+              ]}
             />
           </Section>
         </div>
@@ -890,7 +897,7 @@ export function ComponentsContent() {
               built only from facts Murph still does not know.
             </p>
             <EnvironmentCaptureCard
-              contactAction={null}
+              contactOptions={[]}
               coverage={70}
               known={21}
               script={DESIGN_ENVIRONMENT_GAP_SCRIPT}
@@ -909,7 +916,8 @@ export function ComponentsContent() {
             <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
               The open report keeps ownership after upload: processing,
               updated, no-clear-facts, and delayed recovery remain visible
-              without requiring a reload.
+              without requiring a reload. Processing stays animated, and the
+              delayed action rechecks the existing accepted job.
             </p>
             <div className="grid gap-4">
               <EnvironmentVoiceRefreshNotice

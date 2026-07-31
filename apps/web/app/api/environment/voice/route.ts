@@ -25,7 +25,10 @@ import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   lockHostedMemberRow,
 } from "@/src/lib/hosted-onboarding/shared";
-import { signalHostedMailboxAppendRuntime } from "@/src/lib/hosted-orchestration/signal-runtime";
+import {
+  signalHostedMailboxAppendRuntime,
+  signalHostedRuntimeRecheckRuntime,
+} from "@/src/lib/hosted-orchestration/signal-runtime";
 import { resolveHostedRuntimeAiUsageGate } from "@/src/lib/hosted-orchestration/runtime-usage-decision";
 import { readRawBodyBuffer } from "@/src/lib/http";
 import { getPrisma } from "@/src/lib/prisma";
@@ -41,6 +44,21 @@ export const GET = withJsonError(async (request: Request) => {
     userId: auth.member.id,
   });
   return jsonOk({ processing });
+});
+
+export const PATCH = withJsonError(async (request: Request) => {
+  assertHostedOnboardingMutationOrigin(request);
+  const auth = await requireActiveHostedAppSessionFromRequest(request);
+  const processing = await hasPendingHostedEnvironmentVoiceMailboxItem({
+    userId: auth.member.id,
+  });
+  if (processing) {
+    await signalHostedRuntimeRecheckRuntime({ userId: auth.member.id });
+  }
+  return jsonOk({
+    processing,
+    recheckRequested: processing,
+  });
 });
 
 export const POST = withJsonError(async (request: Request) => {
