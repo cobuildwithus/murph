@@ -13,6 +13,7 @@ import {
   Send,
 } from "lucide-react";
 
+import { AuthButton } from "@/src/components/ui/auth-button";
 import { Button } from "@/src/components/ui/button";
 import {
   Dialog,
@@ -66,12 +67,14 @@ export function EnvironmentVoiceCapture({
   const [recordingFile, setRecordingFile] = useState<File | null>(null);
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [requestingMicrophone, setRequestingMicrophone] = useState(false);
   const [audioLevels, setAudioLevels] = useState(RESTING_AUDIO_LEVELS);
   const [previewPlaying, setPreviewPlaying] = useState(false);
   const [previewElapsedMs, setPreviewElapsedMs] = useState(0);
   const [discardConfirmationOpen, setDiscardConfirmationOpen] = useState(false);
   const topicCount = script.topics.length;
   const recorderRef = useRef<MediaRecorder | null>(null);
+  const microphoneRequestPendingRef = useRef(false);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const startedAtRef = useRef(0);
@@ -219,6 +222,7 @@ export function EnvironmentVoiceCapture({
   );
 
   const reset = () => {
+    microphoneRequestPendingRef.current = false;
     recorderRef.current = null;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
@@ -230,10 +234,14 @@ export function EnvironmentVoiceCapture({
     setElapsedMs(0);
     setRecordingFile(null);
     setNotice(null);
+    setRequestingMicrophone(false);
     setDiscardConfirmationOpen(false);
   };
 
   const startRecording = async () => {
+    if (microphoneRequestPendingRef.current) {
+      return;
+    }
     setNotice(null);
     if (
       typeof MediaRecorder === "undefined" ||
@@ -245,6 +253,8 @@ export function EnvironmentVoiceCapture({
       return;
     }
 
+    microphoneRequestPendingRef.current = true;
+    setRequestingMicrophone(true);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mimeType = preferredMimeType();
@@ -271,6 +281,9 @@ export function EnvironmentVoiceCapture({
       setState("recording");
     } catch (error) {
       setNotice(microphoneAccessNotice(error));
+    } finally {
+      microphoneRequestPendingRef.current = false;
+      setRequestingMicrophone(false);
     }
   };
 
@@ -410,7 +423,13 @@ export function EnvironmentVoiceCapture({
   });
 
   const onOpenChange = (nextOpen: boolean) => {
-    if (!nextOpen && hasUnsentRecording(state)) {
+    if (
+      !nextOpen
+      && (
+        microphoneRequestPendingRef.current
+        || hasUnsentRecording(state)
+      )
+    ) {
       return;
     }
     setOpen(nextOpen);
@@ -422,9 +441,11 @@ export function EnvironmentVoiceCapture({
   const activeTopicIndex = Math.min(topicIndex, topicCount - 1);
   const topic = script.topics[activeTopicIndex] ?? script.topics[0];
   const elapsedLabel = formatElapsed(elapsedMs);
+  const preventCaptureDismissal =
+    requestingMicrophone || hasUnsentRecording(state);
   return (
     <>
-      <Button
+      <AuthButton
         type="button"
         size={triggerSize}
         variant={triggerVariant}
@@ -433,16 +454,16 @@ export function EnvironmentVoiceCapture({
       >
         <Mic data-icon="inline-start" aria-hidden="true" />
         {triggerLabel}
-      </Button>
+      </AuthButton>
 
       <Dialog
         open={open}
         onOpenChange={onOpenChange}
-        disablePointerDismissal={hasUnsentRecording(state)}
+        disablePointerDismissal={preventCaptureDismissal}
       >
         <DialogContent
           className="flex max-h-[calc(100dvh-1rem)] min-h-[min(700px,calc(100dvh-1rem))] flex-col overflow-y-auto p-0 sm:max-h-[calc(100dvh-3rem)] sm:min-h-[min(620px,calc(100dvh-3rem))] sm:max-w-4xl sm:overflow-hidden"
-          showCloseButton={!hasUnsentRecording(state)}
+          showCloseButton={!preventCaptureDismissal}
           onKeyDown={(event) => {
             if (event.key === "ArrowLeft") {
               event.preventDefault();
@@ -483,6 +504,7 @@ export function EnvironmentVoiceCapture({
                   <Button
                     className="mt-4 self-start lg:mt-6"
                     size="lg"
+                    disabled={requestingMicrophone}
                     onClick={startRecording}
                   >
                     <Mic data-icon="inline-start" aria-hidden="true" />

@@ -1,7 +1,19 @@
 import assert from "node:assert/strict";
 
 import { act, createElement, type ReactNode } from "react";
-import { test, vi } from "vitest";
+import { beforeEach, test, vi } from "vitest";
+
+const authMocks = vi.hoisted(() => ({
+  authenticated: true,
+  openAuthDialog: vi.fn(),
+}));
+
+vi.mock("@/src/components/hosted-onboarding/auth-dialog-provider", () => ({
+  useAuth: () => ({
+    authenticated: authMocks.authenticated,
+    openAuthDialog: authMocks.openAuthDialog,
+  }),
+}));
 
 vi.mock("@/src/components/ui/dialog", () => ({
   Dialog: ({
@@ -51,6 +63,11 @@ import {
 import type { EnvironmentVoiceScript } from "../app/(dashboard)/environment/environment-voice-script";
 import { renderClientComponent } from "./render-client-component";
 
+beforeEach(() => {
+  authMocks.authenticated = true;
+  authMocks.openAuthDialog.mockReset();
+});
+
 test("explains when the browser has blocked microphone permission", () => {
   assert.match(
     microphoneAccessNotice({ name: "NotAllowedError" }),
@@ -90,6 +107,111 @@ test("renders a user-specific missing-data script", async () => {
     assert.match(bodyText, /Darkness/);
     assert.doesNotMatch(bodyText, /Recovery and devices/);
   } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("requires authentication before opening the voice walkthrough", async () => {
+  authMocks.authenticated = false;
+  const rendered = await renderClientComponent(
+    createElement(EnvironmentVoiceCapture),
+  );
+
+  try {
+    await clickButton(rendered.window, "Tell Murph by voice");
+
+    assert.equal(authMocks.openAuthDialog.mock.calls.length, 1);
+    assert.doesNotMatch(
+      rendered.window.document.body.textContent ?? "",
+      /Start recording/,
+    );
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("keeps the walkthrough open while iOS resolves microphone permission", async () => {
+  const rendered = await renderClientComponent(
+    createElement(EnvironmentVoiceCapture),
+  );
+  let rejectPermission: ((reason?: unknown) => void) | undefined;
+  const mediaDevicesDescriptor = Object.getOwnPropertyDescriptor(
+    navigator,
+    "mediaDevices",
+  );
+  const windowMediaDevicesDescriptor = Object.getOwnPropertyDescriptor(
+    rendered.window.navigator,
+    "mediaDevices",
+  );
+  const originalMediaRecorder = Reflect.get(globalThis, "MediaRecorder");
+
+  try {
+    class PendingMediaRecorder {
+      static isTypeSupported() {
+        return true;
+      }
+    }
+    const mediaDevices = {
+      getUserMedia: vi.fn(
+        () => new Promise<MediaStream>((_resolve, reject) => {
+          rejectPermission = reject;
+        }),
+      ),
+    };
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: mediaDevices,
+    });
+    Object.defineProperty(rendered.window.navigator, "mediaDevices", {
+      configurable: true,
+      value: mediaDevices,
+    });
+    Reflect.set(globalThis, "MediaRecorder", PendingMediaRecorder);
+    Reflect.set(rendered.window, "MediaRecorder", PendingMediaRecorder);
+
+    await clickButton(rendered.window, "Tell Murph by voice");
+    await clickButton(rendered.window, "Start recording");
+
+    const dialog = rendered.window.document.querySelector(
+      "[data-pointer-dismissal-disabled]",
+    );
+    assert.equal(
+      dialog?.getAttribute("data-pointer-dismissal-disabled"),
+      "true",
+    );
+
+    await clickButton(rendered.window, "Dismiss dialog");
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Start recording/,
+    );
+
+    await act(async () => {
+      rejectPermission?.({ name: "NotAllowedError" });
+      await Promise.resolve();
+    });
+  } finally {
+    if (mediaDevicesDescriptor) {
+      Object.defineProperty(navigator, "mediaDevices", mediaDevicesDescriptor);
+    } else {
+      Reflect.deleteProperty(navigator, "mediaDevices");
+    }
+    if (windowMediaDevicesDescriptor) {
+      Object.defineProperty(
+        rendered.window.navigator,
+        "mediaDevices",
+        windowMediaDevicesDescriptor,
+      );
+    } else {
+      Reflect.deleteProperty(rendered.window.navigator, "mediaDevices");
+    }
+    if (originalMediaRecorder === undefined) {
+      Reflect.deleteProperty(globalThis, "MediaRecorder");
+      Reflect.deleteProperty(rendered.window, "MediaRecorder");
+    } else {
+      Reflect.set(globalThis, "MediaRecorder", originalMediaRecorder);
+      Reflect.set(rendered.window, "MediaRecorder", originalMediaRecorder);
+    }
     await rendered.cleanup();
   }
 });
