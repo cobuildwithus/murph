@@ -28,25 +28,25 @@ describe("hosted product feedback privacy migration", () => {
 
     expect(dropNotNullIndex).toBeGreaterThanOrEqual(0);
     expect(clearAssociationsIndex).toBeGreaterThan(dropNotNullIndex);
-    expectPrivacyCleanup(forwardMigrationSql);
+    expectAnonymizationCleanup(forwardMigrationSql);
   });
 
-  it("repeats the cleanup after old application writers have drained", () => {
-    expectPrivacyCleanup(postDrainMigrationSql);
+  it("repeats the unlink after old application writers have drained", () => {
+    expectAnonymizationCleanup(postDrainMigrationSql);
     expect(postDrainMigrationSql).not.toContain("ALTER TABLE");
+  });
+
+  it("preserves feedback summaries while removing identity", () => {
+    expect(forwardMigrationSql).not.toContain('"summary"');
+    expect(postDrainMigrationSql).not.toContain('"summary"');
   });
 });
 
-function expectPrivacyCleanup(sql: string): void {
-  const clearSummaryIndex = sql.indexOf('"summary" = NULL');
-  const clearAssociationIndex = sql.indexOf('"member_id" = NULL');
-
+function expectAnonymizationCleanup(sql: string): void {
   expect(sql).toContain(
     '"id" = \'product_feedback_\' || replace(gen_random_uuid()::text, \'-\', \'\')',
   );
-  expect(clearSummaryIndex).toBeGreaterThanOrEqual(0);
-  expect(clearAssociationIndex).toBeGreaterThanOrEqual(0);
-  expect(clearSummaryIndex).toBeLessThan(clearAssociationIndex);
+  expect(sql).toContain('"member_id" = NULL');
   expect(sql).toContain('WHERE "member_id" IS NOT NULL');
   expect(sql).not.toMatch(
     /\b(?:INSERT|CREATE TABLE|ADD COLUMN|RENAME COLUMN)\b/iu,

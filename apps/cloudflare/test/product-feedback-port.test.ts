@@ -12,12 +12,10 @@ import {
 } from "../src/runtime-platform/product-feedback-port.ts";
 
 const FEEDBACK: HostedRuntimeProductFeedbackRecord = {
-  action: "configure",
   idempotencyKey: "a".repeat(64),
   kind: "feature_request",
-  outcome: "capability_missing",
-  productArea: "other",
   relatedChangelogItemIds: [],
+  summary: "Speculative: Support the missing Murph workflow.",
 };
 
 describe("hosted product feedback port", () => {

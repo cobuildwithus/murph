@@ -2256,9 +2256,9 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
   )
 })
 
-describeRealCodex('real Codex closed product-feedback e2e', () => {
+describeRealCodex('real Codex product-feedback summary e2e', () => {
   it(
-    'emits only allowlisted product classifications at the dynamic-tool boundary',
+    'emits specific, non-invented, product-only feedback at the dynamic-tool boundary',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const commonInput = {
@@ -2279,12 +2279,18 @@ describeRealCodex('real Codex closed product-feedback e2e', () => {
       }
       const scenarios = [
         {
-          assertArguments(argumentsValue: Record<string, unknown>) {
-            expect(argumentsValue.action).toBe('connect')
-            expect(['connected_apps', 'device_sync', 'settings'])
-              .toContain(argumentsValue.productArea)
-            expect(['failed', 'not_persisted', 'unexpected_behavior'])
-              .toContain(argumentsValue.outcome)
+          assertSummary(summary: string) {
+            expect(summary).toMatch(/\b(?:member|user)\b/iu)
+            expect(summary).toMatch(/\bsettings\b|\bdevices?\b/iu)
+            expect(summary).toMatch(/\boura\b/iu)
+            expect(summary).toMatch(/\bconnect/iu)
+            expect(summary).toMatch(/\b(?:expect|wanted|should)\w*\b/iu)
+            expect(summary).toMatch(
+              /\b(?:auth\w*.*succeed|success\w*.*auth)\w*\b/iu,
+            )
+            expect(summary).toMatch(
+              /\b(?:not added|did not add|did not appear|returned|remain\w* disconnected|failed|absent|missing)\b/iu,
+            )
           },
           prompt: [
             'Treat this synthetic report as explicit Murph product frustration and use the product-feedback tool.',
@@ -2294,13 +2300,12 @@ describeRealCodex('real Codex closed product-feedback e2e', () => {
           ].join(' '),
         },
         {
-          assertArguments(argumentsValue: Record<string, unknown>) {
-            expect(['configure', 'setup', 'other'])
-              .toContain(argumentsValue.action)
-            expect(['onboarding', 'settings', 'other'])
-              .toContain(argumentsValue.productArea)
-            expect(['unclear', 'unexpected_behavior'])
-              .toContain(argumentsValue.outcome)
+          assertSummary(summary: string) {
+            expect(summary).toMatch(/\b(?:member|user)\b/iu)
+            expect(summary).toMatch(/\bsetup chooser\b/iu)
+            expect(summary).not.toMatch(
+              /\b(?:account|authentication|challenge|device|error|failure|group|interest|onboarding|saved|schedule|template|wearable)\b/iu,
+            )
           },
           prompt: [
             'Treat this synthetic report as explicit Murph product frustration and use the product-feedback tool.',
@@ -2309,10 +2314,16 @@ describeRealCodex('real Codex closed product-feedback e2e', () => {
           ].join(' '),
         },
         {
-          assertArguments(argumentsValue: Record<string, unknown>) {
-            expect(['configure', 'edit']).toContain(argumentsValue.action)
-            expect(argumentsValue.productArea).toBe('automations')
-            expect(argumentsValue.outcome).toBe('not_persisted')
+          assertSummary(summary: string) {
+            expect(summary).toMatch(/\b(?:member|user)\b/iu)
+            expect(summary).toMatch(/\bautomation\b|\breminder\b/iu)
+            expect(summary).toMatch(/\b(?:expect|wanted|should)\w*\b/iu)
+            expect(summary).toMatch(
+              /\b(?:save\w*.*success|success\w*.*sav)\w*\b/iu,
+            )
+            expect(summary).not.toMatch(
+              /PRIVATE_(?:HEALTH|CONTACT|IDENTIFIER|DIAGNOSIS|MEDICATION|LOCATION)_DETAIL|unrelated private markers/iu,
+            )
           },
           prompt: [
             'Treat this synthetic report as explicit Murph product frustration and use the product-feedback tool.',
@@ -2351,11 +2362,13 @@ describeRealCodex('real Codex closed product-feedback e2e', () => {
             if (feedbackCall?.kind !== 'dynamic') {
               throw new Error('Expected one product-feedback dynamic tool call.')
             }
-            expect(feedbackCall.argumentsValue).not.toHaveProperty('summary')
-            expect(JSON.stringify(feedbackCall.argumentsValue)).not.toMatch(
-              /PRIVATE_|Oura|9:00|7:00|setup chooser/iu,
-            )
-            scenario.assertArguments(feedbackCall.argumentsValue)
+            const summary = readString(feedbackCall.argumentsValue.summary)
+            expect(summary).not.toBeNull()
+            if (!summary) {
+              throw new Error('Expected a product-feedback summary.')
+            }
+            expect(summary.length).toBeLessThanOrEqual(500)
+            scenario.assertSummary(summary)
           } finally {
             await removeRealCodexTemporaryPaths([workingDirectory])
           }
@@ -2418,17 +2431,17 @@ describeRealCodex('real Codex closed product-feedback e2e', () => {
               'Expected one managed product-feedback dynamic tool call.',
             )
           }
-          expect(managedFeedbackCall.argumentsValue).not.toHaveProperty(
-            'summary',
+          const managedSummary = readString(
+            managedFeedbackCall.argumentsValue.summary,
           )
-          expect(['assistant', 'messaging', 'other']).toContain(
-            managedFeedbackCall.argumentsValue.productArea,
-          )
-          expect(['receive', 'view', 'other']).toContain(
-            managedFeedbackCall.argumentsValue.action,
-          )
-          expect(['failed', 'unexpected_behavior']).toContain(
-            managedFeedbackCall.argumentsValue.outcome,
+          expect(managedSummary).not.toBeNull()
+          expect(managedSummary?.length).toBeLessThanOrEqual(500)
+          expect(managedSummary).toMatch(/\b(?:member|user)\b/iu)
+          expect(managedSummary).toMatch(/\bproduct[- ]notes?\b/iu)
+          expect(managedSummary).toMatch(/\b(?:expect|wanted|should)\w*\b/iu)
+          expect(managedSummary).toMatch(/\bskip/iu)
+          expect(managedSummary).toMatch(
+            /\b(?:changelog.*succeed|success\w*.*changelog)\w*\b/iu,
           )
         } finally {
           await removeRealCodexTemporaryPaths([managedWorkingDirectory])

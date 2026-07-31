@@ -9887,10 +9887,8 @@ describe('assistant codex runtime', () => {
             method: 'item/tool/call',
             params: {
               arguments: {
-                action: 'configure',
                 kind: 'feature_request',
-                outcome: 'capability_missing',
-                productArea: 'settings',
+                summary: 'Speculative: first disconnected candidate.',
               },
               namespace: 'murph',
               tool: 'submit_product_feedback',
@@ -9934,10 +9932,8 @@ describe('assistant codex runtime', () => {
             method: 'item/tool/call',
             params: {
               arguments: {
-                action: 'configure',
                 kind: 'feature_request',
-                outcome: 'capability_missing',
-                productArea: 'connected_apps',
+                summary: 'Speculative: recovered candidate.',
               },
               namespace: 'murph',
               tool: 'submit_product_feedback',
@@ -9998,10 +9994,8 @@ describe('assistant codex runtime', () => {
       providerActionCount: 0,
     })
     expect(productFeedbackRecorder.readProductFeedback()).toMatchObject({
-      action: 'configure',
       kind: 'feature_request',
-      outcome: 'capability_missing',
-      productArea: 'connected_apps',
+      summary: 'Speculative: recovered candidate.',
     })
     expect(acceptProductFeedbackCandidate).not.toHaveBeenCalled()
   })

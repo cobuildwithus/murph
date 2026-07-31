@@ -4201,12 +4201,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     await platform.issueExportPort!.recordIssues([{ code: "runtime.issue" }]);
     await platform.usageRecordPort!.recordUsage(createAssistantUsageRecord());
     await platform.productFeedbackPort!.recordProductFeedback({
-      action: "view",
       idempotencyKey: "a".repeat(64),
       kind: "feature_interest",
-      outcome: "interest",
-      productArea: "messaging",
       relatedChangelogItemIds: ["native-message-formatting"],
+      summary: "Interested in native message formatting.",
     });
     await expect(platform.assistantPersonalizationToolPort!.request({ action: "read" }))
       .resolves.toEqual({

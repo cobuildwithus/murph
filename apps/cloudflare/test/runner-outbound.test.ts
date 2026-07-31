@@ -298,12 +298,10 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
   {
     body: {
       feedback: {
-        action: "view",
         idempotencyKey: "a".repeat(64),
         kind: "feature_interest",
-        outcome: "interest",
-        productArea: "messaging",
         relatedChangelogItemIds: ["native-message-formatting"],
+        summary: "Interested in native message formatting.",
       },
     },
     name: "hosted product feedback recording",

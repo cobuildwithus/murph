@@ -14,10 +14,8 @@ import {
 } from '@murphai/hosted-execution/contracts'
 import {
   HOSTED_PLAN_CODES,
-  HOSTED_PRODUCT_FEEDBACK_ACTIONS,
   HOSTED_PRODUCT_FEEDBACK_KINDS,
-  HOSTED_PRODUCT_FEEDBACK_OUTCOMES,
-  HOSTED_PRODUCT_FEEDBACK_PRODUCT_AREAS,
+  HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
@@ -28,6 +26,7 @@ import {
   HOSTED_USAGE_REFERRAL_POLICY_CODES,
   isHostedRuntimeAssistantAskDiagnosticCode,
   isHostedRuntimeAssistantAskRequestId,
+  sanitizeHostedProductFeedbackSummary,
   type HostedRuntimeAssistantConfigurationToolRequest,
   type HostedRuntimeFamilyPlanToolRequest,
   type HostedRuntimeGroupSummary,
@@ -420,7 +419,7 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
   namespace: 'murph',
   name: 'submit_product_feedback',
   description:
-    'Submit one de-identified Murph product-feedback candidate for the current accepted request. Choose only the closest closed product area, action, and outcome values; never include prose or private facts. The result reports whether the candidate was accepted, already accepted, or unavailable; persistence is best-effort after the reply, so do not retry after any result.',
+    'Submit one structured Murph product-feedback candidate for the current accepted request. Provide the feedback kind, a concise product-only summary, and optional related changelog item ids. The result reports whether the candidate was accepted, already accepted, or unavailable; persistence is best-effort after the reply, so do not retry after any result.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -431,23 +430,12 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
         description:
           'Use feature_request for a missing or unsupported Murph path, frustration for a negative product experience without a clear requested capability, and feature_interest for interest in an available or shipped capability.',
       },
-      productArea: {
+      summary: {
         type: 'string',
-        enum: [...HOSTED_PRODUCT_FEEDBACK_PRODUCT_AREAS],
+        minLength: 1,
+        maxLength: HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
         description:
-          'Closest Murph-owned product area. Use other only when no listed area fits; never encode user context in this field.',
-      },
-      action: {
-        type: 'string',
-        enum: [...HOSTED_PRODUCT_FEEDBACK_ACTIONS],
-        description:
-          'Closest generic product action the person wanted or attempted. Choose only an enum value; use other when unclear.',
-      },
-      outcome: {
-        type: 'string',
-        enum: [...HOSTED_PRODUCT_FEEDBACK_OUTCOMES],
-        description:
-          'Closest product result. Use interest for feature interest, capability_missing for an unsupported request, and unclear when the result is not established.',
+          'Concise de-identified, product-only summary of the feedback. Make it actionable without the conversation: name the generic actor, exact Murph surface or workflow, requested or attempted action, expected versus observed result, and any concrete product constraint the source established. Preserve those distinctions instead of replacing them with vague labels. If a detail is not established, omit it or mark it unclear rather than infer or invent it. Abstract every private fact to the least-specific product concept that still explains the issue, such as "a health metric", "a connected source", or "a scheduled item"; do not preserve a private fact merely because it was relevant in the conversation. When a path is missing, name the desired outcome and missing Murph capability rather than summarizing the conversation. Start with "Speculative:" only for clear inferred user workflow friction, or "Murph-observed:" only for repeated assistant-observed product/tool friction. Never include names, handles, account or member identifiers, raw user wording, quoted conversation or voice-memo content, diagnoses, symptoms, medications, treatments, lab results, biometrics, exact health/fitness/nutrition values, reproductive details, locations, relationships, contact details, secrets, provider payloads, tags, or topics.',
       },
       relatedChangelogItemIds: {
         type: 'array',
@@ -463,7 +451,7 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
         },
       },
     },
-    required: ['action', 'kind', 'outcome', 'productArea'],
+    required: ['kind', 'summary'],
   },
 } as const
 
@@ -1777,10 +1765,13 @@ const imessageContactArgumentsSchema = z.object({}).strict()
 
 const submitProductFeedbackArgumentsSchema = z
   .object({
-    action: z.enum(HOSTED_PRODUCT_FEEDBACK_ACTIONS),
     kind: z.enum(HOSTED_PRODUCT_FEEDBACK_KINDS),
-    outcome: z.enum(HOSTED_PRODUCT_FEEDBACK_OUTCOMES),
-    productArea: z.enum(HOSTED_PRODUCT_FEEDBACK_PRODUCT_AREAS),
+    summary: z
+      .string()
+      .trim()
+      .min(1)
+      .transform(sanitizeHostedProductFeedbackSummary)
+      .pipe(z.string().min(1).max(HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH)),
     relatedChangelogItemIds: z
       .array(z.string().trim().max(120).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u))
       .max(7)

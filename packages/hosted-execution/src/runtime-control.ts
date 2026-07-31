@@ -825,72 +825,41 @@ export const HOSTED_PRODUCT_FEEDBACK_KINDS = [
 export type HostedProductFeedbackKind =
   (typeof HOSTED_PRODUCT_FEEDBACK_KINDS)[number];
 
-export const HOSTED_PRODUCT_FEEDBACK_PRODUCT_AREAS = [
-  "account_and_access",
-  "assistant",
-  "automations",
-  "billing_and_plans",
-  "connected_apps",
-  "device_sync",
-  "experiments_and_challenges",
-  "group_chat",
-  "health_commons",
-  "messaging",
-  "onboarding",
-  "settings",
-  "voice_and_media",
-  "web_app",
-  "other",
+export const HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH = 500;
+
+const HOSTED_PRODUCT_FEEDBACK_REDACTION_TOKEN = "[redacted]";
+
+const HOSTED_PRODUCT_FEEDBACK_SUMMARY_REDACTION_PATTERNS = [
+  /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu,
+  /@[A-Z0-9_]{2,}\b/giu,
+  /\bhttps?:\/\/[^\s<>"']+/giu,
+  /\bwww\.[^\s<>"']+/giu,
+  /\b(?:\+?1[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]?\d{4}\b/gu,
+  /\b\d{3}-\d{2}-\d{4}\b/gu,
+  /\b(?:\d[ -]?){13,19}\b/gu,
+  /\b(?:member|user|usr|account)_[A-Za-z0-9_-]{6,}\b/gu,
+  /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/giu,
+  /\b(?:\d{1,3}\.){3}\d{1,3}\b/gu,
+  /\b0x[A-Fa-f0-9]{40,64}\b/gu,
+  /\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}\b/gu,
+  /\b(?:sk|pk|rk|ak|pat|ghp|gho|ghu|ghs|github_pat|xox[baprs])_[A-Za-z0-9_=-]{12,}\b/gu,
+  /\b\d+(?:\.\d+)?\s*(?:bpm|mg\/dL|mmol\/L|mmHg|mIU\/L|ng\/mL|pg\/mL|g\/dL|µg\/dL)\b/giu,
+  /\b[A-Fa-f0-9]{32,}\b/gu,
 ] as const;
 
-export type HostedProductFeedbackProductArea =
-  (typeof HOSTED_PRODUCT_FEEDBACK_PRODUCT_AREAS)[number];
-
-export const HOSTED_PRODUCT_FEEDBACK_ACTIONS = [
-  "connect",
-  "configure",
-  "create",
-  "discover",
-  "edit",
-  "generate",
-  "import",
-  "manage",
-  "match_or_classify",
-  "receive",
-  "send",
-  "setup",
-  "start",
-  "stop",
-  "sync",
-  "view",
-  "other",
-] as const;
-
-export type HostedProductFeedbackAction =
-  (typeof HOSTED_PRODUCT_FEEDBACK_ACTIONS)[number];
-
-export const HOSTED_PRODUCT_FEEDBACK_OUTCOMES = [
-  "capability_missing",
-  "duplicate",
-  "failed",
-  "interest",
-  "misclassified",
-  "not_persisted",
-  "unavailable",
-  "unexpected_behavior",
-  "unclear",
-] as const;
-
-export type HostedProductFeedbackOutcome =
-  (typeof HOSTED_PRODUCT_FEEDBACK_OUTCOMES)[number];
+export function sanitizeHostedProductFeedbackSummary(value: string): string {
+  let summary = value.trim().replace(/\s+/gu, " ");
+  for (const pattern of HOSTED_PRODUCT_FEEDBACK_SUMMARY_REDACTION_PATTERNS) {
+    summary = summary.replace(pattern, HOSTED_PRODUCT_FEEDBACK_REDACTION_TOKEN);
+  }
+  return summary.trim().replace(/\s+/gu, " ");
+}
 
 export interface HostedRuntimeProductFeedbackRecord {
-  action: HostedProductFeedbackAction;
   idempotencyKey: string;
   kind: HostedProductFeedbackKind;
-  outcome: HostedProductFeedbackOutcome;
-  productArea: HostedProductFeedbackProductArea;
   relatedChangelogItemIds: string[];
+  summary: string;
 }
 
 export interface HostedRuntimeProductFeedbackRecordRequest {

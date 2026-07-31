@@ -163,12 +163,10 @@ test('sendAssistantMessageLocal completes a successful turn, persists usage, and
 test('sendAssistantMessageLocal hands off product feedback only after durable reply handoff', async () => {
   const session = createAssistantSession()
   const productFeedbackCandidate: HostedRuntimeProductFeedbackRecord = {
-    action: 'other',
     idempotencyKey: 'feedback-after-reply',
     kind: 'feature_request',
-    outcome: 'capability_missing',
-    productArea: 'other',
     relatedChangelogItemIds: [],
+    summary: 'Speculative: support the missing Murph path.',
   }
   const acceptProductFeedbackCandidate = vi.fn(() => {
     throw new Error('Best-effort product feedback handoff failed.')

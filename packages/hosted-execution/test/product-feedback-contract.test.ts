@@ -5,17 +5,14 @@ import {
   parseHostedRuntimeProductFeedbackRecordResponse,
 } from "../src/parsers.js";
 
-const feedback = {
-  action: "view",
-  idempotencyKey: "a".repeat(64),
-  kind: "feature_interest",
-  outcome: "interest",
-  productArea: "messaging",
-  relatedChangelogItemIds: ["native-message-formatting"],
-} as const;
-
 describe("hosted product feedback contracts", () => {
-  it("parses the closed product abstraction", () => {
+  it("parses the bounded record contract", () => {
+    const feedback = {
+      idempotencyKey: "a".repeat(64),
+      kind: "feature_interest",
+      relatedChangelogItemIds: ["native-message-formatting"],
+      summary: "Interested in native message formatting.",
+    };
     expect(parseHostedRuntimeProductFeedbackRecordRequest({ feedback })).toEqual({
       feedback,
     });
@@ -28,68 +25,167 @@ describe("hosted product feedback contracts", () => {
     });
   });
 
-  it.each([
-    ["invalid digest", { ...feedback, idempotencyKey: "not-a-digest" }],
-    ["invalid kind", { ...feedback, kind: "bug_report" }],
-    ["invalid area", { ...feedback, productArea: "private_health_context" }],
-    ["invalid action", { ...feedback, action: "quoted_user_request" }],
-    ["invalid outcome", { ...feedback, outcome: "named_person_failed" }],
-    ["missing area", {
-      action: feedback.action,
-      idempotencyKey: feedback.idempotencyKey,
-      kind: feedback.kind,
-      outcome: feedback.outcome,
-      relatedChangelogItemIds: [],
-    }],
-    ["extra prose", { ...feedback, summary: "A private free-text summary." }],
-    ["extra topic", { ...feedback, topic: "private-topic" }],
-    ["duplicate changelog id", {
-      ...feedback,
-      relatedChangelogItemIds: [
-        "native-message-formatting",
-        "native-message-formatting",
-      ],
-    }],
-    ["malformed changelog id", {
-      ...feedback,
-      relatedChangelogItemIds: ["NativeMessageFormatting"],
-    }],
-    ["too many changelog ids", {
-      ...feedback,
-      relatedChangelogItemIds: [
-        "one",
-        "two",
-        "three",
-        "four",
-        "five",
-        "six",
-        "seven",
-        "eight",
-      ],
-    }],
-  ])("rejects %s", (_label, candidate) => {
+  it("rejects unbounded or malformed feedback", () => {
     expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
-      feedback: candidate,
+      feedback: {
+        idempotencyKey: "not-a-digest",
+        kind: "feature_interest",
+        relatedChangelogItemIds: ["native-message-formatting"],
+        summary: "Interested in native message formatting.",
+      },
+    })).toThrow();
+    expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
+      feedback: {
+        idempotencyKey: "a".repeat(64),
+        kind: "bug_report",
+        relatedChangelogItemIds: ["native-message-formatting"],
+        summary: "Wants a bug-report workflow.",
+      },
+    })).toThrow();
+    expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
+      feedback: {
+        idempotencyKey: "a".repeat(64),
+        kind: "feature_request",
+        relatedChangelogItemIds: [],
+      },
+    })).toThrow();
+    expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
+      feedback: {
+        idempotencyKey: "a".repeat(64),
+        kind: "feature_request",
+        relatedChangelogItemIds: [],
+        summary: "",
+      },
+    })).toThrow();
+    expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
+      feedback: {
+        idempotencyKey: "a".repeat(64),
+        kind: "feature_request",
+        relatedChangelogItemIds: [],
+        summary: "x".repeat(501),
+      },
+    })).toThrow();
+    expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
+      feedback: {
+        feedbackTags: ["message-formatting"],
+        idempotencyKey: "a".repeat(64),
+        kind: "feature_request",
+        relatedChangelogItemIds: [],
+        summary: "Wants better message formatting.",
+      },
+    })).toThrow();
+    expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
+      feedback: {
+        idempotencyKey: "a".repeat(64),
+        kind: "feature_request",
+        relatedChangelogItemIds: [],
+        summary: "Wants Strava integration support.",
+        topic: "integrations",
+      },
+    })).toThrow();
+    expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
+      feedback: {
+        idempotencyKey: "a".repeat(64),
+        kind: "feature_interest",
+        relatedChangelogItemIds: [
+          "native-message-formatting",
+          "native-message-formatting",
+        ],
+        summary: "Interested in native message formatting.",
+      },
+    })).toThrow();
+    expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
+      feedback: {
+        idempotencyKey: "a".repeat(64),
+        kind: "feature_interest",
+        relatedChangelogItemIds: ["NativeMessageFormatting"],
+        summary: "Interested in native message formatting.",
+      },
+    })).toThrow();
+    expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
+      feedback: {
+        idempotencyKey: "a".repeat(64),
+        kind: "feature_interest",
+        relatedChangelogItemIds: [
+          "one",
+          "two",
+          "three",
+          "four",
+          "five",
+          "six",
+          "seven",
+          "eight",
+        ],
+        summary: "Interested in many changelog items.",
+      },
     })).toThrow();
   });
 
-  it("defaults optional changelog metadata without admitting prose", () => {
+  it("supports structured feature requests and frustrations", () => {
     expect(parseHostedRuntimeProductFeedbackRecordRequest({
       feedback: {
-        action: "configure",
-        idempotencyKey: "b".repeat(64),
-        kind: "feature_request",
-        outcome: "capability_missing",
-        productArea: "experiments_and_challenges",
+        idempotencyKey: "a".repeat(64),
+        kind: "feature_interest",
+        relatedChangelogItemIds: [],
+        summary: "Interested in generated song reminders.",
       },
     })).toEqual({
       feedback: {
-        action: "configure",
+        idempotencyKey: "a".repeat(64),
+        kind: "feature_interest",
+        relatedChangelogItemIds: [],
+        summary: "Interested in generated song reminders.",
+      },
+    });
+
+    expect(parseHostedRuntimeProductFeedbackRecordRequest({
+      feedback: {
         idempotencyKey: "b".repeat(64),
         kind: "feature_request",
-        outcome: "capability_missing",
-        productArea: "experiments_and_challenges",
         relatedChangelogItemIds: [],
+        summary: "  Wants Strava   integration support.  ",
+      },
+    })).toEqual({
+      feedback: {
+        idempotencyKey: "b".repeat(64),
+        kind: "feature_request",
+        relatedChangelogItemIds: [],
+        summary: "Wants Strava integration support.",
+      },
+    });
+
+    expect(parseHostedRuntimeProductFeedbackRecordRequest({
+      feedback: {
+        idempotencyKey: "d".repeat(64),
+        kind: "frustration",
+        summary: "The dashboard feels slow.",
+      },
+    })).toEqual({
+      feedback: {
+        idempotencyKey: "d".repeat(64),
+        kind: "frustration",
+        relatedChangelogItemIds: [],
+        summary: "The dashboard feels slow.",
+      },
+    });
+  });
+
+  it("redacts high-confidence sensitive tokens from summaries", () => {
+    expect(parseHostedRuntimeProductFeedbackRecordRequest({
+      feedback: {
+        idempotencyKey: "e".repeat(64),
+        kind: "feature_request",
+        relatedChangelogItemIds: [],
+        summary:
+          "Reach me at user@example.com or 415-555-1212; token sk_test_abcdefghijklmnopqrstuvwxyz.",
+      },
+    })).toEqual({
+      feedback: {
+        idempotencyKey: "e".repeat(64),
+        kind: "feature_request",
+        relatedChangelogItemIds: [],
+        summary:
+          "Reach me at [redacted] or [redacted]; token [redacted].",
       },
     });
   });

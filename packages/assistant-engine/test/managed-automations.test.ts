@@ -1033,12 +1033,11 @@ describe('applyMurphManagedAutomations', () => {
     expect(seed.instructions).toContain('murph.submit_product_feedback')
     expect(seed.instructions).toContain('clear inferred workflow friction')
     expect(seed.instructions).toContain('interest in shipped changelog or catalog items')
+    expect(seed.instructions).toContain('Speculative:')
+    expect(seed.instructions).toContain('Murph-observed:')
     expect(seed.instructions).toContain('Do not log vague low-confidence guesses')
-    expect(seed.instructions).toContain('closed kind, product-area, action, and outcome enum values')
-    expect(seed.instructions).toContain('Choose `other` or `unclear`')
-    expect(seed.instructions).toContain('never put prose, raw user wording')
-    expect(seed.instructions).not.toContain('Speculative:')
-    expect(seed.instructions).not.toContain('concise product-only summary')
+    expect(seed.instructions).toContain('concise product-only summary')
+    expect(seed.instructions).toContain('tags, topics, raw user wording')
     expect(seed.instructions).not.toContain('kind/topic')
     expect(seed.instructions).toContain(
       '{"kind":"skip","privateSummary":"No product note cleared the send bar."}',

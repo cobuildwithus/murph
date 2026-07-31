@@ -636,7 +636,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '- Close with one invitation sentence of no more than 12 words.',
       '- If sending nothing, return `{"kind":"skip","privateSummary":"No product note cleared the send bar."}` and do not append to the ledger.',
       '',
-      'On a later user turn, call `murph.submit_product_feedback` for explicit product frustration, feature requests, interest in shipped changelog or catalog items, clear inferred workflow friction, or repeated Murph-observed product/tool friction. Do not log vague low-confidence guesses. Use only the closed kind, product-area, action, and outcome enum values plus optional changelog item ids. Choose `other` or `unclear` rather than encoding context outside those enums; never put prose, raw user wording, conversation content, health details, identifiers, contact details, secrets, or provider payloads into feedback fields.',
+      'On a later user turn, call `murph.submit_product_feedback` for explicit product frustration, feature requests, interest in shipped changelog or catalog items, clear inferred workflow friction, or repeated Murph-observed product/tool friction. Start inferred summaries with `Speculative:` and assistant-observed summaries with `Murph-observed:`. Do not log vague low-confidence guesses. Use only structured kind, a concise product-only summary, and optional changelog item ids; do not include tags, topics, raw user wording, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads.',
     ].join('\n'),
   },
   {

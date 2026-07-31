@@ -19,9 +19,9 @@ Updated: 2026-07-31
 - The callback remains authenticated and member-bound for write authority, but
   the authenticated identity is not forwarded into persistence.
 - Feedback idempotency no longer depends on member identity.
-- The model-facing and runtime contracts allow only closed product kind,
-  product-area, action, and outcome classifications plus catalog-validated
-  changelog ids; they cannot carry arbitrary prose or private facts.
+- The model-facing contract requires abstraction of private facts to generic
+  product concepts, while deterministic contact/secret redaction remains a
+  final guardrail.
 - Optional member linkage remains server-controlled and nullable for an
   explicitly justified future path; the model and runtime payload cannot choose
   it.
@@ -40,18 +40,14 @@ Updated: 2026-07-31
 ## Implementation
 
 - Add a forward Prisma migration that clears existing `member_id` values and
-  free-text summaries, replaces member-derived ids, and makes the member column
-  nullable. Repeat the data cleanup in a post-drain contract migration for
-  rows written by old Web functions during rolling deployment.
+  makes the column nullable.
 - Make the Prisma relation optional and default the persistence service to an
   unlinked row.
 - Stop the authenticated callback route from passing its bound member identity
   into product-feedback persistence.
 - Derive deterministic feedback ids from the runtime idempotency key alone.
-- Replace the model-authored summary with closed product-area, action, and
-  outcome enums. Validate those fields at every boundary and let Web construct
-  the stored summary from the enum values.
-- Update durable architecture, security, and account-data documentation.
+- Tighten the model-facing privacy rubric and update durable architecture,
+  security, and account-data documentation.
 - Add focused regression tests proving anonymous persistence, authenticated
   routing without identity forwarding, migration behavior, idempotency, and
   private-detail abstraction.
@@ -64,10 +60,7 @@ Updated: 2026-07-31
   was selected.
 - Applying the actual migration inside a rolled-back temporary-table scenario
   proved the member column becomes nullable, linked rows become anonymous, and
-  former member-derived feedback ids are replaced. ReviewGPT correctly found
-  that unlinking arbitrary historical free text could preserve private facts
-  with no account-deletion path; remediation now clears those summaries and
-  removes arbitrary prose from all new runtime payloads.
+  former member-derived feedback ids are replaced.
 - Focused Web Vitest passed 95 tests across the product-feedback service,
   callback route, privacy migration, migration inventory, and account-data
   service.
@@ -112,3 +105,21 @@ Updated: 2026-07-31
   the exact post-drain contract migration. Both passes preserved row counts,
   cleared member linkage and summaries, and replaced old ids.
 Completed: 2026-07-31
+
+## Owner decision: restore free-text summaries (2026-07-31)
+
+- After the closed-enum remediation passed review, the owner directed that
+  assistant-captured feedback keep a raw free-text summary; the requirement
+  that stands is anonymity (no member linkage), not the removal of prose.
+- The prose-removal change was reverted: the contract again accepts a
+  model-authored `summary` (1-500 characters, deterministic contact/secret
+  redaction applied at the parser), the closed `productArea`/`action`/`outcome`
+  enums are removed, and the forward migration no longer clears historical
+  summaries. The post-drain contract migration again clears only member links
+  and member-derived ids for rows written by draining old Web functions.
+- Anonymity invariants are unchanged: `member_id` stays nullable and null by
+  default, the authenticated callback still discards its resolved identity
+  before persistence, and ids derive only from the runtime idempotency key.
+- Verification of the restored free-text state (focused suites, typechecks,
+  provider-input capture, exact-head CI, and a new ReviewGPT round) is recorded
+  in the PR for this plan.

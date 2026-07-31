@@ -57,10 +57,9 @@ import {
   HOSTED_RUNTIME_LOG_LEVELS,
   HOSTED_RUNTIME_LOG_PHASES,
   HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES,
-  HOSTED_PRODUCT_FEEDBACK_ACTIONS,
   HOSTED_PRODUCT_FEEDBACK_KINDS,
-  HOSTED_PRODUCT_FEEDBACK_OUTCOMES,
-  HOSTED_PRODUCT_FEEDBACK_PRODUCT_AREAS,
+  HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
+  sanitizeHostedProductFeedbackSummary,
   HOSTED_WORKSPACE_CHECKPOINT_CONFLICT_REASONS,
   HOSTED_WORKSPACE_CHECKPOINT_HANDLED_CONVERSATION_ITEM_MAX_IDS,
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
@@ -182,13 +181,10 @@ import {
   type HostedRuntimeNewsletterToolResponse,
   type HostedRuntimeProductFeedbackRecordRequest,
   type HostedRuntimeProductFeedbackRecordResponse,
-  type HostedProductFeedbackAction,
   type HostedCodexAuthUpdate,
   type HostedCodexAuthUpdateResponse,
   type HostedCodexAuthUpdateResponseStatus,
   type HostedProductFeedbackKind,
-  type HostedProductFeedbackOutcome,
-  type HostedProductFeedbackProductArea,
   type HostedIngressLatencySource,
   type HostedIdleCheckpointTrigger,
   type HostedWorkspaceCheckpointReason,
@@ -891,12 +887,10 @@ export function parseHostedRuntimeProductFeedbackRecordRequest(
   assertAllowedObjectKeys(
     feedback,
     new Set([
-      "action",
       "idempotencyKey",
       "kind",
-      "outcome",
-      "productArea",
       "relatedChangelogItemIds",
+      "summary",
     ]),
     "Hosted runtime product feedback request feedback",
   );
@@ -909,12 +903,8 @@ export function parseHostedRuntimeProductFeedbackRecordRequest(
       "Hosted runtime product feedback idempotencyKey must be a SHA-256 hex digest.",
     );
   }
-  const action = parseHostedProductFeedbackAction(feedback.action);
   const kind = parseHostedProductFeedbackKind(feedback.kind);
-  const outcome = parseHostedProductFeedbackOutcome(feedback.outcome);
-  const productArea = parseHostedProductFeedbackProductArea(
-    feedback.productArea,
-  );
+  const summary = parseHostedProductFeedbackSummary(feedback.summary);
   const relatedChangelogItemIds = parseHostedProductFeedbackSlugArray(
     readOptionalStringArray(
       feedback.relatedChangelogItemIds,
@@ -928,12 +918,10 @@ export function parseHostedRuntimeProductFeedbackRecordRequest(
   );
   return {
     feedback: {
-      action,
       idempotencyKey,
       kind,
-      outcome,
-      productArea,
       relatedChangelogItemIds,
+      summary,
     },
   };
 }
@@ -4917,41 +4905,19 @@ function parseHostedProductFeedbackKind(value: unknown): HostedProductFeedbackKi
   return kind as HostedProductFeedbackKind;
 }
 
-function parseHostedProductFeedbackAction(
-  value: unknown,
-): HostedProductFeedbackAction {
-  const action = requireString(value, "Hosted runtime product feedback action");
-  if (!HOSTED_PRODUCT_FEEDBACK_ACTIONS.includes(action as HostedProductFeedbackAction)) {
-    throw new TypeError("Hosted runtime product feedback action is not supported.");
-  }
-  return action as HostedProductFeedbackAction;
-}
-
-function parseHostedProductFeedbackOutcome(
-  value: unknown,
-): HostedProductFeedbackOutcome {
-  const outcome = requireString(value, "Hosted runtime product feedback outcome");
-  if (!HOSTED_PRODUCT_FEEDBACK_OUTCOMES.includes(outcome as HostedProductFeedbackOutcome)) {
-    throw new TypeError("Hosted runtime product feedback outcome is not supported.");
-  }
-  return outcome as HostedProductFeedbackOutcome;
-}
-
-function parseHostedProductFeedbackProductArea(
-  value: unknown,
-): HostedProductFeedbackProductArea {
-  const productArea = requireString(
-    value,
-    "Hosted runtime product feedback productArea",
+function parseHostedProductFeedbackSummary(value: unknown): string {
+  const summary = sanitizeHostedProductFeedbackSummary(
+    requireString(value, "Hosted runtime product feedback summary"),
   );
   if (
-    !HOSTED_PRODUCT_FEEDBACK_PRODUCT_AREAS.includes(
-      productArea as HostedProductFeedbackProductArea,
-    )
+    summary.length === 0 ||
+    summary.length > HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH
   ) {
-    throw new TypeError("Hosted runtime product feedback productArea is not supported.");
+    throw new TypeError(
+      `Hosted runtime product feedback summary must be between 1 and ${HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH} characters.`,
+    );
   }
-  return productArea as HostedProductFeedbackProductArea;
+  return summary;
 }
 
 function parseHostedProductFeedbackSlugArray(

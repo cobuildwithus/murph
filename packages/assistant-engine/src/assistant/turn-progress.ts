@@ -270,11 +270,9 @@ function normalizeAssistantProductFeedback(
   feedback: Omit<HostedRuntimeProductFeedbackRecord, 'idempotencyKey'>,
 ): Omit<HostedRuntimeProductFeedbackRecord, 'idempotencyKey'> {
   return {
-    action: feedback.action,
     kind: feedback.kind,
-    outcome: feedback.outcome,
-    productArea: feedback.productArea,
     relatedChangelogItemIds: [...new Set(feedback.relatedChangelogItemIds)],
+    summary: feedback.summary,
   }
 }
 
