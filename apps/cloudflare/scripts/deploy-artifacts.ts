@@ -47,6 +47,10 @@ const healthCommonsRuntimeGeneratedArtifacts = [
     label: "Health Commons protocol family graph",
     relativePath: path.join("generated", "protocol-family-graph.json"),
   },
+  {
+    label: "Health Commons biomarker desired directions",
+    relativePath: path.join("generated", "biomarker-desired-directions.json"),
+  },
 ] as const;
 const healthCommonsRuntimeObsoleteGeneratedArtifacts = [
   {
@@ -68,6 +72,16 @@ const healthCommonsProtocolRunSpecsSchemaVersion =
   "murph.commons.protocol-run-specs.v1";
 const healthCommonsProtocolFamilyGraphSchemaVersion =
   "murph.commons.protocol-family-graph.v1";
+const healthCommonsBiomarkerDesiredDirectionsSchemaVersion =
+  "murph.commons.biomarker-desired-directions.v1";
+const healthCommonsBiomarkerDesiredDirections = new Set([
+  "higher",
+  "higher_or_stable",
+  "lower",
+  "lower_or_stable",
+  "mixed_or_contextual",
+  "stable",
+]);
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
@@ -247,7 +261,7 @@ export async function assertPreparedRunnerBundle(input: {
     throw new Error("Prepared runner bundle changed after assembly; rebuild deploy artifacts before deploying.");
   }
 
-  await assertRunnerBundleHealthCommonsProtocolArtifacts(input.runnerBundleDir);
+  await assertRunnerBundleHealthCommonsRuntimeArtifacts(input.runnerBundleDir);
 
   return manifest;
 }
@@ -587,7 +601,7 @@ async function assertRunnerBundleHealthCommonsPackageFiles(bundleDir: string): P
   }
 }
 
-async function assertRunnerBundleHealthCommonsProtocolArtifacts(bundleDir: string): Promise<void> {
+async function assertRunnerBundleHealthCommonsRuntimeArtifacts(bundleDir: string): Promise<void> {
   const packageDirs = await findInstalledPackageDirectories(
     path.join(bundleDir, "node_modules"),
     healthCommonsPackageName,
@@ -604,7 +618,12 @@ async function assertRunnerBundleHealthCommonsProtocolArtifacts(bundleDir: strin
       packageName: healthCommonsPackageName,
       rootDir: bundleDir,
     });
-    const [protocolIndex, protocolRunSpecs, protocolFamilyGraph] = await Promise.all(
+    const [
+      protocolIndex,
+      protocolRunSpecs,
+      protocolFamilyGraph,
+      biomarkerDesiredDirections,
+    ] = await Promise.all(
       healthCommonsRuntimeGeneratedArtifacts.map(async (artifact) => {
         const artifactPath = await resolveContainedRunnerDependencyFile({
           filePath: path.join(packageDir, artifact.relativePath),
@@ -618,7 +637,8 @@ async function assertRunnerBundleHealthCommonsProtocolArtifacts(bundleDir: strin
         );
       }),
     );
-    assertHealthCommonsProtocolArtifacts({
+    assertHealthCommonsRuntimeArtifacts({
+      biomarkerDesiredDirections,
       protocolFamilyGraph,
       protocolIndex,
       protocolRunSpecs,
@@ -833,7 +853,8 @@ function isRecordObject(value: unknown): value is Record<string, unknown> {
   );
 }
 
-function assertHealthCommonsProtocolArtifacts(input: {
+function assertHealthCommonsRuntimeArtifacts(input: {
+  biomarkerDesiredDirections: Record<string, unknown>;
   protocolFamilyGraph: Record<string, unknown>;
   protocolIndex: Record<string, unknown>;
   protocolRunSpecs: Record<string, unknown>;
@@ -845,13 +866,17 @@ function assertHealthCommonsProtocolArtifacts(input: {
   const familyGraphProtocols = assertHealthCommonsProtocolFamilyGraphArtifact(
     input.protocolFamilyGraph,
   );
+  assertHealthCommonsBiomarkerDesiredDirectionsArtifact(
+    input.biomarkerDesiredDirections,
+  );
 
   if (
     input.protocolIndex.catalogHash !== input.protocolRunSpecs.catalogHash ||
-    input.protocolIndex.catalogHash !== input.protocolFamilyGraph.catalogHash
+    input.protocolIndex.catalogHash !== input.protocolFamilyGraph.catalogHash ||
+    input.protocolIndex.catalogHash !== input.biomarkerDesiredDirections.catalogHash
   ) {
     throw new Error(
-      "Runner Health Commons protocol artifacts have mismatched catalog hashes; rebuild deploy artifacts before deploying.",
+      "Runner Health Commons runtime artifacts have mismatched catalog hashes; rebuild deploy artifacts before deploying.",
     );
   }
 
@@ -874,6 +899,40 @@ function assertHealthCommonsProtocolArtifacts(input: {
   assertHealthCommonsProtocolFamilyGraphIncludesFinnishDrySauna(
     input.protocolFamilyGraph,
   );
+}
+
+function assertHealthCommonsBiomarkerDesiredDirectionsArtifact(
+  artifact: Record<string, unknown>,
+): void {
+  if (
+    artifact.schemaVersion !==
+      healthCommonsBiomarkerDesiredDirectionsSchemaVersion ||
+    typeof artifact.catalogHash !== "string"
+  ) {
+    throw new Error(
+      "Runner Health Commons biomarker desired directions are invalid.",
+    );
+  }
+
+  const biomarkers = readRecordArrayProperty(
+    artifact,
+    "biomarkers",
+    "biomarker desired directions",
+  );
+  for (const biomarker of biomarkers) {
+    if (
+      typeof biomarker.key !== "string" ||
+      typeof biomarker.desiredDirection !== "string" ||
+      !healthCommonsBiomarkerDesiredDirections.has(
+        biomarker.desiredDirection,
+      )
+    ) {
+      throw new Error(
+        "Runner Health Commons biomarker desired directions are invalid.",
+      );
+    }
+  }
+  assertUniqueArtifactKeys(biomarkers, "biomarker desired directions");
 }
 
 function assertHealthCommonsProtocolIndexArtifact(

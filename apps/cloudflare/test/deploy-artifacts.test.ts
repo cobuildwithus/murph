@@ -111,11 +111,6 @@ const extraProtocolSummary = {
   slug: "protocols/extra/extra-protocol",
   title: "Extra Protocol",
 } as const;
-const healthCommonsRuntimeArtifactNames = [
-  "protocol-index.json",
-  "protocol-run-specs.json",
-  "protocol-family-graph.json",
-] as const;
 const requiredHostedCryptoWorkerVars = {
   CF_BUNDLES_ENAM_BUCKET: "hosted-bundles-enam",
   CF_BUNDLES_ENAM_PREVIEW_BUCKET: "hosted-bundles-enam-preview",
@@ -344,6 +339,34 @@ describe("deploy artifact validation", () => {
     );
   });
 
+  it("rejects a runner bundle with invalid Health Commons biomarker desired directions", async () => {
+    const fixture = await createDeployArtifactFixture();
+
+    await writeFile(
+      path.join(
+        fixture.runnerBundleDir,
+        "node_modules",
+        "@murphai",
+        "health-commons",
+        "generated",
+        "biomarker-desired-directions.json",
+      ),
+      `${JSON.stringify({
+        ...createHealthCommonsRuntimeArtifacts().biomarkerDesiredDirections,
+        biomarkers: [{
+          desiredDirection: "sideways",
+          key: "biomarker:resting-heart-rate",
+        }],
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    await rewriteRunnerBundleManifest(fixture);
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      "Runner Health Commons biomarker desired directions are invalid.",
+    );
+  });
+
   it("rejects a runner bundle with mismatched Health Commons compact artifact hashes", async () => {
     const fixture = await createDeployArtifactFixture();
 
@@ -365,7 +388,32 @@ describe("deploy artifact validation", () => {
     await rewriteRunnerBundleManifest(fixture);
 
     await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
-      "Runner Health Commons protocol artifacts have mismatched catalog hashes",
+      "Runner Health Commons runtime artifacts have mismatched catalog hashes",
+    );
+  });
+
+  it("rejects a runner bundle with a mismatched Health Commons biomarker direction catalog hash", async () => {
+    const fixture = await createDeployArtifactFixture();
+
+    await writeFile(
+      path.join(
+        fixture.runnerBundleDir,
+        "node_modules",
+        "@murphai",
+        "health-commons",
+        "generated",
+        "biomarker-desired-directions.json",
+      ),
+      `${JSON.stringify({
+        ...createHealthCommonsRuntimeArtifacts().biomarkerDesiredDirections,
+        catalogHash: "sha256:other",
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    await rewriteRunnerBundleManifest(fixture);
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      "Runner Health Commons runtime artifacts have mismatched catalog hashes",
     );
   });
 
@@ -1299,6 +1347,7 @@ async function writeWorkspacePackageManifest(packageDir: string, packageName: st
 async function writeHealthCommonsRuntimeArtifacts(
   generatedDir: string,
   input: {
+    biomarkerDesiredDirections?: Record<string, unknown>;
     familyGraph?: Record<string, unknown>;
     protocolIndex?: Record<string, unknown>;
     protocolRunSpecs?: Record<string, unknown>;
@@ -1307,6 +1356,11 @@ async function writeHealthCommonsRuntimeArtifacts(
   const artifacts = createHealthCommonsRuntimeArtifacts(input);
 
   await mkdir(generatedDir, { recursive: true });
+  await writeFile(
+    path.join(generatedDir, "biomarker-desired-directions.json"),
+    `${JSON.stringify(artifacts.biomarkerDesiredDirections, null, 2)}\n`,
+    "utf8",
+  );
   await writeFile(
     path.join(generatedDir, "protocol-index.json"),
     `${JSON.stringify(artifacts.protocolIndex, null, 2)}\n`,
@@ -1325,10 +1379,19 @@ async function writeHealthCommonsRuntimeArtifacts(
 }
 
 function createHealthCommonsRuntimeArtifacts(input: {
+  biomarkerDesiredDirections?: Record<string, unknown>;
   familyGraph?: Record<string, unknown>;
   protocolIndex?: Record<string, unknown>;
   protocolRunSpecs?: Record<string, unknown>;
 } = {}) {
+  const biomarkerDesiredDirections = input.biomarkerDesiredDirections ?? {
+    biomarkers: [{
+      desiredDirection: "lower_or_stable",
+      key: "biomarker:resting-heart-rate",
+    }],
+    catalogHash: "sha256:test",
+    schemaVersion: "murph.commons.biomarker-desired-directions.v1",
+  };
   const protocolIndex = input.protocolIndex ?? {
     catalogHash: "sha256:test",
     protocols: [finnishDrySaunaProtocolSummary],
@@ -1364,6 +1427,7 @@ function createHealthCommonsRuntimeArtifacts(input: {
   };
 
   return {
+    biomarkerDesiredDirections,
     familyGraph,
     protocolIndex,
     protocolRunSpecs,

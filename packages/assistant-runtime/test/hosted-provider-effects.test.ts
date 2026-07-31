@@ -540,7 +540,7 @@ describe("hosted provider effects", () => {
           parts: [
             {
               type: "text",
-              value: "hello",
+              value: "hello\n\nDead bug setup",
             },
             {
               type: "media",
