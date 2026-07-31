@@ -337,7 +337,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     });
   });
 
-  it("keeps a supported-region removal on its ordinary reaction_removed path", async () => {
+  it("makes a supported canonical pre-member removal terminal after anonymous projection", async () => {
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValueOnce(null);
     const prisma = createPrismaStub();
 
@@ -347,9 +347,10 @@ describe("handleHostedGroupJoinOfferReaction", () => {
         reactionType: "like",
       }),
       prisma,
-    })).resolves.toEqual({ reason: "reaction_removed", status: "ignored" });
+    })).resolves.toEqual({ reason: "reaction_recorded", status: "accepted" });
 
     expect(mocks.appendHostedLinqGroupReactionMailboxTx).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedLinqGroupReactionMailbox).toHaveBeenCalledTimes(1);
   });
 
   it("does not treat a removed Like as disclosure consent or a legacy join", async () => {
