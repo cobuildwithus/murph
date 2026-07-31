@@ -1,6 +1,6 @@
 # iOS address-book advisory names
 
-Last verified: 2026-07-29
+Last verified: 2026-07-30
 
 ## Product boundary
 
@@ -171,22 +171,24 @@ For a registered participant, the label remains only the owner's private
 presentation hint: it does not replace or modify that participant's Murph
 identity, and `hasOwnMurph` remains a separate durable-activation fact.
 
-SMS admission is limited to `read_chat_participants`. Its model-facing result is
-a roster read, but its Web owner also runs the existing best-effort Linq
-participant reconciliation. That reconciliation renews or creates bounded
-participant-derived access rows for resolved active participants and marks
-absent projected participants removed. The rows are seven-day runtime-access
-leases for the synthetic group container. This is the same container-liveness
-projection used by iMessage groups and by Linq group provisioning and inbound
-renewal; it grants no identity, consent, invite, delivery, or sharing authority.
+The roster read is shared by route-authorized iMessage and SMS groups. Its Web
+owner also runs the existing best-effort Linq participant reconciliation. That
+reconciliation renews or creates bounded participant-derived access rows for
+resolved active participants and marks absent projected participants removed.
+The rows are seven-day runtime-access leases for the synthetic group container.
+This is the same container-liveness projection used by Linq group provisioning
+and inbound renewal; it grants no identity, consent, invite, delivery, or
+sharing authority.
 
-The group skill may call this operation automatically on Murph's first ordinary
-reply in a room. If it then requests contact-card sharing, the runtime withholds
-the SMS thread context. Web returns `linq_thread_unavailable` before any
-contact-card provider call, and the assistant continues the same reply without
-claiming that a card was shared. Display-name and avatar changes, join offers,
-disclosure requests, contact-card sharing, and every other chat effect remain
-iMessage-only.
+iMessage and SMS use the same model-facing hosted-group access action. The
+trusted runtime posts native reaction consent only when the current provider
+supports it; otherwise it creates the same first-party permission request and
+returns its join URL for the ordinary reply. SMS sender evidence is valid for
+the same current-turn shared-data attribution as iMessage sender evidence.
+Provider-specific gaps remain typed and narrow: SMS cannot currently attach the
+VCF contact card, post a reaction-based disclosure request, or mutate the chat
+title or avatar. Those results are capability limits, never a generic thread or
+permission-service outage.
 
 The advisory-name lookup itself does not write a canonical profile, participant
 authority, or separate advisory-name state. The roster operation's existing
@@ -250,8 +252,9 @@ or compatibility service for this emergency window.
 8. Enable `HOSTED_ADDRESS_BOOK_ADVISORY_NAMES_ENABLED=1` and exercise one
    labeled `read_chat_participants` result end to end.
 
-Rolling back SMS roster admission stops new SMS-triggered roster refreshes but
-does not erase participant-access rows already reconciled by that operation.
+Rolling back SMS group-route admission stops new SMS-triggered roster refreshes,
+current-sender attribution, and first-party access-link selection, but does not
+erase participant-access rows already reconciled by the roster operation.
 Those rows remain subject to the existing removal and seven-day lease rules;
 group provisioning and authenticated participant inbound can still maintain
 them through their canonical Linq paths.

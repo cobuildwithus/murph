@@ -1543,7 +1543,10 @@ function buildHostedUsageCreditCheckoutReturnUrl(input: {
   if (input.target.kind === "personal") {
     url.hash = "subscription";
   } else if (input.target.kind === "family") {
-    url.hash = "family";
+    url.hash =
+      input.target.payerMemberId === input.target.beneficiaryMemberId
+        ? "subscription"
+        : "family";
   }
   return url.toString();
 }

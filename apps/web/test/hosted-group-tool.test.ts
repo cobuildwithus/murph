@@ -3134,7 +3134,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.recordHostedGroupJoinOfferTx).not.toHaveBeenCalled();
   });
 
-  it("does not post an offer when every current member already grants every requested scope", async () => {
+  it("posts an explicit offer when every current member already grants every requested scope", async () => {
     const requestedScopes = [{ projectionKind: "steps-days.v0" as const }];
     const fullyGrantedGroup = {
       ...GROUP_SUMMARY,
@@ -3169,9 +3169,76 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       },
     });
 
-    expect(mocks.prepareHostedGroupJoinOfferPostTx).not.toHaveBeenCalled();
-    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-    expect(mocks.recordHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+    expect(mocks.prepareHostedGroupJoinOfferPostTx).toHaveBeenCalledWith({
+      groupId: GROUP_SUMMARY.id,
+      projectionScopes: requestedScopes,
+      tx: fakeTx,
+    });
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat_group_1",
+        message: expect.stringContaining(
+          "your Murph profile name and steps",
+        ),
+      }),
+    );
+    expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
+      groupId: GROUP_SUMMARY.id,
+      message: { channel: "linq", messageId: "msg_offer_1" },
+      postedAt: expect.any(Date),
+      projectionScopes: requestedScopes,
+      tx: fakeTx,
+    });
+  });
+
+  it("posts an explicit profile-only offer for a complete current roster", async () => {
+    const fullyGrantedGroup = {
+      ...GROUP_SUMMARY,
+      memberCount: 1,
+      members: [{
+        disclosureGrants: [],
+        grantedVaultShareProjectionKinds: [],
+        grantedVaultShareProjectionScopes: [],
+        handle: null,
+        memberId: "member_owner",
+        role: "owner",
+      }],
+    };
+    mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx.mockResolvedValueOnce({
+      group: fullyGrantedGroup,
+      joinCode: "abc123",
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: { action: "post_join_offer", linqThread: LINQ_THREAD },
+    })).resolves.toEqual({
+      action: "post_join_offer",
+      result: {
+        group: fullyGrantedGroup,
+        joinUrl: "https://www.withmurph.ai/groups/join/abc123",
+        status: "sent",
+      },
+    });
+
+    expect(mocks.prepareHostedGroupJoinOfferPostTx).toHaveBeenCalledWith({
+      groupId: GROUP_SUMMARY.id,
+      projectionScopes: [],
+      tx: fakeTx,
+    });
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat_group_1",
+        message: expect.stringContaining("your Murph profile name"),
+      }),
+    );
+    expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
+      groupId: GROUP_SUMMARY.id,
+      message: { channel: "linq", messageId: "msg_offer_1" },
+      postedAt: expect.any(Date),
+      projectionScopes: [],
+      tx: fakeTx,
+    });
   });
 
   it("fails closed before provider work when active-offer state is unavailable", async () => {

@@ -120,6 +120,43 @@ describe("assistant subscription tool", () => {
     });
   });
 
+  it("projects the legacy Group wire name as Core for the assistant", async () => {
+    const assistantInputId = `ain_${"e".repeat(32)}`;
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        assistantInputId,
+        subscriptionTool: {
+          request: vi.fn(async () => ({
+            action: "change_plan" as const,
+            effectiveAt: "2026-08-30T12:00:00.000Z",
+            plan: {
+              code: "launch_group_monthly" as const,
+              displayName: "Group" as const,
+              interval: "month" as const,
+              recurringAmountUsdCents: 350,
+            },
+            status: "scheduled" as const,
+          })),
+        },
+      }),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request: readQuotedSubscriptionRequest(),
+    });
+
+    expect(result.rpcResult.success).toBe(true);
+    expect(JSON.parse(readToolText(result))).toMatchObject({
+      plan: {
+        code: "launch_group_monthly",
+        displayName: "Core",
+      },
+      status: "scheduled",
+    });
+    expect(readToolText(result)).not.toMatch(/\bGroup\b/u);
+  });
+
   it("fails closed before transport when current input authority is absent", async () => {
     const subscriptionTool = { request: vi.fn() };
     const result = await executeMurphDynamicToolRequest({

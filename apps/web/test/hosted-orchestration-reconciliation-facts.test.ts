@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   sendClaimedHostedAiUsageLimitNoticeToLinqChat: vi.fn(),
   sendClaimedHostedAiUsageLimitNoticeToTelegramThread: vi.fn(),
   sendHostedTrialConversionNoticeToLinqChat: vi.fn(),
+  tryMarkHostedMailboxConversationAiUsageDenied: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
@@ -45,6 +46,8 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   readHostedMailboxMaxSeqByLane: mocks.readHostedMailboxMaxSeqByLane,
   readHostedMailboxPayload: mocks.readHostedMailboxPayload,
   readHostedMailboxWakeByItemId: mocks.readHostedMailboxWakeByItemId,
+  tryMarkHostedMailboxConversationAiUsageDenied:
+    mocks.tryMarkHostedMailboxConversationAiUsageDenied,
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-limit-notice", () => ({
@@ -157,6 +160,7 @@ describe("hosted orchestration reconciliation facts", () => {
     mocks.readHostedMailboxWakeByItemId.mockResolvedValue(null);
     mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(null);
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status: "allowed" });
+    mocks.tryMarkHostedMailboxConversationAiUsageDenied.mockResolvedValue(false);
   });
 
   afterEach(() => {
@@ -688,6 +692,14 @@ describe("hosted orchestration reconciliation facts", () => {
       routeAuthority,
       sourceEventId: "linq_event_runtime_denied",
     });
+    expect(
+      mocks.tryMarkHostedMailboxConversationAiUsageDenied,
+    ).toHaveBeenCalledWith({
+      afterConversationLaneSeq: 2n,
+      prisma: expect.objectContaining({ kind: "prisma" }),
+      throughConversationLaneSeq: 3n,
+      userId: MEMBER_ID,
+    });
   });
 
   it("retries the current capacity-epoch Linq usage-limit notice from the denied gate", async () => {
@@ -738,6 +750,16 @@ describe("hosted orchestration reconciliation facts", () => {
 
     expect(firstResponse.status).toBe(500);
     expect(retryResponse.status).toBe(200);
+    expect(
+      mocks.tryMarkHostedMailboxConversationAiUsageDenied,
+    ).toHaveBeenCalledTimes(2);
+    expect(
+      mocks.tryMarkHostedMailboxConversationAiUsageDenied.mock
+        .invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat.mock
+        .invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
     expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).toHaveBeenCalledTimes(2);
     expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).toHaveBeenLastCalledWith({
       chatId: "chat_runtime_denied",
@@ -1168,6 +1190,9 @@ describe("hosted orchestration reconciliation facts", () => {
     });
     expect(mocks.readHostedMailboxLatestPendingConversationItem).not.toHaveBeenCalled();
     expect(mocks.sendHostedTrialConversionNoticeToLinqChat).not.toHaveBeenCalled();
+    expect(
+      mocks.tryMarkHostedMailboxConversationAiUsageDenied,
+    ).not.toHaveBeenCalled();
   });
 
   it("does not retry usage-limit delivery for read-only status checks", async () => {

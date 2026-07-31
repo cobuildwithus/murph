@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
+import type {
+  HostedRuntimeGroupToolRequest,
+  HostedRuntimeGroupToolResponse,
+} from "@murphai/hosted-execution/runtime-control";
+
 import {
   createHostedGroupToolWithCurrentTurnContext,
 } from "../src/hosted-runtime/workspace-assistant-phase.ts";
@@ -574,7 +579,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     });
   });
 
-  it("dedupes repeated contexts and keeps effectful actions iMessage-only", async () => {
+  it("dedupes repeated route-authorized iMessage contexts", async () => {
     const request = vi.fn().mockResolvedValue({
       action: "share_contact_card",
       result: { status: "sent" },
@@ -589,10 +594,6 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
             ...ROUTE_AUTHORITY,
             accountLookupKey: "hplk_legacy_other_line",
           },
-        }),
-        buildLinqDeliveryContext({
-          routeAuthority: { ...ROUTE_AUTHORITY, threadId: "chat_sms_group" },
-          service: "sms",
         }),
         buildLinqDeliveryContext({
           routeAuthority: { ...ROUTE_AUTHORITY, threadId: "chat_direct" },
@@ -611,10 +612,37 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     });
   });
 
-  it("injects a route-authorized SMS thread only for participant reads", async () => {
-    const request = vi.fn().mockResolvedValue({
-      action: "read_chat_participants",
-      result: { participants: [], status: "ok" },
+  it("gives SMS the shared group workflow and reports only real provider gaps", async () => {
+    const request = vi.fn(async (
+      groupRequest: HostedRuntimeGroupToolRequest,
+    ): Promise<HostedRuntimeGroupToolResponse> => {
+      if (groupRequest.action === "read_chat_participants") {
+        return {
+          action: groupRequest.action,
+          result: { participants: [], status: "ok" },
+        };
+      }
+      if (groupRequest.action === "read_shared") {
+        return {
+          action: groupRequest.action,
+          result: {
+            members: [],
+            requestedProjectionScopeKeys: ["steps-days.v0"],
+            status: "ok",
+          },
+        };
+      }
+      if (groupRequest.action === "create_join_link") {
+        return {
+          action: groupRequest.action,
+          result: {
+            group: null,
+            status: "unavailable",
+            unavailableReason: "synthetic_link_unavailable",
+          },
+        };
+      }
+      throw new Error(`Unexpected group action: ${groupRequest.action}`);
     });
     const smsRouteAuthority = {
       ...ROUTE_AUTHORITY,
@@ -624,6 +652,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
       groupToolPort: { request },
       linqDeliveryContexts: [
         buildLinqDeliveryContext({
+          directRecipientPhoneNumber: "+15550000003",
           routeAuthority: smsRouteAuthority,
           service: "SMS",
           target: "chat_sms_group",
@@ -640,17 +669,200 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
       },
     });
 
-    await groupTool.request({ action: "share_contact_card" });
-    expect(request.mock.calls).toEqual([
-      [{
-        action: "read_chat_participants",
-        linqThread: {
-          authority: smsRouteAuthority,
-          chatId: "chat_sms_group",
+    await groupTool.request({
+      action: "read_shared",
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    });
+    expect(request).toHaveBeenLastCalledWith({
+      action: "read_shared",
+      linqSenderHandles: ["+15550000003"],
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    });
+
+    await groupTool.request({
+      action: "post_join_offer",
+      joinOffer: {
+        displayName: "Weekly Health Crew",
+        messageTemplate:
+          "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
+        projectionScopes: [{ projectionKind: "sleep-times.v0" }],
+      },
+    });
+    expect(request).toHaveBeenLastCalledWith({
+      action: "create_join_link",
+      joinLink: {
+        displayName: "Weekly Health Crew",
+        requestedVaultShareProjectionScopes: [
+          { projectionKind: "sleep-times.v0" },
+        ],
+      },
+    });
+
+    await expect(groupTool.request({ action: "share_contact_card" }))
+      .resolves.toEqual({
+        action: "share_contact_card",
+        result: {
+          status: "unavailable",
+          unavailableReason: "sms_attachments_unsupported",
         },
-      }],
-      [{ action: "share_contact_card" }],
-    ]);
+      });
+    await expect(groupTool.request({
+      action: "post_disclosure_request",
+      originAssistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
+      permissionText: "Share calendar availability only.",
+    })).resolves.toEqual({
+      action: "post_disclosure_request",
+      result: {
+        status: "unavailable",
+        unavailableReason: "sms_reactions_unsupported",
+      },
+    });
+    await expect(groupTool.request({
+      action: "update_display_name",
+      updateDisplayName: { displayName: "Weekly Health Crew" },
+    })).resolves.toEqual({
+      action: "update_display_name",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "sms_chat_customization_unsupported",
+      },
+    });
+    await expect(groupTool.request({ action: "preflight_set_chat_avatar" }))
+      .resolves.toMatchObject({
+        result: { unavailableReason: "sms_chat_customization_unsupported" },
+      });
+    await expect(groupTool.request({
+      action: "set_chat_avatar",
+      groupChatIconUrl:
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
+    })).resolves.toMatchObject({
+      result: { unavailableReason: "sms_chat_customization_unsupported" },
+    });
+
+    expect(request).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([
+    {
+      label: "iMessage and SMS",
+      second: { service: "sms" },
+      service: "imessage",
+    },
+    {
+      label: "iMessage and RCS",
+      second: { service: "RCS" },
+      service: "imessage",
+    },
+    {
+      label: "SMS and RCS",
+      second: { service: "RCS" },
+      service: "sms",
+    },
+    {
+      label: "SMS and a missing service",
+      second: { service: null },
+      service: "sms",
+    },
+    {
+      label: "SMS and unknown thread direction",
+      second: { service: "sms", threadIsDirect: null },
+      service: "sms",
+    },
+  ] satisfies readonly {
+    label: string;
+    second: Partial<HostedAssistantLinqDeliveryContext>;
+    service: string;
+  }[])("fails closed for authoritative $label contexts", async ({
+    second,
+    service,
+  }) => {
+    const request = vi.fn().mockResolvedValue({
+      action: "post_join_offer",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "linq_thread_unavailable",
+      },
+    });
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
+      groupToolPort: { request },
+      linqDeliveryContexts: [
+        buildLinqDeliveryContext({
+          directRecipientPhoneNumber: "+15550000001",
+          routeAuthority: ROUTE_AUTHORITY,
+          service,
+        }),
+        buildLinqDeliveryContext({
+          directRecipientPhoneNumber: "+15550000002",
+          routeAuthority: ROUTE_AUTHORITY,
+          ...second,
+        }),
+      ],
+    });
+
+    await groupTool.request({
+      action: "post_join_offer",
+      joinOffer: { projectionKinds: ["steps-days.v0"] },
+    });
+    expect(request).toHaveBeenLastCalledWith({
+      action: "post_join_offer",
+      joinOffer: { projectionKinds: ["steps-days.v0"] },
+    });
+
+    await groupTool.request({ action: "share_contact_card" });
+    expect(request).toHaveBeenLastCalledWith({ action: "share_contact_card" });
+
+    await groupTool.request({ action: "read_chat_participants" });
+    expect(request).toHaveBeenLastCalledWith({ action: "read_chat_participants" });
+
+    await groupTool.request({
+      action: "read_shared",
+      linqSenderHandles: ["forged"],
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    });
+    expect(request).toHaveBeenLastCalledWith({
+      action: "read_shared",
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    });
+  });
+
+  it("uses the same first-party access link fallback in Telegram groups", async () => {
+    const request = vi.fn().mockResolvedValue({
+      action: "create_join_link",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "synthetic_link_unavailable",
+      },
+    });
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
+      currentDeliveryRoute: {
+        channel: "telegram",
+        deliveryTarget: "raw-group-thread",
+        identityId: `hid_${"4".repeat(32)}`,
+        participantId: `hid_${"5".repeat(32)}`,
+        threadId: `hid_${"6".repeat(32)}`,
+        threadIsDirect: false,
+      },
+      groupToolPort: { request },
+      linqDeliveryContexts: [],
+    });
+
+    await groupTool.request({
+      action: "post_join_offer",
+      joinOffer: {
+        displayName: "Weekly Health Crew",
+        projectionKinds: ["steps-days.v0"],
+      },
+    });
+    expect(request).toHaveBeenCalledWith({
+      action: "create_join_link",
+      joinLink: {
+        displayName: "Weekly Health Crew",
+        requestedVaultShareProjectionKinds: ["steps-days.v0"],
+      },
+    });
   });
 
   it("fails participant reads closed for ambiguous, direct, or unsupported-service contexts", async () => {
@@ -992,7 +1204,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     });
   });
 
-  it("injects deduplicated current-turn phone and email handles only on lazy shared reads", async () => {
+  it("injects deduplicated current-turn Linq handles only on lazy shared reads", async () => {
     const request = vi.fn().mockResolvedValue({
       action: "read_shared",
       result: {
@@ -1020,11 +1232,6 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
           directRecipientPhoneNumber: "direct@example.test",
           routeAuthority: ROUTE_AUTHORITY,
           threadIsDirect: true,
-        }),
-        buildLinqDeliveryContext({
-          directRecipientPhoneNumber: "sms@example.test",
-          routeAuthority: ROUTE_AUTHORITY,
-          service: "sms",
         }),
         buildLinqDeliveryContext({
           directRecipientPhoneNumber: "unauthorized@example.test",

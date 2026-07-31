@@ -455,9 +455,9 @@ async function deleteOldHostedRuntimeLogs(input: {
   `);
 }
 
-async function deleteExpiredIngressLatencyTraces(input: {
+export async function deleteExpiredIngressLatencyTraces(input: {
   now: Date;
-  prisma: PrismaClient;
+  prisma: Pick<PrismaClient, "$executeRaw">;
 }): Promise<number> {
   const cutoff = new Date(
     input.now.getTime() - HOSTED_INGRESS_LATENCY_TRACE_RETENTION_MS,
@@ -467,6 +467,7 @@ async function deleteExpiredIngressLatencyTraces(input: {
       SELECT "id"
       FROM "hosted_ingress_latency_trace"
       WHERE "accepted_at" < ${cutoff}
+        AND "updated_at" < ${cutoff}
       ORDER BY "accepted_at" ASC, "id" ASC
       LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
     )
