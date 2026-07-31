@@ -9,7 +9,6 @@ import { completeHostedPrivyVerification } from "./authentication-service";
 import { ensureHostedAutoPulseTrialEnrollment } from "./auto-trial-enrollment-service";
 import { assertHostedMemberNotSuspended } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
-import type { HostedMemberCoreState } from "./hosted-member-store";
 import {
   assertActiveHostedMemberAccessAllowed,
   readActiveHostedMemberAccess,
@@ -27,11 +26,11 @@ import { resolveHostedPrivySessionFromBearerToken } from "./hosted-session";
  * request may create the canonical member and invite, but consent is checked
  * before trial activation or Junction authority is issued.
  */
-export async function requireHostedCompanionMemberAccessFromRequest(input: {
+export async function requireHostedCompanionMemberIdFromRequest(input: {
   prisma?: PrismaClient;
   request: Request;
   timeZone?: string | null;
-}): Promise<HostedMemberCoreState> {
+}): Promise<string> {
   const prisma = input.prisma ?? getPrisma();
   const session = await resolveHostedPrivySessionFromBearerToken(input.request);
 
@@ -43,19 +42,19 @@ export async function requireHostedCompanionMemberAccessFromRequest(input: {
     });
   }
 
-  return ensureHostedCompanionMemberAccess({
+  return ensureHostedCompanionMemberId({
     identity: session.identity,
     prisma,
     ...(input.timeZone ? { timeZone: input.timeZone } : {}),
   });
 }
 
-export async function ensureHostedCompanionMemberAccess(input: {
+export async function ensureHostedCompanionMemberId(input: {
   identity: HostedPrivyIdentity;
   now?: Date;
   prisma?: PrismaClient;
   timeZone?: string | null;
-}): Promise<HostedMemberCoreState> {
+}): Promise<string> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
   const existingMember = await lookupHostedMemberForPrivyPrincipal({
@@ -74,7 +73,7 @@ export async function ensureHostedCompanionMemberAccess(input: {
         memberId: existingMember.id,
         prisma,
       });
-      return existingMember;
+      return existingMember.id;
     }
   }
 
@@ -96,7 +95,7 @@ export async function ensureHostedCompanionMemberAccess(input: {
     memberId: completion.memberId,
     prisma,
   })) {
-    return completion.member;
+    return completion.memberId;
   }
 
   // Only the untouched hosted acquisition state may enter automatic trial
@@ -119,5 +118,5 @@ export async function ensureHostedCompanionMemberAccess(input: {
     prisma,
   });
 
-  return completion.member;
+  return completion.memberId;
 }
