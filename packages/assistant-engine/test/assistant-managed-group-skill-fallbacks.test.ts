@@ -70,6 +70,9 @@ describe("managed hosted group skill boundary", () => {
     const scorecards = ASSISTANT_SKILLS.find(
       (skill) => skill.slug === "group-challenge-scorecards",
     );
+    const comedy = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === "groupchat-comedy",
+    );
 
     expect(challenge?.triggerHint).toContain(
       "social-first formation grounded in the current room",
@@ -86,6 +89,10 @@ describe("managed hosted group skill boundary", () => {
     expect(scorecards?.triggerHint).toContain(
       "group-challenge still owns formation, buy-in, consent, durable state, scheduling, diagnostics, and close-out",
     );
+    expect(comedy?.triggerHint).toContain(
+      "protected-register handling inside the group",
+    );
+    expect(comedy?.triggerHint).not.toContain("private care");
   });
 
   it("fails closed when the managed challenge policy is absent", async () => {
