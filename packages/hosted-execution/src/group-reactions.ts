@@ -110,13 +110,24 @@ export function renderHostedExecutionGroupReactionEventEvidence(
   return [
     "Group reaction event:",
     `- channel: ${event.channel}`,
-    `- actor: ${event.actor === null ? "anonymous aggregate" : JSON.stringify(event.actor)}`,
+    `- actor: ${renderHostedExecutionGroupReactionActor(event)}`,
     `- target message id: ${JSON.stringify(event.targetMessageId)}`,
     ...(event.targetText === null
       ? []
       : [`- target text: ${JSON.stringify(event.targetText)}`]),
     `- reaction ${event.mode}: ${changes}`,
   ].join("\n");
+}
+
+function renderHostedExecutionGroupReactionActor(
+  event: HostedExecutionGroupReactionEvent,
+): string {
+  if (event.actor !== null) {
+    return JSON.stringify(event.actor);
+  }
+  return event.mode === "snapshot"
+    ? "anonymous aggregate"
+    : "unattributed participant";
 }
 
 function normalizeHostedExecutionGroupReactionEvent(
