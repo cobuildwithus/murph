@@ -8,6 +8,7 @@ import { readOptionalJsonObject } from "@/src/lib/http";
 import {
   requireHostedCompanionMemberAccessFromRequest,
 } from "@/src/lib/hosted-onboarding/companion-member-access";
+import { resolveHostedSignupTimeZone } from "@/src/lib/hosted-onboarding/time-zone-hint";
 import { getPrisma } from "@/src/lib/prisma";
 
 // Companion sign-in token exchange. Auth is a bearer Privy identity token
@@ -22,15 +23,19 @@ export const POST = withJsonError(async (request: Request) => {
   // hosted member. Installation metadata remains validated and discarded; the
   // spec's `companion_installations` record is deferred until operationally
   // needed.
-  const connectionIntent = validateCompanionSignInRequestBody(
-    await readOptionalJsonObject(request),
-  );
+  const body = await readOptionalJsonObject(request);
+  const connectionIntent = validateCompanionSignInRequestBody(body);
+  const timeZone = resolveHostedSignupTimeZone({
+    clientTimeZone: body.timeZone,
+    headers: request.headers,
+  });
 
   const prisma = getPrisma();
-  const member = await requireHostedCompanionMemberAccessFromRequest(
-    request,
+  const member = await requireHostedCompanionMemberAccessFromRequest({
     prisma,
-  );
+    request,
+    ...(timeZone ? { timeZone } : {}),
+  });
   const publicIngress = createHostedDeviceSyncPublicIngressService(request);
   const session = await publicIngress.createSdkSignInSession(
     member.id,
