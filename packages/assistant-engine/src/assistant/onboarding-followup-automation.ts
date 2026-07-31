@@ -1,9 +1,13 @@
 import { createHash } from 'node:crypto'
 import {
+  formatTimeZoneDateTimeParts,
   parseDailyTime,
   type AutomationContinuityPolicy,
   type AutomationSchedule,
 } from '@murphai/contracts'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+
+import { computeAssistantCronNextRunAt } from './cron/schedule.js'
 
 export type MurphOnboardingFollowupAutomationSchedule = Extract<
   AutomationSchedule,
@@ -11,6 +15,7 @@ export type MurphOnboardingFollowupAutomationSchedule = Extract<
 >
 
 export interface MurphOnboardingFollowupAutomationDefinition {
+  activeUntilLocalTime: string
   continuityPolicy: AutomationContinuityPolicy
   instructions: string
   jitterMinutes: number
@@ -32,6 +37,7 @@ export const MURPH_ONBOARDING_FOLLOWUP_AUTOMATION =
       localTime: '13:30',
     },
     jitterMinutes: 60,
+    activeUntilLocalTime: '14:30',
     tags: [
       'assistant',
       'scheduled',
@@ -48,13 +54,13 @@ export const MURPH_ONBOARDING_FOLLOWUP_AUTOMATION =
       '',
       'If `onboarding.status` is `completed`, return skip. The managed-automation owner archives this follow-up deterministically.',
       '',
-      'If the onboarding skill says the visible and saved evidence satisfies answered completion, or shows an overall decline, run its required completion command. Whether completion succeeds or fails, return skip without messaging; the managed-automation owner retires the follow-up after completion.',
+      'If the onboarding skill says the visible and saved evidence satisfies answered completion, or shows an overall decline, run its required completion command and verify that the command output reports `completed`. If the command fails or onboarding remains open, send nothing and do not return a send-or-skip decision: fail this run so the same one-shot remains retryable only inside its active window. Return skip only after completion is durably confirmed.',
       '',
       'Otherwise use exactly the next unresolved step from the onboarding skill, including aspiration capture, explicit parking, foundation questions, contextual return, and its targeted-read rules for omitted, truncated, or errored evidence. If that step is only a reflection or parking transition, combine it with the next skill-approved question when the skill permits; otherwise return skip. Do not compress, reorder, or bypass that policy merely because this is a scheduled run.',
       '',
       'This automation never owns a promised check-in, reminder, or proactive support action. Those use the canonical plan and dedicated automation required by `behavior-followthrough`, which owns timing, due evaluation, delivery, retry, and skip behavior.',
       '',
-      'Before sending, triple-check the snapshot and recent messages for an answer, skip, defer, decline, or a newer topic that should win. Do not re-ask known or resolved context. If the latest onboarding question is still unanswered, do not repeat it or rotate to another setup question. You may instead send this one final, natural reopening nudge with exactly one easy question that lets the member choose whether to continue. Honor requested timing and return skip after an explicit decline, a request not to follow up, or whenever even that nudge would not be timely or useful.',
+      'Before sending, triple-check the snapshot and recent messages for an answer, skip, defer, decline, or a newer topic that should win. Follow the onboarding skill’s finite next-day recovery rule exactly. Do not re-ask known or resolved context, repeat an unanswered setup question, or rotate to another setup question. Honor requested timing and return skip after an explicit decline, a request not to follow up, or whenever the finite reopening question would not be timely or useful.',
       '',
       "Output: send at most one brief, natural, low-pressure in-chat continuation. It must contain exactly one easy, reply-oriented question; otherwise return skip. Do not mention internal state, setup completion, final attempts, schedules, or this automation, and do not use a fixed script. The user's reply will be handled by the next normal Murph onboarding turn.",
     ].join('\n'),
@@ -93,4 +99,41 @@ export function resolveMurphOnboardingFollowupSchedule(
       String(minuteOfDay % 60).padStart(2, '0'),
     ].join(':'),
   }
+}
+
+export function resolveMurphOnboardingFollowupActiveUntil(input: {
+  scheduledAt: string
+  timeZone: string
+}): string {
+  const scheduledAt = new Date(input.scheduledAt)
+  if (!Number.isFinite(scheduledAt.getTime())) {
+    throw new TypeError('Onboarding follow-up active window requires a valid occurrence.')
+  }
+
+  const activeUntil = computeAssistantCronNextRunAt(
+    {
+      kind: 'dailyLocal',
+      localTime:
+        MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.activeUntilLocalTime,
+      timeZone: input.timeZone,
+    },
+    scheduledAt,
+  )
+  if (!activeUntil) {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_INVALID_SCHEDULE',
+      'Onboarding follow-up active window does not produce a cutoff.',
+    )
+  }
+  if (
+    formatTimeZoneDateTimeParts(scheduledAt, input.timeZone).dayKey !==
+    formatTimeZoneDateTimeParts(activeUntil, input.timeZone).dayKey
+  ) {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_INVALID_SCHEDULE',
+      'Onboarding follow-up cutoff must remain on the occurrence local day.',
+    )
+  }
+
+  return activeUntil
 }

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
+  resolveMurphOnboardingFollowupActiveUntil,
   resolveMurphOnboardingFollowupSchedule,
 } from '../src/assistant/onboarding-followup-automation.ts'
 
@@ -32,6 +33,17 @@ describe('onboarding follow-up automation', () => {
     )
   })
 
+  it('closes every jitter slot at the end of the same local window', () => {
+    expect(resolveMurphOnboardingFollowupActiveUntil({
+      scheduledAt: '2026-04-09T17:47:00.000Z',
+      timeZone: 'America/New_York',
+    })).toBe('2026-04-09T18:30:00.000Z')
+    expect(resolveMurphOnboardingFollowupActiveUntil({
+      scheduledAt: '2026-11-01T18:29:00.000Z',
+      timeZone: 'America/New_York',
+    })).toBe('2026-11-01T19:30:00.000Z')
+  })
+
   it('defines a single reply-oriented final attempt', () => {
     expect(MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary).toContain('One finite')
     expect(MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions)
@@ -40,5 +52,9 @@ describe('onboarding follow-up automation', () => {
       .toContain('send at most one')
     expect(MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions)
       .toContain('exactly one easy, reply-oriented question')
+    expect(MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions)
+      .toContain('do not return a send-or-skip decision')
+    expect(MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions)
+      .toContain('finite next-day recovery rule')
   })
 })

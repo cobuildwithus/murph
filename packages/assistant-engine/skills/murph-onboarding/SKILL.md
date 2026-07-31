@@ -20,8 +20,10 @@ should start problem-solving before the foundation is understood.
 
 Experiments are one optional primitive. Do not turn onboarding into an upfront
 profile questionnaire, capability tour, wearable funnel, or experiment funnel.
-Do not create a second context-collection lifecycle, and create no onboarding
-automation beyond the single scheduled early-stall check-in defined below.
+Do not create a second context-collection lifecycle. This skill may create only
+the scheduled early-stall check-in defined below. A separate managed owner may
+invoke this skill through the single finite next-day recovery occurrence
+defined below; never create, replace, repeat, or reschedule that occurrence.
 
 ## Resume without repeating
 
@@ -87,8 +89,8 @@ the aspiration and continue onboarding instead of assuming permission to act.
 
 Do not append an onboarding question to a reply about a meal photo, symptom,
 urgent concern, failed task, or other health-data request that should stand
-alone. Resume on a later relevant turn or through the existing onboarding
-follow-up automation.
+alone. Resume on a later relevant turn or through the finite managed next-day
+recovery occurrence.
 
 ## Delegating onboarding work
 
@@ -230,7 +232,7 @@ result; do not guess the time or offset. Use:
 - `instructions`: exactly the decision policy below.
 
 ```text
-Onboarding just started and the user answered the first question or two. This one-shot exists only to notice a mid-setup stall. Read the recent conversation first. Return skip unless all of these hold: onboarding is still open, the latest message is Murph's own onboarding question, that question has gone unanswered for at least ten minutes, and the user has not asked to pause or continue later. Otherwise reply in chat with one short, light line in Murph's voice: check whether they are still around, keep it playful and pressure-free, and make clear they can pick this up anytime or tell Murph to take a different approach if this style is not working for them. The meaning is "hey, still there? don't leave me hanging - and if you'd rather do this differently, just say so." Use natural wording, not a fixed script. Do not repeat the open question verbatim, do not add a new setup question, and do not mention schedules, automations, or internal state. This check-in happens at most once; any later onboarding continuation belongs to the existing managed daily onboarding follow-up, not this one-shot.
+Onboarding just started and the user answered the first question or two. This one-shot exists only to notice a mid-setup stall. Read the recent conversation first. Return skip unless all of these hold: onboarding is still open, the latest message is Murph's own onboarding question, that question has gone unanswered for at least ten minutes, and the user has not asked to pause or continue later. Otherwise reply in chat with one short, light line in Murph's voice: check whether they are still around, keep it playful and pressure-free, and make clear they can pick this up anytime or tell Murph to take a different approach if this style is not working for them. The meaning is "hey, still there? don't leave me hanging - and if you'd rather do this differently, just say so." Use natural wording, not a fixed script. Do not repeat the open question verbatim, do not add a new setup question, and do not mention schedules, automations, or internal state. This check-in happens at most once; any later scheduled continuation belongs only to the finite managed next-day recovery occurrence below.
 ```
 
 If the save fails or the tool is unavailable, continue onboarding normally
@@ -377,8 +379,8 @@ those solely because the user answered an onboarding question.
 Bridge directly into the foundation and ask its first short question in the
 same reply when that keeps the conversation moving. Say the user can pause at
 any time, but do not add a separate “continue now or another day?” turn by
-default. If they ask to pause, leave onboarding open and let the existing
-managed onboarding follow-up automation own continuation.
+default. If they ask to pause, leave onboarding open and let the finite managed
+next-day recovery occurrence decide whether continuation is timely.
 
 Do not list the remaining foundation topics. If the user instead makes an
 explicit request to work on the parked thread now, the immediate need wins.
@@ -569,8 +571,8 @@ the supplied facts before replying and leaves optional label details unknown.
    rule. A clear “no”
    or explicit skip resolves the checkpoint. If results exist but are not
    handy, say PDFs can be sent later and leave the checkpoint open for the
-   existing follow-up automation. If the user says their labs are from
-   Function Health, proactively tell them to visit
+   finite managed next-day recovery occurrence. If the user says their labs
+   are from Function Health, proactively tell them to visit
    https://my.functionhealth.com/documents, download the Lab Results of Record
    PDFs, and send those files to Murph. Do not wait for them to ask how. Naming
    the provider without supplying results does not start a parse child; wait
@@ -804,9 +806,9 @@ step marker merely to track coverage.
 
 A simple “later” remains unresolved. Save it as a preference only when the user
 expressed durable timing or contact guidance that should survive this thread;
-otherwise let the preserved conversation and managed follow-up honor it. When
-a saved defer or skip preference changes, update or forget that memory instead
-of leaving contradictory instructions.
+otherwise let the preserved conversation and finite managed recovery honor it.
+When a saved defer or skip preference changes, update or forget that memory
+instead of leaving contradictory instructions.
 
 Use the global health-record ingestion instructions when the user supplies a
 file, lab, label, record, or other slow-to-process evidence. Do not mark
@@ -875,6 +877,32 @@ and do not ask another onboarding question. Do not use `user_declined` for one
 skipped category, and do not require a plan or support loop merely to use
 `user_answered`.
 
+During the finite next-day recovery occurrence, a completion command that
+fails or does not leave onboarding durably `completed` must not consume the
+one-shot as a valid skip. Send nothing and return no send-or-skip decision so
+the run fails and can retry only inside its finite active window.
+
+### Finite next-day recovery
+
+A managed owner may invoke this skill once on the next local day after the
+welcome. That occurrence is the only scheduled recovery after the early-stall
+window. It is consumed whether it sends or skips and must never create,
+re-enable, rotate, or reschedule another onboarding follow-up.
+
+- Read current onboarding state and recent user messages before deciding.
+- If the latest onboarding question is still unanswered, do not repeat it and
+  do not rotate to another setup question. The occurrence may instead ask one
+  natural, low-pressure question that lets the user choose whether to continue.
+- A visible message must contain exactly one easy question. Do not mention
+  setup completion, internal state, schedules, automations, or final attempts.
+- Return skip after an answer, completion, overall decline, request for no
+  follow-up, explicit deferral whose timing should be honored, newer urgent or
+  safety-sensitive context, or evidence too stale or incomplete to support a
+  useful reopening question.
+- Send or skip ends this scheduled recovery. Any later member reply resumes
+  through ordinary reply-driven onboarding, which remains open unless
+  completion was durably recorded.
+
 ## Reply and follow-up rules
 
 - Except for the bundled minimal-identity prompt and the foundation brain-dump
@@ -897,9 +925,10 @@ skipped category, and do not require a plan or support loop merely to use
 - A deferred checkpoint remains open, but honor the requested timing.
 - If the last onboarding question is still unanswered, do not send a different
   setup question. Wait for a reply or later inbound message instead of
-  escalating a drip questionnaire. The scheduled early-stall check-in above is
-  not a setup question and is the only permitted scheduled nudge inside this
-  window; it never repeats.
+  escalating a drip questionnaire. Inside the first-minutes stall window, the
+  scheduled early-stall check-in above is the only permitted nudge and it never
+  repeats. The separate finite next-day recovery rule above owns the only later
+  scheduled exception.
 - Skip visible onboarding advancement when the user asks for no follow-up, the
   situation is urgent or safety-sensitive, the immediate task failed and needs
   attention, or the current health-data reply should stand alone.

@@ -55,6 +55,9 @@ import {
   runOnboardingGoalCheckinAuthorityPrecondition,
 } from '../onboarding-goal-checkin-automation.js'
 import {
+  MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
+} from '../onboarding-followup-automation.js'
+import {
   resolveGroupNewsletterAutomationDelivery,
 } from '../group-newsletter-automation.js'
 import {
@@ -1655,12 +1658,17 @@ function resolveAssistantCronNotificationTurnPolicy(
   job: ResolvedAssistantCronJob,
 ): AssistantNotificationTurnPolicy | null {
   const policy = resolveAssistantCronBackgroundMaintenancePolicy(job)
-  return policy
-    ? {
-        kind: 'maintenance-exact-skip',
-        maintenanceProfile: policy.profile,
-        privateSummary: policy.privateSummary,
-      }
+  if (policy) {
+    return {
+      kind: 'maintenance-exact-skip',
+      maintenanceProfile: policy.profile,
+      privateSummary: policy.privateSummary,
+    }
+  }
+
+  return resolveAssistantCronAutomationSlug(job) ===
+    MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug
+    ? { kind: 'onboarding-followup' }
     : null
 }
 

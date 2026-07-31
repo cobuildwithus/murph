@@ -4522,6 +4522,52 @@ function isTraceEventWithRawType(
   )
 }
 
+test('sendAssistantNotificationLocal keeps an onboarding follow-up retryable when completion did not commit', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'onboarding-followup-completion-'))
+  try {
+    const providerResult = createProviderResult({
+      rawEvents: [
+        createCodexCommandCompletedEvent(
+          'vault-cli assistant onboarding complete --reason user_answered',
+        ),
+      ],
+      response: JSON.stringify({
+        kind: 'skip',
+        privateSummary: 'Onboarding completion was attempted.',
+      }),
+    })
+    const {
+      deliverMessage,
+      mocks,
+      sendAssistantNotificationLocal,
+    } = await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-onboarding-followup-completion',
+    })
+
+    await expect(sendAssistantNotificationLocal({
+      instructions: 'Complete onboarding or make one final continuation decision.',
+      scheduledOccurrenceAt: '2026-04-09T17:47:00.000Z',
+      turnPolicy: {
+        kind: 'onboarding-followup',
+      },
+      vault,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_ONBOARDING_COMPLETION_NOT_COMMITTED',
+      context: {
+        retryable: true,
+      },
+      details: {
+        assistantNotificationStage: 'provider',
+      },
+    })
+    expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+    expect(deliverMessage).not.toHaveBeenCalled()
+  } finally {
+    await rm(vault, { force: true, recursive: true })
+  }
+})
+
 function createAssistantSession(input?: {
   binding?: AssistantSession['binding']
   providerOptions?: AssistantProviderSessionOptions

@@ -1166,6 +1166,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       automationId: 'automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FC',
       vaultRoot,
     })).resolves.toMatchObject({
+      activeUntil: '2026-06-24T14:30:00.000Z',
       automationId: 'automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FC',
       continuityPolicy: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy,
       instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
@@ -1258,6 +1259,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       automationId: 'automation_01KCM5T5J4VB7D63T0Y29Q6R7A',
       vaultRoot,
     })).resolves.toMatchObject({
+      activeUntil: '2026-06-24T14:30:00.000Z',
       instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
       route: defaultRoute,
       schedule: {

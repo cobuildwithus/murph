@@ -46,6 +46,7 @@ import {
 import type { AssistantMaintenanceProfile } from './maintenance-evidence.js'
 import {
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
+  resolveMurphOnboardingFollowupActiveUntil,
   resolveMurphOnboardingFollowupSchedule,
 } from './onboarding-followup-automation.js'
 import { assistantRouteSupportsGroupRoomModel } from './group-room-model.js'
@@ -1381,26 +1382,19 @@ async function reconcileExistingOnboardingFollowupAutomation(input: {
   }
 
   const migrateRecurringSchedule = existing.schedule.kind !== 'at'
-  if (
-    !migrateRecurringSchedule &&
-    !onboardingFollowupAutomationDefinitionChanged(existing)
-  ) {
-    return { updated: false, yielded: false }
+  const vault = await loadVault({ vaultRoot: input.vaultRoot })
+  if (input.shouldYield?.() === true) {
+    return { updated: false, yielded: true }
   }
-
+  const vaultId = typeof vault.metadata.vaultId === 'string'
+    ? vault.metadata.vaultId.trim()
+    : ''
+  const timeZone = normalizeIanaTimeZone(vault.metadata.timezone) ?? 'UTC'
   let migratedSchedule: AutomationSchedule | undefined
   if (migrateRecurringSchedule) {
-    const vault = await loadVault({ vaultRoot: input.vaultRoot })
-    if (input.shouldYield?.() === true) {
-      return { updated: false, yielded: true }
-    }
-    const vaultId = typeof vault.metadata.vaultId === 'string'
-      ? vault.metadata.vaultId.trim()
-      : ''
     const schedule = resolveMurphOnboardingFollowupSchedule(
       vaultId || existing.automationId,
     )
-    const timeZone = normalizeIanaTimeZone(vault.metadata.timezone) ?? 'UTC'
     migratedSchedule = {
       kind: 'at',
       at: computeAssistantCronFirstRunAfterCurrentLocalDay({
@@ -1412,11 +1406,36 @@ async function reconcileExistingOnboardingFollowupAutomation(input: {
       }),
     }
   }
+  const scheduledAt =
+    migratedSchedule?.kind === 'at'
+      ? migratedSchedule.at
+      : existing.schedule.kind === 'at'
+        ? existing.schedule.at
+        : null
+  if (scheduledAt === null) {
+    throw new Error('Onboarding follow-up migration did not produce a one-shot.')
+  }
+  const activeUntil =
+    !migrateRecurringSchedule && typeof existing.activeUntil === 'string'
+      ? existing.activeUntil
+      : resolveMurphOnboardingFollowupActiveUntil({
+          scheduledAt,
+          timeZone,
+        })
+
+  if (
+    !migrateRecurringSchedule &&
+    existing.activeUntil === activeUntil &&
+    !onboardingFollowupAutomationDefinitionChanged(existing)
+  ) {
+    return { updated: false, yielded: false }
+  }
 
   if (input.shouldYield?.() === true) {
     return { updated: false, yielded: true }
   }
   await patchAutomation({
+    activeUntil,
     continuityPolicy: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy,
     instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
     lookup: existing.automationId,

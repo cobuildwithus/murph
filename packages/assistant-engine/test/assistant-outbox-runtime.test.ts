@@ -2915,6 +2915,61 @@ describe('assistant outbox runtime', () => {
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(2)
   })
 
+  it('blocks a queued one-shot at activeUntil before provider entry', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-16T14:20:00.000Z'))
+    const { vaultRoot } = await createInitializedAssistantVault(
+      'assistant-outbox-active-until-',
+    )
+    const scaffold = scaffoldAutomationPayload()
+    const automation = await upsertAutomation({
+      ...scaffold,
+      activeUntil: '2026-07-16T14:30:00.000Z',
+      now: new Date('2026-07-16T14:20:00.000Z'),
+      schedule: {
+        at: '2026-07-16T14:29:00.000Z',
+        kind: 'at',
+      },
+      slug: 'outbox-active-until-authority',
+      title: 'Outbox active-until authority',
+      vaultRoot,
+    })
+    const queued = await deliverAssistantOutboxMessage({
+      automationAuthority: {
+        automationId: automation.record.automationId,
+        expectedUpdatedAt: automation.record.updatedAt,
+      },
+      channel: 'telegram',
+      dispatchMode: 'queue-only',
+      explicitTarget: 'telegram-chat',
+      message: 'This one-shot must not send after its window.',
+      sessionId: 'session-outbox-active-until',
+      threadId: 'telegram-chat',
+      threadIsDirect: true,
+      turnId: 'turn-outbox-active-until',
+      vault: vaultRoot,
+    })
+
+    vi.setSystemTime(new Date('2026-07-16T14:30:00.000Z'))
+    const dispatched = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: queued.intent.intentId,
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('failed')
+    expect(dispatched.deliveryError).toMatchObject({
+      code: 'ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE',
+    })
+    await expect(showAutomation({
+      automationId: automation.record.automationId,
+      vaultRoot,
+    })).resolves.toMatchObject({
+      status: 'archived',
+    })
+    expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+  })
+
   it.each([
     { label: 'paused', status: 'paused' as const },
     { label: 'stopped', status: 'archived' as const },

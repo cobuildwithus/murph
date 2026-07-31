@@ -95,6 +95,7 @@ import {
 import {
   MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
 } from './onboarding-goal-checkin-automation.js'
+import { readAssistantOnboardingState } from './onboarding-state.js'
 
 const assistantNotificationSkipDecisionSchema = z
   .object({
@@ -158,11 +159,13 @@ export type AssistantNotificationDecision = z.infer<
   typeof assistantNotificationDecisionSchema
 >
 
-export type AssistantNotificationTurnPolicy = {
-  kind: 'maintenance-exact-skip'
-  maintenanceProfile: AssistantMaintenanceProfile
-  privateSummary: string
-}
+export type AssistantNotificationTurnPolicy =
+  | {
+      kind: 'maintenance-exact-skip'
+      maintenanceProfile: AssistantMaintenanceProfile
+      privateSummary: string
+    }
+  | { kind: 'onboarding-followup' }
 
 export type AssistantNotificationPromptProfile = 'creative-response'
 
@@ -557,6 +560,18 @@ export async function sendAssistantNotificationLocal(
         let decision: AssistantNotificationDecision
         try {
           decision = parseAssistantNotificationDecision(providerResult.response)
+        } catch (error) {
+          throw annotateAssistantNotificationError(
+            error,
+            providerValidationErrorDetails,
+          )
+        }
+        try {
+          await assertAssistantOnboardingFollowupCompletionCommitted({
+            decision,
+            input,
+            rawEvents: providerResult.rawEvents ?? [],
+          })
         } catch (error) {
           throw annotateAssistantNotificationError(
             error,
@@ -1577,6 +1592,50 @@ function assistantMaintenanceRawEventsIncludeMutation(
       event.exitCode === 0 &&
       isAssistantMaintenanceMutationCommand(event.commandLabel, profile)
     )
+  })
+}
+
+async function assertAssistantOnboardingFollowupCompletionCommitted(input: {
+  decision: AssistantNotificationDecision
+  input: AssistantNotificationInput
+  rawEvents: readonly unknown[]
+}): Promise<void> {
+  if (
+    input.input.turnPolicy?.kind !== 'onboarding-followup' ||
+    !assistantNotificationRawEventsAttemptedOnboardingCompletion(input.rawEvents)
+  ) {
+    return
+  }
+
+  const onboardingState = await readAssistantOnboardingState(input.input.vault)
+  if (
+    onboardingState.status === 'completed' &&
+    input.decision.kind === 'skip'
+  ) {
+    return
+  }
+
+  throw new VaultCliError(
+    onboardingState.status === 'completed'
+      ? 'ASSISTANT_ONBOARDING_COMPLETION_DECISION_INVALID'
+      : 'ASSISTANT_ONBOARDING_COMPLETION_NOT_COMMITTED',
+    onboardingState.status === 'completed'
+      ? 'Onboarding completion committed but the notification did not return skip.'
+      : 'Onboarding completion was attempted but did not commit.',
+    { retryable: true },
+  )
+}
+
+function assistantNotificationRawEventsAttemptedOnboardingCompletion(
+  rawEvents: readonly unknown[],
+): boolean {
+  return rawEvents.some((rawEvent) => {
+    const event = normalizeCodexEvent(rawEvent)
+    return event.kind === 'status_item' &&
+      event.itemType === 'command.execution' &&
+      /\bvault-cli\s+assistant\s+onboarding\s+complete(?:\s|$)/u.test(
+        event.commandLabel ?? '',
+      )
   })
 }
 

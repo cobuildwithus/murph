@@ -769,6 +769,7 @@ describe('assistant cron runtime orchestration', () => {
       threadId: null,
     }
     const created = await upsertAssistantCronAutomation({
+      firstOccurrenceActiveUntilLocalTime: '14:30',
       firstOccurrencePolicy: 'once-after-current-local-day',
       instructions: 'Make one final setup invitation.',
       now: new Date('2026-04-08T15:00:00.000Z'),
@@ -792,9 +793,19 @@ describe('assistant cron runtime orchestration', () => {
       at: '2026-04-09T17:47:00.000Z',
       kind: 'at',
     })
+    expect(findCanonicalAutomation(vaultRoot, 'finish-onboarding-followup'))
+      .toMatchObject({
+        activeUntil: '2026-04-09T18:30:00.000Z',
+      })
     expect(created.state.nextRunAt).toBe('2026-04-09T17:47:00.000Z')
 
+    cronMocks.loadVault.mockResolvedValue({
+      metadata: {
+        timezone: 'Asia/Tokyo',
+      },
+    })
     const reseeded = await upsertAssistantCronAutomation({
+      firstOccurrenceActiveUntilLocalTime: '14:30',
       firstOccurrencePolicy: 'once-after-current-local-day',
       instructions: 'Use the latest final invitation wording.',
       now: new Date('2026-04-09T12:00:00.000Z'),
@@ -818,6 +829,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(reseeded.state.nextRunAt).toBe('2026-04-09T17:47:00.000Z')
     expect(findCanonicalAutomation(vaultRoot, 'finish-onboarding-followup'))
       .toMatchObject({
+        activeUntil: '2026-04-09T18:30:00.000Z',
         instructions: 'Use the latest final invitation wording.',
         schedule: created.schedule,
       })
@@ -843,11 +855,20 @@ describe('assistant cron runtime orchestration', () => {
       },
     })
 
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-09T17:47:05.000Z'))
     const completed = await runAssistantCronJobNow({
       job: created.jobId,
       vault: vaultRoot,
     })
 
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        turnPolicy: {
+          kind: 'onboarding-followup',
+        },
+      }),
+    )
     expect(completed.run.outcome).toBe('delivered')
     expect(completed.removedAfterRun).toBe(true)
     expect(findCanonicalAutomation(vaultRoot, 'finish-onboarding-followup')?.status)

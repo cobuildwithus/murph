@@ -1583,6 +1583,7 @@ describe("executeHostedMailboxEvent", () => {
       vault: "/tmp/assistant-runtime-events",
     });
     expect(mocks.upsertAssistantCronAutomation).toHaveBeenCalledWith({
+      firstOccurrenceActiveUntilLocalTime: "14:30",
       firstOccurrencePolicy: "once-after-current-local-day",
       instructions: expect.stringContaining(
         "vault-cli assistant onboarding resume-context --format json",
@@ -1620,7 +1621,7 @@ describe("executeHostedMailboxEvent", () => {
       },
       {
         clause:
-          "If the onboarding skill says the visible and saved evidence satisfies answered completion, or shows an overall decline, run its required completion command.",
+          "If the onboarding skill says the visible and saved evidence satisfies answered completion, or shows an overall decline, run its required completion command and verify that the command output reports `completed`.",
         state: "overall decline",
       },
       {
@@ -1630,7 +1631,7 @@ describe("executeHostedMailboxEvent", () => {
       },
       {
         clause:
-          "If the latest onboarding question is still unanswered, do not repeat it or rotate to another setup question.",
+          "Follow the onboarding skill’s finite next-day recovery rule exactly.",
         state: "latest question unanswered",
       },
       {
@@ -1640,7 +1641,7 @@ describe("executeHostedMailboxEvent", () => {
       },
       {
         clause:
-          "Honor requested timing and return skip after an explicit decline, a request not to follow up, or whenever even that nudge would not be timely or useful.",
+          "Honor requested timing and return skip after an explicit decline, a request not to follow up, or whenever the finite reopening question would not be timely or useful.",
         state: "deferred until later",
       },
       {
@@ -1669,7 +1670,7 @@ describe("executeHostedMailboxEvent", () => {
       "The skill is the single owner of conversation order, checkpoint meaning, persistence, and completion; do not create a second state machine in this automation.",
     );
     expect(seedInput?.instructions).toContain(
-      "Whether completion succeeds or fails, return skip without messaging",
+      "If the command fails or onboarding remains open, send nothing and do not return a send-or-skip decision",
     );
     expect(seedInput?.instructions).not.toContain(
       "If a promised follow-through or next step in the member's agreed support loop is due, do that first.",

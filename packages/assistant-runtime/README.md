@@ -31,7 +31,7 @@ Current responsibilities:
   compaction, and forces the dirty checkpoint and fresh invocation without
   consuming the input
 - expose invocation-scoped automation and device authority only through narrow typed tools on the active root turn, never through Codex App Server or descendant shell env; the runtime supplies existing domain ports directly, canonical automation records remain owned by the already-bound vault, route writes use the trusted current destination rather than model-supplied locators, the structured group-newsletter write accepts only current group routes and system-owned delivery configuration, and the automation tool remains unavailable to scheduled turns and descendants
-- seed one finite hosted signup onboarding follow-up after successful signup welcome delivery; the one-shot is spread deterministically from 1:30 PM through 2:29 PM on the next local day, checks onboarding resume context, and is consumed after either one reply-oriented continuation or a skip
+- seed one finite hosted signup onboarding follow-up after successful signup welcome delivery; the one-shot is spread deterministically from 1:30 PM through 2:29 PM on the next local day, closes delivery authority at 2:30 PM on that local day, checks onboarding resume context, and is consumed after either one reply-oriented continuation or a skip
 - export sanitized pending assistant-runtime issue records through the injected host platform after commit instead of persisting raw hosted diagnostics in the worker
 - expose the method-based `HostedRuntimePlatform` seam that hosted apps inject at runtime
 - execute `clinical-records.sync-requested` as finite, preemptible background

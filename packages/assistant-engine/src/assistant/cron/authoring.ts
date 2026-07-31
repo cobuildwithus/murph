@@ -1,5 +1,6 @@
 import { upsertAutomation } from '@murphai/core'
 import {
+  formatTimeZoneDateTimeParts,
   type AutomationRoute,
 } from '@murphai/contracts'
 import { showAutomation as showCanonicalAutomation } from '@murphai/query'
@@ -67,6 +68,7 @@ export interface AddAssistantCronJobInput
 
 export interface UpsertAssistantCronAutomationInput {
   activeUntil?: string | null
+  firstOccurrenceActiveUntilLocalTime?: string
   firstOccurrencePolicy?:
     | 'after-current-local-day'
     | 'once-after-current-local-day'
@@ -242,10 +244,23 @@ export async function upsertAssistantCronAutomation(
               }),
             }
           : resolvedCreation.schedule
+    const activeUntil =
+      input.activeUntil === undefined &&
+      materializeOneShot &&
+      input.firstOccurrenceActiveUntilLocalTime !== undefined
+        ? existingAutomation?.schedule.kind === 'at' &&
+          typeof existingAutomation.activeUntil === 'string'
+          ? existingAutomation.activeUntil
+          : resolveFirstOccurrenceActiveUntil({
+              activeUntilLocalTime: input.firstOccurrenceActiveUntilLocalTime,
+              occurrenceSchedule: schedule,
+              resolvedSchedule: resolvedCreation.resolvedSchedule,
+            })
+        : input.activeUntil
 
     const created = await upsertAutomation(
       buildCanonicalAutomationUpsertInput({
-        activeUntil: input.activeUntil,
+        activeUntil,
         vault: resolvedCreation.vault,
         automationId: existingAutomation?.automationId,
         automation: existingAutomation,
@@ -400,6 +415,57 @@ function resolveFirstOccurrenceAfterCurrentLocalDay(input: {
       timeZone,
     },
   })
+}
+
+function resolveFirstOccurrenceActiveUntil(input: {
+  activeUntilLocalTime: string
+  occurrenceSchedule: AssistantCronSchedule
+  resolvedSchedule:
+    | AssistantCronSchedule
+    | ({ kind: 'cron'; expression: string; timeZone: string })
+    | ({ kind: 'dailyLocal'; localTime: string; timeZone: string })
+}): string {
+  if (
+    input.occurrenceSchedule.kind !== 'at' ||
+    input.resolvedSchedule.kind !== 'dailyLocal' ||
+    !('timeZone' in input.resolvedSchedule)
+  ) {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_INVALID_SCHEDULE',
+      'A one-shot local cutoff requires a materialized daily-local occurrence.',
+    )
+  }
+
+  const activeUntil = computeAssistantCronNextRunAt(
+    {
+      kind: 'dailyLocal',
+      localTime: input.activeUntilLocalTime,
+      timeZone: input.resolvedSchedule.timeZone,
+    },
+    new Date(input.occurrenceSchedule.at),
+  )
+  if (!activeUntil) {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_INVALID_SCHEDULE',
+      'The one-shot local cutoff does not produce a future boundary.',
+    )
+  }
+  const occurrenceDay = formatTimeZoneDateTimeParts(
+    input.occurrenceSchedule.at,
+    input.resolvedSchedule.timeZone,
+  ).dayKey
+  const cutoffDay = formatTimeZoneDateTimeParts(
+    activeUntil,
+    input.resolvedSchedule.timeZone,
+  ).dayKey
+  if (cutoffDay !== occurrenceDay) {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_INVALID_SCHEDULE',
+      'The one-shot local cutoff must fall after the occurrence on the same local day.',
+    )
+  }
+
+  return activeUntil
 }
 
 function requireCanonicalAutomationCronRecord(

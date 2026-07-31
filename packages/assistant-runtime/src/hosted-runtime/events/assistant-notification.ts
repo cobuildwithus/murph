@@ -229,6 +229,8 @@ async function maybeSeedOnboardingFollowupAutomation(input: {
     // delivery source) is enforced by upsertAssistantCronAutomation's target
     // validation; an undeliverable route lands in the catch below.
     const job = await upsertAssistantCronAutomation({
+      firstOccurrenceActiveUntilLocalTime:
+        MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.activeUntilLocalTime,
       firstOccurrencePolicy: "once-after-current-local-day",
       instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
       route: buildOnboardingFollowupAutomationRoute(input.route),
