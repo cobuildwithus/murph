@@ -61,6 +61,12 @@ the same member lock used by allowance admission. Concurrent sends therefore
 cannot each spend the same remaining capacity, and no second balance owner is
 needed.
 
+A reservation created by the current attempt is released when the caller is
+confirmed aborted before provider dispatch or when final participant authority
+is rejected nonretryably. After provider transport is entered, a missing or
+uncertain response remains pending because Lob may already have accepted the
+request.
+
 ## Provider boundary
 
 Web alone holds `LOB_API_KEY` and the configured return-address id. Lob receives
