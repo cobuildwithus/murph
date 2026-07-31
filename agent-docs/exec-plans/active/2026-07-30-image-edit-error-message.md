@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-07-30
-Updated: 2026-07-30
+Updated: 2026-07-31
 
 ## Goal
 
@@ -118,6 +118,20 @@ Updated: 2026-07-30
   code and request id. Together with the controlled OpenAI 400 dynamic-tool
   regression, this proves the bounded provider message reaches Murph and the
   member-visible recovery path without another inbound turn.
+- Final ReviewGPT round 2 correctly rejected the first route test because it
+  manually launched the image task, authored both outbox intents, marked them
+  sent, and supplied terminal evidence. The remediation replaces that bypass
+  with one production-owner test that restores the vault image, imports the
+  original Linq input, runs the normal assistant/image-completion/outbox phases,
+  and fakes only the Codex, OpenAI, and Linq provider protocols. The clean
+  focused case passed, the full hosted workspace entrypoint file passed all 265
+  tests, and the assistant-runtime typecheck passed.
+- Round 3 anomaly retrospective: the requirement and production architecture
+  are unchanged. Review-driven growth is confined to replacing a synthetic
+  owner-bypassing test with exact route proof; it adds no product state, queue,
+  retry, or runtime owner. Continuing is warranted because the two-turn
+  detached completion and same-route Linq delivery are one indivisible final
+  owner path that the previous test did not exercise.
 - Parent product-experience re-review after specialist remediation found no
   remaining product finding: the smallest complete experience is the existing
   truthful acknowledgement followed by a same-route plain-language failure
