@@ -317,6 +317,7 @@ describe("hosted group funding page", () => {
     }));
 
     assert.match(markup, /top-up:group/u);
+    assert.match(markup, /This chat has enough Murph time right now\./u);
     assert.doesNotMatch(markup, /becomes available when capacity runs low/iu);
     const monthlyProps = mocks.HostedUsageTopUpDialog.mock.calls[0]?.[0];
     expect(monthlyProps).toEqual(expect.objectContaining({
@@ -386,7 +387,6 @@ describe("hosted group funding page", () => {
 
     assert.match(markup, /Murph is sponsored in this chat/u);
     assert.match(markup, /top-up:group/u);
-    assert.match(markup, /Make a one-time contribution instead/u);
     const props = mocks.HostedUsageTopUpDialog.mock.calls.at(-1)?.[0];
     expect(props).toEqual(expect.objectContaining({
       scope: "group",

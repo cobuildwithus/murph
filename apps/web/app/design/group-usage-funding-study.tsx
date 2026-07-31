@@ -11,7 +11,11 @@ import type {
   HostedPlanUsageStatus,
 } from "@murphai/hosted-execution/plan-usage";
 
-import { GroupUsageFundingCard } from "@/src/components/hosted-groups/group-usage-funding-card";
+import {
+  GROUP_USAGE_FUNDING_HEALTHY_STATUS_LABEL,
+  GroupUsageFundingActions,
+  GroupUsageFundingCard,
+} from "@/src/components/hosted-groups/group-usage-funding-card";
 import { GroupSponsorshipDialog } from "@/src/components/hosted-groups/group-sponsorship-dialog";
 import { GroupSponsorshipManagementCard } from "@/src/components/hosted-groups/group-sponsorship-management-card";
 import { HostedAiUsageActivity } from "@/src/components/settings/hosted-ai-usage-activity";
@@ -271,13 +275,17 @@ function GroupUsageFundingStudy() {
       <p className="text-center text-sm text-muted-foreground">
         Murph is sponsored in this chat.
       </p>
-      <GroupSponsorshipDialog
-        checkoutUrl="/api/design/usage-credit-preview"
-        customizationAllowed
-        mode="one_time"
-        offers={DESIGN_GROUP_SPONSORSHIP_OFFERS}
-        payerMemberId={DESIGN_PAYER_MEMBER_ID}
-        triggerVariant="outline"
+      <GroupUsageFundingActions
+        oneTimeAction={(
+          <GroupSponsorshipDialog
+            checkoutUrl="/api/design/usage-credit-preview"
+            customizationAllowed
+            mode="one_time"
+            offers={DESIGN_GROUP_SPONSORSHIP_OFFERS}
+            payerMemberId={DESIGN_PAYER_MEMBER_ID}
+            triggerVariant="outline"
+          />
+        )}
       />
     </div>
   );
@@ -331,20 +339,35 @@ function GroupUsageFundingStudy() {
         <GroupUsageFundingCard
           action={(
             <div inert>
-              <GroupSponsorshipDialog
-                key={activationPreviewOpen ? "open" : "closed"}
-                checkoutUrl="/api/design/usage-credit-preview"
-                customizationAllowed
-                initialOpen={activationPreviewOpen}
-                mode="monthly"
-                monthlyCapMinor={1_000}
-                monthlyCapOptions={DESIGN_GROUP_MONTHLY_CAPS}
-                offers={[DESIGN_GROUP_SPONSORSHIP_OFFERS[0]]}
-                payerMemberId={DESIGN_PAYER_MEMBER_ID}
+              <GroupUsageFundingActions
+                monthlyAction={(
+                  <GroupSponsorshipDialog
+                    key={activationPreviewOpen ? "open" : "closed"}
+                    checkoutUrl="/api/design/usage-credit-preview"
+                    customizationAllowed
+                    initialOpen={activationPreviewOpen}
+                    mode="monthly"
+                    monthlyCapMinor={1_000}
+                    monthlyCapOptions={DESIGN_GROUP_MONTHLY_CAPS}
+                    offers={[DESIGN_GROUP_SPONSORSHIP_OFFERS[0]]}
+                    payerMemberId={DESIGN_PAYER_MEMBER_ID}
+                  />
+                )}
+                oneTimeAction={(
+                  <GroupSponsorshipDialog
+                    checkoutUrl="/api/design/usage-credit-preview"
+                    customizationAllowed
+                    mode="one_time"
+                    offers={DESIGN_GROUP_SPONSORSHIP_OFFERS}
+                    payerMemberId={DESIGN_PAYER_MEMBER_ID}
+                    triggerVariant="outline"
+                  />
+                )}
               />
             </div>
           )}
           groupName="Sunday sleep crew"
+          statusLabel={GROUP_USAGE_FUNDING_HEALTHY_STATUS_LABEL}
         />
       </DesignSponsorshipState>
 

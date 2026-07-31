@@ -86,6 +86,15 @@ Updated: 2026-07-30
   the newly added credit is useful even when included capacity is currently
   healthy and carries forward if unused.
 - No new endpoint, model, table, queue, balance, or payment primitive is needed.
+- A direct request to fund, sponsor, contribute, add group usage, or get the
+  link reads only current group usage. Referral state is reserved for a broad
+  request for every option, ways to earn usage, or a mission.
+- Product purpose revalidation after preliminary remediation: the irreducible
+  purpose is to let a participant fund the room when they choose without a
+  false depletion claim or referral detour. Reusing the current group read,
+  funding page, and payment flows is the smallest complete experience. The
+  healthy page now states that the room has enough Murph time while keeping
+  monthly sponsorship primary and one-time contribution secondary.
 
 ## Verification
 
@@ -100,3 +109,37 @@ Updated: 2026-07-30
 - Expected outcomes:
   - Healthy unsponsored groups expose and can use the monthly sponsorship path.
   - Low/exhausted automatic refill behavior is unchanged.
+- Results:
+  - Preliminary ReviewGPT returned three accepted findings: restore truthful
+    healthy-state context, separate direct funding intent from broad
+    funding-and-referral options, and add real Codex coverage for healthy and
+    already-sponsored explicit funding. All three are resolved without a
+    patch artifact.
+  - Focused hosted-Web verification passed: six files and 216 tests, including
+    page, projection, purchase, refill, notification, and notice behavior.
+  - Assistant prompt/skill verification passed: three files and 94 tests.
+    Assistant Engine and hosted-Web typechecks passed.
+  - Hosted execution parser verification passed: 63 tests and package
+    typecheck.
+  - The opt-in real Codex scenario passed against the linked development
+    provider for both healthy unsponsored funding and an already-sponsored
+    additional contribution. Each path called only `read_usage`, returned the
+    first-party URL, and omitted referrals, depletion pressure, and private
+    billing facts.
+  - Fresh Chromium catalog proof renders the complete healthy production
+    action stack at 1440x1000 and 390x844, plus the unchanged desktop dialog
+    and mobile drawer. The shared `GroupUsageFundingActions` composition keeps
+    production and catalog presentation aligned and removes a sentence that
+    repeated the one-time button label.
+  - Claude Fable UI review first identified the incomplete catalog action-stack
+    proof. Its post-remediation recheck returned `NO FINDINGS` and confirmed
+    the shared production/catalog composition, hierarchy, and responsive
+    evidence.
+  - Complete initial Responses request measurement used pinned real Codex App
+    Server, `gpt-5.6-terra` code mode, representative direct/group Linq turns,
+    and `gpt-tokenizer` 3.4.0 `o200k_base`. It counted the full canonical JSON
+    request body, including messages, eager tools, deferred metadata, generated
+    guidance, and fixed fields, while excluding HTTP headers identically:
+    direct stayed 122,504 bytes / 26,962 tokens; group changed from 108,499
+    bytes / 23,948 tokens to 108,602 bytes / 23,971 tokens, or +103 bytes
+    (+0.095%) and +23 tokens (+0.096%), entirely from group instructions.

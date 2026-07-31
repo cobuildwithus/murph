@@ -1672,6 +1672,185 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
     },
     720_000,
   )
+
+  it(
+    'handles explicit group funding without referral detours',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const healthyGroupWorkingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-healthy-group-funding-e2e-'),
+      )
+      const sponsoredGroupWorkingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-sponsored-group-contribution-e2e-'),
+      )
+      const healthyGroupActions: string[] = []
+      const sponsoredGroupActions: string[] = []
+      const fundingUrl =
+        'https://www.withmurph.ai/groups/fund/e2e_direct_funding'
+
+      try {
+        const healthySkillsRoot = path.join(
+          healthyGroupWorkingDirectory,
+          'skills',
+        )
+        const sponsoredSkillsRoot = path.join(
+          sponsoredGroupWorkingDirectory,
+          'skills',
+        )
+        await Promise.all([
+          materializeAssistantSkill({
+            skillsRoot: healthySkillsRoot,
+            slug: 'group-chat',
+          }),
+          materializeAssistantSkill({
+            skillsRoot: healthySkillsRoot,
+            slug: 'hosted-low-usage',
+          }),
+          materializeAssistantSkill({
+            skillsRoot: sponsoredSkillsRoot,
+            slug: 'group-chat',
+          }),
+          materializeAssistantSkill({
+            skillsRoot: sponsoredSkillsRoot,
+            slug: 'hosted-low-usage',
+          }),
+        ])
+
+        const healthyResult = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildHostedUsageOptionsDeveloperInstructions('group'),
+          dynamicTools: [MURPH_GROUP_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: healthySkillsRoot,
+          },
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            groupTool: {
+              request: async (request) => {
+                healthyGroupActions.push(request.action)
+                if (request.action !== 'read_usage') {
+                  throw new Error(
+                    `Unexpected healthy group funding action: ${request.action}`,
+                  )
+                }
+                return {
+                  action: 'read_usage',
+                  result: {
+                    status: 'ok',
+                    usage: {
+                      fundingNeeded: false,
+                      fundingUrl,
+                      sponsorshipStatus: 'not_sponsored',
+                    },
+                  },
+                }
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Please send me the funding link for this chat.',
+            'I want to add usage, not compare ways to earn it.',
+            'Do not start a purchase.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory: healthyGroupWorkingDirectory,
+        })
+        expect(healthyGroupActions).toEqual(['read_usage'])
+        expect(healthyResult.finalMessage).toContain(fundingUrl)
+        expect(healthyResult.finalMessage).toMatch(/sponsor/iu)
+        expect(healthyResult.finalMessage).not.toMatch(
+          /referr|mission|earn|runs? low|deplet|remaining|percent/iu,
+        )
+
+        const sponsoredResult = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildHostedUsageOptionsDeveloperInstructions('group'),
+          dynamicTools: [MURPH_GROUP_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: sponsoredSkillsRoot,
+          },
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            groupTool: {
+              request: async (request) => {
+                sponsoredGroupActions.push(request.action)
+                if (request.action !== 'read_usage') {
+                  throw new Error(
+                    `Unexpected sponsored group contribution action: ${request.action}`,
+                  )
+                }
+                return {
+                  action: 'read_usage',
+                  result: {
+                    status: 'ok',
+                    usage: {
+                      fundingNeeded: false,
+                      fundingUrl,
+                      sponsorshipStatus: 'sponsored',
+                    },
+                  },
+                }
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Please send me the link for an additional one-time contribution',
+            'to this chat. Do not start a purchase.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory: sponsoredGroupWorkingDirectory,
+        })
+
+        expect(sponsoredGroupActions).toEqual(['read_usage'])
+        expect(sponsoredResult.finalMessage).toContain(fundingUrl)
+        expect(sponsoredResult.finalMessage).toMatch(/one-time|contribut/iu)
+        expect(sponsoredResult.finalMessage).not.toMatch(
+          /referr|mission|earn|payer|charged|maximum|monthly cap|balance|refill|remaining|percent|runs? low|deplet/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          healthyGroupWorkingDirectory,
+          sponsoredGroupWorkingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    720_000,
+  )
 })
 
 describeRealCodex('real Codex app-server cache usage e2e', () => {

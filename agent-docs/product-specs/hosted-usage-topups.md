@@ -440,10 +440,13 @@ For a hosted group, `fundingNeeded` controls only that assistant-initiated
 depletion thread. A valid `fundingUrl` remains available independently. When a
 person explicitly asks to fund the room or add usage, Murph may share the
 current returned URL at any capacity; the first unsolicited heads-up remains
-link-free. If the room already has an automatic sponsor, the page preserves
-that single-sponsor invariant and offers the additional payer only a one-time
-contribution. Murph does not imply the room needs funding or disclose private
-sponsor facts.
+link-free. A direct request to fund, sponsor, contribute, add group usage, or
+get the funding link reads group usage only and does not detour into earned
+missions. A broad request for every option or a way to earn usage reads both
+current funding and referral state. If the room already has an automatic
+sponsor, the page preserves that single-sponsor invariant and offers the
+additional payer only a one-time contribution. Murph does not imply the room
+needs funding or disclose private sponsor facts.
 
 Immediately before both the exhaustion crossing send and a later denied-gate
 retry, delivery re-reads the current personal usage-status projection. It

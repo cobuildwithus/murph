@@ -15,7 +15,11 @@ import {
 import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
 import { HostedDeviceSyncCallbackConfirmation } from "@/src/components/device-sync/hosted-device-sync-callback-confirmation";
 import { HomeExperimentCard } from "@/src/components/home/home-experiment-card";
-import { GroupUsageFundingCard } from "@/src/components/hosted-groups/group-usage-funding-card";
+import {
+  GROUP_USAGE_FUNDING_HEALTHY_STATUS_LABEL,
+  GroupUsageFundingActions,
+  GroupUsageFundingCard,
+} from "@/src/components/hosted-groups/group-usage-funding-card";
 import { GroupSponsorshipDialog } from "@/src/components/hosted-groups/group-sponsorship-dialog";
 import { GroupSponsorshipManagementCard } from "@/src/components/hosted-groups/group-sponsorship-management-card";
 import { MetricCard } from "@/src/components/ui/metric-card";
@@ -1339,18 +1343,33 @@ export function ComponentsContent() {
               id="group-usage-funding-component"
             >
               <GroupUsageFundingCard
-                action={
-                  <GroupSponsorshipDialog
-                    checkoutUrl="/api/design/usage-credit-preview"
-                    customizationAllowed
-                    mode="monthly"
-                    monthlyCapMinor={1_000}
-                    monthlyCapOptions={DESIGN_GROUP_MONTHLY_CAPS}
-                    offers={[DESIGN_GROUP_SPONSORSHIP_OFFERS[0]]}
-                    payerMemberId="design_usage_top_up_payer"
+                action={(
+                  <GroupUsageFundingActions
+                    monthlyAction={(
+                      <GroupSponsorshipDialog
+                        checkoutUrl="/api/design/usage-credit-preview"
+                        customizationAllowed
+                        mode="monthly"
+                        monthlyCapMinor={1_000}
+                        monthlyCapOptions={DESIGN_GROUP_MONTHLY_CAPS}
+                        offers={[DESIGN_GROUP_SPONSORSHIP_OFFERS[0]]}
+                        payerMemberId="design_usage_top_up_payer"
+                      />
+                    )}
+                    oneTimeAction={(
+                      <GroupSponsorshipDialog
+                        checkoutUrl="/api/design/usage-credit-preview"
+                        customizationAllowed
+                        mode="one_time"
+                        offers={DESIGN_GROUP_SPONSORSHIP_OFFERS}
+                        payerMemberId="design_usage_top_up_payer"
+                        triggerVariant="outline"
+                      />
+                    )}
                   />
-                }
+                )}
                 groupName="Sunday sleep crew"
+                statusLabel={GROUP_USAGE_FUNDING_HEALTHY_STATUS_LABEL}
               />
             </div>
             <div

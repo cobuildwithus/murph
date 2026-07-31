@@ -44,6 +44,15 @@ describe('assistant hosted low-usage skill', () => {
       'how to get more usage, what options exist, how to earn usage, or about a mission',
     )
     expect(normalizedSkill).toContain(
+      'A direct funding intent asks to fund, sponsor, contribute, add usage to the chat, or receive its funding link',
+    )
+    expect(normalizedSkill).toContain(
+      'Call `read_usage` only',
+    )
+    expect(normalizedSkill).toContain(
+      'Do not call `read_usage_referral` or add earned missions',
+    )
+    expect(normalizedSkill).toContain(
       'Do this even when current usage is `healthy`',
     )
     expect(normalizedSkill).toContain(
@@ -54,6 +63,9 @@ describe('assistant hosted low-usage skill', () => {
     )
     expect(normalizedSkill).toContain(
       'Do not answer with only the paid or funding path or make the sender ask again',
+    )
+    expect(normalizedSkill).toContain(
+      'A direct group funding intent is not a broad-options request',
     )
     expect(normalizedSkill).toContain(
       "use this turn's `read_usage_referral` result",
@@ -178,7 +190,7 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain('call `murph.group action="read_usage"` once before writing the')
     expect(skill).toContain('`murph.group action="read_usage_referral"` once')
     expect(normalizedSkill).toContain(
-      'In a hosted group, wait until someone engages with the link-free heads-up',
+      'In a hosted group, after someone accepts the link-free first heads-up',
     )
     expect(normalizedSkill).toContain(
       "pass that response's exact opaque accepted `message_ref`",
@@ -224,7 +236,7 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain('Never switch it automatically')
     expect(normalizedSkill).toContain('If no funding URL is returned')
     expect(normalizedSkill).toContain(
-      'share only the binary sponsored status unless the current sender explicitly asks to fund or add usage',
+      'share only the binary sponsored status unless the current request matches the direct or broad intent split above',
     )
     expect(skill).toContain(
       'returned percentages and forecast as overall available AI usage',
@@ -250,7 +262,7 @@ describe('assistant hosted low-usage skill', () => {
       '`fundingNeeded` controls urgency, not whether a returned funding URL may be shared after an explicit request',
     )
     expect(normalizedSkill).toContain(
-      'a returned first-party funding URL may be shared as the private path for an additional one-time contribution',
+      'a returned first-party funding URL is the private path for an additional one-time contribution',
     )
     expect(normalizedSkill).toContain(
       'does not make explicit funding unavailable',

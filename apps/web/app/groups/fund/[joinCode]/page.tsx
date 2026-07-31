@@ -2,7 +2,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { GroupFundingSignInButton } from "@/src/components/hosted-groups/group-funding-sign-in-button";
-import { GroupUsageFundingCard } from "@/src/components/hosted-groups/group-usage-funding-card";
+import {
+  GROUP_USAGE_FUNDING_HEALTHY_STATUS_LABEL,
+  GroupUsageFundingActions,
+  GroupUsageFundingCard,
+} from "@/src/components/hosted-groups/group-usage-funding-card";
 import {
   GroupSponsorshipDialog,
   type GroupSponsorshipMonthlyCapOption,
@@ -179,6 +183,17 @@ export default async function GroupFundingPage({
   const purchaseReturn = purchaseReturnMatchesTarget
     ? requestedPurchaseReturn
     : null;
+  const oneTimeContributionDialog = member && oneTimeOffers.length > 0 ? (
+    <GroupSponsorshipDialog
+      checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
+      customizationAllowed={customizationAllowed}
+      mode="one_time"
+      offers={oneTimeOffers}
+      payerMemberId={member.id}
+      purchaseReturn={purchaseReturn}
+      triggerVariant="outline"
+    />
+  ) : null;
   const oneTimeContributionAction = member && visibleActivePurchase ? (
     <GroupSponsorshipDialog
       activePurchase={visibleActivePurchase}
@@ -190,21 +205,8 @@ export default async function GroupFundingPage({
       payerMemberId={member.id}
       purchaseReturn={purchaseReturn}
     />
-  ) : member && oneTimeOffers.length > 0 ? (
-    <>
-      <GroupSponsorshipDialog
-        checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
-        customizationAllowed={customizationAllowed}
-        mode="one_time"
-        offers={oneTimeOffers}
-        payerMemberId={member.id}
-        purchaseReturn={purchaseReturn}
-        triggerVariant="outline"
-      />
-      <p className="text-center text-xs text-muted-foreground">
-        Make a one-time contribution instead.
-      </p>
-    </>
+  ) : oneTimeContributionDialog ? (
+    <GroupUsageFundingActions oneTimeAction={oneTimeContributionDialog} />
   ) : null;
 
   return (
@@ -245,22 +247,20 @@ export default async function GroupFundingPage({
             ) : visibleActivePurchase ? (
               oneTimeContributionAction
             ) : oneTimeOffers.length > 0 ? (
-              <div className="space-y-3">
-                <GroupSponsorshipDialog
-                  checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
-                  customizationAllowed={customizationAllowed}
-                  mode="monthly"
-                  monthlyCapOptions={monthlyCapOptions}
-                  offers={monthlyOffer}
-                  payerMemberId={member.id}
-                  purchaseReturn={purchaseReturn}
-                />
-                <p className="text-center text-xs leading-5 text-muted-foreground">
-                  Starts with $5. Murph adds another $5 only when this group
-                  needs it, up to the maximum you choose.
-                </p>
-                {oneTimeContributionAction}
-              </div>
+              <GroupUsageFundingActions
+                monthlyAction={(
+                  <GroupSponsorshipDialog
+                    checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
+                    customizationAllowed={customizationAllowed}
+                    mode="monthly"
+                    monthlyCapOptions={monthlyCapOptions}
+                    offers={monthlyOffer}
+                    payerMemberId={member.id}
+                    purchaseReturn={purchaseReturn}
+                  />
+                )}
+                oneTimeAction={oneTimeContributionDialog}
+              />
             ) : (
               <p className="py-2 text-center text-sm text-muted-foreground">
                 Sponsorship isn&apos;t available from this account right now.
@@ -271,6 +271,12 @@ export default async function GroupFundingPage({
           )
         }
         groupName={groupName}
+        statusLabel={
+          usageStatus.sponsorshipStatus === "not_sponsored" &&
+          !usageStatus.fundingNeeded
+            ? GROUP_USAGE_FUNDING_HEALTHY_STATUS_LABEL
+            : undefined
+        }
       />
     </main>
   );

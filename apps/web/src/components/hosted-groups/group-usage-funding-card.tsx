@@ -10,14 +10,42 @@ import {
 } from "@/src/components/ui/card";
 import { cn } from "@/src/lib/utils";
 
+const GROUP_USAGE_FUNDING_HEALTHY_STATUS_LABEL =
+  "This chat has enough Murph time right now.";
+
 type GroupUsageFundingCardProps = {
   action: React.ReactNode;
   groupName: string;
+  statusLabel?: string;
 };
+
+type GroupUsageFundingActionsProps = {
+  monthlyAction?: React.ReactNode;
+  oneTimeAction: React.ReactNode;
+};
+
+function GroupUsageFundingActions({
+  monthlyAction,
+  oneTimeAction,
+}: GroupUsageFundingActionsProps) {
+  return (
+    <div className="space-y-3">
+      {monthlyAction}
+      {monthlyAction ? (
+        <p className="text-center text-xs leading-5 text-muted-foreground">
+          Starts with $5. Murph adds another $5 only when this group needs it,
+          up to the maximum you choose.
+        </p>
+      ) : null}
+      {oneTimeAction}
+    </div>
+  );
+}
 
 function GroupUsageFundingCard({
   action,
   groupName,
+  statusLabel,
 }: GroupUsageFundingCardProps) {
   return (
     <Card className="gap-5 py-6 sm:py-8">
@@ -34,6 +62,11 @@ function GroupUsageFundingCard({
             charges only in $5 increments when the group needs more, up to the
             maximum you choose.
           </CardDescription>
+          {statusLabel ? (
+            <p className="text-sm font-medium text-foreground">
+              {statusLabel}
+            </p>
+          ) : null}
         </div>
       </CardHeader>
       <CardFooter className="flex-col items-stretch gap-2 px-6 py-5 sm:px-8 sm:py-6">
@@ -49,5 +82,12 @@ function GroupUsageFundingCard({
   );
 }
 
-export { GroupUsageFundingCard };
-export type { GroupUsageFundingCardProps };
+export {
+  GROUP_USAGE_FUNDING_HEALTHY_STATUS_LABEL,
+  GroupUsageFundingActions,
+  GroupUsageFundingCard,
+};
+export type {
+  GroupUsageFundingActionsProps,
+  GroupUsageFundingCardProps,
+};
