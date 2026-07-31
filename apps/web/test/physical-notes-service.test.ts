@@ -370,6 +370,35 @@ describe("createHostedPhysicalNote", () => {
     ]);
   });
 
+  it("releases a new reservation when the caller aborts before provider dispatch", async () => {
+    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
+    const store = createPhysicalNoteStore();
+    const provider = createPhysicalNoteRuntime([
+      { kind: "accepted", providerLetterId: "ltr_unexpected" },
+    ]);
+    const controller = new AbortController();
+    mocks.readActiveAccess.mockImplementationOnce(async () => {
+      controller.abort();
+      return true;
+    });
+
+    await expect(createHostedPhysicalNote({
+      ...buildRequest(33),
+      prisma: store.prisma,
+      runtime: provider.runtime,
+      signal: controller.signal,
+    })).rejects.toMatchObject({ name: "AbortError" });
+
+    expect(provider.create).not.toHaveBeenCalled();
+    expect(store.allRows()).toEqual([
+      expect.objectContaining({
+        complimentaryOfferCode: null,
+        providerLetterId: null,
+        status: "failed",
+      }),
+    ]);
+  });
+
   it("allows a group note through participant-backed access", async () => {
     const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();
