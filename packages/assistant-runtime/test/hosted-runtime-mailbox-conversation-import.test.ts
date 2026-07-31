@@ -1894,13 +1894,19 @@ describe("hosted mailbox conversation import adapter", () => {
       identifierBlind,
       "1234567890",
     );
+    const expectedThreadId = hashHostedAssistantConversationIdentifier(
+      identifierBlind,
+      "chat_group_telegram",
+    );
 
     // The blinded actor must derive from the same value stored for the prompt
     // so batching and admission cannot disagree about who spoke.
     assert.equal(event.conversation?.actorId, expectedActorId);
     assert.notEqual(event.conversation?.actorId, null);
     assert.equal(event.conversation?.source, "telegram");
+    assert.equal(event.conversation?.threadId, expectedThreadId);
     assert.equal(event.conversation?.threadIsDirect, false);
+    assert.equal(event.replyTarget?.threadId, "chat_group_telegram");
     assert.equal(
       event.sourceMetadata?.kind === "telegram"
         ? event.sourceMetadata.senderHandle
