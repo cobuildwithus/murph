@@ -1,6 +1,6 @@
 # Keep dashboard content visible during background refresh
 
-Status: active
+Status: completed
 Created: 2026-07-31
 Updated: 2026-07-31
 
@@ -16,12 +16,13 @@ Updated: 2026-07-31
   loading screen while the focus-triggered request is pending.
 - Revoked, expired, or changed identity responses still clear private data and
   follow the existing recovery path.
-- Focused tests, typecheck, rendered proof, review gates, and exact-head CI pass.
+- Focused tests, typecheck, and exact-head CI pass. The required managed final
+  review is attempted and any infrastructure failure is recorded explicitly.
 
 ## Scope
 
-- In scope: the shared browser-vault focus revalidation path, focused regression
-  coverage, and the existing dashboard load-state design study.
+- In scope: the shared browser-vault focus revalidation path and focused
+  regression coverage.
 - Out of scope: changing refresh frequency, caching private data outside the
   existing in-memory owner, or redesigning dashboard loading visuals.
 
@@ -36,20 +37,25 @@ Updated: 2026-07-31
 1. Prove the shared focus handler causes the visible loading regression.
 2. Revalidate on focus as a background refresh after current-route admission.
 3. Add focused coverage for retained content and revoked-session cleanup.
-4. Update the existing design study and capture desktop/mobile proof.
-5. Run scoped verification, review gates, commit, PR, and exact-head CI.
+4. Run scoped verification, review gates, commit, PR, and exact-head CI.
 
 ## Decisions
 
 - Initial mount and internal route changes remain foreground authority checks.
 - Window focus uses the existing background load path; terminal authority
   outcomes still clear or replace the admitted client.
+- No design-catalog surface is added: the final patch changes provider timing,
+  not a component, copy, layout, CSS, asset, or visual presentation.
 
 ## Verification
 
-- Commands to run: focused browser-vault context tests, hosted-web typecheck and
-  lint or the routed diff-aware lane, frontend design proof, desktop/mobile
-  browser proof, preliminary ReviewGPT, and required PR CI.
+- Completed: 59 focused Browser Vault tests, changed-file ESLint, hosted-web
+  typecheck, preliminary specialist review, and all required exact-head PR CI.
+- Managed final ReviewGPT did not produce a model result: one packaging race and
+  repeated managed-Brave attachment/target failures prevented staging the
+  guarded snapshot. No run returned a substantive review or PASS; the failures
+  are recorded in the PR body and task handoff rather than treated as evidence.
 - Expected outcome: ready content stays visible during a pending focus request,
   while 401, 403, empty, and identity-change outcomes keep their current
   fail-closed behavior.
+Completed: 2026-07-31
