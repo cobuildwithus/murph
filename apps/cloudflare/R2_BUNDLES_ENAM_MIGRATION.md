@@ -41,6 +41,42 @@ fixed until a later ENAM-only cleanup removes the bridge.
 - Never promote a quarantined destination. A failed destination may be retained
   as evidence, but a new attempt uses a fresh ENAM bucket.
 
+## Ownership and recovery decision
+
+This is one indivisible, one-time managed migration transition:
+
+- Cloudflare Super Slurper owns every copy mutation, job state, and transfer
+  retry.
+- The operator owns the private, read-only ownership query, in-memory approved
+  manifest, exact-key job batches, terminal-job reconciliation, and two fresh
+  key-and-size parity reads. Keep the exact keys and private identifiers out of
+  repository artifacts; retain only aggregate evidence in the private change
+  record.
+- The application owns only the fixed-role deploy check and the temporary
+  runtime cutover safety bridge.
+
+No repository-executable migration verifier remains. Keeping one would turn a
+completed one-time transition into a permanent production-database and object-
+inventory integration. The managed rehearsal already proved the same operator
+procedure against the real service. Production repeats it under the write
+fence, using the authoritative read-only database path and independent R2
+inventories described below. The operator must be able to reproduce the
+manifest and both parity comparisons from a clean process before promotion; a
+dashboard progress total alone is never sufficient proof.
+
+Recovery is intentionally narrow. Before promotion, any unresolved job result,
+key classification, ownership change, or parity mismatch quarantines the whole
+destination and restarts with a fresh bucket. After ENAM accepts production
+writes, recovery is forward-only and limited to identified missing approved
+objects; broad copying and OC-only rollback are unsupported. There is no frozen-
+window fallback or application-owned abnormal-stop command.
+
+The runtime bridge remains because old direct-upload capabilities, warm Durable
+Objects, lifecycle-managed objects, and deletion retries can legitimately refer
+to either fixed bucket after transfer finishes. Remove it only after the URL,
+lifecycle, fallback-observation, cold-restore, and OC-retirement gates at the end
+of this runbook all pass.
+
 ## Dashboard wizard or jobs API
 
 The dashboard wizard is the preferred whole-bucket path when a frozen source
