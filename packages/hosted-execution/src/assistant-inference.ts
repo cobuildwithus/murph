@@ -16,6 +16,8 @@ export type HostedInferenceAuthKind =
   (typeof HOSTED_INFERENCE_AUTH_KINDS)[number];
 
 export const HOSTED_CUSTOM_INFERENCE_CONSUMER_VERSION = 1 as const;
+export const HOSTED_CUSTOM_INFERENCE_CONSUMER_VERSION_QUERY =
+  "customInferenceVersion" as const;
 export const HOSTED_CUSTOM_INFERENCE_VERIFICATION_PROFILE =
   "murph-codex-0.145.0-portable-responses-v1" as const;
 export const HOSTED_INFERENCE_CONTEXT_WINDOW_MIN_TOKENS = 8_192;
@@ -64,6 +66,13 @@ export function isHostedInferenceAuthKind(
   value: unknown,
 ): value is HostedInferenceAuthKind {
   return HOSTED_INFERENCE_AUTH_KINDS.some((candidate) => candidate === value);
+}
+
+export function isHostedCustomInferenceConsumerVersion(
+  value: unknown,
+): value is typeof HOSTED_CUSTOM_INFERENCE_CONSUMER_VERSION {
+  return value === HOSTED_CUSTOM_INFERENCE_CONSUMER_VERSION
+    || value === String(HOSTED_CUSTOM_INFERENCE_CONSUMER_VERSION);
 }
 
 export function buildHostedCustomInferenceModelAlias(revision: number): string {
