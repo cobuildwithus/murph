@@ -3,10 +3,9 @@ import Link from "next/link";
 
 import { GroupFundingSignInButton } from "@/src/components/hosted-groups/group-funding-sign-in-button";
 import {
-  GROUP_USAGE_FUNDING_HEALTHY_STATUS_LABEL,
   GroupUsageFundingActions,
-  GroupUsageFundingCard,
-} from "@/src/components/hosted-groups/group-usage-funding-card";
+  GroupUsageFundingShell,
+} from "@/src/components/hosted-groups/group-usage-funding-shell";
 import {
   GroupSponsorshipDialog,
   type GroupSponsorshipMonthlyCapOption,
@@ -183,15 +182,20 @@ export default async function GroupFundingPage({
   const purchaseReturn = purchaseReturnMatchesTarget
     ? requestedPurchaseReturn
     : null;
+  const openOneTimeContribution =
+    sponsorshipManagement === null &&
+    usageStatus.sponsorshipStatus === "sponsored";
   const oneTimeContributionDialog = member && oneTimeOffers.length > 0 ? (
     <GroupSponsorshipDialog
       checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
       customizationAllowed={customizationAllowed}
+      initialOpen={openOneTimeContribution}
       mode="one_time"
       offers={oneTimeOffers}
       payerMemberId={member.id}
       purchaseReturn={purchaseReturn}
-      triggerVariant="outline"
+      triggerSize="default"
+      triggerVariant="link"
     />
   ) : null;
   const oneTimeContributionAction = member && visibleActivePurchase ? (
@@ -200,6 +204,7 @@ export default async function GroupFundingPage({
       checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
       customizationAllowed={customizationAllowed}
       frozenSponsorship={frozenSponsorship}
+      initialOpen
       mode="one_time"
       offers={oneTimeOffers}
       payerMemberId={member.id}
@@ -210,8 +215,8 @@ export default async function GroupFundingPage({
   ) : null;
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-xl flex-col justify-center px-5 py-12 sm:px-6 sm:py-16">
-      <GroupUsageFundingCard
+    <main className="mx-auto flex min-h-screen w-full max-w-lg flex-col justify-center px-4 py-8 sm:px-6 sm:py-12">
+      <GroupUsageFundingShell
         action={
           member ? (
             sponsorshipManagement?.status === "pending_activation" &&
@@ -221,6 +226,7 @@ export default async function GroupFundingPage({
                 checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
                 customizationAllowed={customizationAllowed}
                 frozenSponsorship={frozenSponsorship}
+                initialOpen
                 mode="monthly"
                 monthlyCapMinor={sponsorshipManagement.monthlyCapMinor}
                 monthlyCapOptions={monthlyCapOptions}
@@ -232,7 +238,6 @@ export default async function GroupFundingPage({
               <div className="space-y-4">
                 <GroupSponsorshipManagementCard
                   endpoint={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/sponsorship`}
-                  groupName={groupName}
                   management={sponsorshipManagement}
                 />
                 {oneTimeContributionAction}
@@ -252,6 +257,7 @@ export default async function GroupFundingPage({
                   <GroupSponsorshipDialog
                     checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
                     customizationAllowed={customizationAllowed}
+                    initialOpen
                     mode="monthly"
                     monthlyCapOptions={monthlyCapOptions}
                     offers={monthlyOffer}
@@ -271,12 +277,6 @@ export default async function GroupFundingPage({
           )
         }
         groupName={groupName}
-        statusLabel={
-          usageStatus.sponsorshipStatus === "not_sponsored" &&
-          !usageStatus.fundingNeeded
-            ? GROUP_USAGE_FUNDING_HEALTHY_STATUS_LABEL
-            : undefined
-        }
       />
     </main>
   );

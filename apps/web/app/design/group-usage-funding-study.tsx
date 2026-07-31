@@ -12,10 +12,9 @@ import type {
 } from "@murphai/hosted-execution/plan-usage";
 
 import {
-  GROUP_USAGE_FUNDING_HEALTHY_STATUS_LABEL,
   GroupUsageFundingActions,
-  GroupUsageFundingCard,
-} from "@/src/components/hosted-groups/group-usage-funding-card";
+  GroupUsageFundingShell,
+} from "@/src/components/hosted-groups/group-usage-funding-shell";
 import { GroupSponsorshipDialog } from "@/src/components/hosted-groups/group-sponsorship-dialog";
 import { GroupSponsorshipManagementCard } from "@/src/components/hosted-groups/group-sponsorship-management-card";
 import { HostedAiUsageActivity } from "@/src/components/settings/hosted-ai-usage-activity";
@@ -286,10 +285,12 @@ function GroupUsageFundingStudy() {
           <GroupSponsorshipDialog
             checkoutUrl="/api/design/usage-credit-preview"
             customizationAllowed
+            inert
             mode="one_time"
             offers={DESIGN_GROUP_SPONSORSHIP_OFFERS}
             payerMemberId={DESIGN_PAYER_MEMBER_ID}
-            triggerVariant="outline"
+            triggerSize="default"
+            triggerVariant="link"
           />
         )}
       />
@@ -312,6 +313,7 @@ function GroupUsageFundingStudy() {
         checkoutUrl="/api/design/usage-credit-preview"
         customizationAllowed
         frozenSponsorship={null}
+        inert
         mode="one_time"
         offers={[]}
         payerMemberId={DESIGN_PAYER_MEMBER_ID}
@@ -342,7 +344,7 @@ function GroupUsageFundingStudy() {
         label="Activation at any capacity"
         state="monthly-activation"
       >
-        <GroupUsageFundingCard
+        <GroupUsageFundingShell
           action={(
             <div inert>
               <GroupUsageFundingActions
@@ -352,6 +354,7 @@ function GroupUsageFundingStudy() {
                     checkoutUrl="/api/design/usage-credit-preview"
                     customizationAllowed
                     initialOpen={activationPreviewOpen}
+                    inert
                     mode="monthly"
                     monthlyCapMinor={1_000}
                     monthlyCapOptions={DESIGN_GROUP_MONTHLY_CAPS}
@@ -363,17 +366,18 @@ function GroupUsageFundingStudy() {
                   <GroupSponsorshipDialog
                     checkoutUrl="/api/design/usage-credit-preview"
                     customizationAllowed
+                    inert
                     mode="one_time"
                     offers={DESIGN_GROUP_SPONSORSHIP_OFFERS}
                     payerMemberId={DESIGN_PAYER_MEMBER_ID}
-                    triggerVariant="outline"
+                    triggerSize="default"
+                    triggerVariant="link"
                   />
                 )}
               />
             </div>
           )}
           groupName="Sunday sleep crew"
-          statusLabel={GROUP_USAGE_FUNDING_HEALTHY_STATUS_LABEL}
         />
       </DesignSponsorshipState>
 
@@ -382,7 +386,7 @@ function GroupUsageFundingStudy() {
           label="Ordinary sponsored participant + one-time action"
           state="ordinary-sponsored-one-time"
         >
-          <GroupUsageFundingCard
+          <GroupUsageFundingShell
             action={<div inert>{oneTimeContribution}</div>}
             groupName="Sunday sleep crew"
           />
@@ -394,7 +398,6 @@ function GroupUsageFundingStudy() {
         >
           <GroupSponsorshipManagementCard
             endpoint={endpoint}
-            groupName="Sunday sleep crew"
             inert
             management={{
               authorizationId: "hgsa_design_active",
@@ -414,7 +417,6 @@ function GroupUsageFundingStudy() {
         >
           <GroupSponsorshipManagementCard
             endpoint={endpoint}
-            groupName="Sunday sleep crew"
             inert
             management={{
               authorizationId: "hgsa_design_paused",
@@ -434,7 +436,6 @@ function GroupUsageFundingStudy() {
         >
           <GroupSponsorshipManagementCard
             endpoint={endpoint}
-            groupName="Sunday sleep crew"
             inert
             management={{
               authorizationId: "hgsa_design_recovery",
@@ -452,7 +453,7 @@ function GroupUsageFundingStudy() {
           label="Sponsored-chat one-time purchase recovery"
           state="sponsored-one-time-recovery"
         >
-          <GroupUsageFundingCard
+          <GroupUsageFundingShell
             action={<div inert>{oneTimeRecovery()}</div>}
             groupName="Sunday sleep crew"
           />

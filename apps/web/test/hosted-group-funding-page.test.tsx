@@ -151,14 +151,15 @@ describe("hosted group funding page", () => {
     }));
 
     assert.match(markup, /Sunday sleep crew/u);
-    assert.match(markup, /<h1[^>]*>Keep Murph going<\/h1>/u);
     assert.match(
       markup,
-      /Add cost-weighted usage credit for the group\./u,
+      /<h1[^>]*>Support Murph in Sunday sleep crew<\/h1>/u,
     );
+    assert.doesNotMatch(markup, /Keep Murph going/u);
+    assert.doesNotMatch(markup, /Support Murph for everyone in this chat\./u);
     assert.doesNotMatch(markup, /Group usage|Running low/u);
     assert.match(markup, /top-up:group/u);
-    assert.match(markup, /href="\/home"[^>]*>Go home<\/a>/u);
+    assert.match(markup, /href="\/home"[^>]*>Back to Murph<\/a>/u);
     expect(mocks.readHostedUsageCreditPurchaseStatus).toHaveBeenCalledWith({
       beneficiaryMemberId: "member_group_runtime",
       payerMemberId: "member_payer",
@@ -317,10 +318,11 @@ describe("hosted group funding page", () => {
     }));
 
     assert.match(markup, /top-up:group/u);
-    assert.match(markup, /This chat has enough Murph time right now\./u);
+    assert.doesNotMatch(markup, /No refill needed right now\./u);
     assert.doesNotMatch(markup, /becomes available when capacity runs low/iu);
     const monthlyProps = mocks.HostedUsageTopUpDialog.mock.calls[0]?.[0];
     expect(monthlyProps).toEqual(expect.objectContaining({
+      initialOpen: true,
       offers: [expect.objectContaining({ offerCode: "usage_5_usd" })],
       scope: "group",
     }));
@@ -362,7 +364,6 @@ describe("hosted group funding page", () => {
     assert.doesNotMatch(markup, /remaining|messages|percentage/iu);
     expect(mocks.GroupSponsorshipManagementCard).toHaveBeenCalledWith(
       expect.objectContaining({
-        groupName: "Sunday sleep crew",
         management: expect.objectContaining({
           chargedThisPeriodMinor: 500,
           monthlyCapMinor: 1_000,
@@ -389,6 +390,7 @@ describe("hosted group funding page", () => {
     assert.match(markup, /top-up:group/u);
     const props = mocks.HostedUsageTopUpDialog.mock.calls.at(-1)?.[0];
     expect(props).toEqual(expect.objectContaining({
+      initialOpen: true,
       scope: "group",
     }));
     expect(props).not.toHaveProperty("activePurchase");

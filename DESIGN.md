@@ -383,10 +383,13 @@ one route back to Connect. Keep both states readable at narrow mobile widths,
 with 44px-or-larger controls and no provider-supplied copy.
 
 ### Group Usage Funding
-Use `GroupUsageFundingCard` as the public entry surface for one-time group usage
-credit. Lead with the group name, one concise sentence explaining that the
-credit belongs to the group, and one primary action. Do not add a decorative
-status badge; retain `Open Murph` as the quiet secondary action.
+An authenticated group funding link opens its relevant funding control
+immediately: monthly sponsorship for an unsponsored chat, one-time contribution
+for an already sponsored chat, or payment recovery when a purchase is in
+progress. Use `GroupUsageFundingShell` only as the quiet reopen surface beneath
+that control. Do not add a second sales card, decorative status badge, duplicate
+headline, or explanatory paragraph. Retain `Back to Murph` as the quiet
+secondary action.
 
 Use `GroupSponsorshipDialog` for the primary monthly choice. Present $5, $10,
 and $20 as visually prominent monthly maximums. On desktop, use the shared
@@ -407,9 +410,10 @@ them only to the activation or one-time purchase, never to automatic refills.
 Optional text fields use the sage focus border without an outer glow. The
 drawer body owns overflow while the sponsor action stays available at the safe
 area edge, so expanded note fields never become unreachable. Preserve visible
-focus and selection states, and render the production activation,
+focus and selection states. Render the production activation,
 active-management, near-cap/recovery, paused, and one-time states at desktop and
-mobile sizes on `/design` with controls inert.
+mobile sizes on `/design` with controls inert, including content rendered
+through a dialog or drawer portal.
 
 When group funding is fulfilled, switch from the payment-status composition to
 one confident success hierarchy: a compact sage confirmation mark and mono

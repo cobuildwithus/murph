@@ -48,6 +48,7 @@ interface HostedUsageTopUpDialogProps {
   deferTerminalRefreshUntilClose?: boolean;
   groupPaymentMode?: "monthly" | "one_time";
   initialOpen?: boolean;
+  inert?: boolean;
   offers: readonly HostedUsageTopUpOffer[];
   payerMemberId: string;
   purchaseReturn?: HostedUsageTopUpReturn | null;

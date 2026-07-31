@@ -142,7 +142,10 @@ function GroupSponsorshipDialog({
           offers,
         });
         return (
-          <div className="space-y-4 max-md:flex max-md:min-h-0 max-md:flex-1 max-md:flex-col max-md:space-y-0">
+          <div
+            className="space-y-4 max-md:flex max-md:flex-1 max-md:flex-col max-md:space-y-0"
+            data-slot="group-sponsorship-selection-details"
+          >
             {mode === "monthly" ? (
               <FieldSet
                 className="space-y-3 max-md:flex max-md:flex-1 max-md:flex-col max-md:space-y-0"
