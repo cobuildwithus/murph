@@ -73,6 +73,7 @@ const mocks = vi.hoisted(() => ({
   HostedAssistantModelSettings: vi.fn((props: {
     canUpgradeToEdge: boolean;
     configurationAvailable: boolean;
+    customInferenceAvailable: boolean;
     initialDormantSolPreference: boolean;
     initialModel: string;
     initialProvider: string;
@@ -808,6 +809,7 @@ test("SettingsPage reads the app session and persisted account settings into the
     expect(mocks.HostedAssistantModelSettings).toHaveBeenCalledWith({
       canUpgradeToEdge: true,
       configurationAvailable: true,
+      customInferenceAvailable: false,
       expectedCurrentPlanCode: "launch_monthly",
       initialDormantSolPreference: false,
       initialModel: "gpt-5.6-sol",

@@ -126,6 +126,7 @@ interface AssistantModelSettingsResponse {
 interface HostedAssistantModelSettingsProps {
   canUpgradeToEdge: boolean;
   configurationAvailable: boolean;
+  customInferenceAvailable?: boolean;
   expectedCurrentPlanCode?: "launch_group_monthly" | "launch_monthly";
   initialDormantSolPreference: boolean;
   initialModel: HostedAssistantProductModel;
@@ -135,6 +136,7 @@ interface HostedAssistantModelSettingsProps {
 }
 
 interface AssistantProviderDialogProps {
+  managedDefaultOnly?: boolean;
   onOpenChange: (open: boolean) => void;
   onProviderChange: (provider: HostedAssistantProvider) => void;
   open: boolean;
@@ -145,6 +147,7 @@ interface AssistantProviderSummaryProps {
   currentProvider: HostedAssistantProvider;
   disabled?: boolean;
   draftProvider: HostedAssistantProvider;
+  managedDefaultOnly?: boolean;
   onChangeClick: () => void;
 }
 
@@ -152,6 +155,7 @@ export function AssistantProviderSummary({
   currentProvider,
   disabled = false,
   draftProvider,
+  managedDefaultOnly = false,
   onChangeClick,
 }: AssistantProviderSummaryProps) {
   const currentProviderName = readProviderName(currentProvider);
@@ -161,7 +165,24 @@ export function AssistantProviderSummary({
   return (
     <div className="flex w-full items-center gap-2 px-1">
       <p className="text-sm text-muted-foreground">
-        {hasPendingChange ? (
+        {managedDefaultOnly ? (
+          hasPendingChange ? (
+            <>
+              Saved managed provider changes to{" "}
+              <span className="font-medium text-foreground">
+                {draftProviderName}
+              </span>{" "}
+              after Save.
+            </>
+          ) : (
+            <>
+              <span className="font-medium text-foreground">
+                {currentProviderName}
+              </span>{" "}
+              is your saved managed provider.
+            </>
+          )
+        ) : hasPendingChange ? (
           <>
             Core replies switch to{" "}
             <span className="font-medium text-foreground">
@@ -181,7 +202,11 @@ export function AssistantProviderSummary({
       </p>
       <Button
         aria-label={
-          hasPendingChange
+          managedDefaultOnly
+            ? hasPendingChange
+              ? `Change managed model provider. The saved provider will change to ${draftProviderName} after Save.`
+              : `Change managed model provider. ${currentProviderName} is the saved provider.`
+            : hasPendingChange
             ? `Change model provider. Core replies will switch to ${draftProviderName} after Save.`
             : `Change model provider. New core replies use ${currentProviderName}.`
         }
@@ -199,6 +224,7 @@ export function AssistantProviderSummary({
 }
 
 export function AssistantProviderDialog({
+  managedDefaultOnly = false,
   onOpenChange,
   onProviderChange,
   open,
@@ -212,7 +238,9 @@ export function AssistantProviderDialog({
             Choose provider
           </DialogTitle>
           <DialogDescription className="max-w-[38ch] text-sm/6">
-            Murph uses this provider after you save.
+            {managedDefaultOnly
+              ? "Murph uses this provider whenever Murph-managed inference is selected."
+              : "Murph uses this provider after you save."}
           </DialogDescription>
         </DialogHeader>
         <RadioGroup
@@ -273,8 +301,9 @@ export function AssistantProviderDialog({
           })}
         </RadioGroup>
         <p className="px-1 text-xs/5 text-pretty text-muted-foreground">
-          This only changes core replies. Image generation, voice, search, and
-          other tools still use their specialized providers.
+          {managedDefaultOnly
+            ? "This only changes your saved managed defaults. Image generation, voice, search, and other tools still use their specialized providers."
+            : "This only changes core replies. Image generation, voice, search, and other tools still use their specialized providers."}
         </p>
       </DialogContent>
     </Dialog>
@@ -287,7 +316,7 @@ export function HostedAssistantModelSettings(
   const initialProvider = props.initialProvider ?? HOSTED_ASSISTANT_DEFAULT_PROVIDER;
   return (
     <HostedAssistantModelSettingsForm
-      key={`${props.initialModel}:${initialProvider}:${String(props.initialDormantSolPreference)}:${String(props.solAvailable)}:${String(props.configurationAvailable)}:${String(props.canUpgradeToEdge)}:${String(props.veniceAvailable === true)}`}
+      key={`${props.initialModel}:${initialProvider}:${String(props.initialDormantSolPreference)}:${String(props.solAvailable)}:${String(props.configurationAvailable)}:${String(props.canUpgradeToEdge)}:${String(props.veniceAvailable === true)}:${String(props.customInferenceAvailable === true)}`}
       {...props}
       initialProvider={initialProvider}
     />
@@ -369,7 +398,9 @@ function HostedAssistantModelSettingsForm(
       setDormantSolPreference(response.dormantSolPreference);
       setSolAvailable(response.solAvailable);
       setSaveAnnouncement(
-        response.dormantSolPreference
+        props.customInferenceAvailable
+          ? `Saved. ${readProductModelName(response.model)} through ${readProviderName(provider)} is your managed default.`
+          : response.dormantSolPreference
           ? `Saved. New core replies use ${readProductModelName(response.model)} through ${readProviderName(provider)} while Edge is paused; Sol remains saved.`
           : `Saved. ${readProductModelName(response.model)} through ${readProviderName(provider)} is your default.`,
       );
@@ -392,9 +423,13 @@ function HostedAssistantModelSettingsForm(
       }
       setStatus({
         message: solNoLongerAvailable
-          ? `Your Edge access changed. Murph will keep using ${readModelName(currentModel)}.`
+          ? props.customInferenceAvailable
+            ? `Your Edge access changed. Your managed default stays ${readModelName(currentModel)}.`
+            : `Your Edge access changed. Murph will keep using ${readModelName(currentModel)}.`
           : veniceNoLongerAvailable
-            ? "Venice is no longer available. Murph will keep using OpenAI."
+            ? props.customInferenceAvailable
+              ? "Venice is no longer available. OpenAI remains your saved managed provider."
+              : "Venice is no longer available. Murph will keep using OpenAI."
           : "We couldn’t save this change. Try again.",
         tone: solNoLongerAvailable || veniceNoLongerAvailable
           ? "neutral"
@@ -415,7 +450,9 @@ function HostedAssistantModelSettingsForm(
       }}
     >
       <p className="max-w-2xl text-sm text-pretty text-muted-foreground">
-        Choose the intelligence behind your personal health assistant.
+        {props.customInferenceAvailable
+          ? "Choose the model Murph uses whenever Murph-managed inference is selected."
+          : "Choose the intelligence behind your personal health assistant."}
       </p>
 
       {!props.configurationAvailable ? (
@@ -428,8 +465,9 @@ function HostedAssistantModelSettingsForm(
 
       {dormantSolPreference ? (
         <p className="w-full rounded-xl border border-border bg-muted/30 p-4 text-sm text-pretty text-muted-foreground">
-          Terra is active while Edge is paused. Sol is still saved and will
-          return with Edge. Choose Luna or save Terra to replace it.
+          {props.customInferenceAvailable
+            ? "Terra is your managed default while Edge is paused. Sol is still saved and will return with Edge. Choose Luna or save Terra to replace it."
+            : "Terra is active while Edge is paused. Sol is still saved and will return with Edge. Choose Luna or save Terra to replace it."}
         </p>
       ) : null}
 
@@ -437,9 +475,15 @@ function HostedAssistantModelSettingsForm(
         className="w-full gap-3"
         disabled={controlsDisabled}
       >
-        <FieldLegend className="sr-only">Default model</FieldLegend>
+        <FieldLegend className="sr-only">
+          {props.customInferenceAvailable
+            ? "Managed default model"
+            : "Default model"}
+        </FieldLegend>
         <FieldDescription className="sr-only">
-          Choose one model for new Murph replies.
+          {props.customInferenceAvailable
+            ? "Choose the saved model for Murph-managed inference."
+            : "Choose one model for new Murph replies."}
         </FieldDescription>
         <RadioGroup
           className="grid gap-3 lg:grid-cols-3"
@@ -462,6 +506,7 @@ function HostedAssistantModelSettingsForm(
             const badge = readModelOptionBadge({
               current,
               dormantSolPreference,
+              managedDefaultOnly: props.customInferenceAvailable === true,
               model: option.model,
               selected,
               unavailable,
@@ -497,9 +542,11 @@ function HostedAssistantModelSettingsForm(
             currentProvider={currentProvider}
             disabled={controlsDisabled}
             draftProvider={draftProvider}
+            managedDefaultOnly={props.customInferenceAvailable}
             onChangeClick={() => setProviderDialogOpen(true)}
           />
           <AssistantProviderDialog
+            managedDefaultOnly={props.customInferenceAvailable}
             onOpenChange={setProviderDialogOpen}
             onProviderChange={(provider) => {
               setDraftProvider(provider);
@@ -556,6 +603,7 @@ function HostedAssistantModelSettingsForm(
 function readModelOptionBadge(input: {
   current: boolean;
   dormantSolPreference: boolean;
+  managedDefaultOnly: boolean;
   model: HostedAssistantProductModel;
   selected: boolean;
   unavailable: boolean;
@@ -563,7 +611,9 @@ function readModelOptionBadge(input: {
   if (input.current) {
     return (
       <ModelOptionBadge>
-        {input.dormantSolPreference ? "Active" : "Default"}
+        {input.managedDefaultOnly
+          ? "Managed default"
+          : input.dormantSolPreference ? "Active" : "Default"}
       </ModelOptionBadge>
     );
   }

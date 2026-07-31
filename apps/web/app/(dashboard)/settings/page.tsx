@@ -525,6 +525,7 @@ export default async function SettingsPage({
         <HostedAssistantModelSettings
           canUpgradeToEdge={canUpgradeToEdge}
           configurationAvailable={account?.assistant?.configurationAvailable === true}
+          customInferenceAvailable={isHostedCustomInferenceEnabled()}
           expectedCurrentPlanCode={
             currentPlanCode === "launch_group_monthly"
             || currentPlanCode === "launch_monthly"

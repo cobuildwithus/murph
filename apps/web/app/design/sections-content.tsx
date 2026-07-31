@@ -134,6 +134,7 @@ export function SectionsContent() {
           <HostedAssistantModelSettings
             canUpgradeToEdge={false}
             configurationAvailable
+            customInferenceAvailable
             initialDormantSolPreference={false}
             initialModel="gpt-5.6-terra"
             initialProvider="venice"
@@ -148,25 +149,101 @@ export function SectionsContent() {
       <StudySection title="Settings custom inference connection">
         <div
           id="settings-custom-inference"
+          className="flex flex-col gap-8"
           data-design-section="settings-custom-inference"
           inert
         >
-          <HostedInferenceConnectionSettings
-            chatCompletionsAvailable
-            configurationAvailable
-            initialConnection={{
-              contextWindowTokens: 131_072,
-              endpointHost: "inference.example.com",
-              model: "example-health-model",
-              protocol: "responses",
-              revision: 4,
-              selected: true,
-              supportsImages: false,
-              verificationProfile:
-                "murph-codex-0.145.0-portable-responses-v1",
-              verifiedAt: "2026-07-30T22:00:00.000Z",
-            }}
-          />
+          <div
+            className="flex flex-col gap-8"
+            data-design-variant="managed-venice-disabled"
+          >
+            <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">
+              Managed route · Venice unavailable
+            </p>
+            <section className="flex flex-col gap-4">
+              <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                AI model
+              </div>
+              <HostedAssistantModelSettings
+                canUpgradeToEdge={false}
+                configurationAvailable
+                customInferenceAvailable
+                initialDormantSolPreference={false}
+                initialModel="gpt-5.6-terra"
+                initialProvider="openai"
+                solAvailable
+                veniceAvailable={false}
+              />
+            </section>
+            <Separator />
+            <section className="flex flex-col gap-4">
+              <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Inference
+              </div>
+              <HostedInferenceConnectionSettings
+                chatCompletionsAvailable
+                configurationAvailable
+                initialConnection={{
+                  contextWindowTokens: 131_072,
+                  endpointHost: "inference.example.com",
+                  model: "example-health-model",
+                  protocol: "responses",
+                  revision: 4,
+                  selected: false,
+                  supportsImages: false,
+                  verificationProfile:
+                    "murph-codex-0.145.0-portable-responses-v1",
+                  verifiedAt: "2026-07-30T22:00:00.000Z",
+                }}
+              />
+            </section>
+          </div>
+          <Separator />
+          <div
+            className="flex flex-col gap-8"
+            data-design-variant="custom-venice-enabled"
+          >
+            <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">
+              Custom route · Venice available
+            </p>
+            <section className="flex flex-col gap-4">
+              <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                AI model
+              </div>
+              <HostedAssistantModelSettings
+                canUpgradeToEdge={false}
+                configurationAvailable
+                customInferenceAvailable
+                initialDormantSolPreference={false}
+                initialModel="gpt-5.6-terra"
+                initialProvider="venice"
+                solAvailable
+                veniceAvailable
+              />
+            </section>
+            <Separator />
+            <section className="flex flex-col gap-4">
+              <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Inference
+              </div>
+              <HostedInferenceConnectionSettings
+                chatCompletionsAvailable
+                configurationAvailable
+                initialConnection={{
+                  contextWindowTokens: 131_072,
+                  endpointHost: "inference.example.com",
+                  model: "example-health-model",
+                  protocol: "responses",
+                  revision: 4,
+                  selected: true,
+                  supportsImages: false,
+                  verificationProfile:
+                    "murph-codex-0.145.0-portable-responses-v1",
+                  verifiedAt: "2026-07-30T22:00:00.000Z",
+                }}
+              />
+            </section>
+          </div>
         </div>
       </StudySection>
 

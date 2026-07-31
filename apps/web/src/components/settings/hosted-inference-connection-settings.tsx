@@ -108,6 +108,7 @@ export function HostedInferenceConnectionSettings(
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [status, setStatus] = useState<{
     action: "connection" | "mode";
+    announcement?: string;
     message: string;
     tone: "destructive" | "neutral";
   } | null>(null);
@@ -157,9 +158,10 @@ export function HostedInferenceConnectionSettings(
       );
       setStatus({
         action: "mode",
-        message: response.mode === "custom"
-          ? "New core replies use your verified endpoint."
-          : "New core replies use Murph-managed inference.",
+        announcement: response.mode === "custom"
+          ? "Inference mode saved. New core replies use your verified endpoint."
+          : "Inference mode saved. New core replies use Murph-managed inference.",
+        message: "Inference mode saved.",
         tone: "neutral",
       });
     } catch (error) {
@@ -260,7 +262,9 @@ export function HostedInferenceConnectionSettings(
       setSecret("");
       setStatus({
         action: "connection",
-        message: "Connection deleted. Murph-managed inference remains active.",
+        announcement:
+          "Connection deleted. New core replies use Murph-managed inference.",
+        message: "Connection deleted.",
         tone: "neutral",
       });
       requestAnimationFrame(() => connectionHeadingRef.current?.focus());
@@ -287,10 +291,20 @@ export function HostedInferenceConnectionSettings(
           endpoint failure.
         </p>
         <p className="text-xs/5 text-pretty text-muted-foreground">
+          When your endpoint is selected, Murph sends relevant conversation
+          context, tool descriptions, and supported attachments to it.
+        </p>
+        <p className="text-xs/5 text-pretty text-muted-foreground">
           Image generation, voice, search, and other specialized tools may
           still use Murph providers and remain subject to your plan.
         </p>
       </div>
+
+      <p className="max-w-2xl text-sm text-pretty text-foreground">
+        New core replies use {currentMode === "custom"
+          ? "your verified endpoint"
+          : "Murph-managed inference"}.
+      </p>
 
       {!props.configurationAvailable ? (
         <p className="rounded-xl border border-border bg-muted/30 p-4 text-sm text-pretty text-muted-foreground">
@@ -352,7 +366,11 @@ export function HostedInferenceConnectionSettings(
         ) : null}
       </div>
       {status?.action === "mode" ? (
-        <SettingsStatusLine message={status.message} tone={status.tone} />
+        <SettingsStatusLine
+          announce={status.tone === "destructive"}
+          message={status.message}
+          tone={status.tone}
+        />
       ) : null}
 
       <Separator />
@@ -628,7 +646,9 @@ export function HostedInferenceConnectionSettings(
                 className="mr-1 text-sm text-muted-foreground"
                 id="hosted-inference-delete-description"
               >
-                Delete the saved endpoint and credential?
+                {currentMode === "custom"
+                  ? "Delete the saved endpoint and credential? New core replies will switch to Murph-managed inference."
+                  : "Delete the saved endpoint and credential?"}
               </span>
               <Button
                 aria-describedby="hosted-inference-delete-description"
@@ -680,11 +700,17 @@ export function HostedInferenceConnectionSettings(
       ) : null}
 
       {status?.action === "connection" ? (
-        <SettingsStatusLine message={status.message} tone={status.tone} />
+        <SettingsStatusLine
+          announce={status.tone === "destructive"}
+          message={status.message}
+          tone={status.tone}
+        />
       ) : null}
       <SettingsStatusLine
         className="sr-only min-h-0"
-        message={status?.tone === "destructive" ? null : status?.message ?? null}
+        message={status?.tone === "destructive"
+          ? null
+          : status?.announcement ?? status?.message ?? null}
         tone="neutral"
       />
     </div>

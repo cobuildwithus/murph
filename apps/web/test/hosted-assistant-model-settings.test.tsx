@@ -171,6 +171,42 @@ test("other non-Edge members can still choose Luna or Terra without an invalid u
   assert.match(markup, new RegExp(`value="${HOSTED_ASSISTANT_SOL_MODEL}"`));
 });
 
+test("custom inference keeps managed model controls visibly dormant", () => {
+  const withoutVenice = renderToStaticMarkup(
+    createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: false,
+      configurationAvailable: true,
+      customInferenceAvailable: true,
+      initialDormantSolPreference: false,
+      initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      solAvailable: true,
+      veniceAvailable: false,
+    }),
+  );
+  const withVenice = renderToStaticMarkup(
+    createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: false,
+      configurationAvailable: true,
+      customInferenceAvailable: true,
+      initialDormantSolPreference: false,
+      initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      initialProvider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
+      solAvailable: true,
+      veniceAvailable: true,
+    }),
+  );
+
+  for (const markup of [withoutVenice, withVenice]) {
+    assert.match(
+      markup,
+      /Choose the model Murph uses whenever Murph-managed inference is selected/u,
+    );
+    assert.doesNotMatch(markup, /New core replies use/u);
+    assert.match(markup, /Managed default/u);
+  }
+  assert.match(withVenice, /OpenAI.*is your saved managed provider/su);
+});
+
 test("members can switch the provider without changing Terra, Luna, or Sol", async () => {
   mocks.requestHostedOnboardingJson.mockResolvedValue({
     dormantSolPreference: false,
