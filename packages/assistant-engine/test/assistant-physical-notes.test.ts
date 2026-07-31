@@ -4,8 +4,12 @@ import {
   MURPH_SEND_PHYSICAL_NOTE_TOOL,
   createPhysicalNoteRequestKey,
   readPhysicalNoteDynamicToolRequest,
+  resolvePhysicalNoteExplicitOriginInputId,
 } from '../src/assistant-codex/dynamic-tools/physical-notes.js'
 import { resolveMurphDynamicTools } from '../src/assistant-codex/dynamic-tools.js'
+
+const APPROVAL_INPUT_ID = `ain_${'c'.repeat(32)}`
+const OTHER_INPUT_ID = `ain_${'d'.repeat(32)}`
 
 describe('assistant physical notes', () => {
   it('exposes one composable mail tool only when hosted transport is available', () => {
@@ -23,6 +27,9 @@ describe('assistant physical notes', () => {
     )
     expect(MURPH_SEND_PHYSICAL_NOTE_TOOL.description).toContain(
       'provide the exact image_ref and image_sha256',
+    )
+    expect(MURPH_SEND_PHYSICAL_NOTE_TOOL.description).toContain(
+      'exact message_ref from the participant approving the send',
     )
   })
 
@@ -55,6 +62,7 @@ describe('assistant physical notes', () => {
       arguments: {
         image_ref: 'raw/captures/generated.jpeg',
         image_sha256: 'a'.repeat(64),
+        message_ref: APPROVAL_INPUT_ID,
         to: {
           address_line1: '123 Main St',
           city: 'Atlanta',
@@ -68,6 +76,7 @@ describe('assistant physical notes', () => {
       imageRef: 'raw/captures/generated.jpeg',
       imageSha256: 'a'.repeat(64),
       kind: 'send-physical-note',
+      messageRef: APPROVAL_INPUT_ID,
     })
 
     expect(readPhysicalNoteDynamicToolRequest({
@@ -85,6 +94,43 @@ describe('assistant physical notes', () => {
     })).toMatchObject({
       kind: 'invalid-physical-note-arguments',
     })
+
+    expect(readPhysicalNoteDynamicToolRequest({
+      arguments: {
+        message_ref: APPROVAL_INPUT_ID,
+        to: {
+          address_line1: '123 Main St',
+          city: 'Atlanta',
+          name: 'Sam',
+          postal_code: '30308',
+          state: 'GA',
+        },
+      },
+      tool: MURPH_SEND_PHYSICAL_NOTE_TOOL.name,
+    })).toMatchObject({
+      kind: 'invalid-physical-note-arguments',
+    })
+  })
+
+  it('binds a later group send to the exact accepted approving input', () => {
+    expect(resolvePhysicalNoteExplicitOriginInputId({
+      acceptedInputIds: [OTHER_INPUT_ID, APPROVAL_INPUT_ID],
+      conversationScope: 'group',
+      messageRef: APPROVAL_INPUT_ID,
+    })).toBe(APPROVAL_INPUT_ID)
+    expect(resolvePhysicalNoteExplicitOriginInputId({
+      acceptedInputIds: [OTHER_INPUT_ID],
+      conversationScope: 'group',
+      messageRef: APPROVAL_INPUT_ID,
+    })).toBeNull()
+    expect(resolvePhysicalNoteExplicitOriginInputId({
+      acceptedInputIds: [OTHER_INPUT_ID, APPROVAL_INPUT_ID],
+      conversationScope: 'group',
+    })).toBeNull()
+    expect(resolvePhysicalNoteExplicitOriginInputId({
+      acceptedInputIds: [OTHER_INPUT_ID, APPROVAL_INPUT_ID],
+      conversationScope: 'direct',
+    })).toBe(APPROVAL_INPUT_ID)
   })
 
   it('keys the exact generated pixels, origin, and recipient', () => {
