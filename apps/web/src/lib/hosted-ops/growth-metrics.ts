@@ -1,7 +1,9 @@
 import "server-only";
 
 import {
+  HOSTED_EXECUTION_GROUP_REACTION_SENDER_ATTESTATION,
   isHostedEmailConversationMessageWake,
+  isHostedExecutionGroupReactionEventId,
   isHostedLinqConversationMessageWake,
   isHostedTelegramConversationMessageWake,
   readHostedLinqConversationMessageContact,
@@ -743,8 +745,12 @@ async function decodeHostedGrowthGroupMessages(
   prisma: HostedGrowthPrisma,
 ): Promise<HostedGrowthDecodedGroupMessages> {
   return runWithHostedDomainRootUnwrapCache(async () => {
+    // Retired reaction attestations were never sender evidence, so they must
+    // not mark an active-user window incomplete.
     const retiredMessageOccurredAt = rows.flatMap((row) =>
-      row.contentRetiredAt ? [row.occurredAt] : []
+      row.contentRetiredAt && !isHostedExecutionGroupReactionEventId(row.dedupeKey)
+        ? [row.occurredAt]
+        : []
     );
     const retainedRows = rows.filter((row) => !row.contentRetiredAt);
     const messages = await Promise.all(retainedRows.map(async (row) => {
@@ -811,6 +817,13 @@ function readHostedGrowthGroupSenderEvidence(
     if (wake.message.linqMessage.threadIsDirect !== false) {
       throw new Error("Hosted growth thread-container Linq message must be non-direct.");
     }
+    if (
+      isHostedExecutionGroupReactionEventId(wake.eventId)
+      && wake.message.linqMessage.from
+        === HOSTED_EXECUTION_GROUP_REACTION_SENDER_ATTESTATION
+    ) {
+      return null;
+    }
     const storedContact = readHostedLinqConversationMessageContact(wake.message);
     const currentContact = createHostedLinqParticipantContact({
       kind: storedContact.kind,
@@ -849,6 +862,13 @@ function readHostedGrowthGroupSenderEvidence(
   if (isHostedTelegramConversationMessageWake(wake)) {
     if (wake.message.telegramMessage.threadIsDirect !== false) {
       throw new Error("Hosted growth thread-container Telegram message must be non-direct.");
+    }
+    if (
+      isHostedExecutionGroupReactionEventId(wake.eventId)
+      && wake.message.telegramMessage.from
+        === HOSTED_EXECUTION_GROUP_REACTION_SENDER_ATTESTATION
+    ) {
+      return null;
     }
     if (wake.message.senderMemberId) {
       const identityKey = hostedGrowthMemberIdentity(wake.message.senderMemberId);
