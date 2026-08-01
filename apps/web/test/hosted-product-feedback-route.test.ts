@@ -66,7 +66,6 @@ describe("hosted product feedback record route", () => {
     );
     expect(mocks.recordHostedProductFeedback).toHaveBeenCalledWith({
       feedback,
-      memberId: "member_123",
     });
     await expect(response.json()).resolves.toEqual({
       feedbackId: "product_feedback_123",
