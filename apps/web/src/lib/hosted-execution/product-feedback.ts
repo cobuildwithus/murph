@@ -73,6 +73,18 @@ export async function recordHostedProductFeedback(input: {
       )
     `;
 
+    const threadContainer = await tx.hostedThreadContainer.findUnique({
+      select: { memberId: true },
+      where: { memberId },
+    });
+    if (threadContainer) {
+      throw hostedOnboardingError({
+        code: "HOSTED_PRODUCT_SUPPORT_PRIVATE_MEMBER_REQUIRED",
+        httpStatus: 403,
+        message: "Account-linked product support escalation requires a private member runtime.",
+      });
+    }
+
     const created = await tx.hostedProductFeedback.createMany({
       data: [
         {
@@ -187,7 +199,8 @@ export function isHostedProductSupportEscalationSummary(
   value: string | null | undefined,
 ): value is string {
   return typeof value === "string"
-    && value.startsWith(HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX);
+    && value.startsWith(HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX)
+    && value.slice(HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX.length).trim().length > 0;
 }
 
 export function isHostedProductSupportEscalationFeedback(
