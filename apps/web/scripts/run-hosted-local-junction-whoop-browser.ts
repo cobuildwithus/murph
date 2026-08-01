@@ -33,6 +33,11 @@ const AUTH_ACTIONS = [
   /^grant/i,
   /^connect(?: whoop)?$/i,
 ] as const;
+const TRUSTED_AUTHORIZATION_DOMAINS = [
+  "junction.com",
+  "tryvital.io",
+  "whoop.com",
+] as const;
 
 let stage = "configuration";
 let activePage: Page | null = null;
@@ -85,7 +90,7 @@ async function main(): Promise<void> {
     await page.getByRole("button", { name: "Finish connection" }).click();
 
     stage = "murph_connected_completion";
-    await page.getByText(/whoop is connected/i).waitFor({
+    await page.getByRole("heading", { name: /^WHOOP is connected$/i }).waitFor({
       timeout: config.timeoutMs,
     });
 
@@ -144,6 +149,7 @@ async function completeExternalAuthorization(
       return;
     }
 
+    assertTrustedAuthorizationUrl(page.url());
     await fillVisible(page, [
       'input[type="email"]',
       'input[autocomplete="email"]',
@@ -265,9 +271,13 @@ async function disconnectJunctionAccount(
   page: Page,
   timeoutMs: number,
 ): Promise<void> {
-  await page.getByRole("button", { name: "Disconnect account" }).click();
+  await page
+    .getByRole("button", { name: /^Disconnect (?:Whoop|account)$/i })
+    .click();
   const dialog = page.getByRole("dialog");
-  await dialog.getByRole("heading", { name: "Disconnect account?" }).waitFor();
+  await dialog
+    .getByRole("heading", { name: /^Disconnect (?:Whoop|account)\?$/i })
+    .waitFor();
   await dialog.getByRole("button", { name: "Disconnect", exact: true }).click();
   await page.getByText("Source disconnected", { exact: true }).waitFor({
     timeout: timeoutMs,
@@ -330,6 +340,25 @@ function requireEnvironmentValue(
     );
   }
   return value;
+}
+
+function assertTrustedAuthorizationUrl(value: string): void {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("Junction or WHOOP opened an invalid authorization URL.");
+  }
+
+  const hostname = url.hostname.toLowerCase();
+  const trusted = TRUSTED_AUTHORIZATION_DOMAINS.some((domain) =>
+    hostname === domain || hostname.endsWith(`.${domain}`)
+  );
+  if (!trusted || url.protocol !== "https:") {
+    throw new Error(
+      `Refusing to enter WHOOP credentials at unexpected authorization host ${hostname}.`,
+    );
+  }
 }
 
 function readOrigin(value: string): string | null {
