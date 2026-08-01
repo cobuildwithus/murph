@@ -134,13 +134,31 @@ export function createConnectCallbackNotice(
     };
   }
 
+  // Error callbacks are taken straight from query params, so only a catalog
+  // source and a recognizable code shape may reach the prefilled support mail.
+  // Anything else is unverified text and is dropped rather than quoted back.
+  const catalogSource = findCallbackSource({
+    connectSource: input.connectSource,
+    connectTarget: input.connectTarget,
+    provider: input.provider,
+    sources,
+  });
+
   return {
-    errorCode: input.errorCode,
+    errorCode: normalizeConnectCallbackErrorReference(input.errorCode),
     kind: "error",
-    sourceLabel,
+    sourceLabel: catalogSource?.name ?? null,
     title: "Unable to finish connection",
     message: describeDeviceSyncCallbackError(sourceLabel, input.errorCode),
   };
+}
+
+const CONNECT_CALLBACK_ERROR_REFERENCE_PATTERN = /^[A-Z][A-Z0-9_]{2,63}$/u;
+
+function normalizeConnectCallbackErrorReference(errorCode: string | null): string | null {
+  return errorCode && CONNECT_CALLBACK_ERROR_REFERENCE_PATTERN.test(errorCode)
+    ? errorCode
+    : null;
 }
 
 export function stripConnectCallbackParams() {

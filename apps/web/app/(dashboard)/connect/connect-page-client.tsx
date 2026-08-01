@@ -380,6 +380,11 @@ export function ConnectSourcesGrid({
           <ConnectCallbackErrorNotice
             errorCode={visibleNotice.errorCode}
             message={visibleNotice.message}
+            onSignIn={
+              !authenticated && visibleNotice.errorCode === "CALLBACK_SESSION_REQUIRED"
+                ? openAuthDialog
+                : null
+            }
             sourceLabel={visibleNotice.sourceLabel}
             title={visibleNotice.title}
           />

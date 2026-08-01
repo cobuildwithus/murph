@@ -1274,6 +1274,7 @@ export function ComponentsContent() {
             <ConnectCallbackErrorNotice
               errorCode="CALLBACK_SESSION_REQUIRED"
               message="You were signed out before Oura finished connecting. Log in, then start the connection again."
+              onSignIn={() => {}}
               sourceLabel="Oura"
               title="Unable to finish connection"
             />
