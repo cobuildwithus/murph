@@ -4673,6 +4673,160 @@ describe("Linq group chat auto-provision", () => {
     expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
   });
 
+  it("screens an unknown group sender through first-contact admission before offering setup", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000");
+    mockSenderLookup(null);
+
+    try {
+      const plan = await planHostedOnboardingLinqWebhook({
+        event: buildLinqMessageReceivedEvent({}),
+        prisma: prisma as never,
+        requireFirstContactAdmission: true,
+      });
+
+      // A setup link is still a reply to a stranger, so the group planner hands
+      // the service layer the same admission request the direct planner does
+      // instead of answering on a second, looser policy.
+      expect(plan.response).toMatchObject({
+        ignored: true,
+        ok: true,
+        reason: "first-contact-admission-required",
+      });
+      expect(plan.firstContactAdmissionRequest).toMatchObject({
+        eventId: "evt_group_123",
+        participantContactKind: "phone",
+        partTypes: ["text"],
+        service: "imessage",
+        text: "How did we sleep?",
+      });
+      expect(plan.firstContactAdmissionParticipantContact).toMatchObject({
+        kind: "phone",
+        value: "+15551112222",
+      });
+      expect(plan.desiredSideEffects).toEqual([]);
+      expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
+
+      const plannerDetails = info.mock.calls.find(
+        ([message]) => message === "Hosted Linq webhook planner decision.",
+      )?.[1];
+      expect(plannerDetails).toMatchObject({
+        existingMemberActive: false,
+        existingMemberMatch: "none",
+        reason: "first-contact-admission-required",
+        routeStage: "first-contact-admission-required",
+      });
+    } finally {
+      info.mockRestore();
+    }
+  });
+
+  it("offers the group setup link once first-contact admission allows the unknown sender", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000");
+    mockSenderLookup(null);
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      firstContactAdmissionDecision: {
+        confidence: 0.9,
+        kind: "allow",
+        source: "model",
+      },
+      prisma: prisma as never,
+      requireFirstContactAdmission: true,
+    });
+
+    expect(plan.response).toMatchObject({
+      ok: true,
+      reason: "sent-group-setup",
+    });
+    expect(plan.desiredSideEffects.map(({ payload }) => payload.template))
+      .toEqual(["group_setup"]);
+    expect(plan.firstContactAdmissionRequest).toBeUndefined();
+  });
+
+  it("offers the group setup link without an admission request when enforcement is off", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000");
+    mockSenderLookup(null);
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      prisma: prisma as never,
+      requireFirstContactAdmission: false,
+    });
+
+    // The gate is opt-in: with enforcement off the unknown sender is answered
+    // exactly as before, and the classifier is never asked for.
+    expect(plan.response).toMatchObject({
+      ok: true,
+      reason: "sent-group-setup",
+    });
+    expect(plan.desiredSideEffects.map(({ payload }) => payload.template))
+      .toEqual(["group_setup"]);
+    expect(plan.firstContactAdmissionRequest).toBeUndefined();
+  });
+
+  it("offers group setup to a known but inactive member without a first-contact admission request", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000");
+    mockSenderLookup({
+      ...senderCore,
+      billingStatus: HostedBillingStatus.paused,
+    });
+    prisma.hostedMember.findUnique.mockResolvedValue({
+      accountGroupMemberships: [],
+      billingStatus: HostedBillingStatus.paused,
+      suspendedAt: null,
+      threadContainer: null,
+    });
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      prisma: prisma as never,
+      requireFirstContactAdmission: true,
+    });
+
+    // Admission screens strangers. A resolved member whose access lapsed is
+    // already known, so gating them would spend classifier budget re-deciding
+    // an identity the database can answer.
+    expect(plan.response).toMatchObject({
+      ok: true,
+      reason: "sent-group-setup",
+    });
+    expect(plan.desiredSideEffects.map(({ payload }) => payload.template))
+      .toEqual(["group_setup"]);
+    expect(plan.firstContactAdmissionRequest).toBeUndefined();
+  });
+
+  it("does not screen an unknown group sender on a line it could not answer on", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000", {
+      healthStatus: "degraded",
+      providerReputationStatus: "AT_RISK",
+    });
+    mockSenderLookup(null);
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      prisma: prisma as never,
+      requireFirstContactAdmission: true,
+    });
+
+    // The gate sits after the assignable-line check, so strangers on lines we
+    // could never reply from stay ignored instead of consuming classifier
+    // budget on a message that has no answer.
+    expect(plan.response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "group-chat-line-unavailable",
+    });
+    expect(plan.firstContactAdmissionRequest).toBeUndefined();
+    expect(plan.desiredSideEffects).toEqual([]);
+  });
+
   it("does not answer a standalone SMS opt-out command in an unknown group", async () => {
     const prisma = createStatefulThreadRoutePrisma();
     prisma.seedActiveManagedLinqLine("+15550000000");
