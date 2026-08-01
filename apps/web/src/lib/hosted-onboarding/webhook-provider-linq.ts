@@ -86,6 +86,7 @@ import {
   buildFallbackSignupLinkResponse,
   buildFamilyInviteAcceptedResponse,
   buildGroupLineRecoveryResponse,
+  buildGroupSetupRequiredResponse,
   buildIgnoredLinqWebhookPlan,
   buildQuotaReplyResponse,
   buildSignupLinkResponse,
@@ -2494,6 +2495,7 @@ const HOSTED_LINQ_GROUP_PROVISION_UNAVAILABLE_ERROR_CODES = new Set([
 ]);
 
 type HostedLinqNewGroupAdmissionIgnoreReason =
+  | "blocked-first-contact-content"
   | "empty-message-parts"
   | "local-inbound-not-allowlisted"
   | "own-message"
@@ -2508,7 +2510,8 @@ type HostedLinqNewGroupAdmissionIgnoreReason =
   | "recipient-line-structurally-unavailable"
   | "sender-contact-unresolved"
   | "sender-identity-unresolved"
-  | "sender-inactive";
+  | "sender-inactive"
+  | "suspended-member";
 
 /**
  * Group chats with no explicit thread route stay ignored unless the sender is
@@ -2585,20 +2588,33 @@ async function planHostedLinqGroupChatWebhook(input: {
         address: participantContact.value,
         prisma: input.prisma,
       });
-  const sender = senderLookup?.core ?? null;
-  if (!sender) {
-    return ignored("sender-identity-unresolved");
-  }
-  const senderIdentityMatch: HostedLinqExistingMemberMatch =
-    participantContact.kind === "phone" ? "phone-identity" : "verified-email";
-  if (
-    isHostedMemberSuspended(sender.suspendedAt)
-    || !(await readHostedRuntimeAiAccessDecision({
-      memberId: sender.id,
-      prisma: input.prisma,
-    })).allowed
-  ) {
-    return ignored("sender-inactive", senderIdentityMatch);
+  const pendingSenderLookup = senderLookup
+    ? null
+    : await lookupHostedMemberRoutingByPendingLinqParticipantContact({
+        contact: participantContact,
+        linqChatId: summary.chatId,
+        prisma: input.prisma,
+        recipientPhone: incomingRecipientPhone,
+      });
+  const sender = senderLookup?.core ?? pendingSenderLookup?.core ?? null;
+  const senderIdentityMatch: HostedLinqExistingMemberMatch = senderLookup
+    ? participantContact.kind === "phone"
+      ? "phone-identity"
+      : "verified-email"
+    : pendingSenderLookup
+      ? "pending-contact"
+      : "none";
+  const senderSuspended = sender !== null
+    && isHostedMemberSuspended(sender.suspendedAt);
+  const senderAccessAllowed = sender && !senderSuspended
+    ? (await readHostedRuntimeAiAccessDecision({
+        memberId: sender.id,
+        prisma: input.prisma,
+      })).allowed
+    : false;
+
+  if (senderSuspended) {
+    return ignored("suspended-member", senderIdentityMatch);
   }
 
   const lineState = await readHostedLinqIncomingLineState({
@@ -2632,6 +2648,50 @@ async function planHostedLinqGroupChatWebhook(input: {
       "recipient-line-degraded-unavailable",
       senderIdentityMatch,
       "group-chat-line-unavailable",
+    );
+  }
+
+  if (
+    (!sender || !senderAccessAllowed)
+    && hostedLinqFirstContactContainsBlockedContent({
+      event: messageEvent,
+      participantContact,
+    })
+  ) {
+    return ignored("blocked-first-contact-content", senderIdentityMatch);
+  }
+
+  if (!sender || !senderAccessAllowed) {
+    if (lineState.kind !== "assignable") {
+      return ignored(
+        "recipient-line-not-assigned",
+        senderIdentityMatch,
+        "group-chat-line-unavailable",
+      );
+    }
+
+    const reason = sender
+      ? "sender-inactive"
+      : "sender-identity-unresolved";
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildGroupSetupRequiredResponse({
+        chatId: summary.chatId,
+        messageId: summary.messageId,
+        occurredAt,
+        ...(sender === null
+          && participantContact.kind === "email"
+          && isHostedLinqIMessageService(messageEvent.data.service)
+            ? { participantEmail: participantContact.value }
+            : {}),
+        recipientPhone: incomingRecipientPhone,
+        sourceEventId: input.event.event_id,
+      }),
+      buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
+        existingMemberActive: false,
+        existingMemberMatch: senderIdentityMatch,
+        reason,
+        routeStage: "new-group-setup-planned",
+      }),
     );
   }
   if (
