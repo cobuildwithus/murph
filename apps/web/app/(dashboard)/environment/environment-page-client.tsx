@@ -27,6 +27,7 @@ import {
   CategoryCard,
   EnvironmentHero,
   NextChecksStrip,
+  PrintEnvironmentLink,
   ShareEnvironmentButton,
   type NextCheckItem,
 } from "./environment-components";
@@ -266,7 +267,10 @@ export default function EnvironmentPageClient({
     <EnvironmentShell
       actions={
         hasEnvironmentData ? (
-          <ShareEnvironmentButton disabled={grade.letter === null} />
+          <>
+            <ShareEnvironmentButton disabled={grade.letter === null} />
+            <PrintEnvironmentLink />
+          </>
         ) : undefined
       }
     >
