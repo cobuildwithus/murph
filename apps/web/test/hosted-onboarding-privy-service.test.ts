@@ -971,7 +971,10 @@ describe("completeHostedPrivyVerification", () => {
       hostedMember: {
         create: vi.fn(),
         findUnique: vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) => (
-          where.id === existingMember.id || where.privyUserId || where.phoneLookupKey
+          where.id === existingMember.id
+            || where.memberId === existingMember.id
+            || where.privyUserId
+            || where.phoneLookupKey
             ? existingMember
             : null
         )),

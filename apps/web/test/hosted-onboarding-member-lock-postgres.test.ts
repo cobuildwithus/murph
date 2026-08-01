@@ -10,7 +10,10 @@ import type Stripe from "stripe";
 import { describe, expect, it, vi } from "vitest";
 
 import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-crypto/secure-box";
-import { createHostedPrivyUserLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
+import {
+  createHostedPrivyUserLookupKey,
+  createHostedTelegramUserLookupKey,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
   HostedMemberStripeMutationLockBusyError,
   withHostedMemberStripeMutationLockForOps,
@@ -1262,6 +1265,136 @@ describe.skipIf(!runPostgresConcurrencyProof)(
     });
   },
 );
+
+describe.skipIf(!runPostgresConcurrencyProof)(
+  "hosted Privy first-link PostgreSQL concurrency",
+  () => {
+    it("reports exactly one newly linked Privy user across concurrent completions", async () => {
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const firstClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const secondClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixtureId = randomUUID();
+      const memberId = `hbm_first_link_${fixtureId}`;
+      const telegramUserId = `telegram_first_link_${fixtureId}`;
+      const privyUserId = `did:privy:first-link-${fixtureId}`;
+      const telegramUserLookupKey = createHostedTelegramUserLookupKey(telegramUserId);
+      const firstReachedMemberLock = createDeferred();
+      const secondReachedMemberLock = createDeferred();
+      const allowMemberLocks = createDeferred();
+
+      if (!telegramUserLookupKey) {
+        throw new Error("Expected a Telegram lookup key for the concurrency fixture.");
+      }
+
+      setHostedSecureBoxStringTestCodecForTests({
+        decrypt(input) {
+          return input.value;
+        },
+        encrypt(input) {
+          return input.value;
+        },
+      });
+      await observer.hostedMember.create({
+        data: { id: memberId },
+      });
+      await observer.hostedMemberRouting.create({
+        data: {
+          memberId,
+          telegramUserLookupKey,
+        },
+      });
+
+      // A member created from a messaging channel exists before any Privy
+      // binding. Two completions for the same Privy user both finish their
+      // pre-lock credential lookup, then serialize on the member-row lock;
+      // only the transaction that performs the first binding may report it.
+      const completeAuthentication = (
+        client: PrismaClient,
+        reachedMemberLock: Deferred<void>,
+      ) => client.$transaction(async (tx) =>
+        ensureHostedMemberForPrivyIdentityResolutionTx({
+          authMethod: "telegram",
+          identity: {
+            email: null,
+            phone: null,
+            telegram: {
+              firstName: "First",
+              lastName: "Link",
+              photoUrl: null,
+              telegramUserId,
+              username: null,
+            },
+            userId: privyUserId,
+          },
+          now: new Date("2026-08-01T12:00:00.000Z"),
+          prisma: pauseBeforeMemberRowLock({
+            allowMemberLock: allowMemberLocks,
+            reachedMemberLock,
+            tx,
+          }),
+        }), { timeout: transactionTimeoutMs });
+
+      const first = completeAuthentication(firstClient, firstReachedMemberLock);
+      const second = completeAuthentication(secondClient, secondReachedMemberLock);
+
+      try {
+        await Promise.all([
+          firstReachedMemberLock.promise,
+          secondReachedMemberLock.promise,
+        ]);
+        allowMemberLocks.resolve();
+        const results = await Promise.all([first, second]);
+
+        expect(results.map((result) => result.member.id)).toEqual([memberId, memberId]);
+        expect(results.map((result) => result.created)).toEqual([false, false]);
+        expect(
+          results.filter((result) => result.privyUserNewlyLinked),
+        ).toHaveLength(1);
+        await expect(observer.hostedMemberIdentity.count({
+          where: { memberId },
+        })).resolves.toBe(1);
+      } finally {
+        allowMemberLocks.resolve();
+        await Promise.allSettled([first, second]);
+        await observer.hostedMember.deleteMany({
+          where: { id: memberId },
+        });
+        setHostedSecureBoxStringTestCodecForTests(null);
+        await disconnectClients([observer, firstClient, secondClient]);
+      }
+    });
+  },
+);
+
+function pauseBeforeMemberRowLock(input: {
+  allowMemberLock: Deferred<void>;
+  reachedMemberLock: Deferred<void>;
+  tx: Prisma.TransactionClient;
+}): Prisma.TransactionClient {
+  let firstRawQueryObserved = false;
+
+  return new Proxy<Prisma.TransactionClient>(input.tx, {
+    get(target, property) {
+      if (property === "$queryRaw") {
+        const queryRaw = Reflect.get(target, property, target) as (
+          ...args: unknown[]
+        ) => Promise<unknown>;
+        return async (...args: unknown[]) => {
+          // The credential lookup uses delegate reads only, so the first raw
+          // query on this authentication path is the member-row FOR UPDATE.
+          if (!firstRawQueryObserved) {
+            firstRawQueryObserved = true;
+            input.reachedMemberLock.resolve();
+            await input.allowMemberLock.promise;
+          }
+          return queryRaw.apply(target, args);
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
 
 function pauseBeforeAccountDeletionReceiptRead(input: {
   allowAuthenticationReceiptRead: Deferred<void>;

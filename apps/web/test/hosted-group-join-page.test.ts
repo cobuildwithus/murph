@@ -47,6 +47,7 @@ vi.mock("@/src/components/hosted-groups/group-join-client", () => ({
       launchGranted: boolean;
       scopes: readonly { grant: unknown }[];
     } | null;
+    notNowHref: string;
   }) {
     return createElement(
       "section",
@@ -56,6 +57,7 @@ vi.mock("@/src/components/hosted-groups/group-join-client", () => ({
           props.initialStatus?.scopes.map((scope) => scope.grant) ?? [],
         ),
         "data-legal-consent-gate": "true",
+        "data-not-now-href": props.notNowHref,
       },
       "Legal consent gate",
     );
@@ -220,8 +222,27 @@ test.each([
     const markup = await renderGroupJoinPage("JOIN123", { postJoin });
 
     expect(markup).toContain(`data-post-join-destination="${destination.replaceAll("&", "&amp;")}"`);
+    // The decline exit must not strip the bounded handoff: the initial-visit
+    // destination is one-shot and unrecoverable after this authentication.
+    expect(markup).toContain(`href="${destination.replaceAll("&", "&amp;")}"`);
+    expect(markup).toContain("Not now");
   },
 );
+
+test("keeps the initial-visit destination on the legal consent decline exit", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
+    authenticated: true,
+    authenticatedMember: { id: "member_123" },
+  });
+  mocks.readHostedConsentStatus.mockResolvedValueOnce(createConsentStatus({
+    launchGranted: false,
+  }));
+
+  const markup = await renderGroupJoinPage("JOIN123", { postJoin: "initial-visit" });
+
+  expect(markup).toContain('data-legal-consent-gate="true"');
+  expect(markup).toContain('data-not-now-href="/home?initialVisit=true"');
+});
 
 test("does not send an existing group member through the new-member handoff", async () => {
   mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
