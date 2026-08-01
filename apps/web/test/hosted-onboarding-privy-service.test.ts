@@ -929,7 +929,9 @@ describe("completeHostedPrivyVerification", () => {
       inviteCode: expect.any(String),
       joinUrl: expect.stringContaining("/join/"),
       memberId: existingMember.id,
-      messagingSetupRequired: true,
+      // Verified email already gives Murph a delivery route, so signup no
+      // longer holds this member on messaging setup.
+      messagingSetupRequired: false,
       stage: "checkout",
     });
 

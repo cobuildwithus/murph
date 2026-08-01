@@ -599,6 +599,7 @@ describe("deleteHostedAccountData", () => {
           order.push("stripe:subscription-cancel");
           return makeExactPhoneTransferStripeSubscription({
             ended_at: 1_900_000_000,
+            pending_setup_intent: "seti_trial_123",
             status: "canceled",
           });
         }),
@@ -608,8 +609,12 @@ describe("deleteHostedAccountData", () => {
       priceId: "price_launch_monthly",
       stripe,
     });
+    // Stripe attaches a pending SetupIntent to every automatic-collection
+    // trial without a payment method; the unused-surface check must accept it.
     serviceMocks.retrieveHostedPulseTrialCleanupTarget.mockResolvedValue(
-      makeExactPhoneTransferStripeSubscription(),
+      makeExactPhoneTransferStripeSubscription({
+        pending_setup_intent: "seti_trial_123",
+      }),
     );
     serviceMocks.persistHostedAccountDeletionCleanupTx.mockImplementation(async () => {
       order.push("persist:cleanup");
