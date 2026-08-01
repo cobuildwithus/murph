@@ -330,11 +330,14 @@ export function EnvironmentVoiceCapture({
         },
         { once: true },
       );
-      recorder.stop();
+      try {
+        recorder.stop();
+      } finally {
+        streamRef.current?.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+      }
     });
 
-    streamRef.current?.getTracks().forEach((track) => track.stop());
-    streamRef.current = null;
     recorderRef.current = null;
     stopAudioMeter();
     clearRecordingPreview();
@@ -421,6 +424,24 @@ export function EnvironmentVoiceCapture({
       void finishRecording();
     };
   });
+
+  useEffect(() => {
+    const finishWhenHidden = () => {
+      if (document.visibilityState === "hidden") {
+        autoFinishRef.current?.();
+      }
+    };
+    const finishWhenLeaving = () => {
+      autoFinishRef.current?.();
+    };
+
+    document.addEventListener("visibilitychange", finishWhenHidden);
+    window.addEventListener("pagehide", finishWhenLeaving);
+    return () => {
+      document.removeEventListener("visibilitychange", finishWhenHidden);
+      window.removeEventListener("pagehide", finishWhenLeaving);
+    };
+  }, []);
 
   const onOpenChange = (nextOpen: boolean) => {
     if (

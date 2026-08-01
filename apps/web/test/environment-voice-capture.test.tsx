@@ -408,6 +408,139 @@ test("keeps the dialog open until an unsent recording is explicitly discarded", 
   }
 });
 
+test("releases the microphone when Safari moves the page into the background", async () => {
+  const rendered = await renderClientComponent(
+    createElement(EnvironmentVoiceCapture),
+  );
+  const trackStop = vi.fn();
+
+  class FakeMediaRecorder {
+    static isTypeSupported() {
+      return true;
+    }
+
+    mimeType = "audio/webm";
+    state: RecordingState = "inactive";
+    private readonly listeners = new Map<string, EventListener[]>();
+
+    addEventListener(type: string, listener: EventListener) {
+      const listeners = this.listeners.get(type) ?? [];
+      listeners.push(listener);
+      this.listeners.set(type, listeners);
+    }
+
+    start() {
+      this.state = "recording";
+    }
+
+    stop() {
+      const dataEvent = new Event("dataavailable");
+      Object.defineProperty(dataEvent, "data", {
+        value: new Blob([Uint8Array.from([1, 2, 3])], {
+          type: "audio/webm",
+        }),
+      });
+      for (const listener of this.listeners.get("dataavailable") ?? []) {
+        listener(dataEvent);
+      }
+      this.state = "inactive";
+      for (const listener of this.listeners.get("stop") ?? []) {
+        listener(new Event("stop"));
+      }
+    }
+  }
+
+  const originalMediaRecorder = Reflect.get(globalThis, "MediaRecorder");
+  const originalCreateObjectUrl = URL.createObjectURL;
+  const originalRevokeObjectUrl = URL.revokeObjectURL;
+  const mediaDevicesDescriptor = Object.getOwnPropertyDescriptor(
+    navigator,
+    "mediaDevices",
+  );
+  const windowMediaDevicesDescriptor = Object.getOwnPropertyDescriptor(
+    rendered.window.navigator,
+    "mediaDevices",
+  );
+  const visibilityStateDescriptor = Object.getOwnPropertyDescriptor(
+    rendered.window.document,
+    "visibilityState",
+  );
+  try {
+    const mediaDevices = {
+      getUserMedia: async () => ({
+        getTracks: () => [{ stop: trackStop }],
+      }),
+    };
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: mediaDevices,
+    });
+    Object.defineProperty(rendered.window.navigator, "mediaDevices", {
+      configurable: true,
+      value: mediaDevices,
+    });
+    Reflect.set(globalThis, "MediaRecorder", FakeMediaRecorder);
+    Reflect.set(rendered.window, "MediaRecorder", FakeMediaRecorder);
+    URL.createObjectURL = vi.fn(() => "blob:backgrounded-recording");
+    URL.revokeObjectURL = vi.fn();
+
+    await clickButton(rendered.window, "Tell Murph by voice");
+    await clickButton(rendered.window, "Start recording");
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    Object.defineProperty(rendered.window.document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    await act(async () => {
+      rendered.window.document.dispatchEvent(new Event("visibilitychange"));
+      await Promise.resolve();
+    });
+
+    assert.equal(trackStop.mock.calls.length, 1);
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Play preview/,
+    );
+  } finally {
+    if (mediaDevicesDescriptor) {
+      Object.defineProperty(navigator, "mediaDevices", mediaDevicesDescriptor);
+    } else {
+      Reflect.deleteProperty(navigator, "mediaDevices");
+    }
+    if (windowMediaDevicesDescriptor) {
+      Object.defineProperty(
+        rendered.window.navigator,
+        "mediaDevices",
+        windowMediaDevicesDescriptor,
+      );
+    } else {
+      Reflect.deleteProperty(rendered.window.navigator, "mediaDevices");
+    }
+    if (visibilityStateDescriptor) {
+      Object.defineProperty(
+        rendered.window.document,
+        "visibilityState",
+        visibilityStateDescriptor,
+      );
+    } else {
+      Reflect.deleteProperty(rendered.window.document, "visibilityState");
+    }
+    if (originalMediaRecorder === undefined) {
+      Reflect.deleteProperty(globalThis, "MediaRecorder");
+      Reflect.deleteProperty(rendered.window, "MediaRecorder");
+    } else {
+      Reflect.set(globalThis, "MediaRecorder", originalMediaRecorder);
+      Reflect.set(rendered.window, "MediaRecorder", originalMediaRecorder);
+    }
+    URL.createObjectURL = originalCreateObjectUrl;
+    URL.revokeObjectURL = originalRevokeObjectUrl;
+    await rendered.cleanup();
+  }
+});
+
 test("keeps a failed recording for retry and reuses its capture time", async () => {
   const onAccepted = vi.fn();
   const rendered = await renderClientComponent(
