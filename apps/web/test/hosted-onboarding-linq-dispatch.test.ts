@@ -5220,6 +5220,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         retryable: true,
       }),
     );
+    const afterResponseTasks: Array<() => Promise<void>> = [];
 
     await expect(handleHostedOnboardingLinqWebhook({
       prisma,
@@ -5240,19 +5241,25 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         eventId,
         service: "iMessage",
       }),
+      scheduleAfterResponse: (task) => {
+        afterResponseTasks.push(task);
+      },
       signature: null,
       timestamp: null,
     })).rejects.toMatchObject({ retryable: true });
 
-    // The stop must chain behind the still-pending start, not race ahead of it.
+    // The cleanup must be owned by the request's post-response scheduler, not
+    // a detached promise: the failing invocation may freeze after the error
+    // response, so only scheduled work is guaranteed to run.
     expect(mocks.startHostedLinqChatTypingIndicator).toHaveBeenCalledTimes(1);
     expect(mocks.stopHostedLinqChatTypingIndicator).not.toHaveBeenCalled();
+    expect(afterResponseTasks.length).toBeGreaterThan(0);
+    // The stop must also chain behind the still-pending start, not race it.
     typingStart.resolve({ ok: true, status: 204 });
-    await vi.waitFor(() => {
-      expect(mocks.stopHostedLinqChatTypingIndicator).toHaveBeenCalledWith({
-        chatId: "chat_123",
-        timeoutMs: 2_500,
-      });
+    await Promise.all(afterResponseTasks.map((task) => task()));
+    expect(mocks.stopHostedLinqChatTypingIndicator).toHaveBeenCalledWith({
+      chatId: "chat_123",
+      timeoutMs: 2_500,
     });
     expect(mocks.stopHostedLinqChatTypingIndicator).toHaveBeenCalledTimes(1);
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
@@ -5364,6 +5371,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(
       new Error("temporal unavailable"),
     );
+    const afterResponseTasks: Array<() => Promise<void>> = [];
 
     await expect(handleHostedOnboardingLinqWebhook({
       prisma,
@@ -5384,15 +5392,18 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         eventId,
         service: "iMessage",
       }),
+      scheduleAfterResponse: (task) => {
+        afterResponseTasks.push(task);
+      },
       signature: null,
       timestamp: null,
     })).rejects.toThrow("temporal unavailable");
 
-    await vi.waitFor(() => {
-      expect(mocks.stopHostedLinqChatTypingIndicator).toHaveBeenCalledWith({
-        chatId: "chat_123",
-        timeoutMs: 2_500,
-      });
+    expect(mocks.stopHostedLinqChatTypingIndicator).not.toHaveBeenCalled();
+    await Promise.all(afterResponseTasks.map((task) => task()));
+    expect(mocks.stopHostedLinqChatTypingIndicator).toHaveBeenCalledWith({
+      chatId: "chat_123",
+      timeoutMs: 2_500,
     });
     expect(mocks.stopHostedLinqChatTypingIndicator).toHaveBeenCalledTimes(1);
   });

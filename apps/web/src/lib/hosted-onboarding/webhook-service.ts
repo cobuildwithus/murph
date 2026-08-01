@@ -791,7 +791,10 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     // A failing webhook is retried later with no visible continuation until
     // then, so clear any started typing hint instead of letting its promise
     // decay into silence.
-    stopHostedLinqInstantStartTypingHintBestEffort(instantStartTypingHint);
+    stopHostedLinqInstantStartTypingHintBestEffort({
+      hint: instantStartTypingHint,
+      scheduleAfterResponse: input.scheduleAfterResponse,
+    });
     finishHostedOnboardingTiming(timing, "failed", {
       errorName: deriveHostedOnboardingTimingErrorName(error),
       eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
@@ -968,14 +971,19 @@ function startHostedLinqInstantStartTypingHintBestEffort(input: {
 }
 
 // Chains after the in-flight start settles so cancellation cannot race ahead
-// of it, and never affects the webhook's own failure handling.
-function stopHostedLinqInstantStartTypingHintBestEffort(
-  hint: HostedLinqInstantStartTypingHint | null,
-): void {
+// of it, and never affects the webhook's own failure handling. The cleanup is
+// registered with the request's post-response scheduler because the failing
+// webhook's invocation may freeze right after the error response; a detached
+// promise would not be guaranteed to run, leaving the typing promise dangling.
+function stopHostedLinqInstantStartTypingHintBestEffort(input: {
+  hint: HostedLinqInstantStartTypingHint | null;
+  scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
+}): void {
+  const hint = input.hint;
   if (!hint) {
     return;
   }
-  void hint.started
+  const task = () => hint.started
     .then(() => stopHostedLinqChatTypingIndicator({
       chatId: hint.chatId,
       timeoutMs: HOSTED_LINQ_INSTANT_START_TYPING_HINT_TIMEOUT_MS,
@@ -994,6 +1002,16 @@ function stopHostedLinqInstantStartTypingHintBestEffort(
         { errorName: deriveHostedOnboardingTimingErrorName(error) },
       );
     });
+
+  try {
+    if (input.scheduleAfterResponse) {
+      input.scheduleAfterResponse(task);
+      return;
+    }
+  } catch {
+    // Fall through to the immediate best-effort path.
+  }
+  void task();
 }
 
 async function maybeSendHostedLinqIngressReadReceipt(input: {
