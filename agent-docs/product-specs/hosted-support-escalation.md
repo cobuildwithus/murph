@@ -21,8 +21,8 @@ A member who reaches a Murph-owned product blocker should not be left at a hard 
 
 - Ordinary feedback remains anonymous.
 - Explicit support escalation is member-linked because support needs to identify the affected account.
-- The support email is metadata-only: it contains the internal feedback id and internal member id, but never the model-authored summary. The de-identified issue remains in the existing product-feedback record for controlled investigation.
-- Never include raw conversation or voice text, names, handles, email addresses, phone numbers, health facts, measurements, diagnoses, medications, precise locations, secrets, or provider payloads in the email.
+- The support email contains the internal feedback id, internal member id, and the capture-scrubbed de-identified product-only summary. This follows the existing internal product-feedback email boundary: summary text may enter operator email only after the recording path has bounded it and applied the shared deterministic redaction pass.
+- Never include raw conversation or voice text, names, handles, email addresses, phone numbers, health facts, measurements, diagnoses, medications, precise locations, secrets, provider payloads, or any other unsanitized context in the support summary or email.
 
 ## Rate and replay behavior
 
