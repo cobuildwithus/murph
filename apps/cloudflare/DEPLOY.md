@@ -678,6 +678,7 @@ Opt-in runtime integrations:
 - `HOSTED_EMAIL_DOMAIN`
 - `HOSTED_EMAIL_FROM_ADDRESS`
 - `HOSTED_EMAIL_LOCAL_PART`
+- `HOSTED_PHYSICAL_NOTES_ENABLED`
 - `LINQ_API_BASE_URL`
 - `TELEGRAM_API_BASE_URL`
 - `TELEGRAM_BOT_USERNAME`
@@ -692,6 +693,12 @@ Opt-in runtime integrations:
 - `JUNCTION_RECONCILE_DAYS`
 - `JUNCTION_RECONCILE_INTERVAL_MS`
 - `JUNCTION_REQUEST_TIMEOUT_MS`
+
+`HOSTED_PHYSICAL_NOTES_ENABLED` exposes the hosted physical-note tool only when
+set to exactly `true`; leave it unset to keep the tool disabled. Set it as a
+GitHub `production` environment variable, and only after Web's Lob
+configuration is live (see `agent-docs/product-specs/physical-notes.md`,
+Deployment).
 
 `DEVICE_SYNC_PUBLIC_BASE_URL` is optional. When set, it may select a stable
 provider callback/webhook path on the hosted Web hostname, but it must not use a
