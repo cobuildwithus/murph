@@ -7,6 +7,7 @@ import {
 } from "@/src/components/hosted-onboarding/client-api";
 import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
+import { ConnectCallbackErrorNotice } from "@/src/components/device-sync/connect-callback-error-notice";
 import { Input } from "@/src/components/ui/input";
 import { DeviceSyncSetupGuideDialog } from "@/app/(dashboard)/home/device-sync-completion-dialog";
 import type { DeviceSyncCompletionContactAction } from "@/src/lib/device-sync/connect-completion-types";
@@ -376,10 +377,12 @@ export function ConnectSourcesGrid({
             <AlertDescription>{visibleNotice.message}</AlertDescription>
           </Alert>
         ) : (
-          <Alert variant="destructive">
-            <AlertTitle>Unable to finish connection</AlertTitle>
-            <AlertDescription>{visibleNotice.message}</AlertDescription>
-          </Alert>
+          <ConnectCallbackErrorNotice
+            errorCode={visibleNotice.errorCode}
+            message={visibleNotice.message}
+            sourceLabel={visibleNotice.sourceLabel}
+            title={visibleNotice.title}
+          />
         )
       ) : null}
 

@@ -135,7 +135,9 @@ export function createConnectCallbackNotice(
   }
 
   return {
+    errorCode: input.errorCode,
     kind: "error",
+    sourceLabel,
     title: "Unable to finish connection",
     message: describeDeviceSyncCallbackError(sourceLabel, input.errorCode),
   };
@@ -287,6 +289,10 @@ function describeDeviceSyncCallbackError(providerLabel: string, errorCode: strin
       return `${providerLabel} was not connected this time. You can try again whenever you're ready.`;
     case "OAUTH_STATE_INVALID":
       return `${providerLabel} gave us an expired or invalid return from the last attempt. Start a fresh connection and try again.`;
+    case "CALLBACK_PROOF_INVALID":
+      return `That return link did not match the browser you started in, so nothing was connected. Start ${providerLabel} again from this page.`;
+    case "CALLBACK_SESSION_REQUIRED":
+      return `You were signed out before ${providerLabel} finished connecting. Log in, then start the connection again.`;
     default:
       return `We could not finish connecting ${providerLabel}. Try again when you're ready.`;
   }

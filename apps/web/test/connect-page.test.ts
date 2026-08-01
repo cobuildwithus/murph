@@ -3785,6 +3785,72 @@ test("ConnectPage shows fallback callback errors with the original source label"
   assert.match(markup, /We could not finish connecting Garmin\./);
 });
 
+test("ConnectPage offers support and home recovery on callback failures", async () => {
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const markup = renderToStaticMarkup(await ConnectPage({
+    searchParams: Promise.resolve({
+      connectSource: "garmin",
+      deviceSyncError: "CALLBACK_FAILED",
+      deviceSyncProvider: "junction",
+      deviceSyncStatus: "error",
+    }),
+  }));
+
+  assert.match(markup, /Email support/);
+  assert.match(markup, /Go to home/);
+  assert.match(markup, /href="mailto:support@withmurph\.ai\?/u);
+  // Support needs the failing source and code without asking the member.
+  assert.match(markup, /subject=Murph\+device\+connection\+help/u);
+  assert.match(markup, /Garmin/u);
+  assert.match(markup, /CALLBACK_FAILED/u);
+  assert.match(markup, /href="\/home"/u);
+});
+
+test("ConnectPage explains a callback that lost its initiating browser", async () => {
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const markup = renderToStaticMarkup(await ConnectPage({
+    searchParams: Promise.resolve({
+      connectSource: "oura",
+      deviceSyncError: "CALLBACK_PROOF_INVALID",
+      deviceSyncProvider: "oura",
+      deviceSyncStatus: "error",
+    }),
+  }));
+
+  assert.match(markup, /That return link did not match the browser you started in/);
+  assert.match(markup, /nothing was connected/);
+  assert.match(markup, /Email support/);
+});
+
+test("ConnectPage explains a callback that arrived signed out", async () => {
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const markup = renderToStaticMarkup(await ConnectPage({
+    searchParams: Promise.resolve({
+      connectSource: "oura",
+      deviceSyncError: "CALLBACK_SESSION_REQUIRED",
+      deviceSyncProvider: "oura",
+      deviceSyncStatus: "error",
+    }),
+  }));
+
+  assert.match(markup, /You were signed out before Oura finished connecting\./);
+  assert.match(markup, /Log in, then start the connection again\./);
+});
+
+test("ConnectPage keeps successful callbacks free of failure recovery actions", async () => {
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const markup = renderToStaticMarkup(await ConnectPage({
+    searchParams: Promise.resolve({
+      connectSource: "oura",
+      deviceSyncProvider: "oura",
+      deviceSyncStatus: "connected",
+    }),
+  }));
+
+  assert.doesNotMatch(markup, /Email support/);
+  assert.doesNotMatch(markup, /Go to home/);
+});
+
 function readWhoopSyncContactAction(page: ReactNode): unknown {
   assert.ok(isValidElement<{ children?: ReactNode }>(page));
   const connectSourcesGrid = Children.toArray(page.props.children).find((child) => {
