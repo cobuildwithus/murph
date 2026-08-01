@@ -1,6 +1,6 @@
 # Overlap runner container boot with instant-start enrollment
 
-Status: active
+Status: completed
 Created: 2026-08-01
 Updated: 2026-08-01
 
@@ -122,3 +122,4 @@ Updated: 2026-08-01
   the narrowest web check; exact-head CI owns the broad suite.
 - Expected outcomes: new tests pass; existing wake-ordering and instant-start
   dispatch tests unchanged and green.
+Completed: 2026-08-01
