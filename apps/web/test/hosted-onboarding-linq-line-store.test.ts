@@ -16,6 +16,7 @@ import {
   readHostedLinqRecentMessageEffectCountsTx,
   readHostedLinqIncomingLineState,
   readHostedLinqReceiptCorrelatedRecoveryLineTx,
+  syncHostedLinqConfiguredLinesTx,
   upsertHostedLinqLineForPhoneTx,
 } from "@/src/lib/hosted-onboarding/linq-line-store";
 import {
@@ -659,6 +660,57 @@ describe("hosted Linq proactive-conversation capacity", () => {
         phoneNumberLookupKey: "lookup:line-1",
       });
     }
+  });
+});
+
+describe("syncHostedLinqConfiguredLinesTx", () => {
+  it("takes the inventory-wide lock before any per-phone lock, read, or write", async () => {
+    const events: string[] = [];
+    const transactionClient = {
+      $executeRaw: vi.fn().mockImplementation((strings: TemplateStringsArray) => {
+        events.push(
+          strings.join("?").includes("hosted_linq_phone_number_inventory")
+            ? "inventory-lock"
+            : "phone-lock",
+        );
+        return Promise.resolve([]);
+      }),
+      hostedLinqLine: {
+        findMany: vi.fn().mockImplementation(() => {
+          events.push("candidate-read");
+          return Promise.resolve([]);
+        }),
+        upsert: vi.fn().mockImplementation((input: { create: { phoneNumberLookupKey: string } }) => {
+          events.push("write");
+          return Promise.resolve({
+            phoneNumberLookupKey: input.create.phoneNumberLookupKey,
+          });
+        }),
+      },
+    };
+
+    await syncHostedLinqConfiguredLinesTx({
+      activeMemberLimit: null,
+      observedAt: new Date("2026-06-30T12:00:00.000Z"),
+      phoneNumbers: ["+15550100001", "+15550100002"],
+      prisma: transactionClient as never,
+    });
+
+    // Every multi-phone writer must serialize on the shared inventory lock
+    // before touching any per-phone lock, so lock acquisition can never
+    // invert against the provider-inventory writer.
+    expect(events[0]).toBe("inventory-lock");
+    expect(events.filter((event) => event === "inventory-lock")).toHaveLength(1);
+    expect(events.filter((event) => event === "phone-lock")).toHaveLength(2);
+    expect(events).toEqual([
+      "inventory-lock",
+      "phone-lock",
+      "candidate-read",
+      "write",
+      "phone-lock",
+      "candidate-read",
+      "write",
+    ]);
   });
 });
 
