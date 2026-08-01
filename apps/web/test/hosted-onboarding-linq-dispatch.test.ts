@@ -106,6 +106,7 @@ const mocks = vi.hoisted(() => {
     createHostedLinqChat: vi.fn(),
     sendHostedLinqReadReceipt: vi.fn(),
     startHostedLinqChatTypingIndicator: vi.fn(),
+    stopHostedLinqChatTypingIndicator: vi.fn(),
     shareMurphHostedLinqNativeContactCardToChat: vi.fn().mockResolvedValue({
       status: "sent",
     }),
@@ -313,6 +314,7 @@ vi.mock("../src/lib/hosted-onboarding/linq-client", async () => {
     sendHostedLinqChatMessage: mocks.sendHostedLinqChatMessage,
     sendHostedLinqReadReceipt: mocks.sendHostedLinqReadReceipt,
     startHostedLinqChatTypingIndicator: mocks.startHostedLinqChatTypingIndicator,
+    stopHostedLinqChatTypingIndicator: mocks.stopHostedLinqChatTypingIndicator,
   };
 });
 
@@ -622,6 +624,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue(null);
     mocks.startHostedLinqChatTypingIndicator.mockResolvedValue({
+      ok: true,
+      status: 204,
+    });
+    mocks.stopHostedLinqChatTypingIndicator.mockResolvedValue({
       ok: true,
       status: 204,
     });
@@ -4888,17 +4894,19 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       userId: memberId,
     });
     const callOrder: string[] = [];
-    const ensureRuntimeProcessing = vi.fn(async (input: { userId: string }) => {
+    const ensureResult = createDeferred<{ accepted: boolean }>();
+    const typingResult = createDeferred<{ ok: boolean; status: number }>();
+    const ensureRuntimeProcessing = vi.fn((input: { userId: string }) => {
       callOrder.push(`ensure:${input.userId}`);
-      return { accepted: true };
+      return ensureResult.promise;
     });
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       ensureRuntimeProcessing,
     });
     mocks.startHostedLinqChatTypingIndicator.mockImplementation(
-      async (input: { chatId: string }) => {
+      (input: { chatId: string }) => {
         callOrder.push(`typing:${input.chatId}`);
-        return { ok: true, status: 204 };
+        return typingResult.promise;
       },
     );
     mocks.ensureHostedLinqInstantStartPulseTrialEnrollment.mockImplementationOnce(
@@ -4913,7 +4921,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
     );
 
-    await expect(handleHostedOnboardingLinqWebhook({
+    const response = await handleHostedOnboardingLinqWebhook({
       prisma,
       rawBody: buildHostedLinqWebhookBody({
         data: {
@@ -4934,7 +4942,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       }),
       signature: null,
       timestamp: null,
-    })).resolves.toMatchObject({
+    });
+    expect(response).toMatchObject({
       ignored: false,
       ok: true,
       reason: "wake-appended-active-member",
@@ -4951,6 +4960,20 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(ensureRuntimeProcessing.mock.calls[0]?.[0]).toMatchObject({
       orchestrationAttemptId: expect.stringMatching(/^web-ingress-/),
       userId: memberId,
+    });
+    expect(mocks.startHostedLinqChatTypingIndicator).toHaveBeenCalledWith({
+      chatId: "chat_123",
+      timeoutMs: 2_500,
+    });
+
+    ensureResult.resolve({ accepted: true });
+    typingResult.resolve({ ok: false, status: 503 });
+    await Promise.all([ensureResult.promise, typingResult.promise]);
+    await vi.waitFor(() => {
+      expect(mocks.logHostedOnboardingDiagnostic).toHaveBeenCalledWith(
+        "hosted-onboarding.webhook.linq.instant-start-typing-hint-failed",
+        { httpStatus: 503 },
+      );
     });
   });
 
@@ -5049,6 +5072,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       ensureRuntimeProcessing,
     });
+    mocks.startHostedLinqChatTypingIndicator.mockRejectedValueOnce(
+      new Error("typing unavailable"),
+    );
     mocks.ensureHostedLinqInstantStartPulseTrialEnrollment.mockRejectedValueOnce(
       new Error("stripe unavailable"),
     );
@@ -5084,6 +5110,147 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       userId: memberId,
     });
     expect(mocks.startHostedLinqChatTypingIndicator).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => {
+      expect(mocks.logHostedOnboardingDiagnostic).toHaveBeenCalledWith(
+        "hosted-onboarding.webhook.linq.instant-start-typing-hint-failed",
+        { errorName: "Error" },
+      );
+    });
+  });
+
+  it("clears the typing hint after the in-flight start when the webhook fails retryably", async () => {
+    mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
+    const memberId = "member_instant_start_typing_stop";
+    const eventId = "evt_instant_start_typing_stop";
+    const participantContact = createHostedLinqParticipantContact({
+      kind: "phone",
+      value: "+15551234567",
+    });
+    if (!participantContact) {
+      throw new Error("Expected a valid participant contact.");
+    }
+    const pendingRoutingPrivate = await buildHostedMemberRoutingPrivateColumns({
+      linqChatId: null,
+      linqRecipientPhone: null,
+      memberId,
+      pendingLinqChatId: "chat_123",
+      pendingLinqParticipantContact: participantContact.value,
+      pendingLinqRecipientPhone: "+15550000000",
+      telegramThreadId: null,
+      telegramUserId: null,
+    });
+    const hostedMemberRouting = createStatefulHostedMemberRoutingMock({
+      ...pendingRoutingPrivate,
+      linqChatLookupKey: null,
+      linqHomeLineAssignedAt: new Date("2026-03-26T12:00:00.000Z"),
+      linqParticipantContactKind: null,
+      linqParticipantContactLookupKey: null,
+      linqRecipientPhoneLookupKey: null,
+      memberId,
+      pendingLinqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
+      pendingLinqParticipantContactKind: participantContact.kind,
+      pendingLinqParticipantContactLookupKey: participantContact.lookupKey,
+      pendingLinqParticipantContactObservedAt:
+        new Date("2026-03-26T12:00:00.000Z"),
+      pendingLinqRecipientPhoneLookupKey:
+        createHostedPhoneLookupKey("+15550000000"),
+      telegramUserLookupKey: null,
+    });
+    const invite = {
+      channel: "linq",
+      createdAt: new Date("2026-03-26T12:00:00.000Z"),
+      expiresAt: new Date("2026-07-29T12:00:00.000Z"),
+      id: "invite_instant_start_typing_stop",
+      instantStartAdmissionEventId: eventId as string | null,
+      inviteCode: "code_instant_start_typing_stop",
+      memberId,
+      sentAt: null,
+      status: "pending",
+    };
+    const prisma = asPrismaTransactionClient({
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(invite),
+        findFirst: vi.fn(async () =>
+          invite.instantStartAdmissionEventId ? invite : null),
+        findUnique: vi.fn().mockResolvedValue(invite),
+        update: vi.fn().mockResolvedValue(invite),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedLinqFirstContactAdmissionDecision: {
+        createMany: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue({
+          confidence: 0.99,
+          decision: "allow",
+          eventId,
+          source: "model",
+        }),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn(async () => ({
+          accountGroupMemberships: [],
+          billingStatus: HostedBillingStatus.not_started,
+          createdAt: new Date("2026-03-26T12:00:00.000Z"),
+          id: memberId,
+          invites: [],
+          phoneLookupKey: createHostedPhoneLookupKey("+15551234567"),
+          suspendedAt: null,
+          threadContainer: null,
+          updatedAt: new Date("2026-03-26T12:00:00.000Z"),
+        })),
+        update: vi.fn(),
+      },
+      hostedMemberRouting,
+    });
+    const typingStart = createDeferred<{ ok: boolean; status: number }>();
+    mocks.startHostedLinqChatTypingIndicator.mockReturnValueOnce(
+      typingStart.promise,
+    );
+    mocks.ensureHostedLinqInstantStartPulseTrialEnrollment.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "HOSTED_STRIPE_UNAVAILABLE",
+        httpStatus: 503,
+        message: "Stripe is unavailable. Retry this webhook.",
+        retryable: true,
+      }),
+    );
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          chat: {
+            id: "chat_123",
+            is_group: false,
+            owner_handle: {
+              handle: "+15550000000",
+              id: "handle_owner_123",
+              is_me: true,
+              service: "iMessage",
+            },
+          },
+          parts: [{ type: "text", value: "Hey Murph" }],
+        },
+        eventId,
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    })).rejects.toMatchObject({ retryable: true });
+
+    // The stop must chain behind the still-pending start, not race ahead of it.
+    expect(mocks.startHostedLinqChatTypingIndicator).toHaveBeenCalledTimes(1);
+    expect(mocks.stopHostedLinqChatTypingIndicator).not.toHaveBeenCalled();
+    typingStart.resolve({ ok: true, status: 204 });
+    await vi.waitFor(() => {
+      expect(mocks.stopHostedLinqChatTypingIndicator).toHaveBeenCalledWith({
+        chatId: "chat_123",
+        timeoutMs: 2_500,
+      });
+    });
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
   it("does not prewarm or typing-hint an ordinary active-member inbound", async () => {
@@ -11912,6 +12079,18 @@ function normalizeHostedWebhookSideEffectRecord(value: unknown): Record<string, 
     linqResultMessageId:
       record.kind === "linq_message_send" && typeof result?.messageId === "string" ? result.messageId : null,
     linqTemplate: record.kind === "linq_message_send" && typeof payload?.template === "string" ? payload.template : null,
+  };
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((promiseResolve) => {
+    resolve = promiseResolve;
+  });
+
+  return {
+    promise,
+    resolve,
   };
 }
 

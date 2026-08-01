@@ -91,8 +91,12 @@ Updated: 2026-08-01
 2. Fire the prewarm in the instant-start branch of
    `handleHostedOnboardingLinqWebhook` immediately after plan tx #2 returns
    `instantStartEnrollment`.
-3. Add `startHostedLinqChatTypingIndicator` to the web linq-client (same shape
-   as the read-receipt call) and fire it best-effort at the same point.
+3. Add `startHostedLinqChatTypingIndicator` and `stopHostedLinqChatTypingIndicator`
+   to the web linq-client (same shape as the read-receipt call), fire the start
+   best-effort at the same point, and chain a best-effort stop behind the
+   in-flight start when the webhook fails before durable continuation exists
+   (specialist review finding: the hint must not promise a reply no surviving
+   continuation owns).
 4. Add focused tests (dispatch test file, matching existing harness patterns).
 5. Update the durable doc sentence that says direct wakes are post-Temporal
    only, naming this prewarm caller; add the typing-hint line to
