@@ -57,7 +57,9 @@ test("completeHostedPrivyAuth sends initial-visit eligible active members throug
   });
 });
 
-test("completeHostedPrivyAuth sends invite-bound active members through the initial visit handoff", async () => {
+test("completeHostedPrivyAuth keeps invite-bound returning members on the plain home handoff", async () => {
+  // Invite provenance is not an eligibility owner: only the completion
+  // payload's first-web-session signal opens the one-shot initial visit.
   const { completeHostedPrivyAuth } = await import(
     "@/src/components/hosted-onboarding/hosted-auth-completion"
   );
@@ -68,7 +70,7 @@ test("completeHostedPrivyAuth sends invite-bound active members through the init
       inviteCode: "invite-code",
     }),
   ).resolves.toMatchObject({
-    redirectUrl: "/home?initialVisit=true",
+    redirectUrl: "/home",
   });
 });
 

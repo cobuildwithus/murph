@@ -54,7 +54,6 @@ import { hostedOnboardingError } from "./errors";
 
 type HostedPrivyCompletionMemberResolution = {
   bindingAuthMethod: HostedPrivyAuthMethod;
-  initialVisitEligible: boolean;
   member: HostedMemberCoreState;
   primaryBindingSynced: boolean;
 };
@@ -69,7 +68,6 @@ export async function completeHostedPrivyVerification(input: {
 }): Promise<{
   inviteCode: string;
   joinUrl: string;
-  initialVisitEligible: boolean;
   member: HostedMemberCoreState;
   memberId: string;
   messagingSetupRequired: boolean;
@@ -150,7 +148,6 @@ export async function completeHostedPrivyVerification(input: {
 
           return {
             bindingAuthMethod: inviteAuthMethod,
-            initialVisitEligible: true,
             member,
             primaryBindingSynced:
               inviteAuthMethod === "email" || inviteAuthMethod === "telegram",
@@ -179,7 +176,6 @@ export async function completeHostedPrivyVerification(input: {
               });
 
               return {
-                initialVisitEligible: memberResolution.created,
                 member: memberResolution.member,
                 primaryBindingSynced: authMethod === "email" || authMethod === "telegram",
               };
@@ -242,7 +238,6 @@ export async function completeHostedPrivyVerification(input: {
 
     return {
       inviteCode: activeInvite.inviteCode,
-      initialVisitEligible: memberResolution.initialVisitEligible,
       joinUrl: buildHostedInviteUrl(activeInvite.inviteCode),
       member,
       memberId: member.id,
