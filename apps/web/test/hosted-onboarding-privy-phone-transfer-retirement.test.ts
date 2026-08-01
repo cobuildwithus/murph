@@ -257,6 +257,15 @@ describe("Privy phone-transfer source retirement", () => {
     const fixture = makeFixture({ autoTrial: true });
     const activationEventId =
       `member.activated:hosted.auto_pulse_trial.enrolled:${SOURCE_MEMBER_ID}:auto-pulse-trial:${STRIPE_SUBSCRIPTION_ID}`;
+    // The welcome delivery established the provider chat identity and
+    // observed the phone participant handle within seconds of signup.
+    fixture.prisma.hostedMemberRouting.findUnique.mockResolvedValue({
+      ...makeAutoTrialRouting(),
+      linqChatIdEncrypted: "chat-ciphertext",
+      linqChatLookupKey: "chat:established",
+      linqParticipantContactKind: "phone",
+      linqParticipantContactLookupKey: "participant:phone",
+    });
     fixture.prisma.hostedWorkspace.findUnique.mockResolvedValue({
       acceptedAttemptFailureRecheckClaimedAt: null,
       browserVaultReplicaRef: null,
@@ -319,6 +328,50 @@ describe("Privy phone-transfer source retirement", () => {
       },
       sourceMemberId: SOURCE_MEMBER_ID,
     });
+  });
+
+  it.each([
+    {
+      label: "a non-phone participant handle",
+      routing: {
+        linqParticipantContactKind: "email",
+        linqParticipantContactLookupKey: "participant:email",
+      },
+    },
+    {
+      label: "a participant handle without its kind",
+      routing: {
+        linqParticipantContactLookupKey: "participant:unknown",
+      },
+    },
+    {
+      label: "a telegram routing identity",
+      routing: {
+        telegramUserIdEncrypted: "telegram-ciphertext",
+        telegramUserLookupKey: "telegram:user",
+      },
+    },
+  ])("rejects a source routing with $label", async ({ routing }) => {
+    const fixture = makeFixture({ autoTrial: true });
+    fixture.prisma.hostedMemberRouting.findUnique.mockResolvedValue({
+      ...makeAutoTrialRouting(),
+      ...routing,
+    });
+
+    await expect(prepare(fixture)).rejects.toMatchObject({
+      code: "PRIVY_PHONE_TRANSFER_REQUIRES_SUPPORT",
+    });
+    expect(fixture.prisma.hostedMember.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects a source routed through an unknown line", async () => {
+    const fixture = makeFixture({ autoTrial: true });
+    fixture.prisma.hostedLinqLine.findUnique.mockResolvedValue(null);
+
+    await expect(prepare(fixture)).rejects.toMatchObject({
+      code: "PRIVY_PHONE_TRANSFER_REQUIRES_SUPPORT",
+    });
+    expect(fixture.prisma.hostedMember.updateMany).not.toHaveBeenCalled();
   });
 
   it("rejects a source whose conversation counter recorded any input", async () => {
@@ -687,6 +740,11 @@ function makeFixture(input: {
       findFirst: vi.fn().mockResolvedValue(null),
     },
     hostedLinqDelivery: nullFinder(),
+    hostedLinqLine: {
+      findUnique: vi.fn().mockResolvedValue(autoTrial
+        ? { phoneNumberLookupKey: `phone:${PHONE_NUMBER}` }
+        : null),
+    },
     hostedMailboxItem: {
       findMany: vi.fn().mockResolvedValue(autoTrial
         ? [
@@ -724,26 +782,7 @@ function makeFixture(input: {
     },
     hostedMemberRouting: {
       findUnique: vi.fn().mockResolvedValue(autoTrial
-        ? {
-            linqChatIdEncrypted: null,
-            linqChatLookupKey: null,
-            linqHomeLineAssignedAt: NOW,
-            linqParticipantContactKind: null,
-            linqParticipantContactLookupKey: null,
-            linqRecipientPhoneEncrypted: "routing-ciphertext",
-            linqRecipientPhoneLookupKey: `phone:${PHONE_NUMBER}`,
-            pendingLinqChatIdEncrypted: null,
-            pendingLinqChatLookupKey: null,
-            pendingLinqParticipantContactEncrypted: null,
-            pendingLinqParticipantContactKind: null,
-            pendingLinqParticipantContactLookupKey: null,
-            pendingLinqParticipantContactObservedAt: null,
-            pendingLinqRecipientPhoneEncrypted: null,
-            pendingLinqRecipientPhoneLookupKey: null,
-            replyAliasLookupKey: null,
-            telegramUserIdEncrypted: null,
-            telegramUserLookupKey: null,
-          }
+        ? makeAutoTrialRouting()
         : null),
     },
     hostedUsageReferral: nullFinder(),
@@ -801,6 +840,29 @@ function makeFixture(input: {
     sourceShape,
     targetIdentity,
     targetMember,
+  };
+}
+
+function makeAutoTrialRouting() {
+  return {
+    linqChatIdEncrypted: null,
+    linqChatLookupKey: null,
+    linqHomeLineAssignedAt: NOW,
+    linqParticipantContactKind: null,
+    linqParticipantContactLookupKey: null,
+    linqRecipientPhoneEncrypted: "routing-ciphertext",
+    linqRecipientPhoneLookupKey: `phone:${PHONE_NUMBER}`,
+    pendingLinqChatIdEncrypted: null,
+    pendingLinqChatLookupKey: null,
+    pendingLinqParticipantContactEncrypted: null,
+    pendingLinqParticipantContactKind: null,
+    pendingLinqParticipantContactLookupKey: null,
+    pendingLinqParticipantContactObservedAt: null,
+    pendingLinqRecipientPhoneEncrypted: null,
+    pendingLinqRecipientPhoneLookupKey: null,
+    replyAliasLookupKey: null,
+    telegramUserIdEncrypted: null,
+    telegramUserLookupKey: null,
   };
 }
 

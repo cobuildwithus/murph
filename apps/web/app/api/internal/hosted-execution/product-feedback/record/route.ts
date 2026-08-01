@@ -13,13 +13,12 @@ import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 const BODY_LIMIT_BYTES = 16_384;
 
 export const POST = withJsonError(async (request: Request) => {
-  const { payload, userId: memberId } = await requireHostedCloudflareCallbackJsonRequest(request, {
+  const { payload } = await requireHostedCloudflareCallbackJsonRequest(request, {
     maxBodyBytes: BODY_LIMIT_BYTES,
   });
   const body = parseHostedRuntimeProductFeedbackRecordRequest(payload);
 
   return jsonOk(await recordHostedProductFeedback({
     feedback: body.feedback,
-    memberId,
   }));
 });
