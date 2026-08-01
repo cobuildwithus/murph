@@ -20,13 +20,12 @@ import {
 } from "@/src/lib/device-sync/browser-callback-proof";
 import { createHostedDeviceSyncPublicIngressService } from "@/src/lib/device-sync/public-ingress-service";
 import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
-import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 const HOSTED_DEVICE_SYNC_CALLBACK_FAILURE_MESSAGE =
   "Something went wrong while finishing the device connection. Please retry from Murph.";
 
-export async function POST(
+export async function GET(
   request: Request,
   context: { params: Promise<{ provider: string }> },
 ) {
@@ -34,7 +33,6 @@ export async function POST(
 
   try {
     providerName = await resolveDecodedRouteParam(context.params, "provider");
-    assertHostedOnboardingMutationOrigin(request);
     const publicIngress = createHostedDeviceSyncPublicIngressService(request);
     const session = await requireActiveHostedAppSessionFromRequest(request);
     const state = readHostedDeviceSyncCallbackState(new URL(request.url));
@@ -48,13 +46,12 @@ export async function POST(
         state,
       })
     ) {
+      // A callback delivered without its initiating-browser proof stays
+      // non-mutating: burn the OAuth state so the transferable provider URL
+      // cannot be relayed later, then land back on connection truth.
       await publicIngress.discardConnectionCallback(providerName);
       return withCallbackProofCleared(
-        callbackHtml(
-          "Device connection failed",
-          HOSTED_DEVICE_SYNC_CALLBACK_FAILURE_MESSAGE,
-          403,
-        ),
+        redirectTo(new URL("/connect", request.url).toString()),
         providerName,
       );
     }

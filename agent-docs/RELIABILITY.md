@@ -293,16 +293,16 @@ Last verified: 2026-07-31
   for the private message.
 - Foreground inbox/parser-backed daemon runs should favor restartable connectors with bounded backoff over permanently dead watch loops, while still keeping low-level restart behavior opt-in and always bounded by the owning abort signal.
 - Networked assistant/provider/channel calls should set explicit timeouts, propagate caller abort signals, and only auto-retry request shapes that are replay-safe or rate-limit directed.
-- Junction Link setup remains retryable but inert before browser confirmation.
-  Webhooks for an active `pending_link` or `link_returned` account release their
-  trace claim and return a retryable not-ready response; they do not persist
-  dirty state or wake work. Manual reconcile, due scheduling, ordinary queued
-  jobs, and sync-success promotion apply the same account phase gate. After a
-  shared account is `source_confirmed`, a new target source does not move the
-  account back into a pending phase. Its `DeviceConnectionSource` remains
-  `disconnected`, and source-attributed webhooks, dirty-state commit races, and
-  provider pulls fail or exit without admitting target data until callback
-  confirmation reaches the sole runtime connection-established admission
+- Junction Link setup remains retryable but inert before proof-verified callback
+  completion. Webhooks for an active `pending_link` or `link_returned` account
+  release their trace claim and return a retryable not-ready response; they do
+  not persist dirty state or wake work. Manual reconcile, due scheduling,
+  ordinary queued jobs, and sync-success promotion apply the same account phase
+  gate. After a shared account is `source_confirmed`, a new target source does
+  not move the account back into a pending phase. Its `DeviceConnectionSource`
+  remains `disconnected`, and source-attributed webhooks, dirty-state commit
+  races, and provider pulls fail or exit without admitting target data until
+  callback completion reaches the sole runtime connection-established admission
   boundary. Shared ingress marks every account persistence request with the
   closed `replace` or `preserve_established` policy; hosted Prisma and local
   SQLite apply the same shared predicate inside their persistence transactions,
