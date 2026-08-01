@@ -156,13 +156,16 @@ test("footer ownership stays on explicit public surfaces", () => {
   }
 });
 
-test("RootLayout provides default title, description, and preview image metadata", () => {
+test("RootLayout provides default title, description, preview image, and iOS app metadata", () => {
   assert.ok(metadata.metadataBase instanceof URL);
   assert.equal(metadata.title, "Murph — Health is hard. Don’t do it alone.");
   assert.equal(
     metadata.description,
     "Murph figures out what works for you—and gets your friends in on it. A personal health AI that runs experiments with you and challenges with your friends.",
   );
+  assert.deepEqual(metadata.itunes, {
+    appId: "6786145859",
+  });
   assert.deepEqual(metadata.openGraph?.images, [
     {
       alt: "Health is hard. Don’t do it alone.",
