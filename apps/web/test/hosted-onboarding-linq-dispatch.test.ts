@@ -4975,6 +4975,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         { httpStatus: 503 },
       );
     });
+    // A successful handoff owns the visible continuation; the hint stays.
+    expect(mocks.stopHostedLinqChatTypingIndicator).not.toHaveBeenCalled();
   });
 
   it("keeps the signup-link fallback intact when enrollment fails after the prewarm", async () => {
@@ -5116,6 +5118,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         { errorName: "Error" },
       );
     });
+    // The sent signup-link fallback owns the visible continuation; no stop.
+    expect(mocks.stopHostedLinqChatTypingIndicator).not.toHaveBeenCalled();
   });
 
   it("clears the typing hint after the in-flight start when the webhook fails retryably", async () => {
@@ -5250,7 +5254,147 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         timeoutMs: 2_500,
       });
     });
+    expect(mocks.stopHostedLinqChatTypingIndicator).toHaveBeenCalledTimes(1);
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("clears the typing hint once when the wake handoff fails after enrollment", async () => {
+    mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
+    const memberId = "member_instant_start_handoff_fail";
+    const eventId = "evt_instant_start_handoff_fail";
+    const participantContact = createHostedLinqParticipantContact({
+      kind: "phone",
+      value: "+15551234567",
+    });
+    if (!participantContact) {
+      throw new Error("Expected a valid participant contact.");
+    }
+    const pendingRoutingPrivate = await buildHostedMemberRoutingPrivateColumns({
+      linqChatId: null,
+      linqRecipientPhone: null,
+      memberId,
+      pendingLinqChatId: "chat_123",
+      pendingLinqParticipantContact: participantContact.value,
+      pendingLinqRecipientPhone: "+15550000000",
+      telegramThreadId: null,
+      telegramUserId: null,
+    });
+    const hostedMemberRouting = createStatefulHostedMemberRoutingMock({
+      ...pendingRoutingPrivate,
+      linqChatLookupKey: null,
+      linqHomeLineAssignedAt: new Date("2026-03-26T12:00:00.000Z"),
+      linqParticipantContactKind: null,
+      linqParticipantContactLookupKey: null,
+      linqRecipientPhoneLookupKey: null,
+      memberId,
+      pendingLinqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
+      pendingLinqParticipantContactKind: participantContact.kind,
+      pendingLinqParticipantContactLookupKey: participantContact.lookupKey,
+      pendingLinqParticipantContactObservedAt:
+        new Date("2026-03-26T12:00:00.000Z"),
+      pendingLinqRecipientPhoneLookupKey:
+        createHostedPhoneLookupKey("+15550000000"),
+      telegramUserLookupKey: null,
+    });
+    const invite = {
+      channel: "linq",
+      createdAt: new Date("2026-03-26T12:00:00.000Z"),
+      expiresAt: new Date("2026-07-29T12:00:00.000Z"),
+      id: "invite_instant_start_handoff_fail",
+      instantStartAdmissionEventId: eventId as string | null,
+      inviteCode: "code_instant_start_handoff_fail",
+      memberId,
+      sentAt: null,
+      status: "pending",
+    };
+    let trialActive = false;
+    const prisma = asPrismaTransactionClient({
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(invite),
+        findFirst: vi.fn(async () =>
+          invite.instantStartAdmissionEventId ? invite : null),
+        findUnique: vi.fn().mockResolvedValue(invite),
+        update: vi.fn().mockResolvedValue(invite),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedLinqFirstContactAdmissionDecision: {
+        createMany: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue({
+          confidence: 0.99,
+          decision: "allow",
+          eventId,
+          source: "model",
+        }),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn(async () => ({
+          accountGroupMemberships: [],
+          billingStatus: trialActive
+            ? HostedBillingStatus.active
+            : HostedBillingStatus.not_started,
+          createdAt: new Date("2026-03-26T12:00:00.000Z"),
+          id: memberId,
+          invites: [],
+          phoneLookupKey: createHostedPhoneLookupKey("+15551234567"),
+          suspendedAt: null,
+          threadContainer: null,
+          updatedAt: new Date("2026-03-26T12:00:00.000Z"),
+        })),
+        update: vi.fn(),
+      },
+      hostedMemberRouting,
+    });
+    mocks.readHostedMailboxItemOwnerById.mockResolvedValueOnce({
+      id: "mailbox_item_123",
+      userId: memberId,
+    });
+    mocks.ensureHostedLinqInstantStartPulseTrialEnrollment.mockImplementationOnce(
+      async () => {
+        trialActive = true;
+        invite.instantStartAdmissionEventId = null;
+        return {
+          redirectPath: "/home?initialVisit=true",
+          status: "enrolled",
+        };
+      },
+    );
+    mocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(
+      new Error("temporal unavailable"),
+    );
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          chat: {
+            id: "chat_123",
+            is_group: false,
+            owner_handle: {
+              handle: "+15550000000",
+              id: "handle_owner_123",
+              is_me: true,
+              service: "iMessage",
+            },
+          },
+          parts: [{ type: "text", value: "Hey Murph" }],
+        },
+        eventId,
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    })).rejects.toThrow("temporal unavailable");
+
+    await vi.waitFor(() => {
+      expect(mocks.stopHostedLinqChatTypingIndicator).toHaveBeenCalledWith({
+        chatId: "chat_123",
+        timeoutMs: 2_500,
+      });
+    });
+    expect(mocks.stopHostedLinqChatTypingIndicator).toHaveBeenCalledTimes(1);
   });
 
   it("does not prewarm or typing-hint an ordinary active-member inbound", async () => {
