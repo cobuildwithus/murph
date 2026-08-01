@@ -3,7 +3,7 @@ import { buttonVariants } from "@/src/components/ui/button";
 import { ContactSupportAction } from "@/src/components/support/contact-support-action";
 import { cn } from "@/src/lib/utils";
 
-export const CONNECT_CALLBACK_ERROR_SUPPORT_SUBJECT = "Murph device connection help";
+const CONNECT_CALLBACK_ERROR_SUPPORT_SUBJECT = "Murph device connection help";
 
 export function ConnectCallbackErrorNotice({
   errorCode = null,
