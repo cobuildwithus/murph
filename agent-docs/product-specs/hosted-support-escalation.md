@@ -2,6 +2,8 @@
 
 Last verified: 2026-08-01
 
+Implementation plan: `agent-docs/exec-plans/active/2026-08-01-hosted-support-escalation.md`.
+
 ## User purpose
 
 A member who reaches a Murph-owned product blocker should not be left at a hard wall. Murph must provide a real support address immediately and, when the member explicitly asks, can pass a de-identified issue to the product team from the conversation.
