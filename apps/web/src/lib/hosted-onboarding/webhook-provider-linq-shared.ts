@@ -163,6 +163,7 @@ export function buildGroupSetupRequiredResponse(input: {
         },
         recoveryToken: issueHostedLinqGroupEmailRecoveryToken({
           chatId: input.chatId,
+          now: new Date(input.occurredAt),
           observedAt: input.occurredAt,
           participantEmail,
           recipientPhone: input.recipientPhone,

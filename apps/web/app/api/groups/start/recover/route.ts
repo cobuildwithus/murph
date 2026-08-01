@@ -1,26 +1,21 @@
-import {
-  demoteHostedMemberLinqGroupChatBindingsTx,
-  readHostedMemberRoutingState,
-  upsertHostedMemberPendingLinqBindingTx,
-} from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { assertHostedMemberNotSuspended } from "@/src/lib/hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
+  readHostedMemberRoutingState,
+  upsertHostedMemberPendingLinqBindingTx,
+} from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
+import { lookupHostedMemberByVerifiedEmailAddress } from "@/src/lib/hosted-onboarding/hosted-member-store";
+import {
   jsonOk,
   readOptionalJsonObject,
   withJsonError,
 } from "@/src/lib/hosted-onboarding/http";
-import {
-  openHostedLinqGroupEmailRecoveryToken,
-} from "@/src/lib/hosted-onboarding/linq-group-setup";
-import {
-  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
-} from "@/src/lib/hosted-onboarding/shared";
-import {
-  readHostedThreadRouteByThreadIdentity,
-} from "@/src/lib/hosted-routing/thread-route-store";
+import { openHostedLinqGroupEmailRecoveryToken } from "@/src/lib/hosted-onboarding/linq-group-setup";
+import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
+import { acquireHostedLinqChatOwnershipLockTx } from "@/src/lib/hosted-routing/linq-chat-ownership-lock";
+import { readHostedThreadRouteByThreadIdentity } from "@/src/lib/hosted-routing/thread-route-store";
 import { getPrisma } from "@/src/lib/prisma";
 
 export const dynamic = "force-dynamic";
@@ -50,30 +45,47 @@ export const POST = withJsonError(async (request: Request) => {
 
   const prisma = getPrisma();
   const status = await prisma.$transaction(async (tx) => {
-    const routeBefore = await readHostedThreadRouteByThreadIdentity({
+    await acquireHostedLinqChatOwnershipLockTx({
+      chatId: recovery.chatId,
+      tx,
+    });
+    const route = await readHostedThreadRouteByThreadIdentity({
       channel: "linq",
       prisma: tx,
       threadId: recovery.chatId,
     });
-    if (routeBefore) {
+    if (route) {
       return "already_connected" as const;
+    }
+
+    const verifiedEmail = await lookupHostedMemberByVerifiedEmailAddress({
+      address: recovery.participantContact.value,
+      prisma: tx,
+    });
+    if (verifiedEmail) {
+      if (verifiedEmail.core.id !== session.member.id) {
+        throwRecoveryConflict();
+      }
+      return "linked" as const;
     }
 
     const routing = await readHostedMemberRoutingState({
       memberId: session.member.id,
       prisma: tx,
     });
-    if (
-      routing?.pendingLinqChatId
-      && routing.pendingLinqChatId !== recovery.chatId
-    ) {
-      throw hostedOnboardingError({
-        code: "HOSTED_LINQ_GROUP_EMAIL_RECOVERY_CONFLICT",
-        httpStatus: 409,
-        message:
-          "This Murph account is already finishing another Messages connection.",
-        retryable: false,
-      });
+    const pendingChatId = routing?.pendingLinqChatId ?? null;
+    const pendingContact = routing?.pendingLinqParticipantContact ?? null;
+    const pendingRecipientPhone =
+      routing?.pendingLinqRecipientPhone ?? null;
+    const hasPendingBinding = Boolean(
+      pendingChatId || pendingContact || pendingRecipientPhone,
+    );
+    const exactPendingBinding =
+      pendingChatId === recovery.chatId
+      && pendingContact?.lookupKey === recovery.participantContact.lookupKey
+      && pendingRecipientPhone === recovery.recipientPhone;
+    if (hasPendingBinding && !exactPendingBinding) {
+      throwRecoveryConflict();
     }
 
     await upsertHostedMemberPendingLinqBindingTx({
@@ -85,20 +97,6 @@ export const POST = withJsonError(async (request: Request) => {
       prisma: tx,
       recipientPhone: recovery.recipientPhone,
     });
-
-    const routeAfter = await readHostedThreadRouteByThreadIdentity({
-      channel: "linq",
-      prisma: tx,
-      threadId: recovery.chatId,
-    });
-    if (routeAfter) {
-      await demoteHostedMemberLinqGroupChatBindingsTx({
-        linqChatId: recovery.chatId,
-        prisma: tx,
-      });
-      return "already_connected" as const;
-    }
-
     return "linked" as const;
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
@@ -107,6 +105,16 @@ export const POST = withJsonError(async (request: Request) => {
     status,
   });
 });
+
+function throwRecoveryConflict(): never {
+  throw hostedOnboardingError({
+    code: "HOSTED_LINQ_GROUP_EMAIL_RECOVERY_CONFLICT",
+    httpStatus: 409,
+    message:
+      "That Messages address is already linked to another Murph setup.",
+    retryable: false,
+  });
+}
 
 function readRecoveryToken(value: unknown): string {
   if (

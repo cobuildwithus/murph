@@ -1613,13 +1613,14 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
-  it("ignores unbound Linq group chats from non-members before signup side effects", async () => {
+  it("offers unbound Linq group chats from non-members setup without signup side effects", async () => {
     const prisma = asPrismaTransactionClient({
       hostedInvite: {
         create: vi.fn(),
         findFirst: vi.fn(),
         update: vi.fn(),
       },
+      hostedLinqLine: buildManagedInboundHostedLinqLineFixture("+15550000000"),
       hostedMember: {
         create: vi.fn(),
         findUnique: vi.fn(),
@@ -1670,14 +1671,33 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     expect(response).toMatchObject({
-      ignored: true,
       ok: true,
-      reason: "group-chat",
+      reason: "sent-group-setup",
     });
-    // Sender identity is checked before admission, but an unbound non-member
-    // group message must not inspect or mutate personal routing state.
+    // The reply is one setup link. Sender identity is checked before admission,
+    // but an unbound non-member group message must not inspect or mutate
+    // personal routing state, nor start a signup.
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat_group_123",
+        message: expect.stringContaining("https://join.example.test/groups/start"),
+      }),
+    );
     expect(prisma.hostedMemberIdentity.findMany).toHaveBeenCalledTimes(1);
-    expect(prisma.hostedMemberRouting.findFirst).not.toHaveBeenCalled();
+    // The only routing read is the pending group-contact recovery lookup, which
+    // is scoped to this chat and line. Personal routing is neither read by
+    // identity nor mutated.
+    expect(prisma.hostedMemberRouting.findFirst).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedMemberRouting.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          pendingLinqChatLookupKey: expect.anything(),
+          pendingLinqParticipantContactLookupKey: expect.anything(),
+          pendingLinqRecipientPhoneLookupKey: expect.anything(),
+        }),
+      }),
+    );
     expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.upsert).not.toHaveBeenCalled();
     expect(prisma.hostedMember.create).not.toHaveBeenCalled();
@@ -1686,7 +1706,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
-    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
@@ -11198,6 +11217,46 @@ function buildUnassignableHostedLinqLineFixture(): HostedLinqLineFixture {
     update: vi.fn().mockResolvedValue({ phoneNumberLookupKey: "lookup:line" }),
     updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     upsert: vi.fn().mockResolvedValue({ phoneNumberLookupKey: "lookup:line" }),
+  };
+}
+
+/**
+ * A fully configured, healthy managed line. Inbound line state (unlike
+ * assignment eligibility) also reads `configuredAt` and the health/provider
+ * columns, so unknown-group setup recovery needs them populated.
+ */
+function buildManagedInboundHostedLinqLineFixture(
+  phoneNumber: string,
+): HostedLinqLineFixture {
+  const phoneNumberLookupKey = createHostedPhoneLookupKey(phoneNumber);
+  return {
+    findMany: vi.fn(async (query: { where?: { phoneNumberLookupKey?: { in?: string[] } } }) => {
+      const lookupKeys = new Set(query.where?.phoneNumberLookupKey?.in ?? []);
+      return (
+        lookupKeys.size === 0
+        || createHostedPhoneLookupKeyReadCandidates(phoneNumber).some((lookupKey) =>
+          lookupKeys.has(lookupKey)
+        )
+      )
+        ? [{
+            activeMemberLimit: null,
+            assignmentWeight: 1,
+            configuredAt: new Date("2026-03-26T00:00:00.000Z"),
+            egressPolicy: "enabled",
+            healthStatus: "healthy",
+            maxNewConversationsPerDay: null,
+            phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(phoneNumber),
+            phoneNumberHint: `*** ${phoneNumber.slice(-4)}`,
+            phoneNumberLookupKey,
+            providerReputationStatus: "HEALTHY",
+            providerServiceStatus: "ACTIVE",
+          }]
+        : [];
+    }),
+    findUnique: vi.fn().mockResolvedValue(null),
+    update: vi.fn().mockResolvedValue({ phoneNumberLookupKey }),
+    updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    upsert: vi.fn().mockResolvedValue({ phoneNumberLookupKey }),
   };
 }
 

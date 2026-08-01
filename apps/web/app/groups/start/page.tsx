@@ -11,26 +11,15 @@ export const revalidate = 0;
 export const metadata: Metadata = {
   title: "Set up Murph for a group",
   description: "Finish setting up Murph, then return to your group chat.",
+  referrer: "no-referrer",
   robots: {
     follow: false,
     index: false,
   },
 };
 
-type HostedGroupStartSearchParams = {
-  recover?: string | string[] | undefined;
-};
-
-export default async function HostedGroupStartPage({
-  searchParams,
-}: {
-  searchParams?: Promise<HostedGroupStartSearchParams>;
-}) {
-  const [auth, resolvedSearchParams] = await Promise.all([
-    getHostedPageAuthSnapshot(),
-    searchParams ?? Promise.resolve<HostedGroupStartSearchParams>({}),
-  ]);
-  const recoveryToken = readSingleSearchParam(resolvedSearchParams.recover);
+export default async function HostedGroupStartPage() {
+  const auth = await getHostedPageAuthSnapshot();
   const activeAccess = auth.authenticatedMember
     ? await readActiveHostedMemberAccess({
         memberId: auth.authenticatedMember.id,
@@ -42,16 +31,7 @@ export default async function HostedGroupStartPage({
       <HostedGroupStartClient
         activeAccess={activeAccess}
         authenticated={auth.authenticated}
-        recoveryToken={recoveryToken}
       />
     </main>
   );
-}
-
-function readSingleSearchParam(
-  value: string | string[] | undefined,
-): string | null {
-  const candidate = Array.isArray(value) ? value[0] : value;
-  const normalized = candidate?.trim() ?? "";
-  return normalized.length > 0 ? normalized : null;
 }

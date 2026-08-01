@@ -23,6 +23,7 @@ import { ClubsPageStudy } from "./clubs-page-study";
 import { ConnectSourceCardStudy } from "./connect-source-card-study";
 import { FamilyInviteJoinStudy } from "./family-invite-join-study";
 import { GroupJoinStudy } from "./group-join-study";
+import { GroupStartStudy } from "./group-start-study";
 import { GroupMemberPlanStudy } from "./group-member-plan-study";
 import { GrowthScorecardStudy } from "./growth-scorecard-study";
 import { HomeLoadStateStudy } from "./home-load-state-study";
@@ -264,6 +265,12 @@ export function SectionsContent() {
 
       <StudySection title="Group join message invites, actions, and sharing consents">
         <GroupJoinStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Unknown iMessage group setup and recovery">
+        <GroupStartStudy />
       </StudySection>
 
       <Separator />

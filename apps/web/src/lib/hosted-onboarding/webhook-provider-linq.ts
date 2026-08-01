@@ -2495,6 +2495,7 @@ const HOSTED_LINQ_GROUP_PROVISION_UNAVAILABLE_ERROR_CODES = new Set([
 ]);
 
 type HostedLinqNewGroupAdmissionIgnoreReason =
+  | "blocked-first-contact-content"
   | "empty-message-parts"
   | "local-inbound-not-allowlisted"
   | "own-message"
@@ -2509,7 +2510,8 @@ type HostedLinqNewGroupAdmissionIgnoreReason =
   | "recipient-line-structurally-unavailable"
   | "sender-contact-unresolved"
   | "sender-identity-unresolved"
-  | "sender-inactive";
+  | "sender-inactive"
+  | "suspended-member";
 
 /**
  * Group chats with no explicit thread route stay ignored unless the sender is
@@ -2590,7 +2592,9 @@ async function planHostedLinqGroupChatWebhook(input: {
     ? null
     : await lookupHostedMemberRoutingByPendingLinqParticipantContact({
         contact: participantContact,
+        linqChatId: summary.chatId,
         prisma: input.prisma,
+        recipientPhone: incomingRecipientPhone,
       });
   const sender = senderLookup?.core ?? pendingSenderLookup?.core ?? null;
   const senderIdentityMatch: HostedLinqExistingMemberMatch = senderLookup
@@ -2600,13 +2604,18 @@ async function planHostedLinqGroupChatWebhook(input: {
     : pendingSenderLookup
       ? "pending-contact"
       : "none";
-  const senderAccessAllowed = sender
-    ? !isHostedMemberSuspended(sender.suspendedAt)
-      && (await readHostedRuntimeAiAccessDecision({
+  const senderSuspended = sender !== null
+    && isHostedMemberSuspended(sender.suspendedAt);
+  const senderAccessAllowed = sender && !senderSuspended
+    ? (await readHostedRuntimeAiAccessDecision({
         memberId: sender.id,
         prisma: input.prisma,
       })).allowed
     : false;
+
+  if (senderSuspended) {
+    return ignored("suspended-member", senderIdentityMatch);
+  }
 
   const lineState = await readHostedLinqIncomingLineState({
     phoneNumberLookupKeys: input.threadRouteAccountLookupKeys,
@@ -2640,6 +2649,16 @@ async function planHostedLinqGroupChatWebhook(input: {
       senderIdentityMatch,
       "group-chat-line-unavailable",
     );
+  }
+
+  if (
+    (!sender || !senderAccessAllowed)
+    && hostedLinqFirstContactContainsBlockedContent({
+      event: messageEvent,
+      participantContact,
+    })
+  ) {
+    return ignored("blocked-first-contact-content", senderIdentityMatch);
   }
 
   if (!sender || !senderAccessAllowed) {

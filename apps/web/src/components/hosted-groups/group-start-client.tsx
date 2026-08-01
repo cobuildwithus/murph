@@ -2,15 +2,18 @@
 
 import { Check, MessageCircle } from "lucide-react";
 import Link from "next/link";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { AuthDialog } from "@/src/components/hosted-onboarding/auth-dialog";
-import {
-  requestHostedOnboardingJson,
-} from "@/src/components/hosted-onboarding/client-api";
+import { HostedGroupStartFrame } from "./group-start-frame";
+import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
 import { navigateHostedAuthRedirect } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
+import {
+  armHostedGroupStartHandoff,
+  clearHostedGroupStartHandoff,
+} from "@/src/lib/hosted-groups/group-start-handoff";
 import { Button } from "@/src/components/ui/button";
 
 type HostedGroupStartRecoveryResponse = {
@@ -18,39 +21,78 @@ type HostedGroupStartRecoveryResponse = {
   status: "already_connected" | "linked";
 };
 
+type HostedGroupStartRecoveryStatus =
+  | "checking"
+  | "failed"
+  | "idle"
+  | "linked"
+  | "linking";
+
 export function HostedGroupStartClient({
   activeAccess,
   authenticated,
-  recoveryToken,
 }: {
   activeAccess: boolean;
   authenticated: boolean;
-  recoveryToken: string | null;
 }) {
   const recoveryStarted = useRef(false);
+  const recoveryTokenRef = useRef<string | null>(null);
   const [authOpen, setAuthOpen] = useState(!authenticated);
   const [signedIn, setSignedIn] = useState(authenticated);
   const [readyAccess, setReadyAccess] = useState(activeAccess);
-  const [recoveryStatus, setRecoveryStatus] = useState<
-    "idle" | "linking" | "linked" | "failed"
-  >(authenticated && recoveryToken ? "linking" : "idle");
+  const [recoveryStatus, setRecoveryStatus] =
+    useState<HostedGroupStartRecoveryStatus>("checking");
 
   useEffect(() => {
-    if (!authenticated || !recoveryToken || recoveryStarted.current) {
-      return;
+    if (activeAccess) {
+      clearHostedGroupStartHandoff();
+    } else {
+      armHostedGroupStartHandoff();
     }
-    recoveryStarted.current = true;
-    void linkRecovery(recoveryToken).then(
-      () => setRecoveryStatus("linked"),
-      () => setRecoveryStatus("failed"),
-    );
-  }, [authenticated, recoveryToken]);
+
+    let cancelled = false;
+    const token = readHostedGroupStartRecoveryToken();
+    recoveryTokenRef.current = token;
+
+    void Promise.resolve().then(async () => {
+      if (cancelled) {
+        return;
+      }
+      if (!token || !authenticated) {
+        setRecoveryStatus("idle");
+        return;
+      }
+      if (recoveryStarted.current) {
+        return;
+      }
+
+      recoveryStarted.current = true;
+      setRecoveryStatus("linking");
+      try {
+        await linkRecovery(token);
+        if (!cancelled) {
+          clearHostedGroupStartRecoveryFragment();
+          setRecoveryStatus("linked");
+        }
+      } catch {
+        if (!cancelled) {
+          setRecoveryStatus("failed");
+        }
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeAccess, authenticated]);
 
   async function handleCompleted(payload: HostedPrivyCompletionPayload) {
+    const recoveryToken = recoveryTokenRef.current;
     if (recoveryToken) {
       setRecoveryStatus("linking");
       try {
         await linkRecovery(recoveryToken);
+        clearHostedGroupStartRecoveryFragment();
         setRecoveryStatus("linked");
       } catch {
         setRecoveryStatus("failed");
@@ -59,21 +101,31 @@ export function HostedGroupStartClient({
     }
 
     if (!isHostedOnboardingAccessibleStage(payload.stage)) {
+      armHostedGroupStartHandoff();
       navigateHostedAuthRedirect(payload.joinUrl);
       return;
     }
 
+    clearHostedGroupStartHandoff();
     setSignedIn(true);
     setReadyAccess(true);
     setAuthOpen(false);
   }
 
-  if (recoveryStatus === "linking") {
+  if (recoveryStatus === "checking" || recoveryStatus === "linking") {
     return (
       <HostedGroupStartFrame
         icon={<MessageCircle className="size-8" />}
-        title="Connecting your Messages address"
-        body="One moment — Murph is linking the address that sent the group message to your account."
+        title={
+          recoveryStatus === "linking"
+            ? "Connecting your Messages address"
+            : "Preparing Murph"
+        }
+        body={
+          recoveryStatus === "linking"
+            ? "One moment — Murph is linking the address that sent the group message to your account."
+            : "One moment while Murph prepares group setup."
+        }
       />
     );
   }
@@ -90,15 +142,18 @@ export function HostedGroupStartClient({
           size="xl"
           className="w-full"
           onClick={() => {
-            recoveryStarted.current = false;
-            setRecoveryStatus("linking");
-            if (recoveryToken) {
-              recoveryStarted.current = true;
-              void linkRecovery(recoveryToken).then(
-                () => setRecoveryStatus("linked"),
-                () => setRecoveryStatus("failed"),
-              );
+            const recoveryToken = recoveryTokenRef.current;
+            if (!recoveryToken) {
+              return;
             }
+            setRecoveryStatus("linking");
+            void linkRecovery(recoveryToken).then(
+              () => {
+                clearHostedGroupStartRecoveryFragment();
+                setRecoveryStatus("linked");
+              },
+              () => setRecoveryStatus("failed"),
+            );
           }}
         >
           Try again
@@ -165,36 +220,26 @@ async function linkRecovery(token: string): Promise<void> {
   });
 }
 
-function HostedGroupStartFrame({
-  body,
-  children,
-  icon,
-  title,
-}: {
-  body: string;
-  children?: ReactNode;
-  icon: ReactNode;
-  title: string;
-}) {
-  return (
-    <div className="flex flex-col gap-8 text-center">
-      <header className="flex flex-col items-center gap-4">
-        <span
-          aria-hidden="true"
-          className="flex size-16 items-center justify-center rounded-2xl bg-primary/10 text-primary"
-        >
-          {icon}
-        </span>
-        <div className="flex flex-col gap-2">
-          <h1 className="font-serif text-3xl font-semibold tracking-tight text-foreground">
-            {title}
-          </h1>
-          <p className="text-pretty text-base leading-7 text-muted-foreground">
-            {body}
-          </p>
-        </div>
-      </header>
-      {children ? <div className="flex flex-col gap-3">{children}</div> : null}
-    </div>
+function readHostedGroupStartRecoveryToken(): string | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const hash = window.location.hash.startsWith("#")
+    ? window.location.hash.slice(1)
+    : window.location.hash;
+  const token = new URLSearchParams(hash).get("recover")?.trim() ?? "";
+  return token.length > 0 && token.length <= 6_000 ? token : null;
+}
+
+function clearHostedGroupStartRecoveryFragment(): void {
+  if (typeof window === "undefined" || !window.location.hash) {
+    return;
+  }
+
+  window.history.replaceState(
+    window.history.state,
+    "",
+    `${window.location.pathname}${window.location.search}`,
   );
 }

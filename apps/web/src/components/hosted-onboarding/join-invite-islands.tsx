@@ -19,6 +19,10 @@ import type {
   HostedInviteVerificationMode,
 } from "@/src/lib/hosted-onboarding/types";
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
+import {
+  consumeHostedGroupStartHandoff,
+  HOSTED_GROUP_START_PATH,
+} from "@/src/lib/hosted-groups/group-start-handoff";
 
 import { ConsentSkeleton, HostedLegalConsentCard } from "../legal/hosted-legal-consent-card";
 import { useHostedPhoneLinkDiagnostics } from "../settings/hosted-phone-link-diagnostics";
@@ -398,7 +402,11 @@ export function JoinInviteCheckoutPlanButtonIsland({
     checkoutOutcomeRef.current = null;
     if (!outcome) return;
     if (outcome.kind === "alreadyActive") {
-      router.refresh();
+      if (consumeHostedGroupStartHandoff()) {
+        router.replace(HOSTED_GROUP_START_PATH);
+      } else {
+        router.refresh();
+      }
       return;
     }
 

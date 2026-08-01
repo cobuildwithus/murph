@@ -1,11 +1,6 @@
 import "server-only";
 
-import {
-  createCipheriv,
-  createDecipheriv,
-  createHmac,
-  randomBytes,
-} from "node:crypto";
+import { createCipheriv, createDecipheriv, createHmac } from "node:crypto";
 
 import { readHostedAppSessionHmacKey } from "./app-session-config";
 import {
@@ -24,8 +19,13 @@ const HOSTED_LINQ_GROUP_EMAIL_RECOVERY_TOKEN_PREFIX =
   "murph_linq_group_email_v1.";
 const HOSTED_LINQ_GROUP_EMAIL_RECOVERY_TOKEN_DOMAIN =
   "murph.linq-group-email-recovery.v1";
+const HOSTED_LINQ_GROUP_EMAIL_RECOVERY_ENCRYPTION_KEY_DOMAIN =
+  "murph.linq-group-email-recovery.v1.encryption-key";
+const HOSTED_LINQ_GROUP_EMAIL_RECOVERY_IV_KEY_DOMAIN =
+  "murph.linq-group-email-recovery.v1.iv-key";
 const HOSTED_LINQ_GROUP_EMAIL_RECOVERY_TOKEN_VERSION = 1;
 const HOSTED_LINQ_GROUP_EMAIL_RECOVERY_TTL_MS = 24 * 60 * 60 * 1_000;
+const HOSTED_LINQ_GROUP_EMAIL_RECOVERY_CLOCK_SKEW_MS = 5 * 60 * 1_000;
 const HOSTED_LINQ_GROUP_EMAIL_RECOVERY_IV_BYTES = 12;
 const HOSTED_LINQ_GROUP_EMAIL_RECOVERY_TAG_BYTES = 16;
 const HOSTED_LINQ_GROUP_EMAIL_RECOVERY_TOKEN_MAX_BYTES = 4_096;
@@ -35,6 +35,7 @@ type HostedLinqGroupEmailRecoveryTokenPayload = {
   chatId: string;
   email: string;
   expiresAt: string;
+  issuedAt: string;
   observedAt: string;
   recipientPhone: string;
   version: 1;
@@ -71,7 +72,12 @@ export function buildHostedLinqGroupEmailRecoveryEffectId(input: {
     value: input.participantEmail,
   });
   const recipientPhone = normalizePhoneNumber(input.recipientPhone);
-  if (!chatId || !participantContact || participantContact.kind !== "email" || !recipientPhone) {
+  if (
+    !chatId
+    || !participantContact
+    || participantContact.kind !== "email"
+    || !recipientPhone
+  ) {
     throw new TypeError(
       "Hosted Linq group email recovery requires a valid chat, email, and recipient line.",
     );
@@ -93,7 +99,7 @@ export function buildHostedLinqGroupSetupMessage(): string {
     "I'm here — someone in this chat needs to finish setting up Murph,",
     "then message me here again:",
     buildHostedLinqGroupSetupUrl(),
-  ].join(" " );
+  ].join(" ");
 }
 
 export function buildHostedLinqGroupEmailRecoveryMessage(input: {
@@ -105,11 +111,12 @@ export function buildHostedLinqGroupEmailRecoveryMessage(input: {
     "Open this to use your existing Murph account or create one,",
     "then message me in the group again:",
     recoveryUrl,
-  ].join(" " );
+  ].join(" ");
 }
 
 export function issueHostedLinqGroupEmailRecoveryToken(input: {
   chatId: string;
+  now?: Date;
   observedAt: string | Date;
   participantEmail: string;
   recipientPhone: string;
@@ -121,12 +128,14 @@ export function issueHostedLinqGroupEmailRecoveryToken(input: {
   });
   const recipientPhone = normalizePhoneNumber(input.recipientPhone);
   const observedAt = new Date(input.observedAt);
+  const issuedAt = input.now ?? new Date();
   if (
     !chatId
     || !participantContact
     || participantContact.kind !== "email"
     || !recipientPhone
     || Number.isNaN(observedAt.getTime())
+    || Number.isNaN(issuedAt.getTime())
   ) {
     throw new TypeError(
       "Hosted Linq group email recovery requires valid observed provider authority.",
@@ -134,12 +143,13 @@ export function issueHostedLinqGroupEmailRecoveryToken(input: {
   }
 
   const expiresAt = new Date(
-    observedAt.getTime() + HOSTED_LINQ_GROUP_EMAIL_RECOVERY_TTL_MS,
+    issuedAt.getTime() + HOSTED_LINQ_GROUP_EMAIL_RECOVERY_TTL_MS,
   );
   const payload: HostedLinqGroupEmailRecoveryTokenPayload = {
     chatId,
     email: participantContact.value,
     expiresAt: expiresAt.toISOString(),
+    issuedAt: issuedAt.toISOString(),
     observedAt: observedAt.toISOString(),
     recipientPhone,
     version: HOSTED_LINQ_GROUP_EMAIL_RECOVERY_TOKEN_VERSION,
@@ -149,10 +159,16 @@ export function issueHostedLinqGroupEmailRecoveryToken(input: {
     throw new RangeError("Hosted Linq group email recovery token is too large.");
   }
 
-  const iv = randomBytes(HOSTED_LINQ_GROUP_EMAIL_RECOVERY_IV_BYTES);
+  const iv = createHmac(
+    "sha256",
+    deriveHostedLinqGroupEmailRecoveryIvKey(),
+  )
+    .update(plaintext)
+    .digest()
+    .subarray(0, HOSTED_LINQ_GROUP_EMAIL_RECOVERY_IV_BYTES);
   const cipher = createCipheriv(
     "aes-256-gcm",
-    deriveHostedLinqGroupEmailRecoveryKey(),
+    deriveHostedLinqGroupEmailRecoveryEncryptionKey(),
     iv,
   );
   cipher.setAAD(Buffer.from(HOSTED_LINQ_GROUP_EMAIL_RECOVERY_TOKEN_DOMAIN));
@@ -216,7 +232,7 @@ export function openHostedLinqGroupEmailRecoveryToken(input: {
   try {
     const decipher = createDecipheriv(
       "aes-256-gcm",
-      deriveHostedLinqGroupEmailRecoveryKey(),
+      deriveHostedLinqGroupEmailRecoveryEncryptionKey(),
       iv,
     );
     decipher.setAAD(
@@ -240,6 +256,8 @@ export function openHostedLinqGroupEmailRecoveryToken(input: {
   const now = input.now ?? new Date();
   if (
     Number.isNaN(now.getTime())
+    || parsed.issuedAt.getTime()
+      > now.getTime() + HOSTED_LINQ_GROUP_EMAIL_RECOVERY_CLOCK_SKEW_MS
     || parsed.expiresAt <= now
   ) {
     return null;
@@ -255,19 +273,32 @@ export function openHostedLinqGroupEmailRecoveryToken(input: {
 
 function buildHostedLinqGroupEmailRecoveryUrl(token: string): string {
   const url = new URL(buildHostedLinqGroupSetupUrl());
-  url.searchParams.set("recover", token);
+  url.hash = new URLSearchParams({ recover: token }).toString();
   return url.toString();
 }
 
-function deriveHostedLinqGroupEmailRecoveryKey(): Buffer {
+function deriveHostedLinqGroupEmailRecoveryEncryptionKey(): Buffer {
+  return deriveHostedLinqGroupEmailRecoveryKey(
+    HOSTED_LINQ_GROUP_EMAIL_RECOVERY_ENCRYPTION_KEY_DOMAIN,
+  );
+}
+
+function deriveHostedLinqGroupEmailRecoveryIvKey(): Buffer {
+  return deriveHostedLinqGroupEmailRecoveryKey(
+    HOSTED_LINQ_GROUP_EMAIL_RECOVERY_IV_KEY_DOMAIN,
+  );
+}
+
+function deriveHostedLinqGroupEmailRecoveryKey(domain: string): Buffer {
   return createHmac("sha256", readHostedAppSessionHmacKey())
-    .update(HOSTED_LINQ_GROUP_EMAIL_RECOVERY_TOKEN_DOMAIN, "utf8")
+    .update(domain, "utf8")
     .digest();
 }
 
 function parseHostedLinqGroupEmailRecoveryPayload(value: unknown): {
   chatId: string;
   expiresAt: Date;
+  issuedAt: Date;
   observedAt: Date;
   participantContact: HostedLinqParticipantContact & { kind: "email" };
   recipientPhone: string;
@@ -282,6 +313,7 @@ function parseHostedLinqGroupEmailRecoveryPayload(value: unknown): {
     || typeof record.email !== "string"
     || typeof record.recipientPhone !== "string"
     || typeof record.observedAt !== "string"
+    || typeof record.issuedAt !== "string"
     || typeof record.expiresAt !== "string"
   ) {
     return null;
@@ -294,6 +326,7 @@ function parseHostedLinqGroupEmailRecoveryPayload(value: unknown): {
   });
   const recipientPhone = normalizePhoneNumber(record.recipientPhone);
   const observedAt = new Date(record.observedAt);
+  const issuedAt = new Date(record.issuedAt);
   const expiresAt = new Date(record.expiresAt);
   if (
     !chatId
@@ -301,8 +334,9 @@ function parseHostedLinqGroupEmailRecoveryPayload(value: unknown): {
     || participantContact.kind !== "email"
     || !recipientPhone
     || Number.isNaN(observedAt.getTime())
+    || Number.isNaN(issuedAt.getTime())
     || Number.isNaN(expiresAt.getTime())
-    || expiresAt.getTime() - observedAt.getTime()
+    || expiresAt.getTime() - issuedAt.getTime()
       !== HOSTED_LINQ_GROUP_EMAIL_RECOVERY_TTL_MS
   ) {
     return null;
@@ -311,8 +345,13 @@ function parseHostedLinqGroupEmailRecoveryPayload(value: unknown): {
   return {
     chatId,
     expiresAt,
+    issuedAt,
     observedAt,
-    participantContact,
+    participantContact: {
+      kind: "email",
+      lookupKey: participantContact.lookupKey,
+      value: participantContact.value,
+    },
     recipientPhone,
   };
 }
