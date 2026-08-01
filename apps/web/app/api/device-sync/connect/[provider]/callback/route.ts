@@ -2,7 +2,10 @@ import {
   sanitizeHostedRuntimeErrorCode,
   sanitizeHostedRuntimeErrorText,
 } from "@murphai/device-syncd/hosted-runtime";
-import { buildDeviceSyncCallbackReturnLocation } from "@murphai/device-syncd/callback-redirect";
+import {
+  buildDeviceSyncCallbackErrorRedirectLocation,
+  buildDeviceSyncCallbackReturnLocation,
+} from "@murphai/device-syncd/callback-redirect";
 import { isDeviceSyncError } from "@murphai/device-syncd/errors";
 
 import {
@@ -30,6 +33,10 @@ export async function GET(
   context: { params: Promise<{ provider: string }> },
 ) {
   let providerName: string | null = null;
+  // The provider proof cookie is one slot per provider, so a callback may only
+  // clear it after proving it owns the current proof; an unmatched callback
+  // must leave a newer concurrent flow's proof untouched.
+  let proofVerified = false;
 
   try {
     providerName = await resolveDecodedRouteParam(context.params, "provider");
@@ -47,14 +54,17 @@ export async function GET(
       })
     ) {
       // A callback delivered without its initiating-browser proof stays
-      // non-mutating: burn the OAuth state so the transferable provider URL
-      // cannot be relayed later, then land back on connection truth.
+      // non-mutating: burn the presented OAuth state so the transferable
+      // provider URL cannot be relayed later, then land on the Connect
+      // callback-error notice so the member sees a truthful outcome.
       await publicIngress.discardConnectionCallback(providerName);
-      return withCallbackProofCleared(
-        redirectTo(new URL("/connect", request.url).toString()),
+      return hostedDeviceSyncCallbackFailureRedirect(
+        request,
         providerName,
+        "CALLBACK_PROOF_INVALID",
       );
     }
+    proofVerified = true;
 
     const result = await publicIngress.handleConnectionCallback(providerName, {
       expectedOwnerId: session.member.id,
@@ -76,7 +86,9 @@ export async function GET(
     );
   } catch (error) {
     const response = handleHostedDeviceSyncCallbackError(error, request, providerName);
-    return providerName ? withCallbackProofCleared(response, providerName) : response;
+    return providerName && proofVerified
+      ? withCallbackProofCleared(response, providerName)
+      : response;
   }
 }
 
@@ -123,10 +135,12 @@ function handleHostedDeviceSyncCallbackError(
   }
 
   if (isHostedOnboardingError(error)) {
-    return callbackHtml(
-      "Device connection failed",
-      HOSTED_DEVICE_SYNC_CALLBACK_FAILURE_MESSAGE,
-      error.httpStatus,
+    // Landing on Connect routes a signed-out member through the ordinary
+    // sign-in recovery instead of dead-ending on a bare HTML page.
+    return hostedDeviceSyncCallbackFailureRedirect(
+      request,
+      providerName,
+      "CALLBACK_SESSION_REQUIRED",
     );
   }
 
@@ -147,6 +161,21 @@ function handleHostedDeviceSyncCallbackError(
     HOSTED_DEVICE_SYNC_CALLBACK_FAILURE_MESSAGE,
     500,
   );
+}
+
+function hostedDeviceSyncCallbackFailureRedirect(
+  request: Request,
+  providerName: string | null,
+  errorCode: string,
+): Response {
+  const location = buildDeviceSyncCallbackErrorRedirectLocation({
+    returnTo: new URL("/connect", request.url).toString(),
+    provider: providerName ?? "unknown",
+    connectSourceId: null,
+    connectTarget: null,
+    errorCode,
+  });
+  return redirectTo(location ?? new URL("/connect", request.url).toString());
 }
 
 function withCallbackProofCleared(response: Response, provider: string): Response {
