@@ -86,7 +86,9 @@ describe("hosted device-sync callback boundary", () => {
     expect(destination.pathname).toBe("/device-sync/connect/complete");
     expect(destination.searchParams.get("deviceSyncStatus")).toBe("connected");
     expect(destination.searchParams.get("deviceSyncProvider")).toBe("junction");
-    expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
+    // A newer concurrent start may own the provider proof slot by the time
+    // this response applies, so no callback response may touch the cookie.
+    expect(response.headers.get("set-cookie")).toBeNull();
   });
 
   it("burns the callback state and shows the Connect error notice when the URL arrives without its proof", async () => {
@@ -179,7 +181,7 @@ describe("hosted device-sync callback boundary", () => {
     expect(location).toContain("deviceSyncError=OAUTH_CALLBACK_REJECTED");
     expect(location).toContain("connectSource=garmin");
     expect(location).toContain("connectTarget=garmin");
-    expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
+    expect(response.headers.get("set-cookie")).toBeNull();
   });
 
   it("sends replayed callbacks back without asserting a second outcome", async () => {
@@ -209,7 +211,7 @@ describe("hosted device-sync callback boundary", () => {
     expect(destination.searchParams.get("deviceSyncError")).toBeNull();
   });
 
-  it("returns generic callback HTML for unexpected completion failures", async () => {
+  it("routes unexpected completion failures to the Connect error notice", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mocks.handleConnectionCallback.mockRejectedValueOnce(new Error("boom"));
 
@@ -218,9 +220,12 @@ describe("hosted device-sync callback boundary", () => {
       createRouteContext({ provider: "junction" }),
     );
 
-    expect(response.status).toBe(500);
-    expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
-    expect(await response.text()).toContain("Please retry from Murph.");
+    expect(response.status).toBe(302);
+    const destination = new URL(response.headers.get("location")!);
+    expect(destination.pathname).toBe("/connect");
+    expect(destination.searchParams.get("deviceSyncStatus")).toBe("error");
+    expect(destination.searchParams.get("deviceSyncError")).toBe("CALLBACK_FAILED");
+    expect(destination.searchParams.get("deviceSyncProvider")).toBe("junction");
     expect(errorSpy).toHaveBeenCalledWith(
       "Hosted device-sync connection callback failed unexpectedly.",
       expect.objectContaining({
@@ -230,16 +235,41 @@ describe("hosted device-sync callback boundary", () => {
     );
   });
 
-  it("returns safe callback HTML when provider route decoding fails", async () => {
+  it("routes an undecodable provider callback to the Connect error notice", async () => {
     const response = await callbackRoute.GET(
       buildCallbackRequest(),
       createRouteContext({ provider: "%E0%A4%A" }),
     );
 
-    expect(response.status).toBe(400);
-    expect(await response.text()).toContain("callback URL was invalid");
+    expect(response.status).toBe(302);
+    const destination = new URL(response.headers.get("location")!);
+    expect(destination.pathname).toBe("/connect");
+    expect(destination.searchParams.get("deviceSyncStatus")).toBe("error");
+    expect(destination.searchParams.get("deviceSyncError")).toBe("CALLBACK_FAILED");
     expect(mocks.createHostedDeviceSyncPublicIngressService).not.toHaveBeenCalled();
     expect(response.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("falls back to a Connect completion redirect when the stored returnTo is missing", async () => {
+    mocks.handleConnectionCallback.mockResolvedValueOnce({
+      account: {
+        id: "dsc_junction",
+        provider: "junction",
+      },
+      connectSourceId: null,
+      connectTarget: null,
+      returnTo: null,
+    });
+
+    const response = await callbackRoute.GET(
+      buildCallbackRequest(),
+      createRouteContext({ provider: "junction" }),
+    );
+
+    expect(response.status).toBe(302);
+    const destination = new URL(response.headers.get("location")!);
+    expect(destination.pathname).toBe("/connect");
+    expect(destination.searchParams.get("deviceSyncStatus")).toBe("connected");
   });
 });
 

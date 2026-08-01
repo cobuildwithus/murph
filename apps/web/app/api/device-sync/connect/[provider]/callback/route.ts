@@ -10,14 +10,12 @@ import { isDeviceSyncError } from "@murphai/device-syncd/errors";
 
 import {
   InvalidRouteParamEncodingError,
-  callbackHtml,
   errorToCallbackRedirect,
   providerCallbackRedirect,
   redirectTo,
   resolveDecodedRouteParam,
 } from "@/src/lib/device-sync/http";
 import {
-  buildHostedDeviceSyncCallbackProofClearCookie,
   readHostedDeviceSyncCallbackState,
   verifyHostedDeviceSyncCallbackProof,
 } from "@/src/lib/device-sync/browser-callback-proof";
@@ -25,18 +23,16 @@ import { createHostedDeviceSyncPublicIngressService } from "@/src/lib/device-syn
 import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
-const HOSTED_DEVICE_SYNC_CALLBACK_FAILURE_MESSAGE =
-  "Something went wrong while finishing the device connection. Please retry from Murph.";
+// The provider proof cookie is one slot per provider that a newer start may
+// overwrite while an older callback response is still in flight, so no
+// callback response may delete it: the 15-minute expiry and the next start's
+// overwrite own the whole cookie lifecycle.
 
 export async function GET(
   request: Request,
   context: { params: Promise<{ provider: string }> },
 ) {
   let providerName: string | null = null;
-  // The provider proof cookie is one slot per provider, so a callback may only
-  // clear it after proving it owns the current proof; an unmatched callback
-  // must leave a newer concurrent flow's proof untouched.
-  let proofVerified = false;
 
   try {
     providerName = await resolveDecodedRouteParam(context.params, "provider");
@@ -64,31 +60,20 @@ export async function GET(
         "CALLBACK_PROOF_INVALID",
       );
     }
-    proofVerified = true;
 
     const result = await publicIngress.handleConnectionCallback(providerName, {
       expectedOwnerId: session.member.id,
     });
-    const redirect = providerCallbackRedirect({
-      returnTo: result.returnTo,
+    const fallbackReturnTo = new URL("/connect", request.url).toString();
+
+    return providerCallbackRedirect({
+      returnTo: result.returnTo ?? fallbackReturnTo,
       provider: result.account.provider,
       connectSourceId: result.connectSourceId ?? null,
       connectTarget: result.connectTarget ?? null,
-    });
-
-    return withCallbackProofCleared(
-      redirect
-      ?? callbackHtml(
-        `${result.account.provider} connected`,
-        `Connected ${result.account.provider} successfully.`,
-      ),
-      providerName,
-    );
+    }) ?? redirectTo(fallbackReturnTo);
   } catch (error) {
-    const response = handleHostedDeviceSyncCallbackError(error, request, providerName);
-    return providerName && proofVerified
-      ? withCallbackProofCleared(response, providerName)
-      : response;
+    return handleHostedDeviceSyncCallbackError(error, request, providerName);
   }
 }
 
@@ -127,16 +112,16 @@ function handleHostedDeviceSyncCallbackError(
       error,
     });
 
-    return redirect ?? callbackHtml(
-      "Device connection failed",
-      HOSTED_DEVICE_SYNC_CALLBACK_FAILURE_MESSAGE,
-      error.httpStatus,
+    return redirect ?? hostedDeviceSyncCallbackFailureRedirect(
+      request,
+      providerName,
+      error.code,
     );
   }
 
   if (isHostedOnboardingError(error)) {
-    // Landing on Connect routes a signed-out member through the ordinary
-    // sign-in recovery instead of dead-ending on a bare HTML page.
+    // Landing on Connect routes a signed-out member into the ordinary Connect
+    // recovery surface instead of dead-ending on a bare HTML page.
     return hostedDeviceSyncCallbackFailureRedirect(
       request,
       providerName,
@@ -145,22 +130,14 @@ function handleHostedDeviceSyncCallbackError(
   }
 
   if (error instanceof InvalidRouteParamEncodingError) {
-    return callbackHtml(
-      "Device connection failed",
-      "The device connection callback URL was invalid.",
-      400,
-    );
+    return hostedDeviceSyncCallbackFailureRedirect(request, null, "CALLBACK_FAILED");
   }
 
   console.error("Hosted device-sync connection callback failed unexpectedly.", {
     errorType: describeHostedDeviceSyncCallbackErrorType(error),
     provider: providerName,
   });
-  return callbackHtml(
-    "Device connection failed",
-    HOSTED_DEVICE_SYNC_CALLBACK_FAILURE_MESSAGE,
-    500,
-  );
+  return hostedDeviceSyncCallbackFailureRedirect(request, providerName, "CALLBACK_FAILED");
 }
 
 function hostedDeviceSyncCallbackFailureRedirect(
@@ -176,14 +153,6 @@ function hostedDeviceSyncCallbackFailureRedirect(
     errorCode,
   });
   return redirectTo(location ?? new URL("/connect", request.url).toString());
-}
-
-function withCallbackProofCleared(response: Response, provider: string): Response {
-  const clearCookie = buildHostedDeviceSyncCallbackProofClearCookie(provider);
-  if (clearCookie) {
-    response.headers.append("Set-Cookie", clearCookie);
-  }
-  return response;
 }
 
 function describeHostedDeviceSyncCallbackErrorType(error: unknown): string {
