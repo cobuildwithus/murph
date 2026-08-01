@@ -1294,9 +1294,11 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           where: { memberId },
         })).resolves.toBe(2);
 
-        // A completion that failed before its session write left no session
-        // row, so the retry after the failure clears is still the first
-        // session; a later issuance is not.
+        // Zero retained rows means either a completion failed before its
+        // session write or retention deleted an aged history; the two are
+        // indistinguishable by design, and both intentionally re-open the
+        // welcome handoff (recovery in the first case, welcome-back in the
+        // second). A later issuance with retained history is never first.
         const retry = await observer.hostedWebSession.deleteMany({
           where: { memberId },
         }).then(() => issueHostedAppSession({ memberId, privyUserId }));

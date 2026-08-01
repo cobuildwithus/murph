@@ -450,6 +450,41 @@ describe("hosted onboarding Privy completion route", () => {
     });
   });
 
+  it("does not re-offer the handoff while a session from a lost completion is retained", async () => {
+    // Accepted contract limit: if a completion commits its session but the
+    // response never reaches the browser, retries within the session-history
+    // window land on plain /home. The welcome surface is skippable and its
+    // persona choice remains available in settings, so the product declines a
+    // delivery-ack owner for this window.
+    mocks.completeHostedPrivyVerification.mockResolvedValueOnce({
+      inviteCode: "invite_123",
+      joinUrl: "https://join.example.test/join/invite_123",
+      member: createHostedMember(),
+      memberId: "member_123",
+      messagingSetupRequired: false,
+      stage: "active",
+    });
+    mocks.getHostedInviteStatus.mockResolvedValueOnce(createInviteStatus("active"));
+    mocks.issueHostedAppSession.mockResolvedValueOnce({
+      cookie: "murph-session=session-token; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000",
+      firstMemberSession: false,
+      sessionId: "hws_after_lost_response",
+    });
+
+    const response = await privyCompleteRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+        headers: {
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload).not.toHaveProperty("initialVisitEligible");
+  });
+
   it("marks completion as launch-consented when the member already granted launch consent", async () => {
     mocks.completeHostedPrivyVerification.mockResolvedValueOnce({
       inviteCode: "invite_123",
