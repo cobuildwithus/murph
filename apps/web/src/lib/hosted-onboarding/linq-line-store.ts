@@ -768,10 +768,16 @@ export async function listHostedLinqContactCardLines(input: {
 
   let rows: HostedLinqContactCardLineRow[] = configuredRows;
   if (!take || configuredRows.length < take) {
+    // Unconfigured lines qualify only when the provider phone-number
+    // inventory vouches for them (it is what sets providerPhoneNumberId).
+    // Chat-health sync also stamps providerSeenAt, but it derives lines from
+    // chat handles, which can reference numbers the account no longer owns;
+    // Linq rejects contact-card calls for those with HTTP 403.
     const providerRows = await input.prisma.hostedLinqLine.findMany({
       where: {
         configuredAt: null,
         phoneNumberEncrypted: { not: null },
+        providerPhoneNumberId: { not: null },
         providerSeenAt: { not: null },
       },
       orderBy: [

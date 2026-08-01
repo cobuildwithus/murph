@@ -291,7 +291,19 @@ describe("Linq provider health inventory synchronization", () => {
       prisma,
     })).resolves.toEqual({ syncedCount: 1 });
 
-    expect(updateMany).not.toHaveBeenCalled();
+    // The only direct write is the inventory-membership revoke, which keeps
+    // the snapshot's own line; unknown status values never clear stored
+    // provider state.
+    expect(updateMany).toHaveBeenCalledTimes(1);
+    expect(updateMany).toHaveBeenCalledWith({
+      data: { providerPhoneNumberId: null },
+      where: {
+        providerPhoneNumberId: {
+          not: null,
+          notIn: ["line-future"],
+        },
+      },
+    });
   });
 
   it("associates inventoried chat health with its resolved sending line", async () => {
