@@ -18,27 +18,28 @@ interface BrowserConfig {
 }
 
 const AUTH_ACTIONS = [
-  /^accept all$/i,
-  /^accept cookies$/i,
-  /^accept$/i,
-  /^agree$/i,
-  /^continue(?: with email| with whoop)?$/i,
-  /^next$/i,
-  /^log ?in$/i,
-  /^sign in$/i,
-  /^submit$/i,
-  /^verify/i,
-  /^authorize/i,
-  /^allow/i,
-  /^approve/i,
-  /^grant/i,
-  /^connect(?: whoop)?$/i,
+  /\baccept\b/i,
+  /\bagree\b/i,
+  /\bcontinue\b/i,
+  /\bnext\b/i,
+  /\blog ?in\b/i,
+  /\bsign in\b/i,
+  /\bsubmit\b/i,
+  /\bverify\b/i,
+  /\bauthorize\b/i,
+  /\ballow\b/i,
+  /\bapprove\b/i,
+  /\bgrant\b/i,
+  /\bconfirm\b/i,
+  /\bconnect\b/i,
 ] as const;
 const TRUSTED_AUTHORIZATION_DOMAINS = [
   "junction.com",
   "tryvital.io",
   "whoop.com",
 ] as const;
+const REQUIRED_CONSENT_PATTERN = /\b(?:authorization|required|privacy|terms)\b/iu;
+const OPTIONAL_MARKETING_PATTERN = /\b(?:marketing|newsletter|offers?|promotions?)\b/iu;
 
 let stage = "configuration";
 let activePage: Page | null = null;
@@ -179,7 +180,7 @@ async function completeExternalAuthorization(
       }
     }
 
-    await checkVisibleCheckboxes(page);
+    await checkRequiredConsentCheckboxes(page);
     const clicked = await clickFirstVisibleAction(page, AUTH_ACTIONS);
     if (!clicked && !config.headless) {
       // Headful runs permit manual CAPTCHA or one-time-code completion while
@@ -223,15 +224,27 @@ async function findVisibleEditable(
   return null;
 }
 
-async function checkVisibleCheckboxes(page: Page): Promise<void> {
-  const checkboxes = page.locator('input[type="checkbox"]');
+async function checkRequiredConsentCheckboxes(page: Page): Promise<void> {
+  const checkboxes = page.getByRole("checkbox");
   for (let index = 0; index < await checkboxes.count(); index += 1) {
     const checkbox = checkboxes.nth(index);
     if (
-      await checkbox.isVisible().catch(() => false)
-      && !await checkbox.isChecked()
+      !await checkbox.isVisible().catch(() => false)
+      || await checkbox.isChecked().catch(() => false)
     ) {
-      await checkbox.check().catch(() => undefined);
+      continue;
+    }
+
+    const surroundingText = await checkbox.evaluate((element) => [
+      element.getAttribute("aria-label"),
+      element.closest("label")?.textContent,
+      element.parentElement?.textContent,
+    ].filter(Boolean).join(" "));
+    if (
+      REQUIRED_CONSENT_PATTERN.test(surroundingText)
+      && !OPTIONAL_MARKETING_PATTERN.test(surroundingText)
+    ) {
+      await checkbox.check();
     }
   }
 }
@@ -290,13 +303,15 @@ function readBrowserConfig(env: NodeJS.ProcessEnv): BrowserConfig {
   const startUrl = new URL(
     requireEnvironmentValue(env, "MURPH_E2E_CONNECT_URL"),
   );
+  const connectIntentParams = new URLSearchParams(startUrl.hash.slice(1));
   if (
     startUrl.origin !== parsedWebBaseUrl.origin
     || startUrl.pathname !== "/connect"
-    || !new URLSearchParams(startUrl.hash.slice(1)).has("deviceConnectIntent")
+    || !connectIntentParams.has("deviceConnectIntent")
+    || connectIntentParams.get("connectSource") !== "whoop"
   ) {
     throw new Error(
-      "MURPH_E2E_CONNECT_URL must be a signed /connect device intent on the hosted-local Web origin.",
+      "MURPH_E2E_CONNECT_URL must be a signed WHOOP /connect device intent on the hosted-local Web origin.",
     );
   }
   const timeoutMs = Number.parseInt(
