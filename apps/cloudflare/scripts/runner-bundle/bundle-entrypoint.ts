@@ -86,15 +86,23 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // extend the existing assistant, hosted-runtime, and provider paths without
 // adding a forbidden boot input. CI measured 10,020,882B total on 2026-07-31.
 //
+// Physical notes extend the existing dynamic-tool, hosted-runtime, and Web-port
+// paths without adding a forbidden boot input. Linux CI measured 10,012,825B
+// total on 2026-07-31.
+//
 // Deterministic reminder-availability refresh and foreground preemption extend
 // the existing hosted-runtime chunk without adding a forbidden boot input.
-// Linux CI measured that change alone at 10,016,296B total on 2026-07-31. The
-// combined macOS production assembly measured 10,091,204B total and an
-// 8,414,421B static closure on 2026-07-31, with no forbidden boot input. Ratchet
-// both baselines to that measurement and retain the established allowances.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_091_204 + 32_768;
-const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_649_331;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_414_421;
+// Linux CI measured 10,016,296B total on 2026-07-31.
+//
+// After merging the response-card path with physical notes, deterministic
+// reminder refresh, and the checkpoint-first shutdown correction on current
+// main, macOS assembly measured a 1,699,250B entry, 8,442,983B static
+// closure, and 10,119,605B total on 2026-08-01. No forbidden subsystem
+// entered the boot graph. Ratchet each baseline to the merged measurement and
+// retain the established allowances.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_119_605 + 32_768;
+const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_699_250;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_442_983;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:

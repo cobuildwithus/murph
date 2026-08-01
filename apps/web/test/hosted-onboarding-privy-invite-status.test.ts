@@ -85,6 +85,11 @@ describe("getHostedInviteStatus", () => {
       include: {
         member: {
           include: {
+            emailAuthorization: {
+              select: {
+                verifiedEmailVerifiedAt: true,
+              },
+            },
             identity: true,
             routing: true,
           },

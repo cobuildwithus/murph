@@ -40,6 +40,24 @@ export async function syncHostedLinqPhoneNumberInventory(input: {
   const observedAt = input.observedAt ?? new Date();
   let syncedCount = 0;
 
+  // A successful inventory read is a complete snapshot (failed, malformed,
+  // and over-limit reads all throw before this point), so an id the provider
+  // no longer reports marks a relinquished line. Revoke its inventory backing
+  // so ownership-gated consumers (contact-card and backup-number candidacy)
+  // stop treating it as account-owned; revoke before the upserts so a moved
+  // id cannot collide with the unique provider-id index.
+  await input.prisma.hostedLinqLine.updateMany({
+    data: { providerPhoneNumberId: null },
+    where: {
+      providerPhoneNumberId: {
+        not: null,
+        notIn: lines
+          .map((line) => line.providerPhoneNumberId)
+          .filter((id): id is string => id !== null),
+      },
+    },
+  });
+
   for (const line of lines) {
     const storedLine = await upsertHostedLinqLineForPhoneTx({
       observedAt,

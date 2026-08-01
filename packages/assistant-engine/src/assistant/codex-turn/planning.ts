@@ -881,6 +881,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
           typeof input.executionContext?.hosted?.productFeedbackCandidateSink
             ?.acceptProductFeedbackCandidate === 'function',
         responseCardsAvailable,
+        physicalNotesAvailable:
+          (privateInteractiveAudience || authenticatedGroupChatRuntime) &&
+          input.hostedToolContext?.physicalNotes != null &&
+          input.hostedToolContext?.privateImageUrlPublisher != null,
         phoneCallsAvailable:
           (
             privateInteractiveAudience
