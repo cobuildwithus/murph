@@ -350,6 +350,62 @@ describe("assistant product feedback", () => {
     expect(productFeedbackRecorder.readProductFeedback()).toBeNull();
   });
 
+  it("rejects a support escalation outside a verified direct conversation scope", async () => {
+    const deliverProductSupportEscalation = vi.fn();
+    const productFeedbackRecorder = createAssistantProductFeedbackRecorder({
+      acceptedInputItems: [{ id: "assistant_input_1", source: "assistant-input" }],
+      productFeedbackCandidateSink: {
+        acceptProductFeedbackCandidate: vi.fn(),
+        deliverProductSupportEscalation,
+      },
+    });
+    if (!productFeedbackRecorder) {
+      throw new Error("Expected a turn-scoped product feedback recorder.");
+    }
+    const request = readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          kind: "frustration",
+          summary: "Support escalation: the connection flow does not finish.",
+        },
+        namespace: "murph",
+        tool: "submit_product_feedback",
+      },
+    });
+    if (!request) {
+      throw new Error("Expected a parsed support escalation request.");
+    }
+
+    for (const conversationScope of ["group", "unverified-external"] as const) {
+      const result = await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext: {
+          currentUserActionScope: () => ({
+            acceptedInputIds: ["assistant_input_1"],
+            conversationScope,
+          }),
+        },
+        nextUsageOrdinal: () => 0,
+        productFeedbackRecorder,
+        progressDelivery: null,
+        request,
+      });
+
+      expect(result.rpcResult).toEqual({
+        success: false,
+        contentItems: [{
+          type: "inputText",
+          text: expect.stringContaining("verified private direct conversation"),
+        }],
+      });
+    }
+
+    expect(deliverProductSupportEscalation).not.toHaveBeenCalled();
+    expect(productFeedbackRecorder.readProductFeedback()).toBeNull();
+  });
+
   it("reports durable in-turn delivery for the exact support escalation shape", async () => {
     const deliverProductSupportEscalation = vi
       .fn()

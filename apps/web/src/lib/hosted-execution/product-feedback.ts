@@ -20,6 +20,12 @@ import { getPrisma } from "@/src/lib/prisma";
 
 export const HOSTED_PRODUCT_SUPPORT_EMAIL = "support@withmurph.ai";
 export const HOSTED_PRODUCT_SUPPORT_EMAILS_PER_MEMBER_UTC_DAY_MAX = 3;
+// The member-linked row and outbound email carry only this server-authored
+// text. Model-authored free text is best-effort de-identified and may retain
+// semantic private details, so it is persisted exclusively on the anonymous
+// path (see the detail row below), never beside member identity.
+export const HOSTED_PRODUCT_SUPPORT_ESCALATION_RECORD_SUMMARY =
+  "Support escalation: member-requested product support escalation.";
 
 export {
   HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
@@ -68,10 +74,13 @@ export async function recordHostedProductFeedback(input: {
     });
   }
 
-  const now = input.now ?? new Date();
-  if (!Number.isFinite(now.getTime())) {
+  if (input.now && !Number.isFinite(input.now.getTime())) {
     throw new RangeError("Product support escalation time must be valid.");
   }
+  const detailFeedbackId = buildHostedProductSupportDetailFeedbackId(feedbackId);
+  const detailSummary = feedback.summary
+    .slice(HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX.length)
+    .trim();
 
   const persistence = await getPrisma().$transaction(async (tx) => {
     await tx.$executeRaw`
@@ -80,6 +89,11 @@ export async function recordHostedProductFeedback(input: {
         hashtext(${memberId})
       )
     `;
+    // Captured after the advisory lock so same-member escalations get
+    // timestamps ordered with lock acquisition; a pre-lock timestamp could
+    // rank a later-committed row before already-emailed rows and overshoot
+    // the daily email cap.
+    const now = input.now ?? new Date();
 
     const threadContainer = await tx.hostedThreadContainer.findUnique({
       select: { memberId: true },
@@ -101,7 +115,15 @@ export async function recordHostedProductFeedback(input: {
           kind: feedback.kind,
           memberId,
           relatedChangelogItemIdsJson: [...feedback.relatedChangelogItemIds],
-          summary: feedback.summary,
+          summary: HOSTED_PRODUCT_SUPPORT_ESCALATION_RECORD_SUMMARY,
+        },
+        {
+          createdAt: now,
+          id: detailFeedbackId,
+          kind: feedback.kind,
+          memberId: null,
+          relatedChangelogItemIdsJson: [...feedback.relatedChangelogItemIds],
+          summary: detailSummary,
         },
       ],
       skipDuplicates: true,
@@ -122,7 +144,7 @@ export async function recordHostedProductFeedback(input: {
       !row
       || row.memberId !== memberId
       || row.kind !== feedback.kind
-      || row.summary !== feedback.summary
+      || row.summary !== HOSTED_PRODUCT_SUPPORT_ESCALATION_RECORD_SUMMARY
       || !isEmptyJsonArray(row.relatedChangelogItemIdsJson)
     ) {
       throw hostedOnboardingError({
@@ -161,7 +183,7 @@ export async function recordHostedProductFeedback(input: {
     });
 
     return {
-      recorded: created.count === 1,
+      recorded: created.count > 0,
       shouldSendEmail:
         ordinal <= HOSTED_PRODUCT_SUPPORT_EMAILS_PER_MEMBER_UTC_DAY_MAX,
     };
@@ -191,7 +213,6 @@ export async function recordHostedProductFeedback(input: {
       text: formatHostedProductSupportEmail({
         feedbackId,
         memberId,
-        summary: feedback.summary,
       }),
       to: emailConfig.recipients,
     });
@@ -260,20 +281,29 @@ async function persistHostedProductFeedback(input: {
   };
 }
 
+// The email is deliberately metadata-only: model-authored issue text, even
+// after the shared scrub, can retain semantic private details and must never
+// travel beside member identity. The de-identified issue text lives only in
+// the separate anonymous detail row.
 function formatHostedProductSupportEmail(input: {
   feedbackId: string;
   memberId: string;
-  summary: string;
 }): string {
   return [
     "A Murph member explicitly asked to escalate a product issue.",
     "",
     `Feedback ID: ${input.feedbackId}`,
     `Member ID: ${input.memberId}`,
-    "",
-    "De-identified issue:",
-    input.summary,
   ].join("\n");
+}
+
+export function buildHostedProductSupportDetailFeedbackId(
+  feedbackId: string,
+): string {
+  const digest = createHash("sha256")
+    .update(`${feedbackId}:support-detail`)
+    .digest("hex");
+  return `product_feedback_${digest}`;
 }
 
 function resolveUtcDayWindow(value: Date): {

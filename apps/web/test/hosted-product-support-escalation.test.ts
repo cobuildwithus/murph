@@ -20,8 +20,10 @@ vi.mock("@/src/lib/prisma", () => ({
 
 import {
   buildHostedProductFeedbackId,
+  buildHostedProductSupportDetailFeedbackId,
   HOSTED_PRODUCT_SUPPORT_EMAIL,
   HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
+  HOSTED_PRODUCT_SUPPORT_ESCALATION_RECORD_SUMMARY,
   HOSTED_PRODUCT_SUPPORT_EMAILS_PER_MEMBER_UTC_DAY_MAX,
   isHostedProductSupportEscalationFeedback,
   isHostedProductSupportEscalationSummary,
@@ -108,7 +110,16 @@ describe("hosted product support escalation", () => {
           kind: "frustration",
           memberId: MEMBER_ID,
           relatedChangelogItemIdsJson: [],
-          summary: feedback.summary,
+          summary: HOSTED_PRODUCT_SUPPORT_ESCALATION_RECORD_SUMMARY,
+        }),
+        expect.objectContaining({
+          createdAt: NOW,
+          id: buildHostedProductSupportDetailFeedbackId(feedbackId),
+          kind: "frustration",
+          memberId: null,
+          relatedChangelogItemIdsJson: [],
+          summary:
+            "a connected source reports success but Murph does not finish the connection.",
         }),
       ],
       skipDuplicates: true,
@@ -134,7 +145,53 @@ describe("hosted product support escalation", () => {
     }));
     const emailText = sendEmail.mock.calls[0]?.[0].text ?? "";
     expect(emailText).toContain(`Feedback ID: ${feedbackId}`);
-    expect(emailText).toContain(feedback.summary);
+    expect(emailText).not.toContain(feedback.summary);
+    expect(emailText).not.toContain("connected source");
+  });
+
+  it("keeps semantic private details out of the member-linked row and email", async () => {
+    const semanticDetail =
+      "Maria's diabetes readings from her Dexcom vanished after syncing at the Lakeside clinic.";
+    const feedback = makeSupportFeedback({
+      idempotencyKey: "9".repeat(64),
+      detail: semanticDetail,
+    });
+    const feedbackId = buildHostedProductFeedbackId({ feedback });
+    const sendEmail = vi.fn().mockResolvedValue({ providerMessageId: null });
+    prismaMocks.createMany.mockResolvedValue({ count: 2 });
+    prismaMocks.findFeedback.mockResolvedValue(makeStoredSupportFeedback({
+      feedback,
+      feedbackId,
+    }));
+    prismaMocks.count.mockResolvedValue(1);
+
+    await recordHostedProductFeedback({
+      env: EMAIL_ENV,
+      feedback,
+      memberId: MEMBER_ID,
+      now: NOW,
+      sendEmail,
+    });
+
+    const createManyRows = prismaMocks.createMany.mock.calls[0]?.[0]?.data ?? [];
+    const memberRow = createManyRows.find(
+      (row: { memberId: string | null }) => row.memberId !== null,
+    );
+    const anonymousRow = createManyRows.find(
+      (row: { memberId: string | null }) => row.memberId === null,
+    );
+    expect(memberRow?.summary).toBe(
+      HOSTED_PRODUCT_SUPPORT_ESCALATION_RECORD_SUMMARY,
+    );
+    expect(memberRow?.summary).not.toContain("Maria");
+    expect(anonymousRow?.summary).toBe(semanticDetail);
+    expect(anonymousRow?.memberId).toBeNull();
+
+    const emailText = sendEmail.mock.calls[0]?.[0].text ?? "";
+    expect(emailText).not.toContain("Maria");
+    expect(emailText).not.toContain("Dexcom");
+    expect(emailText).not.toContain("diabetes");
+    expect(emailText).toContain(`Member ID: ${MEMBER_ID}`);
   });
 
   it("records later escalations without sending more than three emails per UTC day", async () => {
@@ -288,6 +345,7 @@ describe("hosted product support escalation", () => {
 });
 
 function makeSupportFeedback(input: {
+  detail?: string;
   idempotencyKey?: string;
 } = {}) {
   return {
@@ -296,7 +354,8 @@ function makeSupportFeedback(input: {
     relatedChangelogItemIds: [],
     summary: [
       HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
-      "a connected source reports success but Murph does not finish the connection.",
+      input.detail
+        ?? "a connected source reports success but Murph does not finish the connection.",
     ].join(" "),
   };
 }
@@ -311,6 +370,6 @@ function makeStoredSupportFeedback(input: {
     kind: input.feedback.kind,
     memberId: MEMBER_ID,
     relatedChangelogItemIdsJson: [],
-    summary: input.feedback.summary,
+    summary: HOSTED_PRODUCT_SUPPORT_ESCALATION_RECORD_SUMMARY,
   };
 }
