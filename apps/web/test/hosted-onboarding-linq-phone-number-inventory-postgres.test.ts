@@ -1,6 +1,6 @@
 import { randomInt, randomUUID } from "node:crypto";
 
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedOnboardingLinqConfig: () => ({
@@ -8,6 +8,36 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
     apiToken: "linq-token",
   }),
 }));
+
+// Pass-through wrapper so the rollback proof can inject a failure mid-way
+// through an otherwise fully real snapshot application.
+const providerStateControl = vi.hoisted(() => ({ calls: 0, failOnCall: 0 }));
+
+vi.mock("@/src/lib/hosted-onboarding/linq-provider-health-store", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/hosted-onboarding/linq-provider-health-store")
+  >();
+  return {
+    ...actual,
+    projectHostedLinqLineProviderStateTx: async (
+      input: Parameters<typeof actual.projectHostedLinqLineProviderStateTx>[0],
+    ) => {
+      providerStateControl.calls += 1;
+      if (
+        providerStateControl.failOnCall > 0
+        && providerStateControl.calls === providerStateControl.failOnCall
+      ) {
+        throw new Error("injected mid-application failure");
+      }
+      return actual.projectHostedLinqLineProviderStateTx(input);
+    },
+  };
+});
+
+beforeEach(() => {
+  providerStateControl.calls = 0;
+  providerStateControl.failOnCall = 0;
+});
 
 import { syncHostedLinqPhoneNumberInventory } from "@/src/lib/hosted-onboarding/linq-phone-number-inventory";
 import { upsertHostedLinqLineForPhoneTx } from "@/src/lib/hosted-onboarding/linq-line-store";
@@ -207,6 +237,230 @@ describe.skipIf(!runPostgresProof)(
         }
         await prisma.hostedLinqLine.deleteMany({
           where: { phoneNumberLookupKey: { in: createdLookupKeys } },
+        });
+        await prisma.$disconnect();
+      }
+    });
+    it("blocks a concurrent sync on the inventory-wide advisory lock until the owner commits", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 8 });
+      const observer = createPrismaClient({ databaseUrl, poolMax: 2 });
+      const providerId = `pg-proof-line-${randomUUID()}`;
+      const phoneB = buildSyntheticProofPhoneNumber();
+      const createdLookupKeys: string[] = [];
+
+      const preexistingHeldRows = await prisma.hostedLinqLine.findMany({
+        where: { providerPhoneNumberId: { not: null } },
+        select: {
+          phoneNumberLookupKey: true,
+          providerPhoneNumberId: true,
+        },
+      });
+
+      try {
+        vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+          phone_numbers: [
+            {
+              id: providerId,
+              phone_number: phoneB,
+              reputation: { status: "HEALTHY" },
+              status: "ACTIVE",
+            },
+          ],
+        }), { headers: { "content-type": "application/json" }, status: 200 })));
+
+        let releaseOwner: () => void = () => undefined;
+        const ownerHold = new Promise<void>((resolve) => {
+          releaseOwner = resolve;
+        });
+        let ownerHasLock: () => void = () => undefined;
+        const ownerLocked = new Promise<void>((resolve) => {
+          ownerHasLock = resolve;
+        });
+        const ownerTransaction = prisma.$transaction(async (tx) => {
+          await tx.$executeRaw`
+            SELECT pg_advisory_xact_lock(
+              hashtext('hosted_linq_phone_number_inventory'),
+              hashtext('snapshot')
+            )
+          `;
+          ownerHasLock();
+          await ownerHold;
+        });
+
+        await ownerLocked;
+        const contender = syncHostedLinqPhoneNumberInventory({
+          observedAt: new Date(),
+          prisma,
+        });
+
+        // The production sync must be observably blocked on the advisory lock
+        // while the owner holds it — this assertion fails if the lock is
+        // removed from the sync.
+        let blockedBackends = 0;
+        for (let attempt = 0; attempt < 40 && blockedBackends === 0; attempt += 1) {
+          const rows = await observer.$queryRaw<Array<{ blocked: bigint | number }>>`
+            SELECT count(*) AS blocked
+            FROM pg_stat_activity
+            WHERE wait_event_type = 'Lock'
+              AND wait_event = 'advisory'
+              AND cardinality(pg_blocking_pids(pid)) > 0
+          `;
+          blockedBackends = Number(rows[0]?.blocked ?? 0);
+          if (blockedBackends === 0) {
+            await new Promise((resolve) => setTimeout(resolve, 100));
+          }
+        }
+        expect(blockedBackends).toBeGreaterThan(0);
+
+        releaseOwner();
+        await ownerTransaction;
+        await expect(contender).resolves.toEqual({ syncedCount: 1 });
+
+        const owners = await prisma.hostedLinqLine.findMany({
+          where: { providerPhoneNumberId: providerId },
+          select: { phoneNumberLookupKey: true },
+        });
+        for (const owner of owners) {
+          createdLookupKeys.push(owner.phoneNumberLookupKey);
+        }
+        expect(owners).toHaveLength(1);
+      } finally {
+        vi.unstubAllGlobals();
+        for (const heldRow of preexistingHeldRows) {
+          await prisma.hostedLinqLine.updateMany({
+            data: { providerPhoneNumberId: heldRow.providerPhoneNumberId },
+            where: { phoneNumberLookupKey: heldRow.phoneNumberLookupKey },
+          });
+        }
+        await prisma.hostedLinqLine.deleteMany({
+          where: { phoneNumberLookupKey: { in: createdLookupKeys } },
+        });
+        await prisma.$disconnect();
+        await observer.$disconnect();
+      }
+    });
+
+    it("rolls the whole snapshot application back when a line fails mid-way", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 4 });
+      const providerIdX = `pg-proof-line-${randomUUID()}`;
+      const providerIdY = `pg-proof-line-${randomUUID()}`;
+      const phoneA = buildSyntheticProofPhoneNumber();
+      const phoneB = buildSyntheticProofPhoneNumber();
+      const phoneC = buildSyntheticProofPhoneNumber();
+      const createdLookupKeys: string[] = [];
+
+      const preexistingHeldRows = await prisma.hostedLinqLine.findMany({
+        where: { providerPhoneNumberId: { not: null } },
+        select: {
+          phoneNumberLookupKey: true,
+          providerPhoneNumberId: true,
+        },
+      });
+
+      try {
+        const rowA = await upsertHostedLinqLineForPhoneTx({
+          observedAt: new Date(),
+          phoneNumber: phoneA,
+          prisma,
+          providerPhoneNumberId: providerIdX,
+          source: "provider",
+        });
+        createdLookupKeys.push(rowA.phoneNumberLookupKey);
+
+        // Snapshot: new line C first, then X moved from A to B. Failing the
+        // second line's application (after the stale revoke and a full first
+        // line) must roll the entire replacement back.
+        providerStateControl.failOnCall = 2;
+        vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+          phone_numbers: [
+            {
+              id: providerIdY,
+              phone_number: phoneC,
+              reputation: { status: "HEALTHY" },
+              status: "ACTIVE",
+            },
+            {
+              id: providerIdX,
+              phone_number: phoneB,
+              reputation: { status: "HEALTHY" },
+              status: "ACTIVE",
+            },
+          ],
+        }), { headers: { "content-type": "application/json" }, status: 200 })));
+
+        await expect(syncHostedLinqPhoneNumberInventory({
+          observedAt: new Date(),
+          prisma,
+        })).rejects.toThrow("injected mid-application failure");
+
+        const rowAAfter = await prisma.hostedLinqLine.findUnique({
+          where: { phoneNumberLookupKey: rowA.phoneNumberLookupKey },
+          select: { providerPhoneNumberId: true },
+        });
+        expect(rowAAfter?.providerPhoneNumberId).toBe(providerIdX);
+        const strayRows = await prisma.hostedLinqLine.findMany({
+          where: { providerPhoneNumberId: providerIdY },
+          select: { phoneNumberLookupKey: true },
+        });
+        expect(strayRows).toHaveLength(0);
+      } finally {
+        vi.unstubAllGlobals();
+        for (const heldRow of preexistingHeldRows) {
+          await prisma.hostedLinqLine.updateMany({
+            data: { providerPhoneNumberId: heldRow.providerPhoneNumberId },
+            where: { phoneNumberLookupKey: heldRow.phoneNumberLookupKey },
+          });
+        }
+        await prisma.hostedLinqLine.deleteMany({
+          where: { phoneNumberLookupKey: { in: createdLookupKeys } },
+        });
+        await prisma.$disconnect();
+      }
+    });
+
+    it("applies a maximum-cardinality 250-line snapshot inside the default transaction budget", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 4 });
+      const lineCount = 250;
+      const snapshotLines = Array.from({ length: lineCount }, (_value, index) => ({
+        id: `pg-proof-bulk-${index}-${randomUUID()}`,
+        phone_number: `+1555${String(1_000_000 + index)}`,
+        reputation: { status: "HEALTHY" },
+        status: "ACTIVE",
+      }));
+      const snapshotIds = snapshotLines.map((line) => line.id);
+
+      const preexistingHeldRows = await prisma.hostedLinqLine.findMany({
+        where: { providerPhoneNumberId: { not: null } },
+        select: {
+          phoneNumberLookupKey: true,
+          providerPhoneNumberId: true,
+        },
+      });
+
+      try {
+        vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+          phone_numbers: snapshotLines,
+        }), { headers: { "content-type": "application/json" }, status: 200 })));
+
+        await expect(syncHostedLinqPhoneNumberInventory({
+          observedAt: new Date(),
+          prisma,
+        })).resolves.toEqual({ syncedCount: lineCount });
+
+        const heldCount = await prisma.hostedLinqLine.count({
+          where: { providerPhoneNumberId: { in: snapshotIds } },
+        });
+        expect(heldCount).toBe(lineCount);
+      } finally {
+        vi.unstubAllGlobals();
+        for (const heldRow of preexistingHeldRows) {
+          await prisma.hostedLinqLine.updateMany({
+            data: { providerPhoneNumberId: heldRow.providerPhoneNumberId },
+            where: { phoneNumberLookupKey: heldRow.phoneNumberLookupKey },
+          });
+        }
+        await prisma.hostedLinqLine.deleteMany({
+          where: { providerPhoneNumberId: { in: snapshotIds } },
         });
         await prisma.$disconnect();
       }

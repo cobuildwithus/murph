@@ -114,6 +114,35 @@ describe("syncHostedLinqPhoneNumberInventory", () => {
     });
   });
 
+  it("applies the snapshot inside one owning transaction that takes the inventory lock first", async () => {
+    const callOrder: string[] = [];
+    const tx = {
+      $executeRaw: vi.fn(async () => {
+        callOrder.push("lock");
+        return 0;
+      }),
+      hostedLinqLine: {
+        findMany: vi.fn(async () => {
+          callOrder.push("read-held");
+          return [];
+        }),
+        updateMany: vi.fn(),
+      },
+    };
+    const $transaction = vi.fn(async (callback: (client: unknown) => Promise<unknown>) => {
+      callOrder.push("transaction");
+      return callback(tx);
+    });
+    stubInventoryFetch({ phone_numbers: [] });
+
+    await expect(syncHostedLinqPhoneNumberInventory({
+      prisma: { $transaction, hostedLinqLine: { findMany: vi.fn(), updateMany: vi.fn() } } as never,
+    })).resolves.toEqual({ syncedCount: 0 });
+
+    expect($transaction).toHaveBeenCalledTimes(1);
+    expect(callOrder).toEqual(["transaction", "lock", "read-held"]);
+  });
+
   it("does not revoke inventory backing when the provider read fails", async () => {
     const findMany = vi.fn();
     const updateMany = vi.fn();
