@@ -5,10 +5,11 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
-  buildJunctionClientUserId,
-  JunctionClient,
   normalizeJunctionProviderSlug,
-} from "@murphai/device-syncd";
+} from "@murphai/device-syncd/connect-config";
+import {
+  JunctionClient,
+} from "@murphai/device-syncd/providers/junction-client";
 
 import {
   readHostedExecutionEnvironment,
@@ -31,6 +32,22 @@ import {
 
 const execFileAsync = promisify(execFile);
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
+const junctionProviderModuleSpecifier = new URL(
+  "../../../packages/device-syncd/src/providers/junction.ts",
+  import.meta.url,
+).href;
+const hostedConsentModuleSpecifier = new URL(
+  "../../web/src/lib/legal/consent.ts",
+  import.meta.url,
+).href;
+const hostedAppSessionModuleSpecifier = new URL(
+  "../../web/src/lib/hosted-onboarding/app-session.ts",
+  import.meta.url,
+).href;
+const hostedPrismaModuleSpecifier = new URL(
+  "../../web/src/lib/prisma.ts",
+  import.meta.url,
+).href;
 const linkUserId = `member_local_device_connect_${Date.now()}`;
 const liveBrowserUserId =
   process.env.MURPH_E2E_JUNCTION_WHOOP_MEMBER_ID?.trim()
@@ -259,6 +276,34 @@ interface JunctionWhoopBrowserResult {
   source: "whoop";
 }
 
+interface JunctionProviderModule {
+  buildJunctionClientUserId(secret: string, ownerId: string): string;
+}
+
+interface HostedBrowserSessionPrisma {
+  $disconnect(): Promise<void>;
+}
+
+interface HostedConsentModule {
+  recordHostedLaunchRequiredConsent(input: {
+    memberId: string;
+    prisma: HostedBrowserSessionPrisma;
+    scope: "launch.health-data" | "launch.legal";
+    source: string;
+  }): Promise<unknown>;
+}
+
+interface HostedAppSessionModule {
+  issueHostedAppSession(input: {
+    memberId: string;
+    privyUserId: string;
+  }): Promise<{ cookie: string }>;
+}
+
+interface HostedPrismaModule {
+  getPrisma(): HostedBrowserSessionPrisma;
+}
+
 function readLiveJunctionWhoopConfig(
   env: NodeJS.ProcessEnv,
 ): LiveJunctionWhoopConfig | null {
@@ -314,9 +359,9 @@ function requireLiveJunctionWhoopConfig(): LiveJunctionWhoopConfig {
 }
 
 function assertLiveScenarioIsIsolated(): void {
-  const selectedE2eFiles = process.argv.filter((argument) =>
-    argument.endsWith("e2e.test.ts")
-  );
+  const selectedE2eFiles = process.argv
+    .map((argument) => argument.replaceAll("\\", "/"))
+    .filter((argument) => argument.endsWith("e2e.test.ts"));
   if (
     selectedE2eFiles.length !== 1
     || !selectedE2eFiles[0]?.endsWith(
@@ -337,7 +382,10 @@ async function resetLiveJunctionWhoopProvider(
     environment: "sandbox",
     region: config.region,
   });
-  const clientUserId = buildJunctionClientUserId(
+  const junctionProvider = await import(
+    junctionProviderModuleSpecifier
+  ) as JunctionProviderModule;
+  const clientUserId = junctionProvider.buildJunctionClientUserId(
     config.clientUserIdSecret,
     liveBrowserUserId,
   );
@@ -375,9 +423,9 @@ async function issueHostedBrowserSession(input: {
 
   try {
     const [consentModule, sessionModule, prismaModule] = await Promise.all([
-      import("@/src/lib/legal/consent"),
-      import("@/src/lib/hosted-onboarding/app-session"),
-      import("@/src/lib/prisma"),
+      import(hostedConsentModuleSpecifier) as Promise<HostedConsentModule>,
+      import(hostedAppSessionModuleSpecifier) as Promise<HostedAppSessionModule>,
+      import(hostedPrismaModuleSpecifier) as Promise<HostedPrismaModule>,
     ]);
     const prisma = prismaModule.getPrisma();
 
