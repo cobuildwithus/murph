@@ -39,6 +39,7 @@ const INTEGRATIONS_CONNECT_PATH_PATTERN =
   /^\/integrations\/connect\/cai_[A-Za-z0-9_-]{32}$/u;
 const SETTINGS_DATA_PRIVACY_PATH = "/settings/data-privacy";
 const SETTINGS_PATH = "/settings";
+const ENVIRONMENT_PATH = "/environment";
 
 interface AuthContextValue {
   authenticated: boolean;
@@ -128,6 +129,7 @@ export function AuthProvider({
 function shouldResumeCurrentAuthUrl(payload: HostedPrivyCompletionPayload): boolean {
   return (
     shouldResumeCurrentActionApprovalUrl(payload)
+    || shouldResumeCurrentEnvironmentUrl(payload)
     || shouldResumeCurrentDeviceConnectIntentUrl(payload)
     || shouldResumeCurrentClinicalRecordsIndexUrl(payload)
     || shouldResumeCurrentClinicalRecordsConnectUrl(payload)
@@ -136,6 +138,16 @@ function shouldResumeCurrentAuthUrl(payload: HostedPrivyCompletionPayload): bool
     || shouldResumeCurrentSettingsDataPrivacyUrl(payload)
     || shouldResumeCurrentSettingsGroupPaymentUrl(payload)
     || shouldResumeCurrentSettingsPulseTrialPaymentUrl(payload)
+  );
+}
+
+function shouldResumeCurrentEnvironmentUrl(
+  payload: HostedPrivyCompletionPayload,
+): boolean {
+  return (
+    isHostedOnboardingAccessibleStage(payload.stage)
+    && typeof window !== "undefined"
+    && window.location.pathname === ENVIRONMENT_PATH
   );
 }
 
