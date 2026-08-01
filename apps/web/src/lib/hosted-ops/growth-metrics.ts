@@ -1,6 +1,7 @@
 import "server-only";
 
 import {
+  HOSTED_EXECUTION_GROUP_REACTION_SENDER_ATTESTATION,
   isHostedEmailConversationMessageWake,
   isHostedLinqConversationMessageWake,
   isHostedTelegramConversationMessageWake,
@@ -811,6 +812,12 @@ function readHostedGrowthGroupSenderEvidence(
     if (wake.message.linqMessage.threadIsDirect !== false) {
       throw new Error("Hosted growth thread-container Linq message must be non-direct.");
     }
+    if (
+      wake.message.linqMessage.from
+        === HOSTED_EXECUTION_GROUP_REACTION_SENDER_ATTESTATION
+    ) {
+      return null;
+    }
     const storedContact = readHostedLinqConversationMessageContact(wake.message);
     const currentContact = createHostedLinqParticipantContact({
       kind: storedContact.kind,
@@ -849,6 +856,12 @@ function readHostedGrowthGroupSenderEvidence(
   if (isHostedTelegramConversationMessageWake(wake)) {
     if (wake.message.telegramMessage.threadIsDirect !== false) {
       throw new Error("Hosted growth thread-container Telegram message must be non-direct.");
+    }
+    if (
+      wake.message.telegramMessage.from
+        === HOSTED_EXECUTION_GROUP_REACTION_SENDER_ATTESTATION
+    ) {
+      return null;
     }
     if (wake.message.senderMemberId) {
       const identityKey = hostedGrowthMemberIdentity(wake.message.senderMemberId);

@@ -3,6 +3,7 @@ import {
   buildHostedExecutionEmailConversationMessageWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionTelegramConversationMessageWake,
+  HOSTED_EXECUTION_GROUP_REACTION_SENDER_ATTESTATION,
   HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
   type HostedExecutionConversationMessageWake,
 } from "@murphai/hosted-execution";
@@ -1251,6 +1252,56 @@ describe("hosted ops growth metrics", () => {
     expect(mocks.decodeHostedMailboxStoredPayload).toHaveBeenCalledTimes(3);
   });
 
+  it("omits group reaction attestation rows from active senders", async () => {
+    const now = new Date("2026-07-06T12:00:00.000Z");
+    const senderPhone = requireLinqContact("phone", "+15550000001");
+    const reactorPhone = requireLinqContact("phone", "+15550000002");
+    queueCurrentMetricMocks();
+    mocks.hostedMailboxItem.groupBy
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    mocks.hostedMailboxItem.findMany.mockResolvedValueOnce([
+      buildLinqGroupMailboxRow({
+        contact: senderPhone,
+        containerMemberId: "thread_container_one",
+        occurredAt: new Date("2026-07-05T12:00:00.000Z"),
+      }),
+      buildLinqGroupMailboxRow({
+        contact: reactorPhone,
+        containerMemberId: "thread_container_one",
+        from: HOSTED_EXECUTION_GROUP_REACTION_SENDER_ATTESTATION,
+        occurredAt: new Date("2026-07-04T12:00:00.000Z"),
+      }),
+      buildTelegramGroupMailboxRow({
+        containerMemberId: "thread_container_two",
+        occurredAt: new Date("2026-07-03T12:00:00.000Z"),
+        senderUserId: HOSTED_EXECUTION_GROUP_REACTION_SENDER_ATTESTATION,
+      }),
+    ]);
+    mocks.hostedGrowthAggregate.findUniqueOrThrow.mockResolvedValueOnce({
+      trackedFulfilledUsageTopUps: 0,
+    });
+    mocks.hostedMember.findMany.mockResolvedValueOnce([]);
+    mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+    mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
+    mocks.hostedMemberBillingRef.count
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0);
+
+    const dashboard = await readHostedGrowthDashboard(now);
+
+    expect(dashboard.activeUsers).toEqual({
+      trailing30Days: 1,
+      trailing30DaysComplete: true,
+      trailing7Days: 1,
+      trailing7DaysComplete: true,
+      wowComparisonComplete: true,
+      wowPercent: null,
+    });
+    expect(mocks.decodeHostedMailboxStoredPayload).toHaveBeenCalledTimes(3);
+  });
+
   it("still rejects an unknown thread-container conversation channel", async () => {
     const now = new Date("2026-07-06T12:00:00.000Z");
     const row = buildEmailGroupMailboxRow({
@@ -1842,6 +1893,7 @@ function restoreEnvValue(key: string, value: string | undefined): void {
 function buildLinqGroupMailboxRow(input: {
   contact: NonNullable<ReturnType<typeof createHostedLinqParticipantContact>>;
   containerMemberId: string;
+  from?: string;
   occurredAt: Date;
   senderMemberId?: string;
 }) {
@@ -1858,7 +1910,7 @@ function buildLinqGroupMailboxRow(input: {
     eventId,
     linqMessage: {
       chatId: threadId,
-      from: input.contact.value,
+      from: input.from ?? input.contact.value,
       isFromMe: false,
       messageId: eventId,
       parts: [{ type: "text", value: "hello" }],
