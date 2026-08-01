@@ -240,12 +240,13 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         prisma,
         signal: input.signal,
       });
-      // A refused region is a decided outcome for a reaction that provably
-      // targeted the canonical join offer, so it must be consumed here. Falling
-      // through would stage group-runtime work and wake the mailbox only to skip
-      // it, and could produce the group-visible behaviour this path avoids.
+      // Every terminal outcome for a proven canonical join offer is consumed
+      // here. Falling through would turn a decided reaction into ordinary group
+      // runtime work.
       if (
         reactionResult.status === "accepted"
+        || reactionResult.reason === "already_group_member"
+        || reactionResult.reason === "member_suspended"
         || reactionResult.reason === "recipient_region_unsupported"
       ) {
         const response: HostedOnboardingLinqWebhookResponse = {
@@ -254,7 +255,11 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           ok: true,
           reason: reactionResult.status === "accepted"
             ? "accepted-linq-group-join-offer-reaction"
-            : "ignored-linq-group-join-offer-region-unsupported",
+            : reactionResult.reason === "member_suspended"
+              ? "ignored-linq-group-join-offer-member-suspended"
+              : reactionResult.reason === "already_group_member"
+                ? "ignored-linq-group-join-offer-already-member"
+                : "ignored-linq-group-join-offer-region-unsupported",
         };
         responseReason = response.reason ?? null;
         finishHostedOnboardingTiming(timing, "completed", {

@@ -156,6 +156,9 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     mocks.lookupHostedMemberByVerifiedEmailAddress.mockResolvedValue(null);
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
       core: { id: "member_reactor", suspendedAt: null },
+      identity: {
+        phoneNumberVerifiedAt: new Date("2026-03-20T00:00:00.000Z"),
+      },
     });
     mocks.readHostedGroupJoinOfferTargetTx.mockResolvedValue({
       displayName: "Training circle",
@@ -356,6 +359,121 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     expect(mocks.signalHostedLinqGroupReactionMailbox).toHaveBeenCalledTimes(1);
   });
 
+  it("revokes inactive-member outreach with the existing tombstone", async () => {
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
+    mocks.revokeHostedGroupJoinOutreachForRemovedReactionTx.mockResolvedValueOnce({
+      kind: "revoked",
+    });
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent({
+        eventType: "reaction.removed",
+        reactionType: "like",
+      }),
+      prisma,
+    })).resolves.toEqual({ reason: "outreach_revoked", status: "accepted" });
+
+    expect(mocks.revokeHostedGroupJoinOutreachForRemovedReactionTx)
+      .toHaveBeenCalledWith({
+        allowMissingRowTombstone: true,
+        now: new Date("2026-03-26T12:01:00.000Z"),
+        offerId: "hgrpjo_opaque",
+        participantPhoneNumber: "+15551234567",
+        tx: expect.anything(),
+      });
+    expect(mocks.markHostedLinqGroupJoinOfferHandledTx).toHaveBeenCalledWith({
+      eventId: "evt_reaction_123",
+      handledAt: new Date("2026-03-26T12:01:00.000Z"),
+      prisma: expect.anything(),
+    });
+  });
+
+  it.each([
+    ["active", { active: true, suspendedAt: null, targetMembership: false }],
+    [
+      "suspended",
+      {
+        active: false,
+        suspendedAt: new Date("2026-03-20T00:00:00.000Z"),
+        targetMembership: false,
+      },
+    ],
+    [
+      "already in the target group",
+      { active: false, suspendedAt: null, targetMembership: true },
+    ],
+  ])(
+    "revokes exact pending outreach while the member is %s without creating a tombstone",
+    async (_state, options) => {
+      mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValueOnce({
+        core: {
+          id: "member_reactor",
+          suspendedAt: options.suspendedAt,
+        },
+        identity: {
+          phoneNumberVerifiedAt: new Date("2026-03-20T00:00:00.000Z"),
+        },
+      });
+      mocks.readActiveHostedMemberAccess.mockResolvedValue(options.active);
+      mocks.revokeHostedGroupJoinOutreachForRemovedReactionTx.mockResolvedValueOnce({
+        kind: "revoked",
+      });
+      const prisma = createPrismaStub({
+        memberSuspendedAt: options.suspendedAt,
+        targetMembership: options.targetMembership,
+      });
+
+      await expect(handleHostedGroupJoinOfferReaction({
+        event: parseReactionEvent({
+          eventType: "reaction.removed",
+          reactionType: "like",
+        }),
+        prisma,
+      })).resolves.toEqual({ reason: "outreach_revoked", status: "accepted" });
+
+      expect(mocks.revokeHostedGroupJoinOutreachForRemovedReactionTx)
+        .toHaveBeenCalledWith({
+          allowMissingRowTombstone: false,
+          now: new Date("2026-03-26T12:01:00.000Z"),
+          offerId: "hgrpjo_opaque",
+          participantPhoneNumber: "+15551234567",
+          tx: expect.anything(),
+        });
+      expect(mocks.appendHostedLinqGroupReactionMailboxTx).toHaveBeenCalledWith({
+        actor: "+15551234567",
+        event: expect.anything(),
+        route: expect.objectContaining({ containerMemberId: "hbm_runtime" }),
+        tx: expect.anything(),
+      });
+    },
+  );
+
+  it("makes an active member's non-revoking removal terminal after attributed retention", async () => {
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent({
+        eventType: "reaction.removed",
+        reactionType: "like",
+      }),
+      prisma,
+    })).resolves.toEqual({ reason: "reaction_recorded", status: "accepted" });
+
+    expect(mocks.revokeHostedGroupJoinOutreachForRemovedReactionTx)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        allowMissingRowTombstone: false,
+      }));
+    expect(mocks.appendHostedLinqGroupReactionMailboxTx).toHaveBeenCalledWith({
+      actor: "+15551234567",
+      event: expect.anything(),
+      route: expect.objectContaining({ containerMemberId: "hbm_runtime" }),
+      tx: expect.anything(),
+    });
+    expect(mocks.signalHostedLinqGroupReactionMailbox).toHaveBeenCalledTimes(1);
+  });
+
   it("does not treat a removed Like as disclosure consent or a legacy join", async () => {
     const prisma = createPrismaStub();
 
@@ -365,10 +483,56 @@ describe("handleHostedGroupJoinOfferReaction", () => {
         reactionType: "like",
       }),
       prisma,
-    })).resolves.toEqual({ reason: "reaction_removed", status: "ignored" });
+    })).resolves.toEqual({ reason: "reaction_recorded", status: "accepted" });
 
     expect(mocks.acceptHostedGroupDisclosurePermissionReactionTx).not.toHaveBeenCalled();
     expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+  });
+
+  it("keeps the withdrawal terminal when the best-effort evidence append fails", async () => {
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
+    mocks.revokeHostedGroupJoinOutreachForRemovedReactionTx.mockResolvedValueOnce({
+      kind: "revoked",
+    });
+    mocks.appendHostedLinqGroupReactionMailboxTx.mockRejectedValueOnce(
+      new Error("mailbox unavailable"),
+    );
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent({
+        eventType: "reaction.removed",
+        reactionType: "like",
+      }),
+      prisma,
+    })).resolves.toEqual({ reason: "outreach_revoked", status: "accepted" });
+
+    // The withdrawal and terminal marker committed before the evidence
+    // attempt; the failed best-effort append costs only this removal's room
+    // context and is reported, never a rollback or a replayable event.
+    expect(mocks.revokeHostedGroupJoinOutreachForRemovedReactionTx).toHaveBeenCalledTimes(1);
+    expect(mocks.markHostedLinqGroupJoinOfferHandledTx).toHaveBeenCalledTimes(1);
+    expect(mocks.logHostedOnboardingDiagnostic).toHaveBeenCalledWith(
+      "hosted-onboarding.group-offer-reaction-evidence-failed",
+      { errorName: "Error" },
+    );
+    expect(mocks.signalHostedLinqGroupReactionMailbox).not.toHaveBeenCalled();
+  });
+
+  it("rolls back member outreach consumption when the evidence append fails", async () => {
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
+    mocks.appendHostedLinqGroupReactionMailboxTx.mockRejectedValueOnce(
+      new Error("mailbox unavailable"),
+    );
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent({ reactionType: "like" }),
+      prisma,
+    })).rejects.toThrow("mailbox unavailable");
+
+    expect(mocks.markHostedLinqGroupJoinOfferHandledTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedLinqGroupReactionMailbox).not.toHaveBeenCalled();
   });
 
   it("durably enqueues first outreach and anonymous room evidence for a nonmember phone reaction", async () => {
@@ -410,6 +574,188 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     });
     expect(mocks.acceptHostedGroupDisclosurePermissionReactionTx).not.toHaveBeenCalled();
     expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+  });
+
+  it("enqueues the same outreach for an inactive unsuspended member", async () => {
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent({ reactionType: "like" }),
+      prisma,
+    })).resolves.toEqual({
+      status: "accepted",
+      reason: "outreach_enqueued",
+    });
+
+    expect(mocks.readActiveHostedMemberAccess).toHaveBeenCalledTimes(2);
+    expect(mocks.enqueueHostedGroupJoinOutreachTx).toHaveBeenCalledWith({
+      offerId: "hgrpjo_opaque",
+      participantPhoneNumber: "+15551234567",
+      requestedAt: new Date("2026-03-26T12:01:00.000Z"),
+      tx: expect.anything(),
+    });
+    expect(mocks.markHostedLinqGroupJoinOfferHandledTx).toHaveBeenCalledWith({
+      eventId: "evt_reaction_123",
+      handledAt: new Date("2026-03-26T12:01:00.000Z"),
+      prisma: expect.anything(),
+    });
+    expect(mocks.appendHostedLinqGroupReactionMailboxTx).toHaveBeenCalledWith({
+      actor: "+15551234567",
+      event: expect.anything(),
+      route: expect.objectContaining({ containerMemberId: "hbm_runtime" }),
+      tx: expect.anything(),
+    });
+    expect(mocks.signalHostedLinqGroupReactionMailbox).toHaveBeenCalledTimes(1);
+    expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+  });
+
+  it("requires a live canonical offer before inactive-member outreach", async () => {
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
+    mocks.readHostedGroupJoinOfferTargetTx.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "HOSTED_GROUP_JOIN_OFFER_REVOKED",
+        httpStatus: 410,
+        message: "This group offer has been revoked.",
+        retryable: false,
+      }),
+    );
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent({ reactionType: "like" }),
+      prisma,
+    })).resolves.toEqual({
+      status: "ignored",
+      reason: "offer_revoked",
+    });
+
+    expect(mocks.enqueueHostedGroupJoinOutreachTx).not.toHaveBeenCalled();
+    expect(mocks.markHostedLinqGroupJoinOfferHandledTx).not.toHaveBeenCalled();
+    expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+  });
+
+  it("keeps an unverified inactive phone identity on the prior fallback path", async () => {
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValueOnce({
+      core: { id: "member_reactor", suspendedAt: null },
+      identity: { phoneNumberVerifiedAt: null },
+    });
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent({ reactionType: "like" }),
+      prisma,
+    })).resolves.toEqual({
+      status: "ignored",
+      reason: "member_inactive",
+    });
+
+    expect(mocks.readHostedGroupJoinOfferTargetTx).not.toHaveBeenCalled();
+    expect(mocks.markHostedLinqGroupJoinOfferHandledTx).not.toHaveBeenCalled();
+    expect(mocks.appendHostedLinqGroupReactionMailboxTx).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedGroupJoinOutreachTx).not.toHaveBeenCalled();
+    expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+  });
+
+  it("consumes an unsupported-region inactive member without durable outreach", async () => {
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent({
+        handle: "+353871234567",
+        reactionType: "like",
+      }),
+      prisma,
+    })).resolves.toEqual({
+      status: "ignored",
+      reason: "recipient_region_unsupported",
+    });
+
+    expect(mocks.markHostedLinqGroupJoinOfferHandledTx).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedLinqGroupReactionMailboxTx).toHaveBeenCalledWith({
+      actor: "+353871234567",
+      event: expect.anything(),
+      route: expect.objectContaining({ containerMemberId: "hbm_runtime" }),
+      tx: expect.anything(),
+    });
+    expect(mocks.signalHostedLinqGroupReactionMailbox).toHaveBeenCalledTimes(1);
+    expect(mocks.enqueueHostedGroupJoinOutreachTx).not.toHaveBeenCalled();
+    expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+  });
+
+  it("consumes a suspended member reaction without outreach or direct join", async () => {
+    const suspendedAt = new Date("2026-03-20T00:00:00.000Z");
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValueOnce({
+      core: { id: "member_reactor", suspendedAt },
+      identity: {
+        phoneNumberVerifiedAt: new Date("2026-03-20T00:00:00.000Z"),
+      },
+    });
+    const prisma = createPrismaStub({ memberSuspendedAt: suspendedAt });
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent({ reactionType: "like" }),
+      prisma,
+    })).resolves.toEqual({
+      status: "ignored",
+      reason: "member_suspended",
+    });
+
+    expect(mocks.readHostedGroupJoinOfferTargetTx).toHaveBeenCalledTimes(1);
+    expect(mocks.markHostedLinqGroupJoinOfferHandledTx).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedLinqGroupReactionMailboxTx).toHaveBeenCalledWith({
+      actor: "+15551234567",
+      event: expect.anything(),
+      route: expect.objectContaining({ containerMemberId: "hbm_runtime" }),
+      tx: expect.anything(),
+    });
+    expect(mocks.signalHostedLinqGroupReactionMailbox).toHaveBeenCalledTimes(1);
+    expect(mocks.enqueueHostedGroupJoinOutreachTx).not.toHaveBeenCalled();
+    expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+  });
+
+  it("consumes an inactive member who already belongs to the target group", async () => {
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
+    const prisma = createPrismaStub({ targetMembership: true });
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent({ reactionType: "like" }),
+      prisma,
+    })).resolves.toEqual({
+      status: "ignored",
+      reason: "already_group_member",
+    });
+
+    expect(mocks.markHostedLinqGroupJoinOfferHandledTx).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedLinqGroupReactionMailboxTx).toHaveBeenCalledWith({
+      actor: "+15551234567",
+      event: expect.anything(),
+      route: expect.objectContaining({ containerMemberId: "hbm_runtime" }),
+      tx: expect.anything(),
+    });
+    expect(mocks.signalHostedLinqGroupReactionMailbox).toHaveBeenCalledTimes(1);
+    expect(mocks.enqueueHostedGroupJoinOutreachTx).not.toHaveBeenCalled();
+    expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+  });
+
+  it("returns to direct join when activation wins the member lock", async () => {
+    mocks.readActiveHostedMemberAccess
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent({ reactionType: "like" }),
+      prisma,
+    })).resolves.toEqual({
+      status: "accepted",
+      reason: "accepted",
+    });
+
+    expect(mocks.enqueueHostedGroupJoinOutreachTx).not.toHaveBeenCalled();
+    expect(mocks.acceptHostedGroupJoinOfferTx).toHaveBeenCalledTimes(1);
   });
 
   it("records a non-phone pre-member handle instead of silently dropping it", async () => {
@@ -786,14 +1132,29 @@ function restoreEnvValue(key: string, value: string | undefined): void {
   process.env[key] = value;
 }
 
-function createPrismaStub(): PrismaClient {
+function createPrismaStub(options?: {
+  memberSuspendedAt?: Date | null;
+  targetMembership?: boolean;
+}): PrismaClient {
   const prisma = createPrismaClient({
     databaseUrl: "postgresql://test:test@127.0.0.1:1/test",
   });
+  const tx = {
+    $queryRaw: vi.fn(async () => []),
+    hostedGroupMember: {
+      findUnique: vi.fn(async () =>
+        options?.targetMembership ? { id: "membership_existing" } : null),
+    },
+    hostedMember: {
+      findUnique: vi.fn(async () => ({
+        suspendedAt: options?.memberSuspendedAt ?? null,
+      })),
+    },
+  } as unknown as Prisma.TransactionClient;
   Object.defineProperty(prisma, "$transaction", {
     configurable: true,
     value: vi.fn(async <T>(run: (tx: Prisma.TransactionClient) => Promise<T>) =>
-      run({} as Prisma.TransactionClient)),
+      run(tx)),
   });
   return prisma;
 }
