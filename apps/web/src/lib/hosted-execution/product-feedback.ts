@@ -171,6 +171,7 @@ export async function recordHostedProductFeedback(input: {
       text: formatHostedProductSupportEmail({
         feedbackId,
         memberId,
+        summary: feedback.summary,
       }),
       to: emailConfig.recipients,
     });
@@ -260,6 +261,7 @@ async function persistHostedProductFeedback(input: {
 function formatHostedProductSupportEmail(input: {
   feedbackId: string;
   memberId: string;
+  summary: string;
 }): string {
   return [
     "A Murph member explicitly asked to escalate a product issue.",
@@ -267,7 +269,8 @@ function formatHostedProductSupportEmail(input: {
     `Feedback ID: ${input.feedbackId}`,
     `Member ID: ${input.memberId}`,
     "",
-    "Review the member-linked de-identified support record in Web Postgres.",
+    "De-identified issue:",
+    input.summary,
   ].join("\n");
 }
 
