@@ -86,12 +86,17 @@ export async function sendHostedDeviceConnectFailureAlert(input: {
 export async function reportHostedDeviceConnectFailure(
   input: Parameters<typeof sendHostedDeviceConnectFailureAlert>[0],
 ): Promise<void> {
+  // Only the failure's own identifiers are safe to log; keep them as explicit
+  // locals so no raw payload field can reach the log call.
+  const errorCode = input.errorCode;
+  const provider = input.provider ?? "unknown";
+
   try {
     await sendHostedDeviceConnectFailureAlert(input);
   } catch {
     console.warn("Hosted device connect failure alert email failed.", {
-      errorCode: input.errorCode,
-      provider: input.provider,
+      errorCode,
+      provider,
     });
   }
 }
