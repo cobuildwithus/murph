@@ -13,6 +13,7 @@ import {
 } from "./linq";
 import {
   getHostedLinqChatSummary,
+  startHostedLinqChatTypingIndicator,
 } from "./linq-client";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import { getHostedOnboardingEnvironment } from "./runtime";
@@ -88,6 +89,9 @@ import {
 import {
   maybeHandoffHostedExecutionWebhookWake,
 } from "./webhook-service-wake";
+import {
+  startHostedDirectRuntimeWakeBestEffort,
+} from "../hosted-execution/direct-runtime-wake";
 import {
   assertHostedThreadRouteEgressAuthority,
   markHostedLinqThreadRouteParticipantAdditionPendingTx,
@@ -554,6 +558,19 @@ export async function handleHostedOnboardingLinqWebhook(input: {
 
       if (plan.instantStartEnrollment) {
         const instantStartEnrollment = plan.instantStartEnrollment;
+        // The member row is committed, but enrollment plus the replan below
+        // take seconds before the ordinary post-Temporal ensure fires. Start
+        // the container boot now so it overlaps that work, and show a typing
+        // indicator so the sender's first-ever message is not met with a
+        // silent chat while the runtime spins up. Both are best-effort
+        // latency/feedback hints with no authority and no reply path impact.
+        void startHostedDirectRuntimeWakeBestEffort({
+          source: "linq-instant-start",
+          userId: instantStartEnrollment.memberId,
+        });
+        startHostedLinqInstantStartTypingHintBestEffort({
+          event: planningEvent,
+        });
         let enrollmentFailed = false;
         try {
           await ensureHostedLinqInstantStartPulseTrialEnrollment({
@@ -892,6 +909,47 @@ function logHostedLinqChatClassification(
   logHostedOnboardingDiagnostic("hosted-onboarding.webhook.linq.chat-classification", {
     outcome,
   });
+}
+
+const HOSTED_LINQ_INSTANT_START_TYPING_HINT_TIMEOUT_MS = 2_500;
+
+// Instant start is the sender's first-ever message and the reply waits on a
+// cold runtime boot, so surface typing feedback immediately instead of leaving
+// the chat silent until the runtime's own typing session starts. Losing the
+// hint costs nothing; it must never affect webhook handling.
+function startHostedLinqInstantStartTypingHintBestEffort(input: {
+  event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
+}): void {
+  try {
+    const chatId =
+      requireHostedLinqMessageReceivedEvent(input.event).data.chat_id?.trim() ?? "";
+    if (chatId.length === 0) {
+      return;
+    }
+    void startHostedLinqChatTypingIndicator({
+      chatId,
+      timeoutMs: HOSTED_LINQ_INSTANT_START_TYPING_HINT_TIMEOUT_MS,
+    })
+      .then((result) => {
+        if (!result.ok) {
+          logHostedOnboardingDiagnostic(
+            "hosted-onboarding.webhook.linq.instant-start-typing-hint-failed",
+            { httpStatus: result.status },
+          );
+        }
+      })
+      .catch((error: unknown) => {
+        logHostedOnboardingDiagnostic(
+          "hosted-onboarding.webhook.linq.instant-start-typing-hint-failed",
+          { errorName: deriveHostedOnboardingTimingErrorName(error) },
+        );
+      });
+  } catch (error) {
+    logHostedOnboardingDiagnostic(
+      "hosted-onboarding.webhook.linq.instant-start-typing-hint-failed",
+      { errorName: deriveHostedOnboardingTimingErrorName(error) },
+    );
+  }
 }
 
 async function maybeSendHostedLinqIngressReadReceipt(input: {
