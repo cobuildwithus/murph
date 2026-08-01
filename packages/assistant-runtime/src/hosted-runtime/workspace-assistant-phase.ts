@@ -1716,6 +1716,7 @@ export async function runHostedWorkspaceAssistantPhase(
           input.runtime.platform.assistantConfigurationToolPort ?? null,
         connectedApps: input.runtime.platform.connectedApps ?? null,
         ...(clinicalRecordsConnectLinkTool ? { clinicalRecordsConnectLinkTool } : {}),
+        physicalNotes: input.runtime.platform.physicalNotes ?? null,
         phoneCalls: input.runtime.platform.phoneCalls ?? null,
         progressDeliveryDependencies: createHostedAssistantProgressDeliveryDependencies({
           effectsPort: input.runtime.platform.effectsPort,

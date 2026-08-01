@@ -74,6 +74,10 @@
       "types": "./dist/phone-calls.d.ts",
       "default": "./dist/phone-calls.js"
     },
+    "./physical-notes": {
+      "types": "./dist/physical-notes.d.ts",
+      "default": "./dist/physical-notes.js"
+    },
     "./plan-usage": {
       "types": "./dist/plan-usage.d.ts",
       "default": "./dist/plan-usage.js"

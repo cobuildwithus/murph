@@ -11,6 +11,13 @@ import {
   createAssistantProductFeedbackRecorder,
   resolveAssistantProductFeedbackAcceptedInputIds,
 } from "../src/assistant/turn-progress.js";
+import {
+  MURPH_MANAGED_AUTOMATIONS,
+  MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+} from "../src/assistant/managed-automations.js";
+import {
+  buildAssistantSystemPrompt,
+} from "../src/assistant/system-prompt.js";
 
 describe("assistant product feedback", () => {
   it("is stable across related-item ordering and summary wording, and scoped to accepted input", () => {
@@ -128,11 +135,62 @@ describe("assistant product feedback", () => {
     expect(schema).toContain('"feature_interest"');
     expect(schema).toContain('"summary"');
     expect(schema).toContain('Use feature_request for a missing or unsupported Murph path');
+    expect(schema).toContain('Make it actionable without the conversation');
+    expect(schema).toContain('Concise de-identified, product-only summary');
+    expect(schema).toContain('generic actor');
+    expect(schema).toContain('expected versus observed result');
+    expect(schema).toContain('concrete product constraint the source established');
+    expect(schema).toContain('instead of replacing them with vague labels');
+    expect(schema).toContain('omit it or mark it unclear rather than infer or invent it');
+    expect(schema).toContain('Abstract every private fact');
+    expect(schema).toContain('least-specific product concept');
+    expect(schema).toContain('do not preserve a private fact merely because it was relevant');
+    expect(schema).toContain('Never include names, handles, account or member identifiers');
+    expect(schema).toContain('diagnoses, symptoms, medications, treatments');
+    expect(schema).toContain('exact health/fitness/nutrition values');
     expect(schema).toContain('desired outcome and missing Murph capability');
     expect(schema).toContain('Optional metadata');
     expect(schema).toContain('Speculative:');
     expect(schema).toContain('Murph-observed:');
     expect(schema).not.toContain('"topic"');
+  });
+
+  it("keeps the detailed summary rubric single-owned by the tool schema", () => {
+    const rubricMarker =
+      "name the generic actor, exact Murph surface or workflow";
+    const systemPrompt = buildAssistantSystemPrompt({
+      assistantCliContract: null,
+      assistantContextSnapshotPrompt: null,
+      assistantHostedDeviceConnectAvailable: false,
+      assistantKnowledgeToolsAvailable: false,
+      channel: "telegram",
+      cliAccess: {
+        rawCommand: "vault-cli",
+        setupCommand: "murph",
+      },
+      conversationScope: "direct",
+      currentLocalDate: "2026-07-30",
+      currentTimeZone: "America/New_York",
+      hostedRuntime: true,
+      modelBehaviorProfile: "gpt5-agentic",
+      onboardingGuidance: false,
+      turnTrigger: null,
+    });
+    const productNotes = MURPH_MANAGED_AUTOMATIONS.find(
+      (automation) =>
+        automation.automationId === MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+    );
+    expect(productNotes).toBeDefined();
+
+    const toolSchema = JSON.stringify(
+      MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema,
+    );
+    const ordinaryStack = `${systemPrompt}\n${toolSchema}`;
+    const managedStack =
+      `${systemPrompt}\n${productNotes?.instructions ?? ""}\n${toolSchema}`;
+
+    expect(ordinaryStack.split(rubricMarker)).toHaveLength(2);
+    expect(managedStack.split(rubricMarker)).toHaveLength(2);
   });
 
   it("parses and collects one explicit feedback candidate without a pre-reply write", async () => {

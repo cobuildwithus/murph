@@ -357,6 +357,89 @@ describe('murph.generate_image dynamic tool schema', () => {
     releaseUsage()
   })
 
+  it('binds an irreversible continuation to its exact accepted group input', async () => {
+    const exactInputId = `ain_${'a'.repeat(32)}`
+    const batchTailInputId = `ain_${'b'.repeat(32)}`
+    const launch = vi.fn<
+      NonNullable<AssistantHostedToolContext['imageGenerationLauncher']>['launch']
+    >(() => 'started')
+    const hostedToolContext = {
+      computerToolsAvailable: false,
+      currentAssistantInputId: () => batchTailInputId,
+      currentHostedDeliveryContext: () => null,
+      currentHostedMailboxItemIds: () => [],
+      currentUserActionScope: () => ({
+        acceptedInputIds: [exactInputId, batchTailInputId],
+        conversationId: 'conversation_1',
+        conversationScope: 'group' as const,
+        inboundMailboxItemIds: ['mailbox_1', 'mailbox_2'],
+        originSessionId: 'session_1',
+        recipientKey: 'recipient_1',
+      }),
+      imageGenerationLauncher: { launch },
+      sendVaultFile: async () => ({
+        filename: 'unused',
+        status: 'denied' as const,
+      }),
+      vaultFileSendAvailable: false,
+    } satisfies AssistantHostedToolContext
+    const authorizeAcceptedMessageTarget = vi.fn(async () => ({
+      participant: {
+        assistantInputId: exactInputId,
+        senderHandle: 'participant_1',
+        source: 'linq' as const,
+      },
+      targetInputId: exactInputId,
+    }))
+    const request = {
+      args: {
+        alt: null,
+        outputFormat: 'jpeg' as const,
+        prompt: 'Create a physical note page.',
+        quality: 'high' as const,
+        referenceImageRefs: [],
+        size: '1024x1536' as const,
+      },
+      kind: 'generate-image' as const,
+      messageRef: exactInputId,
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      authorizeAcceptedMessageTarget,
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext,
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+    })
+
+    expect(result.rpcResult).toMatchObject({ success: true })
+    expect(authorizeAcceptedMessageTarget).toHaveBeenCalledWith({
+      action: 'participant-effect',
+      deliveryContextOrdinal: 0,
+      messageRef: exactInputId,
+    })
+    expect(launch).toHaveBeenCalledWith(expect.objectContaining({
+      originAssistantInputId: exactInputId,
+      originAssistantInputIdExact: true,
+    }))
+
+    const denied = await executeMurphDynamicToolRequest({
+      authorizeAcceptedMessageTarget: async () => null,
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext,
+      nextUsageOrdinal: () => 2,
+      progressDelivery: null,
+      request,
+    })
+    expect(denied.rpcResult).toMatchObject({ success: false })
+    expect(launch).toHaveBeenCalledOnce()
+  })
+
   it('keeps provider diagnostics in the hosted image result', async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-image-failure-'))
     tempRoots.push(vaultRoot)
@@ -457,6 +540,27 @@ describe('murph.generate_image dynamic tool schema', () => {
         size: '1024x1024',
       },
       kind: 'generate-image',
+    })
+  })
+
+  it('parses an exact effect-authorizing message outside provider arguments', () => {
+    const messageRef = `ain_${'c'.repeat(32)}`
+    expect(readMurphDynamicToolRequest({
+      method: 'item/tool/call',
+      params: {
+        arguments: {
+          message_ref: messageRef,
+          prompt: 'Create a note page.',
+        },
+        namespace: 'murph',
+        tool: 'generate_image',
+      },
+    })).toMatchObject({
+      args: {
+        prompt: 'Create a note page.',
+      },
+      kind: 'generate-image',
+      messageRef,
     })
   })
 

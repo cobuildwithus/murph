@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import { MURPH_SUPPORT_EMAIL } from "@/src/components/support/contact-support-action";
+
 function GitHubIcon() {
   return (
     <svg
@@ -34,6 +36,11 @@ const footerLinks = {
     { label: "Changelog", href: "/changelog", external: false },
     { label: "Design", href: "/design", external: false },
     { label: "Security", href: "/security", external: false },
+    {
+      label: "Support",
+      href: `mailto:${MURPH_SUPPORT_EMAIL}`,
+      external: false,
+    },
     {
       label: "GitHub",
       href: "https://github.com/cobuildwithus/murph",
