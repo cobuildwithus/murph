@@ -23,6 +23,7 @@ export function readHostedOperationalAlertEmailConfig(
   recipientsEnvironmentVariable:
     | "HOSTED_LINQ_ALERT_EMAILS"
     | "HOSTED_PRODUCT_FEEDBACK_DIGEST_EMAILS"
+    | "HOSTED_PRODUCT_SUPPORT_EMAILS"
     = "HOSTED_LINQ_ALERT_EMAILS",
 ): HostedOperationalAlertEmailConfig | null {
   const apiKey = normalizeNullableString(source.RESEND_API_KEY);
