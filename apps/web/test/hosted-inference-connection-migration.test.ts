@@ -15,6 +15,13 @@ const MIGRATION = readFileSync(
   ),
   "utf8",
 );
+const REVISION_SEQUENCE_MIGRATION = readFileSync(
+  path.join(
+    WEB_ROOT,
+    "prisma/migrations/20260801010000_hosted_inference_connection_revision_seq/migration.sql",
+  ),
+  "utf8",
+);
 
 describe("hosted inference connection migration", () => {
   it("creates one private encrypted connection per hosted member", () => {
@@ -53,6 +60,15 @@ describe("hosted inference connection migration", () => {
       "REFERENCES \"hosted_member\"(\"id\")",
     );
     expect(MIGRATION).toContain("ON DELETE CASCADE ON UPDATE CASCADE");
+  });
+
+  it("allocates revisions from a non-reusable sequence seeded past existing rows", () => {
+    expect(REVISION_SEQUENCE_MIGRATION).toContain(
+      "CREATE SEQUENCE \"hosted_inference_connection_revision_seq\" AS INTEGER",
+    );
+    expect(REVISION_SEQUENCE_MIGRATION).toContain(
+      "SELECT COALESCE(MAX(\"revision\"), 0) + 1 FROM \"hosted_inference_connection\"",
+    );
   });
 });
 

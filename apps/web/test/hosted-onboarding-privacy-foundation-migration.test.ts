@@ -1035,6 +1035,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260730180000_hosted_linq_delivery_thread_directness",
       "20260730233000_hosted_inference_connection",
       "20260731001500_add_hosted_product_feedback_created_at_index",
+      "20260801010000_hosted_inference_connection_revision_seq",
       "migration_lock.toml",
     ]);
     expect(deviceSyncSignalSourceProviderMigrationSql).toContain(

@@ -147,7 +147,7 @@ export async function replaceHostedInferenceConnection(input: {
       currentRevision: current?.revision ?? null,
       expectedRevision: input.expectedRevision,
     });
-    const revision = current ? current.revision + 1 : 1;
+    const revision = await allocateHostedInferenceConnectionRevision(tx);
 
     return await tx.hostedInferenceConnection.upsert({
       create: {
@@ -331,6 +331,19 @@ function requireCurrentVerificationProfile(
       "Reverify the custom inference connection before using it with this Murph runtime.",
     );
   }
+}
+
+// Revisions come from a dedicated sequence rather than current-row + 1: a
+// hard delete followed by a new save would otherwise restart at revision 1,
+// letting a stale selection that observed the deleted connection commit
+// against an endpoint its caller never checked.
+async function allocateHostedInferenceConnectionRevision(
+  tx: Pick<Prisma.TransactionClient, "$queryRaw">,
+): Promise<number> {
+  const rows = await tx.$queryRaw<Array<{ revision: number }>>`
+    select nextval('hosted_inference_connection_revision_seq')::integer as revision
+  `;
+  return requireHostedInferenceRevision(rows[0]?.revision);
 }
 
 function assertExpectedRevision(input: {

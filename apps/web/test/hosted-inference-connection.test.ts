@@ -13,6 +13,7 @@ import {
   parseHostedInferenceConnectionCandidate,
 } from "@/src/lib/hosted-inference/connection-policy";
 import {
+  deleteHostedInferenceConnection,
   readSelectedHostedInferenceConnection,
   readSelectedHostedInferenceConnectionOverride,
   replaceHostedInferenceConnection,
@@ -188,6 +189,52 @@ describe("hosted inference connection", () => {
     expect(harness.row?.revision).toBe(1);
   });
 
+  it("never reuses a revision after delete and recreate, so stale selections conflict", async () => {
+    const harness = createStoreHarness();
+    await replaceHostedInferenceConnection({
+      candidate: CANDIDATE,
+      expectedRevision: null,
+      memberId: MEMBER_ID,
+      prisma: harness.prisma,
+    });
+    // A Settings request observes revision 1, then a concurrent flow deletes
+    // the connection and saves a different endpoint before selection commits.
+    await deleteHostedInferenceConnection({
+      expectedRevision: 1,
+      memberId: MEMBER_ID,
+      prisma: harness.prisma,
+    });
+    const recreated = await replaceHostedInferenceConnection({
+      candidate: {
+        ...CANDIDATE,
+        endpointUrl: "https://next.example.com/v1/responses",
+      },
+      expectedRevision: null,
+      memberId: MEMBER_ID,
+      prisma: harness.prisma,
+    });
+    expect(recreated.revision).toBe(2);
+    expect(recreated.selected).toBe(false);
+
+    await expect(setHostedInferenceConnectionSelected({
+      expectedRevision: 1,
+      memberId: MEMBER_ID,
+      prisma: harness.prisma,
+      selected: true,
+    })).rejects.toMatchObject({
+      code: "HOSTED_INFERENCE_CONNECTION_CONFLICT",
+    });
+    expect(harness.row?.selected).toBe(false);
+
+    const selected = await setHostedInferenceConnectionSelected({
+      expectedRevision: 2,
+      memberId: MEMBER_ID,
+      prisma: harness.prisma,
+      selected: true,
+    });
+    expect(selected.selected).toBe(true);
+  });
+
   it("fails closed when selecting against a replaced connection revision", async () => {
     const harness = createStoreHarness();
     await replaceHostedInferenceConnection({
@@ -240,8 +287,15 @@ function createStoreHarness(
   readonly row: TestConnectionRow | null;
 } {
   let row: TestConnectionRow | null = null;
+  let revisionSequence = 0;
   const transactionClient = {
-    $queryRaw: async () => [],
+    $queryRaw: async (strings: TemplateStringsArray) => {
+      if (strings.join("").includes("nextval")) {
+        revisionSequence += 1;
+        return [{ revision: revisionSequence }];
+      }
+      return [];
+    },
     hostedInferenceConnection: {
       delete: async () => {
         const current = row;
