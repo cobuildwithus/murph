@@ -4,12 +4,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   findMany: vi.fn(),
+  groupBy: vi.fn(),
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: () => ({
     hostedProductFeedback: {
       findMany: mocks.findMany,
+      groupBy: mocks.groupBy,
     },
   }),
 }));
@@ -33,6 +35,7 @@ const feedbackDigestEnv = {
 describe("hosted product feedback digest", () => {
   beforeEach(() => {
     mocks.findMany.mockReset();
+    mocks.groupBy.mockReset();
   });
 
   it("does no work outside 6pm Eastern", async () => {
@@ -134,6 +137,11 @@ describe("hosted product feedback digest", () => {
   });
 
   it("reads only bounded allowlisted kind and summary columns", async () => {
+    mocks.groupBy.mockResolvedValue([
+      { _count: { _all: 2 }, kind: "feature_request" },
+      { _count: { _all: 1 }, kind: "frustration" },
+      { _count: { _all: 1 }, kind: "unrelated_kind" },
+    ]);
     mocks.findMany.mockResolvedValue([
       { kind: "feature_request", summary: "Wants a weekly training summary email." },
       { kind: "frustration", summary: "Reminder cadence felt too frequent this week." },
@@ -147,12 +155,36 @@ describe("hosted product feedback digest", () => {
     });
 
     expect(batch).toEqual({
+      counts: {
+        feature_interest: 0,
+        feature_request: 2,
+        frustration: 1,
+      },
       summariesByKind: {
         feature_interest: [],
         feature_request: ["Wants a weekly training summary email."],
         frustration: ["Reminder cadence felt too frequent this week."],
       },
-      truncated: false,
+    });
+    const digestRowFilter = {
+      createdAt: {
+        gte: new Date("2026-07-29T22:00:00.000Z"),
+        lt: new Date("2026-07-30T22:00:00.000Z"),
+      },
+      kind: {
+        in: ["feature_interest", "feature_request", "frustration"],
+      },
+      summary: {
+        not: null,
+      },
+    };
+    expect(mocks.groupBy).toHaveBeenCalledTimes(1);
+    expect(mocks.groupBy).toHaveBeenCalledWith({
+      by: ["kind"],
+      _count: {
+        _all: true,
+      },
+      where: digestRowFilter,
     });
     expect(mocks.findMany).toHaveBeenCalledTimes(1);
     expect(mocks.findMany).toHaveBeenCalledWith({
@@ -164,19 +196,8 @@ describe("hosted product feedback digest", () => {
         kind: true,
         summary: true,
       },
-      take: HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS + 1,
-      where: {
-        createdAt: {
-          gte: new Date("2026-07-29T22:00:00.000Z"),
-          lt: new Date("2026-07-30T22:00:00.000Z"),
-        },
-        kind: {
-          in: ["feature_interest", "feature_request", "frustration"],
-        },
-        summary: {
-          not: null,
-        },
-      },
+      take: HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS,
+      where: digestRowFilter,
     });
     const querySelect = mocks.findMany.mock.calls[0]?.[0]?.select;
     expect(Object.keys(querySelect)).toEqual(["kind", "summary"]);
@@ -195,8 +216,9 @@ describe("hosted product feedback digest", () => {
 
     expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({
       text: [
-        "Feature requests (1)",
+        "Feature requests (2)",
         "- Wants a weekly training summary email.",
+        "- (1 more not shown past the 200-item email limit)",
         "",
         "Product frustrations (1)",
         "- Reminder cadence felt too frequent this week.",
@@ -205,9 +227,16 @@ describe("hosted product feedback digest", () => {
     expect(JSON.stringify(sendEmail.mock.calls)).not.toContain("Must never render");
   });
 
-  it("caps the rendered digest at the row limit with a truncation line", async () => {
+  it("keeps per-kind counts truthful past the display cap", async () => {
+    mocks.groupBy.mockResolvedValue([
+      {
+        _count: { _all: HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS + 2 },
+        kind: "feature_request",
+      },
+      { _count: { _all: 1 }, kind: "frustration" },
+    ]);
     mocks.findMany.mockResolvedValue(Array.from(
-      { length: HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS + 1 },
+      { length: HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS },
       (_, index) => ({
         kind: "feature_request",
         summary: `Synthetic bounded product request ${index + 1}.`,
@@ -219,10 +248,41 @@ describe("hosted product feedback digest", () => {
       startAt: new Date("2026-07-29T22:00:00.000Z"),
     });
 
-    expect(batch.truncated).toBe(true);
     expect(batch.summariesByKind.feature_request).toHaveLength(
       HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS,
     );
+
+    const sendEmail = vi.fn(async (_input: { text: string }) => ({
+      providerMessageId: "email_1",
+    }));
+    await expect(runHostedProductFeedbackDigest({
+      env: feedbackDigestEnv,
+      now: new Date("2026-07-30T22:00:30.000Z"),
+      readFeedback: async () => batch,
+      sendEmail,
+    })).resolves.toMatchObject({
+      feedbackCount: HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS + 3,
+    });
+
+    const sentText = sendEmail.mock.calls[0]?.[0]?.text;
+    expect(sentText).toContain(
+      `Feature requests (${HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS + 2})`,
+    );
+    expect(sentText).toContain(
+      `- (2 more not shown past the ${HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS}-item email limit)`,
+    );
+    expect(sentText).toContain("Product frustrations (1)");
+    expect(sentText).toContain(
+      `- (1 more not shown past the ${HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS}-item email limit)`,
+    );
+  });
+
+  it("does not claim omission when every summary is displayed at the cap", async () => {
+    const summaries = Array.from(
+      { length: HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS },
+      (_, index) => `Synthetic bounded product request ${index + 1}.`,
+    );
+    const batch = createFeedbackDigestBatch({ feature_request: summaries });
 
     const sendEmail = vi.fn(async (_input: { text: string }) => ({
       providerMessageId: "email_1",
@@ -240,15 +300,13 @@ describe("hosted product feedback digest", () => {
     expect(sentText).toContain(
       `Feature requests (${HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS})`,
     );
-    expect(sentText).toContain(
-      `Additional feedback omitted from this email after the ${HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS}-item safety limit.`,
-    );
-    expect(sentText).not.toContain(
-      `Synthetic bounded product request ${HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS + 1}.`,
-    );
+    expect(sentText).not.toContain("more not shown");
   });
 
   it("retries the production transport with one day key after an ambiguous failure", async () => {
+    mocks.groupBy.mockResolvedValue([
+      { _count: { _all: 2 }, kind: "feature_request" },
+    ]);
     mocks.findMany.mockResolvedValue([
       { kind: "feature_request", summary: "Wants a weekly training summary email." },
       { kind: "feature_request", summary: "Asked for treadmill workout support." },
@@ -364,14 +422,27 @@ function createFeedbackDigestBatch(
     feature_request: string[];
     frustration: string[];
   }> = {},
+  countOverrides: Partial<{
+    feature_interest: number;
+    feature_request: number;
+    frustration: number;
+  }> = {},
 ) {
+  const summariesByKind = {
+    feature_interest: overrides.feature_interest ?? [],
+    feature_request: overrides.feature_request ?? [],
+    frustration: overrides.frustration ?? [],
+  };
+
   return {
-    summariesByKind: {
-      feature_interest: overrides.feature_interest ?? [],
-      feature_request: overrides.feature_request ?? [],
-      frustration: overrides.frustration ?? [],
+    counts: {
+      feature_interest:
+        countOverrides.feature_interest ?? summariesByKind.feature_interest.length,
+      feature_request:
+        countOverrides.feature_request ?? summariesByKind.feature_request.length,
+      frustration: countOverrides.frustration ?? summariesByKind.frustration.length,
     },
-    truncated: false,
+    summariesByKind,
   };
 }
 

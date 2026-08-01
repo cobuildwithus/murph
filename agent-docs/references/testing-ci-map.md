@@ -254,8 +254,9 @@ Hosted product-feedback digest coverage is Web-owned and provider-free.
 `hosted-product-feedback-digest.test.ts` proves the Eastern 6pm-to-6pm window
 across both DST transitions, dedicated recipients, fixed empty digest,
 day-keyed Resend idempotency, the bounded allowlisted-kind summary read that
-selects only the kind and summary columns with deterministic ordering and an
-explicit truncation line at the row cap, observable missing configuration, and
+selects only the kind and summary columns with deterministic ordering,
+truthful grouped per-kind totals with explicit omitted-remainder lines past
+the row cap, observable missing configuration, and
 same-hour
 retry through the real production sender against an isolated loopback provider
 fake. `hosted-product-feedback-digest-cron.test.ts` proves Vercel cron auth

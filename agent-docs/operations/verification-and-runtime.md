@@ -347,8 +347,9 @@ cron allowlist, Prisma schema/migration inventory, and Web typecheck. The
 service proof must exercise the Eastern daily window across both DST
 transitions, the dedicated recipient list, fixed empty digest, day-keyed
 idempotency key, the bounded three-kind summary read that selects only the
-kind and summary columns with deterministic ordering and an explicit
-truncation line at the row cap, observable missing configuration, and a
+kind and summary columns with deterministic ordering, truthful grouped
+per-kind totals with explicit omitted-remainder lines past the row cap,
+observable missing configuration, and a
 bounded same-hour retry. The
 direct scenario must compose the production sender against an isolated
 loopback Resend fake and prove identical request/key reuse plus one fake

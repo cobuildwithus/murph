@@ -879,9 +879,11 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   that existing Resend transport. Web reads its owned
   `HostedProductFeedback` rows from the prior 6pm-to-6pm window for the three
   server-allowlisted product-feedback kinds and renders fixed server-owned
-  kind labels with each row's capture-scrubbed summary, in a bounded,
-  deterministically ordered read capped at a fixed row limit with one explicit
-  truncation line on overflow. The indexed query selects only the kind and
+  kind labels with truthful per-kind totals from a grouped aggregate and each
+  displayed row's capture-scrubbed summary, in a bounded,
+  deterministically ordered read capped at a fixed row limit with an explicit
+  per-kind omitted-remainder line on overflow. Both indexed queries share one
+  window filter, and the row read selects only the kind and
   summary columns and never reads the
   member relation or id, internal feedback id, changelog metadata,
   health data, contact data, or raw conversation; summary text entered email

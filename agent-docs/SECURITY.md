@@ -540,8 +540,10 @@ Last verified: 2026-07-30
   boundary for summary text is the capture side: the recording path stores only
   a bounded product-only summary that passed the deterministic contact-detail
   and secret-token scrub, so the digest renders stored summaries verbatim and
-  adds nothing else. Its bounded, deterministically ordered query must select
-  only the kind and summary columns and must never read the member relation or
+  adds nothing else beyond grouped per-kind counts. Its bounded,
+  deterministically ordered row query must select
+  only the kind and summary columns, its count aggregate groups only by kind,
+  and neither may read the member relation or
   id, internal feedback id, changelog metadata, or any other private row
   content. The cron route must retain the shared timing-safe Vercel bearer
   check before any database read, missing configuration must fail before that

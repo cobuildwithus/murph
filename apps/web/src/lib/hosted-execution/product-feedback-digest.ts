@@ -23,8 +23,8 @@ const HOSTED_PRODUCT_FEEDBACK_DIGEST_RECIPIENTS_ENV =
 const HOSTED_PRODUCT_FEEDBACK_DIGEST_SUBJECT = "Murph feedback";
 
 export type HostedProductFeedbackDigestBatch = {
+  counts: Record<HostedProductFeedbackKind, number>;
   summariesByKind: Record<HostedProductFeedbackKind, string[]>;
-  truncated: boolean;
 };
 
 export type HostedProductFeedbackDigestOutcome =
@@ -126,6 +126,25 @@ export async function readHostedProductFeedbackDigestBatch(input: {
   endAt: Date;
   startAt: Date;
 }): Promise<HostedProductFeedbackDigestBatch> {
+  const digestRowFilter = {
+    createdAt: {
+      gte: input.startAt,
+      lt: input.endAt,
+    },
+    kind: {
+      in: [...HOSTED_PRODUCT_FEEDBACK_KINDS],
+    },
+    summary: {
+      not: null,
+    },
+  };
+  const groupedCounts = await getPrisma().hostedProductFeedback.groupBy({
+    by: ["kind"],
+    _count: {
+      _all: true,
+    },
+    where: digestRowFilter,
+  });
   const rows = await getPrisma().hostedProductFeedback.findMany({
     orderBy: [
       { createdAt: "asc" },
@@ -135,23 +154,18 @@ export async function readHostedProductFeedbackDigestBatch(input: {
       kind: true,
       summary: true,
     },
-    take: HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS + 1,
-    where: {
-      createdAt: {
-        gte: input.startAt,
-        lt: input.endAt,
-      },
-      kind: {
-        in: [...HOSTED_PRODUCT_FEEDBACK_KINDS],
-      },
-      summary: {
-        not: null,
-      },
-    },
+    take: HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS,
+    where: digestRowFilter,
   });
+  const counts = createEmptyHostedProductFeedbackDigestCounts();
   const summariesByKind = createEmptyHostedProductFeedbackDigestSummaries();
 
-  for (const row of rows.slice(0, HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS)) {
+  for (const groupedCount of groupedCounts) {
+    if (isHostedProductFeedbackKind(groupedCount.kind)) {
+      counts[groupedCount.kind] = groupedCount._count._all;
+    }
+  }
+  for (const row of rows) {
     if (
       isHostedProductFeedbackKind(row.kind) &&
       typeof row.summary === "string" &&
@@ -161,10 +175,7 @@ export async function readHostedProductFeedbackDigestBatch(input: {
     }
   }
 
-  return {
-    summariesByKind,
-    truncated: rows.length > HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS,
-  };
+  return { counts, summariesByKind };
 }
 
 function formatHostedProductFeedbackDigest(
@@ -176,23 +187,23 @@ function formatHostedProductFeedbackDigest(
     frustration: "Product frustrations",
   };
   const sections = HOSTED_PRODUCT_FEEDBACK_KINDS.flatMap((kind) => {
-    const summaries = batch.summariesByKind[kind];
-    if (summaries.length === 0) {
+    const count = batch.counts[kind];
+    if (count === 0) {
       return [];
     }
+    const summaries = batch.summariesByKind[kind];
+    const omittedCount = count - summaries.length;
     return [[
-      `${labels[kind]} (${summaries.length})`,
+      `${labels[kind]} (${count})`,
       ...summaries.map((summary) => `- ${summary}`),
+      ...(omittedCount > 0
+        ? [`- (${omittedCount} more not shown past the ${HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS}-item email limit)`]
+        : []),
     ].join("\n")];
   });
 
   if (sections.length === 0) {
     sections.push("- No feedback logged.");
-  }
-  if (batch.truncated) {
-    sections.push(
-      `Additional feedback omitted from this email after the ${HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS}-item safety limit.`,
-    );
   }
 
   return sections.join("\n\n");
@@ -202,9 +213,20 @@ function countHostedProductFeedbackDigestBatch(
   batch: HostedProductFeedbackDigestBatch,
 ): number {
   return HOSTED_PRODUCT_FEEDBACK_KINDS.reduce(
-    (total, kind) => total + batch.summariesByKind[kind].length,
+    (total, kind) => total + batch.counts[kind],
     0,
   );
+}
+
+function createEmptyHostedProductFeedbackDigestCounts(): Record<
+  HostedProductFeedbackKind,
+  number
+> {
+  return {
+    feature_interest: 0,
+    feature_request: 0,
+    frustration: 0,
+  };
 }
 
 function createEmptyHostedProductFeedbackDigestSummaries(): Record<
