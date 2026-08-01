@@ -7,6 +7,10 @@ import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
 import { MurphPulseLoader } from "@/src/components/ui/murph-pulse-loader";
 import { ContactSupportAction } from "@/src/components/support/contact-support-action";
+import {
+  consumeHostedGroupStartHandoff,
+  HOSTED_GROUP_START_PATH,
+} from "@/src/lib/hosted-groups/group-start-handoff";
 
 import {
   HostedOnboardingApiError,
@@ -44,7 +48,11 @@ export function JoinInviteAutoTrialIsland({
       const enrollment = await requestHostedAutoPulseTrialEnrollment({
         inviteCode,
       });
-      replace(enrollment.redirectPath);
+      replace(
+        consumeHostedGroupStartHandoff()
+          ? HOSTED_GROUP_START_PATH
+          : enrollment.redirectPath,
+      );
     } catch (error) {
       startedRef.current = false;
       setErrorState(buildAutoTrialErrorState(error));
@@ -64,7 +72,11 @@ export function JoinInviteAutoTrialIsland({
       });
 
       if (checkout.alreadyActive) {
-        refresh();
+        if (consumeHostedGroupStartHandoff()) {
+          replace(HOSTED_GROUP_START_PATH);
+        } else {
+          refresh();
+        }
         return;
       }
 
@@ -89,7 +101,7 @@ export function JoinInviteAutoTrialIsland({
     } finally {
       setCheckoutPending(false);
     }
-  }, [inviteCode, refresh]);
+  }, [inviteCode, refresh, replace]);
 
   useEffect(() => {
     void startTrial();

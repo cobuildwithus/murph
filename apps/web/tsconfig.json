@@ -126,6 +126,9 @@
       "@murphai/hosted-execution/phone-calls": [
         "../../packages/hosted-execution/src/phone-calls.ts"
       ],
+      "@murphai/hosted-execution/physical-notes": [
+        "../../packages/hosted-execution/src/physical-notes.ts"
+      ],
       "@murphai/hosted-execution/plan-usage": [
         "../../packages/hosted-execution/src/plan-usage.ts"
       ],

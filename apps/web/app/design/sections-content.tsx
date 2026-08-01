@@ -22,9 +22,9 @@ import { AccountExitReasonStudy } from "./account-exit-reason-study";
 import { ChangelogArchiveStudy } from "./changelog-archive-study";
 import { ClubsPageStudy } from "./clubs-page-study";
 import { ConnectSourceCardStudy } from "./connect-source-card-study";
-import { DeviceSyncCallbackStudy } from "./device-sync-callback-study";
 import { FamilyInviteJoinStudy } from "./family-invite-join-study";
 import { GroupJoinStudy } from "./group-join-study";
+import { GroupStartStudy } from "./group-start-study";
 import { GroupMemberPlanStudy } from "./group-member-plan-study";
 import { GrowthScorecardStudy } from "./growth-scorecard-study";
 import { HomeLoadStateStudy } from "./home-load-state-study";
@@ -41,6 +41,7 @@ import {
 } from "./group-usage-funding-study";
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 import { EnvironmentProgressStudy } from "./environment-progress-study";
+import { EnvironmentPrintStudy } from "./environment-print-study";
 
 function StudySection({
   children,
@@ -255,6 +256,12 @@ export function SectionsContent() {
 
       <Separator />
 
+      <StudySection title="Private Environment print report">
+        <EnvironmentPrintStudy />
+      </StudySection>
+
+      <Separator />
+
       <StudySection title="Homepage experiment flow">
         <HowItWorksSection />
       </StudySection>
@@ -319,12 +326,6 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Device connection callback confirmation and failure">
-        <DeviceSyncCallbackStudy />
-      </StudySection>
-
-      <Separator />
-
       <StudySection title="Account deletion exit reason">
         <AccountExitReasonStudy />
       </StudySection>
@@ -373,6 +374,12 @@ export function SectionsContent() {
 
       <Separator />
 
+      <StudySection title="Unknown iMessage group setup and recovery">
+        <GroupStartStudy />
+      </StudySection>
+
+      <Separator />
+
       <StudySection title="Always-available group sponsorship and contribution">
         <GroupUsageFundingStudy />
       </StudySection>
@@ -397,8 +404,10 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Ops weekly growth compass with complete and retention-limited sender evidence">
-        <GrowthScorecardStudy />
+      <StudySection title="Ops weekly growth compass with message-volume history and retention-limited sender evidence">
+        <div inert>
+          <GrowthScorecardStudy />
+        </div>
       </StudySection>
 
       <Separator />

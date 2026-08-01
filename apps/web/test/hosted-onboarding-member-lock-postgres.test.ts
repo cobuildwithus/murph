@@ -16,6 +16,7 @@ import {
   withHostedMemberStripeMutationLockForOps,
 } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
 import { readHostedMemberBillingSnapshot } from "@/src/lib/hosted-onboarding/hosted-member-store";
+import { issueHostedAppSession } from "@/src/lib/hosted-onboarding/app-session";
 import { ensureHostedMemberForPrivyIdentityResolutionTx } from "@/src/lib/hosted-onboarding/member-identity-service";
 import {
   suspendHostedMemberForBillingReversalTx,
@@ -1258,6 +1259,57 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         });
         setHostedSecureBoxStringTestCodecForTests(null);
         await disconnectClients([observer, deletionClient, authenticationClient]);
+      }
+    });
+  },
+);
+
+describe.skipIf(!runPostgresConcurrencyProof)(
+  "hosted first web session PostgreSQL concurrency",
+  () => {
+    it("reports exactly one first member session across concurrent issuance", async () => {
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixtureId = randomUUID();
+      const memberId = `hbm_first_session_${fixtureId}`;
+      const privyUserId = `did:privy:first-session-${fixtureId}`;
+
+      await observer.hostedMember.create({
+        data: { id: memberId },
+      });
+
+      try {
+        // Sessions are the durable owner of first-visit eligibility. The
+        // member-row lock inside issueHostedAppSession serializes concurrent
+        // completions, so exactly one issuance may observe an empty history
+        // regardless of interleaving.
+        const results = await Promise.all([
+          issueHostedAppSession({ memberId, privyUserId }),
+          issueHostedAppSession({ memberId, privyUserId }),
+        ]);
+
+        expect(
+          results.filter((result) => result.firstMemberSession),
+        ).toHaveLength(1);
+        await expect(observer.hostedWebSession.count({
+          where: { memberId },
+        })).resolves.toBe(2);
+
+        // Zero retained rows means either a completion failed before its
+        // session write or retention deleted an aged history; the two are
+        // indistinguishable by design, and both intentionally re-open the
+        // welcome handoff (recovery in the first case, welcome-back in the
+        // second). A later issuance with retained history is never first.
+        const retry = await observer.hostedWebSession.deleteMany({
+          where: { memberId },
+        }).then(() => issueHostedAppSession({ memberId, privyUserId }));
+        expect(retry.firstMemberSession).toBe(true);
+        const subsequent = await issueHostedAppSession({ memberId, privyUserId });
+        expect(subsequent.firstMemberSession).toBe(false);
+      } finally {
+        await observer.hostedMember.deleteMany({
+          where: { id: memberId },
+        });
+        await disconnectClients([observer]);
       }
     });
   },

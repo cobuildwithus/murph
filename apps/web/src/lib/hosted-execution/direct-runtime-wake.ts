@@ -10,11 +10,16 @@ import { describeHostedExecutionSafeLogErrorCode } from "./logging";
 export type HostedDirectRuntimeWakeSource =
   | "assistant-ask-completion"
   | "assistant-ask-request"
-  | "linq";
+  | "linq"
+  | "linq-instant-start";
 
 /**
  * Starts the payloadless Cloudflare latency hint and always settles. Temporal
- * must accept the durable mailbox signal before a caller invokes this helper.
+ * must accept the durable mailbox signal before a caller invokes this helper,
+ * with one exception: the `linq-instant-start` prewarm fires right after the
+ * planner transaction creating the instant-start member commits, because the
+ * same webhook request then performs the ordinary Temporal-then-direct wake
+ * and the ensure grants no authority either way.
  */
 export function startHostedDirectRuntimeWakeBestEffort(input: {
   onTiming?: (

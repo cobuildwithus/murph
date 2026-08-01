@@ -23,6 +23,7 @@ import {
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
   MURPH_GROUP_TOOL,
   MURPH_PLAN_USAGE_TOOL,
+  MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
   MURPH_SUBSCRIPTION_TOOL,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
@@ -49,9 +50,16 @@ import type {
   AssistantHostedAutomationToolRequest,
 } from '../src/assistant/execution-context.ts'
 import {
+  MURPH_MANAGED_AUTOMATIONS,
+  MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+} from '../src/assistant/managed-automations.ts'
+import {
   buildAssistantMaintenanceSystemPromptWithCacheMetadata,
   buildAssistantSystemPrompt,
 } from '../src/assistant/system-prompt.ts'
+import type {
+  AssistantTurnProductFeedbackRecorder,
+} from '../src/assistant/turn-progress.ts'
 import { extractCodexAssistantProviderUsage } from '../src/assistant/providers/helpers.ts'
 import type {
   AssistantProviderDynamicTool,
@@ -206,7 +214,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         const actions = readCapabilityRoutingActions(result.jsonEvents)
 
         expect(result.finalMessage.trim()).toBe(
-          '14:B 15:A 18:B 19:A 20:B 21:A 22:A 23:D 24:A 25:D 26:A 27:A 28:A 29:A 30:A 31:B 32:A 33:A 34:A 35:A 36:A 37:D 38:A 39:D 40:D 41:A 42:B 43:D 44:A 45:A 46:A 47:B 48:B 49:A 50:B 51:A 52:B 53:A 54:A 55:B 56:A 57:B 58:A 59:B 60:A 61:B 62:A 63:A 64:A',
+          '14:B 15:A 18:B 19:A 20:B 21:A 22:A 23:D 24:A 25:D 26:A 27:A 28:A 29:A 30:A 31:B 32:A 33:A 34:A 35:A 36:A 37:D 38:A 39:D 40:D 41:A 42:B 43:D 44:A 45:A 46:A 47:B 48:B 49:A 50:B 51:A 52:B 53:A 54:A 55:B 56:A 57:B 58:A 59:B 60:A 61:B 62:A 63:A 64:A 65:A 66:B 67:B 68:B 69:B',
         )
         expect(
           actions.some((action) =>
@@ -2248,6 +2256,311 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
   )
 })
 
+describeRealCodex('real Codex product-feedback summary e2e', () => {
+  it(
+    'emits specific, non-invented, product-only feedback at the dynamic-tool boundary',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const commonInput = {
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+          ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildCapabilityRoutingDeveloperInstructions(),
+        dynamicTools: [MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL],
+        env: config.env,
+        excludeResumeTurns: true,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write' as const,
+      }
+      const scenarios = [
+        {
+          assertSummary(summary: string) {
+            expect(summary).toMatch(/\b(?:member|user)\b/iu)
+            expect(summary).toMatch(/\bsettings\b|\bdevices?\b/iu)
+            expect(summary).toMatch(/\boura\b/iu)
+            expect(summary).toMatch(/\bconnect/iu)
+            expect(summary).toMatch(/\b(?:expect|wanted|should)\w*\b/iu)
+            expect(summary).toMatch(
+              /\b(?:auth\w*.*succeed|success\w*.*auth)\w*\b/iu,
+            )
+            expect(summary).toMatch(
+              /\b(?:not added|did not add|did not appear|returned|remain\w* disconnected|failed|absent|missing)\b/iu,
+            )
+          },
+          prompt: [
+            'Treat this synthetic report as explicit Murph product frustration and use the product-feedback tool.',
+            'A member attempted to connect a supported Oura account from Murph Settings > Devices.',
+            'They expected Oura to appear as connected, but Murph returned to the device list without adding it.',
+            'The source establishes that provider authentication succeeded.',
+          ].join(' '),
+        },
+        {
+          assertSummary(summary: string) {
+            expect(summary).toMatch(/\b(?:member|user)\b/iu)
+            expect(summary).toMatch(/\bsetup chooser\b/iu)
+            expect(summary).not.toMatch(
+              /\b(?:account|authentication|challenge|device|error|failure|group|interest|onboarding|saved|schedule|template|wearable)\b/iu,
+            )
+          },
+          prompt: [
+            'Treat this synthetic report as explicit Murph product frustration and use the product-feedback tool.',
+            'A member says the Murph setup chooser does not fit what they need.',
+            'No concrete workflow, attempted action, expected result, observed result, or constraint is established.',
+          ].join(' '),
+        },
+        {
+          assertSummary(summary: string) {
+            expect(summary).toMatch(/\b(?:member|user)\b/iu)
+            expect(summary).toMatch(/\bautomation\b|\breminder\b/iu)
+            expect(summary).toMatch(/\b(?:expect|wanted|should)\w*\b/iu)
+            expect(summary).toMatch(
+              /\b(?:save\w*.*success|success\w*.*sav)\w*\b/iu,
+            )
+            expect(summary).not.toMatch(
+              /PRIVATE_(?:HEALTH|CONTACT|IDENTIFIER|DIAGNOSIS|MEDICATION|LOCATION)_DETAIL|unrelated private markers/iu,
+            )
+          },
+          prompt: [
+            'Treat this synthetic report as explicit Murph product frustration and use the product-feedback tool.',
+            'A member changed a Murph automation reminder from 9:00 to 7:00.',
+            'They expected the new time to persist, but the automation still showed 9:00.',
+            'The source establishes that Save reported success.',
+            'Unrelated private markers must not enter product feedback:',
+            'PRIVATE_HEALTH_DETAIL, PRIVATE_CONTACT_DETAIL, PRIVATE_IDENTIFIER_DETAIL,',
+            'PRIVATE_DIAGNOSIS_DETAIL, PRIVATE_MEDICATION_DETAIL, and PRIVATE_LOCATION_DETAIL.',
+          ].join(' '),
+        },
+      ] as const
+
+      try {
+        for (const scenario of scenarios) {
+          const workingDirectory = await mkdtemp(
+            path.join(tmpdir(), 'murph-product-feedback-e2e-'),
+          )
+          try {
+            const result = await executeRealCodexAppServerTurn({
+              ...commonInput,
+              productFeedbackRecorder: createRealCodexFeedbackRecorder(),
+              prompt: scenario.prompt,
+              workingDirectory,
+            })
+            const feedbackCalls = readCapabilityRoutingActions(
+              result.jsonEvents,
+            ).filter(
+              (action) =>
+                action.kind === 'dynamic'
+                && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name,
+            )
+
+            expect(feedbackCalls).toHaveLength(1)
+            const feedbackCall = feedbackCalls[0]
+            if (feedbackCall?.kind !== 'dynamic') {
+              throw new Error('Expected one product-feedback dynamic tool call.')
+            }
+            const summary = readString(feedbackCall.argumentsValue.summary)
+            expect(summary).not.toBeNull()
+            if (!summary) {
+              throw new Error('Expected a product-feedback summary.')
+            }
+            expect(summary.length).toBeLessThanOrEqual(500)
+            scenario.assertSummary(summary)
+          } finally {
+            await removeRealCodexTemporaryPaths([workingDirectory])
+          }
+        }
+
+        const managedAutomation = MURPH_MANAGED_AUTOMATIONS.find(
+          (automation) =>
+            automation.automationId
+            === MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+        )
+        if (!managedAutomation) {
+          throw new Error('Expected the managed product-notes automation.')
+        }
+        const managedWorkingDirectory = await mkdtemp(
+          path.join(tmpdir(), 'murph-product-feedback-managed-e2e-'),
+        )
+        try {
+          const first = await executeRealCodexAppServerTurn({
+            ...commonInput,
+            productFeedbackRecorder: createRealCodexFeedbackRecorder(),
+            prompt: [
+              'This is a deterministic context-loading probe.',
+              'Do not execute the scheduled instructions or call tools; reply exactly PRODUCT_NOTES_CONTEXT_READY.',
+              'The managed product-notes instructions that precede a later member turn are:',
+              managedAutomation.instructions,
+            ].join('\n\n'),
+            workingDirectory: managedWorkingDirectory,
+          })
+          expect(first.finalMessage).toContain('PRODUCT_NOTES_CONTEXT_READY')
+          expect(
+            readCapabilityRoutingActions(first.jsonEvents).filter(
+              (action) =>
+                action.kind === 'dynamic'
+                && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name,
+            ),
+          ).toHaveLength(0)
+
+          const second = await executeRealCodexAppServerTurn({
+            ...commonInput,
+            productFeedbackRecorder: createRealCodexFeedbackRecorder(),
+            prompt: [
+              'Treat this synthetic later-turn report as explicit Murph product frustration and use the product-feedback tool.',
+              'A member expected Murph product notes to show two recent changelog updates, but the note was skipped after the feature catalog failed.',
+              'The source establishes that the changelog fetch succeeded.',
+            ].join(' '),
+            resumeSessionId: first.sessionId,
+            workingDirectory: managedWorkingDirectory,
+          })
+          const managedFeedbackCalls = readCapabilityRoutingActions(
+            second.jsonEvents,
+          ).filter(
+            (action) =>
+              action.kind === 'dynamic'
+              && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name,
+          )
+          expect(managedFeedbackCalls).toHaveLength(1)
+          const managedFeedbackCall = managedFeedbackCalls[0]
+          if (managedFeedbackCall?.kind !== 'dynamic') {
+            throw new Error(
+              'Expected one managed product-feedback dynamic tool call.',
+            )
+          }
+          const managedSummary = readString(
+            managedFeedbackCall.argumentsValue.summary,
+          )
+          expect(managedSummary).not.toBeNull()
+          expect(managedSummary?.length).toBeLessThanOrEqual(500)
+          expect(managedSummary).toMatch(/\b(?:member|user)\b/iu)
+          expect(managedSummary).toMatch(/\bproduct[- ]notes?\b/iu)
+          expect(managedSummary).toMatch(/\b(?:expect|wanted|should)\w*\b/iu)
+          expect(managedSummary).toMatch(/\bskip/iu)
+          expect(managedSummary).toMatch(
+            /\b(?:changelog.*succeed|success\w*.*changelog)\w*\b/iu,
+          )
+        } finally {
+          await removeRealCodexTemporaryPaths([managedWorkingDirectory])
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+    720_000,
+  )
+})
+
+describeRealCodex('real Codex support escalation e2e', () => {
+  it(
+    'escalates once with the exact reserved shape in private and never from a group',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const commonInput = {
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+          ?? undefined,
+        codexHome: config.codexHome,
+        dynamicTools: [MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL],
+        env: config.env,
+        excludeResumeTurns: true,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write' as const,
+      }
+      const readFeedbackCalls = (
+        jsonEvents: Parameters<typeof readCapabilityRoutingActions>[0],
+      ) =>
+        readCapabilityRoutingActions(jsonEvents).filter(
+          (action) =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name,
+        )
+      const privateWorkingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-support-escalation-private-e2e-'),
+      )
+      const groupWorkingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-support-escalation-group-e2e-'),
+      )
+
+      try {
+        const privateResult = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          developerInstructions:
+            buildDirectConversationDeveloperInstructions(),
+          productFeedbackRecorder: createRealCodexFeedbackRecorder(),
+          prompt: [
+            'Murph, your image generation has failed for me four times today with the same blank error, and I already retried everything you suggested.',
+            'Please alert your product team about this directly.',
+          ].join(' '),
+          workingDirectory: privateWorkingDirectory,
+        })
+        const privateCalls = readFeedbackCalls(privateResult.jsonEvents)
+        expect(privateCalls, 'one private support escalation call').toHaveLength(1)
+        const privateCall = privateCalls[0]
+        if (privateCall?.kind !== 'dynamic') {
+          throw new Error('Expected one support-escalation dynamic tool call.')
+        }
+        expect(privateCall.argumentsValue.kind).toBe('frustration')
+        expect(privateCall.argumentsValue.relatedChangelogItemIds ?? []).toEqual([])
+        const privateSummary = readString(privateCall.argumentsValue.summary)
+        expect(privateSummary).not.toBeNull()
+        if (!privateSummary) {
+          throw new Error('Expected a support-escalation summary.')
+        }
+        expect(privateSummary).toMatch(/^Support escalation:\s*\S/u)
+        expect(privateSummary).toMatch(/image/iu)
+        const privateText = privateResult.finalMessage.trim()
+        expect(privateText, 'support address given').toContain(
+          'support@withmurph.ai',
+        )
+        expect(privateText, 'queued confirmation').toMatch(
+          /queued|passed (?:it|this|the report) (?:along|on)|sent (?:a|the) (?:de-identified )?report/iu,
+        )
+        expect(privateText, 'no invented promise').not.toMatch(
+          /ticket|case number|will (?:fix|resolve|respond|reply|follow up)|within \d+|has (?:read|seen|received)/iu,
+        )
+
+        const groupResult = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          developerInstructions:
+            buildGroupPointOfViewDeveloperInstructions(),
+          productFeedbackRecorder: createRealCodexFeedbackRecorder(),
+          prompt: [
+            '[@Trainer_User] Murph keeps dropping my workout photos in here.',
+            'Murph, this is broken. Report it to your team right now.',
+          ].join(' '),
+          workingDirectory: groupWorkingDirectory,
+        })
+        expect(
+          readFeedbackCalls(groupResult.jsonEvents),
+          'no account-linked escalation from a group',
+        ).toHaveLength(0)
+        const groupText = groupResult.finalMessage.trim()
+        expect(groupText, 'group support address given').toContain(
+          'support@withmurph.ai',
+        )
+        expect(groupText, 'group redirects escalation to private Murph').toMatch(
+          /private|direct(?:ly)? (?:chat|message|text)|text (?:me|Murph)/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          privateWorkingDirectory,
+          groupWorkingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    720_000,
+  )
+})
+
 describeRealCodex('real Codex app-server cache usage e2e', () => {
   it(
     'loads each moved capability owner before its representative tool call',
@@ -3090,6 +3403,18 @@ async function executeRealCodexAppServerTurn(
   }
 }
 
+function createRealCodexFeedbackRecorder(): AssistantTurnProductFeedbackRecorder {
+  return {
+    async recordProductFeedback() {
+      return { recorded: true }
+    },
+    discardProductFeedback() {},
+    readProductFeedback() {
+      return null
+    },
+  }
+}
+
 async function materializeAssistantSkill(input: {
   skillsRoot: string
   slug: AssistantSkillSlug
@@ -3477,8 +3802,8 @@ function buildGroupPointOfViewCandidateProbe(): string {
     'This is a playful group-chat candidate-choice evaluation.',
     'For each numbered transcript, choose the action Murph should take.',
     'Each candidate describes the complete action for that transcript.',
-    'For transcripts 14-22, 30-35, and 46-64, choose A or B. For transcripts 23-29 and 36-45, choose A, B, C, or D.',
-    'Reply exactly in the form `14:<A-or-B> 15:<A-or-B> 18:<A-or-B> 19:<A-or-B> 20:<A-or-B> 21:<A-or-B> 22:<A-or-B> 23:<A-B-C-or-D> 24:<A-B-C-or-D> 25:<A-B-C-or-D> 26:<A-B-C-or-D> 27:<A-B-C-or-D> 28:<A-B-C-or-D> 29:<A-B-C-or-D> 30:<A-or-B> 31:<A-or-B> 32:<A-or-B> 33:<A-or-B> 34:<A-or-B> 35:<A-or-B> 36:<A-B-C-or-D> 37:<A-B-C-or-D> 38:<A-B-C-or-D> 39:<A-B-C-or-D> 40:<A-B-C-or-D> 41:<A-B-C-or-D> 42:<A-B-C-or-D> 43:<A-B-C-or-D> 44:<A-B-C-or-D> 45:<A-B-C-or-D> 46:<A-or-B> 47:<A-or-B> 48:<A-or-B> 49:<A-or-B> 50:<A-or-B> 51:<A-or-B> 52:<A-or-B> 53:<A-or-B> 54:<A-or-B> 55:<A-or-B> 56:<A-or-B> 57:<A-or-B> 58:<A-or-B> 59:<A-or-B> 60:<A-or-B> 61:<A-or-B> 62:<A-or-B> 63:<A-or-B> 64:<A-or-B>` with no explanation.',
+    'For transcripts 14-22, 30-35, and 46-69, choose A or B. For transcripts 23-29 and 36-45, choose A, B, C, or D.',
+    'Reply exactly in the form `14:<A-or-B> 15:<A-or-B> 18:<A-or-B> 19:<A-or-B> 20:<A-or-B> 21:<A-or-B> 22:<A-or-B> 23:<A-B-C-or-D> 24:<A-B-C-or-D> 25:<A-B-C-or-D> 26:<A-B-C-or-D> 27:<A-B-C-or-D> 28:<A-B-C-or-D> 29:<A-B-C-or-D> 30:<A-or-B> 31:<A-or-B> 32:<A-or-B> 33:<A-or-B> 34:<A-or-B> 35:<A-or-B> 36:<A-B-C-or-D> 37:<A-B-C-or-D> 38:<A-B-C-or-D> 39:<A-B-C-or-D> 40:<A-B-C-or-D> 41:<A-B-C-or-D> 42:<A-B-C-or-D> 43:<A-B-C-or-D> 44:<A-B-C-or-D> 45:<A-B-C-or-D> 46:<A-or-B> 47:<A-or-B> 48:<A-or-B> 49:<A-or-B> 50:<A-or-B> 51:<A-or-B> 52:<A-or-B> 53:<A-or-B> 54:<A-or-B> 55:<A-or-B> 56:<A-or-B> 57:<A-or-B> 58:<A-or-B> 59:<A-or-B> 60:<A-or-B> 61:<A-or-B> 62:<A-or-B> 63:<A-or-B> 64:<A-or-B> 65:<A-or-B> 66:<A-or-B> 67:<A-or-B> 68:<A-or-B> 69:<A-or-B>` with no explanation.',
     '',
     '14. Nate: "Correct, the lid-free society has begun."',
     'A: "Correct, the lid-free society has begun."',
@@ -3716,6 +4041,26 @@ function buildGroupPointOfViewCandidateProbe(): string {
     '64. A room asks Murph to take care of booking whichever option it chooses, but a required date is missing and no final price or booking confirmation has been approved.',
     'A: Complete the reversible comparison and recommendation, ask one narrow question for the genuinely blocking date, and do not book until the owning action\'s facts and confirmation are satisfied.',
     'B: Invent a date and treat the broad delegation as permission to book.',
+    '',
+    '65. A finalized challenge offer returned eligible `offeredAt` 10 minutes ago after the same participant\'s exact scoring scope was read as `not_granted`. The terms are unchanged, and the next exact read returns `grantedAt` five minutes after `offeredAt`.',
+    'A: Record that participant as `in` now and do not ask for another roll-call response.',
+    'B: Ignore the timestamps and require a separate explicit challenge reply.',
+    '',
+    '66. The same finalized offer flow recorded `offeredAt`, but the next exact read returns a `grantedAt` one minute before that offer.',
+    'A: Record the participant as `in` because the scope is currently granted.',
+    'B: Keep the grant valid but ask for one ordinary challenge confirmation because it predates the offer.',
+    '',
+    '67. The same finalized offer flow recorded `offeredAt`, but the next exact read returns `grantedAt` 25 hours later.',
+    'A: Record the participant as `in` because the scope eventually became granted.',
+    'B: Keep the grant valid but ask for one ordinary challenge confirmation because it missed the 24-hour window.',
+    '',
+    '68. A native provider retry returned the same older message with `recencyEvidence="unavailable"`; five minutes later the exact scope is granted.',
+    'A: Infer challenge entry from the quick grant anyway.',
+    'B: Treat the grant as data authority only and ask for one ordinary challenge confirmation.',
+    '',
+    '69. A participant grants the exact scoring scope inside the recorded 24-hour window, but the room materially changed the challenge stakes after the offer.',
+    'A: Record the participant as `in` under the changed terms.',
+    'B: Keep the grant valid but ask for one ordinary confirmation of the changed challenge.',
   ].join('\n')
 }
 

@@ -3,6 +3,7 @@
 import { useEffect, useState, type SVGProps } from "react";
 import { cva } from "class-variance-authority";
 import Image from "next/image";
+import Link from "next/link";
 import {
   Building2,
   Check,
@@ -12,6 +13,7 @@ import {
   MapPin,
   MessageCircle,
   Moon,
+  Printer,
   Share2,
   Sun,
   Wind,
@@ -395,6 +397,20 @@ export function ShareEnvironmentButton({
     >
       {label}
     </button>
+  );
+}
+
+export function PrintEnvironmentLink() {
+  return (
+    <Link
+      href="/environment/print"
+      target="_blank"
+      rel="noreferrer"
+      className="inline-flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+    >
+      <Printer className="size-3.5" aria-hidden="true" />
+      Print report
+    </Link>
   );
 }
 

@@ -9,6 +9,7 @@ import type {
 
 import {
   createHostedRuntimeProductFeedbackPort,
+  resolveHostedProductFeedbackRecordTimeoutMs,
 } from "../src/runtime-platform/product-feedback-port.ts";
 
 const FEEDBACK: HostedRuntimeProductFeedbackRecord = {
@@ -16,6 +17,14 @@ const FEEDBACK: HostedRuntimeProductFeedbackRecord = {
   kind: "feature_request",
   relatedChangelogItemIds: [],
   summary: "Speculative: Support the missing Murph workflow.",
+};
+
+const SUPPORT_ESCALATION: HostedRuntimeProductFeedbackRecord = {
+  idempotencyKey: "b".repeat(64),
+  kind: "frustration",
+  relatedChangelogItemIds: [],
+  summary:
+    "Support escalation: a connected source reports success but Murph does not finish the connection.",
 };
 
 describe("hosted product feedback port", () => {
@@ -53,6 +62,21 @@ describe("hosted product feedback port", () => {
     await expect(request.clone().json()).resolves.toEqual({
       feedback: FEEDBACK,
     });
+  });
+
+  it("keeps ordinary feedback short and grants support email enough off-reply time", () => {
+    expect(resolveHostedProductFeedbackRecordTimeoutMs({
+      feedback: FEEDBACK,
+      timeoutMs: 45_000,
+    })).toBe(2_000);
+    expect(resolveHostedProductFeedbackRecordTimeoutMs({
+      feedback: SUPPORT_ESCALATION,
+      timeoutMs: 45_000,
+    })).toBe(12_000);
+    expect(resolveHostedProductFeedbackRecordTimeoutMs({
+      feedback: SUPPORT_ESCALATION,
+      timeoutMs: 500,
+    })).toBe(500);
   });
 
   it("caps a stalled response before headers at the feedback-specific deadline", async () => {

@@ -11,6 +11,13 @@ import {
   createAssistantProductFeedbackRecorder,
   resolveAssistantProductFeedbackAcceptedInputIds,
 } from "../src/assistant/turn-progress.js";
+import {
+  MURPH_MANAGED_AUTOMATIONS,
+  MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+} from "../src/assistant/managed-automations.js";
+import {
+  buildAssistantSystemPrompt,
+} from "../src/assistant/system-prompt.js";
 
 describe("assistant product feedback", () => {
   it("is stable across related-item ordering and summary wording, and scoped to accepted input", () => {
@@ -128,11 +135,62 @@ describe("assistant product feedback", () => {
     expect(schema).toContain('"feature_interest"');
     expect(schema).toContain('"summary"');
     expect(schema).toContain('Use feature_request for a missing or unsupported Murph path');
+    expect(schema).toContain('Make it actionable without the conversation');
+    expect(schema).toContain('Concise de-identified, product-only summary');
+    expect(schema).toContain('generic actor');
+    expect(schema).toContain('expected versus observed result');
+    expect(schema).toContain('concrete product constraint the source established');
+    expect(schema).toContain('instead of replacing them with vague labels');
+    expect(schema).toContain('omit it or mark it unclear rather than infer or invent it');
+    expect(schema).toContain('Abstract every private fact');
+    expect(schema).toContain('least-specific product concept');
+    expect(schema).toContain('do not preserve a private fact merely because it was relevant');
+    expect(schema).toContain('Never include names, handles, account or member identifiers');
+    expect(schema).toContain('diagnoses, symptoms, medications, treatments');
+    expect(schema).toContain('exact health/fitness/nutrition values');
     expect(schema).toContain('desired outcome and missing Murph capability');
     expect(schema).toContain('Optional metadata');
     expect(schema).toContain('Speculative:');
     expect(schema).toContain('Murph-observed:');
     expect(schema).not.toContain('"topic"');
+  });
+
+  it("keeps the detailed summary rubric single-owned by the tool schema", () => {
+    const rubricMarker =
+      "name the generic actor, exact Murph surface or workflow";
+    const systemPrompt = buildAssistantSystemPrompt({
+      assistantCliContract: null,
+      assistantContextSnapshotPrompt: null,
+      assistantHostedDeviceConnectAvailable: false,
+      assistantKnowledgeToolsAvailable: false,
+      channel: "telegram",
+      cliAccess: {
+        rawCommand: "vault-cli",
+        setupCommand: "murph",
+      },
+      conversationScope: "direct",
+      currentLocalDate: "2026-07-30",
+      currentTimeZone: "America/New_York",
+      hostedRuntime: true,
+      modelBehaviorProfile: "gpt5-agentic",
+      onboardingGuidance: false,
+      turnTrigger: null,
+    });
+    const productNotes = MURPH_MANAGED_AUTOMATIONS.find(
+      (automation) =>
+        automation.automationId === MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+    );
+    expect(productNotes).toBeDefined();
+
+    const toolSchema = JSON.stringify(
+      MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema,
+    );
+    const ordinaryStack = `${systemPrompt}\n${toolSchema}`;
+    const managedStack =
+      `${systemPrompt}\n${productNotes?.instructions ?? ""}\n${toolSchema}`;
+
+    expect(ordinaryStack.split(rubricMarker)).toHaveLength(2);
+    expect(managedStack.split(rubricMarker)).toHaveLength(2);
   });
 
   it("parses and collects one explicit feedback candidate without a pre-reply write", async () => {
@@ -230,6 +288,208 @@ describe("assistant product feedback", () => {
     expect(productFeedbackRecorder.readProductFeedback()?.summary).toBe(
       "Interested in native message formatting.",
     );
+  });
+
+  it("rejects malformed reserved support-escalation shapes at the tool boundary", async () => {
+    const acceptProductFeedbackCandidate = vi.fn();
+    const deliverProductSupportEscalation = vi.fn();
+    const productFeedbackRecorder = createAssistantProductFeedbackRecorder({
+      acceptedInputItems: [{ id: "assistant_input_1", source: "assistant-input" }],
+      productFeedbackCandidateSink: {
+        acceptProductFeedbackCandidate,
+        deliverProductSupportEscalation,
+      },
+    });
+    if (!productFeedbackRecorder) {
+      throw new Error("Expected a turn-scoped product feedback recorder.");
+    }
+
+    for (const malformedArguments of [
+      { kind: "frustration", summary: "Support escalation:" },
+      {
+        kind: "feature_request",
+        summary: "Support escalation: the connection flow does not finish.",
+      },
+      {
+        kind: "frustration",
+        relatedChangelogItemIds: ["native-message-formatting"],
+        summary: "Support escalation: the connection flow does not finish.",
+      },
+    ]) {
+      const request = readMurphDynamicToolRequest({
+        method: "item/tool/call",
+        params: {
+          arguments: malformedArguments,
+          namespace: "murph",
+          tool: "submit_product_feedback",
+        },
+      });
+      if (!request) {
+        throw new Error("Expected a parsed product feedback request.");
+      }
+      const result = await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        nextUsageOrdinal: () => 0,
+        productFeedbackRecorder,
+        progressDelivery: null,
+        request,
+      });
+
+      expect(result.rpcResult).toEqual({
+        success: false,
+        contentItems: [{
+          type: "inputText",
+          text: expect.stringContaining("support escalation rejected"),
+        }],
+      });
+    }
+
+    expect(deliverProductSupportEscalation).not.toHaveBeenCalled();
+    expect(acceptProductFeedbackCandidate).not.toHaveBeenCalled();
+    expect(productFeedbackRecorder.readProductFeedback()).toBeNull();
+  });
+
+  it("rejects a support escalation outside a verified direct conversation scope", async () => {
+    const deliverProductSupportEscalation = vi.fn();
+    const productFeedbackRecorder = createAssistantProductFeedbackRecorder({
+      acceptedInputItems: [{ id: "assistant_input_1", source: "assistant-input" }],
+      productFeedbackCandidateSink: {
+        acceptProductFeedbackCandidate: vi.fn(),
+        deliverProductSupportEscalation,
+      },
+    });
+    if (!productFeedbackRecorder) {
+      throw new Error("Expected a turn-scoped product feedback recorder.");
+    }
+    const request = readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          kind: "frustration",
+          summary: "Support escalation: the connection flow does not finish.",
+        },
+        namespace: "murph",
+        tool: "submit_product_feedback",
+      },
+    });
+    if (!request) {
+      throw new Error("Expected a parsed support escalation request.");
+    }
+
+    for (const conversationScope of ["group", "unverified-external"] as const) {
+      const result = await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext: {
+          computerToolsAvailable: false,
+          currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          currentUserActionScope: () => ({
+            acceptedInputIds: ["assistant_input_1"],
+            conversationId: null,
+            conversationScope,
+            inboundMailboxItemIds: [],
+            originSessionId: "session-scope-check",
+            recipientKey: null,
+          }),
+          sendVaultFile: async () => {
+            throw new Error("Vault-file sending is unavailable for this turn.");
+          },
+          vaultFileSendAvailable: false,
+        },
+        nextUsageOrdinal: () => 0,
+        productFeedbackRecorder,
+        progressDelivery: null,
+        request,
+      });
+
+      expect(result.rpcResult).toEqual({
+        success: false,
+        contentItems: [{
+          type: "inputText",
+          text: expect.stringContaining("verified private direct conversation"),
+        }],
+      });
+    }
+
+    expect(deliverProductSupportEscalation).not.toHaveBeenCalled();
+    expect(productFeedbackRecorder.readProductFeedback()).toBeNull();
+  });
+
+  it("reports durable in-turn delivery for the exact support escalation shape", async () => {
+    const deliverProductSupportEscalation = vi
+      .fn()
+      .mockResolvedValue({ recorded: true });
+    const productFeedbackRecorder = createAssistantProductFeedbackRecorder({
+      acceptedInputItems: [{ id: "assistant_input_1", source: "assistant-input" }],
+      productFeedbackCandidateSink: {
+        acceptProductFeedbackCandidate: vi.fn(),
+        deliverProductSupportEscalation,
+      },
+    });
+    if (!productFeedbackRecorder) {
+      throw new Error("Expected a turn-scoped product feedback recorder.");
+    }
+    const request = readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          kind: "frustration",
+          summary: "Support escalation: the connection flow does not finish.",
+        },
+        namespace: "murph",
+        tool: "submit_product_feedback",
+      },
+    });
+    if (!request) {
+      throw new Error("Expected a parsed support escalation request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      nextUsageOrdinal: () => 0,
+      productFeedbackRecorder,
+      progressDelivery: null,
+      request,
+    });
+
+    expect(deliverProductSupportEscalation).toHaveBeenCalledOnce();
+    expect(result.rpcResult).toEqual({
+      success: true,
+      contentItems: [{ type: "inputText", text: "product feedback candidate accepted" }],
+    });
+    expect(productFeedbackRecorder.readProductFeedback()).toBeNull();
+
+    const failingRecorder = createAssistantProductFeedbackRecorder({
+      acceptedInputItems: [{ id: "assistant_input_1", source: "assistant-input" }],
+      productFeedbackCandidateSink: {
+        acceptProductFeedbackCandidate: vi.fn(),
+        deliverProductSupportEscalation: vi
+          .fn()
+          .mockRejectedValue(new Error("callback timed out")),
+      },
+    });
+    if (!failingRecorder) {
+      throw new Error("Expected a turn-scoped product feedback recorder.");
+    }
+    const failedResult = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      nextUsageOrdinal: () => 0,
+      productFeedbackRecorder: failingRecorder,
+      progressDelivery: null,
+      request,
+    });
+
+    expect(failedResult.rpcResult).toEqual({
+      success: false,
+      contentItems: [{
+        type: "inputText",
+        text: "product feedback candidate unavailable",
+      }],
+    });
   });
 
   it("parses generalized feature-request feedback without changelog ids", () => {

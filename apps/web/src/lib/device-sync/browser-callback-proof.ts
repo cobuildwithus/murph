@@ -107,19 +107,6 @@ export function verifyHostedDeviceSyncCallbackProof(input: {
   return safeEqual(authenticator, expectedAuthenticator);
 }
 
-export function buildHostedDeviceSyncCallbackProofClearCookie(provider: string): string | null {
-  const normalizedProvider = normalizeHostedDeviceSyncProvider(provider);
-  if (!normalizedProvider) {
-    return null;
-  }
-
-  return buildHostedDeviceSyncCallbackProofCookie({
-    maxAgeSeconds: 0,
-    provider: normalizedProvider,
-    value: "",
-  });
-}
-
 export function readHostedDeviceSyncCallbackState(url: URL): string | null {
   return normalizeHostedDeviceSyncState(
     url.searchParams.get("murph_state") ?? url.searchParams.get("state"),

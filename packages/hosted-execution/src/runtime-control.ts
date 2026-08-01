@@ -834,13 +834,20 @@ const HOSTED_PRODUCT_FEEDBACK_REDACTION_TOKEN = "[redacted]";
 
 const HOSTED_PRODUCT_FEEDBACK_SUMMARY_REDACTION_PATTERNS = [
   /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu,
+  /@[A-Z0-9_]{2,}\b/giu,
   /\bhttps?:\/\/[^\s<>"']+/giu,
   /\bwww\.[^\s<>"']+/giu,
   /\b(?:\+?1[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]?\d{4}\b/gu,
   /\b\d{3}-\d{2}-\d{4}\b/gu,
   /\b(?:\d[ -]?){13,19}\b/gu,
+  /\b(?:member|user|usr|account)_[A-Za-z0-9_-]{6,}\b/gu,
+  /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/giu,
+  /\b(?:\d{1,3}\.){3}\d{1,3}\b/gu,
+  /\b0x[A-Fa-f0-9]{40,64}\b/gu,
   /\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}\b/gu,
   /\b(?:sk|pk|rk|ak|pat|ghp|gho|ghu|ghs|github_pat|xox[baprs])_[A-Za-z0-9_=-]{12,}\b/gu,
+  /\b\d+(?:\.\d+)?\s*\/\s*\d+(?:\.\d+)?\s*mmHg\b/giu,
+  /\b\d+(?:\.\d+)?\s*(?:bpm|mg\/dL|mmol\/L|mmHg|mIU\/L|ng\/mL|pg\/mL|g\/dL|µg\/dL)\b/giu,
   /\b[A-Fa-f0-9]{32,}\b/gu,
 ] as const;
 
@@ -857,6 +864,27 @@ export interface HostedRuntimeProductFeedbackRecord {
   kind: HostedProductFeedbackKind;
   relatedChangelogItemIds: string[];
   summary: string;
+}
+
+export const HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX = "Support escalation:";
+
+export function isHostedProductSupportEscalationSummary(
+  value: string | null | undefined,
+): value is string {
+  return typeof value === "string"
+    && value.startsWith(HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX)
+    && value.slice(HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX.length).trim().length > 0;
+}
+
+export function isHostedProductSupportEscalationFeedback(
+  feedback: Pick<
+    HostedRuntimeProductFeedbackRecord,
+    "kind" | "relatedChangelogItemIds" | "summary"
+  >,
+): boolean {
+  return feedback.kind === "frustration"
+    && feedback.relatedChangelogItemIds.length === 0
+    && isHostedProductSupportEscalationSummary(feedback.summary);
 }
 
 export interface HostedRuntimeProductFeedbackRecordRequest {
@@ -1088,12 +1116,25 @@ export interface HostedRuntimeGroupSetChatAvatarRequest {
   groupChatIconUrl: string;
 }
 
+export function hostedRuntimeLinqProviderErrorMessageForCode(
+  code: unknown,
+): string | null {
+  switch (code) {
+    case 5006:
+      return "The avatar image type was not accepted.";
+    case 5007:
+      return "The avatar image could not be downloaded.";
+    default:
+      return null;
+  }
+}
+
 export const HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN =
   "https://murph-hosted.cobuildwithus.workers.dev";
 export const HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_PATH_PREFIX =
   "/private-media/v1/";
 const HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_PATH_PATTERN =
-  /^\/private-media\/v1\/v1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{32,1024}$/u;
+  /^\/private-media\/v1\/v1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{32,1024}(?:\/group-avatar\.(?:jpg|png|webp))?$/u;
 
 export function isHostedRuntimePrivateImageDeliveryUrl(
   url: URL,
@@ -1234,6 +1275,12 @@ export type HostedRuntimeGroupSharedRecord = Pick<
 
 export interface HostedRuntimeGroupSharedProjection {
   dataStatus: "available" | "missing";
+  /**
+   * Canonical UTC time at which the current exact-scope grant became active.
+   * Missing means the producer predates this additive evidence field; null is
+   * valid only when the scope is not granted.
+   */
+  grantedAt?: string | null;
   grantStatus: "granted" | "not_granted";
   projectionScope: HostedVaultShareSelectableProjectionScope;
   projectionScopeKey: string;
@@ -1499,7 +1546,13 @@ export type HostedRuntimeGroupToolResponse =
   | {
       action: "create_join_link";
       result:
-        | { status: "ok"; group: HostedRuntimeGroupSummary; joinUrl: string }
+        | {
+            status: "ok";
+            group: HostedRuntimeGroupSummary;
+            joinUrl: string;
+            /** Legacy additive evidence; consumers must not infer link delivery. */
+            offeredAt?: string;
+          }
         | { status: "unavailable"; unavailableReason: string; group: null };
     }
   | {
@@ -1516,7 +1569,20 @@ export type HostedRuntimeGroupToolResponse =
   | {
       action: "post_join_offer";
       result:
-        | { status: "sent"; group: HostedRuntimeGroupSummary; joinUrl: string }
+        | {
+            status: "sent";
+            group: HostedRuntimeGroupSummary;
+            joinUrl: string;
+            /**
+             * `posted` means the provider message was durably bound.
+             * `existing` means Web reused a covering active offer; consumers
+             * should present the returned first-party link instead of claiming
+             * a new native message was sent.
+             */
+            offerState?: "existing" | "posted";
+            /** Provider chronology only when the message was created during this send attempt. */
+            offeredAt?: string;
+          }
         | { status: "unavailable"; unavailableReason: string; group: null };
     }
   | {
@@ -1530,7 +1596,12 @@ export type HostedRuntimeGroupToolResponse =
       result:
         | { status: "requested" }
         | { status: "ok" }
-        | { status: "unavailable"; unavailableReason: string };
+        | {
+            status: "unavailable";
+            unavailableReason: string;
+            providerErrorCode?: number;
+            providerErrorMessage?: string;
+          };
     }
   | {
       action: "preflight_set_chat_avatar";

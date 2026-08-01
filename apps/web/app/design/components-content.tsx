@@ -13,7 +13,6 @@ import {
   DeviceSyncSetupGuideDialog,
 } from "@/app/(dashboard)/home/device-sync-completion-dialog";
 import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
-import { HostedDeviceSyncCallbackConfirmation } from "@/src/components/device-sync/hosted-device-sync-callback-confirmation";
 import { HomeExperimentCard } from "@/src/components/home/home-experiment-card";
 import {
   GroupUsageFundingActions,
@@ -31,7 +30,14 @@ import {
   HostedEmailMurphContactDialog,
   WebmailIcon,
 } from "@/src/components/settings/hosted-email-murph-contact-dialog";
-import { HostedPhoneLinkAction } from "@/src/components/settings/hosted-phone-settings";
+import {
+  HostedPhoneLinkAction,
+  HostedPhoneLinkCardPresentation,
+} from "@/src/components/settings/hosted-phone-settings";
+import {
+  HostedIdentitySessionLoading,
+  HostedIdentitySessionMismatch,
+} from "@/src/components/settings/hosted-settings-identity-link-dialog";
 import {
   ASSISTANT_MODEL_CHOICE_CARD_CLASSES,
   AssistantModelArtwork,
@@ -57,6 +63,7 @@ import {
 import { HostedInlineAuthButton } from "@/src/components/hosted-onboarding/hosted-inline-auth-button";
 import { HostedCodeEntryStep } from "@/src/components/hosted-onboarding/hosted-phone-auth-step-views";
 import { HostedAuthenticatedPhoneAuthState } from "@/src/components/hosted-onboarding/hosted-phone-auth-views";
+import { HostedContactChannelChoice } from "@/src/components/hosted-onboarding/hosted-contact-channel-choice";
 import { HostedTelegramAuthButtonPresentation } from "@/src/components/hosted-onboarding/hosted-telegram-auth-button";
 import {
   HostedLegalConsentCard,
@@ -137,6 +144,7 @@ import {
   DESIGN_USAGE_MISSION_CONTACT_OPTION,
 } from "./group-usage-funding-study";
 import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
+import { ConnectCallbackErrorNotice } from "@/src/components/device-sync/connect-callback-error-notice";
 import { HostedAccountDeletionStatus } from "@/src/components/settings/hosted-data-privacy-settings";
 import { GarminHistoricalDataDialog } from "../(dashboard)/connect/connect-page-dialogs";
 import {
@@ -869,11 +877,18 @@ export function ComponentsContent() {
               will build without showing empty scores or missing facts.
             </p>
             <EnvironmentEmptyState
-              contactAction={{
-                href: "sms:+15555550100?body=I%20want%20to%20update%20what%20you%20know%20about%20my%20home%20environment.",
-                kind: "text",
-                label: "Text Murph",
-              }}
+              contactOptions={[
+                {
+                  href: "sms:+15555550100?body=I%20want%20to%20update%20what%20you%20know%20about%20my%20home%20environment.",
+                  kind: "text",
+                  label: "Messages",
+                },
+                {
+                  href: "https://t.me/withmurph_bot",
+                  kind: "telegram",
+                  label: "Telegram",
+                },
+              ]}
             />
           </Section>
         </div>
@@ -891,7 +906,7 @@ export function ComponentsContent() {
               built only from facts Murph still does not know.
             </p>
             <EnvironmentCaptureCard
-              contactAction={null}
+              contactOptions={[]}
               coverage={70}
               known={21}
               script={DESIGN_ENVIRONMENT_GAP_SCRIPT}
@@ -910,7 +925,8 @@ export function ComponentsContent() {
             <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
               The open report keeps ownership after upload: processing,
               updated, no-clear-facts, and delayed recovery remain visible
-              without requiring a reload.
+              without requiring a reload. Processing stays animated, and the
+              delayed action rechecks the existing accepted job.
             </p>
             <div className="grid gap-4">
               <EnvironmentVoiceRefreshNotice
@@ -1260,11 +1276,20 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Device Sync Callback Confirmation">
-          <div className="overflow-hidden rounded-2xl border border-border" inert>
-            <HostedDeviceSyncCallbackConfirmation
-              action="/"
-              state="confirmation"
+        <Section title="Connect Callback Error Notice">
+          <div className="flex flex-col gap-4" inert>
+            <ConnectCallbackErrorNotice
+              errorCode="CALLBACK_PROOF_INVALID"
+              message="That return link did not match the browser you started in, so nothing was connected. Start Oura again from this page."
+              sourceLabel="Oura"
+              title="Unable to finish connection"
+            />
+            <ConnectCallbackErrorNotice
+              errorCode="CALLBACK_SESSION_REQUIRED"
+              message="You were signed out before Oura finished connecting. Log in, then start the connection again."
+              onSignIn={() => {}}
+              sourceLabel="Oura"
+              title="Unable to finish connection"
             />
           </div>
         </Section>
@@ -1668,9 +1693,17 @@ export function ComponentsContent() {
 
         <Section id="phone-account-linking" title="Phone Account Linking">
           <p className="text-sm leading-6 text-muted-foreground">
-            The account-management action hands phone verification to the
-            authenticated identity provider, then saves the verified result to
-            Murph. Existing phone accounts use the same surface for replacement.
+            Settings opens the authenticated identity provider directly, with
+            no second Murph confirmation. After verification or an approved
+            account transfer, Murph saves the exact provider-owned result. If
+            Privy already has a verified phone that Murph has not recorded,
+            Settings repairs that projection directly. A declined transfer
+            closes quietly, and a failed save retries without reopening Privy.
+            Existing phone accounts use the same surface for replacement.
+            Support-required conflicts offer both retry and a direct email
+            action without putting account identifiers in the message.
+            Privacy-safe lifecycle diagnostics observe these states without
+            changing any rendered state or action.
           </p>
           <div className="grid gap-4 sm:grid-cols-2" inert>
             <div className="space-y-3 rounded-xl border border-border bg-card p-5">
@@ -1711,18 +1744,79 @@ export function ComponentsContent() {
               <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
                 Session mismatch
               </p>
-              <HostedPhoneLinkAction
-                disabled
-                isChangeFlow={false}
-                isLinking={false}
-                isSyncing={false}
-                onClick={() => {}}
-              />
-              <p className="text-sm leading-6 text-muted-foreground">
-                Your sign-in changed. Sign in again using a login method already
-                linked to this Murph account before changing a linked account.
-              </p>
+              <HostedIdentitySessionMismatch onSignInAgain={() => {}} />
             </div>
+            <div className="space-y-3 rounded-xl border border-border bg-card p-5">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Provider loading
+              </p>
+              <HostedIdentitySessionLoading />
+            </div>
+            <div className="space-y-3 rounded-xl border border-border bg-card p-5">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Recovery failed
+              </p>
+              <HostedIdentitySessionMismatch
+                errorMessage="Sign out did not finish. Try again."
+                onSignInAgain={() => {}}
+              />
+            </div>
+          </div>
+          <p className="text-sm leading-6 text-muted-foreground">
+            The join card composes that action with its reserved status line
+            and the Telegram alternative. The status line holds its height
+            while empty so the button never moves when a message arrives, so
+            these previews show the real resting spacing between the two
+            contact channels.
+          </p>
+          <div
+            aria-label="Composed contact channel card previews"
+            className="grid max-w-3xl gap-4 sm:grid-cols-2"
+            data-design-component="hosted-contact-channel-choice"
+            inert
+          >
+            {[
+              {
+                errorMessage: null,
+                label: "Resting",
+                state: "resting",
+                statusMessage: null,
+                statusTone: "neutral" as const,
+              },
+              {
+                errorMessage: null,
+                label: "Saved status",
+                state: "status",
+                statusMessage: "Phone saved.",
+                statusTone: "success" as const,
+              },
+            ].map((preview) => (
+              <div
+                className="space-y-3 rounded-xl border border-border bg-card p-5"
+                data-design-state={preview.state}
+                key={preview.label}
+              >
+                <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                  {preview.label}
+                </p>
+                <HostedContactChannelChoice
+                  phone={
+                    <HostedPhoneLinkCardPresentation
+                      errorMessage={preview.errorMessage}
+                      isChangeFlow={false}
+                      isLinking={false}
+                      isSyncing={false}
+                      statusMessage={preview.statusMessage}
+                      statusTone={preview.statusTone}
+                      onClick={() => {}}
+                    />
+                  }
+                  telegram={
+                    <HostedTelegramAuthButtonPresentation onClick={() => {}} />
+                  }
+                />
+              </div>
+            ))}
           </div>
         </Section>
 

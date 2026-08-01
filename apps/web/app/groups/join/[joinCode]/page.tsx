@@ -180,7 +180,10 @@ function renderGroupJoin(input: {
         {input.authenticated ? (
           <div className="flex flex-col gap-2">
             {!input.launchConsentStatus?.launchGranted ? (
-              <GroupJoinLegalConsentGate initialStatus={input.launchConsentStatus} />
+              <GroupJoinLegalConsentGate
+                initialStatus={input.launchConsentStatus}
+                notNowHref={input.postJoinDestination}
+              />
             ) : (
               <GroupJoinAcceptForm
                 activeVaultShareProjectionScopes={view.activeVaultShareProjectionScopes}
@@ -191,7 +194,7 @@ function renderGroupJoin(input: {
                 joinCode={input.joinCode}
                 permissions={view.requestedVaultShareProjections}
                 postJoinContactOption={input.postJoinContactOption}
-                postJoinDestination={alreadyActiveMember ? "/home" : input.postJoinDestination}
+                postJoinDestination={input.postJoinDestination}
               />
             )}
             {view.viewerCanLeave ? (
@@ -199,7 +202,7 @@ function renderGroupJoin(input: {
             ) : null}
             {input.launchConsentStatus?.launchGranted ? (
               <Link
-                href="/home"
+                href={input.postJoinDestination}
                 className="inline-flex min-h-10 items-center justify-center text-center text-xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
               >
                 {alreadyActiveMember ? "Go home" : "Not now"}

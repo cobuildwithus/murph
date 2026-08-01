@@ -6,6 +6,7 @@ import { Prisma } from "@prisma/client";
 import { buildHostedMemberRoutingPrivateColumns } from "./member-private-codecs";
 import {
   createHostedLinqChatLookupKeyReadCandidates,
+  createHostedPhoneLookupKeyReadCandidates,
   createHostedTelegramUserLookupKeyReadCandidates,
 } from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
@@ -156,21 +157,54 @@ export async function lookupHostedMemberRoutingByTelegramUserLookupKey(input: {
 
 export async function lookupHostedMemberRoutingByPendingLinqParticipantContact(input: {
   contact: HostedLinqParticipantContact;
+  linqChatId?: string | null;
   prisma: HostedOnboardingReadClient;
+  recipientPhone?: string | null;
 }): Promise<HostedMemberRoutingLookup | null> {
-  const lookupKeys = createHostedLinqParticipantContactLookupKeyReadCandidates({
-    kind: input.contact.kind,
-    value: input.contact.value,
-  });
-  if (lookupKeys.length === 0) {
+  const contactLookupKeys =
+    createHostedLinqParticipantContactLookupKeyReadCandidates({
+      kind: input.contact.kind,
+      value: input.contact.value,
+    });
+  const scopedToGroup =
+    input.linqChatId !== undefined || input.recipientPhone !== undefined;
+  if (
+    scopedToGroup
+    && (input.linqChatId === undefined || input.recipientPhone === undefined)
+  ) {
+    throw new TypeError(
+      "Pending Linq group contact lookup requires both chat and recipient line.",
+    );
+  }
+  const chatLookupKeys = scopedToGroup
+    ? createHostedLinqChatLookupKeyReadCandidates(input.linqChatId)
+    : [];
+  const recipientLookupKeys = scopedToGroup
+    ? createHostedPhoneLookupKeyReadCandidates(input.recipientPhone)
+    : [];
+  if (
+    contactLookupKeys.length === 0
+    || (scopedToGroup
+      && (chatLookupKeys.length === 0 || recipientLookupKeys.length === 0))
+  ) {
     return null;
   }
 
   const routingRecords = await input.prisma.hostedMemberRouting.findMany({
     where: {
       pendingLinqParticipantContactLookupKey: {
-        in: lookupKeys,
+        in: contactLookupKeys,
       },
+      ...(scopedToGroup
+        ? {
+            pendingLinqChatLookupKey: {
+              in: chatLookupKeys,
+            },
+            pendingLinqRecipientPhoneLookupKey: {
+              in: recipientLookupKeys,
+            },
+          }
+        : {}),
     },
     select: hostedMemberRoutingLookupSelect,
   });

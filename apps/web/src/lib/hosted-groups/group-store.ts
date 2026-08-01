@@ -404,6 +404,11 @@ interface HostedGroupSharedMemberSource {
   memberId: string;
 }
 
+interface HostedGroupSharedProjectionSnapshotEntry
+  extends HostedVaultShareProjectionSnapshotEntry {
+  grantedAt: Date;
+}
+
 type HostedGroupSharedReadCapture =
   | {
       status: "ok";
@@ -413,7 +418,7 @@ type HostedGroupSharedReadCapture =
         memberId: string;
         participantId: string;
       }>;
-      shares: HostedVaultShareProjectionSnapshotEntry[];
+      shares: HostedGroupSharedProjectionSnapshotEntry[];
     }
   | { status: "none" }
   | { status: "unavailable"; unavailableReason: string };
@@ -742,6 +747,7 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
             ],
             select: {
               destinationMemberId: true,
+              grantedAt: true,
               grantorMemberId: true,
               id: true,
               projectionKind: true,
@@ -765,7 +771,7 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
         };
       }
 
-      const shares: HostedVaultShareProjectionSnapshotEntry[] = [];
+      const shares: HostedGroupSharedProjectionSnapshotEntry[] = [];
       const deviceMemberIds = new Set<string>();
       for (const row of grantRows) {
         const projectionScope = parseHostedVaultShareRowProjectionScope(row);
@@ -778,6 +784,7 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
         shares.push({
           ciphertext: row.projectionSnapshotCiphertext,
           destinationMemberId: row.destinationMemberId,
+          grantedAt: row.grantedAt,
           grantorMemberId: row.grantorMemberId,
           id: row.id,
           projectionKind: row.projectionKind,
@@ -879,10 +886,13 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
       recordsByMemberAndScope.set(share.grantorMemberId, memberRecords);
     }
 
-    const grantsByMember = new Map<string, Map<string, HostedVaultShareProjectionSnapshotEntry>>();
+    const grantsByMember = new Map<
+      string,
+      Map<string, HostedGroupSharedProjectionSnapshotEntry>
+    >();
     for (const share of capture.shares) {
       const memberGrants = grantsByMember.get(share.grantorMemberId)
-        ?? new Map<string, HostedVaultShareProjectionSnapshotEntry>();
+        ?? new Map<string, HostedGroupSharedProjectionSnapshotEntry>();
       if (memberGrants.has(share.projectionScopeKey)) {
         throw new Error("Hosted group shared authority contains duplicate grants.");
       }
@@ -923,6 +933,7 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
           if (!grant) {
             return {
               dataStatus: "missing" as const,
+              grantedAt: null,
               grantStatus: "not_granted" as const,
               projectionScope,
               projectionScopeKey,
@@ -942,6 +953,7 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
             dataStatus: normalizedRecords.length > 0
               ? "available" as const
               : "missing" as const,
+            grantedAt: grant.grantedAt.toISOString(),
             grantStatus: "granted" as const,
             projectionScope,
             projectionScopeKey,

@@ -24,6 +24,7 @@ import {
   getHostedLinqChatSummary,
   getHostedLinqReactionTargetMessage,
   shareHostedLinqContactCard,
+  startHostedLinqChatTypingIndicator,
 } from "@/src/lib/hosted-onboarding/linq-client";
 
 const originalFetch = globalThis.fetch;
@@ -1280,7 +1281,10 @@ describe("sendHostedLinqChatMessage", () => {
       void init;
       return createJsonResponse({
         chat_id: "chat_123",
-        message: { id: "msg_offer" },
+        message: {
+          created_at: "2026-07-31T12:01:02Z",
+          id: "msg_offer",
+        },
       }, 200);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -1293,6 +1297,7 @@ describe("sendHostedLinqChatMessage", () => {
       message,
     })).resolves.toEqual({
       chatId: "chat_123",
+      messageCreatedAt: "2026-07-31T12:01:02.000Z",
       messageId: "msg_offer",
     });
 
@@ -1364,6 +1369,42 @@ describe("sendHostedLinqReadReceipt", () => {
   });
 });
 
+describe("startHostedLinqChatTypingIndicator", () => {
+  afterEach(() => {
+    if (originalFetch) {
+      vi.stubGlobal("fetch", originalFetch);
+      return;
+    }
+
+    Reflect.deleteProperty(globalThis, "fetch");
+  });
+
+  it("posts typing starts to the v3 chat typing endpoint", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      void _input;
+      void _init;
+      return new Response(null, { status: 204 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(startHostedLinqChatTypingIndicator({
+      chatId: "chat_123",
+      timeoutMs: 2_500,
+    })).resolves.toEqual({
+      ok: true,
+      status: 204,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL("chats/chat_123/typing", "https://linq.example.test/api/partner/v3/"),
+      expect.objectContaining({
+        method: "POST",
+        signal: expect.any(AbortSignal),
+      }),
+    );
+  });
+});
+
 describe("shareHostedLinqContactCard", () => {
   afterEach(() => {
     if (originalFetch) {
@@ -1425,7 +1466,7 @@ describe("updateHostedLinqChatAvatar", () => {
     await expect(updateHostedLinqChatAvatar({
       chatId: "chat_123",
       groupChatIconUrl:
-        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
     })).resolves.toBeUndefined();
 
     const firstCall = fetchMock.mock.calls[0];
@@ -1438,8 +1479,144 @@ describe("updateHostedLinqChatAvatar", () => {
     expect(expectRequestInit(init).method).toBe("PUT");
     expect(readJsonRequestBody(init)).toEqual({
       group_chat_icon:
-        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
     });
+  });
+
+  it("preserves an allowlisted Linq error code without provider prose", async () => {
+    const privateUrl =
+      `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`;
+    const privatePhone = "15550001111";
+    const privateEmail = "member@example.test";
+    const privateChatId = "550e8400-e29b-41d4-a716-446655440000";
+    const privateGroupChatId = "room-12345";
+    const privateParticipantId = "participant-67890";
+    const traceId = "0123456789abcdef0123456789abcdef";
+    vi.stubGlobal("fetch", vi.fn(async () => createJsonResponse({
+      error: {
+        code: 5006,
+        doc_url: "https://docs.linqapp.com/error/codes/5xxx/5006/",
+        message:
+          `Participant ${privatePhone} failed for ${privateUrl}; chat_id=${privateChatId}; group_chat_id=${privateGroupChatId}; participant_id=${privateParticipantId}; email=${privateEmail}; trace_id=${traceId}; authorization: Basic dXNlcjpwYXNz`,
+        status: 400,
+      },
+      success: false,
+      trace_id: traceId,
+    }, 400)));
+
+    const error = await updateHostedLinqChatAvatar({
+      chatId: "chat_123",
+      groupChatIconUrl: privateUrl,
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({
+      code: "LINQ_SEND_FAILED",
+      details: {
+        failureStage: "http",
+        providerErrorCode: 5006,
+        status: 400,
+      },
+      retryable: false,
+    });
+    const serialized = JSON.stringify(error);
+    expect(serialized).not.toContain(privateUrl);
+    expect(serialized).not.toContain(privatePhone);
+    expect(serialized).not.toContain(privateEmail);
+    expect(serialized).not.toContain(privateChatId);
+    expect(serialized).not.toContain(privateGroupChatId);
+    expect(serialized).not.toContain(privateParticipantId);
+    expect(serialized).not.toContain(traceId);
+    expect(serialized).not.toContain("dXNlcjpwYXNz");
+    expect(serialized).not.toContain("Participant");
+  });
+
+  it("ignores arbitrary provider prose for an allowlisted Linq error code", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => createJsonResponse({
+      error: {
+        code: 5007,
+        message: "provider detail ".repeat(40),
+        status: 400,
+      },
+      success: false,
+    }, 400)));
+
+    const error = await updateHostedLinqChatAvatar({
+      chatId: "chat_123",
+      groupChatIconUrl:
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
+    }).catch((caught: unknown) => caught) as { details?: Record<string, unknown> };
+
+    expect(error.details?.providerErrorCode).toBe(5007);
+    expect(error.details).not.toHaveProperty("providerErrorMessage");
+    expect(JSON.stringify(error)).not.toContain("provider detail");
+  });
+
+  it.each([
+    {
+      label: "non-JSON",
+      response: () => new Response("not-json", { status: 400 }),
+    },
+    {
+      label: "oversized",
+      response: () => createJsonResponse({
+        error: {
+          code: 5007,
+          message: "x".repeat(20 * 1024),
+          status: 400,
+        },
+        success: false,
+      }, 400),
+    },
+  ])("keeps $label Linq error bodies out of diagnostics", async ({ response }) => {
+    vi.stubGlobal("fetch", vi.fn(async () => response()));
+
+    await expect(updateHostedLinqChatAvatar({
+      chatId: "chat_123",
+      groupChatIconUrl:
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
+    })).rejects.toMatchObject({
+      details: {
+        failureStage: "http",
+        status: 400,
+      },
+    });
+
+    const error = await updateHostedLinqChatAvatar({
+      chatId: "chat_123",
+      groupChatIconUrl:
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
+    }).catch((caught: unknown) => caught) as { details?: Record<string, unknown> };
+    expect(error.details).not.toHaveProperty("providerErrorCode");
+    expect(error.details).not.toHaveProperty("providerErrorMessage");
+  });
+
+  it.each([
+    {
+      error: { code: 5007, message: "Failed to download image" },
+    },
+    {
+      error: { code: 50_007, message: "Failed to download image" },
+      success: false,
+    },
+    {
+      error: { code: "5007", message: 123 },
+      success: false,
+    },
+    {
+      error: { code: 5008, message: "Unknown provider prose" },
+      success: false,
+    },
+  ])("ignores fields outside the documented Linq error envelope", async (body) => {
+    vi.stubGlobal("fetch", vi.fn(async () => createJsonResponse(body, 400)));
+
+    const error = await updateHostedLinqChatAvatar({
+      chatId: "chat_123",
+      groupChatIconUrl:
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
+    }).catch((caught: unknown) => caught) as { details?: Record<string, unknown> };
+
+    expect(error.details).not.toHaveProperty("providerErrorCode");
+    expect(error.details).not.toHaveProperty("providerErrorMessage");
   });
 
   it("accepts only the current preview Worker origin", async () => {

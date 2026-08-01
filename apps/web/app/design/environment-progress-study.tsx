@@ -5,11 +5,18 @@ import {
 } from "../(dashboard)/environment/environment-page-client";
 import type { EnvironmentVoiceScript } from "../(dashboard)/environment/environment-voice-script";
 
-const DESIGN_CONTACT_ACTION = {
-  href: "sms:+15555550100",
-  kind: "text" as const,
-  label: "Text Murph",
-};
+const DESIGN_CONTACT_OPTIONS = [
+  {
+    href: "sms:+15555550100",
+    kind: "text" as const,
+    label: "Messages",
+  },
+  {
+    href: "https://t.me/withmurph_bot",
+    kind: "telegram" as const,
+    label: "Telegram",
+  },
+];
 
 const GAP_SCRIPTS: Readonly<Record<10 | 30 | 70, EnvironmentVoiceScript>> = {
   10: gapScript([
@@ -60,12 +67,12 @@ export function EnvironmentProgressStudy() {
       id="environment-progressive-capture"
       inert
     >
-      <StudyState label="0% · First walkthrough">
-        <EnvironmentEmptyState contactAction={DESIGN_CONTACT_ACTION} />
+      <StudyState label="0% · Auth-gated first walkthrough">
+        <EnvironmentEmptyState contactOptions={DESIGN_CONTACT_OPTIONS} />
       </StudyState>
       <StudyState label="10% · Build the core picture">
         <EnvironmentCaptureCard
-          contactAction={DESIGN_CONTACT_ACTION}
+          contactOptions={DESIGN_CONTACT_OPTIONS}
           coverage={10}
           known={3}
           script={GAP_SCRIPTS[10]}
@@ -73,7 +80,7 @@ export function EnvironmentProgressStudy() {
       </StudyState>
       <StudyState label="30% · Continue from known facts">
         <EnvironmentCaptureCard
-          contactAction={DESIGN_CONTACT_ACTION}
+          contactOptions={DESIGN_CONTACT_OPTIONS}
           coverage={30}
           known={9}
           script={GAP_SCRIPTS[30]}
@@ -81,7 +88,7 @@ export function EnvironmentProgressStudy() {
       </StudyState>
       <StudyState label="70% · Ask only for remaining gaps">
         <EnvironmentCaptureCard
-          contactAction={DESIGN_CONTACT_ACTION}
+          contactOptions={DESIGN_CONTACT_OPTIONS}
           coverage={70}
           known={21}
           script={GAP_SCRIPTS[70]}
@@ -89,7 +96,7 @@ export function EnvironmentProgressStudy() {
       </StudyState>
       <StudyState label="100% · Free-form update">
         <EnvironmentCaptureCard
-          contactAction={DESIGN_CONTACT_ACTION}
+          contactOptions={DESIGN_CONTACT_OPTIONS}
           coverage={100}
           known={30}
           script={UPDATE_SCRIPT}

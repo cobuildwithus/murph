@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-07-30
+Last verified: 2026-07-31
 
 ## Decision
 
@@ -156,6 +156,15 @@ may assign one independent canonical record family per child, with every write
 idempotently attributable to that source. A terminal lifecycle receipt remains
 advisory; canonical readback is completion proof. If the member needs the result
 in the current reply, the root keeps the work and uses normal progress updates.
+If the root replies while a child is still generating, every later ordinary
+inbound root turn checks again for completion. It incorporates a newly
+completed relevant result at most once; use, failure, cancellation, or loss of
+relevance ends that child's rechecks. Otherwise it replies without waiting and
+checks the unfinished child again on the next ordinary inbound turn. Scheduled
+automation, maintenance, system-notification, and output-only turns never
+perform this recheck. The recheck uses Codex's native parent-thread completion
+context rather than `wait_agent` and creates no queue, wake, or automatic
+follow-up.
 
 Hosted configuration admits one root plus at most three concurrent children
 per session. Independent roots may retain their own children inside the same
@@ -939,7 +948,14 @@ canonical live active access; Assistant Ask first completes its normal
 server-bound append checks. Web always awaits the applicable Temporal
 `signalWithStart`; only after Temporal accepts that durable signal does Web
 start the direct ensure. An access failure or Temporal acceptance failure starts
-no direct wake. This is a latency hint only, not a second durable wake authority:
+no direct wake. One narrow prewarm exception exists: on the Linq instant-start
+path, the webhook handler fires one additional best-effort payloadless ensure
+immediately after the planner transaction creating the new member commits and
+before enrollment or any Temporal signal, so the container boot overlaps
+enrollment instead of following it. The same request then performs the ordinary
+Temporal-then-direct wake; the prewarm grants no authority, may be dropped, and
+a racing or duplicate ensure lands on the existing fence/active-wake path. This
+is a latency hint only, not a second durable wake authority:
 accepted Linq reply delivery stamps `consumedAt` on the exact
 `HostedMailboxItem`, while Assistant Ask uses deterministic request/completion
 ids, mailbox dedupe, and idempotent continuation delivery. Do not add
@@ -1301,7 +1317,18 @@ uses the existing receipt checkpoint against the latest workspace. After the
 private capture is ready, the runtime upserts one trusted system input containing
 its exact `vault_image` descriptor on the original route, registers that input
 with the ordinary pending assistant-input index, and notifies the existing wake
-signal. Normal foreground selection therefore keeps fresh conversation ahead of
+signal. When OpenAI rejects generation or editing, the same completion input
+keeps the legacy exact `{status:"failed"}` result envelope and carries one
+separate runtime-authored diagnostic line. New readers accept that line only
+from exact runtime-authored system provenance, normalize and bound it, and
+present it to Murph as untrusted provider evidence rather than instructions;
+the authenticated provenance applies only to the completion status. The queued
+completion turn may explain or propose a correction but cannot launch another
+image operation; a retry requires user authorization in a later turn. Old
+readers continue to understand the unchanged failed envelope. The diagnostic may contain only the adapter's bounded
+structured error message, code, request id, and fixed local context, never an
+authorization header, credential, raw response body, prompt payload, or image
+bytes. Normal foreground selection therefore keeps fresh conversation ahead of
 the completion and owns completion retry and terminal evidence. Provider
 completion starts the existing generic usage recorder without awaiting it, and
 image delivery never waits for accounting or diagnostic writes. When the model
@@ -1797,19 +1824,22 @@ projection-pending input is a causal barrier until the existing
 projection-completion notification retries it; terminal projection failure is
 still replyable through the normal fallback. Duplicate staging and
 projection-completion notifications at or behind the newest queued or committed
-frontier are ignored before exact-successor proof. After the provider
-acknowledges `turn/steer`, Murph journals and checkpoints the accepted input
-before any hosted tool effect or final delivery may proceed. First-response
-closure removes the conversation registration and starts no further steer, but
-retains the existing provider-turn correlation until the one steer already
-started under that exact key settles; a rejected steer is not acknowledged and
-its input remains pending. Missing input, a causal gap, a boundary change,
-capacity overflow, or input arriving after the first completed response remains
-pending for a normal later assistant turn. Strict active-turn-targeted input
-still fails closed instead of falling through, and the assistant engine does
-not synthesize another provider request inside the same assistant turn. Final-delivery and hosted-tool effect
-keys use the newest accepted causal input as the stable replay anchor while the
-full answered-mailbox set remains attached as evidence.
+frontier are ignored before exact-successor proof. A successful `turn/steer`
+acknowledges transport only. Before any hosted tool effect or final delivery,
+Murph journals and checkpoints only accepted inputs at or below that tool
+request's or provider result's authoritative delivery-context ordinal. An
+acknowledged later input that remains above the ordinal stays pending for a
+normal later assistant turn. First-response closure removes the conversation
+registration and starts no further steer, but retains the existing
+provider-turn correlation until the one steer already started under that exact
+key settles; a rejected steer is not acknowledged and its input remains
+pending. Missing input, a causal gap, a boundary change, capacity overflow, or
+input arriving after the first completed response remains pending for a normal
+later assistant turn. Strict active-turn-targeted input still fails closed
+instead of falling through, and the assistant engine does not synthesize
+another provider request inside the same assistant turn. Final-delivery and
+hosted-tool effect keys use the newest accepted causal input as the stable
+replay anchor while the full answered-mailbox set remains attached as evidence.
 When mailbox import produces or reuses a canonical write receipt, the runner
 publishes the receipt-log fingerprint and the advanced imported watermark in
 the same status checkpoint. That progress checkpoint is still required when

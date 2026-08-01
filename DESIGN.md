@@ -220,6 +220,20 @@ an affected WAU or MAU with `At least`, explain the private evidence retirement
 in the supporting copy, and withhold a week-over-week rate when either compared
 window is incomplete.
 
+Follow the scorecard with the existing two-column chart grid. Lead that grid
+with **Total messages sent**, a thin sage cumulative line seeded from the
+established historical base, and **Messages sent per day**, restrained sage
+bars for completed UTC days. Both derive from the existing daily growth
+snapshots. Shift each snapshot's prior-day counts onto the date when the
+messages occurred and always preserve the exact 30 completed-day UTC spine.
+Leave absent snapshots and legacy unknown counts as chart gaps rather than
+zeros. Once tracking has begun, an unavailable day also ends the exact
+cumulative line until the missing evidence is reconciled; later known daily
+bars may still render. State that the daily total combines inbound messages
+across supported channels with tracked Linq replies. Give each keyboard-enabled
+chart one visible focus surface named by its heading. Keep acquisition and
+revenue snapshots as the second chart row.
+
 ### Measured Biomarker Index
 On `/biomarkers`, device-derived reading rows lead in a flat full-width notebook
 band bracketed by warm one-pixel rules. Do not wrap that band in a rounded card
@@ -371,16 +385,6 @@ Keyboard focus rings the whole card. Keep actions outside the card label so the
 full card remains one predictable radio target. Stack on narrow screens and use
 a compact grid only when the options are true peers. Do not use choice cards as
 navigation or as a substitute for ordinary buttons.
-
-### Device Connection Callback
-
-Provider return is a quiet, full-height confirmation page built from the shared
-Card primitives. Use one mono kicker, one serif decision heading, one short
-safety instruction, and explicit primary/secondary actions. The callback GET
-never mutates: the primary button is the member's visible completion act. The
-failure state removes that action, says that nothing was connected, and offers
-one route back to Connect. Keep both states readable at narrow mobile widths,
-with 44px-or-larger controls and no provider-supplied copy.
 
 ### Group Usage Funding
 An authenticated group funding link opens its relevant funding control

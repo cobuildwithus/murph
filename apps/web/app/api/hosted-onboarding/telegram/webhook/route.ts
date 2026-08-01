@@ -6,6 +6,9 @@ import {
   withJsonError,
 } from "@/src/lib/hosted-onboarding/http";
 import { assertHostedTelegramWebhookSecret } from "@/src/lib/hosted-onboarding/telegram";
+import {
+  handleHostedTelegramGroupReactionWebhook,
+} from "@/src/lib/hosted-onboarding/telegram-group-reactions";
 import { handleHostedOnboardingTelegramWebhookWithVisibleAccess } from "@/src/lib/hosted-onboarding/visible-access-webhooks";
 import { withHostedVisibleSecondaryTelegramOutcomes } from "@/src/lib/hosted-onboarding/visible-secondary-webhooks";
 
@@ -23,9 +26,14 @@ export const POST = withJsonError(async (request: Request) => {
     tooLargeErrorCode: "TELEGRAM_WEBHOOK_BODY_TOO_LARGE",
     tooLargeErrorMessage: "Telegram webhook body is too large.",
   });
+  const reactionResponse = await handleHostedTelegramGroupReactionWebhook({
+    rawBody,
+    scheduleAfterResponse: scheduleAfterResponseOrFireAndForget,
+    signal: request.signal,
+  });
 
   return jsonOk(
-    await handleHostedOnboardingTelegramWebhookWithVisibleOutcomes({
+    reactionResponse ?? await handleHostedOnboardingTelegramWebhookWithVisibleOutcomes({
       rawBody,
       scheduleAfterResponse: scheduleAfterResponseOrFireAndForget,
       secretToken,

@@ -111,7 +111,13 @@ it has been explicitly elevated to a cross-cutting invariant.
   terminal. It never inherits the root turn's
   invocation-scoped automation or device capability. Root completion or a
   later ordinary turn does not terminate valid detached work merely to rotate
-  request authority.
+  request authority. If the root replies while its child is still generating,
+  every later ordinary inbound root turn checks again for completion. A newly
+  completed relevant result is incorporated at most once. Use, failure,
+  cancellation, or loss of relevance ends that child's rechecks; an unfinished
+  child never blocks the current reply and is checked again on the next
+  ordinary inbound turn. Scheduled automation, maintenance,
+  system-notification, and output-only turns never perform this recheck.
 - Before a hosted workspace snapshot, Murph waits for every exact resident child
   and checks every touched root and resident child for background terminals. A
   root's lifecycle set retains every admitted child until that boundary clears;
@@ -242,14 +248,18 @@ it has been explicitly elevated to a cross-cutting invariant.
   durable outcome. A persisted pending effect names its current validity
   predicate and is durably superseded instead of delivered when that predicate
   fails.
-- A pre-member group-join reaction accepted for proactive outreach is Web-owned
-  durable work. Its stable offer-and-participant identity collapses webhook
-  retry, duplicate reaction, and unlike/re-like delivery. Every refusal is typed
-  and durable: line health and capacity defer with a bounded next attempt, and a
-  condition whose inputs cannot change terminates instead of deferring, so no row
-  retries forever and none is dropped unrecorded. Pre-member contact data that a
-  reaction creates participates in the existing account-deletion and
-  group-deletion owners rather than outliving them.
+- A canonical group-join reaction accepted for reply-gated proactive outreach
+  is Web-owned durable work. The eligible phone participant either has no member
+  identity or is a verified, unsuspended member without active hosted access who
+  is not already in the target group. Active members stay on direct join;
+  suspended and existing target-group members are consumed without outreach. The
+  stable offer-and-participant identity collapses webhook retry, duplicate
+  reaction, and unlike/re-like delivery. Every refusal is typed and durable:
+  line health and capacity defer with a bounded next attempt, and a condition
+  whose inputs cannot change terminates instead of deferring, so no row retries
+  forever and none is dropped unrecorded. Contact data that a reaction creates
+  participates in the existing account-deletion and group-deletion owners rather
+  than outliving them.
 
 ## Authority, Ownership, And State
 

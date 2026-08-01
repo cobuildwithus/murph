@@ -47,6 +47,7 @@ vi.mock("@/src/components/hosted-groups/group-join-client", () => ({
       launchGranted: boolean;
       scopes: readonly { grant: unknown }[];
     } | null;
+    notNowHref: string;
   }) {
     return createElement(
       "section",
@@ -56,6 +57,7 @@ vi.mock("@/src/components/hosted-groups/group-join-client", () => ({
           props.initialStatus?.scopes.map((scope) => scope.grant) ?? [],
         ),
         "data-legal-consent-gate": "true",
+        "data-not-now-href": props.notNowHref,
       },
       "Legal consent gate",
     );
@@ -220,10 +222,32 @@ test.each([
     const markup = await renderGroupJoinPage("JOIN123", { postJoin });
 
     expect(markup).toContain(`data-post-join-destination="${destination.replaceAll("&", "&amp;")}"`);
+    // The decline exit must not strip the bounded handoff: the initial-visit
+    // destination is one-shot and unrecoverable after this authentication.
+    expect(markup).toContain(`href="${destination.replaceAll("&", "&amp;")}"`);
+    expect(markup).toContain("Not now");
   },
 );
 
-test("does not send an existing group member through the new-member handoff", async () => {
+test("keeps the initial-visit destination on the legal consent decline exit", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
+    authenticated: true,
+    authenticatedMember: { id: "member_123" },
+  });
+  mocks.readHostedConsentStatus.mockResolvedValueOnce(createConsentStatus({
+    launchGranted: false,
+  }));
+
+  const markup = await renderGroupJoinPage("JOIN123", { postJoin: "initial-visit" });
+
+  expect(markup).toContain('data-legal-consent-gate="true"');
+  expect(markup).toContain('data-not-now-href="/home?initialVisit=true"');
+});
+
+test("keeps the resolved handoff for an existing group member whose first web auth this is", async () => {
+  // Group membership can be created from a chat thread before any web
+  // authentication, so it must not reinterpret the completion-owned
+  // initial-visit destination.
   mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
     authenticated: true,
     authenticatedMember: { id: "member_123" },
@@ -247,11 +271,11 @@ test("does not send an existing group member through the new-member handoff", as
 
   const markup = await renderGroupJoinPage("JOIN123", { postJoin: "initial-visit" });
 
-  expect(markup).toContain('data-post-join-destination="/home"');
+  expect(markup).toContain('data-post-join-destination="/home?initialVisit=true"');
   expect(markup).toContain('data-membership-id="membership_existing"');
   expect(markup).toContain('data-join-code="JOIN123"');
   expect(markup).toContain("Leave group");
-  expect(markup).toContain('href="/home"');
+  expect(markup).toContain('href="/home?initialVisit=true"');
   expect(markup).toContain("Go home");
 });
 
