@@ -6,8 +6,9 @@ import type {
   AssistantCodexTurnPromptProfile,
   AssistantCodexTurnToolProfile,
 } from './codex-turn/planning.js'
-import type {
-  HostedRuntimeProductFeedbackRecord,
+import {
+  isHostedProductSupportEscalationFeedback,
+  type HostedRuntimeProductFeedbackRecord,
 } from '@murphai/hosted-execution/runtime-control'
 import {
   deliverAssistantProgressUpdate,
@@ -31,6 +32,7 @@ import type {
 import type {
   AssistantHostedProductFeedbackCandidateSink,
 } from './execution-context.js'
+
 
 export interface AssistantProgressDelivery {
   close?(): void
@@ -110,20 +112,45 @@ export function createAssistantProductFeedbackRecorder(input: {
   }
 
   let productFeedback: HostedRuntimeProductFeedbackRecord | null = null
+  let supportEscalationDelivered = false
   return {
     async recordProductFeedback(feedback) {
-      if (productFeedback) {
+      const normalized = normalizeAssistantProductFeedback(feedback)
+      const supportEscalation = isHostedProductSupportEscalationFeedback(normalized)
+      if (supportEscalation && supportEscalationDelivered) {
         return { recorded: false }
       }
-      const normalized = normalizeAssistantProductFeedback(feedback)
+      if (
+        productFeedback
+        && (
+          !supportEscalation
+          || isHostedProductSupportEscalationFeedback(productFeedback)
+        )
+      ) {
+        return { recorded: false }
+      }
       const acceptedInputIds = input.getAcceptedInputIds?.() ?? initialAcceptedInputIds
-      productFeedback = {
+      const candidate = {
         ...normalized,
         idempotencyKey: buildAssistantProductFeedbackIdempotencyKey({
           acceptedInputIds,
           feedback: normalized,
         }),
       }
+      const deliverSupportEscalation =
+        productFeedbackCandidateSink.deliverProductSupportEscalation
+      if (supportEscalation && deliverSupportEscalation) {
+        // Durable-before-confirmation: the support promise ("queued") must be
+        // backed by the Web record before the model may state it, so this path
+        // waits on the callback instead of joining the best-effort post-reply
+        // candidate flush. A same-turn ordinary candidate for the same issue is
+        // superseded by the durably recorded escalation.
+        const delivered = await deliverSupportEscalation(candidate)
+        supportEscalationDelivered = true
+        productFeedback = null
+        return { recorded: delivered.recorded }
+      }
+      productFeedback = candidate
       return { recorded: true }
     },
     discardProductFeedback() {
