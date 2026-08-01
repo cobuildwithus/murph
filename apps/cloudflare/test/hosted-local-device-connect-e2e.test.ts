@@ -48,35 +48,52 @@ const syntheticJunctionConfig = {
 const liveJunctionWhoopConfig = readLiveJunctionWhoopConfig(process.env);
 const junctionConfig = liveJunctionWhoopConfig ?? syntheticJunctionConfig;
 
+if (liveJunctionWhoopConfig) {
+  assertLiveScenarioIsIsolated();
+}
+
 let scenario: HostedLocalFullStackScenario | null = null;
 
 describe("hosted local device connect e2e", () => {
   beforeAll(async () => {
-    scenario = await startHostedLocalFullStackScenario({
-      additionalEnv: {
-        DEVICE_SYNC_PUBLIC_BASE_URL: deviceSyncPublicBaseUrl,
-        DEVICE_SYNC_SECRET: "synthetic-device-sync-runtime-secret",
-        HOSTED_CRYPTO_ENV: "test",
-        HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION:
-          TEST_HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION,
-        HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
-          TEST_HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM,
-        HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME:
-          "projects/test/locations/global/keyRings/ring/cryptoKeys/web-wrap",
-        JUNCTION_API_KEY: junctionConfig.apiKey,
-        JUNCTION_CLIENT_USER_ID_SECRET: junctionConfig.clientUserIdSecret,
-        JUNCTION_ENV: "sandbox",
-        JUNCTION_PROVIDER_FILTER: "whoop_v2",
-        JUNCTION_REGION: junctionConfig.region,
-        MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
-      },
-      localDatabaseUrl,
-      persistDirOverride: workerPersistDirOverride,
-      persistDirPrefix: "murph-hosted-local-device-connect-",
-      requiredRunnerEnvProfile: "assistant",
-      scenarioLabel: "Local hosted device connect e2e",
-      streamLogs: streamDevLogs,
-    });
+    // The hosted stack needs Junction authority, but never the human WHOOP
+    // login. Capture those values at module load and exclude them from every
+    // Web, Worker, runner, and Temporal child process started by the harness.
+    const restoreWhoopLoginEnvironment = temporarilyRemoveProcessEnvironment([
+      "MURPH_E2E_WHOOP_EMAIL",
+      "MURPH_E2E_WHOOP_OTP",
+      "MURPH_E2E_WHOOP_PASSWORD",
+    ]);
+
+    try {
+      scenario = await startHostedLocalFullStackScenario({
+        additionalEnv: {
+          DEVICE_SYNC_PUBLIC_BASE_URL: deviceSyncPublicBaseUrl,
+          DEVICE_SYNC_SECRET: "synthetic-device-sync-runtime-secret",
+          HOSTED_CRYPTO_ENV: "test",
+          HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION:
+            TEST_HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION,
+          HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
+            TEST_HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM,
+          HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME:
+            "projects/test/locations/global/keyRings/ring/cryptoKeys/web-wrap",
+          JUNCTION_API_KEY: junctionConfig.apiKey,
+          JUNCTION_CLIENT_USER_ID_SECRET: junctionConfig.clientUserIdSecret,
+          JUNCTION_ENV: "sandbox",
+          JUNCTION_PROVIDER_FILTER: "whoop_v2",
+          JUNCTION_REGION: junctionConfig.region,
+          MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
+        },
+        localDatabaseUrl,
+        persistDirOverride: workerPersistDirOverride,
+        persistDirPrefix: "murph-hosted-local-device-connect-",
+        requiredRunnerEnvProfile: "assistant",
+        scenarioLabel: "Local hosted device connect e2e",
+        streamLogs: streamDevLogs,
+      });
+    } finally {
+      restoreWhoopLoginEnvironment();
+    }
   }, 600_000);
 
   afterAll(async () => {
@@ -116,24 +133,32 @@ describe("hosted local device connect e2e", () => {
         runnerRuntime.resolvedConfig?.deviceSync?.providerConfigs,
       ).not.toHaveProperty("whoop");
       expect(runnerRuntime.platformEnv).toMatchObject({
-        JUNCTION_API_KEY: junctionConfig.apiKey,
-        JUNCTION_CLIENT_USER_ID_SECRET: junctionConfig.clientUserIdSecret,
         JUNCTION_ENV: "sandbox",
         JUNCTION_PROVIDER_FILTER: "whoop_v2",
         JUNCTION_REGION: junctionConfig.region,
       });
+      expect(
+        runnerRuntime.platformEnv?.JUNCTION_API_KEY === junctionConfig.apiKey,
+      ).toBe(true);
+      expect(
+        runnerRuntime.platformEnv?.JUNCTION_CLIENT_USER_ID_SECRET
+          === junctionConfig.clientUserIdSecret,
+      ).toBe(true);
       const forwardedEnv = runnerRuntime.forwardedEnv ?? {};
       const userEnv = runnerRuntime.userEnv ?? {};
       expect(forwardedEnv.JUNCTION_API_KEY).toBeUndefined();
       expect(forwardedEnv.JUNCTION_CLIENT_USER_ID_SECRET).toBeUndefined();
-      expect(JSON.stringify(forwardedEnv)).not.toContain(junctionConfig.apiKey);
-      expect(JSON.stringify(forwardedEnv)).not.toContain(
-        junctionConfig.clientUserIdSecret,
-      );
-      expect(JSON.stringify(userEnv)).not.toContain(junctionConfig.apiKey);
-      expect(JSON.stringify(userEnv)).not.toContain(
-        junctionConfig.clientUserIdSecret,
-      );
+      expect(JSON.stringify(forwardedEnv).includes(junctionConfig.apiKey)).toBe(false);
+      expect(
+        JSON.stringify(forwardedEnv).includes(junctionConfig.clientUserIdSecret),
+      ).toBe(false);
+      expect(JSON.stringify(userEnv).includes(junctionConfig.apiKey)).toBe(false);
+      expect(
+        JSON.stringify(userEnv).includes(junctionConfig.clientUserIdSecret),
+      ).toBe(false);
+      expect(Boolean(requireScenario().runtimeEnv.MURPH_E2E_WHOOP_EMAIL)).toBe(false);
+      expect(Boolean(requireScenario().runtimeEnv.MURPH_E2E_WHOOP_OTP)).toBe(false);
+      expect(Boolean(requireScenario().runtimeEnv.MURPH_E2E_WHOOP_PASSWORD)).toBe(false);
 
       const hostedExecutionEnvironment = readHostedExecutionEnvironment(
         requireHostedWorkerRuntimeEnv(),
@@ -164,10 +189,14 @@ describe("hosted local device connect e2e", () => {
         /^dc_[A-Za-z0-9_-]{32}$/u,
       );
       expect(authorizationFragment.get("connectSource")).toBe("whoop");
-      expect(connectLink?.authorizationUrl).not.toContain(junctionConfig.apiKey);
-      expect(connectLink?.authorizationUrl).not.toContain(
-        junctionConfig.clientUserIdSecret,
-      );
+      expect(
+        (connectLink?.authorizationUrl ?? "").includes(junctionConfig.apiKey),
+      ).toBe(false);
+      expect(
+        (connectLink?.authorizationUrl ?? "").includes(
+          junctionConfig.clientUserIdSecret,
+        ),
+      ).toBe(false);
       expect(requireScenario().harness.stderrTail()).not.toContain(
         "No device sync providers are configured",
       );
@@ -177,11 +206,10 @@ describe("hosted local device connect e2e", () => {
 
   // The default scenario remains hermetic. This opt-in branch uses one real
   // Junction sandbox user and WHOOP account, and must run as the only selected
-  // hosted-local scenario so its temporary Prisma client cannot affect peers.
+  // hosted-local scenario so no unrelated process inherits its credentials.
   it.runIf(Boolean(liveJunctionWhoopConfig))(
     "connects WHOOP through Junction Link in a real browser and reloads persisted state",
     async () => {
-      assertLiveScenarioIsIsolated();
       const liveConfig = requireLiveJunctionWhoopConfig();
       await resetLiveJunctionWhoopProvider(liveConfig);
       await requireScenario().seedActiveHostedMember({
@@ -195,6 +223,8 @@ describe("hosted local device connect e2e", () => {
         config: liveConfig,
         hostedSessionCookie,
         webBaseUrl: requireScenario().harness.webBaseUrl,
+      }).finally(async () => {
+        await resetLiveJunctionWhoopProvider(liveConfig);
       });
 
       expect(result).toEqual({
@@ -287,7 +317,12 @@ function assertLiveScenarioIsIsolated(): void {
   const selectedE2eFiles = process.argv.filter((argument) =>
     argument.endsWith("e2e.test.ts")
   );
-  if (selectedE2eFiles.length > 1) {
+  if (
+    selectedE2eFiles.length !== 1
+    || !selectedE2eFiles[0]?.endsWith(
+      "apps/cloudflare/test/hosted-local-device-connect-e2e.test.ts",
+    )
+  ) {
     throw new Error(
       "Run the live Junction WHOOP browser proof by itself: pnpm hosted-local e2e device-connect.",
     );
@@ -332,7 +367,11 @@ async function issueHostedBrowserSession(input: {
   environment: NodeJS.ProcessEnv;
   memberId: string;
 }): Promise<string> {
-  const restoreEnvironment = applyProcessEnvironment(input.environment);
+  const restoreEnvironment = applyProcessEnvironment({
+    ...input.environment,
+    NODE_ENV: "test",
+    VITEST: "1",
+  });
 
   try {
     const [consentModule, sessionModule, prismaModule] = await Promise.all([
@@ -391,6 +430,25 @@ function applyProcessEnvironment(environment: NodeJS.ProcessEnv): () => void {
   };
 }
 
+function temporarilyRemoveProcessEnvironment(keys: readonly string[]): () => void {
+  const previousValues = new Map<string, string | undefined>();
+
+  for (const key of keys) {
+    previousValues.set(key, process.env[key]);
+    delete process.env[key];
+  }
+
+  return () => {
+    for (const [key, value] of previousValues) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  };
+}
+
 async function runJunctionWhoopBrowser(input: {
   config: LiveJunctionWhoopConfig;
   hostedSessionCookie: string;
@@ -407,6 +465,7 @@ async function runJunctionWhoopBrowser(input: {
     ],
     {
       cwd: repoRoot,
+      encoding: "utf8",
       env: {
         ...buildBrowserProcessEnvironment(),
         MURPH_E2E_HOSTED_SESSION_COOKIE: input.hostedSessionCookie,
@@ -422,7 +481,8 @@ async function runJunctionWhoopBrowser(input: {
   );
   const marker = stdout
     .split(/\r?\n/u)
-    .findLast((line) => line.startsWith("MURPH_E2E_RESULT="));
+    .reverse()
+    .find((line) => line.startsWith("MURPH_E2E_RESULT="));
   if (!marker) {
     throw new Error("Junction WHOOP browser E2E did not return a result marker.");
   }
@@ -438,6 +498,12 @@ function buildBrowserProcessEnvironment(): NodeJS.ProcessEnv {
     "JUNCTION_API_KEY",
     "JUNCTION_CLIENT_USER_ID_SECRET",
     "JUNCTION_WEBHOOK_SECRET",
+    "MURPH_E2E_HOSTED_SESSION_COOKIE",
+    "MURPH_E2E_WEB_BASE_URL",
+    "MURPH_E2E_WHOOP_EMAIL",
+    "MURPH_E2E_WHOOP_HEADLESS",
+    "MURPH_E2E_WHOOP_OTP",
+    "MURPH_E2E_WHOOP_PASSWORD",
     "WHOOP_CLIENT_ID",
     "WHOOP_CLIENT_SECRET",
   ]) {
