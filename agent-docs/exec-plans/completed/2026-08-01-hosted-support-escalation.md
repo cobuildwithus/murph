@@ -1,6 +1,6 @@
 # Hosted support escalation
 
-Status: active
+Status: completed
 Created: 2026-08-01
 Updated: 2026-08-01
 
@@ -65,4 +65,5 @@ Give a member who hits a real Murph product wall two truthful exits in the same 
 - Current implementation is aligned with the feedback-summary email policy merged to `main` on August 1.
 - Preliminary specialist ReviewGPT findings were remediated: the deterministic unverified-audience reply now names the support address; the reserved `Support escalation:` shape is validated once in `@murphai/hosted-execution/runtime-control` and enforced synchronously at the tool boundary; and the hosted runtime records the exact support shape through the Web callback inside the turn, so the member-facing confirmation is backed by a durable member-linked record instead of the best-effort post-delivery flush. Opt-in real-Codex support-escalation scenarios were added.
 - Final-gate round 1 findings were remediated: the member-linked row and support email now carry only server-authored text and internal ids while the model-authored de-identified detail persists as a separate anonymous row; member-linked support rows are excluded from the daily digest; escalation timestamps are captured under the member advisory lock so the daily email cap cannot be overshot by concurrent requests; and the tool boundary rejects reserved support payloads outside a verified direct scope.
-- Next: correction-verification ReviewGPT round and exact-head CI on the remediated head, then close this plan when the branch is merge-ready.
+- Correction-verification ReviewGPT round 2 reviewed the exact remediated head and returned `ROUND_OUTCOME: PASS` with zero findings; the preliminary specialist pass findings were all resolved. Exact-head CI is green. The branch is merge-ready; this plan is closed with the archived-plan commit.
+Completed: 2026-08-01
