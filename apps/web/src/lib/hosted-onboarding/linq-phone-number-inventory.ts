@@ -3,7 +3,10 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { fetchLinqApi, LinqApiTimeoutError } from "../linq/api";
 import { createHostedPhoneLookupKeyReadCandidates } from "./contact-privacy-core";
 import { hostedOnboardingError } from "./errors";
-import { upsertHostedLinqLineForPhoneTx } from "./linq-line-store";
+import {
+  acquireHostedLinqInventoryApplyLockTx,
+  upsertHostedLinqLineForPhoneTx,
+} from "./linq-line-store";
 import {
   projectHostedLinqLineProviderStateTx,
 } from "./linq-provider-health-store";
@@ -73,12 +76,7 @@ async function applyHostedLinqPhoneNumberInventorySnapshot(input: {
   const { lines, observedAt } = input;
   let syncedCount = 0;
 
-  await input.prisma.$executeRaw`
-    SELECT pg_advisory_xact_lock(
-      hashtext('hosted_linq_phone_number_inventory'),
-      hashtext('snapshot')
-    )
-  `;
+  await acquireHostedLinqInventoryApplyLockTx({ prisma: input.prisma });
 
   // A validated read is a complete identity snapshot (failed, malformed,
   // over-limit, and identity-lossy reads all throw before this point), so any

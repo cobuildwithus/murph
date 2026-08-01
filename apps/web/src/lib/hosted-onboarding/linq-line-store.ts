@@ -244,6 +244,24 @@ function chooseHostedLinqLineWriteLookupKey(
   return lookupKeyReadCandidates.find((candidate) => existingLookupKeys.has(candidate)) ?? null;
 }
 
+/**
+ * Serializes every multi-phone line writer (provider inventory application
+ * and configured-line synchronization) on one inventory-wide advisory lock.
+ * Without a shared first lock, two writers touching the same phones in
+ * opposite orders can invert their per-phone lock acquisition and deadlock.
+ * Transaction-scoped: callers must already be inside a transaction.
+ */
+export async function acquireHostedLinqInventoryApplyLockTx(input: {
+  prisma: HostedLinqLineClient;
+}): Promise<void> {
+  await input.prisma.$executeRaw`
+    SELECT pg_advisory_xact_lock(
+      hashtext('hosted_linq_phone_number_inventory'),
+      hashtext('snapshot')
+    )
+  `;
+}
+
 export async function syncHostedLinqConfiguredLinesTx(input: {
   /**
    * Additive-rollout compatibility for previous application builds only.
@@ -256,6 +274,7 @@ export async function syncHostedLinqConfiguredLinesTx(input: {
   prisma: HostedLinqLineClient;
 }): Promise<void> {
   const observedAt = input.observedAt ?? new Date();
+  await acquireHostedLinqInventoryApplyLockTx({ prisma: input.prisma });
   for (const phoneNumber of input.phoneNumbers) {
     await upsertHostedLinqLineForPhoneTx({
       activeMemberLimit: input.activeMemberLimit,

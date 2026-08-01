@@ -9,6 +9,11 @@ const providerHealthStoreMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-line-store", () => ({
+  acquireHostedLinqInventoryApplyLockTx: async (
+    input: { prisma: { $executeRaw: (...args: unknown[]) => Promise<unknown> } },
+  ) => {
+    await input.prisma.$executeRaw();
+  },
   upsertHostedLinqLineForPhoneTx: lineStoreMocks.upsertHostedLinqLineForPhoneTx,
 }));
 

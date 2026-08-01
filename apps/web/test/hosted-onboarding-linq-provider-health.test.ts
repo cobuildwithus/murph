@@ -52,6 +52,11 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-line-store", () => ({
+  acquireHostedLinqInventoryApplyLockTx: async (
+    input: { prisma: { $executeRaw: (...args: unknown[]) => Promise<unknown> } },
+  ) => {
+    await input.prisma.$executeRaw();
+  },
   upsertHostedLinqLineForPhoneTx:
     inventoryMocks.upsertHostedLinqLineForPhoneTx,
 }));
