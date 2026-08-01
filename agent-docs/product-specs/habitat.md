@@ -1,6 +1,6 @@
 # Habitat: Progressive Member Life-Context
 
-Last verified: 2026-07-23
+Last verified: 2026-07-31
 
 ## Current State
 
@@ -16,6 +16,10 @@ Habitat is the umbrella for this knowledge: durable, structured facts about the 
 - Diet is explicitly out of scope for now.
 - No gamification, points, or streaks. Any grading is a research audit derived from indicators, with per-grade reasoning (see Environment Audit below).
 - Environment v1 describes one primary home. Multi-home and travel profiles are deliberately out of scope.
+- The printable Environment report is an authenticated dashboard view. Its
+  facts are read from the same private Browser Vault replica as `/environment`;
+  no Habitat value is placed in public metadata or a public share asset. The
+  separate Share action remains a generic card without member facts.
 
 ## Domains
 
@@ -222,3 +226,6 @@ Zone/aspect grades (A–E or `unknown`) render on the home visualization — spe
 - 2026-07-30 — Voice guidance has three modes: five-category first walkthrough, catalog-derived gap filling for unknown high- and medium-priority facts that excludes declined facts, and one free-form update prompt once those collection-eligible facts are resolved. Grade coverage does not select the script.
 - 2026-07-30 — Every ordinary Habitat write and live-conditions egress may retain or send only a member-stated city or approximate region; precise addresses are rejected and unsafe legacy values fail closed before provider egress.
 - 2026-07-30 — First-seen Environment voice uploads use the existing AI-usage gate, one unconsumed recording per member, and a server-enforced three-minute media cap. Exact retries remain idempotent, and the open page polls Browser Vault long enough to show the processing result.
+- 2026-07-31 — `/environment/print` is authenticated and derives its printable
+  report from the signed-in member's Browser Vault data. The public Share card
+  remains generic and contains no private Habitat facts.

@@ -1,7 +1,19 @@
 import assert from "node:assert/strict";
 
 import { act, createElement, type ReactNode } from "react";
-import { test, vi } from "vitest";
+import { beforeEach, test, vi } from "vitest";
+
+const authMocks = vi.hoisted(() => ({
+  authenticated: true,
+  openAuthDialog: vi.fn(),
+}));
+
+vi.mock("@/src/components/hosted-onboarding/auth-dialog-provider", () => ({
+  useAuth: () => ({
+    authenticated: authMocks.authenticated,
+    openAuthDialog: authMocks.openAuthDialog,
+  }),
+}));
 
 vi.mock("@/src/components/ui/dialog", () => ({
   Dialog: ({
@@ -51,6 +63,11 @@ import {
 import type { EnvironmentVoiceScript } from "../app/(dashboard)/environment/environment-voice-script";
 import { renderClientComponent } from "./render-client-component";
 
+beforeEach(() => {
+  authMocks.authenticated = true;
+  authMocks.openAuthDialog.mockReset();
+});
+
 test("explains when the browser has blocked microphone permission", () => {
   assert.match(
     microphoneAccessNotice({ name: "NotAllowedError" }),
@@ -90,6 +107,111 @@ test("renders a user-specific missing-data script", async () => {
     assert.match(bodyText, /Darkness/);
     assert.doesNotMatch(bodyText, /Recovery and devices/);
   } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("requires authentication before opening the voice walkthrough", async () => {
+  authMocks.authenticated = false;
+  const rendered = await renderClientComponent(
+    createElement(EnvironmentVoiceCapture),
+  );
+
+  try {
+    await clickButton(rendered.window, "Tell Murph by voice");
+
+    assert.equal(authMocks.openAuthDialog.mock.calls.length, 1);
+    assert.doesNotMatch(
+      rendered.window.document.body.textContent ?? "",
+      /Start recording/,
+    );
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("keeps the walkthrough open while iOS resolves microphone permission", async () => {
+  const rendered = await renderClientComponent(
+    createElement(EnvironmentVoiceCapture),
+  );
+  let rejectPermission: ((reason?: unknown) => void) | undefined;
+  const mediaDevicesDescriptor = Object.getOwnPropertyDescriptor(
+    navigator,
+    "mediaDevices",
+  );
+  const windowMediaDevicesDescriptor = Object.getOwnPropertyDescriptor(
+    rendered.window.navigator,
+    "mediaDevices",
+  );
+  const originalMediaRecorder = Reflect.get(globalThis, "MediaRecorder");
+
+  try {
+    class PendingMediaRecorder {
+      static isTypeSupported() {
+        return true;
+      }
+    }
+    const mediaDevices = {
+      getUserMedia: vi.fn(
+        () => new Promise<MediaStream>((_resolve, reject) => {
+          rejectPermission = reject;
+        }),
+      ),
+    };
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: mediaDevices,
+    });
+    Object.defineProperty(rendered.window.navigator, "mediaDevices", {
+      configurable: true,
+      value: mediaDevices,
+    });
+    Reflect.set(globalThis, "MediaRecorder", PendingMediaRecorder);
+    Reflect.set(rendered.window, "MediaRecorder", PendingMediaRecorder);
+
+    await clickButton(rendered.window, "Tell Murph by voice");
+    await clickButton(rendered.window, "Start recording");
+
+    const dialog = rendered.window.document.querySelector(
+      "[data-pointer-dismissal-disabled]",
+    );
+    assert.equal(
+      dialog?.getAttribute("data-pointer-dismissal-disabled"),
+      "true",
+    );
+
+    await clickButton(rendered.window, "Dismiss dialog");
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Start recording/,
+    );
+
+    await act(async () => {
+      rejectPermission?.({ name: "NotAllowedError" });
+      await Promise.resolve();
+    });
+  } finally {
+    if (mediaDevicesDescriptor) {
+      Object.defineProperty(navigator, "mediaDevices", mediaDevicesDescriptor);
+    } else {
+      Reflect.deleteProperty(navigator, "mediaDevices");
+    }
+    if (windowMediaDevicesDescriptor) {
+      Object.defineProperty(
+        rendered.window.navigator,
+        "mediaDevices",
+        windowMediaDevicesDescriptor,
+      );
+    } else {
+      Reflect.deleteProperty(rendered.window.navigator, "mediaDevices");
+    }
+    if (originalMediaRecorder === undefined) {
+      Reflect.deleteProperty(globalThis, "MediaRecorder");
+      Reflect.deleteProperty(rendered.window, "MediaRecorder");
+    } else {
+      Reflect.set(globalThis, "MediaRecorder", originalMediaRecorder);
+      Reflect.set(rendered.window, "MediaRecorder", originalMediaRecorder);
+    }
     await rendered.cleanup();
   }
 });
@@ -282,6 +404,139 @@ test("keeps the dialog open until an unsent recording is explicitly discarded", 
         originalPause,
       );
     }
+    await rendered.cleanup();
+  }
+});
+
+test("releases the microphone when Safari moves the page into the background", async () => {
+  const rendered = await renderClientComponent(
+    createElement(EnvironmentVoiceCapture),
+  );
+  const trackStop = vi.fn();
+
+  class FakeMediaRecorder {
+    static isTypeSupported() {
+      return true;
+    }
+
+    mimeType = "audio/webm";
+    state: RecordingState = "inactive";
+    private readonly listeners = new Map<string, EventListener[]>();
+
+    addEventListener(type: string, listener: EventListener) {
+      const listeners = this.listeners.get(type) ?? [];
+      listeners.push(listener);
+      this.listeners.set(type, listeners);
+    }
+
+    start() {
+      this.state = "recording";
+    }
+
+    stop() {
+      const dataEvent = new Event("dataavailable");
+      Object.defineProperty(dataEvent, "data", {
+        value: new Blob([Uint8Array.from([1, 2, 3])], {
+          type: "audio/webm",
+        }),
+      });
+      for (const listener of this.listeners.get("dataavailable") ?? []) {
+        listener(dataEvent);
+      }
+      this.state = "inactive";
+      for (const listener of this.listeners.get("stop") ?? []) {
+        listener(new Event("stop"));
+      }
+    }
+  }
+
+  const originalMediaRecorder = Reflect.get(globalThis, "MediaRecorder");
+  const originalCreateObjectUrl = URL.createObjectURL;
+  const originalRevokeObjectUrl = URL.revokeObjectURL;
+  const mediaDevicesDescriptor = Object.getOwnPropertyDescriptor(
+    navigator,
+    "mediaDevices",
+  );
+  const windowMediaDevicesDescriptor = Object.getOwnPropertyDescriptor(
+    rendered.window.navigator,
+    "mediaDevices",
+  );
+  const visibilityStateDescriptor = Object.getOwnPropertyDescriptor(
+    rendered.window.document,
+    "visibilityState",
+  );
+  try {
+    const mediaDevices = {
+      getUserMedia: async () => ({
+        getTracks: () => [{ stop: trackStop }],
+      }),
+    };
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: mediaDevices,
+    });
+    Object.defineProperty(rendered.window.navigator, "mediaDevices", {
+      configurable: true,
+      value: mediaDevices,
+    });
+    Reflect.set(globalThis, "MediaRecorder", FakeMediaRecorder);
+    Reflect.set(rendered.window, "MediaRecorder", FakeMediaRecorder);
+    URL.createObjectURL = vi.fn(() => "blob:backgrounded-recording");
+    URL.revokeObjectURL = vi.fn();
+
+    await clickButton(rendered.window, "Tell Murph by voice");
+    await clickButton(rendered.window, "Start recording");
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    Object.defineProperty(rendered.window.document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    await act(async () => {
+      rendered.window.document.dispatchEvent(new Event("visibilitychange"));
+      await Promise.resolve();
+    });
+
+    assert.equal(trackStop.mock.calls.length, 1);
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Play preview/,
+    );
+  } finally {
+    if (mediaDevicesDescriptor) {
+      Object.defineProperty(navigator, "mediaDevices", mediaDevicesDescriptor);
+    } else {
+      Reflect.deleteProperty(navigator, "mediaDevices");
+    }
+    if (windowMediaDevicesDescriptor) {
+      Object.defineProperty(
+        rendered.window.navigator,
+        "mediaDevices",
+        windowMediaDevicesDescriptor,
+      );
+    } else {
+      Reflect.deleteProperty(rendered.window.navigator, "mediaDevices");
+    }
+    if (visibilityStateDescriptor) {
+      Object.defineProperty(
+        rendered.window.document,
+        "visibilityState",
+        visibilityStateDescriptor,
+      );
+    } else {
+      Reflect.deleteProperty(rendered.window.document, "visibilityState");
+    }
+    if (originalMediaRecorder === undefined) {
+      Reflect.deleteProperty(globalThis, "MediaRecorder");
+      Reflect.deleteProperty(rendered.window, "MediaRecorder");
+    } else {
+      Reflect.set(globalThis, "MediaRecorder", originalMediaRecorder);
+      Reflect.set(rendered.window, "MediaRecorder", originalMediaRecorder);
+    }
+    URL.createObjectURL = originalCreateObjectUrl;
+    URL.revokeObjectURL = originalRevokeObjectUrl;
     await rendered.cleanup();
   }
 });
