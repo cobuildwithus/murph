@@ -9,15 +9,16 @@ Updated: 2026-08-01
 Give a member who hits a real Murph product wall two truthful exits in the same conversation:
 
 1. the public support address, `support@withmurph.ai`; and
-2. an explicit, consented path that queues a de-identified issue for the product team and sends a bounded internal support alert.
+2. in their verified private direct conversation, an explicit consented path that queues a de-identified issue for the product team and sends a bounded internal support alert.
 
 ## Success criteria
 
 - Murph gives the public support address directly instead of searching legal pages or claiming there is no support route.
-- An explicit request to alert humans reuses `murph.submit_product_feedback` rather than adding a second feedback transport.
+- An explicit private-member request to alert humans reuses `murph.submit_product_feedback` rather than adding a second feedback transport.
+- Group and unverified audiences receive the address but cannot bind an account-linked escalation to a synthetic room or uncertain audience.
 - The escalation summary is de-identified, product-only, and begins with one exact server-recognized prefix.
 - Ordinary product feedback remains anonymous by default.
-- Explicit support escalation is linked to the authenticated member so support can investigate the correct account.
+- Explicit support escalation is linked to the authenticated private member so support can investigate the correct account.
 - At most three distinct escalation records per member per UTC day are eligible to send email.
 - Duplicate callback attempts reuse one stable Resend idempotency key.
 - The support email carries only the feedback id, member id, and capture-scrubbed de-identified product summary allowed by the existing internal feedback-email boundary.
@@ -32,7 +33,8 @@ Give a member who hits a real Murph product wall two truthful exits in the same 
 
 ## Design
 
-- The assistant offers escalation only for a product problem and calls the existing feedback tool only after the user explicitly asks or accepts the offer.
+- The assistant offers account-linked escalation only for a product problem in a verified private direct conversation and calls the existing feedback tool only after the member explicitly asks or accepts the offer.
+- In a group or unverified audience, the assistant gives the public support address and moves account-linked escalation to the requester's private Murph.
 - A summary beginning exactly `Support escalation:` marks the explicit support path.
 - The Web route attaches the callback-authenticated member only for that exact path; every other feedback record keeps the existing anonymous behavior.
 - Web serializes support records with a member-scoped PostgreSQL advisory transaction lock, ranks the record within its UTC day, and emails only ranks one through three.
@@ -49,12 +51,12 @@ Give a member who hits a real Murph product wall two truthful exits in the same 
 
 ## Verification
 
-- Focused assistant prompt tests, including the existing base-instruction size contract.
+- Focused assistant prompt tests, including the existing base-instruction size contract and group/private route language.
 - Focused assistant same-turn escalation-priority tests.
 - Focused hosted Web route and support-email service tests.
 - Focused Cloudflare callback-deadline tests.
 - Web and assistant-engine typecheck/CI on the exact PR head.
-- Parent diff review for anonymity, member binding, email disclosure, rate-limit concurrency, and provider idempotency.
+- Parent diff review for audience ownership, anonymity, member binding, email disclosure, rate-limit concurrency, and provider idempotency.
 
 ## State
 
