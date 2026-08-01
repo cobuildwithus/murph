@@ -194,7 +194,7 @@ function renderGroupJoin(input: {
                 joinCode={input.joinCode}
                 permissions={view.requestedVaultShareProjections}
                 postJoinContactOption={input.postJoinContactOption}
-                postJoinDestination={alreadyActiveMember ? "/home" : input.postJoinDestination}
+                postJoinDestination={input.postJoinDestination}
               />
             )}
             {view.viewerCanLeave ? (
@@ -202,7 +202,7 @@ function renderGroupJoin(input: {
             ) : null}
             {input.launchConsentStatus?.launchGranted ? (
               <Link
-                href={alreadyActiveMember ? "/home" : input.postJoinDestination}
+                href={input.postJoinDestination}
                 className="inline-flex min-h-10 items-center justify-center text-center text-xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
               >
                 {alreadyActiveMember ? "Go home" : "Not now"}

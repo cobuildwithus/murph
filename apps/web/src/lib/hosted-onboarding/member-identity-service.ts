@@ -340,7 +340,7 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
 }): Promise<HostedMemberCoreState> {
   const prisma = input.prisma ?? getPrisma();
 
-  const reconciliation = await prisma.$transaction((tx) => reconcileHostedPrivyIdentityOnMemberTx({
+  return prisma.$transaction((tx) => reconcileHostedPrivyIdentityOnMemberTx({
     authMethod: input.authMethod,
     expectedPhoneHint: input.expectedPhoneHint,
     expectedPhoneLookupKey: input.expectedPhoneLookupKey,
@@ -350,7 +350,6 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
     now: input.now,
     prisma: tx,
   }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-  return reconciliation.member;
 }
 
 export async function ensureHostedMemberForPrivyIdentityTx(input: {
@@ -371,7 +370,6 @@ export async function ensureHostedMemberForPrivyIdentityResolutionTx(input: {
 }): Promise<{
   created: boolean;
   member: HostedMemberCoreState;
-  privyUserNewlyLinked: boolean;
 }> {
   const authMethod = resolveHostedPrivyAuthMethodFromIdentity({
     authMethod: input.authMethod,
@@ -430,22 +428,18 @@ export async function ensureHostedMemberForPrivyIdentityResolutionTx(input: {
     return {
       created: true,
       member: createdMember,
-      privyUserNewlyLinked: true,
     };
   }
 
-  const reconciliation = await reconcileHostedPrivyIdentityOnMemberTx({
-    authMethod,
-    identity: input.identity,
-    member: existingMemberLookup.core,
-    now: input.now,
-    prisma: input.prisma,
-  });
-
   return {
     created: false,
-    member: reconciliation.member,
-    privyUserNewlyLinked: reconciliation.privyUserNewlyLinked,
+    member: await reconcileHostedPrivyIdentityOnMemberTx({
+      authMethod,
+      identity: input.identity,
+      member: existingMemberLookup.core,
+      now: input.now,
+      prisma: input.prisma,
+    }),
   };
 }
 
@@ -458,10 +452,7 @@ export async function reconcileHostedPrivyIdentityOnMemberTx(input: {
   member: HostedMemberCoreState;
   prisma: Prisma.TransactionClient;
   now: Date;
-}): Promise<{
-  member: HostedMemberCoreState;
-  privyUserNewlyLinked: boolean;
-}> {
+}): Promise<HostedMemberCoreState> {
   if (
     input.identity.phone
     && (
@@ -543,15 +534,7 @@ export async function reconcileHostedPrivyIdentityOnMemberTx(input: {
     signupPhoneCodeSentAt: null,
     signupPhoneNumber: null,
   });
-  // Derived under the member-row lock from the authoritative identity read:
-  // members can exist before their first web auth (e.g. created by texting a
-  // Murph line), and only the transaction that performs the first Privy
-  // binding may report it. A pre-lock lookup cannot decide this — concurrent
-  // completions would each see the member as unbound.
-  return {
-    member: currentMember,
-    privyUserNewlyLinked: !currentIdentity?.privyUserId,
-  };
+  return currentMember;
 }
 
 async function assertHostedPrivyAccountDeletionNotPendingTx(input: {

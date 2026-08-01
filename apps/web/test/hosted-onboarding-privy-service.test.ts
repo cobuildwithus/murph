@@ -651,7 +651,6 @@ describe("completeHostedPrivyVerification", () => {
       }),
     }));
     expect(result.joinUrl).toBe("https://join.example.test/join/public-invite-code");
-    expect(result.initialVisitEligible).toBe(true);
     expect(result.inviteCode).toBe("public-invite-code");
     expect(result.messagingSetupRequired).toBe(false);
     expect(result.stage).toBe("checkout");
@@ -923,9 +922,6 @@ describe("completeHostedPrivyVerification", () => {
         prisma,
       }),
     ).resolves.toMatchObject({
-      // The member existed without a bound Privy user, so this auth is the
-      // member's first web sign-in and keeps initial-visit eligibility.
-      initialVisitEligible: true,
       inviteCode: expect.any(String),
       joinUrl: expect.stringContaining("/join/"),
       memberId: existingMember.id,
@@ -944,7 +940,7 @@ describe("completeHostedPrivyVerification", () => {
     expect(prisma.hostedMemberEmailAuthorization.upsert).toHaveBeenCalled();
   });
 
-  it("does not mark an existing active direct Privy member as initial-visit eligible", async () => {
+  it("resolves an existing active direct Privy member without creating a duplicate", async () => {
     const existingMember = makeMember({
       billingStatus: HostedBillingStatus.active,
       id: "member_active_direct_existing",
@@ -988,7 +984,6 @@ describe("completeHostedPrivyVerification", () => {
         prisma,
       }),
     ).resolves.toMatchObject({
-      initialVisitEligible: false,
       inviteCode: "invite-active-direct-existing",
       memberId: existingMember.id,
       stage: "active",
@@ -997,7 +992,7 @@ describe("completeHostedPrivyVerification", () => {
     expect(prisma.hostedMember.create).not.toHaveBeenCalled();
   });
 
-  it("keeps initial-visit eligibility for a texted-first member's first web auth", async () => {
+  it("resolves a texted-first member by phone on first web auth without creating a duplicate", async () => {
     const existingMember = makeMember({
       billingStatus: HostedBillingStatus.active,
       id: "member_texted_first_existing",
@@ -1036,9 +1031,6 @@ describe("completeHostedPrivyVerification", () => {
         prisma,
       }),
     ).resolves.toMatchObject({
-      // The member was created by texting a Murph line before ever signing in
-      // on the web, so completing web auth is still their initial visit.
-      initialVisitEligible: true,
       inviteCode: "invite-texted-first-existing",
       memberId: existingMember.id,
       stage: "active",
