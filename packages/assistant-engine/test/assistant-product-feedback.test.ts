@@ -382,10 +382,21 @@ describe("assistant product feedback", () => {
         env: {},
         fetchImpl: fetch,
         hostedToolContext: {
+          computerToolsAvailable: false,
+          currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
           currentUserActionScope: () => ({
             acceptedInputIds: ["assistant_input_1"],
+            conversationId: null,
             conversationScope,
+            inboundMailboxItemIds: [],
+            originSessionId: "session-scope-check",
+            recipientKey: null,
           }),
+          sendVaultFile: async () => {
+            throw new Error("Vault-file sending is unavailable for this turn.");
+          },
+          vaultFileSendAvailable: false,
         },
         nextUsageOrdinal: () => 0,
         productFeedbackRecorder,
