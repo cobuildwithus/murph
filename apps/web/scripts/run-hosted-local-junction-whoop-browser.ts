@@ -168,13 +168,16 @@ async function completeExternalAuthorization(
       'input[name*="verification" i]',
     ]);
     if (otpInput) {
+      const currentOtp = await otpInput.inputValue().catch(() => "");
       if (config.otp) {
-        await otpInput.fill(config.otp);
+        if (currentOtp !== config.otp) {
+          await otpInput.fill(config.otp);
+        }
       } else if (config.headless) {
         throw new Error(
           "WHOOP requested a one-time code. Set MURPH_E2E_WHOOP_OTP or run headfully for manual entry.",
         );
-      } else {
+      } else if (!currentOtp.trim()) {
         await page.waitForTimeout(1_000);
         continue;
       }
