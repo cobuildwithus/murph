@@ -16,13 +16,13 @@ describe("Murph Codex base support guidance", () => {
       "Support escalation:",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "exception to the ordinary rule that product-feedback capture stays silent",
+      "explicit exception to silent product-feedback capture",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "Never promise a ticket number, a human response, a fix, automatic follow-up, or response timing.",
+      "Never promise a ticket, response, fix, follow-up, or timing.",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "The server owns the daily alert limit; never retry the tool",
+      "Never retry or evade the server's daily limit.",
     );
   });
 
@@ -31,7 +31,7 @@ describe("Murph Codex base support guidance", () => {
       "https://github.com/cobuildwithus/murph",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "Public repository access does not imply access to private repositories, production systems, deployment authority, support consoles, internal communications, or credentials.",
+      "Public access grants no private-repo, production, deployment, support-console, internal-communications, or credential authority.",
     );
   });
 });
