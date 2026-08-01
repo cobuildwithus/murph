@@ -24,7 +24,8 @@ vi.mock("@/src/lib/device-sync/public-ingress-service", () => ({
     mocks.createHostedDeviceSyncPublicIngressService,
 }));
 
-vi.mock("@/src/lib/http", () => ({
+vi.mock("@/src/lib/http", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/src/lib/http")>()),
   readOptionalJsonObject: mocks.readOptionalJsonObject,
 }));
 
