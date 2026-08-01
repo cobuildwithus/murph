@@ -673,9 +673,13 @@ Last verified: 2026-07-31
 - The daily product-feedback digest is an internal read-and-email projection,
   not another feedback or delivery-state owner. The ten-minute cron does no
   work outside the 6pm Eastern hour, derives the prior 6pm-to-6pm window with
-  time-zone-aware day boundaries, and groups only the three allowlisted
-  product-feedback kinds into fixed count labels. That aggregate is bounded
-  independently of row volume and never reads the model-authored summary. An
+  time-zone-aware day boundaries, and renders only the three allowlisted
+  product-feedback kinds as fixed labels with truthful per-kind totals from a
+  grouped aggregate plus their capture-scrubbed summaries.
+  The summary read is bounded independently of row volume by a fixed row cap
+  with deterministic ordering, and any kind whose total exceeds its displayed
+  summaries appends an explicit per-kind omitted-remainder line instead of
+  growing the email or misstating counts. An
   empty window still sends the fixed empty digest, while missing configuration
   fails before the database read so the cron stays observably unhealthy.
   Every same-hour retry reuses the exact window and Eastern day-keyed Resend
