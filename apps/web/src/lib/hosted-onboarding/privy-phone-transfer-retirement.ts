@@ -434,7 +434,6 @@ async function classifyHostedPrivyPhoneTransferSourceScaffoldTx(input: {
 
   return assertHostedPrivyPhoneTransferAutoTrialScaffoldTx({
     memberId: input.memberId,
-    phoneNumber: input.phoneNumber,
     prisma: input.prisma,
   });
 }
@@ -712,7 +711,6 @@ async function assertNoHostedPrivyPhoneTransferExternalMaterialTx(input: {
 
 async function assertHostedPrivyPhoneTransferAutoTrialScaffoldTx(input: {
   memberId: string;
-  phoneNumber: string;
   prisma: Prisma.TransactionClient;
 }): Promise<NonNullable<
   HostedPrivyPhoneTransferSourceRetirementProof["autoTrialBilling"]
@@ -820,9 +818,17 @@ async function assertHostedPrivyPhoneTransferAutoTrialScaffoldTx(input: {
       },
     }),
   ]);
+  const assignedHomeLine = routing?.linqRecipientPhoneLookupKey
+    ? await input.prisma.hostedLinqLine.findUnique({
+        where: { phoneNumberLookupKey: routing.linqRecipientPhoneLookupKey },
+        select: { phoneNumberLookupKey: true },
+      })
+    : null;
+  const hasAssignedHomeLine = Boolean(assignedHomeLine);
+
   if (
     !isHostedPrivyPhoneTransferAutoTrialRoutingScaffold({
-      phoneNumber: input.phoneNumber,
+      hasAssignedHomeLine,
       routing,
     })
     // The workspace lifecycle (version, snapshot, checkpoint, wake
@@ -916,22 +922,35 @@ async function assertHostedPrivyPhoneTransferCryptoScaffoldTx(input: {
 }
 
 function isHostedPrivyPhoneTransferAutoTrialRoutingScaffold(input: {
-  phoneNumber: string;
+  hasAssignedHomeLine: boolean;
   routing: Awaited<
     ReturnType<Prisma.TransactionClient["hostedMemberRouting"]["findUnique"]>
   >;
 }): boolean {
-  const phoneLookupKeys =
-    createHostedPhoneLookupKeyReadCandidates(input.phoneNumber);
   const routing = input.routing;
   return Boolean(
     routing
-    && !routing.linqChatLookupKey
-    && !routing.linqChatIdEncrypted
-    && !routing.linqParticipantContactKind
-    && !routing.linqParticipantContactLookupKey
+    // The home line texts every new signup within seconds and its delivery
+    // receipts record the provider chat identity plus the observed phone
+    // participant handle, so that outbound-established chat identity is
+    // platform scaffolding. Inbound member input stays gated by the
+    // conversation lane counter, and any non-phone participant handle
+    // still fails closed as cross-channel activity.
+    && (
+      !routing.linqParticipantContactKind
+      || (
+        routing.linqParticipantContactKind === "phone"
+        && routing.linqParticipantContactLookupKey
+      )
+    )
+    && (
+      !routing.linqParticipantContactLookupKey
+      || routing.linqParticipantContactKind === "phone"
+    )
+    // The recipient key stores which platform line the member is routed
+    // through, so scaffolding requires it to reference a configured line.
     && routing.linqRecipientPhoneLookupKey
-    && phoneLookupKeys.includes(routing.linqRecipientPhoneLookupKey)
+    && input.hasAssignedHomeLine
     && routing.linqRecipientPhoneEncrypted
     && routing.linqHomeLineAssignedAt
     && !routing.pendingLinqChatLookupKey

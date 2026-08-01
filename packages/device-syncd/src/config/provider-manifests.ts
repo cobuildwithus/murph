@@ -166,6 +166,7 @@ const JUNCTION_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProvide
     backfill: {
       payload: {
         emptyBackfillAttempts: numberJobField({ includeInHostedHint: true }),
+        sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
         timeseriesCursor: stringJobField({ includeInHostedHint: true }),
         windowEnd: stringJobField({ includeInHostedHint: true }),
         windowStart: stringJobField({ includeInHostedHint: true }),
@@ -173,6 +174,7 @@ const JUNCTION_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProvide
     },
     reconcile: {
       payload: {
+        sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
         windowEnd: stringJobField({ includeInHostedHint: true }),
         windowStart: stringJobField({ includeInHostedHint: true }),
       },
