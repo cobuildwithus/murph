@@ -121,12 +121,15 @@ import {
 import {
   readHostedLinqHomeLineAuthority,
   reserveHostedLinqHealthyProactiveLineTx,
+  startOfUtcDay,
 } from "./linq-home-routing";
 import {
+  claimHostedLinqProactiveConversationCapacityTx,
   listHostedLinqHealthyProactiveLines,
   readHostedLinqIncomingLineState,
   readHostedLinqReceiptCorrelatedRecoveryLineTx,
 } from "./linq-line-store";
+import { resolveHostedLinqSignupWelcomeDailyLimit } from "./linq-routing-policy";
 import { lockHostedMemberRow } from "./shared";
 
 type HostedLinqTransportPersistenceClient = PrismaClient | Prisma.TransactionClient;
@@ -1364,6 +1367,28 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
         prisma,
       });
       if (incomingLineState.kind !== "assignable") {
+        return { status: "target_unauthorized" };
+      }
+      // Private email recovery opens a brand-new conversation from the managed
+      // line, so it claims the same per-line daily new-conversation budget as
+      // every other proactive path. Without this a single sender could open one
+      // new conversation per group chat and burn the line's reputation.
+      const recoveryLine = await prisma.hostedLinqLine.findUnique({
+        select: { maxNewConversationsPerDay: true },
+        where: {
+          phoneNumberLookupKey: incomingLineState.phoneNumberLookupKey,
+        },
+      });
+      if (
+        !recoveryLine
+        || !await claimHostedLinqProactiveConversationCapacityTx({
+          dayUtc: startOfUtcDay(new Date(input.startedAtMs)),
+          limit: resolveHostedLinqSignupWelcomeDailyLimit(recoveryLine),
+          phoneNumberLookupKey: incomingLineState.phoneNumberLookupKey,
+          prisma,
+          requiredHealthStatus: "healthy",
+        })
+      ) {
         return { status: "target_unauthorized" };
       }
     }

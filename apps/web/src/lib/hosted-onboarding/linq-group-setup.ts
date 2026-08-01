@@ -83,9 +83,12 @@ export function buildHostedLinqGroupEmailRecoveryEffectId(input: {
     );
   }
 
+  // Hashes normalized raw inputs directly: the contact-privacy lookup keys
+  // embed the current keyring version, so a rotation would change this id and
+  // re-send a duplicate private recovery link to the same address.
   return `linq-group-email-recovery:${sha256Hex(JSON.stringify({
     chatId,
-    participantLookupKey: participantContact.lookupKey,
+    participantEmail: participantContact.value,
     recipientPhone,
   })).slice(0, 32)}`;
 }
