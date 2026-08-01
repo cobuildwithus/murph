@@ -39,6 +39,7 @@ beforeEach(() => {
   providerStateControl.failOnCall = 0;
 });
 
+import { createHostedPhoneLookupKeyReadCandidates } from "@/src/lib/hosted-onboarding/contact-privacy-core";
 import { syncHostedLinqPhoneNumberInventory } from "@/src/lib/hosted-onboarding/linq-phone-number-inventory";
 import { upsertHostedLinqLineForPhoneTx } from "@/src/lib/hosted-onboarding/linq-line-store";
 import { createPrismaClient } from "@/src/lib/prisma";
@@ -413,6 +414,86 @@ describe.skipIf(!runPostgresProof)(
         }
         await prisma.hostedLinqLine.deleteMany({
           where: { phoneNumberLookupKey: { in: createdLookupKeys } },
+        });
+        await prisma.$disconnect();
+      }
+    });
+
+    it("completes two concurrent maximum-cardinality syncs within the default transaction budget", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 8 });
+      const lineCount = 250;
+      const buildBulkSnapshot = (batch: string) => Array.from({ length: lineCount }, (_value, index) => ({
+        id: `pg-proof-${batch}-${index}-${randomUUID()}`,
+        phone_number: `+1555${batch === "one" ? "2" : "3"}${String(100_000 + index)}`,
+        reputation: { status: "HEALTHY" },
+        status: "ACTIVE",
+      }));
+      const snapshotOne = buildBulkSnapshot("one");
+      const snapshotTwo = buildBulkSnapshot("two");
+      const allIds = [...snapshotOne, ...snapshotTwo].map((line) => line.id);
+      const snapshotTwoIds = snapshotTwo.map((line) => line.id);
+
+      const preexistingHeldRows = await prisma.hostedLinqLine.findMany({
+        where: { providerPhoneNumberId: { not: null } },
+        select: {
+          phoneNumberLookupKey: true,
+          providerPhoneNumberId: true,
+        },
+      });
+
+      try {
+        // The follower's transaction lifetime covers both the advisory-lock
+        // wait behind the leader's full apply and its own 250-line apply;
+        // both overlapping minute-zero crons must still finish without
+        // hitting the shared 15s transaction timeout (P2028).
+        let fetchCalls = 0;
+        vi.stubGlobal("fetch", vi.fn(async () => {
+          fetchCalls += 1;
+          return new Response(JSON.stringify({
+            phone_numbers: fetchCalls === 1 ? snapshotOne : snapshotTwo,
+          }), { headers: { "content-type": "application/json" }, status: 200 });
+        }));
+        await expect(Promise.all([
+          syncHostedLinqPhoneNumberInventory({ observedAt: new Date(), prisma }),
+          syncHostedLinqPhoneNumberInventory({ observedAt: new Date(), prisma }),
+        ])).resolves.toEqual([
+          { syncedCount: lineCount },
+          { syncedCount: lineCount },
+        ]);
+
+        const heldAfterRace = await prisma.hostedLinqLine.count({
+          where: { providerPhoneNumberId: { in: allIds } },
+        });
+        expect(heldAfterRace).toBe(lineCount);
+
+        vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+          phone_numbers: snapshotTwo,
+        }), { headers: { "content-type": "application/json" }, status: 200 })));
+        await expect(syncHostedLinqPhoneNumberInventory({
+          observedAt: new Date(),
+          prisma,
+        })).resolves.toEqual({ syncedCount: lineCount });
+
+        const finalHeld = await prisma.hostedLinqLine.count({
+          where: { providerPhoneNumberId: { in: snapshotTwoIds } },
+        });
+        expect(finalHeld).toBe(lineCount);
+      } finally {
+        vi.unstubAllGlobals();
+        for (const heldRow of preexistingHeldRows) {
+          await prisma.hostedLinqLine.updateMany({
+            data: { providerPhoneNumberId: heldRow.providerPhoneNumberId },
+            where: { phoneNumberLookupKey: heldRow.phoneNumberLookupKey },
+          });
+        }
+        await prisma.hostedLinqLine.deleteMany({
+          where: {
+            phoneNumberLookupKey: {
+              in: [...snapshotOne, ...snapshotTwo].flatMap(
+                (line) => createHostedPhoneLookupKeyReadCandidates(line.phone_number),
+              ),
+            },
+          },
         });
         await prisma.$disconnect();
       }
