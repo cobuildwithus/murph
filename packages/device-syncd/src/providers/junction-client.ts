@@ -32,6 +32,8 @@ export interface JunctionClientConfig {
   apiKey: string;
   environment: JunctionEnvironment;
   region: JunctionRegion;
+  /** Overrides the environment/region-derived Junction API base URL. */
+  apiBaseUrl?: string;
   allowedLinkHosts?: readonly string[];
   requestTimeoutMs?: number;
   fetchImpl?: typeof fetch;

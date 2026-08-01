@@ -48,6 +48,7 @@ export type HostedLocalE2eScenarioName =
   | "family-sponsored-group-roundtrip"
   | "foreground-reply-priority"
   | "idle-checkpoint-deferred-progress"
+  | "junction-link-connect"
   | "junction-wearable-fixture"
   | "mailbox-platform-env"
   | "linq-first-contact"
@@ -162,6 +163,10 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     file: "apps/cloudflare/test/hosted-local-idle-checkpoint-deferred-progress-e2e.test.ts",
     name: "idle-checkpoint-deferred-progress",
     testControls: true,
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-junction-link-connect-e2e.test.ts",
+    name: "junction-link-connect",
   },
   {
     file: "apps/cloudflare/test/hosted-local-junction-wearable-fixture-e2e.test.ts",

@@ -69,7 +69,8 @@ export function assertHostedDeviceSyncBrowserCallbackHostname(input: {
     },
     code: "DEVICE_SYNC_PUBLIC_BASE_URL_HOST_MISMATCH",
     message:
-      "Hosted browser OAuth callbacks must use the same hostname as the first-party hosted app session. "
+      "Hosted browser OAuth callbacks must use the same hostname as the first-party hosted app session "
+      + `(app session hostname ${appSessionHostname}, callback hostname ${callbackHostname}). `
       + "Align DEVICE_SYNC_PUBLIC_BASE_URL with the hosted Web public URL.",
     retryable: false,
     httpStatus: 500,

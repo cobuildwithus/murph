@@ -20,6 +20,7 @@ import {
   verifyHostedDeviceSyncCallbackProof,
 } from "@/src/lib/device-sync/browser-callback-proof";
 import { createHostedDeviceSyncPublicIngressService } from "@/src/lib/device-sync/public-ingress-service";
+import { reportHostedDeviceConnectFailure } from "@/src/lib/device-sync/connect-failure-alert";
 import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
@@ -33,11 +34,13 @@ export async function GET(
   context: { params: Promise<{ provider: string }> },
 ) {
   let providerName: string | null = null;
+  let sessionMemberId: string | null = null;
 
   try {
     providerName = await resolveDecodedRouteParam(context.params, "provider");
     const publicIngress = createHostedDeviceSyncPublicIngressService(request);
     const session = await requireActiveHostedAppSessionFromRequest(request);
+    sessionMemberId = session.member.id;
     const state = readHostedDeviceSyncCallbackState(new URL(request.url));
     if (
       !state
@@ -54,6 +57,13 @@ export async function GET(
       // provider URL cannot be relayed later, then land on the Connect
       // callback-error notice so the member sees a truthful outcome.
       await publicIngress.discardConnectionCallback(providerName);
+      // A discarded callback writes no connection error, so without this the
+      // member is stuck at a wall that leaves no trace anywhere.
+      await reportHostedDeviceConnectFailure({
+        errorCode: "CALLBACK_PROOF_INVALID",
+        memberId: sessionMemberId,
+        provider: providerName,
+      });
       return hostedDeviceSyncCallbackFailureRedirect(
         request,
         providerName,
@@ -73,15 +83,21 @@ export async function GET(
       connectTarget: result.connectTarget ?? null,
     }) ?? redirectTo(fallbackReturnTo);
   } catch (error) {
-    return handleHostedDeviceSyncCallbackError(error, request, providerName);
+    return await handleHostedDeviceSyncCallbackError(
+      error,
+      request,
+      providerName,
+      sessionMemberId,
+    );
   }
 }
 
-function handleHostedDeviceSyncCallbackError(
+async function handleHostedDeviceSyncCallbackError(
   error: unknown,
   request: Request,
   providerName: string | null,
-): Response {
+  sessionMemberId: string | null,
+): Promise<Response> {
   if (isDeviceSyncError(error)) {
     console.warn("Hosted device-sync connection callback failed.", {
       provider: sanitizeHostedRuntimeErrorCode(providerName),
@@ -92,6 +108,13 @@ function handleHostedDeviceSyncCallbackError(
     const connectSourceId = typeof error.details?.connectSourceId === "string"
       ? error.details.connectSourceId
       : null;
+    await reportHostedDeviceConnectFailure({
+      connectSourceId,
+      errorCode: error.code,
+      httpStatus: error.httpStatus ?? null,
+      memberId: sessionMemberId,
+      provider: providerName,
+    });
     const connectTarget = typeof error.details?.connectTarget === "string"
       ? error.details.connectTarget
       : null;
@@ -135,6 +158,11 @@ function handleHostedDeviceSyncCallbackError(
 
   console.error("Hosted device-sync connection callback failed unexpectedly.", {
     errorType: describeHostedDeviceSyncCallbackErrorType(error),
+    provider: providerName,
+  });
+  await reportHostedDeviceConnectFailure({
+    errorCode: "UNEXPECTED_CALLBACK_ERROR",
+    memberId: sessionMemberId,
     provider: providerName,
   });
   return hostedDeviceSyncCallbackFailureRedirect(request, providerName, "CALLBACK_FAILED");

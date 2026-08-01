@@ -6,6 +6,11 @@ export interface JunctionDeviceSyncProviderConfig {
   clientUserIdSecret: string;
   environment: JunctionEnvironment;
   region: JunctionRegion;
+  /**
+   * Overrides the environment/region-derived Junction API base URL. Local
+   * harnesses point this at a faked Junction; production leaves it unset.
+   */
+  apiBaseUrl?: string;
   allowedLinkHosts?: readonly string[];
   providerFilter?: string[];
   summaryResources?: string[];

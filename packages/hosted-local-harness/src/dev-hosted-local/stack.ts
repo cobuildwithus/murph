@@ -129,6 +129,12 @@ const HOSTED_LOCAL_DEFAULT_WRANGLER_PERSIST_DIR_NAME = "wrangler-state";
 
 export interface HostedLocalDevStack {
   config: HostedLocalDevConfig;
+  /**
+   * The app-session HMAC key the web process runs with, so test harnesses can
+   * mint valid hosted app sessions in-process. The key is stripped from
+   * `runtimeEnv` and only injected into the web child process env.
+   */
+  hostedAppSessionHmacKey: string;
   oidcIdentity: HostedExecutionOidcIdentity;
   oidcToken: string;
   processes: {
@@ -1079,6 +1085,7 @@ export async function startHostedLocalDevStack(input: {
         ...config,
         workerPersistDir,
       },
+      hostedAppSessionHmacKey,
       kill,
       oidcIdentity,
       oidcToken,
