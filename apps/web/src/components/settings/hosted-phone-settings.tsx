@@ -5,6 +5,7 @@ import {
   useUpdateAccount,
   useUser,
 } from "@privy-io/react-auth";
+import { PhoneIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { finalizeHostedPhoneLink } from "@/src/components/hosted-onboarding/hosted-phone-auth-support";
@@ -376,16 +377,22 @@ export function HostedPhoneSettings(props: {
   }
 
   return (
-    <div className="space-y-5">
-      <HostedPhoneLinkAction
-        disabled={isBusy}
-        isChangeFlow={shouldUpdatePhone}
-        isLinking={isLinking}
-        isSyncing={isSyncing}
-        onClick={handleLinkPhone}
-      />
+    <div className="space-y-4">
+      {/* The status line reserves its height to keep the button from moving
+          when a message appears, so it stays tight to the action it reports
+          on rather than reading as a gap below the card's primary CTA. */}
+      <div className="space-y-2">
+        <HostedPhoneLinkAction
+          disabled={isBusy}
+          isChangeFlow={shouldUpdatePhone}
+          isLinking={isLinking}
+          isSyncing={isSyncing}
+          onClick={handleLinkPhone}
+        />
 
-      <SettingsStatusLine message={statusMessage} tone={statusTone} />
+        <SettingsStatusLine message={statusMessage} tone={statusTone} />
+      </div>
+
       <HostedPhoneSupportAction errorMessage={errorMessage} />
     </div>
   );
@@ -506,14 +513,16 @@ export function HostedPhoneLinkAction(props: {
       disabled={props.disabled}
       onClick={props.onClick}
     >
-      {props.isLinking || props.isSyncing ? <Spinner aria-hidden="true" /> : null}
+      {props.isLinking || props.isSyncing
+        ? <Spinner aria-hidden="true" />
+        : <PhoneIcon aria-hidden="true" className="size-4" />}
       {props.isSyncing
         ? "Saving…"
         : props.isLinking
           ? "Opening…"
           : props.isChangeFlow
-            ? "Verify a new phone"
-            : "Verify phone"}
+            ? "Change phone"
+            : "Add phone"}
     </Button>
   );
 }
