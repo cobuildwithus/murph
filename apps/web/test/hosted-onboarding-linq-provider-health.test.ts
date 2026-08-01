@@ -304,7 +304,13 @@ describe("Linq provider health inventory synchronization", () => {
       prisma,
     })).resolves.toEqual({ syncedCount: 1 });
 
-    expect(updateMany).not.toHaveBeenCalled();
+    // The only write is the freshness watermark for the confirmed line;
+    // unknown status values never clear stored provider state.
+    expect(updateMany).toHaveBeenCalledTimes(1);
+    expect(updateMany).toHaveBeenCalledWith({
+      data: { providerInventoryConfirmedAt: expect.any(Date) },
+      where: { phoneNumberLookupKey: "line-key" },
+    });
   });
 
   it("associates inventoried chat health with its resolved sending line", async () => {

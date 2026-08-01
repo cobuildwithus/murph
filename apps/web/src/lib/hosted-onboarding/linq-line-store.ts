@@ -760,11 +760,32 @@ function mapHostedLinqAssignableHomeLineRows(
   });
 }
 
+/**
+ * Ownership must be re-confirmed by a validated provider snapshot at least
+ * this often for a line to stay contact-card eligible. Sized to three
+ * five-minute health-cron cycles, so a single missed or failed run does not
+ * disqualify the pool while a sustained inventory outage does.
+ */
+export const HOSTED_LINQ_INVENTORY_FRESHNESS_MAX_AGE_MS = 15 * 60 * 1000;
+
+export function buildHostedLinqInventoryFreshnessCutoff(observedAt: Date): Date {
+  return new Date(observedAt.getTime() - HOSTED_LINQ_INVENTORY_FRESHNESS_MAX_AGE_MS);
+}
+
 export async function listHostedLinqContactCardLines(input: {
   limit?: number;
+  observedAt?: Date;
   prisma: HostedLinqLineClient;
 }): Promise<HostedLinqContactCardLine[]> {
   const take = input.limit && input.limit > 0 ? input.limit : undefined;
+  // Ownership is only trustworthy while a recent validated snapshot still
+  // confirms it. Rows written before this watermark existed, and rows whose
+  // confirmation has aged out through repeated failed or malformed inventory
+  // reads, fail closed out of candidacy rather than publishing a possibly
+  // relinquished number.
+  const inventoryConfirmedAfter = buildHostedLinqInventoryFreshnessCutoff(
+    input.observedAt ?? new Date(),
+  );
   // Contact-card candidacy always requires validated inventory backing
   // (providerPhoneNumberId is written only from an authoritative provider
   // snapshot): a configured row whose ownership the inventory has revoked —
@@ -775,6 +796,7 @@ export async function listHostedLinqContactCardLines(input: {
     where: {
       configuredAt: { not: null },
       phoneNumberEncrypted: { not: null },
+      providerInventoryConfirmedAt: { gte: inventoryConfirmedAfter },
       providerPhoneNumberId: { not: null },
     },
     orderBy: [
@@ -803,6 +825,7 @@ export async function listHostedLinqContactCardLines(input: {
       where: {
         configuredAt: null,
         phoneNumberEncrypted: { not: null },
+        providerInventoryConfirmedAt: { gte: inventoryConfirmedAfter },
         providerPhoneNumberId: { not: null },
         providerSeenAt: { not: null },
       },

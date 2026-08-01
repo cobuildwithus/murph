@@ -4,7 +4,10 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { fetchLinqApi, LinqApiTimeoutError } from "../linq/api";
 import { hostedOnboardingError } from "./errors";
-import { listHostedLinqContactCardLines } from "./linq-line-store";
+import {
+  buildHostedLinqInventoryFreshnessCutoff,
+  listHostedLinqContactCardLines,
+} from "./linq-line-store";
 import { normalizePhoneNumber } from "./phone";
 import {
   getHostedOnboardingEnvironment,
@@ -55,34 +58,27 @@ type LinqContactCardsResponse = {
 
 export async function reconcileHostedLinqContactCards(input: {
   maxLines?: number;
+  observedAt?: Date;
   prisma: HostedLinqContactCardClient;
   signal?: AbortSignal;
 }): Promise<HostedLinqContactCardReconciliation> {
-  const lines = await listHostedLinqConfiguredContactCardLines({
-    maxLines: input.maxLines,
+  const observedAt = input.observedAt ?? new Date();
+
+  // Configured lines are the only ones that can own a member conversation,
+  // so their health is evaluated independently of the combined candidate
+  // list: an unrelated provider-only row must never let a total
+  // configured-line outage read as success. Checked before any provider
+  // request so no call is made for numbers the account no longer owns.
+  await assertHostedLinqConfiguredContactCardPoolHealthy({
+    observedAt,
     prisma: input.prisma,
   });
 
-  // An empty candidate list while configured lines exist means the inventory
-  // has revoked ownership of every configured number — that is a contact-card
-  // outage, not a legitimately empty pool, and must not read as a lineCount:0
-  // success.
-  if (lines.length === 0) {
-    const configuredLineCount = await input.prisma.hostedLinqLine.count({
-      where: {
-        configuredAt: { not: null },
-        phoneNumberEncrypted: { not: null },
-      },
-    });
-    if (configuredLineCount > 0) {
-      throw hostedOnboardingError({
-        code: "LINQ_CONTACT_CARD_RECONCILE_FAILED",
-        message: `Linq contact-card reconciliation found ${configuredLineCount} configured line(s) but none with validated inventory backing.`,
-        httpStatus: 502,
-        retryable: true,
-      });
-    }
-  }
+  const lines = await listHostedLinqConfiguredContactCardLines({
+    maxLines: input.maxLines,
+    observedAt,
+    prisma: input.prisma,
+  });
 
   const result: HostedLinqContactCardReconciliation = {
     activeCards: 0,
@@ -224,6 +220,49 @@ export async function updateHostedLinqContactCard(input: {
   return requireHostedLinqContactCard(payload, "update");
 }
 
+/**
+ * Configured lines are the only ones that can own a member conversation, so
+ * the pool is unhealthy whenever configured lines exist but none of them
+ * still carries a fresh, validated inventory confirmation — whether their
+ * ownership was revoked or the inventory owner has been failing long enough
+ * for confirmation to age out. Provider-only rows never satisfy this.
+ */
+async function assertHostedLinqConfiguredContactCardPoolHealthy(input: {
+  observedAt: Date;
+  prisma: HostedLinqContactCardClient;
+}): Promise<void> {
+  const configuredLineCount = await input.prisma.hostedLinqLine.count({
+    where: {
+      configuredAt: { not: null },
+      phoneNumberEncrypted: { not: null },
+    },
+  });
+  if (configuredLineCount === 0) {
+    return;
+  }
+
+  const backedConfiguredLineCount = await input.prisma.hostedLinqLine.count({
+    where: {
+      configuredAt: { not: null },
+      phoneNumberEncrypted: { not: null },
+      providerInventoryConfirmedAt: {
+        gte: buildHostedLinqInventoryFreshnessCutoff(input.observedAt),
+      },
+      providerPhoneNumberId: { not: null },
+    },
+  });
+  if (backedConfiguredLineCount > 0) {
+    return;
+  }
+
+  throw hostedOnboardingError({
+    code: "LINQ_CONTACT_CARD_RECONCILE_FAILED",
+    message: `Linq contact-card reconciliation found ${configuredLineCount} configured line(s) but none with a fresh validated inventory confirmation.`,
+    httpStatus: 502,
+    retryable: true,
+  });
+}
+
 type HostedLinqContactCardOutcome =
   | "activeCards"
   | "createdCards"
@@ -232,6 +271,7 @@ type HostedLinqContactCardOutcome =
 
 async function listHostedLinqConfiguredContactCardLines(input: {
   maxLines?: number;
+  observedAt: Date;
   prisma: HostedLinqContactCardClient;
 }): Promise<Array<{
   phoneNumber: string;
@@ -247,6 +287,7 @@ async function listHostedLinqConfiguredContactCardLines(input: {
   // into a member's saved vCard.
   const lines = await listHostedLinqContactCardLines({
     limit: maxLines,
+    observedAt: input.observedAt,
     prisma: input.prisma,
   });
   return lines.map((line) => ({

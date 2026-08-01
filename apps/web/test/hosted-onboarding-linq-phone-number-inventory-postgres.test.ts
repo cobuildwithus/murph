@@ -43,6 +43,7 @@ import { createHostedPhoneLookupKeyReadCandidates } from "@/src/lib/hosted-onboa
 import { resolveMurphHostedLinqContactCardBackupPhoneNumber } from "@/src/lib/hosted-onboarding/linq-contact-card";
 import { syncHostedLinqPhoneNumberInventory } from "@/src/lib/hosted-onboarding/linq-phone-number-inventory";
 import {
+  HOSTED_LINQ_INVENTORY_FRESHNESS_MAX_AGE_MS,
   listHostedLinqContactCardLines,
   syncHostedLinqConfiguredLinesTx,
   upsertHostedLinqLineForPhoneTx,
@@ -321,6 +322,107 @@ describe.skipIf(!runPostgresProof)(
           });
           expect(backup).not.toBe(phoneA);
         }
+      } finally {
+        vi.unstubAllGlobals();
+        for (const heldRow of preexistingHeldRows) {
+          await prisma.hostedLinqLine.updateMany({
+            data: { providerPhoneNumberId: heldRow.providerPhoneNumberId },
+            where: { phoneNumberLookupKey: heldRow.phoneNumberLookupKey },
+          });
+        }
+        await prisma.hostedLinqLine.deleteMany({
+          where: { phoneNumberLookupKey: { in: proofLookupKeys } },
+        });
+        await prisma.$disconnect();
+      }
+    });
+
+    it("gates candidacy on a fresh validated confirmation before, during, and after inventory outages", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 4 });
+      const providerId = `pg-proof-line-${randomUUID()}`;
+      const phone = buildSyntheticProofPhoneNumber();
+      const proofLookupKeys = createHostedPhoneLookupKeyReadCandidates(phone);
+
+      const preexistingHeldRows = await prisma.hostedLinqLine.findMany({
+        where: { providerPhoneNumberId: { not: null } },
+        select: {
+          phoneNumberLookupKey: true,
+          providerPhoneNumberId: true,
+        },
+      });
+
+      try {
+        // A pre-rollout row: configured and holding a provider id written by
+        // the former lenient path, with no snapshot confirmation.
+        const row = await upsertHostedLinqLineForPhoneTx({
+          activeMemberLimit: null,
+          observedAt: new Date(),
+          phoneNumber: phone,
+          prisma,
+          providerPhoneNumberId: providerId,
+          source: "configured",
+        });
+        await prisma.hostedLinqLine.update({
+          data: {
+            providerInventoryConfirmedAt: null,
+            providerPhoneNumberId: providerId,
+          },
+          where: { phoneNumberLookupKey: row.phoneNumberLookupKey },
+        });
+
+        const beforeFirstSnapshot = await listHostedLinqContactCardLines({ prisma });
+        expect(beforeFirstSnapshot.map((line) => line.phoneNumber)).not.toContain(phone);
+
+        // A validated snapshot stamps the watermark and makes it eligible.
+        vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+          phone_numbers: [
+            {
+              id: providerId,
+              phone_number: phone,
+              reputation: { status: "HEALTHY" },
+              status: "ACTIVE",
+            },
+          ],
+        }), { headers: { "content-type": "application/json" }, status: 200 })));
+        await expect(syncHostedLinqPhoneNumberInventory({
+          observedAt: new Date(),
+          prisma,
+        })).resolves.toEqual({ syncedCount: 1 });
+
+        const afterSnapshot = await listHostedLinqContactCardLines({ prisma });
+        expect(afterSnapshot.map((line) => line.phoneNumber)).toContain(phone);
+
+        // Repeated failed and malformed reads leave ownership untouched but
+        // never refresh the watermark, so eligibility ages out on a clock
+        // advanced past the freshness budget.
+        vi.stubGlobal("fetch", vi.fn(async () => new Response("upstream error", { status: 503 })));
+        await expect(syncHostedLinqPhoneNumberInventory({ prisma })).rejects.toMatchObject({
+          code: "LINQ_PHONE_NUMBER_INVENTORY_FAILED",
+        });
+        vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ data: [] }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        })));
+        await expect(syncHostedLinqPhoneNumberInventory({ prisma })).rejects.toMatchObject({
+          code: "LINQ_PHONE_NUMBER_INVENTORY_INVALID",
+        });
+
+        const stillOwned = await prisma.hostedLinqLine.findUnique({
+          where: { phoneNumberLookupKey: row.phoneNumberLookupKey },
+          select: { providerPhoneNumberId: true },
+        });
+        expect(stillOwned?.providerPhoneNumberId).toBe(providerId);
+
+        const pastBudget = new Date(
+          Date.parse(new Date().toISOString())
+          + HOSTED_LINQ_INVENTORY_FRESHNESS_MAX_AGE_MS
+          + 60_000,
+        );
+        const afterStaleness = await listHostedLinqContactCardLines({
+          observedAt: pastBudget,
+          prisma,
+        });
+        expect(afterStaleness.map((line) => line.phoneNumber)).not.toContain(phone);
       } finally {
         vi.unstubAllGlobals();
         for (const heldRow of preexistingHeldRows) {

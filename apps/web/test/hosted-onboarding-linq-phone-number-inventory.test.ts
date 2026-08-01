@@ -89,9 +89,11 @@ describe("syncHostedLinqPhoneNumberInventory", () => {
     // line_current keeps its pairing; line_moving is held at a lookup key
     // that is not a candidate for its snapshot phone (a move) and line_gone
     // is absent from the snapshot, so exactly those two rows are cleared.
-    expect(updateMany).toHaveBeenCalledTimes(1);
     expect(updateMany).toHaveBeenCalledWith({
-      data: { providerPhoneNumberId: null },
+      data: {
+        providerInventoryConfirmedAt: null,
+        providerPhoneNumberId: null,
+      },
       where: {
         phoneNumberLookupKey: { in: ["lookup:moved", "lookup:relinquished"] },
       },
@@ -112,7 +114,10 @@ describe("syncHostedLinqPhoneNumberInventory", () => {
     })).resolves.toEqual({ syncedCount: 0 });
 
     expect(updateMany).toHaveBeenCalledWith({
-      data: { providerPhoneNumberId: null },
+      data: {
+        providerInventoryConfirmedAt: null,
+        providerPhoneNumberId: null,
+      },
       where: {
         phoneNumberLookupKey: { in: ["lookup:only"] },
       },

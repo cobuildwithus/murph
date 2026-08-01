@@ -112,7 +112,10 @@ async function applyHostedLinqPhoneNumberInventorySnapshot(input: {
     .map((row) => row.phoneNumberLookupKey);
   if (staleLookupKeys.length > 0) {
     await input.prisma.hostedLinqLine.updateMany({
-      data: { providerPhoneNumberId: null },
+      data: {
+        providerInventoryConfirmedAt: null,
+        providerPhoneNumberId: null,
+      },
       where: { phoneNumberLookupKey: { in: staleLookupKeys } },
     });
   }
@@ -124,6 +127,13 @@ async function applyHostedLinqPhoneNumberInventorySnapshot(input: {
       prisma: input.prisma,
       providerPhoneNumberId: line.providerPhoneNumberId,
       source: "provider",
+    });
+    // Freshness watermark for ownership-gated consumers. Stamped only here,
+    // inside the same transaction that applied a validated snapshot, so it
+    // can never be advanced by chat-health or status projection.
+    await input.prisma.hostedLinqLine.updateMany({
+      data: { providerInventoryConfirmedAt: observedAt },
+      where: { phoneNumberLookupKey: storedLine.phoneNumberLookupKey },
     });
     await projectHostedLinqLineProviderStateTx({
       observedAt,

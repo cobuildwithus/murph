@@ -83,6 +83,7 @@ describe("listHostedLinqContactCardLines", () => {
       where: {
         configuredAt: { not: null },
         phoneNumberEncrypted: { not: null },
+        providerInventoryConfirmedAt: { gte: expect.any(Date) },
         providerPhoneNumberId: { not: null },
       },
     }));
@@ -91,6 +92,7 @@ describe("listHostedLinqContactCardLines", () => {
       where: {
         configuredAt: null,
         phoneNumberEncrypted: { not: null },
+        providerInventoryConfirmedAt: { gte: expect.any(Date) },
         providerPhoneNumberId: { not: null },
         providerSeenAt: { not: null },
       },

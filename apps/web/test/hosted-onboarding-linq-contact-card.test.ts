@@ -24,6 +24,8 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-line-store", () => ({
+  buildHostedLinqInventoryFreshnessCutoff: (observedAt: Date) =>
+    new Date(observedAt.getTime() - 15 * 60 * 1000),
   listHostedLinqContactCardLines: linqLineStoreMocks.listHostedLinqContactCardLines,
 }));
 
@@ -231,7 +233,7 @@ describe("hosted Linq contact card client", () => {
         providerServiceStatus: "ACTIVE",
       },
     ]);
-    const prisma = {};
+    const prisma = { hostedLinqLine: { count: vi.fn().mockResolvedValue(1) } };
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = input instanceof URL ? input : new URL(String(input));
@@ -298,6 +300,7 @@ describe("hosted Linq contact card client", () => {
     expect(linqInventoryMocks.syncHostedLinqPhoneNumberInventory).not.toHaveBeenCalled();
     expect(linqLineStoreMocks.listHostedLinqContactCardLines).toHaveBeenCalledWith({
       limit: 50,
+      observedAt: expect.any(Date),
       prisma,
     });
   });
@@ -323,7 +326,7 @@ describe("hosted Linq contact card client", () => {
         providerServiceStatus: "ACTIVE",
       },
     ]);
-    const prisma = {};
+    const prisma = { hostedLinqLine: { count: vi.fn().mockResolvedValue(1) } };
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = input instanceof URL ? input : new URL(String(input));
@@ -400,7 +403,7 @@ describe("hosted Linq contact card client", () => {
         providerServiceStatus: "ACTIVE",
       },
     ]);
-    const prisma = {};
+    const prisma = { hostedLinqLine: { count: vi.fn().mockResolvedValue(1) } };
 
     const fetchMock = vi.fn(async () => createJsonResponse({
       error: {
@@ -439,7 +442,7 @@ describe("hosted Linq contact card client", () => {
         providerServiceStatus: "ACTIVE",
       },
     ]);
-    const prisma = {};
+    const prisma = { hostedLinqLine: { count: vi.fn().mockResolvedValue(1) } };
 
     const fetchMock = vi.fn(async () => createJsonResponse({
       contact_cards: [
@@ -487,7 +490,7 @@ describe("hosted Linq contact card client", () => {
         providerServiceStatus: "ACTIVE",
       },
     ]);
-    const prisma = {};
+    const prisma = { hostedLinqLine: { count: vi.fn().mockResolvedValue(1) } };
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = input instanceof URL ? input : new URL(String(input));
@@ -530,7 +533,10 @@ describe("hosted Linq contact card client", () => {
 
   it("fails the run when configured lines exist but none keep validated inventory backing", async () => {
     linqLineStoreMocks.listHostedLinqContactCardLines.mockResolvedValue([]);
-    const count = vi.fn().mockResolvedValue(2);
+    // Two configured lines exist, but none carries a fresh confirmation.
+    const count = vi.fn()
+      .mockResolvedValueOnce(2)
+      .mockResolvedValueOnce(0);
     const prisma = { hostedLinqLine: { count } };
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -544,10 +550,18 @@ describe("hosted Linq contact card client", () => {
     // A revoked pool is an outage, not an empty pool: no provider call is
     // made for a number the account no longer owns.
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(count).toHaveBeenCalledWith({
+    expect(count).toHaveBeenNthCalledWith(1, {
       where: {
         configuredAt: { not: null },
         phoneNumberEncrypted: { not: null },
+      },
+    });
+    expect(count).toHaveBeenNthCalledWith(2, {
+      where: {
+        configuredAt: { not: null },
+        phoneNumberEncrypted: { not: null },
+        providerInventoryConfirmedAt: { gte: expect.any(Date) },
+        providerPhoneNumberId: { not: null },
       },
     });
   });
@@ -592,7 +606,7 @@ describe("hosted Linq contact card client", () => {
         providerServiceStatus: "ACTIVE",
       },
     ]);
-    const prisma = {};
+    const prisma = { hostedLinqLine: { count: vi.fn().mockResolvedValue(1) } };
     const abortController = new AbortController();
     const abortReason = new Error("cron request aborted");
 
@@ -625,7 +639,7 @@ describe("hosted Linq contact card client", () => {
         providerServiceStatus: "ACTIVE",
       },
     ]);
-    const prisma = {};
+    const prisma = { hostedLinqLine: { count: vi.fn().mockResolvedValue(1) } };
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = input instanceof URL ? input : new URL(String(input));
@@ -693,7 +707,7 @@ describe("hosted Linq contact card client", () => {
         providerServiceStatus: "ACTIVE",
       },
     ]);
-    const prisma = {};
+    const prisma = { hostedLinqLine: { count: vi.fn().mockResolvedValue(1) } };
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = input instanceof URL ? input : new URL(String(input));
@@ -736,6 +750,7 @@ describe("hosted Linq contact card client", () => {
     expect(linqInventoryMocks.syncHostedLinqPhoneNumberInventory).not.toHaveBeenCalled();
     expect(linqLineStoreMocks.listHostedLinqContactCardLines).toHaveBeenCalledWith({
       limit: 50,
+      observedAt: expect.any(Date),
       prisma,
     });
   });
@@ -889,7 +904,7 @@ describe("resolveMurphHostedLinqContactCardBackupPhoneNumber", () => {
       throw new Error("Backup selection must not call Linq.");
     });
     vi.stubGlobal("fetch", providerFetch);
-    const prisma = {};
+    const prisma = { hostedLinqLine: { count: vi.fn().mockResolvedValue(1) } };
 
     await expect(resolveMurphHostedLinqContactCardBackupPhoneNumber({
       excludePhoneNumber: "+15550000001",
