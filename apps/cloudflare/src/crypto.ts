@@ -55,6 +55,8 @@ function describeHostedStorageEnvelopeLabel(scope: HostedStorageScope): string {
       return "Hosted bundle envelope";
     case "email-raw":
       return "Hosted email raw message envelope";
+    case "environment-voice":
+      return "Hosted environment voice envelope";
     case "meal-photo":
       return "Hosted meal photo envelope";
     case "private-media":

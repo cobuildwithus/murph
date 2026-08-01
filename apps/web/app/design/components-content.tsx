@@ -15,7 +15,10 @@ import {
 import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
 import { HostedDeviceSyncCallbackConfirmation } from "@/src/components/device-sync/hosted-device-sync-callback-confirmation";
 import { HomeExperimentCard } from "@/src/components/home/home-experiment-card";
-import { GroupUsageFundingCard } from "@/src/components/hosted-groups/group-usage-funding-card";
+import {
+  GroupUsageFundingActions,
+  GroupUsageFundingShell,
+} from "@/src/components/hosted-groups/group-usage-funding-shell";
 import { GroupSponsorshipDialog } from "@/src/components/hosted-groups/group-sponsorship-dialog";
 import { GroupSponsorshipManagementCard } from "@/src/components/hosted-groups/group-sponsorship-management-card";
 import { MetricCard } from "@/src/components/ui/metric-card";
@@ -29,6 +32,10 @@ import {
   WebmailIcon,
 } from "@/src/components/settings/hosted-email-murph-contact-dialog";
 import { HostedPhoneLinkAction } from "@/src/components/settings/hosted-phone-settings";
+import {
+  HostedIdentitySessionLoading,
+  HostedIdentitySessionMismatch,
+} from "@/src/components/settings/hosted-settings-identity-link-dialog";
 import {
   ASSISTANT_MODEL_CHOICE_CARD_CLASSES,
   AssistantModelArtwork,
@@ -135,7 +142,39 @@ import {
 import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
 import { HostedAccountDeletionStatus } from "@/src/components/settings/hosted-data-privacy-settings";
 import { GarminHistoricalDataDialog } from "../(dashboard)/connect/connect-page-dialogs";
+import {
+  EnvironmentCaptureCard,
+  EnvironmentEmptyState,
+  EnvironmentVoiceRefreshNotice,
+} from "../(dashboard)/environment/environment-page-client";
+import type { EnvironmentVoiceScript } from "../(dashboard)/environment/environment-voice-script";
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
+
+const DESIGN_ENVIRONMENT_GAP_SCRIPT: EnvironmentVoiceScript = {
+  dialogTitle: "Fill the gaps in your report",
+  flow: "fill-gaps",
+  idleDescription:
+    "Two short topics, based on what Murph does not know yet.",
+  idleTitle: "Only the missing details",
+  topics: [
+    {
+      eyebrow: "Sleep",
+      focus: ["Bedroom CO₂"],
+      id: "sleep",
+      prompt:
+        "Cover only the details Murph is still missing. If something does not apply or you would rather skip it, say so.",
+      title: "Your sleep setup",
+    },
+    {
+      eyebrow: "Workspace",
+      focus: ["Breaks"],
+      id: "workspace",
+      prompt:
+        "Cover only the details Murph is still missing. If something does not apply or you would rather skip it, say so.",
+      title: "Your remaining workspace details",
+    },
+  ],
+};
 
 function Section({
   children,
@@ -822,6 +861,94 @@ export function ComponentsContent() {
 
         <Separator />
 
+        <div
+          data-design-component="environment-empty-state"
+          id="environment-empty-state-component"
+        >
+          <Section title="Environment empty state">
+            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+              Production zero-data state. One voice-first action leads to the
+              walkthrough, while the real report categories preview what Murph
+              will build without showing empty scores or missing facts.
+            </p>
+            <EnvironmentEmptyState
+              contactOptions={[
+                {
+                  href: "sms:+15555550100?body=I%20want%20to%20update%20what%20you%20know%20about%20my%20home%20environment.",
+                  kind: "text",
+                  label: "Messages",
+                },
+                {
+                  href: "https://t.me/withmurph_bot",
+                  kind: "telegram",
+                  label: "Telegram",
+                },
+              ]}
+            />
+          </Section>
+        </div>
+
+        <Separator />
+
+        <div
+          data-design-component="environment-capture-card"
+          id="environment-capture-card-component"
+          inert
+        >
+          <Section title="Environment progressive capture">
+            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+              Production partial-data state. The action opens a voice script
+              built only from facts Murph still does not know.
+            </p>
+            <EnvironmentCaptureCard
+              contactOptions={[]}
+              coverage={70}
+              known={21}
+              script={DESIGN_ENVIRONMENT_GAP_SCRIPT}
+            />
+          </Section>
+        </div>
+
+        <Separator />
+
+        <div
+          data-design-component="environment-voice-refresh-notice"
+          id="environment-voice-refresh-notice-component"
+          inert
+        >
+          <Section title="Environment voice processing feedback">
+            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+              The open report keeps ownership after upload: processing,
+              updated, no-clear-facts, and delayed recovery remain visible
+              without requiring a reload. Processing stays animated, and the
+              delayed action rechecks the existing accepted job.
+            </p>
+            <div className="grid gap-4">
+              <EnvironmentVoiceRefreshNotice
+                state={{
+                  baselineValues: "{}",
+                  status: "processing",
+                }}
+                onCheckAgain={() => {}}
+              />
+              <EnvironmentVoiceRefreshNotice
+                state={{ factsChanged: true, status: "updated" }}
+                onCheckAgain={() => {}}
+              />
+              <EnvironmentVoiceRefreshNotice
+                state={{ factsChanged: false, status: "updated" }}
+                onCheckAgain={() => {}}
+              />
+              <EnvironmentVoiceRefreshNotice
+                state={{ status: "delayed" }}
+                onCheckAgain={() => {}}
+              />
+            </div>
+          </Section>
+        </div>
+
+        <Separator />
+
         <Section title="Buttons">
           <div className="flex flex-wrap items-center gap-3">
             <Button size="lg">Start Experiment →</Button>
@@ -1328,6 +1455,7 @@ export function ComponentsContent() {
               <div className="mt-6">
                 <HostedUsageTopUpDialog
                   checkoutUrl="/api/design/usage-credit-preview"
+                  inert
                   offers={DESIGN_USAGE_OFFERS}
                   payerMemberId="design_usage_top_up_payer"
                   scope="personal"
@@ -1338,18 +1466,35 @@ export function ComponentsContent() {
               data-design-component="group-usage-funding"
               id="group-usage-funding-component"
             >
-              <GroupUsageFundingCard
-                action={
-                  <GroupSponsorshipDialog
-                    checkoutUrl="/api/design/usage-credit-preview"
-                    customizationAllowed
-                    mode="monthly"
-                    monthlyCapMinor={1_000}
-                    monthlyCapOptions={DESIGN_GROUP_MONTHLY_CAPS}
-                    offers={[DESIGN_GROUP_SPONSORSHIP_OFFERS[0]]}
-                    payerMemberId="design_usage_top_up_payer"
+              <GroupUsageFundingShell
+                action={(
+                  <GroupUsageFundingActions
+                    monthlyAction={(
+                      <GroupSponsorshipDialog
+                        checkoutUrl="/api/design/usage-credit-preview"
+                        customizationAllowed
+                        inert
+                        mode="monthly"
+                        monthlyCapMinor={1_000}
+                        monthlyCapOptions={DESIGN_GROUP_MONTHLY_CAPS}
+                        offers={[DESIGN_GROUP_SPONSORSHIP_OFFERS[0]]}
+                        payerMemberId="design_usage_top_up_payer"
+                      />
+                    )}
+                    oneTimeAction={(
+                      <GroupSponsorshipDialog
+                        checkoutUrl="/api/design/usage-credit-preview"
+                        customizationAllowed
+                        inert
+                        mode="one_time"
+                        offers={DESIGN_GROUP_SPONSORSHIP_OFFERS}
+                        payerMemberId="design_usage_top_up_payer"
+                        triggerSize="default"
+                        triggerVariant="link"
+                      />
+                    )}
                   />
-                }
+                )}
                 groupName="Sunday sleep crew"
               />
             </div>
@@ -1360,7 +1505,6 @@ export function ComponentsContent() {
             >
               <GroupSponsorshipManagementCard
                 endpoint="/api/design/group-sponsorship-management"
-                groupName="Sunday sleep crew"
                 inert
                 management={{
                   authorizationId: "hgsa_design_component",
@@ -1391,6 +1535,7 @@ export function ComponentsContent() {
               <div className="mt-6 flex flex-wrap gap-3">
                 <HostedUsageTopUpDialog
                   checkoutUrl="/api/design/usage-credit-preview"
+                  inert
                   offers={DESIGN_USAGE_OFFERS}
                   payerMemberId="design_usage_top_up_payer"
                   scope="family"
@@ -1405,6 +1550,7 @@ export function ComponentsContent() {
                     targetConflict: true,
                   }}
                   checkoutUrl="/api/design/usage-credit-preview"
+                  inert
                   offers={[]}
                   payerMemberId="design_usage_top_up_payer"
                   scope="family"
@@ -1521,9 +1667,17 @@ export function ComponentsContent() {
 
         <Section id="phone-account-linking" title="Phone Account Linking">
           <p className="text-sm leading-6 text-muted-foreground">
-            The account-management action hands phone verification to the
-            authenticated identity provider, then saves the verified result to
-            Murph. Existing phone accounts use the same surface for replacement.
+            Settings opens the authenticated identity provider directly, with
+            no second Murph confirmation. After verification or an approved
+            account transfer, Murph saves the exact provider-owned result. If
+            Privy already has a verified phone that Murph has not recorded,
+            Settings repairs that projection directly. A declined transfer
+            closes quietly, and a failed save retries without reopening Privy.
+            Existing phone accounts use the same surface for replacement.
+            Support-required conflicts offer both retry and a direct email
+            action without putting account identifiers in the message.
+            Privacy-safe lifecycle diagnostics observe these states without
+            changing any rendered state or action.
           </p>
           <div className="grid gap-4 sm:grid-cols-2" inert>
             <div className="space-y-3 rounded-xl border border-border bg-card p-5">
@@ -1564,17 +1718,22 @@ export function ComponentsContent() {
               <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
                 Session mismatch
               </p>
-              <HostedPhoneLinkAction
-                disabled
-                isChangeFlow={false}
-                isLinking={false}
-                isSyncing={false}
-                onClick={() => {}}
-              />
-              <p className="text-sm leading-6 text-muted-foreground">
-                Your sign-in changed. Sign in again using a login method already
-                linked to this Murph account before changing a linked account.
+              <HostedIdentitySessionMismatch onSignInAgain={() => {}} />
+            </div>
+            <div className="space-y-3 rounded-xl border border-border bg-card p-5">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Provider loading
               </p>
+              <HostedIdentitySessionLoading />
+            </div>
+            <div className="space-y-3 rounded-xl border border-border bg-card p-5">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Recovery failed
+              </p>
+              <HostedIdentitySessionMismatch
+                errorMessage="Sign out did not finish. Try again."
+                onSignInAgain={() => {}}
+              />
             </div>
           </div>
         </Section>

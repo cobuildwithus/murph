@@ -85,6 +85,10 @@ import type {
   HostedPhoneCallStartResponse,
 } from "@murphai/hosted-execution/phone-calls";
 import type {
+  HostedPhysicalNoteSendRequest,
+  HostedPhysicalNoteSendResponse,
+} from "@murphai/hosted-execution/physical-notes";
+import type {
   HostedPlanUsageStatus,
   HostedPlanUsageToolRequest,
 } from "@murphai/hosted-execution/plan-usage";
@@ -361,6 +365,8 @@ type HostedRuntimeEffectsPortBase = {
     request: HostedRuntimeTelegramGetFileRequest,
     context?: { signal?: AbortSignal | null },
   ): Promise<HostedRuntimeTelegramFile | null>;
+  deleteEnvironmentVoice?(audioKey: string): Promise<void>;
+  readEnvironmentVoice?(audioKey: string): Promise<Uint8Array | null>;
   deleteMealPhoto?(mealPhotoKey: string): Promise<void>;
   readMealPhoto?(mealPhotoKey: string): Promise<Uint8Array | null>;
   readRawEmailMessage(rawMessageKey: string): Promise<Uint8Array | null>;
@@ -522,6 +528,15 @@ export interface HostedRuntimePhoneCallPort {
   ): Promise<HostedPhoneCallStartResponse>;
 }
 
+export interface HostedRuntimePhysicalNotePort {
+  send(
+    request: HostedPhysicalNoteSendRequest,
+    context?: {
+      signal?: AbortSignal | null;
+    },
+  ): Promise<HostedPhysicalNoteSendResponse>;
+}
+
 export interface HostedRuntimeMailboxPort {
   fetch(request: HostedMailboxFetchRequest): Promise<HostedMailboxFetchResponse>;
   fetchPayload(
@@ -665,6 +680,7 @@ export interface HostedRuntimePlatform {
   mailboxPort?: HostedRuntimeMailboxPort | null;
   newsletterToolPort?: HostedRuntimeNewsletterToolPort | null;
   planUsageToolPort?: HostedRuntimePlanUsageToolPort | null;
+  physicalNotes?: HostedRuntimePhysicalNotePort | null;
   privateImageUrlPublisher?: AssistantHostedPrivateImageUrlPublisher | null;
   subscriptionToolPort?: HostedRuntimeSubscriptionToolPort | null;
   phoneCalls?: HostedRuntimePhoneCallPort | null;

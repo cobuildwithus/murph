@@ -13,6 +13,7 @@ import {
 import {
   AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
   MURPH_PRODUCT_ORIGIN,
+  normalizeIanaTimeZone,
   parseAutomationSupportSeriesTag,
   type AutomationAssistantTargetOverride,
   type AutomationContinuityPolicy,
@@ -31,6 +32,9 @@ import {
   type AssistantCronDeliveryRouteValidationProfile,
 } from './cron/targets.js'
 import {
+  computeAssistantCronFirstRunAfterCurrentLocalDay,
+} from './cron/schedule.js'
+import {
   prepareExperimentLifecycleAutomations,
 } from './experiment-support-automations.js'
 import { readAssistantOnboardingState } from './onboarding-state.js'
@@ -40,7 +44,11 @@ import {
   prepareOnboardingGoalCheckinAutomation,
 } from './onboarding-goal-checkin-automation.js'
 import type { AssistantMaintenanceProfile } from './maintenance-evidence.js'
-import { MURPH_ONBOARDING_FOLLOWUP_AUTOMATION } from './onboarding-followup-automation.js'
+import {
+  MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
+  resolveMurphOnboardingFollowupActiveUntil,
+  resolveMurphOnboardingFollowupSchedule,
+} from './onboarding-followup-automation.js'
 import { assistantRouteSupportsGroupRoomModel } from './group-room-model.js'
 
 export { MURPH_ONBOARDING_FOLLOWUP_AUTOMATION }
@@ -265,6 +273,44 @@ const LEGACY_ONBOARDING_FOLLOWUP_AUTOMATION_TAGS = [
   'assistant',
   'onboarding',
 ] as const
+
+const PREVIOUS_ONBOARDING_FOLLOWUP_AUTOMATION = {
+  continuityPolicy: 'preserve',
+  instructions: [
+    'Goal: advance Murph onboarding through an anchored health aspiration, a finite health-context foundation, and a contextual return without turning it into a drip questionnaire or unsolicited plan. Ordinary health help remains available while onboarding is open. The first scheduled occurrence is intentionally deferred until the next local day after the relationship begins.',
+    '',
+    'Before deciding, read and follow `$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md`, run `vault-cli assistant onboarding resume-context --format json`, and read the available recent user messages. The skill is the single owner of conversation order, checkpoint meaning, persistence, and completion; do not create a second state machine in this automation.',
+    '',
+    'Success criteria: onboarding is no longer open, or exactly one skill-approved, reply-oriented onboarding question usefully advances the relationship.',
+    '',
+    'If `onboarding.status` is `completed`, return skip. The managed-automation owner archives this follow-up deterministically.',
+    '',
+    'If the onboarding skill says the visible and saved evidence satisfies answered completion, or shows an overall decline, run its required completion command. Whether completion succeeds or fails, return skip without messaging; the managed-automation owner retires the follow-up after completion.',
+    '',
+    'Otherwise use exactly the next unresolved step from the onboarding skill, including aspiration capture, explicit parking, foundation questions, contextual return, and its targeted-read rules for omitted, truncated, or errored evidence. If that step is only a reflection or parking transition, combine it with the next skill-approved question when the skill permits; otherwise return skip. Do not compress, reorder, or bypass that policy merely because this is a scheduled run.',
+    '',
+    'This automation never owns a promised check-in, reminder, or proactive support action. Those use the canonical plan and dedicated automation required by `behavior-followthrough`, which owns timing, due evaluation, delivery, retry, and skip behavior.',
+    '',
+    'Before sending, triple-check the snapshot and recent messages for an answer, skip, defer, or decline. Do not re-ask known or resolved context. If the latest onboarding question is unanswered, do not rotate to another setup question or repeat it through this daily automation; return skip. Honor requested timing, and return skip whenever there is no timely, useful onboarding continuation.',
+    '',
+    "Output: send one brief, natural, low-pressure in-chat continuation only when it advances unfinished onboarding. Every user-facing scheduled continuation must include exactly one easy, reply-oriented question; otherwise return skip. Do not mention internal state, setup completion, or this automation, and do not use a fixed script. The user's reply will be handled by the next normal Murph onboarding turn.",
+  ].join('\n'),
+  schedule: {
+    kind: 'dailyLocal',
+    localTime: '13:30',
+  },
+  slug: 'finish-onboarding-followup',
+  summary:
+    'Daily aspiration-and-foundation continuation check until Murph onboarding is complete.',
+  tags: [
+    'assistant',
+    'scheduled',
+    'murph-managed',
+    'onboarding',
+    'murph-managed:onboarding-followup',
+  ],
+  title: 'Finish Murph onboarding follow-up',
+} as const
 
 const MURPH_PROACTIVE_HEALTH_OUTREACH_POLICY = [
   '- Proactive health outreach is not a report card. Send only when it leaves the member more informed, reassured, or capable—not merely aware that a number or behavior worsened.',
@@ -612,7 +658,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '- Skip items already covered in a prior ledger section.',
       '- Do not inspect raw health values solely to personalize product news, and do not open raw health records, uploaded documents, inbox attachments, provider payloads, transcripts, or raw notes solely to judge relevance.',
       '- Prefer user-fit, practical benefit, editorial priority, and novelty. Do not pad with weak matches; one strong item beats stretching to fill 2-3 slots.',
-      '- Use the canonical title, summary, URL, and tryIt fields from the feed, and verify each selected item has a concrete reason it may interest this user.',
+      '- Use the canonical title, summary, and tryIt fields from the feed, and verify each selected item has a concrete reason it may interest this user. Treat URL only as source metadata; never include it in the outbound note.',
       '',
       'Feature discovery kind:',
       `- Fetch the canonical JSON catalog once from ${MURPH_PRODUCT_ORIGIN}/api/feature-catalog.`,
@@ -630,9 +676,10 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '- Before sending, append one dated section to the ledger with the locked append surface, for example: `vault-cli knowledge append-section murph-product-notes YYYY-MM-DD --title "Murph product notes" --body <markdown>`. The appended section body must record only this run\'s kind and the chosen item ids; do not include reasons, user context, health details, raw user wording, provider data, or copied catalog/changelog text.',
       '- If `append-section` reports that the section already exists, another run already recorded today\'s note: read that section and, if its recorded kind and item ids still clear the current bar, compose and send a note for those exact items; otherwise return `{"kind":"skip","privateSummary":"No product note cleared the send bar."}`. Do not append again and do not switch kinds.',
       '- Keep this scheduled note text-only. Do not create, attach, or send images or response media.',
-      '- Write a brief, warm note with the selected items and why each may matter for this user. 2-3 short bullets or short paragraphs are enough.',
-      '- If the ledger page was missing before this run, open with one short sentence that Murph occasionally shares what is new or useful, then move directly into the items.',
-      '- Close by inviting the user to reply if anything sounds interesting, or if there is something else they wish Murph could do.',
+      '- The outbound note must be link-free. Never include URLs, Markdown links, bare domains, or link labels such as "read more".',
+      '- Use exactly one bullet per selected item. Each bullet must be one sentence and no more than 28 words after the bullet marker, including the title. State the benefit directly; omit optional color and repeated personalization, but preserve required prerequisites, availability limits, and approval or confirmation boundaries.',
+      '- If the ledger page was missing before this run, open with one sentence of no more than 10 words saying Murph occasionally shares what is new or useful.',
+      '- Close with one invitation sentence of no more than 12 words.',
       '- If sending nothing, return `{"kind":"skip","privateSummary":"No product note cleared the send bar."}` and do not append to the ledger.',
       '',
       'On a later user turn, call `murph.submit_product_feedback` for explicit product frustration, feature requests, interest in shipped changelog or catalog items, clear inferred workflow friction, or repeated Murph-observed product/tool friction. Start inferred summaries with `Speculative:` and assistant-observed summaries with `Murph-observed:`. Do not log vague low-confidence guesses. Use only structured kind, a concise product-only summary, and optional changelog item ids; do not include tags, topics, raw user wording, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads.',
@@ -663,7 +710,6 @@ export const MURPH_MANAGED_AUTOMATIONS = [
     ],
     instructions: [
       'Goal: consolidate durable user context from recent assistant/user conversation history into the canonical vault memory surface.',
-      '',
       'Read existing saved context with `vault-cli memory show --format json` first. Existing memory is for deduplication and update targeting only; it is never an independent source for new writes.',
       'Retrieval budget: use only the engine-supplied "Conversation evidence" section appended to this prompt. It already contains the bounded committed user and assistant conversation messages from the last 7 days; count assistant messages as support only when they record a completed user-approved action or directly clarify user context. If that section reports no messages, do not write any new memory.',
       'Write durable memory only with `vault-cli memory upsert` or `vault-cli memory update` when a concise, user-useful fact is clearly supported by the supplied conversation evidence and is not already represented.',
@@ -1373,7 +1419,53 @@ async function reconcileExistingOnboardingFollowupAutomation(input: {
     return { updated: true, yielded: false }
   }
 
-  if (!onboardingFollowupAutomationDefinitionChanged(existing)) {
+  const migrateRecurringSchedule = existing.schedule.kind !== 'at'
+  const vault = await loadVault({ vaultRoot: input.vaultRoot })
+  if (input.shouldYield?.() === true) {
+    return { updated: false, yielded: true }
+  }
+  const vaultId = typeof vault.metadata.vaultId === 'string'
+    ? vault.metadata.vaultId.trim()
+    : ''
+  const timeZone = normalizeIanaTimeZone(vault.metadata.timezone) ?? 'UTC'
+  let migratedSchedule: AutomationSchedule | undefined
+  if (migrateRecurringSchedule) {
+    const schedule = resolveMurphOnboardingFollowupSchedule(
+      vaultId || existing.automationId,
+    )
+    migratedSchedule = {
+      kind: 'at',
+      at: computeAssistantCronFirstRunAfterCurrentLocalDay({
+        after: input.now,
+        schedule: {
+          ...schedule,
+          timeZone,
+        },
+      }),
+    }
+  }
+  const scheduledAt =
+    migratedSchedule?.kind === 'at'
+      ? migratedSchedule.at
+      : existing.schedule.kind === 'at'
+        ? existing.schedule.at
+        : null
+  if (scheduledAt === null) {
+    throw new Error('Onboarding follow-up migration did not produce a one-shot.')
+  }
+  const activeUntil =
+    !migrateRecurringSchedule && typeof existing.activeUntil === 'string'
+      ? existing.activeUntil
+      : resolveMurphOnboardingFollowupActiveUntil({
+          scheduledAt,
+          timeZone,
+        })
+
+  if (
+    !migrateRecurringSchedule &&
+    existing.activeUntil === activeUntil &&
+    !onboardingFollowupAutomationDefinitionChanged(existing)
+  ) {
     return { updated: false, yielded: false }
   }
 
@@ -1381,10 +1473,14 @@ async function reconcileExistingOnboardingFollowupAutomation(input: {
     return { updated: false, yielded: true }
   }
   await patchAutomation({
+    activeUntil,
     continuityPolicy: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy,
     instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
     lookup: existing.automationId,
     now: input.now,
+    ...(migratedSchedule === undefined
+      ? {}
+      : { schedule: migratedSchedule }),
     summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
     tags: [...MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags],
     title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
@@ -1489,15 +1585,35 @@ function isManagedOnboardingFollowupAutomation(
   automation: AutomationRecord,
 ): boolean {
   return isCurrentManagedOnboardingFollowupAutomation(automation) ||
+    isPreviousSeededOnboardingFollowupAutomation(automation) ||
     isLegacySeededOnboardingFollowupAutomation(automation)
 }
 
 function isCurrentManagedOnboardingFollowupAutomation(
   automation: AutomationRecord,
 ): boolean {
-  const tags = new Set(automation.tags)
-  return tags.has('murph-managed') &&
-    tags.has('murph-managed:onboarding-followup')
+  return automation.slug === MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug &&
+    !onboardingFollowupAutomationDefinitionChanged(automation)
+}
+
+function isPreviousSeededOnboardingFollowupAutomation(
+  automation: AutomationRecord,
+): boolean {
+  return automation.slug === PREVIOUS_ONBOARDING_FOLLOWUP_AUTOMATION.slug &&
+    automation.title === PREVIOUS_ONBOARDING_FOLLOWUP_AUTOMATION.title &&
+    automation.summary === PREVIOUS_ONBOARDING_FOLLOWUP_AUTOMATION.summary &&
+    automation.continuityPolicy ===
+      PREVIOUS_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy &&
+    automation.instructions ===
+      PREVIOUS_ONBOARDING_FOLLOWUP_AUTOMATION.instructions &&
+    murphManagedAutomationValuesEqual(
+      automation.schedule,
+      PREVIOUS_ONBOARDING_FOLLOWUP_AUTOMATION.schedule,
+    ) &&
+    murphManagedAutomationValuesEqual(
+      automation.tags,
+      PREVIOUS_ONBOARDING_FOLLOWUP_AUTOMATION.tags,
+    )
 }
 
 function isLegacySeededOnboardingFollowupAutomation(

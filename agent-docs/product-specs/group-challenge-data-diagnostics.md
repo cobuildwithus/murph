@@ -65,10 +65,13 @@ eligible only after that read returns exact missing-grant evidence.
 
 Web answers one model-triggered read with every current member and every
 requested scope. Each cell distinguishes `not_granted`, `granted` plus
-`missing`, and `available`; a real zero remains available data. Profile labels
-come only from the separately granted profile snapshot. Authority, decryption,
-parsing, or bound failures return one typed `unavailable` result without shared
-records rather than falling back to cached data.
+`missing`, and `available`; a current grant additionally carries its canonical
+`grantedAt`, while a non-grant carries null. The timestamp is bounded
+authorization metadata, not proof of why the member granted access. A real zero
+remains available data. Profile labels come only from the separately granted
+profile snapshot. Authority, decryption, parsing, or bound failures return one
+typed `unavailable` result without shared records rather than falling back to
+cached data.
 
 That full Web result remains the authority boundary. The assistant-engine model
 adapter keys each retained projection by exact scope and maps the grant/data
@@ -295,16 +298,34 @@ first-party customize page. Native consent grants only the disclosed snapshot.
 A returned link grants nothing until the member accepts the first-party page.
 The standings message itself never grants permission.
 
-A semantic `status="ok"` from this scheduled adapter is an opaque handled link
-result. Murph includes the exact returned `joinUrl` once in the same substantive
-standings response; it does not imply that anyone accepted the page. For each
-participant whose same read showed `not_granted`, Murph records only that the
-offer action was handled for that exact participant and scope. An explicit
-sharing decline is also recorded and excludes that participant from the scope
-decision. The scoring scope is never offered merely because its grant exists
-but current data is missing. Apart from the exact missing diagnostic grant
-above, stale, disconnected, reconnect, and other sync/device cases never enter
-the permission path.
+Only a native access message whose canonical provider creation second falls
+inside the current send attempt adds `offeredAt` evidence. This matches Linq's
+accepted whole-second timestamp precision. An idempotent replay
+retains its original provider time, is still durably bound, and returns
+unavailable recency evidence instead of claiming a new adjacent message or
+minting a fresh window. When Web finds a covering active native offer instead
+of posting another card, assistant-engine exposes the returned first-party URL
+as `presentation="link"` so the model never claims another native message
+appeared. Standalone and scheduled links use the same presentation. Murph
+includes a returned `joinUrl` once in the substantive response, but link
+delivery has no canonical presentation receipt and therefore returns
+unavailable recency evidence. Neither presentation proves acceptance.
+
+For a finalized challenge, one recent exact-scope grant may count as the social
+entry action. The challenge page must record the exact participant and scope
+from a same-turn `not_granted` read, the newly posted native tool result's
+eligible `offeredAt`, unchanged metric/window/stakes, and a 24-hour deadline. A
+later exact-scope `grantedAt` counts only from `offeredAt` through that deadline.
+This is an intentional best-effort product rule: it narrows causal ambiguity
+but does not claim the grant is challenge-bound legal consent. Links, reused
+offers, and missing, older, late, unresolved, or terms-mismatched evidence
+require ordinary explicit challenge confirmation.
+For each participant whose same read showed `not_granted`, Murph still records
+that the offer action was handled so it is not retried. An explicit sharing
+decline excludes that participant from the scope decision. The scoring scope is
+never offered merely because its grant exists but current data is missing.
+Apart from the exact missing diagnostic grant above, stale, disconnected,
+reconnect, and other sync/device cases never enter the permission path.
 
 ## Message shape
 
@@ -323,6 +344,14 @@ usable metric is absent, it says the cause is unverified. It does not repeat
 speculative causes or expose private troubleshooting in the room.
 
 ## Deployment compatibility
+
+The additive recency fields use a smaller consumer-first release on top of the
+established cut: deploy the Cloudflare parser and runner first, accepting
+missing `offeredAt`, offer-state, and `grantedAt` as ineligible evidence. Then
+deploy Web to emit the fields. Older strict consumers cannot accept the new
+keys, so Web must not lead this pair. Missing evidence always falls back to
+ordinary challenge confirmation; no compatibility flag or second state owner
+is required.
 
 This is a consumer-first hard cut:
 
@@ -398,8 +427,20 @@ cross-member fanout, polling, a scheduler, or persisted rollout state.
   neither a recorded decline nor a prior handled offer action.
 - Missing or stale synced data, a disconnected source, or `needs-reconnect`
   produces ordinary-language recovery guidance and no access offer.
-- A scheduled link result exposes only the exact first-party `joinUrl`; it does
-  not prove acceptance. Murph records only that the participant-and-scope offer
-  action was handled so it is not retried.
+- A scheduled link result exposes only the exact first-party `joinUrl`; it has
+  unavailable recency evidence and does not prove acceptance. Murph records
+  only that the participant-and-scope offer action was handled so it is not
+  retried.
+- A covering active native offer returns a freshly presentable link instead of
+  a false claim that another native message was posted.
+- A provider-idempotent replay outside the current send interval keeps its
+  durable message binding but cannot establish challenge-entry recency.
+- Same-provider-second chronology is an accepted best-effort ambiguity; no
+  challenge-bound or provider-created-versus-replayed claim is made from it.
+- A participant whose exact scope was `not_granted` becomes `in` only after a
+  newly posted native offer when the later exact `grantedAt` falls inside the
+  recorded eligible 24-hour window and the challenge terms did not change.
+- Missing rollout evidence, an old or late grant, or changed terms preserves the
+  data grant but requires ordinary challenge confirmation.
 - No output exposes provider keys, account/device identifiers, raw errors,
   health values, or private 1:1 context.

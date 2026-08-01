@@ -34,6 +34,7 @@ import { createHostedWebRuntimeLatencyTracePort } from "./latency-trace-port.ts"
 import { createHostedWebRuntimeLogPort } from "./log-port.ts";
 import { createHostedWebVaultSharePort } from "./vault-share-port.ts";
 import { createHostedWebPhoneCallPort } from "./phone-calls-port.ts";
+import { createHostedWebPhysicalNotePort } from "./physical-notes-port.ts";
 import { createHostedWebMailboxPort } from "./mailbox-port.ts";
 import {
   createCloudflareHostedInternalFetch,
@@ -51,6 +52,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
   boundUserId: string;
   commitTimeoutMs?: number | null;
   fetchImpl?: typeof fetch;
+  physicalNotesEnabled?: boolean | null;
   privateMediaDeliveryOrigin?: string | null;
   preparedSnapshotRestore?: HostedWorkspaceSnapshotPreparedRestore | null;
   providerFetchBaseUrlSource?: Readonly<Record<string, unknown>> | null;
@@ -159,6 +161,16 @@ export function buildHostedExecutionRuntimePlatform(input: {
             timeoutMs,
             transport,
           }),
+          ...(input.physicalNotesEnabled === true
+            ? {
+                physicalNotes: createHostedWebPhysicalNotePort({
+                  boundUserId: input.boundUserId,
+                  fetchImpl,
+                  timeoutMs,
+                  transport,
+                }),
+              }
+            : {}),
           phoneCalls: createHostedWebPhoneCallPort({
             boundUserId: input.boundUserId,
             fetchImpl,

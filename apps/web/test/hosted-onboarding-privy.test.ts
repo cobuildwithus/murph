@@ -36,6 +36,7 @@ import {
   requireHostedPrivyIdentity,
   requireHostedPrivyPhoneAuthConfig,
   remapHostedPrivyCompletionLagError,
+  readHostedPrivyUserByIdIfExists,
   verifyHostedPrivyIdentityToken,
 } from "@/src/lib/hosted-onboarding/privy";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -57,6 +58,107 @@ describe("hosted Privy verification", () => {
     mocks.runtimeEnv.privyAppId = "cm_app_123";
     mocks.runtimeEnv.privyAppSecret = "app_secret_123";
     mocks.runtimeEnv.privyVerificationKey = "line-1\\nline-2";
+  });
+
+  it("treats a non-retryable Privy 404 as proof that a transferred source user is gone", async () => {
+    const notFoundError = {
+      headers: new Headers(),
+      status: 404,
+    };
+    const getUser = vi.fn().mockRejectedValue(notFoundError);
+    (
+      globalThis as typeof globalThis & {
+        __murphHostedPrivyManagementClient?: unknown;
+      }
+    ).__murphHostedPrivyManagementClient = {
+      users: () => ({
+        _get: getUser,
+      }),
+    };
+
+    await expect(readHostedPrivyUserByIdIfExists(
+      "did:privy:user_transferred",
+      {
+        maxRetries: 0,
+        timeout: 100,
+      },
+    )).resolves.toBeNull();
+  });
+
+  it("fails closed when Privy marks a 404 as retryable", async () => {
+    const getUser = vi.fn().mockRejectedValue({
+      headers: new Headers({
+        "x-should-retry": "true",
+      }),
+      status: 404,
+    });
+    (
+      globalThis as typeof globalThis & {
+        __murphHostedPrivyManagementClient?: unknown;
+      }
+    ).__murphHostedPrivyManagementClient = {
+      users: () => ({
+        _get: getUser,
+      }),
+    };
+
+    await expect(readHostedPrivyUserByIdIfExists(
+      "did:privy:user_transferred",
+      {
+        maxRetries: 0,
+        timeout: 100,
+      },
+    )).rejects.toMatchObject({
+      code: "PRIVY_USER_LOOKUP_FAILED",
+      details: {
+        providerRequestIdPresent: false,
+        statusCode: 404,
+        type: "provider_marked_retryable",
+      },
+      retryable: true,
+    });
+  });
+
+  it.each([
+    {
+      error: {
+        headers: new Headers(),
+        status: 503,
+      },
+      label: "a provider failure",
+    },
+    {
+      error: new Error("connection failed"),
+      label: "a connection failure",
+    },
+    {
+      error: {
+        status: 404,
+      },
+      label: "a malformed 404",
+    },
+  ])("fails closed for $label", async ({ error }) => {
+    const getUser = vi.fn().mockRejectedValue(error);
+    (
+      globalThis as typeof globalThis & {
+        __murphHostedPrivyManagementClient?: unknown;
+      }
+    ).__murphHostedPrivyManagementClient = {
+      users: () => ({
+        _get: getUser,
+      }),
+    };
+
+    await expect(readHostedPrivyUserByIdIfExists(
+      "did:privy:user_transferred",
+      {
+        maxRetries: 0,
+        timeout: 100,
+      },
+    )).rejects.toMatchObject({
+      code: "PRIVY_USER_LOOKUP_FAILED",
+      retryable: true,
+    });
   });
 
   it("builds hosted session state without projecting provider custom metadata", () => {

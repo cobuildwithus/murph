@@ -1036,6 +1036,53 @@ test("browser-vault provider clears a fresh ready client when window focus finds
   await rendered.cleanup();
 });
 
+test("browser-vault provider keeps admitted content visible during focus revalidation", async () => {
+  const ref = createReplicaRef();
+  const focusResponse = createDeferred<Response>();
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(jsonResponse({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: ref,
+      state: "ready",
+    }))
+    .mockImplementationOnce(() => focusResponse.promise);
+
+  installBrowserVaultCryptoMocks();
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createAuthenticatedBrowserVaultElement(createElement(BrowserVaultStatusProbe)),
+    { requireButton: false },
+  );
+
+  await waitForText(rendered.container, `ready:${ref.dataVersion}`);
+  await act(async () => {
+    rendered.window.dispatchEvent(new rendered.window.Event("focus"));
+  });
+  await waitForCondition(
+    () => fetchMock.mock.calls.length === 2,
+    "focus browser-vault revalidation",
+  );
+
+  assert.equal(rendered.container.textContent, `ready:${ref.dataVersion}`);
+
+  focusResponse.resolve(jsonResponse({
+    encryptedReplica: null,
+    memberId: "member_123",
+    replicaAad: null,
+    replicaKeyEnvelope: null,
+    replicaRef: ref,
+    state: "not_modified",
+  }));
+
+  await waitForText(rendered.container, `ready:${ref.dataVersion}`);
+  assert.equal(mocks.unwrapHostedBrowserSessionKey.mock.calls.length, 1);
+
+  await rendered.cleanup();
+});
+
 test("browser-vault provider keeps access-denied recovery pages mounted without redirecting", async () => {
   const ref = createReplicaRef();
   const fetchMock = vi.fn()
@@ -1436,6 +1483,55 @@ test("browser-vault provider reuses an in-flight load for repeated refreshes", a
   await rendered.cleanup();
 });
 
+test("a background refresh keeps the admitted vault visible while it checks for changes", async () => {
+  const ref = createReplicaRef();
+  const backgroundResponse = createDeferred<Response>();
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(jsonResponse({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: ref,
+      state: "ready",
+    }))
+    .mockImplementationOnce(() => backgroundResponse.promise);
+
+  installBrowserVaultCryptoMocks();
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createAuthenticatedBrowserVaultElement(
+      createElement(BrowserVaultBackgroundRefreshProbe),
+    ),
+    { requireButton: false },
+  );
+
+  await waitForText(rendered.container, `ready:${ref.dataVersion}`);
+  await act(async () => {
+    rendered.button?.dispatchEvent(new Event("click", { bubbles: true }));
+  });
+  await waitForCondition(
+    () => fetchMock.mock.calls.length === 2,
+    "background browser-vault refresh",
+  );
+
+  assert.equal(rendered.container.textContent, `ready:${ref.dataVersion}`);
+
+  backgroundResponse.resolve(jsonResponse({
+    encryptedReplica: null,
+    memberId: "member_123",
+    replicaAad: null,
+    replicaKeyEnvelope: null,
+    replicaRef: ref,
+    state: "not_modified",
+  }));
+
+  await waitForText(rendered.container, `ready:${ref.dataVersion}`);
+  assert.equal(mocks.unwrapHostedBrowserSessionKey.mock.calls.length, 1);
+
+  await rendered.cleanup();
+});
+
 test("browser-vault selector returns projected data only after the client is ready", async () => {
   const response = createDeferred<Response>();
   const fetchMock = vi.fn(() => response.promise);
@@ -1830,6 +1926,16 @@ function BrowserVaultStatusProbe({ onClick }: { onClick?: () => void }) {
     "button",
     { onClick: onClick ?? (() => void vault.refresh()) },
     `${vault.status}:${vault.error ?? vault.dataVersion ?? "none"}`,
+  );
+}
+
+function BrowserVaultBackgroundRefreshProbe() {
+  const vault = useBrowserVault();
+
+  return createElement(
+    "button",
+    { onClick: () => void vault.refresh({ background: true }) },
+    `${vault.status}:${vault.dataVersion ?? "none"}`,
   );
 }
 

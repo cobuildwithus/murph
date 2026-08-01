@@ -128,6 +128,7 @@ import {
   type HostedRuntimeAssistantConfigurationToolResponse,
   type HostedRuntimeAssistantConfigurationUpdateStatus,
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
+  hostedRuntimeLinqProviderErrorMessageForCode,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_GRANTS_MAX,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
@@ -2262,6 +2263,7 @@ function parseHostedRuntimeGroupSharedProjection(
     projection,
     new Set([
       "dataStatus",
+      "grantedAt",
       "grantStatus",
       "projectionScope",
       "projectionScopeKey",
@@ -2294,6 +2296,24 @@ function parseHostedRuntimeGroupSharedProjection(
   const dataStatus = requireString(projection.dataStatus, `${label}.dataStatus`);
   if (dataStatus !== "available" && dataStatus !== "missing") {
     throw new TypeError(`${label}.dataStatus is invalid.`);
+  }
+  const grantedAt = projection.grantedAt === undefined
+    ? undefined
+    : projection.grantedAt === null
+      ? null
+      : parseHostedRuntimeGroupCanonicalTimestamp(
+          projection.grantedAt,
+          `${label}.grantedAt`,
+        );
+  if (
+    grantStatus === "not_granted"
+    && grantedAt !== undefined
+    && grantedAt !== null
+  ) {
+    throw new TypeError(`${label} not_granted projections cannot have grantedAt.`);
+  }
+  if (grantStatus === "granted" && grantedAt === null) {
+    throw new TypeError(`${label} granted projections cannot have null grantedAt.`);
   }
 
   const rawRecords = requireArray(projection.records, `${label}.records`);
@@ -2344,11 +2364,24 @@ function parseHostedRuntimeGroupSharedProjection(
 
   return {
     dataStatus,
+    ...(grantedAt === undefined ? {} : { grantedAt }),
     grantStatus,
     projectionScope,
     projectionScopeKey,
     records,
   };
+}
+
+function parseHostedRuntimeGroupCanonicalTimestamp(
+  value: unknown,
+  label: string,
+): string {
+  const timestamp = requireString(value, label);
+  const parsed = Date.parse(timestamp);
+  if (!Number.isFinite(parsed) || new Date(parsed).toISOString() !== timestamp) {
+    throw new TypeError(`${label} must be a canonical UTC timestamp.`);
+  }
+  return timestamp;
 }
 
 function parseHostedRuntimeGroupMemberAskResult(
@@ -2742,7 +2775,7 @@ export function parseHostedRuntimeGroupToolResponse(
             status,
             usage: {
               fundingNeeded: capacityState !== "healthy",
-              fundingUrl: capacityState === "healthy" ? null : fundingUrl,
+              fundingUrl,
               sponsorshipStatus: "not_sponsored",
             },
           },
@@ -2991,13 +3024,20 @@ export function parseHostedRuntimeGroupToolResponse(
     const result = requireObject(record.result, "Hosted runtime group tool create_join_link response result");
     const status = requireString(result.status, "Hosted runtime group tool create_join_link response status");
     if (status === "ok") {
-      assertAllowedObjectKeys(result, new Set(["status", "group", "joinUrl"]), "Hosted runtime group tool create_join_link ok response result");
+      assertAllowedObjectKeys(result, new Set(["status", "group", "joinUrl", "offeredAt"]), "Hosted runtime group tool create_join_link ok response result");
+      const offeredAt = result.offeredAt === undefined
+        ? undefined
+        : parseHostedRuntimeGroupCanonicalTimestamp(
+            result.offeredAt,
+            "Hosted runtime group tool create_join_link offeredAt",
+          );
       return {
         action,
         result: {
           status,
           group: parseHostedRuntimeGroupSummary(result.group),
           joinUrl: requireString(result.joinUrl, "Hosted runtime group tool create_join_link joinUrl"),
+          ...(offeredAt === undefined ? {} : { offeredAt }),
         },
       };
     }
@@ -3046,13 +3086,43 @@ export function parseHostedRuntimeGroupToolResponse(
     const result = requireObject(record.result, "Hosted runtime group tool post_join_offer response result");
     const status = requireString(result.status, "Hosted runtime group tool post_join_offer response status");
     if (status === "sent") {
-      assertAllowedObjectKeys(result, new Set(["status", "group", "joinUrl"]), "Hosted runtime group tool post_join_offer sent response result");
+      assertAllowedObjectKeys(result, new Set(["status", "group", "joinUrl", "offeredAt", "offerState"]), "Hosted runtime group tool post_join_offer sent response result");
+      const offeredAt = result.offeredAt === undefined
+        ? undefined
+        : parseHostedRuntimeGroupCanonicalTimestamp(
+            result.offeredAt,
+            "Hosted runtime group tool post_join_offer offeredAt",
+          );
+      const offerState = result.offerState === undefined
+        ? undefined
+        : requireString(
+            result.offerState,
+            "Hosted runtime group tool post_join_offer offerState",
+          );
+      if (
+        offerState !== undefined
+        && offerState !== "existing"
+        && offerState !== "posted"
+      ) {
+        throw new TypeError(
+          "Hosted runtime group tool post_join_offer offerState is invalid.",
+        );
+      }
+      if (offeredAt !== undefined && offerState === undefined) {
+        throw new TypeError(
+          "Hosted runtime group tool post_join_offer offeredAt requires offerState.",
+        );
+      }
       return {
         action,
         result: {
           status,
           group: parseHostedRuntimeGroupSummary(result.group),
           joinUrl: requireString(result.joinUrl, "Hosted runtime group tool post_join_offer joinUrl"),
+          ...(offerState === undefined ? {} : {
+            offerState,
+            ...(offeredAt === undefined ? {} : { offeredAt }),
+          }),
         },
       };
     }
@@ -3103,12 +3173,64 @@ export function parseHostedRuntimeGroupToolResponse(
       return { action, result: { status } };
     }
     if (status === "unavailable") {
-      assertAllowedObjectKeys(result, new Set(["status", "unavailableReason"]), "Hosted runtime group tool set_chat_avatar unavailable response result");
+      assertAllowedObjectKeys(
+        result,
+        new Set([
+          "status",
+          "unavailableReason",
+          "providerErrorCode",
+        ]),
+        "Hosted runtime group tool set_chat_avatar unavailable response result",
+      );
+      const providerErrorCode = result.providerErrorCode === undefined
+        ? undefined
+        : requireNumber(
+            result.providerErrorCode,
+            "Hosted runtime group tool set_chat_avatar providerErrorCode",
+          );
+      if (
+        providerErrorCode !== undefined
+        && (
+          !Number.isSafeInteger(providerErrorCode)
+          || providerErrorCode < 1_000
+          || providerErrorCode > 9_999
+        )
+      ) {
+        throw new TypeError(
+          "Hosted runtime group tool set_chat_avatar providerErrorCode must be a four-digit integer.",
+        );
+      }
+      const expectedProviderErrorMessage =
+        hostedRuntimeLinqProviderErrorMessageForCode(providerErrorCode);
+      if (
+        providerErrorCode !== undefined
+        && expectedProviderErrorMessage === null
+      ) {
+        throw new TypeError(
+          "Hosted runtime group tool set_chat_avatar providerErrorCode must be allowlisted.",
+        );
+      }
+      const unavailableReason = requireString(
+        result.unavailableReason,
+        "Hosted runtime group unavailableReason",
+      );
+      if (
+        unavailableReason !== "provider_unavailable"
+        && providerErrorCode !== undefined
+      ) {
+        throw new TypeError(
+          "Hosted runtime group tool set_chat_avatar provider diagnostics require provider_unavailable.",
+        );
+      }
       return {
         action,
         result: {
           status,
-          unavailableReason: requireString(result.unavailableReason, "Hosted runtime group unavailableReason"),
+          unavailableReason,
+          ...(providerErrorCode === undefined ? {} : { providerErrorCode }),
+          ...(expectedProviderErrorMessage === null
+            ? {}
+            : { providerErrorMessage: expectedProviderErrorMessage }),
         },
       };
     }

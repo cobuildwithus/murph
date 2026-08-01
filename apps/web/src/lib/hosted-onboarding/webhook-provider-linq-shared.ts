@@ -377,6 +377,7 @@ export function buildConversationHomeRedirectResponse(input: {
   homeRecipientPhone: string;
   memberId: string;
   messageId: string;
+  occurredAt: string;
   sourceEventId: string;
 }): HostedOnboardingLinqDirectPlan {
   return buildActiveMemberDirectPlan({
@@ -387,6 +388,7 @@ export function buildConversationHomeRedirectResponse(input: {
         // receipt sends do not depend on routing still being present later.
         homeRecipientPhone: input.homeRecipientPhone,
         memberId: input.memberId,
+        occurredAt: input.occurredAt,
         replyToMessageId: input.messageId,
         sourceEventId: input.sourceEventId,
         template: "conversation_home_redirect",

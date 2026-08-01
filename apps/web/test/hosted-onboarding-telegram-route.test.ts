@@ -5,6 +5,7 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 const mocks = vi.hoisted(() => ({
   after: vi.fn(),
   handleHostedOnboardingTelegramWebhook: vi.fn(),
+  handleHostedTelegramGroupReactionWebhook: vi.fn(),
   sendHostedTelegramTextMessage: vi.fn(),
 }));
 
@@ -19,6 +20,11 @@ vi.mock("next/server", async () => {
 
 vi.mock("@/src/lib/hosted-onboarding/webhook-service", () => ({
   handleHostedOnboardingTelegramWebhook: mocks.handleHostedOnboardingTelegramWebhook,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/telegram-group-reactions", () => ({
+  handleHostedTelegramGroupReactionWebhook:
+    mocks.handleHostedTelegramGroupReactionWebhook,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/telegram-client", async () => {
@@ -48,6 +54,7 @@ describe("hosted onboarding Telegram webhook route", () => {
     mocks.handleHostedOnboardingTelegramWebhook.mockResolvedValue({
       ok: true,
     });
+    mocks.handleHostedTelegramGroupReactionWebhook.mockResolvedValue(null);
     mocks.sendHostedTelegramTextMessage.mockResolvedValue(undefined);
   });
 
@@ -55,12 +62,11 @@ describe("hosted onboarding Telegram webhook route", () => {
     expect(hostedOnboardingTelegramRoute).not.toHaveProperty("GET");
   });
 
-  it("forwards the public request signal into the hosted Telegram webhook service", async () => {
+  it("forwards ordinary updates into the hosted Telegram message service", async () => {
+    const rawBody = JSON.stringify({ ok: true });
     const request = new Request("https://join.example.test/api/hosted-onboarding/telegram/webhook", {
       method: "POST",
-      body: JSON.stringify({
-        ok: true,
-      }),
+      body: rawBody,
       headers: {
         "x-telegram-bot-api-secret-token": "telegram-secret",
       },
@@ -69,14 +75,55 @@ describe("hosted onboarding Telegram webhook route", () => {
     const response = await hostedOnboardingTelegramRoute.POST(request);
 
     expect(response.status).toBe(202);
+    expect(mocks.handleHostedTelegramGroupReactionWebhook).toHaveBeenCalledWith({
+      rawBody,
+      scheduleAfterResponse: expect.any(Function),
+      signal: request.signal,
+    });
     expect(mocks.handleHostedOnboardingTelegramWebhook).toHaveBeenCalledWith({
-      rawBody: JSON.stringify({
-        ok: true,
-      }),
+      rawBody,
       scheduleAfterResponse: expect.any(Function),
       secretToken: "telegram-secret",
       signal: request.signal,
     });
+  });
+
+  it("handles reaction updates durably without passing them through reply planning", async () => {
+    const rawBody = JSON.stringify({
+      message_reaction: {
+        chat: { id: -100123, type: "group" },
+        date: 1_785_000_000,
+        message_id: 17,
+        new_reaction: [{ emoji: "😂", type: "emoji" }],
+        old_reaction: [],
+      },
+      update_id: 123,
+    });
+    mocks.handleHostedTelegramGroupReactionWebhook.mockResolvedValueOnce({
+      ok: true,
+      reason: "durable-telegram-group-reaction",
+    });
+    const request = new Request("https://join.example.test/api/hosted-onboarding/telegram/webhook", {
+      method: "POST",
+      body: rawBody,
+      headers: {
+        "x-telegram-bot-api-secret-token": "telegram-secret",
+      },
+    });
+
+    const response = await hostedOnboardingTelegramRoute.POST(request);
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      reason: "durable-telegram-group-reaction",
+    });
+    expect(mocks.handleHostedTelegramGroupReactionWebhook).toHaveBeenCalledWith({
+      rawBody,
+      scheduleAfterResponse: expect.any(Function),
+      signal: request.signal,
+    });
+    expect(mocks.handleHostedOnboardingTelegramWebhook).not.toHaveBeenCalled();
   });
 
   it("maps visible Telegram provider refusal through the public route", async () => {
@@ -156,6 +203,7 @@ describe("hosted onboarding Telegram webhook route", () => {
       const response = await hostedOnboardingTelegramRoute.POST(request);
 
       expect(response.status).toBe(401);
+      expect(mocks.handleHostedTelegramGroupReactionWebhook).not.toHaveBeenCalled();
       expect(mocks.handleHostedOnboardingTelegramWebhook).not.toHaveBeenCalled();
       await expect(response.json()).resolves.toEqual({
         error: {
@@ -170,7 +218,7 @@ describe("hosted onboarding Telegram webhook route", () => {
     }
   });
 
-  it("rejects oversized Telegram webhook bodies before calling the service", async () => {
+  it("rejects oversized Telegram webhook bodies before calling either service", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const request = new Request("https://join.example.test/api/hosted-onboarding/telegram/webhook", {
@@ -185,6 +233,7 @@ describe("hosted onboarding Telegram webhook route", () => {
       const response = await hostedOnboardingTelegramRoute.POST(request);
 
       expect(response.status).toBe(413);
+      expect(mocks.handleHostedTelegramGroupReactionWebhook).not.toHaveBeenCalled();
       expect(mocks.handleHostedOnboardingTelegramWebhook).not.toHaveBeenCalled();
       await expect(response.json()).resolves.toEqual({
         error: {

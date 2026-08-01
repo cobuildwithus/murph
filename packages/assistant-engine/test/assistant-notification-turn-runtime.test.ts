@@ -12,6 +12,10 @@ import type {
 import { createAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import {
+  AVAILABILITY_CONFLICT_BLOCK_END,
+  AVAILABILITY_CONFLICT_BLOCK_START,
+} from '@murphai/core'
 import type { AssistantChannelAdapter } from '../src/assistant/channel-adapters.ts'
 import type { CodexThreadIdentity } from '../src/assistant/codex-thread-route.ts'
 import type {
@@ -40,6 +44,10 @@ import {
 import {
   MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
 } from '../src/assistant/onboarding-goal-checkin-automation.ts'
+import {
+  completeAssistantOnboarding,
+  readAssistantOnboardingState,
+} from '../src/assistant/onboarding-state.ts'
 
 type CodexAssistantTarget = Extract<
   AssistantSession['target'],
@@ -77,6 +85,23 @@ const CODEX_MODEL_PROVIDER_CONFIG = {
   wireApi: 'responses' as const,
 }
 
+const AVAILABILITY_BASE_INSTRUCTIONS = [
+  'Send one flexible reminder.',
+  'Availability conflict policy: skip-when-busy',
+  'Availability source policy: calendar-only',
+  'Availability calendar account: googlecalendar / calendar-account',
+].join('\n')
+const AVAILABILITY_CONFLICT_INSTRUCTIONS = [
+  AVAILABILITY_BASE_INSTRUCTIONS,
+  '',
+  AVAILABILITY_CONFLICT_BLOCK_START,
+  'Availability conflict snapshot:',
+  '- generatedAt: 2026-07-30T03:00:00.000Z',
+  '- expiresAt: 2026-08-06T03:00:00.000Z',
+  '- 2026-07-30T14:00:00.000Z / 2026-07-30T15:00:00.000Z',
+  AVAILABILITY_CONFLICT_BLOCK_END,
+].join('\n')
+
 afterEach(() => {
   vi.resetModules()
   vi.unstubAllEnvs()
@@ -95,9 +120,99 @@ afterEach(() => {
   vi.doUnmock('../src/assistant/service-turn-routes.js')
   vi.doUnmock('../src/assistant/turns.js')
   vi.doUnmock('../src/assistant/channel-adapters.js')
+  vi.doUnmock('../src/assistant/channel-typing.js')
   vi.doUnmock('../src/assistant/turn-lock.js')
   vi.doUnmock('../src/assistant/response-media.js')
   vi.doUnmock('../src/assistant/first-contact.js')
+})
+
+test('sendAssistantNotificationLocal deterministically skips only an authorized busy occurrence before provider delivery', async () => {
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'summary',
+      text: 'This must not be delivered.',
+    }),
+  })
+  const {
+    deliverMessage,
+    mocks,
+    sendAssistantNotificationLocal,
+  } = await loadNotificationTurnHarness({
+    providerResult,
+    turnId: 'turn-availability-conflict-skip',
+  })
+  const result = await sendAssistantNotificationLocal({
+    executionContext: { hosted: null },
+    instructions: AVAILABILITY_CONFLICT_INSTRUCTIONS,
+    scheduledAutomationScheduleKind: 'dailyLocal',
+    scheduledOccurrenceAt: '2026-07-30T14:30:00.000Z',
+    vault: '/vaults/availability-conflict-skip',
+  })
+
+  expect(result).toMatchObject({
+    decision: {
+      kind: 'skip',
+    },
+    response: null,
+  })
+  expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
+  expect(deliverMessage).not.toHaveBeenCalled()
+})
+
+test.each([
+  {
+    caseName: 'a non-overlapping recurring occurrence',
+    instructions: AVAILABILITY_CONFLICT_INSTRUCTIONS,
+    occurrenceAt: '2026-07-30T15:30:00.000Z',
+    scheduleKind: 'dailyLocal' as const,
+  },
+  {
+    caseName: 'an overlapping exact-time occurrence',
+    instructions: AVAILABILITY_CONFLICT_INSTRUCTIONS,
+    occurrenceAt: '2026-07-30T14:30:00.000Z',
+    scheduleKind: 'at' as const,
+  },
+  {
+    caseName: 'malformed recurring evidence',
+    instructions: AVAILABILITY_CONFLICT_INSTRUCTIONS.replace(
+      AVAILABILITY_CONFLICT_BLOCK_END,
+      'incomplete evidence',
+    ),
+    occurrenceAt: '2026-07-30T14:30:00.000Z',
+    scheduleKind: 'dailyLocal' as const,
+  },
+])('sendAssistantNotificationLocal keeps evidence out of the provider for $caseName', async ({
+  instructions,
+  occurrenceAt,
+  scheduleKind,
+}) => {
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'summary',
+      text: 'Send the reminder.',
+    }),
+  })
+  const { mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: `turn-availability-evidence-${scheduleKind}`,
+    })
+
+  await sendAssistantNotificationLocal({
+    executionContext: { hosted: null },
+    instructions,
+    scheduledAutomationScheduleKind: scheduleKind,
+    scheduledOccurrenceAt: occurrenceAt,
+    vault: '/vaults/availability-evidence',
+  })
+
+  const providerPrompt = mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]
+    .input.prompt
+  expect(providerPrompt).toBe(AVAILABILITY_BASE_INSTRUCTIONS)
+  expect(providerPrompt).not.toContain(AVAILABILITY_CONFLICT_BLOCK_START)
+  expect(providerPrompt).not.toContain('2026-07-30T14:00:00.000Z')
 })
 
 test('sendAssistantNotificationLocal persists the turn before outbound delivery and forwards the dedupe token', async () => {
@@ -4474,6 +4589,16 @@ describe('parseAssistantNotificationDecision', () => {
         'Assistant notification turn returned an invalid decision object.',
       ),
     )
+    expect(() =>
+      parseAssistantNotificationDecision(
+        '{"kind":"skip","unexpected":"value","privateSummary":"No action"}',
+      ),
+    ).toThrowError(
+      new VaultCliError(
+        'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+        'Assistant notification turn returned an invalid decision object.',
+      ),
+    )
   })
 })
 
@@ -4521,6 +4646,306 @@ function isTraceEventWithRawType(
     (rawEvent as { type?: unknown }).type === type
   )
 }
+
+test('sendAssistantNotificationLocal treats a background skip as an ordinary notification decision', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'onboarding-followup-completion-'))
+  try {
+    const providerResult = createProviderResult({
+      rawEvents: [
+        createCodexCommandCompletedEvent(
+          'vault-cli batch --compact --format json --command \'["assistant","onboarding","complete","--reason","user_answered"]\'',
+        ),
+      ],
+      response: JSON.stringify({
+        kind: 'skip',
+        privateSummary: 'Onboarding completion was attempted.',
+      }),
+    })
+    const {
+      deliverMessage,
+      mocks,
+      sendAssistantNotificationLocal,
+    } = await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-onboarding-followup-completion',
+    })
+
+    await expect(sendAssistantNotificationLocal({
+      instructions: 'Complete onboarding or make one final continuation decision.',
+      scheduledOccurrenceAt: '2026-04-09T17:47:00.000Z',
+      vault,
+    })).resolves.toMatchObject({
+      decision: {
+        kind: 'skip',
+      },
+      response: null,
+    })
+    expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledOnce()
+    expect(deliverMessage).not.toHaveBeenCalled()
+  } finally {
+    await rm(vault, { force: true, recursive: true })
+  }
+})
+
+test('sendAssistantNotificationLocal does not mutate onboarding for a background skip', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'onboarding-followup-owned-completion-'))
+  try {
+    const providerResult = createProviderResult({
+      response: JSON.stringify({
+        kind: 'skip',
+        privateSummary: 'The saved evidence completes onboarding.',
+      }),
+    })
+    const {
+      deliverMessage,
+      mocks,
+      sendAssistantNotificationLocal,
+    } = await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-onboarding-followup-owned-completion',
+    })
+    const beforeCommit = vi.fn(async () => {
+      await expect(readAssistantOnboardingState(vault)).resolves.toMatchObject({
+        status: 'open',
+      })
+    })
+
+    await expect(sendAssistantNotificationLocal({
+      beforeCommit,
+      instructions: 'Complete onboarding or make one final continuation decision.',
+      scheduledOccurrenceAt: '2026-04-09T18:29:00.000Z',
+      vault,
+    })).resolves.toMatchObject({
+      decision: {
+        kind: 'skip',
+      },
+      response: null,
+    })
+    await expect(readAssistantOnboardingState(vault)).resolves.toMatchObject({
+      status: 'open',
+    })
+    expect(beforeCommit).toHaveBeenCalledOnce()
+    expect(mocks.resolveAssistantSessionForMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.not.objectContaining({
+          notificationDecisionProfile: expect.anything(),
+        }),
+      }),
+    )
+    expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledOnce()
+    expect(deliverMessage).not.toHaveBeenCalled()
+  } finally {
+    await rm(vault, { force: true, recursive: true })
+  }
+})
+
+test('sendAssistantNotificationLocal does not complete onboarding after provider work is aborted', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'onboarding-followup-aborted-completion-'))
+  try {
+    const abortController = new AbortController()
+    const abortError = new VaultCliError(
+      'ASSISTANT_CRON_FOREGROUND_YIELDED',
+      'Assistant cron yielded to fresh foreground input.',
+    )
+    const providerResult = createProviderResult({
+      response: JSON.stringify({
+        kind: 'skip',
+        privateSummary: 'The stale result would complete onboarding.',
+      }),
+    })
+    const {
+      deliverMessage,
+      mocks,
+      sendAssistantNotificationLocal,
+    } = await loadNotificationTurnHarness({
+      onExecuteCodexTurnWithRecovery: async () => {
+        abortController.abort(abortError)
+        return {
+          kind: 'succeeded',
+          providerTurn: providerResult,
+        }
+      },
+      providerResult,
+      turnId: 'turn-onboarding-followup-aborted-completion',
+    })
+
+    await expect(sendAssistantNotificationLocal({
+      abortSignal: abortController.signal,
+      instructions: 'Make one final continuation decision.',
+      vault,
+    })).rejects.toBe(abortError)
+
+    await expect(readAssistantOnboardingState(vault)).resolves.toMatchObject({
+      status: 'open',
+    })
+    expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+    expect(deliverMessage).not.toHaveBeenCalled()
+  } finally {
+    await rm(vault, { force: true, recursive: true })
+  }
+})
+
+test('sendAssistantNotificationLocal does not complete onboarding when commit authority rejects', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'onboarding-followup-rejected-completion-'))
+  try {
+    const authorityError = new VaultCliError(
+      'ASSISTANT_CRON_CANONICAL_SOURCE_INVALIDATED',
+      'Scheduled onboarding source expired before commit.',
+    )
+    const providerResult = createProviderResult({
+      response: JSON.stringify({
+        kind: 'skip',
+        privateSummary: 'The expired result would complete onboarding.',
+      }),
+    })
+    const {
+      deliverMessage,
+      mocks,
+      sendAssistantNotificationLocal,
+    } = await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-onboarding-followup-rejected-completion',
+    })
+    const beforeCommit = vi.fn(async () => {
+      throw authorityError
+    })
+
+    await expect(sendAssistantNotificationLocal({
+      beforeCommit,
+      instructions: 'Make one final continuation decision.',
+      vault,
+    })).rejects.toBe(authorityError)
+
+    await expect(readAssistantOnboardingState(vault)).resolves.toMatchObject({
+      status: 'open',
+    })
+    expect(beforeCommit).toHaveBeenCalledOnce()
+    expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+    expect(deliverMessage).not.toHaveBeenCalled()
+  } finally {
+    await rm(vault, { force: true, recursive: true })
+  }
+})
+
+test('sendAssistantNotificationLocal permits an ordinary skip that leaves onboarding open', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'onboarding-followup-leave-open-'))
+  try {
+    const providerResult = createProviderResult({
+      response: JSON.stringify({
+        kind: 'skip',
+        privateSummary: 'A newer urgent topic should stand alone.',
+      }),
+    })
+    const {
+      deliverMessage,
+      sendAssistantNotificationLocal,
+    } = await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-onboarding-followup-leave-open',
+    })
+
+    await expect(sendAssistantNotificationLocal({
+      instructions: 'Make one final continuation decision.',
+      scheduledOccurrenceAt: '2026-04-09T18:29:00.000Z',
+      vault,
+    })).resolves.toMatchObject({
+      decision: {
+        kind: 'skip',
+      },
+      response: null,
+    })
+    await expect(readAssistantOnboardingState(vault)).resolves.toMatchObject({
+      status: 'open',
+    })
+    expect(deliverMessage).not.toHaveBeenCalled()
+  } finally {
+    await rm(vault, { force: true, recursive: true })
+  }
+})
+
+test('sendAssistantNotificationLocal accepts only skip after batched completion committed canonical state', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'onboarding-followup-batch-completed-'))
+  try {
+    await completeAssistantOnboarding({
+      completedAt: '2026-04-09T18:29:30.000Z',
+      reason: 'user_answered',
+      vault,
+    })
+    const providerResult = createProviderResult({
+      rawEvents: [
+        createCodexCommandCompletedEvent(
+          'vault-cli batch --compact --format json --command \'["assistant","onboarding","complete","--reason","user_answered"]\'',
+        ),
+      ],
+      response: JSON.stringify({
+        kind: 'skip',
+        privateSummary: 'Onboarding is already complete.',
+      }),
+    })
+    const {
+      deliverMessage,
+      sendAssistantNotificationLocal,
+    } = await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-onboarding-followup-batch-completed',
+    })
+
+    await expect(sendAssistantNotificationLocal({
+      instructions: 'Make one final continuation decision.',
+      scheduledOccurrenceAt: '2026-04-09T18:29:00.000Z',
+      vault,
+    })).resolves.toMatchObject({
+      decision: {
+        kind: 'skip',
+      },
+      response: null,
+    })
+    expect(deliverMessage).not.toHaveBeenCalled()
+  } finally {
+    await rm(vault, { force: true, recursive: true })
+  }
+})
+
+test('sendAssistantNotificationLocal keeps generic notification delivery independent of onboarding state', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'onboarding-followup-completed-send-'))
+  try {
+    await completeAssistantOnboarding({
+      completedAt: '2026-04-09T18:29:30.000Z',
+      reason: 'user_answered',
+      vault,
+    })
+    const providerResult = createProviderResult({
+      response: JSON.stringify({
+        kind: 'send_message',
+        privateSummary: 'Prepared a continuation.',
+        text: 'Want to keep going?',
+      }),
+    })
+    const {
+      deliverMessage,
+      mocks,
+      sendAssistantNotificationLocal,
+    } = await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-onboarding-followup-completed-send',
+    })
+
+    await expect(sendAssistantNotificationLocal({
+      instructions: 'Make one final continuation decision.',
+      scheduledOccurrenceAt: '2026-04-09T18:29:00.000Z',
+      vault,
+    })).resolves.toMatchObject({
+      decision: {
+        kind: 'send_message',
+      },
+      response: 'Want to keep going?',
+    })
+    expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledOnce()
+    expect(deliverMessage).toHaveBeenCalledOnce()
+  } finally {
+    await rm(vault, { force: true, recursive: true })
+  }
+})
 
 function createAssistantSession(input?: {
   binding?: AssistantSession['binding']

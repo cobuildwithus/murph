@@ -127,6 +127,8 @@ const mocks = vi.hoisted(() => ({
       null,
       `Hosted passkey settings ${String(props.authenticated)} ${props.secureApprovalStatus.status}`,
     )),
+  HostedPrivyProvider: vi.fn((input: { children: React.ReactNode }) =>
+    React.createElement("div", null, input.children)),
   routerRefresh: vi.fn(),
   readHostedFamilyAccessForMember: vi.fn(),
   readHostedFamilyOwnerSnapshotForMember: vi.fn(),
@@ -230,9 +232,7 @@ vi.mock("@/src/components/hosted-onboarding/phone-country-code-provider", () => 
 }));
 
 vi.mock("@/src/components/hosted-onboarding/privy-provider", () => ({
-  HostedPrivyProvider(input: { children: React.ReactNode }) {
-    return React.createElement("div", null, input.children);
-  },
+  HostedPrivyProvider: mocks.HostedPrivyProvider,
 }));
 
 vi.mock("@/src/components/settings/hosted-ai-usage-activity", () => ({
@@ -936,6 +936,7 @@ test("SettingsPage reads the app session and persisted account settings into the
       authenticated: true,
       secureApprovalStatus: { status: "configured" },
     }), undefined);
+    expect(mocks.HostedPrivyProvider).toHaveBeenCalledTimes(1);
     expect(mocks.HostedDataPrivacySettings).toHaveBeenCalledWith(expect.objectContaining({
       authenticated: true,
     }), undefined);

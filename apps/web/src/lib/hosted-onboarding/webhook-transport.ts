@@ -75,6 +75,7 @@ import {
   readHostedLinqDailyState,
   releaseHostedLinqOnboardingLinkNoticeClaim,
   releaseHostedLinqQuotaReplyNoticeClaim,
+  resolveHostedLinqDayUtc,
 } from "./linq-daily-state";
 import {
   buildHostedDailyQuotaReply,
@@ -135,6 +136,7 @@ export type HostedLinqConversationHomeRedirectPayload = {
   chatId: string;
   homeRecipientPhone: string;
   memberId: string;
+  occurredAt: string;
   replyToMessageId: string | null;
   template: "conversation_home_redirect";
 };
@@ -296,6 +298,7 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
       chatId: string;
       homeRecipientPhone: string;
       memberId: string;
+      occurredAt: string;
       replyToMessageId?: string | null;
       sourceEventId: string;
       template: "conversation_home_redirect";
@@ -455,10 +458,12 @@ function buildHostedWebhookLinqMessageEffectId(
   return `linq-message:${input.sourceEventId}`;
 }
 
-// One redirect per wrong Linq chat + home line + member. If the member's home
-// line changes later, the new target hashes differently and is announced once.
+// One redirect per wrong Linq chat + home line + member + inbound UTC day. If
+// the member's home line changes later, the new target hashes differently.
 // Hashes normalized raw inputs directly; the contact-privacy lookup keys are
-// not stable across keyring rotation and would let a rotation re-send a duplicate.
+// not stable across keyring rotation and would let a rotation re-send a
+// duplicate. The provider occurrence day keeps webhook retries stable even when
+// processing crosses midnight.
 function buildHostedLinqConversationHomeRedirectEffectId(
   input: Extract<
     CreateHostedWebhookLinqMessageSideEffectInput,
@@ -466,6 +471,7 @@ function buildHostedLinqConversationHomeRedirectEffectId(
   >,
 ): string {
   const chatId = input.chatId.trim();
+  const dayUtc = resolveHostedLinqDayUtc(input.occurredAt).toISOString();
   const homeRecipientPhone = normalizePhoneNumber(input.homeRecipientPhone);
   const memberId = input.memberId.trim();
 
@@ -475,6 +481,7 @@ function buildHostedLinqConversationHomeRedirectEffectId(
 
   const hash = sha256Hex(JSON.stringify({
     chatId,
+    dayUtc,
     homeRecipientPhone,
     memberId,
   })).slice(0, 32);
@@ -2227,6 +2234,7 @@ function buildHostedWebhookLinqMessagePayload(
         chatId: input.chatId,
         homeRecipientPhone: input.homeRecipientPhone,
         memberId: input.memberId,
+        occurredAt: input.occurredAt,
         replyToMessageId,
         template: input.template,
       };

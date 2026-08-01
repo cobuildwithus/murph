@@ -8,6 +8,7 @@ import {
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
+  hostedRuntimeLinqProviderErrorMessageForCode,
   isHostedRuntimePrivateImageDeliveryUrl,
   type HostedRuntimeGroupChatParticipant,
   type HostedRuntimeGroupParticipantDisplayName,
@@ -36,6 +37,7 @@ import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
 import {
   assertHostedMemberNotSuspended,
 } from "../hosted-onboarding/entitlement";
+import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { hasHostedMemberActivationProof } from "../hosted-onboarding/member-activation";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import {
@@ -1092,6 +1094,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       result: {
         group: created.group,
         joinUrl,
+        offerState: "existing",
         status: "sent",
       },
     };
@@ -1101,6 +1104,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     joinUrl,
     projectionScopes,
   });
+  const providerSendStartedAt = new Date();
   let sent: Awaited<ReturnType<typeof sendHostedLinqChatMessage>>;
   try {
     sent = await sendHostedLinqChatMessage({
@@ -1115,16 +1119,37 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   } catch {
     return unavailable("send_failed");
   }
+  const providerSendCompletedAt = new Date();
   if (!sent.messageId) {
     return unavailable("provider_message_unavailable");
   }
+  const providerCreatedAtMs = sent.messageCreatedAt
+    ? Date.parse(sent.messageCreatedAt)
+    : Number.NaN;
+  const providerCreatedAt = Number.isFinite(providerCreatedAtMs)
+    ? new Date(providerCreatedAtMs)
+    : null;
+  const providerSendStartedAtSecond = Math.floor(
+    providerSendStartedAt.getTime() / 1_000,
+  );
+  const providerSendCompletedAtSecond = Math.floor(
+    providerSendCompletedAt.getTime() / 1_000,
+  );
+  const providerCreatedAtSecond = providerCreatedAt === null
+    ? null
+    : Math.floor(providerCreatedAt.getTime() / 1_000);
+  const providerCreatedDuringAttempt = providerCreatedAt !== null
+    && providerCreatedAtSecond !== null
+    && providerCreatedAtSecond >= providerSendStartedAtSecond
+    && providerCreatedAtSecond <= providerSendCompletedAtSecond;
+  const postedAt = providerCreatedAt ?? providerSendCompletedAt;
 
   try {
     await prisma.$transaction(async (tx) => {
       await recordHostedGroupJoinOfferTx({
         groupId: created.group.id,
         message: { channel: "linq", messageId: sent.messageId },
-        postedAt: now,
+        postedAt,
         projectionScopes,
         tx,
       });
@@ -1150,6 +1175,10 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     result: {
       group: created.group,
       joinUrl,
+      offerState: "posted",
+      ...(providerCreatedDuringAttempt
+        ? { offeredAt: providerCreatedAt.toISOString() }
+        : {}),
       status: "sent",
     },
   };
@@ -1160,9 +1189,18 @@ async function handleHostedRuntimeGroupSetChatAvatar(input: {
   linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
   memberId: string;
 }): Promise<HostedRuntimeGroupToolResponse> {
-  const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
+  const unavailable = (
+    unavailableReason: string,
+    providerDiagnostics?: {
+      providerErrorCode?: number;
+    },
+  ): HostedRuntimeGroupToolResponse => ({
     action: "set_chat_avatar",
-    result: { status: "unavailable", unavailableReason },
+    result: {
+      status: "unavailable",
+      unavailableReason,
+      ...providerDiagnostics,
+    },
   });
 
   const access = await checkHostedRuntimeGroupLinqChatMutationAccess({
@@ -1183,14 +1221,45 @@ async function handleHostedRuntimeGroupSetChatAvatar(input: {
       chatId: access.chatId,
       groupChatIconUrl,
     });
-  } catch {
-    return unavailable("provider_unavailable");
+  } catch (error) {
+    return unavailable(
+      "provider_unavailable",
+      readHostedLinqAvatarProviderDiagnostics(error),
+    );
   }
 
   return {
     action: "set_chat_avatar",
     result: { status: "requested" },
   };
+}
+
+function readHostedLinqAvatarProviderDiagnostics(error: unknown): {
+  providerErrorCode?: number;
+} | undefined {
+  if (
+    !isHostedOnboardingError(error)
+    || error.code !== "LINQ_SEND_FAILED"
+    || error.details?.failureStage !== "http"
+  ) {
+    return undefined;
+  }
+  const code = error.details.providerErrorCode;
+  const providerErrorCode = typeof code === "number"
+    && Number.isSafeInteger(code)
+    && code >= 1_000
+    && code <= 9_999
+      ? code
+      : null;
+  if (providerErrorCode === null) {
+    return undefined;
+  }
+  if (
+    hostedRuntimeLinqProviderErrorMessageForCode(providerErrorCode) === null
+  ) {
+    return undefined;
+  }
+  return { providerErrorCode };
 }
 
 async function handleHostedRuntimeGroupSetChatAvatarPreflight(input: {

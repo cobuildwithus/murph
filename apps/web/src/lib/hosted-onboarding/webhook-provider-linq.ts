@@ -1065,6 +1065,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
           homeRecipientPhone: bindingResult.homeRecipientPhone,
           memberId: existingMember.id,
           messageId: summary.messageId,
+          occurredAt: context.occurredAt,
           sourceEventId: input.event.event_id,
         }),
         buildHostedLinqWebhookPlannerDetails(input.event, context, {

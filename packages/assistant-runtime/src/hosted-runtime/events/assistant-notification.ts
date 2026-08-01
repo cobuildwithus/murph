@@ -4,6 +4,7 @@ import type { AutomationRoute } from "@murphai/contracts";
 import {
   buildHostedAssistantContextFingerprintDetails,
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
+  resolveMurphOnboardingFollowupSchedule,
   sendAssistantNotification,
   upsertAssistantCronAutomation,
   type AssistantExecutionContext,
@@ -80,6 +81,7 @@ export async function executeHostedMemberActivatedWake(input: {
       notificationResult,
       redactedLogEntries,
       route: signupWelcome.route,
+      stableKey: input.wake.userId,
       vaultRoot: input.vaultRoot,
       wake: input.wake,
     });
@@ -160,6 +162,7 @@ export async function executeHostedAssistantNotificationWake(input: {
         notificationResult,
         redactedLogEntries,
         route: input.wake.notification.route,
+        stableKey: input.wake.userId,
         vaultRoot: input.vaultRoot,
         wake: input.wake,
       });
@@ -210,6 +213,7 @@ async function maybeSeedOnboardingFollowupAutomation(input: {
   notificationResult: AssistantNotificationResult | undefined;
   redactedLogEntries: HostedExecutionRedactedLogEntry[];
   route: HostedExecutionAssistantNotificationRoute;
+  stableKey: string;
   vaultRoot: string;
   wake: HostedExecutionSystemWake;
 }): Promise<string | null> {
@@ -225,10 +229,12 @@ async function maybeSeedOnboardingFollowupAutomation(input: {
     // delivery source) is enforced by upsertAssistantCronAutomation's target
     // validation; an undeliverable route lands in the catch below.
     const job = await upsertAssistantCronAutomation({
-      firstOccurrencePolicy: "after-current-local-day",
+      firstOccurrenceActiveUntilLocalTime:
+        MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.activeUntilLocalTime,
+      firstOccurrencePolicy: "once-after-current-local-day",
       instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
       route: buildOnboardingFollowupAutomationRoute(input.route),
-      schedule: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.schedule,
+      schedule: resolveMurphOnboardingFollowupSchedule(input.stableKey),
       slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
       summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
       tags: [...MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags],

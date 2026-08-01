@@ -17,7 +17,10 @@ import {
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { getHostedInviteStatus } from "@/src/lib/hosted-onboarding/invite-service";
 import { requirePrivyCompletionSession } from "@/src/lib/hosted-onboarding/request-auth";
-import { issueHostedAppSession } from "@/src/lib/hosted-onboarding/app-session";
+import {
+  getHostedAppSessionFromRequest,
+  issueHostedAppSession,
+} from "@/src/lib/hosted-onboarding/app-session";
 import { resolveHostedSignupTimeZone } from "@/src/lib/hosted-onboarding/time-zone-hint";
 import {
   readHostedConsentStatus,
@@ -34,7 +37,16 @@ export const POST = withJsonError(async (request: Request) => {
 
   try {
     assertHostedOnboardingMutationOrigin(request);
-    const auth = await requirePrivyCompletionSession(request);
+    const [auth, existingAppSession] = await Promise.all([
+      requirePrivyCompletionSession(request),
+      getHostedAppSessionFromRequest(request),
+    ]);
+    if (
+      existingAppSession
+      && existingAppSession.privyUserId !== auth.identity.userId
+    ) {
+      throw privySessionMemberMismatchError();
+    }
     const body = await readOptionalJsonObject(request);
     const authMethod = resolveHostedPrivyCompletionAuthMethod({
       body,
@@ -52,6 +64,12 @@ export const POST = withJsonError(async (request: Request) => {
     }).catch((error: unknown) => {
       throw remapHostedPrivyCompletionLagError(error);
     });
+    if (
+      existingAppSession
+      && existingAppSession.member.id !== result.memberId
+    ) {
+      throw privySessionMemberMismatchError();
+    }
     const [status, launchConsent] = await Promise.all([
       getHostedInviteStatus({
         authenticatedMember: result.member,
@@ -91,6 +109,15 @@ export const POST = withJsonError(async (request: Request) => {
     throw error;
   }
 });
+
+function privySessionMemberMismatchError() {
+  return hostedOnboardingError({
+    code: "PRIVY_SESSION_MEMBER_MISMATCH",
+    message:
+      "This Privy login does not match your current Murph session. Sign out and sign back in.",
+    httpStatus: 409,
+  });
+}
 
 async function readHostedCompletionLaunchConsent(memberId: string): Promise<{
   granted: boolean;
