@@ -177,18 +177,7 @@ describe("hosted local device connect e2e", () => {
       expect(Boolean(requireScenario().runtimeEnv.MURPH_E2E_WHOOP_OTP)).toBe(false);
       expect(Boolean(requireScenario().runtimeEnv.MURPH_E2E_WHOOP_PASSWORD)).toBe(false);
 
-      const hostedExecutionEnvironment = readHostedExecutionEnvironment(
-        requireHostedWorkerRuntimeEnv(),
-      );
-      const platform = buildHostedExecutionRuntimePlatform({
-        boundUserId: linkUserId,
-        webCallbackSigning: hostedExecutionEnvironment.webCallbackSigning,
-        webControlBaseUrl: requireScenario().harness.webBaseUrl,
-      });
-      const connectLink = await platform.deviceSyncPort?.createConnectLink({
-        messagingReturnTarget: "telegram",
-        connectTarget: "whoop",
-      });
+      const connectLink = await createHostedWhoopConnectLink(linkUserId);
 
       expect(connectLink).toMatchObject({
         provider: "junction",
@@ -236,9 +225,14 @@ describe("hosted local device connect e2e", () => {
         environment: requireScenario().runtimeEnv,
         memberId: liveBrowserUserId,
       });
+      const connectLink = await createHostedWhoopConnectLink(liveBrowserUserId);
+      if (!connectLink) {
+        throw new Error("Hosted device-sync port did not create a WHOOP connect link.");
+      }
       const result = await runJunctionWhoopBrowser({
         config: liveConfig,
         hostedSessionCookie,
+        startUrl: connectLink.authorizationUrl,
         webBaseUrl: requireScenario().harness.webBaseUrl,
       }).finally(async () => {
         await resetLiveJunctionWhoopProvider(liveConfig);
@@ -374,6 +368,21 @@ function assertLiveScenarioIsIsolated(): void {
   }
 }
 
+async function createHostedWhoopConnectLink(memberId: string) {
+  const hostedExecutionEnvironment = readHostedExecutionEnvironment(
+    requireHostedWorkerRuntimeEnv(),
+  );
+  const platform = buildHostedExecutionRuntimePlatform({
+    boundUserId: memberId,
+    webCallbackSigning: hostedExecutionEnvironment.webCallbackSigning,
+    webControlBaseUrl: requireScenario().harness.webBaseUrl,
+  });
+  return await platform.deviceSyncPort?.createConnectLink({
+    messagingReturnTarget: "telegram",
+    connectTarget: "whoop",
+  });
+}
+
 async function resetLiveJunctionWhoopProvider(
   config: LiveJunctionWhoopConfig,
 ): Promise<void> {
@@ -500,6 +509,7 @@ function temporarilyRemoveProcessEnvironment(keys: readonly string[]): () => voi
 async function runJunctionWhoopBrowser(input: {
   config: LiveJunctionWhoopConfig;
   hostedSessionCookie: string;
+  startUrl: string;
   webBaseUrl: string;
 }): Promise<JunctionWhoopBrowserResult> {
   const { stdout } = await execFileAsync(
@@ -516,6 +526,7 @@ async function runJunctionWhoopBrowser(input: {
       encoding: "utf8",
       env: {
         ...buildBrowserProcessEnvironment(),
+        MURPH_E2E_CONNECT_URL: input.startUrl,
         MURPH_E2E_HOSTED_SESSION_COOKIE: input.hostedSessionCookie,
         MURPH_E2E_WEB_BASE_URL: input.webBaseUrl,
         MURPH_E2E_WHOOP_EMAIL: input.config.email,
@@ -546,6 +557,7 @@ function buildBrowserProcessEnvironment(): NodeJS.ProcessEnv {
     "JUNCTION_API_KEY",
     "JUNCTION_CLIENT_USER_ID_SECRET",
     "JUNCTION_WEBHOOK_SECRET",
+    "MURPH_E2E_CONNECT_URL",
     "MURPH_E2E_HOSTED_SESSION_COOKIE",
     "MURPH_E2E_WEB_BASE_URL",
     "MURPH_E2E_WHOOP_EMAIL",
