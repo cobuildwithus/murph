@@ -1,7 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  isHostedProductSupportEscalationSummary: vi.fn(),
+  isHostedProductSupportEscalationFeedback: vi.fn(),
   recordHostedProductFeedback: vi.fn(),
   requireHostedCloudflareCallbackJsonRequest: vi.fn(),
 }));
@@ -12,8 +12,8 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-execution/product-feedback", () => ({
-  isHostedProductSupportEscalationSummary:
-    mocks.isHostedProductSupportEscalationSummary,
+  isHostedProductSupportEscalationFeedback:
+    mocks.isHostedProductSupportEscalationFeedback,
   recordHostedProductFeedback: mocks.recordHostedProductFeedback,
 }));
 
@@ -38,8 +38,14 @@ describe("hosted product feedback record route", () => {
         userId: "member_123",
       }),
     );
-    mocks.isHostedProductSupportEscalationSummary.mockImplementation(
-      (summary: string) => summary.startsWith("Support escalation:"),
+    mocks.isHostedProductSupportEscalationFeedback.mockImplementation(
+      (feedback: {
+        kind: string;
+        relatedChangelogItemIds: string[];
+        summary: string;
+      }) => feedback.kind === "frustration"
+        && feedback.relatedChangelogItemIds.length === 0
+        && feedback.summary.startsWith("Support escalation:"),
     );
     mocks.recordHostedProductFeedback.mockResolvedValue({
       feedbackId: "product_feedback_123",
@@ -103,5 +109,27 @@ describe("hosted product feedback record route", () => {
       feedback,
       memberId: "member_123",
     });
+  });
+
+  it("does not attach member identity to a prefixed non-support shape", async () => {
+    const feedback = {
+      idempotencyKey: "c".repeat(64),
+      kind: "feature_request",
+      relatedChangelogItemIds: [],
+      summary: "Support escalation: add a support dashboard.",
+    };
+    const response = await route.POST(
+      new Request(
+        "https://join.example.test/api/internal/hosted-execution/product-feedback/record",
+        {
+          body: JSON.stringify({ feedback }),
+          headers: { "content-type": "application/json" },
+          method: "POST",
+        },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.recordHostedProductFeedback).toHaveBeenCalledWith({ feedback });
   });
 });
