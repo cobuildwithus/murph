@@ -425,6 +425,109 @@ describe("hosted Linq contact card client", () => {
     consoleErrorSpy.mockRestore();
   });
 
+  it("fails the run when every line yields an inactive card without logging request failures", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    linqInventoryMocks.syncHostedLinqPhoneNumberInventory.mockResolvedValue({
+      syncedCount: 1,
+    });
+    linqLineStoreMocks.listHostedLinqContactCardLines.mockResolvedValue([
+      {
+        phoneNumber: "+15550000001",
+        phoneNumberHint: "*** 0001",
+        phoneNumberLookupKey: "lookup:1",
+        providerReputationStatus: "HEALTHY",
+        providerServiceStatus: "ACTIVE",
+      },
+    ]);
+    const prisma = {};
+
+    const fetchMock = vi.fn(async () => createJsonResponse({
+      contact_cards: [
+        {
+          first_name: "Murph",
+          image_url: null,
+          is_active: false,
+          phone_number: "+15550000001",
+        },
+      ],
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(reconcileHostedLinqContactCards({
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "LINQ_CONTACT_CARD_RECONCILE_FAILED",
+    });
+
+    // The line responded; it just has no usable active card, so nothing is a
+    // per-line request failure worth logging.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
+    consoleErrorSpy.mockRestore();
+  });
+
+  it("fails the run when the only non-failing lines yield inactive cards", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    linqInventoryMocks.syncHostedLinqPhoneNumberInventory.mockResolvedValue({
+      syncedCount: 2,
+    });
+    linqLineStoreMocks.listHostedLinqContactCardLines.mockResolvedValue([
+      {
+        phoneNumber: "+15550000009",
+        phoneNumberHint: "*** 0009",
+        phoneNumberLookupKey: "lookup:9",
+        providerReputationStatus: null,
+        providerServiceStatus: null,
+      },
+      {
+        phoneNumber: "+15550000001",
+        phoneNumberHint: "*** 0001",
+        phoneNumberLookupKey: "lookup:1",
+        providerReputationStatus: "HEALTHY",
+        providerServiceStatus: "ACTIVE",
+      },
+    ]);
+    const prisma = {};
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof URL ? input : new URL(String(input));
+
+      if (url.searchParams.get("phone_number") === "+15550000009" && init?.method === "GET") {
+        return createJsonResponse({
+          error: {
+            code: 2006,
+            message: "You do not have permission to send from this phone number",
+            status: 403,
+          },
+          success: false,
+        }, 403);
+      }
+
+      return createJsonResponse({
+        contact_cards: [
+          {
+            first_name: "Murph",
+            image_url: null,
+            is_active: false,
+            phone_number: "+15550000001",
+          },
+        ],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(reconcileHostedLinqContactCards({
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "LINQ_CONTACT_CARD_RECONCILE_FAILED",
+    });
+
+    // Both lines attempted; only the real request failure is logged.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
+    consoleErrorSpy.mockRestore();
+  });
+
   it("rethrows caller cancellation instead of counting it as a line failure", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     linqInventoryMocks.syncHostedLinqPhoneNumberInventory.mockResolvedValue({

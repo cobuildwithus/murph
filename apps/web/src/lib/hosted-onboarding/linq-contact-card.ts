@@ -106,13 +106,17 @@ export async function reconcileHostedLinqContactCards(input: {
     }
   }
 
-  // Per-line isolation covers a partially degraded pool; a run where every
-  // line failed is a reconciliation outage and must fail the cron so the
-  // scheduler and alerting see it instead of a silent success.
-  if (result.lineCount > 0 && result.failedLines === result.lineCount) {
+  // Per-line isolation covers a partially degraded pool; a run that ends
+  // with zero usable active cards — every line failed or produced an
+  // inactive card — leaves the native contact-card share with nothing to
+  // send, so it must fail the cron and reach the scheduler and alerting
+  // instead of reporting a silent success.
+  const usableActiveCards =
+    result.activeCards + result.createdCards + result.updatedCards;
+  if (result.lineCount > 0 && usableActiveCards === 0) {
     throw hostedOnboardingError({
       code: "LINQ_CONTACT_CARD_RECONCILE_FAILED",
-      message: `Linq contact-card reconciliation failed for all ${result.lineCount} line(s).`,
+      message: `Linq contact-card reconciliation produced no usable active contact card across ${result.lineCount} line(s) (${result.failedLines} failed, ${result.inactiveCards} inactive).`,
       httpStatus: 502,
       retryable: true,
     });
