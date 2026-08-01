@@ -346,8 +346,10 @@ service, authenticated cron route, shared operational-email config, production
 cron allowlist, Prisma schema/migration inventory, and Web typecheck. The
 service proof must exercise the Eastern daily window across both DST
 transitions, the dedicated recipient list, fixed empty digest, day-keyed
-idempotency key, fixed three-kind aggregate that never reads free-form summary
-text, observable missing configuration, and a bounded same-hour retry. The
+idempotency key, the bounded three-kind summary read that selects only the
+kind and summary columns with deterministic ordering and an explicit
+truncation line at the row cap, observable missing configuration, and a
+bounded same-hour retry. The
 direct scenario must compose the production sender against an isolated
 loopback Resend fake and prove identical request/key reuse plus one fake
 delivery after an ambiguous failure. Routine tests must not call Resend or read

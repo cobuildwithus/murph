@@ -16,13 +16,15 @@ import { getPrisma } from "../prisma";
 
 export const HOSTED_PRODUCT_FEEDBACK_DIGEST_TIME_ZONE = "America/New_York";
 export const HOSTED_PRODUCT_FEEDBACK_DIGEST_SEND_HOUR = 18;
+export const HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS = 200;
 
 const HOSTED_PRODUCT_FEEDBACK_DIGEST_RECIPIENTS_ENV =
   "HOSTED_PRODUCT_FEEDBACK_DIGEST_EMAILS";
 const HOSTED_PRODUCT_FEEDBACK_DIGEST_SUBJECT = "Murph feedback";
 
 export type HostedProductFeedbackDigestBatch = {
-  counts: Record<HostedProductFeedbackKind, number>;
+  summariesByKind: Record<HostedProductFeedbackKind, string[]>;
+  truncated: boolean;
 };
 
 export type HostedProductFeedbackDigestOutcome =
@@ -124,11 +126,16 @@ export async function readHostedProductFeedbackDigestBatch(input: {
   endAt: Date;
   startAt: Date;
 }): Promise<HostedProductFeedbackDigestBatch> {
-  const groupedCounts = await getPrisma().hostedProductFeedback.groupBy({
-    by: ["kind"],
-    _count: {
-      _all: true,
+  const rows = await getPrisma().hostedProductFeedback.findMany({
+    orderBy: [
+      { createdAt: "asc" },
+      { id: "asc" },
+    ],
+    select: {
+      kind: true,
+      summary: true,
     },
+    take: HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS + 1,
     where: {
       createdAt: {
         gte: input.startAt,
@@ -137,17 +144,27 @@ export async function readHostedProductFeedbackDigestBatch(input: {
       kind: {
         in: [...HOSTED_PRODUCT_FEEDBACK_KINDS],
       },
+      summary: {
+        not: null,
+      },
     },
   });
-  const counts = createEmptyHostedProductFeedbackDigestCounts();
+  const summariesByKind = createEmptyHostedProductFeedbackDigestSummaries();
 
-  for (const groupedCount of groupedCounts) {
-    if (isHostedProductFeedbackKind(groupedCount.kind)) {
-      counts[groupedCount.kind] = groupedCount._count._all;
+  for (const row of rows.slice(0, HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS)) {
+    if (
+      isHostedProductFeedbackKind(row.kind) &&
+      typeof row.summary === "string" &&
+      row.summary.length > 0
+    ) {
+      summariesByKind[row.kind].push(row.summary);
     }
   }
 
-  return { counts };
+  return {
+    summariesByKind,
+    truncated: rows.length > HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS,
+  };
 }
 
 function formatHostedProductFeedbackDigest(
@@ -158,35 +175,46 @@ function formatHostedProductFeedbackDigest(
     feature_request: "Feature requests",
     frustration: "Product frustrations",
   };
-  const lines = HOSTED_PRODUCT_FEEDBACK_KINDS.flatMap((kind) => {
-    const count = batch.counts[kind];
-    return count > 0 ? [`- ${labels[kind]}: ${count}`] : [];
+  const sections = HOSTED_PRODUCT_FEEDBACK_KINDS.flatMap((kind) => {
+    const summaries = batch.summariesByKind[kind];
+    if (summaries.length === 0) {
+      return [];
+    }
+    return [[
+      `${labels[kind]} (${summaries.length})`,
+      ...summaries.map((summary) => `- ${summary}`),
+    ].join("\n")];
   });
 
-  if (lines.length === 0) {
-    lines.push("- No feedback logged.");
+  if (sections.length === 0) {
+    sections.push("- No feedback logged.");
+  }
+  if (batch.truncated) {
+    sections.push(
+      `Additional feedback omitted from this email after the ${HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS}-item safety limit.`,
+    );
   }
 
-  return lines.join("\n");
+  return sections.join("\n\n");
 }
 
 function countHostedProductFeedbackDigestBatch(
   batch: HostedProductFeedbackDigestBatch,
 ): number {
   return HOSTED_PRODUCT_FEEDBACK_KINDS.reduce(
-    (total, kind) => total + batch.counts[kind],
+    (total, kind) => total + batch.summariesByKind[kind].length,
     0,
   );
 }
 
-function createEmptyHostedProductFeedbackDigestCounts(): Record<
+function createEmptyHostedProductFeedbackDigestSummaries(): Record<
   HostedProductFeedbackKind,
-  number
+  string[]
 > {
   return {
-    feature_interest: 0,
-    feature_request: 0,
-    frustration: 0,
+    feature_interest: [],
+    feature_request: [],
+    frustration: [],
   };
 }
 

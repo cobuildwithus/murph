@@ -876,12 +876,18 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
 
   A separate authenticated ten-minute Vercel cron performs work only during the
   6pm Eastern hour and sends one daily internal product-feedback digest through
-  that existing Resend transport. Web groups its owned
-  `HostedProductFeedback` rows from the prior 6pm-to-6pm window by the three
-  server-allowlisted product-feedback kinds and renders only fixed server-owned
-  count labels. The indexed aggregate query never reads the model-authored
-  summary, member relation or id, internal feedback id, changelog metadata,
-  health data, contact data, or raw conversation. Recipients come from a
+  that existing Resend transport. Web reads its owned
+  `HostedProductFeedback` rows from the prior 6pm-to-6pm window for the three
+  server-allowlisted product-feedback kinds and renders fixed server-owned
+  kind labels with each row's capture-scrubbed summary, in a bounded,
+  deterministically ordered read capped at a fixed row limit with one explicit
+  truncation line on overflow. The indexed query selects only the kind and
+  summary columns and never reads the
+  member relation or id, internal feedback id, changelog metadata,
+  health data, contact data, or raw conversation; summary text entered email
+  scope only because capture already bounds it to a product-only summary that
+  passed the deterministic contact-detail and secret-token scrub. Recipients
+  come from a
   dedicated environment allowlist, and every same-hour attempt reuses the
   Eastern day key as the Resend idempotency key. Missing configuration fails
   before the database read. This adds no digest table, cursor, scheduler,
