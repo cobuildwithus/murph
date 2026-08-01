@@ -289,6 +289,7 @@ describe("hosted Linq contact card client", () => {
       atRiskLines: 1,
       createdCards: 1,
       criticalLines: 0,
+      failedLines: 0,
       inactiveCards: 0,
       lineCount: 2,
       updatedCards: 0,
@@ -303,6 +304,128 @@ describe("hosted Linq contact card client", () => {
       limit: 50,
       prisma,
     });
+  });
+
+  it("keeps reconciling remaining lines when one line fails and counts the failure", async () => {
+    const observedAt = new Date("2026-06-25T12:30:00.000Z");
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    linqInventoryMocks.syncHostedLinqPhoneNumberInventory.mockResolvedValue({
+      syncedCount: 2,
+    });
+    linqLineStoreMocks.listHostedLinqContactCardLines.mockResolvedValue([
+      {
+        phoneNumber: "+15550000009",
+        phoneNumberHint: "*** 0009",
+        phoneNumberLookupKey: "lookup:9",
+        providerReputationStatus: null,
+        providerServiceStatus: null,
+      },
+      {
+        phoneNumber: "+15550000001",
+        phoneNumberHint: "*** 0001",
+        phoneNumberLookupKey: "lookup:1",
+        providerReputationStatus: "HEALTHY",
+        providerServiceStatus: "ACTIVE",
+      },
+    ]);
+    const prisma = {};
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof URL ? input : new URL(String(input));
+
+      if (url.pathname.endsWith("/contact_card")
+        && url.searchParams.get("phone_number") === "+15550000009"
+        && init?.method === "GET") {
+        return createJsonResponse({
+          error: {
+            code: 2006,
+            message: "You do not have permission to send from this phone number",
+            status: 403,
+          },
+          success: false,
+        }, 403);
+      }
+
+      if (url.pathname.endsWith("/contact_card")
+        && url.searchParams.get("phone_number") === "+15550000001"
+        && init?.method === "GET") {
+        return createJsonResponse({
+          contact_cards: [
+            {
+              first_name: "Murph",
+              image_url: null,
+              is_active: true,
+              phone_number: "+15550000001",
+            },
+          ],
+        });
+      }
+
+      throw new Error(`Unexpected Linq URL ${url.pathname}${url.search}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(reconcileHostedLinqContactCards({
+      observedAt,
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      activeCards: 1,
+      atRiskLines: 0,
+      createdCards: 0,
+      criticalLines: 0,
+      failedLines: 1,
+      inactiveCards: 0,
+      lineCount: 2,
+      updatedCards: 0,
+    });
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      "Hosted Linq contact-card line reconcile failed.",
+      expect.objectContaining({ phoneNumberHint: "*** 0009" }),
+    );
+    consoleErrorSpy.mockRestore();
+  });
+
+  it("rethrows caller cancellation instead of counting it as a line failure", async () => {
+    const observedAt = new Date("2026-06-25T12:30:00.000Z");
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    linqInventoryMocks.syncHostedLinqPhoneNumberInventory.mockResolvedValue({
+      syncedCount: 2,
+    });
+    linqLineStoreMocks.listHostedLinqContactCardLines.mockResolvedValue([
+      {
+        phoneNumber: "+15550000001",
+        phoneNumberHint: "*** 0001",
+        phoneNumberLookupKey: "lookup:1",
+        providerReputationStatus: "HEALTHY",
+        providerServiceStatus: "ACTIVE",
+      },
+      {
+        phoneNumber: "+15550000002",
+        phoneNumberHint: "*** 0002",
+        phoneNumberLookupKey: "lookup:2",
+        providerReputationStatus: "HEALTHY",
+        providerServiceStatus: "ACTIVE",
+      },
+    ]);
+    const prisma = {};
+    const abortController = new AbortController();
+    const abortReason = new Error("cron request aborted");
+
+    const fetchMock = vi.fn(async () => {
+      abortController.abort(abortReason);
+      throw abortReason;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(reconcileHostedLinqContactCards({
+      observedAt,
+      prisma: prisma as never,
+      signal: abortController.signal,
+    })).rejects.toBe(abortReason);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
+    consoleErrorSpy.mockRestore();
   });
 
   it("corrects a non-Murph first name without clearing legacy provider fields", async () => {
@@ -367,6 +490,7 @@ describe("hosted Linq contact card client", () => {
       atRiskLines: 0,
       createdCards: 0,
       criticalLines: 0,
+      failedLines: 0,
       inactiveCards: 0,
       lineCount: 1,
       updatedCards: 1,
@@ -421,6 +545,7 @@ describe("hosted Linq contact card client", () => {
       atRiskLines: 0,
       createdCards: 0,
       criticalLines: 0,
+      failedLines: 0,
       inactiveCards: 0,
       lineCount: 1,
       updatedCards: 0,

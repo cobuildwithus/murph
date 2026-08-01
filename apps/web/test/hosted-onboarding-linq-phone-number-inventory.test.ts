@@ -1,6 +1,93 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { parseHostedLinqPhoneNumberInventory } from "@/src/lib/hosted-onboarding/linq-phone-number-inventory";
+const lineStoreMocks = vi.hoisted(() => ({
+  upsertHostedLinqLineForPhoneTx: vi.fn(),
+}));
+
+const providerHealthStoreMocks = vi.hoisted(() => ({
+  projectHostedLinqLineProviderStateTx: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/linq-line-store", () => ({
+  upsertHostedLinqLineForPhoneTx: lineStoreMocks.upsertHostedLinqLineForPhoneTx,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/linq-provider-health-store", () => ({
+  projectHostedLinqLineProviderStateTx: providerHealthStoreMocks.projectHostedLinqLineProviderStateTx,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
+  requireHostedOnboardingLinqConfig: () => ({
+    apiBaseUrl: "https://linq.example.test/api/partner/v3",
+    apiToken: "linq-token",
+  }),
+}));
+
+import {
+  parseHostedLinqPhoneNumberInventory,
+  syncHostedLinqPhoneNumberInventory,
+} from "@/src/lib/hosted-onboarding/linq-phone-number-inventory";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  lineStoreMocks.upsertHostedLinqLineForPhoneTx.mockReset();
+  providerHealthStoreMocks.projectHostedLinqLineProviderStateTx.mockReset();
+});
+
+describe("syncHostedLinqPhoneNumberInventory", () => {
+  it("revokes inventory backing from lines absent in a successful snapshot before upserting", async () => {
+    const callOrder: string[] = [];
+    const updateMany = vi.fn(async () => {
+      callOrder.push("revoke");
+      return { count: 1 };
+    });
+    lineStoreMocks.upsertHostedLinqLineForPhoneTx.mockImplementation(async () => {
+      callOrder.push("upsert");
+      return { phoneNumberLookupKey: "lookup:1" };
+    });
+    providerHealthStoreMocks.projectHostedLinqLineProviderStateTx.mockResolvedValue(undefined);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      phone_numbers: [
+        {
+          id: "line_current",
+          phone_number: "+15550000001",
+          reputation: { status: "HEALTHY" },
+          status: "ACTIVE",
+        },
+      ],
+    }), { headers: { "content-type": "application/json" }, status: 200 })));
+
+    await expect(syncHostedLinqPhoneNumberInventory({
+      prisma: { hostedLinqLine: { updateMany } } as never,
+    })).resolves.toEqual({ syncedCount: 1 });
+
+    expect(updateMany).toHaveBeenCalledWith({
+      data: { providerPhoneNumberId: null },
+      where: {
+        providerPhoneNumberId: {
+          not: null,
+          notIn: ["line_current"],
+        },
+      },
+    });
+    expect(callOrder[0]).toBe("revoke");
+    expect(callOrder).toContain("upsert");
+  });
+
+  it("does not revoke inventory backing when the provider read fails", async () => {
+    const updateMany = vi.fn();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("upstream error", { status: 503 })));
+
+    await expect(syncHostedLinqPhoneNumberInventory({
+      prisma: { hostedLinqLine: { updateMany } } as never,
+    })).rejects.toMatchObject({
+      code: "LINQ_PHONE_NUMBER_INVENTORY_FAILED",
+    });
+
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(lineStoreMocks.upsertHostedLinqLineForPhoneTx).not.toHaveBeenCalled();
+  });
+});
 
 describe("parseHostedLinqPhoneNumberInventory", () => {
   it("keeps line service and reputation independent", () => {

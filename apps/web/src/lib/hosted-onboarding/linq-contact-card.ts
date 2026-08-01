@@ -37,6 +37,7 @@ export type HostedLinqContactCardReconciliation = {
   atRiskLines: number;
   createdCards: number;
   criticalLines: number;
+  failedLines: number;
   inactiveCards: number;
   lineCount: number;
   updatedCards: number;
@@ -74,6 +75,7 @@ export async function reconcileHostedLinqContactCards(input: {
     atRiskLines: 0,
     createdCards: 0,
     criticalLines: 0,
+    failedLines: 0,
     inactiveCards: 0,
     lineCount: lines.length,
     updatedCards: 0,
@@ -87,16 +89,29 @@ export async function reconcileHostedLinqContactCards(input: {
       result.criticalLines += 1;
     }
 
-    const existingCard = await getHostedLinqContactCard({
-      phoneNumber: line.phoneNumber,
-      signal: input.signal,
-    });
-    const outcome = await reconcileHostedLinqContactCardForLine({
-      existingCard,
-      phoneNumber: line.phoneNumber,
-      signal: input.signal,
-    });
-    result[outcome] += 1;
+    // One failing line must not stop contact-card upkeep for the rest of the
+    // pool; count it, log it, and keep going.
+    try {
+      const existingCard = await getHostedLinqContactCard({
+        phoneNumber: line.phoneNumber,
+        signal: input.signal,
+      });
+      const outcome = await reconcileHostedLinqContactCardForLine({
+        existingCard,
+        phoneNumber: line.phoneNumber,
+        signal: input.signal,
+      });
+      result[outcome] += 1;
+    } catch (error) {
+      if (input.signal?.aborted) {
+        throw error;
+      }
+      result.failedLines += 1;
+      console.error("Hosted Linq contact-card line reconcile failed.", {
+        errorMessage: error instanceof Error ? error.message : String(error),
+        phoneNumberHint: line.phoneNumberHint,
+      });
+    }
   }
 
   return result;
@@ -192,6 +207,7 @@ async function listHostedLinqConfiguredContactCardLines(input: {
   signal?: AbortSignal;
 }): Promise<Array<{
   phoneNumber: string;
+  phoneNumberHint: string;
   providerReputationStatus: string | null;
 }>> {
   const maxLines = normalizeLineLimit(input.maxLines);
@@ -209,6 +225,7 @@ async function listHostedLinqConfiguredContactCardLines(input: {
   });
   return lines.map((line) => ({
     phoneNumber: line.phoneNumber,
+    phoneNumberHint: line.phoneNumberHint,
     providerReputationStatus: line.providerReputationStatus,
   }));
 }
