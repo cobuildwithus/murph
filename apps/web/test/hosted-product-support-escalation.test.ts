@@ -4,7 +4,8 @@ const prismaMocks = vi.hoisted(() => ({
   count: vi.fn(),
   createMany: vi.fn(),
   executeRaw: vi.fn(),
-  findUnique: vi.fn(),
+  findFeedback: vi.fn(),
+  findThreadContainer: vi.fn(),
   transaction: vi.fn(),
 }));
 
@@ -39,7 +40,10 @@ type TransactionClientMock = {
   hostedProductFeedback: {
     count: typeof prismaMocks.count;
     createMany: typeof prismaMocks.createMany;
-    findUnique: typeof prismaMocks.findUnique;
+    findUnique: typeof prismaMocks.findFeedback;
+  };
+  hostedThreadContainer: {
+    findUnique: typeof prismaMocks.findThreadContainer;
   };
 };
 
@@ -47,6 +51,7 @@ describe("hosted product support escalation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     prismaMocks.executeRaw.mockResolvedValue(0);
+    prismaMocks.findThreadContainer.mockResolvedValue(null);
     prismaMocks.transaction.mockImplementation(
       async (callback: (tx: TransactionClientMock) => Promise<unknown>) =>
         await callback({
@@ -54,7 +59,10 @@ describe("hosted product support escalation", () => {
           hostedProductFeedback: {
             count: prismaMocks.count,
             createMany: prismaMocks.createMany,
-            findUnique: prismaMocks.findUnique,
+            findUnique: prismaMocks.findFeedback,
+          },
+          hostedThreadContainer: {
+            findUnique: prismaMocks.findThreadContainer,
           },
         }),
     );
@@ -67,7 +75,7 @@ describe("hosted product support escalation", () => {
       providerMessageId: "email_123",
     });
     prismaMocks.createMany.mockResolvedValue({ count: 1 });
-    prismaMocks.findUnique.mockResolvedValue(makeStoredSupportFeedback({
+    prismaMocks.findFeedback.mockResolvedValue(makeStoredSupportFeedback({
       feedback,
       feedbackId,
     }));
@@ -88,6 +96,10 @@ describe("hosted product support escalation", () => {
       recorded: true,
     });
     expect(prismaMocks.executeRaw).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.findThreadContainer).toHaveBeenCalledWith({
+      select: { memberId: true },
+      where: { memberId: MEMBER_ID },
+    });
     expect(prismaMocks.createMany).toHaveBeenCalledWith({
       data: [
         expect.objectContaining({
@@ -132,7 +144,7 @@ describe("hosted product support escalation", () => {
     const feedbackId = buildHostedProductFeedbackId({ feedback });
     const sendEmail = vi.fn();
     prismaMocks.createMany.mockResolvedValue({ count: 1 });
-    prismaMocks.findUnique.mockResolvedValue(makeStoredSupportFeedback({
+    prismaMocks.findFeedback.mockResolvedValue(makeStoredSupportFeedback({
       feedback,
       feedbackId,
     }));
@@ -161,7 +173,7 @@ describe("hosted product support escalation", () => {
     const feedbackId = buildHostedProductFeedbackId({ feedback });
     const sendEmail = vi.fn().mockResolvedValue({ providerMessageId: null });
     prismaMocks.createMany.mockResolvedValue({ count: 0 });
-    prismaMocks.findUnique.mockResolvedValue(makeStoredSupportFeedback({
+    prismaMocks.findFeedback.mockResolvedValue(makeStoredSupportFeedback({
       feedback,
       feedbackId,
     }));
@@ -195,6 +207,25 @@ describe("hosted product support escalation", () => {
     expect(prismaMocks.transaction).not.toHaveBeenCalled();
   });
 
+  it("fails closed before persistence for a synthetic group-room runtime", async () => {
+    const sendEmail = vi.fn();
+    prismaMocks.findThreadContainer.mockResolvedValue({ memberId: MEMBER_ID });
+
+    await expect(recordHostedProductFeedback({
+      env: EMAIL_ENV,
+      feedback: makeSupportFeedback(),
+      memberId: MEMBER_ID,
+      now: NOW,
+      sendEmail,
+    })).rejects.toMatchObject({
+      code: "HOSTED_PRODUCT_SUPPORT_PRIVATE_MEMBER_REQUIRED",
+      httpStatus: 403,
+    });
+
+    expect(prismaMocks.createMany).not.toHaveBeenCalled();
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
   it("rejects a prefixed payload that is not the exact support shape", async () => {
     await expect(recordHostedProductFeedback({
       env: EMAIL_ENV,
@@ -217,7 +248,7 @@ describe("hosted product support escalation", () => {
     });
     const feedbackId = buildHostedProductFeedbackId({ feedback });
     prismaMocks.createMany.mockResolvedValue({ count: 0 });
-    prismaMocks.findUnique.mockResolvedValue({
+    prismaMocks.findFeedback.mockResolvedValue({
       ...makeStoredSupportFeedback({ feedback, feedbackId }),
       summary: `${HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX} a different issue.`,
     });
@@ -235,10 +266,13 @@ describe("hosted product support escalation", () => {
     expect(prismaMocks.count).not.toHaveBeenCalled();
   });
 
-  it("requires the exact support escalation prefix and structured shape", () => {
+  it("requires the exact support escalation prefix, content, and structured shape", () => {
     const feedback = makeSupportFeedback();
     expect(isHostedProductSupportEscalationSummary(feedback.summary)).toBe(true);
     expect(isHostedProductSupportEscalationFeedback(feedback)).toBe(true);
+    expect(isHostedProductSupportEscalationSummary(
+      HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
+    )).toBe(false);
     expect(isHostedProductSupportEscalationSummary(
       "support escalation: device connection failed.",
     )).toBe(false);
