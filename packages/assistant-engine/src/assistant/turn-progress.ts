@@ -32,6 +32,8 @@ import type {
   AssistantHostedProductFeedbackCandidateSink,
 } from './execution-context.js'
 
+const ASSISTANT_PRODUCT_SUPPORT_ESCALATION_PREFIX = 'Support escalation:'
+
 export interface AssistantProgressDelivery {
   close?(): void
   send(
@@ -112,10 +114,16 @@ export function createAssistantProductFeedbackRecorder(input: {
   let productFeedback: HostedRuntimeProductFeedbackRecord | null = null
   return {
     async recordProductFeedback(feedback) {
-      if (productFeedback) {
+      const normalized = normalizeAssistantProductFeedback(feedback)
+      if (
+        productFeedback
+        && (
+          !isAssistantProductSupportEscalation(normalized)
+          || isAssistantProductSupportEscalation(productFeedback)
+        )
+      ) {
         return { recorded: false }
       }
-      const normalized = normalizeAssistantProductFeedback(feedback)
       const acceptedInputIds = input.getAcceptedInputIds?.() ?? initialAcceptedInputIds
       productFeedback = {
         ...normalized,
@@ -276,6 +284,17 @@ export function buildAssistantProductFeedbackIdempotencyKey(input: {
       relatedChangelogItemIds: [...new Set(input.feedback.relatedChangelogItemIds)].sort(),
     }))
     .digest('hex')
+}
+
+function isAssistantProductSupportEscalation(
+  feedback: Pick<
+    HostedRuntimeProductFeedbackRecord,
+    'kind' | 'relatedChangelogItemIds' | 'summary'
+  >,
+): boolean {
+  return feedback.kind === 'frustration'
+    && feedback.relatedChangelogItemIds.length === 0
+    && feedback.summary.startsWith(ASSISTANT_PRODUCT_SUPPORT_ESCALATION_PREFIX)
 }
 
 function normalizeAssistantProductFeedback(
