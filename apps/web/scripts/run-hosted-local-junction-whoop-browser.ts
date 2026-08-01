@@ -33,6 +33,8 @@ const AUTH_ACTIONS = [
   /\bconfirm\b/i,
   /\bconnect\b/i,
 ] as const;
+const NEGATIVE_AUTH_ACTION_PATTERN =
+  /\b(?:cancel|decline|deny|disallow|do not|don't|not now|reject|skip)\b/iu;
 const TRUSTED_AUTHORIZATION_DOMAINS = [
   "junction.com",
   "tryvital.io",
@@ -258,13 +260,19 @@ async function clickFirstVisibleAction(
       const controls = page.getByRole(role, { name });
       for (let index = 0; index < await controls.count(); index += 1) {
         const control = controls.nth(index);
+        const actionText = [
+          await control.getAttribute("aria-label").catch(() => null),
+          await control.innerText().catch(() => ""),
+        ].filter(Boolean).join(" ");
         if (
-          await control.isVisible().catch(() => false)
-          && await control.isEnabled().catch(() => false)
+          NEGATIVE_AUTH_ACTION_PATTERN.test(actionText)
+          || !await control.isVisible().catch(() => false)
+          || !await control.isEnabled().catch(() => false)
         ) {
-          await control.click();
-          return true;
+          continue;
         }
+        await control.click();
+        return true;
       }
     }
   }
