@@ -40,6 +40,7 @@ describe("listHostedLinqContactCardLines", () => {
     const findMany = vi.fn()
       .mockResolvedValueOnce([
         buildLineRow("+15550100001", {
+          configuredAt: new Date("2026-06-30T11:00:00.000Z"),
           providerLastSeenAt: new Date("2026-06-30T12:00:00.000Z"),
           providerReputationStatus: "HEALTHY",
           providerServiceStatus: "ACTIVE",
@@ -65,12 +66,14 @@ describe("listHostedLinqContactCardLines", () => {
       }),
     ).resolves.toMatchObject([
       {
+        isConfigured: true,
         phoneNumber: "+15550100001",
         phoneNumberHint: "*** 0001",
         providerReputationStatus: "HEALTHY",
         providerServiceStatus: "ACTIVE",
       },
       {
+        isConfigured: false,
         phoneNumber: "+15550100002",
         phoneNumberHint: "*** 0002",
         providerReputationStatus: "AT_RISK",
@@ -859,12 +862,14 @@ describe("upsertHostedLinqLineForPhoneTx", () => {
 function buildLineRow(
   phoneNumber: string,
   input: {
+    configuredAt?: Date | null;
     providerLastSeenAt: Date;
     providerReputationStatus: string;
     providerServiceStatus: string;
   },
 ) {
   return {
+    configuredAt: input.configuredAt ?? null,
     phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(phoneNumber),
     phoneNumberHint: `*** ${phoneNumber.slice(-4)}`,
     phoneNumberLookupKey: `lookup:${phoneNumber}`,

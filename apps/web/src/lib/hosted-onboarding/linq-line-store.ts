@@ -42,6 +42,11 @@ export type HostedLinqAssignableHomeLine = {
 };
 
 export type HostedLinqContactCardLine = {
+  /**
+   * Only configured lines can own a member conversation, so consumers must
+   * be able to judge configured-pool health without re-querying.
+   */
+  isConfigured: boolean;
   phoneNumber: string;
   phoneNumberHint: string;
   phoneNumberLookupKey: string;
@@ -60,6 +65,7 @@ type HostedLinqAssignableHomeLineRow = {
 };
 
 type HostedLinqContactCardLineRow = {
+  configuredAt: Date | null;
   phoneNumberEncrypted: string | null;
   phoneNumberHint: string;
   phoneNumberLookupKey: string;
@@ -772,6 +778,44 @@ export function buildHostedLinqInventoryFreshnessCutoff(observedAt: Date): Date 
   return new Date(observedAt.getTime() - HOSTED_LINQ_INVENTORY_FRESHNESS_MAX_AGE_MS);
 }
 
+/**
+ * One consistent contact-card candidacy snapshot. Reads the configured-line
+ * total and the eligible candidates under the same inventory-wide advisory
+ * lock the snapshot applier uses, so a revoking health-cron run overlapping
+ * the hourly contact-card cron can never be observed half-applied.
+ */
+export async function readHostedLinqContactCardCandidacySnapshot(input: {
+  limit?: number;
+  observedAt?: Date;
+  prisma: PrismaClient | Prisma.TransactionClient;
+}): Promise<{
+  configuredLineCount: number;
+  lines: HostedLinqContactCardLine[];
+}> {
+  const read = async (tx: HostedLinqLineClient) => {
+    await acquireHostedLinqInventoryApplyLockTx({ prisma: tx });
+    const configuredLineCount = await tx.hostedLinqLine.count({
+      where: {
+        configuredAt: { not: null },
+        phoneNumberEncrypted: { not: null },
+      },
+    });
+    const lines = await listHostedLinqContactCardLines({
+      ...(input.limit === undefined ? {} : { limit: input.limit }),
+      ...(input.observedAt === undefined ? {} : { observedAt: input.observedAt }),
+      prisma: tx,
+    });
+    return { configuredLineCount, lines };
+  };
+
+  if ("$transaction" in input.prisma && typeof input.prisma.$transaction === "function") {
+    const prisma = input.prisma;
+    return prisma.$transaction((tx) => read(tx));
+  }
+
+  return read(input.prisma);
+}
+
 export async function listHostedLinqContactCardLines(input: {
   limit?: number;
   observedAt?: Date;
@@ -806,6 +850,7 @@ export async function listHostedLinqContactCardLines(input: {
     ],
     ...(take ? { take } : {}),
     select: {
+      configuredAt: true,
       phoneNumberEncrypted: true,
       phoneNumberHint: true,
       phoneNumberLookupKey: true,
@@ -835,6 +880,7 @@ export async function listHostedLinqContactCardLines(input: {
       ],
       ...(take ? { take: take - configuredRows.length } : {}),
       select: {
+        configuredAt: true,
         phoneNumberEncrypted: true,
         phoneNumberHint: true,
         phoneNumberLookupKey: true,
@@ -859,6 +905,7 @@ function mapHostedLinqContactCardRows(
       return [];
     }
     return [{
+      isConfigured: row.configuredAt !== null,
       phoneNumber,
       phoneNumberHint: row.phoneNumberHint,
       phoneNumberLookupKey: row.phoneNumberLookupKey,
