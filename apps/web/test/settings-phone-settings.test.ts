@@ -136,7 +136,7 @@ describe("HostedPhoneSettings", () => {
     );
     cleanupRender = cleanup;
 
-    expect(container.textContent).toContain("Verify phone");
+    expect(container.textContent).toContain("Add phone");
     expect(container.textContent).not.toContain("Not connected");
     expect(container.querySelector('[aria-live="polite"]')).toBeTruthy();
     expect(container.querySelector('[aria-live="polite"]')?.textContent).toBe("");
@@ -156,7 +156,7 @@ describe("HostedPhoneSettings", () => {
     cleanupRender = cleanup;
 
     await act(async () => {
-      findButton(container, "Verify phone")?.dispatchEvent(new Event("click", { bubbles: true }));
+      findButton(container, "Add phone")?.dispatchEvent(new Event("click", { bubbles: true }));
       await Promise.resolve();
     });
 
@@ -232,7 +232,7 @@ describe("HostedPhoneSettings", () => {
     cleanupRender = cleanup;
 
     await act(async () => {
-      findButton(container, "Verify phone")?.dispatchEvent(new Event("click", { bubbles: true }));
+      findButton(container, "Add phone")?.dispatchEvent(new Event("click", { bubbles: true }));
     });
 
     expect(mocks.linkPhone).toHaveBeenCalledTimes(1);
@@ -253,7 +253,7 @@ describe("HostedPhoneSettings", () => {
     cleanupRender = cleanup;
 
     await act(async () => {
-      findButton(container, "Verify phone")?.dispatchEvent(new Event("click", { bubbles: true }));
+      findButton(container, "Add phone")?.dispatchEvent(new Event("click", { bubbles: true }));
       await Promise.resolve();
     });
     await act(async () => {
@@ -262,7 +262,7 @@ describe("HostedPhoneSettings", () => {
       });
     });
     await act(async () => {
-      findButton(container, "Verify phone")?.dispatchEvent(new Event("click", { bubbles: true }));
+      findButton(container, "Add phone")?.dispatchEvent(new Event("click", { bubbles: true }));
       await Promise.resolve();
     });
 
@@ -321,7 +321,7 @@ describe("HostedPhoneSettings", () => {
     cleanupRender = cleanup;
 
     await act(async () => {
-      findButton(container, "Verify a new phone")?.dispatchEvent(
+      findButton(container, "Change phone")?.dispatchEvent(
         new Event("click", { bubbles: true }),
       );
       await Promise.resolve();
@@ -406,7 +406,7 @@ describe("HostedPhoneSettings", () => {
     cleanupRender = cleanup;
 
     await act(async () => {
-      findButton(container, "Verify a new phone")?.dispatchEvent(
+      findButton(container, "Change phone")?.dispatchEvent(
         new Event("click", { bubbles: true }),
       );
       await Promise.resolve();
@@ -424,7 +424,7 @@ describe("HostedPhoneSettings", () => {
     });
 
     await act(async () => {
-      findButton(container, "Verify a new phone")?.dispatchEvent(
+      findButton(container, "Change phone")?.dispatchEvent(
         new Event("click", { bubbles: true }),
       );
       await Promise.resolve();
@@ -455,7 +455,7 @@ describe("HostedPhoneSettings", () => {
     cleanupRender = cleanup;
 
     await act(async () => {
-      findButton(container, "Verify a new phone")?.dispatchEvent(
+      findButton(container, "Change phone")?.dispatchEvent(
         new Event("click", { bubbles: true }),
       );
       await Promise.resolve();
@@ -503,7 +503,7 @@ describe("HostedPhoneSettings", () => {
     cleanupRender = cleanup;
 
     await act(async () => {
-      findButton(container, "Verify phone")?.dispatchEvent(new Event("click", { bubbles: true }));
+      findButton(container, "Add phone")?.dispatchEvent(new Event("click", { bubbles: true }));
       await Promise.resolve();
     });
     await vi.waitFor(() => {
@@ -551,7 +551,7 @@ describe("HostedPhoneSettings", () => {
     cleanupRender = cleanup;
 
     await act(async () => {
-      findButton(container, "Verify phone")?.dispatchEvent(new Event("click", { bubbles: true }));
+      findButton(container, "Add phone")?.dispatchEvent(new Event("click", { bubbles: true }));
       await Promise.resolve();
     });
     await vi.waitFor(() => {
@@ -589,7 +589,7 @@ describe("HostedPhoneSettings", () => {
     cleanupRender = cleanup;
 
     await act(async () => {
-      findButton(container, "Verify a new phone")?.dispatchEvent(
+      findButton(container, "Change phone")?.dispatchEvent(
         new Event("click", { bubbles: true }),
       );
       await Promise.resolve();
@@ -632,7 +632,7 @@ describe("HostedPhoneSettings", () => {
     cleanupRender = cleanup;
 
     await act(async () => {
-      findButton(container, "Verify a new phone")?.dispatchEvent(
+      findButton(container, "Change phone")?.dispatchEvent(
         new Event("click", { bubbles: true }),
       );
       await Promise.resolve();
@@ -690,7 +690,7 @@ describe("HostedPhoneSettings", () => {
     cleanupRender = cleanup;
 
     await act(async () => {
-      findButton(container, "Verify a new phone")?.dispatchEvent(
+      findButton(container, "Change phone")?.dispatchEvent(
         new Event("click", { bubbles: true }),
       );
       await Promise.resolve();
@@ -712,7 +712,7 @@ describe("HostedPhoneSettings", () => {
     });
 
     await act(async () => {
-      findButton(container, "Verify a new phone")?.dispatchEvent(
+      findButton(container, "Change phone")?.dispatchEvent(
         new Event("click", { bubbles: true }),
       );
       await Promise.resolve();
@@ -777,7 +777,7 @@ describe("HostedPhoneSettings", () => {
     cleanupRender = cleanup;
 
     await act(async () => {
-      findButton(container, "Verify phone")?.dispatchEvent(
+      findButton(container, "Add phone")?.dispatchEvent(
         new Event("click", { bubbles: true }),
       );
       await Promise.resolve();
@@ -803,7 +803,7 @@ describe("HostedPhoneSettings", () => {
     });
 
     await act(async () => {
-      findButton(container, "Verify phone")?.dispatchEvent(
+      findButton(container, "Add phone")?.dispatchEvent(
         new Event("click", { bubbles: true }),
       );
       await Promise.resolve();
@@ -839,7 +839,7 @@ describe("HostedPhoneSettings", () => {
     cleanupRender = cleanup;
 
     await act(async () => {
-      findButton(container, "Verify phone")?.dispatchEvent(new Event("click", { bubbles: true }));
+      findButton(container, "Add phone")?.dispatchEvent(new Event("click", { bubbles: true }));
       await Promise.resolve();
     });
     await vi.waitFor(() => {
@@ -882,8 +882,8 @@ describe("HostedPhoneSettings", () => {
     );
     cleanupRender = cleanup;
 
-    expect(findButton(container, "Verify phone")).toBeTruthy();
-    expect(findButton(container, "Verify a new phone")).toBeUndefined();
+    expect(findButton(container, "Add phone")).toBeTruthy();
+    expect(findButton(container, "Change phone")).toBeUndefined();
   });
 });
 

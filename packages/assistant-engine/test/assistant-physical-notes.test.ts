@@ -68,6 +68,9 @@ describe('assistant physical notes', () => {
     expect(MURPH_SEND_PHYSICAL_NOTE_TOOL.description).toContain(
       'exact message_ref approving the send in the current turn',
     )
+    expect(
+      MURPH_SEND_PHYSICAL_NOTE_TOOL.inputSchema.properties.to.properties.state,
+    ).toEqual({ type: 'string', pattern: '^[A-Za-z]{2}$' })
   })
 
   it('normalizes the bounded US recipient', () => {
@@ -92,6 +95,25 @@ describe('assistant physical notes', () => {
         state: 'GA',
       },
     })
+  })
+
+  it('returns the safe invalid-arguments result for a non-alphabetic state', () => {
+    for (const state of ['d1', '1A']) {
+      expect(readPhysicalNoteDynamicToolRequest({
+        arguments: {
+          to: {
+            address_line1: '123 Main St',
+            city: 'Atlanta',
+            name: 'Sam',
+            postal_code: '30308',
+            state,
+          },
+        },
+        tool: MURPH_SEND_PHYSICAL_NOTE_TOOL.name,
+      })).toMatchObject({
+        kind: 'invalid-physical-note-arguments',
+      })
+    }
   })
 
   it('accepts an exact earlier generated-image identity only as a pair', () => {
