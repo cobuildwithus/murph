@@ -209,6 +209,7 @@ describe("hosted device-sync callback boundary", () => {
     expect(destination.searchParams.get("source")).toBe("assistant");
     expect(destination.searchParams.get("deviceSyncStatus")).toBeNull();
     expect(destination.searchParams.get("deviceSyncError")).toBeNull();
+    expect(response.headers.get("set-cookie")).toBeNull();
   });
 
   it("routes unexpected completion failures to the Connect error notice", async () => {
@@ -233,6 +234,7 @@ describe("hosted device-sync callback boundary", () => {
         provider: "junction",
       }),
     );
+    expect(response.headers.get("set-cookie")).toBeNull();
   });
 
   it("routes an undecodable provider callback to the Connect error notice", async () => {
@@ -270,6 +272,7 @@ describe("hosted device-sync callback boundary", () => {
     const destination = new URL(response.headers.get("location")!);
     expect(destination.pathname).toBe("/connect");
     expect(destination.searchParams.get("deviceSyncStatus")).toBe("connected");
+    expect(response.headers.get("set-cookie")).toBeNull();
   });
 });
 
