@@ -60,7 +60,7 @@ describe("hosted product support escalation", () => {
     );
   });
 
-  it("emails the first three member-linked escalations with a stable provider key", async () => {
+  it("emails the first three member-linked escalations with a stable metadata-only payload", async () => {
     const feedback = makeSupportFeedback();
     const feedbackId = buildHostedProductFeedbackId({ feedback });
     const sendEmail = vi.fn().mockResolvedValue({
@@ -120,7 +120,9 @@ describe("hosted product support escalation", () => {
       text: expect.stringContaining(`Member ID: ${MEMBER_ID}`),
       to: [HOSTED_PRODUCT_SUPPORT_EMAIL],
     }));
-    expect(sendEmail.mock.calls[0]?.[0].text).toContain(feedback.summary);
+    const emailText = sendEmail.mock.calls[0]?.[0].text ?? "";
+    expect(emailText).toContain(`Feedback ID: ${feedbackId}`);
+    expect(emailText).not.toContain(feedback.summary);
   });
 
   it("records later escalations without sending more than three emails per UTC day", async () => {
