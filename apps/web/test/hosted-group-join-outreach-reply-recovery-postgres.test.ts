@@ -1690,7 +1690,7 @@ describe.skipIf(!runPostgresProof)(
       },
     );
 
-    it("commits the withdrawal before room evidence and converges on provider replay", async () => {
+    it("aborts a removal atomically on evidence failure and stays deletion-safe across provider replay", async () => {
       const fixture = await createReactionAdmissionFixture();
       const addedEvent = buildReactionAdmissionEvent({
         eventId: `event-reaction-added-${randomUUID()}`,
@@ -1721,27 +1721,26 @@ describe.skipIf(!runPostgresProof)(
           prisma: fixture.reactionPrisma,
         })).rejects.toThrow("simulated room-evidence outage");
 
-        // The withdrawal committed in its own transaction before the failed
-        // evidence append: the production drain finds nothing sendable and the
-        // provider is never called after the explicit removal.
-        await expect(drainOneHostedGroupJoinOutreach({
-          now: new Date("2026-07-28T16:02:00.000Z"),
-          prisma: fixture.reactionPrisma,
-        })).resolves.toEqual({ kind: "idle" });
-        expect(providerMocks.createHostedLinqChat).not.toHaveBeenCalled();
+        // The whole decision aborted atomically: no revocation delivery, no
+        // evidence row, and no handled marker committed. The event remains
+        // retryable and nothing partial exists for account deletion to erase.
         await expect(fixture.reactionPrisma.hostedLinqDelivery.findFirst({
-          select: { skipReason: true, status: true },
+          select: { id: true },
           where: {
             groupJoinOutreach: { is: { offerId: fixture.offerId } },
             source: HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE,
             template: HOSTED_GROUP_JOIN_OUTREACH_TEMPLATE,
           },
-        })).resolves.toEqual({
-          skipReason: "reaction_removed",
-          status: "skipped",
-        });
-        // The provider event stayed unhandled, so retry replays the idempotent
-        // revocation and completes the deduplicated evidence append.
+        })).resolves.toBeNull();
+        await expect(fixture.reactionPrisma.hostedMailboxItem.findFirst({
+          select: { id: true },
+          where: {
+            dedupeKey: createHostedExecutionGroupReactionEventId(
+              removedEvent.eventId,
+            ),
+            userId: fixture.runtimeMemberId,
+          },
+        })).resolves.toBeNull();
         await expect(fixture.reactionPrisma.hostedLinqProviderEvent.findUnique({
           select: { groupJoinOfferHandledAt: true },
           where: {
@@ -1751,12 +1750,30 @@ describe.skipIf(!runPostgresProof)(
           },
         })).resolves.toEqual({ groupJoinOfferHandledAt: null });
 
+        // The participant completes production account deletion while the
+        // interrupted event is still marker-less. Deletion removes the pending
+        // outreach through the still-present phone identity.
+        await deleteHostedAccountData({
+          memberId: fixture.participantMemberId,
+          prisma: fixture.reactionPrisma,
+          request: new Request("https://join.example.test/settings"),
+        });
+        await expect(fixture.reactionPrisma.hostedGroupJoinOutreach.findMany({
+          select: { id: true },
+          where: { offerId: fixture.offerId },
+        })).resolves.toEqual([]);
+
+        // Provider replay of the marker-less removal now resolves no member.
+        // It converges as an anonymous pre-member removal: the terminal
+        // tombstone participates in group-deletion ownership, is never
+        // deliverable, and blocks any marker-less add replay from texting the
+        // deleted phone. No opener dispatch can occur.
         await ingestReactionAdmissionEvent({ event: removedEvent, fixture });
         await expect(handleHostedGroupJoinOfferReaction({
           event: removedEvent,
           prisma: fixture.reactionPrisma,
         })).resolves.toEqual({
-          reason: "reaction_recorded",
+          reason: "outreach_revoked",
           status: "accepted",
         });
         await expect(fixture.reactionPrisma.hostedLinqProviderEvent.findUnique({
@@ -1781,6 +1798,21 @@ describe.skipIf(!runPostgresProof)(
           });
         expect(removalEvidence).toHaveLength(1);
         expect(removalEvidence[0]?.consumedAt).not.toBeNull();
+        await expect(fixture.reactionPrisma.hostedLinqDelivery.findFirst({
+          select: { skipReason: true, status: true },
+          where: {
+            groupJoinOutreach: { is: { offerId: fixture.offerId } },
+            source: HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE,
+            template: HOSTED_GROUP_JOIN_OUTREACH_TEMPLATE,
+          },
+        })).resolves.toEqual({
+          skipReason: "reaction_removed",
+          status: "skipped",
+        });
+        await expect(drainOneHostedGroupJoinOutreach({
+          now: new Date("2026-07-28T16:05:00.000Z"),
+          prisma: fixture.reactionPrisma,
+        })).resolves.toEqual({ kind: "idle" });
         expect(providerMocks.createHostedLinqChat).not.toHaveBeenCalled();
       } finally {
         reactionEvidenceMocks.failNextAppend.value = false;

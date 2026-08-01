@@ -147,12 +147,15 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     );
     let reactionMailboxAppend: HostedLinqGroupReactionMailboxAppend | null = null;
     try {
-      // Phase 1: commit the withdrawal first, under the same drain fence the
-      // opener dispatch takes. Room-evidence work (mailbox sequence locks and
-      // a KMS unwrap) must never delay or roll back a revocation that races
-      // dispatch: a stalled append would let the minute sweep send the opener
-      // after an explicit withdrawal, and a failed append must not erase it.
-      const decision = await input.prisma.$transaction(async (tx) => {
+      // One atomic decision: the withdrawal, its consumed room evidence, and
+      // the terminal provider marker commit together. Revocation acquires the
+      // shared drain fence before the KMS-backed evidence work, so a stalled
+      // append cannot lose the dispatch race; a failed append aborts the whole
+      // decision and Linq's bounded webhook retry re-runs it. Because nothing
+      // partial can commit, a handled event always carries its evidence, and
+      // account deletion can never be followed by replay recreating state this
+      // decision had committed.
+      const revoked = await input.prisma.$transaction(async (tx) => {
         const offer = await readHostedGroupJoinOfferTargetTx({
           channel: "linq",
           messageLookupKeyReadCandidates,
@@ -197,18 +200,10 @@ export async function handleHostedGroupJoinOfferReaction(input: {
           participantPhoneNumber,
           tx,
         });
-        return { offer, revoked };
-      }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-      // Phase 2: retain the consumed room evidence and consume the provider
-      // event atomically. The event stays unhandled until this commits, so a
-      // failure or restart replays into the idempotent revocation above and
-      // the deduplicated append here — evidence is never lost behind a handled
-      // marker, and a withdrawal is never lost behind evidence.
-      await input.prisma.$transaction(async (tx) => {
         reactionMailboxAppend = await appendHostedGroupOfferReactionRoomEvidenceTx({
           actor: member ? input.event.reactionFromHandle : null,
           event: input.event,
-          expectedContainerMemberId: decision.offer.runtimeMemberId,
+          expectedContainerMemberId: offer.runtimeMemberId,
           tx,
         });
         await markHostedLinqGroupJoinOfferHandledTx({
@@ -216,8 +211,8 @@ export async function handleHostedGroupJoinOfferReaction(input: {
           handledAt: input.event.providerCreatedAt,
           prisma: tx,
         });
+        return revoked;
       }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-      const revoked = decision.revoked;
       await signalHostedGroupOfferReactionBestEffort({
         append: reactionMailboxAppend,
         prisma: input.prisma,

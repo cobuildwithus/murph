@@ -489,7 +489,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
   });
 
-  it("keeps a withdrawal committed when the removal evidence append fails, then converges on replay", async () => {
+  it("aborts the whole removal decision when the evidence append fails, then converges on replay", async () => {
     mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
     mocks.revokeHostedGroupJoinOutreachForRemovedReactionTx.mockResolvedValueOnce({
       kind: "revoked",
@@ -508,9 +508,9 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       prisma,
     })).rejects.toThrow("mailbox unavailable");
 
-    // The withdrawal decision committed in its own transaction; only the
-    // evidence-and-handled transaction failed, leaving the provider event
-    // replayable and no signal emitted.
+    // The whole atomic decision aborts: revocation ran but rolls back with the
+    // failed evidence append, the provider event is never marked handled, and
+    // no signal is emitted. Linq's bounded webhook retry re-runs the decision.
     expect(mocks.revokeHostedGroupJoinOutreachForRemovedReactionTx).toHaveBeenCalledTimes(1);
     expect(mocks.markHostedLinqGroupJoinOfferHandledTx).not.toHaveBeenCalled();
     expect(mocks.signalHostedLinqGroupReactionMailbox).not.toHaveBeenCalled();
