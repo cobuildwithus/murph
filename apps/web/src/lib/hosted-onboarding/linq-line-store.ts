@@ -765,10 +765,17 @@ export async function listHostedLinqContactCardLines(input: {
   prisma: HostedLinqLineClient;
 }): Promise<HostedLinqContactCardLine[]> {
   const take = input.limit && input.limit > 0 ? input.limit : undefined;
+  // Contact-card candidacy always requires validated inventory backing
+  // (providerPhoneNumberId is written only from an authoritative provider
+  // snapshot): a configured row whose ownership the inventory has revoked —
+  // a moved or relinquished number — must not be maintained or offered as a
+  // member-facing backup, even though configuration still matters to other
+  // consumers such as inbound routing.
   const configuredRows = await input.prisma.hostedLinqLine.findMany({
     where: {
       configuredAt: { not: null },
       phoneNumberEncrypted: { not: null },
+      providerPhoneNumberId: { not: null },
     },
     orderBy: [
       { configuredAt: "desc" },

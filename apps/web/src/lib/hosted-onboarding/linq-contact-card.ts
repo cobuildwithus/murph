@@ -62,6 +62,28 @@ export async function reconcileHostedLinqContactCards(input: {
     maxLines: input.maxLines,
     prisma: input.prisma,
   });
+
+  // An empty candidate list while configured lines exist means the inventory
+  // has revoked ownership of every configured number — that is a contact-card
+  // outage, not a legitimately empty pool, and must not read as a lineCount:0
+  // success.
+  if (lines.length === 0) {
+    const configuredLineCount = await input.prisma.hostedLinqLine.count({
+      where: {
+        configuredAt: { not: null },
+        phoneNumberEncrypted: { not: null },
+      },
+    });
+    if (configuredLineCount > 0) {
+      throw hostedOnboardingError({
+        code: "LINQ_CONTACT_CARD_RECONCILE_FAILED",
+        message: `Linq contact-card reconciliation found ${configuredLineCount} configured line(s) but none with validated inventory backing.`,
+        httpStatus: 502,
+        retryable: true,
+      });
+    }
+  }
+
   const result: HostedLinqContactCardReconciliation = {
     activeCards: 0,
     atRiskLines: 0,

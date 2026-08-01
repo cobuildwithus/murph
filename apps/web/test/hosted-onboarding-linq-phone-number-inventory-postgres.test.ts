@@ -40,8 +40,10 @@ beforeEach(() => {
 });
 
 import { createHostedPhoneLookupKeyReadCandidates } from "@/src/lib/hosted-onboarding/contact-privacy-core";
+import { resolveMurphHostedLinqContactCardBackupPhoneNumber } from "@/src/lib/hosted-onboarding/linq-contact-card";
 import { syncHostedLinqPhoneNumberInventory } from "@/src/lib/hosted-onboarding/linq-phone-number-inventory";
 import {
+  listHostedLinqContactCardLines,
   syncHostedLinqConfiguredLinesTx,
   upsertHostedLinqLineForPhoneTx,
 } from "@/src/lib/hosted-onboarding/linq-line-store";
@@ -245,6 +247,95 @@ describe.skipIf(!runPostgresProof)(
         await prisma.$disconnect();
       }
     });
+    it("drops a revoked configured line from contact-card candidacy and backup selection", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 4 });
+      const providerId = `pg-proof-line-${randomUUID()}`;
+      const phoneA = buildSyntheticProofPhoneNumber();
+      const phoneB = buildSyntheticProofPhoneNumber();
+      const phoneOther = buildSyntheticProofPhoneNumber();
+      const otherProviderId = `pg-proof-line-${randomUUID()}`;
+      const proofLookupKeys = [phoneA, phoneB, phoneOther].flatMap(
+        (phone) => createHostedPhoneLookupKeyReadCandidates(phone),
+      );
+
+      const preexistingHeldRows = await prisma.hostedLinqLine.findMany({
+        where: { providerPhoneNumberId: { not: null } },
+        select: {
+          phoneNumberLookupKey: true,
+          providerPhoneNumberId: true,
+        },
+      });
+
+      try {
+        // Phone A is a fully configured sending line that currently holds the
+        // provider id — the strongest candidate the lister can return.
+        const rowA = await upsertHostedLinqLineForPhoneTx({
+          activeMemberLimit: null,
+          observedAt: new Date(),
+          phoneNumber: phoneA,
+          prisma,
+          providerPhoneNumberId: providerId,
+          source: "configured",
+        });
+        await prisma.hostedLinqLine.update({
+          data: { providerPhoneNumberId: providerId },
+          where: { phoneNumberLookupKey: rowA.phoneNumberLookupKey },
+        });
+
+        // The provider moves that id to phone B and reports one other owned
+        // line, so a healthy backup candidate still exists.
+        vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+          phone_numbers: [
+            {
+              id: providerId,
+              phone_number: phoneB,
+              reputation: { status: "HEALTHY" },
+              status: "ACTIVE",
+            },
+            {
+              id: otherProviderId,
+              phone_number: phoneOther,
+              reputation: { status: "HEALTHY" },
+              status: "ACTIVE",
+            },
+          ],
+        }), { headers: { "content-type": "application/json" }, status: 200 })));
+
+        await expect(syncHostedLinqPhoneNumberInventory({
+          observedAt: new Date(),
+          prisma,
+        })).resolves.toEqual({ syncedCount: 2 });
+
+        // The revoked configured row must disappear from the real consumers,
+        // not merely lose its ownership column.
+        const candidates = await listHostedLinqContactCardLines({ prisma });
+        expect(candidates.map((line) => line.phoneNumber)).not.toContain(phoneA);
+        expect(candidates.map((line) => line.phoneNumber)).toEqual(
+          expect.arrayContaining([phoneB, phoneOther]),
+        );
+
+        for (const excludePhoneNumber of [phoneB, phoneOther]) {
+          const backup = await resolveMurphHostedLinqContactCardBackupPhoneNumber({
+            excludePhoneNumber,
+            prisma,
+          });
+          expect(backup).not.toBe(phoneA);
+        }
+      } finally {
+        vi.unstubAllGlobals();
+        for (const heldRow of preexistingHeldRows) {
+          await prisma.hostedLinqLine.updateMany({
+            data: { providerPhoneNumberId: heldRow.providerPhoneNumberId },
+            where: { phoneNumberLookupKey: heldRow.phoneNumberLookupKey },
+          });
+        }
+        await prisma.hostedLinqLine.deleteMany({
+          where: { phoneNumberLookupKey: { in: proofLookupKeys } },
+        });
+        await prisma.$disconnect();
+      }
+    });
+
     it("blocks a concurrent sync on the inventory-wide advisory lock until the owner commits", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 8 });
       const observer = createPrismaClient({ databaseUrl, poolMax: 2 });

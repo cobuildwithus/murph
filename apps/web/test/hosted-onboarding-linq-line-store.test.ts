@@ -83,6 +83,7 @@ describe("listHostedLinqContactCardLines", () => {
       where: {
         configuredAt: { not: null },
         phoneNumberEncrypted: { not: null },
+        providerPhoneNumberId: { not: null },
       },
     }));
     expect(findMany).toHaveBeenNthCalledWith(2, expect.objectContaining({

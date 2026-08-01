@@ -528,6 +528,49 @@ describe("hosted Linq contact card client", () => {
     consoleErrorSpy.mockRestore();
   });
 
+  it("fails the run when configured lines exist but none keep validated inventory backing", async () => {
+    linqLineStoreMocks.listHostedLinqContactCardLines.mockResolvedValue([]);
+    const count = vi.fn().mockResolvedValue(2);
+    const prisma = { hostedLinqLine: { count } };
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(reconcileHostedLinqContactCards({
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "LINQ_CONTACT_CARD_RECONCILE_FAILED",
+    });
+
+    // A revoked pool is an outage, not an empty pool: no provider call is
+    // made for a number the account no longer owns.
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(count).toHaveBeenCalledWith({
+      where: {
+        configuredAt: { not: null },
+        phoneNumberEncrypted: { not: null },
+      },
+    });
+  });
+
+  it("resolves an empty run when no configured lines exist at all", async () => {
+    linqLineStoreMocks.listHostedLinqContactCardLines.mockResolvedValue([]);
+    const prisma = { hostedLinqLine: { count: vi.fn().mockResolvedValue(0) } };
+    vi.stubGlobal("fetch", vi.fn());
+
+    await expect(reconcileHostedLinqContactCards({
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      activeCards: 0,
+      atRiskLines: 0,
+      createdCards: 0,
+      criticalLines: 0,
+      failedLines: 0,
+      inactiveCards: 0,
+      lineCount: 0,
+      updatedCards: 0,
+    });
+  });
+
   it("rethrows caller cancellation instead of counting it as a line failure", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     linqInventoryMocks.syncHostedLinqPhoneNumberInventory.mockResolvedValue({
