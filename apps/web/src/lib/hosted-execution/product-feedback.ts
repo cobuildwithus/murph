@@ -36,13 +36,19 @@ export async function recordHostedProductFeedback(input: {
   const feedbackId = buildHostedProductFeedbackId({
     feedback: input.feedback,
   });
+  const supportEscalation = isHostedProductSupportEscalationSummary(
+    feedback.summary,
+  );
 
-  if (!isHostedProductSupportEscalationSummary(feedback.summary)) {
+  if (!supportEscalation) {
     return await persistHostedProductFeedback({
       feedback,
       feedbackId,
       memberId: input.memberId ?? null,
     });
+  }
+  if (!isHostedProductSupportEscalationFeedback(feedback)) {
+    rejectHostedProductSupportEscalation();
   }
 
   const memberId = input.memberId?.trim();
@@ -84,7 +90,9 @@ export async function recordHostedProductFeedback(input: {
       select: {
         createdAt: true,
         id: true,
+        kind: true,
         memberId: true,
+        relatedChangelogItemIdsJson: true,
         summary: true,
       },
       where: { id: feedbackId },
@@ -93,7 +101,9 @@ export async function recordHostedProductFeedback(input: {
     if (
       !row
       || row.memberId !== memberId
-      || !isHostedProductSupportEscalationSummary(row.summary)
+      || row.kind !== feedback.kind
+      || row.summary !== feedback.summary
+      || !isEmptyJsonArray(row.relatedChangelogItemIdsJson)
     ) {
       throw hostedOnboardingError({
         code: "HOSTED_PRODUCT_SUPPORT_IDEMPOTENCY_CONFLICT",
@@ -109,6 +119,7 @@ export async function recordHostedProductFeedback(input: {
           gte: day.startAt,
           lt: day.endAt,
         },
+        kind: "frustration",
         memberId,
         OR: [
           {
@@ -177,6 +188,17 @@ export function isHostedProductSupportEscalationSummary(
 ): value is string {
   return typeof value === "string"
     && value.startsWith(HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX);
+}
+
+export function isHostedProductSupportEscalationFeedback(
+  feedback: Pick<
+    HostedRuntimeProductFeedbackRecord,
+    "kind" | "relatedChangelogItemIds" | "summary"
+  >,
+): boolean {
+  return feedback.kind === "frustration"
+    && feedback.relatedChangelogItemIds.length === 0
+    && isHostedProductSupportEscalationSummary(feedback.summary);
 }
 
 export function normalizeHostedProductFeedback(
@@ -265,6 +287,18 @@ function resolveUtcDayWindow(value: Date): {
     endAt: new Date(startAt.getTime() + DAY_MS),
     startAt,
   };
+}
+
+function isEmptyJsonArray(value: unknown): boolean {
+  return Array.isArray(value) && value.length === 0;
+}
+
+function rejectHostedProductSupportEscalation(): never {
+  throw hostedOnboardingError({
+    code: "HOSTED_PRODUCT_SUPPORT_REJECTED",
+    httpStatus: 400,
+    message: "Product support escalation must be a frustration without changelog references.",
+  });
 }
 
 function rejectHostedProductFeedback(): never {
