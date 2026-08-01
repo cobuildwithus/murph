@@ -1,6 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  isHostedProductSupportEscalationSummary: vi.fn(),
   recordHostedProductFeedback: vi.fn(),
   requireHostedCloudflareCallbackJsonRequest: vi.fn(),
 }));
@@ -11,6 +12,8 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-execution/product-feedback", () => ({
+  isHostedProductSupportEscalationSummary:
+    mocks.isHostedProductSupportEscalationSummary,
   recordHostedProductFeedback: mocks.recordHostedProductFeedback,
 }));
 
@@ -35,13 +38,16 @@ describe("hosted product feedback record route", () => {
         userId: "member_123",
       }),
     );
+    mocks.isHostedProductSupportEscalationSummary.mockImplementation(
+      (summary: string) => summary.startsWith("Support escalation:"),
+    );
     mocks.recordHostedProductFeedback.mockResolvedValue({
       feedbackId: "product_feedback_123",
       recorded: true,
     });
   });
 
-  it("authenticates the callback and records bounded feedback", async () => {
+  it("keeps ordinary bounded feedback anonymous", async () => {
     const feedback = {
       idempotencyKey: "a".repeat(64),
       kind: "feature_interest",
@@ -70,6 +76,32 @@ describe("hosted product feedback record route", () => {
     await expect(response.json()).resolves.toEqual({
       feedbackId: "product_feedback_123",
       recorded: true,
+    });
+  });
+
+  it("links an explicit support escalation to the authenticated member", async () => {
+    const feedback = {
+      idempotencyKey: "b".repeat(64),
+      kind: "frustration",
+      relatedChangelogItemIds: [],
+      summary:
+        "Support escalation: a connected source reports success but Murph does not finish the connection.",
+    };
+    const response = await route.POST(
+      new Request(
+        "https://join.example.test/api/internal/hosted-execution/product-feedback/record",
+        {
+          body: JSON.stringify({ feedback }),
+          headers: { "content-type": "application/json" },
+          method: "POST",
+        },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.recordHostedProductFeedback).toHaveBeenCalledWith({
+      feedback,
+      memberId: "member_123",
     });
   });
 });
