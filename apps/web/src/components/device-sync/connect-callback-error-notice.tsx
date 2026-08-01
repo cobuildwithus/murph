@@ -64,8 +64,9 @@ function buildConnectCallbackSupportBody({
   errorCode: string | null;
   sourceLabel: string | null;
 }): string {
-  // Support needs the failing source and code to answer without a round trip;
-  // both are product labels, never member data.
+  // Support needs the failing source and code to answer without a round trip.
+  // createConnectCallbackNotice only passes a catalog-resolved source name and a
+  // Murph error code here, so raw callback query text cannot reach this draft.
   return [
     `I could not finish connecting ${sourceLabel ?? "a device"} in Murph.`,
     "",
