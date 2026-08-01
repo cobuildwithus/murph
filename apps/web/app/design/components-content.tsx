@@ -143,6 +143,7 @@ import {
   DESIGN_USAGE_MISSION_CONTACT_OPTION,
 } from "./group-usage-funding-study";
 import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
+import { ConnectCallbackErrorNotice } from "@/src/components/device-sync/connect-callback-error-notice";
 import { HostedAccountDeletionStatus } from "@/src/components/settings/hosted-data-privacy-settings";
 import { GarminHistoricalDataDialog } from "../(dashboard)/connect/connect-page-dialogs";
 import {
@@ -1257,6 +1258,26 @@ export function ComponentsContent() {
           <div className="flex flex-col gap-4">
             <Alert><AlertTitle>Experiment in progress</AlertTitle><AlertDescription>Day 15 of 28. Next session scheduled for this evening.</AlertDescription></Alert>
             <Alert variant="destructive"><AlertTitle>Oura disconnected</AlertTitle><AlertDescription>Reconnect your ring to continue tracking metrics.</AlertDescription></Alert>
+          </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Connect Callback Error Notice">
+          <div className="flex flex-col gap-4" inert>
+            <ConnectCallbackErrorNotice
+              errorCode="CALLBACK_PROOF_INVALID"
+              message="That return link did not match the browser you started in, so nothing was connected. Start Oura again from this page."
+              sourceLabel="Oura"
+              title="Unable to finish connection"
+            />
+            <ConnectCallbackErrorNotice
+              errorCode="CALLBACK_SESSION_REQUIRED"
+              message="You were signed out before Oura finished connecting. Log in, then start the connection again."
+              onSignIn={() => {}}
+              sourceLabel="Oura"
+              title="Unable to finish connection"
+            />
           </div>
         </Section>
 
