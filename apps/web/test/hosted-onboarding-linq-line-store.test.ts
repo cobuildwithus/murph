@@ -89,8 +89,33 @@ describe("listHostedLinqContactCardLines", () => {
       where: {
         configuredAt: null,
         phoneNumberEncrypted: { not: null },
+        providerPhoneNumberId: { not: null },
         providerSeenAt: { not: null },
       },
+    }));
+  });
+
+  it("excludes provider-only rows that the phone-number inventory has not vouched for", async () => {
+    // Chat-health sync stamps providerSeenAt on lines derived from chat
+    // handles, which can reference numbers the account no longer owns. Only
+    // inventory-backed rows (providerPhoneNumberId set) may join the batch.
+    const findMany = vi.fn().mockResolvedValue([]);
+    const prisma = {
+      hostedLinqLine: {
+        findMany,
+      },
+    } as never;
+
+    await expect(
+      listHostedLinqContactCardLines({
+        prisma,
+      }),
+    ).resolves.toEqual([]);
+
+    expect(findMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      where: expect.objectContaining({
+        providerPhoneNumberId: { not: null },
+      }),
     }));
   });
 });

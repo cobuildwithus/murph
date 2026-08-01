@@ -3,6 +3,9 @@ import {
   buildHostedExecutionEmailConversationMessageWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionTelegramConversationMessageWake,
+  createHostedExecutionGroupReactionEventId,
+  formatHostedExecutionGroupReactionEventText,
+  HOSTED_EXECUTION_GROUP_REACTION_SENDER_ATTESTATION,
   HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
   type HostedExecutionConversationMessageWake,
 } from "@murphai/hosted-execution";
@@ -1251,6 +1254,88 @@ describe("hosted ops growth metrics", () => {
     expect(mocks.decodeHostedMailboxStoredPayload).toHaveBeenCalledTimes(3);
   });
 
+  it("omits group reaction attestation rows from active senders", async () => {
+    const now = new Date("2026-07-06T12:00:00.000Z");
+    const senderPhone = requireLinqContact("phone", "+15550000001");
+    const reactorPhone = requireLinqContact("phone", "+15550000002");
+    const retiredReactorPhone = requireLinqContact("phone", "+15550000003");
+    queueCurrentMetricMocks();
+    mocks.hostedMailboxItem.groupBy
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    mocks.hostedMailboxItem.findMany.mockResolvedValueOnce([
+      buildLinqGroupMailboxRow({
+        contact: senderPhone,
+        containerMemberId: "thread_container_one",
+        occurredAt: new Date("2026-07-05T12:00:00.000Z"),
+      }),
+      buildLinqGroupReactionMailboxRow({
+        contact: reactorPhone,
+        containerMemberId: "thread_container_one",
+        occurredAt: new Date("2026-07-04T12:00:00.000Z"),
+      }),
+      buildTelegramGroupReactionMailboxRow({
+        containerMemberId: "thread_container_two",
+        occurredAt: new Date("2026-07-03T12:00:00.000Z"),
+      }),
+      retireGroupMailboxRow(buildLinqGroupReactionMailboxRow({
+        contact: retiredReactorPhone,
+        containerMemberId: "thread_container_one",
+        occurredAt: new Date("2026-06-15T12:00:00.000Z"),
+      })),
+    ]);
+    mocks.hostedGrowthAggregate.findUniqueOrThrow.mockResolvedValueOnce({
+      trackedFulfilledUsageTopUps: 0,
+    });
+    mocks.hostedMember.findMany.mockResolvedValueOnce([]);
+    mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+    mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
+    mocks.hostedMemberBillingRef.count
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0);
+
+    const dashboard = await readHostedGrowthDashboard(now);
+
+    expect(dashboard.activeUsers).toEqual({
+      trailing30Days: 1,
+      trailing30DaysComplete: true,
+      trailing7Days: 1,
+      trailing7DaysComplete: true,
+      wowComparisonComplete: true,
+      wowPercent: null,
+    });
+    expect(mocks.decodeHostedMailboxStoredPayload).toHaveBeenCalledTimes(3);
+  });
+
+  it("still rejects the reaction sender attestation on a non-reaction event", async () => {
+    const now = new Date("2026-07-06T12:00:00.000Z");
+    const forgedPhone = requireLinqContact("phone", "+15550000004");
+    queueCurrentMetricMocks();
+    mocks.hostedMailboxItem.groupBy
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    mocks.hostedMailboxItem.findMany.mockResolvedValueOnce([
+      buildLinqGroupMailboxRow({
+        contact: forgedPhone,
+        containerMemberId: "thread_container_one",
+        from: HOSTED_EXECUTION_GROUP_REACTION_SENDER_ATTESTATION,
+        occurredAt: new Date("2026-07-05T12:00:00.000Z"),
+      }),
+    ]);
+    mocks.hostedMember.findMany.mockResolvedValueOnce([]);
+    mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+    mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
+    mocks.hostedMemberBillingRef.count
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0);
+
+    await expect(readHostedGrowthDashboard(now)).rejects.toThrow(
+      "Hosted growth Linq group sender contact is invalid.",
+    );
+  });
+
   it("still rejects an unknown thread-container conversation channel", async () => {
     const now = new Date("2026-07-06T12:00:00.000Z");
     const row = buildEmailGroupMailboxRow({
@@ -1842,6 +1927,7 @@ function restoreEnvValue(key: string, value: string | undefined): void {
 function buildLinqGroupMailboxRow(input: {
   contact: NonNullable<ReturnType<typeof createHostedLinqParticipantContact>>;
   containerMemberId: string;
+  from?: string;
   occurredAt: Date;
   senderMemberId?: string;
 }) {
@@ -1858,7 +1944,7 @@ function buildLinqGroupMailboxRow(input: {
     eventId,
     linqMessage: {
       chatId: threadId,
-      from: input.contact.value,
+      from: input.from ?? input.contact.value,
       isFromMe: false,
       messageId: eventId,
       parts: [{ type: "text", value: "hello" }],
@@ -1915,6 +2001,103 @@ function buildTelegramGroupMailboxRow(input: {
       messageId: eventId,
       schema: HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
       text: "hello",
+      threadId,
+      threadIsDirect: false,
+    },
+    userId: input.containerMemberId,
+  });
+
+  return buildGroupMailboxRow({
+    containerMemberId: input.containerMemberId,
+    eventId,
+    occurredAt: input.occurredAt,
+    wake,
+  });
+}
+
+function buildLinqGroupReactionMailboxRow(input: {
+  contact: NonNullable<ReturnType<typeof createHostedLinqParticipantContact>>;
+  containerMemberId: string;
+  occurredAt: Date;
+}) {
+  const eventId = createHostedExecutionGroupReactionEventId([
+    "linq-reaction",
+    input.containerMemberId,
+    input.occurredAt.getTime(),
+  ].join("_"));
+  const threadId = `thread_${input.containerMemberId}`;
+  const wake = buildHostedExecutionLinqConversationMessageWake({
+    contactKind: input.contact.kind,
+    contactLookupKey: input.contact.lookupKey,
+    eventId,
+    linqMessage: {
+      chatId: threadId,
+      from: HOSTED_EXECUTION_GROUP_REACTION_SENDER_ATTESTATION,
+      isFromMe: false,
+      messageId: eventId,
+      parts: [{
+        type: "text",
+        value: formatHostedExecutionGroupReactionEventText({
+          actor: input.contact.value,
+          changes: [{ operation: "added", reaction: "like" }],
+          channel: "linq",
+          mode: "delta",
+          targetMessageId: "target_message",
+          targetText: null,
+        }),
+      }],
+      reactionEligible: false,
+      replyToMessageId: "target_message",
+      service: "iMessage",
+      threadIsDirect: false,
+    },
+    occurredAt: input.occurredAt.toISOString(),
+    routeAuthority: {
+      channel: "linq",
+      containerMemberId: input.containerMemberId,
+      threadId,
+    },
+    userId: input.containerMemberId,
+  });
+
+  return buildGroupMailboxRow({
+    containerMemberId: input.containerMemberId,
+    eventId,
+    occurredAt: input.occurredAt,
+    wake,
+  });
+}
+
+function buildTelegramGroupReactionMailboxRow(input: {
+  containerMemberId: string;
+  occurredAt: Date;
+}) {
+  const eventId = createHostedExecutionGroupReactionEventId([
+    "telegram-reaction",
+    input.containerMemberId,
+    input.occurredAt.getTime(),
+  ].join("_"));
+  const threadId = `thread_${input.containerMemberId}`;
+  const wake = buildHostedExecutionTelegramConversationMessageWake({
+    eventId,
+    occurredAt: input.occurredAt.toISOString(),
+    routeAuthority: {
+      channel: "telegram",
+      containerMemberId: input.containerMemberId,
+      threadId,
+    },
+    telegramMessage: {
+      from: HOSTED_EXECUTION_GROUP_REACTION_SENDER_ATTESTATION,
+      messageId: eventId,
+      schema: HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
+      text: formatHostedExecutionGroupReactionEventText({
+        actor: "Group Member",
+        changes: [{ operation: "added", reaction: "👍" }],
+        channel: "telegram",
+        mode: "delta",
+        targetMessageId: "target_message",
+        targetText: null,
+      }),
       threadId,
       threadIsDirect: false,
     },

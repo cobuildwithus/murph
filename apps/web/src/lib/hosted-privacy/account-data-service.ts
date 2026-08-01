@@ -386,7 +386,7 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     slug: "prisma.hosted_product_feedback",
     label: "Hosted product feedback rows",
     deletion: "live-delete",
-    note: "Deletes assistant-captured product feedback rows. Export includes safe kind/summary metadata and optional published changelog item ids while omitting the internal feedback id.",
+    note: "Deletes and exports only explicitly member-linked product feedback rows. Ordinary assistant-captured feedback is de-identified and stored without a member relation, so it cannot be associated with an account export or deletion request.",
   },
   {
     slug: "prisma.hosted_group_join_outreach",
@@ -1877,7 +1877,10 @@ function assertHostedPrivyPhoneTransferUnusedStripeSurface(input: {
     || input.subscription.cancel_at !== null
     || input.subscription.cancel_at_period_end !== false
     || input.subscription.pending_invoice_item_interval !== null
-    || input.subscription.pending_setup_intent !== null
+    // Stripe itself attaches a pending SetupIntent to every
+    // automatic-collection trial without a payment method, so its presence
+    // is provider scaffolding. A setup intent that ever succeeded sets the
+    // payment method checked above, which stays fail-closed.
     || input.subscription.pending_update !== null
     || input.subscription.pause_collection !== null
     || input.subscription.schedule !== null
