@@ -23,6 +23,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   }),
 }));
 
+import { createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy-core";
 import {
   parseHostedLinqPhoneNumberInventory,
   syncHostedLinqPhoneNumberInventory,
@@ -35,18 +36,31 @@ afterEach(() => {
 });
 
 describe("syncHostedLinqPhoneNumberInventory", () => {
-  it("revokes inventory backing from lines absent in a successful snapshot before upserting", async () => {
+  const stubInventoryFetch = (payload: unknown, status = 200) => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      typeof payload === "string" ? payload : JSON.stringify(payload),
+      { headers: { "content-type": "application/json" }, status },
+    )));
+  };
+
+  it("revokes relinquished and moved provider-id pairings before upserting", async () => {
+    const keptLookupKey = createHostedPhoneLookupKey("+15550000001");
     const callOrder: string[] = [];
+    const findMany = vi.fn(async () => [
+      { phoneNumberLookupKey: keptLookupKey, providerPhoneNumberId: "line_current" },
+      { phoneNumberLookupKey: "lookup:moved", providerPhoneNumberId: "line_moving" },
+      { phoneNumberLookupKey: "lookup:relinquished", providerPhoneNumberId: "line_gone" },
+    ]);
     const updateMany = vi.fn(async () => {
       callOrder.push("revoke");
-      return { count: 1 };
+      return { count: 2 };
     });
     lineStoreMocks.upsertHostedLinqLineForPhoneTx.mockImplementation(async () => {
       callOrder.push("upsert");
-      return { phoneNumberLookupKey: "lookup:1" };
+      return { phoneNumberLookupKey: "lookup:any" };
     });
     providerHealthStoreMocks.projectHostedLinqLineProviderStateTx.mockResolvedValue(undefined);
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+    stubInventoryFetch({
       phone_numbers: [
         {
           id: "line_current",
@@ -54,36 +68,111 @@ describe("syncHostedLinqPhoneNumberInventory", () => {
           reputation: { status: "HEALTHY" },
           status: "ACTIVE",
         },
+        {
+          id: "line_moving",
+          phone_number: "+15550000002",
+          reputation: { status: "HEALTHY" },
+          status: "ACTIVE",
+        },
       ],
-    }), { headers: { "content-type": "application/json" }, status: 200 })));
+    });
 
     await expect(syncHostedLinqPhoneNumberInventory({
-      prisma: { hostedLinqLine: { updateMany } } as never,
-    })).resolves.toEqual({ syncedCount: 1 });
+      prisma: { hostedLinqLine: { findMany, updateMany } } as never,
+    })).resolves.toEqual({ syncedCount: 2 });
 
+    // line_current keeps its pairing; line_moving is held at a lookup key
+    // that is not a candidate for its snapshot phone (a move) and line_gone
+    // is absent from the snapshot, so exactly those two rows are cleared.
+    expect(updateMany).toHaveBeenCalledTimes(1);
     expect(updateMany).toHaveBeenCalledWith({
       data: { providerPhoneNumberId: null },
       where: {
-        providerPhoneNumberId: {
-          not: null,
-          notIn: ["line_current"],
-        },
+        phoneNumberLookupKey: { in: ["lookup:moved", "lookup:relinquished"] },
       },
     });
     expect(callOrder[0]).toBe("revoke");
     expect(callOrder).toContain("upsert");
   });
 
-  it("does not revoke inventory backing when the provider read fails", async () => {
-    const updateMany = vi.fn();
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("upstream error", { status: 503 })));
+  it("clears every held provider id when the provider reports an explicitly empty inventory", async () => {
+    const findMany = vi.fn(async () => [
+      { phoneNumberLookupKey: "lookup:only", providerPhoneNumberId: "line_prior" },
+    ]);
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    stubInventoryFetch({ phone_numbers: [] });
 
     await expect(syncHostedLinqPhoneNumberInventory({
-      prisma: { hostedLinqLine: { updateMany } } as never,
+      prisma: { hostedLinqLine: { findMany, updateMany } } as never,
+    })).resolves.toEqual({ syncedCount: 0 });
+
+    expect(updateMany).toHaveBeenCalledWith({
+      data: { providerPhoneNumberId: null },
+      where: {
+        phoneNumberLookupKey: { in: ["lookup:only"] },
+      },
+    });
+  });
+
+  it("does not revoke inventory backing when the provider read fails", async () => {
+    const findMany = vi.fn();
+    const updateMany = vi.fn();
+    stubInventoryFetch("upstream error", 503);
+
+    await expect(syncHostedLinqPhoneNumberInventory({
+      prisma: { hostedLinqLine: { findMany, updateMany } } as never,
     })).rejects.toMatchObject({
       code: "LINQ_PHONE_NUMBER_INVENTORY_FAILED",
     });
 
+    expect(findMany).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(lineStoreMocks.upsertHostedLinqLineForPhoneTx).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a missing collection field", {}],
+    ["an aliased collection field", { data: [{ id: "line_1", phone_number: "+15550000001" }] }],
+    ["a non-array collection field", { phone_numbers: "+15550000001" }],
+  ])("rejects %s without touching stored ownership", async (_label, payload) => {
+    const findMany = vi.fn();
+    const updateMany = vi.fn();
+    stubInventoryFetch(payload);
+
+    await expect(syncHostedLinqPhoneNumberInventory({
+      prisma: { hostedLinqLine: { findMany, updateMany } } as never,
+    })).rejects.toMatchObject({
+      code: "LINQ_PHONE_NUMBER_INVENTORY_INVALID",
+    });
+
+    expect(findMany).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(lineStoreMocks.upsertHostedLinqLineForPhoneTx).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["an invalid phone number", [{ id: "line_1", phone_number: "not-a-phone" }]],
+    ["a duplicate phone number", [
+      { id: "line_1", phone_number: "+15550000001" },
+      { id: "line_2", phone_number: "+1 (555) 000-0001" },
+    ]],
+    ["a missing provider id", [{ phone_number: "+15550000001" }]],
+    ["a duplicate provider id", [
+      { id: "line_1", phone_number: "+15550000001" },
+      { id: "line_1", phone_number: "+15550000002" },
+    ]],
+  ])("rejects a snapshot containing %s without touching stored ownership", async (_label, records) => {
+    const findMany = vi.fn();
+    const updateMany = vi.fn();
+    stubInventoryFetch({ phone_numbers: records });
+
+    await expect(syncHostedLinqPhoneNumberInventory({
+      prisma: { hostedLinqLine: { findMany, updateMany } } as never,
+    })).rejects.toMatchObject({
+      code: "LINQ_PHONE_NUMBER_INVENTORY_INVALID",
+    });
+
+    expect(findMany).not.toHaveBeenCalled();
     expect(updateMany).not.toHaveBeenCalled();
     expect(lineStoreMocks.upsertHostedLinqLineForPhoneTx).not.toHaveBeenCalled();
   });

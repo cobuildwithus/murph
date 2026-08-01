@@ -114,6 +114,18 @@ export async function reconcileHostedLinqContactCards(input: {
     }
   }
 
+  // Per-line isolation covers a partially degraded pool; a run where every
+  // line failed is a reconciliation outage and must fail the cron so the
+  // scheduler and alerting see it instead of a silent success.
+  if (result.lineCount > 0 && result.failedLines === result.lineCount) {
+    throw hostedOnboardingError({
+      code: "LINQ_CONTACT_CARD_RECONCILE_FAILED",
+      message: `Linq contact-card reconciliation failed for all ${result.lineCount} line(s).`,
+      httpStatus: 502,
+      retryable: true,
+    });
+  }
+
   return result;
 }
 

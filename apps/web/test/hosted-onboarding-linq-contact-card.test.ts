@@ -385,6 +385,54 @@ describe("hosted Linq contact card client", () => {
     consoleErrorSpy.mockRestore();
   });
 
+  it("attempts every line but fails the run when all lines fail", async () => {
+    const observedAt = new Date("2026-06-25T12:30:00.000Z");
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    linqInventoryMocks.syncHostedLinqPhoneNumberInventory.mockResolvedValue({
+      syncedCount: 2,
+    });
+    linqLineStoreMocks.listHostedLinqContactCardLines.mockResolvedValue([
+      {
+        phoneNumber: "+15550000001",
+        phoneNumberHint: "*** 0001",
+        phoneNumberLookupKey: "lookup:1",
+        providerReputationStatus: "HEALTHY",
+        providerServiceStatus: "ACTIVE",
+      },
+      {
+        phoneNumber: "+15550000002",
+        phoneNumberHint: "*** 0002",
+        phoneNumberLookupKey: "lookup:2",
+        providerReputationStatus: "HEALTHY",
+        providerServiceStatus: "ACTIVE",
+      },
+    ]);
+    const prisma = {};
+
+    const fetchMock = vi.fn(async () => createJsonResponse({
+      error: {
+        code: 2006,
+        message: "You do not have permission to send from this phone number",
+        status: 403,
+      },
+      success: false,
+    }, 403));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(reconcileHostedLinqContactCards({
+      observedAt,
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "LINQ_CONTACT_CARD_RECONCILE_FAILED",
+    });
+
+    // Both lines were still attempted and individually logged before the run
+    // was surfaced as an outage.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(consoleErrorSpy).toHaveBeenCalledTimes(2);
+    consoleErrorSpy.mockRestore();
+  });
+
   it("rethrows caller cancellation instead of counting it as a line failure", async () => {
     const observedAt = new Date("2026-06-25T12:30:00.000Z");
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
