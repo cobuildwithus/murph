@@ -17,6 +17,7 @@ export const MURPH_DEFAULT_METADATA_DESCRIPTION =
   "Murph figures out what works for you—and gets your friends in on it. A personal health AI that runs experiments with you and challenges with your friends.";
 export const MURPH_DEFAULT_OPEN_GRAPH_DESCRIPTION =
   "Murph figures out what works for you—and gets your friends in on it. A personal health AI that runs experiments with you and challenges with your friends.";
+export const MURPH_IOS_APP_STORE_ID = "6786145859";
 
 export const MURPH_DEFAULT_OPEN_GRAPH_IMAGE = {
   alt: MURPH_TAGLINE,
@@ -55,6 +56,9 @@ export function createMurphPageMetadata(input: {
 }): Metadata {
   const metadata: Metadata = {
     description: input.description,
+    itunes: {
+      appId: MURPH_IOS_APP_STORE_ID,
+    },
     openGraph: withMurphOpenGraphDefaults({
       description: input.description,
       title: input.title,
