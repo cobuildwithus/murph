@@ -179,6 +179,8 @@ export async function runHostedWorkspaceInvocation(
     const platform = buildHostedExecutionRuntimePlatform({
       boundUserId,
       commitTimeoutMs: job.runtime?.commitTimeoutMs ?? null,
+      physicalNotesEnabled:
+        job.runtime?.platformEnv?.HOSTED_PHYSICAL_NOTES_ENABLED === "true",
       privateMediaDeliveryOrigin:
         job.runtime?.platformEnv?.CF_PUBLIC_BASE_URL ?? null,
       preparedSnapshotRestore: job.preparedSnapshotRestore ?? null,

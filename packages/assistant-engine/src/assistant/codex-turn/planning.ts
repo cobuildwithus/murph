@@ -875,6 +875,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
           productFeedbackAcceptedInputIds.length > 0 &&
           typeof input.executionContext?.hosted?.productFeedbackCandidateSink
             ?.acceptProductFeedbackCandidate === 'function',
+        physicalNotesAvailable:
+          (privateInteractiveAudience || authenticatedGroupChatRuntime) &&
+          input.hostedToolContext?.physicalNotes != null &&
+          input.hostedToolContext?.privateImageUrlPublisher != null,
         phoneCallsAvailable:
           (
             privateInteractiveAudience

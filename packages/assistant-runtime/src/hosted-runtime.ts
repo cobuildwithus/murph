@@ -2239,6 +2239,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         });
       },
       signal: imageGenerationSignal,
+      shutdownSignal: options.shutdownSignal ?? null,
       vaultRoot: restored.vaultRoot,
       withCanonicalWritePersistence,
     });
@@ -2938,7 +2939,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         let continueForegroundCausalPass =
           !assistantProviderHandoffRequested
           && shouldContinueForegroundCausalPass(passResult);
-        while (rerunAssistantInputBatch || continueForegroundCausalPass) {
+        while (
+          options.shutdownSignal?.aborted !== true
+          && (rerunAssistantInputBatch || continueForegroundCausalPass)
+        ) {
           passResult = await runSingleForegroundPass({
             foregroundCausalOnly:
               rerunAssistantInputBatch === null
@@ -2978,7 +2982,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         if (assistantProviderHandoffRequested) {
           return false;
         }
-        const shouldContinue = input.shouldContinue ?? (() => true);
+        // Graceful shutdown hands staged work to the durable checkpoint before
+        // this invocation starts another assistant or provider turn.
+        const shouldContinue = () =>
+          options.shutdownSignal?.aborted !== true
+          && (input.shouldContinue?.() ?? true);
         const runtimeStateDirtyBeforeMailboxImport = runtimeStateDirty;
         let invocationLocalAssistantInputBatch:
           HostedWorkspaceRunnerAssistantInputBatch | null = null;
@@ -3396,6 +3404,21 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           runtimeWakeSignal: options.runtimeWakeSignal ?? null,
           shutdownSignal: options.shutdownSignal ?? null,
         });
+        if (options.shutdownSignal?.aborted === true) {
+          await flushImageGenerationWork();
+          if (imageAssistantWakePending) {
+            pendingWake = selectEarliestHostedRuntimeWake([
+              {
+                at: pendingWake.nextWakeAt,
+                reason: pendingWake.nextWakeReason,
+              },
+              {
+                at: new Date().toISOString(),
+                reason: "assistant",
+              },
+            ]);
+          }
+        }
         if (dirtyWaitResult.kind === "external_wake") {
           const latencySeed = createHostedRuntimeWakeLatencySeed(
             dirtyWaitResult.notification,

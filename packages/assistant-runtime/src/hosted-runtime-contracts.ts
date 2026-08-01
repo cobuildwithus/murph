@@ -40,6 +40,7 @@ export type {
   HostedRuntimeActionApprovalPort,
   HostedRuntimeLogPort,
   HostedRuntimeMailboxPort,
+  HostedRuntimePhysicalNotePort,
   HostedRuntimePlatform,
   HostedRuntimePhoneCallPort,
   HostedRuntimePlanUsageToolPort,

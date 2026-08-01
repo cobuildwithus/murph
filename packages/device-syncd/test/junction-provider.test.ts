@@ -6674,6 +6674,20 @@ test("Junction completeConnection treats Link callback as weak and enqueues scal
     sourceConnection.initialJobs?.[0]?.dedupeKey,
     connection.initialJobs?.[0]?.dedupeKey,
   );
+
+  // Every initial job crosses the configured-manifest boundary inside the OAuth
+  // callback handler before the connection is persisted. An undeclared payload
+  // field throws there, failing the whole Link completion, so the source-scoped
+  // payload must round-trip unchanged.
+  for (const job of sourceConnection.initialJobs ?? []) {
+    assert.deepEqual(
+      normalizeConfiguredDeviceSyncJobInput("junction", {
+        kind: job.kind,
+        payload: job.payload ?? {},
+      }, "oauth callback").payload,
+      job.payload,
+    );
+  }
 });
 
 test("Junction scheduled polling uses stable closed-day windows", () => {

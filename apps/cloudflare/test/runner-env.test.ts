@@ -1283,8 +1283,10 @@ describe("hosted private-media platform env", () => {
   it("keeps the deployment Worker origin in the trusted container platform env", () => {
     expect(buildHostedRunnerContainerPlatformEnv({
       CF_PUBLIC_BASE_URL: "https://hosted-runner-staging.example.test",
+      HOSTED_PHYSICAL_NOTES_ENABLED: "true",
     })).toEqual({
       CF_PUBLIC_BASE_URL: "https://hosted-runner-staging.example.test",
+      HOSTED_PHYSICAL_NOTES_ENABLED: "true",
     });
   });
 });
