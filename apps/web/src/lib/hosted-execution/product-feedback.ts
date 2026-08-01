@@ -15,16 +15,18 @@ import { getPrisma } from "@/src/lib/prisma";
 
 export async function recordHostedProductFeedback(input: {
   feedback: HostedRuntimeProductFeedbackRecord;
-  memberId: string;
+  memberId?: string | null;
 }): Promise<HostedRuntimeProductFeedbackRecordResponse> {
   const feedback = normalizeHostedProductFeedback(input.feedback);
-  const feedbackId = buildHostedProductFeedbackId(input);
+  const feedbackId = buildHostedProductFeedbackId({
+    feedback: input.feedback,
+  });
   const result = await getPrisma().hostedProductFeedback.createMany({
     data: [
       {
         id: feedbackId,
         kind: feedback.kind,
-        memberId: input.memberId,
+        memberId: input.memberId ?? null,
         relatedChangelogItemIdsJson: [...feedback.relatedChangelogItemIds],
         summary: feedback.summary,
       },
@@ -61,11 +63,8 @@ export function normalizeHostedProductFeedback(
 
 export function buildHostedProductFeedbackId(input: {
   feedback: Pick<HostedRuntimeProductFeedbackRecord, "idempotencyKey">;
-  memberId: string;
 }): string {
   const digest = createHash("sha256")
-    .update(input.memberId)
-    .update("\0")
     .update(input.feedback.idempotencyKey)
     .digest("hex")
     .slice(0, 32);
