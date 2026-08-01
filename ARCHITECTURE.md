@@ -1343,13 +1343,12 @@ Hosted app-session cookies use a strict v2 session-id plus bearer format. The ex
 Hosted browser wearable OAuth is a same-browser, same-member, same-host
 boundary. Start issues one short-lived, host-only callback proof bound to the
 provider, OAuth state, member, and app-session generation. The provider callback
-GET requires that proof and active session, but only renders a confirmation; it
-does not consume state, exchange a code, or persist credentials. One explicit
-same-origin POST passes the session member as `expectedOwnerId` and is the only
-browser callback path that may reach shared ingress. A callback delivered
-without its initiating-browser proof consumes only the OAuth state, so its
-transferable provider URL cannot be relayed later. This proof adds no durable
-state owner and never crosses hosts.
+GET requires that proof and active session, passes the session member as
+`expectedOwnerId`, completes the connection in shared ingress, and redirects
+straight back into the app with no interstitial confirmation. A callback
+delivered without its initiating-browser proof consumes only the OAuth state
+and returns to Connect, so its transferable provider URL cannot be relayed
+later. This proof adds no durable state owner and never crosses hosts.
 
 Before constructing shared ingress or starting provider authorization, Web
 rejects a callback hostname that differs from the authenticated start request.
@@ -1367,7 +1366,7 @@ or promote itself through sync success. After an account reaches
 `source_confirmed`, adding or retrying another Junction-backed source preserves
 that account and its established siblings. The target `DeviceConnectionSource`
 stays `disconnected` and its webhook and pull work remain inert until callback
-confirmation reaches the runtime connection-established hook. Shared ingress
+completion reaches the runtime connection-established hook. Shared ingress
 chooses one closed account write policy for every persistence request:
 `replace` for an account reconnect or `preserve_established` for a
 source-scoped addition. Hosted Prisma and local SQLite apply the same shared

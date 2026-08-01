@@ -13,7 +13,6 @@ import {
   DeviceSyncSetupGuideDialog,
 } from "@/app/(dashboard)/home/device-sync-completion-dialog";
 import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
-import { HostedDeviceSyncCallbackConfirmation } from "@/src/components/device-sync/hosted-device-sync-callback-confirmation";
 import { HomeExperimentCard } from "@/src/components/home/home-experiment-card";
 import {
   GroupUsageFundingActions,
@@ -1258,17 +1257,6 @@ export function ComponentsContent() {
           <div className="flex flex-col gap-4">
             <Alert><AlertTitle>Experiment in progress</AlertTitle><AlertDescription>Day 15 of 28. Next session scheduled for this evening.</AlertDescription></Alert>
             <Alert variant="destructive"><AlertTitle>Oura disconnected</AlertTitle><AlertDescription>Reconnect your ring to continue tracking metrics.</AlertDescription></Alert>
-          </div>
-        </Section>
-
-        <Separator />
-
-        <Section title="Device Sync Callback Confirmation">
-          <div className="overflow-hidden rounded-2xl border border-border" inert>
-            <HostedDeviceSyncCallbackConfirmation
-              action="/"
-              state="confirmation"
-            />
           </div>
         </Section>
 
