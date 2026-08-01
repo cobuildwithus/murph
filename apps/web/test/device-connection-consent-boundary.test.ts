@@ -10,7 +10,6 @@ function readSource(relativePath: string): string {
 test("stale launch-document versions do not stop historically authorized device access", () => {
   const nonblockingDevicePaths = [
     "src/lib/device-sync/hosted-connect-start.ts",
-    "app/api/device-sync/companion/sign-in-token/route.ts",
     "app/api/device-sync/companion/status/route.ts",
     "app/api/device-sync/companion/health-metadata/route.ts",
     "app/api/device-sync/companion/hrv-rmssd/route.ts",
@@ -28,6 +27,36 @@ test("stale launch-document versions do not stop historically authorized device 
       `${relativePath} must retain historical launch authorization`,
     );
   }
+
+  // The companion sign-in-token route delegates admission — including the
+  // historical launch-consent assert — to the shared companion member-access
+  // owner, so the tripwire holds on both the delegation and the owner.
+  const signInTokenSource = readSource(
+    "app/api/device-sync/companion/sign-in-token/route.ts",
+  );
+  assert.doesNotMatch(
+    signInTokenSource,
+    /assertHostedLaunchRequiredConsentGranted/u,
+    "sign-in-token route must remain available when launch-document acceptance is stale",
+  );
+  assert.match(
+    signInTokenSource,
+    /requireHostedCompanionMemberIdFromRequest/u,
+    "sign-in-token route must admit members through the companion member-access owner",
+  );
+  const companionAccessSource = readSource(
+    "src/lib/hosted-onboarding/companion-member-access.ts",
+  );
+  assert.doesNotMatch(
+    companionAccessSource,
+    /assertHostedLaunchRequiredConsentGranted/u,
+    "companion member access must remain available when launch-document acceptance is stale",
+  );
+  assert.match(
+    companionAccessSource,
+    /assertHostedHistoricalLaunchConsentGranted/u,
+    "companion member access must retain historical launch authorization",
+  );
 
   const connectStartSource = readSource("src/lib/device-sync/hosted-connect-start.ts");
   assert.match(connectStartSource, /requireActiveHostedAppSessionFromRequest/u);
