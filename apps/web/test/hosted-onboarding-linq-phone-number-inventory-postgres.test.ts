@@ -273,8 +273,8 @@ describe.skipIf(!runPostgresProof)(
         const ownerHold = new Promise<void>((resolve) => {
           releaseOwner = resolve;
         });
-        let ownerHasLock: () => void = () => undefined;
-        const ownerLocked = new Promise<void>((resolve) => {
+        let ownerHasLock: (backendPid: number) => void = () => undefined;
+        const ownerLocked = new Promise<number>((resolve) => {
           ownerHasLock = resolve;
         });
         const ownerTransaction = prisma.$transaction(async (tx) => {
@@ -284,19 +284,24 @@ describe.skipIf(!runPostgresProof)(
               hashtext('snapshot')
             )
           `;
-          ownerHasLock();
+          const pidRows = await tx.$queryRaw<Array<{ pid: number }>>`
+            SELECT pg_backend_pid() AS pid
+          `;
+          ownerHasLock(Number(pidRows[0]?.pid ?? 0));
           await ownerHold;
         });
 
-        await ownerLocked;
+        const ownerBackendPid = await ownerLocked;
+        expect(ownerBackendPid).toBeGreaterThan(0);
         const contender = syncHostedLinqPhoneNumberInventory({
           observedAt: new Date(),
           prisma,
         });
 
         // The production sync must be observably blocked on the advisory lock
-        // while the owner holds it — this assertion fails if the lock is
-        // removed from the sync.
+        // held by this exact owner backend — this assertion fails if the lock
+        // is removed from the sync, and an unrelated suite's advisory waiter
+        // cannot satisfy it.
         let blockedBackends = 0;
         for (let attempt = 0; attempt < 40 && blockedBackends === 0; attempt += 1) {
           const rows = await observer.$queryRaw<Array<{ blocked: bigint | number }>>`
@@ -304,7 +309,7 @@ describe.skipIf(!runPostgresProof)(
             FROM pg_stat_activity
             WHERE wait_event_type = 'Lock'
               AND wait_event = 'advisory'
-              AND cardinality(pg_blocking_pids(pid)) > 0
+              AND ${ownerBackendPid} = ANY(pg_blocking_pids(pid))
           `;
           blockedBackends = Number(rows[0]?.blocked ?? 0);
           if (blockedBackends === 0) {

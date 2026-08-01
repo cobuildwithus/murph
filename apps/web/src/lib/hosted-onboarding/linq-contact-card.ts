@@ -5,10 +5,6 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { fetchLinqApi, LinqApiTimeoutError } from "../linq/api";
 import { hostedOnboardingError } from "./errors";
 import { listHostedLinqContactCardLines } from "./linq-line-store";
-import {
-  HOSTED_LINQ_PHONE_NUMBER_INVENTORY_SYNC_LIMIT,
-  syncHostedLinqPhoneNumberInventory,
-} from "./linq-phone-number-inventory";
 import { normalizePhoneNumber } from "./phone";
 import {
   getHostedOnboardingEnvironment,
@@ -59,16 +55,12 @@ type LinqContactCardsResponse = {
 
 export async function reconcileHostedLinqContactCards(input: {
   maxLines?: number;
-  observedAt?: Date;
   prisma: HostedLinqContactCardClient;
   signal?: AbortSignal;
 }): Promise<HostedLinqContactCardReconciliation> {
-  const observedAt = input.observedAt ?? new Date();
   const lines = await listHostedLinqConfiguredContactCardLines({
     maxLines: input.maxLines,
-    observedAt,
     prisma: input.prisma,
-    signal: input.signal,
   });
   const result: HostedLinqContactCardReconciliation = {
     activeCards: 0,
@@ -214,9 +206,7 @@ type HostedLinqContactCardOutcome =
 
 async function listHostedLinqConfiguredContactCardLines(input: {
   maxLines?: number;
-  observedAt: Date;
   prisma: HostedLinqContactCardClient;
-  signal?: AbortSignal;
 }): Promise<Array<{
   phoneNumber: string;
   phoneNumberHint: string;
@@ -224,13 +214,11 @@ async function listHostedLinqConfiguredContactCardLines(input: {
 }>> {
   const maxLines = normalizeLineLimit(input.maxLines);
 
-  await syncHostedLinqPhoneNumberInventory({
-    maxLines: HOSTED_LINQ_PHONE_NUMBER_INVENTORY_SYNC_LIMIT,
-    observedAt: input.observedAt,
-    prisma: input.prisma,
-    signal: input.signal,
-  });
-
+  // Provider inventory refresh has exactly one scheduled owner: the
+  // five-minute health cron. Reconciliation reads that projection instead of
+  // issuing a second minute-zero inventory fetch, so two crons can never
+  // apply provider snapshots out of order and publish a relinquished line
+  // into a member's saved vCard.
   const lines = await listHostedLinqContactCardLines({
     limit: maxLines,
     prisma: input.prisma,

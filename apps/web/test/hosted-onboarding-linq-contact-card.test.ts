@@ -211,8 +211,7 @@ describe("hosted Linq contact card client", () => {
     });
   });
 
-  it("reconciles DB-backed line contact cards after provider inventory sync", async () => {
-    const observedAt = new Date("2026-06-25T12:30:00.000Z");
+  it("reconciles DB-backed line contact cards from the owned-line projection", async () => {
     linqInventoryMocks.syncHostedLinqPhoneNumberInventory.mockResolvedValue({
       syncedCount: 2,
     });
@@ -282,7 +281,6 @@ describe("hosted Linq contact card client", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(reconcileHostedLinqContactCards({
-      observedAt,
       prisma: prisma as never,
     })).resolves.toEqual({
       activeCards: 1,
@@ -295,11 +293,9 @@ describe("hosted Linq contact card client", () => {
       updatedCards: 0,
     });
 
-    expect(linqInventoryMocks.syncHostedLinqPhoneNumberInventory).toHaveBeenCalledWith(expect.objectContaining({
-      maxLines: 250,
-      observedAt,
-      prisma,
-    }));
+    // Inventory refresh has one scheduled owner (the health cron); the
+    // contact-card path must only read the projection.
+    expect(linqInventoryMocks.syncHostedLinqPhoneNumberInventory).not.toHaveBeenCalled();
     expect(linqLineStoreMocks.listHostedLinqContactCardLines).toHaveBeenCalledWith({
       limit: 50,
       prisma,
@@ -307,7 +303,6 @@ describe("hosted Linq contact card client", () => {
   });
 
   it("keeps reconciling remaining lines when one line fails and counts the failure", async () => {
-    const observedAt = new Date("2026-06-25T12:30:00.000Z");
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     linqInventoryMocks.syncHostedLinqPhoneNumberInventory.mockResolvedValue({
       syncedCount: 2,
@@ -366,7 +361,6 @@ describe("hosted Linq contact card client", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(reconcileHostedLinqContactCards({
-      observedAt,
       prisma: prisma as never,
     })).resolves.toEqual({
       activeCards: 1,
@@ -386,7 +380,6 @@ describe("hosted Linq contact card client", () => {
   });
 
   it("attempts every line but fails the run when all lines fail", async () => {
-    const observedAt = new Date("2026-06-25T12:30:00.000Z");
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     linqInventoryMocks.syncHostedLinqPhoneNumberInventory.mockResolvedValue({
       syncedCount: 2,
@@ -420,7 +413,6 @@ describe("hosted Linq contact card client", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(reconcileHostedLinqContactCards({
-      observedAt,
       prisma: prisma as never,
     })).rejects.toMatchObject({
       code: "LINQ_CONTACT_CARD_RECONCILE_FAILED",
@@ -434,7 +426,6 @@ describe("hosted Linq contact card client", () => {
   });
 
   it("rethrows caller cancellation instead of counting it as a line failure", async () => {
-    const observedAt = new Date("2026-06-25T12:30:00.000Z");
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     linqInventoryMocks.syncHostedLinqPhoneNumberInventory.mockResolvedValue({
       syncedCount: 2,
@@ -466,7 +457,6 @@ describe("hosted Linq contact card client", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(reconcileHostedLinqContactCards({
-      observedAt,
       prisma: prisma as never,
       signal: abortController.signal,
     })).rejects.toBe(abortReason);
@@ -477,7 +467,6 @@ describe("hosted Linq contact card client", () => {
   });
 
   it("corrects a non-Murph first name without clearing legacy provider fields", async () => {
-    const observedAt = new Date("2026-06-25T12:30:00.000Z");
     linqInventoryMocks.syncHostedLinqPhoneNumberInventory.mockResolvedValue({
       syncedCount: 1,
     });
@@ -531,7 +520,6 @@ describe("hosted Linq contact card client", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(reconcileHostedLinqContactCards({
-      observedAt,
       prisma: prisma as never,
     })).resolves.toEqual({
       activeCards: 0,
@@ -547,7 +535,6 @@ describe("hosted Linq contact card client", () => {
   });
 
   it("keeps legacy provider fields when the contact-card first name is current", async () => {
-    const observedAt = new Date("2026-06-25T12:30:00.000Z");
     linqInventoryMocks.syncHostedLinqPhoneNumberInventory.mockResolvedValue({
       syncedCount: 1,
     });
@@ -586,7 +573,6 @@ describe("hosted Linq contact card client", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(reconcileHostedLinqContactCards({
-      observedAt,
       prisma: prisma as never,
     })).resolves.toEqual({
       activeCards: 1,
@@ -599,11 +585,9 @@ describe("hosted Linq contact card client", () => {
       updatedCards: 0,
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(linqInventoryMocks.syncHostedLinqPhoneNumberInventory).toHaveBeenCalledWith(expect.objectContaining({
-      maxLines: 250,
-      observedAt,
-      prisma,
-    }));
+    // Inventory refresh has one scheduled owner (the health cron); the
+    // contact-card path must only read the projection.
+    expect(linqInventoryMocks.syncHostedLinqPhoneNumberInventory).not.toHaveBeenCalled();
     expect(linqLineStoreMocks.listHostedLinqContactCardLines).toHaveBeenCalledWith({
       limit: 50,
       prisma,
