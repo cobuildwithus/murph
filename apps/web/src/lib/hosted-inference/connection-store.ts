@@ -189,6 +189,7 @@ export async function replaceHostedInferenceConnection(input: {
 }
 
 export async function setHostedInferenceConnectionSelected(input: {
+  expectedRevision: number | null;
   memberId: string;
   prisma?: PrismaClient;
   selected: boolean;
@@ -210,6 +211,13 @@ export async function setHostedInferenceConnectionSelected(input: {
         "Save and verify a custom inference connection before selecting it.",
       );
     }
+    // The caller's protocol eligibility check ran against the revision it
+    // read; a concurrent replacement may have changed the connection since,
+    // so the selection only commits against that same revision.
+    assertExpectedRevision({
+      currentRevision: current.revision,
+      expectedRevision: input.expectedRevision,
+    });
     requireCurrentVerificationProfile(current);
     if (current.selected === input.selected) {
       return current;

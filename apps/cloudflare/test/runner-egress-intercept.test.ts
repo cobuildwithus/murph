@@ -419,8 +419,12 @@ describe("hostedRunnerIntercept", () => {
         headers: {
           ...BOUND_USER_PROVIDER_EGRESS_HEADERS,
           authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+          "cf-connecting-ip": "203.0.113.7",
           cookie: "caller-private-cookie",
+          forwarded: "for=203.0.113.7",
           "x-api-key": "caller-private-key",
+          "x-caller-arbitrary": "caller-private-value",
+          "x-forwarded-for": "203.0.113.7",
         },
         method: "POST",
       }),
@@ -441,10 +445,15 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.redirect).toBe("manual");
     expect(forwarded.headers.get("x-api-key"))
       .toBe("synthetic-custom-upstream-secret");
-    expect(forwarded.headers.has("authorization")).toBe(false);
-    expect(forwarded.headers.has("cookie")).toBe(false);
-    expect(forwarded.headers.has(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(false);
-    expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
+    // The member-controlled upstream must receive a from-scratch header set:
+    // SSE/JSON transport plus the one configured auth header, nothing inbound.
+    expect([...forwarded.headers.keys()].sort()).toEqual([
+      "accept",
+      "content-type",
+      "x-api-key",
+    ]);
+    expect(forwarded.headers.get("accept")).toBe("text/event-stream");
+    expect(forwarded.headers.get("content-type")).toBe("application/json");
     await expect(forwarded.json()).resolves.toEqual({
       input: "synthetic request",
       model: "synthetic-upstream-model",

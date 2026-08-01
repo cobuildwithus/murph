@@ -1,5 +1,9 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  HostedInferenceConnectionError,
+} from "@/src/lib/hosted-inference/connection-store";
+
 const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
   readHostedInferenceConnectionView: vi.fn(),
@@ -86,6 +90,7 @@ describe("assistant inference mode settings route", () => {
       updated: true,
     });
     expect(mocks.setHostedInferenceConnectionSelected).toHaveBeenCalledWith({
+      expectedRevision: CONNECTION_VIEW.revision,
       memberId: "member_assistant_mode",
       selected: true,
     });
@@ -118,6 +123,20 @@ describe("assistant inference mode settings route", () => {
 
     expect(response.status).toBe(403);
     expect(mocks.setHostedInferenceConnectionSelected).not.toHaveBeenCalled();
+    expect(mocks.scheduleHostedInferenceRuntimeWake).not.toHaveBeenCalled();
+  });
+
+  it("returns a conflict when the connection changed between read and select", async () => {
+    mocks.setHostedInferenceConnectionSelected.mockRejectedValueOnce(
+      new HostedInferenceConnectionError(
+        "HOSTED_INFERENCE_CONNECTION_CONFLICT",
+        "The custom inference connection changed. Refresh Settings and try again.",
+      ),
+    );
+
+    const response = await route.POST(request({ mode: "custom" }));
+
+    expect(response.status).toBe(409);
     expect(mocks.scheduleHostedInferenceRuntimeWake).not.toHaveBeenCalled();
   });
 

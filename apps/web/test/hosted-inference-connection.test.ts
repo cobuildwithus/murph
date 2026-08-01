@@ -124,6 +124,7 @@ describe("hosted inference connection", () => {
     })).resolves.toBeNull();
 
     const selected = await setHostedInferenceConnectionSelected({
+      expectedRevision: 1,
       memberId: MEMBER_ID,
       prisma: harness.prisma,
       selected: true,
@@ -185,6 +186,37 @@ describe("hosted inference connection", () => {
       code: "HOSTED_INFERENCE_CONNECTION_CONFLICT",
     });
     expect(harness.row?.revision).toBe(1);
+  });
+
+  it("fails closed when selecting against a replaced connection revision", async () => {
+    const harness = createStoreHarness();
+    await replaceHostedInferenceConnection({
+      candidate: CANDIDATE,
+      expectedRevision: null,
+      memberId: MEMBER_ID,
+      prisma: harness.prisma,
+    });
+    // Simulates a caller that checked eligibility against revision 1 while a
+    // concurrent replacement bumped the connection to revision 2.
+    await replaceHostedInferenceConnection({
+      candidate: {
+        ...CANDIDATE,
+        endpointUrl: "https://next.example.com/v1/responses",
+      },
+      expectedRevision: 1,
+      memberId: MEMBER_ID,
+      prisma: harness.prisma,
+    });
+
+    await expect(setHostedInferenceConnectionSelected({
+      expectedRevision: 1,
+      memberId: MEMBER_ID,
+      prisma: harness.prisma,
+      selected: true,
+    })).rejects.toMatchObject({
+      code: "HOSTED_INFERENCE_CONNECTION_CONFLICT",
+    });
+    expect(harness.row?.selected).toBe(false);
   });
 
   it("rejects group-room runtime members", async () => {

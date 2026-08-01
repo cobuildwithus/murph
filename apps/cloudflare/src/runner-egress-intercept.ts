@@ -1330,10 +1330,14 @@ async function maybeHandleCustomInferenceRequest(input: {
     });
   }
 
-  const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
-  headers.delete("content-encoding");
-  headers.delete("content-length");
-  headers.set("content-type", "application/json");
+  // The upstream endpoint is member-controlled, so the header set is built
+  // from scratch rather than stripped from the inbound request: only the
+  // JSON/SSE transport headers plus the one configured auth header may cross
+  // this boundary.
+  const headers = new Headers({
+    accept: "text/event-stream",
+    "content-type": "application/json",
+  });
   injectHostedCustomInferenceAuth(headers, target);
   try {
     return await adaptHostedCustomInferenceUpstreamResponse({

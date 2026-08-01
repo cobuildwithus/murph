@@ -74,6 +74,7 @@ export const POST = withJsonError(async (request: Request) => {
       requireHostedInferenceProtocolEnabled(current.protocol);
     }
     const connection = await setHostedInferenceConnectionSelected({
+      expectedRevision: current?.revision ?? null,
       memberId: auth.member.id,
       selected,
     });

@@ -544,6 +544,66 @@ describe("hosted runner container identity", () => {
     expect(invokedContainerNames).toEqual([]);
   });
 
+  it("lets inbox media retention run under a denied allowance while metered egress stays blocked", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const durable = createRunnerDurableState();
+    const stateStore = new RunnerStateStore(durable.state);
+    const service = createRuntimeInvocationService({
+      invokedContainerNames: [],
+      platformAiUsageAllowed: false,
+      runnerRuntimeEnvSource: {
+        CF_VERSION_METADATA: { id: "version_1" },
+        HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_TERRA_MODEL,
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+          "provider-egress-signing-secret",
+        OPENAI_API_KEY: "test-openai-key",
+      },
+      stateStore,
+      state: durable.state,
+    });
+    const token = await stateStore.beginWriteFence({
+      runnerContainerName: "member_123--v-version_1",
+      userId: TEST_USER_ID,
+    });
+
+    // Modes that can reach a model stay blocked under a denied allowance.
+    await expect(service.prepareWithFence({
+      input: {
+        orchestrationAttemptId: "orchestration_attempt_system_mailbox_denied",
+        processingMode: "system_mailbox",
+        userId: TEST_USER_ID,
+      },
+      token,
+    })).rejects.toThrow(
+      "Hosted managed inference was no longer allowed during invocation preparation.",
+    );
+
+    await expect(service.prepareWithFence({
+      input: {
+        orchestrationAttemptId: "orchestration_attempt_retention_denied",
+        processingMode: "inbox_media_retention",
+        userId: TEST_USER_ID,
+      },
+      token,
+    })).resolves.toMatchObject({
+      workspaceVersion: "0",
+    });
+
+    if (!token.providerEgressToken) {
+      throw new Error("Expected a provider egress token on the active fence.");
+    }
+    const validation = await stateStore.validateProviderEgressToken({
+      providerEgressToken: token.providerEgressToken,
+      userId: TEST_USER_ID,
+    });
+    expect(validation).toMatchObject({
+      owns: true,
+      platformAiUsageAllowed: false,
+    });
+  });
+
   it("wakes an active runtime through the write fence's stored runner container name", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));

@@ -236,9 +236,16 @@ export class RuntimeInvocationService {
       }
       platformAiUsageAllowed = workspaceRead.platformAiUsageAllowed;
     } else if (workspaceRead.platformAiUsageAllowed === false) {
-      throw new Error(
-        "Hosted managed inference was no longer allowed during invocation preparation.",
-      );
+      if (input.input.processingMode !== "inbox_media_retention") {
+        throw new Error(
+          "Hosted managed inference was no longer allowed during invocation preparation.",
+        );
+      }
+      // Inbox media retention deletes expired private media without any model
+      // call, so a denied managed allowance must not block it. Binding the
+      // denial into the write fence keeps every metered provider egress
+      // rejected for the run anyway.
+      platformAiUsageAllowed = false;
     }
     const customInferenceEnvelope = customInferenceTarget
       ? await sealHostedInferenceRuntimeTarget({
