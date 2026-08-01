@@ -109,6 +109,108 @@ describe.skipIf(!runPostgresProof)(
         await prisma.$disconnect();
       }
     });
+    it("serializes concurrent snapshot applications without violating the unique index", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 8 });
+      const providerId = `pg-proof-line-${randomUUID()}`;
+      const phoneA = buildSyntheticProofPhoneNumber();
+      const phoneB = buildSyntheticProofPhoneNumber();
+      const createdLookupKeys: string[] = [];
+
+      const preexistingHeldRows = await prisma.hostedLinqLine.findMany({
+        where: { providerPhoneNumberId: { not: null } },
+        select: {
+          phoneNumberLookupKey: true,
+          providerPhoneNumberId: true,
+        },
+      });
+
+      const buildSnapshotResponse = (phoneNumber: string) => new Response(JSON.stringify({
+        phone_numbers: [
+          {
+            id: providerId,
+            phone_number: phoneNumber,
+            reputation: { status: "HEALTHY" },
+            status: "ACTIVE",
+          },
+        ],
+      }), { headers: { "content-type": "application/json" }, status: 200 });
+
+      try {
+        const rowA = await upsertHostedLinqLineForPhoneTx({
+          observedAt: new Date(),
+          phoneNumber: phoneA,
+          prisma,
+          providerPhoneNumberId: providerId,
+          source: "provider",
+        });
+        createdLookupKeys.push(rowA.phoneNumberLookupKey);
+
+        // One overlapping run still sees the old X→A snapshot while the other
+        // sees the new X→B snapshot; both apply concurrently. The advisory
+        // lock must serialize them so neither hits the unique index, in
+        // either commit order.
+        let fetchCalls = 0;
+        vi.stubGlobal("fetch", vi.fn(async () => {
+          fetchCalls += 1;
+          return buildSnapshotResponse(fetchCalls === 1 ? phoneA : phoneB);
+        }));
+        await expect(Promise.all([
+          syncHostedLinqPhoneNumberInventory({ observedAt: new Date(), prisma }),
+          syncHostedLinqPhoneNumberInventory({ observedAt: new Date(), prisma }),
+        ])).resolves.toEqual([{ syncedCount: 1 }, { syncedCount: 1 }]);
+
+        const ownersAfterRace = await prisma.hostedLinqLine.findMany({
+          where: { providerPhoneNumberId: providerId },
+          select: { phoneNumberLookupKey: true },
+        });
+        for (const owner of ownersAfterRace) {
+          if (!createdLookupKeys.includes(owner.phoneNumberLookupKey)) {
+            createdLookupKeys.push(owner.phoneNumberLookupKey);
+          }
+        }
+        expect(ownersAfterRace).toHaveLength(1);
+
+        // The provider's current truth converges on the next run regardless
+        // of which overlapping snapshot committed last.
+        vi.stubGlobal("fetch", vi.fn(async () => buildSnapshotResponse(phoneB)));
+        await expect(syncHostedLinqPhoneNumberInventory({
+          observedAt: new Date(),
+          prisma,
+        })).resolves.toEqual({ syncedCount: 1 });
+
+        const finalOwners = await prisma.hostedLinqLine.findMany({
+          where: { providerPhoneNumberId: providerId },
+          select: {
+            phoneNumberHint: true,
+            phoneNumberLookupKey: true,
+          },
+        });
+        for (const owner of finalOwners) {
+          if (!createdLookupKeys.includes(owner.phoneNumberLookupKey)) {
+            createdLookupKeys.push(owner.phoneNumberLookupKey);
+          }
+        }
+        expect(finalOwners).toHaveLength(1);
+        expect(finalOwners[0]?.phoneNumberHint).toBe(`*** ${phoneB.slice(-4)}`);
+        const releasedRowA = await prisma.hostedLinqLine.findUnique({
+          where: { phoneNumberLookupKey: rowA.phoneNumberLookupKey },
+          select: { providerPhoneNumberId: true },
+        });
+        expect(releasedRowA?.providerPhoneNumberId).toBeNull();
+      } finally {
+        vi.unstubAllGlobals();
+        for (const heldRow of preexistingHeldRows) {
+          await prisma.hostedLinqLine.updateMany({
+            data: { providerPhoneNumberId: heldRow.providerPhoneNumberId },
+            where: { phoneNumberLookupKey: heldRow.phoneNumberLookupKey },
+          });
+        }
+        await prisma.hostedLinqLine.deleteMany({
+          where: { phoneNumberLookupKey: { in: createdLookupKeys } },
+        });
+        await prisma.$disconnect();
+      }
+    });
   },
 );
 

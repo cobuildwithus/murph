@@ -223,6 +223,7 @@ describe("Linq provider health inventory synchronization", () => {
     const observedAt = new Date("2026-07-29T16:08:00.000Z");
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     const prisma = {
+      $executeRaw: vi.fn(),
       hostedLinqLine: {
         findMany: vi.fn().mockResolvedValue([]),
         updateMany,
@@ -275,6 +276,7 @@ describe("Linq provider health inventory synchronization", () => {
   it("does not clear stored provider state from unknown inventory values", async () => {
     const updateMany = vi.fn();
     const prisma = {
+      $executeRaw: vi.fn(),
       hostedLinqLine: {
         findMany: vi.fn().mockResolvedValue([]),
         updateMany,

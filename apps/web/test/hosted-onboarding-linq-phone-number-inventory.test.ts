@@ -78,7 +78,7 @@ describe("syncHostedLinqPhoneNumberInventory", () => {
     });
 
     await expect(syncHostedLinqPhoneNumberInventory({
-      prisma: { hostedLinqLine: { findMany, updateMany } } as never,
+      prisma: { $executeRaw: vi.fn(), hostedLinqLine: { findMany, updateMany } } as never,
     })).resolves.toEqual({ syncedCount: 2 });
 
     // line_current keeps its pairing; line_moving is held at a lookup key
@@ -103,7 +103,7 @@ describe("syncHostedLinqPhoneNumberInventory", () => {
     stubInventoryFetch({ phone_numbers: [] });
 
     await expect(syncHostedLinqPhoneNumberInventory({
-      prisma: { hostedLinqLine: { findMany, updateMany } } as never,
+      prisma: { $executeRaw: vi.fn(), hostedLinqLine: { findMany, updateMany } } as never,
     })).resolves.toEqual({ syncedCount: 0 });
 
     expect(updateMany).toHaveBeenCalledWith({
@@ -120,7 +120,7 @@ describe("syncHostedLinqPhoneNumberInventory", () => {
     stubInventoryFetch("upstream error", 503);
 
     await expect(syncHostedLinqPhoneNumberInventory({
-      prisma: { hostedLinqLine: { findMany, updateMany } } as never,
+      prisma: { $executeRaw: vi.fn(), hostedLinqLine: { findMany, updateMany } } as never,
     })).rejects.toMatchObject({
       code: "LINQ_PHONE_NUMBER_INVENTORY_FAILED",
     });
@@ -140,7 +140,7 @@ describe("syncHostedLinqPhoneNumberInventory", () => {
     stubInventoryFetch(payload);
 
     await expect(syncHostedLinqPhoneNumberInventory({
-      prisma: { hostedLinqLine: { findMany, updateMany } } as never,
+      prisma: { $executeRaw: vi.fn(), hostedLinqLine: { findMany, updateMany } } as never,
     })).rejects.toMatchObject({
       code: "LINQ_PHONE_NUMBER_INVENTORY_INVALID",
     });
@@ -167,7 +167,7 @@ describe("syncHostedLinqPhoneNumberInventory", () => {
     stubInventoryFetch({ phone_numbers: records });
 
     await expect(syncHostedLinqPhoneNumberInventory({
-      prisma: { hostedLinqLine: { findMany, updateMany } } as never,
+      prisma: { $executeRaw: vi.fn(), hostedLinqLine: { findMany, updateMany } } as never,
     })).rejects.toMatchObject({
       code: "LINQ_PHONE_NUMBER_INVENTORY_INVALID",
     });

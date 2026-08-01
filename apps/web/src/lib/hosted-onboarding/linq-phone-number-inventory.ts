@@ -39,7 +39,46 @@ export async function syncHostedLinqPhoneNumberInventory(input: {
     signal: input.signal,
   });
   const observedAt = input.observedAt ?? new Date();
+
+  // The contact-card and health crons both trigger this sync at minute zero,
+  // and the per-phone upsert locks cannot order two whole-snapshot
+  // applications that touch different phones. Apply each validated snapshot
+  // under one inventory-wide advisory lock inside one transaction: concurrent
+  // applications serialize instead of interleaving (so a moved id can never
+  // race the unique provider-id index), and a mid-application failure rolls
+  // the whole replacement back. Two overlapping runs may still commit in
+  // either order; the hourly cadence converges any stale winner on the next
+  // run.
+  if ("$transaction" in input.prisma && typeof input.prisma.$transaction === "function") {
+    const prisma = input.prisma;
+    return prisma.$transaction((tx) => applyHostedLinqPhoneNumberInventorySnapshot({
+      lines,
+      observedAt,
+      prisma: tx,
+    }));
+  }
+
+  return applyHostedLinqPhoneNumberInventorySnapshot({
+    lines,
+    observedAt,
+    prisma: input.prisma,
+  });
+}
+
+async function applyHostedLinqPhoneNumberInventorySnapshot(input: {
+  lines: HostedLinqProviderInventoryLine[];
+  observedAt: Date;
+  prisma: HostedLinqInventoryClient;
+}): Promise<{ syncedCount: number }> {
+  const { lines, observedAt } = input;
   let syncedCount = 0;
+
+  await input.prisma.$executeRaw`
+    SELECT pg_advisory_xact_lock(
+      hashtext('hosted_linq_phone_number_inventory'),
+      hashtext('snapshot')
+    )
+  `;
 
   // A validated read is a complete identity snapshot (failed, malformed,
   // over-limit, and identity-lossy reads all throw before this point), so any
@@ -48,9 +87,7 @@ export async function syncHostedLinqPhoneNumberInventory(input: {
   // upserts: relinquished ids stop qualifying as account-owned for
   // ownership-gated consumers (contact-card and backup-number candidacy), and
   // a moved id is released before its new row claims it, so the unique
-  // provider-id index cannot collide. Writes are ordered fail-closed: a crash
-  // between revoke and restore leaves ownership under-claimed, never
-  // over-claimed, and the next hourly sync converges it.
+  // provider-id index cannot collide.
   const confirmedLookupKeysById = new Map<string, Set<string>>();
   for (const line of lines) {
     if (line.providerPhoneNumberId) {
