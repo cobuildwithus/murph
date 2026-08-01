@@ -68,6 +68,9 @@ describe('assistant physical notes', () => {
     expect(MURPH_SEND_PHYSICAL_NOTE_TOOL.description).toContain(
       'exact message_ref approving the send in the current turn',
     )
+    expect(
+      MURPH_SEND_PHYSICAL_NOTE_TOOL.inputSchema.properties.to.properties.state,
+    ).toEqual({ type: 'string', pattern: '^[A-Za-z]{2}$' })
   })
 
   it('normalizes the bounded US recipient', () => {
