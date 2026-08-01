@@ -145,16 +145,20 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     const regionSupportedForRemoval = isHostedGroupJoinOutreachSupportedRegion(
       participantPhoneNumber,
     );
-    let reactionMailboxAppend: HostedLinqGroupReactionMailboxAppend | null = null;
+    let removalEvidence: {
+      actor: string | null;
+      expectedContainerMemberId: string;
+    } | null = null;
     try {
-      // One atomic decision: the withdrawal, its consumed room evidence, and
-      // the terminal provider marker commit together. Revocation acquires the
-      // shared drain fence before the KMS-backed evidence work, so a stalled
-      // append cannot lose the dispatch race; a failed append aborts the whole
-      // decision and Linq's bounded webhook retry re-runs it. Because nothing
-      // partial can commit, a handled event always carries its evidence, and
-      // account deletion can never be followed by replay recreating state this
-      // decision had committed.
+      // The withdrawal and its terminal provider marker commit together in one
+      // small transaction that never performs KMS-backed evidence work: the
+      // shared drain fence is held only across fast row operations, so a
+      // removal racing dispatch either terminalizes before provider entry or
+      // observes the durable opener, and every commit that creates or revokes
+      // contact state carries the marker — account deletion can never be
+      // followed by replay recreating state a commit had created. Room
+      // evidence for the decided removal is appended best-effort after commit;
+      // its availability must not gate or roll back the user's withdrawal.
       const revoked = await input.prisma.$transaction(async (tx) => {
         const offer = await readHostedGroupJoinOfferTargetTx({
           channel: "linq",
@@ -200,21 +204,20 @@ export async function handleHostedGroupJoinOfferReaction(input: {
           participantPhoneNumber,
           tx,
         });
-        reactionMailboxAppend = await appendHostedGroupOfferReactionRoomEvidenceTx({
-          actor: member ? input.event.reactionFromHandle : null,
-          event: input.event,
-          expectedContainerMemberId: offer.runtimeMemberId,
-          tx,
-        });
         await markHostedLinqGroupJoinOfferHandledTx({
           eventId: input.event.eventId,
           handledAt: input.event.providerCreatedAt,
           prisma: tx,
         });
+        removalEvidence = {
+          actor: member ? input.event.reactionFromHandle : null,
+          expectedContainerMemberId: offer.runtimeMemberId,
+        };
         return revoked;
       }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-      await signalHostedGroupOfferReactionBestEffort({
-        append: reactionMailboxAppend,
+      await appendHostedGroupOfferRemovalEvidenceBestEffort({
+        evidence: removalEvidence,
+        event: input.event,
         prisma: input.prisma,
       });
       if (revoked.kind === "revoked") {
@@ -418,6 +421,47 @@ async function appendHostedGroupOfferReactionRoomEvidenceTx(input: {
     route,
     tx: input.tx,
   });
+}
+
+/**
+ * Retains a decided removal's consumed room evidence after the withdrawal and
+ * terminal marker have committed. The KMS-backed append is deliberately not
+ * part of that decision: an evidence outage may cost this one removal's room
+ * context, but it can never delay, roll back, or replay the withdrawal. The
+ * append reuses the event-keyed idempotent envelope, so a duplicate provider
+ * delivery retries it harmlessly while the marker keeps the decision terminal.
+ */
+async function appendHostedGroupOfferRemovalEvidenceBestEffort(input: {
+  evidence: { actor: string | null; expectedContainerMemberId: string } | null;
+  event: ParsedHostedLinqProviderEvent;
+  prisma: PrismaClient;
+}): Promise<void> {
+  const evidence = input.evidence;
+  if (!evidence) {
+    return;
+  }
+  try {
+    const append = await input.prisma.$transaction(
+      (tx) => appendHostedGroupOfferReactionRoomEvidenceTx({
+        actor: evidence.actor,
+        event: input.event,
+        expectedContainerMemberId: evidence.expectedContainerMemberId,
+        tx,
+      }),
+      HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+    );
+    await signalHostedGroupOfferReactionBestEffort({
+      append,
+      prisma: input.prisma,
+    });
+  } catch (error) {
+    logHostedOnboardingDiagnostic(
+      "hosted-onboarding.group-offer-reaction-evidence-failed",
+      {
+        errorName: error instanceof Error ? error.name : "UnknownError",
+      },
+    );
+  }
 }
 
 async function signalHostedGroupOfferReactionBestEffort(input: {

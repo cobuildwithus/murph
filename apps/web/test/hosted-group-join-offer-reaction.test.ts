@@ -489,7 +489,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
   });
 
-  it("aborts the whole removal decision when the evidence append fails, then converges on replay", async () => {
+  it("keeps the withdrawal terminal when the best-effort evidence append fails", async () => {
     mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
     mocks.revokeHostedGroupJoinOutreachForRemovedReactionTx.mockResolvedValueOnce({
       kind: "revoked",
@@ -498,31 +498,25 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       new Error("mailbox unavailable"),
     );
     const prisma = createPrismaStub();
-    const event = parseReactionEvent({
-      eventType: "reaction.removed",
-      reactionType: "like",
-    });
 
     await expect(handleHostedGroupJoinOfferReaction({
-      event,
+      event: parseReactionEvent({
+        eventType: "reaction.removed",
+        reactionType: "like",
+      }),
       prisma,
-    })).rejects.toThrow("mailbox unavailable");
+    })).resolves.toEqual({ reason: "outreach_revoked", status: "accepted" });
 
-    // The whole atomic decision aborts: revocation ran but rolls back with the
-    // failed evidence append, the provider event is never marked handled, and
-    // no signal is emitted. Linq's bounded webhook retry re-runs the decision.
+    // The withdrawal and terminal marker committed before the evidence
+    // attempt; the failed best-effort append costs only this removal's room
+    // context and is reported, never a rollback or a replayable event.
     expect(mocks.revokeHostedGroupJoinOutreachForRemovedReactionTx).toHaveBeenCalledTimes(1);
-    expect(mocks.markHostedLinqGroupJoinOfferHandledTx).not.toHaveBeenCalled();
-    expect(mocks.signalHostedLinqGroupReactionMailbox).not.toHaveBeenCalled();
-
-    await expect(handleHostedGroupJoinOfferReaction({
-      event,
-      prisma,
-    })).resolves.toEqual({ reason: "reaction_recorded", status: "accepted" });
-
-    expect(mocks.appendHostedLinqGroupReactionMailboxTx).toHaveBeenCalledTimes(2);
     expect(mocks.markHostedLinqGroupJoinOfferHandledTx).toHaveBeenCalledTimes(1);
-    expect(mocks.signalHostedLinqGroupReactionMailbox).toHaveBeenCalledTimes(1);
+    expect(mocks.logHostedOnboardingDiagnostic).toHaveBeenCalledWith(
+      "hosted-onboarding.group-offer-reaction-evidence-failed",
+      { errorName: "Error" },
+    );
+    expect(mocks.signalHostedLinqGroupReactionMailbox).not.toHaveBeenCalled();
   });
 
   it("rolls back member outreach consumption when the evidence append fails", async () => {

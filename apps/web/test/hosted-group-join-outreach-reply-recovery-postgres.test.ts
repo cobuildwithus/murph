@@ -115,7 +115,25 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", async () => {
 
 const reactionEvidenceMocks = vi.hoisted(() => ({
   failNextAppend: { value: false },
+  failNextRevoke: { value: false },
 }));
+vi.mock("@/src/lib/hosted-groups/group-join-outreach-store", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-groups/group-join-outreach-store")
+  >("@/src/lib/hosted-groups/group-join-outreach-store");
+  const revokeHostedGroupJoinOutreachForRemovedReactionTx: typeof actual.revokeHostedGroupJoinOutreachForRemovedReactionTx =
+    (input) => {
+      if (reactionEvidenceMocks.failNextRevoke.value) {
+        reactionEvidenceMocks.failNextRevoke.value = false;
+        throw new Error("simulated revocation outage");
+      }
+      return actual.revokeHostedGroupJoinOutreachForRemovedReactionTx(input);
+    };
+  return {
+    ...actual,
+    revokeHostedGroupJoinOutreachForRemovedReactionTx,
+  };
+});
 vi.mock(
   "@/src/lib/hosted-onboarding/webhook-provider-linq-reaction-context",
   async () => {
@@ -1690,7 +1708,7 @@ describe.skipIf(!runPostgresProof)(
       },
     );
 
-    it("aborts a removal atomically on evidence failure and stays deletion-safe across provider replay", async () => {
+    it("keeps a withdrawal terminal across an evidence outage so the drain never dispatches", async () => {
       const fixture = await createReactionAdmissionFixture();
       const addedEvent = buildReactionAdmissionEvent({
         eventId: `event-reaction-added-${randomUUID()}`,
@@ -1715,23 +1733,38 @@ describe.skipIf(!runPostgresProof)(
         });
         await ingestReactionAdmissionEvent({ event: removedEvent, fixture });
 
+        // The evidence outage costs only this removal's room context. The
+        // withdrawal and terminal marker still commit, so the production
+        // drain running inside the outage window finds nothing to send.
         reactionEvidenceMocks.failNextAppend.value = true;
         await expect(handleHostedGroupJoinOfferReaction({
           event: removedEvent,
           prisma: fixture.reactionPrisma,
-        })).rejects.toThrow("simulated room-evidence outage");
-
-        // The whole decision aborted atomically: no revocation delivery, no
-        // evidence row, and no handled marker committed. The event remains
-        // retryable and nothing partial exists for account deletion to erase.
+        })).resolves.toEqual({
+          reason: "outreach_revoked",
+          status: "accepted",
+        });
         await expect(fixture.reactionPrisma.hostedLinqDelivery.findFirst({
-          select: { id: true },
+          select: { skipReason: true, status: true },
           where: {
             groupJoinOutreach: { is: { offerId: fixture.offerId } },
             source: HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE,
             template: HOSTED_GROUP_JOIN_OUTREACH_TEMPLATE,
           },
-        })).resolves.toBeNull();
+        })).resolves.toEqual({
+          skipReason: "reaction_removed",
+          status: "skipped",
+        });
+        await expect(fixture.reactionPrisma.hostedLinqProviderEvent.findUnique({
+          select: { groupJoinOfferHandledAt: true },
+          where: {
+            eventId: createHostedLinqProviderEventLookupKey(
+              removedEvent.eventId,
+            ),
+          },
+        })).resolves.toEqual({
+          groupJoinOfferHandledAt: removedEvent.providerCreatedAt,
+        });
         await expect(fixture.reactionPrisma.hostedMailboxItem.findFirst({
           select: { id: true },
           where: {
@@ -1739,6 +1772,58 @@ describe.skipIf(!runPostgresProof)(
               removedEvent.eventId,
             ),
             userId: fixture.runtimeMemberId,
+          },
+        })).resolves.toBeNull();
+        await expect(drainOneHostedGroupJoinOutreach({
+          now: new Date("2026-07-28T16:02:00.000Z"),
+          prisma: fixture.reactionPrisma,
+        })).resolves.toEqual({ kind: "idle" });
+        expect(providerMocks.createHostedLinqChat).not.toHaveBeenCalled();
+      } finally {
+        reactionEvidenceMocks.failNextAppend.value = false;
+        providerMocks.createHostedLinqChat.mockReset();
+        await cleanupReactionAdmissionFixture(fixture);
+      }
+    });
+
+    it("stays deletion-safe when a marker-less removal replays after account deletion", async () => {
+      const fixture = await createReactionAdmissionFixture();
+      const addedEvent = buildReactionAdmissionEvent({
+        eventId: `event-reaction-added-${randomUUID()}`,
+        eventType: "reaction.added",
+        fixture,
+      });
+      const removedEvent = buildReactionAdmissionEvent({
+        eventId: `event-reaction-removed-${randomUUID()}`,
+        eventType: "reaction.removed",
+        fixture,
+      });
+      await ingestReactionAdmissionEvent({ event: addedEvent, fixture });
+      providerMocks.createHostedLinqChat.mockReset();
+
+      try {
+        await expect(handleHostedGroupJoinOfferReaction({
+          event: addedEvent,
+          prisma: fixture.reactionPrisma,
+        })).resolves.toEqual({
+          reason: "outreach_enqueued",
+          status: "accepted",
+        });
+        await ingestReactionAdmissionEvent({ event: removedEvent, fixture });
+
+        // Nothing partial commits when the decision transaction itself fails:
+        // no delivery, no marker, no evidence.
+        reactionEvidenceMocks.failNextRevoke.value = true;
+        await expect(handleHostedGroupJoinOfferReaction({
+          event: removedEvent,
+          prisma: fixture.reactionPrisma,
+        })).rejects.toThrow("simulated revocation outage");
+        await expect(fixture.reactionPrisma.hostedLinqDelivery.findFirst({
+          select: { id: true },
+          where: {
+            groupJoinOutreach: { is: { offerId: fixture.offerId } },
+            source: HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE,
+            template: HOSTED_GROUP_JOIN_OUTREACH_TEMPLATE,
           },
         })).resolves.toBeNull();
         await expect(fixture.reactionPrisma.hostedLinqProviderEvent.findUnique({
@@ -1751,7 +1836,7 @@ describe.skipIf(!runPostgresProof)(
         })).resolves.toEqual({ groupJoinOfferHandledAt: null });
 
         // The participant completes production account deletion while the
-        // interrupted event is still marker-less. Deletion removes the pending
+        // interrupted event is still marker-less; deletion removes the pending
         // outreach through the still-present phone identity.
         await deleteHostedAccountData({
           memberId: fixture.participantMemberId,
@@ -1763,11 +1848,11 @@ describe.skipIf(!runPostgresProof)(
           where: { offerId: fixture.offerId },
         })).resolves.toEqual([]);
 
-        // Provider replay of the marker-less removal now resolves no member.
-        // It converges as an anonymous pre-member removal: the terminal
-        // tombstone participates in group-deletion ownership, is never
-        // deliverable, and blocks any marker-less add replay from texting the
-        // deleted phone. No opener dispatch can occur.
+        // Provider replay resolves no member and converges on the documented
+        // anonymous pre-member removal: a terminal marker, anonymous room
+        // evidence, and the non-deliverable remove-before-add tombstone that
+        // group deletion owns and that blocks any marker-less add replay from
+        // texting the deleted phone. The drain never reaches the provider.
         await ingestReactionAdmissionEvent({ event: removedEvent, fixture });
         await expect(handleHostedGroupJoinOfferReaction({
           event: removedEvent,
@@ -1815,7 +1900,7 @@ describe.skipIf(!runPostgresProof)(
         })).resolves.toEqual({ kind: "idle" });
         expect(providerMocks.createHostedLinqChat).not.toHaveBeenCalled();
       } finally {
-        reactionEvidenceMocks.failNextAppend.value = false;
+        reactionEvidenceMocks.failNextRevoke.value = false;
         providerMocks.createHostedLinqChat.mockReset();
         await cleanupReactionAdmissionFixture(fixture);
       }
