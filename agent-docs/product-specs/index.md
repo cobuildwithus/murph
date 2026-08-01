@@ -1,6 +1,6 @@
 # Product Specs Index
 
-Last verified: 2026-07-29
+Last verified: 2026-08-01
 
 | Path | Purpose | Status |
 | --- | --- | --- |
@@ -16,6 +16,7 @@ Last verified: 2026-07-29
 | `agent-docs/product-specs/hosted-usage-topups.md` | Implemented fixed $5/$10/$25 personal, exact Family-member, and hosted-group funding with current-policy saved-card reuse, Checkout fallback, authenticated payer-and-target-scoped lost-response recovery, canonical purchase/referral credit entries, and purchase-only refund/dispute reversal; fulfilled top-ups immediately refresh the overall usage bar. | Active |
 | `agent-docs/product-specs/hosted-usage-referrals.md` | Conversational personal/group usage missions, portable qualification, canonical credit-entry accounting, final rewards, and source-room celebration. | Active |
 | `agent-docs/product-specs/physical-notes.md` | GPT Image plus Lob physical notes composed through the existing hosted image-completion wake, one Web-owned provider effect, one complimentary claim per member or group, and ordinary Murph usage thereafter. | Active |
+| `agent-docs/product-specs/hosted-support-escalation.md` | Direct support address plus explicit, member-linked, de-identified product-team escalation with a three-email-per-UTC-day server limit and stable provider idempotency. | Implemented |
 | `agent-docs/product-specs/hosted-family-plan.md` | Hosted Family plan for 2-6 sponsored people with mixed Pulse/Edge seats, exact owner-funded member usage top-ups, private member accounts, chat-first invites, and privacy boundaries. | Active |
 | `agent-docs/product-specs/health-commons.md` | Health Commons page graph, catalog, versioning, future aggregate outcome summaries, and artifact-storage product boundary. | Active |
 | `agent-docs/product-specs/murph-safe-public-product-search.md` | Public supplement and branded-food evidence search, normalized API contract, exact product-test semantics, privacy, and abuse bounds. | Active |
