@@ -31,7 +31,7 @@ describe("Murph Codex base support guidance", () => {
       "https://github.com/cobuildwithus/murph",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "Public access grants no private-repo, production, deployment, support-console, internal-communications, or credential authority.",
+      "It grants no private-repo, production, deployment, support-console, internal-comms, or credential authority.",
     );
   });
 });
