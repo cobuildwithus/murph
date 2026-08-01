@@ -129,6 +129,7 @@ export async function setMemoryDisplayName(
       vaultRoot,
       operationType: "memory_upsert",
       summary: `Set memory display name ${next.record.id}`,
+      occurredAt: input.now,
       target: resolveSingletonMarkdownDocumentTarget({
         relativePath: memoryDocumentRelativePath,
         created: !snapshot.exists,
