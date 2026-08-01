@@ -20,7 +20,7 @@ Give a member who hits a real Murph product wall two truthful exits in the same 
 - Explicit support escalation is linked to the authenticated member so support can investigate the correct account.
 - At most three distinct escalation records per member per UTC day are eligible to send email.
 - Duplicate callback attempts reuse one stable Resend idempotency key.
-- The support email is mechanically metadata-only and never carries model-authored summary text.
+- The support email carries only the feedback id, member id, and capture-scrubbed de-identified product summary allowed by the existing internal feedback-email boundary.
 - The public GitHub repository URL is present in the assistant instruction stack without implying private or production access.
 
 ## Existing owners reused
@@ -37,7 +37,7 @@ Give a member who hits a real Murph product wall two truthful exits in the same 
 - The Web route attaches the callback-authenticated member only for that exact path; every other feedback record keeps the existing anonymous behavior.
 - Web serializes support records with a member-scoped PostgreSQL advisory transaction lock, ranks the record within its UTC day, and emails only ranks one through three.
 - A duplicate eligible record may retry the email, but its stable provider idempotency key prevents another recipient-visible email.
-- The email contains only the feedback id and internal member id. The de-identified issue remains in the existing feedback row; raw transcript, model-authored summary, contact details, provider payloads, and health data never cross the email boundary.
+- The email contains the feedback id, internal member id, and the same bounded capture-scrubbed de-identified summary stored in the feedback row. Raw transcript, contact details, provider payloads, health data, and unsanitized context never cross the email boundary.
 - Ordinary feedback keeps its two-second callback cap. Only the exact support-prefixed path receives a bounded 12-second cap so the existing Resend request can finish off the reply path.
 
 ## Failure behavior
@@ -50,6 +50,7 @@ Give a member who hits a real Murph product wall two truthful exits in the same 
 ## Verification
 
 - Focused assistant prompt tests, including the existing base-instruction size contract.
+- Focused assistant same-turn escalation-priority tests.
 - Focused hosted Web route and support-email service tests.
 - Focused Cloudflare callback-deadline tests.
 - Web and assistant-engine typecheck/CI on the exact PR head.
@@ -59,4 +60,5 @@ Give a member who hits a real Murph product wall two truthful exits in the same 
 
 - Draft PR #1247 is open from `agent/support-escalation-email`.
 - Initial exact-head failures in prompt invariants and doc indexing were corrected.
+- Current implementation is aligned with the feedback-summary email policy merged to `main` on August 1.
 - Next: finish exact-head CI and review, then close this plan if the branch is merge-ready.
