@@ -189,4 +189,22 @@ describe("hosted product feedback contracts", () => {
       },
     });
   });
+
+  it("redacts compound blood-pressure readings without leaving either component", () => {
+    for (const reading of ["120/80 mmHg", "120 / 80 mmHg"]) {
+      const parsed = parseHostedRuntimeProductFeedbackRecordRequest({
+        feedback: {
+          idempotencyKey: "e".repeat(64),
+          kind: "frustration",
+          relatedChangelogItemIds: [],
+          summary: `Blood pressure was ${reading} and the cuff sync failed.`,
+        },
+      });
+      expect(parsed.feedback.summary).toBe(
+        "Blood pressure was [redacted] and the cuff sync failed.",
+      );
+      expect(parsed.feedback.summary).not.toContain("120");
+      expect(parsed.feedback.summary).not.toContain("80");
+    }
+  });
 });

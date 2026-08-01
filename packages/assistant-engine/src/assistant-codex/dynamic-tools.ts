@@ -16,6 +16,8 @@ import {
   HOSTED_PLAN_CODES,
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
+  HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
+  isHostedProductSupportEscalationFeedback,
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
@@ -455,7 +457,7 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
         minLength: 1,
         maxLength: HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
         description:
-          'Concise product-only summary of the feedback. When a path is missing, name the desired outcome and missing Murph capability rather than summarizing the conversation. Start with "Speculative:" only for clear inferred user workflow friction, or "Murph-observed:" only for repeated assistant-observed product/tool friction. Do not include tags, topics, raw user wording, health details, identifiers, contact details, secrets, or provider payloads.',
+          'Concise de-identified, product-only summary of the feedback. Make it actionable without the conversation: name the generic actor, exact Murph surface or workflow, requested or attempted action, expected versus observed result, and any concrete product constraint the source established. Preserve those distinctions instead of replacing them with vague labels. If a detail is not established, omit it or mark it unclear rather than infer or invent it. Abstract every private fact to the least-specific product concept that still explains the issue, such as "a health metric", "a connected source", or "a scheduled item"; do not preserve a private fact merely because it was relevant in the conversation. When a path is missing, name the desired outcome and missing Murph capability rather than summarizing the conversation. Start with "Speculative:" only for clear inferred user workflow friction, or "Murph-observed:" only for repeated assistant-observed product/tool friction. Never include names, handles, account or member identifiers, raw user wording, quoted conversation or voice-memo content, diagnoses, symptoms, medications, treatments, lab results, biometrics, exact health/fitness/nutrition values, reproductive details, locations, relationships, contact details, secrets, provider payloads, tags, or topics.',
       },
       relatedChangelogItemIds: {
         type: 'array',
@@ -3444,6 +3446,7 @@ export async function executeMurphDynamicToolRequest(input: {
     case 'submit-product-feedback':
       return await executeSubmitProductFeedbackTool({
         feedback: input.request.feedback,
+        hostedToolContext: input.hostedToolContext ?? null,
         productFeedbackRecorder: input.productFeedbackRecorder ?? null,
       })
     case 'family-plan':
@@ -3849,10 +3852,27 @@ function hasVoiceMemoResponseMedia(
 
 async function executeSubmitProductFeedbackTool(input: {
   feedback: Omit<HostedRuntimeProductFeedbackRecord, 'idempotencyKey'>
+  hostedToolContext: AssistantHostedToolContext | null
   productFeedbackRecorder: AssistantTurnProductFeedbackRecorder | null
 }): Promise<MurphDynamicToolExecutionResult> {
   if (!input.productFeedbackRecorder?.recordProductFeedback) {
     return toolTextResult(false, 'product feedback recording is not available for this turn')
+  }
+  if (input.feedback.summary.startsWith(HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX)) {
+    if (!isHostedProductSupportEscalationFeedback(input.feedback)) {
+      return toolTextResult(
+        false,
+        `support escalation rejected: a summary beginning "${HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX}" is reserved and requires kind "frustration", empty relatedChangelogItemIds, and a non-empty de-identified explanation after the prefix`,
+      )
+    }
+    const userActionScope =
+      input.hostedToolContext?.currentUserActionScope?.() ?? null
+    if (userActionScope && userActionScope.conversationScope !== 'direct') {
+      return toolTextResult(
+        false,
+        'support escalation rejected: an account-linked support escalation is only available in a verified private direct conversation',
+      )
+    }
   }
   try {
     const result = await input.productFeedbackRecorder.recordProductFeedback(input.feedback)

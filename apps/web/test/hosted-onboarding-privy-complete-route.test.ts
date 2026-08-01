@@ -81,6 +81,7 @@ describe("hosted onboarding Privy completion route", () => {
     mocks.getPrisma.mockReturnValue({ prisma: "mock" });
     mocks.issueHostedAppSession.mockResolvedValue({
       cookie: "murph-session=session-token; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000",
+      firstMemberSession: false,
       sessionId: "hws_123",
     });
     mocks.readHostedConsentStatus.mockResolvedValue(launchConsentStatus);
@@ -266,7 +267,6 @@ describe("hosted onboarding Privy completion route", () => {
     mocks.completeHostedPrivyVerification.mockResolvedValueOnce({
       inviteCode: "invite_123",
       joinUrl: "https://join.example.test/join/invite_123",
-      initialVisitEligible: false,
       member: createHostedMember(),
       memberId: "member_123",
       messagingSetupRequired: false,
@@ -304,7 +304,6 @@ describe("hosted onboarding Privy completion route", () => {
     mocks.completeHostedPrivyVerification.mockResolvedValueOnce({
       inviteCode: "invite_123",
       joinUrl: "https://join.example.test/join/invite_123",
-      initialVisitEligible: false,
       member,
       memberId: "member_123",
       messagingSetupRequired: false,
@@ -385,10 +384,9 @@ describe("hosted onboarding Privy completion route", () => {
     expect(mocks.issueHostedAppSession).not.toHaveBeenCalled();
   });
 
-  it("returns initial visit eligibility only when the completion should open first-run handoff", async () => {
+  it("returns initial visit eligibility only for the member's first web session", async () => {
     mocks.completeHostedPrivyVerification.mockResolvedValueOnce({
       inviteCode: "invite_123",
-      initialVisitEligible: true,
       joinUrl: "https://join.example.test/join/invite_123",
       member: createHostedMember(),
       memberId: "member_123",
@@ -396,6 +394,11 @@ describe("hosted onboarding Privy completion route", () => {
       stage: "active",
     });
     mocks.getHostedInviteStatus.mockResolvedValueOnce(createInviteStatus("active"));
+    mocks.issueHostedAppSession.mockResolvedValueOnce({
+      cookie: "murph-session=session-token; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000",
+      firstMemberSession: true,
+      sessionId: "hws_123",
+    });
 
     const response = await privyCompleteRoute.POST(
       new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
@@ -411,6 +414,75 @@ describe("hosted onboarding Privy completion route", () => {
       initialVisitEligible: true,
       stage: "active",
     });
+  });
+
+  it("keeps the first-visit handoff recoverable when completion fails after the identity commit", async () => {
+    // The identity binding commits inside completeHostedPrivyVerification, but
+    // eligibility is owned by the first web session: a completion that fails
+    // before the session write must leave the one-shot handoff intact for the
+    // retry rather than consuming it with nothing delivered.
+    mocks.getHostedInviteStatus.mockResolvedValue(createInviteStatus("active"));
+    mocks.issueHostedAppSession.mockRejectedValueOnce(
+      new Error("transient session-store failure"),
+    );
+
+    const request = () => new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+      headers: {
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    });
+
+    const failedResponse = await privyCompleteRoute.POST(request());
+    expect(failedResponse.status).toBe(500);
+
+    mocks.issueHostedAppSession.mockResolvedValueOnce({
+      cookie: "murph-session=session-token; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000",
+      firstMemberSession: true,
+      sessionId: "hws_retry",
+    });
+
+    const retryResponse = await privyCompleteRoute.POST(request());
+
+    expect(retryResponse.status).toBe(200);
+    await expect(retryResponse.json()).resolves.toMatchObject({
+      initialVisitEligible: true,
+    });
+  });
+
+  it("does not re-offer the handoff while a session from a lost completion is retained", async () => {
+    // Accepted contract limit: if a completion commits its session but the
+    // response never reaches the browser, retries within the session-history
+    // window land on plain /home. The welcome surface is skippable and its
+    // persona choice remains available in settings, so the product declines a
+    // delivery-ack owner for this window.
+    mocks.completeHostedPrivyVerification.mockResolvedValueOnce({
+      inviteCode: "invite_123",
+      joinUrl: "https://join.example.test/join/invite_123",
+      member: createHostedMember(),
+      memberId: "member_123",
+      messagingSetupRequired: false,
+      stage: "active",
+    });
+    mocks.getHostedInviteStatus.mockResolvedValueOnce(createInviteStatus("active"));
+    mocks.issueHostedAppSession.mockResolvedValueOnce({
+      cookie: "murph-session=session-token; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000",
+      firstMemberSession: false,
+      sessionId: "hws_after_lost_response",
+    });
+
+    const response = await privyCompleteRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+        headers: {
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload).not.toHaveProperty("initialVisitEligible");
   });
 
   it("marks completion as launch-consented when the member already granted launch consent", async () => {

@@ -24,6 +24,7 @@ import {
   getHostedLinqChatSummary,
   getHostedLinqReactionTargetMessage,
   shareHostedLinqContactCard,
+  startHostedLinqChatTypingIndicator,
 } from "@/src/lib/hosted-onboarding/linq-client";
 
 const originalFetch = globalThis.fetch;
@@ -1360,6 +1361,42 @@ describe("sendHostedLinqReadReceipt", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       new URL("chats/chat_123/read", "https://linq.example.test/api/partner/v3/"),
+      expect.objectContaining({
+        method: "POST",
+        signal: expect.any(AbortSignal),
+      }),
+    );
+  });
+});
+
+describe("startHostedLinqChatTypingIndicator", () => {
+  afterEach(() => {
+    if (originalFetch) {
+      vi.stubGlobal("fetch", originalFetch);
+      return;
+    }
+
+    Reflect.deleteProperty(globalThis, "fetch");
+  });
+
+  it("posts typing starts to the v3 chat typing endpoint", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      void _input;
+      void _init;
+      return new Response(null, { status: 204 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(startHostedLinqChatTypingIndicator({
+      chatId: "chat_123",
+      timeoutMs: 2_500,
+    })).resolves.toEqual({
+      ok: true,
+      status: 204,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL("chats/chat_123/typing", "https://linq.example.test/api/partner/v3/"),
       expect.objectContaining({
         method: "POST",
         signal: expect.any(AbortSignal),

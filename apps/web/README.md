@@ -302,8 +302,9 @@ The hosted Prisma schema keeps ownership sharp and nested:
   adapters normalize Linq and Telegram evidence into this Web-owned state; the
   assistant and browser never own attribution or grant authority.
 - `HostedProductFeedback` owns assistant-captured structured product feedback
-  with only a bounded product-only summary, kind, and optional changelog ids,
-  without storing raw conversation text, health details, tags, topics, or provider payloads
+  with only a bounded product-only summary, kind, and optional changelog ids;
+  the summary-content policy (de-identification contract and best-effort
+  deterministic redaction) is owned by `agent-docs/SECURITY.md`
 - `HostedPhoneCall` owns one member-bound Retell phone-call row per real call
   with a bounded call brief, provider call id, status, and final analysis
   result. Briefs and results use member/table/row/field/scope-bound hosted
@@ -911,12 +912,12 @@ Callback auth contract:
 
 - hosted browser start sets one 15-minute host-only callback proof bound to the
   provider, OAuth state, member, and app-session generation
-- callback GET requires that proof and active session but only renders the
-  confirmation or safe failure surface; it never exchanges provider credentials
-- the explicit same-origin confirmation POST passes the exact member as
-  `expectedOwnerId` before shared ingress can consume state or exchange a code
-- a callback without its initiating-browser proof consumes only the OAuth state,
-  preventing later relay into the member's signed-in browser
+- callback GET requires that proof and active session, passes the exact member
+  as `expectedOwnerId` before shared ingress can consume state or exchange a
+  code, and redirects back into the app without an interstitial
+- a callback without its initiating-browser proof consumes only the OAuth state
+  and redirects to Connect, preventing later relay into the member's signed-in
+  browser
 - the provider callback hostname must match the hostname that served the
   authenticated browser start; the `__Host-` app-session and callback-proof
   cookies remain host-only, and Murph does not add a Domain cookie or

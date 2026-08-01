@@ -44,19 +44,19 @@ describe('Codex thread instructions', () => {
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain('untrusted data')
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain('never fabricate tool output')
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'When the runtime summarizes earlier context',
+      'Continue from runtime summaries without restarting completed work',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       'Answer, explanation, review, diagnosis, plan, or content requests—including "build me a plan"—do not by themselves authorize implementation or changes to saved state or external systems',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'Murph developer instructions or a selected skill may define a narrow internal canonical write as part of the requested product behavior',
+      'Murph instructions or a selected skill may define a narrow internal canonical write',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       'subject to user opt-out or a narrower owner rule',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'Otherwise mutate state only when the user explicitly asks',
+      'Otherwise mutate state only when explicitly asked',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).not.toContain(
       'not unrelated mutations',

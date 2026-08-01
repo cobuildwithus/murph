@@ -31,6 +31,7 @@ import { metadata as experimentsMetadata } from "../app/(dashboard)/experiments/
 import { ExperimentsPageClient } from "../app/(dashboard)/experiments/experiments-page-client";
 import { metadata as environmentMetadata } from "../app/(dashboard)/environment/page";
 import EnvironmentPage from "../app/(dashboard)/environment/page";
+import { EnvironmentPrintPageClient } from "../app/(dashboard)/environment/print/environment-print-page-client";
 import HistoryPageClient from "../app/(dashboard)/history/history-page-client";
 import { metadata as historyMetadata } from "../app/(dashboard)/history/layout";
 import OverviewPageClient from "../app/(dashboard)/overview/overview-page-client";
@@ -221,10 +222,30 @@ test("EnvironmentPage renders private habitat facts from Browser Vault", async (
   assert.match(markup, /Air &amp; water/);
   assert.match(markup, /Night temperature/);
   assert.match(markup, /Recovery &amp; devices/);
+  assert.match(markup, /href="\/environment\/print"/);
+  assert.match(markup, /Print report/);
   assert.match(markup, /group\/category/);
   assert.doesNotMatch(markup, /fixture data|mock/i);
   assert.doesNotMatch(markup, /Overall picture/);
   assert.doesNotMatch(markup, /Target score/);
+});
+
+test("Environment print report renders the signed-in member's Browser Vault facts", () => {
+  const markup = renderToStaticMarkup(
+    createElement(EnvironmentPrintPageClient, {
+      generatedOn: "July 31, 2026",
+    }),
+  );
+
+  assert.match(markup, /Environment report/);
+  assert.match(markup, /Private to you/);
+  assert.match(markup, /Generated July 31, 2026/);
+  assert.match(markup, /Lisbon/);
+  assert.match(markup, /Night temperature/);
+  assert.match(markup, /20°C/);
+  assert.match(markup, /blackout/);
+  assert.match(markup, /href="\/environment"/);
+  assert.doesNotMatch(markup, /fixture data|mock/i);
 });
 
 test("EnvironmentPage gives zero-data members one clear start and previews the report", async () => {
