@@ -11,6 +11,7 @@ interface BrowserConfig {
   hostedSessionCookie: string;
   otp: string | null;
   password: string;
+  startUrl: string;
   timeoutMs: number;
   webBaseUrl: string;
   webOrigin: string;
@@ -61,20 +62,15 @@ async function main(): Promise<void> {
     page.setDefaultTimeout(15_000);
     page.setDefaultNavigationTimeout(config.timeoutMs);
 
-    stage = "murph_connect_page";
-    await page.goto(new URL("/connect", config.webBaseUrl).toString(), {
+    stage = "murph_connect_intent";
+    await page.goto(config.startUrl, {
       waitUntil: "domcontentloaded",
     });
-    await page.getByRole("heading", { name: "Sync your biomarkers" }).waitFor();
 
     stage = "murph_connect_start";
-    const connectButton = page.getByRole("button", { name: /connect whoop/i });
-    await Promise.all([
-      page.waitForURL((url) => url.origin !== config.webOrigin, {
-        timeout: config.timeoutMs,
-      }),
-      connectButton.click(),
-    ]);
+    await page.waitForURL((url) => url.origin !== config.webOrigin, {
+      timeout: config.timeoutMs,
+    });
 
     stage = "junction_whoop_authorization";
     await completeExternalAuthorization(page, config);
@@ -291,6 +287,18 @@ async function disconnectJunctionAccount(
 function readBrowserConfig(env: NodeJS.ProcessEnv): BrowserConfig {
   const webBaseUrl = requireEnvironmentValue(env, "MURPH_E2E_WEB_BASE_URL");
   const parsedWebBaseUrl = new URL(webBaseUrl);
+  const startUrl = new URL(
+    requireEnvironmentValue(env, "MURPH_E2E_CONNECT_URL"),
+  );
+  if (
+    startUrl.origin !== parsedWebBaseUrl.origin
+    || startUrl.pathname !== "/connect"
+    || !new URLSearchParams(startUrl.hash.slice(1)).has("deviceConnectIntent")
+  ) {
+    throw new Error(
+      "MURPH_E2E_CONNECT_URL must be a signed /connect device intent on the hosted-local Web origin.",
+    );
+  }
   const timeoutMs = Number.parseInt(
     env.MURPH_E2E_WHOOP_TIMEOUT_MS ?? "180000",
     10,
@@ -310,6 +318,7 @@ function readBrowserConfig(env: NodeJS.ProcessEnv): BrowserConfig {
     ),
     otp: env.MURPH_E2E_WHOOP_OTP?.trim() || null,
     password: requireEnvironmentValue(env, "MURPH_E2E_WHOOP_PASSWORD"),
+    startUrl: startUrl.toString(),
     timeoutMs,
     webBaseUrl: parsedWebBaseUrl.toString().replace(/\/$/u, ""),
     webOrigin: parsedWebBaseUrl.origin,
@@ -321,6 +330,7 @@ function clearSensitiveBrowserEnvironment(): void {
     "JUNCTION_API_KEY",
     "JUNCTION_CLIENT_USER_ID_SECRET",
     "JUNCTION_WEBHOOK_SECRET",
+    "MURPH_E2E_CONNECT_URL",
     "MURPH_E2E_HOSTED_SESSION_COOKIE",
     "MURPH_E2E_WHOOP_EMAIL",
     "MURPH_E2E_WHOOP_OTP",
@@ -388,6 +398,7 @@ function sanitizeFailure(error: unknown, config: BrowserConfig | null): string {
     config?.password,
     config?.otp,
     config?.hostedSessionCookie,
+    config?.startUrl,
   ]) {
     if (secret) {
       message = message.replaceAll(secret, "[redacted]");
