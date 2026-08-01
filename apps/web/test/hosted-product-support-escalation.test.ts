@@ -22,6 +22,7 @@ import {
   HOSTED_PRODUCT_SUPPORT_EMAIL,
   HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
   HOSTED_PRODUCT_SUPPORT_EMAILS_PER_MEMBER_UTC_DAY_MAX,
+  isHostedProductSupportEscalationFeedback,
   isHostedProductSupportEscalationSummary,
   recordHostedProductFeedback,
 } from "@/src/lib/hosted-execution/product-feedback";
@@ -66,12 +67,10 @@ describe("hosted product support escalation", () => {
       providerMessageId: "email_123",
     });
     prismaMocks.createMany.mockResolvedValue({ count: 1 });
-    prismaMocks.findUnique.mockResolvedValue({
-      createdAt: NOW,
-      id: feedbackId,
-      memberId: MEMBER_ID,
-      summary: feedback.summary,
-    });
+    prismaMocks.findUnique.mockResolvedValue(makeStoredSupportFeedback({
+      feedback,
+      feedbackId,
+    }));
     prismaMocks.count.mockResolvedValue(
       HOSTED_PRODUCT_SUPPORT_EMAILS_PER_MEMBER_UTC_DAY_MAX,
     );
@@ -94,7 +93,9 @@ describe("hosted product support escalation", () => {
         expect.objectContaining({
           createdAt: NOW,
           id: feedbackId,
+          kind: "frustration",
           memberId: MEMBER_ID,
+          relatedChangelogItemIdsJson: [],
           summary: feedback.summary,
         }),
       ],
@@ -106,6 +107,7 @@ describe("hosted product support escalation", () => {
           gte: new Date("2026-08-01T00:00:00.000Z"),
           lt: new Date("2026-08-02T00:00:00.000Z"),
         },
+        kind: "frustration",
         memberId: MEMBER_ID,
         summary: {
           startsWith: HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
@@ -128,12 +130,10 @@ describe("hosted product support escalation", () => {
     const feedbackId = buildHostedProductFeedbackId({ feedback });
     const sendEmail = vi.fn();
     prismaMocks.createMany.mockResolvedValue({ count: 1 });
-    prismaMocks.findUnique.mockResolvedValue({
-      createdAt: NOW,
-      id: feedbackId,
-      memberId: MEMBER_ID,
-      summary: feedback.summary,
-    });
+    prismaMocks.findUnique.mockResolvedValue(makeStoredSupportFeedback({
+      feedback,
+      feedbackId,
+    }));
     prismaMocks.count.mockResolvedValue(
       HOSTED_PRODUCT_SUPPORT_EMAILS_PER_MEMBER_UTC_DAY_MAX + 1,
     );
@@ -159,12 +159,10 @@ describe("hosted product support escalation", () => {
     const feedbackId = buildHostedProductFeedbackId({ feedback });
     const sendEmail = vi.fn().mockResolvedValue({ providerMessageId: null });
     prismaMocks.createMany.mockResolvedValue({ count: 0 });
-    prismaMocks.findUnique.mockResolvedValue({
-      createdAt: NOW,
-      id: feedbackId,
-      memberId: MEMBER_ID,
-      summary: feedback.summary,
-    });
+    prismaMocks.findUnique.mockResolvedValue(makeStoredSupportFeedback({
+      feedback,
+      feedbackId,
+    }));
     prismaMocks.count.mockResolvedValue(1);
 
     await expect(recordHostedProductFeedback({
@@ -195,13 +193,61 @@ describe("hosted product support escalation", () => {
     expect(prismaMocks.transaction).not.toHaveBeenCalled();
   });
 
-  it("requires the exact support escalation prefix", () => {
-    expect(isHostedProductSupportEscalationSummary(
-      `${HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX} device connection failed.`,
-    )).toBe(true);
+  it("rejects a prefixed payload that is not the exact support shape", async () => {
+    await expect(recordHostedProductFeedback({
+      env: EMAIL_ENV,
+      feedback: {
+        ...makeSupportFeedback(),
+        kind: "feature_request",
+      },
+      memberId: MEMBER_ID,
+    })).rejects.toMatchObject({
+      code: "HOSTED_PRODUCT_SUPPORT_REJECTED",
+      httpStatus: 400,
+    });
+
+    expect(prismaMocks.transaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects an idempotent replay bound to different support content", async () => {
+    const feedback = makeSupportFeedback({
+      idempotencyKey: "f".repeat(64),
+    });
+    const feedbackId = buildHostedProductFeedbackId({ feedback });
+    prismaMocks.createMany.mockResolvedValue({ count: 0 });
+    prismaMocks.findUnique.mockResolvedValue({
+      ...makeStoredSupportFeedback({ feedback, feedbackId }),
+      summary: `${HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX} a different issue.`,
+    });
+
+    await expect(recordHostedProductFeedback({
+      env: EMAIL_ENV,
+      feedback,
+      memberId: MEMBER_ID,
+      now: NOW,
+    })).rejects.toMatchObject({
+      code: "HOSTED_PRODUCT_SUPPORT_IDEMPOTENCY_CONFLICT",
+      httpStatus: 409,
+    });
+
+    expect(prismaMocks.count).not.toHaveBeenCalled();
+  });
+
+  it("requires the exact support escalation prefix and structured shape", () => {
+    const feedback = makeSupportFeedback();
+    expect(isHostedProductSupportEscalationSummary(feedback.summary)).toBe(true);
+    expect(isHostedProductSupportEscalationFeedback(feedback)).toBe(true);
     expect(isHostedProductSupportEscalationSummary(
       "support escalation: device connection failed.",
     )).toBe(false);
+    expect(isHostedProductSupportEscalationFeedback({
+      ...feedback,
+      kind: "feature_request",
+    })).toBe(false);
+    expect(isHostedProductSupportEscalationFeedback({
+      ...feedback,
+      relatedChangelogItemIds: ["native-message-formatting"],
+    })).toBe(false);
   });
 });
 
@@ -216,5 +262,19 @@ function makeSupportFeedback(input: {
       HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
       "a connected source reports success but Murph does not finish the connection.",
     ].join(" "),
+  };
+}
+
+function makeStoredSupportFeedback(input: {
+  feedback: ReturnType<typeof makeSupportFeedback>;
+  feedbackId: string;
+}) {
+  return {
+    createdAt: NOW,
+    id: input.feedbackId,
+    kind: input.feedback.kind,
+    memberId: MEMBER_ID,
+    relatedChangelogItemIdsJson: [],
+    summary: input.feedback.summary,
   };
 }
