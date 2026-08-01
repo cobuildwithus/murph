@@ -21,14 +21,15 @@ A member who reaches a Murph-owned product blocker should not be left at a hard 
 
 - Ordinary feedback remains anonymous.
 - Explicit support escalation is member-linked because support needs to identify the affected account.
-- The support email contains only the internal feedback id, internal member id, and the de-identified product summary.
-- Never include raw conversation or voice text, names, handles, email addresses, phone numbers, health facts, measurements, diagnoses, medications, precise locations, secrets, or provider payloads.
+- The support email is metadata-only: it contains the internal feedback id and internal member id, but never the model-authored summary. The de-identified issue remains in the existing product-feedback record for controlled investigation.
+- Never include raw conversation or voice text, names, handles, email addresses, phone numbers, health facts, measurements, diagnoses, medications, precise locations, secrets, or provider payloads in the email.
 
 ## Rate and replay behavior
 
 - The first three distinct escalation records for one member in one UTC day are email-eligible.
 - Later records remain persisted but do not send another email that day.
 - Exact callback replay may retry an eligible provider request with the same Resend idempotency key and must not create a duplicate recipient-visible email.
+- Ordinary feedback keeps the existing two-second callback bound; only the exact explicit support path receives a bounded 12-second callback allowance for the email provider.
 - Murph never retries the model tool in the same turn or attempts to evade the server limit.
 
 ## Public source context
