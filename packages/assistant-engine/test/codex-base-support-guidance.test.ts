@@ -16,13 +16,16 @@ describe("Murph Codex base support guidance", () => {
       "Support escalation:",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "explicit exception to silent product-feedback capture",
+      "Only in a verified private direct conversation",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "Never promise a ticket, response, fix, follow-up, or timing.",
+      "In groups or unverified audiences, give the address and move account-linked escalation to private Murph.",
     );
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      "Never retry or evade the server's daily limit.",
+      "Never promise a ticket, response, fix, follow-up, or timing",
+    );
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      "never retry or evade the daily limit",
     );
   });
 
