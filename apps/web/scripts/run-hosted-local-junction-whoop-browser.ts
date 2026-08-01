@@ -97,9 +97,9 @@ async function main(): Promise<void> {
     await page.goto(new URL("/connect", config.webBaseUrl).toString(), {
       waitUntil: "domcontentloaded",
     });
-    await assertWhoopConnectionState(page, "Whoop connected", config.timeoutMs);
+    await assertWhoopConnectionState(page, "connected", config.timeoutMs);
     await page.reload({ waitUntil: "domcontentloaded" });
-    await assertWhoopConnectionState(page, "Whoop connected", config.timeoutMs);
+    await assertWhoopConnectionState(page, "connected", config.timeoutMs);
 
     stage = "junction_cleanup";
     await disconnectJunctionAccount(page, config.timeoutMs);
@@ -281,10 +281,15 @@ async function clickFirstVisibleAction(
 
 async function assertWhoopConnectionState(
   page: Page,
-  text: string,
+  state: "connected" | "idle",
   timeoutMs: number,
 ): Promise<void> {
-  await page.getByText(text, { exact: true }).waitFor({ timeout: timeoutMs });
+  const whoopCard = page
+    .getByRole("heading", { name: "Whoop", exact: true })
+    .locator("xpath=ancestor::div[.//*[@data-connection-state]][1]");
+  await whoopCard.locator(`[data-connection-state="${state}"]`).waitFor({
+    timeout: timeoutMs,
+  });
 }
 
 async function disconnectJunctionAccount(
@@ -302,7 +307,7 @@ async function disconnectJunctionAccount(
   await page.getByText("Source disconnected", { exact: true }).waitFor({
     timeout: timeoutMs,
   });
-  await assertWhoopConnectionState(page, "Whoop not connected", timeoutMs);
+  await assertWhoopConnectionState(page, "idle", timeoutMs);
 }
 
 function readBrowserConfig(env: NodeJS.ProcessEnv): BrowserConfig {
