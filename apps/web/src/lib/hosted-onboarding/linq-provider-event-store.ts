@@ -100,9 +100,19 @@ export async function ingestHostedLinqProviderEventTx(input: {
       where: { eventId: eventLookupKey },
       select: { groupJoinOfferHandledAt: true },
     });
+    const replayDurableReactionProjection = Boolean(existing)
+      && !existing?.groupJoinOfferHandledAt
+      && (
+        input.event.eventType === "reaction.added"
+        || input.event.eventType === "reaction.removed"
+      );
+    // Provider-event persistence is not the terminal owner for reaction
+    // context. Until a reaction was consumed by the join-offer owner, replay
+    // its idempotent mailbox projection on webhook retry; the mailbox event id
+    // owns exact dedupe and closes an append-or-signal failure window.
     return {
       alertIds: [],
-      duplicate: true,
+      duplicate: !replayDurableReactionProjection,
       ...(existing?.groupJoinOfferHandledAt
         ? { groupJoinOfferHandled: true }
         : {}),

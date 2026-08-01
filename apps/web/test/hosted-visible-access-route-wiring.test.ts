@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   handleHostedOnboardingTelegramWebhook: vi.fn(),
   handleHostedOnboardingTelegramWebhookWithVisibleAccess: vi.fn(),
   handleHostedOnboardingTelegramWebhookWithVisibleOutcomes: vi.fn(),
+  handleHostedTelegramGroupReactionWebhook: vi.fn(),
 }));
 
 vi.mock("next/server", async () => {
@@ -36,6 +37,11 @@ vi.mock("@/src/lib/hosted-onboarding/webhook-service", () => ({
   handleHostedOnboardingLinqWebhook: mocks.handleHostedOnboardingLinqWebhook,
   handleHostedOnboardingTelegramWebhook:
     mocks.handleHostedOnboardingTelegramWebhook,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/telegram-group-reactions", () => ({
+  handleHostedTelegramGroupReactionWebhook:
+    mocks.handleHostedTelegramGroupReactionWebhook,
 }));
 
 type LinqRoute = typeof import(
@@ -72,6 +78,7 @@ describe("visible access webhook route wiring", () => {
     mocks.handleHostedOnboardingTelegramWebhookWithVisibleOutcomes.mockImplementation(
       (input) => mocks.handleHostedOnboardingTelegramWebhookWithVisibleAccess(input),
     );
+    mocks.handleHostedTelegramGroupReactionWebhook.mockResolvedValue(null);
   });
 
   afterEach(() => {

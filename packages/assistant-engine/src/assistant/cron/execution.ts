@@ -923,6 +923,11 @@ export async function executeClaimedAssistantCronJob(
               })
             },
             instructions: buildAssistantCronExecutionInstructions(input.job),
+            scheduledAutomationScheduleKind:
+              input.job.kind === 'canonical'
+                && input.job.source.kind === 'automation'
+                ? input.job.source.schedule.kind
+                : null,
             deliveryDedupeToken: buildAssistantCronNotificationDedupeToken({
               job: claimedJob,
               trigger: input.trigger,
@@ -1655,13 +1660,15 @@ function resolveAssistantCronNotificationTurnPolicy(
   job: ResolvedAssistantCronJob,
 ): AssistantNotificationTurnPolicy | null {
   const policy = resolveAssistantCronBackgroundMaintenancePolicy(job)
-  return policy
-    ? {
-        kind: 'maintenance-exact-skip',
-        maintenanceProfile: policy.profile,
-        privateSummary: policy.privateSummary,
-      }
-    : null
+  if (policy) {
+    return {
+      kind: 'maintenance-exact-skip',
+      maintenanceProfile: policy.profile,
+      privateSummary: policy.privateSummary,
+    }
+  }
+
+  return null
 }
 
 function assistantCronDeviceActivitySkipConsumesOccurrence(input: {

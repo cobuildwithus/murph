@@ -101,6 +101,9 @@ import {
   type AssistantHostedGroupSharedRecord,
   type AssistantWorkspaceArtifactMaterializer,
 } from '../assistant/execution-context.js'
+import type {
+  AssistantConversationScope,
+} from '../assistant/conversation-policy.js'
 import {
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS,
@@ -125,6 +128,9 @@ import type {
 import {
   ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
 } from '../assistant/generated-delivery-files.js'
+import {
+  readAssistantHostedImageCompletion,
+} from '../assistant/hosted-image-completion.js'
 import {
   resolveAssistantVaultImageResponseMedia,
 } from '../assistant/vault-file-send.js'
@@ -217,6 +223,14 @@ import {
   readPhoneCallDynamicToolRequest,
   type PhoneCallDynamicToolRequest,
 } from './dynamic-tools/phone-calls.js'
+import {
+  createPhysicalNoteRequestKey,
+  MURPH_SEND_PHYSICAL_NOTE_TOOL,
+  readPhysicalNoteDynamicToolRequest,
+  resolvePhysicalNoteExplicitOriginInputId,
+  type PhysicalNoteDynamicToolRequest,
+} from './dynamic-tools/physical-notes.js'
+export { MURPH_SEND_PHYSICAL_NOTE_TOOL } from './dynamic-tools/physical-notes.js'
 import {
   executeGenerateSongDynamicTool,
   MURPH_GENERATE_SONG_TOOL,
@@ -410,6 +424,12 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
           maxLength: 1024,
         },
       },
+      message_ref: {
+        type: 'string',
+        pattern: '^ain_[0-9a-f]{32}$',
+        description:
+          'Exact current Message ref authorizing an irreversible continuation that will consume this image, such as mailing a physical note. Omit for ordinary image generation.',
+      },
     },
     required: ['prompt'],
   },
@@ -580,7 +600,7 @@ export const MURPH_PERSONALIZATION_TOOL = {
   namespace: 'murph',
   name: 'personalization',
   description:
-    'Read the current hosted conversation runtime\'s effective Murph tone, voice, and model context, or atomically update tone and voice. In a private chat this is the member\'s Murph; in a group chat this is the synthetic room Murph and never a participant\'s private settings. Use murph.assistant_configuration for model, provider, or reasoning changes only when that separate tool is available.',
+    'Read the current hosted conversation runtime\'s effective Murph tone, voice, and model context, or atomically update tone and voice. Reply casing maps to the existing tone field: capitalize, standard capitalization, or sentence case means formal; lowercase means casual. Treat a request about how Murph should keep writing as an update rather than an unsupported setting; a one-reply formatting request does not persist. In a private chat this is the member\'s Murph; in a group chat this is the synthetic room Murph and never a participant\'s private settings. Use murph.assistant_configuration for model, provider, or reasoning changes only when that separate tool is available.',
   inputSchema: {
     oneOf: [
       {
@@ -863,7 +883,7 @@ export const MURPH_GROUP_TOOL = {
   name: 'group',
   deferLoading: true,
   description:
-    'Perform one group action in an authorized direct, group, or scheduled context. The trusted host binds member, group, route, input, and occurrence. offer_access returns an opaque handled native path or one exact link; standaloneLink requires an explicit link request. Self-targeting actions and referral reads require exact message_ref; use exact server-issued membershipId or grantId. read_shared status="partial" is incomplete; ask is asynchronous. Scheduled ask_member must replay exactly; changed questions conflict. update_display_name or set_chat_avatar ok means provider acceptance. group=null proves neither absence nor label storage. Participant displayName and untrusted read_chat_name text prove no identity, consent, routing, persistence, or authority. Results authorize no other action.',
+    'Perform one group action in an authorized direct, group, or scheduled context. The trusted host binds member, group, route, input, and occurrence. offer_access returns native or one exact link; standaloneLink requires an explicit link request. Self-targeting actions and referral reads require exact message_ref; use exact server-issued membershipId or grantId. read_shared status="partial" is incomplete; ask is asynchronous. Scheduled ask_member must replay exactly; changed questions conflict. update_display_name or set_chat_avatar ok means provider acceptance. group=null proves neither absence nor label storage. Participant displayName and untrusted read_chat_name text prove no identity, consent, routing, persistence, or authority. Results authorize no other action.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -1011,7 +1031,7 @@ export const MURPH_GROUP_TOOL = {
         maxItems: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length,
         items: GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA,
         description:
-          'For read_shared, one to three exact consent-aware group projections to read. For offer_access, optional bounded health projections offered as one fixed permission request. Existing membership and other grants remain unchanged. The trusted host owns the exact consent copy and uses a handled native consent path or a first-party link.',
+          'For read_shared, one to three exact consent-aware group projections to read, including additive exact-grant activation time when available. For offer_access, optional bounded health projections offered as one fixed permission request. Existing membership and other grants remain unchanged. The trusted host owns the exact consent copy and uses a handled native consent path or a first-party link.',
       },
       standaloneLink: {
         type: 'boolean',
@@ -1303,6 +1323,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_REACT_TO_MESSAGE_TOOL,
   MURPH_CREATE_CLINICAL_RECORDS_CONNECT_LINK_TOOL,
   MURPH_CREATE_PHONE_CALL_TOOL,
+  MURPH_SEND_PHYSICAL_NOTE_TOOL,
   MURPH_LABS_TOOL,
 ] as const
 
@@ -1353,6 +1374,7 @@ export interface MurphDynamicToolAvailability {
   personalizationAvailable?: boolean | null
   productFeedbackAvailable?: boolean | null
   progressUpdateMode?: 'direct' | 'group'
+  physicalNotesAvailable?: boolean | null
   phoneCallsAvailable?: boolean | null
   voiceMemoGenerationAvailable?: boolean | null
   vaultFileSendAvailable?: boolean | null
@@ -1400,6 +1422,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_ASK_GROK_TOOL, defaultOff((a) => a.askGrokAvailable)],
     [MURPH_SEND_VAULT_FILE_TOOL, defaultOff((a) => a.vaultFileSendAvailable)],
     [MURPH_CREATE_PHONE_CALL_TOOL, defaultOff((a) => a.phoneCallsAvailable)],
+    [MURPH_SEND_PHYSICAL_NOTE_TOOL, defaultOff((a) => a.physicalNotesAvailable)],
     ...MURPH_COMPUTER_DYNAMIC_TOOLS.map(
       (tool) =>
         [tool, defaultOff((a) => a.computerToolsAvailable)] as const,
@@ -1473,6 +1496,9 @@ const generateImageArgumentsSchema = z
       .describe(GENERATE_IMAGE_REFERENCE_IMAGE_REFS_DESCRIPTION)
       .default([]),
     size: z.enum(['1024x1024', '1024x1536', '1536x1024']).default('1024x1024'),
+    message_ref: z.string().regex(
+      new RegExp(ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN, 'u'),
+    ).optional(),
   })
   .strict()
 
@@ -2129,6 +2155,7 @@ export type MurphDynamicToolRequest =
   | {
       kind: 'generate-image'
       args: GenerateImageToolArgs
+      messageRef?: string
       toolCallId?: string
     }
   | {
@@ -2164,6 +2191,7 @@ export type MurphDynamicToolRequest =
       args: HostedComputerFinishRunRequest & { runId: string }
     }
   | PhoneCallDynamicToolRequest
+  | PhysicalNoteDynamicToolRequest
   | ClinicalRecordsConnectLinkDynamicToolRequest
   | {
       kind: 'send-vault-file'
@@ -2384,6 +2412,14 @@ export function readMurphDynamicToolRequest(
     return phoneCallRequest
   }
 
+  const physicalNoteRequest = readPhysicalNoteDynamicToolRequest({
+    arguments: request.arguments,
+    tool: request.tool,
+  })
+  if (physicalNoteRequest) {
+    return physicalNoteRequest
+  }
+
   const clinicalRecordsConnectLinkRequest =
     readClinicalRecordsConnectLinkDynamicToolRequest({
       arguments: request.arguments,
@@ -2434,6 +2470,7 @@ export function readMurphDynamicToolRequest(
       return {
         kind: 'generate-image',
         args: parsed.args,
+        ...(parsed.messageRef ? { messageRef: parsed.messageRef } : {}),
         ...(request.toolCallId ? { toolCallId: request.toolCallId } : {}),
       }
     }
@@ -2884,6 +2921,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid vault file arguments')
     case 'invalid-phone-call-arguments':
       return toolTextResult(false, 'invalid phone-call arguments')
+    case 'invalid-physical-note-arguments':
+      return toolTextResult(false, 'invalid physical-note arguments')
     case 'invalid-clinical-records-connect-link-arguments':
       return toolTextResult(false, 'invalid Clinical Records connect-link arguments')
     case 'unsupported-dynamic-tool':
@@ -2920,6 +2959,7 @@ export async function executeMurphDynamicToolRequest(input: {
     }
     case 'send-progress-update':
       return await executeProgressUpdateTool({
+        deliveryContextOrdinal: input.deliveryContextOrdinal ?? null,
         progressDelivery: input.progressDelivery,
         text: input.request.text,
       })
@@ -3071,6 +3111,212 @@ export async function executeMurphDynamicToolRequest(input: {
         return replyRequiredResult(
           false,
           'secure vault-file approval could not be prepared',
+        )
+      }
+    }
+    case 'send-physical-note': {
+      const hostedToolContext = input.hostedToolContext ?? null
+      const physicalNotes = hostedToolContext?.physicalNotes ?? null
+      const publisher = hostedToolContext?.privateImageUrlPublisher ?? null
+      const vaultRoot = input.vaultRoot?.trim() ?? ''
+      if (!hostedToolContext || !physicalNotes || !publisher || !vaultRoot) {
+        return toolTextResult(
+          false,
+          'physical-note sending is unavailable without hosted mail transport and the owning vault',
+        )
+      }
+
+      const hasExplicitArtwork =
+        input.request.imageRef !== undefined
+        && input.request.imageSha256 !== undefined
+      let trustedCompletion: Awaited<
+        ReturnType<typeof readAssistantHostedImageCompletion>
+      > = null
+      let artwork: ResolvedGenerateImageReference | null = null
+      let originAssistantInputId: string | null = null
+      try {
+        trustedCompletion = hasExplicitArtwork
+          ? null
+          : await readAssistantHostedImageCompletion({
+              assistantInputId:
+                hostedToolContext.currentAssistantInputId?.() ?? null,
+              vault: vaultRoot,
+            })
+        const userActionScope = hasExplicitArtwork
+          ? hostedToolContext.currentUserActionScope?.() ?? null
+          : null
+        const explicitOriginCandidate = userActionScope
+          ? resolvePhysicalNoteExplicitOriginInputId({
+              acceptedInputIds: userActionScope.acceptedInputIds,
+              conversationScope: userActionScope.conversationScope,
+              ...(input.request.messageRef
+                ? { messageRef: input.request.messageRef }
+                : {}),
+            })
+          : null
+        const explicitOriginAssistantInputId = explicitOriginCandidate
+          && userActionScope
+          ? await authorizeDynamicToolEffectOrigin({
+              authorizer: input.authorizeAcceptedMessageTarget ?? null,
+              conversationScope: userActionScope.conversationScope,
+              deliveryContextOrdinal: input.deliveryContextOrdinal ?? null,
+              messageRef: explicitOriginCandidate,
+            })
+          : null
+        originAssistantInputId = trustedCompletion?.originAssistantInputIdExact
+          ? trustedCompletion.originAssistantInputId
+          : explicitOriginAssistantInputId
+          ?? null
+        const imageRef = trustedCompletion?.imageRef
+          ?? input.request.imageRef
+          ?? null
+        const imageSha256 = trustedCompletion?.imageSha256
+          ?? input.request.imageSha256
+          ?? null
+        if (
+          !originAssistantInputId
+          || !imageRef
+          || !imageSha256
+          || !imageRef.startsWith('raw/captures/')
+        ) {
+          return toolTextResult(
+            false,
+            hasExplicitArtwork
+              ? 'sending previously previewed physical-note artwork requires fresh user input, the exact trusted generated-image ref and SHA-256, and the exact approving Message ref'
+              : 'physical-note sending requires a current trusted hosted image completion bound to the exact authorizing Message ref',
+          )
+        }
+
+        const [resolvedArtwork] = await resolveGenerateImageReferences({
+          materializeWorkspaceArtifacts:
+            input.materializeWorkspaceArtifacts ?? null,
+          refs: [imageRef],
+          vaultRoot,
+        })
+        if (
+          !resolvedArtwork
+          || resolvedArtwork.sha256 !== imageSha256
+          || (
+            trustedCompletion !== null
+            && (
+              resolvedArtwork.mediaType !== trustedCompletion.contentType
+              || resolvedArtwork.bytes.byteLength !== trustedCompletion.sizeBytes
+            )
+          )
+        ) {
+          return toolTextResult(
+            false,
+            'the selected physical-note artwork no longer matches its trusted saved image',
+          )
+        }
+        artwork = resolvedArtwork
+      } catch {
+        return toolTextResult(
+          false,
+          'the selected physical-note artwork could not be read from the private vault',
+        )
+      }
+      if (!artwork || !originAssistantInputId) {
+        return toolTextResult(
+          false,
+          'physical-note artwork authority could not be established',
+        )
+      }
+
+      let published: Awaited<
+        ReturnType<typeof publisher.publishPrivateImageUrl>
+      >
+      try {
+        published = await publisher.publishPrivateImageUrl({
+          bytes: artwork.bytes,
+          contentType: artwork.mediaType,
+        })
+      } catch {
+        return toolTextResult(
+          false,
+          'the physical-note artwork could not be prepared for private printing',
+        )
+      }
+
+      try {
+        const result = await physicalNotes.send({
+          artwork: {
+            expiresAt: published.expiresAt,
+            sha256: artwork.sha256,
+            url: published.url,
+          },
+          originAssistantInputId,
+          recipient: input.request.recipient,
+          requestKey: createPhysicalNoteRequestKey({ originAssistantInputId }),
+        }, {
+          signal: input.abortSignal ?? null,
+        })
+
+        switch (result.status) {
+          case 'accepted':
+            return toolTextResult(
+              true,
+              JSON.stringify({
+                complimentary: result.complimentary,
+                costUsdMicros: result.costUsdMicros,
+                note:
+                  'Lob accepted the exact generated artwork for printing. Do not attach the image unless it adds conversational value. Say it is headed to print, not delivered.',
+                physicalNoteId: result.physicalNoteId,
+                status: result.status,
+              }),
+            )
+          case 'pending':
+            return toolTextResult(
+              true,
+              JSON.stringify({
+                note:
+                  'The provider outcome is not certain. Do not retry this note automatically or claim that it was mailed.',
+                physicalNoteId: result.physicalNoteId,
+                status: result.status,
+              }),
+            )
+          case 'insufficient_usage':
+            return toolTextResult(
+              false,
+              JSON.stringify({
+                costUsdMicros: result.costUsdMicros,
+                note:
+                  'The complimentary note was already used and this conversation does not currently have enough Murph time for the configured print-and-mail cost.',
+                status: result.status,
+              }),
+            )
+          case 'permission_denied':
+            return toolTextResult(
+              false,
+              JSON.stringify({
+                note:
+                  'The physical note was not sent because the current participant is not authorized to approve this action.',
+                status: result.status,
+              }),
+            )
+          case 'unavailable':
+            return toolTextResult(
+              false,
+              JSON.stringify({
+                note:
+                  'Physical-note mailing is currently unavailable, so nothing was sent. Do not regenerate the artwork or retry automatically.',
+                status: result.status,
+              }),
+            )
+          case 'failed':
+            return toolTextResult(
+              false,
+              'the physical note was not accepted for printing',
+            )
+        }
+      } catch {
+        return toolTextResult(
+          false,
+          JSON.stringify({
+            note:
+              'Murph could not confirm whether this physical note was accepted. Do not regenerate or retry it automatically, and do not claim that it was mailed.',
+            status: 'pending',
+          }),
         )
       }
     }
@@ -3300,18 +3546,35 @@ export async function executeMurphDynamicToolRequest(input: {
         return toolTextResult(false, 'image generation cannot be combined with a voice memo')
       }
 
-      const providerRequestOrdinal = input.nextUsageOrdinal()
       const captureIdempotencyKey = buildGeneratedImageCaptureIdempotencyKey({
         toolCallId: readGeneratedImageToolCallId(input.request),
         scope: 'generate-image',
       })
       const imageGenerationLauncher =
         input.hostedToolContext?.imageGenerationLauncher ?? null
-      const originAssistantInputId =
-        input.hostedToolContext?.currentAssistantInputId?.() ?? null
-      const imageGenerationScopeId =
-        input.hostedToolContext?.currentUserActionScope?.()?.originSessionId
+      const userActionScope =
+        input.hostedToolContext?.currentUserActionScope?.() ?? null
+      const explicitOriginAssistantInputId = input.request.messageRef
+        && userActionScope?.acceptedInputIds.includes(input.request.messageRef)
+        ? await authorizeDynamicToolEffectOrigin({
+            authorizer: input.authorizeAcceptedMessageTarget ?? null,
+            conversationScope: userActionScope.conversationScope,
+            deliveryContextOrdinal: input.deliveryContextOrdinal ?? null,
+            messageRef: input.request.messageRef,
+          })
+        : null
+      if (input.request.messageRef && !explicitOriginAssistantInputId) {
+        return toolTextResult(
+          false,
+          'image generation for a later irreversible effect requires the exact accepted Message ref authorizing that effect',
+        )
+      }
+      const originAssistantInputId = explicitOriginAssistantInputId
+        ?? input.hostedToolContext?.currentAssistantInputId?.()
         ?? null
+      const originAssistantInputIdExact = explicitOriginAssistantInputId !== null
+      const imageGenerationScopeId = userActionScope?.originSessionId ?? null
+      const providerRequestOrdinal = input.nextUsageOrdinal()
       const operationId =
         captureIdempotencyKey
         ?? `murph.dynamic-tool.generate-image:${originAssistantInputId}:${providerRequestOrdinal}`
@@ -3323,6 +3586,7 @@ export async function executeMurphDynamicToolRequest(input: {
         const launch = imageGenerationLauncher.launch({
           operationId,
           originAssistantInputId,
+          originAssistantInputIdExact,
           scopeId: imageGenerationScopeId,
           run: async (signal, persistCanonicalWrite) => {
             const result = await executeGenerateImageTool({
@@ -3347,10 +3611,17 @@ export async function executeMurphDynamicToolRequest(input: {
               })
             }
             const privateMedia = result.responseMedia?.[0] ?? null
-            return {
-              media: result.rpcSuccess && privateMedia?.kind === 'vault_image'
+            const generatedMedia =
+              result.rpcSuccess && privateMedia?.kind === 'vault_image'
                 ? privateMedia
-                : null,
+                : null
+            return {
+              failureDiagnostic: generatedMedia
+                ? null
+                : result.rpcSuccess
+                  ? 'image generation completed without deliverable private media'
+                  : result.rpcText,
+              media: generatedMedia,
               runtimeIssue: null,
               savedImageRef: result.savedImageRef ?? null,
             }
@@ -4009,6 +4280,9 @@ function groupSharedWorkoutsModelProjection(
       ? {}
       : { calendarClosedThroughDate }),
     days,
+    ...(typeof projection.grantedAt === 'string'
+      ? { grantedAt: projection.grantedAt }
+      : {}),
     // Each workout's `kindIndex` points into this list.
     ...(kinds.length === 0 ? {} : { kinds }),
     status: groupSharedProjectionStatus(projection),
@@ -4048,6 +4322,9 @@ function groupSharedModelResult(
       projections: Object.fromEntries(member.projections.map((projection) => [
         projection.projectionScopeKey,
         groupSharedWorkoutsModelProjection(projection) ?? {
+          ...(typeof projection.grantedAt === 'string'
+            ? { grantedAt: projection.grantedAt }
+            : {}),
           records: projection.records,
           status: groupSharedProjectionStatus(projection),
         },
@@ -4166,13 +4443,18 @@ type GroupAccessOfferHostResponse =
   | {
       action: 'create_join_link'
       result:
-        | { joinUrl: string; status: 'ok' }
+        | { joinUrl: string; offeredAt?: string; status: 'ok' }
         | { status: 'unavailable'; unavailableReason: string }
     }
   | {
       action: 'post_join_offer'
       result:
-        | { status: 'sent' }
+        | {
+            joinUrl?: string
+            offeredAt?: string
+            offerState?: 'existing' | 'posted'
+            status: 'sent'
+          }
         | { status: 'unavailable'; unavailableReason: string }
     }
 
@@ -4186,22 +4468,45 @@ function groupAccessOfferModelResult(response: GroupAccessOfferHostResponse) {
       },
     }
   }
-  return response.action === 'post_join_offer'
-    ? {
-        action: 'offer_access' as const,
-        result: {
-          presentation: 'native' as const,
-          status: 'ok' as const,
-        },
-      }
-    : {
-        action: 'offer_access' as const,
-        result: {
-          joinUrl: response.result.joinUrl,
-          presentation: 'link' as const,
-          status: 'ok' as const,
-        },
-      }
+  if (response.action === 'create_join_link') {
+    return {
+      action: 'offer_access' as const,
+      result: {
+        joinUrl: response.result.joinUrl,
+        presentation: 'link' as const,
+        recencyEvidence: 'unavailable' as const,
+        status: 'ok' as const,
+      },
+    }
+  }
+  if (
+    response.result.offerState === 'existing'
+    && response.result.joinUrl !== undefined
+  ) {
+    return {
+      action: 'offer_access' as const,
+      result: {
+        joinUrl: response.result.joinUrl,
+        presentation: 'link' as const,
+        recencyEvidence: 'unavailable' as const,
+        status: 'ok' as const,
+      },
+    }
+  }
+  return {
+    action: 'offer_access' as const,
+    result: {
+      ...(response.result.offerState === 'posted'
+          && response.result.offeredAt !== undefined
+        ? {
+            offeredAt: response.result.offeredAt,
+            recencyEvidence: 'eligible' as const,
+          }
+        : { recencyEvidence: 'unavailable' as const }),
+      presentation: 'native' as const,
+      status: 'ok' as const,
+    },
+  }
 }
 
 async function executeGroupSharedRead(input: {
@@ -4648,6 +4953,10 @@ async function executeGroupPermissionOffer(input: {
 
   try {
     const result = await permissionOfferTool.request({ projectionScopes })
+    const canonicalTimestampSchema = z.string().trim().refine((value) => {
+      const parsed = Date.parse(value)
+      return Number.isFinite(parsed) && new Date(parsed).toISOString() === value
+    })
     const unavailableResultSchema = z.object({
       status: z.literal('unavailable'),
       unavailableReason: z.string()
@@ -4659,7 +4968,12 @@ async function executeGroupPermissionOffer(input: {
       z.object({
         action: z.literal('post_join_offer'),
         result: z.discriminatedUnion('status', [
-          z.object({ status: z.literal('sent') }),
+          z.object({
+            joinUrl: z.string().trim().url().optional(),
+            offeredAt: canonicalTimestampSchema.optional(),
+            offerState: z.enum(['existing', 'posted']).optional(),
+            status: z.literal('sent'),
+          }),
           unavailableResultSchema,
         ]),
       }),
@@ -4668,6 +4982,7 @@ async function executeGroupPermissionOffer(input: {
         result: z.discriminatedUnion('status', [
           z.object({
             joinUrl: z.string().trim().url(),
+            offeredAt: canonicalTimestampSchema.optional(),
             status: z.literal('ok'),
           }),
           unavailableResultSchema,
@@ -5177,6 +5492,7 @@ function groupSharedProjectionUnavailableResult(
 }
 
 async function executeProgressUpdateTool(input: {
+  deliveryContextOrdinal: number | null
   progressDelivery: AssistantProgressDelivery | null
   text: string
 }): Promise<MurphDynamicToolExecutionResult> {
@@ -5184,7 +5500,12 @@ async function executeProgressUpdateTool(input: {
     return toolTextResult(false, 'progress updates are not available for this turn')
   }
   try {
-    const result = await input.progressDelivery.send(input.text, { source: 'model' })
+    const result = await input.progressDelivery.send(input.text, {
+      ...(input.deliveryContextOrdinal === null
+        ? {}
+        : { deliveryContextOrdinal: input.deliveryContextOrdinal }),
+      source: 'model',
+    })
     if (result.kind === 'sent') {
       return toolTextResult(true, 'progress update sent')
     }
@@ -5734,7 +6055,7 @@ function parseSendProgressUpdateArguments(
 function parseGenerateImageArguments(
   value: unknown,
 ):
-  | { ok: true; args: GenerateImageToolArgs }
+  | { ok: true; args: GenerateImageToolArgs; messageRef?: string }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
   const parsed = generateImageArgumentsSchema.safeParse(value)
   if (!parsed.success) {
@@ -5749,8 +6070,10 @@ function parseGenerateImageArguments(
       }),
     }
   }
+  const { message_ref: messageRef, ...args } = parsed.data
   return {
-    args: parsed.data,
+    args,
+    ...(messageRef ? { messageRef } : {}),
     ok: true,
   }
 }
@@ -6327,6 +6650,32 @@ async function authorizeDynamicToolParticipant(input: {
     return null
   }
   return target.participant
+}
+
+async function authorizeDynamicToolEffectOrigin(input: {
+  authorizer: AssistantAcceptedMessageTargetAuthorizer | null
+  conversationScope: AssistantConversationScope
+  deliveryContextOrdinal: number | null
+  messageRef: string
+}): Promise<string | null> {
+  if (input.conversationScope === 'unverified-external') {
+    return null
+  }
+  if (input.conversationScope === 'group') {
+    const participant = await authorizeDynamicToolParticipant({
+      authorizer: input.authorizer,
+      deliveryContextOrdinal: input.deliveryContextOrdinal,
+      messageRef: input.messageRef,
+    })
+    return participant?.assistantInputId ?? null
+  }
+  const target = await authorizeDynamicToolMessageTarget({
+    action: 'native-reply',
+    authorizer: input.authorizer,
+    deliveryContextOrdinal: input.deliveryContextOrdinal,
+    messageRef: input.messageRef,
+  })
+  return target?.targetInputId ?? null
 }
 
 function parseComputerArguments<TArgs>(input: {

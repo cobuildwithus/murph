@@ -1036,6 +1036,53 @@ test("browser-vault provider clears a fresh ready client when window focus finds
   await rendered.cleanup();
 });
 
+test("browser-vault provider keeps admitted content visible during focus revalidation", async () => {
+  const ref = createReplicaRef();
+  const focusResponse = createDeferred<Response>();
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(jsonResponse({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: ref,
+      state: "ready",
+    }))
+    .mockImplementationOnce(() => focusResponse.promise);
+
+  installBrowserVaultCryptoMocks();
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createAuthenticatedBrowserVaultElement(createElement(BrowserVaultStatusProbe)),
+    { requireButton: false },
+  );
+
+  await waitForText(rendered.container, `ready:${ref.dataVersion}`);
+  await act(async () => {
+    rendered.window.dispatchEvent(new rendered.window.Event("focus"));
+  });
+  await waitForCondition(
+    () => fetchMock.mock.calls.length === 2,
+    "focus browser-vault revalidation",
+  );
+
+  assert.equal(rendered.container.textContent, `ready:${ref.dataVersion}`);
+
+  focusResponse.resolve(jsonResponse({
+    encryptedReplica: null,
+    memberId: "member_123",
+    replicaAad: null,
+    replicaKeyEnvelope: null,
+    replicaRef: ref,
+    state: "not_modified",
+  }));
+
+  await waitForText(rendered.container, `ready:${ref.dataVersion}`);
+  assert.equal(mocks.unwrapHostedBrowserSessionKey.mock.calls.length, 1);
+
+  await rendered.cleanup();
+});
+
 test("browser-vault provider keeps access-denied recovery pages mounted without redirecting", async () => {
   const ref = createReplicaRef();
   const fetchMock = vi.fn()
