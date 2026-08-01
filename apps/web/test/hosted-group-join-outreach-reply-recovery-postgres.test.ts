@@ -113,6 +113,30 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", async () => {
   };
 });
 
+const reactionEvidenceMocks = vi.hoisted(() => ({
+  failNextAppend: { value: false },
+}));
+vi.mock(
+  "@/src/lib/hosted-onboarding/webhook-provider-linq-reaction-context",
+  async () => {
+    const actual = await vi.importActual<
+      typeof import("@/src/lib/hosted-onboarding/webhook-provider-linq-reaction-context")
+    >("@/src/lib/hosted-onboarding/webhook-provider-linq-reaction-context");
+    const appendHostedLinqGroupReactionMailboxTx: typeof actual.appendHostedLinqGroupReactionMailboxTx =
+      (input) => {
+        if (reactionEvidenceMocks.failNextAppend.value) {
+          reactionEvidenceMocks.failNextAppend.value = false;
+          throw new Error("simulated room-evidence outage");
+        }
+        return actual.appendHostedLinqGroupReactionMailboxTx(input);
+      };
+    return {
+      ...actual,
+      appendHostedLinqGroupReactionMailboxTx,
+    };
+  },
+);
+
 vi.mock(
   "@/src/lib/hosted-onboarding/usage-credit-purchase-service",
   async () => {
@@ -1665,6 +1689,105 @@ describe.skipIf(!runPostgresProof)(
         }
       },
     );
+
+    it("commits the withdrawal before room evidence and converges on provider replay", async () => {
+      const fixture = await createReactionAdmissionFixture();
+      const addedEvent = buildReactionAdmissionEvent({
+        eventId: `event-reaction-added-${randomUUID()}`,
+        eventType: "reaction.added",
+        fixture,
+      });
+      const removedEvent = buildReactionAdmissionEvent({
+        eventId: `event-reaction-removed-${randomUUID()}`,
+        eventType: "reaction.removed",
+        fixture,
+      });
+      await ingestReactionAdmissionEvent({ event: addedEvent, fixture });
+      providerMocks.createHostedLinqChat.mockReset();
+
+      try {
+        await expect(handleHostedGroupJoinOfferReaction({
+          event: addedEvent,
+          prisma: fixture.reactionPrisma,
+        })).resolves.toEqual({
+          reason: "outreach_enqueued",
+          status: "accepted",
+        });
+        await ingestReactionAdmissionEvent({ event: removedEvent, fixture });
+
+        reactionEvidenceMocks.failNextAppend.value = true;
+        await expect(handleHostedGroupJoinOfferReaction({
+          event: removedEvent,
+          prisma: fixture.reactionPrisma,
+        })).rejects.toThrow("simulated room-evidence outage");
+
+        // The withdrawal committed in its own transaction before the failed
+        // evidence append: the production drain finds nothing sendable and the
+        // provider is never called after the explicit removal.
+        await expect(drainOneHostedGroupJoinOutreach({
+          now: new Date("2026-07-28T16:02:00.000Z"),
+          prisma: fixture.reactionPrisma,
+        })).resolves.toEqual({ kind: "idle" });
+        expect(providerMocks.createHostedLinqChat).not.toHaveBeenCalled();
+        await expect(fixture.reactionPrisma.hostedLinqDelivery.findFirst({
+          select: { skipReason: true, status: true },
+          where: {
+            groupJoinOutreach: { is: { offerId: fixture.offerId } },
+            source: HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE,
+            template: HOSTED_GROUP_JOIN_OUTREACH_TEMPLATE,
+          },
+        })).resolves.toEqual({
+          skipReason: "reaction_removed",
+          status: "skipped",
+        });
+        // The provider event stayed unhandled, so retry replays the idempotent
+        // revocation and completes the deduplicated evidence append.
+        await expect(fixture.reactionPrisma.hostedLinqProviderEvent.findUnique({
+          select: { groupJoinOfferHandledAt: true },
+          where: {
+            eventId: createHostedLinqProviderEventLookupKey(
+              removedEvent.eventId,
+            ),
+          },
+        })).resolves.toEqual({ groupJoinOfferHandledAt: null });
+
+        await ingestReactionAdmissionEvent({ event: removedEvent, fixture });
+        await expect(handleHostedGroupJoinOfferReaction({
+          event: removedEvent,
+          prisma: fixture.reactionPrisma,
+        })).resolves.toEqual({
+          reason: "reaction_recorded",
+          status: "accepted",
+        });
+        await expect(fixture.reactionPrisma.hostedLinqProviderEvent.findUnique({
+          select: { groupJoinOfferHandledAt: true },
+          where: {
+            eventId: createHostedLinqProviderEventLookupKey(
+              removedEvent.eventId,
+            ),
+          },
+        })).resolves.toEqual({
+          groupJoinOfferHandledAt: removedEvent.providerCreatedAt,
+        });
+        const removalEvidence =
+          await fixture.reactionPrisma.hostedMailboxItem.findMany({
+            select: { consumedAt: true },
+            where: {
+              dedupeKey: createHostedExecutionGroupReactionEventId(
+                removedEvent.eventId,
+              ),
+              userId: fixture.runtimeMemberId,
+            },
+          });
+        expect(removalEvidence).toHaveLength(1);
+        expect(removalEvidence[0]?.consumedAt).not.toBeNull();
+        expect(providerMocks.createHostedLinqChat).not.toHaveBeenCalled();
+      } finally {
+        reactionEvidenceMocks.failNextAppend.value = false;
+        providerMocks.createHostedLinqChat.mockReset();
+        await cleanupReactionAdmissionFixture(fixture);
+      }
+    });
 
     it("keeps a pre-existing inactive member on the group-aware signup reply path", async () => {
       vi.stubEnv(

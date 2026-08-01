@@ -489,23 +489,40 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
   });
 
-  it("rolls back a member removal when the attributed evidence append fails", async () => {
+  it("keeps a withdrawal committed when the removal evidence append fails, then converges on replay", async () => {
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
+    mocks.revokeHostedGroupJoinOutreachForRemovedReactionTx.mockResolvedValueOnce({
+      kind: "revoked",
+    });
     mocks.appendHostedLinqGroupReactionMailboxTx.mockRejectedValueOnce(
       new Error("mailbox unavailable"),
     );
     const prisma = createPrismaStub();
+    const event = parseReactionEvent({
+      eventType: "reaction.removed",
+      reactionType: "like",
+    });
 
     await expect(handleHostedGroupJoinOfferReaction({
-      event: parseReactionEvent({
-        eventType: "reaction.removed",
-        reactionType: "like",
-      }),
+      event,
       prisma,
     })).rejects.toThrow("mailbox unavailable");
 
-    expect(mocks.revokeHostedGroupJoinOutreachForRemovedReactionTx).not.toHaveBeenCalled();
+    // The withdrawal decision committed in its own transaction; only the
+    // evidence-and-handled transaction failed, leaving the provider event
+    // replayable and no signal emitted.
+    expect(mocks.revokeHostedGroupJoinOutreachForRemovedReactionTx).toHaveBeenCalledTimes(1);
     expect(mocks.markHostedLinqGroupJoinOfferHandledTx).not.toHaveBeenCalled();
     expect(mocks.signalHostedLinqGroupReactionMailbox).not.toHaveBeenCalled();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event,
+      prisma,
+    })).resolves.toEqual({ reason: "reaction_recorded", status: "accepted" });
+
+    expect(mocks.appendHostedLinqGroupReactionMailboxTx).toHaveBeenCalledTimes(2);
+    expect(mocks.markHostedLinqGroupJoinOfferHandledTx).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedLinqGroupReactionMailbox).toHaveBeenCalledTimes(1);
   });
 
   it("rolls back member outreach consumption when the evidence append fails", async () => {
