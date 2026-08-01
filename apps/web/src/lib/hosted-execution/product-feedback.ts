@@ -4,6 +4,9 @@ import { createHash } from "node:crypto";
 
 import {
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
+  HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
+  isHostedProductSupportEscalationFeedback,
+  isHostedProductSupportEscalationSummary,
   sanitizeHostedProductFeedbackSummary,
   type HostedRuntimeProductFeedbackRecord,
   type HostedRuntimeProductFeedbackRecordResponse,
@@ -16,8 +19,13 @@ import { sendHostedResendPlainTextEmail } from "@/src/lib/hosted-onboarding/rese
 import { getPrisma } from "@/src/lib/prisma";
 
 export const HOSTED_PRODUCT_SUPPORT_EMAIL = "support@withmurph.ai";
-export const HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX = "Support escalation:";
 export const HOSTED_PRODUCT_SUPPORT_EMAILS_PER_MEMBER_UTC_DAY_MAX = 3;
+
+export {
+  HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
+  isHostedProductSupportEscalationFeedback,
+  isHostedProductSupportEscalationSummary,
+} from "@murphai/hosted-execution/runtime-control";
 
 const HOSTED_PRODUCT_SUPPORT_RECIPIENTS_ENV = "HOSTED_LINQ_ALERT_EMAILS";
 const HOSTED_PRODUCT_SUPPORT_SUBJECT = "Murph support escalation";
@@ -193,25 +201,6 @@ export async function recordHostedProductFeedback(input: {
     feedbackId,
     recorded: persistence.recorded,
   };
-}
-
-export function isHostedProductSupportEscalationSummary(
-  value: string | null | undefined,
-): value is string {
-  return typeof value === "string"
-    && value.startsWith(HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX)
-    && value.slice(HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX.length).trim().length > 0;
-}
-
-export function isHostedProductSupportEscalationFeedback(
-  feedback: Pick<
-    HostedRuntimeProductFeedbackRecord,
-    "kind" | "relatedChangelogItemIds" | "summary"
-  >,
-): boolean {
-  return feedback.kind === "frustration"
-    && feedback.relatedChangelogItemIds.length === 0
-    && isHostedProductSupportEscalationSummary(feedback.summary);
 }
 
 export function normalizeHostedProductFeedback(

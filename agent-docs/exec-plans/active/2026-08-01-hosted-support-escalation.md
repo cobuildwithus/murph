@@ -61,6 +61,7 @@ Give a member who hits a real Murph product wall two truthful exits in the same 
 ## State
 
 - Draft PR #1247 is open from `agent/support-escalation-email`.
-- Initial exact-head failures in prompt invariants and doc indexing were corrected.
+- Initial exact-head failures in prompt invariants and doc indexing were corrected; exact-head CI went green.
 - Current implementation is aligned with the feedback-summary email policy merged to `main` on August 1.
-- Next: finish exact-head CI and review, then close this plan if the branch is merge-ready.
+- Preliminary specialist ReviewGPT findings were remediated: the deterministic unverified-audience reply now names the support address; the reserved `Support escalation:` shape is validated once in `@murphai/hosted-execution/runtime-control` and enforced synchronously at the tool boundary; and the hosted runtime records the exact support shape through the Web callback inside the turn, so the member-facing confirmation is backed by a durable member-linked record instead of the best-effort post-delivery flush. Opt-in real-Codex support-escalation scenarios were added.
+- Next: finish the final ReviewGPT gate and exact-head CI on the remediated head, then close this plan when the branch is merge-ready.

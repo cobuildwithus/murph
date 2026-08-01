@@ -8180,6 +8180,51 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     await postCheckpointPromise;
   });
 
+  it("records support escalations through the port inside the turn instead of the post-delivery flush", async () => {
+    const supportFeedback = {
+      idempotencyKey: "support-escalation-in-turn",
+      kind: "frustration" as const,
+      relatedChangelogItemIds: [],
+      summary: "Support escalation: a connected source does not finish connecting.",
+    };
+    const recordProductFeedback = vi.fn(async () => ({
+      feedbackId: "feedback_support_synthetic",
+      recorded: true,
+    }));
+    let deliveredDuringLane: { recorded: boolean } | null = null;
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(
+      async (laneInput) => {
+        const sink =
+          laneInput.executionContext.hosted?.productFeedbackCandidateSink;
+        if (!sink?.deliverProductSupportEscalation) {
+          throw new Error(
+            "Expected a durable support-escalation sink for the hosted lane.",
+          );
+        }
+        deliveredDuringLane =
+          await sink.deliverProductSupportEscalation(supportFeedback);
+        return {
+          assistantAutomationProgressed: true,
+          nextWakeAt: null,
+          redactedLogEntries: [],
+        };
+      },
+    );
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      runtimeProductFeedbackPort: { recordProductFeedback },
+    }));
+
+    expect(deliveredDuringLane).toEqual({ recorded: true });
+    expect(recordProductFeedback).toHaveBeenCalledExactlyOnceWith(
+      supportFeedback,
+    );
+
+    await result.afterCheckpoint?.();
+    expect(recordProductFeedback).toHaveBeenCalledOnce();
+  });
+
   it("does not re-emit a stale pre-delivery outbox wake after deferred foreground delivery drains", async () => {
     const staleOutboxWakeAt = "2026-05-08T16:00:05.000Z";
     const deliveryEffect = createDeliveryEffect();

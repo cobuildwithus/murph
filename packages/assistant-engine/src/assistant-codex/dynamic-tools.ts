@@ -16,6 +16,8 @@ import {
   HOSTED_PLAN_CODES,
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
+  HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
+  isHostedProductSupportEscalationFeedback,
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
@@ -3853,6 +3855,15 @@ async function executeSubmitProductFeedbackTool(input: {
 }): Promise<MurphDynamicToolExecutionResult> {
   if (!input.productFeedbackRecorder?.recordProductFeedback) {
     return toolTextResult(false, 'product feedback recording is not available for this turn')
+  }
+  if (
+    input.feedback.summary.startsWith(HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX)
+    && !isHostedProductSupportEscalationFeedback(input.feedback)
+  ) {
+    return toolTextResult(
+      false,
+      `support escalation rejected: a summary beginning "${HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX}" is reserved and requires kind "frustration", empty relatedChangelogItemIds, and a non-empty de-identified explanation after the prefix`,
+    )
   }
   try {
     const result = await input.productFeedbackRecorder.recordProductFeedback(input.feedback)
