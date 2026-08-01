@@ -74,6 +74,7 @@ describe("hosted signup timezone handoff", () => {
     mocks.ensureHostedMemberForPrivyIdentityResolutionTx.mockResolvedValue({
       created: true,
       member: MEMBER,
+      privyUserNewlyLinked: true,
     });
     mocks.issueHostedInvite.mockResolvedValue({
       inviteCode: "invite_timezone_handoff",

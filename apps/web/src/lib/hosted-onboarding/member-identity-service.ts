@@ -370,6 +370,7 @@ export async function ensureHostedMemberForPrivyIdentityResolutionTx(input: {
 }): Promise<{
   created: boolean;
   member: HostedMemberCoreState;
+  privyUserNewlyLinked: boolean;
 }> {
   const authMethod = resolveHostedPrivyAuthMethodFromIdentity({
     authMethod: input.authMethod,
@@ -428,8 +429,17 @@ export async function ensureHostedMemberForPrivyIdentityResolutionTx(input: {
     return {
       created: true,
       member: createdMember,
+      privyUserNewlyLinked: true,
     };
   }
+
+  // Members can exist before their first web auth (e.g. created by texting a
+  // Murph line). When no Privy user was bound before this reconcile, this auth
+  // links one for the first time; a member already bound to a different Privy
+  // user fails reconcile instead.
+  const privyUserAlreadyLinked =
+    existingMemberLookup.matchedBy.includes("privyUserId")
+    || hasHostedMemberPrivyIdentity(existingMemberLookup.identity ?? {});
 
   return {
     created: false,
@@ -440,6 +450,7 @@ export async function ensureHostedMemberForPrivyIdentityResolutionTx(input: {
       now: input.now,
       prisma: input.prisma,
     }),
+    privyUserNewlyLinked: !privyUserAlreadyLinked,
   };
 }
 

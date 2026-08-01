@@ -179,7 +179,7 @@ export async function completeHostedPrivyVerification(input: {
               });
 
               return {
-                initialVisitEligible: memberResolution.created,
+                initialVisitEligible: memberResolution.privyUserNewlyLinked,
                 member: memberResolution.member,
                 primaryBindingSynced: authMethod === "email" || authMethod === "telegram",
               };

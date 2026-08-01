@@ -923,7 +923,9 @@ describe("completeHostedPrivyVerification", () => {
         prisma,
       }),
     ).resolves.toMatchObject({
-      initialVisitEligible: false,
+      // The member existed without a bound Privy user, so this auth is the
+      // member's first web sign-in and keeps initial-visit eligibility.
+      initialVisitEligible: true,
       inviteCode: expect.any(String),
       joinUrl: expect.stringContaining("/join/"),
       memberId: existingMember.id,
@@ -983,6 +985,56 @@ describe("completeHostedPrivyVerification", () => {
     ).resolves.toMatchObject({
       initialVisitEligible: false,
       inviteCode: "invite-active-direct-existing",
+      memberId: existingMember.id,
+      stage: "active",
+    });
+
+    expect(prisma.hostedMember.create).not.toHaveBeenCalled();
+  });
+
+  it("keeps initial-visit eligibility for a texted-first member's first web auth", async () => {
+    const existingMember = makeMember({
+      billingStatus: HostedBillingStatus.active,
+      id: "member_texted_first_existing",
+      phoneLookupKey: DEFAULT_PHONE_LOOKUP_KEY,
+      phoneNumberVerifiedAt: null,
+      privyUserId: null,
+      walletAddress: null,
+      walletChainType: null,
+      walletCreatedAt: null,
+      walletProvider: null,
+    });
+    const activeInvite = makeInvite(existingMember, {
+      channel: "web",
+      id: "invite_texted_first_existing",
+      inviteCode: "invite-texted-first-existing",
+      memberId: existingMember.id,
+    });
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(activeInvite),
+        findFirst: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) => (
+          where.id === existingMember.id || where.phoneLookupKey ? existingMember : null
+        )),
+      },
+    });
+
+    await expect(
+      completeHostedPrivyVerification({
+        identity: makeIdentity(),
+        now: NOW,
+        prisma,
+      }),
+    ).resolves.toMatchObject({
+      // The member was created by texting a Murph line before ever signing in
+      // on the web, so completing web auth is still their initial visit.
+      initialVisitEligible: true,
+      inviteCode: "invite-texted-first-existing",
       memberId: existingMember.id,
       stage: "active",
     });
