@@ -34,6 +34,9 @@ const defaultMetadata = createMurphPageMetadata({
 
 export const metadata: Metadata = {
   ...defaultMetadata,
+  itunes: {
+    appId: "6786145859",
+  },
   metadataBase,
 };
 
