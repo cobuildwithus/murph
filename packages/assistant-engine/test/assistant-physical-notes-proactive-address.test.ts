@@ -32,13 +32,19 @@ describe('assistant physical-note proactive address flow', () => {
     )
   })
 
-  it('treats a clear note request as enough drafting intent', async () => {
+  it('treats a clear note request as enough drafting intent without inventing authorship', async () => {
     const skill = await readFile(skillPath, 'utf8')
 
     expect(skill).toContain(
       'A clear request to send a thank-you, congratulations, apology, or similar note already asks Murph to draft fitting short copy.',
     )
-    expect(skill).toContain('Do not ask whether Murph should draft it.')
+    expect(skill).toContain(
+      'Use a signature the requester explicitly supplied or that is already established in their private direct context',
+    )
+    expect(skill).toContain(
+      "never use a room display label or another participant's identity as authorship proof",
+    )
+    expect(skill).toContain('Do not ask whether Murph should draft the note.')
     expect(skill).toContain(
       'Ask about content only when the intended sender, relationship, signature, or message meaning is materially ambiguous.',
     )
