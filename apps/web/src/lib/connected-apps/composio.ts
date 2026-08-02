@@ -6,7 +6,12 @@ import {
 } from "./config";
 
 const COMPOSIO_REQUEST_TIMEOUT_MS = 30_000;
-const COMPOSIO_RESPONSE_LIMIT_BYTES = 512 * 1024;
+// Memory ceiling for the raw provider body only. A mailbox read carrying full
+// HTML bodies routinely exceeds a few hundred kilobytes before compaction, so
+// this sits well above the assistant result budget the route enforces after
+// stripping markup; rejecting here would discard a payload that compacts to a
+// fraction of its wire size.
+const COMPOSIO_RESPONSE_LIMIT_BYTES = 4 * 1024 * 1024;
 
 export interface ComposioConnectedAccount {
   alias: string | null;

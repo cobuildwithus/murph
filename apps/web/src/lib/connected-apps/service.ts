@@ -3,9 +3,11 @@ import "server-only";
 import { createHash, randomBytes } from "node:crypto";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
-import type {
-  HostedConnectedAppsManageInput,
-  HostedConnectedAppsRequest,
+import {
+  compactHostedConnectedAppsResult,
+  serializeHostedConnectedAppsResult,
+  type HostedConnectedAppsManageInput,
+  type HostedConnectedAppsRequest,
 } from "@murphai/hosted-execution/connected-apps";
 
 import {
@@ -48,6 +50,33 @@ export interface HostedConnectedAppIntent {
 }
 
 export async function executeHostedConnectedAppsRequest(input: {
+  fetchImpl?: typeof fetch;
+  memberId: string;
+  prisma?: PrismaClient;
+  request: HostedConnectedAppsRequest;
+}): Promise<unknown> {
+  return boundHostedConnectedAppsResult(
+    await runHostedConnectedAppsRequest(input),
+  );
+}
+
+// Provider output reaches the assistant verbatim, so markup is stripped here
+// rather than at the runtime edge: the budget that matters is the serialized
+// size the model reads, not the wire size the provider sent.
+function boundHostedConnectedAppsResult(result: unknown): unknown {
+  const compacted = compactHostedConnectedAppsResult(result);
+  if (serializeHostedConnectedAppsResult(compacted) === null) {
+    throw hostedOnboardingError({
+      code: "CONNECTED_APPS_RESULT_TOO_LARGE",
+      httpStatus: 413,
+      message:
+        "That request returned more than Murph can read at once. Ask for fewer results, a narrower time range, or one item at a time.",
+    });
+  }
+  return compacted;
+}
+
+async function runHostedConnectedAppsRequest(input: {
   fetchImpl?: typeof fetch;
   memberId: string;
   prisma?: PrismaClient;
