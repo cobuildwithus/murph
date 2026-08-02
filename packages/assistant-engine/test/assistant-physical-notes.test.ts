@@ -233,7 +233,7 @@ describe('assistant physical notes', () => {
     })).not.toBe(first)
   })
 
-  it('executes a later approved send with the exact private bytes and identity', async () => {
+  it('reports a terminal recovered acceptance without claiming the new note was sent', async () => {
     const vaultRoot = await createPhysicalNoteVault()
     const publishPrivateImageUrl = vi.fn<
       NonNullable<
@@ -246,7 +246,7 @@ describe('assistant physical notes', () => {
     const send = vi.fn(async () => ({
       complimentary: true,
       costUsdMicros: '250000',
-      physicalNoteId: 'hpn_test',
+      physicalNoteId: 'hpn_prior',
       priorAcceptedPhysicalNote: {
         physicalNoteId: 'hpn_prior',
       },
@@ -296,16 +296,18 @@ describe('assistant physical notes', () => {
       signal: null,
     })
     expect(result.rpcResult).toMatchObject({ success: true })
-    expect(result.rpcResult.contentItems[0]?.text).toContain(
-      '"status":"accepted"',
+    const toolText = result.rpcResult.contentItems[0]?.text ?? ''
+    expect(toolText).toContain('"status":"accepted"')
+    expect(toolText).toContain(
+      'Lob accepted the earlier physical note for printing.',
     )
-    expect(result.rpcResult.contentItems[0]?.text).toContain(
-      '"costUsdMicros":"250000"',
-    )
-    expect(result.rpcResult.contentItems[0]?.text).toContain(
-      'A previously uncertain physical note was confirmed mailed.',
-    )
-    expect(result.rpcResult.contentItems[0]?.text).toContain('hpn_prior')
+    expect(toolText).toContain('The newly requested note was not sent.')
+    expect(toolText).toContain('they can ask again')
+    expect(toolText).toContain('hpn_prior')
+    expect(toolText).not.toMatch(/\b(?:mailed|delivered)\b/iu)
+    expect(toolText).not.toContain(RECIPIENT.name)
+    expect(toolText).not.toContain(RECIPIENT.addressLine1)
+    expect(toolText).not.toContain(RECIPIENT.city)
   })
 
   it('rejects changed artwork bytes before publishing or mailing', async () => {

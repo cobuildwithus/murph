@@ -54,12 +54,15 @@ note text.
 
 The exact authorized input derives the request key. The artwork and recipient
 remain in the separate request fingerprint, so reusing one approval with changed
-content is a collision rather than a second effect. Before inserting a row, Web
-validates the artwork lifetime, constructs the provider runtime, reasserts final
-group authority, and observes caller cancellation. Accepted replays resolve
+content is a collision rather than a second effect. Accepted replays resolve
 from the durable row even after the temporary artwork capability expires; an
-existing uncertain send remains pending rather than being rewritten. Web then
-admits a new provider effect under the member lock.
+existing uncertain send remains pending rather than being rewritten. After that
+replay check, Web constructs the provider runtime and a later request may resolve
+one stale complimentary claim against Lob. Confirmed acceptance is terminal for
+that request: Web finalizes and reports the earlier note without admitting
+another mailpiece. Otherwise Web validates the artwork lifetime, reasserts final
+group authority, observes caller cancellation, and admits a new provider effect
+under the member lock.
 
 `memberId + complimentaryOfferCode` atomically admits one complimentary note per
 direct member or synthetic group member. A definite provider rejection releases
@@ -121,3 +124,9 @@ proof before enabling the Cloudflare capability, and enable live sending only
 after that proof passes. The older runtime simply lacks the tool during a
 Web-first compatibility window; a new runtime against an old Web deployment
 would expose a route that does not exist and is therefore the unsafe order.
+
+For the terminal stale-acceptance response cutover, deploy the assistant/runtime
+reader through Cloudflare first and drain old warm runners before deploying the
+Web producer. The new reader recognizes the terminal same-id response while
+remaining compatible with the older producer's different-id disclosure shape;
+an old reader would misstate the new terminal response.

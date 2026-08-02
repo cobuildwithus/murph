@@ -50,11 +50,11 @@ describe("hosted physical-note contracts", () => {
     });
   });
 
-  it("accepts the optional prior accepted-note disclosure", () => {
+  it("accepts the terminal prior accepted-note outcome", () => {
     const response = {
-      complimentary: false,
+      complimentary: true,
       costUsdMicros: "250000",
-      physicalNoteId: "hpn_current",
+      physicalNoteId: "hpn_prior",
       status: "accepted",
     } as const;
 
