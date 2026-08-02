@@ -150,12 +150,12 @@ and postal-service retention remain governed by those providers.
 
 ## Deployment
 
-The proactive address-completion change is runner-only and reuses an existing
-CLI command family plus the Worker-owned Mapbox provider-egress credential
-boundary and allowlist. It adds no Web route, database schema, durable state, or
-mixed-version protocol. Deploy the Cloudflare Worker and runner bundle with the
-ordinary fingerprint convergence check; an older warm runner simply retains the
-prior ask-for-address behavior.
+The proactive address-completion change ships in the runner bundle and reuses an
+existing CLI command family plus the unchanged Worker-owned Mapbox provider-egress
+credential boundary and allowlist. It adds no Web route, database schema, durable
+state, or mixed-version protocol. Deploy the Cloudflare Worker and runner bundle
+with the ordinary fingerprint convergence check; an older warm runner simply
+retains the prior ask-for-address behavior.
 
 The original physical-note deployment order remains: deploy the Prisma migration
 and Web route/service first with live sending off, then deploy Cloudflare and the
