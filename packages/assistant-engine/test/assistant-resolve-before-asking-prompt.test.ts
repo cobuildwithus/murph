@@ -33,7 +33,7 @@ describe('assistant resolve-before-asking guidance', () => {
         'Do not turn a retrievable objective detail into user homework.',
       )
       expect(prompt).toContain(
-        'use the conversation and the narrowest source or tool already authorized for this audience and task',
+        'Use the conversation and the narrowest source or tool already authorized for this audience and task',
       )
       expect(prompt).toContain(
         'Ask only when permitted sources cannot produce one sufficiently reliable answer',
