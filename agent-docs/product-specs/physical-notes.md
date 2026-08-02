@@ -55,8 +55,9 @@ Omitted city, state, or ZIP fields are not automatically a conversational
 blocker. Before asking for one of those objective details, the assistant may run
 `vault-cli route resolve-address` against the exact US destination text already
 supplied for the current note request. The command reuses the CLI-owned Mapbox
-credential and temporary forward-geocoding boundary, requests at most three
-candidates, and persists neither the query nor the response in Murph state.
+command surface and the existing Worker-owned provider-egress credential
+boundary, requests at most three candidates, and persists neither the query nor
+the response in Murph state.
 
 The command returns a `recommendedCandidate` only when deduplication leaves one
 candidate, the provider classifies it as a strong address result, the supplied
@@ -104,10 +105,12 @@ remaining capacity, and no second balance owner is needed.
 
 ## Provider boundary
 
-The runner alone holds the existing Mapbox credential used for temporary address
-completion. The request uses the already-allowlisted Mapbox Geocoding path with
-`autocomplete=false` and `permanent=false`. Its normalized result omits
-coordinates and provider identifiers before returning to the assistant.
+The existing Worker-owned hosted provider-egress boundary holds the real Mapbox
+credential. The runner issues only the bounded CLI request through the
+already-allowlisted Mapbox Geocoding path, so the real credential does not enter
+the model prompt or workspace. The request uses `autocomplete=false` and
+`permanent=false`, and its normalized result omits coordinates and provider
+identifiers before returning to the assistant.
 
 Web alone holds `LOB_API_KEY` and the configured return-address id. Lob receives
 one color US Letter request using First Class mail, `insert_blank_page`, and a
@@ -148,10 +151,11 @@ and postal-service retention remain governed by those providers.
 ## Deployment
 
 The proactive address-completion change is runner-only and reuses an existing
-CLI command family, Mapbox credential, and Worker egress allowlist. It adds no
-Web route, database schema, durable state, or mixed-version protocol. Deploy the
-Cloudflare Worker and runner bundle with the ordinary fingerprint convergence
-check; an older warm runner simply retains the prior ask-for-address behavior.
+CLI command family plus the Worker-owned Mapbox provider-egress credential
+boundary and allowlist. It adds no Web route, database schema, durable state, or
+mixed-version protocol. Deploy the Cloudflare Worker and runner bundle with the
+ordinary fingerprint convergence check; an older warm runner simply retains the
+prior ask-for-address behavior.
 
 The original physical-note deployment order remains: deploy the Prisma migration
 and Web route/service first with live sending off, then deploy Cloudflare and the
