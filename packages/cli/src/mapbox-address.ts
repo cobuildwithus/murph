@@ -15,7 +15,17 @@ const MAX_CITY_LENGTH = 200
 const MAX_PROVIDER_STRING_LENGTH = 512
 const MAX_MATCH_VALUE_LENGTH = 32
 const US_POSTAL_CODE_PATTERN = /^\d{5}(?:-\d{4})?$/u
+const US_POSTAL_CODE_SEARCH_PATTERN = /\b(\d{5})(?:-\d{4})?\b/u
 const US_STATE_CODE_PATTERN = /^[A-Z]{2}$/u
+const US_STATE_CODES = new Set([
+  'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'DC', 'FL', 'GA',
+  'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD', 'MA',
+  'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM', 'NY',
+  'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX',
+  'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY',
+])
+const SECONDARY_ADDRESS_PREFIX_PATTERN =
+  /^(?:#|apt\b|apartment\b|bldg\b|building\b|fl\b|floor\b|ste\b|suite\b|unit\b)/iu
 
 const isoCountryCodeSchema = z.string().trim().regex(/^[A-Za-z]{2}$/u)
 const nullableAddressLineSchema = z
@@ -178,6 +188,11 @@ export type MapboxAddressResolveResult = z.infer<
 type MapboxAddressCandidate = z.infer<typeof mapboxAddressCandidateSchema>
 type ProviderAddressFeature = z.infer<typeof providerAddressFeatureSchema>
 
+type ExplicitMailingHints = {
+  city: string | null
+  postalCode: string | null
+  state: string | null
+}
 type ResolvedAddressCandidate = {
   candidate: MapboxAddressCandidate
   safeToAutofill: boolean
@@ -232,10 +247,11 @@ export async function resolveMapboxAddress(
     )
   }
 
+  const explicitMailingHints = readExplicitMailingHints(input.query)
   const resolvedCandidates = dedupeCandidates(
     (parsedPayload.data.features ?? [])
       .slice(0, MAX_ADDRESS_CANDIDATES)
-      .map(buildCandidate)
+      .map((feature) => buildCandidate(feature, explicitMailingHints))
       .filter(isPresent),
   )
   const candidates = resolvedCandidates.map(({ candidate }) => candidate)
@@ -265,6 +281,7 @@ export async function resolveMapboxAddress(
 
 function buildCandidate(
   feature: ProviderAddressFeature,
+  explicitMailingHints: ExplicitMailingHints,
 ): ResolvedAddressCandidate | null {
   const properties = feature.properties
   const context = properties?.context
@@ -322,12 +339,12 @@ function buildCandidate(
   const secondaryAddressIsExact = candidate.addressLine2
     ? normalizeLowercase(match?.secondary_address) === 'matched'
     : featureType !== 'secondary_address'
-  const localityDidNotConflict = [
-    match?.postcode,
-    match?.place,
-    match?.region,
-    match?.country,
-  ].every(isNonConflictingMatch)
+  const suppliedMailingHintsMatch = mailingHintsMatchCandidate(
+    explicitMailingHints,
+    candidate,
+  )
+  const countryDidNotConflict =
+    normalizeLowercase(match?.country) !== 'unmatched'
   const safeToAutofill = Boolean(
     completeForUsMail &&
       (featureType === 'address' || featureType === 'secondary_address') &&
@@ -335,13 +352,115 @@ function buildCandidate(
       normalizeLowercase(match?.address_number) === 'matched' &&
       normalizeLowercase(match?.street) === 'matched' &&
       secondaryAddressIsExact &&
-      localityDidNotConflict,
+      suppliedMailingHintsMatch &&
+      countryDidNotConflict,
   )
 
   return {
     candidate,
     safeToAutofill,
   }
+}
+
+function readExplicitMailingHints(query: string): ExplicitMailingHints {
+  const parts = query
+    .split(',')
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+  const postalCode = US_POSTAL_CODE_SEARCH_PATTERN.exec(query)?.[1] ?? null
+  let city: string | null = null
+  let state: string | null = null
+  let statePartIndex = -1
+
+  for (let index = parts.length - 1; index >= 1; index -= 1) {
+    const part = parts[index] ?? ''
+    const stateMatch = findStateCode(part)
+    if (!stateMatch) {
+      continue
+    }
+
+    state = stateMatch.code
+    statePartIndex = index
+    const cityInStatePart = part.slice(0, stateMatch.index).trim()
+    if (cityInStatePart && !looksLikeSecondaryAddress(cityInStatePart)) {
+      city = cityInStatePart
+    }
+    break
+  }
+
+  if (!city && statePartIndex > 1) {
+    const precedingPart = parts[statePartIndex - 1] ?? ''
+    if (!looksLikeSecondaryAddress(precedingPart)) {
+      city = precedingPart
+    }
+  }
+  if (!city && statePartIndex === -1 && parts.length === 2) {
+    const lastPart = parts[1] ?? ''
+    if (
+      !looksLikeSecondaryAddress(lastPart) &&
+      !US_POSTAL_CODE_SEARCH_PATTERN.test(lastPart)
+    ) {
+      city = lastPart
+    }
+  }
+
+  return {
+    city: normalizeComparableText(city),
+    postalCode,
+    state,
+  }
+}
+
+function findStateCode(value: string): { code: string; index: number } | null {
+  const matches = value.matchAll(/\b([A-Za-z]{2})\b/gu)
+  for (const match of matches) {
+    const code = match[1]?.toUpperCase()
+    if (code && US_STATE_CODES.has(code)) {
+      return {
+        code,
+        index: match.index ?? 0,
+      }
+    }
+  }
+
+  return null
+}
+
+function mailingHintsMatchCandidate(
+  hints: ExplicitMailingHints,
+  candidate: MapboxAddressCandidate,
+): boolean {
+  if (
+    hints.postalCode &&
+    candidate.postalCode?.slice(0, 5) !== hints.postalCode
+  ) {
+    return false
+  }
+  if (hints.state && candidate.state !== hints.state) {
+    return false
+  }
+  if (
+    hints.city &&
+    normalizeComparableText(candidate.city) !== hints.city
+  ) {
+    return false
+  }
+
+  return true
+}
+
+function looksLikeSecondaryAddress(value: string): boolean {
+  return SECONDARY_ADDRESS_PREFIX_PATTERN.test(value.trim())
+}
+
+function normalizeComparableText(
+  value: string | null | undefined,
+): string | null {
+  const normalized = normalizeNullableString(value)
+    ?.toLowerCase()
+    .replace(/[^a-z0-9]+/gu, ' ')
+    .trim()
+  return normalized || null
 }
 
 function dedupeCandidates(
@@ -391,16 +510,6 @@ function isCompleteCandidate(
       candidate.state &&
       candidate.postalCode,
   )
-}
-
-function isNonConflictingMatch(
-  value: string | null | undefined,
-): boolean {
-  const normalized = normalizeLowercase(value)
-  return normalized === null ||
-    normalized === 'matched' ||
-    normalized === 'inferred' ||
-    normalized === 'not_applicable'
 }
 
 function joinBoundedStrings(
