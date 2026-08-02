@@ -140,7 +140,6 @@ describe('resolveMapboxAddress', () => {
 
     expect(result.recommendedCandidate).toEqual({
       addressLine1: '42 Example Lane',
-      addressLine2: null,
       city: 'Sampleton',
       state: 'GA',
       postalCode: '30303',
