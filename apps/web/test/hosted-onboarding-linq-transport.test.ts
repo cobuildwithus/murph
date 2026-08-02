@@ -228,6 +228,7 @@ import {
   buildHostedLinqGroupLineRecoveryMessage,
   buildHostedLinqGroupLineRecoverySourceRef,
 } from "@/src/lib/hosted-onboarding/linq-group-line-recovery";
+import { issueHostedLinqGroupEmailRecoveryToken } from "@/src/lib/hosted-onboarding/linq-group-setup";
 import {
   createHostedWebhookLinqMessageSideEffect,
   drainHostedLinqSideEffectsDirect,
@@ -3584,15 +3585,27 @@ describe("hosted Linq webhook transport", () => {
       return lookupKey;
     }
 
-    function buildGroupEmailRecoveryEffect(sourceEventId: string) {
+    // Dispatch re-opens the token to reject links that expired while the
+    // webhook sat in a backlog, so this fixture carries a real sealed token
+    // rather than a placeholder.
+    function buildGroupEmailRecoveryEffect(
+      sourceEventId: string,
+      observedAt = "2026-03-27T11:59:00.000Z",
+    ) {
       return createHostedWebhookLinqMessageSideEffect({
         assignedRecipientPhone: recoveryLinePhone,
-        occurredAt: "2026-03-27T11:59:00.000Z",
+        occurredAt: observedAt,
         participantContact: {
           kind: "email",
           value: unknownSenderEmail,
         },
-        recoveryToken: "murph_linq_group_email_v1.token",
+        recoveryToken: issueHostedLinqGroupEmailRecoveryToken({
+          chatId: "chat-group-email-budget",
+          now: new Date(observedAt),
+          observedAt,
+          participantEmail: unknownSenderEmail,
+          recipientPhone: recoveryLinePhone,
+        }),
         sourceEventId,
         template: "group_email_recovery",
         threadId: "chat-group-email-budget",
@@ -3641,6 +3654,84 @@ describe("hosted Linq webhook transport", () => {
             }),
           }),
         );
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("skips a recovery link whose token expired before dispatch without spending line budget", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(dispatchNow);
+      const lookupKey = arrangeAssignableRecoveryLine();
+      const { line, prisma } = createHostedLinqLineCapacityPrisma({
+        maxNewConversationsPerDay: 10,
+        phoneNumberLookupKey: lookupKey,
+        proactiveConversationCount: 3,
+        proactiveConversationDayUtc: dispatchDayUtc,
+      });
+      // Two days of backlog: the token's 24-hour life is anchored to the
+      // provider's observed send time so plan retries stay byte-identical, so a
+      // late redelivery carries a link that is already dead on arrival.
+      const effect = buildGroupEmailRecoveryEffect(
+        "event-group-email-token-expired",
+        "2026-03-25T11:59:00.000Z",
+      );
+
+      try {
+        await expect(drainHostedLinqSideEffectsDirect({
+          prisma: prisma as never,
+          sideEffects: [effect],
+        })).resolves.toEqual({
+          sentCount: 0,
+          skipped: [{
+            effectId: effect.effectId,
+            reason: "notice_target_unauthorized",
+            template: "group_email_recovery",
+          }],
+        });
+
+        expect(createHostedLinqChat).not.toHaveBeenCalled();
+        // Freshness is checked before the capacity claim, so a link that cannot
+        // work never burns a slot the line could have spent on a live one.
+        expect(prisma.hostedLinqLine.updateMany).not.toHaveBeenCalled();
+        expect(line.proactiveConversationCount).toBe(3);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("still sends a recovery link whose token is inside its lifetime at dispatch", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(dispatchNow);
+      const lookupKey = arrangeAssignableRecoveryLine();
+      const { line, prisma } = createHostedLinqLineCapacityPrisma({
+        maxNewConversationsPerDay: 10,
+        phoneNumberLookupKey: lookupKey,
+        proactiveConversationCount: 3,
+        proactiveConversationDayUtc: dispatchDayUtc,
+      });
+      // Issued 23.5 hours before dispatch: still inside the window, so the
+      // freshness guard must let an aged-but-live link through rather than
+      // rejecting anything that did not arrive immediately.
+      const effect = buildGroupEmailRecoveryEffect(
+        "event-group-email-token-fresh",
+        "2026-03-26T12:30:00.000Z",
+      );
+
+      try {
+        await expect(drainHostedLinqSideEffectsDirect({
+          prisma: prisma as never,
+          sideEffects: [effect],
+        })).resolves.toEqual({ sentCount: 1, skipped: [] });
+
+        expect(createHostedLinqChat).toHaveBeenCalledWith(
+          expect.objectContaining({
+            from: recoveryLinePhone,
+            idempotencyKey: effect.effectId,
+            to: [unknownSenderEmail],
+          }),
+        );
+        expect(line.proactiveConversationCount).toBe(4);
       } finally {
         vi.useRealTimers();
       }

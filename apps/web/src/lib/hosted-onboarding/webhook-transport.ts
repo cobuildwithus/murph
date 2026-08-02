@@ -68,6 +68,7 @@ import {
   buildHostedLinqGroupSetupMessage,
   HOSTED_LINQ_GROUP_EMAIL_RECOVERY_TEMPLATE,
   HOSTED_LINQ_GROUP_SETUP_TEMPLATE,
+  openHostedLinqGroupEmailRecoveryToken,
 } from "./linq-group-setup";
 import {
   claimHostedLinqQuotaReplyNotice,
@@ -425,12 +426,14 @@ function buildHostedWebhookLinqMessageEffectId(
   if (input.template === HOSTED_LINQ_GROUP_SETUP_TEMPLATE) {
     return buildHostedLinqGroupSetupEffectId({
       chatId: input.chatId,
+      occurredAt: input.occurredAt,
     });
   }
 
   if (input.template === HOSTED_LINQ_GROUP_EMAIL_RECOVERY_TEMPLATE) {
     return buildHostedLinqGroupEmailRecoveryEffectId({
       chatId: input.threadId,
+      occurredAt: input.occurredAt,
       participantEmail: input.participantContact.value,
       recipientPhone: input.assignedRecipientPhone,
     });
@@ -1348,6 +1351,19 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
     }
 
     if (groupEmailRecoveryEffect) {
+      // The token's lifetime is anchored to the provider's observed send time
+      // so plan retries stay byte-identical for idempotency. A redelivery from
+      // a long backlog can therefore surface a token that is already dead, so
+      // re-open it with the same reader the redeem endpoint uses and skip
+      // rather than open a conversation around a link that cannot work.
+      if (
+        !openHostedLinqGroupEmailRecoveryToken({
+          now: new Date(input.startedAtMs),
+          token: groupEmailRecoveryEffect.payload.recoveryToken,
+        })
+      ) {
+        return { status: "target_unauthorized" };
+      }
       await acquireHostedLinqChatOwnershipLockTx({
         chatId: groupEmailRecoveryEffect.payload.threadId,
         tx: prisma,
