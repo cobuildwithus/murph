@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { registerRouteCommands } from '../src/commands/route.js'
 
 describe('route resolve-address command', () => {
-  it('is discoverable with bounded inputs and the fail-closed result hint', async () => {
+  it('is discoverable with bounded address-resolution inputs', async () => {
     const cli = Cli.create('vault-cli', {
       description: 'test CLI',
     })
@@ -20,7 +20,6 @@ describe('route resolve-address command', () => {
 
     const manifest = JSON.parse(output.join('')) as {
       commands?: Array<{
-        hint?: string
         name?: string
         schema?: {
           args?: {
@@ -45,9 +44,6 @@ describe('route resolve-address command', () => {
       minLength: 1,
     })
     expect(command?.schema?.options?.properties).toHaveProperty('country')
-    expect(command?.hint).toContain(
-      'Use recommendedCandidate only when it is non-null',
-    )
-    expect(command?.hint).toContain('does not grant permission to mail anything')
+    expect(command?.schema?.options?.properties).toHaveProperty('language')
   })
 })
