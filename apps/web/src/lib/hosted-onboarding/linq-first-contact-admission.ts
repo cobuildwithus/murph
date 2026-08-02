@@ -91,10 +91,34 @@ type HostedLinqFirstContactAdmissionBudgetStore = {
         };
       };
     }): Promise<HostedLinqFirstContactAdmissionBudgetRecord | null>;
+    findMany(input: {
+      select: {
+        eventId: true;
+      };
+      where: {
+        participantContactLookupKey: {
+          in: string[];
+        };
+      };
+    }): Promise<{ eventId: string }[]>;
+  };
+  hostedLinqFirstContactAdmissionDecision: {
+    findMany(input: {
+      where: {
+        decision: HostedLinqFirstContactAdmissionDecision["kind"];
+        eventId: {
+          in: string[];
+        };
+      };
+    }): Promise<HostedLinqFirstContactAdmissionDecisionRecord[]>;
   };
 };
 
 export type HostedLinqFirstContactAdmissionBudgetClaim =
+  | {
+      decision: HostedLinqFirstContactAdmissionDecision;
+      kind: "already_allowed";
+    }
   | {
       attemptCount: number;
       kind: "claimed";
@@ -366,6 +390,26 @@ export async function claimHostedLinqFirstContactAdmissionBudget(input: {
       },
     },
   });
+  // Admission is a decision about a contact, not about one message. Once any
+  // earlier event for this contact recorded a terminal allow, later events
+  // reuse it instead of spending another lifetime attempt or another
+  // classifier call. Without that, a sender who keeps messaging before they
+  // resolve to a member burns the cap on repeat offers and is then blocked
+  // forever, on this path and on the ordinary direct one. Blocks and
+  // never-completed attempts still count against the cap.
+  const recordedAllow = existingCount > 0
+    ? await readHostedLinqFirstContactAdmissionRecordedContactAllow({
+      lookupKeyCandidates,
+      tx: input.tx,
+    })
+    : null;
+  if (recordedAllow) {
+    return {
+      decision: recordedAllow,
+      kind: "already_allowed",
+    };
+  }
+
   if (existingCount >= HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MAX_ATTEMPTS) {
     return {
       attemptCount: existingCount,
@@ -385,6 +429,46 @@ export async function claimHostedLinqFirstContactAdmissionBudget(input: {
     attemptCount: existingCount + 1,
     kind: "claimed",
   };
+}
+
+// The budget rows carry the contact key and the decision rows carry the
+// outcome; they join on the event id. Reading them here keeps the contact-key
+// candidates (and their rotation handling) inside this owner instead of
+// leaking the lookup-key rules into callers.
+async function readHostedLinqFirstContactAdmissionRecordedContactAllow(input: {
+  lookupKeyCandidates: string[];
+  tx: HostedLinqFirstContactAdmissionBudgetStore;
+}): Promise<HostedLinqFirstContactAdmissionDecision | null> {
+  const attempts = await input.tx.hostedLinqFirstContactAdmissionBudget.findMany({
+    select: {
+      eventId: true,
+    },
+    where: {
+      participantContactLookupKey: {
+        in: input.lookupKeyCandidates,
+      },
+    },
+  });
+  if (attempts.length === 0) {
+    return null;
+  }
+
+  const records = await input.tx.hostedLinqFirstContactAdmissionDecision.findMany({
+    where: {
+      decision: "allow",
+      eventId: {
+        in: attempts.map(({ eventId }) => eventId),
+      },
+    },
+  });
+  for (const record of records) {
+    const decision = parseHostedLinqFirstContactAdmissionDecisionRecord(record);
+    if (decision?.kind === "allow") {
+      return decision;
+    }
+  }
+
+  return null;
 }
 
 function buildHostedLinqFirstContactAdmissionOpenAiBody(input: {

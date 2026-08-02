@@ -412,6 +412,10 @@ describe("Linq first-contact admission", () => {
           participantContactKind: BASE_PARTICIPANT_CONTACT.kind,
           participantContactLookupKey: BASE_PARTICIPANT_CONTACT.lookupKey,
         }),
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+      hostedLinqFirstContactAdmissionDecision: {
+        findMany: vi.fn().mockResolvedValue([]),
       },
     };
 
@@ -438,6 +442,10 @@ describe("Linq first-contact admission", () => {
           participantContactKind: BASE_PARTICIPANT_CONTACT.kind,
           participantContactLookupKey: BASE_PARTICIPANT_CONTACT.lookupKey,
         }),
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+      hostedLinqFirstContactAdmissionDecision: {
+        findMany: vi.fn().mockResolvedValue([]),
       },
     };
 
@@ -459,6 +467,16 @@ describe("Linq first-contact admission", () => {
         count: vi.fn().mockResolvedValueOnce(4),
         create: vi.fn(),
         findFirst: vi.fn().mockResolvedValueOnce(null),
+        findMany: vi.fn().mockResolvedValue([
+          { eventId: "evt_attempt_1" },
+          { eventId: "evt_attempt_2" },
+          { eventId: "evt_attempt_3" },
+          { eventId: "evt_attempt_4" },
+        ]),
+      },
+      hostedLinqFirstContactAdmissionDecision: {
+        // Four attempts that never recorded a terminal allow: the cap stands.
+        findMany: vi.fn().mockResolvedValue([]),
       },
     };
 
@@ -473,6 +491,170 @@ describe("Linq first-contact admission", () => {
     expect(tx.hostedLinqFirstContactAdmissionBudget.create).not.toHaveBeenCalled();
   });
 
+  it("keeps the cap when every counted attempt for the contact recorded a block", async () => {
+    const tx = {
+      $executeRaw: vi.fn().mockResolvedValue(0),
+      hostedLinqFirstContactAdmissionBudget: {
+        count: vi.fn().mockResolvedValueOnce(4),
+        create: vi.fn(),
+        findFirst: vi.fn().mockResolvedValueOnce(null),
+        findMany: vi.fn().mockResolvedValue([
+          { eventId: "evt_blocked_1" },
+          { eventId: "evt_blocked_2" },
+          { eventId: "evt_blocked_3" },
+          { eventId: "evt_blocked_4" },
+        ]),
+      },
+      hostedLinqFirstContactAdmissionDecision: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            confidence: 0.96,
+            decision: "block",
+            eventId: "evt_blocked_1",
+            source: "model",
+          },
+          {
+            confidence: 0.98,
+            decision: "block",
+            eventId: "evt_blocked_2",
+            source: "model",
+          },
+        ]),
+      },
+    };
+
+    // Only a terminal allow escapes the cap. Recorded blocks are still spent
+    // attempts, so the contact stays exhausted.
+    await expect(claimHostedLinqFirstContactAdmissionBudget({
+      eventId: BASE_REQUEST.eventId,
+      participantContact: BASE_PARTICIPANT_CONTACT,
+      tx,
+    })).resolves.toEqual({
+      attemptCount: 4,
+      kind: "exhausted",
+    });
+    expect(tx.hostedLinqFirstContactAdmissionBudget.create).not.toHaveBeenCalled();
+  });
+
+  it("reuses a recorded allow from an earlier event instead of spending another attempt", async () => {
+    const tx = {
+      $executeRaw: vi.fn().mockResolvedValue(0),
+      hostedLinqFirstContactAdmissionBudget: {
+        count: vi.fn().mockResolvedValueOnce(2),
+        create: vi.fn(),
+        findFirst: vi.fn().mockResolvedValueOnce(null),
+        findMany: vi.fn().mockResolvedValue([
+          { eventId: "evt_earlier_allow" },
+          { eventId: "evt_earlier_unresolved" },
+        ]),
+      },
+      hostedLinqFirstContactAdmissionDecision: {
+        findMany: vi.fn().mockResolvedValue([{
+          confidence: 0.87,
+          decision: "allow",
+          eventId: "evt_earlier_allow",
+          source: "model",
+        }]),
+      },
+    };
+
+    await expect(claimHostedLinqFirstContactAdmissionBudget({
+      eventId: BASE_REQUEST.eventId,
+      participantContact: BASE_PARTICIPANT_CONTACT,
+      tx,
+    })).resolves.toEqual({
+      decision: {
+        confidence: 0.87,
+        kind: "allow",
+        source: "model",
+      },
+      kind: "already_allowed",
+    });
+    expect(tx.hostedLinqFirstContactAdmissionBudget.create).not.toHaveBeenCalled();
+  });
+
+  it("reuses a recorded allow that landed after the contact reached the attempt cap", async () => {
+    const tx = {
+      $executeRaw: vi.fn().mockResolvedValue(0),
+      hostedLinqFirstContactAdmissionBudget: {
+        count: vi.fn().mockResolvedValueOnce(4),
+        create: vi.fn(),
+        findFirst: vi.fn().mockResolvedValueOnce(null),
+        findMany: vi.fn().mockResolvedValue([
+          { eventId: "evt_race_1" },
+          { eventId: "evt_race_2" },
+          { eventId: "evt_race_3" },
+          { eventId: "evt_race_4" },
+        ]),
+      },
+      hostedLinqFirstContactAdmissionDecision: {
+        // Concurrent events claimed the last slots before the winning
+        // classifier call finished recording its allow.
+        findMany: vi.fn().mockResolvedValue([{
+          confidence: 1,
+          decision: "allow",
+          eventId: "evt_race_3",
+          source: "deterministic",
+        }]),
+      },
+    };
+
+    await expect(claimHostedLinqFirstContactAdmissionBudget({
+      eventId: BASE_REQUEST.eventId,
+      participantContact: BASE_PARTICIPANT_CONTACT,
+      tx,
+    })).resolves.toEqual({
+      decision: {
+        confidence: 1,
+        kind: "allow",
+        source: "deterministic",
+      },
+      kind: "already_allowed",
+    });
+    expect(tx.hostedLinqFirstContactAdmissionBudget.create).not.toHaveBeenCalled();
+  });
+
+  it("reads the recorded allow under every contact key version that still resolves", async () => {
+    mocks.participantContact.readCandidates = ["blind:v2:test-contact", "blind:v1:test-contact"];
+    mocks.participantContact.currentLookupKey = "blind:v2:test-contact";
+
+    const tx = {
+      $executeRaw: vi.fn().mockResolvedValue(0),
+      hostedLinqFirstContactAdmissionBudget: {
+        count: vi.fn().mockResolvedValueOnce(1),
+        create: vi.fn(),
+        findFirst: vi.fn().mockResolvedValueOnce(null),
+        findMany: vi.fn().mockResolvedValue([{ eventId: "evt_rotated_allow" }]),
+      },
+      hostedLinqFirstContactAdmissionDecision: {
+        findMany: vi.fn().mockResolvedValue([{
+          confidence: 0.91,
+          decision: "allow",
+          eventId: "evt_rotated_allow",
+          source: "model",
+        }]),
+      },
+    };
+
+    await expect(claimHostedLinqFirstContactAdmissionBudget({
+      eventId: BASE_REQUEST.eventId,
+      participantContact: BASE_PARTICIPANT_CONTACT,
+      tx,
+    })).resolves.toMatchObject({
+      kind: "already_allowed",
+    });
+    expect(tx.hostedLinqFirstContactAdmissionBudget.findMany).toHaveBeenCalledWith({
+      select: {
+        eventId: true,
+      },
+      where: {
+        participantContactLookupKey: {
+          in: ["blind:v2:test-contact", "blind:v1:test-contact"],
+        },
+      },
+    });
+  });
+
   it("counts a fresh first-contact event as a single new attempt", async () => {
     const tx = {
       $executeRaw: vi.fn().mockResolvedValue(0),
@@ -484,6 +666,10 @@ describe("Linq first-contact admission", () => {
           participantContactLookupKey: BASE_PARTICIPANT_CONTACT.lookupKey,
         }),
         findFirst: vi.fn().mockResolvedValueOnce(null),
+        findMany: vi.fn().mockResolvedValue([{ eventId: "evt_earlier_attempt" }]),
+      },
+      hostedLinqFirstContactAdmissionDecision: {
+        findMany: vi.fn().mockResolvedValue([]),
       },
     };
 
@@ -512,6 +698,10 @@ describe("Linq first-contact admission", () => {
           participantContactKind: BASE_PARTICIPANT_CONTACT.kind,
           participantContactLookupKey: "blind:v1:test-contact",
         }),
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+      hostedLinqFirstContactAdmissionDecision: {
+        findMany: vi.fn().mockResolvedValue([]),
       },
     };
 
@@ -548,6 +738,10 @@ describe("Linq first-contact admission", () => {
           participantContactLookupKey: "blind:v2:test-contact",
         }),
         findFirst: vi.fn().mockResolvedValueOnce(null),
+        findMany: vi.fn().mockResolvedValue([{ eventId: "evt_rotated_attempt" }]),
+      },
+      hostedLinqFirstContactAdmissionDecision: {
+        findMany: vi.fn().mockResolvedValue([]),
       },
     };
 
@@ -599,6 +793,13 @@ describe("Linq first-contact admission", () => {
           callOrder.push("findFirst");
           return null;
         }),
+        findMany: vi.fn(async () => {
+          callOrder.push("findMany");
+          return [];
+        }),
+      },
+      hostedLinqFirstContactAdmissionDecision: {
+        findMany: vi.fn(async () => []),
       },
     };
 

@@ -4747,6 +4747,61 @@ describe("Linq group chat auto-provision", () => {
     expect(plan.firstContactAdmissionRequest).toBeUndefined();
   });
 
+  it("plans one setup and private recovery link per day for an allowed unknown email sender", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000");
+
+    const planUnknownEmailSender = (input: { createdAt: string; eventId: string }) =>
+      planHostedOnboardingLinqWebhook({
+        event: buildLinqMessageReceivedEvent({
+          createdAt: input.createdAt,
+          eventId: input.eventId,
+          sender: "group-stranger@example.com",
+        }),
+        // The contact already cleared admission, so later messages are planned
+        // on the stored allow instead of a fresh classifier decision.
+        firstContactAdmissionDecision: {
+          confidence: 0.9,
+          kind: "allow",
+          source: "model",
+        },
+        prisma: prisma as never,
+        requireFirstContactAdmission: true,
+      });
+
+    const firstOfDay = await planUnknownEmailSender({
+      createdAt: "2026-06-24T12:00:00.000Z",
+      eventId: "evt_group_email_day1_first",
+    });
+    const laterSameDay = await planUnknownEmailSender({
+      createdAt: "2026-06-24T18:00:00.000Z",
+      eventId: "evt_group_email_day1_second",
+    });
+    const nextDay = await planUnknownEmailSender({
+      createdAt: "2026-06-25T09:00:00.000Z",
+      eventId: "evt_group_email_day2_first",
+    });
+
+    for (const plan of [firstOfDay, laterSameDay, nextDay]) {
+      expect(plan.response).toMatchObject({
+        ok: true,
+        reason: "sent-group-setup",
+      });
+      expect(plan.desiredSideEffects.map(({ payload }) => payload.template))
+        .toEqual(["group_setup", "group_email_recovery"]);
+    }
+
+    const effectIds = (plan: typeof firstOfDay) =>
+      plan.desiredSideEffects.map(({ effectId }) => effectId);
+    // Same day dedupes to the one offer already delivered; the next day earns
+    // a fresh in-group link and a fresh private recovery link.
+    expect(effectIds(laterSameDay)).toEqual(effectIds(firstOfDay));
+    expect(effectIds(nextDay)).toHaveLength(2);
+    for (const effectId of effectIds(nextDay)) {
+      expect(effectIds(firstOfDay)).not.toContain(effectId);
+    }
+  });
+
   it("offers the group setup link without an admission request when enforcement is off", async () => {
     const prisma = createStatefulThreadRoutePrisma();
     prisma.seedActiveManagedLinqLine("+15550000000");
