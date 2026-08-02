@@ -27,6 +27,10 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Generate Health Commons catalog
+        run: pnpm health-commons:generate
+      - name: Prepare built CLI runtime artifacts
+        run: pnpm build:test-runtime:prepared
       - name: Generate CLI artifacts
         run: pnpm --dir packages/cli gen:config-schema
       - name: Upload generated CLI artifacts
