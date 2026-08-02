@@ -72,6 +72,33 @@ describe("hosted plan usage tool port", () => {
     );
   });
 
+  it("preserves a non-OK Web status across the real HTTP transport", async () => {
+    webControl = await startHostedWebControlStub({
+      respond: () => ({
+        body: {
+          error: {
+            code: "HOSTED_PLAN_USAGE_TEMPORARILY_UNAVAILABLE",
+            message: "Try again shortly.",
+            retryable: true,
+          },
+        },
+        status: 503,
+      }),
+    });
+    const port = createHostedRuntimePlanUsageToolPort({
+      boundUserId: "member_bound",
+      fetchImpl: fetch,
+      timeoutMs: 2_000,
+      transport: webControl.transport,
+    });
+
+    await expect(port.read({})).rejects.toMatchObject({
+      retryable: true,
+      status: 503,
+      statusCode: 503,
+    });
+  });
+
   it("rejects an invalid control-plane response", async () => {
     webControl = await startHostedWebControlStub({
       respond: () => ({
