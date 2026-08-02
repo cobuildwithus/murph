@@ -5,7 +5,10 @@ import { resolveHostedAiUsageGate } from "../hosted-execution/usage-allowance";
 import { signalHostedRuntimeManualWakeBestEffort } from "../hosted-orchestration/manual-wake";
 import { sha256Hex } from "../primitives";
 import { getPrisma } from "../prisma";
-import { coerceStripeObjectId } from "./billing";
+import {
+  coerceStripeObjectId,
+  readStripeSubscriptionPayableInvoiceUrl,
+} from "./billing";
 import {
   canUpgradeHostedBillingPlan,
   HOSTED_STANDARD_CHECKOUT_OFFER,
@@ -34,6 +37,13 @@ import {
   describeHostedStripeErrorDetails,
   logHostedStripeFailure,
 } from "./stripe-error-log";
+
+// `latest_invoice` carries the invoice a failed upgrade charge leaves open, which
+// is the payment surface a pending update has to hand back to the member.
+const HOSTED_BILLING_PLAN_UPGRADE_EXPANSIONS = [
+  "items.data.price",
+  "latest_invoice",
+] as const;
 
 export type HostedBillingPlanUpgradeResult =
   | {
@@ -157,7 +167,7 @@ async function upgradeHostedBillingPlanWithLockedOwner(input: {
   const stripe = targetConfig.stripe;
   const subscription = await callHostedStripePlanUpgradeOperation("subscription.retrieve", () =>
     stripe.subscriptions.retrieve(stripeSubscriptionId, {
-      expand: ["items.data.price"],
+      expand: [...HOSTED_BILLING_PLAN_UPGRADE_EXPANSIONS],
     })
   );
 
@@ -196,7 +206,7 @@ async function upgradeHostedBillingPlanWithLockedOwner(input: {
   if (!subscription.pending_update) {
     try {
       updatedSubscription = await stripe.subscriptions.update(stripeSubscriptionId, {
-        expand: ["items.data.price"],
+        expand: [...HOSTED_BILLING_PLAN_UPGRADE_EXPANSIONS],
         items: updateItems,
         payment_behavior: "pending_if_incomplete",
         proration_behavior: "always_invoice",
@@ -222,7 +232,7 @@ async function upgradeHostedBillingPlanWithLockedOwner(input: {
         "subscription.retrieve.after-plan-items-error",
         () =>
           stripe.subscriptions.retrieve(stripeSubscriptionId, {
-            expand: ["items.data.price"],
+            expand: [...HOSTED_BILLING_PLAN_UPGRADE_EXPANSIONS],
           }),
       );
       assertHostedStripeSubscriptionMatchesCustomer({
@@ -251,9 +261,11 @@ async function upgradeHostedBillingPlanWithLockedOwner(input: {
 
     return {
       billingPlanCode: transition.currentPlanCode,
-      paymentUrl: await createHostedBillingPlanUpgradePortalUrl({
+      paymentUrl: await resolveHostedBillingPlanUpgradePaymentUrl({
         stripe,
         stripeCustomerId,
+        stripeSubscriptionId,
+        subscription: updatedSubscription,
       }),
       status: "pending_payment",
     };
@@ -753,6 +765,28 @@ async function reconcileAppliedHostedBillingPlanUpgrade(input: {
     httpStatus: 409,
     message: "Your plan change is still syncing. Try again shortly.",
     retryable: true,
+  });
+}
+
+/**
+ * A pending upgrade is only completable by paying the invoice the failed charge
+ * left open, so send the member straight there. The billing portal stays as the
+ * fallback for the case where Stripe has no payable invoice to point at, since
+ * managing payment methods is then the only useful next step.
+ */
+async function resolveHostedBillingPlanUpgradePaymentUrl(input: {
+  stripe: Stripe;
+  stripeCustomerId: string;
+  stripeSubscriptionId: string;
+  subscription: Stripe.Subscription;
+}): Promise<string> {
+  return readStripeSubscriptionPayableInvoiceUrl({
+    stripeCustomerId: input.stripeCustomerId,
+    stripeSubscriptionId: input.stripeSubscriptionId,
+    subscription: input.subscription,
+  }) ?? await createHostedBillingPlanUpgradePortalUrl({
+    stripe: input.stripe,
+    stripeCustomerId: input.stripeCustomerId,
   });
 }
 

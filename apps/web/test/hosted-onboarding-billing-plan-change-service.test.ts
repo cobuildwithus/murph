@@ -161,7 +161,7 @@ describe("upgradeHostedBillingPlan", () => {
     });
 
     expect(mocks.stripe.subscriptions.update).toHaveBeenCalledWith("sub_123", {
-      expand: ["items.data.price"],
+      expand: ["items.data.price", "latest_invoice"],
       items: [
         {
           id: "si_recurring",
@@ -824,7 +824,7 @@ describe("upgradeHostedBillingPlan", () => {
       1,
       "sub_123",
       expect.objectContaining({
-        expand: ["items.data.price"],
+        expand: ["items.data.price", "latest_invoice"],
         items: [
           {
             id: "si_recurring",
@@ -1269,6 +1269,106 @@ describe("upgradeHostedBillingPlan", () => {
     expect(mocks.signalHostedRuntimeManualWakeBestEffort).not.toHaveBeenCalled();
   });
 
+  test("sends the member to the unpaid invoice when the Edge charge fails", async () => {
+    mocks.stripe.subscriptions.update.mockResolvedValueOnce(makeSubscription({
+      customer: "cus_123",
+      items: [
+        ["si_recurring", "price_pulse_recurring"],
+      ],
+      latestInvoice: {},
+      metadata: {
+        billingPlanCode: "launch_monthly",
+      },
+      pendingUpdate: {
+        subscriptionItems: [
+          ["si_recurring", "price_edge_recurring", 1],
+        ],
+      },
+      status: "active",
+    }));
+
+    await expect(upgradeHostedBillingPlan({
+      memberId: "member_123",
+      targetPlanCode: "launch_edge_monthly",
+    })).resolves.toEqual({
+      billingPlanCode: "launch_monthly",
+      paymentUrl: "https://stripe.example.test/invoice/inv_123",
+      status: "pending_payment",
+    });
+
+    // The Billing Portal home cannot collect this payment, so it must not stand
+    // in for the invoice.
+    expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
+  });
+
+  test("sends a retried Edge upgrade back to the same unpaid invoice", async () => {
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      customer: "cus_123",
+      items: [
+        ["si_recurring", "price_pulse_recurring"],
+      ],
+      latestInvoice: {},
+      metadata: {
+        billingPlanCode: "launch_monthly",
+      },
+      pendingUpdate: {
+        subscriptionItems: [
+          ["si_recurring", "price_edge_recurring", 1],
+        ],
+      },
+      status: "active",
+    }));
+
+    await expect(upgradeHostedBillingPlan({
+      memberId: "member_123",
+      targetPlanCode: "launch_edge_monthly",
+    })).resolves.toEqual({
+      billingPlanCode: "launch_monthly",
+      paymentUrl: "https://stripe.example.test/invoice/inv_123",
+      status: "pending_payment",
+    });
+
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+    expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    ["a settled invoice", { status: "paid" as const }],
+    ["a fully credited invoice", { amountRemaining: 0 }],
+    ["another subscription's invoice", { subscription: "sub_other" }],
+    ["another customer's invoice", { customer: "cus_other" }],
+    ["an invoice with no hosted page", { hostedInvoiceUrl: null }],
+  ])(
+    "falls back to the Billing Portal for %s",
+    async (_label, latestInvoice) => {
+      mocks.stripe.subscriptions.update.mockResolvedValueOnce(makeSubscription({
+        customer: "cus_123",
+        items: [
+          ["si_recurring", "price_pulse_recurring"],
+        ],
+        latestInvoice,
+        metadata: {
+          billingPlanCode: "launch_monthly",
+        },
+        pendingUpdate: {
+          subscriptionItems: [
+            ["si_recurring", "price_edge_recurring", 1],
+          ],
+        },
+        status: "active",
+      }));
+
+      await expect(upgradeHostedBillingPlan({
+        memberId: "member_123",
+        targetPlanCode: "launch_edge_monthly",
+      })).resolves.toEqual({
+        billingPlanCode: "launch_monthly",
+        paymentUrl: "https://stripe.example.test/portal/session_123",
+        status: "pending_payment",
+      });
+    },
+  );
+
   test("reuses an existing intended Edge pending update without another Stripe update", async () => {
     mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
       customer: "cus_123",
@@ -1414,6 +1514,13 @@ describe("upgradeHostedBillingPlan", () => {
 function makeSubscription(input: {
   customer: string;
   items: Array<[id: string, priceId: string, quantity?: number | null]>;
+  latestInvoice?: {
+    amountRemaining?: number;
+    customer?: string;
+    hostedInvoiceUrl?: string | null;
+    status?: Stripe.Invoice.Status;
+    subscription?: string | null;
+  };
   metadata: Record<string, string>;
   pendingUpdate?: {
     billingCycleAnchor?: number | null;
@@ -1452,6 +1559,21 @@ function makeSubscription(input: {
         ...(quantity === undefined ? {} : { quantity }),
       })),
     },
+    latest_invoice: input.latestInvoice === undefined
+      ? null
+      : {
+          amount_remaining: input.latestInvoice.amountRemaining ?? 500,
+          customer: input.latestInvoice.customer ?? input.customer,
+          hosted_invoice_url: input.latestInvoice.hostedInvoiceUrl === undefined
+            ? "https://stripe.example.test/invoice/inv_123"
+            : input.latestInvoice.hostedInvoiceUrl,
+          id: "inv_123",
+          object: "invoice",
+          status: input.latestInvoice.status ?? "open",
+          subscription: input.latestInvoice.subscription === undefined
+            ? "sub_123"
+            : input.latestInvoice.subscription,
+        },
     metadata: input.metadata,
     object: "subscription",
     schedule: input.schedule ?? null,
