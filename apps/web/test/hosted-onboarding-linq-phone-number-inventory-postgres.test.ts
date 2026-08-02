@@ -82,6 +82,7 @@ describe.skipIf(!runPostgresProof)(
         where: { providerPhoneNumberId: { not: null } },
         select: {
           phoneNumberLookupKey: true,
+          providerInventoryConfirmedAt: true,
           providerPhoneNumberId: true,
         },
       });
@@ -137,7 +138,10 @@ describe.skipIf(!runPostgresProof)(
         vi.unstubAllGlobals();
         for (const heldRow of preexistingHeldRows) {
           await prisma.hostedLinqLine.updateMany({
-            data: { providerPhoneNumberId: heldRow.providerPhoneNumberId },
+            data: {
+              providerInventoryConfirmedAt: heldRow.providerInventoryConfirmedAt,
+              providerPhoneNumberId: heldRow.providerPhoneNumberId,
+            },
             where: { phoneNumberLookupKey: heldRow.phoneNumberLookupKey },
           });
         }
@@ -158,6 +162,7 @@ describe.skipIf(!runPostgresProof)(
         where: { providerPhoneNumberId: { not: null } },
         select: {
           phoneNumberLookupKey: true,
+          providerInventoryConfirmedAt: true,
           providerPhoneNumberId: true,
         },
       });
@@ -239,7 +244,10 @@ describe.skipIf(!runPostgresProof)(
         vi.unstubAllGlobals();
         for (const heldRow of preexistingHeldRows) {
           await prisma.hostedLinqLine.updateMany({
-            data: { providerPhoneNumberId: heldRow.providerPhoneNumberId },
+            data: {
+              providerInventoryConfirmedAt: heldRow.providerInventoryConfirmedAt,
+              providerPhoneNumberId: heldRow.providerPhoneNumberId,
+            },
             where: { phoneNumberLookupKey: heldRow.phoneNumberLookupKey },
           });
         }
@@ -264,6 +272,7 @@ describe.skipIf(!runPostgresProof)(
         where: { providerPhoneNumberId: { not: null } },
         select: {
           phoneNumberLookupKey: true,
+          providerInventoryConfirmedAt: true,
           providerPhoneNumberId: true,
         },
       });
@@ -327,7 +336,10 @@ describe.skipIf(!runPostgresProof)(
         vi.unstubAllGlobals();
         for (const heldRow of preexistingHeldRows) {
           await prisma.hostedLinqLine.updateMany({
-            data: { providerPhoneNumberId: heldRow.providerPhoneNumberId },
+            data: {
+              providerInventoryConfirmedAt: heldRow.providerInventoryConfirmedAt,
+              providerPhoneNumberId: heldRow.providerPhoneNumberId,
+            },
             where: { phoneNumberLookupKey: heldRow.phoneNumberLookupKey },
           });
         }
@@ -348,6 +360,7 @@ describe.skipIf(!runPostgresProof)(
         where: { providerPhoneNumberId: { not: null } },
         select: {
           phoneNumberLookupKey: true,
+          providerInventoryConfirmedAt: true,
           providerPhoneNumberId: true,
         },
       });
@@ -428,7 +441,10 @@ describe.skipIf(!runPostgresProof)(
         vi.unstubAllGlobals();
         for (const heldRow of preexistingHeldRows) {
           await prisma.hostedLinqLine.updateMany({
-            data: { providerPhoneNumberId: heldRow.providerPhoneNumberId },
+            data: {
+              providerInventoryConfirmedAt: heldRow.providerInventoryConfirmedAt,
+              providerPhoneNumberId: heldRow.providerPhoneNumberId,
+            },
             where: { phoneNumberLookupKey: heldRow.phoneNumberLookupKey },
           });
         }
@@ -439,9 +455,8 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
-    it("never returns a relinquished line as the member-facing backup mid-move", async () => {
+    it("serves the member backup without waiting on an in-flight ownership move", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 8 });
-      const observer = createPrismaClient({ databaseUrl, poolMax: 2 });
       const providerId = `pg-proof-line-${randomUUID()}`;
       const otherProviderId = `pg-proof-line-${randomUUID()}`;
       const phoneA = buildSyntheticProofPhoneNumber();
@@ -455,6 +470,7 @@ describe.skipIf(!runPostgresProof)(
         where: { providerPhoneNumberId: { not: null } },
         select: {
           phoneNumberLookupKey: true,
+          providerInventoryConfirmedAt: true,
           providerPhoneNumberId: true,
         },
       });
@@ -526,37 +542,37 @@ describe.skipIf(!runPostgresProof)(
           await moveHold;
         });
 
-        const moveBackendPid = await moveLocked;
-        const backupPromise = resolveMurphHostedLinqContactCardBackupPhoneNumber({
-          excludePhoneNumber: phoneOther,
-          prisma,
-        });
+        await moveLocked;
 
-        // The member-facing resolver must wait for the move rather than read
-        // across it.
-        let blocked = 0;
-        for (let attempt = 0; attempt < 40 && blocked === 0; attempt += 1) {
-          const rows = await observer.$queryRaw<Array<{ blocked: bigint | number }>>`
-            SELECT count(*) AS blocked
-            FROM pg_stat_activity
-            WHERE wait_event_type = 'Lock'
-              AND wait_event = 'advisory'
-              AND ${moveBackendPid} = ANY(pg_blocking_pids(pid))
-          `;
-          blocked = Number(rows[0]?.blocked ?? 0);
-          if (blocked === 0) {
-            await new Promise((resolve) => setTimeout(resolve, 100));
-          }
-        }
-        expect(blocked).toBeGreaterThan(0);
+        // The member-facing resolver must never queue behind the writer: it
+        // resolves while the move is still open, omitting the optional backup
+        // rather than delaying the member's primary card.
+        await expect(Promise.race([
+          resolveMurphHostedLinqContactCardBackupPhoneNumber({
+            excludePhoneNumber: phoneOther,
+            prisma,
+          }),
+          new Promise((_resolve, reject) => {
+            setTimeout(() => reject(new Error("backup resolution blocked on the inventory lock")), 5_000);
+          }),
+        ])).resolves.toBeNull();
 
         releaseMove();
         await moveTransaction;
-        await expect(backupPromise).resolves.not.toBe(phoneA);
+
+        // After the move commits, the relinquished line is never offered and
+        // the new owner is.
+        await expect(resolveMurphHostedLinqContactCardBackupPhoneNumber({
+          excludePhoneNumber: phoneOther,
+          prisma,
+        })).resolves.toBe(phoneB);
       } finally {
         for (const heldRow of preexistingHeldRows) {
           await prisma.hostedLinqLine.updateMany({
-            data: { providerPhoneNumberId: heldRow.providerPhoneNumberId },
+            data: {
+              providerInventoryConfirmedAt: heldRow.providerInventoryConfirmedAt,
+              providerPhoneNumberId: heldRow.providerPhoneNumberId,
+            },
             where: { phoneNumberLookupKey: heldRow.phoneNumberLookupKey },
           });
         }
@@ -564,7 +580,6 @@ describe.skipIf(!runPostgresProof)(
           where: { phoneNumberLookupKey: { in: proofLookupKeys } },
         });
         await prisma.$disconnect();
-        await observer.$disconnect();
       }
     });
 
@@ -579,6 +594,7 @@ describe.skipIf(!runPostgresProof)(
         where: { providerPhoneNumberId: { not: null } },
         select: {
           phoneNumberLookupKey: true,
+          providerInventoryConfirmedAt: true,
           providerPhoneNumberId: true,
         },
       });
@@ -660,7 +676,10 @@ describe.skipIf(!runPostgresProof)(
         vi.unstubAllGlobals();
         for (const heldRow of preexistingHeldRows) {
           await prisma.hostedLinqLine.updateMany({
-            data: { providerPhoneNumberId: heldRow.providerPhoneNumberId },
+            data: {
+              providerInventoryConfirmedAt: heldRow.providerInventoryConfirmedAt,
+              providerPhoneNumberId: heldRow.providerPhoneNumberId,
+            },
             where: { phoneNumberLookupKey: heldRow.phoneNumberLookupKey },
           });
         }
@@ -685,6 +704,7 @@ describe.skipIf(!runPostgresProof)(
         where: { providerPhoneNumberId: { not: null } },
         select: {
           phoneNumberLookupKey: true,
+          providerInventoryConfirmedAt: true,
           providerPhoneNumberId: true,
         },
       });
@@ -739,7 +759,10 @@ describe.skipIf(!runPostgresProof)(
         vi.unstubAllGlobals();
         for (const heldRow of preexistingHeldRows) {
           await prisma.hostedLinqLine.updateMany({
-            data: { providerPhoneNumberId: heldRow.providerPhoneNumberId },
+            data: {
+              providerInventoryConfirmedAt: heldRow.providerInventoryConfirmedAt,
+              providerPhoneNumberId: heldRow.providerPhoneNumberId,
+            },
             where: { phoneNumberLookupKey: heldRow.phoneNumberLookupKey },
           });
         }
@@ -768,6 +791,7 @@ describe.skipIf(!runPostgresProof)(
         where: { providerPhoneNumberId: { not: null } },
         select: {
           phoneNumberLookupKey: true,
+          providerInventoryConfirmedAt: true,
           providerPhoneNumberId: true,
         },
       });
@@ -813,7 +837,10 @@ describe.skipIf(!runPostgresProof)(
         vi.unstubAllGlobals();
         for (const heldRow of preexistingHeldRows) {
           await prisma.hostedLinqLine.updateMany({
-            data: { providerPhoneNumberId: heldRow.providerPhoneNumberId },
+            data: {
+              providerInventoryConfirmedAt: heldRow.providerInventoryConfirmedAt,
+              providerPhoneNumberId: heldRow.providerPhoneNumberId,
+            },
             where: { phoneNumberLookupKey: heldRow.phoneNumberLookupKey },
           });
         }
@@ -844,6 +871,7 @@ describe.skipIf(!runPostgresProof)(
         where: { providerPhoneNumberId: { not: null } },
         select: {
           phoneNumberLookupKey: true,
+          providerInventoryConfirmedAt: true,
           providerPhoneNumberId: true,
         },
       });
@@ -896,7 +924,10 @@ describe.skipIf(!runPostgresProof)(
         vi.unstubAllGlobals();
         for (const heldRow of preexistingHeldRows) {
           await prisma.hostedLinqLine.updateMany({
-            data: { providerPhoneNumberId: heldRow.providerPhoneNumberId },
+            data: {
+              providerInventoryConfirmedAt: heldRow.providerInventoryConfirmedAt,
+              providerPhoneNumberId: heldRow.providerPhoneNumberId,
+            },
             where: { phoneNumberLookupKey: heldRow.phoneNumberLookupKey },
           });
         }
@@ -922,6 +953,7 @@ describe.skipIf(!runPostgresProof)(
         where: { providerPhoneNumberId: { not: null } },
         select: {
           phoneNumberLookupKey: true,
+          providerInventoryConfirmedAt: true,
           providerPhoneNumberId: true,
         },
       });
@@ -944,7 +976,10 @@ describe.skipIf(!runPostgresProof)(
         vi.unstubAllGlobals();
         for (const heldRow of preexistingHeldRows) {
           await prisma.hostedLinqLine.updateMany({
-            data: { providerPhoneNumberId: heldRow.providerPhoneNumberId },
+            data: {
+              providerInventoryConfirmedAt: heldRow.providerInventoryConfirmedAt,
+              providerPhoneNumberId: heldRow.providerPhoneNumberId,
+            },
             where: { phoneNumberLookupKey: heldRow.phoneNumberLookupKey },
           });
         }

@@ -271,9 +271,18 @@ async function listHostedLinqConfiguredContactCardLines(input: {
   // into a member's saved vCard.
   const snapshot = await readHostedLinqContactCardCandidacySnapshot({
     limit: maxLines,
+    lockMode: "wait",
     observedAt: input.observedAt,
     prisma: input.prisma,
   });
+  if (!snapshot) {
+    throw hostedOnboardingError({
+      code: "LINQ_CONTACT_CARD_RECONCILE_FAILED",
+      message: "Linq contact-card reconciliation could not read a candidacy snapshot.",
+      httpStatus: 502,
+      retryable: true,
+    });
+  }
   return {
     configuredLineCount: snapshot.configuredLineCount,
     lines: snapshot.lines.map((line) => ({
@@ -538,10 +547,15 @@ export async function resolveMurphHostedLinqContactCardBackupPhoneNumber(input: 
     // can straddle a committing ownership move and return a line that was
     // just revoked, which this resolver would then embed terminally in a
     // member's saved vCard.
-    const { lines } = await readHostedLinqContactCardCandidacySnapshot({
+    const snapshot = await readHostedLinqContactCardCandidacySnapshot({
       limit: HOSTED_LINQ_CONTACT_CARD_LINE_LIMIT,
+      lockMode: "skip",
       prisma: input.prisma,
     });
+    if (!snapshot) {
+      return null;
+    }
+    const { lines } = snapshot;
     return lines.find((line) =>
       line.phoneNumber !== excludePhoneNumber
       && line.providerServiceStatus !== "FLAGGED"

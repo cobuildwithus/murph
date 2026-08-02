@@ -788,12 +788,31 @@ export async function readHostedLinqContactCardCandidacySnapshot(input: {
   limit?: number;
   observedAt?: Date;
   prisma: PrismaClient | Prisma.TransactionClient;
+  /**
+   * `wait` (default) is for background reconciliation, which must observe a
+   * fully applied snapshot. `skip` is for member-facing reads that must never
+   * queue behind an inventory writer: it returns null instead of waiting, so
+   * the caller can serve the primary card and omit the optional backup.
+   */
+  lockMode?: "skip" | "wait";
 }): Promise<{
   configuredLineCount: number;
   lines: HostedLinqContactCardLine[];
-}> {
+} | null> {
   const read = async (tx: HostedLinqLineClient) => {
-    await acquireHostedLinqInventoryApplyLockTx({ prisma: tx });
+    if (input.lockMode === "skip") {
+      const acquired = await tx.$queryRaw<Array<{ locked: boolean }>>`
+        SELECT pg_try_advisory_xact_lock(
+          hashtext('hosted_linq_phone_number_inventory'),
+          hashtext('snapshot')
+        ) AS locked
+      `;
+      if (acquired[0]?.locked !== true) {
+        return null;
+      }
+    } else {
+      await acquireHostedLinqInventoryApplyLockTx({ prisma: tx });
+    }
     const configuredLineCount = await tx.hostedLinqLine.count({
       where: {
         configuredAt: { not: null },
