@@ -12,6 +12,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 function addressFeature(input: {
+  addressNumberMatch?: string
   city: string
   confidence?: string
   countryMatch?: string
@@ -24,7 +25,6 @@ function addressFeature(input: {
   secondaryAddressMatch?: string
   state: string
   streetAddress: string
-  streetMatch?: string
 }) {
   const [addressNumber = '', ...streetParts] = input.streetAddress.split(' ')
   const streetName = streetParts.join(' ')
@@ -78,8 +78,8 @@ function addressFeature(input: {
         },
       },
       match_code: {
-        address_number: 'matched',
-        street: input.streetMatch ?? 'matched',
+        address_number: input.addressNumberMatch ?? 'matched',
+        street: 'matched',
         ...(featureType === 'secondary_address'
           ? {
               secondary_address:
@@ -336,17 +336,16 @@ describe('resolveMapboxAddress', () => {
     })
   })
 
-  it('does not recommend a complete result whose supplied street components did not match strongly', async () => {
+  it('does not recommend an interpolated primary address', async () => {
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
       jsonResponse({
         features: [
           addressFeature({
+            addressNumberMatch: 'plausible',
             city: 'Sampleton',
-            confidence: 'medium',
             postalCode: '30303',
             state: 'GA',
             streetAddress: '42 Example Lane',
-            streetMatch: 'plausible',
           }),
         ],
       }),
