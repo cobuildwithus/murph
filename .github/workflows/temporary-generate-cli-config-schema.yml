@@ -4,12 +4,9 @@ on:
   push:
     branches:
       - codex/proactive-address-resolution
-  pull_request:
-    branches:
-      - main
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   generate:
@@ -17,7 +14,8 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
-          persist-credentials: false
+          ref: codex/proactive-address-resolution
+          persist-credentials: true
       - name: Setup pnpm
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
       - name: Setup Node
@@ -33,13 +31,15 @@ jobs:
         run: pnpm build:test-runtime:prepared
       - name: Generate CLI artifacts
         run: pnpm --dir packages/cli gen:config-schema
-      - name: Upload generated CLI artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: generated-cli-artifacts
-          path: |
-            packages/cli/config.schema.json
-            packages/cli/src/incur.generated.ts
-            packages/cli/src/vault-cli-skill-hash.generated.ts
-          if-no-files-found: error
-          retention-days: 1
+      - name: Commit generated artifacts and retire this workflow
+        run: |
+          rm .github/workflows/temporary-generate-cli-config-schema.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add \
+            packages/cli/config.schema.json \
+            packages/cli/src/incur.generated.ts \
+            packages/cli/src/vault-cli-skill-hash.generated.ts \
+            .github/workflows/temporary-generate-cli-config-schema.yml
+          git commit -m "chore(cli): regenerate command artifacts"
+          git push origin HEAD:codex/proactive-address-resolution
