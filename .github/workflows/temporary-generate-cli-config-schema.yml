@@ -27,11 +27,19 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Generate config schema
+      - name: Generate CLI artifacts
         run: pnpm --dir packages/cli gen:config-schema
-      - name: Print generated config schema
+      - name: Print generated CLI artifacts
         run: |
           echo 'CONFIG_SCHEMA_BASE64_BEGIN'
           base64 -w0 packages/cli/config.schema.json
           echo
           echo 'CONFIG_SCHEMA_BASE64_END'
+          echo 'INCUR_TYPES_BASE64_BEGIN'
+          base64 -w0 packages/cli/src/incur.generated.ts
+          echo
+          echo 'INCUR_TYPES_BASE64_END'
+          echo 'SKILL_HASH_BASE64_BEGIN'
+          base64 -w0 packages/cli/src/vault-cli-skill-hash.generated.ts
+          echo
+          echo 'SKILL_HASH_BASE64_END'
