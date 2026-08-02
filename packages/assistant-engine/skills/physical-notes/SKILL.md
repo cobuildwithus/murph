@@ -25,10 +25,13 @@ lives, choose among genuinely ambiguous people or destinations, or infer send
 authority.
 
 A clear request to send a thank-you, congratulations, apology, or similar note
-already asks Murph to draft fitting short copy. Use the conversation and the
-requester's known identity when available. Do not ask whether Murph should draft
-it. Ask about content only when the intended sender, relationship, signature, or
-message meaning is materially ambiguous.
+already asks Murph to draft fitting short copy. Use a signature the requester
+explicitly supplied or that is already established in their private direct
+context; otherwise omit it unless the note genuinely needs one. In a group,
+never use a room display label or another participant's identity as authorship
+proof. Do not ask whether Murph should draft the note. Ask about content only
+when the intended sender, relationship, signature, or message meaning is
+materially ambiguous.
 
 ## Compose with the existing primitives
 
