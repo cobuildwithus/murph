@@ -17,12 +17,7 @@ it('does not replace a supplied conflicting locality component automatically', a
         {
           properties: {
             feature_type: 'address',
-            full_address:
-              '42 Example Lane, Correct City, GA 30303, United States',
             name: '42 Example Lane',
-            coordinates: {
-              accuracy: 'rooftop',
-            },
             context: {
               address: {
                 address_number: '42',
@@ -72,13 +67,15 @@ it('does not replace a supplied conflicting locality component automatically', a
     },
   )
 
-  expect(result.candidates[0]).toMatchObject({
-    completeForUsMail: true,
-    safeToAutofill: false,
-    match: {
-      place: 'unmatched',
+  expect(result.candidates).toEqual([
+    {
+      addressLine1: '42 Example Lane',
+      addressLine2: null,
+      city: 'Correct City',
+      state: 'GA',
+      postalCode: '30303',
     },
-  })
+  ])
   expect(result.recommendedCandidate).toBeNull()
   expect(result.warnings).toEqual([
     'The mailing-address match was not strong enough to fill automatically.',
