@@ -145,6 +145,9 @@ function acceptedRuntime(providerLetterId: string): LobPhysicalNoteRuntime {
         providerLetterId,
       };
     },
+    async findLetterByNoteId() {
+      return { kind: "indeterminate" };
+    },
   };
 }
 

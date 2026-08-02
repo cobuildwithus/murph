@@ -3292,7 +3292,7 @@ export async function executeMurphDynamicToolRequest(input: {
               false,
               JSON.stringify({
                 note:
-                  'The physical note was not sent because the current participant is not authorized to approve this action.',
+                  'The physical note was not sent because this action is not available to the current participant right now.',
                 status: result.status,
               }),
             )

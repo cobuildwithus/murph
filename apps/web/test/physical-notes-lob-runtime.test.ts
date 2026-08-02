@@ -104,6 +104,87 @@ describe("Lob physical-note runtime", () => {
     })).resolves.toEqual({ kind: "ambiguous_failure" });
   });
 
+  it("finds an accepted letter through Lob's exact metadata filter", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      expect(request.url).toBe(
+        "https://api.lob.com/v1/letters?limit=2&metadata%5Bmurph_physical_note_id%5D=hpn_lookup",
+      );
+      expect(request.method).toBe("GET");
+      expect(request.headers.get("authorization")).toMatch(/^Basic /u);
+      expect(request.headers.get("Lob-Version")).toBe("2024-01-01");
+      expect(init?.body).toBeUndefined();
+      return Response.json({
+        data: [{ id: "ltr_lookup" }],
+      });
+    });
+    const runtime = createLobPhysicalNoteRuntime({
+      apiKey: "test_key",
+      fetchImpl,
+      fromAddressId: "adr_from",
+    });
+
+    await expect(runtime.findLetterByNoteId({
+      noteId: "hpn_lookup",
+    })).resolves.toEqual({
+      kind: "accepted",
+      providerLetterId: "ltr_lookup",
+    });
+  });
+
+  it("treats a valid empty Lob metadata result as definitively absent", async () => {
+    const runtime = createLobPhysicalNoteRuntime({
+      apiKey: "test_key",
+      fetchImpl: vi.fn<typeof fetch>(async () => Response.json({ data: [] })),
+      fromAddressId: "adr_from",
+    });
+
+    await expect(runtime.findLetterByNoteId({
+      noteId: "hpn_absent",
+    })).resolves.toEqual({ kind: "absent" });
+  });
+
+  it("keeps failed and malformed Lob metadata lookups indeterminate", async () => {
+    const responses: Array<() => Promise<Response>> = [
+      async () => {
+        throw new Error("network unavailable");
+      },
+      async () => new Response(null, { status: 503 }),
+      async () => Response.json({ data: [{ object: "letter" }] }),
+    ];
+
+    for (const response of responses) {
+      const runtime = createLobPhysicalNoteRuntime({
+        apiKey: "test_key",
+        fetchImpl: vi.fn<typeof fetch>(response),
+        fromAddressId: "adr_from",
+      });
+      await expect(runtime.findLetterByNoteId({
+        noteId: "hpn_indeterminate",
+      })).resolves.toEqual({ kind: "indeterminate" });
+    }
+  });
+
+  it("keeps a timed-out Lob metadata lookup indeterminate", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (_input, init) =>
+      await new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          reject(init.signal?.reason);
+        }, { once: true });
+      })
+    );
+    const runtime = createLobPhysicalNoteRuntime({
+      apiKey: "test_key",
+      fetchImpl,
+      fromAddressId: "adr_from",
+    });
+
+    await expect(runtime.findLetterByNoteId({
+      noteId: "hpn_timeout",
+      signal: AbortSignal.timeout(1),
+    })).resolves.toEqual({ kind: "indeterminate" });
+  });
+
   it("renders only transport layout around the model-owned artwork", () => {
     const html = renderPhysicalNoteHtml("https://media.example.test/artwork");
     expect(html).toContain("object-fit:cover");

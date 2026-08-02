@@ -135,7 +135,13 @@ describe("physical-note durable replay", () => {
     };
     const prisma = asPhysicalNotePrismaClient(prismaLike);
     const create = vi.fn<LobPhysicalNoteRuntime["create"]>();
-    const runtime = { create } satisfies LobPhysicalNoteRuntime;
+    const findLetterByNoteId = vi.fn<
+      LobPhysicalNoteRuntime["findLetterByNoteId"]
+    >();
+    const runtime = {
+      create,
+      findLetterByNoteId,
+    } satisfies LobPhysicalNoteRuntime;
     const { createHostedPhysicalNote } = await import(
       "@/src/lib/physical-notes/service"
     );
@@ -185,7 +191,13 @@ describe("physical-note durable replay", () => {
     };
     const prisma = asPhysicalNotePrismaClient(prismaLike);
     const create = vi.fn<LobPhysicalNoteRuntime["create"]>();
-    const runtime = { create } satisfies LobPhysicalNoteRuntime;
+    const findLetterByNoteId = vi.fn<
+      LobPhysicalNoteRuntime["findLetterByNoteId"]
+    >();
+    const runtime = {
+      create,
+      findLetterByNoteId,
+    } satisfies LobPhysicalNoteRuntime;
     const { createHostedPhysicalNote } = await import(
       "@/src/lib/physical-notes/service"
     );

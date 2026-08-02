@@ -375,7 +375,7 @@ describe('assistant physical notes', () => {
       '"status":"permission_denied"',
     )
     expect(result.rpcResult.contentItems[0]?.text).toContain(
-      'current participant is not authorized',
+      'action is not available to the current participant right now',
     )
   })
 })

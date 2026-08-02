@@ -17,6 +17,7 @@ import {
 
 import type {
   LobPhysicalNoteCreateResult,
+  LobPhysicalNoteLookupResult,
   LobPhysicalNoteRuntime,
 } from "@/src/lib/physical-notes/lob-runtime";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -64,6 +65,7 @@ vi.mock("@/src/lib/hosted-execution/usage", () => ({
 const MEMBER_ID = "member_physical_note";
 const COST_USD_MICROS = 250_000n;
 const COMPLIMENTARY_OFFER_CODE = "physical-note-v1";
+const REPLAY_WINDOW_MS = 23 * 60 * 60 * 1_000;
 const DEFAULT_PERIOD_START = new Date(Date.now() - 60 * 60 * 1_000);
 const DEFAULT_PERIOD_END = new Date(Date.now() + 60 * 60 * 1_000);
 
@@ -75,7 +77,9 @@ type PhysicalNoteWhere = Partial<Pick<
   | "providerLetterId"
   | "requestKey"
   | "status"
->>;
+>> & {
+  createdAt?: { lte: Date };
+};
 
 type PhysicalNoteCreateData = Pick<
   HostedPhysicalNote,
@@ -251,10 +255,16 @@ describe("createHostedPhysicalNote", () => {
     const firstPaidCreate = vi.fn<
       LobPhysicalNoteRuntime["create"]
     >(() => firstPaidResult.promise);
+    const firstPaidLookup = vi.fn<
+      LobPhysicalNoteRuntime["findLetterByNoteId"]
+    >();
     const firstPaidPromise = createHostedPhysicalNote({
       ...buildRequest(11),
       prisma: store.prisma,
-      runtime: { create: firstPaidCreate },
+      runtime: {
+        create: firstPaidCreate,
+        findLetterByNoteId: firstPaidLookup,
+      },
     });
     await vi.waitFor(() => {
       expect(firstPaidCreate).toHaveBeenCalledOnce();
@@ -588,6 +598,163 @@ describe("createHostedPhysicalNote", () => {
     expect(mocks.recordUsage).not.toHaveBeenCalled();
   });
 
+  it("finalizes a stale complimentary note found at Lob before sending the current note as paid", async () => {
+    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
+    const store = createPhysicalNoteStore();
+    const provider = createPhysicalNoteRuntime(
+      [
+        { kind: "ambiguous_failure" },
+        { kind: "accepted", providerLetterId: "ltr_current_paid" },
+      ],
+      [{ kind: "accepted", providerLetterId: "ltr_stale_free" }],
+    );
+
+    const stale = await createHostedPhysicalNote({
+      ...buildRequest(50),
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    });
+    store.setCreatedAt(
+      stale.physicalNoteId!,
+      new Date(Date.now() - REPLAY_WINDOW_MS - 1),
+    );
+    const current = await createHostedPhysicalNote({
+      ...buildRequest(51),
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    });
+
+    expect(provider.findLetterByNoteId).toHaveBeenCalledOnce();
+    expect(provider.findLetterByNoteId).toHaveBeenCalledWith({
+      noteId: stale.physicalNoteId,
+      signal: undefined,
+    });
+    expect(current).toMatchObject({
+      complimentary: false,
+      status: "accepted",
+    });
+    expect(store.allRows().find((row) => row.id === stale.physicalNoteId))
+      .toMatchObject({
+        complimentaryOfferCode: COMPLIMENTARY_OFFER_CODE,
+        providerLetterId: "ltr_stale_free",
+        status: "accepted",
+      });
+    expect(store.allRows().find((row) => row.id === current.physicalNoteId))
+      .toMatchObject({
+        complimentaryOfferCode: null,
+        providerLetterId: "ltr_current_paid",
+        status: "accepted",
+      });
+    expect(mocks.recordUsage).toHaveBeenCalledOnce();
+  });
+
+  it("releases a stale complimentary claim when Lob confirms no letter exists", async () => {
+    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
+    const store = createPhysicalNoteStore();
+    const provider = createPhysicalNoteRuntime(
+      [
+        { kind: "ambiguous_failure" },
+        { kind: "accepted", providerLetterId: "ltr_reclaimed_free" },
+      ],
+      [{ kind: "absent" }],
+    );
+
+    const stale = await createHostedPhysicalNote({
+      ...buildRequest(52),
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    });
+    store.setCreatedAt(
+      stale.physicalNoteId!,
+      new Date(Date.now() - REPLAY_WINDOW_MS - 1),
+    );
+    const current = await createHostedPhysicalNote({
+      ...buildRequest(53),
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    });
+
+    expect(current).toMatchObject({
+      complimentary: true,
+      status: "accepted",
+    });
+    expect(store.allRows().find((row) => row.id === stale.physicalNoteId))
+      .toMatchObject({
+        complimentaryOfferCode: null,
+        providerLetterId: null,
+        status: "failed",
+      });
+    expect(mocks.readUsageGate).not.toHaveBeenCalled();
+    expect(mocks.recordUsage).not.toHaveBeenCalled();
+  });
+
+  it("leaves a stale complimentary claim pending when the Lob lookup is indeterminate", async () => {
+    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
+    const store = createPhysicalNoteStore();
+    const provider = createPhysicalNoteRuntime(
+      [
+        { kind: "ambiguous_failure" },
+        { kind: "accepted", providerLetterId: "ltr_after_indeterminate" },
+      ],
+      [{ kind: "indeterminate" }],
+    );
+
+    const stale = await createHostedPhysicalNote({
+      ...buildRequest(54),
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    });
+    store.setCreatedAt(
+      stale.physicalNoteId!,
+      new Date(Date.now() - REPLAY_WINDOW_MS - 1),
+    );
+    const current = await createHostedPhysicalNote({
+      ...buildRequest(55),
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    });
+
+    expect(current).toMatchObject({
+      complimentary: false,
+      status: "accepted",
+    });
+    expect(store.allRows().find((row) => row.id === stale.physicalNoteId))
+      .toMatchObject({
+        complimentaryOfferCode: COMPLIMENTARY_OFFER_CODE,
+        providerLetterId: null,
+        status: "starting",
+      });
+    expect(mocks.recordUsage).toHaveBeenCalledOnce();
+  });
+
+  it("uses ordinary same-request replay inside the window without a Lob lookup", async () => {
+    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
+    const store = createPhysicalNoteStore();
+    const provider = createPhysicalNoteRuntime([
+      { kind: "ambiguous_failure" },
+      { kind: "accepted", providerLetterId: "ltr_replayed_in_window" },
+    ]);
+    const request = buildRequest(56);
+
+    await expect(createHostedPhysicalNote({
+      ...request,
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    })).resolves.toMatchObject({ status: "pending" });
+    await expect(createHostedPhysicalNote({
+      ...request,
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    })).resolves.toMatchObject({
+      complimentary: true,
+      status: "accepted",
+    });
+
+    expect(provider.findLetterByNoteId).not.toHaveBeenCalled();
+    expect(provider.create).toHaveBeenCalledTimes(2);
+    expect(store.allRows()).toHaveLength(1);
+  });
+
   it("reserves paid notes only against the current allowance period", async () => {
     const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();
@@ -698,8 +865,10 @@ function buildRequest(sequence: number): HostedPhysicalNoteSendRequest & {
 
 function createPhysicalNoteRuntime(
   results: readonly LobPhysicalNoteCreateResult[],
+  lookupResults: readonly LobPhysicalNoteLookupResult[] = [],
 ) {
   const remaining = [...results];
+  const remainingLookups = [...lookupResults];
   const create = vi.fn(async (): Promise<LobPhysicalNoteCreateResult> => {
     const result = remaining.shift();
     if (!result) {
@@ -707,8 +876,20 @@ function createPhysicalNoteRuntime(
     }
     return result;
   });
-  const runtime = { create } satisfies LobPhysicalNoteRuntime;
-  return { create, runtime };
+  const findLetterByNoteId = vi.fn(
+    async (): Promise<LobPhysicalNoteLookupResult> => {
+      const result = remainingLookups.shift();
+      if (!result) {
+        throw new Error("unexpected physical-note provider lookup");
+      }
+      return result;
+    },
+  );
+  const runtime = {
+    create,
+    findLetterByNoteId,
+  } satisfies LobPhysicalNoteRuntime;
+  return { create, findLetterByNoteId, runtime };
 }
 
 function createDeferred<T>(): {
@@ -886,6 +1067,8 @@ function matchesWhere(
   return (
     (where.complimentaryOfferCode === undefined
       || row.complimentaryOfferCode === where.complimentaryOfferCode)
+    && (where.createdAt === undefined
+      || row.createdAt <= where.createdAt.lte)
     && (where.id === undefined || row.id === where.id)
     && (where.memberId === undefined || row.memberId === where.memberId)
     && (where.providerLetterId === undefined
