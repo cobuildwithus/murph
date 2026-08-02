@@ -8,9 +8,32 @@ description: Generate and mail one expressive full-page Murph note through the e
 Use this flow only when a person explicitly wants Murph to send a real note in
 the mail. The product is one US-only, one-artwork-page, color First Class note.
 
+## Resolve before asking
+
+Identify one recipient name, the US street address the person supplied, and
+enough intent to make the note. Do not treat an address as incomplete merely
+because city, state, or ZIP were omitted.
+
+Before asking for an objective missing address component, run
+`vault-cli route resolve-address "<address>" --country US --format json`. This
+is a narrow temporary Mapbox lookup for completing the destination the person
+already supplied. Use `recommendedCandidate` only when it is non-null; it means
+one strong candidate preserved the supplied house number and street and supplied
+all US mailing fields. Otherwise ask one concise question about the unresolved
+delivery-critical detail. Never use address lookup to discover where a person
+lives, choose among genuinely ambiguous people or destinations, or infer send
+authority.
+
+A clear request to send a thank-you, congratulations, apology, or similar note
+already asks Murph to draft fitting short copy. Use the conversation and the
+requester's known identity when available. Do not ask whether Murph should draft
+it. Ask about content only when the intended sender, relationship, signature, or
+message meaning is materially ambiguous.
+
 ## Compose with the existing primitives
 
-1. Collect one complete US recipient address and enough intent to make the note.
+1. Confirm the recipient address is complete as supplied or safely resolved and
+   the request contains enough intent to make the note.
 2. Call `murph.generate_image` with portrait size `1024x1536`, JPEG output,
    high quality, and the exact current authorizing message as `message_ref`.
    The generated image is the complete expressive page.
@@ -31,9 +54,10 @@ the mail. The product is one US-only, one-artwork-page, color First Class note.
    these values.
 
 Do not attach or preview the image merely because it exists. When the
-originating request already said to mail it and the address is complete, send
-it automatically. Show the image first only when the person requested a draft,
-the intended content is ambiguous, or Murph genuinely needs their choice.
+originating request already said to mail it and the address is complete or
+safely resolved, send it automatically. Show the image first only when the
+person requested a draft, the intended content is ambiguous, or Murph genuinely
+needs their choice.
 
 ## Image prompt
 
@@ -62,8 +86,11 @@ and any later Murph-time cost.
 
 Do not send bulk or repeated mail, international mail, anonymous threats,
 harassment, fraud, impersonation, doxxing, illegal content, or a note that
-claims to come from an uninvolved real person. Ask one concise question when
-the address or send intent is incomplete.
+claims to come from an uninvolved real person. Ask one concise question only
+after the permitted lookup cannot uniquely resolve a delivery-critical address
+field, or when send intent or note authorship is genuinely incomplete. Do not
+ask the person to repeat retrievable city, state, or ZIP details or whether
+Murph should draft a clear note request.
 
 Treat tool results literally:
 
