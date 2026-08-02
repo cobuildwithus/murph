@@ -70,7 +70,6 @@ it('does not replace a supplied conflicting locality component automatically', a
   expect(result.candidates).toEqual([
     {
       addressLine1: '42 Example Lane',
-      addressLine2: null,
       city: 'Correct City',
       state: 'GA',
       postalCode: '30303',
