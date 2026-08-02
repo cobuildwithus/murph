@@ -3253,7 +3253,6 @@ export async function executeMurphDynamicToolRequest(input: {
         }, {
           signal: input.abortSignal ?? null,
         })
-
         switch (result.status) {
           case 'accepted':
             return toolTextResult(
@@ -3292,7 +3291,7 @@ export async function executeMurphDynamicToolRequest(input: {
               false,
               JSON.stringify({
                 note:
-                  'The physical note was not sent because the current participant is not authorized to approve this action.',
+                  'The physical note was not sent because this action is not available to the current participant right now.',
                 status: result.status,
               }),
             )
@@ -3308,7 +3307,7 @@ export async function executeMurphDynamicToolRequest(input: {
           case 'failed':
             return toolTextResult(
               false,
-              'the physical note was not accepted for printing',
+              'The physical note was not accepted for printing.',
             )
         }
       } catch {
