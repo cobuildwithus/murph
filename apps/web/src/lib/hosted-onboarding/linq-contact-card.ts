@@ -4,10 +4,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { fetchLinqApi, LinqApiTimeoutError } from "../linq/api";
 import { hostedOnboardingError } from "./errors";
-import {
-  listHostedLinqContactCardLines,
-  readHostedLinqContactCardCandidacySnapshot,
-} from "./linq-line-store";
+import { readHostedLinqContactCardCandidacySnapshot } from "./linq-line-store";
 import { normalizePhoneNumber } from "./phone";
 import {
   getHostedOnboardingEnvironment,
@@ -537,7 +534,11 @@ export async function resolveMurphHostedLinqContactCardBackupPhoneNumber(input: 
 }): Promise<string | null> {
   const excludePhoneNumber = normalizePhoneNumber(input.excludePhoneNumber);
   try {
-    const lines = await listHostedLinqContactCardLines({
+    // Same locked snapshot the reconciler uses: an unlocked two-query read
+    // can straddle a committing ownership move and return a line that was
+    // just revoked, which this resolver would then embed terminally in a
+    // member's saved vCard.
+    const { lines } = await readHostedLinqContactCardCandidacySnapshot({
       limit: HOSTED_LINQ_CONTACT_CARD_LINE_LIMIT,
       prisma: input.prisma,
     });

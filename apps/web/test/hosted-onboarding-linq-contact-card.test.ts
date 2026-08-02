@@ -1019,7 +1019,9 @@ describe("fetchMurphHostedLinqContactCardVcfPhoto", () => {
 
 describe("resolveMurphHostedLinqContactCardBackupPhoneNumber", () => {
   it("reads the existing projection and returns the first healthy alternate without provider sync", async () => {
-    linqLineStoreMocks.listHostedLinqContactCardLines.mockResolvedValue([
+    linqLineStoreMocks.readHostedLinqContactCardCandidacySnapshot.mockResolvedValue({
+      configuredLineCount: 4,
+      lines: [
       {
         isConfigured: true,
         phoneNumber: "+15550000001",
@@ -1052,7 +1054,8 @@ describe("resolveMurphHostedLinqContactCardBackupPhoneNumber", () => {
         providerReputationStatus: "HEALTHY",
         providerServiceStatus: "ACTIVE",
       },
-    ]);
+      ],
+    });
     const providerFetch = vi.fn(() => {
       throw new Error("Backup selection must not call Linq.");
     });
@@ -1064,8 +1067,8 @@ describe("resolveMurphHostedLinqContactCardBackupPhoneNumber", () => {
       prisma: prisma as never,
     })).resolves.toBe("+15550000003");
 
-    expect(linqLineStoreMocks.listHostedLinqContactCardLines).toHaveBeenCalledOnce();
-    expect(linqLineStoreMocks.listHostedLinqContactCardLines).toHaveBeenCalledWith({
+    expect(linqLineStoreMocks.readHostedLinqContactCardCandidacySnapshot).toHaveBeenCalledOnce();
+    expect(linqLineStoreMocks.readHostedLinqContactCardCandidacySnapshot).toHaveBeenCalledWith({
       limit: 50,
       prisma,
     });

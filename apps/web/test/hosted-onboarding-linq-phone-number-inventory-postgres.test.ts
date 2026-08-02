@@ -48,6 +48,7 @@ import {
   syncHostedLinqConfiguredLinesTx,
   upsertHostedLinqLineForPhoneTx,
 } from "@/src/lib/hosted-onboarding/linq-line-store";
+import { encryptHostedLinqLinePhoneNumber } from "@/src/lib/hosted-onboarding/linq-line-phone-codec";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -435,6 +436,135 @@ describe.skipIf(!runPostgresProof)(
           where: { phoneNumberLookupKey: { in: proofLookupKeys } },
         });
         await prisma.$disconnect();
+      }
+    });
+
+    it("never returns a relinquished line as the member-facing backup mid-move", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 8 });
+      const observer = createPrismaClient({ databaseUrl, poolMax: 2 });
+      const providerId = `pg-proof-line-${randomUUID()}`;
+      const otherProviderId = `pg-proof-line-${randomUUID()}`;
+      const phoneA = buildSyntheticProofPhoneNumber();
+      const phoneB = buildSyntheticProofPhoneNumber();
+      const phoneOther = buildSyntheticProofPhoneNumber();
+      const proofLookupKeys = [phoneA, phoneB, phoneOther].flatMap(
+        (phone) => createHostedPhoneLookupKeyReadCandidates(phone),
+      );
+
+      const preexistingHeldRows = await prisma.hostedLinqLine.findMany({
+        where: { providerPhoneNumberId: { not: null } },
+        select: {
+          phoneNumberLookupKey: true,
+          providerPhoneNumberId: true,
+        },
+      });
+
+      try {
+        // Seed A as a confirmed configured owner plus one other owned line,
+        // so backup resolution has a real choice.
+        for (const [phone, id] of [[phoneA, providerId], [phoneOther, otherProviderId]] as const) {
+          const seeded = await upsertHostedLinqLineForPhoneTx({
+            activeMemberLimit: null,
+            observedAt: new Date(),
+            phoneNumber: phone,
+            prisma,
+            providerPhoneNumberId: id,
+            source: "configured",
+          });
+          await prisma.hostedLinqLine.update({
+            data: {
+              providerInventoryConfirmedAt: new Date(),
+              providerPhoneNumberId: id,
+            },
+            where: { phoneNumberLookupKey: seeded.phoneNumberLookupKey },
+          });
+        }
+
+        // Hold the authoritative move X: A→B open under the inventory lock.
+        let releaseMove: () => void = () => undefined;
+        const moveHold = new Promise<void>((resolve) => {
+          releaseMove = resolve;
+        });
+        let movePid: (pid: number) => void = () => undefined;
+        const moveLocked = new Promise<number>((resolve) => {
+          movePid = resolve;
+        });
+        const moveTransaction = prisma.$transaction(async (tx) => {
+          await tx.$executeRaw`
+            SELECT pg_advisory_xact_lock(
+              hashtext('hosted_linq_phone_number_inventory'),
+              hashtext('snapshot')
+            )
+          `;
+          const revokedKeys = createHostedPhoneLookupKeyReadCandidates(phoneA);
+          await tx.hostedLinqLine.updateMany({
+            data: {
+              providerInventoryConfirmedAt: null,
+              providerPhoneNumberId: null,
+            },
+            where: { phoneNumberLookupKey: { in: revokedKeys } },
+          });
+          const claimed = createHostedPhoneLookupKeyReadCandidates(phoneB);
+          await tx.hostedLinqLine.create({
+            data: {
+              assignmentWeight: 100,
+              egressPolicy: "enabled",
+              healthStatus: "unknown",
+              phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(phoneB),
+              phoneNumberHint: `*** ${phoneB.slice(-4)}`,
+              phoneNumberLookupKey: claimed[0] as string,
+              providerInventoryConfirmedAt: new Date(),
+              providerPhoneNumberId: providerId,
+              providerSeenAt: new Date(),
+              source: "provider",
+            },
+          });
+          const pidRows = await tx.$queryRaw<Array<{ pid: number }>>`
+            SELECT pg_backend_pid() AS pid
+          `;
+          movePid(Number(pidRows[0]?.pid ?? 0));
+          await moveHold;
+        });
+
+        const moveBackendPid = await moveLocked;
+        const backupPromise = resolveMurphHostedLinqContactCardBackupPhoneNumber({
+          excludePhoneNumber: phoneOther,
+          prisma,
+        });
+
+        // The member-facing resolver must wait for the move rather than read
+        // across it.
+        let blocked = 0;
+        for (let attempt = 0; attempt < 40 && blocked === 0; attempt += 1) {
+          const rows = await observer.$queryRaw<Array<{ blocked: bigint | number }>>`
+            SELECT count(*) AS blocked
+            FROM pg_stat_activity
+            WHERE wait_event_type = 'Lock'
+              AND wait_event = 'advisory'
+              AND ${moveBackendPid} = ANY(pg_blocking_pids(pid))
+          `;
+          blocked = Number(rows[0]?.blocked ?? 0);
+          if (blocked === 0) {
+            await new Promise((resolve) => setTimeout(resolve, 100));
+          }
+        }
+        expect(blocked).toBeGreaterThan(0);
+
+        releaseMove();
+        await moveTransaction;
+        await expect(backupPromise).resolves.not.toBe(phoneA);
+      } finally {
+        for (const heldRow of preexistingHeldRows) {
+          await prisma.hostedLinqLine.updateMany({
+            data: { providerPhoneNumberId: heldRow.providerPhoneNumberId },
+            where: { phoneNumberLookupKey: heldRow.phoneNumberLookupKey },
+          });
+        }
+        await prisma.hostedLinqLine.deleteMany({
+          where: { phoneNumberLookupKey: { in: proofLookupKeys } },
+        });
+        await prisma.$disconnect();
+        await observer.$disconnect();
       }
     });
 
