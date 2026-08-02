@@ -20,7 +20,7 @@ export function readHostedLocalWorkflowScenarioSelections(
   const selections: string[] = [];
 
   for (const line of workflowText.split(/\r?\n/u)) {
-    const match = /^\s*scenarios:\s*([^#]*?)(?:\s+#.*)?$/u.exec(line);
+    const match = /^\s*(?:-\s*)?scenarios:\s*([^#]*?)(?:\s+#.*)?$/u.exec(line);
     const value = match?.[1]?.trim() ?? "";
     if (!value) {
       continue;
