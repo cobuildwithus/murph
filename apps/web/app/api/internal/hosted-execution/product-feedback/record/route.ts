@@ -6,7 +6,6 @@ import {
   requireHostedCloudflareCallbackJsonRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import {
-  isHostedProductSupportEscalationFeedback,
   recordHostedProductFeedback,
 } from "@/src/lib/hosted-execution/product-feedback";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
@@ -24,8 +23,6 @@ export const POST = withJsonError(async (request: Request) => {
 
   return jsonOk(await recordHostedProductFeedback({
     feedback: body.feedback,
-    ...(isHostedProductSupportEscalationFeedback(body.feedback)
-      ? { memberId: userId }
-      : {}),
+    memberId: userId,
   }));
 });
