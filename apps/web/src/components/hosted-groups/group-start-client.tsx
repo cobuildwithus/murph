@@ -6,7 +6,10 @@ import { useEffect, useRef, useState } from "react";
 
 import { AuthDialog } from "@/src/components/hosted-onboarding/auth-dialog";
 import { HostedGroupStartFrame } from "./group-start-frame";
-import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
+import {
+  HostedOnboardingApiError,
+  requestHostedOnboardingJson,
+} from "@/src/components/hosted-onboarding/client-api";
 import { navigateHostedAuthRedirect } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
@@ -23,10 +26,16 @@ type HostedGroupStartRecoveryResponse = {
 
 type HostedGroupStartRecoveryStatus =
   | "checking"
+  | "conflict"
   | "failed"
   | "idle"
   | "linked"
   | "linking";
+
+// The route reports a cross-account binding as this typed 409. It is terminal
+// for this link, so it gets its own message and no retry action.
+const HOSTED_GROUP_START_RECOVERY_CONFLICT_CODE =
+  "HOSTED_LINQ_GROUP_EMAIL_RECOVERY_CONFLICT";
 
 export function HostedGroupStartClient({
   activeAccess,
@@ -74,9 +83,9 @@ export function HostedGroupStartClient({
           clearHostedGroupStartRecoveryFragment();
           setRecoveryStatus("linked");
         }
-      } catch {
+      } catch (error) {
         if (!cancelled) {
-          setRecoveryStatus("failed");
+          setRecoveryStatus(readHostedGroupStartRecoveryFailure(error));
         }
       }
     });
@@ -94,8 +103,8 @@ export function HostedGroupStartClient({
         await linkRecovery(recoveryToken);
         clearHostedGroupStartRecoveryFragment();
         setRecoveryStatus("linked");
-      } catch {
-        setRecoveryStatus("failed");
+      } catch (error) {
+        setRecoveryStatus(readHostedGroupStartRecoveryFailure(error));
         return;
       }
     }
@@ -130,6 +139,16 @@ export function HostedGroupStartClient({
     );
   }
 
+  if (recoveryStatus === "conflict") {
+    return (
+      <HostedGroupStartFrame
+        icon={<MessageCircle className="size-8" />}
+        title="That address is already set up"
+        body="The Messages address that sent this group message is connected to a different Murph account. Log in to that account and message the group again, or ask someone else in the group to message Murph."
+      />
+    );
+  }
+
   if (recoveryStatus === "failed") {
     return (
       <HostedGroupStartFrame
@@ -152,7 +171,8 @@ export function HostedGroupStartClient({
                 clearHostedGroupStartRecoveryFragment();
                 setRecoveryStatus("linked");
               },
-              () => setRecoveryStatus("failed"),
+              (error: unknown) =>
+                setRecoveryStatus(readHostedGroupStartRecoveryFailure(error)),
             );
           }}
         >
@@ -211,6 +231,15 @@ export function HostedGroupStartClient({
       />
     </HostedGroupStartFrame>
   );
+}
+
+function readHostedGroupStartRecoveryFailure(
+  error: unknown,
+): Extract<HostedGroupStartRecoveryStatus, "conflict" | "failed"> {
+  return error instanceof HostedOnboardingApiError
+    && error.code === HOSTED_GROUP_START_RECOVERY_CONFLICT_CODE
+    ? "conflict"
+    : "failed";
 }
 
 async function linkRecovery(token: string): Promise<void> {

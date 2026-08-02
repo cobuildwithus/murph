@@ -8,6 +8,7 @@ import {
 } from "@murphai/importers/device-providers/provider-descriptors";
 
 import { deviceSyncError } from "../errors.ts";
+import type { StravaDeviceSyncJobPayloads } from "../config/provider-manifests.ts";
 import {
   addMilliseconds,
   coerceRecord,
@@ -221,7 +222,7 @@ function buildWindowJobPayload(input: {
   windowDays: number;
   includeAthlete?: boolean;
   kind?: "backfill" | "reconcile";
-}): Record<string, unknown> {
+}): StravaDeviceSyncJobPayloads["backfill" | "reconcile"] {
   return {
     windowStart: subtractDays(input.now, input.windowDays),
     windowEnd: input.now,
@@ -1048,7 +1049,7 @@ export function createStravaDeviceSyncProvider(
         reconcileIntervalMs,
         payload: {
           windowKind: "reconcile",
-        },
+        } satisfies Omit<StravaDeviceSyncJobPayloads["reconcile"], "windowStart" | "windowEnd">,
       });
     },
     async verifyAndParseWebhook(context: ProviderWebhookContext): Promise<ProviderWebhookResult> {
@@ -1120,7 +1121,7 @@ export function createStravaDeviceSyncProvider(
             occurredAt,
             resourceId: objectId,
             resourceType: objectType,
-          } satisfies StravaWebhookJobPayload,
+          } satisfies StravaWebhookJobPayload & StravaDeviceSyncJobPayloads["deauthorize"],
         });
       } else if (objectType === "activity") {
         const jobKind = aspectType === "delete" ? "delete" : "resource";
@@ -1140,7 +1141,7 @@ export function createStravaDeviceSyncProvider(
             occurredAt,
             resourceId: objectId,
             resourceType: objectType,
-          } satisfies StravaWebhookJobPayload,
+          } satisfies StravaWebhookJobPayload & StravaDeviceSyncJobPayloads["resource" | "delete"],
         });
       }
 

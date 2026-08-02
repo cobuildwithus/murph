@@ -46,6 +46,10 @@ const hostedCryptoDomainRootStoreModuleSpecifier = new URL(
   "../../src/lib/hosted-crypto/domain-root-store.ts",
   import.meta.url,
 ).href;
+const hostedAppSessionModuleSpecifier = new URL(
+  "../../src/lib/hosted-onboarding/app-session.ts",
+  import.meta.url,
+).href;
 const hostedMemberSeedHostOnlyEnv = {
   DOCKER_BUILDKIT: process.env.DOCKER_BUILDKIT,
   DOCKER_CONFIG: process.env.DOCKER_CONFIG,
@@ -168,6 +172,40 @@ export interface HostedJunctionDeviceSyncReplayDrainStatus {
   historicalBackfillEvidence: string | null;
   historicalBackfillLastEmptyAt: string | null;
   historicalBackfillStatus: string | null;
+}
+
+export interface HostedAppSessionForTestInput {
+  environment?: NodeJS.ProcessEnv;
+  memberId: string;
+  privyUserId: string;
+}
+
+export interface HostedAppSessionForTest {
+  cookieName: string;
+  cookieValue: string;
+  sessionId: string;
+}
+
+export interface HostedDeviceSyncConnectionForTestInput {
+  environment?: NodeJS.ProcessEnv;
+  memberId: string;
+  provider?: string;
+}
+
+export interface HostedDeviceSyncConnectionSourceForTest {
+  sourceProviderSlug: string;
+  status: string;
+}
+
+export interface HostedDeviceSyncConnectionForTest {
+  connectionId: string;
+  provider: string;
+  status: string;
+  setupPhase: string | null;
+  setupExpiresAt: string | null;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  sources: HostedDeviceSyncConnectionSourceForTest[];
 }
 
 interface HostedMemberSeedTransactionClient {
@@ -323,6 +361,19 @@ interface HostedDeviceSyncControlPlaneStore {
     userId: string,
     connectionId: string,
   ): Promise<{ metadata: Record<string, unknown> } | null>;
+  listConnectionsForUser(userId: string): Promise<Array<{
+    id: string;
+    provider: string;
+    status: string;
+    setupPhase?: string | null;
+    setupExpiresAt?: string | null;
+    lastErrorCode: string | null;
+    lastErrorMessage: string | null;
+  }>>;
+  listConnectionSources(connectionId: string): Promise<Array<{
+    sourceProviderSlug: string;
+    status: string;
+  }>>;
   upsertConnection(input: {
     connectedAt: string;
     credential: {
@@ -401,6 +452,14 @@ interface HostedJunctionDeviceSyncReplaySeedModules {
   createPrismaClient: HostedMemberSeedPrismaModule["createPrismaClient"];
   PrismaDeviceSyncControlPlaneStore:
     HostedDeviceSyncPrismaStoreModule["PrismaDeviceSyncControlPlaneStore"];
+}
+
+interface HostedAppSessionModule {
+  issueHostedAppSession(input: {
+    memberId: string;
+    now?: Date;
+    privyUserId: string;
+  }): Promise<{ cookie: string; sessionId: string }>;
 }
 
 export async function seedHostedActiveMember(
@@ -984,6 +1043,93 @@ export async function readHostedJunctionDeviceSyncReplayDrainStatus(
           typeof historicalBackfillStatus === "string"
             ? historicalBackfillStatus
             : null,
+      };
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+}
+
+/**
+ * Issues a real hosted app session for a seeded member by running the
+ * production `issueHostedAppSession` in-process against the harness database.
+ * The caller must supply the same `HOSTED_APP_SESSION_HMAC_KEY` the hosted web
+ * process runs with (the full-stack harness exposes it) so the minted cookie
+ * verifies against the session row over HTTP.
+ */
+export async function issueHostedAppSessionForTest(
+  input: HostedAppSessionForTestInput,
+): Promise<HostedAppSessionForTest> {
+  if (!input.memberId.trim() || !input.privyUserId.trim()) {
+    throw new Error("Hosted app session issuance requires member id and privy user id.");
+  }
+
+  return await withHostedMemberSeedEnvironment(input.environment, async () => {
+    const appSessionModule = await import(hostedAppSessionModuleSpecifier) as HostedAppSessionModule;
+    const issued = await appSessionModule.issueHostedAppSession({
+      memberId: input.memberId,
+      privyUserId: input.privyUserId,
+    });
+    const [cookiePair] = issued.cookie.split(";");
+    const separatorIndex = cookiePair?.indexOf("=") ?? -1;
+    if (!cookiePair || separatorIndex <= 0) {
+      throw new Error("Hosted app session issuance returned an unparsable cookie.");
+    }
+
+    return {
+      cookieName: cookiePair.slice(0, separatorIndex).trim(),
+      cookieValue: decodeURIComponent(cookiePair.slice(separatorIndex + 1)),
+      sessionId: issued.sessionId,
+    };
+  });
+}
+
+/**
+ * Reads the persisted device-sync connection state (connection row + source
+ * rows) the way production reads it, so hosted E2E specs can assert the final
+ * lifecycle outcome of a connect flow.
+ */
+export async function readHostedDeviceSyncConnectionForTest(
+  input: HostedDeviceSyncConnectionForTestInput,
+): Promise<HostedDeviceSyncConnectionForTest> {
+  if (!input.memberId.trim()) {
+    throw new Error("Hosted device-sync connection read requires a member id.");
+  }
+
+  return await withHostedMemberSeedEnvironment(input.environment, async (environment) => {
+    const modules = await loadHostedJunctionDeviceSyncReplaySeedModules(environment);
+    const prisma = createHostedMemberSeedPrisma({
+      environment,
+      modules,
+    });
+    const store = new modules.PrismaDeviceSyncControlPlaneStore({
+      prisma,
+      providerAccountBlindIndexKey: readHostedJunctionReplayProviderAccountBlindIndexKey(environment),
+    });
+
+    try {
+      const connections = (await store.listConnectionsForUser(input.memberId))
+        .filter((connection) => !input.provider || connection.provider === input.provider);
+      const [connection] = connections;
+      if (!connection || connections.length !== 1) {
+        throw new Error(
+          `Expected exactly one hosted device-sync connection for the member, found ${connections.length}.`,
+        );
+      }
+
+      const sources = await store.listConnectionSources(connection.id);
+      return {
+        connectionId: connection.id,
+        provider: connection.provider,
+        status: connection.status,
+        setupPhase: connection.setupPhase ?? null,
+        setupExpiresAt: connection.setupExpiresAt ?? null,
+        lastErrorCode: connection.lastErrorCode,
+        lastErrorMessage: connection.lastErrorMessage,
+        sources: sources.map((source) => ({
+          sourceProviderSlug: source.sourceProviderSlug,
+          status: source.status,
+        })),
       };
     } finally {
       await prisma.$disconnect();

@@ -3,6 +3,7 @@ import "server-only";
 import { createCipheriv, createDecipheriv, createHmac } from "node:crypto";
 
 import { readHostedAppSessionHmacKey } from "./app-session-config";
+import { resolveHostedLinqDayUtc } from "./linq-daily-state";
 import {
   createHostedLinqParticipantContact,
   type HostedLinqParticipantContact,
@@ -48,25 +49,39 @@ export type HostedLinqGroupEmailRecovery = {
   recipientPhone: string;
 };
 
+// One setup link per group chat per inbound UTC day. Keying on the chat alone
+// would mute a chat forever after a single link: if the wrong person redeems
+// it, or nobody does, the group could never be offered another one. The
+// provider occurrence day keeps webhook retries deduped even when processing
+// crosses midnight.
 export function buildHostedLinqGroupSetupEffectId(input: {
   chatId: string;
+  occurredAt: string | Date;
 }): string {
   const chatId = normalizeHostedLinqGroupChatId(input.chatId);
-  if (!chatId) {
+  const dayUtc = resolveHostedLinqDayUtc(input.occurredAt);
+  if (!chatId || Number.isNaN(dayUtc.getTime())) {
     throw new TypeError(
-      "Hosted Linq group setup requires a non-empty chat id.",
+      "Hosted Linq group setup requires a non-empty chat id and a valid occurrence time.",
     );
   }
 
-  return `linq-group-setup:${sha256Hex(chatId).slice(0, 32)}`;
+  return `linq-group-setup:${sha256Hex(JSON.stringify({
+    chatId,
+    dayUtc: dayUtc.toISOString(),
+  })).slice(0, 32)}`;
 }
 
+// One private recovery link per address per group chat per inbound UTC day,
+// for the same reason as the in-group link above.
 export function buildHostedLinqGroupEmailRecoveryEffectId(input: {
   chatId: string;
+  occurredAt: string | Date;
   participantEmail: string;
   recipientPhone: string;
 }): string {
   const chatId = normalizeHostedLinqGroupChatId(input.chatId);
+  const dayUtc = resolveHostedLinqDayUtc(input.occurredAt);
   const participantContact = createHostedLinqParticipantContact({
     kind: "email",
     value: input.participantEmail,
@@ -74,12 +89,13 @@ export function buildHostedLinqGroupEmailRecoveryEffectId(input: {
   const recipientPhone = normalizePhoneNumber(input.recipientPhone);
   if (
     !chatId
+    || Number.isNaN(dayUtc.getTime())
     || !participantContact
     || participantContact.kind !== "email"
     || !recipientPhone
   ) {
     throw new TypeError(
-      "Hosted Linq group email recovery requires a valid chat, email, and recipient line.",
+      "Hosted Linq group email recovery requires a valid chat, occurrence time, email, and recipient line.",
     );
   }
 
@@ -88,6 +104,7 @@ export function buildHostedLinqGroupEmailRecoveryEffectId(input: {
   // re-send a duplicate private recovery link to the same address.
   return `linq-group-email-recovery:${sha256Hex(JSON.stringify({
     chatId,
+    dayUtc: dayUtc.toISOString(),
     participantEmail: participantContact.value,
     recipientPhone,
   })).slice(0, 32)}`;

@@ -198,6 +198,43 @@ test("accepts an idempotent exact pending Messages setup", async () => {
   expect(mocks.upsertHostedMemberPendingLinqBindingTx).toHaveBeenCalledTimes(1);
 });
 
+test("reports a contact already bound to another member as a conflict", async () => {
+  // The pre-checks above only read the session member's own bindings. The
+  // routing store is the only layer that sees every member's, and it reports
+  // the cross-member collision as a unique violation — the same conflict, so
+  // it must not escape as a 5xx.
+  mocks.upsertHostedMemberPendingLinqBindingTx.mockRejectedValueOnce({
+    code: "P2002",
+  });
+
+  const response = await route.POST(buildRequest());
+
+  expect(response.status).toBe(409);
+  await expect(response.json()).resolves.toMatchObject({
+    error: { code: "HOSTED_LINQ_GROUP_EMAIL_RECOVERY_CONFLICT" },
+  });
+});
+
+test("still fails loudly when the binding upsert fails for an unrelated reason", async () => {
+  const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  mocks.upsertHostedMemberPendingLinqBindingTx.mockRejectedValueOnce(
+    new Error("routing store unavailable"),
+  );
+
+  try {
+    const response = await route.POST(buildRequest());
+
+    // A conflict is the only failure the catch may reinterpret; anything else
+    // must keep its original 5xx so the outage stays visible.
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "INTERNAL_ERROR" },
+    });
+  } finally {
+    errorSpy.mockRestore();
+  }
+});
+
 test("rejects an expired or malformed recovery token", async () => {
   mocks.openHostedLinqGroupEmailRecoveryToken.mockReturnValueOnce(null);
 

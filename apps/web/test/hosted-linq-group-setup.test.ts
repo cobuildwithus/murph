@@ -114,25 +114,62 @@ describe("Hosted Linq group setup", () => {
     })).toBeNull();
   });
 
-  it("uses stable opaque setup and recovery identities", () => {
+  it("uses stable opaque setup and recovery identities within one UTC day", () => {
     const setupId = buildHostedLinqGroupSetupEffectId({
       chatId: "chat_group_123",
+      occurredAt: "2026-07-31T04:00:00.000Z",
     });
     const recoveryId = buildHostedLinqGroupEmailRecoveryEffectId({
       chatId: "chat_group_123",
-      participantEmail: "person@icloud.com",
+      occurredAt: "2026-07-31T04:00:00.000Z",
+      participantEmail: "person@example.com",
       recipientPhone: "+15550000000",
     });
 
     expect(buildHostedLinqGroupSetupEffectId({
       chatId: "chat_group_123",
+      occurredAt: "2026-07-31T22:15:00.000Z",
     })).toBe(setupId);
     expect(buildHostedLinqGroupEmailRecoveryEffectId({
       chatId: "chat_group_123",
-      participantEmail: "PERSON@ICLOUD.COM",
+      occurredAt: "2026-07-31T22:15:00.000Z",
+      participantEmail: "PERSON@EXAMPLE.COM",
       recipientPhone: "+1 (555) 000-0000",
     })).toBe(recoveryId);
-    expect(`${setupId}:${recoveryId}`).not.toContain("icloud");
+    expect(`${setupId}:${recoveryId}`).not.toContain("example");
     expect(`${setupId}:${recoveryId}`).not.toContain("+1555");
+  });
+
+  it("offers a new setup and recovery identity on the next UTC day", () => {
+    // Keying on the chat alone would mute a group forever after one link: if
+    // the wrong person redeems it, or nobody does, no further link is ever
+    // sent. A day bucket bounds the repeats without making the chat a dead end.
+    const nextDay = { occurredAt: "2026-08-01T00:00:00.000Z" } as const;
+
+    expect(buildHostedLinqGroupSetupEffectId({
+      chatId: "chat_group_123",
+      ...nextDay,
+    })).not.toBe(buildHostedLinqGroupSetupEffectId({
+      chatId: "chat_group_123",
+      occurredAt: "2026-07-31T23:59:59.999Z",
+    }));
+    expect(buildHostedLinqGroupEmailRecoveryEffectId({
+      chatId: "chat_group_123",
+      participantEmail: "person@example.com",
+      recipientPhone: "+15550000000",
+      ...nextDay,
+    })).not.toBe(buildHostedLinqGroupEmailRecoveryEffectId({
+      chatId: "chat_group_123",
+      occurredAt: "2026-07-31T23:59:59.999Z",
+      participantEmail: "person@example.com",
+      recipientPhone: "+15550000000",
+    }));
+  });
+
+  it("rejects an unusable occurrence time", () => {
+    expect(() => buildHostedLinqGroupSetupEffectId({
+      chatId: "chat_group_123",
+      occurredAt: "not-a-time",
+    })).toThrow(TypeError);
   });
 });

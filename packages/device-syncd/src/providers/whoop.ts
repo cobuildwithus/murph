@@ -8,6 +8,7 @@ import {
 } from "@murphai/importers/device-providers/provider-descriptors";
 
 import { deviceSyncError } from "../errors.ts";
+import type { WhoopDeviceSyncJobPayloads } from "../config/provider-manifests.ts";
 import {
   buildWhoopDeviceSyncRuntimeDescriptor,
   buildWhoopDeviceSyncScopes,
@@ -666,7 +667,7 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
           ...(occurredAt ? { occurredAt } : {}),
           resourceType: eventDescriptor.resourceType,
           resourceId,
-        } satisfies WhoopWebhookJobPayload,
+        } satisfies WhoopWebhookJobPayload & WhoopDeviceSyncJobPayloads["resource" | "delete"],
         priority: eventDescriptor.priority,
         dedupeKey: `whoop-webhook:${traceId}`,
       },
@@ -854,7 +855,7 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
               payload: {
                 windowStart: subtractDays(context.now, backfillDays),
                 windowEnd: context.now,
-              },
+              } satisfies WhoopDeviceSyncJobPayloads["backfill"],
             },
           ],
           nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
@@ -903,7 +904,7 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
         now,
         reconcileDays,
         reconcileIntervalMs,
-        payload: {},
+        payload: {} satisfies Omit<WhoopDeviceSyncJobPayloads["reconcile"], "windowStart" | "windowEnd">,
       });
     },
     async verifyAndParseWebhook(context: ProviderWebhookContext): Promise<ProviderWebhookResult> {
