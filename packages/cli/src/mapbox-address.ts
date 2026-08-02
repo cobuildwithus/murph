@@ -23,6 +23,11 @@ const nullableAddressLineSchema = z
   .min(1)
   .max(MAX_ADDRESS_LINE_LENGTH)
   .nullable()
+const optionalAddressLineSchema = z
+  .string()
+  .min(1)
+  .max(MAX_ADDRESS_LINE_LENGTH)
+  .optional()
 const nullableCitySchema = z.string().min(1).max(MAX_CITY_LENGTH).nullable()
 const nullableStateSchema = z.string().regex(US_STATE_CODE_PATTERN).nullable()
 const nullablePostalCodeSchema = z
@@ -39,7 +44,7 @@ export const mapboxAddressResolveInputSchema = z.object({
 const mapboxAddressCandidateSchema = z
   .object({
     addressLine1: nullableAddressLineSchema,
-    addressLine2: nullableAddressLineSchema,
+    addressLine2: optionalAddressLineSchema,
     city: nullableCitySchema,
     state: nullableStateSchema,
     postalCode: nullablePostalCodeSchema,
@@ -77,12 +82,14 @@ const providerStringSchema = z
   .trim()
   .min(1)
   .max(MAX_PROVIDER_STRING_LENGTH)
+  .nullable()
   .optional()
 const matchValueSchema = z
   .string()
   .trim()
   .min(1)
   .max(MAX_MATCH_VALUE_LENGTH)
+  .nullable()
   .optional()
 const providerNamedContextSchema = z
   .object({
@@ -292,7 +299,7 @@ function buildCandidate(
       : null)
   const candidate = {
     addressLine1,
-    addressLine2,
+    ...(addressLine2 ? { addressLine2 } : {}),
     city:
       normalizeBoundedString(context?.place?.name, MAX_CITY_LENGTH) ??
       normalizeBoundedString(context?.locality?.name, MAX_CITY_LENGTH),
@@ -346,8 +353,7 @@ function dedupeCandidates(
     const key = Object.values(candidate.candidate)
       .map((value) => value?.toLowerCase() ?? '')
       .join('|')
-    const existing = candidatesByAddress.get(key)
-    if (!existing || (!existing.safeToAutofill && candidate.safeToAutofill)) {
+    if (!candidatesByAddress.has(key)) {
       candidatesByAddress.set(key, candidate)
     }
   }
@@ -387,7 +393,9 @@ function isCompleteCandidate(
   )
 }
 
-function isNonConflictingMatch(value: string | undefined): boolean {
+function isNonConflictingMatch(
+  value: string | null | undefined,
+): boolean {
   const normalized = normalizeLowercase(value)
   return normalized === null ||
     normalized === 'matched' ||
