@@ -38,6 +38,14 @@ export function GroupStartStudy() {
 
       <StudyCard>
         <HostedGroupStartFrame
+          icon={<MessageCircle className="size-8" />}
+          title="That address is already set up"
+          body="The Messages address that sent this group message is connected to a different Murph account. Log in to that account and message the group again, or ask someone else in the group to message Murph."
+        />
+      </StudyCard>
+
+      <StudyCard>
+        <HostedGroupStartFrame
           icon={<Check className="size-8" />}
           title="Go back to the group"
           body="Message Murph in that group again. Your next message will connect the chat and Murph will reply there."

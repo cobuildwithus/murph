@@ -861,7 +861,9 @@ export async function planHostedOnboardingLinqWebhook(input: {
       ...(input.affirmativeReaction ? { affirmativeReaction: true } : {}),
       context,
       event: input.event,
+      firstContactAdmissionDecision: input.firstContactAdmissionDecision,
       prisma: input.prisma,
+      requireFirstContactAdmission: input.requireFirstContactAdmission,
       threadRouteAccountLookupKeys,
     });
   }
@@ -2527,7 +2529,9 @@ async function planHostedLinqGroupChatWebhook(input: {
   affirmativeReaction?: boolean;
   context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
   event: HostedLinqWebhookEvent;
+  firstContactAdmissionDecision?: HostedLinqFirstContactAdmissionDecision | null;
   prisma: Prisma.TransactionClient;
+  requireFirstContactAdmission?: boolean;
   threadRouteAccountLookupKeys: readonly string[];
 }): Promise<HostedOnboardingLinqDirectPlan> {
   const {
@@ -2667,6 +2671,33 @@ async function planHostedLinqGroupChatWebhook(input: {
         "recipient-line-not-assigned",
         senderIdentityMatch,
         "group-chat-line-unavailable",
+      );
+    }
+
+    // A setup link is a reply to a stranger, so it goes through the same
+    // first-contact admission gate that screens unknown direct senders rather
+    // than running a second, looser policy. The service layer acts on the
+    // returned request and re-plans with the decision.
+    if (
+      sender === null
+      && input.requireFirstContactAdmission === true
+      && input.firstContactAdmissionDecision?.kind !== "allow"
+    ) {
+      return logHostedLinqWebhookPlannerDecisionAndReturn(
+        buildFirstContactAdmissionRequiredPlan({
+          participantContact,
+          request: buildHostedLinqFirstContactAdmissionRequest({
+            context: input.context,
+            event: input.event,
+            participantContact,
+          }),
+        }),
+        buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
+          existingMemberActive: false,
+          existingMemberMatch: senderIdentityMatch,
+          reason: "first-contact-admission-required",
+          routeStage: "first-contact-admission-required",
+        }),
       );
     }
 
