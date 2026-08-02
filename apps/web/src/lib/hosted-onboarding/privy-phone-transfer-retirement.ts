@@ -29,6 +29,7 @@ import { acquireHostedLinqParticipantPhoneLockTx } from "./linq-participant-cont
 import { normalizePhoneNumber } from "./phone";
 import {
   readHostedPrivyUserByIdIfExists,
+  resolveHostedPrivyIdentityFromVerifiedUser,
   type HostedPrivyIdentity,
 } from "./privy";
 import {
@@ -126,12 +127,34 @@ export async function readHostedPrivyPhoneTransferProof(input: {
     },
   );
   if (sourcePrivyUser) {
+    // A surviving source account means one of two very different things.
+    // While it still holds the phone the provider has not finished moving
+    // it, so retrying is the correct advice. Once the phone is gone from it
+    // the move is already complete and the provider deliberately kept the
+    // account because it carries other login methods, so it will never be
+    // deleted and retrying can never resolve anything.
+    const survivingSourcePhoneNumber =
+      resolveHostedPrivyIdentityFromVerifiedUser(sourcePrivyUser).phone?.number;
+    const survivingSourceStillHoldsPhone = Boolean(
+      survivingSourcePhoneNumber
+      && normalizePhoneNumber(survivingSourcePhoneNumber)
+        === normalizePhoneNumber(phoneNumber),
+    );
+    if (survivingSourceStillHoldsPhone) {
+      throw hostedOnboardingError({
+        code: "PRIVY_PHONE_NOT_READY",
+        httpStatus: 409,
+        message:
+          "Privy is still finishing the phone transfer. Wait a moment and try again.",
+        retryable: true,
+      });
+    }
+
     throw hostedOnboardingError({
-      code: "PRIVY_PHONE_NOT_READY",
+      code: "PRIVY_PHONE_TRANSFER_SOURCE_STILL_ACTIVE",
       httpStatus: 409,
       message:
-        "Privy is still finishing the phone transfer. Wait a moment and try again.",
-      retryable: true,
+        "That phone moved from another Murph account that is still active with its own sign-in. Contact support to reconcile it safely.",
     });
   }
 

@@ -40,6 +40,9 @@ vi.mock("@/src/lib/hosted-onboarding/linq-participant-contact", () => ({
 vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
   readHostedPrivyUserByIdIfExists:
     mocks.readHostedPrivyUserByIdIfExists,
+  // Provider users are stubbed as their own resolved identity shape so a
+  // test can state exactly which phone a surviving source still holds.
+  resolveHostedPrivyIdentityFromVerifiedUser: (user: unknown) => user,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/shared", () => ({
@@ -51,6 +54,7 @@ import {
   acquireHostedPrivyPhoneTransferPhoneLocksTx,
   assertHostedPrivyPhoneTransferSourceRetirementFenceTx,
   prepareHostedPrivyPhoneTransferSourceRetirementTx,
+  readHostedPrivyPhoneTransferProof,
 } from "@/src/lib/hosted-onboarding/privy-phone-transfer-retirement";
 import {
   buildHostedBrowserVaultRefreshRuntimeControlEvent,
@@ -78,6 +82,65 @@ describe("Privy phone-transfer source retirement", () => {
     mocks.acquireHostedLinqParticipantPhoneLockTx.mockResolvedValue(undefined);
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     mocks.readHostedPrivyUserByIdIfExists.mockResolvedValue(null);
+  });
+
+  describe("surviving provider source accounts", () => {
+    function stubPhoneOwner() {
+      mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
+        core: { id: SOURCE_MEMBER_ID },
+        identity: { privyUserId: SOURCE_PRIVY_USER_ID },
+      });
+    }
+
+    function readProof() {
+      return readHostedPrivyPhoneTransferProof({
+        identity: {
+          phone: { number: PHONE_NUMBER, verifiedAt: 1 },
+          telegram: null,
+          userId: TARGET_PRIVY_USER_ID,
+        },
+        memberId: TARGET_MEMBER_ID,
+        prisma: {} as never,
+      });
+    }
+
+    it("asks the member to wait while the source still holds the phone", async () => {
+      stubPhoneOwner();
+      mocks.readHostedPrivyUserByIdIfExists.mockResolvedValue({
+        phone: { number: PHONE_NUMBER },
+        userId: SOURCE_PRIVY_USER_ID,
+      });
+
+      await expect(readProof()).rejects.toMatchObject({
+        code: "PRIVY_PHONE_NOT_READY",
+        retryable: true,
+      });
+    });
+
+    it("stops retrying once the source keeps its own sign-in without the phone", async () => {
+      stubPhoneOwner();
+      mocks.readHostedPrivyUserByIdIfExists.mockResolvedValue({
+        email: { address: "owner@example.com" },
+        phone: null,
+        userId: SOURCE_PRIVY_USER_ID,
+      });
+
+      await expect(readProof()).rejects.toMatchObject({
+        code: "PRIVY_PHONE_TRANSFER_SOURCE_STILL_ACTIVE",
+        retryable: false,
+      });
+    });
+
+    it("returns transfer proof once the provider released the source", async () => {
+      stubPhoneOwner();
+      mocks.readHostedPrivyUserByIdIfExists.mockResolvedValue(null);
+
+      await expect(readProof()).resolves.toEqual({
+        phoneNumber: PHONE_NUMBER,
+        sourceMemberId: SOURCE_MEMBER_ID,
+        sourcePrivyUserId: SOURCE_PRIVY_USER_ID,
+      });
+    });
   });
 
   it("fences an exact pristine not-started signup scaffold", async () => {
