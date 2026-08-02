@@ -1,6 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  buildHostedExecutionTelegramConversationMessageWake,
+} from "@murphai/hosted-execution";
+import {
+  createHostedMailboxAssistantInputId,
+} from "@murphai/hosted-execution/assistant-identifiers";
+import {
   readHostedExecutionEnvironment,
 } from "../src/env.ts";
 import {
@@ -19,7 +25,11 @@ import {
   type HostedLocalFullStackScenario,
 } from "./helpers/hosted-local-full-stack-scenario.js";
 
-const userId = `member_local_device_connect_${Date.now()}`;
+const runId = Date.now();
+const userId = `member_local_device_connect_${runId}`;
+const planUsageUserId = `member_local_plan_usage_control_${runId}`;
+const subscriptionUserId = `member_local_subscription_control_${runId}`;
+const subscriptionThreadId = `telegram_direct_subscription_${runId}`;
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
 const localDatabaseUrl = process.env.DATABASE_URL?.trim() || undefined;
@@ -52,7 +62,7 @@ describe("hosted local device connect e2e", () => {
       persistDirOverride: workerPersistDirOverride,
       persistDirPrefix: "murph-hosted-local-device-connect-",
       requiredRunnerEnvProfile: "assistant",
-      scenarioLabel: "Local hosted device connect e2e",
+      scenarioLabel: "Local hosted device connect and web-control e2e",
       streamLogs: streamDevLogs,
     });
   }, 600_000);
@@ -91,14 +101,7 @@ describe("hosted local device connect e2e", () => {
     expect(JSON.stringify(forwardedEnv)).not.toContain(whoopClientSecret);
     expect(JSON.stringify(userEnv)).not.toContain(whoopClientSecret);
 
-    const hostedExecutionEnvironment = readHostedExecutionEnvironment(
-      requireHostedWorkerRuntimeEnv(),
-    );
-    const platform = buildHostedExecutionRuntimePlatform({
-      boundUserId: userId,
-      webCallbackSigning: hostedExecutionEnvironment.webCallbackSigning,
-      webControlBaseUrl: requireScenario().harness.webBaseUrl,
-    });
+    const platform = buildRuntimePlatform(userId);
     const connectLink = await platform.deviceSyncPort?.createConnectLink({
       messagingReturnTarget: "telegram",
       connectTarget: "whoop",
@@ -123,7 +126,96 @@ describe("hosted local device connect e2e", () => {
       "No device sync providers are configured",
     );
   }, 300_000);
+
+  it("reads plan usage through the real signed runner-to-Web control plane", async () => {
+    await requireScenario().seedActiveHostedMember({
+      billingPlanCode: "launch_monthly",
+      memberId: planUsageUserId,
+      stripeCustomerId: `cus_local_plan_usage_${runId}`,
+      stripeSubscriptionId: `sub_local_plan_usage_${runId}`,
+    });
+    const planUsagePort = buildRuntimePlatform(planUsageUserId).planUsageToolPort;
+    if (!planUsagePort) {
+      throw new Error("Hosted plan-usage port was not configured.");
+    }
+
+    await expect(planUsagePort.read({})).resolves.toMatchObject({
+      accessKind: "paid",
+      planCode: "launch_monthly",
+      planName: "Pulse",
+      status: "active",
+    });
+  }, 300_000);
+
+  it("binds subscription actions to one real mailbox input across signed Web control", async () => {
+    await requireScenario().seedActiveHostedMember({
+      billingPlanCode: "launch_monthly",
+      memberId: subscriptionUserId,
+      stripeCustomerId: `cus_local_subscription_${runId}`,
+      stripeSubscriptionId: `sub_local_subscription_${runId}`,
+    });
+    const wake = buildHostedExecutionTelegramConversationMessageWake({
+      eventId:
+        `telegram.message.received:local:${subscriptionUserId}:subscription-control`,
+      occurredAt: new Date().toISOString(),
+      telegramMessage: {
+        messageId: `telegram_subscription_message_${runId}`,
+        schema: "murph.hosted-telegram-message.v1",
+        text: "Keep my Pulse subscription active.",
+        threadId: subscriptionThreadId,
+      },
+      userId: subscriptionUserId,
+    });
+    await requireScenario().enqueueWake(wake, subscriptionUserId);
+    const assistantInputId = createHostedMailboxAssistantInputId({
+      dedupeKey: wake.eventId,
+      eventId: wake.eventId,
+      lane: "conversation",
+      secret: subscriptionThreadId,
+      userId: subscriptionUserId,
+    });
+    const subscriptionPort = buildRuntimePlatform(subscriptionUserId)
+      .subscriptionToolPort;
+    if (!subscriptionPort) {
+      throw new Error("Hosted subscription port was not configured.");
+    }
+    const request = {
+      action: "continue_pulse" as const,
+      assistantInputId,
+    };
+
+    await expect(subscriptionPort.request(request)).resolves.toMatchObject({
+      action: "continue_pulse",
+      plan: {
+        code: "launch_monthly",
+        displayName: "Pulse",
+      },
+      status: "completed",
+    });
+    await expect(subscriptionPort.request(request)).resolves.toMatchObject({
+      action: "continue_pulse",
+      status: "completed",
+    });
+    await expect(subscriptionPort.request({
+      action: "upgrade_edge",
+      assistantInputId,
+    })).rejects.toMatchObject({
+      status: 409,
+      statusCode: 409,
+    });
+  }, 300_000);
 });
+
+function buildRuntimePlatform(boundUserId: string) {
+  const hostedExecutionEnvironment = readHostedExecutionEnvironment(
+    requireHostedWorkerRuntimeEnv(),
+  );
+  return buildHostedExecutionRuntimePlatform({
+    boundUserId,
+    webCallbackSigning: hostedExecutionEnvironment.webCallbackSigning,
+    webControlBaseUrl: requireScenario().harness.webBaseUrl,
+  });
+}
 
 function requireScenario(): HostedLocalFullStackScenario {
   if (!scenario) {
