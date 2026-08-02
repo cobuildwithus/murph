@@ -701,8 +701,10 @@ policy requires the explicit exact choice. Web then re-derives current
 eligibility and delegates only continue-Pulse,
 start-Pulse-now, or upgrade-to-Edge choices to the existing billing services.
 Pulse activation keeps its existing Stripe-hosted invoice or Customer Portal
-handoff when payment is required; a pending Edge change uses Customer Portal
-without a separate invoice lookup. This path adds no subscription table,
+handoff when payment is required; a pending Edge change returns the Stripe-hosted
+page for the member's own still-open upgrade invoice, because only that page can
+collect the payment the pending update waits on, and falls back to Customer
+Portal when no such invoice exists. This path adds no subscription table,
 scheduler, trial-ending webhook, custom checkout, App Clip, or automatic model
 change.
 
