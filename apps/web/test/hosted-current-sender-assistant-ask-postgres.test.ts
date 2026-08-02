@@ -79,7 +79,6 @@ describe.skipIf(!runPostgresProof)(
           mailboxItemId: requestId,
           prisma,
         });
-        expect(isHostedExecutionAssistantAskRequestedWake(requestWake)).toBe(true);
         if (!requestWake || !isHostedExecutionAssistantAskRequestedWake(requestWake)) {
           throw new Error("Expected the persisted current-sender request wake.");
         }
@@ -95,6 +94,9 @@ describe.skipIf(!runPostgresProof)(
           eventId: requestId,
           userId: fixture.senderMemberId,
         });
+        if (requestWake.ask.target.kind !== "group_sender") {
+          throw new Error("Expected a current-sender Assistant Ask target.");
+        }
         expect(requestWake.ask.target.permissionDigest).toMatch(/^[a-f0-9]{64}$/u);
 
         await expect(requestHostedGroupCurrentSenderAssistantAsk({
@@ -166,7 +168,6 @@ describe.skipIf(!runPostgresProof)(
           mailboxItemId: completionId,
           prisma,
         });
-        expect(isHostedExecutionAssistantAskCompletedWake(completionWake)).toBe(true);
         if (!completionWake || !isHostedExecutionAssistantAskCompletedWake(completionWake)) {
           throw new Error("Expected the persisted current-sender completion wake.");
         }
