@@ -594,7 +594,7 @@ describe("Linq first-contact admission", () => {
           confidence: 1,
           decision: "allow",
           eventId: "evt_race_3",
-          source: "deterministic",
+          source: "model",
         }]),
       },
     };
@@ -607,9 +607,44 @@ describe("Linq first-contact admission", () => {
       decision: {
         confidence: 1,
         kind: "allow",
-        source: "deterministic",
+        source: "model",
       },
       kind: "already_allowed",
+    });
+    expect(tx.hostedLinqFirstContactAdmissionBudget.create).not.toHaveBeenCalled();
+  });
+
+  it("does not reuse a classifier-unavailable fail-open allow", async () => {
+    // A deterministic allow means nobody could check this sender, not that the
+    // sender is welcome. Reusing it would let one classifier outage admit a
+    // contact permanently, so the cap still applies.
+    const tx = {
+      $executeRaw: vi.fn().mockResolvedValue(0),
+      hostedLinqFirstContactAdmissionBudget: {
+        count: vi.fn().mockResolvedValueOnce(4),
+        create: vi.fn(),
+        findFirst: vi.fn().mockResolvedValueOnce(null),
+        findMany: vi.fn().mockResolvedValue([
+          { eventId: "evt_unavailable_1" },
+        ]),
+      },
+      hostedLinqFirstContactAdmissionDecision: {
+        findMany: vi.fn().mockResolvedValue([{
+          confidence: 1,
+          decision: "allow",
+          eventId: "evt_unavailable_1",
+          source: "deterministic",
+        }]),
+      },
+    };
+
+    await expect(claimHostedLinqFirstContactAdmissionBudget({
+      eventId: BASE_REQUEST.eventId,
+      participantContact: BASE_PARTICIPANT_CONTACT,
+      tx,
+    })).resolves.toEqual({
+      attemptCount: 4,
+      kind: "exhausted",
     });
     expect(tx.hostedLinqFirstContactAdmissionBudget.create).not.toHaveBeenCalled();
   });

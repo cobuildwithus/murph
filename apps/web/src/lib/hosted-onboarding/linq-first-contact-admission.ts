@@ -109,6 +109,7 @@ type HostedLinqFirstContactAdmissionBudgetStore = {
         eventId: {
           in: string[];
         };
+        source: HostedLinqFirstContactAdmissionDecision["source"];
       };
     }): Promise<HostedLinqFirstContactAdmissionDecisionRecord[]>;
   };
@@ -435,6 +436,15 @@ export async function claimHostedLinqFirstContactAdmissionBudget(input: {
 // outcome; they join on the event id. Reading them here keeps the contact-key
 // candidates (and their rotation handling) inside this owner instead of
 // leaking the lookup-key rules into callers.
+//
+// Only a model-source allow is reusable. The other allow this path can persist
+// is the classifier-unavailable fail-open, which is evidence that nobody could
+// check the sender rather than evidence the sender is welcome; reusing it would
+// let one OpenAI outage admit a contact permanently. Reuse answers the contact
+// question ("may Murph answer this stranger at all?") only. Whether an inbound
+// may mint instant-start entitlement stays a property of the exact event that
+// earned its own model allow, which is why nothing is written under a later
+// event id.
 async function readHostedLinqFirstContactAdmissionRecordedContactAllow(input: {
   lookupKeyCandidates: string[];
   tx: HostedLinqFirstContactAdmissionBudgetStore;
@@ -459,11 +469,12 @@ async function readHostedLinqFirstContactAdmissionRecordedContactAllow(input: {
       eventId: {
         in: attempts.map(({ eventId }) => eventId),
       },
+      source: "model",
     },
   });
   for (const record of records) {
     const decision = parseHostedLinqFirstContactAdmissionDecisionRecord(record);
-    if (decision?.kind === "allow") {
+    if (decision?.kind === "allow" && decision.source === "model") {
       return decision;
     }
   }
