@@ -36,6 +36,12 @@ export const hostedPhysicalNoteSendResponseSchema = z
     complimentary: z.boolean(),
     costUsdMicros: z.string().regex(/^\d+$/u),
     physicalNoteId: z.string().trim().min(1).max(200).nullable(),
+    priorAcceptedPhysicalNote: z
+      .object({
+        physicalNoteId: z.string().trim().min(1).max(200),
+      })
+      .strict()
+      .optional(),
     status: z.enum([
       "accepted",
       "failed",

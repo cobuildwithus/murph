@@ -144,6 +144,43 @@ describe("Lob physical-note runtime", () => {
     })).resolves.toEqual({ kind: "absent" });
   });
 
+  it("keeps multiple Lob metadata matches indeterminate", async () => {
+    const runtime = createLobPhysicalNoteRuntime({
+      apiKey: "test_key",
+      fetchImpl: vi.fn<typeof fetch>(async () => Response.json({
+        data: [{ id: "ltr_first" }, { id: "ltr_second" }],
+      })),
+      fromAddressId: "adr_from",
+    });
+
+    await expect(runtime.findLetterByNoteId({
+      noteId: "hpn_multiple",
+    })).resolves.toEqual({ kind: "indeterminate" });
+  });
+
+  it("uses the short lookup-only provider deadline", async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+    const fetchImpl = vi.fn<typeof fetch>(async (_input, init) => {
+      expect(init?.signal).toBe(timeoutSpy.mock.results[0]?.value);
+      return Response.json({ data: [] });
+    });
+    const runtime = createLobPhysicalNoteRuntime({
+      apiKey: "test_key",
+      fetchImpl,
+      fromAddressId: "adr_from",
+    });
+
+    try {
+      await expect(runtime.findLetterByNoteId({
+        noteId: "hpn_short_timeout",
+      })).resolves.toEqual({ kind: "absent" });
+      expect(timeoutSpy).toHaveBeenCalledOnce();
+      expect(timeoutSpy).toHaveBeenCalledWith(5_000);
+    } finally {
+      timeoutSpy.mockRestore();
+    }
+  });
+
   it("keeps failed and malformed Lob metadata lookups indeterminate", async () => {
     const responses: Array<() => Promise<Response>> = [
       async () => {

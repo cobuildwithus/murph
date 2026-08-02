@@ -8,6 +8,7 @@ import type {
 
 const LOB_API_BASE_URL = "https://api.lob.com";
 const LOB_API_VERSION = "2024-01-01";
+const LOB_LOOKUP_TIMEOUT_MS = 5_000;
 const LOB_REQUEST_TIMEOUT_MS = 30_000;
 const PHYSICAL_NOTE_METADATA_KEY = "murph_physical_note_id";
 
@@ -131,9 +132,9 @@ export function createLobPhysicalNoteRuntime(input: {
       const signal = request.signal
         ? AbortSignal.any([
             request.signal,
-            AbortSignal.timeout(LOB_REQUEST_TIMEOUT_MS),
+            AbortSignal.timeout(LOB_LOOKUP_TIMEOUT_MS),
           ])
-        : AbortSignal.timeout(LOB_REQUEST_TIMEOUT_MS);
+        : AbortSignal.timeout(LOB_LOOKUP_TIMEOUT_MS);
       const url = new URL("/v1/letters", LOB_API_BASE_URL);
       url.searchParams.set("limit", "2");
       url.searchParams.set(

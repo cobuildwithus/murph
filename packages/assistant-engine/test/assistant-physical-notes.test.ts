@@ -247,6 +247,9 @@ describe('assistant physical notes', () => {
       complimentary: true,
       costUsdMicros: '250000',
       physicalNoteId: 'hpn_test',
+      priorAcceptedPhysicalNote: {
+        physicalNoteId: 'hpn_prior',
+      },
       status: 'accepted' as const,
     }))
 
@@ -299,6 +302,10 @@ describe('assistant physical notes', () => {
     expect(result.rpcResult.contentItems[0]?.text).toContain(
       '"costUsdMicros":"250000"',
     )
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      'A previously uncertain physical note was confirmed mailed.',
+    )
+    expect(result.rpcResult.contentItems[0]?.text).toContain('hpn_prior')
   })
 
   it('rejects changed artwork bytes before publishing or mailing', async () => {

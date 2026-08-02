@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   hostedPhysicalNoteSendRequestSchema,
+  hostedPhysicalNoteSendResponseSchema,
   normalizeHostedPhysicalNoteRecipient,
   stableHostedPhysicalNoteRecipientJson,
 } from "../src/physical-notes.ts";
@@ -46,6 +47,29 @@ describe("hosted physical-note contracts", () => {
       requestKey: "physical_note_123",
     })).toMatchObject({
       recipient: { state: "GA" },
+    });
+  });
+
+  it("accepts the optional prior accepted-note disclosure", () => {
+    const response = {
+      complimentary: false,
+      costUsdMicros: "250000",
+      physicalNoteId: "hpn_current",
+      status: "accepted",
+    } as const;
+
+    expect(hostedPhysicalNoteSendResponseSchema.parse(response)).toEqual(
+      response,
+    );
+    expect(hostedPhysicalNoteSendResponseSchema.parse({
+      ...response,
+      priorAcceptedPhysicalNote: {
+        physicalNoteId: "hpn_prior",
+      },
+    })).toMatchObject({
+      priorAcceptedPhysicalNote: {
+        physicalNoteId: "hpn_prior",
+      },
     });
   });
 

@@ -3253,6 +3253,14 @@ export async function executeMurphDynamicToolRequest(input: {
         }, {
           signal: input.abortSignal ?? null,
         })
+        const priorAcceptedPhysicalNoteDisclosure =
+          result.priorAcceptedPhysicalNote
+            ? `A previously uncertain physical note was confirmed mailed. Tell the member about that earlier note even if this request did not succeed. Its physical note id is ${result.priorAcceptedPhysicalNote.physicalNoteId}.`
+            : ''
+        const includePriorAcceptedPhysicalNote = (message: string): string =>
+          priorAcceptedPhysicalNoteDisclosure
+            ? `${message} ${priorAcceptedPhysicalNoteDisclosure}`
+            : message
 
         switch (result.status) {
           case 'accepted':
@@ -3262,7 +3270,9 @@ export async function executeMurphDynamicToolRequest(input: {
                 complimentary: result.complimentary,
                 costUsdMicros: result.costUsdMicros,
                 note:
-                  'Lob accepted the exact generated artwork for printing. Do not attach the image unless it adds conversational value. Say it is headed to print, not delivered.',
+                  includePriorAcceptedPhysicalNote(
+                    'Lob accepted the exact generated artwork for printing. Do not attach the image unless it adds conversational value. Say it is headed to print, not delivered.',
+                  ),
                 physicalNoteId: result.physicalNoteId,
                 status: result.status,
               }),
@@ -3272,7 +3282,9 @@ export async function executeMurphDynamicToolRequest(input: {
               true,
               JSON.stringify({
                 note:
-                  'The provider outcome is not certain. Do not retry this note automatically or claim that it was mailed.',
+                  includePriorAcceptedPhysicalNote(
+                    'The provider outcome is not certain. Do not retry this note automatically or claim that it was mailed.',
+                  ),
                 physicalNoteId: result.physicalNoteId,
                 status: result.status,
               }),
@@ -3283,7 +3295,9 @@ export async function executeMurphDynamicToolRequest(input: {
               JSON.stringify({
                 costUsdMicros: result.costUsdMicros,
                 note:
-                  'The complimentary note was already used and this conversation does not currently have enough Murph time for the configured print-and-mail cost.',
+                  includePriorAcceptedPhysicalNote(
+                    'The complimentary note was already used and this conversation does not currently have enough Murph time for the configured print-and-mail cost.',
+                  ),
                 status: result.status,
               }),
             )
@@ -3292,7 +3306,9 @@ export async function executeMurphDynamicToolRequest(input: {
               false,
               JSON.stringify({
                 note:
-                  'The physical note was not sent because this action is not available to the current participant right now.',
+                  includePriorAcceptedPhysicalNote(
+                    'The physical note was not sent because this action is not available to the current participant right now.',
+                  ),
                 status: result.status,
               }),
             )
@@ -3301,14 +3317,18 @@ export async function executeMurphDynamicToolRequest(input: {
               false,
               JSON.stringify({
                 note:
-                  'Physical-note mailing is currently unavailable, so nothing was sent. Do not regenerate the artwork or retry automatically.',
+                  includePriorAcceptedPhysicalNote(
+                    'Physical-note mailing is currently unavailable, so nothing was sent. Do not regenerate the artwork or retry automatically.',
+                  ),
                 status: result.status,
               }),
             )
           case 'failed':
             return toolTextResult(
               false,
-              'the physical note was not accepted for printing',
+              includePriorAcceptedPhysicalNote(
+                'The physical note was not accepted for printing.',
+              ),
             )
         }
       } catch {

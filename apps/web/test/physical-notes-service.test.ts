@@ -631,6 +631,9 @@ describe("createHostedPhysicalNote", () => {
     });
     expect(current).toMatchObject({
       complimentary: false,
+      priorAcceptedPhysicalNote: {
+        physicalNoteId: stale.physicalNoteId,
+      },
       status: "accepted",
     });
     expect(store.allRows().find((row) => row.id === stale.physicalNoteId))
@@ -646,6 +649,80 @@ describe("createHostedPhysicalNote", () => {
         status: "accepted",
       });
     expect(mocks.recordUsage).toHaveBeenCalledOnce();
+  });
+
+  it("discloses a recovered accepted note when the current send fails", async () => {
+    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
+    const store = createPhysicalNoteStore();
+    const provider = createPhysicalNoteRuntime(
+      [
+        { kind: "ambiguous_failure" },
+        { kind: "definite_failure", status: 422 },
+      ],
+      [{ kind: "accepted", providerLetterId: "ltr_stale_before_failure" }],
+    );
+
+    const stale = await createHostedPhysicalNote({
+      ...buildRequest(57),
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    });
+    store.setCreatedAt(
+      stale.physicalNoteId!,
+      new Date(Date.now() - REPLAY_WINDOW_MS - 1),
+    );
+    const current = await createHostedPhysicalNote({
+      ...buildRequest(58),
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    });
+
+    expect(current).toMatchObject({
+      complimentary: false,
+      priorAcceptedPhysicalNote: {
+        physicalNoteId: stale.physicalNoteId,
+      },
+      status: "failed",
+    });
+  });
+
+  it("discloses a recovered accepted note when current usage is insufficient", async () => {
+    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
+    const store = createPhysicalNoteStore();
+    const provider = createPhysicalNoteRuntime(
+      [{ kind: "ambiguous_failure" }],
+      [{ kind: "accepted", providerLetterId: "ltr_stale_before_limit" }],
+    );
+
+    const stale = await createHostedPhysicalNote({
+      ...buildRequest(59),
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    });
+    store.setCreatedAt(
+      stale.physicalNoteId!,
+      new Date(Date.now() - REPLAY_WINDOW_MS - 1),
+    );
+    mocks.readUsageGate.mockResolvedValueOnce({
+      allowed: true,
+      periodEnd: DEFAULT_PERIOD_END,
+      periodStart: DEFAULT_PERIOD_START,
+      remainingUsdMicros: COST_USD_MICROS - 1n,
+    });
+
+    await expect(createHostedPhysicalNote({
+      ...buildRequest(60),
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    })).resolves.toMatchObject({
+      complimentary: false,
+      physicalNoteId: null,
+      priorAcceptedPhysicalNote: {
+        physicalNoteId: stale.physicalNoteId,
+      },
+      status: "insufficient_usage",
+    });
+    expect(provider.create).toHaveBeenCalledOnce();
   });
 
   it("releases a stale complimentary claim when Lob confirms no letter exists", async () => {
@@ -688,7 +765,7 @@ describe("createHostedPhysicalNote", () => {
     expect(mocks.recordUsage).not.toHaveBeenCalled();
   });
 
-  it("leaves a stale complimentary claim pending when the Lob lookup is indeterminate", async () => {
+  it("leaves an indeterminate claim pending and discloses later recovery on replay", async () => {
     const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const provider = createPhysicalNoteRuntime(
@@ -696,7 +773,10 @@ describe("createHostedPhysicalNote", () => {
         { kind: "ambiguous_failure" },
         { kind: "accepted", providerLetterId: "ltr_after_indeterminate" },
       ],
-      [{ kind: "indeterminate" }],
+      [
+        { kind: "indeterminate" },
+        { kind: "accepted", providerLetterId: "ltr_recovered_on_replay" },
+      ],
     );
 
     const stale = await createHostedPhysicalNote({
@@ -724,7 +804,25 @@ describe("createHostedPhysicalNote", () => {
         providerLetterId: null,
         status: "starting",
       });
-    expect(mocks.recordUsage).toHaveBeenCalledOnce();
+
+    await expect(createHostedPhysicalNote({
+      ...buildRequest(55),
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    })).resolves.toMatchObject({
+      physicalNoteId: current.physicalNoteId,
+      priorAcceptedPhysicalNote: {
+        physicalNoteId: stale.physicalNoteId,
+      },
+      status: "accepted",
+    });
+    expect(store.allRows().find((row) => row.id === stale.physicalNoteId))
+      .toMatchObject({
+        providerLetterId: "ltr_recovered_on_replay",
+        status: "accepted",
+      });
+    expect(provider.create).toHaveBeenCalledTimes(2);
+    expect(mocks.recordUsage).toHaveBeenCalledTimes(2);
   });
 
   it("uses ordinary same-request replay inside the window without a Lob lookup", async () => {

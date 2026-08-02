@@ -121,6 +121,7 @@ describe("physical-note durable replay", () => {
       updatedAt: acceptedAt,
     };
     const hostedPhysicalNote = {
+      findFirst: vi.fn().mockResolvedValue(null),
       findUnique: vi.fn().mockResolvedValue(row),
       findUniqueOrThrow: vi.fn().mockResolvedValue(row),
       updateMany: vi.fn().mockResolvedValue({ count: 0 }),
@@ -179,6 +180,7 @@ describe("physical-note durable replay", () => {
   it("rejects expiring artwork before reserving a new note", async () => {
     const hostedPhysicalNote = {
       create: vi.fn(),
+      findFirst: vi.fn().mockResolvedValue(null),
       findUnique: vi.fn().mockResolvedValue(null),
     };
     const prismaLike = {
