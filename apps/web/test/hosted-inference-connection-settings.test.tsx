@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  HostedInferenceConnectionSettings,
+  HostedInferenceConnectionPane,
 } from "@/src/components/settings/hosted-inference-connection-settings";
 import { renderClientComponent } from "./render-client-component";
 
@@ -28,36 +28,36 @@ vi.mock("@/src/components/ui/input", () => ({
   },
 }));
 
-describe("hosted inference connection settings", () => {
+describe("hosted inference connection pane", () => {
   beforeEach(() => {
     mocks.requestHostedOnboardingJson.mockReset();
   });
 
-  it("explains the privacy and no-fallback boundary before collecting a secret", () => {
+  it("explains the privacy boundary before collecting a secret", () => {
     const markup = renderToStaticMarkup(createElement(
-      HostedInferenceConnectionSettings,
+      HostedInferenceConnectionPane,
       {
         chatCompletionsAvailable: false,
         configurationAvailable: true,
-        initialConnection: null,
+        connection: null,
+        onConnectionChange: () => {},
+        selected: false,
       },
     ));
 
     assert.match(
       markup,
-      /Murph never switches away from your endpoint after an endpoint failure/u,
+      /relevant conversation context, tool descriptions, and\s+supported attachments/u,
     );
     assert.match(
       markup,
-      /relevant conversation context, tool descriptions, and supported attachments/u,
+      /credential is encrypted and\s+is never placed in the assistant runner/u,
     );
-    assert.match(markup, /New core replies use Murph-managed inference/u);
     assert.match(markup, /type="password"/u);
     assert.match(markup, /Verify and save/u);
     assert.match(markup, /Public HTTPS on port 443/u);
     assert.match(markup, /Responses API/u);
     assert.match(markup, /Bearer token/u);
-    assert.match(markup, />Inference mode</u);
     assert.match(markup, />Custom connection details</u);
     assert.match(
       markup,
@@ -69,22 +69,13 @@ describe("hosted inference connection settings", () => {
 
   it("renders only sanitized metadata for a saved connection", () => {
     const markup = renderToStaticMarkup(createElement(
-      HostedInferenceConnectionSettings,
+      HostedInferenceConnectionPane,
       {
         chatCompletionsAvailable: true,
         configurationAvailable: true,
-        initialConnection: {
-          contextWindowTokens: 131_072,
-          endpointHost: "inference.example.test",
-          model: "example-model",
-          protocol: "responses",
-          revision: 4,
-          selected: true,
-          supportsImages: false,
-          verificationProfile:
-            "murph-codex-0.145.0-portable-responses-v1",
-          verifiedAt: "2026-07-30T12:00:00.000Z",
-        },
+        connection: savedConnection(true),
+        onConnectionChange: () => {},
+        selected: true,
       },
     ));
 
@@ -95,48 +86,68 @@ describe("hosted inference connection settings", () => {
     assert.match(markup, />4</u);
     assert.match(markup, /Jul 30, 2026/u);
     assert.match(markup, /12:00 PM UTC/u);
-    assert.match(markup, /normal-case \[overflow-wrap:anywhere\]/u);
     assert.doesNotMatch(markup, /type="password"/u);
     assert.doesNotMatch(markup, /https:\/\/inference\.example\.test/u);
   });
 
+  it("shows a verified connection as inactive until it is routed", () => {
+    const markup = renderToStaticMarkup(createElement(
+      HostedInferenceConnectionPane,
+      {
+        chatCompletionsAvailable: true,
+        configurationAvailable: true,
+        connection: savedConnection(false),
+        onConnectionChange: () => {},
+        selected: false,
+      },
+    ));
+
+    assert.match(markup, /Verified, inactive/u);
+    assert.doesNotMatch(markup, /In use/u);
+  });
+
   it("disables changes when personal assistant configuration is unavailable", () => {
     const markup = renderToStaticMarkup(createElement(
-      HostedInferenceConnectionSettings,
+      HostedInferenceConnectionPane,
       {
         chatCompletionsAvailable: true,
         configurationAvailable: false,
-        initialConnection: null,
+        connection: null,
+        onConnectionChange: () => {},
+        selected: false,
       },
     ));
 
     assert.match(markup, /disabled=""/u);
-    assert.match(markup, /data-disabled="true"/u);
     assert.match(
       markup,
-      /Inference choices are read-only until personal Murph access is active/u,
+      /Endpoint choices are read-only until personal Murph access is active/u,
     );
   });
 
-  it("keeps verification inactive until an explicit mode save", async () => {
-    mocks.requestHostedOnboardingJson
-      .mockResolvedValueOnce({
-        connection: savedConnection(false),
-      })
-      .mockResolvedValueOnce({ mode: "custom", updated: true })
-      .mockResolvedValueOnce({ deleted: true });
+  it("hands a verified connection upward without routing replies to it", async () => {
+    const connectionChanges: unknown[] = [];
+    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+      connection: savedConnection(false),
+    });
     const view = await renderClientComponent(createElement(
-      HostedInferenceConnectionSettings,
+      HostedInferenceConnectionPane,
       {
         chatCompletionsAvailable: true,
         configurationAvailable: true,
-        initialConnection: null,
+        connection: null,
+        onConnectionChange: (next: unknown) => connectionChanges.push(next),
+        selected: false,
       },
     ));
 
     try {
       await act(() => {
-        setInputValue(view, "hosted-inference-endpoint", "https://inference.example.test/v1/responses");
+        setInputValue(
+          view,
+          "hosted-inference-endpoint",
+          "https://inference.example.test/v1/responses",
+        );
         setInputValue(view, "hosted-inference-model", "example-model");
         setInputValue(view, "hosted-inference-secret", "synthetic-secret");
       });
@@ -158,57 +169,38 @@ describe("hosted inference connection settings", () => {
         },
         url: "/api/settings/inference-connection",
       });
-      assert.match(view.container.textContent ?? "", /Verified, inactive/u);
-      assert.match(
-        view.container.textContent ?? "",
-        /New core replies use Murph-managed inference/u,
-      );
-      const saveMode = findButton(view.container, "Save inference mode");
-      assert.equal(saveMode.disabled, true);
-      assert.equal(nonEmptyLiveRegions(view.container).length, 1);
-
-      await act(async () => {
-        findRadio(view.container, "assistant-inference-custom").click();
-      });
-      assert.equal(saveMode.disabled, false);
+      // Verification is not activation: the pane never calls the mode route.
       expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(1);
-
-      await act(async () => {
-        saveMode.click();
-        await Promise.resolve();
-      });
-
-      expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(2, {
-        method: "POST",
-        payload: { mode: "custom" },
-        url: "/api/settings/assistant",
-      });
-      assert.match(view.container.textContent ?? "", /In use/u);
+      assert.deepEqual(connectionChanges, [savedConnection(false)]);
       assert.match(
         view.container.textContent ?? "",
-        /New core replies use your verified endpoint/u,
+        /Choose Your endpoint and save to route new core replies to it/u,
       );
       assert.equal(nonEmptyLiveRegions(view.container).length, 1);
+    } finally {
+      await view.cleanup();
+    }
+  });
 
+  it("warns that deleting the routed endpoint returns replies to Murph", async () => {
+    const view = await renderClientComponent(createElement(
+      HostedInferenceConnectionPane,
+      {
+        chatCompletionsAvailable: true,
+        configurationAvailable: true,
+        connection: savedConnection(true),
+        onConnectionChange: () => {},
+        selected: true,
+      },
+    ));
+
+    try {
       await act(async () => {
         findButton(view.container, "Delete connection").click();
       });
       assert.match(
         view.container.textContent ?? "",
         /New core replies will switch to Murph-managed inference/u,
-      );
-      await act(async () => {
-        findButton(view.container, "Delete").click();
-        await Promise.resolve();
-      });
-      assert.match(view.container.textContent ?? "", /Connection deleted/u);
-      assert.match(
-        view.container.textContent ?? "",
-        /New core replies use Murph-managed inference/u,
-      );
-      assert.deepEqual(
-        nonEmptyLiveRegions(view.container).map((region) => region.textContent),
-        ["Connection deleted. New core replies use Murph-managed inference."],
       );
     } finally {
       await view.cleanup();
@@ -217,11 +209,13 @@ describe("hosted inference connection settings", () => {
 
   it("does not claim an inactive deletion changes routing", async () => {
     const view = await renderClientComponent(createElement(
-      HostedInferenceConnectionSettings,
+      HostedInferenceConnectionPane,
       {
         chatCompletionsAvailable: true,
         configurationAvailable: true,
-        initialConnection: savedConnection(false),
+        connection: savedConnection(false),
+        onConnectionChange: () => {},
+        selected: false,
       },
     ));
 
@@ -285,12 +279,6 @@ function findButton(container: HTMLElement, label: string): HTMLButtonElement {
     .find((candidate) => candidate.textContent === label);
   assert.ok(button);
   return button;
-}
-
-function findRadio(container: HTMLElement, id: string): HTMLElement {
-  const radio = container.querySelector<HTMLElement>(`#${id}`);
-  assert.ok(radio);
-  return radio;
 }
 
 function nonEmptyLiveRegions(container: HTMLElement): HTMLElement[] {

@@ -15,8 +15,9 @@ import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser
 import { TogetherSection } from "@/src/components/homepage/together-section";
 import { ModelProviderSecuritySection } from "@/src/components/security/model-provider-security-section";
 import { HostedAssistantModelSettings } from "@/src/components/settings/hosted-assistant-model-settings";
-import { HostedInferenceConnectionSettings } from "@/src/components/settings/hosted-inference-connection-settings";
+import { HostedInferenceConnectionPane } from "@/src/components/settings/hosted-inference-connection-settings";
 import { Separator } from "@/src/components/ui/separator";
+import { DESIGN_INFERENCE_CONNECTION } from "./design-inference-connection";
 import { AccountDeletionMaintenanceStudy } from "./account-deletion-maintenance-study";
 import { AccountExitReasonStudy } from "./account-exit-reason-study";
 import { ChangelogArchiveStudy } from "./changelog-archive-study";
@@ -159,7 +160,7 @@ export function SectionsContent() {
             data-design-variant="managed-venice-disabled"
           >
             <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">
-              Managed route · Venice unavailable
+              Managed route · verified endpoint inactive
             </p>
             <section className="flex flex-col gap-4">
               <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
@@ -167,35 +168,18 @@ export function SectionsContent() {
               </div>
               <HostedAssistantModelSettings
                 canUpgradeToEdge={false}
+                chatCompletionsAvailable
                 configurationAvailable
                 customInferenceAvailable
+                initialConnection={{
+                  ...DESIGN_INFERENCE_CONNECTION,
+                  selected: false,
+                }}
                 initialDormantSolPreference={false}
                 initialModel="gpt-5.6-terra"
                 initialProvider="openai"
                 solAvailable
                 veniceAvailable={false}
-              />
-            </section>
-            <Separator />
-            <section className="flex flex-col gap-4">
-              <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-                Inference
-              </div>
-              <HostedInferenceConnectionSettings
-                chatCompletionsAvailable
-                configurationAvailable
-                initialConnection={{
-                  contextWindowTokens: 131_072,
-                  endpointHost: "inference.example.com",
-                  model: "example-health-model",
-                  protocol: "responses",
-                  revision: 4,
-                  selected: false,
-                  supportsImages: false,
-                  verificationProfile:
-                    "murph-codex-0.145.0-portable-responses-v1",
-                  verifiedAt: "2026-07-30T22:00:00.000Z",
-                }}
               />
             </section>
           </div>
@@ -205,7 +189,7 @@ export function SectionsContent() {
             data-design-variant="custom-venice-enabled"
           >
             <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">
-              Custom route · Venice available
+              Endpoint route · Venice available
             </p>
             <section className="flex flex-col gap-4">
               <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
@@ -213,8 +197,13 @@ export function SectionsContent() {
               </div>
               <HostedAssistantModelSettings
                 canUpgradeToEdge={false}
+                chatCompletionsAvailable
                 configurationAvailable
                 customInferenceAvailable
+                initialConnection={{
+                  ...DESIGN_INFERENCE_CONNECTION,
+                  selected: true,
+                }}
                 initialDormantSolPreference={false}
                 initialModel="gpt-5.6-terra"
                 initialProvider="venice"
@@ -222,28 +211,38 @@ export function SectionsContent() {
                 veniceAvailable
               />
             </section>
-            <Separator />
-            <section className="flex flex-col gap-4">
-              <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-                Inference
-              </div>
-              <HostedInferenceConnectionSettings
-                chatCompletionsAvailable
-                configurationAvailable
-                initialConnection={{
-                  contextWindowTokens: 131_072,
-                  endpointHost: "inference.example.com",
-                  model: "example-health-model",
-                  protocol: "responses",
-                  revision: 4,
-                  selected: true,
-                  supportsImages: false,
-                  verificationProfile:
-                    "murph-codex-0.145.0-portable-responses-v1",
-                  verifiedAt: "2026-07-30T22:00:00.000Z",
-                }}
-              />
-            </section>
+          </div>
+          <Separator />
+          <div
+            className="flex flex-col gap-8"
+            data-design-variant="endpoint-pane"
+          >
+            <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">
+              Endpoint pane · setup form
+            </p>
+            <HostedInferenceConnectionPane
+              chatCompletionsAvailable
+              configurationAvailable
+              connection={null}
+              onConnectionChange={() => {}}
+              selected={false}
+            />
+          </div>
+          <Separator />
+          <div
+            className="flex flex-col gap-8"
+            data-design-variant="endpoint-pane-verified"
+          >
+            <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">
+              Endpoint pane · verified connection
+            </p>
+            <HostedInferenceConnectionPane
+              chatCompletionsAvailable
+              configurationAvailable
+              connection={DESIGN_INFERENCE_CONNECTION}
+              onConnectionChange={() => {}}
+              selected
+            />
           </div>
         </div>
       </StudySection>

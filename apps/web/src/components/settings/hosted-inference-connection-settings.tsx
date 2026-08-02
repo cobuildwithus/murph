@@ -16,7 +16,6 @@ import {
 } from "@/src/components/hosted-onboarding/client-api";
 import { Button } from "@/src/components/ui/button";
 import { Checkbox } from "@/src/components/ui/checkbox";
-import { ChoiceCard } from "@/src/components/ui/choice-card";
 import {
   Field,
   FieldContent,
@@ -27,7 +26,6 @@ import {
   FieldSet,
 } from "@/src/components/ui/field";
 import { Input } from "@/src/components/ui/input";
-import { RadioGroup } from "@/src/components/ui/radio-group";
 import {
   Select,
   SelectContent,
@@ -35,7 +33,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/src/components/ui/select";
-import { Separator } from "@/src/components/ui/separator";
 import { Spinner } from "@/src/components/ui/spinner";
 import type {
   HostedInferenceConnectionView,
@@ -45,7 +42,6 @@ import { SettingsStatusLine } from "./connected-account-card";
 
 const HOSTED_INFERENCE_CONNECTION_URL =
   "/api/settings/inference-connection";
-const HOSTED_ASSISTANT_MODE_URL = "/api/settings/assistant";
 const DEFAULT_CONTEXT_WINDOW_TOKENS = 131_072;
 const PROTOCOL_LABELS: Record<HostedInferenceProtocol, string> = {
   chat_completions: "Chat Completions",
@@ -57,126 +53,56 @@ const AUTH_KIND_LABELS: Record<HostedInferenceAuthKind, string> = {
   x_api_key: "x-api-key header",
 };
 
-interface HostedInferenceConnectionSettingsProps {
+interface HostedInferenceConnectionPaneProps {
   chatCompletionsAvailable: boolean;
   configurationAvailable: boolean;
-  initialConnection: HostedInferenceConnectionView | null;
+  connection: HostedInferenceConnectionView | null;
+  onConnectionChange: (connection: HostedInferenceConnectionView | null) => void;
+  selected: boolean;
 }
 
 interface ConnectionMutationResponse {
   connection: HostedInferenceConnectionView;
 }
 
-interface AssistantModeResponse {
-  mode: "custom" | "managed";
-  updated: boolean;
-}
-
-export function HostedInferenceConnectionSettings(
-  props: HostedInferenceConnectionSettingsProps,
+/**
+ * Endpoint pane of the provider dialog: verify, replace, and delete the one
+ * personal connection. Selecting it for core replies is the dialog's job, so a
+ * successful verification here deliberately leaves the connection inactive.
+ */
+export function HostedInferenceConnectionPane(
+  props: HostedInferenceConnectionPaneProps,
 ) {
-  const initialMode = props.initialConnection?.selected
-    ? "custom"
-    : "managed";
-  const [connection, setConnection] = useState(props.initialConnection);
-  const [currentMode, setCurrentMode] = useState<"custom" | "managed">(
-    initialMode,
-  );
-  const [draftMode, setDraftMode] = useState<"custom" | "managed">(
-    initialMode,
-  );
-  const [editing, setEditing] = useState(props.initialConnection === null);
+  const { connection } = props;
+  const [editing, setEditing] = useState(connection === null);
   const [protocol, setProtocol] = useState<HostedInferenceProtocol>(
-    props.initialConnection?.protocol ?? "responses",
+    connection?.protocol ?? "responses",
   );
   const [endpointUrl, setEndpointUrl] = useState("");
-  const [model, setModel] = useState(props.initialConnection?.model ?? "");
+  const [model, setModel] = useState(connection?.model ?? "");
   const [authKind, setAuthKind] = useState<HostedInferenceAuthKind>("bearer");
   const [secret, setSecret] = useState("");
   const [contextWindowTokens, setContextWindowTokens] = useState(
-    String(
-      props.initialConnection?.contextWindowTokens
-      ?? DEFAULT_CONTEXT_WINDOW_TOKENS,
-    ),
+    String(connection?.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS),
   );
   const [supportsImages, setSupportsImages] = useState(
-    props.initialConnection?.supportsImages ?? false,
+    connection?.supportsImages ?? false,
   );
   const [pendingAction, setPendingAction] = useState<
-    "connection" | "delete" | "mode" | null
+    "connection" | "delete" | null
   >(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [status, setStatus] = useState<{
-    action: "connection" | "mode";
     announcement?: string;
     message: string;
     tone: "destructive" | "neutral";
   } | null>(null);
   const confirmDeleteButtonRef = useRef<HTMLButtonElement>(null);
-  const connectionHeadingRef = useRef<HTMLHeadingElement>(null);
+  const connectionHeadingRef = useRef<HTMLParagraphElement>(null);
   const deleteConnectionButtonRef = useRef<HTMLButtonElement>(null);
   const protocolTriggerRef = useRef<HTMLButtonElement>(null);
   const replaceButtonRef = useRef<HTMLButtonElement>(null);
   const disabled = pendingAction !== null || !props.configurationAvailable;
-  const modeChanged = currentMode !== draftMode;
-
-  async function saveMode(): Promise<void> {
-    if (draftMode === "custom" && !connection) {
-      setStatus({
-        action: "mode",
-        message: "Verify a connection before switching to your endpoint.",
-        tone: "neutral",
-      });
-      setEditing(true);
-      return;
-    }
-    if (
-      draftMode === "custom"
-      && connection?.protocol === "chat_completions"
-      && !props.chatCompletionsAvailable
-    ) {
-      setStatus({
-        action: "mode",
-        message:
-          "Chat Completions connections are not available in this deployment.",
-        tone: "destructive",
-      });
-      return;
-    }
-    setPendingAction("mode");
-    setStatus(null);
-    try {
-      const response = await requestHostedOnboardingJson<AssistantModeResponse>({
-        method: "POST",
-        payload: { mode: draftMode },
-        url: HOSTED_ASSISTANT_MODE_URL,
-      });
-      setCurrentMode(response.mode);
-      setDraftMode(response.mode);
-      setConnection((current) =>
-        current ? { ...current, selected: response.mode === "custom" } : current
-      );
-      setStatus({
-        action: "mode",
-        announcement: response.mode === "custom"
-          ? "Inference mode saved. New core replies use your verified endpoint."
-          : "Inference mode saved. New core replies use Murph-managed inference.",
-        message: "Inference mode saved.",
-        tone: "neutral",
-      });
-    } catch (error) {
-      setStatus({
-        action: "mode",
-        message: readSafeConnectionError(
-          error,
-          "We couldn’t change the inference mode. Try again.",
-        ),
-        tone: "destructive",
-      });
-    } finally {
-      setPendingAction(null);
-    }
-  }
 
   async function verifyConnection(
     event: React.FormEvent<HTMLFormElement>,
@@ -189,7 +115,6 @@ export function HostedInferenceConnectionSettings(
       || parsedContext > HOSTED_INFERENCE_CONTEXT_WINDOW_MAX_TOKENS
     ) {
       setStatus({
-        action: "connection",
         message:
           `Context window must be between ${HOSTED_INFERENCE_CONTEXT_WINDOW_MIN_TOKENS.toLocaleString()} and ${HOSTED_INFERENCE_CONTEXT_WINDOW_MAX_TOKENS.toLocaleString()} tokens.`,
         tone: "destructive",
@@ -214,23 +139,19 @@ export function HostedInferenceConnectionSettings(
           },
           url: HOSTED_INFERENCE_CONNECTION_URL,
         });
-      setConnection(response.connection);
-      setCurrentMode("managed");
-      setDraftMode("managed");
+      props.onConnectionChange(response.connection);
       setEndpointUrl("");
       setSecret("");
       setEditing(false);
       setConfirmDelete(false);
       setStatus({
-        action: "connection",
         message:
-          "Verified and saved. This connection stays inactive until you select Your endpoint and save the inference mode.",
+          "Verified and saved. Choose Your endpoint and save to route new core replies to it.",
         tone: "neutral",
       });
       requestAnimationFrame(() => connectionHeadingRef.current?.focus());
     } catch (error) {
       setStatus({
-        action: "connection",
         message: readSafeConnectionError(
           error,
           "The endpoint could not be verified. Your previous connection was not changed.",
@@ -252,16 +173,13 @@ export function HostedInferenceConnectionSettings(
         payload: { expectedRevision: connection.revision },
         url: HOSTED_INFERENCE_CONNECTION_URL,
       });
-      setConnection(null);
-      setCurrentMode("managed");
-      setDraftMode("managed");
+      props.onConnectionChange(null);
       setEditing(true);
       setConfirmDelete(false);
       setModel("");
       setEndpointUrl("");
       setSecret("");
       setStatus({
-        action: "connection",
         announcement:
           "Connection deleted. New core replies use Murph-managed inference.",
         message: "Connection deleted.",
@@ -270,7 +188,6 @@ export function HostedInferenceConnectionSettings(
       requestAnimationFrame(() => connectionHeadingRef.current?.focus());
     } catch (error) {
       setStatus({
-        action: "connection",
         message: readSafeConnectionError(
           error,
           "We couldn’t delete the connection. Try again.",
@@ -283,167 +200,134 @@ export function HostedInferenceConnectionSettings(
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex max-w-2xl flex-col gap-2">
-        <p className="text-sm text-pretty text-muted-foreground">
-          Core replies can use Murph-managed inference or one endpoint you
-          control. Murph never switches away from your endpoint after an
-          endpoint failure.
-        </p>
-        <p className="text-xs/5 text-pretty text-muted-foreground">
-          When your endpoint is selected, Murph sends relevant conversation
-          context, tool descriptions, and supported attachments to it.
-        </p>
-        <p className="text-xs/5 text-pretty text-muted-foreground">
-          Image generation, voice, search, and other specialized tools may
-          still use Murph providers and remain subject to your plan.
-        </p>
-      </div>
-
-      <p className="max-w-2xl text-sm text-pretty text-foreground">
-        New core replies use {currentMode === "custom"
-          ? "your verified endpoint"
-          : "Murph-managed inference"}.
+    <div className="flex flex-col gap-5">
+      <p
+        className="max-w-[46ch] rounded-sm text-sm/6 text-pretty text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        ref={connectionHeadingRef}
+        tabIndex={-1}
+      >
+        Murph sends relevant conversation context, tool descriptions, and
+        supported attachments to this endpoint. The credential is encrypted and
+        is never placed in the assistant runner.
       </p>
 
       {!props.configurationAvailable ? (
         <p className="rounded-xl border border-border bg-muted/30 p-4 text-sm text-pretty text-muted-foreground">
-          Inference choices are read-only until personal Murph access is active.
+          Endpoint choices are read-only until personal Murph access is active.
         </p>
       ) : null}
 
-      <FieldSet className="w-full gap-3" disabled={disabled}>
-        <FieldLegend className="sr-only">Inference mode</FieldLegend>
-        <RadioGroup
-          className="grid gap-3 md:grid-cols-2"
-          disabled={disabled}
-          onValueChange={(value) => {
-            if (value !== "managed" && value !== "custom") return;
-            setDraftMode(value);
-            setStatus(null);
-            if (value === "custom" && !connection) setEditing(true);
-          }}
-          value={draftMode}
-        >
-          <ChoiceCard
-            description="Murph operates the model connection and usage."
-            disabled={disabled}
-            id="assistant-inference-managed"
-            meta={currentMode === "managed" ? "Current" : "Available"}
-            title="Managed by Murph"
-            value="managed"
-          />
-          <ChoiceCard
-            description="Core conversation content goes to your verified endpoint."
-            disabled={disabled}
-            id="assistant-inference-custom"
-            meta={connection
-              ? (
-                  <span className="normal-case [overflow-wrap:anywhere]">
-                    {connection.endpointHost} · {connection.model}
-                  </span>
-                )
-              : "Connection required"}
-            title="Your endpoint"
-            value="custom"
-          />
-        </RadioGroup>
-      </FieldSet>
-
-      <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center">
-        <Button
-          disabled={disabled || !modeChanged}
-          onClick={() => void saveMode()}
-          type="button"
-        >
-          {pendingAction === "mode" ? <Spinner aria-hidden="true" /> : null}
-          {pendingAction === "mode" ? "Saving…" : "Save inference mode"}
-        </Button>
-        {draftMode === "custom" && !connection ? (
-          <span className="text-xs text-muted-foreground">
-            Verify a connection below first.
-          </span>
-        ) : null}
-      </div>
-      {status?.action === "mode" ? (
-        <SettingsStatusLine
-          announce={status.tone === "destructive"}
-          message={status.message}
-          tone={status.tone}
-        />
-      ) : null}
-
-      <Separator />
-
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h3
-            className="rounded-sm text-sm font-semibold text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-background"
-            ref={connectionHeadingRef}
-            tabIndex={-1}
-          >
-            Custom connection
-          </h3>
-          <p className="mt-1 text-sm text-muted-foreground">
-            The credential is encrypted and is never placed in the assistant
-            runner.
-          </p>
-        </div>
-        {connection && !editing ? (
-          <Button
-            disabled={disabled}
-            onClick={() => {
-              setEditing(true);
-              setStatus(null);
-              requestAnimationFrame(() => protocolTriggerRef.current?.focus());
-            }}
-            ref={replaceButtonRef}
-            size="sm"
-            type="button"
-            variant="outline"
-          >
-            Replace
-          </Button>
-        ) : null}
-      </div>
-
       {connection && !editing ? (
-        <dl className="grid gap-x-8 gap-y-4 border-y border-border py-5 sm:grid-cols-2 lg:grid-cols-4">
-          <ConnectionFact label="Endpoint" value={connection.endpointHost} />
-          <ConnectionFact label="Model" value={connection.model} />
-          <ConnectionFact
-            label="Protocol"
-            value={
-              connection.protocol === "responses"
-                ? "Responses API"
-                : "Chat Completions"
-            }
-          />
-          <ConnectionFact
-            label="Context"
-            value={`${connection.contextWindowTokens.toLocaleString()} tokens`}
-          />
-          <ConnectionFact
-            label="Images"
-            value={connection.supportsImages ? "Verified" : "Unavailable"}
-          />
-          <ConnectionFact
-            label="Revision"
-            value={String(connection.revision)}
-          />
-          <ConnectionFact
-            label="Verified"
-            value={formatVerificationTime(connection.verifiedAt)}
-          />
-          <ConnectionFact
-            label="Status"
-            value={connection.selected ? "In use" : "Verified, inactive"}
-          />
-        </dl>
+        <>
+          <dl className="grid gap-x-6 gap-y-4 border-y border-border py-5 sm:grid-cols-2">
+            <ConnectionFact label="Endpoint" value={connection.endpointHost} />
+            <ConnectionFact label="Model" value={connection.model} />
+            <ConnectionFact
+              label="Protocol"
+              value={
+                connection.protocol === "responses"
+                  ? "Responses API"
+                  : "Chat Completions"
+              }
+            />
+            <ConnectionFact
+              label="Context"
+              value={`${connection.contextWindowTokens.toLocaleString()} tokens`}
+            />
+            <ConnectionFact
+              label="Images"
+              value={connection.supportsImages ? "Verified" : "Unavailable"}
+            />
+            <ConnectionFact
+              label="Revision"
+              value={String(connection.revision)}
+            />
+            <ConnectionFact
+              label="Verified"
+              value={formatVerificationTime(connection.verifiedAt)}
+            />
+            <ConnectionFact
+              label="Status"
+              value={props.selected ? "In use" : "Verified, inactive"}
+            />
+          </dl>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              disabled={disabled}
+              onClick={() => {
+                setEditing(true);
+                setStatus(null);
+                requestAnimationFrame(() => protocolTriggerRef.current?.focus());
+              }}
+              ref={replaceButtonRef}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Replace
+            </Button>
+            {confirmDelete ? (
+              <>
+                <span
+                  className="mr-1 text-sm text-muted-foreground"
+                  id="hosted-inference-delete-description"
+                >
+                  {props.selected
+                    ? "Delete the saved endpoint and credential? New core replies will switch to Murph-managed inference."
+                    : "Delete the saved endpoint and credential?"}
+                </span>
+                <Button
+                  aria-describedby="hosted-inference-delete-description"
+                  disabled={disabled}
+                  onClick={() => void deleteConnection()}
+                  ref={confirmDeleteButtonRef}
+                  size="sm"
+                  type="button"
+                  variant="destructive"
+                >
+                  {pendingAction === "delete" ? (
+                    <Spinner aria-hidden="true" />
+                  ) : null}
+                  {pendingAction === "delete" ? "Deleting…" : "Delete"}
+                </Button>
+                <Button
+                  disabled={disabled}
+                  onClick={() => {
+                    setConfirmDelete(false);
+                    requestAnimationFrame(() =>
+                      deleteConnectionButtonRef.current?.focus()
+                    );
+                  }}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  Keep connection
+                </Button>
+              </>
+            ) : (
+              <Button
+                disabled={disabled}
+                onClick={() => {
+                  setConfirmDelete(true);
+                  requestAnimationFrame(() =>
+                    confirmDeleteButtonRef.current?.focus()
+                  );
+                }}
+                ref={deleteConnectionButtonRef}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                Delete connection
+              </Button>
+            )}
+          </div>
+        </>
       ) : (
         <form
           aria-busy={pendingAction === "connection"}
-          className="flex max-w-3xl flex-col gap-5"
+          className="flex flex-col gap-5"
           onSubmit={(event) => void verifyConnection(event)}
         >
           {connection ? (
@@ -579,7 +463,7 @@ export function HostedInferenceConnectionSettings(
                 />
               </Field>
             </FieldGroup>
-            <Field className="max-w-xl" orientation="horizontal">
+            <Field orientation="horizontal">
               <Checkbox
                 aria-describedby="hosted-inference-images-description"
                 checked={supportsImages}
@@ -638,68 +522,7 @@ export function HostedInferenceConnectionSettings(
         </form>
       )}
 
-      {connection && !editing ? (
-        <div className="flex flex-wrap items-center gap-2">
-          {confirmDelete ? (
-            <>
-              <span
-                className="mr-1 text-sm text-muted-foreground"
-                id="hosted-inference-delete-description"
-              >
-                {currentMode === "custom"
-                  ? "Delete the saved endpoint and credential? New core replies will switch to Murph-managed inference."
-                  : "Delete the saved endpoint and credential?"}
-              </span>
-              <Button
-                aria-describedby="hosted-inference-delete-description"
-                disabled={disabled}
-                onClick={() => void deleteConnection()}
-                ref={confirmDeleteButtonRef}
-                size="sm"
-                type="button"
-                variant="destructive"
-              >
-                {pendingAction === "delete" ? (
-                  <Spinner aria-hidden="true" />
-                ) : null}
-                {pendingAction === "delete" ? "Deleting…" : "Delete"}
-              </Button>
-              <Button
-                disabled={disabled}
-                onClick={() => {
-                  setConfirmDelete(false);
-                  requestAnimationFrame(() =>
-                    deleteConnectionButtonRef.current?.focus()
-                  );
-                }}
-                size="sm"
-                type="button"
-                variant="ghost"
-              >
-                Keep connection
-              </Button>
-            </>
-          ) : (
-            <Button
-              disabled={disabled}
-              onClick={() => {
-                setConfirmDelete(true);
-                requestAnimationFrame(() =>
-                  confirmDeleteButtonRef.current?.focus()
-                );
-              }}
-              ref={deleteConnectionButtonRef}
-              size="sm"
-              type="button"
-              variant="ghost"
-            >
-              Delete connection
-            </Button>
-          )}
-        </div>
-      ) : null}
-
-      {status?.action === "connection" ? (
+      {status ? (
         <SettingsStatusLine
           announce={status.tone === "destructive"}
           message={status.message}

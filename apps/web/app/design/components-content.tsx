@@ -45,8 +45,10 @@ import {
 import {
   AssistantProviderDialog,
   AssistantProviderSummary,
+  type AssistantRoutingChoice,
 } from "@/src/components/settings/hosted-assistant-model-settings";
-import { HostedInferenceConnectionSettings } from "@/src/components/settings/hosted-inference-connection-settings";
+import { HostedInferenceConnectionPane } from "@/src/components/settings/hosted-inference-connection-settings";
+import { DESIGN_INFERENCE_CONNECTION } from "./design-inference-connection";
 import { HealthDomainCard } from "@/src/components/overview/health-domain-card";
 import { ActiveExperimentBanner } from "@/src/components/overview/active-experiment-banner";
 import { TrialBillingBanner } from "@/src/components/home/trial-billing-banner";
@@ -558,7 +560,7 @@ export function ComponentsContent() {
     useState<SegmentedControlDemoValue>("email");
   const [choiceCardValue, setChoiceCardValue] = useState("terra");
   const [providerDialogOpen, setProviderDialogOpen] = useState(false);
-  const [providerValue, setProviderValue] = useState<HostedAssistantProvider>(
+  const [providerValue, setProviderValue] = useState<AssistantRoutingChoice>(
     HOSTED_ASSISTANT_OPENAI_PROVIDER,
   );
   const [addedContactAvatar, setAddedContactAvatar] =
@@ -1169,26 +1171,33 @@ export function ComponentsContent() {
             />
           </RadioGroup>
           <AssistantProviderSummary
-            currentProvider={HOSTED_ASSISTANT_OPENAI_PROVIDER}
-            draftProvider={providerValue}
+            connection={DESIGN_INFERENCE_CONNECTION}
+            currentRouting={HOSTED_ASSISTANT_OPENAI_PROVIDER}
+            draftRouting={providerValue}
             onChangeClick={() => setProviderDialogOpen(true)}
           />
           <AssistantProviderDialog
+            chatCompletionsAvailable
+            connection={DESIGN_INFERENCE_CONNECTION}
+            currentRouting={HOSTED_ASSISTANT_OPENAI_PROVIDER}
+            customInferenceAvailable
             onOpenChange={setProviderDialogOpen}
-            onProviderChange={setProviderValue}
+            onRoutingChange={setProviderValue}
             open={providerDialogOpen}
-            provider={providerValue}
+            routing={providerValue}
           />
         </Section>
 
         <Separator />
 
-        <Section title="Custom inference connection">
+        <Section title="Custom inference endpoint pane">
           <div inert>
-            <HostedInferenceConnectionSettings
+            <HostedInferenceConnectionPane
               chatCompletionsAvailable
               configurationAvailable={false}
-              initialConnection={null}
+              connection={null}
+              onConnectionChange={() => {}}
+              selected={false}
             />
           </div>
         </Section>

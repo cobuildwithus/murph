@@ -10,7 +10,6 @@ import { CustomizeMurphSettings } from "@/src/components/settings/customize-murp
 import { HostedAccountSettingsCards } from "@/src/components/settings/hosted-account-settings-cards";
 import { HostedAiUsageActivity } from "@/src/components/settings/hosted-ai-usage-activity";
 import { HostedAssistantModelSettings } from "@/src/components/settings/hosted-assistant-model-settings";
-import { HostedInferenceConnectionSettings } from "@/src/components/settings/hosted-inference-connection-settings";
 import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-settings";
 import type {
   HostedUsageTopUpOffer,
@@ -524,6 +523,7 @@ export default async function SettingsPage({
         </div>
         <HostedAssistantModelSettings
           canUpgradeToEdge={canUpgradeToEdge}
+          chatCompletionsAvailable={isHostedCustomChatCompletionsEnabled()}
           configurationAvailable={account?.assistant?.configurationAvailable === true}
           customInferenceAvailable={isHostedCustomInferenceEnabled()}
           expectedCurrentPlanCode={
@@ -531,6 +531,9 @@ export default async function SettingsPage({
             || currentPlanCode === "launch_monthly"
               ? currentPlanCode
               : undefined
+          }
+          initialConnection={
+            isHostedCustomInferenceEnabled() ? inferenceConnection : null
           }
           initialDormantSolPreference={
             account?.assistant?.dormantSolPreference === true
@@ -543,26 +546,6 @@ export default async function SettingsPage({
           veniceAvailable={isHostedVeniceAssistantEnabled()}
         />
       </section>
-
-      {isHostedCustomInferenceEnabled() ? (
-        <section
-          id="inference"
-          className="flex scroll-mt-24 flex-col gap-4"
-        >
-          <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-            Inference
-          </div>
-          <HostedInferenceConnectionSettings
-            chatCompletionsAvailable={
-              isHostedCustomChatCompletionsEnabled()
-            }
-            configurationAvailable={
-              account?.assistant?.configurationAvailable === true
-            }
-            initialConnection={inferenceConnection}
-          />
-        </section>
-      ) : null}
 
       {familyOwner && authenticatedMember ? (
         <section id="family" className="flex scroll-mt-24 flex-col gap-4">

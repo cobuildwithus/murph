@@ -171,7 +171,7 @@ test("other non-Edge members can still choose Luna or Terra without an invalid u
   assert.match(markup, new RegExp(`value="${HOSTED_ASSISTANT_SOL_MODEL}"`));
 });
 
-test("custom inference keeps managed model controls visibly dormant", () => {
+test("custom inference marks the model cards as the managed default", () => {
   const withoutVenice = renderToStaticMarkup(
     createElement(HostedAssistantModelSettings, {
       canUpgradeToEdge: false,
@@ -201,10 +201,43 @@ test("custom inference keeps managed model controls visibly dormant", () => {
       markup,
       /Choose the model Murph uses whenever Murph-managed inference is selected/u,
     );
-    assert.doesNotMatch(markup, /New core replies use/u);
     assert.match(markup, /Managed default/u);
+    // One control owns where replies go, even when Venice is unavailable.
+    assert.match(markup, /New core replies use/u);
   }
-  assert.match(withVenice, /OpenAI.*is your saved managed provider/su);
+  assert.match(withVenice, /New core replies use.*OpenAI/su);
+});
+
+test("the routing dialog offers the member's endpoint as a third option", () => {
+  const markup = renderToStaticMarkup(
+    createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: false,
+      chatCompletionsAvailable: true,
+      configurationAvailable: true,
+      customInferenceAvailable: true,
+      initialConnection: {
+        contextWindowTokens: 131_072,
+        endpointHost: "inference.example.test",
+        model: "example-model",
+        protocol: "responses",
+        revision: 4,
+        selected: true,
+        supportsImages: false,
+        verificationProfile: "murph-codex-0.145.0-portable-responses-v1",
+        verifiedAt: "2026-07-30T12:00:00.000Z",
+      },
+      initialDormantSolPreference: false,
+      initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      initialProvider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
+      solAvailable: true,
+      veniceAvailable: true,
+    }),
+  );
+
+  // A routed endpoint is described where the provider choice lives, so there
+  // is no second inference control to reconcile.
+  assert.match(markup, /New core replies use.*your endpoint/su);
+  assert.match(markup, /inference\.example\.test · example-model/u);
 });
 
 test("members can switch the provider without changing Terra, Luna, or Sol", async () => {
@@ -246,7 +279,7 @@ test("members can switch the provider without changing Terra, Luna, or Sol", asy
   );
   assert.match(
     view.document.body.textContent ?? "",
-    /Murph uses this provider after you save\./u,
+    /Murph sends core replies here after you save\./u,
   );
   assert.match(
     view.document.body.textContent ?? "",
@@ -300,6 +333,124 @@ test("members can switch the provider without changing Terra, Luna, or Sol", asy
     view.container,
     HOSTED_ASSISTANT_TERRA_MODEL,
   )));
+  view.cleanup();
+});
+
+test("one save routes replies to the endpoint and keeps the managed default", async () => {
+  mocks.requestHostedOnboardingJson
+    .mockResolvedValueOnce({ mode: "custom", updated: true })
+    .mockResolvedValueOnce({
+      dormantSolPreference: false,
+      model: HOSTED_ASSISTANT_TERRA_MODEL,
+      ok: true,
+      provider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
+      solAvailable: true,
+      updated: false,
+    });
+  const view = await renderClient(
+    createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: false,
+      chatCompletionsAvailable: true,
+      configurationAvailable: true,
+      customInferenceAvailable: true,
+      initialConnection: {
+        contextWindowTokens: 131_072,
+        endpointHost: "inference.example.test",
+        model: "example-model",
+        protocol: "responses",
+        revision: 4,
+        selected: false,
+        supportsImages: false,
+        verificationProfile: "murph-codex-0.145.0-portable-responses-v1",
+        verifiedAt: "2026-07-30T12:00:00.000Z",
+      },
+      initialDormantSolPreference: false,
+      initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      initialProvider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
+      solAvailable: true,
+      veniceAvailable: true,
+    }),
+  );
+
+  assert.match(view.container.textContent ?? "", /New core replies use OpenAI\./u);
+  await act(async () => {
+    findButton(view.container, "Change").click();
+  });
+  assert.match(view.document.body.textContent ?? "", /Your endpoint/u);
+  assert.match(
+    view.document.body.textContent ?? "",
+    /inference\.example\.test · example-model/u,
+  );
+
+  await act(async () => {
+    findProviderRadio(view.document, "custom").click();
+  });
+  assert.equal(view.document.querySelector('[role="dialog"]'), null);
+  assert.match(
+    view.container.textContent ?? "",
+    /Core replies switch to your endpoint after Save\./u,
+  );
+  // Selecting is a draft: nothing is durable until the single Save runs.
+  expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+
+  await act(async () => {
+    submitForm(view.container);
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  // The routing bit commits before the managed model/provider, so a later
+  // failure cannot leave replies pointed somewhere the member did not confirm.
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(1, {
+    method: "POST",
+    payload: { mode: "custom" },
+    url: "/api/settings/assistant",
+  });
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(2, {
+    method: "POST",
+    payload: {},
+    url: "/api/settings/assistant-model",
+  });
+  assert.match(
+    view.container.textContent ?? "",
+    /New core replies use your endpoint\./u,
+  );
+  assertHiddenSaveAnnouncement(
+    view.container,
+    /Saved\. New core replies use your endpoint\. Terra through OpenAI stays your managed default\./u,
+  );
+  view.cleanup();
+});
+
+test("an endpoint that is not verified yet cannot be selected for replies", async () => {
+  const view = await renderClient(
+    createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: false,
+      chatCompletionsAvailable: true,
+      configurationAvailable: true,
+      customInferenceAvailable: true,
+      initialConnection: null,
+      initialDormantSolPreference: false,
+      initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      initialProvider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
+      solAvailable: true,
+      veniceAvailable: true,
+    }),
+  );
+
+  await act(async () => {
+    findButton(view.container, "Change").click();
+  });
+  assert.match(
+    view.document.body.textContent ?? "",
+    /Connect an OpenAI-compatible endpoint you control\./u,
+  );
+  // No radio exists for an endpoint that has never been verified.
+  assert.equal(
+    view.document.querySelector('[id="assistant-provider-custom"]'),
+    null,
+  );
+  assert.ok(findOptionalButton(view.document.body as HTMLElement, "Set up"));
   view.cleanup();
 });
 

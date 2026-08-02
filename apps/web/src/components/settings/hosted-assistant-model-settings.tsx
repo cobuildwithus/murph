@@ -39,6 +39,9 @@ import {
   RadioGroupItem,
 } from "@/src/components/ui/radio-group";
 import { Spinner } from "@/src/components/ui/spinner";
+import type {
+  HostedInferenceConnectionView,
+} from "@/src/lib/hosted-inference/types";
 
 import {
   ASSISTANT_MODEL_CHOICE_CARD_CLASSES,
@@ -46,11 +49,30 @@ import {
   type AssistantModelArtworkVariant,
 } from "./assistant-model-artwork";
 import { SettingsStatusLine } from "./connected-account-card";
+import { HostedInferenceConnectionPane } from "./hosted-inference-connection-settings";
 import { UpgradeToEdgeButton } from "./hosted-plan-upgrade-button";
 
 const ASSISTANT_MODEL_SETTINGS_URL = "/api/settings/assistant-model";
+const ASSISTANT_MODE_SETTINGS_URL = "/api/settings/assistant";
 const SOL_REQUIRES_EDGE_ERROR_CODE = "ASSISTANT_MODEL_SOL_REQUIRES_EDGE";
 const VENICE_UNAVAILABLE_ERROR_CODE = "ASSISTANT_PROVIDER_VENICE_UNAVAILABLE";
+
+/**
+ * Where new core replies go. Murph-managed providers and the member's own
+ * endpoint are one choice because they answer the same question; the managed
+ * provider stays remembered while the endpoint is in use.
+ */
+export const CUSTOM_INFERENCE_ROUTING = "custom";
+
+export type AssistantRoutingChoice =
+  | HostedAssistantProvider
+  | typeof CUSTOM_INFERENCE_ROUTING;
+
+function isAssistantRoutingChoice(
+  value: string,
+): value is AssistantRoutingChoice {
+  return value === CUSTOM_INFERENCE_ROUTING || isHostedAssistantProvider(value);
+}
 
 const MODEL_OPTIONS = [
   {
@@ -123,11 +145,18 @@ interface AssistantModelSettingsResponse {
   updated: boolean;
 }
 
+interface AssistantModeResponse {
+  mode: "custom" | "managed";
+  updated: boolean;
+}
+
 interface HostedAssistantModelSettingsProps {
   canUpgradeToEdge: boolean;
+  chatCompletionsAvailable?: boolean;
   configurationAvailable: boolean;
   customInferenceAvailable?: boolean;
   expectedCurrentPlanCode?: "launch_group_monthly" | "launch_monthly";
+  initialConnection?: HostedInferenceConnectionView | null;
   initialDormantSolPreference: boolean;
   initialModel: HostedAssistantProductModel;
   initialProvider?: HostedAssistantProvider;
@@ -136,79 +165,69 @@ interface HostedAssistantModelSettingsProps {
 }
 
 interface AssistantProviderDialogProps {
-  managedDefaultOnly?: boolean;
+  chatCompletionsAvailable?: boolean;
+  configurationAvailable?: boolean;
+  connection?: HostedInferenceConnectionView | null;
+  currentRouting?: AssistantRoutingChoice;
+  customInferenceAvailable?: boolean;
+  onConnectionChange?: (
+    connection: HostedInferenceConnectionView | null,
+  ) => void;
   onOpenChange: (open: boolean) => void;
-  onProviderChange: (provider: HostedAssistantProvider) => void;
+  onRoutingChange: (routing: AssistantRoutingChoice) => void;
   open: boolean;
-  provider: HostedAssistantProvider;
+  routing: AssistantRoutingChoice;
 }
 
 interface AssistantProviderSummaryProps {
-  currentProvider: HostedAssistantProvider;
+  connection?: HostedInferenceConnectionView | null;
+  currentRouting: AssistantRoutingChoice;
   disabled?: boolean;
-  draftProvider: HostedAssistantProvider;
-  managedDefaultOnly?: boolean;
+  draftRouting: AssistantRoutingChoice;
   onChangeClick: () => void;
 }
 
 export function AssistantProviderSummary({
-  currentProvider,
+  connection = null,
+  currentRouting,
   disabled = false,
-  draftProvider,
-  managedDefaultOnly = false,
+  draftRouting,
   onChangeClick,
 }: AssistantProviderSummaryProps) {
-  const currentProviderName = readProviderName(currentProvider);
-  const draftProviderName = readProviderName(draftProvider);
-  const hasPendingChange = currentProvider !== draftProvider;
+  const currentName = readRoutingName(currentRouting);
+  const draftName = readRoutingName(draftRouting);
+  const hasPendingChange = currentRouting !== draftRouting;
+  const endpointDetail =
+    draftRouting === CUSTOM_INFERENCE_ROUTING && connection
+      ? `${connection.endpointHost} · ${connection.model}`
+      : null;
 
   return (
-    <div className="flex w-full items-center gap-2 px-1">
+    <div className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 px-1">
       <p className="text-sm text-muted-foreground">
-        {managedDefaultOnly ? (
-          hasPendingChange ? (
-            <>
-              Saved managed provider changes to{" "}
-              <span className="font-medium text-foreground">
-                {draftProviderName}
-              </span>{" "}
-              after Save.
-            </>
-          ) : (
-            <>
-              <span className="font-medium text-foreground">
-                {currentProviderName}
-              </span>{" "}
-              is your saved managed provider.
-            </>
-          )
-        ) : hasPendingChange ? (
+        {hasPendingChange ? (
           <>
             Core replies switch to{" "}
-            <span className="font-medium text-foreground">
-              {draftProviderName}
-            </span>{" "}
+            <span className="font-medium text-foreground">{draftName}</span>{" "}
             after Save.
           </>
         ) : (
           <>
             New core replies use{" "}
-            <span className="font-medium text-foreground">
-              {currentProviderName}
-            </span>
-            .
+            <span className="font-medium text-foreground">{currentName}</span>.
           </>
         )}
+        {endpointDetail ? (
+          <span className="ml-1.5 font-mono text-xs [overflow-wrap:anywhere]">
+            {endpointDetail}
+          </span>
+        ) : null}
       </p>
       <Button
         aria-label={
-          managedDefaultOnly
-            ? hasPendingChange
-              ? `Change managed model provider. The saved provider will change to ${draftProviderName} after Save.`
-              : `Change managed model provider. ${currentProviderName} is the saved provider.`
-            : hasPendingChange
-            ? `Change model provider. Core replies will switch to ${draftProviderName} after Save.`
-            : `Change model provider. New core replies use ${currentProviderName}.`
+          hasPendingChange
+            ? `Change where core replies go. Core replies will switch to ${draftName} after Save.`
+            : `Change where core replies go. New core replies use ${currentName}.`
         }
         className="text-muted-foreground"
         disabled={disabled}
@@ -224,89 +243,232 @@ export function AssistantProviderSummary({
 }
 
 export function AssistantProviderDialog({
-  managedDefaultOnly = false,
+  chatCompletionsAvailable = false,
+  configurationAvailable = true,
+  connection = null,
+  currentRouting,
+  customInferenceAvailable = false,
+  onConnectionChange,
   onOpenChange,
-  onProviderChange,
+  onRoutingChange,
   open,
-  provider,
+  routing,
 }: AssistantProviderDialogProps) {
+  const [pane, setPane] = useState<"endpoint" | "list">("list");
+  const endpointUnsupported =
+    connection?.protocol === "chat_completions" && !chatCompletionsAvailable;
+
+  function changeOpen(next: boolean): void {
+    if (!next) {
+      setPane("list");
+    }
+    onOpenChange(next);
+  }
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[min(27rem,calc(100vw-2rem))] gap-5 overflow-y-auto border border-border/80 bg-popover p-5 text-popover-foreground ring-border sm:max-w-[27rem] sm:p-6">
-        <DialogHeader className="gap-1.5 pr-9">
-          <DialogTitle className="font-serif text-xl/7 font-semibold tracking-normal">
-            Choose provider
-          </DialogTitle>
-          <DialogDescription className="max-w-[38ch] text-sm/6">
-            {managedDefaultOnly
-              ? "Murph uses this provider whenever Murph-managed inference is selected."
-              : "Murph uses this provider after you save."}
-          </DialogDescription>
-        </DialogHeader>
-        <RadioGroup
-          aria-label="Model provider"
-          className="gap-2"
-          value={provider}
-          onValueChange={(value) => {
-            if (!isHostedAssistantProvider(value)) {
-              return;
-            }
-            onProviderChange(value);
-            onOpenChange(false);
-          }}
-        >
-          {PROVIDER_OPTIONS.map((option) => {
-            const titleId = `assistant-provider-${option.provider}-title`;
-            const descriptionId =
-              `assistant-provider-${option.provider}-description`;
-            return (
-              <label
-                className="flex min-h-[4.5rem] cursor-pointer items-center gap-3 rounded-2xl border border-border/70 bg-background/40 px-3 py-2.5 text-left transition-colors hover:bg-muted/45 has-[[data-checked]]:border-primary/35 has-[[data-checked]]:bg-primary/[0.035] has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring"
-                htmlFor={`assistant-provider-${option.provider}`}
-                key={option.provider}
+    <Dialog open={open} onOpenChange={changeOpen}>
+      <DialogContent
+        className={`max-h-[calc(100dvh-2rem)] gap-5 overflow-y-auto border border-border/80 bg-popover p-5 text-popover-foreground ring-border sm:p-6 ${
+          pane === "endpoint"
+            ? "max-w-[min(36rem,calc(100vw-2rem))] sm:max-w-[36rem]"
+            : "max-w-[min(27rem,calc(100vw-2rem))] sm:max-w-[27rem]"
+        }`}
+      >
+        {pane === "endpoint" ? (
+          <>
+            <DialogHeader className="gap-1.5 pr-9">
+              <DialogTitle className="font-serif text-xl/7 font-semibold tracking-normal">
+                Your endpoint
+              </DialogTitle>
+              <DialogDescription className="max-w-[46ch] text-sm/6">
+                Connect one OpenAI-compatible endpoint you operate or pay for.
+                Murph never switches away from it after an endpoint failure.
+              </DialogDescription>
+            </DialogHeader>
+            <HostedInferenceConnectionPane
+              chatCompletionsAvailable={chatCompletionsAvailable}
+              configurationAvailable={configurationAvailable}
+              connection={connection}
+              onConnectionChange={(next) => onConnectionChange?.(next)}
+              selected={currentRouting === CUSTOM_INFERENCE_ROUTING}
+            />
+            <div className="flex items-center justify-between gap-2 border-t border-border pt-4">
+              <Button
+                onClick={() => setPane("list")}
+                size="sm"
+                type="button"
+                variant="ghost"
               >
-                <span className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-border/60 bg-white/80">
-                  <Image
-                    alt=""
-                    aria-hidden="true"
-                    className="size-8 object-contain [color-scheme:light]"
-                    height={option.logo.height}
-                    src={option.logo.src}
-                    width={option.logo.width}
-                  />
-                </span>
-                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <span
-                    className="text-sm font-medium text-foreground"
-                    id={titleId}
+                Back to providers
+              </Button>
+              {connection && !endpointUnsupported ? (
+                <Button
+                  disabled={!configurationAvailable}
+                  onClick={() => {
+                    onRoutingChange(CUSTOM_INFERENCE_ROUTING);
+                    changeOpen(false);
+                  }}
+                  size="sm"
+                  type="button"
+                  variant={
+                    routing === CUSTOM_INFERENCE_ROUTING ? "outline" : "default"
+                  }
+                >
+                  {routing === CUSTOM_INFERENCE_ROUTING
+                    ? "Selected for core replies"
+                    : "Use for core replies"}
+                </Button>
+              ) : null}
+            </div>
+          </>
+        ) : (
+          <>
+            <DialogHeader className="gap-1.5 pr-9">
+              <DialogTitle className="font-serif text-xl/7 font-semibold tracking-normal">
+                Choose provider
+              </DialogTitle>
+              <DialogDescription className="max-w-[38ch] text-sm/6">
+                Murph sends core replies here after you save.
+              </DialogDescription>
+            </DialogHeader>
+            <RadioGroup
+              aria-label="Core reply provider"
+              className="gap-2"
+              value={routing}
+              onValueChange={(value) => {
+                if (!isAssistantRoutingChoice(value)) {
+                  return;
+                }
+                onRoutingChange(value);
+                changeOpen(false);
+              }}
+            >
+              {PROVIDER_OPTIONS.map((option) => {
+                const titleId = `assistant-provider-${option.provider}-title`;
+                const descriptionId =
+                  `assistant-provider-${option.provider}-description`;
+                return (
+                  <label
+                    className="flex min-h-[4.5rem] cursor-pointer items-center gap-3 rounded-2xl border border-border/70 bg-background/40 px-3 py-2.5 text-left transition-colors hover:bg-muted/45 has-[[data-checked]]:border-primary/35 has-[[data-checked]]:bg-primary/[0.035] has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring"
+                    htmlFor={`assistant-provider-${option.provider}`}
+                    key={option.provider}
                   >
-                    {option.name}
-                  </span>
-                  <span
-                    className="text-xs/5 text-muted-foreground"
-                    id={descriptionId}
-                  >
-                    {option.description}
-                  </span>
-                </span>
-                <RadioGroupItem
-                  aria-describedby={descriptionId}
-                  aria-labelledby={titleId}
-                  className="size-5"
-                  id={`assistant-provider-${option.provider}`}
-                  value={option.provider}
+                    <span className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-border/60 bg-white/80">
+                      <Image
+                        alt=""
+                        aria-hidden="true"
+                        className="size-8 object-contain [color-scheme:light]"
+                        height={option.logo.height}
+                        src={option.logo.src}
+                        width={option.logo.width}
+                      />
+                    </span>
+                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                      <span
+                        className="text-sm font-medium text-foreground"
+                        id={titleId}
+                      >
+                        {option.name}
+                      </span>
+                      <span
+                        className="text-xs/5 text-muted-foreground"
+                        id={descriptionId}
+                      >
+                        {option.description}
+                      </span>
+                    </span>
+                    <RadioGroupItem
+                      aria-describedby={descriptionId}
+                      aria-labelledby={titleId}
+                      className="size-5"
+                      id={`assistant-provider-${option.provider}`}
+                      value={option.provider}
+                    />
+                  </label>
+                );
+              })}
+              {customInferenceAvailable ? (
+                <CustomEndpointOption
+                  connection={connection}
+                  onManage={() => setPane("endpoint")}
+                  unsupported={endpointUnsupported}
                 />
-              </label>
-            );
-          })}
-        </RadioGroup>
-        <p className="px-1 text-xs/5 text-pretty text-muted-foreground">
-          {managedDefaultOnly
-            ? "This only changes your saved managed defaults. Image generation, voice, search, and other tools still use their specialized providers."
-            : "This only changes core replies. Image generation, voice, search, and other tools still use their specialized providers."}
-        </p>
+              ) : null}
+            </RadioGroup>
+            <p className="px-1 text-xs/5 text-pretty text-muted-foreground">
+              This only changes core replies. Image generation, voice, search,
+              and other tools still use their specialized providers.
+            </p>
+          </>
+        )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * The member's own endpoint as a peer of the managed providers. It carries a
+ * radio only once a verified connection exists, so an unverified endpoint can
+ * never be routed to; before that the row is a way into the setup pane.
+ */
+function CustomEndpointOption({
+  connection,
+  onManage,
+  unsupported,
+}: {
+  connection: HostedInferenceConnectionView | null;
+  onManage: () => void;
+  unsupported: boolean;
+}) {
+  return (
+    // min-w-0 keeps this grid item from taking its single-line summary as a
+    // min-content floor, which would overflow the dialog on narrow viewports.
+    <div className="flex min-h-[4.5rem] min-w-0 items-center gap-3 rounded-2xl border border-border/70 bg-background/40 px-3 py-2.5 text-left transition-colors has-[[data-checked]]:border-primary/35 has-[[data-checked]]:bg-primary/[0.035] has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring">
+      <span className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-border/60 bg-white/80">
+        <span
+          aria-hidden="true"
+          className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground"
+        >
+          API
+        </span>
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span
+          className="text-sm font-medium text-foreground"
+          id="assistant-provider-custom-title"
+        >
+          Your endpoint
+        </span>
+        <span
+          className="truncate text-xs/5 text-muted-foreground"
+          id="assistant-provider-custom-description"
+        >
+          {connection
+            ? unsupported
+              ? "This connection's protocol is unavailable in this deployment."
+              : `${connection.endpointHost} · ${connection.model}`
+            : "Connect an OpenAI-compatible endpoint you control."}
+        </span>
+      </span>
+      <Button
+        className="shrink-0 text-muted-foreground"
+        onClick={onManage}
+        size="xs"
+        type="button"
+        variant="ghost"
+      >
+        {connection ? "Manage" : "Set up"}
+      </Button>
+      {connection && !unsupported ? (
+        <RadioGroupItem
+          aria-describedby="assistant-provider-custom-description"
+          aria-labelledby="assistant-provider-custom-title"
+          className="size-5"
+          id="assistant-provider-custom"
+          value={CUSTOM_INFERENCE_ROUTING}
+        />
+      ) : null}
+    </div>
   );
 }
 
@@ -314,10 +476,12 @@ export function HostedAssistantModelSettings(
   props: HostedAssistantModelSettingsProps,
 ) {
   const initialProvider = props.initialProvider ?? HOSTED_ASSISTANT_DEFAULT_PROVIDER;
+  const initialConnection = props.initialConnection ?? null;
   return (
     <HostedAssistantModelSettingsForm
-      key={`${props.initialModel}:${initialProvider}:${String(props.initialDormantSolPreference)}:${String(props.solAvailable)}:${String(props.configurationAvailable)}:${String(props.canUpgradeToEdge)}:${String(props.veniceAvailable === true)}:${String(props.customInferenceAvailable === true)}`}
+      key={`${props.initialModel}:${initialProvider}:${String(props.initialDormantSolPreference)}:${String(props.solAvailable)}:${String(props.configurationAvailable)}:${String(props.canUpgradeToEdge)}:${String(props.veniceAvailable === true)}:${String(props.customInferenceAvailable === true)}:${String(initialConnection?.revision ?? "none")}:${String(initialConnection?.selected === true)}`}
       {...props}
+      initialConnection={initialConnection}
       initialProvider={initialProvider}
     />
   );
@@ -325,13 +489,19 @@ export function HostedAssistantModelSettings(
 
 function HostedAssistantModelSettingsForm(
   props: HostedAssistantModelSettingsProps & {
+    initialConnection: HostedInferenceConnectionView | null;
     initialProvider: HostedAssistantProvider;
   },
 ) {
+  const initialRouting: AssistantRoutingChoice = props.initialConnection?.selected
+    ? CUSTOM_INFERENCE_ROUTING
+    : props.initialProvider;
   const [currentModel, setCurrentModel] = useState(props.initialModel);
   const [draftModel, setDraftModel] = useState(props.initialModel);
   const [currentProvider, setCurrentProvider] = useState(props.initialProvider);
-  const [draftProvider, setDraftProvider] = useState(props.initialProvider);
+  const [connection, setConnection] = useState(props.initialConnection);
+  const [currentRouting, setCurrentRouting] = useState(initialRouting);
+  const [draftRouting, setDraftRouting] = useState(initialRouting);
   const [dormantSolPreference, setDormantSolPreference] = useState(
     props.initialDormantSolPreference,
   );
@@ -347,9 +517,13 @@ function HostedAssistantModelSettingsForm(
   } | null>(null);
   const [saveAnnouncement, setSaveAnnouncement] = useState<string | null>(null);
   const controlsDisabled = isSaving || !props.configurationAvailable;
-  const hasChanges =
-    draftModel !== currentModel
-    || draftProvider !== currentProvider
+  // Selecting the member's own endpoint leaves the saved managed provider
+  // untouched so switching back restores it.
+  const draftProvider =
+    draftRouting === CUSTOM_INFERENCE_ROUTING ? currentProvider : draftRouting;
+  const routingChanged = draftRouting !== currentRouting;
+  const hasChanges = draftModel !== currentModel
+    || routingChanged
     || dormantSolPreference;
 
   async function saveModel() {
@@ -361,6 +535,34 @@ function HostedAssistantModelSettingsForm(
       const modelChanged = draftModel !== currentModel;
       const providerChanged = draftProvider !== currentProvider;
       const replaceDormantSol = dormantSolPreference && !providerChanged;
+      const customChanged =
+        (draftRouting === CUSTOM_INFERENCE_ROUTING)
+          !== (currentRouting === CUSTOM_INFERENCE_ROUTING);
+      // The mode route owns the endpoint routing bit; the model route owns the
+      // managed model and provider. Save the mode first so a failure there
+      // cannot leave replies pointed at an endpoint the member did not confirm.
+      if (customChanged) {
+        await requestHostedOnboardingJson<AssistantModeResponse>({
+          method: "POST",
+          payload: {
+            mode: draftRouting === CUSTOM_INFERENCE_ROUTING
+              ? "custom"
+              : "managed",
+          },
+          url: ASSISTANT_MODE_SETTINGS_URL,
+        });
+        // Commit the routing locally as soon as it is durable, so a later
+        // model/provider failure cannot report routing as unsaved.
+        setCurrentRouting(draftRouting);
+        setConnection((current) =>
+          current
+            ? {
+                ...current,
+                selected: draftRouting === CUSTOM_INFERENCE_ROUTING,
+              }
+            : current
+        );
+      }
       const response = await requestHostedOnboardingJson<AssistantModelSettingsResponse>({
         method: "POST",
         payload: {
@@ -391,15 +593,20 @@ function HostedAssistantModelSettingsForm(
       const provider = isHostedAssistantProvider(response.provider)
         ? response.provider
         : draftProvider;
+      const savedRouting: AssistantRoutingChoice =
+        draftRouting === CUSTOM_INFERENCE_ROUTING
+          ? CUSTOM_INFERENCE_ROUTING
+          : provider;
       setCurrentModel(response.model);
       setDraftModel(response.model);
       setCurrentProvider(provider);
-      setDraftProvider(provider);
+      setCurrentRouting(savedRouting);
+      setDraftRouting(savedRouting);
       setDormantSolPreference(response.dormantSolPreference);
       setSolAvailable(response.solAvailable);
       setSaveAnnouncement(
-        props.customInferenceAvailable
-          ? `Saved. ${readProductModelName(response.model)} through ${readProviderName(provider)} is your managed default.`
+        savedRouting === CUSTOM_INFERENCE_ROUTING
+          ? `Saved. New core replies use your endpoint. ${readProductModelName(response.model)} through ${readProviderName(provider)} stays your managed default.`
           : response.dormantSolPreference
           ? `Saved. New core replies use ${readProductModelName(response.model)} through ${readProviderName(provider)} while Edge is paused; Sol remains saved.`
           : `Saved. ${readProductModelName(response.model)} through ${readProviderName(provider)} is your default.`,
@@ -417,7 +624,10 @@ function HostedAssistantModelSettingsForm(
       }
       if (veniceNoLongerAvailable) {
         setCurrentProvider(HOSTED_ASSISTANT_OPENAI_PROVIDER);
-        setDraftProvider(HOSTED_ASSISTANT_OPENAI_PROVIDER);
+        if (draftRouting !== CUSTOM_INFERENCE_ROUTING) {
+          setCurrentRouting(HOSTED_ASSISTANT_OPENAI_PROVIDER);
+          setDraftRouting(HOSTED_ASSISTANT_OPENAI_PROVIDER);
+        }
         setVeniceAvailable(false);
         setProviderDialogOpen(false);
       }
@@ -536,24 +746,42 @@ function HostedAssistantModelSettingsForm(
         </RadioGroup>
       </FieldSet>
 
-      {veniceAvailable ? (
+      {veniceAvailable || props.customInferenceAvailable ? (
         <>
           <AssistantProviderSummary
-            currentProvider={currentProvider}
+            connection={connection}
+            currentRouting={currentRouting}
             disabled={controlsDisabled}
-            draftProvider={draftProvider}
-            managedDefaultOnly={props.customInferenceAvailable}
+            draftRouting={draftRouting}
             onChangeClick={() => setProviderDialogOpen(true)}
           />
           <AssistantProviderDialog
-            managedDefaultOnly={props.customInferenceAvailable}
+            chatCompletionsAvailable={props.chatCompletionsAvailable}
+            configurationAvailable={props.configurationAvailable}
+            connection={connection}
+            currentRouting={currentRouting}
+            customInferenceAvailable={props.customInferenceAvailable}
+            onConnectionChange={(next) => {
+              setConnection(next);
+              // A deleted connection cannot stay selected; the mode route
+              // already returned this member to managed inference.
+              if (!next) {
+                setCurrentRouting((current) =>
+                  current === CUSTOM_INFERENCE_ROUTING ? currentProvider : current
+                );
+                setDraftRouting((current) =>
+                  current === CUSTOM_INFERENCE_ROUTING ? currentProvider : current
+                );
+              }
+              setStatus(null);
+            }}
             onOpenChange={setProviderDialogOpen}
-            onProviderChange={(provider) => {
-              setDraftProvider(provider);
+            onRoutingChange={(routing) => {
+              setDraftRouting(routing);
               setStatus(null);
             }}
             open={providerDialogOpen}
-            provider={draftProvider}
+            routing={draftRouting}
           />
         </>
       ) : null}
@@ -657,4 +885,10 @@ function readProductModelName(model: HostedAssistantProductModel): string {
 
 function readProviderName(provider: HostedAssistantProvider): string {
   return provider === HOSTED_ASSISTANT_VENICE_PROVIDER ? "Venice" : "OpenAI";
+}
+
+function readRoutingName(routing: AssistantRoutingChoice): string {
+  return routing === CUSTOM_INFERENCE_ROUTING
+    ? "your endpoint"
+    : readProviderName(routing);
 }
