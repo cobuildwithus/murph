@@ -10,10 +10,9 @@ import {
 } from './mapbox-route-client.js'
 
 const MAX_ADDRESS_CANDIDATES = 3
-const MAX_FORMATTED_ADDRESS_LENGTH = 512
 const MAX_ADDRESS_LINE_LENGTH = 64
 const MAX_CITY_LENGTH = 200
-const MAX_PROVIDER_LABEL_LENGTH = 64
+const MAX_PROVIDER_STRING_LENGTH = 512
 const MAX_MATCH_VALUE_LENGTH = 32
 const US_POSTAL_CODE_PATTERN = /^\d{5}(?:-\d{4})?$/u
 const US_STATE_CODE_PATTERN = /^[A-Z]{2}$/u
@@ -25,15 +24,10 @@ const nullableAddressLineSchema = z
   .max(MAX_ADDRESS_LINE_LENGTH)
   .nullable()
 const nullableCitySchema = z.string().min(1).max(MAX_CITY_LENGTH).nullable()
-const nullableProviderLabelSchema = z
+const nullableStateSchema = z.string().regex(US_STATE_CODE_PATTERN).nullable()
+const nullablePostalCodeSchema = z
   .string()
-  .min(1)
-  .max(MAX_PROVIDER_LABEL_LENGTH)
-  .nullable()
-const nullableMatchValueSchema = z
-  .string()
-  .min(1)
-  .max(MAX_MATCH_VALUE_LENGTH)
+  .regex(US_POSTAL_CODE_PATTERN)
   .nullable()
 
 export const mapboxAddressResolveInputSchema = z.object({
@@ -42,33 +36,13 @@ export const mapboxAddressResolveInputSchema = z.object({
   language: z.string().trim().min(1).max(10).optional(),
 })
 
-const mapboxAddressMatchSchema = z
-  .object({
-    confidence: nullableMatchValueSchema,
-    addressNumber: nullableMatchValueSchema,
-    street: nullableMatchValueSchema,
-    secondaryAddress: nullableMatchValueSchema,
-    postcode: nullableMatchValueSchema,
-    place: nullableMatchValueSchema,
-    region: nullableMatchValueSchema,
-    country: nullableMatchValueSchema,
-  })
-  .strict()
-
 const mapboxAddressCandidateSchema = z
   .object({
-    formattedAddress: z.string().min(1).max(MAX_FORMATTED_ADDRESS_LENGTH),
     addressLine1: nullableAddressLineSchema,
     addressLine2: nullableAddressLineSchema,
     city: nullableCitySchema,
-    state: nullableProviderLabelSchema,
-    postalCode: nullableProviderLabelSchema,
-    countryCode: nullableProviderLabelSchema,
-    featureType: nullableProviderLabelSchema,
-    accuracy: nullableProviderLabelSchema,
-    completeForUsMail: z.boolean(),
-    safeToAutofill: z.boolean(),
-    match: mapboxAddressMatchSchema,
+    state: nullableStateSchema,
+    postalCode: nullablePostalCodeSchema,
   })
   .strict()
 
@@ -80,7 +54,6 @@ export const mapboxAddressResolveResultSchema = z
         geocodingApiVersion: z.literal(MAPBOX_GEOCODING_API_VERSION),
       })
       .strict(),
-    query: z.string().min(1).max(256),
     candidates: z.array(mapboxAddressCandidateSchema).max(MAX_ADDRESS_CANDIDATES),
     recommendedCandidate: mapboxAddressCandidateSchema.nullable(),
     privacy: z
@@ -88,12 +61,102 @@ export const mapboxAddressResolveResultSchema = z
         tokenSource: z.literal('env'),
         persistedByTool: z.literal(false),
         geocodingStorage: z.literal('temporary'),
-        candidateCount: z.number().int().nonnegative(),
+        candidateCount: z
+          .number()
+          .int()
+          .min(0)
+          .max(MAX_ADDRESS_CANDIDATES),
       })
       .strict(),
-    warnings: z.array(z.string().min(1)),
+    warnings: z.array(z.string().min(1)).max(1),
   })
   .strict()
+
+const providerStringSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(MAX_PROVIDER_STRING_LENGTH)
+  .optional()
+const matchValueSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(MAX_MATCH_VALUE_LENGTH)
+  .optional()
+const providerNamedContextSchema = z
+  .object({
+    name: providerStringSchema,
+  })
+  .passthrough()
+  .optional()
+const providerAddressFeatureSchema = z
+  .object({
+    properties: z
+      .object({
+        feature_type: providerStringSchema,
+        name: providerStringSchema,
+        context: z
+          .object({
+            address: z
+              .object({
+                address_number: providerStringSchema,
+                street_name: providerStringSchema,
+                name: providerStringSchema,
+              })
+              .passthrough()
+              .optional(),
+            secondary_address: z
+              .object({
+                designator: providerStringSchema,
+                identifier: providerStringSchema,
+                name: providerStringSchema,
+              })
+              .passthrough()
+              .optional(),
+            postcode: providerNamedContextSchema,
+            place: providerNamedContextSchema,
+            locality: providerNamedContextSchema,
+            region: z
+              .object({
+                name: providerStringSchema,
+                region_code: providerStringSchema,
+              })
+              .passthrough()
+              .optional(),
+            country: z
+              .object({
+                name: providerStringSchema,
+                country_code: providerStringSchema,
+              })
+              .passthrough()
+              .optional(),
+          })
+          .passthrough()
+          .optional(),
+        match_code: z
+          .object({
+            confidence: matchValueSchema,
+            address_number: matchValueSchema,
+            street: matchValueSchema,
+            secondary_address: matchValueSchema,
+            postcode: matchValueSchema,
+            place: matchValueSchema,
+            region: matchValueSchema,
+            country: matchValueSchema,
+          })
+          .passthrough()
+          .optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough()
+const providerAddressResponseSchema = z
+  .object({
+    features: z.array(providerAddressFeatureSchema).max(10).optional(),
+  })
+  .passthrough()
 
 export type MapboxAddressDependencies = {
   env?: NodeJS.ProcessEnv
@@ -106,59 +169,11 @@ export type MapboxAddressResolveResult = z.infer<
   typeof mapboxAddressResolveResultSchema
 >
 type MapboxAddressCandidate = z.infer<typeof mapboxAddressCandidateSchema>
+type ProviderAddressFeature = z.infer<typeof providerAddressFeatureSchema>
 
-interface MapboxAddressGeocodingResponse {
-  features?: MapboxAddressFeature[]
-}
-
-interface MapboxAddressFeature {
-  properties?: {
-    feature_type?: string
-    full_address?: string
-    name?: string
-    coordinates?: {
-      accuracy?: string
-    }
-    context?: {
-      address?: {
-        address_number?: string
-        street_name?: string
-        name?: string
-      }
-      secondary_address?: {
-        designator?: string
-        identifier?: string
-        name?: string
-      }
-      postcode?: {
-        name?: string
-      }
-      place?: {
-        name?: string
-      }
-      locality?: {
-        name?: string
-      }
-      region?: {
-        name?: string
-        region_code?: string
-      }
-      country?: {
-        name?: string
-        country_code?: string
-      }
-    }
-    match_code?: {
-      confidence?: string
-      address_number?: string
-      street?: string
-      secondary_address?: string
-      postcode?: string
-      place?: string
-      region?: string
-      country?: string
-    }
-  }
+type ResolvedAddressCandidate = {
+  candidate: MapboxAddressCandidate
+  safeToAutofill: boolean
 }
 
 export async function resolveMapboxAddress(
@@ -167,7 +182,6 @@ export async function resolveMapboxAddress(
 ): Promise<MapboxAddressResolveResult> {
   const input = mapboxAddressResolveInputSchema.parse(rawInput)
   const env = dependencies.env ?? process.env
-  const fetchImpl = dependencies.fetchImpl ?? fetch
   const accessToken = readMapboxAccessToken(env)
 
   if (!accessToken) {
@@ -193,33 +207,41 @@ export async function resolveMapboxAddress(
       input.country.map((country) => country.toLowerCase()).join(','),
     )
   }
-
   if (input.language) {
     url.searchParams.set('language', input.language)
   }
 
-  const payload = await fetchMapboxJson<MapboxAddressGeocodingResponse>({
-    fetchImpl,
+  const rawPayload = await fetchMapboxJson<unknown>({
+    fetchImpl: dependencies.fetchImpl ?? fetch,
     timeoutMs: resolveMapboxTimeoutMs(env),
     url,
     requestLabel: 'address resolution',
   })
-  const candidates = dedupeCandidates(
-    (payload.features ?? [])
+  const parsedPayload = providerAddressResponseSchema.safeParse(rawPayload)
+  if (!parsedPayload.success) {
+    throw new VaultCliError(
+      'route_mapbox_response_invalid',
+      'Mapbox returned an invalid address-resolution response.',
+    )
+  }
+
+  const resolvedCandidates = dedupeCandidates(
+    (parsedPayload.data.features ?? [])
       .slice(0, MAX_ADDRESS_CANDIDATES)
       .map(buildCandidate)
       .filter(isPresent),
   )
-  const soleCandidate = candidates.length === 1 ? candidates[0] ?? null : null
+  const candidates = resolvedCandidates.map(({ candidate }) => candidate)
+  const soleCandidate =
+    resolvedCandidates.length === 1 ? resolvedCandidates[0] ?? null : null
   const recommendedCandidate = soleCandidate?.safeToAutofill
-    ? soleCandidate
+    ? soleCandidate.candidate
     : null
   const result = {
     provider: {
       name: 'mapbox',
       geocodingApiVersion: MAPBOX_GEOCODING_API_VERSION,
     },
-    query: input.query,
     candidates,
     recommendedCandidate,
     privacy: {
@@ -228,30 +250,28 @@ export async function resolveMapboxAddress(
       geocodingStorage: 'temporary',
       candidateCount: candidates.length,
     },
-    warnings: buildWarnings(candidates, recommendedCandidate),
+    warnings: buildWarnings(resolvedCandidates, recommendedCandidate),
   } satisfies MapboxAddressResolveResult
 
   return mapboxAddressResolveResultSchema.parse(result)
 }
 
 function buildCandidate(
-  feature: MapboxAddressFeature,
-): MapboxAddressCandidate | null {
+  feature: ProviderAddressFeature,
+): ResolvedAddressCandidate | null {
   const properties = feature.properties
   const context = properties?.context
-  const featureType = normalizeLowercase(
-    properties?.feature_type,
-    MAX_PROVIDER_LABEL_LENGTH,
-  )
+  const featureType = normalizeLowercase(properties?.feature_type)
   const addressLine1 =
     normalizeBoundedString(
       context?.address?.name,
       MAX_ADDRESS_LINE_LENGTH,
     ) ??
-    formatStreetAddress({
-      addressNumber: context?.address?.address_number,
-      streetName: context?.address?.street_name,
-    }) ??
+    joinBoundedStrings(
+      context?.address?.address_number,
+      context?.address?.street_name,
+      MAX_ADDRESS_LINE_LENGTH,
+    ) ??
     (featureType === 'address'
       ? normalizeBoundedString(properties?.name, MAX_ADDRESS_LINE_LENGTH)
       : null)
@@ -261,244 +281,141 @@ function buildCandidate(
       MAX_ADDRESS_LINE_LENGTH,
     ) ??
     (featureType === 'secondary_address'
-      ? formatSecondaryAddress({
-          designator: context?.secondary_address?.designator,
-          identifier: context?.secondary_address?.identifier,
-        }) ?? normalizeBoundedString(
+      ? joinBoundedStrings(
+          context?.secondary_address?.designator,
+          context?.secondary_address?.identifier,
+          MAX_ADDRESS_LINE_LENGTH,
+        ) ?? normalizeBoundedString(
           properties?.name,
           MAX_ADDRESS_LINE_LENGTH,
         )
       : null)
-  const city =
-    normalizeBoundedString(context?.place?.name, MAX_CITY_LENGTH) ??
-    normalizeBoundedString(context?.locality?.name, MAX_CITY_LENGTH)
-  const state = normalizeUsStateCode(context?.region?.region_code)
-  const postalCode = normalizeUppercase(
-    context?.postcode?.name,
-    MAX_PROVIDER_LABEL_LENGTH,
-  )
-  const countryCode = normalizeUppercase(
-    context?.country?.country_code,
-    MAX_PROVIDER_LABEL_LENGTH,
-  )
-  const accuracy = normalizeLowercase(
-    properties?.coordinates?.accuracy,
-    MAX_PROVIDER_LABEL_LENGTH,
-  )
-  const match = {
-    confidence: normalizeLowercase(
-      properties?.match_code?.confidence,
-      MAX_MATCH_VALUE_LENGTH,
-    ),
-    addressNumber: normalizeLowercase(
-      properties?.match_code?.address_number,
-      MAX_MATCH_VALUE_LENGTH,
-    ),
-    street: normalizeLowercase(
-      properties?.match_code?.street,
-      MAX_MATCH_VALUE_LENGTH,
-    ),
-    secondaryAddress: normalizeLowercase(
-      properties?.match_code?.secondary_address,
-      MAX_MATCH_VALUE_LENGTH,
-    ),
-    postcode: normalizeLowercase(
-      properties?.match_code?.postcode,
-      MAX_MATCH_VALUE_LENGTH,
-    ),
-    place: normalizeLowercase(
-      properties?.match_code?.place,
-      MAX_MATCH_VALUE_LENGTH,
-    ),
-    region: normalizeLowercase(
-      properties?.match_code?.region,
-      MAX_MATCH_VALUE_LENGTH,
-    ),
-    country: normalizeLowercase(
-      properties?.match_code?.country,
-      MAX_MATCH_VALUE_LENGTH,
-    ),
-  }
-  const formattedAddress =
-    normalizeBoundedString(
-      properties?.full_address,
-      MAX_FORMATTED_ADDRESS_LENGTH,
-    ) ??
-    formatAddress({
-      addressLine1,
-      addressLine2,
-      city,
-      state,
-      postalCode,
-      countryCode,
-    })
+  const candidate = {
+    addressLine1,
+    addressLine2,
+    city:
+      normalizeBoundedString(context?.place?.name, MAX_CITY_LENGTH) ??
+      normalizeBoundedString(context?.locality?.name, MAX_CITY_LENGTH),
+    state: normalizeUsStateCode(context?.region?.region_code),
+    postalCode: normalizePostalCode(context?.postcode?.name),
+  } satisfies MapboxAddressCandidate
 
-  if (!formattedAddress) {
+  if (!Object.values(candidate).some(isPresent)) {
     return null
   }
 
+  const match = properties?.match_code
   const completeForUsMail = Boolean(
-    addressLine1 &&
-      city &&
-      state &&
-      US_STATE_CODE_PATTERN.test(state) &&
-      postalCode &&
-      US_POSTAL_CODE_PATTERN.test(postalCode) &&
-      countryCode === 'US',
+    candidate.addressLine1 &&
+      candidate.city &&
+      candidate.state &&
+      candidate.postalCode &&
+      normalizeUppercase(context?.country?.country_code) === 'US',
   )
-  const secondaryAddressIsExact =
-    !addressLine2 || match.secondaryAddress === 'matched'
+  const secondaryAddressIsExact = candidate.addressLine2
+    ? normalizeLowercase(match?.secondary_address) === 'matched'
+    : featureType !== 'secondary_address'
   const localityDidNotConflict = [
-    match.postcode,
-    match.place,
-    match.region,
-    match.country,
+    match?.postcode,
+    match?.place,
+    match?.region,
+    match?.country,
   ].every(isNonConflictingMatch)
   const safeToAutofill = Boolean(
     completeForUsMail &&
       (featureType === 'address' || featureType === 'secondary_address') &&
-      (match.confidence === 'exact' || match.confidence === 'high') &&
-      match.addressNumber === 'matched' &&
-      match.street === 'matched' &&
+      ['exact', 'high'].includes(normalizeLowercase(match?.confidence) ?? '') &&
+      normalizeLowercase(match?.address_number) === 'matched' &&
+      normalizeLowercase(match?.street) === 'matched' &&
       secondaryAddressIsExact &&
       localityDidNotConflict,
   )
 
   return {
-    formattedAddress,
-    addressLine1,
-    addressLine2,
-    city,
-    state,
-    postalCode,
-    countryCode,
-    featureType,
-    accuracy,
-    completeForUsMail,
+    candidate,
     safeToAutofill,
-    match,
   }
-}
-
-function formatStreetAddress(input: {
-  addressNumber: string | null | undefined
-  streetName: string | null | undefined
-}): string | null {
-  const addressNumber = normalizeBoundedString(input.addressNumber, 16)
-  const streetName = normalizeBoundedString(input.streetName, 56)
-  if (!addressNumber || !streetName) {
-    return null
-  }
-
-  return normalizeBoundedString(
-    `${addressNumber} ${streetName}`,
-    MAX_ADDRESS_LINE_LENGTH,
-  )
-}
-
-function formatSecondaryAddress(input: {
-  designator: string | null | undefined
-  identifier: string | null | undefined
-}): string | null {
-  const designator = normalizeBoundedString(input.designator, 24)
-  const identifier = normalizeBoundedString(input.identifier, 32)
-  if (!designator || !identifier) {
-    return null
-  }
-
-  return normalizeBoundedString(
-    `${designator} ${identifier}`,
-    MAX_ADDRESS_LINE_LENGTH,
-  )
-}
-
-function formatAddress(input: {
-  addressLine1: string | null
-  addressLine2: string | null
-  city: string | null
-  state: string | null
-  postalCode: string | null
-  countryCode: string | null
-}): string | null {
-  const locality = [input.city, input.state, input.postalCode]
-    .filter(isPresent)
-    .join(' ')
-  const formatted = [
-    input.addressLine1,
-    input.addressLine2,
-    locality || null,
-    input.countryCode,
-  ]
-    .filter(isPresent)
-    .join(', ')
-
-  return normalizeBoundedString(formatted, MAX_FORMATTED_ADDRESS_LENGTH)
 }
 
 function dedupeCandidates(
-  candidates: readonly MapboxAddressCandidate[],
-): MapboxAddressCandidate[] {
-  const seen = new Set<string>()
-  const uniqueCandidates: MapboxAddressCandidate[] = []
+  candidates: readonly ResolvedAddressCandidate[],
+): ResolvedAddressCandidate[] {
+  const candidatesByAddress = new Map<string, ResolvedAddressCandidate>()
 
   for (const candidate of candidates) {
-    const structuredParts = [
-      candidate.addressLine1,
-      candidate.addressLine2,
-      candidate.city,
-      candidate.state,
-      candidate.postalCode,
-      candidate.countryCode,
-    ].map((value) => value?.toLowerCase() ?? '')
-    const key = structuredParts.some((value) => value.length > 0)
-      ? structuredParts.join('|')
-      : candidate.formattedAddress.toLowerCase()
-
-    if (seen.has(key)) {
-      continue
+    const key = Object.values(candidate.candidate)
+      .map((value) => value?.toLowerCase() ?? '')
+      .join('|')
+    const existing = candidatesByAddress.get(key)
+    if (!existing || (!existing.safeToAutofill && candidate.safeToAutofill)) {
+      candidatesByAddress.set(key, candidate)
     }
-
-    seen.add(key)
-    uniqueCandidates.push(candidate)
   }
 
-  return uniqueCandidates
+  return [...candidatesByAddress.values()]
 }
 
 function buildWarnings(
-  candidates: readonly MapboxAddressCandidate[],
+  candidates: readonly ResolvedAddressCandidate[],
   recommendedCandidate: MapboxAddressCandidate | null,
 ): string[] {
   if (candidates.length === 0) {
     return ['No mailing-address candidates were found.']
   }
-
   if (candidates.length > 1) {
     return ['More than one mailing-address candidate was returned.']
   }
-
   if (recommendedCandidate) {
     return []
   }
 
-  if (candidates[0]?.completeForUsMail) {
-    return ['The mailing-address match was not strong enough to fill automatically.']
-  }
-
-  return ['The mailing-address match did not include every required US mailing field.']
+  return [
+    isCompleteCandidate(candidates[0]?.candidate)
+      ? 'The mailing-address match was not strong enough to fill automatically.'
+      : 'The mailing-address match did not include every required US mailing field.',
+  ]
 }
 
-function isNonConflictingMatch(value: string | null): boolean {
-  return value === null ||
-    value === 'matched' ||
-    value === 'inferred' ||
-    value === 'not_applicable'
+function isCompleteCandidate(
+  candidate: MapboxAddressCandidate | undefined,
+): boolean {
+  return Boolean(
+    candidate?.addressLine1 &&
+      candidate.city &&
+      candidate.state &&
+      candidate.postalCode,
+  )
+}
+
+function isNonConflictingMatch(value: string | undefined): boolean {
+  const normalized = normalizeLowercase(value)
+  return normalized === null ||
+    normalized === 'matched' ||
+    normalized === 'inferred' ||
+    normalized === 'not_applicable'
+}
+
+function joinBoundedStrings(
+  left: string | null | undefined,
+  right: string | null | undefined,
+  maxLength: number,
+): string | null {
+  const normalizedLeft = normalizeNullableString(left)
+  const normalizedRight = normalizeNullableString(right)
+  if (!normalizedLeft || !normalizedRight) {
+    return null
+  }
+
+  return normalizeBoundedString(
+    `${normalizedLeft} ${normalizedRight}`,
+    maxLength,
+  )
 }
 
 function normalizeUsStateCode(
   value: string | null | undefined,
 ): string | null {
-  const normalized = normalizeUppercase(value, 8)
+  const normalized = normalizeUppercase(value)
   if (!normalized) {
     return null
   }
@@ -506,22 +423,28 @@ function normalizeUsStateCode(
     return normalized
   }
 
-  const fullCodeMatch = /^US-([A-Z]{2})$/u.exec(normalized)
-  return fullCodeMatch?.[1] ?? null
+  return /^US-([A-Z]{2})$/u.exec(normalized)?.[1] ?? null
+}
+
+function normalizePostalCode(
+  value: string | null | undefined,
+): string | null {
+  const normalized = normalizeNullableString(value)
+  return normalized && US_POSTAL_CODE_PATTERN.test(normalized)
+    ? normalized
+    : null
 }
 
 function normalizeUppercase(
   value: string | null | undefined,
-  maxLength: number,
 ): string | null {
-  return normalizeBoundedString(value, maxLength)?.toUpperCase() ?? null
+  return normalizeNullableString(value)?.toUpperCase() ?? null
 }
 
 function normalizeLowercase(
   value: string | null | undefined,
-  maxLength: number,
 ): string | null {
-  return normalizeBoundedString(value, maxLength)?.toLowerCase() ?? null
+  return normalizeNullableString(value)?.toLowerCase() ?? null
 }
 
 function normalizeBoundedString(
