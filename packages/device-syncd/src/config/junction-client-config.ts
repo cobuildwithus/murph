@@ -6,6 +6,7 @@ export interface JunctionClientConfigValidationInput {
   apiKey: string;
   environment: JunctionEnvironment;
   region: JunctionRegion;
+  apiBaseUrl?: string;
 }
 
 const JUNCTION_ENVIRONMENT_MATRIX: Readonly<Record<
@@ -31,10 +32,11 @@ const JUNCTION_ENVIRONMENT_MATRIX: Readonly<Record<
 });
 
 export function resolveJunctionBaseUrl(
-  config: Pick<JunctionClientConfigValidationInput, "environment" | "region">,
+  config: Pick<JunctionClientConfigValidationInput, "apiBaseUrl" | "environment" | "region">,
 ): string {
   const expected = requireJunctionEnvironmentProfile(config.environment, config.region);
-  return normalizeJunctionBaseUrl(expected.baseUrl);
+  const override = normalizeString(config.apiBaseUrl);
+  return normalizeJunctionBaseUrl(override ?? expected.baseUrl);
 }
 
 export function assertValidJunctionClientConfig(

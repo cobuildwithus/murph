@@ -37,6 +37,8 @@ const hostedLocalRunUntilIdleTimeoutMs = 30_000;
 export interface HostedLocalDevHarness {
   assertNoInterventions(): void;
   config: ReturnType<typeof resolveHostedLocalDevConfig>;
+  /** The app-session HMAC key the web process runs with. */
+  hostedAppSessionHmacKey: string;
   interventionCount: number;
   oidcToken: string;
   persistDir: string;
@@ -201,6 +203,7 @@ export async function startHostedLocalDevHarness(input: {
         ...config,
         workerPersistDir: persistDir,
       },
+      hostedAppSessionHmacKey: stack.hostedAppSessionHmacKey,
       oidcToken: stack.oidcToken,
       get interventionCount(): number {
         return interventionCount;
