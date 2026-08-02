@@ -6657,25 +6657,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
-      hostedLinqFirstContactAdmissionBudget: {
-        count: vi.fn().mockResolvedValue(0),
-        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
-          firstContactAdmissionOrder.push("claim");
-          return data;
-        }),
-        findFirst: vi.fn().mockResolvedValue(null),
-      },
-      hostedLinqFirstContactAdmissionDecision: {
-        createMany: vi.fn(async () => ({ count: 1 })),
-        findUnique: vi.fn()
-          .mockResolvedValueOnce(null)
-          .mockResolvedValueOnce({
-            confidence: 1,
-            decision: "allow",
-            eventId: "evt_sms_first_contact",
-            source: "deterministic",
-          }),
-      },
+      ...createHostedLinqAdmissionTables({
+        onAttemptCreated: () => firstContactAdmissionOrder.push("claim"),
+      }),
       hostedInvite: {
         create: vi.fn().mockResolvedValue(invite),
         findFirst: vi.fn().mockResolvedValue(null),
@@ -6855,17 +6839,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         update: vi.fn(),
         updateMany: vi.fn(),
       },
-      hostedLinqFirstContactAdmissionDecision: {
-        createMany: vi.fn().mockResolvedValue({ count: 1 }),
-        findUnique: vi.fn()
-          .mockResolvedValueOnce(null)
-          .mockResolvedValue({
-            confidence: 0.94,
-            decision: "block",
-            eventId: "evt_wrong_person_first_contact",
-            source: "model",
-          }),
-      },
+      ...createHostedLinqAdmissionTables(),
       hostedMember: {
         create: vi.fn(),
         findUnique: vi.fn()
@@ -6955,16 +6929,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       throw new Error("first-contact admission decision should not be recorded inside the budget transaction");
     });
     const transactionClient = {
-      hostedLinqFirstContactAdmissionBudget: {
-        count: vi.fn().mockResolvedValue(0),
-        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
-          admissionOrder.push("claim");
-          return data;
-        }),
-        findFirst: vi.fn().mockResolvedValue(null),
-      },
+      hostedLinqFirstContactAdmissionBudget: createHostedLinqAdmissionTables({
+        onAttemptCreated: () => admissionOrder.push("claim"),
+      }).hostedLinqFirstContactAdmissionBudget,
       hostedLinqFirstContactAdmissionDecision: {
         createMany: transactionDecisionCreateMany,
+        findMany: vi.fn().mockResolvedValue([]),
         findUnique: vi.fn().mockResolvedValue(null),
       },
       hostedMember: {
@@ -6991,6 +6961,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedLinqFirstContactAdmissionDecision: {
         createMany: rootDecisionCreateMany,
+        findMany: vi.fn().mockResolvedValue([]),
         findUnique: vi.fn()
           .mockResolvedValueOnce(null)
           .mockResolvedValueOnce({
@@ -7174,23 +7145,16 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         update: vi.fn(),
         updateMany: vi.fn(),
       },
-      hostedLinqFirstContactAdmissionBudget: {
-        count: vi.fn().mockResolvedValue(4),
-        create: vi.fn(),
-        findFirst: vi.fn().mockResolvedValue(null),
-        findMany: vi.fn().mockResolvedValue([
-          { eventId: "evt_first_contact_attempt_1" },
-          { eventId: "evt_first_contact_attempt_2" },
-          { eventId: "evt_first_contact_attempt_3" },
-          { eventId: "evt_first_contact_attempt_4" },
-        ]),
-      },
-      hostedLinqFirstContactAdmissionDecision: {
-        createMany: vi.fn(),
-        // None of the four attempts ever recorded a terminal allow.
-        findMany: vi.fn().mockResolvedValue([]),
-        findUnique: vi.fn().mockResolvedValue(null),
-      },
+      // Four attempts that never completed a classification: none of them is a
+      // fail-open, so all four are chargeable and the cap stands.
+      ...createHostedLinqAdmissionTables({
+        attemptEventIds: [
+          "evt_first_contact_attempt_1",
+          "evt_first_contact_attempt_2",
+          "evt_first_contact_attempt_3",
+          "evt_first_contact_attempt_4",
+        ],
+      }),
       hostedMember: {
         create: vi.fn(),
         findUnique: vi.fn().mockResolvedValue(null),
@@ -7225,7 +7189,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     // The locked claim checks same-event idempotency first (findFirst) so
     // transport retries of an already-claimed event can re-run the classifier;
     // only brand-new events for an already-exhausted contact short-circuit on
-    // the total-count read, before model egress or any insert.
+    // the contact-history read, before model egress or any insert.
     expect(prismaMocks.hostedLinqFirstContactAdmissionBudget.findFirst).toHaveBeenCalledWith({
       where: {
         eventId: "evt_first_contact_budget_exhausted",
@@ -7234,7 +7198,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         },
       },
     });
-    expect(prismaMocks.hostedLinqFirstContactAdmissionBudget.count).toHaveBeenCalledWith({
+    expect(prismaMocks.hostedLinqFirstContactAdmissionBudget.findMany).toHaveBeenCalledWith({
+      select: {
+        eventId: true,
+      },
       where: {
         participantContactLookupKey: {
           in: expect.arrayContaining([expect.any(String)]),
@@ -7370,6 +7337,223 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       expect(effectId).toMatch(/^linq-group-setup:/u);
     }
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it("classifies a contact again once the classifier recovers from an outage that spanned four events", async () => {
+    mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
+    // A launch prefix, so the later direct message is a genuine instant-start
+    // candidate and the entitlement assertions below have teeth.
+    mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
+    const classifierUnavailable = () => hostedOnboardingError({
+      code: "LINQ_FIRST_CONTACT_ADMISSION_CLASSIFIER_UNAVAILABLE",
+      details: {
+        operationName: "hosted_linq_first_contact_admission",
+        type: "transport",
+      },
+      httpStatus: 503,
+      message: "Linq first-contact admission classifier is unavailable.",
+      retryable: true,
+    });
+    const outageEventIds = [
+      "evt_outage_group_1",
+      "evt_outage_group_2",
+      "evt_outage_group_3",
+      "evt_outage_group_4",
+    ] as const;
+    outageEventIds.forEach(() => {
+      mocks.classifyHostedLinqFirstContactAdmission.mockRejectedValueOnce(
+        classifierUnavailable(),
+      );
+    });
+
+    const invite = {
+      channel: "linq",
+      id: "invite_after_outage",
+      inviteCode: "code_after_outage",
+      memberId: "member_after_outage",
+      sentAt: null,
+      status: "pending",
+    };
+    const prisma = asPrismaTransactionClient({
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(invite),
+        findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue(invite),
+        update: vi.fn().mockResolvedValue({
+          id: invite.id,
+          sentAt: new Date("2026-03-30T12:00:01.000Z"),
+        }),
+        updateMany: vi.fn(),
+      },
+      hostedLinqLine: buildManagedInboundHostedLinqLineFixture("+15550000000"),
+      hostedMember: {
+        create: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingStatus: HostedBillingStatus.not_started,
+          id: invite.memberId,
+          phoneLookupKey: "+15551112222",
+        }),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+      hostedMemberIdentity: {
+        findFirst: vi.fn(),
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique: vi.fn(),
+      },
+      hostedMemberRouting: {
+        findFirst: vi.fn(),
+        findUnique: vi.fn(),
+        upsert: vi.fn(),
+      },
+      hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
+    });
+    const groupWebhook = (input: { createdAt: string; eventId: string }) =>
+      handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: buildHostedLinqWebhookBody({
+          createdAt: input.createdAt,
+          data: {
+            chat: {
+              id: "chat_group_123",
+              is_group: true,
+              owner_handle: {
+                handle: "+15550000000",
+                id: "handle_owner_123",
+                is_me: true,
+                service: "iMessage",
+              },
+            },
+            sender_handle: {
+              handle: "+15551112222",
+              id: "handle_group_stranger",
+              service: "iMessage",
+            },
+            sent_at: input.createdAt,
+          },
+          eventId: input.eventId,
+          service: "iMessage",
+        }),
+        signature: null,
+        timestamp: null,
+      });
+
+    // Four events while OpenAI is unreachable. Each fails open, so each records
+    // a deterministic allow that nobody may reuse.
+    for (const [index, eventId] of outageEventIds.entries()) {
+      await expect(groupWebhook({
+        createdAt: `2026-03-2${6 + index}T12:00:00.000Z`,
+        eventId,
+      })).resolves.toMatchObject({
+        ok: true,
+        reason: "sent-group-setup",
+      });
+    }
+
+    // The classifier recovers. The contact must still be reachable: an outage
+    // alone may not spend the lifetime cap.
+    const recoveredEventId = "evt_recovered_group";
+    await expect(groupWebhook({
+      createdAt: "2026-03-30T12:00:00.000Z",
+      eventId: recoveredEventId,
+    })).resolves.toMatchObject({
+      ok: true,
+      reason: "sent-group-setup",
+    });
+    expect(mocks.classifyHostedLinqFirstContactAdmission).toHaveBeenCalledTimes(5);
+    expect(mocks.classifyHostedLinqFirstContactAdmission).toHaveBeenNthCalledWith(5, {
+      request: expect.objectContaining({ eventId: recoveredEventId }),
+      signal: undefined,
+    });
+
+    // The ordinary direct path is reachable for the same contact too, on the
+    // recovered model allow, and it mints no instant-start authority.
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        createdAt: "2026-03-30T13:00:00.000Z",
+        data: {
+          chat: {
+            id: "chat_123",
+            is_group: false,
+            owner_handle: {
+              handle: "+15550000000",
+              id: "handle_owner_123",
+              is_me: true,
+              service: "iMessage",
+            },
+          },
+          sender_handle: {
+            handle: "+15551112222",
+            id: "handle_direct_stranger",
+            service: "iMessage",
+          },
+          sent_at: "2026-03-30T13:00:00.000Z",
+        },
+        eventId: "evt_recovered_direct",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      inviteCode: invite.inviteCode,
+      ok: true,
+      reason: "sent-signup-link",
+    });
+
+    // A replay of the recovered event reuses its own stored decision: no sixth
+    // classification and no sixth attempt row.
+    await expect(groupWebhook({
+      createdAt: "2026-03-30T12:00:00.000Z",
+      eventId: recoveredEventId,
+    })).resolves.toMatchObject({
+      ok: true,
+      reason: "sent-group-setup",
+    });
+    expect(mocks.classifyHostedLinqFirstContactAdmission).toHaveBeenCalledTimes(5);
+
+    const budgetCreate = requireMock(
+      prisma.hostedLinqFirstContactAdmissionBudget?.create,
+      "hostedLinqFirstContactAdmissionBudget.create",
+    );
+    expect(
+      (budgetCreate.mock.calls as [{ data: { eventId: string } }][])
+        .map(([{ data }]) => data.eventId),
+    ).toEqual([...outageEventIds, recoveredEventId]);
+
+    // Every decision stays owned by the event that earned it: four fail-opens,
+    // one model allow, and nothing at all for the direct message.
+    const decisionCreateMany = requireMock(
+      prisma.hostedLinqFirstContactAdmissionDecision?.createMany,
+      "hostedLinqFirstContactAdmissionDecision.createMany",
+    );
+    expect(
+      (decisionCreateMany.mock.calls as [{ data: { eventId: string; source: string } }][])
+        .map(([{ data }]) => [data.eventId, data.source]),
+    ).toEqual([
+      ...outageEventIds.map((eventId) => [eventId, "deterministic"]),
+      [recoveredEventId, "model"],
+    ]);
+
+    expect(mocks.ensureHostedLinqInstantStartPulseTrialEnrollment).not.toHaveBeenCalled();
+    const inviteCreate = requireMock(
+      prisma.hostedInvite?.create,
+      "hostedInvite.create",
+    );
+    for (const [{ data }] of inviteCreate.mock.calls as [
+      { data: { instantStartAdmissionEventId?: string | null } },
+    ][]) {
+      expect(data.instantStartAdmissionEventId ?? null).toBeNull();
+    }
+    const identityCreateMany = requireMock(
+      prisma.hostedMemberIdentity?.createMany,
+      "hostedMemberIdentity.createMany",
+    );
+    for (const [{ data }] of identityCreateMany.mock.calls as [
+      { data: { phoneNumberVerifiedAt?: Date | null } },
+    ][]) {
+      expect(data.phoneNumberVerifiedAt ?? null).toBeNull();
+    }
   });
 
   it("admits a direct first contact whose contact recorded an allow after the attempt cap filled", async () => {
@@ -7860,22 +8044,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
-      hostedLinqFirstContactAdmissionBudget: {
-        count: vi.fn().mockResolvedValue(0),
-        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
-        findFirst: vi.fn().mockResolvedValue(null),
-      },
-      hostedLinqFirstContactAdmissionDecision: {
-        createMany: vi.fn().mockResolvedValue({ count: 1 }),
-        findUnique: vi.fn()
-          .mockResolvedValueOnce(null)
-          .mockResolvedValue({
-            confidence: 1,
-            decision: "allow",
-            eventId: "evt_classifier_transport_retry",
-            source: "deterministic",
-          }),
-      },
+      ...createHostedLinqAdmissionTables(),
       hostedInvite: {
         create: vi.fn().mockResolvedValue(invite),
         findFirst: vi.fn().mockResolvedValue(null),
@@ -7970,15 +8139,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
-      hostedLinqFirstContactAdmissionBudget: {
-        count: vi.fn().mockResolvedValue(0),
-        create: vi.fn(),
-        findFirst: vi.fn().mockResolvedValue(null),
-      },
-      hostedLinqFirstContactAdmissionDecision: {
-        createMany: vi.fn(),
-        findUnique: vi.fn().mockResolvedValue(null),
-      },
+      ...createHostedLinqAdmissionTables(),
       hostedInvite: {
         create: vi.fn(),
         findFirst: vi.fn(),
@@ -8065,26 +8226,17 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         }),
         updateMany: vi.fn(),
       },
-      hostedLinqFirstContactAdmissionBudget: {
-        count: vi.fn().mockResolvedValue(4),
-        create: vi.fn(),
-        findFirst: vi.fn().mockResolvedValue({
+      // The contact is already at the cap, and this event is one of the four
+      // attempts: a transport retry of an already-claimed event still
+      // classifies rather than short-circuiting.
+      ...createHostedLinqAdmissionTables({
+        attemptEventIds: [
           eventId,
-          participantContactKind: "phone",
-          participantContactLookupKey: "blind:v1:retry-contact",
-        }),
-      },
-      hostedLinqFirstContactAdmissionDecision: {
-        createMany: vi.fn().mockResolvedValue({ count: 1 }),
-        findUnique: vi.fn()
-          .mockResolvedValueOnce(null)
-          .mockResolvedValue({
-            confidence: 1,
-            decision: "allow",
-            eventId,
-            source: "deterministic",
-          }),
-      },
+          "evt_classifier_transport_retry_other_1",
+          "evt_classifier_transport_retry_other_2",
+          "evt_classifier_transport_retry_other_3",
+        ],
+      }),
       hostedMember: {
         create: vi.fn().mockResolvedValue({
           accountGroupMemberships: [],
@@ -12062,33 +12214,11 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
     hostedLinqDailyState.updateMany = vi.fn().mockResolvedValue({ count: 1 });
   }
 
+  const defaultAdmissionTables = createHostedLinqAdmissionTables();
   if (!hostedLinqFirstContactAdmissionDecision?.findUnique || !hostedLinqFirstContactAdmissionDecision?.createMany) {
-    const decisionRecords = new Map<string, Record<string, unknown>>();
     Object.defineProperty(prisma, "hostedLinqFirstContactAdmissionDecision", {
       configurable: true,
-      value: {
-        // `decision.eventId` is the primary key and inserts are
-        // `skipDuplicates`, so the first write for an event wins.
-        createMany: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
-          if (typeof data.eventId !== "string" || decisionRecords.has(data.eventId)) {
-            return { count: 0 };
-          }
-          decisionRecords.set(data.eventId, data);
-          return { count: 1 };
-        }),
-        findMany: vi.fn(async ({ where }: {
-          where: { decision?: string; eventId?: { in?: string[] } };
-        }) => {
-          const eventIds = where.eventId?.in ?? null;
-          return [...decisionRecords.values()].filter((record) =>
-            (where.decision === undefined || record.decision === where.decision)
-            && (!eventIds || eventIds.includes(String(record.eventId)))
-          );
-        }),
-        findUnique: vi.fn(async ({ where }: { where: { eventId: string } }) =>
-          decisionRecords.get(where.eventId) ?? null,
-        ),
-      },
+      value: defaultAdmissionTables.hostedLinqFirstContactAdmissionDecision,
     });
   }
 
@@ -12097,45 +12227,105 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
     || !hostedLinqFirstContactAdmissionBudget?.create
     || !hostedLinqFirstContactAdmissionBudget?.count
   ) {
-    // The budget table is keyed by (contact lookup key, event id) and is read
-    // back within the same webhook run, so the default fixture persists rows
-    // instead of answering a fixed count.
-    const budgetRows: { eventId: string; participantContactLookupKey: string }[] = [];
-    const matchesBudgetContact = (
-      row: { participantContactLookupKey: string },
-      where: { participantContactLookupKey?: { in?: string[] } },
-    ) => (where.participantContactLookupKey?.in ?? []).includes(
-      row.participantContactLookupKey,
-    );
     Object.defineProperty(prisma, "hostedLinqFirstContactAdmissionBudget", {
       configurable: true,
-      value: {
-        count: vi.fn(async ({ where }: {
-          where: { participantContactLookupKey?: { in?: string[] } };
-        }) => budgetRows.filter((row) => matchesBudgetContact(row, where)).length),
-        create: vi.fn(async ({ data }: {
-          data: { eventId: string; participantContactLookupKey: string };
-        }) => {
-          budgetRows.push(data);
-          return data;
-        }),
-        findFirst: vi.fn(async ({ where }: {
-          where: { eventId: string; participantContactLookupKey?: { in?: string[] } };
-        }) =>
-          budgetRows.find((row) =>
-            row.eventId === where.eventId && matchesBudgetContact(row, where)
-          ) ?? null),
-        findMany: vi.fn(async ({ where }: {
-          where: { participantContactLookupKey?: { in?: string[] } };
-        }) =>
-          budgetRows
-            .filter((row) => matchesBudgetContact(row, where))
-            .map(({ eventId }) => ({ eventId }))),
-      },
+      value: defaultAdmissionTables.hostedLinqFirstContactAdmissionBudget,
     });
   }
 
   return prisma as T & HostedOnboardingLinqWebhookPrismaFixture;
+}
+
+type HostedLinqAdmissionDecisionRow = {
+  confidence: number;
+  decision: string;
+  eventId: string;
+  source: string;
+};
+
+/**
+ * One stateful stand-in for the two first-contact admission tables. The claim
+ * derives the contact's chargeable attempt count and its reusable allow by
+ * joining budget rows to decision rows on the event id, so a double that
+ * answers a fixed count cannot express the scenarios these tests describe.
+ * Seed `attemptEventIds` and `decisions` to state the contact's prior history;
+ * everything written during the run is read back the way Postgres would.
+ */
+function createHostedLinqAdmissionTables(input: {
+  attemptEventIds?: readonly string[];
+  decisions?: readonly HostedLinqAdmissionDecisionRow[];
+  onAttemptCreated?: (eventId: string) => void;
+} = {}) {
+  const attempts = (input.attemptEventIds ?? []).map((eventId) => ({
+    eventId,
+    participantContactKind: "phone",
+    participantContactLookupKey: null as string | null,
+  }));
+  const decisions = new Map<string, HostedLinqAdmissionDecisionRow>(
+    (input.decisions ?? []).map((row) => [row.eventId, row]),
+  );
+  // Seeded rows belong to whichever contact the test is exercising, so they
+  // match every lookup-key candidate; rows written during the run carry the
+  // key the claim inserted.
+  const matchesContact = (
+    row: { participantContactLookupKey: string | null },
+    where: { participantContactLookupKey?: { in?: string[] } },
+  ) => row.participantContactLookupKey === null
+    || (where.participantContactLookupKey?.in ?? []).includes(
+      row.participantContactLookupKey,
+    );
+
+  return {
+    hostedLinqFirstContactAdmissionBudget: {
+      count: vi.fn(async ({ where }: {
+        where: { participantContactLookupKey?: { in?: string[] } };
+      }) => attempts.filter((row) => matchesContact(row, where)).length),
+      create: vi.fn(async ({ data }: {
+        data: {
+          eventId: string;
+          participantContactKind: string;
+          participantContactLookupKey: string;
+        };
+      }) => {
+        attempts.push({ ...data });
+        input.onAttemptCreated?.(data.eventId);
+        return data;
+      }),
+      findFirst: vi.fn(async ({ where }: {
+        where: { eventId: string; participantContactLookupKey?: { in?: string[] } };
+      }) =>
+        attempts.find((row) =>
+          row.eventId === where.eventId && matchesContact(row, where)
+        ) ?? null),
+      findMany: vi.fn(async ({ where }: {
+        where: { participantContactLookupKey?: { in?: string[] } };
+      }) =>
+        attempts
+          .filter((row) => matchesContact(row, where))
+          .map(({ eventId }) => ({ eventId }))),
+    },
+    hostedLinqFirstContactAdmissionDecision: {
+      // `decision.eventId` is the primary key and inserts are
+      // `skipDuplicates`, so the first write for an event wins.
+      createMany: vi.fn(async ({ data }: { data: HostedLinqAdmissionDecisionRow }) => {
+        if (decisions.has(data.eventId)) {
+          return { count: 0 };
+        }
+        decisions.set(data.eventId, data);
+        return { count: 1 };
+      }),
+      findMany: vi.fn(async ({ where }: {
+        where: { eventId?: { in?: string[] } };
+      }) => {
+        const eventIds = where.eventId?.in ?? null;
+        return [...decisions.values()].filter((row) =>
+          !eventIds || eventIds.includes(row.eventId)
+        );
+      }),
+      findUnique: vi.fn(async ({ where }: { where: { eventId: string } }) =>
+        decisions.get(where.eventId) ?? null),
+    },
+  };
 }
 
 function createSingleHostedMemberRoutingMock(record: Record<string, unknown>) {

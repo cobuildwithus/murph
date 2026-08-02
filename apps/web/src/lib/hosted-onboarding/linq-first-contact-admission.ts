@@ -69,13 +69,6 @@ type HostedLinqFirstContactAdmissionBudgetStore = {
     ...values: readonly unknown[]
   ): Promise<number>;
   hostedLinqFirstContactAdmissionBudget: {
-    count(input: {
-      where: {
-        participantContactLookupKey: {
-          in: string[];
-        };
-      };
-    }): Promise<number>;
     create(input: {
       data: {
         eventId: string;
@@ -105,11 +98,9 @@ type HostedLinqFirstContactAdmissionBudgetStore = {
   hostedLinqFirstContactAdmissionDecision: {
     findMany(input: {
       where: {
-        decision: HostedLinqFirstContactAdmissionDecision["kind"];
         eventId: {
           in: string[];
         };
-        source: HostedLinqFirstContactAdmissionDecision["source"];
       };
     }): Promise<HostedLinqFirstContactAdmissionDecisionRecord[]>;
   };
@@ -371,49 +362,33 @@ export async function claimHostedLinqFirstContactAdmissionBudget(input: {
       },
     },
   });
+  const history = await readHostedLinqFirstContactAdmissionContactHistory({
+    lookupKeyCandidates,
+    tx: input.tx,
+  });
   if (alreadyCounted) {
     return {
-      attemptCount: await input.tx.hostedLinqFirstContactAdmissionBudget.count({
-        where: {
-          participantContactLookupKey: {
-            in: lookupKeyCandidates,
-          },
-        },
-      }),
+      attemptCount: history.chargeableCount,
       kind: "claimed",
     };
   }
 
-  const existingCount = await input.tx.hostedLinqFirstContactAdmissionBudget.count({
-    where: {
-      participantContactLookupKey: {
-        in: lookupKeyCandidates,
-      },
-    },
-  });
   // Admission is a decision about a contact, not about one message. Once any
-  // earlier event for this contact recorded a terminal allow, later events
-  // reuse it instead of spending another lifetime attempt or another
-  // classifier call. Without that, a sender who keeps messaging before they
-  // resolve to a member burns the cap on repeat offers and is then blocked
-  // forever, on this path and on the ordinary direct one. Blocks and
-  // never-completed attempts still count against the cap.
-  const recordedAllow = existingCount > 0
-    ? await readHostedLinqFirstContactAdmissionRecordedContactAllow({
-      lookupKeyCandidates,
-      tx: input.tx,
-    })
-    : null;
-  if (recordedAllow) {
+  // earlier event for this contact recorded a reusable allow, later events
+  // reuse it instead of spending another attempt or another classifier call.
+  // Without that, a sender who keeps messaging before they resolve to a member
+  // burns the cap on repeat offers and is then blocked forever, on this path
+  // and on the ordinary direct one.
+  if (history.reusableAllow) {
     return {
-      decision: recordedAllow,
+      decision: history.reusableAllow,
       kind: "already_allowed",
     };
   }
 
-  if (existingCount >= HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MAX_ATTEMPTS) {
+  if (history.chargeableCount >= HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MAX_ATTEMPTS) {
     return {
-      attemptCount: existingCount,
+      attemptCount: history.chargeableCount,
       kind: "exhausted",
     };
   }
@@ -427,28 +402,40 @@ export async function claimHostedLinqFirstContactAdmissionBudget(input: {
   });
 
   return {
-    attemptCount: existingCount + 1,
+    attemptCount: history.chargeableCount + 1,
     kind: "claimed",
   };
 }
 
 // The budget rows carry the contact key and the decision rows carry the
-// outcome; they join on the event id. Reading them here keeps the contact-key
-// candidates (and their rotation handling) inside this owner instead of
-// leaking the lookup-key rules into callers.
+// outcome; they join on the event id. Reading them together here keeps the
+// contact-key candidates (and their rotation handling) inside this owner
+// instead of leaking the lookup-key rules into callers, and derives both facts
+// the caller needs from one pair of reads.
 //
-// Only a model-source allow is reusable. The other allow this path can persist
-// is the classifier-unavailable fail-open, which is evidence that nobody could
-// check the sender rather than evidence the sender is welcome; reusing it would
-// let one OpenAI outage admit a contact permanently. Reuse answers the contact
-// question ("may Murph answer this stranger at all?") only. Whether an inbound
-// may mint instant-start entitlement stays a property of the exact event that
-// earned its own model allow, which is why nothing is written under a later
-// event id.
-async function readHostedLinqFirstContactAdmissionRecordedContactAllow(input: {
+// `reusableAllow` answers only the contact question, "may Murph answer this
+// stranger at all". Just a model-source allow qualifies: the other allow this
+// path persists is the classifier-unavailable fail-open, which is evidence
+// that nobody could check the sender rather than evidence the sender is
+// welcome, so reusing it would let one outage admit a contact permanently.
+// Whether an inbound may mint instant-start entitlement stays a property of the
+// exact event that earned its own model allow, which is why nothing is ever
+// written under a later event id.
+//
+// `chargeableCount` is the lifetime cap's meaning: attempts that actually spent
+// a classification. A fail-open event never reached the classifier, so charging
+// it would let an outage alone exhaust the contact — four unavailable events
+// would leave the contact with no reusable evidence and no remaining attempts,
+// permanently silent on both the group and direct paths with no repair short of
+// a database edit. Real blocks, model allows, and never-completed attempts all
+// still count, so the spend and abuse bound keeps its meaning.
+async function readHostedLinqFirstContactAdmissionContactHistory(input: {
   lookupKeyCandidates: string[];
   tx: HostedLinqFirstContactAdmissionBudgetStore;
-}): Promise<HostedLinqFirstContactAdmissionDecision | null> {
+}): Promise<{
+  chargeableCount: number;
+  reusableAllow: HostedLinqFirstContactAdmissionDecision | null;
+}> {
   const attempts = await input.tx.hostedLinqFirstContactAdmissionBudget.findMany({
     select: {
       eventId: true,
@@ -460,26 +447,44 @@ async function readHostedLinqFirstContactAdmissionRecordedContactAllow(input: {
     },
   });
   if (attempts.length === 0) {
-    return null;
+    return { chargeableCount: 0, reusableAllow: null };
   }
 
   const records = await input.tx.hostedLinqFirstContactAdmissionDecision.findMany({
     where: {
-      decision: "allow",
       eventId: {
         in: attempts.map(({ eventId }) => eventId),
       },
-      source: "model",
     },
   });
-  for (const record of records) {
-    const decision = parseHostedLinqFirstContactAdmissionDecisionRecord(record);
+  const decisionsByEventId = new Map(
+    records.map((record) => [
+      record.eventId,
+      parseHostedLinqFirstContactAdmissionDecisionRecord(record),
+    ]),
+  );
+
+  let reusableAllow: HostedLinqFirstContactAdmissionDecision | null = null;
+  let chargeableCount = 0;
+  for (const { eventId } of attempts) {
+    const decision = decisionsByEventId.get(eventId) ?? null;
     if (decision?.kind === "allow" && decision.source === "model") {
-      return decision;
+      reusableAllow ??= decision;
+    }
+    if (!isHostedLinqFirstContactAdmissionFailOpenDecision(decision)) {
+      chargeableCount += 1;
     }
   }
 
-  return null;
+  return { chargeableCount, reusableAllow };
+}
+
+// The classifier-unavailable fallback is the only allow this path records
+// without asking the model.
+function isHostedLinqFirstContactAdmissionFailOpenDecision(
+  decision: HostedLinqFirstContactAdmissionDecision | null,
+): boolean {
+  return decision?.kind === "allow" && decision.source === "deterministic";
 }
 
 function buildHostedLinqFirstContactAdmissionOpenAiBody(input: {
