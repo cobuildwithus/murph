@@ -526,18 +526,14 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               }),
           );
           if (admissionBudget.kind === "already_allowed") {
-            // This contact cleared admission on an earlier event, so the offer
-            // is re-planned on the stored allow: no attempt is spent and the
-            // classifier is not asked to re-decide a sender already admitted.
-            firstContactAdmissionDecision =
-              await recordHostedLinqFirstContactAdmissionDecision({
-                decision: admissionBudget.decision,
-                eventId: event.event_id,
-                prisma,
-              });
-            plan = firstContactAdmissionDecision.kind === "block"
-              ? await planAfterBlockedAdmission()
-              : await runPlan();
+            // This contact cleared admission on an earlier event, so this one
+            // is planned on that allow: no attempt is spent and the classifier
+            // is not asked to re-decide a sender already admitted. The allow
+            // stays owned by the event that earned it and is never written
+            // under this event id, and instant start is off here: only a
+            // classification of this exact inbound may mint that entitlement.
+            firstContactAdmissionDecision = admissionBudget.decision;
+            plan = await runPlan(false);
           } else if (admissionBudget.kind === "exhausted") {
             plan = await planAfterBlockedAdmission(
               "first-contact-admission-budget-exhausted",

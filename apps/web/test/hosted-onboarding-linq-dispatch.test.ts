@@ -7469,6 +7469,156 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(prismaMocks.hostedInvite.create).toHaveBeenCalledTimes(1);
   });
 
+  it("never lends an earlier group allow to a launch-prefix direct first contact as instant-start authority", async () => {
+    mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
+    // The production default prefix list includes +1, so the later direct
+    // message below is a genuine instant-start candidate.
+    mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
+
+    const groupAdmissionEventId = "evt_group_offer_model_allow";
+    // The contact's only classification happened on a group message, which may
+    // never mint instant-start entitlement for a different inbound.
+    const budgetRows = [{ eventId: groupAdmissionEventId }];
+    const decisionRows = new Map<string, Record<string, unknown>>([
+      [groupAdmissionEventId, {
+        confidence: 0.9,
+        decision: "allow",
+        eventId: groupAdmissionEventId,
+        source: "model",
+      }],
+    ]);
+    const invite = {
+      channel: "linq",
+      id: "invite_direct_after_group_allow",
+      inviteCode: "code_direct_after_group_allow",
+      memberId: "member_direct_after_group_allow",
+      sentAt: null,
+      status: "pending",
+    };
+    // The admission tables outlive one webhook attempt; the rest of the
+    // fixture is rebuilt per attempt so the retry is a clean redelivery.
+    const budgetCreate = vi.fn(async ({ data }: { data: { eventId: string } }) => {
+      budgetRows.push({ eventId: data.eventId });
+      return data;
+    });
+    const decisionCreateMany = vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+      if (typeof data.eventId !== "string" || decisionRows.has(data.eventId)) {
+        return { count: 0 };
+      }
+      decisionRows.set(data.eventId, data);
+      return { count: 1 };
+    });
+    const inviteCreate = vi.fn().mockResolvedValue(invite);
+    const buildDirectAttemptPrisma = () => asPrismaTransactionClient({
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
+      hostedLinqFirstContactAdmissionBudget: {
+        count: vi.fn(async () => budgetRows.length),
+        create: budgetCreate,
+        findFirst: vi.fn(async ({ where }: { where: { eventId: string } }) =>
+          budgetRows.find((row) => row.eventId === where.eventId) ?? null),
+        findMany: vi.fn(async () => budgetRows.map(({ eventId }) => ({ eventId }))),
+      },
+      hostedLinqFirstContactAdmissionDecision: {
+        createMany: decisionCreateMany,
+        findMany: vi.fn(async ({ where }: {
+          where: { decision?: string; eventId?: { in?: string[] } };
+        }) =>
+          [...decisionRows.values()].filter((row) =>
+            (where.decision === undefined || row.decision === where.decision)
+            && (where.eventId?.in ?? []).includes(String(row.eventId))
+          )),
+        findUnique: vi.fn(async ({ where }: { where: { eventId: string } }) =>
+          decisionRows.get(where.eventId) ?? null),
+      },
+      hostedInvite: {
+        create: inviteCreate,
+        findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue(invite),
+        update: vi.fn().mockResolvedValue({
+          id: invite.id,
+          sentAt: new Date("2026-03-26T12:00:01.000Z"),
+        }),
+        updateMany: vi.fn(),
+      },
+      hostedMember: {
+        create: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingStatus: HostedBillingStatus.not_started,
+          id: invite.memberId,
+          phoneLookupKey: "+15551234567",
+        }),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+    });
+
+    const attempts = [buildDirectAttemptPrisma(), buildDirectAttemptPrisma()];
+    const directWebhook = (prisma: ReturnType<typeof buildDirectAttemptPrisma>) =>
+      handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: buildHostedLinqWebhookBody({
+          data: {
+            chat: {
+              id: "chat_123",
+              is_group: false,
+              owner_handle: {
+                handle: "+15550000000",
+                id: "handle_owner_123",
+                is_me: true,
+                service: "iMessage",
+              },
+            },
+            parts: [{ type: "text", value: "Limited spots left on our program." }],
+          },
+          eventId: "evt_direct_after_group_allow",
+          service: "iMessage",
+        }),
+        signature: null,
+        timestamp: null,
+      });
+
+    // The delivery attempt and its redelivery must both land on the ordinary
+    // signup link, never on instant start.
+    for (const attempt of attempts) {
+      await expect(directWebhook(attempt)).resolves.toMatchObject({
+        inviteCode: invite.inviteCode,
+        ok: true,
+        reason: "sent-signup-link",
+      });
+    }
+
+    // The earlier allow satisfies the gate without spending an attempt or a
+    // classifier call, and it is never copied onto this event: the model-source
+    // proof stays owned by the event the model actually judged, so no retry can
+    // read instant-start authority back out of the decision table.
+    expect(mocks.classifyHostedLinqFirstContactAdmission).not.toHaveBeenCalled();
+    expect(budgetCreate).not.toHaveBeenCalled();
+    expect(decisionCreateMany).not.toHaveBeenCalled();
+    expect([...decisionRows.keys()]).toEqual([groupAdmissionEventId]);
+    // No instant-start entitlement: no trial enrollment, no admission id on the
+    // invite, and no phone verified off the back of a group classification.
+    expect(mocks.ensureHostedLinqInstantStartPulseTrialEnrollment).not.toHaveBeenCalled();
+    expect(inviteCreate).toHaveBeenCalledTimes(attempts.length);
+    for (const [{ data }] of inviteCreate.mock.calls as [
+      { data: { instantStartAdmissionEventId?: string | null } },
+    ][]) {
+      expect(data.instantStartAdmissionEventId ?? null).toBeNull();
+    }
+    for (const attempt of attempts) {
+      const identityCreateMany = requireMock(
+        attempt.hostedMemberIdentity?.createMany,
+        "hostedMemberIdentity.createMany",
+      );
+      expect(identityCreateMany).toHaveBeenCalled();
+      for (const [call] of identityCreateMany.mock.calls as [
+        { data: { phoneNumberVerifiedAt?: Date | null } },
+      ][]) {
+        expect(call.data.phoneNumberVerifiedAt ?? null).toBeNull();
+      }
+    }
+  });
+
   it("reuses stored classifier blocks for duplicate unknown Linq first contacts", async () => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
 
