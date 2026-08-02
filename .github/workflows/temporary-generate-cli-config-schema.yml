@@ -1,0 +1,34 @@
+name: Temporary Generate CLI Config Schema
+
+on:
+  push:
+    branches:
+      - codex/proactive-address-resolution
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Generate config schema
+        run: pnpm --dir packages/cli gen:config-schema
+      - name: Print generated config schema
+        run: |
+          echo 'CONFIG_SCHEMA_BASE64_BEGIN'
+          base64 -w0 packages/cli/config.schema.json
+          echo
+          echo 'CONFIG_SCHEMA_BASE64_END'
