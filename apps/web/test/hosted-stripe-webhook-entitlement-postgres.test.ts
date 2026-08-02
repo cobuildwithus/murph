@@ -204,10 +204,14 @@ describe.skipIf(!runPostgresProof)(
           ok: true,
           type: "customer.subscription.updated",
         });
-        expect(workflowBoundary.start).toHaveBeenCalledTimes(1);
+        expect(workflowBoundary.start).toHaveBeenCalledTimes(2);
+        expect(workflowBoundary.start).toHaveBeenLastCalledWith({
+          eventId: stripeEventId,
+        });
         await expect(prisma.hostedStripeEvent.count({
           where: { eventId: stripeEventId },
         })).resolves.toBe(1);
+        expect(stripeFixture.observedRequests).toHaveLength(2);
       } finally {
         delete runtimeGlobals.__murphHostedOnboardingEnv;
         delete runtimeGlobals.__murphHostedOnboardingStripe;
