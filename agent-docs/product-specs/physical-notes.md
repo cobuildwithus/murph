@@ -56,8 +56,10 @@ blocker. Before asking for one of those objective details, the assistant may run
 `vault-cli route resolve-address` against the exact US destination text already
 supplied for the current note request. The command reuses the CLI-owned Mapbox
 command surface and the existing Worker-owned provider-egress credential
-boundary, requests at most three candidates, and persists neither the query nor
-the response in Murph state.
+boundary and requests at most three candidates. The command itself does not
+cache or write the query or result into canonical vault or hosted-product state;
+the normalized result remains ordinary assistant-turn context under the
+runtime's existing conversation and checkpoint retention rules.
 
 The command returns a `recommendedCandidate` only when deduplication leaves one
 candidate, the provider classifies it as a strong address result, the supplied
