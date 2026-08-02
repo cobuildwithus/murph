@@ -54,7 +54,6 @@ export async function seedHostedCurrentSenderAssistantAskFixture(input: {
   const threadId = `telegram_group_current_sender_${suffix}`;
   const sourceEventId = `telegram.message.received:current-sender:${suffix}`;
   const sourceMessageId = `telegram_message_current_sender_${suffix}`;
-  const sourceMailboxItemId = `hmb_current_sender_${suffix}`;
   const question = input.question
     ?? "Murph, use my private sleep history to answer this exact question.";
   const routeAuthority = {
@@ -136,13 +135,13 @@ export async function seedHostedCurrentSenderAssistantAskFixture(input: {
     const append = await appendHostedMailboxEnvelopeWithIdentityTx({
       envelope: wake,
       expiresAt: new Date(input.now.getTime() + 60 * 60 * 1_000),
-      itemId: sourceMailboxItemId,
+      itemId: sourceEventId,
       tx,
     });
     if (
       !append.inserted
       || append.dedupeConflict
-      || append.item.id !== sourceMailboxItemId
+      || append.item.id !== sourceEventId
     ) {
       throw new Error("Could not append the current-sender source wake.");
     }
