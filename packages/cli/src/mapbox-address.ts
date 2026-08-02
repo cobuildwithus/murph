@@ -347,15 +347,21 @@ function buildCandidate(
       countryCode === 'US',
   )
   const secondaryAddressIsExact =
-    featureType !== 'secondary_address' ||
-    Boolean(addressLine2 && match.secondaryAddress === 'matched')
+    !addressLine2 || match.secondaryAddress === 'matched'
+  const localityDidNotConflict = [
+    match.postcode,
+    match.place,
+    match.region,
+    match.country,
+  ].every(isNonConflictingMatch)
   const safeToAutofill = Boolean(
     completeForUsMail &&
       (featureType === 'address' || featureType === 'secondary_address') &&
       (match.confidence === 'exact' || match.confidence === 'high') &&
       match.addressNumber === 'matched' &&
       match.street === 'matched' &&
-      secondaryAddressIsExact,
+      secondaryAddressIsExact &&
+      localityDidNotConflict,
   )
 
   return {
@@ -480,6 +486,13 @@ function buildWarnings(
   }
 
   return ['The mailing-address match did not include every required US mailing field.']
+}
+
+function isNonConflictingMatch(value: string | null): boolean {
+  return value === null ||
+    value === 'matched' ||
+    value === 'inferred' ||
+    value === 'not_applicable'
 }
 
 function normalizeUsStateCode(
