@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - codex/proactive-address-resolution
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
