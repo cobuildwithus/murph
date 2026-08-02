@@ -598,11 +598,14 @@ describe("createHostedPhysicalNote", () => {
     expect(mocks.recordUsage).not.toHaveBeenCalled();
   });
 
-  it("returns a recovered Lob acceptance without reserving or sending the current note", async () => {
+  it("finalizes a stale Lob acceptance while the current request proceeds", async () => {
     const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const provider = createPhysicalNoteRuntime(
-      [{ kind: "ambiguous_failure" }],
+      [
+        { kind: "ambiguous_failure" },
+        { kind: "accepted", providerLetterId: "ltr_current_paid" },
+      ],
       [{ kind: "accepted", providerLetterId: "ltr_stale_free" }],
     );
 
@@ -616,7 +619,7 @@ describe("createHostedPhysicalNote", () => {
       new Date(Date.now() - REPLAY_WINDOW_MS - 1),
     );
     provider.create.mockClear();
-    const recovered = await createHostedPhysicalNote({
+    const current = await createHostedPhysicalNote({
       ...buildRequest(51),
       prisma: store.prisma,
       runtime: provider.runtime,
@@ -627,13 +630,10 @@ describe("createHostedPhysicalNote", () => {
       noteId: stale.physicalNoteId,
       signal: undefined,
     });
-    expect(recovered).toEqual({
-      complimentary: true,
+    expect(current).toEqual({
+      complimentary: false,
       costUsdMicros: COST_USD_MICROS.toString(),
-      physicalNoteId: stale.physicalNoteId,
-      priorAcceptedPhysicalNote: {
-        physicalNoteId: stale.physicalNoteId,
-      },
+      physicalNoteId: expect.stringMatching(/^hpn_[a-f0-9]{32}$/u),
       status: "accepted",
     });
     expect(store.allRows().find((row) => row.id === stale.physicalNoteId))
@@ -642,10 +642,16 @@ describe("createHostedPhysicalNote", () => {
         providerLetterId: "ltr_stale_free",
         status: "accepted",
       });
-    expect(store.allRows()).toHaveLength(1);
-    expect(provider.create).not.toHaveBeenCalled();
-    expect(mocks.readUsageGate).not.toHaveBeenCalled();
-    expect(mocks.recordUsage).not.toHaveBeenCalled();
+    expect(store.allRows().find((row) => row.id === current.physicalNoteId))
+      .toMatchObject({
+        complimentaryOfferCode: null,
+        providerLetterId: "ltr_current_paid",
+        status: "accepted",
+      });
+    expect(store.allRows()).toHaveLength(2);
+    expect(provider.create).toHaveBeenCalledOnce();
+    expect(mocks.readUsageGate).toHaveBeenCalledOnce();
+    expect(mocks.recordUsage).toHaveBeenCalledOnce();
   });
 
   it("releases a stale complimentary claim when Lob confirms no letter exists", async () => {

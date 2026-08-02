@@ -3253,23 +3253,6 @@ export async function executeMurphDynamicToolRequest(input: {
         }, {
           signal: input.abortSignal ?? null,
         })
-        if (
-          result.status === 'accepted'
-          && result.physicalNoteId
-            === result.priorAcceptedPhysicalNote?.physicalNoteId
-        ) {
-          return toolTextResult(
-            true,
-            JSON.stringify({
-              note:
-                'Lob accepted the earlier physical note for printing. The newly requested note was not sent. If the member still wants to send it, they can ask again.',
-              physicalNoteId:
-                result.priorAcceptedPhysicalNote.physicalNoteId,
-              status: result.status,
-            }),
-          )
-        }
-
         switch (result.status) {
           case 'accepted':
             return toolTextResult(
