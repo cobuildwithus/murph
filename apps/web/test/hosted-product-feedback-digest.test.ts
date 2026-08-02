@@ -174,7 +174,11 @@ describe("hosted product feedback digest", () => {
       kind: {
         in: ["feature_interest", "feature_request", "frustration"],
       },
-      memberId: null,
+      NOT: {
+        summary: {
+          startsWith: "Support escalation:",
+        },
+      },
       summary: {
         not: null,
       },
