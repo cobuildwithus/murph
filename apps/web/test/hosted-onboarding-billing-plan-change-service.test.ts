@@ -1157,6 +1157,59 @@ describe("upgradeHostedBillingPlan", () => {
     expect(mocks.stripe.billingPortal.sessions.create).toHaveBeenCalledTimes(1);
   });
 
+  test("sends the unpaid invoice found after an ambiguous Stripe update failure", async () => {
+    mocks.stripe.subscriptions.retrieve
+      .mockResolvedValueOnce(makeSubscription({
+        customer: "cus_123",
+        items: [
+          ["si_recurring", "price_pulse_recurring"],
+        ],
+        metadata: {
+          billingPlanCode: "launch_monthly",
+          memberId: "member_123",
+        },
+        status: "active",
+      }))
+      .mockResolvedValueOnce(makeSubscription({
+        customer: "cus_123",
+        items: [
+          ["si_recurring", "price_pulse_recurring"],
+        ],
+        latestInvoice: {},
+        metadata: {
+          billingPlanCode: "launch_monthly",
+          memberId: "member_123",
+        },
+        pendingUpdate: {
+          subscriptionItems: [
+            ["si_recurring", "price_edge_recurring", 1],
+          ],
+        },
+        status: "active",
+      }));
+    mocks.stripe.subscriptions.update.mockRejectedValueOnce({
+      requestId: "req_ambiguous",
+      statusCode: 500,
+      type: "StripeAPIError",
+    });
+
+    await expect(upgradeHostedBillingPlan({
+      memberId: "member_123",
+      targetPlanCode: "launch_edge_monthly",
+    })).resolves.toEqual({
+      billingPlanCode: "launch_monthly",
+      paymentUrl: "https://stripe.example.test/invoice/inv_123",
+      status: "pending_payment",
+    });
+
+    // The reconciliation retrieve must expand the invoice too, or this recovery
+    // path silently degrades to the Portal dead end.
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenNthCalledWith(2, "sub_123", {
+      expand: ["items.data.price", "latest_invoice"],
+    });
+    expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
+  });
+
   test("surfaces the Stripe update failure when reconciliation proves no effect", async () => {
     const currentSubscription = makeSubscription({
       customer: "cus_123",
@@ -1330,6 +1383,11 @@ describe("upgradeHostedBillingPlan", () => {
 
     expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
     expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
+    // Without this expansion Stripe returns an invoice id rather than the object,
+    // which would silently drop the retry back to the Portal dead end.
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledWith("sub_123", {
+      expand: ["items.data.price", "latest_invoice"],
+    });
   });
 
   test.each([

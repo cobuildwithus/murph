@@ -253,8 +253,17 @@ returns inert, and the existing short expiry bounds any surviving claim.
 Starting Pulse now uses the existing start-paid-Pulse service. Upgrading to
 Edge uses the existing plan-change service. Pulse activation keeps its existing
 Stripe-hosted invoice or Customer Portal handoff when payment is required. A
-pending Edge change returns the existing Customer Portal handoff and does not
-retrieve or validate a separate invoice URL. The assistant sends a returned
+pending Edge change returns the Stripe-hosted page for the invoice the failed
+charge left open, because that page is the only surface that can collect the
+payment the pending update waits on; the Customer Portal home shows the pending
+state as inert text and files the payable invoice under invoice history. The
+service returns that invoice URL only when the subscription's latest invoice is
+still open, still owed, and belongs to the same Stripe customer and
+subscription, so an unrelated or settled invoice is never presented as this
+subscription's payment step. Retrying the upgrade while that update is still
+pending returns the same invoice without issuing another subscription update.
+When no such payable invoice exists, the existing Customer Portal handoff
+remains the fallback. The assistant sends a returned
 Stripe URL only after the member's explicit choice and only when the
 authoritative result says payment is required. Completed, pending, and
 no-action results do not carry a URL.
