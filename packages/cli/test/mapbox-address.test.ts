@@ -14,21 +14,40 @@ function jsonResponse(body: unknown, status = 200): Response {
 function addressFeature(input: {
   city: string
   confidence?: string
+  featureType?: 'address' | 'secondary_address'
   postalCode: string
+  secondaryAddress?: string
+  secondaryAddressMatch?: string
   state: string
   streetAddress: string
+  streetMatch?: string
 }) {
   const [addressNumber = '', ...streetParts] = input.streetAddress.split(' ')
   const streetName = streetParts.join(' ')
+  const featureType = input.featureType ?? 'address'
 
   return {
     type: 'Feature',
+    geometry: {
+      coordinates: [-84.39, 33.75],
+      type: 'Point',
+    },
     properties: {
-      feature_type: 'address',
-      full_address: `${input.streetAddress}, ${input.city}, ${input.state} ${input.postalCode}, United States`,
-      name: input.streetAddress,
+      feature_type: featureType,
+      full_address: [
+        input.streetAddress,
+        input.secondaryAddress,
+        `${input.city}, ${input.state} ${input.postalCode}`,
+        'United States',
+      ].filter(Boolean).join(', '),
+      mapbox_id: 'example-provider-id',
+      name: featureType === 'secondary_address'
+        ? input.secondaryAddress
+        : input.streetAddress,
       coordinates: {
         accuracy: 'rooftop',
+        latitude: 33.75,
+        longitude: -84.39,
       },
       context: {
         address: {
@@ -36,6 +55,15 @@ function addressFeature(input: {
           street_name: streetName,
           name: input.streetAddress,
         },
+        ...(input.secondaryAddress
+          ? {
+              secondary_address: {
+                designator: 'Unit',
+                identifier: input.secondaryAddress.replace(/^Unit\s+/u, ''),
+                name: input.secondaryAddress,
+              },
+            }
+          : {}),
         postcode: {
           name: input.postalCode,
         },
@@ -53,7 +81,13 @@ function addressFeature(input: {
       },
       match_code: {
         address_number: 'matched',
-        street: 'matched',
+        street: input.streetMatch ?? 'matched',
+        ...(featureType === 'secondary_address'
+          ? {
+              secondary_address:
+                input.secondaryAddressMatch ?? 'matched',
+            }
+          : {}),
         postcode: 'inferred',
         place: 'inferred',
         region: 'inferred',
@@ -119,8 +153,12 @@ describe('resolveMapboxAddress', () => {
         confidence: 'high',
         addressNumber: 'matched',
         street: 'matched',
+        secondaryAddress: null,
       },
     })
+    expect(JSON.stringify(result)).not.toContain('example-provider-id')
+    expect(JSON.stringify(result)).not.toContain('longitude')
+    expect(JSON.stringify(result)).not.toContain('latitude')
     expect(result.privacy).toEqual({
       tokenSource: 'env',
       persistedByTool: false,
@@ -128,6 +166,50 @@ describe('resolveMapboxAddress', () => {
       candidateCount: 1,
     })
     expect(result.warnings).toEqual([])
+  })
+
+  it('does not recommend one strong match while another weaker destination remains', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({
+        type: 'FeatureCollection',
+        features: [
+          addressFeature({
+            city: 'Sampleton',
+            postalCode: '30303',
+            state: 'GA',
+            streetAddress: '42 Example Lane',
+          }),
+          addressFeature({
+            city: 'Exampleville',
+            confidence: 'medium',
+            postalCode: '10001',
+            state: 'NY',
+            streetAddress: '42 Example Lane',
+          }),
+        ],
+      }),
+    )
+
+    const result = await resolveMapboxAddress(
+      {
+        query: '42 Example Lane',
+        country: ['US'],
+      },
+      {
+        env: {
+          MAPBOX_ACCESS_TOKEN: 'test-token',
+        },
+        fetchImpl,
+      },
+    )
+
+    expect(result.candidates).toHaveLength(2)
+    expect(result.candidates[0]?.safeToAutofill).toBe(true)
+    expect(result.candidates[1]?.safeToAutofill).toBe(false)
+    expect(result.recommendedCandidate).toBeNull()
+    expect(result.warnings).toEqual([
+      'More than one mailing-address candidate was returned.',
+    ])
   })
 
   it('does not recommend an address when more than one strong match remains', async () => {
@@ -170,23 +252,111 @@ describe('resolveMapboxAddress', () => {
     )
     expect(result.recommendedCandidate).toBeNull()
     expect(result.warnings).toEqual([
-      'More than one strong mailing-address match was returned.',
+      'More than one mailing-address candidate was returned.',
     ])
   })
 
-  it('does not recommend a complete result whose supplied street components did not match strongly', async () => {
-    const feature = addressFeature({
-      city: 'Sampleton',
-      confidence: 'medium',
-      postalCode: '30303',
-      state: 'GA',
-      streetAddress: '42 Example Lane',
-    })
-    feature.properties.match_code.street = 'plausible'
+  it('does not auto-fill a plausible or extrapolated secondary address', async () => {
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
       jsonResponse({
         type: 'FeatureCollection',
-        features: [feature],
+        features: [
+          addressFeature({
+            city: 'Sampleton',
+            featureType: 'secondary_address',
+            postalCode: '30303',
+            secondaryAddress: 'Unit 400',
+            secondaryAddressMatch: 'plausible',
+            state: 'GA',
+            streetAddress: '42 Example Lane',
+          }),
+        ],
+      }),
+    )
+
+    const result = await resolveMapboxAddress(
+      {
+        query: '42 Example Lane Unit 400',
+        country: ['US'],
+      },
+      {
+        env: {
+          MAPBOX_ACCESS_TOKEN: 'test-token',
+        },
+        fetchImpl,
+      },
+    )
+
+    expect(result.candidates[0]).toMatchObject({
+      addressLine1: '42 Example Lane',
+      addressLine2: 'Unit 400',
+      completeForUsMail: true,
+      safeToAutofill: false,
+      match: {
+        secondaryAddress: 'plausible',
+      },
+    })
+    expect(result.recommendedCandidate).toBeNull()
+    expect(result.warnings).toEqual([
+      'The mailing-address match was not strong enough to fill automatically.',
+    ])
+  })
+
+  it('can recommend an exactly matched secondary address', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({
+        type: 'FeatureCollection',
+        features: [
+          addressFeature({
+            city: 'Sampleton',
+            featureType: 'secondary_address',
+            postalCode: '30303',
+            secondaryAddress: 'Unit 400',
+            secondaryAddressMatch: 'matched',
+            state: 'GA',
+            streetAddress: '42 Example Lane',
+          }),
+        ],
+      }),
+    )
+
+    const result = await resolveMapboxAddress(
+      {
+        query: '42 Example Lane Unit 400',
+        country: ['US'],
+      },
+      {
+        env: {
+          MAPBOX_ACCESS_TOKEN: 'test-token',
+        },
+        fetchImpl,
+      },
+    )
+
+    expect(result.recommendedCandidate).toMatchObject({
+      addressLine1: '42 Example Lane',
+      addressLine2: 'Unit 400',
+      safeToAutofill: true,
+      match: {
+        secondaryAddress: 'matched',
+      },
+    })
+  })
+
+  it('does not recommend a complete result whose supplied street components did not match strongly', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({
+        type: 'FeatureCollection',
+        features: [
+          addressFeature({
+            city: 'Sampleton',
+            confidence: 'medium',
+            postalCode: '30303',
+            state: 'GA',
+            streetAddress: '42 Example Lane',
+            streetMatch: 'plausible',
+          }),
+        ],
       }),
     )
 
@@ -209,7 +379,46 @@ describe('resolveMapboxAddress', () => {
     })
     expect(result.recommendedCandidate).toBeNull()
     expect(result.warnings).toEqual([
-      'No unique strong mailing-address match was returned.',
+      'The mailing-address match was not strong enough to fill automatically.',
+    ])
+  })
+
+  it('does not recommend provider output that exceeds the physical-note address limits', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({
+        type: 'FeatureCollection',
+        features: [
+          addressFeature({
+            city: 'Sampleton',
+            postalCode: '30303',
+            state: 'GA',
+            streetAddress: `42 ${'VeryLongStreetName'.repeat(5)}`,
+          }),
+        ],
+      }),
+    )
+
+    const result = await resolveMapboxAddress(
+      {
+        query: '42 very long street',
+        country: ['US'],
+      },
+      {
+        env: {
+          MAPBOX_ACCESS_TOKEN: 'test-token',
+        },
+        fetchImpl,
+      },
+    )
+
+    expect(result.candidates[0]).toMatchObject({
+      addressLine1: null,
+      completeForUsMail: false,
+      safeToAutofill: false,
+    })
+    expect(result.recommendedCandidate).toBeNull()
+    expect(result.warnings).toEqual([
+      'The mailing-address match did not include every required US mailing field.',
     ])
   })
 
