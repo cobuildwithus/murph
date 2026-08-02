@@ -14,9 +14,13 @@ const skillPath = path.join(
   'SKILL.md',
 )
 
+async function readSkill(): Promise<string> {
+  return (await readFile(skillPath, 'utf8')).replace(/\s+/gu, ' ').trim()
+}
+
 describe('assistant physical-note proactive address flow', () => {
   it('resolves objective mailing fields before asking without widening authority', async () => {
-    const skill = await readFile(skillPath, 'utf8')
+    const skill = await readSkill()
 
     expect(skill).toContain(
       'vault-cli route resolve-address "<address>" --country US --format json',
@@ -33,7 +37,7 @@ describe('assistant physical-note proactive address flow', () => {
   })
 
   it('treats a clear note request as enough drafting intent without inventing authorship', async () => {
-    const skill = await readFile(skillPath, 'utf8')
+    const skill = await readSkill()
 
     expect(skill).toContain(
       'A clear request to send a thank-you, congratulations, apology, or similar note already asks Murph to draft fitting short copy.',
