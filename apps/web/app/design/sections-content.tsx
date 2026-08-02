@@ -21,10 +21,10 @@ import { AccountExitReasonStudy } from "./account-exit-reason-study";
 import { ChangelogArchiveStudy } from "./changelog-archive-study";
 import { ClubsPageStudy } from "./clubs-page-study";
 import { ConnectSourceCardStudy } from "./connect-source-card-study";
-import { DeviceSyncCallbackStudy } from "./device-sync-callback-study";
 import { DataExportFlowStudy } from "./data-export-study";
 import { FamilyInviteJoinStudy } from "./family-invite-join-study";
 import { GroupJoinStudy } from "./group-join-study";
+import { GroupStartStudy } from "./group-start-study";
 import { GroupMemberPlanStudy } from "./group-member-plan-study";
 import { GrowthScorecardStudy } from "./growth-scorecard-study";
 import { HealthDataConsentWithdrawalFlowStudy } from "./health-data-consent-study";
@@ -235,12 +235,6 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Device connection callback confirmation and failure">
-        <DeviceSyncCallbackStudy />
-      </StudySection>
-
-      <Separator />
-
       <StudySection title="Account deletion exit reason">
         <AccountExitReasonStudy />
       </StudySection>
@@ -285,6 +279,12 @@ export function SectionsContent() {
 
       <StudySection title="Group join message invites, actions, and sharing consents">
         <GroupJoinStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Unknown iMessage group setup and recovery">
+        <GroupStartStudy />
       </StudySection>
 
       <Separator />

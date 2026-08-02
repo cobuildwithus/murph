@@ -13,7 +13,6 @@ import {
   DeviceSyncSetupGuideDialog,
 } from "@/app/(dashboard)/home/device-sync-completion-dialog";
 import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
-import { HostedDeviceSyncCallbackConfirmation } from "@/src/components/device-sync/hosted-device-sync-callback-confirmation";
 import { HomeExperimentCard } from "@/src/components/home/home-experiment-card";
 import {
   GroupUsageFundingActions,
@@ -31,7 +30,10 @@ import {
   HostedEmailMurphContactDialog,
   WebmailIcon,
 } from "@/src/components/settings/hosted-email-murph-contact-dialog";
-import { HostedPhoneLinkAction } from "@/src/components/settings/hosted-phone-settings";
+import {
+  HostedPhoneLinkAction,
+  HostedPhoneLinkCardPresentation,
+} from "@/src/components/settings/hosted-phone-settings";
 import {
   HostedIdentitySessionLoading,
   HostedIdentitySessionMismatch,
@@ -60,6 +62,7 @@ import {
 import { HostedInlineAuthButton } from "@/src/components/hosted-onboarding/hosted-inline-auth-button";
 import { HostedCodeEntryStep } from "@/src/components/hosted-onboarding/hosted-phone-auth-step-views";
 import { HostedAuthenticatedPhoneAuthState } from "@/src/components/hosted-onboarding/hosted-phone-auth-views";
+import { HostedContactChannelChoice } from "@/src/components/hosted-onboarding/hosted-contact-channel-choice";
 import { HostedTelegramAuthButtonPresentation } from "@/src/components/hosted-onboarding/hosted-telegram-auth-button";
 import {
   HostedLegalConsentCard,
@@ -140,6 +143,7 @@ import {
   DESIGN_USAGE_MISSION_CONTACT_OPTION,
 } from "./group-usage-funding-study";
 import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
+import { ConnectCallbackErrorNotice } from "@/src/components/device-sync/connect-callback-error-notice";
 import { HostedAccountDeletionStatus } from "@/src/components/settings/hosted-data-privacy-settings";
 import { GarminHistoricalDataDialog } from "../(dashboard)/connect/connect-page-dialogs";
 import {
@@ -1261,11 +1265,20 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Device Sync Callback Confirmation">
-          <div className="overflow-hidden rounded-2xl border border-border" inert>
-            <HostedDeviceSyncCallbackConfirmation
-              action="/"
-              state="confirmation"
+        <Section title="Connect Callback Error Notice">
+          <div className="flex flex-col gap-4" inert>
+            <ConnectCallbackErrorNotice
+              errorCode="CALLBACK_PROOF_INVALID"
+              message="That return link did not match the browser you started in, so nothing was connected. Start Oura again from this page."
+              sourceLabel="Oura"
+              title="Unable to finish connection"
+            />
+            <ConnectCallbackErrorNotice
+              errorCode="CALLBACK_SESSION_REQUIRED"
+              message="You were signed out before Oura finished connecting. Log in, then start the connection again."
+              onSignIn={() => {}}
+              sourceLabel="Oura"
+              title="Unable to finish connection"
             />
           </div>
         </Section>
@@ -1737,6 +1750,62 @@ export function ComponentsContent() {
                 onSignInAgain={() => {}}
               />
             </div>
+          </div>
+          <p className="text-sm leading-6 text-muted-foreground">
+            The join card composes that action with its reserved status line
+            and the Telegram alternative. The status line holds its height
+            while empty so the button never moves when a message arrives, so
+            these previews show the real resting spacing between the two
+            contact channels.
+          </p>
+          <div
+            aria-label="Composed contact channel card previews"
+            className="grid max-w-3xl gap-4 sm:grid-cols-2"
+            data-design-component="hosted-contact-channel-choice"
+            inert
+          >
+            {[
+              {
+                errorMessage: null,
+                label: "Resting",
+                state: "resting",
+                statusMessage: null,
+                statusTone: "neutral" as const,
+              },
+              {
+                errorMessage: null,
+                label: "Saved status",
+                state: "status",
+                statusMessage: "Phone saved.",
+                statusTone: "success" as const,
+              },
+            ].map((preview) => (
+              <div
+                className="space-y-3 rounded-xl border border-border bg-card p-5"
+                data-design-state={preview.state}
+                key={preview.label}
+              >
+                <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                  {preview.label}
+                </p>
+                <HostedContactChannelChoice
+                  phone={
+                    <HostedPhoneLinkCardPresentation
+                      errorMessage={preview.errorMessage}
+                      isChangeFlow={false}
+                      isLinking={false}
+                      isSyncing={false}
+                      statusMessage={preview.statusMessage}
+                      statusTone={preview.statusTone}
+                      onClick={() => {}}
+                    />
+                  }
+                  telegram={
+                    <HostedTelegramAuthButtonPresentation onClick={() => {}} />
+                  }
+                />
+              </div>
+            ))}
           </div>
         </Section>
 

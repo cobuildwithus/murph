@@ -16,6 +16,8 @@ import {
   HOSTED_PLAN_CODES,
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
+  HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
+  isHostedProductSupportEscalationFeedback,
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
@@ -3251,7 +3253,6 @@ export async function executeMurphDynamicToolRequest(input: {
         }, {
           signal: input.abortSignal ?? null,
         })
-
         switch (result.status) {
           case 'accepted':
             return toolTextResult(
@@ -3290,7 +3291,7 @@ export async function executeMurphDynamicToolRequest(input: {
               false,
               JSON.stringify({
                 note:
-                  'The physical note was not sent because the current participant is not authorized to approve this action.',
+                  'The physical note was not sent because this action is not available to the current participant right now.',
                 status: result.status,
               }),
             )
@@ -3306,7 +3307,7 @@ export async function executeMurphDynamicToolRequest(input: {
           case 'failed':
             return toolTextResult(
               false,
-              'the physical note was not accepted for printing',
+              'The physical note was not accepted for printing.',
             )
         }
       } catch {
@@ -3444,6 +3445,7 @@ export async function executeMurphDynamicToolRequest(input: {
     case 'submit-product-feedback':
       return await executeSubmitProductFeedbackTool({
         feedback: input.request.feedback,
+        hostedToolContext: input.hostedToolContext ?? null,
         productFeedbackRecorder: input.productFeedbackRecorder ?? null,
       })
     case 'family-plan':
@@ -3849,10 +3851,27 @@ function hasVoiceMemoResponseMedia(
 
 async function executeSubmitProductFeedbackTool(input: {
   feedback: Omit<HostedRuntimeProductFeedbackRecord, 'idempotencyKey'>
+  hostedToolContext: AssistantHostedToolContext | null
   productFeedbackRecorder: AssistantTurnProductFeedbackRecorder | null
 }): Promise<MurphDynamicToolExecutionResult> {
   if (!input.productFeedbackRecorder?.recordProductFeedback) {
     return toolTextResult(false, 'product feedback recording is not available for this turn')
+  }
+  if (input.feedback.summary.startsWith(HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX)) {
+    if (!isHostedProductSupportEscalationFeedback(input.feedback)) {
+      return toolTextResult(
+        false,
+        `support escalation rejected: a summary beginning "${HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX}" is reserved and requires kind "frustration", empty relatedChangelogItemIds, and a non-empty de-identified explanation after the prefix`,
+      )
+    }
+    const userActionScope =
+      input.hostedToolContext?.currentUserActionScope?.() ?? null
+    if (userActionScope && userActionScope.conversationScope !== 'direct') {
+      return toolTextResult(
+        false,
+        'support escalation rejected: an account-linked support escalation is only available in a verified private direct conversation',
+      )
+    }
   }
   try {
     const result = await input.productFeedbackRecorder.recordProductFeedback(input.feedback)

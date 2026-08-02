@@ -8,6 +8,7 @@ import {
 } from "@murphai/importers/device-providers/provider-descriptors";
 
 import { deviceSyncError } from "../errors.ts";
+import type { OuraDeviceSyncJobPayloads } from "../config/provider-manifests.ts";
 import {
   buildOuraDeviceSyncRuntimeDescriptor,
   buildOuraDeviceSyncScopes,
@@ -950,7 +951,7 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
     now: string;
     includePersonalInfo: boolean;
     windowDays: number;
-  }): Record<string, unknown> {
+  }): OuraDeviceSyncJobPayloads["backfill" | "reconcile"] {
     return {
       windowStart: subtractDays(input.now, input.windowDays),
       windowEnd: input.now,
@@ -963,7 +964,7 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
     objectId: string;
     occurredAt: string;
     now: string;
-  }): Record<string, unknown> {
+  }): OuraDeviceSyncJobPayloads["resource"] {
     return {
       dataType: input.dataType,
       objectId: input.objectId,
@@ -981,7 +982,7 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
     objectId: string;
     occurredAt: string;
     sourceEventType: string;
-  }): Record<string, unknown> {
+  }): OuraDeviceSyncJobPayloads["delete"] {
     return {
       sourceEventType: input.sourceEventType,
       dataType: input.dataType,
@@ -1297,7 +1298,7 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
         reconcileIntervalMs,
         payload: {
           includePersonalInfo: false,
-        },
+        } satisfies Omit<OuraDeviceSyncJobPayloads["reconcile"], "windowStart" | "windowEnd">,
       });
     },
     async executeJob(context: ProviderJobContext, job: DeviceSyncJobRecord): Promise<ProviderJobResult> {

@@ -169,6 +169,7 @@ vi.mock("../src/lib/hosted-onboarding/hosted-member-routing-store", async (impor
   return {
     ...actual,
     demoteHostedMemberLinqGroupChatBindingsTx: vi.fn(),
+    lookupHostedMemberRoutingByPendingLinqParticipantContact: vi.fn(),
     readHostedMemberRoutingState: vi.fn(),
   };
 });
@@ -235,6 +236,10 @@ const TEST_KEYRING_ENTRIES = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Group setup links are built from the hosted onboarding public base URL, and
+  // the environment read is memoized on globalThis.
+  vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "https://join.example.test");
+  clearHostedOnboardingEnvCache();
   usageReferralMocks.bindArmedHostedUsageReferralToNewContainerTx
     .mockResolvedValue({ referralIds: [] });
   usageReferralMocks.observeHostedUsageReferralInboundTx.mockResolvedValue({
@@ -253,6 +258,12 @@ beforeEach(() => {
     mailboxConsumedAt: null,
   });
   vi.mocked(memberRoutingStore.readHostedMemberRoutingState).mockReset();
+  vi.mocked(
+    memberRoutingStore.lookupHostedMemberRoutingByPendingLinqParticipantContact,
+  ).mockReset();
+  vi.mocked(
+    memberRoutingStore.lookupHostedMemberRoutingByPendingLinqParticipantContact,
+  ).mockResolvedValue(null);
   vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue({
     handles: [],
     isGroup: null,
@@ -298,6 +309,8 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllEnvs();
+  clearHostedOnboardingEnvCache();
 });
 
 function buildLinqMessageReceivedEvent(input: {
@@ -896,6 +909,38 @@ function createPrisma(input: {
   const hostedMailboxItem = {
     updateMany: vi.fn().mockResolvedValue({ count: 1 }),
   };
+  // Inbound webhooks always land on a Murph-managed line, so the route account
+  // phone is backed by one healthy, assignable managed line here.
+  const routeAccountPhone = input.routeAccountPhone ?? "+15550000000";
+  const hostedLinqLine = {
+    findMany: vi.fn().mockImplementation(async ({ select, where }: {
+      select: Record<string, boolean>;
+      where: { phoneNumberLookupKey?: { in?: string[] } };
+    }) => {
+      const lookupKeys = where.phoneNumberLookupKey?.in ?? null;
+      if (
+        !routeAccountLookupKey
+        || (lookupKeys && !lookupKeys.includes(routeAccountLookupKey))
+      ) {
+        return [];
+      }
+      const line = {
+        configuredAt: new Date("2026-06-24T00:00:00.000Z"),
+        egressPolicy: "enabled",
+        healthStatus: "healthy",
+        phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(routeAccountPhone),
+        phoneNumberHint: readHostedPhoneHint(routeAccountPhone),
+        phoneNumberLookupKey: routeAccountLookupKey,
+        providerReputationStatus: "HEALTHY",
+        providerServiceStatus: "ACTIVE",
+      };
+      return [
+        Object.fromEntries(
+          Object.entries(line).filter(([key]) => select[key] === true),
+        ),
+      ];
+    }),
+  };
   const transaction = vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => {
     const pendingBefore = pendingParticipantAddition;
     const accountLookupKeyBefore = accountLookupKeyProjection;
@@ -915,6 +960,7 @@ function createPrisma(input: {
     $executeRaw: vi.fn().mockResolvedValue(0),
     $queryRaw: vi.fn().mockResolvedValue([]),
     $transaction: transaction,
+    hostedLinqLine,
     hostedMailboxItem,
     hostedMember,
     hostedMemberRouting,
@@ -3866,7 +3912,7 @@ describe("Linq explicit external-thread routing", () => {
     });
   });
 
-  it("still ignores unbound Linq group threads when the sender is not a member", async () => {
+  it("still routes nothing for unbound Linq group threads when the sender is not a member", async () => {
     const prisma = createPrisma();
     vi.mocked(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber)
       .mockResolvedValue(null);
@@ -3876,10 +3922,11 @@ describe("Linq explicit external-thread routing", () => {
       prisma: prisma as never,
     });
 
+    // An unknown sender on a healthy managed line is offered group setup, but
+    // an unbound group thread must still never reach personal routing.
     expect(plan.response).toMatchObject({
-      ignored: true,
       ok: true,
-      reason: "group-chat",
+      reason: "sent-group-setup",
     });
     expect(memberRoutingStore.readHostedMemberRoutingState).not.toHaveBeenCalled();
     expect(hostedMemberStore.createHostedMember).not.toHaveBeenCalled();
@@ -4680,7 +4727,7 @@ describe("Linq group chat auto-provision", () => {
     mockAllowedThreadUsage();
   }
 
-  it("logs a privacy-safe reason when a group sender email has no verified authorization", async () => {
+  it("offers setup without logging an unknown group sender email", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const prisma = createStatefulThreadRoutePrisma();
     const senderEmail = "incident-sender@example.com";
@@ -4688,6 +4735,7 @@ describe("Linq group chat auto-provision", () => {
     const chatId = "chat_private_incident_123";
     const messageId = "message_private_incident_123";
     const messageText = "Private incident message with secret-token-value";
+    prisma.seedActiveManagedLinqLine(recipientPhone);
 
     try {
       const plan = await planHostedOnboardingLinqWebhook({
@@ -4702,10 +4750,15 @@ describe("Linq group chat auto-provision", () => {
       });
 
       expect(plan.response).toMatchObject({
-        ignored: true,
+        joinUrl: expect.stringContaining("/groups/start"),
         ok: true,
-        reason: "group-chat",
+        reason: "sent-group-setup",
       });
+      expect(plan.desiredSideEffects.map(({ payload }) => payload.template))
+        .toEqual([
+          "group_setup",
+          "group_email_recovery",
+        ]);
       expect(prisma.hostedMemberEmailAuthorization.findMany).toHaveBeenCalledTimes(1);
       expect(
         memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber,
@@ -4715,15 +4768,15 @@ describe("Linq group chat auto-provision", () => {
         ([message]) => message === "Hosted Linq webhook planner decision.",
       )?.[1];
       expect(plannerDetails).toMatchObject({
+        existingMemberActive: false,
         existingMemberMatch: "none",
-        ignored: true,
         linqChatPresent: true,
         linqContactKind: "email",
         linqRecipientPhonePresent: true,
         ok: true,
         reason: "sender-identity-unresolved",
-        responseReason: "group-chat",
-        routeStage: "new-group-admission-ignored",
+        responseReason: "sent-group-setup",
+        routeStage: "new-group-setup-planned",
       });
 
       const serializedDetails = JSON.stringify(plannerDetails);
@@ -4740,6 +4793,294 @@ describe("Linq group chat auto-provision", () => {
     } finally {
       info.mockRestore();
     }
+  });
+
+  it("offers one group setup link for an unknown phone sender", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000");
+    mockSenderLookup(null);
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toMatchObject({
+      ok: true,
+      reason: "sent-group-setup",
+    });
+    expect(plan.desiredSideEffects.map(({ payload }) => payload.template))
+      .toEqual(["group_setup"]);
+    expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
+  });
+
+  it("screens an unknown group sender through first-contact admission before offering setup", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000");
+    mockSenderLookup(null);
+
+    try {
+      const plan = await planHostedOnboardingLinqWebhook({
+        event: buildLinqMessageReceivedEvent({}),
+        prisma: prisma as never,
+        requireFirstContactAdmission: true,
+      });
+
+      // A setup link is still a reply to a stranger, so the group planner hands
+      // the service layer the same admission request the direct planner does
+      // instead of answering on a second, looser policy.
+      expect(plan.response).toMatchObject({
+        ignored: true,
+        ok: true,
+        reason: "first-contact-admission-required",
+      });
+      expect(plan.firstContactAdmissionRequest).toMatchObject({
+        eventId: "evt_group_123",
+        participantContactKind: "phone",
+        partTypes: ["text"],
+        service: "imessage",
+        text: "How did we sleep?",
+      });
+      expect(plan.firstContactAdmissionParticipantContact).toMatchObject({
+        kind: "phone",
+        value: "+15551112222",
+      });
+      expect(plan.desiredSideEffects).toEqual([]);
+      expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
+
+      const plannerDetails = info.mock.calls.find(
+        ([message]) => message === "Hosted Linq webhook planner decision.",
+      )?.[1];
+      expect(plannerDetails).toMatchObject({
+        existingMemberActive: false,
+        existingMemberMatch: "none",
+        reason: "first-contact-admission-required",
+        routeStage: "first-contact-admission-required",
+      });
+    } finally {
+      info.mockRestore();
+    }
+  });
+
+  it("offers the group setup link once first-contact admission allows the unknown sender", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000");
+    mockSenderLookup(null);
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      firstContactAdmissionDecision: {
+        confidence: 0.9,
+        kind: "allow",
+        source: "model",
+      },
+      prisma: prisma as never,
+      requireFirstContactAdmission: true,
+    });
+
+    expect(plan.response).toMatchObject({
+      ok: true,
+      reason: "sent-group-setup",
+    });
+    expect(plan.desiredSideEffects.map(({ payload }) => payload.template))
+      .toEqual(["group_setup"]);
+    expect(plan.firstContactAdmissionRequest).toBeUndefined();
+  });
+
+  it("plans one setup and private recovery link per day for an allowed unknown email sender", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000");
+
+    const planUnknownEmailSender = (input: { createdAt: string; eventId: string }) =>
+      planHostedOnboardingLinqWebhook({
+        event: buildLinqMessageReceivedEvent({
+          createdAt: input.createdAt,
+          eventId: input.eventId,
+          sender: "group-stranger@example.com",
+        }),
+        // The contact already cleared admission, so later messages are planned
+        // on the stored allow instead of a fresh classifier decision.
+        firstContactAdmissionDecision: {
+          confidence: 0.9,
+          kind: "allow",
+          source: "model",
+        },
+        prisma: prisma as never,
+        requireFirstContactAdmission: true,
+      });
+
+    const firstOfDay = await planUnknownEmailSender({
+      createdAt: "2026-06-24T12:00:00.000Z",
+      eventId: "evt_group_email_day1_first",
+    });
+    const laterSameDay = await planUnknownEmailSender({
+      createdAt: "2026-06-24T18:00:00.000Z",
+      eventId: "evt_group_email_day1_second",
+    });
+    const nextDay = await planUnknownEmailSender({
+      createdAt: "2026-06-25T09:00:00.000Z",
+      eventId: "evt_group_email_day2_first",
+    });
+
+    for (const plan of [firstOfDay, laterSameDay, nextDay]) {
+      expect(plan.response).toMatchObject({
+        ok: true,
+        reason: "sent-group-setup",
+      });
+      expect(plan.desiredSideEffects.map(({ payload }) => payload.template))
+        .toEqual(["group_setup", "group_email_recovery"]);
+    }
+
+    const effectIds = (plan: typeof firstOfDay) =>
+      plan.desiredSideEffects.map(({ effectId }) => effectId);
+    // Same day dedupes to the one offer already delivered; the next day earns
+    // a fresh in-group link and a fresh private recovery link.
+    expect(effectIds(laterSameDay)).toEqual(effectIds(firstOfDay));
+    expect(effectIds(nextDay)).toHaveLength(2);
+    for (const effectId of effectIds(nextDay)) {
+      expect(effectIds(firstOfDay)).not.toContain(effectId);
+    }
+  });
+
+  it("offers the group setup link without an admission request when enforcement is off", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000");
+    mockSenderLookup(null);
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      prisma: prisma as never,
+      requireFirstContactAdmission: false,
+    });
+
+    // The gate is opt-in: with enforcement off the unknown sender is answered
+    // exactly as before, and the classifier is never asked for.
+    expect(plan.response).toMatchObject({
+      ok: true,
+      reason: "sent-group-setup",
+    });
+    expect(plan.desiredSideEffects.map(({ payload }) => payload.template))
+      .toEqual(["group_setup"]);
+    expect(plan.firstContactAdmissionRequest).toBeUndefined();
+  });
+
+  it("offers group setup to a known but inactive member without a first-contact admission request", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000");
+    mockSenderLookup({
+      ...senderCore,
+      billingStatus: HostedBillingStatus.paused,
+    });
+    prisma.hostedMember.findUnique.mockResolvedValue({
+      accountGroupMemberships: [],
+      billingStatus: HostedBillingStatus.paused,
+      suspendedAt: null,
+      threadContainer: null,
+    });
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      prisma: prisma as never,
+      requireFirstContactAdmission: true,
+    });
+
+    // Admission screens strangers. A resolved member whose access lapsed is
+    // already known, so gating them would spend classifier budget re-deciding
+    // an identity the database can answer.
+    expect(plan.response).toMatchObject({
+      ok: true,
+      reason: "sent-group-setup",
+    });
+    expect(plan.desiredSideEffects.map(({ payload }) => payload.template))
+      .toEqual(["group_setup"]);
+    expect(plan.firstContactAdmissionRequest).toBeUndefined();
+  });
+
+  it("does not screen an unknown group sender on a line it could not answer on", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000", {
+      healthStatus: "degraded",
+      providerReputationStatus: "AT_RISK",
+    });
+    mockSenderLookup(null);
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      prisma: prisma as never,
+      requireFirstContactAdmission: true,
+    });
+
+    // The gate sits after the assignable-line check, so strangers on lines we
+    // could never reply from stay ignored instead of consuming classifier
+    // budget on a message that has no answer.
+    expect(plan.response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "group-chat-line-unavailable",
+    });
+    expect(plan.firstContactAdmissionRequest).toBeUndefined();
+    expect(plan.desiredSideEffects).toEqual([]);
+  });
+
+  it("does not answer a standalone SMS opt-out command in an unknown group", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000");
+    mockSenderLookup(null);
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({
+        service: "sms",
+        text: "STOP",
+      }),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "group-chat",
+    });
+    expect(plan.desiredSideEffects).toEqual([]);
+  });
+
+  it("provisions normally after private email recovery links the sender", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    vi.mocked(
+      memberRoutingStore.lookupHostedMemberRoutingByPendingLinqParticipantContact,
+    ).mockResolvedValue({
+      core: senderCore,
+      matchedBy: "pendingLinqParticipantContactLookupKey",
+      routing: {
+        memberId: senderCore.id,
+      },
+    } as never);
+    mockSuccessfulGroupProvision({ prisma, senderCore });
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({
+        sender: "incident-sender@example.com",
+      }),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "wake-appended-thread-route",
+    });
+    expect(prisma.hostedThreadContainer.create).toHaveBeenCalledTimes(1);
+    expect(
+      memberRoutingStore.lookupHostedMemberRoutingByPendingLinqParticipantContact,
+    ).toHaveBeenCalledWith({
+      contact: expect.objectContaining({
+        kind: "email",
+        value: "incident-sender@example.com",
+      }),
+      linqChatId: "chat_group_123",
+      prisma,
+      recipientPhone: "+15550000000",
+    });
   });
 
   it.each([
@@ -4998,10 +5339,13 @@ describe("Linq group chat auto-provision", () => {
       timestamp: null,
     });
 
+    // No managed line is seeded here, so group planning stops at the line read.
+    // The group-specific ignore reason is what proves the disappeared route did
+    // not fall back to personal direct planning.
     expect(response).toMatchObject({
       ignored: true,
       ok: true,
-      reason: "group-chat",
+      reason: "group-chat-line-unavailable",
     });
     expect(linqClient.getHostedLinqChatSummary).not.toHaveBeenCalled();
     expect(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber).toHaveBeenCalled();
@@ -6007,7 +6351,7 @@ describe("Linq group chat auto-provision", () => {
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(2);
   });
 
-  it("ignores group messages from senders without hosted member identity", async () => {
+  it("ignores group messages from senders without hosted member identity when no managed line owns the recipient", async () => {
     const prisma = createStatefulThreadRoutePrisma();
     mockSenderLookup(null);
 
@@ -6016,11 +6360,14 @@ describe("Linq group chat auto-provision", () => {
       prisma: prisma as never,
     });
 
+    // Unknown senders are only offered group setup on a line Murph manages;
+    // no seeded line means the group stays silent instead of replying.
     expect(plan.response).toMatchObject({
       ignored: true,
       ok: true,
-      reason: "group-chat",
+      reason: "group-chat-line-unavailable",
     });
+    expect(plan.desiredSideEffects).toEqual([]);
     expect(
       memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx,
     ).not.toHaveBeenCalled();
@@ -6028,7 +6375,7 @@ describe("Linq group chat auto-provision", () => {
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
-  it("ignores group messages from members without active access", async () => {
+  it("offers group setup without provisioning for members without active access", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const prisma = createStatefulThreadRoutePrisma();
     prisma.seedActiveManagedLinqLine("+15550000000");
@@ -6051,11 +6398,14 @@ describe("Linq group chat auto-provision", () => {
         prisma: prisma as never,
       });
 
+      // A member whose access lapsed is treated like any other sender who has
+      // not finished setup: one setup link, and no provisioning.
       expect(plan.response).toMatchObject({
-        ignored: true,
         ok: true,
-        reason: "group-chat",
+        reason: "sent-group-setup",
       });
+      expect(plan.desiredSideEffects.map(({ payload }) => payload.template))
+        .toEqual(["group_setup"]);
       expect(memberRoutingStore.readHostedMemberRoutingState).not.toHaveBeenCalled();
       expect(prisma.hostedLinqLine.findFirst).not.toHaveBeenCalled();
       expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
@@ -6067,8 +6417,8 @@ describe("Linq group chat auto-provision", () => {
       expect(plannerDetails).toMatchObject({
         existingMemberMatch: "phone-identity",
         reason: "sender-inactive",
-        responseReason: "group-chat",
-        routeStage: "new-group-admission-ignored",
+        responseReason: "sent-group-setup",
+        routeStage: "new-group-setup-planned",
       });
     } finally {
       info.mockRestore();
@@ -6094,6 +6444,39 @@ describe("Linq group chat auto-provision", () => {
       prisma: prisma as never,
     });
 
+    expect(plan.response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "group-chat",
+    });
+    expect(plan.desiredSideEffects).toEqual([]);
+    expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("stays silent for a withdrawn group sender even when a managed line is available", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000");
+    mockSenderLookup(senderCore);
+    prisma.hostedMember.findUnique.mockResolvedValue({
+      accountGroupMemberships: [],
+      billingStatus: HostedBillingStatus.active,
+      consentGrants: [{
+        scope: "launch.health-data",
+        status: "revoked",
+      }],
+      suspendedAt: null,
+      threadContainer: null,
+    });
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      prisma: prisma as never,
+    });
+
+    // A member whose access lapsed for billing is offered group setup, but an
+    // explicit withdrawal has to stop outreach instead: an assignable line is
+    // the case where the setup offer would otherwise be sent.
     expect(plan.response).toMatchObject({
       ignored: true,
       ok: true,
@@ -6130,17 +6513,21 @@ describe("Linq group chat auto-provision", () => {
       prisma: prisma as never,
     });
 
+    // The expired trial revokes access, so the delayed message can only earn a
+    // setup link — never a container, route, or wake.
     expect(plan.response).toMatchObject({
-      ignored: true,
       ok: true,
-      reason: "group-chat",
+      reason: "sent-group-setup",
     });
+    expect(plan.desiredSideEffects.map(({ payload }) => payload.template))
+      .toEqual(["group_setup"]);
     expect(memberRoutingStore.readHostedMemberRoutingState).not.toHaveBeenCalled();
     expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
-  it("ignores group messages from suspended members", async () => {
+  it("ignores group messages from suspended members without answering", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const prisma = createStatefulThreadRoutePrisma();
     prisma.seedActiveManagedLinqLine("+15550000000");
     mockSenderLookup({
@@ -6148,19 +6535,34 @@ describe("Linq group chat auto-provision", () => {
       suspendedAt: new Date("2026-06-24T00:00:00.000Z"),
     });
 
-    const plan = await planHostedOnboardingLinqWebhook({
-      event: buildLinqMessageReceivedEvent({}),
-      prisma: prisma as never,
-    });
+    try {
+      const plan = await planHostedOnboardingLinqWebhook({
+        event: buildLinqMessageReceivedEvent({}),
+        prisma: prisma as never,
+      });
 
-    expect(plan.response).toMatchObject({
-      ignored: true,
-      ok: true,
-      reason: "group-chat",
-    });
-    expect(prisma.hostedLinqLine.findFirst).not.toHaveBeenCalled();
-    expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
-    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+      // Suspension outranks group setup recovery: a suspended sender must not
+      // receive any outbound message, matching the direct-thread planner.
+      expect(plan.response).toMatchObject({
+        ignored: true,
+        ok: true,
+        reason: "group-chat",
+      });
+      expect(plan.desiredSideEffects).toEqual([]);
+      expect(prisma.hostedLinqLine.findFirst).not.toHaveBeenCalled();
+      expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
+      expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+
+      const plannerDetails = info.mock.calls.find(
+        ([message]) => message === "Hosted Linq webhook planner decision.",
+      )?.[1];
+      expect(plannerDetails).toMatchObject({
+        reason: "suspended-member",
+        routeStage: "new-group-admission-ignored",
+      });
+    } finally {
+      info.mockRestore();
+    }
   });
 
   it("logs provisioning unavailability when owner access disappears during route creation", async () => {

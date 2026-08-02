@@ -110,14 +110,14 @@ export async function issueHostedAppSession(input: {
   memberId: string;
   now?: Date;
   privyUserId: string;
-}): Promise<{ cookie: string; sessionId: string }> {
+}): Promise<{ cookie: string; firstMemberSession: boolean; sessionId: string }> {
   const now = input.now ?? new Date();
   const sessionId = generateHostedAppSessionId();
   const token = generateHostedAppSessionToken(sessionId);
   const expiresAt = new Date(now.getTime() + HOSTED_APP_SESSION_MAX_AGE_SECONDS * 1000);
   const hmacKey = readHostedAppSessionHmacKey();
 
-  await getPrisma().$transaction(async (tx) => {
+  const firstMemberSession = await getPrisma().$transaction(async (tx) => {
     await lockHostedMemberRow(tx, input.memberId);
     const member = await readHostedMemberCoreState({
       memberId: input.memberId,
@@ -131,6 +131,14 @@ export async function issueHostedAppSession(input: {
       });
     }
     assertHostedMemberNotSuspended(member);
+    // Session rows are the durable owner of "has this member ever completed a
+    // web sign-in": logout revokes rather than deletes, and overflow pruning
+    // always retains the newest rows, so the count is monotonic per member.
+    // Counted under the member-row lock so concurrent completions cannot both
+    // observe an empty history.
+    const priorMemberSessions = await tx.hostedWebSession.count({
+      where: { memberId: input.memberId },
+    });
     await tx.hostedWebSession.create({
       data: {
         id: sessionId,
@@ -155,6 +163,7 @@ export async function issueHostedAppSession(input: {
       sessionId,
       tx,
     });
+    return priorMemberSessions === 0;
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
   return {
@@ -162,6 +171,7 @@ export async function issueHostedAppSession(input: {
       serializeHostedAppSessionToken(token),
       HOSTED_APP_SESSION_MAX_AGE_SECONDS,
     ),
+    firstMemberSession,
     sessionId,
   };
 }

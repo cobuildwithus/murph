@@ -134,6 +134,9 @@ export async function readHostedProductFeedbackDigestBatch(input: {
     kind: {
       in: [...HOSTED_PRODUCT_FEEDBACK_KINDS],
     },
+    // Member-linked support-escalation rows stay out of the digest audience;
+    // their anonymous detail rows carry the issue text instead.
+    memberId: null,
     summary: {
       not: null,
     },

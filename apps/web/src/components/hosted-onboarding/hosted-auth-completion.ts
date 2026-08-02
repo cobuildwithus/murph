@@ -27,10 +27,7 @@ export async function completeHostedPrivyAuth(
     authMethod: input.authMethod,
     inviteCode: input.inviteCode,
   });
-  const redirectUrl = await resolveHostedAuthRedirectUrl({
-    initialVisitOnAccessibleStage: Boolean(input.inviteCode),
-    payload,
-  });
+  const redirectUrl = await resolveHostedAuthRedirectUrl({ payload });
 
   return {
     payload,
@@ -39,7 +36,6 @@ export async function completeHostedPrivyAuth(
 }
 
 export async function resolveHostedAuthRedirectUrl(input: {
-  initialVisitOnAccessibleStage?: boolean;
   payload: HostedPrivyCompletionPayload;
 }): Promise<string> {
   if (input.payload.stage === "checkout") {
@@ -47,8 +43,9 @@ export async function resolveHostedAuthRedirectUrl(input: {
   }
 
   if (isHostedOnboardingAccessibleStage(input.payload.stage)) {
-    return input.initialVisitOnAccessibleStage
-      || input.payload.initialVisitEligible === true
+    // The completion payload is the only owner of first-visit eligibility;
+    // invite provenance must not reinterpret it.
+    return input.payload.initialVisitEligible === true
       ? HOSTED_APP_INITIAL_VISIT_HOME_PATH
       : HOSTED_APP_HOME_PATH;
   }

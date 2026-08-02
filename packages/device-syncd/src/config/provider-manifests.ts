@@ -75,6 +75,31 @@ export interface DeviceSyncProviderJobDefinition {
 export type DeviceSyncProviderJobDefinitionMap =
   Readonly<Partial<Record<string, DeviceSyncProviderJobDefinition>>>;
 
+type DeviceSyncJobPayloadFieldValue<Spec extends DeviceSyncJobPayloadFieldSpec> =
+  Spec["kind"] extends "boolean" ? boolean
+    : Spec["kind"] extends "number" ? number
+      : Spec["kind"] extends "string" ? string
+        : Spec["kind"] extends "string[]" ? string[]
+          : never;
+
+/**
+ * Payload type derived from a manifest job definition. Producers that
+ * construct jobs must type their payloads with this so an undeclared field is
+ * a typecheck error instead of a runtime DEVICE_SYNC_JOB_PAYLOAD_INVALID at
+ * the enqueue boundary.
+ */
+export type DeviceSyncJobPayloadOf<Definition extends DeviceSyncProviderJobDefinition> =
+  & {
+    [Field in keyof Definition["payload"] as Definition["payload"][Field] extends { required: true }
+      ? Field
+      : never]: DeviceSyncJobPayloadFieldValue<Definition["payload"][Field]>;
+  }
+  & {
+    [Field in keyof Definition["payload"] as Definition["payload"][Field] extends { required: true }
+      ? never
+      : Field]?: DeviceSyncJobPayloadFieldValue<Definition["payload"][Field]>;
+  };
+
 export type HostedHintPayloadFieldMap = Readonly<Record<string, HostedHintFieldKind>>;
 
 export interface ConfiguredDeviceSyncProviderCapabilities {
@@ -146,6 +171,52 @@ const WHOOP_SYNC = requireDeviceProviderSyncDescriptor(WHOOP_DEVICE_PROVIDER_DES
 const WHOOP_DEFAULT_SCOPES = Object.freeze([...WHOOP_OAUTH.defaultScopes]);
 const WHOOP_REQUIRED_SCOPES = Object.freeze(["offline", "read:profile"] as const);
 
+const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
+  backfill: {
+    payload: {
+      emptyBackfillAttempts: numberJobField({ includeInHostedHint: true }),
+      sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
+      timeseriesCursor: stringJobField({ includeInHostedHint: true }),
+      windowEnd: stringJobField({ includeInHostedHint: true }),
+      windowStart: stringJobField({ includeInHostedHint: true }),
+    },
+  },
+  reconcile: {
+    payload: {
+      sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
+      windowEnd: stringJobField({ includeInHostedHint: true }),
+      windowStart: stringJobField({ includeInHostedHint: true }),
+    },
+  },
+  push_source_recovery: {
+    payload: {
+      silentSinceAt: stringJobField({ includeInHostedHint: true }),
+      sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
+    },
+  },
+  resource: {
+    payload: {
+      companionAdmissionId: stringJobField({ includeInHostedHint: true }),
+      companionObservationJson: stringJobField({ includeInHostedHint: true }),
+      eventType: stringJobField({ includeInHostedHint: true }),
+      objectId: stringJobField({ includeInHostedHint: true }),
+      occurredAt: stringJobField({ includeInHostedHint: true }),
+      resource: stringJobField({ includeInHostedHint: true }),
+      resourceCategory: stringJobField({ includeInHostedHint: true }),
+      sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
+      webhookDataJson: stringJobField({ includeInHostedHint: true }),
+      windowEnd: stringJobField({ includeInHostedHint: true }),
+      windowStart: stringJobField({ includeInHostedHint: true }),
+    },
+  },
+} satisfies DeviceSyncProviderJobDefinitionMap;
+
+export type JunctionDeviceSyncJobPayloads = {
+  [Kind in keyof typeof JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS]: DeviceSyncJobPayloadOf<
+    (typeof JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS)[Kind]
+  >;
+};
+
 const JUNCTION_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderManifest<
   "junction",
   ConfiguredDeviceSyncProviderConfigByKey["junction"],
@@ -162,46 +233,49 @@ const JUNCTION_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProvide
   serializableFields: JUNCTION_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA.serializableFields,
   disallowedSerializableFields:
     JUNCTION_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA.disallowedSerializableFields,
-  jobs: freezeConfiguredDeviceSyncProviderJobDefinitions({
-    backfill: {
-      payload: {
-        emptyBackfillAttempts: numberJobField({ includeInHostedHint: true }),
-        sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
-        timeseriesCursor: stringJobField({ includeInHostedHint: true }),
-        windowEnd: stringJobField({ includeInHostedHint: true }),
-        windowStart: stringJobField({ includeInHostedHint: true }),
-      },
-    },
-    reconcile: {
-      payload: {
-        sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
-        windowEnd: stringJobField({ includeInHostedHint: true }),
-        windowStart: stringJobField({ includeInHostedHint: true }),
-      },
-    },
-    push_source_recovery: {
-      payload: {
-        silentSinceAt: stringJobField({ includeInHostedHint: true }),
-        sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
-      },
-    },
-    resource: {
-      payload: {
-        companionAdmissionId: stringJobField({ includeInHostedHint: true }),
-        companionObservationJson: stringJobField({ includeInHostedHint: true }),
-        eventType: stringJobField({ includeInHostedHint: true }),
-        objectId: stringJobField({ includeInHostedHint: true }),
-        occurredAt: stringJobField({ includeInHostedHint: true }),
-        resource: stringJobField({ includeInHostedHint: true }),
-        resourceCategory: stringJobField({ includeInHostedHint: true }),
-        sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
-        webhookDataJson: stringJobField({ includeInHostedHint: true }),
-        windowEnd: stringJobField({ includeInHostedHint: true }),
-        windowStart: stringJobField({ includeInHostedHint: true }),
-      },
-    },
-  }),
+  jobs: freezeConfiguredDeviceSyncProviderJobDefinitions(JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS),
 });
+
+const OURA_DEVICE_SYNC_JOB_DEFINITIONS = {
+  backfill: {
+    payload: {
+      includePersonalInfo: booleanJobField({ includeInHostedHint: true }),
+      windowEnd: stringJobField({ includeInHostedHint: true }),
+      windowStart: stringJobField({ includeInHostedHint: true }),
+    },
+  },
+  reconcile: {
+    payload: {
+      includePersonalInfo: booleanJobField({ includeInHostedHint: true }),
+      windowEnd: stringJobField({ includeInHostedHint: true }),
+      windowStart: stringJobField({ includeInHostedHint: true }),
+    },
+  },
+  resource: {
+    payload: {
+      dataType: stringJobField({ includeInHostedHint: true }),
+      includePersonalInfo: booleanJobField({ includeInHostedHint: true }),
+      objectId: stringJobField({ includeInHostedHint: true }),
+      occurredAt: stringJobField({ includeInHostedHint: true }),
+      windowEnd: stringJobField({ includeInHostedHint: true }),
+      windowStart: stringJobField({ includeInHostedHint: true }),
+    },
+  },
+  delete: {
+    payload: {
+      dataType: stringJobField({ includeInHostedHint: true, required: true }),
+      objectId: stringJobField({ includeInHostedHint: true, required: true }),
+      occurredAt: stringJobField({ includeInHostedHint: true }),
+      sourceEventType: stringJobField({ includeInHostedHint: true }),
+    },
+  },
+} satisfies DeviceSyncProviderJobDefinitionMap;
+
+export type OuraDeviceSyncJobPayloads = {
+  [Kind in keyof typeof OURA_DEVICE_SYNC_JOB_DEFINITIONS]: DeviceSyncJobPayloadOf<
+    (typeof OURA_DEVICE_SYNC_JOB_DEFINITIONS)[Kind]
+  >;
+};
 
 const OURA_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderManifest<
   "oura",
@@ -218,41 +292,45 @@ const OURA_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderMan
   serializableFields: OURA_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA.serializableFields,
   disallowedSerializableFields:
     OURA_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA.disallowedSerializableFields,
-  jobs: freezeConfiguredDeviceSyncProviderJobDefinitions({
-    backfill: {
-      payload: {
-        includePersonalInfo: booleanJobField({ includeInHostedHint: true }),
-        windowEnd: stringJobField({ includeInHostedHint: true }),
-        windowStart: stringJobField({ includeInHostedHint: true }),
-      },
-    },
-    reconcile: {
-      payload: {
-        includePersonalInfo: booleanJobField({ includeInHostedHint: true }),
-        windowEnd: stringJobField({ includeInHostedHint: true }),
-        windowStart: stringJobField({ includeInHostedHint: true }),
-      },
-    },
-    resource: {
-      payload: {
-        dataType: stringJobField({ includeInHostedHint: true }),
-        includePersonalInfo: booleanJobField({ includeInHostedHint: true }),
-        objectId: stringJobField({ includeInHostedHint: true }),
-        occurredAt: stringJobField({ includeInHostedHint: true }),
-        windowEnd: stringJobField({ includeInHostedHint: true }),
-        windowStart: stringJobField({ includeInHostedHint: true }),
-      },
-    },
-    delete: {
-      payload: {
-        dataType: stringJobField({ includeInHostedHint: true, required: true }),
-        objectId: stringJobField({ includeInHostedHint: true, required: true }),
-        occurredAt: stringJobField({ includeInHostedHint: true }),
-        sourceEventType: stringJobField({ includeInHostedHint: true }),
-      },
-    },
-  }),
+  jobs: freezeConfiguredDeviceSyncProviderJobDefinitions(OURA_DEVICE_SYNC_JOB_DEFINITIONS),
 });
+
+const WHOOP_DEVICE_SYNC_JOB_DEFINITIONS = {
+  backfill: {
+    payload: {
+      windowEnd: stringJobField({ includeInHostedHint: true }),
+      windowStart: stringJobField({ includeInHostedHint: true }),
+    },
+  },
+  reconcile: {
+    payload: {
+      windowEnd: stringJobField({ includeInHostedHint: true }),
+      windowStart: stringJobField({ includeInHostedHint: true }),
+    },
+  },
+  resource: {
+    payload: {
+      eventType: stringJobField({ includeInHostedHint: true }),
+      occurredAt: stringJobField({ includeInHostedHint: true }),
+      resourceId: stringJobField({ includeInHostedHint: true, required: true }),
+      resourceType: stringJobField({ includeInHostedHint: true, required: true }),
+    },
+  },
+  delete: {
+    payload: {
+      eventType: stringJobField({ includeInHostedHint: true }),
+      occurredAt: stringJobField({ includeInHostedHint: true }),
+      resourceId: stringJobField({ includeInHostedHint: true, required: true }),
+      resourceType: stringJobField({ includeInHostedHint: true, required: true }),
+    },
+  },
+} satisfies DeviceSyncProviderJobDefinitionMap;
+
+export type WhoopDeviceSyncJobPayloads = {
+  [Kind in keyof typeof WHOOP_DEVICE_SYNC_JOB_DEFINITIONS]: DeviceSyncJobPayloadOf<
+    (typeof WHOOP_DEVICE_SYNC_JOB_DEFINITIONS)[Kind]
+  >;
+};
 
 const WHOOP_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderManifest<
   "whoop",
@@ -269,37 +347,57 @@ const WHOOP_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderMa
   serializableFields: WHOOP_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA.serializableFields,
   disallowedSerializableFields:
     WHOOP_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA.disallowedSerializableFields,
-  jobs: freezeConfiguredDeviceSyncProviderJobDefinitions({
-    backfill: {
-      payload: {
-        windowEnd: stringJobField({ includeInHostedHint: true }),
-        windowStart: stringJobField({ includeInHostedHint: true }),
-      },
-    },
-    reconcile: {
-      payload: {
-        windowEnd: stringJobField({ includeInHostedHint: true }),
-        windowStart: stringJobField({ includeInHostedHint: true }),
-      },
-    },
-    resource: {
-      payload: {
-        eventType: stringJobField({ includeInHostedHint: true }),
-        occurredAt: stringJobField({ includeInHostedHint: true }),
-        resourceId: stringJobField({ includeInHostedHint: true, required: true }),
-        resourceType: stringJobField({ includeInHostedHint: true, required: true }),
-      },
-    },
-    delete: {
-      payload: {
-        eventType: stringJobField({ includeInHostedHint: true }),
-        occurredAt: stringJobField({ includeInHostedHint: true }),
-        resourceId: stringJobField({ includeInHostedHint: true, required: true }),
-        resourceType: stringJobField({ includeInHostedHint: true, required: true }),
-      },
-    },
-  }),
+  jobs: freezeConfiguredDeviceSyncProviderJobDefinitions(WHOOP_DEVICE_SYNC_JOB_DEFINITIONS),
 });
+
+const STRAVA_DEVICE_SYNC_JOB_DEFINITIONS = {
+  backfill: {
+    payload: {
+      includeAthlete: booleanJobField(),
+      windowEnd: stringJobField({ includeInHostedHint: true }),
+      windowKind: stringJobField(),
+      windowStart: stringJobField({ includeInHostedHint: true }),
+    },
+  },
+  reconcile: {
+    payload: {
+      includeAthlete: booleanJobField(),
+      windowEnd: stringJobField({ includeInHostedHint: true }),
+      windowKind: stringJobField(),
+      windowStart: stringJobField({ includeInHostedHint: true }),
+    },
+  },
+  resource: {
+    payload: {
+      eventType: stringJobField({ includeInHostedHint: true }),
+      occurredAt: stringJobField({ includeInHostedHint: true }),
+      resourceId: stringJobField({ includeInHostedHint: true, required: true }),
+      resourceType: stringJobField({ includeInHostedHint: true, required: true }),
+    },
+  },
+  delete: {
+    payload: {
+      eventType: stringJobField({ includeInHostedHint: true }),
+      occurredAt: stringJobField({ includeInHostedHint: true }),
+      resourceId: stringJobField({ includeInHostedHint: true, required: true }),
+      resourceType: stringJobField({ includeInHostedHint: true }),
+    },
+  },
+  deauthorize: {
+    payload: {
+      eventType: stringJobField({ includeInHostedHint: true }),
+      occurredAt: stringJobField({ includeInHostedHint: true }),
+      resourceId: stringJobField({ includeInHostedHint: true, required: true }),
+      resourceType: stringJobField({ includeInHostedHint: true, required: true }),
+    },
+  },
+} satisfies DeviceSyncProviderJobDefinitionMap;
+
+export type StravaDeviceSyncJobPayloads = {
+  [Kind in keyof typeof STRAVA_DEVICE_SYNC_JOB_DEFINITIONS]: DeviceSyncJobPayloadOf<
+    (typeof STRAVA_DEVICE_SYNC_JOB_DEFINITIONS)[Kind]
+  >;
+};
 
 const STRAVA_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderManifest<
   "strava",
@@ -316,48 +414,7 @@ const STRAVA_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderM
   serializableFields: STRAVA_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA.serializableFields,
   disallowedSerializableFields:
     STRAVA_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA.disallowedSerializableFields,
-  jobs: freezeConfiguredDeviceSyncProviderJobDefinitions({
-    backfill: {
-      payload: {
-        includeAthlete: booleanJobField(),
-        windowEnd: stringJobField({ includeInHostedHint: true }),
-        windowKind: stringJobField(),
-        windowStart: stringJobField({ includeInHostedHint: true }),
-      },
-    },
-    reconcile: {
-      payload: {
-        includeAthlete: booleanJobField(),
-        windowEnd: stringJobField({ includeInHostedHint: true }),
-        windowKind: stringJobField(),
-        windowStart: stringJobField({ includeInHostedHint: true }),
-      },
-    },
-    resource: {
-      payload: {
-        eventType: stringJobField({ includeInHostedHint: true }),
-        occurredAt: stringJobField({ includeInHostedHint: true }),
-        resourceId: stringJobField({ includeInHostedHint: true, required: true }),
-        resourceType: stringJobField({ includeInHostedHint: true, required: true }),
-      },
-    },
-    delete: {
-      payload: {
-        eventType: stringJobField({ includeInHostedHint: true }),
-        occurredAt: stringJobField({ includeInHostedHint: true }),
-        resourceId: stringJobField({ includeInHostedHint: true, required: true }),
-        resourceType: stringJobField({ includeInHostedHint: true }),
-      },
-    },
-    deauthorize: {
-      payload: {
-        eventType: stringJobField({ includeInHostedHint: true }),
-        occurredAt: stringJobField({ includeInHostedHint: true }),
-        resourceId: stringJobField({ includeInHostedHint: true, required: true }),
-        resourceType: stringJobField({ includeInHostedHint: true, required: true }),
-      },
-    },
-  }),
+  jobs: freezeConfiguredDeviceSyncProviderJobDefinitions(STRAVA_DEVICE_SYNC_JOB_DEFINITIONS),
 });
 
 export const deviceSyncProviderManifestByKey = Object.freeze({
@@ -713,8 +770,17 @@ function normalizeOptionalJunctionResourceList(
   return [...new Set(enabledResources)];
 }
 
+type DeviceSyncJobFieldOptions = Pick<
+  DeviceSyncJobPayloadFieldSpec,
+  "includeInHostedHint" | "required"
+>;
+
+function booleanJobField(): { kind: "boolean" };
+function booleanJobField<const O extends DeviceSyncJobFieldOptions>(
+  options: O,
+): { kind: "boolean" } & O;
 function booleanJobField(
-  options: Pick<DeviceSyncJobPayloadFieldSpec, "includeInHostedHint" | "required"> = {},
+  options: DeviceSyncJobFieldOptions = {},
 ): DeviceSyncJobPayloadFieldSpec {
   return {
     kind: "boolean",
@@ -722,8 +788,12 @@ function booleanJobField(
   };
 }
 
+function numberJobField(): { kind: "number" };
+function numberJobField<const O extends DeviceSyncJobFieldOptions>(
+  options: O,
+): { kind: "number" } & O;
 function numberJobField(
-  options: Pick<DeviceSyncJobPayloadFieldSpec, "includeInHostedHint" | "required"> = {},
+  options: DeviceSyncJobFieldOptions = {},
 ): DeviceSyncJobPayloadFieldSpec {
   return {
     kind: "number",
@@ -731,8 +801,12 @@ function numberJobField(
   };
 }
 
+function stringJobField(): { kind: "string" };
+function stringJobField<const O extends DeviceSyncJobFieldOptions>(
+  options: O,
+): { kind: "string" } & O;
 function stringJobField(
-  options: Pick<DeviceSyncJobPayloadFieldSpec, "includeInHostedHint" | "required"> = {},
+  options: DeviceSyncJobFieldOptions = {},
 ): DeviceSyncJobPayloadFieldSpec {
   return {
     kind: "string",

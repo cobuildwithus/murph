@@ -863,6 +863,27 @@ export interface HostedRuntimeProductFeedbackRecord {
   summary: string;
 }
 
+export const HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX = "Support escalation:";
+
+export function isHostedProductSupportEscalationSummary(
+  value: string | null | undefined,
+): value is string {
+  return typeof value === "string"
+    && value.startsWith(HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX)
+    && value.slice(HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX.length).trim().length > 0;
+}
+
+export function isHostedProductSupportEscalationFeedback(
+  feedback: Pick<
+    HostedRuntimeProductFeedbackRecord,
+    "kind" | "relatedChangelogItemIds" | "summary"
+  >,
+): boolean {
+  return feedback.kind === "frustration"
+    && feedback.relatedChangelogItemIds.length === 0
+    && isHostedProductSupportEscalationSummary(feedback.summary);
+}
+
 export interface HostedRuntimeProductFeedbackRecordRequest {
   feedback: HostedRuntimeProductFeedbackRecord;
 }
