@@ -18,6 +18,7 @@ import {
   TrialBillingBanner,
 } from "@/src/components/home/trial-billing-banner";
 import { UsageLimitBanner } from "@/src/components/home/usage-limit-banner";
+import { UsageLimitRecoveryRedirect } from "@/src/components/home/usage-limit-recovery-redirect";
 import {
   UploadLabsActionFallback,
   UploadLabsMurphContactAction,
@@ -201,12 +202,18 @@ export default async function HomePage({
       ) : null}
 
       {usageLimitNotice ? (
-        <UsageLimitBanner
-          noticeCode={usageLimitNotice.code}
-          now={usageGateCheckedAt}
-          recommendedAction={projectedUsageStatus?.recommendedAction ?? null}
-          resetAt={usageLimitResetAt}
-        />
+        <>
+          <UsageLimitRecoveryRedirect
+            noticeCode={usageLimitNotice.code}
+            recommendedAction={projectedUsageStatus?.recommendedAction ?? null}
+          />
+          <UsageLimitBanner
+            noticeCode={usageLimitNotice.code}
+            now={usageGateCheckedAt}
+            recommendedAction={projectedUsageStatus?.recommendedAction ?? null}
+            resetAt={usageLimitResetAt}
+          />
+        </>
       ) : null}
 
       {trialBillingBannerVariant ? (
