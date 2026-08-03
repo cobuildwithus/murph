@@ -206,12 +206,18 @@ function stripHtmlForHostedConnectedAppsResult(value: string): string {
     .replace(/<[^>]+>/gu, " ")
     .replace(/&nbsp;/giu, " ")
     .replace(/&amp;/giu, "&")
-    .replace(/&lt;/giu, "<")
-    .replace(/&gt;/giu, ">")
     .replace(/&quot;/giu, '"')
     .replace(/&#39;/giu, "'")
+    // Angle brackets stay escaped. Decoding them would let an email whose
+    // visible text quotes markup ("&lt;p&gt;Do not cancel&lt;/p&gt;") come out
+    // of this function looking like structure, and a later pass over that
+    // output would then strip the member's own words as if they were tags.
+    // Leaving the entities intact costs the model nothing and keeps compaction
+    // safe to apply more than once.
     .replace(/&#(\d+);/gu, (_match, code: string) => {
       const num = Number(code);
+      if (num === 0x3c) return "&lt;";
+      if (num === 0x3e) return "&gt;";
       return Number.isInteger(num) && num >= 32 && num <= 0x10ffff
         ? String.fromCodePoint(num)
         : " ";

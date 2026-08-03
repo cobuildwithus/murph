@@ -90,22 +90,22 @@ describe("hosted connected-app contracts", () => {
     expect(compactedBody).not.toMatch(/title=|src=/u);
   });
 
-  it("does not treat its own output as markup on a second pass", () => {
-    // Compaction is deliberately single-pass. An email whose visible text
-    // quotes markup decodes to real tags here, so running the compactor over
-    // its own output would strip that text as structure and silently delete
-    // the member's content.
+  it("survives a second pass so mixed-version callers cannot corrupt content", () => {
+    // A deployment window can leave an older caller compacting a result the web
+    // tier already compacted. That second pass must not read the member's own
+    // quoted markup as structure and delete it.
     const quoted = `<!doctype html><html><body><p>Use this exact block:</p>`
       + `<p>&lt;p class="warning"&gt;Do not cancel&lt;/p&gt;</p>`
+      + `<p>And this one: &#60;span&#62;keep me&#60;/span&#62;</p>`
       + `<p>Paste it verbatim.</p>${"<p>filler copy for length</p>".repeat(20)}</body></html>`;
     const once = compactHostedConnectedAppsResult({ body: quoted }) as { body: string };
 
-    expect(once.body).toContain('<p class="warning">Do not cancel</p>');
+    expect(once.body).toContain("Do not cancel");
+    expect(once.body).toContain("keep me");
     expect(once.body).toContain("Paste it verbatim.");
 
     const twice = compactHostedConnectedAppsResult(once) as { body: string };
-    expect(twice.body).not.toBe(once.body);
-    expect(twice.body).not.toContain("Do not cancel</p>");
+    expect(twice.body).toBe(once.body);
   });
 
   it("bounds a compacted result to the assistant budget", () => {
