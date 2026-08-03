@@ -6,6 +6,7 @@ import {
 } from "@murphai/contracts";
 import {
   HOSTED_PRODUCT_FEEDBACK_KINDS,
+  HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
   type HostedProductFeedbackKind,
 } from "@murphai/hosted-execution/runtime-control";
 
@@ -134,9 +135,14 @@ export async function readHostedProductFeedbackDigestBatch(input: {
     kind: {
       in: [...HOSTED_PRODUCT_FEEDBACK_KINDS],
     },
-    // Member-linked support-escalation rows stay out of the digest audience;
-    // their anonymous detail rows carry the issue text instead.
-    memberId: null,
+    // Ordinary feedback is member-linked again and remains visible here. The
+    // reserved support marker stays out because its separate anonymous detail
+    // row carries the actionable issue summary.
+    NOT: {
+      summary: {
+        startsWith: HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
+      },
+    },
     summary: {
       not: null,
     },

@@ -2541,6 +2541,32 @@ describe("deleteHostedAccountData", () => {
     });
   });
 
+  it("records hosted physical-note rows before member deletion cascades them", async () => {
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const operationOrder: string[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      countResults: { hostedPhysicalNote: 2 },
+      deleteCalls,
+      onTransaction: () => undefined,
+      operationOrder,
+    });
+
+    const result = await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(result.deletedCounts["prisma.hosted_physical_note"]).toBe(2);
+    expect(operationOrder.indexOf("count:hostedPhysicalNote")).toBeLessThan(
+      operationOrder.indexOf("delete:hostedMember"),
+    );
+    expect(deleteCalls).not.toContainEqual({
+      model: "hostedPhysicalNote",
+      where: expect.anything(),
+    });
+  });
+
   it("deletes computer-use handoffs before runs", async () => {
     const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({

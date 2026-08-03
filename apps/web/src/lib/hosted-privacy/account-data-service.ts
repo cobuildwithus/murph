@@ -2147,6 +2147,7 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_computer_handoff", await input.prisma.hostedComputerHandoff.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_computer_run", await input.prisma.hostedComputerRun.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_phone_call", await input.prisma.hostedPhoneCall.deleteMany({ where: { memberId: memberIdFilter } }));
+  recordCount("prisma.hosted_physical_note", await input.prisma.hostedPhysicalNote.count({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_member_email_authorization", await input.prisma.hostedMemberEmailAuthorization.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_member_subscription_checkout", await input.prisma.hostedMemberSubscriptionCheckout.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_member_billing_ref", await input.prisma.hostedMemberBillingRef.deleteMany({ where: { memberId: memberIdFilter } }));

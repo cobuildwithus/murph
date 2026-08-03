@@ -54,12 +54,15 @@ note text.
 
 The exact authorized input derives the request key. The artwork and recipient
 remain in the separate request fingerprint, so reusing one approval with changed
-content is a collision rather than a second effect. Before inserting a row, Web
-validates the artwork lifetime, constructs the provider runtime, reasserts final
-group authority, and observes caller cancellation. Accepted replays resolve
+content is a collision rather than a second effect. Accepted replays resolve
 from the durable row even after the temporary artwork capability expires; an
-existing uncertain send remains pending rather than being rewritten. Web then
-admits a new provider effect under the member lock.
+existing uncertain send remains pending rather than being rewritten. After that
+replay check, Web constructs the provider runtime and a later request may repair
+one stale complimentary claim against Lob. Confirmed acceptance finalizes the
+stale row, confirmed absence releases its claim, and an indeterminate lookup
+changes nothing. The current request then validates the artwork lifetime,
+reasserts final group authority, observes caller cancellation, and follows its
+ordinary member-locked admission, provider effect, replay, and response path.
 
 `memberId + complimentaryOfferCode` atomically admits one complimentary note per
 direct member or synthetic group member. A definite provider rejection releases
