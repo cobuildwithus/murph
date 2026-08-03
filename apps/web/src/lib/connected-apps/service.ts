@@ -34,6 +34,8 @@ import {
 } from "@/src/lib/hosted-onboarding/shared";
 import { getPrisma } from "@/src/lib/prisma";
 
+const CONNECTED_APPS_RESULT_TOO_LARGE_MESSAGE =
+  "That request returned more than Murph can read at once. Ask for fewer results, a narrower time range, or one item at a time.";
 const CONNECTED_APP_INTENT_PREFIX = "cai_";
 const CONNECTED_APP_INTENT_BYTES = 24;
 const CONNECTED_APP_INTENT_TTL_MS = 15 * 60 * 1000;
@@ -66,14 +68,18 @@ export async function executeHostedConnectedAppsRequest(input: {
 function boundHostedConnectedAppsResult(result: unknown): unknown {
   const compacted = compactHostedConnectedAppsResult(result);
   if (serializeHostedConnectedAppsResult(compacted) === null) {
-    throw hostedOnboardingError({
-      code: "CONNECTED_APPS_RESULT_TOO_LARGE",
-      httpStatus: 413,
-      message:
-        "That request returned more than Murph can read at once. Ask for fewer results, a narrower time range, or one item at a time.",
-    });
+    throw connectedAppsResultTooLargeError();
   }
   return compacted;
+}
+
+function connectedAppsResultTooLargeError(cause?: unknown) {
+  return hostedOnboardingError({
+    ...(cause === undefined ? {} : { cause }),
+    code: "CONNECTED_APPS_RESULT_TOO_LARGE",
+    httpStatus: 413,
+    message: CONNECTED_APPS_RESULT_TOO_LARGE_MESSAGE,
+  });
 }
 
 async function runHostedConnectedAppsRequest(input: {
@@ -756,8 +762,13 @@ function mapConnectedAppsError(error: unknown): unknown {
   if (!(error instanceof ComposioConnectedAppsRequestError)) {
     return error;
   }
-  const retryable = error.retryable
-    ?? (error.status === null || error.status === 429 || error.status >= 500);
+  // A provider body too large to read is a narrowable request, not an outage.
+  // Reporting it as one is what left the assistant offering a retry that could
+  // only fail again.
+  if (error.type === "composio_response_too_large") {
+    return connectedAppsResultTooLargeError(error);
+  }
+  const retryable = error.retryable ?? isRetryableComposioFailure(error);
   return hostedOnboardingError({
     cause: error,
     code: "CONNECTED_APPS_PROVIDER_UNAVAILABLE",
@@ -768,6 +779,18 @@ function mapConnectedAppsError(error: unknown): unknown {
       : "The connected-app request could not be completed.",
     retryable,
   });
+}
+
+function isRetryableComposioFailure(
+  error: ComposioConnectedAppsRequestError,
+): boolean {
+  // A malformed body arrives on a 200 with nothing about the request to blame,
+  // so calling it non-retryable would tell the assistant that repeating the
+  // call must fail — a claim the evidence does not support.
+  if (error.type === "composio_invalid_json") {
+    return true;
+  }
+  return error.status === null || error.status === 429 || error.status >= 500;
 }
 
 function buildConnectedAppsProviderErrorDetails(

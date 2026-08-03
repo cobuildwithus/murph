@@ -90,6 +90,24 @@ describe("hosted connected-app contracts", () => {
     expect(compactedBody).not.toMatch(/title=|src=/u);
   });
 
+  it("does not treat its own output as markup on a second pass", () => {
+    // Compaction is deliberately single-pass. An email whose visible text
+    // quotes markup decodes to real tags here, so running the compactor over
+    // its own output would strip that text as structure and silently delete
+    // the member's content.
+    const quoted = `<!doctype html><html><body><p>Use this exact block:</p>`
+      + `<p>&lt;p class="warning"&gt;Do not cancel&lt;/p&gt;</p>`
+      + `<p>Paste it verbatim.</p>${"<p>filler copy for length</p>".repeat(20)}</body></html>`;
+    const once = compactHostedConnectedAppsResult({ body: quoted }) as { body: string };
+
+    expect(once.body).toContain('<p class="warning">Do not cancel</p>');
+    expect(once.body).toContain("Paste it verbatim.");
+
+    const twice = compactHostedConnectedAppsResult(once) as { body: string };
+    expect(twice.body).not.toBe(once.body);
+    expect(twice.body).not.toContain("Do not cancel</p>");
+  });
+
   it("bounds a compacted result to the assistant budget", () => {
     expect(serializeHostedConnectedAppsResult({ body: "x".repeat(10) })).not.toBeNull();
     expect(serializeHostedConnectedAppsResult({ body: "x".repeat(130_000) })).toBeNull();

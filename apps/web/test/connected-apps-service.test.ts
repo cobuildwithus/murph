@@ -731,6 +731,63 @@ describe("connected-app service", () => {
     });
   });
 
+  it("classifies a provider body too large to read as a narrowable request", async () => {
+    // The provider answers 200 and the body is simply beyond what the tier can
+    // buffer. Reporting that as an outage is what produced the false diagnosis.
+    installPrismaHarness();
+    const fetchImpl = vi.fn(async (url: string | URL | Request): Promise<Response> => {
+      const parsed = new URL(String(url));
+      if (parsed.pathname === "/api/v3.1/tool_router/session") {
+        return jsonResponse({ session_id: "trs_member" });
+      }
+      if (parsed.pathname === "/api/v3.1/tool_router/session/trs_member/search") {
+        return new Response(`{"data":"${"x".repeat(5 * 1024 * 1024)}"}`, {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        });
+      }
+      throw new Error(`Unexpected Composio request ${String(url)}`);
+    });
+
+    await expect(executeHostedConnectedAppsRequest({
+      fetchImpl,
+      memberId: "hbm_member",
+      request: { input: { query: "everything" }, operation: "search" },
+    })).rejects.toMatchObject({
+      code: "CONNECTED_APPS_RESULT_TOO_LARGE",
+      httpStatus: 413,
+    });
+  });
+
+  it("keeps a malformed provider body retryable", async () => {
+    // Invalid JSON arrives on a 200 with nothing about the request to blame, so
+    // the assistant must not be told that repeating the call cannot work.
+    installPrismaHarness();
+    const fetchImpl = vi.fn(async (url: string | URL | Request): Promise<Response> => {
+      const parsed = new URL(String(url));
+      if (parsed.pathname === "/api/v3.1/tool_router/session") {
+        return jsonResponse({ session_id: "trs_member" });
+      }
+      if (parsed.pathname === "/api/v3.1/tool_router/session/trs_member/search") {
+        return new Response("{ truncated", {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        });
+      }
+      throw new Error(`Unexpected Composio request ${String(url)}`);
+    });
+
+    await expect(executeHostedConnectedAppsRequest({
+      fetchImpl,
+      memberId: "hbm_member",
+      request: { input: { query: "travel credit" }, operation: "search" },
+    })).rejects.toMatchObject({
+      code: "CONNECTED_APPS_PROVIDER_UNAVAILABLE",
+      httpStatus: 503,
+      retryable: true,
+    });
+  });
+
   it("executes OpenWeather through Composio with the server-held API key", async () => {
     vi.stubEnv("OPENWEATHER_API_KEY", "openweather-test-key");
     installPrismaHarness();

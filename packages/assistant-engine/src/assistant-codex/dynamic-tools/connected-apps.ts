@@ -1,7 +1,6 @@
 import { z } from 'zod'
 
 import {
-  compactHostedConnectedAppsResult,
   hostedConnectedAppsExecuteInputSchema,
   hostedConnectedAppsManageInputSchema,
   hostedConnectedAppsSearchInputSchema,
@@ -146,11 +145,12 @@ export async function executeConnectedAppsDynamicTool(input: {
     const response = await input.connectedApps.request(requestBody, {
       signal: input.abortSignal ?? null,
     })
-    // The web tier already compacts and bounds the result. Repeating both here
-    // keeps an older web deployment from spending the model's context on raw
-    // markup, and compaction is a no-op once the markup is gone.
-    const compacted = compactHostedConnectedAppsResult(response.result)
-    const text = serializeHostedConnectedAppsResult(compacted)
+    // Compaction belongs to the web tier alone. It is not idempotent: an email
+    // whose visible text contains escaped markup (`&lt;p&gt;`) decodes to real
+    // tags on the first pass, and a second pass would strip them as structure
+    // and silently delete the member's content. The budget check stays here as
+    // an independent guard on what enters the model's context.
+    const text = serializeHostedConnectedAppsResult(response.result)
     if (!text) {
       return connectedAppsTextResult(
         false,

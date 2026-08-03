@@ -331,6 +331,30 @@ describe("murph connected-app dynamic tools", () => {
     expect(text).not.toContain("10.0.0.1");
   });
 
+  it("hands the web tier's compacted result to the model unchanged", async () => {
+    // Compaction runs once, in the web tier. Text that merely looks like markup
+    // must survive the runtime edge verbatim.
+    const literalMarkup = '<p class="warning">Do not cancel</p>';
+    const connectedApps: AssistantConnectedAppsPort = {
+      request: vi.fn(async () => ({ result: { body: literalMarkup } })),
+    };
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext(connectedApps),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: createProgressDelivery(),
+      request: {
+        args: { account: "work", arguments: {}, toolSlug: "GMAIL_FETCH_EMAILS" },
+        kind: "connected-apps-execute",
+      },
+    });
+
+    expect(result.rpcResult.success).toBe(true);
+    expect(JSON.parse(result.rpcResult.contentItems[0]!.text)).toEqual({ body: literalMarkup });
+  });
+
   it("fails closed instead of truncating an oversized provider result", async () => {
     const connectedApps: AssistantConnectedAppsPort = {
       request: vi.fn(async () => ({ result: { body: "x".repeat(130_000) } })),
