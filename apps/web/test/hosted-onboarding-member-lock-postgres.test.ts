@@ -13,7 +13,9 @@ import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-cryp
 import {
   createHostedEmailLookupKey,
   createHostedPrivyUserLookupKey,
+  createHostedTelegramUserLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
+import { completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/authentication-service";
 import {
   HostedMemberStripeMutationLockBusyError,
   withHostedMemberStripeMutationLockForOps,
@@ -49,18 +51,28 @@ const privyProvider = vi.hoisted(() => ({
       throw new Error("Privy user no longer exists.");
     }
     const emailAddress = privyProvider.emailByUserId.get(userId);
+    const telegramUserId = privyProvider.telegramByUserId.get(userId);
     return {
       id: userId,
-      linked_accounts: emailAddress
-        ? [{
+      linked_accounts: [
+        ...(emailAddress
+          ? [{
             address: emailAddress,
             type: "email",
             verified_at: 1_775_203_200,
           }]
-        : [],
+          : []),
+        ...(telegramUserId
+          ? [{
+              telegram_user_id: telegramUserId,
+              type: "telegram",
+            }]
+          : []),
+      ],
     };
   }),
   missingUserIds: new Set<string>(),
+  telegramByUserId: new Map<string, string>(),
 }));
 
 const accountDeletionBoundaries = vi.hoisted(() => ({
@@ -1563,6 +1575,171 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         await disconnectClients([observer, authenticationClient]);
       }
     });
+
+    it("rolls back principal recovery when a live-only Telegram account belongs to another member", async () => {
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixtureId = randomUUID();
+      const memberId = `hbm_email_rebind_telegram_conflict_${fixtureId}`;
+      const telegramOwnerMemberId = `hbm_telegram_owner_${fixtureId}`;
+      const emailAddress = `rebind-telegram-conflict-${fixtureId}@example.test`;
+      const oldPrivyUserId = `did:privy:old-telegram-conflict-${fixtureId}`;
+      const replacementPrivyUserId = `did:privy:replacement-telegram-conflict-${fixtureId}`;
+      const telegramUserId = `telegram-conflict-${fixtureId}`;
+      const telegramUserLookupKey = createHostedTelegramUserLookupKey(telegramUserId);
+
+      if (!telegramUserLookupKey) {
+        throw new Error("Expected a Telegram lookup key for the conflict fixture.");
+      }
+
+      installPassthroughHostedSecureBoxTestCodec();
+      privyProvider.exists = true;
+      privyProvider.emailByUserId.set(replacementPrivyUserId, emailAddress);
+      privyProvider.telegramByUserId.set(replacementPrivyUserId, telegramUserId);
+      await seedVerifiedEmailRebindingMember({
+        emailAddress,
+        memberId,
+        oldPrivyUserId,
+        prisma: observer,
+      });
+      await observer.hostedMember.create({ data: { id: telegramOwnerMemberId } });
+      await observer.hostedMemberRouting.create({
+        data: {
+          memberId: telegramOwnerMemberId,
+          telegramUserIdEncrypted: telegramUserId,
+          telegramUserLookupKey,
+        },
+      });
+      const emailAuthorizationBefore =
+        await observer.hostedMemberEmailAuthorization.findUniqueOrThrow({
+          where: { memberId },
+        });
+
+      try {
+        await expect(completeHostedPrivyVerification({
+          authMethod: "email",
+          identity: makeVerifiedEmailRebindingIdentity({
+            emailAddress,
+            privyUserId: replacementPrivyUserId,
+          }),
+          now: new Date("2026-08-03T12:00:00.000Z"),
+          prisma: observer,
+          timeZone: "America/New_York",
+        })).rejects.toMatchObject({
+          code: "TELEGRAM_IDENTITY_CONFLICT",
+          httpStatus: 409,
+        });
+
+        await expect(observer.hostedMemberIdentity.findUniqueOrThrow({
+          where: { memberId },
+        })).resolves.toMatchObject({
+          privyUserIdEncrypted: oldPrivyUserId,
+          privyUserLookupKey: requirePrivyUserLookupKey(oldPrivyUserId),
+        });
+        await expect(observer.hostedMemberIdentity.count({
+          where: {
+            privyUserLookupKey: requirePrivyUserLookupKey(replacementPrivyUserId),
+          },
+        })).resolves.toBe(0);
+        await expect(observer.hostedMemberEmailAuthorization.findUniqueOrThrow({
+          where: { memberId },
+        })).resolves.toEqual(emailAuthorizationBefore);
+        await expect(observer.hostedMemberRouting.findUnique({
+          where: { memberId },
+        })).resolves.toBeNull();
+        await expect(observer.hostedInvite.count({
+          where: { memberId },
+        })).resolves.toBe(0);
+        await expect(observer.hostedMember.findUniqueOrThrow({
+          select: { pendingActivationTimeZone: true },
+          where: { id: memberId },
+        })).resolves.toEqual({ pendingActivationTimeZone: null });
+      } finally {
+        privyProvider.emailByUserId.delete(replacementPrivyUserId);
+        privyProvider.telegramByUserId.delete(replacementPrivyUserId);
+        await observer.hostedMember.deleteMany({
+          where: { id: { in: [memberId, telegramOwnerMemberId] } },
+        });
+        setHostedSecureBoxStringTestCodecForTests(null);
+        await disconnectClients([observer]);
+      }
+    });
+
+    it("commits an unowned live-only Telegram account with principal recovery", async () => {
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixtureId = randomUUID();
+      const memberId = `hbm_email_rebind_telegram_${fixtureId}`;
+      const emailAddress = `rebind-telegram-${fixtureId}@example.test`;
+      const oldPrivyUserId = `did:privy:old-telegram-${fixtureId}`;
+      const replacementPrivyUserId = `did:privy:replacement-telegram-${fixtureId}`;
+      const telegramUserId = `telegram-${fixtureId}`;
+      const telegramUserLookupKey = createHostedTelegramUserLookupKey(telegramUserId);
+
+      if (!telegramUserLookupKey) {
+        throw new Error("Expected a Telegram lookup key for the success fixture.");
+      }
+
+      installPassthroughHostedSecureBoxTestCodec();
+      privyProvider.exists = true;
+      privyProvider.emailByUserId.set(replacementPrivyUserId, emailAddress);
+      privyProvider.telegramByUserId.set(replacementPrivyUserId, telegramUserId);
+      await seedVerifiedEmailRebindingMember({
+        emailAddress,
+        memberId,
+        oldPrivyUserId,
+        prisma: observer,
+      });
+      const previousPublicBaseUrl = process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL;
+      process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = "https://join.example.test";
+      clearHostedOnboardingEnvCache();
+
+      try {
+        await expect(completeHostedPrivyVerification({
+          authMethod: "email",
+          identity: makeVerifiedEmailRebindingIdentity({
+            emailAddress,
+            privyUserId: replacementPrivyUserId,
+          }),
+          now: new Date("2026-08-03T12:00:00.000Z"),
+          prisma: observer,
+        })).resolves.toMatchObject({
+          memberId,
+        });
+
+        await expect(observer.hostedMemberIdentity.findUniqueOrThrow({
+          where: { memberId },
+        })).resolves.toMatchObject({
+          privyUserIdEncrypted: replacementPrivyUserId,
+          privyUserLookupKey: requirePrivyUserLookupKey(replacementPrivyUserId),
+        });
+        const telegramRouting = await observer.hostedMemberRouting.findUniqueOrThrow({
+          where: { memberId },
+        });
+        expect(telegramRouting).toMatchObject({
+          telegramUserLookupKey,
+        });
+        expect(telegramRouting.telegramUserIdEncrypted).toContain(
+          `"telegramUserId":"${telegramUserId}"`,
+        );
+        await expect(observer.hostedMemberRouting.count({
+          where: { telegramUserLookupKey },
+        })).resolves.toBe(1);
+        await expect(observer.hostedInvite.count({
+          where: { memberId },
+        })).resolves.toBe(1);
+      } finally {
+        if (previousPublicBaseUrl === undefined) {
+          delete process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL;
+        } else {
+          process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = previousPublicBaseUrl;
+        }
+        clearHostedOnboardingEnvCache();
+        privyProvider.emailByUserId.delete(replacementPrivyUserId);
+        privyProvider.telegramByUserId.delete(replacementPrivyUserId);
+        await observer.hostedMember.deleteMany({ where: { id: memberId } });
+        setHostedSecureBoxStringTestCodecForTests(null);
+        await disconnectClients([observer]);
+      }
+    });
   },
 );
 
@@ -1743,6 +1920,10 @@ function installPassthroughHostedSecureBoxTestCodec(): void {
     decrypt: ({ value }) => value,
     encrypt: ({ value }) => value,
   });
+}
+
+function clearHostedOnboardingEnvCache(): void {
+  Reflect.deleteProperty(globalThis, "__murphHostedOnboardingEnv");
 }
 
 async function waitForPostgresLock(input: {
