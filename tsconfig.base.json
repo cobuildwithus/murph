@@ -153,6 +153,9 @@
       "@murphai/cloudflare-hosted-control/client": [
         "./packages/cloudflare-hosted-control/src/client.ts"
       ],
+      "@murphai/cloudflare-hosted-control/inference-verification": [
+        "./packages/cloudflare-hosted-control/src/inference-verification.ts"
+      ],
       "@murphai/cloudflare-hosted-control/routes": [
         "./packages/cloudflare-hosted-control/src/routes.ts"
       ],

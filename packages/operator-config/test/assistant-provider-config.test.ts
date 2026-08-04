@@ -7,8 +7,10 @@ import {
   serializeAssistantProviderSessionOptions,
 } from '../src/assistant/provider-config.ts'
 import {
+  HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_CONFIG,
   OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
   VENICE_CODEX_MODEL_PROVIDER_CONFIG,
+  resolveAssistantCodexModelProviderConfig,
   resolveAssistantCodexLocalOnboardingProviderConfig,
 } from '../src/assistant/target-runtime.ts'
 
@@ -43,6 +45,31 @@ describe('assistant provider config runtime resolution', () => {
     expect(incompatible.continuityFingerprint).not.toBe(
       first.continuityFingerprint,
     )
+  })
+
+  it('makes custom inference continuity revision-sensitive through its model alias', () => {
+    const revisionSeven = resolveAssistantProviderRuntimeTarget({
+      model: 'murph-custom-r7',
+      modelProvider: 'hosted-custom-inference',
+      provider: 'codex-cli',
+    })
+    const sameRevision = resolveAssistantProviderRuntimeTarget({
+      model: 'murph-custom-r7',
+      modelProvider: 'hosted-custom-inference',
+      provider: 'codex-cli',
+      reasoningEffort: 'high',
+    })
+    const revisionEight = resolveAssistantProviderRuntimeTarget({
+      model: 'murph-custom-r8',
+      modelProvider: 'hosted-custom-inference',
+      provider: 'codex-cli',
+    })
+
+    expect(sameRevision.continuityFingerprint)
+      .toBe(revisionSeven.continuityFingerprint)
+    expect(revisionEight.continuityFingerprint)
+      .not.toBe(revisionSeven.continuityFingerprint)
+    expect(revisionSeven.supportsReasoningEffort).toBe(false)
   })
 
   it('normalizes Vercel AI Gateway as a Codex model provider', () => {
@@ -111,6 +138,23 @@ describe('assistant provider config runtime resolution', () => {
       supportsWebSockets: true,
       wireApi: 'responses',
     })
+  })
+
+  it('registers one internal Responses provider for hosted custom inference', () => {
+    expect(resolveAssistantCodexModelProviderConfig('hosted-custom-inference'))
+      .toEqual(HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_CONFIG)
+    expect(HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_CONFIG).toEqual({
+      id: 'hosted-custom-inference',
+      name: 'Murph Custom Inference',
+      baseUrl: 'http://murph-custom-inference.worker/v1',
+      envKey: 'MURPH_CUSTOM_INFERENCE_API_KEY',
+      failureHint:
+        'The selected custom inference endpoint is unavailable or incompatible. Murph did not fall back to managed inference.',
+      wireApi: 'responses',
+    })
+    expect(resolveAssistantCodexLocalOnboardingProviderConfig(
+      'hosted-custom-inference',
+    )).toBeNull()
   })
 
   it('normalizes Venice as a Codex Responses model provider with local onboarding metadata', () => {

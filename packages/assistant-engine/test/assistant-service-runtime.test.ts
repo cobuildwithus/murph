@@ -560,6 +560,8 @@ describe("assistant usage recording seam", () => {
       seamMocks.resolveAssistantUsageCredentialSource
     ).toHaveBeenCalledWith({
       apiKeyEnv: "RUNTIME_KEY",
+      credentialSourceHint: null,
+      effectiveEnv: undefined,
       headers: null,
       provider: "codex-cli",
       userEnvKeys: [" CODEX_API_KEY ", "", "CUSTOM_KEY"],
@@ -714,6 +716,8 @@ describe("assistant usage recording seam", () => {
       seamMocks.resolveAssistantUsageCredentialSource
     ).toHaveBeenCalledWith({
       apiKeyEnv: null,
+      credentialSourceHint: null,
+      effectiveEnv: undefined,
       headers: null,
       provider: "codex-cli",
       userEnvKeys: [],
@@ -723,6 +727,57 @@ describe("assistant usage recording seam", () => {
         credentialSource: "member",
         occurredAt: "2026-04-08T10:02:00.000Z",
         turnId: "turn-usage-header-fallback",
+      }),
+    );
+  });
+
+  it("records custom core inference as member-funded without trusting upstream routing metadata", async () => {
+    const recordUsage = vi.fn(async () => undefined);
+    seamMocks.resolveAssistantUsageCredentialSource
+      .mockReset()
+      .mockReturnValue("member");
+
+    await recordAssistantUsageEvent({
+      executionContext: {
+        hosted: {
+          memberId: "member-42",
+          usageRecorder: { recordUsage },
+          userEnvKeys: [],
+        },
+      },
+      providerResult: createProviderResult({
+        providerOptions: createProviderOptions({
+          model: "murph-custom-r7-ab12cd34",
+          modelProvider: "hosted-custom-inference",
+        }),
+        usage: {
+          apiKeyEnv: null,
+          baseUrl: "https://untrusted-upstream.example/v1",
+          inputTokens: 7,
+          outputTokens: 11,
+          providerName: "Untrusted upstream name",
+          requestedModel: "murph-custom-r7-ab12cd34",
+          servedModel: "untrusted-upstream-model",
+          totalTokens: 18,
+        },
+      }),
+      turnId: "turn-custom-inference",
+    });
+
+    expect(
+      seamMocks.resolveAssistantUsageCredentialSource,
+    ).toHaveBeenCalledWith(expect.objectContaining({
+      apiKeyEnv: null,
+      credentialSourceHint: "member",
+      provider: "codex-cli",
+    }));
+    expect(recordUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        baseUrl: null,
+        credentialSource: "member",
+        providerName: "hosted-custom-inference",
+        requestedModel: "murph-custom-r7-ab12cd34",
+        servedModel: null,
       }),
     );
   });

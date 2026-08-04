@@ -10,6 +10,9 @@ import type {
   HostedAssistantProviderOverride,
   HostedAssistantReasoningEffortOverride,
 } from "@murphai/hosted-execution/assistant-model";
+import type {
+  HostedAssistantCustomInferenceOverride,
+} from "@murphai/hosted-execution/assistant-inference";
 import {
   HOSTED_RUNTIME_LOG_PATH,
   HOSTED_RUNTIME_OWNER_RELEASE_IMMEDIATE_RECHECK_QUERY,
@@ -47,8 +50,18 @@ import {
   createHostedProviderEgressCredential,
 } from "../hosted-provider-egress-credential.js";
 import {
+  parseHostedInferenceRuntimeTarget,
+  type HostedInferenceRuntimeTarget,
+} from "../hosted-inference-runtime-target.ts";
+import {
+  sealHostedInferenceRuntimeTarget,
+} from "../hosted-inference-target-envelope.ts";
+import {
   readHostedProviderCredentialDiagnosticKind,
 } from "../hosted-provider-credential-diagnostics.js";
+import {
+  HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+} from "../runner-injected-credential.ts";
 import {
   HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
   type HostedExecutionWorkspaceInvocationJobInput,
@@ -81,6 +94,8 @@ import { RunnerStoreCache } from "./runner-store-cache.js";
 
 const RUNTIME_ATTEMPT_LIVENESS_PROBE_TIMEOUT_MS = 5_000;
 const RUNTIME_OWNER_RELEASE_CALLBACK_TIMEOUT_MS = 2_000;
+const HOSTED_INFERENCE_RUNTIME_TARGET_MAX_BODY_BYTES = 16 * 1024;
+const HOSTED_INFERENCE_RUNTIME_TARGET_PATH = "/api/internal/hosted-inference/resolve";
 const HOSTED_RUNNER_NATIVE_PROVIDER_EGRESS_ENV = {
   EXA_API_KEY: "exa",
   MAPBOX_ACCESS_TOKEN: "mapbox",
@@ -89,6 +104,10 @@ const HOSTED_RUNNER_NATIVE_PROVIDER_EGRESS_ENV = {
   VENICE_API_KEY: "venice",
 } as const;
 const HOSTED_RUNNER_WORKERS_AI_TRANSCRIBE_PROVIDER_KIND = "workers_ai_transcribe";
+const HOSTED_CUSTOM_INFERENCE_PROVIDER = "hosted-custom-inference";
+const HOSTED_CUSTOM_INFERENCE_API_KEY_ENV = "MURPH_CUSTOM_INFERENCE_API_KEY";
+const HOSTED_CUSTOM_INFERENCE_CONTEXT_WINDOW_ENV =
+  "HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS";
 
 function shouldDeferHostedRuntimeOwnerReleaseCallback(
   result: HostedWorkspaceInvocationResult,
@@ -194,7 +213,49 @@ export class RuntimeInvocationService {
       input.input.userId,
     );
     const workspaceVersion = workspaceRead.workspace?.version ?? "0";
-    const token = await this.input.stateStore.bindWriteFenceWorkspaceVersion({
+    const hostedAssistantCustomInferenceOverride =
+      workspaceRead.hostedAssistantCustomInferenceOverride ?? null;
+    const customInferenceTarget = hostedAssistantCustomInferenceOverride
+      ? await this.readHostedInferenceRuntimeTargetFromWeb({
+          override: hostedAssistantCustomInferenceOverride,
+          timeoutMs: input.commandBudget
+            ? readRuntimeProcessingCommandStepTimeoutMs({
+                budget: input.commandBudget,
+                stepTimeoutMs: this.input.env.webControlTimeoutMs,
+              })
+            : this.input.env.webControlTimeoutMs,
+          userId: input.input.userId,
+        })
+      : null;
+    let platformAiUsageAllowed: boolean | null = null;
+    if (hostedAssistantCustomInferenceOverride) {
+      if (typeof workspaceRead.platformAiUsageAllowed !== "boolean") {
+        throw new Error(
+          "Hosted custom inference workspace projection omitted the platform AI usage decision.",
+        );
+      }
+      platformAiUsageAllowed = workspaceRead.platformAiUsageAllowed;
+    } else if (workspaceRead.platformAiUsageAllowed === false) {
+      if (input.input.processingMode !== "inbox_media_retention") {
+        throw new Error(
+          "Hosted managed inference was no longer allowed during invocation preparation.",
+        );
+      }
+      // Inbox media retention deletes expired private media without any model
+      // call, so a denied managed allowance must not block it. Binding the
+      // denial into the write fence keeps every metered provider egress
+      // rejected for the run anyway.
+      platformAiUsageAllowed = false;
+    }
+    const customInferenceEnvelope = customInferenceTarget
+      ? await sealHostedInferenceRuntimeTarget({
+          source: this.input.runnerRuntimeEnvSource,
+          target: customInferenceTarget,
+        })
+      : null;
+    const token = await this.input.stateStore.bindWriteFenceInvocationFacts({
+      customInferenceEnvelope,
+      platformAiUsageAllowed,
       token: input.token,
       workspaceVersion,
     });
@@ -203,6 +264,7 @@ export class RuntimeInvocationService {
       ...workspaceRunnerInvocation
     } = await this.prepareWorkspaceRunnerInvocation({
       commandBudget: input.commandBudget,
+      hostedAssistantCustomInferenceOverride,
       hostedAssistantModelOverride:
         workspaceRead.hostedAssistantModelOverride ?? null,
       hostedAssistantProviderOverride:
@@ -668,8 +730,58 @@ export class RuntimeInvocationService {
     }
   }
 
+  private async readHostedInferenceRuntimeTargetFromWeb(input: {
+    override: HostedAssistantCustomInferenceOverride;
+    timeoutMs: number;
+    userId: string;
+  }): Promise<HostedInferenceRuntimeTarget> {
+    const response = await fetchHostedExecutionWebControlPlaneResponse({
+      ...(this.input.env.hostedWebAllowHttpHosts
+        ? { allowHttpHosts: this.input.env.hostedWebAllowHttpHosts }
+        : {}),
+      baseUrl: this.input.readHostedWebControlBaseUrl(),
+      boundUserId: input.userId,
+      callbackSigning: this.input.env.webCallbackSigning,
+      method: "GET",
+      path: HOSTED_INFERENCE_RUNTIME_TARGET_PATH,
+      search: `?revision=${input.override.revision}`,
+      timeoutMs: input.timeoutMs,
+    });
+    if (!response.ok) {
+      throw new Error(
+        `Hosted custom inference resolution failed with HTTP ${response.status}.`,
+      );
+    }
+    const text = await response.text();
+    if (
+      new TextEncoder().encode(text).byteLength
+      > HOSTED_INFERENCE_RUNTIME_TARGET_MAX_BODY_BYTES
+    ) {
+      throw new RangeError("Hosted custom inference resolution response was too large.");
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new TypeError("Hosted custom inference resolution response was invalid.");
+    }
+    const target = parseHostedInferenceRuntimeTarget(parsed);
+    if (
+      target.contextWindowTokens !== input.override.contextWindowTokens
+      || target.protocol !== input.override.protocol
+      || target.revision !== input.override.revision
+      || target.supportsImages !== input.override.supportsImages
+      || target.verificationProfile !== input.override.verificationProfile
+    ) {
+      throw new Error("Hosted custom inference resolution did not match workspace projection.");
+    }
+    return target;
+  }
+
   private async prepareWorkspaceRunnerInvocation(input: {
     commandBudget?: RuntimeProcessingCommandBudget;
+    hostedAssistantCustomInferenceOverride:
+      HostedAssistantCustomInferenceOverride | null;
     hostedAssistantModelOverride: HostedAssistantModelOverride | null;
     hostedAssistantProviderOverride: HostedAssistantProviderOverride | null;
     hostedAssistantReasoningEffortOverride:
@@ -691,17 +803,28 @@ export class RuntimeInvocationService {
     const forwardedEnv = buildHostedRunnerContainerEnv(
       this.input.runnerRuntimeEnvSource,
     );
-    if (input.hostedAssistantProviderOverride !== null) {
-      forwardedEnv.HOSTED_ASSISTANT_PROVIDER =
-        input.hostedAssistantProviderOverride;
-    }
-    if (input.hostedAssistantModelOverride !== null) {
+    if (input.hostedAssistantCustomInferenceOverride !== null) {
+      forwardedEnv.HOSTED_ASSISTANT_PROVIDER = HOSTED_CUSTOM_INFERENCE_PROVIDER;
       forwardedEnv.HOSTED_ASSISTANT_MODEL =
-        input.hostedAssistantModelOverride;
-    }
-    if (input.hostedAssistantReasoningEffortOverride !== null) {
-      forwardedEnv.HOSTED_ASSISTANT_REASONING_EFFORT =
-        input.hostedAssistantReasoningEffortOverride;
+        input.hostedAssistantCustomInferenceOverride.modelAlias;
+      forwardedEnv[HOSTED_CUSTOM_INFERENCE_API_KEY_ENV] =
+        HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;
+      forwardedEnv[HOSTED_CUSTOM_INFERENCE_CONTEXT_WINDOW_ENV] =
+        String(input.hostedAssistantCustomInferenceOverride.contextWindowTokens);
+      delete forwardedEnv.HOSTED_ASSISTANT_REASONING_EFFORT;
+    } else {
+      if (input.hostedAssistantProviderOverride !== null) {
+        forwardedEnv.HOSTED_ASSISTANT_PROVIDER =
+          input.hostedAssistantProviderOverride;
+      }
+      if (input.hostedAssistantModelOverride !== null) {
+        forwardedEnv.HOSTED_ASSISTANT_MODEL =
+          input.hostedAssistantModelOverride;
+      }
+      if (input.hostedAssistantReasoningEffortOverride !== null) {
+        forwardedEnv.HOSTED_ASSISTANT_REASONING_EFFORT =
+          input.hostedAssistantReasoningEffortOverride;
+      }
     }
     const configSource = this.input.runnerStoreCache.readRuntimeConfigSource();
     const webControlTimeoutMs = input.commandBudget
@@ -855,6 +978,8 @@ export class RuntimeInvocationService {
         hostedAssistantProviderConfigured:
           typeof forwardedEnv.HOSTED_ASSISTANT_PROVIDER === "string"
           && forwardedEnv.HOSTED_ASSISTANT_PROVIDER.length > 0,
+        hostedAssistantCustomInferenceConfigured:
+          input.hostedAssistantCustomInferenceOverride !== null,
         hostedAssistantOpenAiConfigured:
           isHostedRunnerOpenAiProvider(forwardedEnv.HOSTED_ASSISTANT_PROVIDER),
         hostedAssistantVeniceConfigured:
