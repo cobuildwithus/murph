@@ -235,6 +235,7 @@ export function expectAdvertisedMurphDynamicTools(
     imessageContactAvailable?: boolean;
     messageTargetingAvailable?: boolean;
     newsletterAvailable?: boolean;
+    physicalNotesAvailable?: boolean;
     phoneCallsAvailable?: boolean;
     progressUpdatesAvailable?: boolean;
     responseCardAvailable?: boolean;
@@ -288,6 +289,13 @@ export function expectAdvertisedMurphDynamicTools(
       if (
         options.newsletterAvailable !== true
         && name === "murph.newsletter"
+      ) {
+        return false;
+      }
+
+      if (
+        options.physicalNotesAvailable !== true
+        && name === "murph.send_physical_note"
       ) {
         return false;
       }

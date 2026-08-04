@@ -384,8 +384,24 @@ export interface DeviceSyncPublicIngressStore {
     | Promise<Pick<PublicDeviceConnectionSource, "connectionId" | "sourceProviderSlug" | "status">>;
   listConnectionSources(
     input: ListDeviceConnectionSourcesInput,
-  ): Array<Pick<PublicDeviceConnectionSource, "connectionId" | "sourceProviderSlug" | "status">>
-    | Promise<Array<Pick<PublicDeviceConnectionSource, "connectionId" | "sourceProviderSlug" | "status">>>;
+  ): Array<Pick<
+    PublicDeviceConnectionSource,
+    | "connectionId"
+    | "lastErrorCode"
+    | "lastSeenAt"
+    | "sourceInstanceKey"
+    | "sourceProviderSlug"
+    | "status"
+  >>
+    | Promise<Array<Pick<
+      PublicDeviceConnectionSource,
+      | "connectionId"
+      | "lastErrorCode"
+      | "lastSeenAt"
+      | "sourceInstanceKey"
+      | "sourceProviderSlug"
+      | "status"
+    >>>;
   getConnectionOwnerId?(accountId: string): string | null | Promise<string | null>;
   claimWebhookTrace(input: ClaimDeviceSyncWebhookTraceInput): DeviceSyncWebhookTraceClaimResult | Promise<DeviceSyncWebhookTraceClaimResult>;
   completeWebhookTrace(provider: string, traceId: string, claimToken: string): boolean | Promise<boolean>;
@@ -596,6 +612,8 @@ export interface ProviderWebhookAdminCapability {
 
 export interface DeviceSyncPublicIngressConnectionEstablishedInput {
   account: PublicDeviceSyncAccount;
+  /** Start instant of the consumed browser connection state, when applicable. */
+  connectionStartedAt?: string | null;
   connectSourceId?: string | null;
   connectTarget?: string | null;
   sourceProviderSlug?: string | null;
@@ -606,6 +624,27 @@ export interface DeviceSyncPublicIngressConnectionEstablishedInput {
 
 export interface DeviceSyncPublicIngressConnectionEstablishedResult {
   sourceAdmissionCommitted: true;
+}
+
+export type DeviceSyncPublicIngressConnectionSourceObservedResult =
+  | { sourceAdmissionCommitted: true }
+  | { sourceRegistrationRemoved: true };
+
+export interface DeviceSyncPublicIngressConnectionSourceAdmissionRejectedInput {
+  account: PublicDeviceSyncAccount;
+  /** Start instant of the rejected browser source-connection attempt. */
+  connectionStartedAt: string;
+  sourceProviderSlug: string;
+  provider: DeviceSyncProvider;
+  now: string;
+}
+
+export interface DeviceSyncPublicIngressConnectionSourceObservedInput {
+  account: PublicDeviceSyncAccount;
+  eventType: string;
+  sourceProviderSlug: string;
+  provider: DeviceSyncProvider;
+  now: string;
 }
 
 export interface DeviceSyncPublicIngressWebhookAcceptedInput {
@@ -658,6 +697,21 @@ export interface DeviceSyncPublicIngressHooks {
   ): void
     | DeviceSyncPublicIngressConnectionEstablishedResult
     | Promise<void | DeviceSyncPublicIngressConnectionEstablishedResult>;
+  // A reused Junction parent can finish provider authorization before hosted
+  // source admission rejects an obsolete attempt. The hosted owner uses this
+  // hook to remove only that rejected provider registration without applying
+  // account-wide cleanup or racing a newer source epoch.
+  onConnectionSourceAdmissionRejected?(
+    input: DeviceSyncPublicIngressConnectionSourceAdmissionRejectedInput,
+  ): void | Promise<void>;
+  // Native SDK sources have no browser callback. A current provider-authored
+  // event may commit their pending exact-source epoch; passive traffic cannot
+  // clear a completed disconnect fence.
+  onConnectionSourceObserved?(
+    input: DeviceSyncPublicIngressConnectionSourceObservedInput,
+  ): void
+    | DeviceSyncPublicIngressConnectionSourceObservedResult
+    | Promise<void | DeviceSyncPublicIngressConnectionSourceObservedResult>;
   onLevelDirtyWebhookAlreadySatisfied?(
     input: DeviceSyncPublicIngressWebhookAlreadySatisfiedInput,
   ): DeviceSyncPublicIngressWebhookAlreadySatisfiedResult
@@ -783,6 +837,7 @@ export interface DeviceConnectionHandler {
   refreshTokens?(account: DeviceSyncAccount, options?: { signal?: AbortSignal | null }): Promise<ProviderAuthTokens>;
   revokeAccess?(account: DeviceSyncAccount): Promise<void>;
   revokeSourceAccess?(account: DeviceSyncAccount, sourceProviderSlug: string): Promise<void>;
+  isSourceAccessActive?(account: DeviceSyncAccount, sourceProviderSlug: string): Promise<boolean>;
 }
 
 export interface DeviceSdkSignInToken {
@@ -859,8 +914,16 @@ export interface StartConnectionInput {
   returnTo?: string | null;
   ownerId?: string | null;
   sourceProviderSlug?: string | null;
+  sourceLifecycleProof?: StartConnectionSourceLifecycleProof | null;
   connectSourceId?: string | null;
   connectTarget?: string | null;
+}
+
+export interface StartConnectionSourceLifecycleProof {
+  connectionId: string;
+  lastSeenAt: string;
+  sourceInstanceKey: string;
+  sourceProviderSlug: string;
 }
 
 export interface BeginConnectionResult {

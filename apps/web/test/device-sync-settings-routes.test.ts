@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   createBrowserConnectionId: vi.fn(),
   diagnoseBackfill: vi.fn(),
   disconnectConnection: vi.fn(),
+  disconnectConnectionSource: vi.fn(),
   findManyDeviceConnectionSources: vi.fn(),
   findManyDeviceConnections: vi.fn(),
   getConnectionForUser: vi.fn(),
@@ -86,6 +87,8 @@ type SettingsDeviceSyncSidebarStatusRouteModule = typeof import("../app/api/sett
 type SettingsDeviceSyncDiagnoseBackfillRouteModule =
   typeof import("../app/api/settings/device-sync/diagnose-backfill/route");
 type SettingsDeviceSyncDisconnectRouteModule = typeof import("../app/api/settings/device-sync/connections/[connectionId]/disconnect/route");
+type SettingsDeviceSyncSourceDisconnectRouteModule =
+  typeof import("../app/api/settings/device-sync/connections/[connectionId]/sources/[sourceProviderSlug]/disconnect/route");
 type SettingsDeviceSyncStatusRouteModule = typeof import("../app/api/settings/device-sync/connections/[connectionId]/status/route");
 type ConnectSourceStartRouteModule = typeof import("../app/api/connect-sources/[sourceId]/start/route");
 
@@ -93,6 +96,7 @@ let settingsDeviceSyncRoute: SettingsDeviceSyncRouteModule;
 let settingsDeviceSyncSidebarStatusRoute: SettingsDeviceSyncSidebarStatusRouteModule;
 let settingsDeviceSyncDiagnoseBackfillRoute: SettingsDeviceSyncDiagnoseBackfillRouteModule;
 let settingsDeviceSyncDisconnectRoute: SettingsDeviceSyncDisconnectRouteModule;
+let settingsDeviceSyncSourceDisconnectRoute: SettingsDeviceSyncSourceDisconnectRouteModule;
 let settingsDeviceSyncStatusRoute: SettingsDeviceSyncStatusRouteModule;
 let connectSourceStartRoute: ConnectSourceStartRouteModule;
 
@@ -253,6 +257,9 @@ describe("device sync settings routes", () => {
     settingsDeviceSyncDiagnoseBackfillRoute =
       await import("../app/api/settings/device-sync/diagnose-backfill/route");
     settingsDeviceSyncDisconnectRoute = await import("../app/api/settings/device-sync/connections/[connectionId]/disconnect/route");
+    settingsDeviceSyncSourceDisconnectRoute = await import(
+      "../app/api/settings/device-sync/connections/[connectionId]/sources/[sourceProviderSlug]/disconnect/route"
+    );
     settingsDeviceSyncStatusRoute = await import("../app/api/settings/device-sync/connections/[connectionId]/status/route");
     connectSourceStartRoute = await import("../app/api/connect-sources/[sourceId]/start/route");
   });
@@ -309,6 +316,7 @@ describe("device sync settings routes", () => {
     });
     mocks.createHostedDeviceSyncPublicIngressService.mockReturnValue({
       disconnectConnection: mocks.disconnectConnection,
+      disconnectConnectionSource: mocks.disconnectConnectionSource,
       prepareConnectionStart: mocks.prepareConnectionStart,
       startConnection: mocks.startConnection,
     });
@@ -1791,6 +1799,39 @@ describe("device sync settings routes", () => {
         code: "REMOTE_REVOKE_FAILED",
         message: "Provider revocation timed out.",
       },
+    });
+  });
+
+  it("disconnects only the selected hosted Junction source", async () => {
+    mocks.disconnectConnectionSource.mockResolvedValue({
+      sourceProviderSlug: "oura",
+      status: "disconnected",
+    });
+
+    const response = await settingsDeviceSyncSourceDisconnectRoute.POST(
+      new Request(
+        "https://join.example.test/api/settings/device-sync/connections/dspc_junction_123/sources/oura/disconnect",
+        {
+          headers: { origin: "https://join.example.test" },
+          method: "POST",
+        },
+      ),
+      createRouteContext({
+        connectionId: "dspc_junction_123",
+        sourceProviderSlug: "oura",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
+    expect(mocks.disconnectConnectionSource).toHaveBeenCalledWith(
+      "member_123",
+      "dspc_junction_123",
+      "oura",
+    );
+    await expect(response.json()).resolves.toEqual({
+      sourceProviderSlug: "oura",
+      status: "disconnected",
     });
   });
 

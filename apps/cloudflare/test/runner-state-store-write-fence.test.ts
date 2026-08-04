@@ -95,6 +95,35 @@ describe("RunnerStateStore write-fence state", () => {
     await expect(store.readWriteFenceToken()).resolves.toBeNull();
   });
 
+  it("binds the effective invocation mode to the active write fence", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const { db, store } = createHarness();
+    await store.bindUser("member_123");
+    const token = await store.beginWriteFence({
+      runnerContainerName: "member_123",
+      userId: "member_123",
+    });
+
+    const pinned = await store.bindWriteFenceInvocationFacts({
+      customInferenceEnvelope: null,
+      platformAiUsageAllowed: false,
+      processingMode: "system_mailbox",
+      token,
+      workspaceVersion: "9",
+    });
+
+    expect(pinned.processingMode).toBe("system_mailbox");
+    expect(readActiveReason(db)).toBe("system_mailbox");
+    const restartedStore = new RunnerStateStore(createDurableObjectState(db));
+    await expect(restartedStore.readWriteFenceToken()).resolves.toMatchObject({
+      attemptId: token.attemptId,
+      processingMode: "system_mailbox",
+      userId: "member_123",
+      workspaceVersion: "9",
+    } satisfies Partial<RunnerWriteFenceToken>);
+  });
+
   it("pins one custom target envelope to the active fence and clears it with that fence", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(NOW));

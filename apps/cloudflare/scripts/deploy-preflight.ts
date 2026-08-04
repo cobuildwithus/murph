@@ -21,11 +21,9 @@ import {
 } from "./deploy-automation/shared.ts";
 import {
   assertR2FixedBucketPair,
-  buildWranglerMigrationChildEnvironment,
-  createR2BundlesMigrationCommandRunner,
-  readR2BucketInfoWithWrangler,
+  createWranglerR2BucketInfoReader,
   type R2BucketInfo,
-} from "./r2-bundles-migration.ts";
+} from "./r2-fixed-buckets.ts";
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 type HostedDeployContext = "development" | "preview" | "production";
@@ -331,6 +329,29 @@ export function listHostedDeployEnvironmentInvariantErrors(
   ) {
     errors.push("HOSTED_R2_CUTOVER_PHASE must be source_active or destination_active.");
   }
+  const r2WriteAdmission = normalizeOptionalString(source.HOSTED_R2_WRITE_ADMISSION);
+  if (r2WriteAdmission && r2WriteAdmission !== "open" && r2WriteAdmission !== "paused") {
+    errors.push("HOSTED_R2_WRITE_ADMISSION must be open or paused.");
+  }
+  const r2PausedCanaryUserIdSha256 = normalizeOptionalString(
+    source.HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256,
+  );
+  if (
+    r2PausedCanaryUserIdSha256
+    && !/^[a-f0-9]{64}$/u.test(r2PausedCanaryUserIdSha256)
+  ) {
+    errors.push(
+      "HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256 must be a lowercase SHA-256 hex digest.",
+    );
+  }
+  if (
+    r2PausedCanaryUserIdSha256
+    && (r2CutoverPhase !== "destination_active" || r2WriteAdmission !== "paused")
+  ) {
+    errors.push(
+      "HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256 must be unset unless HOSTED_R2_CUTOVER_PHASE=destination_active and HOSTED_R2_WRITE_ADMISSION=paused.",
+    );
+  }
   const cloudflareAccountId = normalizeOptionalString(source.CLOUDFLARE_ACCOUNT_ID);
   const presignAccountId = normalizeOptionalString(source.HOSTED_R2_PRESIGN_ACCOUNT_ID);
   if (cloudflareAccountId && presignAccountId && presignAccountId !== cloudflareAccountId) {
@@ -635,15 +656,7 @@ async function listHostedDeployR2BucketInvariantErrors(
 }
 
 function createDefaultR2BucketInfoReader(source: EnvSource): R2BucketInfoReader {
-  const runner = createR2BundlesMigrationCommandRunner();
-  const environment = buildWranglerMigrationChildEnvironment(source);
-  return async (bucketName) =>
-    await readR2BucketInfoWithWrangler({
-      bucketName,
-      environment,
-      label: "Hosted deploy R2 bucket-info check",
-      runner,
-    });
+  return createWranglerR2BucketInfoReader(source);
 }
 
 function listMissingRequiredEnvNames(

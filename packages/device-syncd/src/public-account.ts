@@ -12,6 +12,47 @@ export const DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE =
 export const DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE =
   "DISCONNECT_IN_PROGRESS";
 
+export const DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE =
+  "SOURCE_DISCONNECT_IN_PROGRESS";
+
+export const DEVICE_SYNC_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE =
+  "SOURCE_START_CLEANUP_IN_PROGRESS";
+
+export const DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE =
+  "SOURCE_USER_DISCONNECTED";
+
+const DEVICE_SYNC_SOURCE_DISCONNECT_FENCE_CODES = new Set([
+  DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+  DEVICE_SYNC_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE,
+  DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+]);
+
+export function isDeviceSyncSourceDisconnectFenced(source: {
+  lastErrorCode?: string | null;
+}): boolean {
+  return source.lastErrorCode !== null
+    && source.lastErrorCode !== undefined
+    && DEVICE_SYNC_SOURCE_DISCONNECT_FENCE_CODES.has(source.lastErrorCode);
+}
+
+export function isDeviceSyncSourceAdmitted(
+  sources: readonly {
+    lastErrorCode?: string | null;
+    sourceProviderSlug: string;
+    status: string;
+  }[],
+  sourceProviderSlug: string,
+): boolean {
+  const matchingSources = sources.filter(
+    (source) => source.sourceProviderSlug === sourceProviderSlug,
+  );
+
+  return matchingSources.length === 0
+    || matchingSources.some(
+      (source) => source.status === "connected" && !isDeviceSyncSourceDisconnectFenced(source),
+    );
+}
+
 // Garmin historical exports can only restart after the provider-side connection is
 // deregistered. Keep that provider-specific rule beside the durable recovery marker so
 // every reader applies the same narrow interpretation.

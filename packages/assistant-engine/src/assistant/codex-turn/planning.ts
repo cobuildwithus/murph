@@ -493,6 +493,12 @@ export async function resolveAssistantRouteTurnPlan(input: {
       input.input.turnTrigger === 'manual-ask' ||
       input.input.turnTrigger === 'automation-auto-reply'
     )
+  const responseCardsAvailable =
+    privateInteractiveProviderTurn &&
+    ((ordinaryInboundTurn &&
+      input.input.scheduledInvocationAuthority == null) ||
+      input.input.scheduledInvocationAuthority?.automationId ===
+        MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID)
   const shouldUseCommittedTranscriptHistory =
     input.profile.threadScope === 'session-thread' ||
     input.profile.promptProfile === 'assistant-ask-continuation' ||
@@ -802,10 +808,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
   })
   const allowFinishWithoutReply =
     input.allowFinishWithoutReply ?? input.profile.toolProfile === 'provider-turn'
-  const responseCardsAvailable =
-    privateInteractiveAudience &&
-    input.input.scheduledInvocationAuthority?.automationId ===
-      MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID
   // Maintenance turns run without a delivery target. The room-model profile
   // receives only its host-owned tool for the exact managed automation.
   const availableDynamicTools = outputOnlyTurn || onboardingGoalCheckinTurn
