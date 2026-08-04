@@ -2063,6 +2063,7 @@ describe("cloudflare worker routes", () => {
     await expect(statusResponse.json()).resolves.toMatchObject({
       r2Cutover: {
         phase: "source_active",
+        pausedCanaryConfigured: false,
         protocolVersion: "r2-oc-enam-v1",
         writeAdmission: "paused",
       },
@@ -2432,11 +2433,66 @@ describe("cloudflare worker routes", () => {
       expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
     });
 
+    it("admits only the configured callback-signed canary after destination promotion", async () => {
+      const canaryUserId = "test-canary";
+      const stub = createUserRunnerStub({
+        ensureRuntimeProcessingForUser: vi.fn(async () => ({
+          action: "started" as const,
+          kind: "runtime_processing_accepted" as const,
+          recommendedRecheckAt: "2026-08-04T03:01:00.000Z",
+          runtimeAttemptId: "runtime-attempt-canary",
+        })),
+      });
+      const env = createWorkerEnv(stub, {
+        BUNDLES_ENAM: createBucketStore().api,
+        HOSTED_R2_CUTOVER_PHASE: "destination_active",
+        HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256:
+          createHash("sha256").update(canaryUserId).digest("hex"),
+        HOSTED_R2_WRITE_ADMISSION: "paused",
+      });
+
+      const response = await worker.fetch(
+        await signWebCallbackControlRequest(
+          new Request(
+            `https://runner.example.test/internal/users/${canaryUserId}/runtime/ensure-processing`,
+            {
+              body: JSON.stringify({
+                orchestrationAttemptId: "orchestration-attempt-canary",
+              }),
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              method: "POST",
+            },
+          ),
+          env,
+        ),
+        env,
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        kind: "runtime_processing_accepted",
+        runtimeAttemptId: "runtime-attempt-canary",
+      });
+      expect(stub.ensureRuntimeProcessingForUser).toHaveBeenCalledOnce();
+      expect(stub.ensureRuntimeProcessingForUser).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orchestrationAttemptId: "orchestration-attempt-canary",
+          userId: canaryUserId,
+        }),
+      );
+    });
+
     it("does not schedule the direct web latency hint while R2 write admission is paused", async () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-08-04T03:00:00.000Z"));
       const stub = createUserRunnerStub();
       const env = createWorkerEnv(stub, {
+        BUNDLES_ENAM: createBucketStore().api,
+        HOSTED_R2_CUTOVER_PHASE: "destination_active",
+        HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256:
+          createHash("sha256").update("test-user").digest("hex"),
         HOSTED_R2_WRITE_ADMISSION: "paused",
       });
       const execution = createWorkerExecutionContextForTest();
@@ -3840,6 +3896,24 @@ function createBucketStore() {
               bytes.byteOffset + bytes.byteLength,
             );
           },
+        };
+      },
+      async head(key: string) {
+        const value = values.get(key);
+        return value === undefined
+          ? null
+          : { size: Buffer.byteLength(value, "utf8") };
+      },
+      async list(options: { prefix?: string } = {}) {
+        const prefix = options.prefix ?? "";
+        return {
+          objects: [...values.entries()]
+            .filter(([key]) => key.startsWith(prefix))
+            .map(([key, value]) => ({
+              key,
+              size: Buffer.byteLength(value, "utf8"),
+            })),
+          truncated: false,
         };
       },
       async put(key: string, value: string) {

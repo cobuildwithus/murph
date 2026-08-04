@@ -36,6 +36,8 @@ import {
 } from "../../worker-routes/shared.ts";
 import {
   createHostedR2WriteAdmissionPausedResponse,
+  isHostedR2PausedCanaryUser,
+  readHostedR2PausedCanaryConfigured,
   readHostedR2WriteAdmission,
 } from "../../r2-cutover.ts";
 import {
@@ -139,6 +141,7 @@ export async function handleStatusRoute(
       ? {
           r2Cutover: {
             ...status.r2Cutover,
+            pausedCanaryConfigured: readHostedR2PausedCanaryConfigured(context.env),
             writeAdmission: readHostedR2WriteAdmission(context.env),
           },
         }
@@ -195,7 +198,10 @@ export async function handleRuntimeEnsureProcessingRoute(
       // caller-supplied body fields.
       authorizationKind === "vercel-oidc",
     );
-    if (readHostedR2WriteAdmission(context.env) === "paused") {
+    const writeAdmission = readHostedR2WriteAdmission(context.env);
+    const admitPausedCanary = authorizationKind === "web-callback-signature"
+      && await isHostedR2PausedCanaryUser(context.env, userId);
+    if (writeAdmission === "paused" && !admitPausedCanary) {
       return json(createHostedR2WriteAdmissionPausedResponse());
     }
     if (authorizationKind === "vercel-oidc") {

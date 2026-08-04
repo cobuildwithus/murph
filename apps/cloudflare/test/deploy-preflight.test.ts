@@ -473,6 +473,29 @@ describe("deploy preflight helpers", () => {
     );
   });
 
+  it("restricts the temporary paused canary digest to paused deploys", () => {
+    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
+      HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256: "not-a-digest",
+      HOSTED_R2_WRITE_ADMISSION: "paused",
+    }), { deployWorker: true })).toContain(
+      "HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256 must be a lowercase SHA-256 hex digest.",
+    );
+
+    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
+      HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256: "a".repeat(64),
+      HOSTED_R2_WRITE_ADMISSION: "open",
+    }), { deployWorker: true })).toContain(
+      "HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256 must be unset unless HOSTED_R2_WRITE_ADMISSION=paused.",
+    );
+
+    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
+      HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256: "a".repeat(64),
+      HOSTED_R2_WRITE_ADMISSION: "paused",
+    }), { deployWorker: true })).not.toContain(
+      "HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256 must be unset unless HOSTED_R2_WRITE_ADMISSION=paused.",
+    );
+  });
+
   it("requires the direct-R2 presign account to match the Cloudflare deploy account", () => {
     expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
       HOSTED_R2_PRESIGN_ACCOUNT_ID: "other-account",

@@ -2857,6 +2857,7 @@ export interface HostedRunnerStatusResponse {
   recentLogs?: HostedRuntimeLogEntry[];
   r2Cutover?: {
     coexisting: boolean;
+    pausedCanaryConfigured?: boolean;
     phase: "destination_active" | "source_active";
     protocolVersion: string;
     writeAdmission?: "open" | "paused";

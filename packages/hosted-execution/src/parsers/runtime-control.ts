@@ -6460,6 +6460,14 @@ function parseHostedRunnerR2CutoverStatus(
       record.coexisting,
       "Hosted runner status response r2Cutover.coexisting",
     ),
+    ...(record.pausedCanaryConfigured === undefined
+      ? {}
+      : {
+          pausedCanaryConfigured: requireBoolean(
+            record.pausedCanaryConfigured,
+            "Hosted runner status response r2Cutover.pausedCanaryConfigured",
+          ),
+        }),
     phase,
     protocolVersion: requireString(
       record.protocolVersion,

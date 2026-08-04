@@ -949,6 +949,25 @@ describe("hosted deploy automation helpers", () => {
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_WORKER_NAME: "hosted-worker",
       ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+      HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256: "a".repeat(64),
+    })).toThrow(
+      "HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256 must be unset unless HOSTED_R2_WRITE_ADMISSION=paused",
+    );
+
+    expect(readHostedDeployAutomationEnvironment({
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+      CF_WORKER_NAME: "hosted-worker",
+      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+      HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256: "a".repeat(64),
+      HOSTED_R2_WRITE_ADMISSION: "paused",
+    }).workerVars.HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256).toBe("a".repeat(64));
+
+    expect(() => readHostedDeployAutomationEnvironment({
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+      CF_WORKER_NAME: "hosted-worker",
+      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
       HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-bundles-enam",
     })).toThrow("HOSTED_R2_PRESIGN_BUCKET_NAME must match CF_BUNDLES_BUCKET");
 

@@ -340,6 +340,22 @@ export function listHostedDeployEnvironmentInvariantErrors(
   if (r2WriteAdmission && r2WriteAdmission !== "open" && r2WriteAdmission !== "paused") {
     errors.push("HOSTED_R2_WRITE_ADMISSION must be open or paused.");
   }
+  const r2PausedCanaryUserIdSha256 = normalizeOptionalString(
+    source.HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256,
+  );
+  if (
+    r2PausedCanaryUserIdSha256
+    && !/^[a-f0-9]{64}$/u.test(r2PausedCanaryUserIdSha256)
+  ) {
+    errors.push(
+      "HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256 must be a lowercase SHA-256 hex digest.",
+    );
+  }
+  if (r2PausedCanaryUserIdSha256 && r2WriteAdmission !== "paused") {
+    errors.push(
+      "HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256 must be unset unless HOSTED_R2_WRITE_ADMISSION=paused.",
+    );
+  }
   const cloudflareAccountId = normalizeOptionalString(source.CLOUDFLARE_ACCOUNT_ID);
   const presignAccountId = normalizeOptionalString(source.HOSTED_R2_PRESIGN_ACCOUNT_ID);
   if (cloudflareAccountId && presignAccountId && presignAccountId !== cloudflareAccountId) {

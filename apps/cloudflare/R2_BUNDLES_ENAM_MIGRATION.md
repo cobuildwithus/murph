@@ -20,8 +20,13 @@ bindings.
   retaining ENAM-to-OC read fallback and dual-bucket deletion.
 - `HOSTED_R2_WRITE_ADMISSION=open` admits normal runtime starts and wakes.
   `paused` makes the Worker return `retry_later` before any UserRunner Durable
-Object call, so the existing encrypted mailbox remains the only durable
-backlog while current invocations drain.
+  Object call, so the existing encrypted mailbox remains the only durable
+  backlog while current invocations drain.
+- `HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256` is a temporary lowercase SHA-256
+  digest of one operator-selected member ID. It never contains the raw member
+  ID. It can admit only that member's callback-signed Temporal ensure while the
+  phase is `destination_active` and write admission is `paused`; source-active
+  pauses, every other member, and every Vercel OIDC hint remain fenced.
 
 Deploy preflight verifies that both source bindings report OC, both destination
 bindings report ENAM, and every bucket uses Standard storage. Keep these roles
@@ -105,13 +110,20 @@ Require current runner status from every relevant Durable Object and wait for
 pre-bridge Worker and Durable Object invocations to drain. Ordinary reads,
 writes, lists, and new direct uploads must still resolve to OC.
 
-### 2. Copy the baseline while runtime admission stays open
+### 2. Stabilize ownership and prove the warm baseline while admission stays open
 
 Enable the account-deletion maintenance control at both admission and effect
 boundaries so the approved ownership set cannot shrink during the managed copy.
 Keep `HOSTED_R2_CUTOVER_PHASE=source_active` and
 `HOSTED_R2_WRITE_ADMISSION=open`: messages and ordinary runtime work continue
 against OC throughout the bulk transfer.
+
+An already-completed warm transfer that ran before account-deletion maintenance
+is copy progress only, not an approved baseline checkpoint. After maintenance is
+active, rebuild the approved manifest and inventory ENAM. If ENAM contains an
+object outside that current manifest, quarantine the destination and restart
+with a fresh destination; never delete or mutate OC to reconcile it. Otherwise
+copy only currently approved missing keys and continue with baseline parity.
 
 Read current hosted ownership and canonical workspace snapshot state through
 the authorized read-only production path. Admit immutable user-scoped bundle,
@@ -134,11 +146,17 @@ objects may continue to appear in OC and are handled by the final delta.
 
 ### 3. Pause and drain runtime writes
 
-Set `HOSTED_R2_WRITE_ADMISSION=paused`, deploy the Worker version to 100 percent,
-and require every status response to report `writeAdmission=paused`. Start a
-30-minute pre-promotion deadline when the paused version reaches 100 percent.
+Select one active hosted member with a current snapshot and derive the lowercase
+SHA-256 digest of its member ID in the private operator process. Set only that
+digest as `HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256`; never place the raw member ID
+in deploy configuration, logs, or artifacts. Set
+`HOSTED_R2_WRITE_ADMISSION=paused`, deploy the Worker version to 100 percent,
+and require every status response to report `writeAdmission=paused` and
+`pausedCanaryConfigured=true`. Start a 30-minute pre-promotion deadline when the
+paused version reaches 100 percent.
 The Worker-level check must return `retry_later` for both signed Temporal calls
-and Vercel OIDC direct latency hints without calling UserRunner. Inbound messages
+including the selected canary, and for Vercel OIDC direct latency hints, without
+calling UserRunner while the phase remains `source_active`. Inbound messages
 remain accepted in the web-owned encrypted mailbox. An invocation already in
 flight may finish work it accepted before the pause; after every runner reports
 `inFlight=false`, Murph replies and other new runtime effects wait until
@@ -194,14 +212,20 @@ Deploy the same bridge with:
 
 ```text
 HOSTED_R2_CUTOVER_PHASE=destination_active
+HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256=<lowercase-sha256-digest>
 HOSTED_R2_WRITE_ADMISSION=paused
 ```
 
 Require the destination-active Worker version at 100 percent and query every
 relevant Durable Object until it reports the current bridge protocol and
-destination-active phase.
+destination-active phase. Every response must still report
+`pausedCanaryConfigured=true` and `writeAdmission=paused`.
 
-While write admission remains closed, prove:
+Wake the selected member through the existing explicit runtime-maintenance path.
+Its callback-signed Temporal ensure is the only request permitted through the
+paused gate. A wrong or absent digest, every other member, and every direct OIDC
+hint must still receive `retry_later` without a UserRunner call. While global
+write admission remains closed, prove:
 
 1. a copied pre-switch snapshot cold-restores;
 2. a canary writes directly to ENAM;
@@ -215,11 +239,14 @@ ENAM accepts production writes.
 
 ### 6. Resume service
 
-Deploy `HOSTED_R2_WRITE_ADMISSION=open` only after promotion checks pass, then
-require the destination-active Worker version at 100 percent and confirm a
-newly admitted canary consumes its durable mailbox input and checkpoints to
-ENAM. The paused `retry_later` response gives Temporal the continuation owner;
-the direct web hint remains optional and performs no retry.
+Unset `HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256` and deploy
+`HOSTED_R2_WRITE_ADMISSION=open` only after promotion checks pass. Require the
+destination-active Worker version at 100 percent, every status response to
+report `pausedCanaryConfigured=false`, and confirm newly admitted work consumes
+durable mailbox input and checkpoints to ENAM. Deploy preflight rejects the
+temporary canary digest on an open-admission version. The paused `retry_later`
+response gives Temporal the continuation owner; the direct web hint remains
+optional and performs no retry.
 
 Re-enable account
 deletion only after its race canary proves the bridge deletes from both

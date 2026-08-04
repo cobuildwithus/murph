@@ -1,9 +1,13 @@
+import { createHash } from "node:crypto";
+
 import { describe, expect, it, vi } from "vitest";
 
 import type { R2BucketLike } from "../src/bundle-store.ts";
 import {
   createHostedR2WriteAdmissionPausedResponse,
+  isHostedR2PausedCanaryUser,
   locateHostedR2ObjectBucketRole,
+  readHostedR2PausedCanaryConfigured,
   readHostedR2WriteAdmission,
   resolveHostedR2CutoverContext,
 } from "../src/r2-cutover.ts";
@@ -57,6 +61,37 @@ describe("R2 OC to ENAM cutover bucket", () => {
       kind: "retry_later",
       retryAt: "2026-08-04T03:01:00.000Z",
     });
+  });
+
+  it("admits only the configured hashed canary after destination promotion", async () => {
+    const canaryUserId = "member_canary";
+    const canarySha256 = createHash("sha256").update(canaryUserId).digest("hex");
+    const destinationPaused = {
+      HOSTED_R2_CUTOVER_PHASE: "destination_active",
+      HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256: canarySha256,
+      HOSTED_R2_WRITE_ADMISSION: "paused",
+    };
+
+    expect(readHostedR2PausedCanaryConfigured(destinationPaused)).toBe(true);
+    await expect(isHostedR2PausedCanaryUser(
+      destinationPaused,
+      canaryUserId,
+    )).resolves.toBe(true);
+    await expect(isHostedR2PausedCanaryUser(
+      destinationPaused,
+      "member_other",
+    )).resolves.toBe(false);
+    await expect(isHostedR2PausedCanaryUser({
+      ...destinationPaused,
+      HOSTED_R2_CUTOVER_PHASE: "source_active",
+    }, canaryUserId)).resolves.toBe(false);
+    await expect(isHostedR2PausedCanaryUser({
+      ...destinationPaused,
+      HOSTED_R2_WRITE_ADMISSION: "open",
+    }, canaryUserId)).resolves.toBe(false);
+    expect(() => readHostedR2PausedCanaryConfigured({
+      HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256: "not-a-digest",
+    })).toThrow("HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256");
   });
 
   it("keeps source_active reads, writes, and lists on OC while deleting OC then ENAM", async () => {

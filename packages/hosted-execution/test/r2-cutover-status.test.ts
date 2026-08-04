@@ -17,12 +17,14 @@ describe("hosted runner R2 cutover status", () => {
       ...baseStatus,
       r2Cutover: {
         coexisting: true,
+        pausedCanaryConfigured: true,
         phase: "destination_active",
         protocolVersion: "r2-oc-enam-v1",
         writeAdmission: "paused",
       },
     }).r2Cutover).toEqual({
       coexisting: true,
+      pausedCanaryConfigured: true,
       phase: "destination_active",
       protocolVersion: "r2-oc-enam-v1",
       writeAdmission: "paused",
@@ -69,5 +71,17 @@ describe("hosted runner R2 cutover status", () => {
         writeAdmission: "draining",
       },
     })).toThrow("r2Cutover.writeAdmission");
+  });
+
+  it("rejects a non-boolean paused-canary status", () => {
+    expect(() => parseHostedRunnerStatusResponse({
+      ...baseStatus,
+      r2Cutover: {
+        coexisting: true,
+        pausedCanaryConfigured: "yes",
+        phase: "source_active",
+        protocolVersion: "r2-oc-enam-v1",
+      },
+    })).toThrow("r2Cutover.pausedCanaryConfigured");
   });
 });
