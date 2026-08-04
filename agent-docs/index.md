@@ -19,8 +19,9 @@ contract are jointly specified by `ARCHITECTURE.md`,
 `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`, and
 `agent-docs/references/hosted-runtime-protocol.md`.
 
-Daily nutrition response-card request eligibility, whole-response semantics,
-and delivery ownership are jointly specified by `ARCHITECTURE.md`,
+Daily nutrition response-card request eligibility, live-turn invalidation,
+whole-response semantics, and delivery ownership are jointly specified by
+`ARCHITECTURE.md`,
 `agent-docs/RELIABILITY.md`, and
 `agent-docs/operations/imessage-deliverability.md`.
 

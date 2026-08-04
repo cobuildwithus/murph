@@ -19979,6 +19979,39 @@ describe('steered final segments', () => {
     }])
   })
 
+  it('invalidates a card-only response when a live steer adds accepted work', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-card-only-request',
+        type: 'user_message',
+        message: 'Send today\'s nutrition card',
+      }),
+      {
+        card: DAILY_NUTRITION_RESPONSE_CARD,
+        expectedText: 'response card attached',
+        id: 86,
+        kind: 'attach-response-card',
+      },
+      completedItemEvent({
+        id: 'user-card-follow-up',
+        type: 'user_message',
+        message: 'Also explain how to reach my protein goal',
+      }),
+      completedItemEvent({
+        id: 'assistant-card-follow-up',
+        type: 'assistant_message',
+        message: 'Complete combined nutrition answer.',
+      }),
+    ], { responseCardsAvailable: true })
+
+    expect(result.responseCard).toBeNull()
+    expect(result.responseMedia).toEqual([])
+    expect(result.finalMessage).toBe('Complete combined nutrition answer.')
+    expect(result.providerAuthoredFinalMessage).toBe(
+      'Complete combined nutrition answer.',
+    )
+  })
+
   it('keeps independent last-successful reply and reaction targets per steered segment', async () => {
     const firstReplyRef = `ain_${'1'.repeat(32)}`
     const firstReactionRef = `ain_${'2'.repeat(32)}`

@@ -1257,7 +1257,9 @@ only from current active canonical goals; the one-message semantic status is
 not persisted goal progress. Ordinary private-direct interactive turns and the
 managed meal closeout share this one attachment tool; other scheduled turns do
 not receive it. Because a card replaces the whole final response, it is only
-eligible when the card alone completely satisfies the current request. Every
+eligible when the card alone completely satisfies the current request. New
+accepted input in the same live turn invalidates an earlier card-only decision,
+and an attachment captured for an older delivery context is rejected. Every
 card copies the immediately preceding single-date canonical meal-totals read.
 Both versions use the same deterministic text fallback, Linq capability
 boundary, inline URL size bound, and existing outbox idempotency lifecycle. No

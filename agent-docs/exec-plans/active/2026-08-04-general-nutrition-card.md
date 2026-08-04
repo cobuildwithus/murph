@@ -25,6 +25,8 @@ Updated: 2026-08-04
   capability fallback, and delivery behavior remain unchanged.
 - Card attachment is limited to requests the whole-response card completely
   satisfies; compound requests retain their complete ordinary text response.
+- New accepted input in the same live turn invalidates an earlier card-only
+  outcome, including an asynchronous attachment captured for the old context.
 - Focused route-planning and tool-contract tests prove the new availability
   boundary and the unchanged private-direct restriction.
 
@@ -32,6 +34,8 @@ Updated: 2026-08-04
 
 - Replace the scheduled-only condition with the existing ordinary-inbound
   boundary plus the exact managed-closeout authority.
+- Keep card-only finalization aligned with the existing accepted-input delivery
+  context; do not add another state or lifecycle owner.
 - Update the existing response-card tool description and focused tests.
 - Align the smallest durable response-card documentation with on-demand use.
 - Publish the change through the required prompt, product-experience,
@@ -64,8 +68,8 @@ Updated: 2026-08-04
 
 - Focused route-planning and response-card tool tests: 77 passed after review
   remediation.
-- Existing singular response-card runtime and notification/outbox delivery
-  scenarios: 2 passed.
+- Existing singular response-card runtime, new live-steer invalidation, and
+  notification/outbox delivery scenarios: 3 passed.
 - Assistant Engine typecheck: passed.
 - `git diff --check`: passed.
 - Pinned Codex App Server plus local scripted Responses capture, model
@@ -90,6 +94,16 @@ Updated: 2026-08-04
   scheduled surface was narrowed, and the tool contract now limits attachment
   to requests the card alone completely satisfies so compound requests keep
   their complete ordinary text response.
+- Final ReviewGPT round 2 reproduced the same mechanism when a live steer is
+  accepted after card attachment but before first completion and required a
+  retrospective. The pre-fix regression failed because the earlier card
+  remained attached. The recorded decision continues with the existing turn
+  owner: advancing accepted input clears the card-only outcome, and a late
+  attachment for an older delivery context is rejected. The regression and
+  existing singular-card scenario pass after the correction.
+- All required GitHub Actions passed on correction head
+  `6c5d22d914493d70ac446e87698a659a5bb5204d`; the live-steer correction head
+  still requires its exact-head run and ReviewGPT round 3.
 - Corrected-head product-experience revalidation: `NO FINDINGS`. The smallest
   complete journey remains one explicit private request, one fresh canonical
   read, and one existing card/fallback effect in the same thread. The material

@@ -3847,6 +3847,12 @@ async function runCodexAppServerTurnOnProcess(
     card: AssistantResponseCard,
     deliveryContextOrdinal: number,
   ): void => {
+    if (deliveryContextOrdinal !== currentDeliveryContextOrdinal()) {
+      throw new VaultCliError(
+        'ASSISTANT_RESPONSE_CARD_STALE_CONTEXT',
+        'A response card cannot attach to an earlier response context.',
+      )
+    }
     if (hasAcceptedNoReplyPatchForDeliveryContext(deliveryContextOrdinal)) {
       throw new VaultCliError(
         'ASSISTANT_RESPONSE_CARD_AFTER_NO_REPLY',
@@ -4688,8 +4694,8 @@ async function runCodexAppServerTurnOnProcess(
         assistantStreams.clear()
         assistantStreamOrder.length = 0
         responseMedia = []
-        responseCard = null
       }
+      responseCard = null
       completedUserMessageOrdinal += 1
     }
 
