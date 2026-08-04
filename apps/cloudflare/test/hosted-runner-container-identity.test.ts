@@ -461,6 +461,7 @@ describe("hosted runner container identity", () => {
     const service = createRuntimeInvocationService({
       hostedAssistantCustomInferenceOverride: override,
       invokedContainerNames: [],
+      platformAiUsageAllowed: false,
       runnerRuntimeEnvSource,
       stateStore,
       state: durable.state,
@@ -480,6 +481,7 @@ describe("hosted runner container identity", () => {
     const forwardedEnv = prepared.job.runtime?.forwardedEnv;
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(prepared.job.request.processingMode).toBeUndefined();
     expect(forwardedEnv).toMatchObject({
       HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS: "131072",
       HOSTED_ASSISTANT_MODEL: "murph-custom-r7",
@@ -507,7 +509,7 @@ describe("hosted runner container identity", () => {
     })).resolves.toEqual(runtimeTarget);
   });
 
-  it("binds a denied managed allowance to the fresh runtime fence", async () => {
+  it("narrows a denied managed default wake to model-free system mailbox work", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const durable = createRunnerDurableState();
@@ -540,6 +542,7 @@ describe("hosted runner container identity", () => {
       token,
     });
     expect(invokedContainerNames).toEqual([]);
+    expect(prepared.job.request.processingMode).toBe("system_mailbox");
     if (!prepared.token.providerEgressToken) {
       throw new Error("Expected a provider egress token on the active fence.");
     }

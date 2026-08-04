@@ -1954,6 +1954,9 @@ describe("HostedUserRunner execution coordination", () => {
 
     await vi.waitFor(() => {
       expect(invoke).toHaveBeenCalledOnce();
+      expect(invoke.mock.calls[0]?.[0].job.request.processingMode).toBe(
+        "system_mailbox",
+      );
       expect(readRunnerMeta(sql)).toMatchObject({
         active_attempt_id: null,
         failure_count: 0,
