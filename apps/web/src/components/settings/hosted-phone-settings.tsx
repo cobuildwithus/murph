@@ -420,7 +420,7 @@ function HostedPhoneSupportAction({
   );
 }
 
-function HostedPhonePrivyHandOffStatus({
+export function HostedPhonePrivyHandOffStatus({
   errorMessage,
   isLinking,
   isRetryAllowed,
