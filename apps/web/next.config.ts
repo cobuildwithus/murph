@@ -66,10 +66,6 @@ const require = createRequire(import.meta.url);
 export const WORKSPACE_SOURCE_PACKAGE_NAMES = HOSTED_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES;
 export const HOSTED_WEB_NEXT_TSCONFIG_PATH = "./tsconfig.next.json";
 export const HOSTED_WEB_PRODUCTION_BUILD_CPUS = 2;
-// Bound Turbopack's compilation heap so the production build stays under the
-// 8 GB standard Vercel builder. Turbopack is the peak-memory driver; worker
-// count (`cpus`) does not affect it because this app is mostly SSR routes.
-export const HOSTED_WEB_TURBOPACK_BUILD_MEMORY_LIMIT_BYTES = 4 * 1024 * 1024 * 1024;
 export const HOSTED_WEB_WORKFLOW_OPTIONS = {
   workflows: {
     lazyDiscovery: true,
@@ -283,6 +279,9 @@ export function configureHostedWebWorkflowLocalDataDir(
 
 export function buildHostedWebNextConfig(phase: string): NextConfig {
   return {
+    // The repository already owns agent guidance at its root. Avoid generating
+    // nested AGENTS.md and CLAUDE.md files whenever an agent starts Next dev.
+    agentRules: false,
     allowedDevOrigins: ["local.withmurph.ai"],
     distDir: resolveHostedWebDistDir(phase, process.env),
     env: buildHostedWebClientEnv(process.env),
@@ -290,9 +289,7 @@ export function buildHostedWebNextConfig(phase: string): NextConfig {
       cpus: HOSTED_WEB_PRODUCTION_BUILD_CPUS,
       turbopackFileSystemCacheForDev: isHostedWebDevFileSystemCacheEnabled(process.env),
       // Source-map emission is the largest single build-memory cost; skipping
-      // it for the production build is the main saving. The memory limit is a
-      // secondary GC cap. Together they keep the build under the 8 GB builder.
-      turbopackMemoryLimit: HOSTED_WEB_TURBOPACK_BUILD_MEMORY_LIMIT_BYTES,
+      // it for the production build keeps that avoidable cost off the builder.
       turbopackSourceMaps: false,
     },
     outputFileTracingIncludes: {

@@ -18,7 +18,6 @@ import {
 import {
   HOSTED_WEB_NEXT_TSCONFIG_PATH,
   HOSTED_WEB_PRODUCTION_BUILD_CPUS,
-  HOSTED_WEB_TURBOPACK_BUILD_MEMORY_LIMIT_BYTES,
   HOSTED_WEB_WORKFLOW_OPTIONS,
   WORKSPACE_SOURCE_PACKAGE_NAMES,
   assertHostedBrowserDeviceSyncCallbackHostnameConfiguration,
@@ -349,12 +348,11 @@ test("next.config keeps Turbopack focused on the repo root without custom worksp
   assert.equal(productionNextConfig.experimental?.cpus, HOSTED_WEB_PRODUCTION_BUILD_CPUS);
 });
 
-test("production build bounds Turbopack memory and skips source maps to fit the standard builder", () => {
-  assert.equal(
-    productionNextConfig.experimental?.turbopackMemoryLimit,
-    HOSTED_WEB_TURBOPACK_BUILD_MEMORY_LIMIT_BYTES,
-  );
-  assert.equal(HOSTED_WEB_TURBOPACK_BUILD_MEMORY_LIMIT_BYTES, 4 * 1024 * 1024 * 1024);
+test("next.config leaves agent guidance under repository ownership", () => {
+  assert.equal(productionNextConfig.agentRules, false);
+});
+
+test("production build skips Turbopack source maps to reduce builder memory", () => {
   assert.equal(productionNextConfig.experimental?.turbopackSourceMaps, false);
 });
 
