@@ -287,7 +287,17 @@ never reads production feedback or enters Resend.
   GiB limits starved Next's
   generated-contract TypeScript worker, as did a 1 GiB parent / 2 GiB worker
   split. The 1 GiB / 3 GiB split completed the full local build. Either a V8
-  heap failure or a container OOM rejects the candidate. The advisory budget is
+  heap failure or a container OOM rejects the candidate. The first forced-cold
+  Standard preview with that split still exhausted the container during
+  Turbopack compilation. Profiling identified the multiplier: `/design` made
+  the whole catalog a client graph solely to manage its `tab` query parameter.
+  The route now parses that query on the server and uses URL-backed tab links,
+  while reachable client modules use narrow client-safe public imports and only
+  the three callback-bearing synthetic studies declare local client boundaries.
+  With the same heap policy, a cold local Turbopack build compiled in 57
+  seconds instead of roughly 4.4 minutes and completed all 229 static pages.
+  Repeated exact-head Standard previews remain the external acceptance proof.
+  The advisory budget is
   a cgroup-unit model of Vercel Standard's 8 GB build machine: 7.2 GB available
   to the build cgroup and a 0.8 GB reserve for OS/container overhead outside it
   at the ceiling. The legacy-named guard budget override must stay strictly

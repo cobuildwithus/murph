@@ -28,7 +28,6 @@ import {
   type MurphContactAvatarOption,
 } from "@/src/lib/murph-contact-avatars";
 import { detectInAppBrowser } from "@/src/lib/in-app-browser";
-import { isRecord } from "@/src/lib/primitives";
 import { cn } from "@/src/lib/utils";
 
 export {
@@ -213,6 +212,10 @@ const DEFAULT_PICKER_COPY = {
 };
 
 export type MurphContactCardPickerCopy = Partial<typeof DEFAULT_PICKER_COPY>;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
 
 export function MurphContactCardPicker({
   copy,

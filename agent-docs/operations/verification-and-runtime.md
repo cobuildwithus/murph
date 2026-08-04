@@ -528,7 +528,17 @@ OOM boundary. Single
 global 1 GiB and 1.5 GiB limits starved Next's generated-contract TypeScript
 worker, and a 1 GiB parent / 2 GiB worker split did the same. A 1 GiB parent /
 3 GiB worker split completed the full local build. Either failure mode still
-invalidates the candidate. The advisory budget is a cgroup-unit machine model
+invalidates the candidate. The first forced-cold Standard preview with that
+split still exhausted the container during Turbopack compilation. Profiling
+then found that `/design` made the entire catalog a client graph solely to own
+its `tab` query parameter. Moving query parsing to the route Server Component,
+using URL-backed tab links, and routing reachable client modules through narrow
+client-safe public imports keeps the catalog shell server-owned; only the three
+synthetic studies that pass callback props declare local client boundaries. A
+cold local Turbopack compile then fell from roughly 4.4 minutes to 57 seconds
+and completed all 229 static pages with the same heap policy. Repeated
+exact-head Standard previews remain the external acceptance proof. The
+advisory budget is a cgroup-unit machine model
 for Vercel Standard's 8 GB build machine: 7.2 GB available to the build cgroup,
 with a 0.8 GB reserve for OS/container overhead outside it at the ceiling. The
 legacy-named guard budget override must stay strictly greater than the
@@ -543,9 +553,10 @@ accounting, which includes anonymous memory across all build workers plus page
 cache. Live CI on 2026-07-07 showed enforcement cannot ship green yet:
 `turbopackMemoryLimit=3GiB` produced the same cold-build anon ramp as the 4 GiB
 (about 2.9 GB at 12 seconds, 5.5 GB at 27 seconds, and 6.9 GB at 42 seconds)
-before an OOM-group kill. Cold-build memory optimization is explicit follow-up
-work. Next 16.2.6 discards that option when creating its native backend, so the
-experiment changed no enforced target. The no-op option is now omitted. The
+before an OOM-group kill. That historical result still prevents enabling the
+hard cap until exact-head CI accounting proves a safe enforced budget. Next
+16.2.6 discards that option when creating its native backend, so the experiment
+changed no enforced target. The no-op option is now omitted. The
 guard samples cgroup `memory.current` and selected `memory.stat`
 fields about every 3 seconds, prints trajectory lines about every 15 seconds,
 then reports sampled maxima before cgroup `memory.peak`, `memory.events`, and

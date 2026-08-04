@@ -13,7 +13,6 @@ import { renderClientComponent } from "./render-client-component";
 
 const navigationMocks = vi.hoisted(() => ({
   replace: vi.fn(),
-  tab: "sections",
 }));
 
 vi.mock("next/navigation", async (importOriginal) => {
@@ -22,7 +21,6 @@ vi.mock("next/navigation", async (importOriginal) => {
   return {
     ...actual,
     useRouter: () => ({ replace: navigationMocks.replace }),
-    useSearchParams: () => new URLSearchParams(`tab=${navigationMocks.tab}`),
   };
 });
 
@@ -32,9 +30,17 @@ vi.mock("next/link", async () => {
   return {
     default({
       prefetch,
+      replace,
+      scroll,
       ...props
-    }: ComponentPropsWithoutRef<"a"> & { prefetch?: boolean }) {
+    }: ComponentPropsWithoutRef<"a"> & {
+      prefetch?: boolean;
+      replace?: boolean;
+      scroll?: boolean;
+    }) {
       void prefetch;
+      void replace;
+      void scroll;
       return React.createElement("a", props);
     },
   };
@@ -90,11 +96,12 @@ import { DesignPage } from "@/app/design/design-page";
 
 beforeEach(() => {
   navigationMocks.replace.mockReset();
-  navigationMocks.tab = "sections";
 });
 
 test("design page routes the biomarker studies through the dedicated sections tab", () => {
-  const sectionsMarkup = renderToStaticMarkup(createElement(DesignPage));
+  const sectionsMarkup = renderToStaticMarkup(
+    createElement(DesignPage, { activeTab: "sections" }),
+  );
 
   expect(sectionsMarkup).toContain(">Sections<");
   expect(sectionsMarkup).toContain("Homepage security and privacy");
@@ -158,8 +165,9 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain("inert=\"\"");
   expect(sectionsMarkup).toContain("max-w-7xl");
 
-  navigationMocks.tab = "components";
-  const componentsMarkup = renderToStaticMarkup(createElement(DesignPage));
+  const componentsMarkup = renderToStaticMarkup(
+    createElement(DesignPage, { activeTab: "components" }),
+  );
 
   expect(componentsMarkup).toContain(">Components<");
   expect(componentsMarkup).toContain("WHOOP Completion Dialog");
@@ -188,6 +196,26 @@ test("design page routes the biomarker studies through the dedicated sections ta
   );
   expect(componentsMarkup).toContain("max-w-5xl");
   expect(componentsMarkup).not.toContain("max-w-7xl");
+
+  const designPageSource = readFileSync(
+    new URL("../app/design/design-page.tsx", import.meta.url),
+    "utf8",
+  );
+  expect(designPageSource).not.toContain('"use client"');
+  expect(designPageSource).not.toContain("useSearchParams");
+  expect(designPageSource).toContain('import Link from "next/link"');
+
+  for (const clientStudy of [
+    "environment-progress-study.tsx",
+    "experiment-results-share-study.tsx",
+    "homepage-auth-warm-runtime-study.tsx",
+  ]) {
+    const clientStudySource = readFileSync(
+      new URL(`../app/design/${clientStudy}`, import.meta.url),
+      "utf8",
+    );
+    expect(clientStudySource).toMatch(/^"use client";/u);
+  }
 
   const groupFundingStudySource = readFileSync(
     new URL("../app/design/group-usage-funding-study.tsx", import.meta.url),

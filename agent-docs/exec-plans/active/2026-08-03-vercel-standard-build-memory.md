@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-03
-Updated: 2026-08-03
+Updated: 2026-08-04
 
 ## Outcome
 
@@ -49,6 +49,22 @@ Updated: 2026-08-03
   boundary; a 1 GiB / 3 GiB split completed the full local build. Next 16.2.6
   derives the non-isolated worker limit from `NODE_OPTIONS` but honors the
   direct CLI flag in the parent, while isolated static workers remove the flag.
+- The first forced-cold Standard preview using that phase-aware split still hit
+  the container OOM boundary during Turbopack compilation, so the split alone
+  is necessary but insufficient.
+- `/design` made its top-level catalog component a Client Component only to
+  read and replace the `tab` query parameter. That boundary pulled every design
+  study, and their server-only transitive imports, into one browser compilation
+  graph. Moving query parsing to the page Server Component and rendering tab
+  navigation as links removes that graph-wide client boundary. The few shared
+  client modules exposed by a diagnostic Webpack build now import through
+  client-safe public entrypoints instead of server-heavy barrels, and only the
+  three synthetic studies that pass callback props declare local client
+  boundaries.
+- After that boundary correction, a cold local production Turbopack build with
+  the same 1 GiB parent / 3 GiB TypeScript-worker policy compiled in 57 seconds
+  instead of roughly 4.4 minutes and completed all 229 static pages. Repeated
+  exact-head Standard previews remain the acceptance proof.
 
 ## Architecture decision gate
 
@@ -57,8 +73,9 @@ Updated: 2026-08-03
    trades the kernel kill for a V8 heap failure.
 2. Prefer one explicit build-command resource bound over another state owner,
    dependency, or deployment service.
-3. If the bound is insufficient, profile the compile graph before changing
-   route imports or generated-data ownership.
+3. The bound was insufficient; compile-graph profiling identified and removed
+   an accidental catalog-wide client boundary without changing product data
+   ownership or adding another runtime mechanism.
 
 ## Tasks
 

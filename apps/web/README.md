@@ -1398,6 +1398,19 @@ worker failed at the same boundary; the 1 GiB / 3 GiB split completed the full
 local build. Either a V8 heap failure or a container OOM invalidates it rather
 than justifying weaker checks.
 
+The first forced-cold Standard preview with that split still exhausted the
+container during Turbopack compilation. Compile-graph profiling found the
+underlying multiplier: the top-level `/design` catalog was a Client Component
+only to manage its `tab` query parameter, so every catalog study and its
+transitive server imports entered one browser compilation graph. The route now
+parses the query on the server and uses URL-backed tab links. Client components
+reachable from catalog studies also use narrow client-safe public imports
+instead of server-heavy barrels, while the three synthetic studies that pass
+callback props declare their own local client boundaries. With the same heap
+split, a cold local Turbopack build then compiled in 57 seconds instead of
+roughly 4.4 minutes and completed all 229 static pages. Exact-head forced-cold
+Standard previews remain the external acceptance proof.
+
 The default advisory budget is 7,200,000,000 cgroup-accounted bytes: the 8 GB
 machine model minus a 0.8 GB reserve for OS/container overhead outside the build
 cgroup at the ceiling. The legacy-named
@@ -1425,14 +1438,15 @@ to creating/removing that measured cgroup and moving the build process into it;
 the build itself still runs as the invoking user with its normal environment,
 working directory, and stdio.
 
-Enforcement is deferred because live CI on 2026-07-07 showed the cold-build
+Enforcement remains deferred because live CI on 2026-07-07 showed the cold-build
 multi-process anonymous-memory ramp was unchanged by the ignored Turbopack option:
 with `turbopackMemoryLimit=3GiB`, anon climbed about 2.9 GB at 12 seconds, 5.5
 GB at 27 seconds, and 6.9 GB at 42 seconds before an OOM-group kill, matching
 the prior 4 GiB-configured run. Any hard cgroup limit that leaves a meaningful reserve on
-the 8 GB machine would currently false-fail the cold build. Cold-build memory
-optimization is the follow-up work; production config should not carry
-unproven heap-limit churn from the 3 GiB trial.
+the 8 GB machine would false-fail that historical cold build. The later
+compile-graph correction addresses the active Standard-build candidate, but
+the guard must remain observe-only until exact-head CI accounting supports a
+safe enforced budget.
 
 That failed 3 GiB trial changed only a discarded configuration input, not a
 native Turbopack target. Keep it distinct from the enforced Node old-space
