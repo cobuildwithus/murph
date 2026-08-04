@@ -131,14 +131,12 @@ head. The response must contain `SPECIALIST_REVIEW_COMPLETE` and one of
 `SPECIALIST_OUTCOME: PASS`, `SPECIALIST_OUTCOME: FINDINGS`, or
 `SPECIALIST_OUTCOME: INVALID`. Apply the same exact-turn, attachment, configured
 model, and owned-target checks used by the final gate. Because this is a narrow,
-lens-scoped pass, its minimum trustworthy duration is 4 minutes rather than the
-final gate's default 7.5-minute floor. A marked response below 4 minutes does not
-count. The current ReviewGPT package may conservatively reject any marked
-concrete-model response below 7.5 minutes; a specialist response at or above 4
-minutes may still count after local inspection confirms the exact turn,
-attachment, requested model selection, completion marker, and substantive lens
-coverage. Record the elapsed time, lane/model evidence, and acceptance reason;
-the package's missing attestation sidecar is expected for this manual exception.
+lens-scoped pass, its minimum trustworthy duration is 5 minutes rather than the
+final gate's default 7.5-minute floor. A marked response below 5 minutes does not
+count. The ReviewGPT package enforces that same five-minute minimum for marked
+concrete-model responses. Duration alone is not sufficient: confirm the exact
+turn, attachment, requested model selection, completion marker, and substantive
+lens coverage, then record the elapsed time and lane/model evidence.
 An `INVALID` result is a tooling/evidence failure: correct the gap and retry the
 same preliminary pass. A `PASS` or `FINDINGS` result is the one substantive
 specialist pass; do not split or rerun it by lens.
@@ -342,10 +340,9 @@ requires it or the current user explicitly asks for it.
    confirms the exact turn, attachment, requested model selection, completion
    marker, and a substantive review proportionate to the requested scope. Record
    the elapsed time, selected lane/model evidence, artifact-quality judgment,
-   and acceptance reason in the round handoff. The current ReviewGPT package may
-   conservatively fail such a near-threshold run and omit its model-verification
-   sidecar; that diagnostic status alone does not invalidate a documented manual
-   acceptance. Responses at or above 7.5 minutes still require all ordinary
+   and acceptance reason in the round handoff. ReviewGPT's package-level
+   five-minute attestation threshold does not replace this stricter final-gate
+   judgment. Responses at or above 7.5 minutes still require all ordinary
    evidence checks and are not trusted by duration alone.
 
    If a too-fast response is not accepted under this narrow exception, preserve

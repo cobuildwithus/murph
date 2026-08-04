@@ -160,7 +160,10 @@ test("launch consent renders one explicit decision without checkboxes", async ()
   await vi.waitFor(() => {
     expect(container.textContent).toContain("Use your health data");
     expect(container.textContent).toContain(
-      "By consenting, you accept the terms and let Murph and contracted AI providers use your health data",
+      "Murph uses health data you share to personalize answers and insights.",
+    );
+    expect(container.textContent).toContain(
+      "AI providers process relevant data on Murph’s behalf to generate results.",
     );
   });
 
@@ -169,9 +172,8 @@ test("launch consent renders one explicit decision without checkboxes", async ()
   expect(container.textContent).toContain("AI safety");
   expect(container.textContent).toContain("Health data");
   expect(container.textContent).not.toContain("Health data consent");
-  expect(container.textContent).toContain("We do not sell health data.");
   expect(container.textContent).toContain(
-    "We do not use Murph-managed health data to train general-purpose AI models.",
+    "Not sold or used to train general-purpose AI models. Withdraw anytime in Settings.",
   );
   expect(container.querySelector('input[type="checkbox"]')).toBeNull();
 

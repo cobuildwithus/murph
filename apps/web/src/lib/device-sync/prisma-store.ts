@@ -1,5 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 
+import { deviceSyncError } from "@murphai/device-syncd/errors";
+import type { HostedExecutionDeviceSyncStagedDirtyAck } from "@murphai/device-syncd/hosted-runtime";
 import type {
   ClaimDeviceSyncWebhookTraceInput,
   ConsumeOAuthStateResult,
@@ -13,10 +15,11 @@ import type {
   UpsertPublicDeviceSyncConnectionInput,
   UpsertPublicDeviceSyncConnectionResult,
 } from "@murphai/device-syncd/types";
-import type { HostedExecutionDeviceSyncStagedDirtyAck } from "@murphai/device-syncd/hosted-runtime";
-import type { HostedDeviceSyncSecretTestCodec } from "./prisma-store/connection-secrets";
-import type { HostedLocalHeartbeatPatch } from "./local-heartbeat";
+import { lockHostedMemberRow } from "../hosted-onboarding/shared";
+import { readHostedHealthDataConsentState } from "../legal/consent";
 import type { AuthenticatedHostedUser, HostedBrowserAssertionNonceStore } from "./auth";
+import type { HostedLocalHeartbeatPatch } from "./local-heartbeat";
+import type { HostedDeviceSyncSecretTestCodec } from "./prisma-store/connection-secrets";
 import { PrismaHostedAgentSessionStore } from "./prisma-store/agent-sessions";
 import { PrismaHostedBrowserAssertionNonceStore } from "./prisma-store/browser-assertion-nonces";
 import { PrismaHostedConnectionStore } from "./prisma-store/connections";
@@ -477,6 +480,31 @@ export class PrismaDeviceSyncControlPlaneStore
     callback: (tx: HostedPrismaTransactionClient) => Promise<TResult>,
   ): Promise<TResult> {
     return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`select pg_advisory_xact_lock(hashtext(${connectionId}))`;
+      return callback(tx);
+    });
+  }
+
+  async withHealthDataAdmissionLock<TResult>(
+    userId: string,
+    connectionId: string,
+    callback: (tx: HostedPrismaTransactionClient) => Promise<TResult>,
+  ): Promise<TResult> {
+    return this.prisma.$transaction(async (tx) => {
+      // Member first is the repository-wide consent serialization order.
+      // Connection state is locked only after withdrawal authority is current.
+      await lockHostedMemberRow(tx, userId);
+      if (await readHostedHealthDataConsentState({
+        memberId: userId,
+        prisma: tx,
+      }) === "revoked") {
+        throw deviceSyncError({
+          code: "HEALTH_DATA_CONSENT_REQUIRED",
+          httpStatus: 403,
+          message: "Use Murph again before processing health data.",
+          retryable: false,
+        });
+      }
       await tx.$executeRaw`select pg_advisory_xact_lock(hashtext(${connectionId}))`;
       return callback(tx);
     });

@@ -8,6 +8,10 @@ import {
 import {
   activeHostedThreadContainerParticipantWhere,
 } from "../hosted-groups/thread-container-participant-access";
+import {
+  HOSTED_HEALTH_DATA_CONSENT_SCOPE,
+  resolveHostedHealthDataConsentState,
+} from "../legal/consent";
 import { getPrisma } from "../prisma";
 import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
 import {
@@ -90,20 +94,28 @@ export const hostedMemberAccessSelect = Prisma.validator<Prisma.HostedMemberSele
   },
 });
 
-const hostedRuntimeAiMemberAccessSelect = Prisma.validator<Prisma.HostedMemberSelect>()({
+const hostedRuntimeAiPersonAccessSelect = Prisma.validator<Prisma.HostedMemberSelect>()({
   ...hostedMemberPersonAccessSelect,
   billingRef: {
     select: hostedRuntimeAiAccessBillingRefSelect,
   },
+  consentGrants: {
+    select: {
+      scope: true,
+      status: true,
+    },
+    where: {
+      scope: HOSTED_HEALTH_DATA_CONSENT_SCOPE,
+    },
+  },
+});
+
+const hostedRuntimeAiMemberAccessSelect = Prisma.validator<Prisma.HostedMemberSelect>()({
+  ...hostedRuntimeAiPersonAccessSelect,
   threadContainer: {
     select: {
       owner: {
-        select: {
-          ...hostedMemberPersonAccessSelect,
-          billingRef: {
-            select: hostedRuntimeAiAccessBillingRefSelect,
-          },
-        },
+        select: hostedRuntimeAiPersonAccessSelect,
       },
     },
   },
@@ -120,22 +132,17 @@ export type HostedMemberAccessState = HostedMemberPersonAccessState & {
 };
 
 type HostedRuntimeAiPersonAccessState = Prisma.HostedMemberGetPayload<{
-  select: {
-    accountGroupMemberships: {
-      select: typeof hostedSponsorAccessMembershipSelect;
-      where: { status: "active" };
-    };
-    billingRef: { select: typeof hostedRuntimeAiAccessBillingRefSelect };
-    billingStatus: true;
-    suspendedAt: true;
-  };
+  select: typeof hostedRuntimeAiPersonAccessSelect;
 }>;
 
 export type HostedRuntimeAiAccessDecision =
   | { allowed: true }
   | {
     allowed: false;
-    reason: "hosted_access_inactive" | "trial_expired_pending_billing";
+    reason:
+      | "health_data_consent_withdrawn"
+      | "hosted_access_inactive"
+      | "trial_expired_pending_billing";
     retryAfter: Date;
     userNotice: {
       code: HostedRuntimeAiAccessNoticeCode;
@@ -151,10 +158,12 @@ export type HostedRuntimeAiAccessDecision =
  */
 export type HostedRuntimeAiAccessNoticeCode =
   | "billing_inactive"
+  | "health_data_consent_withdrawn"
   | "trial_conversion_pending";
 
 const HOSTED_RUNTIME_AI_ACCESS_NOTICE_CODES = new Set<string>([
   "billing_inactive",
+  "health_data_consent_withdrawn",
   "trial_conversion_pending",
 ]);
 
@@ -167,6 +176,8 @@ export function isHostedRuntimeAiAccessNoticeCode(
 
 const HOSTED_RUNTIME_AI_ACCESS_RETRY_MS = 15 * 60_000;
 const HOSTED_AI_USAGE_HOME_URL = "https://withmurph.ai/home";
+const HOSTED_HEALTH_DATA_CONSENT_SETTINGS_URL =
+  "https://withmurph.ai/settings#data-privacy";
 // Lapsed billing recovers from the Subscription controls, not the dashboard: the
 // Home page only surfaces a billing action for a narrow paused-trial shape.
 const HOSTED_BILLING_RECOVERY_URL = "https://withmurph.ai/settings#subscription";
@@ -371,12 +382,18 @@ export async function readHostedRuntimeAiAccessDecision(input: {
       return ownerDecision;
     }
 
-    return await hasAnyHostedRuntimeAiAccessThreadContainerParticipant({
-      containerMemberId: input.memberId,
-      now,
-      prisma,
-    })
-      ? { allowed: true }
+    const participantAllowed =
+      await hasAnyHostedRuntimeAiAccessThreadContainerParticipant({
+        containerMemberId: input.memberId,
+        now,
+        prisma,
+      });
+    if (participantAllowed) {
+      return { allowed: true };
+    }
+
+    return ownerDecision.reason === "health_data_consent_withdrawn"
+      ? ownerDecision
       : buildHostedRuntimeInactiveAccessDecision(now);
   }
 
@@ -396,6 +413,10 @@ function resolveHostedRuntimeAiPersonAccessDecision(input: {
 }): HostedRuntimeAiAccessDecision {
   if (isHostedMemberSuspended(input.person.suspendedAt)) {
     return buildHostedRuntimeInactiveAccessDecision(input.now);
+  }
+
+  if (resolveHostedHealthDataConsentState(input.person.consentGrants) === "revoked") {
+    return buildHostedRuntimeHealthDataConsentWithdrawnDecision(input.now);
   }
 
   const sponsored = input.person.accountGroupMemberships.some((membership) =>
@@ -507,6 +528,22 @@ function resolveHostedRuntimeAiPersonAccessDecision(input: {
   };
 }
 
+function buildHostedRuntimeHealthDataConsentWithdrawnDecision(
+  now: Date,
+): Extract<HostedRuntimeAiAccessDecision, { allowed: false }> {
+  return {
+    allowed: false,
+    reason: "health_data_consent_withdrawn",
+    retryAfter: new Date(now.getTime() + HOSTED_RUNTIME_AI_ACCESS_RETRY_MS),
+    userNotice: {
+      code: "health_data_consent_withdrawn",
+      message:
+        "Murph is paused because you withdrew health data consent. "
+        + `Use Murph again in Settings: ${HOSTED_HEALTH_DATA_CONSENT_SETTINGS_URL}`,
+    },
+  };
+}
+
 function buildHostedRuntimeInactiveAccessDecision(
   now: Date,
   userNotice: Extract<
@@ -546,10 +583,7 @@ async function hasAnyHostedRuntimeAiAccessThreadContainerParticipant(input: {
     select: {
       participant: {
         select: {
-          ...hostedMemberPersonAccessSelect,
-          billingRef: {
-            select: hostedRuntimeAiAccessBillingRefSelect,
-          },
+          ...hostedRuntimeAiPersonAccessSelect,
         },
       },
     },

@@ -9,7 +9,10 @@ import {
 } from "@prisma/client";
 
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
-import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
+import {
+  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  lockHostedMemberRow,
+} from "../hosted-onboarding/shared";
 
 export const HOSTED_LEGAL_DOCUMENT_VERSION = "2026-07-23";
 export const HOSTED_PRIVACY_POLICY_VERSION = "2026-07-23";
@@ -45,9 +48,11 @@ export const HOSTED_CONSENT_DOCUMENTS = [
   },
 ] as const;
 
-// Launch scopes preserve historical acceptance of the required documents.
-// They do not prevent members from disconnecting optional sources, withdrawing
-// optional permissions for future processing, or exercising deletion rights.
+export const HOSTED_HEALTH_DATA_CONSENT_SCOPE = "launch.health-data" as const;
+
+// Launch scopes preserve historical acceptance of the required documents. The
+// legal agreement remains immutable, while health-data consent can be withdrawn
+// for all future hosted processing without deleting the member account.
 export const HOSTED_CONSENT_SCOPES = [
   {
     scope: "launch.legal",
@@ -60,9 +65,9 @@ export const HOSTED_CONSENT_SCOPES = [
     ],
   },
   {
-    scope: "launch.health-data",
+    scope: HOSTED_HEALTH_DATA_CONSENT_SCOPE,
     label: "Health data notice and processing authorization",
-    revocable: false,
+    revocable: true,
     documentIds: [
       "consumer-health-data-notice",
     ],
@@ -199,7 +204,7 @@ export function parseHostedConsentRevokeRequest(
     throw hostedOnboardingError({
       code: "CONSENT_SCOPE_NOT_REVOCABLE",
       httpStatus: 400,
-      message: "This consent is required to use hosted Murph and cannot be revoked through this endpoint.",
+      message: "The launch legal agreement cannot be revoked through this endpoint.",
     });
   }
 
@@ -344,6 +349,7 @@ export async function recordHostedConsentGrant(input: {
     ?? (scopeDefinition.revocable ? "granted" : "accepted");
 
   await input.prisma.$transaction(async (tx) => {
+    await lockHostedMemberRow(tx, input.memberId);
     const event = await tx.hostedConsentEvent.create({
       data: {
         action,
@@ -393,7 +399,7 @@ export async function recordHostedConsentGrant(input: {
   });
 }
 
-export async function revokeHostedOptionalFeatureConsent(input: {
+export async function revokeHostedConsentScope(input: {
   memberId: string;
   now?: Date;
   prisma: PrismaClient;
@@ -405,7 +411,7 @@ export async function revokeHostedOptionalFeatureConsent(input: {
     throw hostedOnboardingError({
       code: "CONSENT_SCOPE_NOT_REVOCABLE",
       httpStatus: 400,
-      message: "This consent is required to use hosted Murph and cannot be revoked through this endpoint.",
+      message: "The launch legal agreement cannot be revoked through this endpoint.",
     });
   }
 
@@ -413,6 +419,10 @@ export async function revokeHostedOptionalFeatureConsent(input: {
   const now = input.now ?? new Date();
 
   await input.prisma.$transaction(async (tx) => {
+    // Health-processing admissions use this same member row as their
+    // serialization fence. Once this lock is acquired, every later admission
+    // must observe the committed revocation before it can persist new work.
+    await lockHostedMemberRow(tx, input.memberId);
     const existingGrant = await tx.hostedConsentGrant.findUnique({
       where: {
         memberId_scope: {
@@ -535,6 +545,56 @@ export function hasHostedHistoricalLaunchConsent(
   status: HostedConsentStatus,
 ): boolean {
   return getMissingHistoricalLaunchConsentScopes(status).length === 0;
+}
+
+export type HostedHealthDataConsentState = HostedConsentGrantStatus | "missing";
+
+export function resolveHostedHealthDataConsentState(
+  grants: readonly { scope: string; status: string }[] | null | undefined,
+): HostedHealthDataConsentState {
+  const grant = grants?.find(
+    (candidate) => candidate.scope === HOSTED_HEALTH_DATA_CONSENT_SCOPE,
+  );
+  if (grant?.status === "granted" || grant?.status === "revoked") {
+    return grant.status;
+  }
+  return "missing";
+}
+
+/**
+ * Set-based form of the explicit-withdrawal rule. A missing historical grant
+ * remains compatible with legacy members; only a persisted revocation denies
+ * health-data processing.
+ */
+export function hostedHealthDataConsentNotRevokedWhere(): Prisma.HostedMemberWhereInput {
+  return {
+    consentGrants: {
+      none: {
+        scope: HOSTED_HEALTH_DATA_CONSENT_SCOPE,
+        status: "revoked",
+      },
+    },
+  };
+}
+
+export async function readHostedHealthDataConsentState(input: {
+  memberId: string;
+  prisma: HostedConsentPrismaClient;
+}): Promise<HostedHealthDataConsentState> {
+  const grant = await input.prisma.hostedConsentGrant.findUnique({
+    select: {
+      scope: true,
+      status: true,
+    },
+    where: {
+      memberId_scope: {
+        memberId: input.memberId,
+        scope: HOSTED_HEALTH_DATA_CONSENT_SCOPE,
+      },
+    },
+  });
+
+  return resolveHostedHealthDataConsentState(grant ? [grant] : []);
 }
 
 export function buildHostedConsentStatus(input: {
