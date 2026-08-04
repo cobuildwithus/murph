@@ -90,6 +90,7 @@ function toIngressWebhook(parsed: {
   eventType: string;
   jobs: DeviceSyncIngressWebhook["jobs"];
   occurredAt?: string;
+  sourceObservedAt?: string;
   resourceCategory?: string | null;
   sourceProviderSlug?: string | null;
   dataSourceProviderSlug?: string | null;
@@ -103,6 +104,7 @@ function toIngressWebhook(parsed: {
     eventType: parsed.eventType,
     jobs: [...parsed.jobs],
     ...(parsed.occurredAt ? { occurredAt: parsed.occurredAt } : {}),
+    ...(parsed.sourceObservedAt ? { sourceObservedAt: parsed.sourceObservedAt } : {}),
     ...(resourceCategory ? { resourceCategory } : {}),
     ...(sourceProviderSlug ? { sourceProviderSlug } : {}),
     ...(dataSourceProviderSlug ? { dataSourceProviderSlug } : {}),
@@ -493,6 +495,15 @@ function connectionFlowRequiresCallbackUrl(
   return connectionKind === "oauth2" || connectionKind === "external_link";
 }
 
+function connectionSourceStartStaleError(): never {
+  throw deviceSyncError({
+    code: "CONNECTION_SOURCE_START_STALE",
+    message: "Device source state changed while its connection link was starting. Retry.",
+    retryable: true,
+    httpStatus: 409,
+  });
+}
+
 export class DeviceSyncPublicIngress {
   readonly publicBaseUrl: string;
   readonly allowedReturnOrigins: string[];
@@ -627,7 +638,7 @@ export class DeviceSyncPublicIngress {
       if (
         sourceInstanceKey
         && sourceProviderSlug
-        && !(reusedEstablishedJunctionAccount && input.sourceLifecyclePrepared === true)
+        && !(reusedEstablishedJunctionAccount && input.sourceLifecycleProof)
       ) {
         await this.store.upsertConnectionSource({
           connectionId: seededAccount.id,
@@ -650,7 +661,39 @@ export class DeviceSyncPublicIngress {
       stateMetadata = setSeededConnectionStateMetadata(stateMetadata, seededAccount);
     }
 
+    const requirePreparedSourceLifecycleCurrent = async () => {
+      const proof = input.sourceLifecycleProof ?? null;
+      if (!proof) {
+        return;
+      }
+      if (
+        !reusedEstablishedJunctionAccount
+        || !seededAccount
+        || !sourceProviderSlug
+        || proof.connectionId !== seededAccount.id
+        || normalizeString(proof.sourceProviderSlug) !== sourceProviderSlug
+      ) {
+        connectionSourceStartStaleError();
+      }
+      const sources = await this.store.listConnectionSources({
+        connectionId: seededAccount.id,
+        sourceProviderSlug,
+      });
+      const source = sources.find(
+        (candidate) => candidate.sourceInstanceKey === proof.sourceInstanceKey,
+      );
+      if (
+        !source
+        || source.lastSeenAt !== proof.lastSeenAt
+        || source.lastErrorCode !== null
+        || source.status !== "disconnected"
+      ) {
+        connectionSourceStartStaleError();
+      }
+    };
+
     try {
+      await requirePreparedSourceLifecycleCurrent();
       await this.store.createOAuthState({
         state,
         provider: provider.provider,
@@ -660,6 +703,7 @@ export class DeviceSyncPublicIngress {
         expiresAt,
         metadata: stateMetadata,
       });
+      await requirePreparedSourceLifecycleCurrent();
     } catch (error) {
       if (seededAccount && !reusedEstablishedJunctionAccount) {
         await this.markSeededConnectionSetupFailed(
@@ -1366,38 +1410,6 @@ export class DeviceSyncPublicIngress {
       account
       && account.status === "active"
       && !isDeviceSyncConnectionSetupPending(account)
-      && webhookSourceProviderSlug
-    ) {
-      const matchingSources = await this.store.listConnectionSources({
-        connectionId: account.id,
-        sourceProviderSlug: webhookSourceProviderSlug,
-      });
-      if (
-        matchingSources.length > 0
-        && !matchingSources.some((source) => source.status === "connected")
-      ) {
-        const sourceObservation = await this.hooks.onConnectionSourceObserved?.({
-          account,
-          observedAt: webhook.occurredAt ?? null,
-          sourceProviderSlug: webhookSourceProviderSlug,
-          provider,
-          now,
-        });
-        if (sourceObservation?.sourceAdmissionCommitted !== true) {
-          throw deviceSyncError({
-            code: "WEBHOOK_SOURCE_NOT_READY",
-            message: "Device source setup must finish before its webhook can be accepted.",
-            retryable: true,
-            httpStatus: 503,
-          });
-        }
-      }
-    }
-
-    if (
-      account
-      && account.status === "active"
-      && !isDeviceSyncConnectionSetupPending(account)
       && webhook.acceptanceMode === "level_dirty_hint"
     ) {
       // Only provider-declared level hints can be satisfied by committed dirty state.
@@ -1568,6 +1580,33 @@ export class DeviceSyncPublicIngress {
     const onWebhookAccepted = this.hooks.onWebhookAccepted;
 
     try {
+      if (webhookSourceProviderSlug) {
+        const matchingSources = await this.store.listConnectionSources({
+          connectionId: account.id,
+          sourceProviderSlug: webhookSourceProviderSlug,
+        });
+        if (
+          matchingSources.length > 0
+          && !matchingSources.some((source) => source.status === "connected")
+        ) {
+          const sourceObservation = await this.hooks.onConnectionSourceObserved?.({
+            account,
+            observedAt: webhook.sourceObservedAt ?? null,
+            sourceProviderSlug: webhookSourceProviderSlug,
+            provider,
+            now,
+          });
+          if (sourceObservation?.sourceAdmissionCommitted !== true) {
+            throw deviceSyncError({
+              code: "WEBHOOK_SOURCE_NOT_READY",
+              message: "Device source setup must finish before its webhook can be accepted.",
+              retryable: true,
+              httpStatus: 503,
+            });
+          }
+        }
+      }
+
       const acceptedResult = await onWebhookAccepted?.({
         account,
         claimToken,

@@ -163,6 +163,14 @@ function acceptTestCompanionHrvRmssdObservation(options: {
   });
 }
 
+function createDeferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
+}
+
 function buildHostedConnection(
   overrides: Partial<{
     accessTokenExpiresAt: string | null;
@@ -693,6 +701,7 @@ describe("hosted device-sync wakes", () => {
       setupPhase: "source_confirmed",
     });
     mocks.getConnectionForUser.mockResolvedValue(connection);
+    mocks.listConnectionsForUser.mockResolvedValue([connection]);
     mocks.listConnectionSources.mockResolvedValue([
       buildHostedConnectionSource(connection.id, "apple_health_kit", {
         lastErrorCode: "SOURCE_USER_DISCONNECTED",
@@ -712,7 +721,7 @@ describe("hosted device-sync wakes", () => {
       provider: "junction",
     });
     expect(mocks.resumeSdkSignInSession).not.toHaveBeenCalled();
-    expect(mocks.listConnectionsForUser).not.toHaveBeenCalled();
+    expect(mocks.listConnectionsForUser).toHaveBeenCalledWith("user-123");
     expect(mocks.upsertConnectionSource).toHaveBeenCalledWith(expect.objectContaining({
       connectionId: connection.id,
       lastErrorCode: null,
@@ -720,6 +729,48 @@ describe("hosted device-sync wakes", () => {
       status: "disconnected",
       tx: mocks.prismaTx,
     }));
+  });
+
+  it("does not let an older native connect clear a newer source disconnect", async () => {
+    const connection = buildHostedConnection({
+      id: "dsc_junction_123",
+      provider: "junction",
+      setupPhase: "source_confirmed",
+    });
+    let source = buildHostedConnectionSource(connection.id, "apple_health_kit", {
+      lastErrorCode: "SOURCE_USER_DISCONNECTED",
+      lastSeenAt: "2026-03-26T12:01:00.000Z",
+      status: "disconnected",
+    });
+    const session = {
+      account: connection,
+      environment: "sandbox" as const,
+      signInToken: "junction-sign-in-token",
+    };
+    const deferredSession = createDeferred<typeof session>();
+    mocks.createSdkSignInSession.mockReturnValue(deferredSession.promise);
+    mocks.listConnectionsForUser.mockResolvedValue([connection]);
+    mocks.getConnectionForUser.mockResolvedValue(connection);
+    mocks.listConnectionSources.mockImplementation(async () => [source]);
+    const ingress = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/companion/sign-in-token"),
+    );
+
+    const connect = ingress.createSdkSignInSession("user-123", "junction", "connect");
+    await vi.waitFor(() => expect(mocks.createSdkSignInSession).toHaveBeenCalledOnce());
+
+    source = {
+      ...source,
+      lastSeenAt: "2026-03-26T12:02:00.000Z",
+    };
+    deferredSession.resolve(session);
+
+    await expect(connect).rejects.toMatchObject({
+      code: "CONNECTION_CHANGED_DURING_DISCONNECT",
+      httpStatus: 409,
+      retryable: true,
+    });
+    expect(mocks.upsertConnectionSource).not.toHaveBeenCalled();
   });
 
   it.each(["resume", null] as const)(
@@ -2277,7 +2328,6 @@ describe("hosted device-sync wakes", () => {
     mocks.syncDurableConnectionState.mockImplementation(async (connection) => {
       currentConnection = connection;
     });
-
     const disconnect = controlPlane.disconnectConnection(
       "user-123",
       buildPublicConnectionId("dsc_123"),
@@ -2456,6 +2506,13 @@ describe("hosted device-sync wakes", () => {
     mocks.syncDurableConnectionState.mockImplementation(async (connection) => {
       currentConnection = connection;
     });
+    mocks.upsertConnectionSource.mockImplementation(async (input) => ({
+      ...buildHostedConnectionSource(input.connectionId, input.sourceProviderSlug, {
+        lastSeenAt: input.lastSeenAt,
+        status: input.status,
+      }),
+      sourceInstanceKey: input.sourceInstanceKey,
+    }));
 
     await expect(
       controlPlane.prepareConnectionStart("user-123", {
@@ -2507,7 +2564,10 @@ describe("hosted device-sync wakes", () => {
       sourceProviderSlug: "fitbit",
     });
     expect(ingress.startConnection).toHaveBeenLastCalledWith(expect.objectContaining({
-      sourceLifecyclePrepared: true,
+      sourceLifecycleProof: expect.objectContaining({
+        connectionId: currentConnection.id,
+        sourceProviderSlug: "fitbit",
+      }),
       sourceProviderSlug: "fitbit",
     }));
 
@@ -2517,7 +2577,7 @@ describe("hosted device-sync wakes", () => {
       sourceProviderSlug: "fitbit",
     });
     expect(ingress.startConnection).toHaveBeenLastCalledWith(expect.objectContaining({
-      sourceLifecyclePrepared: false,
+      sourceLifecycleProof: null,
       sourceProviderSlug: "fitbit",
     }));
   });

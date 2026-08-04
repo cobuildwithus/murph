@@ -53,6 +53,8 @@ import {
 import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH } from "../metadata.ts";
 import {
   DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
+  DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+  isDeviceSyncSourceAdmitted,
   isJunctionHistoricalResetProviderSlug,
   requiresHistoricalResetDeviceSyncSource,
 } from "../public-account.ts";
@@ -1538,20 +1540,6 @@ export function createJunctionDeviceSyncProvider(
     skippedOptionalResources: JunctionSkippedOptionalResource[],
   ): Promise<ProviderJobResult> {
     const resourceName = normalizeString(job.payload.resource);
-    const sourceProviderSlug = normalizeProviderSlug(
-      resourceName === COMPANION_HRV_RMSSD_RESOURCE
-        ? JUNCTION_COMPANION_HRV_SOURCE_PROVIDER
-        : job.payload.sourceProviderSlug,
-    );
-    if (
-      sourceProviderSlug
-      && !isJunctionSourceAdmittedForImport(
-        context.account.sources ?? [],
-        sourceProviderSlug,
-      )
-    ) {
-      return {};
-    }
 
     if (resourceName === COMPANION_HRV_RMSSD_RESOURCE) {
       let observation;
@@ -1577,6 +1565,12 @@ export function createJunctionDeviceSyncProvider(
         });
       }
 
+      if (!await isJunctionCompanionSourceCurrentlyAdmitted(
+        context,
+        JUNCTION_COMPANION_HRV_SOURCE_PROVIDER,
+      )) {
+        return {};
+      }
       await context.importSnapshot({
         provider: "junction",
         accountId: buildJunctionImportAccountId(context.account.externalAccountId),
@@ -1590,6 +1584,12 @@ export function createJunctionDeviceSyncProvider(
     const window = resolveJobWindow(job, context.now, reconcileDays);
     if (normalizeString(job.payload.resource) === JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE) {
       const records = parseJunctionCompanionHealthMetadataJob(job);
+      if (!await isJunctionCompanionSourceCurrentlyAdmitted(
+        context,
+        JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER,
+      )) {
+        return {};
+      }
       await importJunctionCompanionHealthMetadataSnapshot(context, records);
       return {
         nextReconcileAt: clampWebhookJobNextReconcileAt(context),
@@ -1598,6 +1598,16 @@ export function createJunctionDeviceSyncProvider(
 
     const resource = normalizeJunctionResourceName(job.payload.resource);
     const resourceCategory = normalizeString(job.payload.resourceCategory);
+    const sourceProviderSlug = normalizeProviderSlug(job.payload.sourceProviderSlug);
+    if (
+      sourceProviderSlug
+      && !isJunctionSourceAdmittedForImport(
+        context.account.sources ?? [],
+        sourceProviderSlug,
+      )
+    ) {
+      return {};
+    }
     let listedSourceProviders: readonly JunctionProviderConnection[] | null = null;
     let projectedSourceProviders: readonly JunctionProviderConnection[] | null = null;
     const loadSourceProviders = async (): Promise<readonly JunctionProviderConnection[]> => {
@@ -2000,7 +2010,8 @@ export function createJunctionDeviceSyncProvider(
     const resource = inferJunctionWebhookResource(eventType, data);
     const sourceProviderSlug = extractJunctionWebhookSourceProviderSlug(data);
     const objectId = extractJunctionWebhookObjectId(data);
-    const occurredAt = extractJunctionWebhookOccurredAt(data) ?? context.now;
+    const sourceObservedAt = extractJunctionWebhookOccurredAt(data);
+    const occurredAt = sourceObservedAt ?? context.now;
     const window = buildJunctionWebhookWindow(data, occurredAt, context.now, resource);
     const webhookDataJsons = buildJunctionWebhookDataJobJsons({
       data,
@@ -2028,6 +2039,7 @@ export function createJunctionDeviceSyncProvider(
       eventType,
       traceId: verified.messageId,
       occurredAt,
+      ...(sourceObservedAt ? { sourceObservedAt } : {}),
       resourceCategory: resource?.category ?? null,
       sourceProviderSlug,
       // A historical-pull completion is a data-less notification, so accepting
@@ -6316,6 +6328,57 @@ function isJunctionSourceAdmittedForImport(
   );
   return matchingSources.length === 0
     || matchingSources.some((source) => source.status !== "disconnected");
+}
+
+async function isJunctionCompanionSourceCurrentlyAdmitted(
+  context: ProviderJobContext,
+  sourceProviderSlug: string,
+): Promise<boolean> {
+  const normalizedSourceProviderSlug = normalizeProviderSlug(sourceProviderSlug);
+  if (!context.listConnectionSources) {
+    throw junctionCompanionSourceStateUnavailableError();
+  }
+  if (!normalizedSourceProviderSlug) {
+    throw junctionCompanionSourceStateUnavailableError();
+  }
+
+  let sources;
+  try {
+    sources = await context.listConnectionSources({
+      sourceProviderSlug: normalizedSourceProviderSlug,
+    });
+  } catch (error) {
+    if (isDeviceSyncError(error) && error.retryable) {
+      throw error;
+    }
+    throw junctionCompanionSourceStateUnavailableError(error);
+  }
+
+  if (isDeviceSyncSourceAdmitted(sources, normalizedSourceProviderSlug)) {
+    return true;
+  }
+  if (sources.some(
+    (source) => source.lastErrorCode === DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+  )) {
+    return false;
+  }
+
+  throw deviceSyncError({
+    code: "JUNCTION_COMPANION_SOURCE_NOT_READY",
+    message: "Current companion source authorization is not ready. Retry shortly.",
+    retryable: true,
+    httpStatus: 503,
+  });
+}
+
+function junctionCompanionSourceStateUnavailableError(cause?: unknown): DeviceSyncError {
+  return deviceSyncError({
+    code: "JUNCTION_COMPANION_SOURCE_STATE_UNAVAILABLE",
+    message: "Current companion source authorization is unavailable. Retry shortly.",
+    retryable: true,
+    httpStatus: 503,
+    ...(cause === undefined ? {} : { cause }),
+  });
 }
 
 interface ProjectedJunctionSource {

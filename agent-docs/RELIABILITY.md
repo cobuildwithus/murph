@@ -351,12 +351,19 @@ Last verified: 2026-07-31
   Repeated removal performs target-only provider cleanup again, and a Link
   callback rejected after provider completion uses the same two-phase source
   claim to remove authorization recreated by an obsolete Link. A newer Link is
-  not issued while exact-source cleanup is in progress.
+  not issued while exact-source cleanup is in progress. A start carries its
+  exact pending source epoch through provider Link creation and rechecks it
+  before OAuth-state persistence and response; a concurrent newer disconnect
+  makes the Link unreachable instead of returning stale authorization.
 - Companion Apple Health metadata and WHOOP overnight summaries recheck their
   exact source inside the health-data admission lock and again before runtime
-  import. Explicit Apple Health SDK connect creates a pending source epoch only
-  after token mint; a provider-authored event newer than that epoch may commit
-  it connected. WHOOP summary provenance remains `whoop`, but admission uses
+  import by rereading the durable source row rather than trusting the queued
+  account snapshot. Explicit Apple Health SDK connect captures the exact source
+  epoch before token mint and creates a pending epoch afterward only when that
+  proof remains current. A provider-authored event timestamp newer than that
+  epoch may commit it connected, but synthesized receipt time may not. Source
+  observation runs after the webhook attempt owns its trace so duplicate or
+  losing attempts cannot change authorization. WHOOP summary provenance remains `whoop`, but admission uses
   the Junction `whoop_v2` lifecycle source. Resume, omitted intent, stale
   events, and background work never clear the source fence.
 - The hosted reply-latency operator alert remains one singleton incident owner.

@@ -115,7 +115,8 @@ account, its credentials, and sibling source rows active. The connection-wide
 path above is reserved for the explicit historical-export reset. Obsolete Link
 completion is followed by exact-target cleanup, and repeated removal rechecks
 provider state so a local disconnected row is never treated as proof of remote
-revocation.
+revocation. A reconnect Link carries the exact pending source epoch through URL
+creation and is returned only if that epoch is still current.
 
 WHOOP uses OAuth plus webhooks.
 Strava uses OAuth, polling, and optional app-global webhooks.
@@ -145,10 +146,13 @@ establishes only when zero provider rows exist, and rejects terminal or
 ambiguous state. Only a future visible hosted-health/Junction Reconnect action
 may send `connect` and create/reactivate the shared lane. Resume, omitted intent,
 data ingress, and retry work cannot undo an explicit disconnect.
-That explicit Apple Health connect opens one pending source epoch after the SDK
-token is minted; only a newer provider-authored event can commit it connected.
+That explicit Apple Health connect captures the current source epoch before SDK
+token mint and opens one pending epoch afterward only if the proof remains
+current; only a newer provider-authored event timestamp can commit it connected.
 Apple Health companion metadata, WHOOP overnight summaries, and their queued
-runtime jobs all honor the exact-source disconnect state before import. WHOOP
+runtime jobs reread and honor the exact-source disconnect state immediately
+before import instead of trusting queued account state. Webhook receipt time is
+not reconnect proof. WHOOP
 summaries keep `whoop` as data provenance while their authorization is checked
 against the disconnectable Junction `whoop_v2` source.
 

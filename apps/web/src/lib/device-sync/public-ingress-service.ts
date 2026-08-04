@@ -21,6 +21,7 @@ import {
   type PublicDeviceSyncAccount,
   type PublicProviderDescriptor,
   type SdkSignInSessionResult,
+  type StartConnectionSourceLifecycleProof,
   type DeviceSyncRegistry,
 } from "@murphai/device-syncd/types";
 import type { CompanionHrvRmssdObservation } from "@murphai/contracts";
@@ -45,6 +46,7 @@ import {
   admitHostedDeviceSyncConnectionSourceObservation,
   beginHostedDeviceSyncConnectionSourceReconnect,
   buildHostedCompanionHrvRmssdDirtyResource,
+  captureHostedDeviceSyncConnectionSourceReconnect,
   cleanupRejectedHostedDeviceSyncConnectionSource,
   disconnectHostedDeviceSyncConnection,
   disconnectHostedDeviceSyncConnectionSource,
@@ -59,7 +61,10 @@ import { createHostedDeviceSyncRegistry } from "./providers";
 
 export class HostedDeviceSyncPublicIngressService {
   private readonly ingress;
-  private readonly preparedSourceLifecycles = new Set<string>();
+  private readonly preparedSourceLifecycles = new Map<
+    string,
+    StartConnectionSourceLifecycleProof
+  >();
 
   constructor(
     private readonly context: HostedDeviceSyncControlPlaneContext,
@@ -210,14 +215,18 @@ export class HostedDeviceSyncPublicIngressService {
       provider,
       options.sourceProviderSlug ?? null,
     );
+    const sourceLifecycleProof = sourceLifecycleKey
+      ? this.preparedSourceLifecycles.get(sourceLifecycleKey) ?? null
+      : null;
+    if (sourceLifecycleKey) {
+      this.preparedSourceLifecycles.delete(sourceLifecycleKey);
+    }
     return this.ingress.startConnection({
       provider,
       returnTo,
       ownerId: userId,
       sourceProviderSlug: options.sourceProviderSlug ?? null,
-      sourceLifecyclePrepared: sourceLifecycleKey
-        ? this.preparedSourceLifecycles.delete(sourceLifecycleKey)
-        : false,
+      sourceLifecycleProof,
       connectSourceId: options.connectSourceId ?? null,
       connectTarget: options.connectTarget ?? null,
     });
@@ -237,8 +246,9 @@ export class HostedDeviceSyncPublicIngressService {
         && connection.status !== "disconnected"
       );
 
+    let sourceLifecycleProof: StartConnectionSourceLifecycleProof | null = null;
     for (const connection of connections) {
-      await prepareHostedDeviceSyncConnectionSourceStart({
+      sourceLifecycleProof = await prepareHostedDeviceSyncConnectionSourceStart({
         connectionId: connection.id,
         registry: this.registry,
         sourceProviderSlug: target.sourceProviderSlug,
@@ -251,8 +261,8 @@ export class HostedDeviceSyncPublicIngressService {
       target.provider,
       target.sourceProviderSlug,
     );
-    if (sourceLifecycleKey) {
-      this.preparedSourceLifecycles.add(sourceLifecycleKey);
+    if (sourceLifecycleKey && sourceLifecycleProof) {
+      this.preparedSourceLifecycles.set(sourceLifecycleKey, sourceLifecycleProof);
     }
   }
 
@@ -270,13 +280,52 @@ export class HostedDeviceSyncPublicIngressService {
     connectionIntent: CompanionConnectionIntent | null,
   ): Promise<SdkSignInSessionResult> {
     if (connectionIntent === "connect") {
+      const providerConnections = (await this.context.store.listConnectionsForUser(userId))
+        .filter((connection) =>
+          connection.provider === provider
+          && isEstablishedDeviceSyncConnection(connection)
+        );
+      if (providerConnections.length > 1) {
+        throw deviceSyncError({
+          code: "SDK_SIGN_IN_CONNECTION_AMBIGUOUS",
+          message: "The companion could not identify one active device-sync connection.",
+          retryable: false,
+          httpStatus: 409,
+        });
+      }
+      const establishedConnection = providerConnections[0] ?? null;
+      const capturedReconnectProof = establishedConnection
+        ? await captureHostedDeviceSyncConnectionSourceReconnect({
+            connectionId: establishedConnection.id,
+            sourceProviderSlug: COMPANION_APPLE_HEALTH_SOURCE_PROVIDER,
+            store: this.context.store,
+            userId,
+          })
+        : null;
       const session = await this.ingress.createSdkSignInSession({
         provider,
         ownerId: userId,
       });
+      if (
+        capturedReconnectProof
+        && session.account.id !== capturedReconnectProof.connection.id
+      ) {
+        throw deviceSyncError({
+          code: "SDK_SIGN_IN_CONNECTION_CHANGED",
+          message: "The companion connection changed while sign-in was starting. Retry.",
+          retryable: true,
+          httpStatus: 409,
+        });
+      }
+      const reconnectProof = capturedReconnectProof
+        ?? await captureHostedDeviceSyncConnectionSourceReconnect({
+          connectionId: session.account.id,
+          sourceProviderSlug: COMPANION_APPLE_HEALTH_SOURCE_PROVIDER,
+          store: this.context.store,
+          userId,
+        });
       await beginHostedDeviceSyncConnectionSourceReconnect({
-        connectionId: session.account.id,
-        sourceProviderSlug: COMPANION_APPLE_HEALTH_SOURCE_PROVIDER,
+        proof: reconnectProof,
         store: this.context.store,
         userId,
       });

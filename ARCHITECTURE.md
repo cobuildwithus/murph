@@ -1422,7 +1422,11 @@ credentials, or sibling rows. The existing connection-source row carries a
 two-phase disconnect fence so callbacks and hosted-runtime projections captured
 before removal cannot restore the source. A failed provider revoke restores the
 captured source lifecycle and remains retryable; a fresh explicit connect clears
-the completed fence before opening the new provider link. Historical-export
+the completed fence before opening the new provider link. That pending-source
+epoch is carried as an exact proof through provider Link creation and checked
+again before OAuth state is persisted or the URL is returned; a newer
+disconnect therefore makes an already-created Link unreachable instead of
+publishing stale authorization. Historical-export
 reset remains the deliberate connection-wide exception and keeps its broader
 confirmation copy. If an already-open Junction Link completes after removal,
 the rejected callback reclaims that same source fence and deregisters only the
@@ -1433,9 +1437,14 @@ treating the local fence as proof of remote revocation.
 Native companion work uses the same source row. Source-attributed Apple Health
 metadata and WHOOP overnight summaries are admitted only when the exact source
 is absent for first use or connected without a disconnect fence, and the hosted
-runtime repeats that check before canonical import. An explicit Apple Health
-SDK connect opens a pending source epoch after token mint; only a newer
-provider-authored event can mark it connected. Passive SDK resume, omitted
+runtime rereads that durable source immediately before canonical import; a
+queued job never treats its cached account snapshot as current authorization.
+An explicit Apple Health SDK connect captures the exact source epoch before
+token mint and opens a pending epoch only if that proof is still current after
+mint; an older Connect therefore cannot clear a newer Disconnect. Only a newer
+provider-authored event timestamp can mark the pending source connected.
+Receipt time is never synthesized as reconnect proof, and source admission runs
+only after the webhook attempt owns its dedupe trace. Passive SDK resume, omitted
 intent, stale events, background uploads, and queued runtime work cannot clear
 or bypass a completed source disconnect. Companion WHOOP summaries retain the
 `whoop` health-data provenance while authorization is derived from the

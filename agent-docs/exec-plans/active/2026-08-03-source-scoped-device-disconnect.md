@@ -69,6 +69,7 @@ Updated: 2026-08-03
 5. Run focused tests, Web typecheck, UI double-check, design screenshots, and inspect the candidate diff for privacy and scope.
 6. Commit and push the exact candidate, open the PR, run preliminary specialists and final ReviewGPT concurrently with CI, resolve findings, and repeat exact-head gates as required.
 7. Resolve the preliminary/final review findings covering native companion authority and stale-Link provider reauthorization, then run a correction ReviewGPT round on the exact pushed head.
+8. Resolve correction-round findings by carrying exact source proofs through native token and Link issuance, rereading live authorization at companion import, and admitting only provider-timestamped webhook observations after trace claim; run the required third exact-head review round.
 
 ## Decisions
 
@@ -80,6 +81,7 @@ Updated: 2026-08-03
 - The companion SDK's explicit `connect` intent is the closed Apple Health source-start operation; resume, omitted intent, BLE enrollment, and data ingress do not clear source lifecycle state.
 - Review remediation crossed the anomaly-retrospective threshold: the first-reviewed patch had 509 added / 64 deleted source lines, while the corrected patch has 1,215 added / 141 deleted source lines; remediation itself accounts for 729 added / 100 deleted source lines before its final commit.
 - Continue in this PR because both added paths close demonstrated privacy/revocation failures in the same operation and owner boundary. The growth is source-claim, stale-callback cleanup, native admission, and their direct hooks—not a second owner. Retain the existing connection-source row and target-only provider revoke as the whole architecture; reject a queue, reconciler, schema change, secondary lifecycle service, or compatibility state.
+- Correction round 2 repeated the same causal-authority mechanism and therefore triggers the round-3 anomaly retrospective. Continue with the existing source row, mutation lock, and live store read: replace the request-local Boolean with an exact epoch proof, share one fence predicate across Web and `device-syncd`, and delete any reliance on cached account snapshots or synthesized receipt time. Do not add durable handoff state, a queue, or another lifecycle owner.
 
 ## Verification
 

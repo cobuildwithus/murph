@@ -384,8 +384,24 @@ export interface DeviceSyncPublicIngressStore {
     | Promise<Pick<PublicDeviceConnectionSource, "connectionId" | "sourceProviderSlug" | "status">>;
   listConnectionSources(
     input: ListDeviceConnectionSourcesInput,
-  ): Array<Pick<PublicDeviceConnectionSource, "connectionId" | "sourceProviderSlug" | "status">>
-    | Promise<Array<Pick<PublicDeviceConnectionSource, "connectionId" | "sourceProviderSlug" | "status">>>;
+  ): Array<Pick<
+    PublicDeviceConnectionSource,
+    | "connectionId"
+    | "lastErrorCode"
+    | "lastSeenAt"
+    | "sourceInstanceKey"
+    | "sourceProviderSlug"
+    | "status"
+  >>
+    | Promise<Array<Pick<
+      PublicDeviceConnectionSource,
+      | "connectionId"
+      | "lastErrorCode"
+      | "lastSeenAt"
+      | "sourceInstanceKey"
+      | "sourceProviderSlug"
+      | "status"
+    >>>;
   getConnectionOwnerId?(accountId: string): string | null | Promise<string | null>;
   claimWebhookTrace(input: ClaimDeviceSyncWebhookTraceInput): DeviceSyncWebhookTraceClaimResult | Promise<DeviceSyncWebhookTraceClaimResult>;
   completeWebhookTrace(provider: string, traceId: string, claimToken: string): boolean | Promise<boolean>;
@@ -473,6 +489,8 @@ export interface ProviderWebhookResult {
   eventType: string;
   traceId: string;
   occurredAt?: string;
+  /** Immutable provider-authored event instant; never synthesized from receipt time. */
+  sourceObservedAt?: string;
   // Keep top-level parser data narrow; provider-owned jobs may carry sanitized payload hints.
   resourceCategory?: string | null;
   /** Source this provider event is attributable to, including lifecycle events. */
@@ -506,6 +524,8 @@ export interface DeviceSyncIngressWebhook {
   eventType: string;
   jobs: readonly DeviceSyncJobInput[];
   occurredAt?: string;
+  /** See `ProviderWebhookResult.sourceObservedAt`. */
+  sourceObservedAt?: string;
   // Accepted and unknown ingress hooks receive stripped summary plus provider-owned job hints.
   resourceCategory?: string | null;
   /** See `ProviderWebhookResult.sourceProviderSlug`. */
@@ -894,10 +914,16 @@ export interface StartConnectionInput {
   returnTo?: string | null;
   ownerId?: string | null;
   sourceProviderSlug?: string | null;
-  /** Hosted owner already committed the pending exact-source epoch. */
-  sourceLifecyclePrepared?: boolean;
+  sourceLifecycleProof?: StartConnectionSourceLifecycleProof | null;
   connectSourceId?: string | null;
   connectTarget?: string | null;
+}
+
+export interface StartConnectionSourceLifecycleProof {
+  connectionId: string;
+  lastSeenAt: string;
+  sourceInstanceKey: string;
+  sourceProviderSlug: string;
 }
 
 export interface BeginConnectionResult {

@@ -420,6 +420,14 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
   }
 }
 
+function createVoidDeferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve = () => {};
+  const promise = new Promise<void>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
+}
+
 function readOAuthCredentialTokens(input: UpsertPublicDeviceSyncConnectionInput): ProviderAuthTokens | null {
   if (input.credential) {
     return input.credential.kind === "oauth_tokens" ? input.credential.tokens : null;
@@ -1004,7 +1012,10 @@ test("starting another Junction source preserves an established shared account",
   const observedSourceAttempts: Array<{
     observedAt: string | null;
     sourceProviderSlug: string;
+    traceClaimed: boolean;
   }> = [];
+  const delayedSourceStartEntered = createVoidDeferred();
+  const releaseDelayedSourceStart = createVoidDeferred();
   const provider = createFakeProvider({
     provider: "junction",
     credentialPolicy: {
@@ -1036,6 +1047,10 @@ test("starting another Junction source preserves an established shared account",
       },
     },
     async beginConnection(input) {
+      if (input.sourceProviderSlug === "polar") {
+        delayedSourceStartEntered.resolve();
+        await releaseDelayedSourceStart.promise;
+      }
       return {
         authorizationUrl: `https://junction.example/link?murph_state=${input.state}`,
         connectionSeed: {
@@ -1067,13 +1082,18 @@ test("starting another Junction source preserves an established shared account",
       };
     },
     async verifyAndParseWebhook(input) {
-      const sourceProviderSlug = input.rawBody.toString("utf8");
+      const [sourceProviderSlug, timestampMode] = input.rawBody.toString("utf8").split(":");
+      assert.ok(sourceProviderSlug);
+      const sourceObservedAt = timestampMode === "no_timestamp"
+        ? null
+        : "2026-03-26T12:01:00.000Z";
       return {
         acceptanceMode: "durable_webhook_work",
         externalAccountId: "shared-junction-account",
         eventType: `${sourceProviderSlug}.data`,
-        occurredAt: "2026-03-26T12:01:00.000Z",
-        traceId: `trace-${sourceProviderSlug}`,
+        occurredAt: sourceObservedAt ?? input.now,
+        ...(sourceObservedAt ? { sourceObservedAt } : {}),
+        traceId: `trace-${sourceProviderSlug}-${timestampMode ?? "timestamped"}`,
         sourceProviderSlug,
         dataSourceProviderSlug: sourceProviderSlug,
         jobs: [{
@@ -1121,7 +1141,11 @@ test("starting another Junction source preserves an established shared account",
         rejectedSourceAttempts.push({ connectionStartedAt, sourceProviderSlug });
       },
       onConnectionSourceObserved({ account, observedAt, sourceProviderSlug }) {
-        observedSourceAttempts.push({ observedAt, sourceProviderSlug });
+        observedSourceAttempts.push({
+          observedAt,
+          sourceProviderSlug,
+          traceClaimed: store.claimWebhookTraceCalls > 0,
+        });
         if (sourceProviderSlug !== "apple_health_kit" || !observedAt) {
           return;
         }
@@ -1162,6 +1186,49 @@ test("starting another Junction source preserves an established shared account",
   });
   const establishedConnectedAt = established.account.connectedAt;
 
+  const polarSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+    connectionId: established.account.id,
+    sourceProviderSlug: "polar",
+  });
+  assert.ok(polarSourceInstanceKey);
+  const polarPreparedAt = "2026-03-26T12:00:20.000Z";
+  store.upsertConnectionSource({
+    connectionId: established.account.id,
+    sourceInstanceKey: polarSourceInstanceKey,
+    sourceProviderSlug: "polar",
+    status: "disconnected",
+    firstSeenAt: polarPreparedAt,
+    lastSeenAt: polarPreparedAt,
+  });
+  const polarStart = ingress.startConnection({
+    ownerId: "<REDACTED_OWNER_ID>",
+    provider: "junction",
+    sourceProviderSlug: "polar",
+    sourceLifecycleProof: {
+      connectionId: established.account.id,
+      lastSeenAt: polarPreparedAt,
+      sourceInstanceKey: polarSourceInstanceKey,
+      sourceProviderSlug: "polar",
+    },
+  });
+  await delayedSourceStartEntered.promise;
+  store.upsertConnectionSource({
+    connectionId: established.account.id,
+    sourceInstanceKey: polarSourceInstanceKey,
+    sourceProviderSlug: "polar",
+    status: "disconnected",
+    firstSeenAt: polarPreparedAt,
+    lastSeenAt: "2026-03-26T12:00:21.000Z",
+    lastErrorCode: "SOURCE_DISCONNECT_IN_PROGRESS",
+  });
+  releaseDelayedSourceStart.resolve();
+  await assert.rejects(
+    polarStart,
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "CONNECTION_SOURCE_START_STALE",
+  );
+
   const fitbitSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
     connectionId: established.account.id,
     sourceProviderSlug: "fitbit",
@@ -1179,12 +1246,23 @@ test("starting another Junction source preserves an established shared account",
     lastErrorMessage: "Source cleanup is in progress.",
   });
 
-  const fitbit = await ingress.startConnection({
-    ownerId: "<REDACTED_OWNER_ID>",
-    provider: "junction",
+  const fitbitSourceLifecycleProof = {
+    connectionId: established.account.id,
+    lastSeenAt: concurrentCleanupAt,
+    sourceInstanceKey: fitbitSourceInstanceKey,
     sourceProviderSlug: "fitbit",
-    sourceLifecyclePrepared: true,
-  });
+  };
+  await assert.rejects(
+    ingress.startConnection({
+      ownerId: "<REDACTED_OWNER_ID>",
+      provider: "junction",
+      sourceProviderSlug: "fitbit",
+      sourceLifecycleProof: fitbitSourceLifecycleProof,
+    }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "CONNECTION_SOURCE_START_STALE",
+  );
 
   const afterFitbitStart = store.getConnectionByExternalAccount(
     "junction",
@@ -1215,6 +1293,13 @@ test("starting another Junction source preserves an established shared account",
     status: "disconnected",
     firstSeenAt: concurrentCleanupAt,
     lastSeenAt: concurrentCleanupAt,
+  });
+
+  const fitbit = await ingress.startConnection({
+    ownerId: "<REDACTED_OWNER_ID>",
+    provider: "junction",
+    sourceProviderSlug: "fitbit",
+    sourceLifecycleProof: fitbitSourceLifecycleProof,
   });
 
   await assert.doesNotReject(
@@ -1273,10 +1358,12 @@ test("starting another Junction source preserves an established shared account",
     {
       observedAt: "2026-03-26T12:01:00.000Z",
       sourceProviderSlug: "fitbit",
+      traceClaimed: true,
     },
     {
       observedAt: "2026-03-26T12:01:00.000Z",
       sourceProviderSlug: "apple_health_kit",
+      traceClaimed: true,
     },
   ]);
   assert.equal(
@@ -1287,6 +1374,46 @@ test("starting another Junction source preserves an established shared account",
     "connected",
   );
   assert.equal(acceptedWebhookCount, 3);
+
+  store.upsertConnectionSource({
+    connectionId: established.account.id,
+    sourceInstanceKey: appleHealthSourceInstanceKey,
+    sourceProviderSlug: "apple_health_kit",
+    status: "disconnected",
+    firstSeenAt: "2026-03-26T12:02:00.000Z",
+    lastSeenAt: "2026-03-26T12:02:00.000Z",
+  });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await assert.rejects(
+      ingress.handleWebhook(
+        "junction",
+        new Headers(),
+        Buffer.from("apple_health_kit:no_timestamp"),
+      ),
+      (error: unknown) =>
+        error instanceof DeviceSyncError
+        && error.code === "WEBHOOK_SOURCE_NOT_READY",
+    );
+  }
+  assert.deepEqual(observedSourceAttempts.slice(-2), [
+    {
+      observedAt: null,
+      sourceProviderSlug: "apple_health_kit",
+      traceClaimed: true,
+    },
+    {
+      observedAt: null,
+      sourceProviderSlug: "apple_health_kit",
+      traceClaimed: true,
+    },
+  ]);
+  assert.equal(
+    store.listConnectionSources({
+      connectionId: established.account.id,
+      sourceProviderSlug: "apple_health_kit",
+    })[0]?.status,
+    "disconnected",
+  );
 
   const withings = await ingress.startConnection({
     ownerId: "<REDACTED_OWNER_ID>",

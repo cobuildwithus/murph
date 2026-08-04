@@ -284,6 +284,10 @@ function createJunctionJobContext(overrides: Partial<ProviderJobContext> = {}): 
       createdAt: input.lastSeenAt,
       updatedAt: input.lastSeenAt,
     }),
+    listConnectionSources: async (input = {}) => (account.sources ?? []).filter((source) =>
+      (!input.sourceProviderSlug || source.sourceProviderSlug === input.sourceProviderSlug)
+      && (!input.status || source.status === input.status)
+    ),
     refreshAccountTokens: async () => account,
     logger: {},
     ...overrides,
@@ -4456,6 +4460,7 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
     });
 
     assert.equal(parsed.dataSourceProviderSlug, sourceProviderSlug);
+    assert.equal(parsed.sourceObservedAt, "2026-04-03T00:00:00.000Z");
   }
 
   // A historical-pull completion is a data-less notification. Accepting its
@@ -4490,6 +4495,8 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
   });
 
   assert.equal(lifecycle.dataSourceProviderSlug, null);
+  assert.equal(lifecycle.sourceObservedAt, undefined);
+  assert.equal(lifecycle.occurredAt, "2026-04-03T00:00:00.000Z");
 });
 
 test("Junction connection-day direct pushes do not prove older historical coverage", async () => {
@@ -10640,7 +10647,7 @@ test("Junction companion jobs do not import through a disconnected exact source"
       },
     },
     {
-      authoritySourceProviderSlug: JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER,
+      authoritySourceProviderSlug: "apple_health_kit",
       payload: {
         eventType: JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
         occurredAt: "2026-04-03T13:00:00.000Z",
@@ -10677,9 +10684,16 @@ test("Junction companion jobs do not import through a disconnected exact source"
             lastSeenAt: "2026-04-03T00:00:00.000Z",
             resourceCount: 0,
             sourceProviderSlug: testCase.authoritySourceProviderSlug,
-            status: "disconnected",
+            status: "connected",
           }],
         }),
+        listConnectionSources: async () => [{
+          displayName: null,
+          lastErrorCode: "SOURCE_USER_DISCONNECTED",
+          lastErrorMessage: null,
+          sourceProviderSlug: testCase.authoritySourceProviderSlug,
+          status: "disconnected",
+        }],
         importSnapshot: async (snapshot) => {
           importedSnapshots.push(snapshot);
           return { imported: true };
@@ -10692,6 +10706,108 @@ test("Junction companion jobs do not import through a disconnected exact source"
     assert.deepEqual(importedSnapshots, []);
   }
   assert.equal(fetchCalls, 0);
+});
+
+test("Junction companion import rechecks current source authority at the import boundary", async () => {
+  const provider = createJunctionProvider(async () => {
+    throw new Error("Companion HRV import must not call Junction.");
+  });
+  const observation = {
+    schema: COMPANION_HRV_RMSSD_SCHEMA,
+    methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
+    nightDate: "2026-04-02",
+    rmssdMs: 48.25,
+    completedWindowCount: 96,
+    acceptedWindowCount: 56,
+  } satisfies Parameters<typeof serializeCompanionHrvRmssdObservation>[0];
+  const observationJson = serializeCompanionHrvRmssdObservation(observation);
+  const job = createJob("resource", {
+    companionAdmissionId: createHash("sha256").update(observationJson).digest("hex"),
+    companionObservationJson: observationJson,
+    resource: COMPANION_HRV_RMSSD_RESOURCE,
+    resourceCategory: "derived",
+    sourceProviderSlug: "whoop",
+  });
+  const cachedAccount = createAccount({
+    sources: [{
+      displayName: null,
+      firstSeenAt: "2026-04-03T00:00:00.000Z",
+      lastDataAt: null,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lastSeenAt: "2026-04-03T00:00:00.000Z",
+      resourceCount: 0,
+      sourceProviderSlug: "whoop_v2",
+      status: "connected",
+    }],
+  });
+  let importedCount = 0;
+  const connectedSource = {
+    displayName: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    sourceProviderSlug: "whoop_v2",
+    status: "connected" as const,
+  };
+
+  await assert.rejects(
+    executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        account: cachedAccount,
+        importSnapshot: async () => {
+          importedCount += 1;
+          return { imported: true };
+        },
+        listConnectionSources: async () => [{
+          ...connectedSource,
+          lastErrorCode: "SOURCE_DISCONNECT_IN_PROGRESS",
+        }],
+      }),
+      job,
+    ),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "JUNCTION_COMPANION_SOURCE_NOT_READY"
+      && error.retryable,
+  );
+  assert.equal(importedCount, 0);
+
+  await assert.rejects(
+    executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        account: cachedAccount,
+        importSnapshot: async () => {
+          importedCount += 1;
+          return { imported: true };
+        },
+        listConnectionSources: async () => {
+          throw new Error("hosted authority unavailable");
+        },
+      }),
+      job,
+    ),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "JUNCTION_COMPANION_SOURCE_STATE_UNAVAILABLE"
+      && error.retryable,
+  );
+  assert.equal(importedCount, 0);
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: cachedAccount,
+      importSnapshot: async () => {
+        importedCount += 1;
+        return { imported: true };
+      },
+      listConnectionSources: async () => [connectedSource],
+    }),
+    job,
+  );
+  assert.equal(importedCount, 1);
 });
 
 test("Junction companion HRV jobs reject malformed derived observations without network access", async () => {

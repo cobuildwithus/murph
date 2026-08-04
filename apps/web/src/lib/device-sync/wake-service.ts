@@ -14,6 +14,7 @@ import type {
   DeviceSyncWebhookAcceptanceMode,
   ProviderConnectionResult,
   PublicDeviceSyncAccount,
+  StartConnectionSourceLifecycleProof,
 } from "@murphai/device-syncd/types";
 import {
   shapeHostedDeviceSyncJobHintPayload,
@@ -222,18 +223,24 @@ export async function disconnectHostedDeviceSyncConnectionSource(input: {
  * Opens one exact native-SDK source epoch after a successful explicit token
  * mint. Passive resume and missing intent never call this owner.
  */
-export async function beginHostedDeviceSyncConnectionSourceReconnect(input: {
+export interface HostedDeviceSyncConnectionSourceReconnectProof {
+  connection: PublicDeviceSyncAccount;
+  source: HostedDeviceConnectionSource | null;
+  sourceProviderSlug: string;
+}
+
+export async function captureHostedDeviceSyncConnectionSourceReconnect(input: {
   connectionId: string;
   sourceProviderSlug: string;
   store: PrismaDeviceSyncControlPlaneStore;
   userId: string;
-}): Promise<void> {
+}): Promise<HostedDeviceSyncConnectionSourceReconnectProof> {
   const sourceProviderSlug = normalizeJunctionProviderSlug(input.sourceProviderSlug);
   if (!sourceProviderSlug) {
     throw connectionSourceNotFoundError();
   }
 
-  await input.store.withConnectionMutationLock(input.connectionId, async (tx) => {
+  return input.store.withConnectionMutationLock(input.connectionId, async (tx) => {
     const connection = await input.store.getConnectionForUser(input.userId, input.connectionId, tx);
     if (!connection || connection.provider !== "junction" || connection.status === "disconnected") {
       throw connectionSourceNotFoundError();
@@ -248,6 +255,41 @@ export async function beginHostedDeviceSyncConnectionSourceReconnect(input: {
     if (source?.lastErrorCode === HOSTED_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE) {
       connectionChangedDuringDisconnectError();
     }
+
+    return { connection, source, sourceProviderSlug };
+  });
+}
+
+export async function beginHostedDeviceSyncConnectionSourceReconnect(input: {
+  proof: HostedDeviceSyncConnectionSourceReconnectProof;
+  store: PrismaDeviceSyncControlPlaneStore;
+  userId: string;
+}): Promise<void> {
+  const { connection: expectedConnection, source: expectedSource } = input.proof;
+  const sourceProviderSlug = normalizeJunctionProviderSlug(input.proof.sourceProviderSlug);
+  if (!sourceProviderSlug) {
+    throw connectionSourceNotFoundError();
+  }
+
+  await input.store.withConnectionMutationLock(expectedConnection.id, async (tx) => {
+    const connection = await input.store.getConnectionForUser(
+      input.userId,
+      expectedConnection.id,
+      tx,
+    );
+    const source = await findHostedConnectionSource({
+      connectionId: expectedConnection.id,
+      sourceProviderSlug,
+      store: input.store,
+      tx,
+    });
+    if (
+      !connection
+      || !publicAccountMatchesDisconnectTarget(expectedConnection, connection)
+      || !hostedConnectionSourceMatchesReconnectProof(expectedSource, source)
+    ) {
+      connectionChangedDuringDisconnectError();
+    }
     if (
       source?.status === "connected"
       && !isHostedSourceDisconnectFenced(source)
@@ -256,7 +298,7 @@ export async function beginHostedDeviceSyncConnectionSourceReconnect(input: {
     }
 
     const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
-      connectionId: input.connectionId,
+      connectionId: expectedConnection.id,
       sourceProviderSlug,
     });
     if (!sourceInstanceKey) {
@@ -264,7 +306,7 @@ export async function beginHostedDeviceSyncConnectionSourceReconnect(input: {
     }
     const sourceStartedAt = nextHostedSourceLifecycleAt(source?.lastSeenAt ?? null);
     await input.store.upsertConnectionSource({
-      connectionId: input.connectionId,
+      connectionId: expectedConnection.id,
       sourceInstanceKey,
       sourceProviderSlug,
       status: "disconnected",
@@ -275,6 +317,21 @@ export async function beginHostedDeviceSyncConnectionSourceReconnect(input: {
       tx,
     });
   });
+}
+
+function hostedConnectionSourceMatchesReconnectProof(
+  expected: HostedDeviceConnectionSource | null,
+  current: HostedDeviceConnectionSource | null,
+): boolean {
+  if (!expected || !current) {
+    return expected === current;
+  }
+  return expected.id === current.id
+    && expected.lastErrorCode === current.lastErrorCode
+    && expected.lastErrorMessage === current.lastErrorMessage
+    && expected.lastSeenAt === current.lastSeenAt
+    && expected.sourceInstanceKey === current.sourceInstanceKey
+    && expected.status === current.status;
 }
 
 export async function admitHostedDeviceSyncConnectionSourceObservation(input: {
@@ -344,7 +401,7 @@ export async function prepareHostedDeviceSyncConnectionSourceStart(input: {
   sourceProviderSlug: string;
   store: PrismaDeviceSyncControlPlaneStore;
   userId: string;
-}): Promise<void> {
+}): Promise<StartConnectionSourceLifecycleProof> {
   const sourceProviderSlug = normalizeJunctionProviderSlug(input.sourceProviderSlug);
   if (!sourceProviderSlug) {
     throw sourceStartCleanupUnavailableError();
@@ -429,7 +486,7 @@ export async function prepareHostedDeviceSyncConnectionSourceStart(input: {
     throw sourceStartCleanupUnavailableError();
   }
 
-  await input.store.withConnectionMutationLock(input.connectionId, async (tx) => {
+  return input.store.withConnectionMutationLock(input.connectionId, async (tx) => {
     let source: HostedDeviceConnectionSource | null = null;
     if (target.source && target.claimAt) {
       source = await requireUnchangedSourceDisconnectTarget({
@@ -476,7 +533,7 @@ export async function prepareHostedDeviceSyncConnectionSourceStart(input: {
     }
     const sourceStartedAt = target.claimAt
       ?? nextHostedSourceLifecycleAt(source?.lastSeenAt ?? null);
-    await input.store.upsertConnectionSource({
+    const preparedSource = await input.store.upsertConnectionSource({
       connectionId: input.connectionId,
       sourceInstanceKey,
       sourceProviderSlug,
@@ -487,6 +544,12 @@ export async function prepareHostedDeviceSyncConnectionSourceStart(input: {
       lastSeenAt: sourceStartedAt,
       tx,
     });
+    return {
+      connectionId: input.connectionId,
+      lastSeenAt: preparedSource.lastSeenAt,
+      sourceInstanceKey: preparedSource.sourceInstanceKey,
+      sourceProviderSlug,
+    };
   });
 }
 
@@ -519,6 +582,7 @@ export async function cleanupRejectedHostedDeviceSyncConnectionSource(input: {
     const connectionStartedAtMs = Date.parse(input.connectionStartedAt);
     const sourceEpochMs = source ? Date.parse(source.lastSeenAt) : Number.NaN;
     const canObsoleteCallbackOwnCleanup = source !== null
+      && source.lastErrorCode !== HOSTED_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE
       && Number.isFinite(connectionStartedAtMs)
       && Number.isFinite(sourceEpochMs)
       && sourceEpochMs > connectionStartedAtMs
@@ -605,7 +669,8 @@ export async function cleanupRejectedHostedDeviceSyncConnectionSource(input: {
       tx,
       userId: target.userId,
     });
-    const preserveUserDisconnect = isHostedSourceDisconnectFenced(target.source);
+    const preserveUserDisconnect =
+      target.source.lastErrorCode === HOSTED_SOURCE_USER_DISCONNECTED_ERROR_CODE;
     await writeHostedConnectionSourceLifecycle({
       errorCode: preserveUserDisconnect
         ? HOSTED_SOURCE_USER_DISCONNECTED_ERROR_CODE
