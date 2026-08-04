@@ -51,6 +51,62 @@ jobs:
             run = run.sub(needle, needle.sub("replace_once", "replace_all"))
             File.write("/tmp/apply-zepp-patch.sh", "set -euo pipefail\n#{run}")
           '
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("/tmp/apply-zepp-patch.sh")
+          content = path.read_text(encoding="utf-8")
+          replacements = [
+              (
+                  "- Apple Watch/iPhone/Apple Health, WHOOP, and Zepp/Amazfit relay handoffs: apply the app-link rule above, then after opening Murph, sign in and connect Apple Health.",
+                  "- Apple Watch/iPhone, WHOOP, and Zepp/Amazfit: apply the app-link rule; in Murph, sign in and connect Apple Health.",
+              ),
+              (
+                  "- WHOOP limits third-party access. Direct sync omits steps; Apple Health may relay them. Do not infer/request missing steps.",
+                  "- WHOOP limits third-party access; direct sync lacks steps. Apple Health may relay them. Never infer/request missing steps.",
+              ),
+              (
+                  "- WHOOP: More > App Settings > Integrations > Apple Health > Connect > Turn On All (or chosen categories) > Allow; then connect Apple Health in Murph.",
+                  "- WHOOP: More > App Settings > Integrations > Apple Health > Connect > Turn On All (or chosen categories) > Allow.",
+              ),
+              (
+                  "- Zepp/Amazfit is an Apple Health relay, not a direct Murph connection. Tell the user to enable Apple Health sharing in the Zepp app for the categories they want, then connect Apple Health in Murph. Do not promise direct Zepp cloud access or historical backfill.",
+                  "- Zepp/Amazfit is an Apple Health relay, not a direct Murph connection. Enable sharing in Zepp, then connect it in Murph. Do not promise direct Zepp cloud access or historical backfill.",
+              ),
+              (
+                  "When the user asks to set up Zepp/Amazfit and ",
+                  "With ",
+              ),
+              (
+                  " is available, send one short privacy-safe voice memo that explains those two steps. Keep accompanying text minimal and follow the app-link rule, including the App Store URL alone on the final line.",
+                  ", send one brief privacy-safe Zepp setup memo. Keep text minimal; put the App Store URL alone on the final line.",
+              ),
+              (
+                  "Apple Watch/iPhone/Apple Health, WHOOP, and Zepp/Amazfit relay handoffs",
+                  "Apple Watch/iPhone, WHOOP, and Zepp/Amazfit",
+              ),
+              (
+                  "enable Apple Health sharing in the Zepp app",
+                  "Enable sharing in Zepp",
+              ),
+              (
+                  "one short privacy-safe voice memo",
+                  "one brief privacy-safe Zepp setup memo",
+              ),
+          ]
+
+          for old, new in replacements:
+              count = content.count(old)
+              if count != 1:
+                  raise RuntimeError(
+                      f"Expected exactly one prompt-compaction match, found {count}: {old!r}"
+                  )
+              content = content.replace(old, new, 1)
+
+          path.write_text(content, encoding="utf-8")
+          PY
+
           bash /tmp/apply-zepp-patch.sh
 
       - name: Install dependencies
