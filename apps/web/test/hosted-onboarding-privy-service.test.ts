@@ -1024,11 +1024,22 @@ describe("completeHostedPrivyVerification", () => {
           where.memberId === existingMember.id
           || where.phoneLookupKey === DEFAULT_PHONE_LOOKUP_KEY
           || where.privyUserLookupKey === createHostedPrivyUserLookupKey(oldPrivyUserId)
-            ? storedIdentity
+            ? {
+                ...storedIdentity,
+                privyUserId: oldPrivyUserId,
+              }
             : null
         )),
         upsert: identityUpsert,
       },
+    });
+    privyManagementMocks.getUser.mockResolvedValueOnce({
+      id: replacementPrivyUserId,
+      linked_accounts: [{
+        address: emailAddress,
+        type: "email",
+        verified_at: 1_743_064_200,
+      }],
     });
 
     await expect(completeHostedPrivyVerification({
@@ -1049,7 +1060,14 @@ describe("completeHostedPrivyVerification", () => {
     });
 
     expect(prisma.hostedMember.create).not.toHaveBeenCalled();
-    expect(lockQuery).toHaveBeenCalledTimes(2);
+    expect(privyManagementMocks.getUser).toHaveBeenCalledWith(
+      replacementPrivyUserId,
+      {
+        maxRetries: 0,
+        timeout: 5_000,
+      },
+    );
+    expect(lockQuery).toHaveBeenCalledTimes(3);
     expect(identityUpsert).toHaveBeenCalledWith(expect.objectContaining({
       update: expect.objectContaining({
         privyUserIdEncrypted: expect.any(String),

@@ -117,6 +117,7 @@ export async function completeHostedPrivyVerification(input: {
           const member = await prisma.$transaction(
             (tx) => runWithHostedDomainRootUnwrapCache(async () => {
               const reconciledMember = await reconcileHostedPrivyIdentityOnMemberTx({
+                allowVerifiedEmailRebinding: true,
                 authMethod: inviteAuthMethod,
                 expectedEmailLookupKey: pendingEmailContact?.lookupKey,
                 expectedPhoneHint: pendingEmailContact
@@ -158,6 +159,7 @@ export async function completeHostedPrivyVerification(input: {
           ...(await prisma.$transaction(
             (tx) => runWithHostedDomainRootUnwrapCache(async () => {
               const memberResolution = await ensureHostedMemberForPrivyIdentityResolutionTx({
+                allowVerifiedEmailRebinding: true,
                 authMethod,
                 identity: input.identity,
                 prisma: tx,

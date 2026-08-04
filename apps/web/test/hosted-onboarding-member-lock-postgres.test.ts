@@ -42,13 +42,25 @@ const privyProvider = vi.hoisted(() => ({
     privyProvider.exists = false;
     return true;
   }),
+  emailByUserId: new Map<string, string>(),
   exists: true,
   readUser: vi.fn(async (userId: string) => {
-    if (!privyProvider.exists) {
+    if (!privyProvider.exists || privyProvider.missingUserIds.has(userId)) {
       throw new Error("Privy user no longer exists.");
     }
-    return { id: userId };
+    const emailAddress = privyProvider.emailByUserId.get(userId);
+    return {
+      id: userId,
+      linked_accounts: emailAddress
+        ? [{
+            address: emailAddress,
+            type: "email",
+            verified_at: 1_775_203_200,
+          }]
+        : [],
+    };
   }),
+  missingUserIds: new Set<string>(),
 }));
 
 const accountDeletionBoundaries = vi.hoisted(() => ({
@@ -1283,6 +1295,8 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       const replacementPrivyUserId = `did:privy:replacement-${fixtureId}`;
 
       installPassthroughHostedSecureBoxTestCodec();
+      privyProvider.exists = true;
+      privyProvider.emailByUserId.set(replacementPrivyUserId, emailAddress);
       const member = await seedVerifiedEmailRebindingMember({
         emailAddress,
         memberId,
@@ -1298,6 +1312,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       try {
         await expect(writer.$transaction((tx) =>
           reconcileHostedPrivyIdentityOnMemberTx({
+            allowVerifiedEmailRebinding: true,
             authMethod: "email",
             identity: makeVerifiedEmailRebindingIdentity({
               emailAddress,
@@ -1322,6 +1337,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           where: { memberId },
         })).resolves.toEqual(emailAuthorizationBefore);
       } finally {
+        privyProvider.emailByUserId.delete(replacementPrivyUserId);
         await observer.hostedMember.deleteMany({ where: { id: memberId } });
         setHostedSecureBoxStringTestCodecForTests(null);
         await disconnectClients([observer, writer]);
@@ -1343,6 +1359,8 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       let emailMove: Promise<unknown> | null = null;
 
       installPassthroughHostedSecureBoxTestCodec();
+      privyProvider.exists = true;
+      privyProvider.emailByUserId.set(replacementPrivyUserId, emailAddress);
       const member = await seedVerifiedEmailRebindingMember({
         emailAddress,
         memberId,
@@ -1353,6 +1371,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       try {
         rebinding = rebindingClient.$transaction((tx) =>
           reconcileHostedPrivyIdentityOnMemberTx({
+            allowVerifiedEmailRebinding: true,
             authMethod: "email",
             identity: makeVerifiedEmailRebindingIdentity({
               emailAddress,
@@ -1409,6 +1428,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           verifiedEmailVerifiedAt: null,
         });
       } finally {
+        privyProvider.emailByUserId.delete(replacementPrivyUserId);
         allowRebindingIdentityWrite.resolve();
         await Promise.allSettled([
           ...(rebinding ? [rebinding] : []),
@@ -1431,6 +1451,8 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       const replacementPrivyUserId = `did:privy:owned-${fixtureId}`;
 
       installPassthroughHostedSecureBoxTestCodec();
+      privyProvider.exists = true;
+      privyProvider.emailByUserId.set(replacementPrivyUserId, emailAddress);
       const member = await seedVerifiedEmailRebindingMember({
         emailAddress,
         memberId,
@@ -1449,6 +1471,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       try {
         await expect(writer.$transaction((tx) =>
           reconcileHostedPrivyIdentityOnMemberTx({
+            allowVerifiedEmailRebinding: true,
             authMethod: "email",
             identity: makeVerifiedEmailRebindingIdentity({
               emailAddress,
@@ -1475,11 +1498,69 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           privyUserLookupKey: requirePrivyUserLookupKey(replacementPrivyUserId),
         });
       } finally {
+        privyProvider.emailByUserId.delete(replacementPrivyUserId);
         await observer.hostedMember.deleteMany({
           where: { id: { in: [memberId, conflictingMemberId] } },
         });
         setHostedSecureBoxStringTestCodecForTests(null);
         await disconnectClients([observer, writer]);
+      }
+    });
+
+    it("rejects a stale missing principal without displacing the current email owner", async () => {
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const authenticationClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixtureId = randomUUID();
+      const memberId = `hbm_email_rebind_stale_${fixtureId}`;
+      const emailAddress = `rebind-stale-${fixtureId}@example.test`;
+      const currentPrivyUserId = `did:privy:current-${fixtureId}`;
+      const stalePrivyUserId = `did:privy:stale-${fixtureId}`;
+
+      installPassthroughHostedSecureBoxTestCodec();
+      privyProvider.exists = true;
+      await seedVerifiedEmailRebindingMember({
+        emailAddress,
+        memberId,
+        oldPrivyUserId: currentPrivyUserId,
+        prisma: observer,
+      });
+      const memberCountBefore = await observer.hostedMember.count();
+      const webSessionCountBefore = await observer.hostedWebSession.count();
+      privyProvider.missingUserIds.add(stalePrivyUserId);
+
+      try {
+        await expect(authenticationClient.$transaction((tx) =>
+          ensureHostedMemberForPrivyIdentityResolutionTx({
+            allowVerifiedEmailRebinding: true,
+            authMethod: "email",
+            identity: makeVerifiedEmailRebindingIdentity({
+              emailAddress,
+              privyUserId: stalePrivyUserId,
+            }),
+            now: new Date("2026-08-03T12:00:00.000Z"),
+            prisma: tx,
+          }), { timeout: transactionTimeoutMs })).rejects.toThrow(
+          "Privy user no longer exists.",
+        );
+
+        await expect(observer.hostedMember.count()).resolves.toBe(memberCountBefore);
+        await expect(observer.hostedWebSession.count()).resolves.toBe(webSessionCountBefore);
+        await expect(observer.hostedMemberIdentity.findUniqueOrThrow({
+          where: { memberId },
+        })).resolves.toMatchObject({
+          privyUserIdEncrypted: currentPrivyUserId,
+          privyUserLookupKey: requirePrivyUserLookupKey(currentPrivyUserId),
+        });
+        await expect(observer.hostedMemberIdentity.count({
+          where: {
+            privyUserLookupKey: requirePrivyUserLookupKey(stalePrivyUserId),
+          },
+        })).resolves.toBe(0);
+      } finally {
+        privyProvider.missingUserIds.delete(stalePrivyUserId);
+        await observer.hostedMember.deleteMany({ where: { id: memberId } });
+        setHostedSecureBoxStringTestCodecForTests(null);
+        await disconnectClients([observer, authenticationClient]);
       }
     });
   },

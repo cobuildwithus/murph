@@ -14,6 +14,15 @@ import {
 } from "@/src/lib/hosted-onboarding/member-identity-service";
 import type { HostedPrivyIdentity } from "@/src/lib/hosted-onboarding/privy";
 
+const privyProvider = vi.hoisted(() => ({
+  readUser: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/privy", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/src/lib/hosted-onboarding/privy")>()),
+  readHostedPrivyUserById: privyProvider.readUser,
+}));
+
 vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
   provisionActiveHostedDomainRootEnvelopeForUserOnly: vi.fn().mockResolvedValue(undefined),
 }));
@@ -32,6 +41,7 @@ describe("hosted-onboarding member-identity-service", () => {
     process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = "v1";
     clearHostedOnboardingEnvCache();
     vi.clearAllMocks();
+    privyProvider.readUser.mockReset();
   });
 
   afterEach(() => {
@@ -467,8 +477,17 @@ describe("hosted-onboarding member-identity-service", () => {
         upsert: identityUpsert,
       },
     });
+    privyProvider.readUser.mockResolvedValueOnce({
+      id: "did:privy:replacement_user",
+      linked_accounts: [{
+        address: "member@example.com",
+        type: "email",
+        verified_at: 1743933600,
+      }],
+    });
 
     await expect(reconcileHostedPrivyIdentityOnMember({
+      allowVerifiedEmailRebinding: true,
       identity: makeIdentity({
         email: {
           address: "member@example.com",
@@ -510,8 +529,17 @@ describe("hosted-onboarding member-identity-service", () => {
         upsert: identityUpsert,
       },
     });
+    privyProvider.readUser.mockResolvedValueOnce({
+      id: "did:privy:replacement_user",
+      linked_accounts: [{
+        number: "+15551234567",
+        type: "phone",
+        verified_at: 1743933600,
+      }],
+    });
 
     await expect(reconcileHostedPrivyIdentityOnMember({
+      allowVerifiedEmailRebinding: true,
       identity: makeIdentity({
         userId: "did:privy:replacement_user",
       }),
@@ -544,8 +572,17 @@ describe("hosted-onboarding member-identity-service", () => {
         upsert: identityUpsert,
       },
     });
+    privyProvider.readUser.mockResolvedValueOnce({
+      id: "did:privy:replacement_user",
+      linked_accounts: [{
+        address: "other-member@example.com",
+        type: "email",
+        verified_at: 1743933600,
+      }],
+    });
 
     await expect(reconcileHostedPrivyIdentityOnMember({
+      allowVerifiedEmailRebinding: true,
       identity: makeIdentity({
         email: {
           address: "other-member@example.com",
@@ -559,6 +596,130 @@ describe("hosted-onboarding member-identity-service", () => {
     })).rejects.toMatchObject({
       code: "PRIVY_USER_MISMATCH",
       httpStatus: 409,
+    });
+
+    expect(identityUpsert).not.toHaveBeenCalled();
+  });
+
+  it("keeps changed-principal email rebinding disabled outside interactive authentication", async () => {
+    const identityUpsert = vi.fn();
+    const lockQuery = vi.fn().mockResolvedValue([]);
+    const prisma = asRootPrisma({
+      $queryRaw: lockQuery,
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(makeMember()),
+        update: vi.fn(),
+      },
+      hostedMemberIdentity: {
+        findUnique: vi.fn().mockResolvedValue(await makeStoredIdentity({
+          privyUserId: "did:privy:previous_user",
+        })),
+        upsert: identityUpsert,
+      },
+    });
+
+    await expect(reconcileHostedPrivyIdentityOnMember({
+      identity: makeIdentity({
+        email: {
+          address: "member@example.com",
+          verifiedAt: 1743933600,
+        },
+        userId: "did:privy:replacement_user",
+      }),
+      member: makeMember(),
+      now: NOW,
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "PRIVY_USER_MISMATCH",
+      httpStatus: 409,
+    });
+
+    expect(privyProvider.readUser).not.toHaveBeenCalled();
+    expect(lockQuery).toHaveBeenCalledTimes(1);
+    expect(identityUpsert).not.toHaveBeenCalled();
+  });
+
+  it("rejects a stale token when the live principal no longer owns the member email", async () => {
+    const identityUpsert = vi.fn();
+    const prisma = asRootPrisma({
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(makeMember()),
+        update: vi.fn(),
+      },
+      hostedMemberIdentity: {
+        findUnique: vi.fn().mockResolvedValue(await makeStoredIdentity({
+          privyUserId: "did:privy:current_user",
+        })),
+        upsert: identityUpsert,
+      },
+    });
+    privyProvider.readUser.mockResolvedValueOnce({
+      id: "did:privy:stale_user",
+      linked_accounts: [{
+        address: "different@example.com",
+        type: "email",
+        verified_at: 1743933600,
+      }],
+    });
+
+    await expect(reconcileHostedPrivyIdentityOnMember({
+      allowVerifiedEmailRebinding: true,
+      identity: makeIdentity({
+        email: {
+          address: "member@example.com",
+          verifiedAt: 1743933600,
+        },
+        userId: "did:privy:stale_user",
+      }),
+      member: makeMember(),
+      now: NOW,
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "PRIVY_USER_MISMATCH",
+      httpStatus: 409,
+    });
+
+    expect(identityUpsert).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the changed principal is missing from the live provider", async () => {
+    const identityUpsert = vi.fn();
+    const prisma = asRootPrisma({
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(makeMember()),
+        update: vi.fn(),
+      },
+      hostedMemberIdentity: {
+        findUnique: vi.fn().mockResolvedValue(await makeStoredIdentity({
+          privyUserId: "did:privy:current_user",
+        })),
+        upsert: identityUpsert,
+      },
+    });
+    privyProvider.readUser.mockRejectedValueOnce({
+      code: "PRIVY_USER_LOOKUP_FAILED",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    await expect(reconcileHostedPrivyIdentityOnMember({
+      allowVerifiedEmailRebinding: true,
+      identity: makeIdentity({
+        email: {
+          address: "member@example.com",
+          verifiedAt: 1743933600,
+        },
+        userId: "did:privy:missing_user",
+      }),
+      member: makeMember(),
+      now: NOW,
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "PRIVY_USER_LOOKUP_FAILED",
+      httpStatus: 503,
+      retryable: true,
     });
 
     expect(identityUpsert).not.toHaveBeenCalled();

@@ -16,6 +16,7 @@ import {
 } from "./errors";
 import {
   readHostedPrivyUserById,
+  resolveHostedPrivyIdentityFromVerifiedUser,
   type HostedPrivyIdentity,
 } from "./privy";
 import { resolveHostedPrivyAuthMethodFromIdentity } from "./privy-auth-method";
@@ -70,7 +71,7 @@ export {
 };
 export type { HostedMemberPrivyIdentityLookup };
 
-const HOSTED_PRIVY_NEW_MEMBER_AUTHORITY_TIMEOUT_MS = 5_000;
+const HOSTED_PRIVY_AUTHORITY_TIMEOUT_MS = 5_000;
 
 export async function ensureHostedMemberForPhone(input: {
   phoneNumber: string;
@@ -314,6 +315,7 @@ async function refreshHostedMemberForPhoneTx(input: {
 }
 
 export async function ensureHostedMemberForPrivyIdentity(input: {
+  allowVerifiedEmailRebinding?: boolean;
   authMethod?: HostedPrivyAuthMethod;
   identity: HostedPrivyIdentity;
   now: Date;
@@ -322,6 +324,7 @@ export async function ensureHostedMemberForPrivyIdentity(input: {
   const prisma = input.prisma ?? getPrisma();
 
   return prisma.$transaction((tx) => ensureHostedMemberForPrivyIdentityTx({
+    allowVerifiedEmailRebinding: input.allowVerifiedEmailRebinding,
     authMethod: input.authMethod,
     identity: input.identity,
     now: input.now,
@@ -330,6 +333,7 @@ export async function ensureHostedMemberForPrivyIdentity(input: {
 }
 
 export async function reconcileHostedPrivyIdentityOnMember(input: {
+  allowVerifiedEmailRebinding?: boolean;
   authMethod?: HostedPrivyAuthMethod;
   expectedEmailLookupKey?: string;
   expectedPhoneHint?: string;
@@ -342,6 +346,7 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
   const prisma = input.prisma ?? getPrisma();
 
   return prisma.$transaction((tx) => reconcileHostedPrivyIdentityOnMemberTx({
+    allowVerifiedEmailRebinding: input.allowVerifiedEmailRebinding,
     authMethod: input.authMethod,
     expectedPhoneHint: input.expectedPhoneHint,
     expectedPhoneLookupKey: input.expectedPhoneLookupKey,
@@ -354,6 +359,7 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
 }
 
 export async function ensureHostedMemberForPrivyIdentityTx(input: {
+  allowVerifiedEmailRebinding?: boolean;
   authMethod?: HostedPrivyAuthMethod;
   identity: HostedPrivyIdentity;
   now: Date;
@@ -364,6 +370,7 @@ export async function ensureHostedMemberForPrivyIdentityTx(input: {
 }
 
 export async function ensureHostedMemberForPrivyIdentityResolutionTx(input: {
+  allowVerifiedEmailRebinding?: boolean;
   authMethod?: HostedPrivyAuthMethod;
   identity: HostedPrivyIdentity;
   now: Date;
@@ -398,7 +405,7 @@ export async function ensureHostedMemberForPrivyIdentityResolutionTx(input: {
     });
     await readHostedPrivyUserById(input.identity.userId, {
       maxRetries: 0,
-      timeout: HOSTED_PRIVY_NEW_MEMBER_AUTHORITY_TIMEOUT_MS,
+      timeout: HOSTED_PRIVY_AUTHORITY_TIMEOUT_MS,
     });
     const memberId = generateHostedMemberId();
 
@@ -435,6 +442,7 @@ export async function ensureHostedMemberForPrivyIdentityResolutionTx(input: {
   return {
     created: false,
     member: await reconcileHostedPrivyIdentityOnMemberTx({
+      allowVerifiedEmailRebinding: input.allowVerifiedEmailRebinding,
       authMethod,
       identity: input.identity,
       member: existingMemberLookup.core,
@@ -445,6 +453,7 @@ export async function ensureHostedMemberForPrivyIdentityResolutionTx(input: {
 }
 
 export async function reconcileHostedPrivyIdentityOnMemberTx(input: {
+  allowVerifiedEmailRebinding?: boolean;
   authMethod?: HostedPrivyAuthMethod;
   expectedEmailLookupKey?: string;
   expectedPhoneHint?: string;
@@ -510,9 +519,17 @@ export async function reconcileHostedPrivyIdentityOnMemberTx(input: {
     currentIdentity?.privyUserId
     && currentIdentity.privyUserId !== input.identity.userId,
   );
-  const verifiedEmailAuthorizesRebinding = privyUserChanged
+  const liveIdentity = privyUserChanged && input.allowVerifiedEmailRebinding
+    ? resolveHostedPrivyIdentityFromVerifiedUser(
+        await readHostedPrivyUserById(input.identity.userId, {
+          maxRetries: 0,
+          timeout: HOSTED_PRIVY_AUTHORITY_TIMEOUT_MS,
+        }),
+      )
+    : null;
+  const verifiedEmailAuthorizesRebinding = liveIdentity
     ? await hasHostedVerifiedEmailRebindingAuthorityTx({
-        identity: input.identity,
+        identity: liveIdentity,
         memberId: currentMember.id,
         prisma: input.prisma,
       })
