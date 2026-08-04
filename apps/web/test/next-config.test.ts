@@ -352,8 +352,10 @@ test("next.config leaves agent guidance under repository ownership", () => {
   assert.equal(productionNextConfig.agentRules, false);
 });
 
-test("production build skips Turbopack source maps to reduce builder memory", () => {
+test("production build uses the isolated memory-optimized Webpack path", () => {
   assert.equal(productionNextConfig.experimental?.turbopackSourceMaps, false);
+  assert.equal(productionNextConfig.experimental?.webpackBuildWorker, true);
+  assert.equal(productionNextConfig.experimental?.webpackMemoryOptimizations, true);
 });
 
 test("hosted runtime issue imports avoid the runtime-state Node barrel", () => {
@@ -368,7 +370,7 @@ test("hosted runtime issue imports avoid the runtime-state Node barrel", () => {
 
 test("device connect routes use the narrow connect-config entrypoint", () => {
   for (const relativePath of [
-    "apps/web/app/(dashboard)/connect/page.tsx",
+    "apps/web/app/(dashboard)/connect/connect-page-content.tsx",
     "apps/web/app/api/connect-sources/[sourceId]/start/route.ts",
     "apps/web/app/api/internal/device-sync/connect-targets/[connectTarget]/connect-link/route.ts",
     "apps/web/app/device/connect/[claim]/route.ts",

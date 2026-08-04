@@ -288,9 +288,10 @@ export function buildHostedWebNextConfig(phase: string): NextConfig {
     experimental: {
       cpus: HOSTED_WEB_PRODUCTION_BUILD_CPUS,
       turbopackFileSystemCacheForDev: isHostedWebDevFileSystemCacheEnabled(process.env),
-      // Source-map emission is the largest single build-memory cost; skipping
-      // it for the production build keeps that avoidable cost off the builder.
+      // Source-map emission is the largest proven build-memory cost.
       turbopackSourceMaps: false,
+      webpackBuildWorker: true,
+      webpackMemoryOptimizations: true,
     },
     outputFileTracingIncludes: {
       "/experiments": [

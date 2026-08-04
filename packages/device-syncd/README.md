@@ -109,6 +109,18 @@ before confirmation. If provider-side deregistration fails, the local
 disconnect still stands and the member must remove the connection in the Garmin
 account before reconnecting.
 
+Ordinary removal of a healthy Junction-backed source is source-scoped. Hosted
+Web deregisters only the selected provider slug and leaves the shared Junction
+account, its credentials, and sibling source rows active. The connection-wide
+path above is reserved for the explicit historical-export reset. Obsolete Link
+completion is followed by exact-target cleanup, and repeated removal rechecks
+provider state so a local disconnected row is never treated as proof of remote
+revocation. A reconnect Link carries the exact pending source epoch through URL
+creation and is returned only if that epoch is still current. Obsolete Link
+completion that overlaps provider cleanup advances the same exact-source
+operation and performs another idempotent target-only deregistration before the
+initiating operation can converge on success.
+
 WHOOP uses OAuth plus webhooks.
 Strava uses OAuth, polling, and optional app-global webhooks.
 
@@ -137,6 +149,17 @@ establishes only when zero provider rows exist, and rejects terminal or
 ambiguous state. Only a future visible hosted-health/Junction Reconnect action
 may send `connect` and create/reactivate the shared lane. Resume, omitted intent,
 data ingress, and retry work cannot undo an explicit disconnect.
+That explicit Apple Health connect captures the current source epoch before SDK
+token mint and opens one pending epoch afterward only if the proof remains
+current. A signed Junction source-registration event reconciles that unchanged
+pending epoch against the live provider list and commits it connected; the same
+event target-cleans a fenced source or disconnected parent.
+Apple Health companion metadata, WHOOP overnight summaries, and their queued
+runtime jobs reread and honor the exact-source disconnect state immediately
+before import instead of trusting queued account state. Webhook receipt time and
+health-record occurrence time are not source-registration proof. WHOOP
+summaries keep `whoop` as data provenance while their authorization is checked
+against the disconnectable Junction `whoop_v2` source.
 
 The provider lifecycle metadata used here now comes from the shared `@murphai/importers/device-providers/provider-descriptors` surface, so callback paths, default scopes, webhook capabilities, sync windows, metric families, and source-priority hints stay aligned between connector code and snapshot normalization.
 The configured-provider assembly composes a lightweight hosted-runtime config schema from `packages/device-syncd/src/config/serializable-provider-configs.ts` into the full registry in `packages/device-syncd/src/config/provider-manifests.ts`. Serialization fields and secret exclusions therefore have one boot-safe owner, while descriptors, provider-owned jobs, and runtime adapters stay outside the hosted runner's static boot closure. Hosted web and runner startup can read provider config without importing the provider implementation graph.

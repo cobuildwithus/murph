@@ -119,9 +119,9 @@ const HOSTED_USAGE_CREDIT_PURCHASE_ID_PATTERN = /^hucp_[A-Za-z0-9_-]{16}$/u;
 export default async function SettingsPage({
   searchParams,
 }: {
-  searchParams?: Promise<SettingsSearchParams>;
-} = {}) {
-  const resolvedSearchParams = searchParams ? await searchParams : {};
+  searchParams: Promise<SettingsSearchParams>;
+}) {
+  const resolvedSearchParams = await searchParams;
   const openEmailLink =
     readFirstSearchParamValue(resolvedSearchParams.addEmail) === "true";
   const addUsageTarget = readOnlySearchParamValue(resolvedSearchParams.addUsage);

@@ -13,7 +13,7 @@ import {
 import { getPublicProductDetail } from "@/src/lib/public-products/service";
 
 interface PublicProductDetailRouteContext {
-  params: Promise<{ productRef: string }> | { productRef: string };
+  params: Promise<{ productRef: string }>;
 }
 
 export const GET = withPublicProductsJsonError(async (

@@ -1178,7 +1178,13 @@ application code.
   Venice model translation happens only at Worker egress.
   OpenAI uses its existing Responses intercept; Venice accepts only the two
   Responses POST paths and rewrites a canonical
-  Luna/Terra/Sol model to one fixed operator model id at egress. Specialized
+  Luna/Terra/Sol model to the matching regular Venice GPT-5.6 provider id at
+  egress. The shared mapping is code-owned and exposes no duplicate operator
+  model variables, so inference and pricing cannot drift independently. Web
+  prices immutable usage rows by canonical model plus recorded provider, using
+  Venice's distinct input, cache-read, cache-write, and output rates when
+  `provider_name=venice`; each pricing snapshot records the matching provider
+  model id and provider pricing source. Specialized
   tools retain their existing provider owners independently of the core choice.
 - Assistant input follows one spine for local and hosted execution: source adapter -> `AssistantInputEvent` -> `AssistantInputSource` -> scanner/active turn -> accepted-input journal -> Codex. Source adapters may project accepted input into inbox for search, attachments, UI, and diagnostics, but inbox projection success is not the gate that decides whether Codex can see a decoded conversation message. `AssistantInputEvent` may carry bounded prompt-readiness facts such as attachment descriptors and minimized channel source metadata; prompt construction must read those first and use inbox capture/envelope data only as projection enrichment.
 - Provider transcript history and channel-native delivery history should stay with upstream adapters when possible; Murph stores local assistant transcript copies, minimal manual aliases, explicit conversation bindings, fixed auto-reply channel enablement state, timestamps/turn counts, provider session references, runtime automation run history, compact system-emitted turn receipts, idempotent outbound intent state, diagnostics counters/warnings, and persisted status snapshots under `vault/.runtime/operations/assistant/**`. Assistant runtime directories must stay private (`0700`) and assistant runtime files must stay private (`0600`). Secret-bearing provider headers for persisted sessions live only in private sidecars under `vault/.runtime/operations/assistant/secrets/**`; the general session JSON keeps only public headers, diagnostics/runtime-event writes redact inline secret material before persistence, and `assistant doctor --repair` can tighten permissive assistant runtime modes in place. Inline secret findings indicate stale local session data rather than a supported migration path. Fresh sessions may inject a small canonical memory block from `bank/memory.md`, and assistant turns now use one shared CLI-first Murph runtime surface plus a small helper-tool layer across manual and message-triggered automation turns. Codex App Server is the hard-cut assistant adapter: it reaches the canonical `vault-cli` surface through native local CLI/filesystem/env authority, defaults to unsandboxed execution plus no approval friction, and is trusted as a local operator path. Assistant-engine keeps one Codex App Server process warm across ordinary turns for the warm container or Node-process lifetime; each ordinary turn is an RPC into that process. Prompts, session/thread/turn ids, delivery routes, and invocation-scoped automation or device authority stay in request data rather than process launch identity. Those capabilities are exposed only through narrow typed tools on the current root turn and are absent from the App Server and descendant shell environments. Process replacement is limited to owner shutdown, process exit, proven unhealthy or poisoned protocol state, explicit operator shutdown, explicit workspace invocation abort/preemption, or a genuine process-level configuration change that Codex cannot accept through RPC. An explicit abort synchronously stops the exact owned App Server before the container job slot can be reused; ordinary turn and invocation completion do not. Codex App Server owns provider-native web-search behavior; Murph normalizes Codex `web.search` events into assistant trace and status output without carrying a separate Murph-side search provider or web-read tool layer. Accepted inbound channel messages are therefore treated as operator-authorized actions for the bound vault and may use the assistant runtime, canonical `memory`, canonical `automation`, self-target, and vault query/write surface. Murph owns transcript policy, turn orchestration, and tool/runtime planning, while canonical vault records remain authoritative on conflicts.
@@ -1278,10 +1284,16 @@ new delivery primitive. The daily-nutrition V1 contract remains readable for
 retained effects and already-sent messages. V2 keeps the same card kind and
 adds canonical fiber totals plus nullable frozen goal snapshots. Targets come
 only from current active canonical goals; the one-message semantic status is
-not persisted goal progress. Both versions use the same deterministic text
-fallback, Linq capability boundary, inline URL size bound, and existing outbox
-idempotency lifecycle. No card API, database, auth path, cleanup owner, or
-second queue exists.
+not persisted goal progress. Ordinary private-direct interactive turns and the
+managed meal closeout share this one attachment tool; other scheduled turns do
+not receive it. Because a card replaces the whole final response, it is only
+eligible when the card alone completely satisfies the current request. New
+accepted input in the same live turn invalidates an earlier card-only decision,
+and attachment is rejected after the delivery context advances. Every
+card copies the immediately preceding single-date canonical meal-totals read.
+Both versions use the same deterministic text fallback, Linq capability
+boundary, inline URL size bound, and existing outbox idempotency lifecycle. No
+card API, database, auth path, cleanup owner, or second queue exists.
 
 Assistant image media has an explicit public/private type boundary. `image`
 contains an intentionally public fetchable URL, while `vault_image` contains a
@@ -1439,7 +1451,46 @@ Explicit disconnect or a newer connection epoch wins the locked recheck,
 fails the stale callback, and leaves the target disconnected. Retry cleanup
 deregisters only the target source; whole-account revoke remains the explicit
 connection-wide disconnect path. Ambiguous target cleanup blocks the new link
-and remains retryable.
+and remains retryable. The hosted Connect surface uses that same split for
+removal: an ordinary Junction source card targets the child source route and
+calls provider-specific revoke without changing the parent connection,
+credentials, or sibling rows. The existing connection-source row carries a
+two-phase disconnect fence so callbacks and hosted-runtime projections captured
+before removal cannot restore the source. A failed provider revoke restores the
+captured source lifecycle and remains retryable; a fresh explicit connect clears
+the completed fence before opening the new provider link. That pending-source
+epoch is carried as an exact proof through provider Link creation and checked
+again before OAuth state is persisted or the URL is returned; a newer
+disconnect therefore makes an already-created Link unreachable instead of
+publishing stale authorization. Historical-export
+reset remains the deliberate connection-wide exception and keeps its broader
+confirmation copy. If an already-open Junction Link completes after removal,
+the rejected callback advances that same source operation and deregisters only
+the obsolete provider authorization, including while the initiating Disconnect
+or source-start cleanup is still in provider I/O. The initiating operation
+follows the newer exact-source claim before it can report success; a new Link
+cannot start while that cleanup is in progress. Repeating Disconnect also
+rechecks provider state instead of treating the local fence as proof of remote
+revocation.
+
+Native companion work uses the same source row. Source-attributed Apple Health
+metadata and WHOOP overnight summaries are admitted only when the exact source
+is absent for first use or connected without a disconnect fence, and the hosted
+runtime rereads that durable source immediately before canonical import; a
+queued job never treats its cached account snapshot as current authorization.
+An explicit Apple Health SDK connect captures the exact source epoch before
+token mint and opens a pending epoch only if that proof is still current after
+mint; an older Connect therefore cannot clear a newer Disconnect. A signed
+source-registration event reconciles that pending epoch against Junction's live
+provider list and can mark it connected without inventing a timestamp. If the
+source or parent was disconnected, the same event performs target-only cleanup
+instead. Receipt time and health-record occurrence time are never synthesized
+as registration proof, and source admission runs only after the webhook attempt
+owns its dedupe trace. Passive SDK resume, omitted
+intent, stale events, background uploads, and queued runtime work cannot clear
+or bypass a completed source disconnect. Companion WHOOP summaries retain the
+`whoop` health-data provenance while authorization is derived from the
+disconnectable Junction `whoop_v2` source row.
 
 The companion Privy bearer rule above is the default, with one authenticated
 extension bridge: `POST /api/device-sync/companion/imessage-mini-app/enrollment`

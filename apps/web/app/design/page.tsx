@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { Suspense } from "react";
 import { SiteFooter } from "@/src/components/homepage/site-footer";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 import { DesignPage } from "./design-page";
@@ -9,12 +8,17 @@ export const metadata: Metadata = createMurphPageMetadata({
   description: "Brand guidelines, visual identity, and component library.",
 });
 
-export default function Page() {
+export default async function Page({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string | string[] }>;
+}) {
+  const requestedTab = (await searchParams).tab;
+  const activeTab = Array.isArray(requestedTab) ? requestedTab[0] : requestedTab;
+
   return (
     <>
-      <Suspense>
-        <DesignPage />
-      </Suspense>
+      <DesignPage activeTab={activeTab} />
       <SiteFooter />
     </>
   );

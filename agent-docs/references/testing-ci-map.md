@@ -273,11 +273,42 @@ never reads production feedback or enters Resend.
   creates a root-level cgroup-v2 child for accounting only and moves the build
   process into that cgroup while keeping the build itself on the invoking user,
   environment, cwd, and stdio. It does not currently write `memory.max`,
-  `memory.swap.max`, or `memory.oom.group`. The advisory budget is a cgroup-unit
-  model of Vercel Standard's 8 GB build machine: 7.2 GB available to the build
-  cgroup and a 0.8 GB reserve for OS/container overhead outside it at the
-  ceiling. The legacy-named guard budget override must stay strictly above the
-  6,000,000,000-byte known-false-positive cgroup floor and at or below
+  `memory.swap.max`, or `memory.oom.group`. The Vercel package build gives the
+  parent Next process a direct 1 GiB old-space flag and appends a 3 GiB flag to
+  `NODE_OPTIONS`. Node applies the direct flag to the parent; Next 16.2.6
+  rebuilds its non-isolated TypeScript worker options from the parent arguments
+  followed by `NODE_OPTIONS`, while removing the flag from isolated static
+  workers. The same script owns the Vercel package build and CI memory-
+  observation invocation. The split reduces the compile-parent peak without
+  weakening generated-contract validation, while repeated forced-cold Standard
+  previews remain the real Vercel acceptance proof. A 2 GiB parent-bound
+  candidate passed one forced-cold Standard preview but the next identical
+  build still hit the 8 GB container OOM boundary. Single global 1 GiB and 1.5
+  GiB limits starved Next's
+  generated-contract TypeScript worker, as did a 1 GiB parent / 2 GiB worker
+  split. The 1 GiB / 3 GiB split completed the full local build. Either a V8
+  heap failure or a container OOM rejects the candidate. The first forced-cold
+  Standard preview with that split still exhausted the container during
+  Turbopack compilation. Profiling identified the multiplier: `/design` made
+  the whole catalog a client graph solely to manage its `tab` query parameter.
+  The route now parses that query on the server and uses URL-backed tab links,
+  while reachable client modules use narrow client-safe public imports and only
+  the three callback-bearing synthetic studies declare local client boundaries.
+  With the same heap policy, a cold local Turbopack build compiled in 57
+  seconds instead of roughly 4.4 minutes and completed all 229 static pages.
+  Repeated exact-head Standard previews remain the external acceptance proof.
+  The next exact-head Standard preview still OOM-killed Turbopack, so the
+  catalog correction is retained as a boundary fix but not sufficient capacity
+  proof. Production builds therefore use Next's supported `--webpack` fallback
+  with `webpackBuildWorker` and `webpackMemoryOptimizations` enabled. The
+  Workflow integration contributes custom Webpack configuration, so the worker
+  must be explicit. Local development remains on Turbopack. The worker build
+  preserves the same heap split and all route/type validation and completed all
+  229 pages locally. The advisory budget is
+  a cgroup-unit model of Vercel Standard's 8 GB build machine: 7.2 GB available
+  to the build cgroup and a 0.8 GB reserve for OS/container overhead outside it
+  at the ceiling. The legacy-named guard budget override must stay strictly
+  above the 6,000,000,000-byte known-false-positive cgroup floor and at or below
   7,200,000,000 bytes, preserving at least a 0.8 GB reserve under the 8 GB
   machine model. The floor comes from the fully working 2026-07-06 Linux CI run
   where a 6.0 GB cgroup cap OOM-killed a build that Vercel's real 8 GB Standard
@@ -285,9 +316,11 @@ never reads production feedback or enters Resend.
   numbers are historical single-process RSS measurements only, not cgroup cap
   bounds; cgroup accounting includes anonymous memory across all build workers
   plus page cache. Live CI on 2026-07-07 showed the hard limit cannot ship green
-  yet: `turbopackMemoryLimit=3GiB` matched the 4 GiB cold-build anon ramp,
-  rising about 2.9 GB at 12 seconds, 5.5 GB at 27 seconds, and 6.9 GB at 42
-  seconds before an OOM-group kill. The guard samples cgroup `memory.current`
+  yet: `turbopackMemoryLimit=3GiB` matched the 4 GiB-configured cold-build anon
+  ramp, rising about 2.9 GB at 12 seconds, 5.5 GB at 27 seconds, and 6.9 GB at 42
+  seconds before an OOM-group kill. Next 16.2.6 discards that option while
+  creating the native backend, so it changed no enforced target and is now
+  omitted. The guard samples cgroup `memory.current`
   and selected `memory.stat` fields about every 3 seconds, prints trajectory
   lines about every 15 seconds, then reports sampled maxima before cgroup
   `memory.peak`, `memory.events`, and selected final-read `memory.stat` values.

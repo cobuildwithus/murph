@@ -13,6 +13,7 @@ import {
   JUNCTION_COMPANION_HEALTH_METADATA_MAX_BATCH_BYTES,
   JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE,
   JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER,
+  JUNCTION_COMPANION_HRV_SOURCE_PROVIDER,
   JunctionCompanionHealthMetadataParseError,
   normalizeJunctionResourceName,
   parseJunctionCompanionHealthMetadataBatch,
@@ -27,15 +28,20 @@ import type {
   PrismaDeviceSyncControlPlaneStore,
 } from "./prisma-store";
 import { isAvailableConnectionSourceResource } from "./browser-connection-source";
+import {
+  isHostedConnectionSourceAdmitted,
+  isHostedSourceDisconnectFenced,
+} from "./connection-source-lifecycle";
 
 /** The companion app's only device-sync provider. */
 export const COMPANION_DEVICE_SYNC_PROVIDER = "junction";
+/** Canonical connection-source slug for the companion's Apple Health SDK lane. */
+export const COMPANION_APPLE_HEALTH_SOURCE_PROVIDER = "apple_health_kit";
+export const COMPANION_HRV_SOURCE_PROVIDER = JUNCTION_COMPANION_HRV_SOURCE_PROVIDER;
 
 const COMPANION_METADATA_STRING_MAX_LENGTH = 200;
 const COMPANION_SDK_VERSION_MAX_ENTRIES = 10;
 export type CompanionPlatform = "ios" | "android";
-const COMPANION_HEALTH_METADATA_JUNCTION_SOURCE_PROVIDER =
-  normalizeJunctionProviderSlug(JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER);
 
 export const COMPANION_HEALTH_METADATA_RESOURCE = JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE;
 export const COMPANION_HEALTH_METADATA_BODY_LIMIT_BYTES =
@@ -276,11 +282,19 @@ export async function resolveCompanionHrvRmssdConnection(input: {
 }): Promise<{ id: string; provider: string }> {
   const connections = input.connections
     ?? await input.store.listConnectionsForUser(input.memberId);
-  const activeConnections = connections.filter(
-    (connection) =>
-      connection.provider === COMPANION_DEVICE_SYNC_PROVIDER
-      && isEstablishedDeviceSyncConnection(connection),
-  );
+  const activeConnections: PublicDeviceSyncAccount[] = [];
+  for (const connection of connections) {
+    if (
+      connection.provider !== COMPANION_DEVICE_SYNC_PROVIDER
+      || !isEstablishedDeviceSyncConnection(connection)
+    ) {
+      continue;
+    }
+    const sources = await input.store.listConnectionSources(connection.id);
+    if (isHostedConnectionSourceAdmitted(sources, COMPANION_HRV_SOURCE_PROVIDER)) {
+      activeConnections.push(connection);
+    }
+  }
 
   if (activeConnections.length === 0) {
     throw deviceSyncError({
@@ -370,16 +384,25 @@ export async function resolveCompanionHealthMetadataConnection(input: {
     });
   }
   if (activeConnections.length === 1) {
-    return activeConnections[0]!;
+    const connection = activeConnections[0]!;
+    const sources = await input.store.listConnectionSources(connection.id);
+    if (isHostedConnectionSourceAdmitted(sources, COMPANION_APPLE_HEALTH_SOURCE_PROVIDER)) {
+      return connection;
+    }
+    throw deviceSyncError({
+      code: "COMPANION_HEALTH_CONNECTION_REQUIRED",
+      message: "Connect Apple Health in the companion before syncing supplemental metadata.",
+      retryable: false,
+      httpStatus: 409,
+    });
   }
-
   const appleHealthConnections: typeof activeConnections = [];
   for (const connection of activeConnections) {
     const sources = await input.store.listConnectionSources(connection.id);
     if (sources.some((source) =>
-      source.status === "connected"
-      && normalizeJunctionProviderSlug(source.sourceProviderSlug)
-        === COMPANION_HEALTH_METADATA_JUNCTION_SOURCE_PROVIDER
+      source.sourceProviderSlug === COMPANION_APPLE_HEALTH_SOURCE_PROVIDER
+      && source.status === "connected"
+      && !isHostedSourceDisconnectFenced(source)
     )) {
       appleHealthConnections.push(connection);
     }
