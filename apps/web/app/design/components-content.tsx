@@ -31,6 +31,7 @@ import {
   WebmailIcon,
 } from "@/src/components/settings/hosted-email-murph-contact-dialog";
 import {
+  HostedPhonePrivyHandOffStatus,
   HostedPhoneLinkAction,
   HostedPhoneLinkCardPresentation,
 } from "@/src/components/settings/hosted-phone-settings";
@@ -565,6 +566,8 @@ export function ComponentsContent() {
   const [inlineContactAvatarId, setInlineContactAvatarId] = useState("hooded");
   const [phoneInputCountryCode, setPhoneInputCountryCode] = useState("US");
   const [phoneInputValue, setPhoneInputValue] = useState("");
+  const [phoneTransferSupportDialogOpen, setPhoneTransferSupportDialogOpen] =
+    useState(false);
   const [whoopCompletionPreviewKey, setWhoopCompletionPreviewKey] = useState(0);
   const [whoopCapacityPreviewOpen, setWhoopCapacityPreviewOpen] = useState(false);
   const [whoopCapacityNoContactPreviewOpen, setWhoopCapacityNoContactPreviewOpen] =
@@ -1687,7 +1690,7 @@ export function ComponentsContent() {
             Settings repairs that projection directly. A declined transfer
             closes quietly, and a failed save retries without reopening Privy.
             Existing phone accounts use the same surface for replacement.
-            Support-required conflicts offer both retry and a direct email
+            Support-required conflicts stop retrying and leave one direct email
             action without putting account identifiers in the message.
             Privacy-safe lifecycle diagnostics observe these states without
             changing any rendered state or action.
@@ -1764,18 +1767,33 @@ export function ComponentsContent() {
           >
             {[
               {
+                disabled: false,
                 errorMessage: null,
                 label: "Resting",
+                showPhoneAction: true,
                 state: "resting",
                 statusMessage: null,
                 statusTone: "neutral" as const,
               },
               {
+                disabled: false,
                 errorMessage: null,
                 label: "Saved status",
+                showPhoneAction: true,
                 state: "status",
                 statusMessage: "Phone saved.",
                 statusTone: "success" as const,
+              },
+              {
+                disabled: true,
+                errorMessage:
+                  "That phone moved from another Murph account that is still active with its own sign-in. Contact support to reconcile it safely.",
+                label: "Support required",
+                showPhoneAction: false,
+                state: "support-required",
+                statusMessage:
+                  "That phone moved from another Murph account that is still active with its own sign-in. Contact support to reconcile it safely.",
+                statusTone: "destructive" as const,
               },
             ].map((preview) => (
               <div
@@ -1789,10 +1807,12 @@ export function ComponentsContent() {
                 <HostedContactChannelChoice
                   phone={
                     <HostedPhoneLinkCardPresentation
+                      disabled={preview.disabled}
                       errorMessage={preview.errorMessage}
                       isChangeFlow={false}
                       isLinking={false}
                       isSyncing={false}
+                      showPhoneAction={preview.showPhoneAction}
                       statusMessage={preview.statusMessage}
                       statusTone={preview.statusTone}
                       onClick={() => {}}
@@ -1804,6 +1824,29 @@ export function ComponentsContent() {
                 />
               </div>
             ))}
+          </div>
+          <div className="space-y-3">
+            <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              Settings support-required dialog
+            </p>
+            <Button
+              variant="outline"
+              onClick={() => setPhoneTransferSupportDialogOpen(true)}
+            >
+              Preview terminal dialog
+            </Button>
+            {phoneTransferSupportDialogOpen
+              ? (
+                  <HostedPhonePrivyHandOffStatus
+                    errorMessage="That phone moved from another Murph account that is still active with its own sign-in. Contact support to reconcile it safely."
+                    isLinking={false}
+                    isRetryAllowed={false}
+                    isSyncing={false}
+                    onAborted={() => setPhoneTransferSupportDialogOpen(false)}
+                    onRetry={() => {}}
+                  />
+                )
+              : null}
           </div>
         </Section>
 
