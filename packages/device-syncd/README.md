@@ -109,6 +109,11 @@ before confirmation. If provider-side deregistration fails, the local
 disconnect still stands and the member must remove the connection in the Garmin
 account before reconnecting.
 
+Ordinary removal of a healthy Junction-backed source is source-scoped. Hosted
+Web deregisters only the selected provider slug and leaves the shared Junction
+account, its credentials, and sibling source rows active. The connection-wide
+path above is reserved for the explicit historical-export reset.
+
 WHOOP uses OAuth plus webhooks.
 Strava uses OAuth, polling, and optional app-global webhooks.
 

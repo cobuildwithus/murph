@@ -1214,6 +1214,7 @@ export class DeviceSyncPublicIngress {
 
       const establishment = await this.hooks.onConnectionEstablished?.({
         account,
+        connectionStartedAt: stateRecord.createdAt,
         ...(connectSourceId ? { connectSourceId } : {}),
         ...(connectTarget ? { connectTarget } : {}),
         ...(sourceProviderSlug ? { sourceProviderSlug } : {}),

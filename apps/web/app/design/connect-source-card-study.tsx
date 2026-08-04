@@ -1,6 +1,9 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
+
 import { SourceCard } from "@/app/(dashboard)/connect/connect-source-card";
+import { ConnectDisconnectDialog } from "@/app/(dashboard)/connect/connect-page-dialogs";
 import type { ConnectSource } from "@/app/(dashboard)/connect/connect-page-types";
 
 type ConnectSourceCardStudyCase = {
@@ -17,6 +20,7 @@ const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
       description: "Workouts, sleep, stress, heart rate, and body battery.",
       connected: true,
       disconnectConnectionId: "design-garmin-connection",
+      disconnectSourceProviderSlug: "garmin",
       id: "garmin",
       logo: {
         className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
@@ -114,26 +118,43 @@ const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
 ];
 
 export function ConnectSourceCardStudy() {
+  const searchParams = useSearchParams();
+  const disconnectDialogSource = searchParams?.get("connectDisconnectStudy") === "source"
+    ? DESIGN_CONNECT_SOURCE_CASES[0]?.source ?? null
+    : null;
+
   return (
-    <div
-      className="rounded-3xl border border-border bg-background px-4 py-8 sm:px-8"
-      data-design-study="connect-source-card-actions"
-      id="connect-source-card-actions"
-    >
-      <div className="grid items-stretch gap-4 lg:grid-cols-3">
-        {DESIGN_CONNECT_SOURCE_CASES.map(({ authenticated, errorMessage, source }) => (
-          <SourceCard
-            key={source.id}
-            authenticated={authenticated}
-            errorMessage={errorMessage}
-            pending={false}
-            pendingDisconnect={false}
-            source={source}
-            onDisconnectTargetChange={() => {}}
-            onStartConnection={() => Promise.resolve()}
-          />
-        ))}
+    <>
+      <div
+        className="rounded-3xl border border-border bg-background px-4 py-8 sm:px-8"
+        data-design-study="connect-source-card-actions"
+        id="connect-source-card-actions"
+        inert
+      >
+        <div className="grid items-stretch gap-4 lg:grid-cols-3">
+          {DESIGN_CONNECT_SOURCE_CASES.map(({ authenticated, errorMessage, source }) => (
+            <SourceCard
+              key={source.id}
+              authenticated={authenticated}
+              errorMessage={errorMessage}
+              pending={false}
+              pendingDisconnect={false}
+              source={source}
+              onDisconnectTargetChange={() => {}}
+              onStartConnection={() => Promise.resolve()}
+            />
+          ))}
+        </div>
       </div>
-    </div>
+
+      <ConnectDisconnectDialog
+        errorMessage={null}
+        inert
+        pending={false}
+        source={disconnectDialogSource}
+        onConfirm={() => Promise.resolve()}
+        onOpenChange={() => {}}
+      />
+    </>
   );
 }

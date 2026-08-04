@@ -56,7 +56,13 @@ import {
 import {
   buildHostedDeviceSyncWake,
 } from "./wake";
+import {
+  HOSTED_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+  HOSTED_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+  isHostedSourceDisconnectFenced,
+} from "./connection-source-lifecycle";
 import { PrismaDeviceSyncControlPlaneStore, type HostedPrismaTransactionClient } from "./prisma-store";
+import type { HostedDeviceConnectionSource } from "./prisma-store";
 import type { HostedDeviceSyncDirtyResource } from "./prisma-store";
 import {
   normalizeNullableString,
@@ -70,6 +76,146 @@ const COMPANION_HEALTH_MAX_PENDING_PAYLOADS = 16;
 const HISTORICAL_RESET_REVOKE_WARNING_MESSAGE =
   "Provider revoke did not complete while a historical data reset is pending. "
   + "Remove the connection in the provider account before reconnecting.";
+
+export async function disconnectHostedDeviceSyncConnectionSource(input: {
+  connectionId: string;
+  registry: DeviceSyncRegistry;
+  sourceProviderSlug: string;
+  store: PrismaDeviceSyncControlPlaneStore;
+  userId: string;
+}): Promise<{ sourceProviderSlug: string; status: "disconnected" }> {
+  const sourceProviderSlug = normalizeJunctionProviderSlug(input.sourceProviderSlug);
+  if (!sourceProviderSlug) {
+    throw deviceSyncError({
+      code: "CONNECTION_SOURCE_INVALID",
+      message: "Hosted device-sync source was invalid.",
+      retryable: false,
+      httpStatus: 400,
+    });
+  }
+
+  const disconnectStartedAt = toIsoTimestamp(new Date());
+  const target = await input.store.withConnectionMutationLock(input.connectionId, async (tx) => {
+    const connection = await input.store.getConnectionForUser(input.userId, input.connectionId, tx);
+    if (!connection) {
+      throw connectionSourceNotFoundError();
+    }
+    if (connection.provider !== "junction" || connection.status === "disconnected") {
+      throw connectionSourceNotFoundError();
+    }
+
+    const source = await findHostedConnectionSource({
+      connectionId: input.connectionId,
+      sourceProviderSlug,
+      store: input.store,
+      tx,
+    });
+    if (!source) {
+      throw connectionSourceNotFoundError();
+    }
+    if (
+      source.status === "disconnected"
+      && source.lastErrorCode === HOSTED_SOURCE_USER_DISCONNECTED_ERROR_CODE
+    ) {
+      return { alreadyDisconnected: true as const, connection, source, storedAccount: null };
+    }
+
+    const storedAccount = await input.store.getStoredConnectionAccountForUser(
+      input.userId,
+      input.connectionId,
+      tx,
+    );
+    const revokeSourceAccess = input.registry.get("junction")?.connectionHandler?.revokeSourceAccess;
+    if (!storedAccount || !revokeSourceAccess) {
+      throw sourceDisconnectUnavailableError();
+    }
+
+    await writeHostedConnectionSourceLifecycle({
+      errorCode: HOSTED_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+      errorMessage: null,
+      now: disconnectStartedAt,
+      source,
+      status: source.status,
+      store: input.store,
+      tx,
+    });
+
+    return {
+      alreadyDisconnected: false as const,
+      connection,
+      revokeSourceAccess,
+      source,
+      storedAccount,
+    };
+  });
+
+  if (target.alreadyDisconnected) {
+    return { sourceProviderSlug, status: "disconnected" };
+  }
+
+  try {
+    await target.revokeSourceAccess(target.storedAccount, sourceProviderSlug);
+  } catch {
+    await input.store.withConnectionMutationLock(input.connectionId, async (tx) => {
+      const current = await requireUnchangedSourceDisconnectTarget({
+        connection: target.connection,
+        connectionId: input.connectionId,
+        source: target.source,
+        sourceProviderSlug,
+        storedAccount: target.storedAccount,
+        store: input.store,
+        tx,
+        userId: input.userId,
+      });
+      await writeHostedConnectionSourceLifecycle({
+        errorCode: target.source.lastErrorCode,
+        errorMessage: target.source.lastErrorMessage,
+        now: toIsoTimestamp(new Date()),
+        source: current,
+        status: target.source.status,
+        store: input.store,
+        tx,
+      });
+    });
+    throw sourceDisconnectUnavailableError();
+  }
+
+  const disconnectedAt = toIsoTimestamp(new Date());
+  await input.store.withConnectionMutationLock(input.connectionId, async (tx) => {
+    const current = await requireUnchangedSourceDisconnectTarget({
+      connection: target.connection,
+      connectionId: input.connectionId,
+      source: target.source,
+      sourceProviderSlug,
+      storedAccount: target.storedAccount,
+      store: input.store,
+      tx,
+      userId: input.userId,
+    });
+    await writeHostedConnectionSourceLifecycle({
+      errorCode: HOSTED_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+      errorMessage: null,
+      now: disconnectedAt,
+      source: current,
+      status: "disconnected",
+      store: input.store,
+      tx,
+    });
+    await input.store.createSignal({
+      userId: input.userId,
+      connectionId: input.connectionId,
+      provider: target.connection.provider,
+      kind: "source_disconnected",
+      occurredAt: disconnectedAt,
+      sourceProviderSlug,
+      reason: "user_disconnect",
+      createdAt: disconnectedAt,
+      tx,
+    });
+  });
+
+  return { sourceProviderSlug, status: "disconnected" };
+}
 
 export async function disconnectHostedDeviceSyncConnection(input: {
   connectionId: string;
@@ -407,6 +553,7 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
     scopes: string[];
     status: PublicDeviceSyncAccount["status"];
   };
+  connectionStartedAt?: string | null;
   sourceProviderSlug?: string | null;
   connection: Pick<ProviderConnectionResult, "initialJobs" | "nextReconcileAt">;
   now: string;
@@ -467,6 +614,21 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
         sourceProviderSlug: input.sourceProviderSlug ?? null,
       });
       if (linkedSource) {
+        const currentSource = (await input.store.listConnectionSources(input.account.id, tx))
+          .find((source) => source.sourceInstanceKey === linkedSource.sourceInstanceKey);
+        if (
+          currentSource
+          && (
+            isHostedSourceDisconnectFenced(currentSource)
+            || (
+              currentSource.status === "disconnected"
+              && input.connectionStartedAt
+              && currentSource.lastSeenAt !== input.connectionStartedAt
+            )
+          )
+        ) {
+          throw connectionEstablishmentStaleError();
+        }
         await input.store.upsertConnectionSource({
           connectionId: input.account.id,
           sourceInstanceKey: linkedSource.sourceInstanceKey,
@@ -514,6 +676,113 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
   ) {
     await startHostedDeviceSyncWakeWorkflow(mailboxAppend.item.id);
   }
+}
+
+async function findHostedConnectionSource(input: {
+  connectionId: string;
+  sourceProviderSlug: string;
+  store: PrismaDeviceSyncControlPlaneStore;
+  tx: HostedPrismaTransactionClient;
+}): Promise<HostedDeviceConnectionSource | null> {
+  const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+    connectionId: input.connectionId,
+    sourceProviderSlug: input.sourceProviderSlug,
+  });
+  if (!sourceInstanceKey) {
+    return null;
+  }
+
+  return (await input.store.listConnectionSources(input.connectionId, input.tx))
+    .find((source) => source.sourceInstanceKey === sourceInstanceKey) ?? null;
+}
+
+async function requireUnchangedSourceDisconnectTarget(input: {
+  connection: PublicDeviceSyncAccount;
+  connectionId: string;
+  source: HostedDeviceConnectionSource;
+  sourceProviderSlug: string;
+  storedAccount: NonNullable<Awaited<ReturnType<PrismaDeviceSyncControlPlaneStore["getStoredConnectionAccountForUser"]>>>;
+  store: PrismaDeviceSyncControlPlaneStore;
+  tx: HostedPrismaTransactionClient;
+  userId: string;
+}): Promise<HostedDeviceConnectionSource> {
+  const connection = await input.store.getConnectionForUser(input.userId, input.connectionId, input.tx);
+  const storedAccount = await input.store.getStoredConnectionAccountForUser(
+    input.userId,
+    input.connectionId,
+    input.tx,
+  );
+  const source = await findHostedConnectionSource({
+    connectionId: input.connectionId,
+    sourceProviderSlug: input.sourceProviderSlug,
+    store: input.store,
+    tx: input.tx,
+  });
+
+  if (
+    !connection
+    || !publicAccountMatchesDisconnectTarget(input.connection, connection)
+    || !storedAccountMatchesDisconnectTarget(input.storedAccount, storedAccount)
+    || !source
+    || source.id !== input.source.id
+    || source.lastErrorCode !== HOSTED_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE
+  ) {
+    connectionChangedDuringDisconnectError();
+  }
+
+  return source;
+}
+
+async function writeHostedConnectionSourceLifecycle(input: {
+  errorCode: string | null;
+  errorMessage: string | null;
+  now: string;
+  source: HostedDeviceConnectionSource;
+  status: HostedDeviceConnectionSource["status"];
+  store: PrismaDeviceSyncControlPlaneStore;
+  tx: HostedPrismaTransactionClient;
+}): Promise<void> {
+  await input.store.upsertConnectionSource({
+    connectionId: input.source.connectionId,
+    sourceInstanceKey: input.source.sourceInstanceKey,
+    sourceProviderSlug: input.source.sourceProviderSlug,
+    status: input.status,
+    lastErrorCode: input.errorCode,
+    lastErrorMessage: input.errorMessage,
+    lastSeenAt: input.now,
+    tx: input.tx,
+  });
+}
+
+function connectionSourceNotFoundError(): never {
+  throw deviceSyncError({
+    code: "CONNECTION_SOURCE_NOT_FOUND",
+    message: "Hosted device-sync source was not found for this connection.",
+    retryable: false,
+    httpStatus: 404,
+  });
+}
+
+function sourceDisconnectUnavailableError(): never {
+  throw deviceSyncError({
+    cause: {
+      errorObservabilityClass: "provider_cleanup",
+      errorPhase: "browser_disconnect",
+    },
+    code: "CONNECTION_SOURCE_DISCONNECT_FAILED",
+    message: "Murph could not disconnect this source right now. Retry in a moment.",
+    retryable: true,
+    httpStatus: 503,
+  });
+}
+
+function connectionEstablishmentStaleError(): never {
+  throw deviceSyncError({
+    code: "CONNECTION_ESTABLISHMENT_STALE",
+    message: "Device connection changed during completion. Start the connection again.",
+    retryable: false,
+    httpStatus: 409,
+  });
 }
 
 function resolveHostedJunctionLinkedSource(input: {

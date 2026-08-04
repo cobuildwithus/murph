@@ -3885,6 +3885,7 @@ test("public ingress passes connect source context to connection-established hoo
   assert.equal(connectionEvents[0]?.account.id, connected.account.id);
   assert.equal(connectionEvents[0]?.connectSourceId, "garmin");
   assert.equal(connectionEvents[0]?.connectTarget, "garmin");
+  assert.equal(typeof connectionEvents[0]?.connectionStartedAt, "string");
   assert.equal(connectionEvents[0]?.sourceProviderSlug, "garmin");
   assert.equal(connected.sourceProviderSlug, "garmin");
 });

@@ -2,6 +2,7 @@ import {
   DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE,
   DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
 } from "@murphai/device-syncd/public-account";
+import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
 import { DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES } from "@murphai/device-syncd/public-ingress";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -258,6 +259,42 @@ function buildProviderConfigStoredConnection(
     disconnectGeneration: 0,
     keyVersion: null,
     tokenVersion: null,
+  };
+}
+
+function buildHostedConnectionSource(
+  connectionId: string,
+  sourceProviderSlug: string,
+  overrides: Partial<{
+    lastErrorCode: string | null;
+    lastErrorMessage: string | null;
+    status: "connected" | "disconnected" | "error" | "unavailable";
+  }> = {},
+) {
+  const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+    connectionId,
+    sourceProviderSlug,
+  });
+  if (!sourceInstanceKey) {
+    throw new Error("Expected a canonical Junction source instance key.");
+  }
+
+  return {
+    connectionId,
+    createdAt: "2026-03-26T12:00:00.000Z",
+    displayName: null,
+    firstSeenAt: "2026-03-26T12:00:00.000Z",
+    id: `dcs_${sourceProviderSlug}`,
+    lastDataAt: "2026-03-26T11:59:00.000Z",
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    lastSeenAt: "2026-03-26T12:00:00.000Z",
+    resourceAvailabilitySummary: { sleep: true },
+    sourceInstanceKey,
+    sourceProviderSlug,
+    status: "connected" as const,
+    updatedAt: "2026-03-26T12:00:00.000Z",
+    ...overrides,
   };
 }
 
@@ -1430,6 +1467,202 @@ describe("hosted device-sync wakes", () => {
         tx: mocks.prismaTx,
       }),
     );
+  });
+
+  it("disconnects only the selected Junction source and fences its late callback", async () => {
+    const connection = buildHostedConnection({
+      displayName: "Junction",
+      externalAccountId: "junction-user-established",
+      id: "dsc_junction_shared",
+      provider: "junction",
+      scopes: [],
+      setupPhase: "source_confirmed",
+    });
+    const storedConnection = buildProviderConfigStoredConnection(connection);
+    let sources = [
+      buildHostedConnectionSource(connection.id, "oura"),
+      buildHostedConnectionSource(connection.id, "whoop_v2"),
+      buildHostedConnectionSource(connection.id, "apple_health_kit"),
+    ];
+    const siblingSnapshot = sources.slice(1).map((source) => ({ ...source }));
+    const revokeSourceAccess = vi.fn(async () => undefined);
+    mocks.listConnectionsForUser.mockResolvedValue([connection]);
+    mocks.getConnectionForUser.mockResolvedValue(connection);
+    mocks.getStoredConnectionAccountForUser.mockResolvedValue(storedConnection);
+    mocks.listConnectionSources.mockImplementation(async () => sources);
+    mocks.registryGet.mockReturnValue({
+      connectionHandler: { revokeSourceAccess },
+    });
+    mocks.upsertConnectionSource.mockImplementation(async (input) => {
+      const existing = sources.find((source) => source.sourceInstanceKey === input.sourceInstanceKey);
+      if (!existing) {
+        throw new Error("Test source was not found.");
+      }
+      const updated = {
+        ...existing,
+        lastErrorCode: input.lastErrorCode ?? null,
+        lastErrorMessage: input.lastErrorMessage ?? null,
+        lastSeenAt: input.lastSeenAt ?? existing.lastSeenAt,
+        status: input.status ?? existing.status,
+      };
+      sources = sources.map((source) => source.id === existing.id ? updated : source);
+      return updated;
+    });
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/settings/device-sync/connections/source/disconnect"),
+    );
+
+    await expect(controlPlane.disconnectConnectionSource(
+      "user-123",
+      buildPublicConnectionId(connection.id),
+      "oura",
+    )).resolves.toEqual({
+      sourceProviderSlug: "oura",
+      status: "disconnected",
+    });
+
+    expect(revokeSourceAccess).toHaveBeenCalledTimes(1);
+    expect(revokeSourceAccess).toHaveBeenCalledWith(storedConnection, "oura");
+    expect(sources[0]).toMatchObject({
+      lastErrorCode: "SOURCE_USER_DISCONNECTED",
+      sourceProviderSlug: "oura",
+      status: "disconnected",
+    });
+    expect(sources.slice(1)).toEqual(siblingSnapshot);
+    expect(mocks.syncDurableConnectionState).not.toHaveBeenCalled();
+    expect(mocks.markConnectionSourcesDisconnected).not.toHaveBeenCalled();
+    expect(mocks.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
+    expect(mocks.clearStoredProviderConfigCredential).not.toHaveBeenCalled();
+    expect(mocks.createSignal).toHaveBeenCalledWith(expect.objectContaining({
+      connectionId: connection.id,
+      kind: "source_disconnected",
+      provider: "junction",
+      sourceProviderSlug: "oura",
+      tx: mocks.prismaTx,
+      userId: "user-123",
+    }));
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+
+    await expect(handleHostedDeviceSyncConnectionEstablished({
+      account: {
+        connectedAt: connection.connectedAt,
+        id: connection.id,
+        provider: "junction",
+        scopes: [],
+        status: "active",
+      },
+      connection: { initialJobs: [], nextReconcileAt: null },
+      now: "2026-03-26T12:01:00.000Z",
+      sourceProviderSlug: "oura",
+      store: new PrismaDeviceSyncControlPlaneStore({ prisma: getPrisma() }),
+    })).rejects.toMatchObject({
+      code: "CONNECTION_ESTABLISHMENT_STALE",
+      httpStatus: 409,
+    });
+
+    sources = sources.map((source) => source.sourceProviderSlug === "oura"
+      ? {
+          ...source,
+          lastErrorCode: null,
+          lastSeenAt: "2026-03-26T12:02:00.000Z",
+        }
+      : source);
+    await expect(handleHostedDeviceSyncConnectionEstablished({
+      account: {
+        connectedAt: connection.connectedAt,
+        id: connection.id,
+        provider: "junction",
+        scopes: [],
+        status: "active",
+      },
+      connection: { initialJobs: [], nextReconcileAt: null },
+      connectionStartedAt: "2026-03-26T12:00:00.000Z",
+      now: "2026-03-26T12:03:00.000Z",
+      sourceProviderSlug: "oura",
+      store: new PrismaDeviceSyncControlPlaneStore({ prisma: getPrisma() }),
+    })).rejects.toMatchObject({
+      code: "CONNECTION_ESTABLISHMENT_STALE",
+      httpStatus: 409,
+    });
+    await expect(handleHostedDeviceSyncConnectionEstablished({
+      account: {
+        connectedAt: connection.connectedAt,
+        id: connection.id,
+        provider: "junction",
+        scopes: [],
+        status: "active",
+      },
+      connection: { initialJobs: [], nextReconcileAt: null },
+      connectionStartedAt: "2026-03-26T12:02:00.000Z",
+      now: "2026-03-26T12:04:00.000Z",
+      sourceProviderSlug: "oura",
+      store: new PrismaDeviceSyncControlPlaneStore({ prisma: getPrisma() }),
+    })).resolves.toBeUndefined();
+    expect(sources[0]).toMatchObject({
+      lastErrorCode: null,
+      sourceProviderSlug: "oura",
+      status: "connected",
+    });
+    expect(mocks.upsertConnectionSource).toHaveBeenCalledTimes(3);
+    expect(mocks.createSignal).toHaveBeenCalledTimes(2);
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
+  });
+
+  it("restores the selected Junction source when provider revoke fails", async () => {
+    const connection = buildHostedConnection({
+      displayName: "Junction",
+      externalAccountId: "junction-user-established",
+      id: "dsc_junction_shared",
+      provider: "junction",
+      scopes: [],
+      setupPhase: "source_confirmed",
+    });
+    const storedConnection = buildProviderConfigStoredConnection(connection);
+    let source = buildHostedConnectionSource(connection.id, "oura", {
+      lastErrorCode: "TOKEN_REFRESH_FAILED",
+      lastErrorMessage: "Reconnect this source.",
+      status: "error",
+    });
+    mocks.listConnectionsForUser.mockResolvedValue([connection]);
+    mocks.getConnectionForUser.mockResolvedValue(connection);
+    mocks.getStoredConnectionAccountForUser.mockResolvedValue(storedConnection);
+    mocks.listConnectionSources.mockImplementation(async () => [source]);
+    mocks.registryGet.mockReturnValue({
+      connectionHandler: {
+        revokeSourceAccess: vi.fn(async () => {
+          throw new Error("provider unavailable");
+        }),
+      },
+    });
+    mocks.upsertConnectionSource.mockImplementation(async (input) => {
+      source = {
+        ...source,
+        lastErrorCode: input.lastErrorCode ?? null,
+        lastErrorMessage: input.lastErrorMessage ?? null,
+        lastSeenAt: input.lastSeenAt ?? source.lastSeenAt,
+        status: input.status ?? source.status,
+      };
+      return source;
+    });
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/settings/device-sync/connections/source/disconnect"),
+    );
+
+    await expect(controlPlane.disconnectConnectionSource(
+      "user-123",
+      buildPublicConnectionId(connection.id),
+      "oura",
+    )).rejects.toMatchObject({
+      code: "CONNECTION_SOURCE_DISCONNECT_FAILED",
+      httpStatus: 503,
+      retryable: true,
+    });
+    expect(source).toMatchObject({
+      lastErrorCode: "TOKEN_REFRESH_FAILED",
+      lastErrorMessage: "Reconnect this source.",
+      status: "error",
+    });
+    expect(mocks.createSignal).not.toHaveBeenCalled();
   });
 
   it("re-reads inside the connection mutation lock before clearing refreshed tokens", async () => {

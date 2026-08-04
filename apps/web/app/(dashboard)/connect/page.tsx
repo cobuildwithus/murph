@@ -56,6 +56,7 @@ type ConnectSourceConnectionState = {
   connectProvider: string | null;
   connectTarget: string | null;
   disconnectScope?: ConnectSourceDisconnectScope;
+  disconnectSourceProviderSlug?: string;
   recoveryKind?: ConnectSourceRecoveryKind;
   requiresReconnect: boolean;
   sourceId: string;
@@ -253,6 +254,7 @@ export default async function ConnectPage({
   const reconnectTargetBySourceId = new Map<string, string>();
   const disconnectConnectionIdBySourceId = new Map<string, string>();
   const disconnectScopeBySourceId = new Map<string, ConnectSourceDisconnectScope>();
+  const disconnectSourceProviderSlugBySourceId = new Map<string, string>();
   let historicalResetIncompleteSourceIds = new Set<string>();
   let initialLoadError: ConnectPageInitialLoadError | null = null;
   const [recoveryContactAction, voiceMemoSources, whoopSyncContactAction] = await Promise.all([
@@ -281,6 +283,12 @@ export default async function ConnectPage({
         if (connection.disconnectScope) {
           disconnectScopeBySourceId.set(sourceId, connection.disconnectScope);
         }
+        if (connection.disconnectSourceProviderSlug) {
+          disconnectSourceProviderSlugBySourceId.set(
+            sourceId,
+            connection.disconnectSourceProviderSlug,
+          );
+        }
         if (connection.requiresReconnect) {
           if (connection.connectProvider) {
             reconnectProviderBySourceId.set(sourceId, connection.connectProvider);
@@ -307,6 +315,7 @@ export default async function ConnectPage({
     connectedSourceIds,
     disconnectConnectionIdBySourceId,
     disconnectScopeBySourceId,
+    disconnectSourceProviderSlugBySourceId,
     historicalResetIncompleteSourceIds,
     reconnectProviderBySourceId,
     reconnectSourceIds,
@@ -419,6 +428,7 @@ export function resolveConfiguredConnectSources(
     connectedSourceIds?: ReadonlySet<string>;
     disconnectConnectionIdBySourceId?: ReadonlyMap<string, string>;
     disconnectScopeBySourceId?: ReadonlyMap<string, ConnectSourceDisconnectScope>;
+    disconnectSourceProviderSlugBySourceId?: ReadonlyMap<string, string>;
     historicalResetIncompleteSourceIds?: ReadonlySet<string>;
     reconnectProviderBySourceId?: ReadonlyMap<string, string>;
     reconnectSourceIds?: ReadonlySet<string>;
@@ -444,6 +454,8 @@ export function resolveConfiguredConnectSources(
         && options.historicalResetIncompleteSourceIds?.has(source.id) === true;
       const disconnectConnectionId = options.disconnectConnectionIdBySourceId?.get(source.id);
       const disconnectScope = options.disconnectScopeBySourceId?.get(source.id);
+      const disconnectSourceProviderSlug =
+        options.disconnectSourceProviderSlugBySourceId?.get(source.id);
       const reconnectProvider = options.reconnectProviderBySourceId?.get(source.id);
       const reconnectTarget = options.reconnectTargetBySourceId?.get(source.id);
       const resolvedConnectTarget = connectionAvailable
@@ -457,6 +469,7 @@ export function resolveConfiguredConnectSources(
         ...(resolvedConnectTarget ? { connectTarget: resolvedConnectTarget } : {}),
         ...(disconnectConnectionId ? { disconnectConnectionId } : {}),
         ...(disconnectScope ? { disconnectScope } : {}),
+        ...(disconnectSourceProviderSlug ? { disconnectSourceProviderSlug } : {}),
         ...(historicalResetIncomplete ? { historicalResetIncomplete } : {}),
         ...(recoveryKind ? { recoveryKind } : {}),
         ...(requiresReconnect ? { requiresReconnect } : {}),
@@ -586,7 +599,6 @@ function resolveConnectSourceConnectionMatches(
     const connectTarget = typeof source.connectTarget === "string" && source.connectTarget.trim()
       ? source.connectTarget
       : null;
-    const disconnect = resolveConnectSourceDisconnect(source, connectionId);
     const hasJunctionUpstreamSources = provider === "junction" && source.upstreamSources.length > 0;
     const unambiguousJunctionReconnectUpstreamCount = hasJunctionUpstreamSources && sourceRequiresReconnect
       ? countLiveJunctionUpstreamSources(source.upstreamSources)
@@ -600,10 +612,9 @@ function resolveConnectSourceConnectionMatches(
       && !hasJunctionUpstreamSources
     ) {
       upsertConnectSourceConnection(connectedConnections, {
-        connectionId: disconnect.connectionId,
+        connectionId,
         connectProvider: provider,
         connectTarget,
-        ...(disconnect.scope ? { disconnectScope: disconnect.scope } : {}),
         requiresReconnect,
         sourceId: configuredSourceId,
         state: sourceState,
@@ -614,10 +625,9 @@ function resolveConnectSourceConnectionMatches(
       const sourceId = sourceIdByDirectProvider.get(provider);
       if (sourceId) {
         upsertConnectSourceConnection(connectedConnections, {
-          connectionId: disconnect.connectionId,
+          connectionId,
           connectProvider: provider,
           connectTarget,
-          ...(disconnect.scope ? { disconnectScope: disconnect.scope } : {}),
           requiresReconnect,
           sourceId,
           state: sourceState,
@@ -670,13 +680,16 @@ function resolveConnectSourceConnectionMatches(
         : null;
       if (sourceId && visibleSourceIds.has(sourceId)) {
         upsertConnectSourceConnection(connectedConnections, {
-          connectionId: disconnect.connectionId,
+          connectionId,
           connectProvider: upstreamRequiresReconnect ? upstreamConnectProvider : provider,
           connectTarget: upstreamRequiresReconnect ? upstreamConnectTarget : null,
           // Resetting always disconnects the whole shared Junction connection, so keep
           // the disconnect account-scoped even when this is its only source.
-          ...(disconnect.scope || (upstreamNeedsConnectionReset && disconnect.connectionId)
+          ...(upstreamNeedsConnectionReset && connectionId
             ? { disconnectScope: "junction_account" as const }
+            : {}),
+          ...(!upstreamNeedsConnectionReset && sourceProviderSlug
+            ? { disconnectSourceProviderSlug: sourceProviderSlug }
             : {}),
           ...(upstreamNeedsConnectionReset ? { recoveryKind: "connection_reset" as const } : {}),
           requiresReconnect: upstreamRequiresReconnect,
@@ -690,39 +703,10 @@ function resolveConnectSourceConnectionMatches(
   return [...connectedConnections.values()];
 }
 
-function resolveConnectSourceDisconnect(
-  source: ConnectSettingsSourceMatch,
-  connectionId: string | null,
-): { connectionId: string | null; scope: ConnectSourceDisconnectScope | null } {
-  if (!connectionId) {
-    return { connectionId: null, scope: null };
-  }
-
-  const provider = normalizeDeviceSyncConnectTargetKey(source.provider);
-  if (provider !== "junction") {
-    return { connectionId, scope: null };
-  }
-
-  if (countDisconnectableJunctionUpstreamSources(source.upstreamSources) <= 1) {
-    return { connectionId, scope: null };
-  }
-
-  return {
-    connectionId,
-    scope: "junction_account",
-  };
-}
-
 function countLiveJunctionUpstreamSources(
   upstreamSources: ConnectSettingsSourceMatch["upstreamSources"],
 ): number {
   return upstreamSources.filter(isLiveJunctionUpstreamSource).length;
-}
-
-function countDisconnectableJunctionUpstreamSources(
-  upstreamSources: ConnectSettingsSourceMatch["upstreamSources"],
-): number {
-  return upstreamSources.filter(isDisconnectableJunctionUpstreamSource).length;
 }
 
 function isLiveJunctionUpstreamSource(

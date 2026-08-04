@@ -41,6 +41,7 @@ import {
   acceptHostedCompanionHrvRmssdObservation,
   buildHostedCompanionHrvRmssdDirtyResource,
   disconnectHostedDeviceSyncConnection,
+  disconnectHostedDeviceSyncConnectionSource,
   handleHostedDeviceSyncConnectionEstablished,
   handleHostedDeviceSyncUnknownWebhook,
   handleHostedDeviceSyncWebhookAccepted,
@@ -66,6 +67,7 @@ export class HostedDeviceSyncPublicIngressService {
         onConnectionEstablished: async ({
           account,
           connection,
+          connectionStartedAt,
           now,
           provider,
           sourceProviderSlug,
@@ -73,6 +75,7 @@ export class HostedDeviceSyncPublicIngressService {
           await handleHostedDeviceSyncConnectionEstablished({
             account,
             connection,
+            connectionStartedAt: connectionStartedAt ?? null,
             now,
             sourceProviderSlug: sourceProviderSlug ?? null,
             store: this.context.store,
@@ -409,6 +412,22 @@ export class HostedDeviceSyncPublicIngressService {
           }
         : {}),
     };
+  }
+
+  async disconnectConnectionSource(
+    userId: string,
+    connectionId: string,
+    sourceProviderSlug: string,
+  ): Promise<{ sourceProviderSlug: string; status: "disconnected" }> {
+    const connection = await this.requireOwnedBrowserConnection(userId, connectionId);
+
+    return disconnectHostedDeviceSyncConnectionSource({
+      connectionId: connection.id,
+      registry: this.registry,
+      sourceProviderSlug,
+      store: this.context.store,
+      userId,
+    });
   }
 
   toBrowserConnection(account: PublicDeviceSyncAccount): HostedBrowserDeviceSyncConnection {

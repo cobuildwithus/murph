@@ -315,6 +315,15 @@ Last verified: 2026-07-31
   Starting or retrying the source first attempts target-only provider cleanup;
   a cleanup warning blocks the new link instead of adopting an ambiguous
   linkage or revoking sibling sources.
+  Ordinary hosted removal follows the same target-only provider boundary. Web
+  marks the selected connection-source row with a disconnect fence under the
+  existing connection mutation lock, performs provider revoke outside the
+  transaction, then rechecks the parent, credential, and source epochs before
+  committing only that source as disconnected. The fence rejects late callback
+  admission and hosted-runtime source projection until a fresh explicit connect
+  clears it. Provider failure restores the captured source lifecycle and returns
+  a retryable error; it does not disconnect siblings or the parent account.
+  Connection-wide historical reset remains the explicit broader operation.
 - The hosted reply-latency operator alert remains one singleton incident owner.
   Fresh conversation mailbox rows that the existing Web AI usage gate
   intentionally denies receive one assign-once timestamp at the mutating

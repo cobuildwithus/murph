@@ -596,6 +596,8 @@ export interface ProviderWebhookAdminCapability {
 
 export interface DeviceSyncPublicIngressConnectionEstablishedInput {
   account: PublicDeviceSyncAccount;
+  /** Start instant of the consumed browser connection state, when applicable. */
+  connectionStartedAt?: string | null;
   connectSourceId?: string | null;
   connectTarget?: string | null;
   sourceProviderSlug?: string | null;
