@@ -5,6 +5,9 @@ import {
   type AssistantProviderSessionOptions,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
+  assistantCodexModelProviderRequiresModelThreadCompatibility,
+} from '@murphai/operator-config/assistant/target-runtime'
+import {
   isAssistantCodexTargetConfig,
   resolveAssistantChatProviderFromConfig,
   serializeAssistantProviderSessionOptions,
@@ -108,6 +111,11 @@ function hashCodexThreadCompatibilityIdentity(input: {
         provider: input.provider,
         executionDriver: input.providerOptions.executionDriver,
         modelProvider: input.providerOptions.modelProvider ?? null,
+        model: assistantCodexModelProviderRequiresModelThreadCompatibility(
+            input.providerOptions.modelProvider,
+          )
+          ? input.providerOptions.model
+          : null,
         sandbox: input.providerOptions.sandbox,
         approvalPolicy: input.providerOptions.approvalPolicy,
         profile: input.providerOptions.profile,

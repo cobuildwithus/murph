@@ -40,6 +40,13 @@ import {
   resolveVisibleHostedBillingPlanCodes,
 } from "@/src/lib/hosted-onboarding/billing-plan-eligibility";
 import { isHostedVeniceAssistantEnabled } from "@/src/lib/hosted-onboarding/assistant-model-preference";
+import {
+  isHostedCustomChatCompletionsEnabled,
+  isHostedCustomInferenceEnabled,
+} from "@/src/lib/hosted-inference/feature";
+import {
+  readHostedInferenceConnectionView,
+} from "@/src/lib/hosted-inference/connection-store";
 import { readHostedPulseTrialContinuationCookie } from "@/src/lib/hosted-onboarding/billing-pulse-trial-continuation";
 import {
   HOSTED_START_PAID_GROUP_RETURN_PARAM,
@@ -187,6 +194,7 @@ export default async function SettingsPage({
   const usageTopUpOfferCodes = settingsData?.usageTopUpOfferCodes ?? [];
   const usageTopUpActivePurchase = settingsData?.usageTopUpActivePurchase ?? null;
   const usageTopUpReturnTarget = settingsData?.usageTopUpReturnTarget ?? null;
+  const inferenceConnection = settingsData?.inferenceConnection ?? null;
   const account = settingsSnapshot?.account ?? null;
   const billingRef = settingsSnapshot?.billingRef ?? null;
   const routing = settingsSnapshot?.routing ?? null;
@@ -520,12 +528,17 @@ export default async function SettingsPage({
         </div>
         <HostedAssistantModelSettings
           canUpgradeToEdge={canUpgradeToEdge}
+          chatCompletionsAvailable={isHostedCustomChatCompletionsEnabled()}
           configurationAvailable={account?.assistant?.configurationAvailable === true}
+          customInferenceAvailable={isHostedCustomInferenceEnabled()}
           expectedCurrentPlanCode={
             currentPlanCode === "launch_group_monthly"
             || currentPlanCode === "launch_monthly"
               ? currentPlanCode
               : undefined
+          }
+          initialConnection={
+            isHostedCustomInferenceEnabled() ? inferenceConnection : null
           }
           initialDormantSolPreference={
             account?.assistant?.dormantSolPreference === true
@@ -671,6 +684,12 @@ async function readSettingsPageData(input: {
     memberId,
     prisma,
   });
+  const inferenceConnection = isHostedCustomInferenceEnabled()
+    ? await readHostedInferenceConnectionView({
+        memberId,
+        prisma,
+      })
+    : null;
   const consentStatus = await readHostedConsentStatus({
     memberId,
     prisma,
@@ -737,6 +756,7 @@ async function readSettingsPageData(input: {
     familyOwner,
     groupPlanAvailable,
     hasConfirmedGroupMembership,
+    inferenceConnection,
     freshPrivySession: await freshPrivySessionPromise,
     secureApprovalStatus: await secureApprovalStatusPromise,
     settingsSnapshot,

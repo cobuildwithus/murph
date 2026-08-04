@@ -505,6 +505,30 @@ The full behavior and rollout contract lives in
 
 Member-scoped hosted runner operations validate the existing active runtime write fence at the Cloudflare route that owns the read or effect. The fence binds the claimed member, attempt, and lease generation before private-content decryption, artifact access, signed web callbacks, or durable mutation. Runtime clients attach the current lease through their existing transport boundary; member-scoped identity and authority are never derived from Cloudflare container ids. The pre-binding container-fatal sink is the sole log-only exception.
 
+## Hosted Custom Inference
+
+`apps/web` owns one optional encrypted `HostedInferenceConnection` per personal
+member. Its selection bit is independent of the member's dormant managed
+provider, model, and reasoning preferences. Web verifies a candidate before
+replacing the row, projects only revision and bounded capability facts into the
+signed workspace response, and resolves the decrypted target exactly once
+during invocation preparation. Group thread-container members cannot own or
+select this connection.
+
+`apps/cloudflare` revalidates the resolved target, seals it under a
+context-separated Worker key, and binds the encrypted envelope to the existing
+UserRunner invocation fence. The runner receives only one fixed
+`hosted-custom-inference` Codex provider, a revision-derived model alias, and a
+non-secret sentinel. Each Responses request must present the existing
+provider-egress authority for the same active fence before Cloudflare can open
+the envelope, inject the member credential, and call the exact public HTTPS
+operation URL. Native Responses streams directly; Chat Completions uses one
+stateless request-local TypeScript adapter. There is no second agent runtime,
+provider registry, gateway database, inference Durable Object, or managed-model
+fallback. Member-funded core usage and Murph-funded tool usage remain separate
+authorities on the same invocation fence. The full contract lives in
+`agent-docs/product-specs/bring-your-own-inference.md`.
+
 ## Hosted Computer Authentication
 
 `apps/web` owns both Kernel login transports behind the existing durable

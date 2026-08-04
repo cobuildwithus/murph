@@ -32,6 +32,12 @@ import type {
 import { normalizeHostedExecutionBaseUrl } from "@murphai/hosted-execution/env";
 
 import {
+  parseCloudflareHostedInferenceVerificationRequest,
+  parseCloudflareHostedInferenceVerificationResult,
+  type CloudflareHostedInferenceVerificationRequest,
+  type CloudflareHostedInferenceVerificationResult,
+} from "./inference-verification.ts";
+import {
   CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
   CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_CAPTURE_ID_HEADER,
   CLOUDFLARE_HOSTED_CONTROL_ENVIRONMENT_VOICE_KEY_HEADER,
@@ -42,6 +48,7 @@ import {
   buildCloudflareHostedControlBrowserVaultSessionPath,
   buildCloudflareHostedControlEnvironmentVoiceDeletePath,
   buildCloudflareHostedControlEnvironmentVoiceStagePath,
+  buildCloudflareHostedControlInferenceVerificationPath,
   buildCloudflareHostedControlMealPhotoDeletePath,
   buildCloudflareHostedControlMealPhotoStagePath,
   buildCloudflareHostedControlRuntimeEnsureProcessingPath,
@@ -154,6 +161,10 @@ export interface CloudflareHostedControlClient {
     userId: string,
   ): Promise<CloudflareHostedControlRuntimeHealthDataConsentResult>;
   getRunnerStatus(userId: string): Promise<HostedRunnerStatusResponse>;
+  verifyInferenceConnection(input: {
+    request: CloudflareHostedInferenceVerificationRequest;
+    userId: string;
+  }): Promise<CloudflareHostedInferenceVerificationResult>;
   sendTelegramUsageLimitNotice(input: {
     onRequestAttempted?: () => Promise<void> | void;
     request: CloudflareHostedControlTelegramUsageLimitNoticeRequest;
@@ -407,6 +418,30 @@ export function createCloudflareHostedControlClient(
         parse: (value) => parseHostedRunnerStatusForExpectedUser(value, expectedUserId),
         path: buildCloudflareHostedControlUserStatusPath(expectedUserId),
         request: { method: "GET" },
+        timeoutMs: options.timeoutMs,
+      });
+    },
+    verifyInferenceConnection(input) {
+      const userId = requireCloudflareHostedControlUserId(input.userId);
+      const request = parseCloudflareHostedInferenceVerificationRequest(
+        input.request,
+      );
+
+      return requestHostedExecutionAuthorizedJson({
+        baseUrl,
+        boundUserId: userId,
+        fetchImpl,
+        getAuthorizationHeader,
+        label: "custom inference verification",
+        parse: parseCloudflareHostedInferenceVerificationResult,
+        path: buildCloudflareHostedControlInferenceVerificationPath(userId),
+        request: {
+          body: JSON.stringify(request),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
         timeoutMs: options.timeoutMs,
       });
     },

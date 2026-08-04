@@ -66,9 +66,10 @@ export const MURPH_SEND_PHYSICAL_NOTE_TOOL = {
     'Before creating or mailing a physical note, read $MURPH_ASSISTANT_SKILLS_ROOT/physical-notes/SKILL.md.',
     'On a trusted hosted image-completion turn whose generation was launched with the exact authorizing message_ref, omit image_ref, image_sha256, and message_ref so runtime code binds the exact generated image and request automatically.',
     'When a generated note was intentionally shown first and a person later says to send it, provide the exact image_ref and image_sha256 from that trusted completion plus the exact message_ref approving the send in the current turn. Runtime code re-reads and verifies the private vault bytes and exact accepted input.',
-    'When the originating user already explicitly asked Murph to mail the note and supplied a complete US address, call this tool automatically after generation finishes; showing or attaching the image first is optional, not required.',
+    'Before treating omitted city, state, or ZIP fields as an incomplete address, follow the skill\'s narrow temporary address-resolution step. Lookup results complete a destination only; they never identify a recipient or authorize a send.',
+    'When the originating user already explicitly asked Murph to mail the note and supplied a complete or reliably resolved US address, call this tool automatically after generation finishes; showing or attaching the image first is optional, not required.',
     "The server supplies Murph's fixed return address. Never ask the person for a return address, invent one, or include one in the tool arguments or artwork.",
-    'Do not call for a draft-only request, an incomplete address, bulk mail, an international address, impersonation, threats, harassment, fraud, or illegal content.',
+    'Do not call for a draft-only request, an unresolved or ambiguous address, bulk mail, an international address, impersonation, threats, harassment, fraud, or illegal content.',
     'The server decides whether the note is complimentary and computes any Murph-time cost. Never claim acceptance until this tool reports accepted.',
   ].join(' '),
   inputSchema: {

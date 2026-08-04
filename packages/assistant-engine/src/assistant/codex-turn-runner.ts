@@ -5,6 +5,9 @@ import {
   resolveAssistantUsageCredentialSource,
 } from '@murphai/hosted-execution/assistant-usage'
 import {
+  HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
+} from '@murphai/operator-config/assistant/target-runtime'
+import {
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
   MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
@@ -317,6 +320,11 @@ function createAssistantProviderUsageAttribution(input: {
 
   const credentialSource = resolveAssistantUsageCredentialSource({
     apiKeyEnv: null,
+    credentialSourceHint:
+      input.attemptPlan.route.providerOptions.modelProvider
+        === HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID
+        ? 'member'
+        : null,
     effectiveEnv: input.env,
     headers: null,
     provider: input.attemptPlan.route.provider,

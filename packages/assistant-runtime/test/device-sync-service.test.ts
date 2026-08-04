@@ -4,11 +4,13 @@ import { beforeEach, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   closeStore: vi.fn(),
+  createDefaultImporterPort: vi.fn(),
   createDeviceSyncService: vi.fn(),
   SqliteDeviceSyncStore: vi.fn(),
 }));
 
 vi.mock("@murphai/device-syncd/service", () => ({
+  createDefaultImporterPort: mocks.createDefaultImporterPort,
   createDeviceSyncService: mocks.createDeviceSyncService,
   SqliteDeviceSyncStore: mocks.SqliteDeviceSyncStore,
 }));
@@ -17,6 +19,9 @@ import { createHostedRuntimeDeviceSyncService } from "../src/device-sync-service
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.createDefaultImporterPort.mockReturnValue({
+    importDeviceProviderSnapshot: vi.fn(),
+  });
   mocks.SqliteDeviceSyncStore.mockImplementation(function MockSqliteDeviceSyncStore() {
     return {
       close: mocks.closeStore,

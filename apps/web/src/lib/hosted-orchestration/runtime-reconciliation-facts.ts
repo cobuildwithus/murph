@@ -73,6 +73,9 @@ import {
   resolveHostedRuntimeAiUsageGate,
   type HostedRuntimeUsageGateCheck,
 } from "./runtime-usage-decision";
+import {
+  readSelectedHostedInferenceConnectionOverride,
+} from "../hosted-inference/connection-store";
 
 type HostedRuntimeReconciliationUsageGateStatus =
   | HostedRuntimeUsageGateCheck["status"]
@@ -270,11 +273,17 @@ export async function readHostedRuntimeReconciliationFacts(
   });
 
   if (usageGateRequired) {
-    const gate = await resolveHostedRuntimeAiUsageGate({
-      mode: input.usageGateMode ?? "mutating",
-      now,
-      userId: input.userId,
-    });
+    const [gate, selectedCustomInference] = await Promise.all([
+      resolveHostedRuntimeAiUsageGate({
+        mode: input.usageGateMode ?? "mutating",
+        now,
+        userId: input.userId,
+      }),
+      readSelectedHostedInferenceConnectionOverride({
+        memberId: input.userId,
+        prisma,
+      }),
+    ]);
 
     if (gate.status === "health_data_consent_withdrawn") {
       const facts = buildHostedRuntimeBlockedFacts({
@@ -292,7 +301,7 @@ export async function readHostedRuntimeReconciliationFacts(
       return facts;
     }
 
-    if (gate.status === "denied") {
+    if (gate.status === "denied" && !selectedCustomInference) {
       let noticeRetryAt: Date | null = null;
       if ((input.usageGateMode ?? "mutating") === "mutating") {
         if (freshConversationMailboxLag) {
