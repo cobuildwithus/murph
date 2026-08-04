@@ -465,6 +465,14 @@ describe("deploy preflight helpers", () => {
     );
   });
 
+  it("requires a supported R2 write-admission state", () => {
+    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
+      HOSTED_R2_WRITE_ADMISSION: "draining",
+    }), { deployWorker: true })).toContain(
+      "HOSTED_R2_WRITE_ADMISSION must be open or paused.",
+    );
+  });
+
   it("requires the direct-R2 presign account to match the Cloudflare deploy account", () => {
     expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
       HOSTED_R2_PRESIGN_ACCOUNT_ID: "other-account",

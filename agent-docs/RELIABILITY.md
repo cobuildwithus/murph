@@ -612,6 +612,12 @@ Last verified: 2026-07-31
   consented-member requests remain checkpoint-gated. Completion ordering uses
   the existing pending-input occurrence proof, and incomplete or invalid index
   evidence rejects the shortcut without repairing state.
+- The temporary R2 cutover write-admission pause is a Worker-route gate before
+  UserRunner dispatch, not a second queue or persisted state owner. A paused
+  signed Temporal ensure returns a one-minute `retry_later`; a paused direct
+  web hint schedules no Durable Object work. Already-accepted inbound remains
+  in the encrypted mailbox, existing invocations drain normally, and service
+  resumes by deploying admission `open` after destination canaries pass.
 - One-time current-sender Assistant Ask reuses the same mailbox lifecycle,
   deterministic request identity, ten-minute expiry, isolated reviewed
   personal read, completion append, and exact-origin group delivery. Exact

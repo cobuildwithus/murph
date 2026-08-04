@@ -18,6 +18,10 @@ bindings.
   uploads on OC.
 - `HOSTED_R2_CUTOVER_PHASE=destination_active` makes ENAM authoritative while
   retaining ENAM-to-OC read fallback and dual-bucket deletion.
+- `HOSTED_R2_WRITE_ADMISSION=open` admits normal runtime starts and wakes.
+  `paused` makes the Worker return `retry_later` before any UserRunner Durable
+Object call, so the existing encrypted mailbox remains the only durable
+backlog while current invocations drain.
 
 Deploy preflight verifies that both source bindings report OC, both destination
 bindings report ENAM, and every bucket uses Standard storage. Keep these roles
@@ -95,7 +99,8 @@ repository files.
 
 ### 1. Deploy and prove the bridge
 
-Deploy the two fixed bindings with `HOSTED_R2_CUTOVER_PHASE=source_active`.
+Deploy the two fixed bindings with `HOSTED_R2_CUTOVER_PHASE=source_active` and
+`HOSTED_R2_WRITE_ADMISSION=open`.
 Require current runner status from every relevant Durable Object and wait for
 pre-bridge Worker and Durable Object invocations to drain. Ordinary reads,
 writes, lists, and new direct uploads must still resolve to OC.
@@ -103,8 +108,23 @@ writes, lists, and new direct uploads must still resolve to OC.
 ### 2. Close destructive and write admission
 
 Enable the account-deletion maintenance control at both admission and effect
-boundaries. Pause new workspace writes and direct-upload ticket issuance, then
-drain current write invocations.
+boundaries. Set `HOSTED_R2_WRITE_ADMISSION=paused`, deploy the Worker version to
+100 percent, and require every status response to report `writeAdmission=paused`.
+The Worker-level check must return `retry_later` for both signed Temporal calls
+and Vercel OIDC direct latency hints without calling UserRunner. Inbound messages
+remain accepted in the web-owned encrypted mailbox. An invocation already in
+flight may finish work it accepted before the pause; after every runner reports
+`inFlight=false`, Murph replies and other new runtime effects wait until
+admission reopens.
+
+Query every relevant UserRunner until `inFlight=false`. Do not terminate an
+invocation: let it finish its ordinary checkpoint. Record the last completion
+time only after the paused Worker version is at 100 percent. Cloudflare Worker
+versions include their bindings and configuration, but Worker and Durable
+Object code updates are eventually consistent, so the route-level pause and
+explicit per-runner drain are both required:
+[versions and deployments](https://developers.cloudflare.com/workers/versions-and-deployments/),
+[Durable Object lifecycle](https://developers.cloudflare.com/durable-objects/concepts/durable-object-lifecycle/).
 
 The production direct-PUT URL lifetime is ten minutes and the upload request
 has a separate conservative ten-minute completion bound. Wait both intervals
@@ -153,6 +173,7 @@ Deploy the same bridge with:
 
 ```text
 HOSTED_R2_CUTOVER_PHASE=destination_active
+HOSTED_R2_WRITE_ADMISSION=paused
 ```
 
 Require the destination-active Worker version at 100 percent and query every
@@ -173,7 +194,13 @@ ENAM accepts production writes.
 
 ### 7. Resume service
 
-Resume ordinary writes only after promotion checks pass. Re-enable account
+Deploy `HOSTED_R2_WRITE_ADMISSION=open` only after promotion checks pass, then
+require the destination-active Worker version at 100 percent and confirm a
+newly admitted canary consumes its durable mailbox input and checkpoints to
+ENAM. The paused `retry_later` response gives Temporal the continuation owner;
+the direct web hint remains optional and performs no retry.
+
+Re-enable account
 deletion only after its race canary proves the bridge deletes from both
 concrete buckets and retains state for retry after a partial failure.
 

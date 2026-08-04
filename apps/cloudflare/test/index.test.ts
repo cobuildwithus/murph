@@ -2033,6 +2033,39 @@ describe("cloudflare worker routes", () => {
     });
   });
 
+  it("reports the Worker-level R2 write-admission state with runner cutover status", async () => {
+    const stub = createUserRunnerStub({
+      runnerStatus: vi.fn(async () => ({
+        inFlight: false,
+        mailboxLag: [],
+        r2Cutover: {
+          coexisting: true,
+          phase: "source_active" as const,
+          protocolVersion: "r2-oc-enam-v1",
+        },
+        userId: "member_123",
+        workspace: null,
+      })),
+    });
+
+    const statusResponse = await worker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/internal/users/member_123/status",
+        { method: "GET" },
+      )),
+      createWorkerEnv(stub, { HOSTED_R2_WRITE_ADMISSION: "paused" }),
+    );
+
+    expect(statusResponse.status).toBe(200);
+    await expect(statusResponse.json()).resolves.toMatchObject({
+      r2Cutover: {
+        phase: "source_active",
+        protocolVersion: "r2-oc-enam-v1",
+        writeAdmission: "paused",
+      },
+    });
+  });
+
   it("ignores malformed per-user status log limits instead of partially parsing them", async () => {
     const stub = createUserRunnerStub({
       runnerStatus: vi.fn(async () => ({
@@ -2362,6 +2395,72 @@ describe("cloudflare worker routes", () => {
         },
         userId: "test-user",
       });
+    });
+
+    it("returns retry-later without a Durable Object call while R2 write admission is paused", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-08-04T03:00:00.000Z"));
+      const stub = createUserRunnerStub();
+      const env = createWorkerEnv(stub, {
+        HOSTED_R2_WRITE_ADMISSION: "paused",
+      });
+
+      const response = await worker.fetch(
+        await signWebCallbackControlRequest(
+          new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-processing", {
+            body: JSON.stringify({
+              orchestrationAttemptId: "orchestration-attempt-test",
+            }),
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            method: "POST",
+          }),
+          env,
+        ),
+        env,
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        kind: "retry_later",
+        retryAt: "2026-08-04T03:01:00.000Z",
+      });
+      expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
+    });
+
+    it("does not schedule the direct web latency hint while R2 write admission is paused", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-08-04T03:00:00.000Z"));
+      const stub = createUserRunnerStub();
+      const env = createWorkerEnv(stub, {
+        HOSTED_R2_WRITE_ADMISSION: "paused",
+      });
+      const execution = createWorkerExecutionContextForTest();
+
+      const response = await worker.fetch(
+        await signControlRequest(
+          new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-processing", {
+            body: JSON.stringify({
+              orchestrationAttemptId: "web-ingress-attempt-test",
+            }),
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            method: "POST",
+          }),
+        ),
+        env,
+        execution.ctx,
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        kind: "retry_later",
+        retryAt: "2026-08-04T03:01:00.000Z",
+      });
+      expect(execution.waitUntil).not.toHaveBeenCalled();
+      expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
     });
 
     it("acks web-plane OIDC runtime ensure-processing requests early and schedules the Durable Object call", async () => {

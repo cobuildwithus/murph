@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { R2BucketLike } from "../src/bundle-store.ts";
 import {
+  createHostedR2WriteAdmissionPausedResponse,
   locateHostedR2ObjectBucketRole,
+  readHostedR2WriteAdmission,
   resolveHostedR2CutoverContext,
 } from "../src/r2-cutover.ts";
 
@@ -38,6 +40,25 @@ function createBucket(input: {
 }
 
 describe("R2 OC to ENAM cutover bucket", () => {
+  it("defaults write admission open, accepts the pause, and rejects unknown values", () => {
+    expect(readHostedR2WriteAdmission({})).toBe("open");
+    expect(readHostedR2WriteAdmission({
+      HOSTED_R2_WRITE_ADMISSION: " paused ",
+    })).toBe("paused");
+    expect(() => readHostedR2WriteAdmission({
+      HOSTED_R2_WRITE_ADMISSION: "closed",
+    })).toThrow("HOSTED_R2_WRITE_ADMISSION must be open or paused");
+  });
+
+  it("returns a bounded retry while write admission is paused", () => {
+    expect(createHostedR2WriteAdmissionPausedResponse(
+      Date.parse("2026-08-04T03:00:00.000Z"),
+    )).toEqual({
+      kind: "retry_later",
+      retryAt: "2026-08-04T03:01:00.000Z",
+    });
+  });
+
   it("keeps source_active reads, writes, and lists on OC while deleting OC then ENAM", async () => {
     const operations: string[] = [];
     const source = createBucket({

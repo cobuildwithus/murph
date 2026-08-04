@@ -2859,6 +2859,7 @@ export interface HostedRunnerStatusResponse {
     coexisting: boolean;
     phase: "destination_active" | "source_active";
     protocolVersion: string;
+    writeAdmission?: "open" | "paused";
   };
   userId: string;
   workspace: HostedWorkspaceState | null;

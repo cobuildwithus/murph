@@ -19,11 +19,13 @@ describe("hosted runner R2 cutover status", () => {
         coexisting: true,
         phase: "destination_active",
         protocolVersion: "r2-oc-enam-v1",
+        writeAdmission: "paused",
       },
     }).r2Cutover).toEqual({
       coexisting: true,
       phase: "destination_active",
       protocolVersion: "r2-oc-enam-v1",
+      writeAdmission: "paused",
     });
   });
 
@@ -40,5 +42,17 @@ describe("hosted runner R2 cutover status", () => {
         protocolVersion: "r2-oc-enam-v1",
       },
     })).toThrow("r2Cutover.phase");
+  });
+
+  it("rejects an unknown write-admission state", () => {
+    expect(() => parseHostedRunnerStatusResponse({
+      ...baseStatus,
+      r2Cutover: {
+        coexisting: true,
+        phase: "source_active",
+        protocolVersion: "r2-oc-enam-v1",
+        writeAdmission: "draining",
+      },
+    })).toThrow("r2Cutover.writeAdmission");
   });
 });

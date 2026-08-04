@@ -208,6 +208,10 @@ function assertHostedR2FixedRoleConfiguration(input: {
   if (phase !== "source_active" && phase !== "destination_active") {
     throw new TypeError("HOSTED_R2_CUTOVER_PHASE must be source_active or destination_active.");
   }
+  const writeAdmission = input.workerVars.HOSTED_R2_WRITE_ADMISSION;
+  if (writeAdmission !== "open" && writeAdmission !== "paused") {
+    throw new TypeError("HOSTED_R2_WRITE_ADMISSION must be open or paused.");
+  }
   if (input.workerVars.HOSTED_R2_PRESIGN_BUCKET_NAME !== input.bundlesBucketName) {
     throw new TypeError(
       "HOSTED_R2_PRESIGN_BUCKET_NAME must match CF_BUNDLES_BUCKET while roles are fixed.",

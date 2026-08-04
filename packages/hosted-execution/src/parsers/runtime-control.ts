@@ -6463,7 +6463,25 @@ function parseHostedRunnerR2CutoverStatus(
       record.protocolVersion,
       "Hosted runner status response r2Cutover.protocolVersion",
     ),
+    ...(record.writeAdmission === undefined
+      ? {}
+      : {
+          writeAdmission: parseHostedR2WriteAdmission(record.writeAdmission),
+        }),
   };
+}
+
+function parseHostedR2WriteAdmission(value: unknown): "open" | "paused" {
+  const writeAdmission = requireString(
+    value,
+    "Hosted runner status response r2Cutover.writeAdmission",
+  );
+  if (writeAdmission !== "open" && writeAdmission !== "paused") {
+    throw new TypeError(
+      "Hosted runner status response r2Cutover.writeAdmission must be open or paused.",
+    );
+  }
+  return writeAdmission;
 }
 
 export function parseHostedRuntimeWebStatusResponse(value: unknown): HostedRuntimeWebStatusResponse {

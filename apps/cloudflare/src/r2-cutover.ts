@@ -6,16 +6,20 @@ import type { R2BucketLike } from "./bundle-store.ts";
 
 export const HOSTED_R2_CUTOVER_PHASE_ENV = "HOSTED_R2_CUTOVER_PHASE";
 export const HOSTED_R2_CUTOVER_PROTOCOL_VERSION = "r2-oc-enam-v1";
+export const HOSTED_R2_WRITE_ADMISSION_ENV = "HOSTED_R2_WRITE_ADMISSION";
+export const HOSTED_R2_WRITE_ADMISSION_RETRY_DELAY_MS = 60_000;
 
 const cutoverContextByEnvironment = new WeakMap<object, HostedR2CutoverContext>();
 
 export type HostedR2BucketRole = "destination" | "source";
 export type HostedR2CutoverPhase = "destination_active" | "source_active";
+export type HostedR2WriteAdmission = "open" | "paused";
 
 export interface HostedR2CutoverEnvironmentSource extends Readonly<Record<string, unknown>> {
   BUNDLES: R2BucketLike;
   BUNDLES_ENAM?: R2BucketLike;
   HOSTED_R2_CUTOVER_PHASE?: unknown;
+  HOSTED_R2_WRITE_ADMISSION?: unknown;
 }
 
 export interface HostedR2CutoverContext {
@@ -100,6 +104,25 @@ export function readHostedR2CutoverStatus(
     coexisting: context.coexisting,
     phase: context.phase,
     protocolVersion: HOSTED_R2_CUTOVER_PROTOCOL_VERSION,
+  };
+}
+
+export function readHostedR2WriteAdmission(
+  source: Readonly<Record<string, unknown>>,
+): HostedR2WriteAdmission {
+  const value = readOptionalString(source.HOSTED_R2_WRITE_ADMISSION) ?? "open";
+  if (value !== "open" && value !== "paused") {
+    throw new TypeError(`${HOSTED_R2_WRITE_ADMISSION_ENV} must be open or paused.`);
+  }
+  return value;
+}
+
+export function createHostedR2WriteAdmissionPausedResponse(
+  nowMs = Date.now(),
+): { kind: "retry_later"; retryAt: string } {
+  return {
+    kind: "retry_later",
+    retryAt: new Date(nowMs + HOSTED_R2_WRITE_ADMISSION_RETRY_DELAY_MS).toISOString(),
   };
 }
 

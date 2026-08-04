@@ -336,6 +336,10 @@ export function listHostedDeployEnvironmentInvariantErrors(
   ) {
     errors.push("HOSTED_R2_CUTOVER_PHASE must be source_active or destination_active.");
   }
+  const r2WriteAdmission = normalizeOptionalString(source.HOSTED_R2_WRITE_ADMISSION);
+  if (r2WriteAdmission && r2WriteAdmission !== "open" && r2WriteAdmission !== "paused") {
+    errors.push("HOSTED_R2_WRITE_ADMISSION must be open or paused.");
+  }
   const cloudflareAccountId = normalizeOptionalString(source.CLOUDFLARE_ACCOUNT_ID);
   const presignAccountId = normalizeOptionalString(source.HOSTED_R2_PRESIGN_ACCOUNT_ID);
   if (cloudflareAccountId && presignAccountId && presignAccountId !== cloudflareAccountId) {
