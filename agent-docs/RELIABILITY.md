@@ -267,6 +267,17 @@ Last verified: 2026-08-04
   Pulse Trial loser cleanup validates exact provider targets before one short
   member-owner revalidation transaction and cancels them only after that
   transaction releases; no Stripe request is made while that lock is held.
+- Immediate paid-plan upgrades use a one-item Customer Portal
+  `subscription_update_confirm` session rather than a Murph-owned Subscription
+  mutation or pending-invoice retry loop. Web takes the member lock only to
+  read and later revalidate the exact billing owner; Stripe retrieval and
+  Portal-session creation happen between those short transactions. The session
+  binds the exact Customer, Subscription, current licensed item, allowlisted
+  target Price, and dedicated Portal configuration. A changed owner, scheduled
+  change, pending update, legacy second item, or unknown add-on fails closed.
+  Stripe webhooks remain the retry and local-reconciliation owner after the
+  customer confirms the change; the unsigned return query is display/polling
+  context only and never entitlement authority.
 - Participant-derived hosted-group access is bounded by the shared seven-day
   observation lease. Provider rosters larger than the reconciliation cap cannot
   leave a participant authoritative forever: stale relationships age out.

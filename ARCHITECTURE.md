@@ -725,8 +725,18 @@ policy requires the explicit exact choice. Web then re-derives current
 eligibility and delegates only continue-Pulse,
 start-Pulse-now, or upgrade-to-Edge choices to the existing billing services.
 Pulse activation keeps its existing Stripe-hosted invoice or Customer Portal
-handoff when payment is required; a pending Edge change uses Customer Portal
-without a separate invoice lookup. This path adds no subscription table,
+handoff when payment is required. Immediate paid-plan upgrades create a
+Customer Portal `subscription_update_confirm` flow for the exact owned
+Subscription Item and allowlisted target Price. Stripe owns proration display,
+payment collection, payment-method recovery, and authentication before
+redirecting to Settings; Stripe webhooks remain the only normal owner that
+projects the applied plan into Postgres. The existing Settings authentication
+handoff preserves only the allowlisted direct-plan completion or cancellation
+return marker when Stripe opens outside the member's signed-in browser; it does
+not read billing truth before sign-in, and cancellation is stripped after the
+authenticated return. Retired hosted-AI metered items must be
+removed by the guarded operator migration before this one-item Portal flow is
+enabled. This path adds no subscription table,
 scheduler, trial-ending webhook, custom checkout, App Clip, or automatic model
 change.
 

@@ -1,12 +1,22 @@
-import type Stripe from "stripe";
-
 export const HOSTED_STRIPE_LEGACY_AI_USAGE_PRICE_METADATA_KEY =
   "murphHostedAiUsagePrice";
 export const HOSTED_STRIPE_LEGACY_AI_USAGE_PRICE_METADATA_VALUE =
   "legacy_hosted_ai_usage";
 
+interface HostedStripeLegacyAiUsageItemShape {
+  price?: {
+    metadata?: Record<string, string> | null;
+    recurring?: {
+      interval?: string;
+      interval_count?: number;
+      usage_type?: string;
+    } | null;
+  } | null;
+  quantity?: number | null;
+}
+
 export function isHostedStripeLegacyAiUsageMeteredItem(
-  item: Stripe.SubscriptionItem,
+  item: HostedStripeLegacyAiUsageItemShape,
 ): boolean {
   const recurring = item.price?.recurring;
   return recurring?.interval === "month" &&
@@ -17,6 +27,8 @@ export function isHostedStripeLegacyAiUsageMeteredItem(
     !hasHostedStripeSubscriptionItemQuantity(item);
 }
 
-function hasHostedStripeSubscriptionItemQuantity(item: Stripe.SubscriptionItem): boolean {
+function hasHostedStripeSubscriptionItemQuantity(
+  item: HostedStripeLegacyAiUsageItemShape,
+): boolean {
   return typeof item.quantity === "number" && Number.isFinite(item.quantity);
 }

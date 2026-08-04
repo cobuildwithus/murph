@@ -290,7 +290,6 @@ function projectQuotedPlanChangeResult(input: {
         "Trial payment-method preflight must be projected by the trial transition owner.",
       );
     case "started":
-    case "upgraded":
       return {
         action: "change_plan",
         plan,
@@ -368,12 +367,6 @@ function projectPlanUpgradeResult(input: {
         action: "upgrade_edge",
         plan,
         status: "no_action_required",
-      };
-    case "upgraded":
-      return {
-        action: "upgrade_edge",
-        plan,
-        status: "completed",
       };
     case "pending_payment":
       return {

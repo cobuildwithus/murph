@@ -204,6 +204,15 @@ Last verified: 2026-08-04
 - Account deletion must establish durable external-cleanup ownership before canonical member removal. The foreign-key-free retry receipt stores only KMS-encrypted runtime/vendor identifiers with receipt- and environment-bound authenticated data, remains pending for missing configuration, provider timeout, partial failure, or a legacy Cloudflare response without explicit `deleteAllCompleted` evidence, and is deleted only after Cloudflare, Stripe-customer, and Privy cleanup converge. Privy new-member resolution must first resolve any existing identity, then reject a pending deletion receipt, then require a bounded live-provider read; after binding, app-session issuance must lock and re-check the member so a missing or suspended deletion target cannot receive a session. Immediate and retention attempts have explicit target deadlines; the retention batch uses bounded concurrency so a stuck provider cannot become an unbounded response-path or sweep owner. Logs and the deleted member row are not retry owners.
 - A scheduled non-direct Telegram target is routing data, not authority. Before group tools, shared-data reads, or model work, the runner must ask the signed Web route owner to bind the exact Telegram thread to the callback-authenticated synthetic container member. Persist that exact typed authority on the ordinary outbox, then reassert it immediately before Telegram text, image, reaction, or voice provider entry. A missing owner/effect is retryable, a changed or mismatched owner fails closed, and neither a stored automation target nor a runner-injected provider credential may substitute for the live route assertion. Ordinary current-inbound group replies remain authorized by their admitted route and do not require manufactured scheduled authority.
 - Before adding a new external API, auth surface, wallet surface, storage authority, webhook, or runtime ingress path, document the trust boundary in `ARCHITECTURE.md` and the concrete rules here.
+- Direct-plan upgrades use Stripe Customer Portal's `subscription_update_confirm`
+  flow for the authenticated member's exact current Customer, Subscription,
+  Subscription Item, and server-selected target Price. The browser chooses no
+  Stripe identifiers, and the Portal return query is display context only;
+  verified Stripe webhooks and the canonical billing projection remain the
+  only entitlement authority. The one-time retired-usage-item migration may
+  delete only explicitly marked metered companion Items next to exactly one
+  known licensed monthly direct-plan Item, must dry-run before apply, and may
+  emit aggregate counts only.
 - Usage-credit Checkout is an authenticated payment boundary, not an assistant
   or browser-selected billing primitive. Settings routes must enforce the
   normal app-session and same-origin/CSRF protections. Personal checkout binds
