@@ -1,0 +1,79 @@
+name: Apply product feedback problem discovery patch
+
+on:
+  push:
+    branches:
+      - agent/product-feedback-problem-discovery
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-product-feedback-problem-discovery
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/product-feedback-problem-discovery
+          fetch-depth: 0
+
+      - name: Apply focused prompt patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('packages/assistant-engine/src/assistant/system-prompt.ts')
+          text = path.read_text()
+          start_marker = 'function buildAssistantProductFeedbackGuidanceText(): string {'
+          end_marker = '\n\nfunction buildAssistantStyleSettingsGuidanceText'
+
+          if text.count(start_marker) != 1:
+              raise SystemExit('expected exactly one product feedback guidance function')
+
+          start = text.index(start_marker)
+          end = text.index(end_marker, start)
+          replacement = r'''function buildAssistantProductFeedbackGuidanceText(): string {
+            return [
+              "Product feedback:",
+              "- When `murph.submit_product_feedback` is available, capture explicit Murph product frustration, feature requests, interest in shipped changelog or feature-catalog items, clear inferred workflow friction, and repeated Murph-observed product or tool friction.",
+              "- Treat the current request as a high-confidence inferred feature request when a Murph workflow is blocked, materially degraded, or forced into a manual workaround because Murph or its current tools lack a product path. One current-request gap is enough; the user does not need to complain or name the feature.",
+              "- Treat a requested feature, bug report, or workaround as evidence about the user's underlying problem, not automatically the thing Murph should build. Use the current conversation first to identify the user's goal, the problem blocking it, and the outcome they are trying to reach. When those are clear, center the candidate summary on that problem and outcome rather than only the requested implementation or observed symptom.",
+              "- If the underlying problem or desired outcome is materially unclear and one answer would change what Murph should build, ask one concise, natural follow-up question in the reply and do not call the tool yet. Ask at most one feedback-discovery question per turn, never re-ask a fact already established, and continue across later turns only while each answer materially improves product understanding. Do not mention feedback logging or ask permission. Still answer the immediate request or provide the best available fallback when possible.",
+              "- When the problem and desired outcome are already clear, or the friction is Murph-observed, do not ask a feedback follow-up. Capture it silently without interrupting the workflow: select the single most material qualifying gap and call the tool at most once for the accepted user request. Never retry after any tool result, including accepted, already accepted, or unavailable; persistence is best-effort after the reply. Do not log safety refusals, missing user input, or purely external or transient failures unless they also reveal a Murph-owned gap.",
+              "- Use `feature_request` for a missing or unsupported path. Record only the structured kind, a concise product-only summary, and relevant changelog item ids when known. Changelog ids are optional metadata, not required for general product interest. Start inferred summaries with `Speculative:` and assistant-observed summaries with `Murph-observed:`. Do not log vague low-confidence guesses. Never include tags, topics, raw user wording, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads.",
+            ].join("\\n");
+          }'''
+
+          updated = text[:start] + replacement + text[end:]
+          required = (
+              "Treat a requested feature, bug report, or workaround as evidence about the user's underlying problem",
+              'ask one concise, natural follow-up question in the reply and do not call the tool yet',
+              'Ask at most one feedback-discovery question per turn',
+              'When the problem and desired outcome are already clear, or the friction is Murph-observed, do not ask a feedback follow-up',
+              'Still answer the immediate request or provide the best available fallback when possible',
+          )
+          for phrase in required:
+              if phrase not in updated:
+                  raise SystemExit(f'missing required guidance: {phrase}')
+
+          path.write_text(updated)
+          Path('.github/workflows/agent-apply-product-feedback-problem-discovery.yml').unlink()
+          PY
+
+          git diff --check
+          git diff -- packages/assistant-engine/src/assistant/system-prompt.ts packages/assistant-engine/test/assistant-product-feedback-problem-discovery.test.ts
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add packages/assistant-engine/src/assistant/system-prompt.ts .github/workflows/agent-apply-product-feedback-problem-discovery.yml
+          git commit -m 'Teach feedback capture to uncover user problems'
+          git push origin HEAD:agent/product-feedback-problem-discovery
