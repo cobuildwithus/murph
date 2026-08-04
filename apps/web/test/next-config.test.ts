@@ -353,6 +353,7 @@ test("next.config leaves agent guidance under repository ownership", () => {
 });
 
 test("production build uses the isolated memory-optimized Webpack path", () => {
+  assert.equal(productionNextConfig.experimental?.turbopackFileSystemCacheForBuild, false);
   assert.equal(productionNextConfig.experimental?.turbopackSourceMaps, false);
   assert.equal(productionNextConfig.experimental?.webpackBuildWorker, true);
   assert.equal(productionNextConfig.experimental?.webpackMemoryOptimizations, true);

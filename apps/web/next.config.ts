@@ -287,6 +287,10 @@ export function buildHostedWebNextConfig(phase: string): NextConfig {
     env: buildHostedWebClientEnv(process.env),
     experimental: {
       cpus: HOSTED_WEB_PRODUCTION_BUILD_CPUS,
+      // Next 16.3 enables persistent production-build caching by default.
+      // Keep builds independent until that new state owner is evaluated
+      // separately.
+      turbopackFileSystemCacheForBuild: false,
       turbopackFileSystemCacheForDev: isHostedWebDevFileSystemCacheEnabled(process.env),
       // Source-map emission is the largest proven build-memory cost.
       turbopackSourceMaps: false,
