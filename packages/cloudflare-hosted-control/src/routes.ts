@@ -28,6 +28,10 @@ export const CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS = {
     method: "DELETE",
     suffix: "environment-voice/delete",
   },
+  inferenceVerification: {
+    method: "POST",
+    suffix: "inference/verify",
+  },
   mealPhotoStage: {
     method: "POST",
     suffix: "meal-photos/stage",
@@ -65,6 +69,15 @@ export type CloudflareHostedControlUserRouteParams = Readonly<Record<string, str
 
 export function buildCloudflareHostedControlUserStatusPath(userId: string): string {
   return buildCloudflareHostedControlUserRoutePath("status", userId);
+}
+
+export function buildCloudflareHostedControlInferenceVerificationPath(
+  userId: string,
+): string {
+  return buildCloudflareHostedControlUserRoutePath(
+    "inferenceVerification",
+    userId,
+  );
 }
 
 export function buildCloudflareHostedControlRuntimeEnsureProcessingPath(userId: string): string {

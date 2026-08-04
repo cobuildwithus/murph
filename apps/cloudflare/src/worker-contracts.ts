@@ -33,8 +33,10 @@ export type WorkerProviderEgressTokenValidationResult =
     }
   | {
       attemptId: string;
+      customInferenceEnvelope?: string;
       leaseGeneration: string;
       owns: true;
+      platformAiUsageAllowed?: boolean;
       userId: string;
       workspaceVersion: string | null;
     };
@@ -55,6 +57,7 @@ export type WorkerProviderEgressCredentialValidationResult =
       attemptId: string;
       leaseGeneration: string;
       owns: true;
+      platformAiUsageAllowed?: boolean;
       userId: string;
       workspaceVersion: string | null;
     };

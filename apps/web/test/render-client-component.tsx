@@ -224,6 +224,7 @@ function installGlobals(
   vi.stubGlobal("self", window);
   vi.stubGlobal("document", document);
   vi.stubGlobal("navigator", window.navigator);
+  vi.stubGlobal("Element", window.Element);
   vi.stubGlobal("HTMLElement", window.HTMLElement);
   vi.stubGlobal("Node", window.Node);
   vi.stubGlobal("Event", window.Event);

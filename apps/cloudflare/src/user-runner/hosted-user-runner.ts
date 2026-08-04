@@ -401,8 +401,14 @@ export class HostedUserRunner {
     }
     return {
       attemptId: validation.attemptId,
+      ...(validation.customInferenceEnvelope
+        ? { customInferenceEnvelope: validation.customInferenceEnvelope }
+        : {}),
       leaseGeneration: validation.leaseGeneration,
       owns: true,
+      ...(validation.platformAiUsageAllowed === undefined
+        ? {}
+        : { platformAiUsageAllowed: validation.platformAiUsageAllowed }),
       userId: validation.userId,
       workspaceVersion: validation.workspaceVersion,
     };
@@ -441,6 +447,9 @@ export class HostedUserRunner {
       attemptId: validation.attemptId,
       leaseGeneration: validation.leaseGeneration,
       owns: true,
+      ...(validation.platformAiUsageAllowed === undefined
+        ? {}
+        : { platformAiUsageAllowed: validation.platformAiUsageAllowed }),
       userId: validation.userId,
       workspaceVersion: validation.workspaceVersion,
     };
