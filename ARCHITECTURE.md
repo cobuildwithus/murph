@@ -1278,10 +1278,16 @@ new delivery primitive. The daily-nutrition V1 contract remains readable for
 retained effects and already-sent messages. V2 keeps the same card kind and
 adds canonical fiber totals plus nullable frozen goal snapshots. Targets come
 only from current active canonical goals; the one-message semantic status is
-not persisted goal progress. Both versions use the same deterministic text
-fallback, Linq capability boundary, inline URL size bound, and existing outbox
-idempotency lifecycle. No card API, database, auth path, cleanup owner, or
-second queue exists.
+not persisted goal progress. Ordinary private-direct interactive turns and the
+managed meal closeout share this one attachment tool; other scheduled turns do
+not receive it. Because a card replaces the whole final response, it is only
+eligible when the card alone completely satisfies the current request. New
+accepted input in the same live turn invalidates an earlier card-only decision,
+and attachment is rejected after the delivery context advances. Every
+card copies the immediately preceding single-date canonical meal-totals read.
+Both versions use the same deterministic text fallback, Linq capability
+boundary, inline URL size bound, and existing outbox idempotency lifecycle. No
+card API, database, auth path, cleanup owner, or second queue exists.
 
 Assistant image media has an explicit public/private type boundary. `image`
 contains an intentionally public fetchable URL, while `vault_image` contains a
