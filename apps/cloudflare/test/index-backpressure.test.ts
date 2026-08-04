@@ -6,7 +6,10 @@ import {
   type HostedExecutionWake,
 } from "@murphai/hosted-execution";
 import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution/contracts";
-import { HOSTED_RUNTIME_STATUS_PATH } from "@murphai/hosted-execution/routes";
+import {
+  HOSTED_RUNTIME_HEALTH_DATA_ADMISSION_PATH,
+  HOSTED_RUNTIME_STATUS_PATH,
+} from "@murphai/hosted-execution/routes";
 import worker, { UserRunnerDurableObject } from "../src/index.ts";
 import { RunnerStateStore } from "../src/user-runner/runner-state-store.ts";
 
@@ -107,6 +110,17 @@ describe("cloudflare worker queue backpressure routes", () => {
           ],
           userId: "member_123",
           workspace: null,
+        });
+      }
+
+      if (
+        url.origin === "https://web.example.test" &&
+        url.pathname === HOSTED_RUNTIME_HEALTH_DATA_ADMISSION_PATH
+      ) {
+        return Response.json({
+          consentState: "granted",
+          processingAllowed: true,
+          userId: "member_123",
         });
       }
 

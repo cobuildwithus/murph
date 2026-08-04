@@ -2,17 +2,33 @@ import {
   buildHostedExecutionPrefixedSafeErrorDiagnostics,
 } from "@murphai/hosted-execution";
 import {
+  HOSTED_CUSTOM_INFERENCE_CONSUMER_VERSION_QUERY,
+  isHostedCustomInferenceConsumerVersion,
+} from "@murphai/hosted-execution/assistant-inference";
+import {
   parseHostedWorkspaceReadResponse,
 } from "@murphai/hosted-execution/parsers";
 
 import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
+import {
+  readSelectedHostedInferenceConnectionOverride,
+} from "@/src/lib/hosted-inference/connection-store";
+import {
+  isHostedCustomInferenceEnabled,
+  isHostedCustomChatCompletionsEnabled,
+} from "@/src/lib/hosted-inference/feature";
 import { getPrisma } from "@/src/lib/prisma";
+import {
+  resolveHostedRuntimeAiUsageGate,
+} from "@/src/lib/hosted-orchestration/runtime-usage-decision";
 import {
   isHostedVeniceAssistantEnabled,
   readHostedMemberAssistantModelPreference,
+  type HostedMemberAssistantModelResolution,
 } from "@/src/lib/hosted-onboarding/assistant-model-preference";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { readHostedWorkspace } from "@/src/lib/hosted-workspace/store";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 
@@ -27,49 +43,108 @@ export const GET = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request, {
     maxBodyBytes: HOSTED_WORKSPACE_READ_CALLBACK_BODY_LIMIT_BYTES,
   });
+  const customInferenceConsumerSupported =
+    isHostedCustomInferenceConsumerVersion(
+      new URL(request.url).searchParams.get(
+        HOSTED_CUSTOM_INFERENCE_CONSUMER_VERSION_QUERY,
+      ),
+    );
+  const prisma = getPrisma();
   const [workspace, assistantConfiguration] = await Promise.all([
     readHostedWorkspace({ userId }),
-    readHostedMemberAssistantModelPreference({
+    readHostedAssistantConfigurationFailingClosedForCustomInference({
       memberId: userId,
-      prisma: getPrisma(),
-    }).catch((error: unknown) => {
-      console.warn(
-        "Hosted workspace assistant configuration read failed; using fleet defaults.",
-        {
-          ...buildHostedExecutionPrefixedSafeErrorDiagnostics({
-            error,
-            prefix: "preferenceRead",
-          }),
-          errorCode: "HOSTED_WORKSPACE_ASSISTANT_CONFIGURATION_READ_FAILED",
-          fallback: "fleet_default",
-          operation: "read_hosted_member_assistant_configuration",
-        },
-      );
-      return null;
+      prisma,
     }),
   ]);
 
+  if (assistantConfiguration?.customInferenceReverificationRequired) {
+    throw hostedOnboardingError({
+      code: "HOSTED_INFERENCE_CONNECTION_REVERIFICATION_REQUIRED",
+      httpStatus: 409,
+      message:
+        "Reverify the selected custom inference connection before using this Murph runtime.",
+    });
+  }
+  if (
+    assistantConfiguration?.customInferenceSelected
+    && !isHostedCustomInferenceEnabled()
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_CUSTOM_INFERENCE_UNAVAILABLE",
+      httpStatus: 409,
+      message:
+        "Custom inference is unavailable. Murph did not fall back to managed inference.",
+    });
+  }
+  if (
+    assistantConfiguration?.customInferenceSelected
+    && !customInferenceConsumerSupported
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_CUSTOM_INFERENCE_CONSUMER_UNSUPPORTED",
+      httpStatus: 409,
+      message:
+        "This hosted runtime does not support the selected custom inference connection.",
+    });
+  }
+  const customInferenceOverride =
+    assistantConfiguration?.hostedAssistantCustomInferenceOverride ?? null;
+  if (
+    customInferenceOverride?.protocol === "chat_completions"
+    && !isHostedCustomChatCompletionsEnabled()
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_CUSTOM_CHAT_COMPLETIONS_UNAVAILABLE",
+      httpStatus: 409,
+      message:
+        "Chat Completions custom inference is unavailable. Murph did not fall back to managed inference.",
+    });
+  }
+  if (
+    assistantConfiguration?.customInferenceSelected
+    && !customInferenceOverride
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_INFERENCE_CONNECTION_INVALID",
+      httpStatus: 409,
+      message: "The selected custom inference connection is invalid.",
+    });
+  }
+  const platformAiUsageAllowed = (
+    await resolveHostedRuntimeAiUsageGate({
+      mode: "read_only",
+      prisma,
+      userId,
+    })
+  ).status === "allowed";
+
   return jsonOk(parseHostedWorkspaceReadResponse({
     fetchedAt: new Date().toISOString(),
-    ...(assistantConfiguration?.hostedAssistantModelOverride
-      ? {
-          hostedAssistantModelOverride:
-            assistantConfiguration.hostedAssistantModelOverride,
-        }
-      : {}),
-    ...(assistantConfiguration?.hostedAssistantProviderOverride
+    ...(customInferenceOverride
+      ? { hostedAssistantCustomInferenceOverride: customInferenceOverride }
+      : assistantConfiguration?.hostedAssistantModelOverride
+        ? {
+            hostedAssistantModelOverride:
+              assistantConfiguration.hostedAssistantModelOverride,
+          }
+        : {}),
+    ...(!customInferenceOverride
+        && assistantConfiguration?.hostedAssistantProviderOverride
         && isHostedVeniceAssistantEnabled()
       ? {
           hostedAssistantProviderOverride:
             assistantConfiguration.hostedAssistantProviderOverride,
         }
       : {}),
-    ...(assistantConfiguration?.hostedAssistantReasoningEffortOverride
+    ...(!customInferenceOverride
+        && assistantConfiguration?.hostedAssistantReasoningEffortOverride
       ? {
           hostedAssistantReasoningEffortOverride:
             assistantConfiguration.hostedAssistantReasoningEffortOverride,
         }
       : {}),
+    platformAiUsageAllowed,
     workspace: workspace
       ? {
           browserVaultReplicaRef: workspace.browserVaultReplicaRef,
@@ -87,3 +162,37 @@ export const GET = withJsonError(async (request: Request) => {
       : null,
   }));
 });
+
+async function readHostedAssistantConfigurationFailingClosedForCustomInference(
+  input: {
+    memberId: string;
+    prisma: Parameters<typeof readHostedMemberAssistantModelPreference>[0]["prisma"];
+  },
+): Promise<HostedMemberAssistantModelResolution | null> {
+  try {
+    return await readHostedMemberAssistantModelPreference(input);
+  } catch (error) {
+    // Managed inference historically tolerates a transient preference read
+    // failure by using fleet defaults. That fallback is unsafe when a member
+    // selected custom inference, so confirm the singular custom selection
+    // before preserving the managed-only behavior.
+    const selectedCustomInference =
+      await readSelectedHostedInferenceConnectionOverride(input);
+    if (selectedCustomInference) {
+      throw error;
+    }
+    console.warn(
+      "Hosted workspace assistant configuration read failed; using fleet defaults.",
+      {
+        ...buildHostedExecutionPrefixedSafeErrorDiagnostics({
+          error,
+          prefix: "preferenceRead",
+        }),
+        errorCode: "HOSTED_WORKSPACE_ASSISTANT_CONFIGURATION_READ_FAILED",
+        fallback: "fleet_default",
+        operation: "read_hosted_member_assistant_configuration",
+      },
+    );
+    return null;
+  }
+}

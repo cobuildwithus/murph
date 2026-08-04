@@ -11,6 +11,8 @@ export interface RunnerMetaRow {
   active_generation: number;
   active_kind: string | null;
   active_provider_egress_token_hash: string | null;
+  active_custom_inference_envelope: string | null;
+  active_platform_ai_allowed: number | null;
   active_reason: string | null;
   active_runner_container_name: string | null;
   active_started_at: string | null;
@@ -28,6 +30,8 @@ export function createDefaultRunnerMetaRow(userId: string): RunnerMetaRow {
     active_generation: 0,
     active_kind: null,
     active_provider_egress_token_hash: null,
+    active_custom_inference_envelope: null,
+    active_platform_ai_allowed: null,
     active_reason: null,
     active_runner_container_name: null,
     active_started_at: null,

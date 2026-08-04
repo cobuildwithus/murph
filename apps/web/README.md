@@ -54,6 +54,31 @@ workspace-runtime pass, and checkpoints through the web-owned workspace CAS. It 
 opaque encrypted runtime blobs and explicit execution-time callback data, but it is not the
 canonical owner of hosted product facts.
 
+## Health-data withdrawal rollback floor
+
+Deploy the consent-aware Cloudflare Worker before the Web deployment that can
+record explicit `launch.health-data = revoked` events, then promote Web
+immediately. The short Worker-first window is intentionally fail closed for
+runtime admission if old Web does not expose the signed consent callback. Old
+Web cannot create the new withdrawal event through the product flow.
+
+Once the consent-aware Web deployment can record a revocation, both that Web
+artifact and the compatible Worker are hard rollback floors. An older Web build
+does not enforce the persisted revoke at Web-only provider webhooks, scheduled
+sync, messaging, or cross-member shared-data reads; retaining the signed
+callback route protects only Worker runtime admission and cannot make that
+legacy Web consumer safe. Do not independently roll either plane below the
+floor after cutover. Recover with a coordinated forward fix on the compatible
+pair. A separately proposed rollback artifact would need complete proof for
+every Web- and Worker-owned authority reader, not a callback-only compatibility
+shim.
+
+The supported post-cutover matrix is therefore the consent-aware Web with the
+consent-aware Worker. Focused proof covers a revoked Worker runtime admission,
+a revoked Web webhook/sync admission, and a revoked grantor shared-data read.
+Missing legacy grants remain compatible within those current artifacts; they
+are not a reason to restore pre-consent readers.
+
 ## Browser-vault member-proof rollback floor
 
 Successful browser-vault session responses in the `empty` and `not_modified`

@@ -28,6 +28,10 @@ export const CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS = {
     method: "DELETE",
     suffix: "environment-voice/delete",
   },
+  inferenceVerification: {
+    method: "POST",
+    suffix: "inference/verify",
+  },
   mealPhotoStage: {
     method: "POST",
     suffix: "meal-photos/stage",
@@ -39,6 +43,10 @@ export const CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS = {
   runtimeEnsureProcessing: {
     method: "POST",
     suffix: "runtime/ensure-processing",
+  },
+  runtimeHealthDataConsentReconcile: {
+    method: "POST",
+    suffix: "runtime/health-data-consent",
   },
   telegramUsageLimitNotice: {
     method: "POST",
@@ -63,8 +71,26 @@ export function buildCloudflareHostedControlUserStatusPath(userId: string): stri
   return buildCloudflareHostedControlUserRoutePath("status", userId);
 }
 
+export function buildCloudflareHostedControlInferenceVerificationPath(
+  userId: string,
+): string {
+  return buildCloudflareHostedControlUserRoutePath(
+    "inferenceVerification",
+    userId,
+  );
+}
+
 export function buildCloudflareHostedControlRuntimeEnsureProcessingPath(userId: string): string {
   return buildCloudflareHostedControlUserRoutePath("runtimeEnsureProcessing", userId);
+}
+
+export function buildCloudflareHostedControlRuntimeHealthDataConsentPath(
+  userId: string,
+): string {
+  return buildCloudflareHostedControlUserRoutePath(
+    "runtimeHealthDataConsentReconcile",
+    userId,
+  );
 }
 
 export function buildCloudflareHostedControlTelegramUsageLimitNoticePath(userId: string): string {

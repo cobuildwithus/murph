@@ -754,6 +754,7 @@ export function parseAssistantUsageRecord(value: unknown): AssistantUsageRecord 
 
 export function resolveAssistantUsageCredentialSource(input: {
   apiKeyEnv: string | null;
+  credentialSourceHint?: Exclude<AssistantUsageCredentialSource, "unknown"> | null;
   effectiveEnv?: Readonly<Record<string, string | undefined>> | null;
   headers?: Readonly<Record<string, string>> | null;
   provider: string;
@@ -763,6 +764,13 @@ export function resolveAssistantUsageCredentialSource(input: {
     [...input.userEnvKeys].map((key) => normalizeRequiredString(key, "userEnvKey")),
   );
   const effectiveEnv = input.effectiveEnv ?? null;
+
+  if (
+    input.credentialSourceHint === "member"
+    || input.credentialSourceHint === "platform"
+  ) {
+    return input.credentialSourceHint;
+  }
 
   if (hasCredentialLikeAssistantHeaders(input.headers)) {
     return "member";

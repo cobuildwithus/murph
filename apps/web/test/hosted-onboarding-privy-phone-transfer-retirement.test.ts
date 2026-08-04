@@ -40,9 +40,6 @@ vi.mock("@/src/lib/hosted-onboarding/linq-participant-contact", () => ({
 vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
   readHostedPrivyUserByIdIfExists:
     mocks.readHostedPrivyUserByIdIfExists,
-  // Provider users are stubbed as their own resolved identity shape so a
-  // test can state exactly which phone a surviving source still holds.
-  resolveHostedPrivyIdentityFromVerifiedUser: (user: unknown) => user,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/shared", () => ({
@@ -107,8 +104,14 @@ describe("Privy phone-transfer source retirement", () => {
     it("asks the member to wait while the source still holds the phone", async () => {
       stubPhoneOwner();
       mocks.readHostedPrivyUserByIdIfExists.mockResolvedValue({
-        phone: { number: PHONE_NUMBER },
-        userId: SOURCE_PRIVY_USER_ID,
+        id: SOURCE_PRIVY_USER_ID,
+        linkedAccounts: [
+          {
+            latest_verified_at: 1,
+            phone_number: PHONE_NUMBER,
+            type: "phone",
+          },
+        ],
       });
 
       await expect(readProof()).rejects.toMatchObject({
@@ -117,12 +120,25 @@ describe("Privy phone-transfer source retirement", () => {
       });
     });
 
-    it("stops retrying once the source keeps its own sign-in without the phone", async () => {
+    it("stops retrying once the source keeps other sign-ins without the phone", async () => {
       stubPhoneOwner();
       mocks.readHostedPrivyUserByIdIfExists.mockResolvedValue({
-        email: { address: "owner@example.com" },
-        phone: null,
-        userId: SOURCE_PRIVY_USER_ID,
+        id: SOURCE_PRIVY_USER_ID,
+        linkedAccounts: [
+          {
+            address: "owner@example.com",
+            latest_verified_at: 1,
+            type: "email",
+          },
+          {
+            telegram_user_id: "telegram-source-a",
+            type: "telegram",
+          },
+          {
+            telegram_user_id: "telegram-source-b",
+            type: "telegram",
+          },
+        ],
       });
 
       await expect(readProof()).rejects.toMatchObject({

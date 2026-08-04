@@ -40,6 +40,9 @@ import {
 import {
   looksLikePrivateAssistantRoutePlaceholder,
 } from './assistant/current-delivery-route.js'
+import {
+  assistantResponseCardSchema,
+} from './assistant-response-cards.js'
 
 export const assistantSandboxValues = [
   'read-only',
@@ -890,6 +893,7 @@ export const assistantOutboxIntentSchema = z
     reviewedAssistantAskCompletionExpiresAt: isoTimestampSchema.optional(),
     emailHtml: z.string().max(500_000).nullable().optional(),
     media: z.array(assistantResponseMediaSchema).max(40).default([]),
+    card: assistantResponseCardSchema.nullable().default(null),
     subject: z.string().trim().min(1).nullable().default(null),
     operation: assistantOutboxOperationSchema.nullable().default(null),
     dedupeKey: z.string().min(1),
@@ -928,6 +932,30 @@ export const assistantOutboxIntentSchema = z
   })
   .strict()
   .superRefine((intent, context) => {
+    if (intent.card !== null && intent.media.length > 0) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Assistant response cards cannot be combined with response media.',
+        path: ['card'],
+      })
+    }
+
+    if (intent.card !== null && intent.operation !== null) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Assistant response cards require a normal message intent.',
+        path: ['card'],
+      })
+    }
+
+    if (intent.card !== null && intent.threadIsDirect !== true) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Assistant response cards require a private direct conversation.',
+        path: ['card'],
+      })
+    }
+
     if (intent.nativeReplyRequested !== true) {
       return
     }

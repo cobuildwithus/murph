@@ -28,6 +28,36 @@ Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budg
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
+## Health-Data Consent Stop-Target Rollout
+
+Deploy the Cloudflare Worker that retains an exact user-control stop target
+before deploying the Web health-data withdrawal routes, then deploy Web
+immediately. No runner-bundle shape changes, but the Worker changes the meaning
+of an existing Durable Object row: after write authority is cleared,
+`active_runner_container_name` may remain populated until that exact container
+is confirmed destroyed. Withdrawal and account deletion both consume this
+pending-stop pointer before acknowledging their respective cleanup boundary.
+
+After the first such pending-stop row is written, this Worker is a hard
+Cloudflare rollback floor. An older Worker treats the absent active attempt as
+no exact target, derives a container name from its own version, and can erase
+the retained pointer during account deletion while the intended newer runner
+survives.
+
+The consent-aware Web deployment is also a hard rollback floor after it can
+record the first explicit `launch.health-data = revoked` event. Retaining only
+the signed callback route is insufficient: webhook admission, scheduled sync,
+shared-data reads, messaging, and other Web-owned consumers enforce revocation
+inside that Web artifact and do not pass through the Worker callback. After the
+consent-aware Web deployment is live, do not roll either plane below its floor.
+Forward-fix the compatible Web and Worker pair; do not add a callback-only shim,
+dual-read consent state, or a second lifecycle owner.
+
+After deployment, withdraw consent while a runner is active and confirm the
+stored target clears only after destruction succeeds. Also exercise one forced
+container-destroy retry through account deletion and confirm R2 and Durable
+Object deletion remain blocked until the same stored target is destroyed.
+
 ## Database Health Alert Rollout
 
 Before deploying the Worker version that introduces
@@ -151,6 +181,25 @@ remains flat, one selected reply with `---` keeps the same native target on
 every bubble, and one reaction reaches its selected accepted message. Confirm
 no strict outbox parse failures or stale runner fingerprints appear in Workers
 Observability.
+
+## Native iMessage Response-Card Rollout
+
+Deploy the first native response-card release as one Cloudflare Worker and
+runner bundle update with `container_rollout=immediate`. Before allowing card
+traffic, require managed-container smoke to report the exact new runner-bundle
+fingerprint and prove the updated assistant CLI surface. There is no Web
+deployment dependency.
+
+Ordinary outbox records and hosted delivery side effects omit the optional
+`card` field. A new Worker with an old runner is therefore safe for ordinary
+work, although that runner cannot produce cards. The inverse is unsafe after a
+new runner writes or emits a card-bearing record or side effect: do not pair
+that state with an old Worker.
+
+The prior bundle remains a safe rollback only before the first card-bearing
+value exists. After that point, the new bundle is the hard rollback floor for
+workspaces, checkpoints, retained outbox intents, and side effects. Forward-fix
+on that bundle or newer rather than restoring an older reader.
 
 ## Audience-Key Rollout
 
@@ -509,6 +558,36 @@ Rollback in the opposite exposure order: disable the Web flag and redeploy Web
 first, verify new workspace reads omit the Venice override, and only then
 remove the Venice secret or roll Cloudflare back. The nullable stored
 preference may remain; while the flag is off it resolves to OpenAI.
+
+## Custom Inference Activation
+
+Custom inference is reader-first and fail-closed. Apply the additive Web
+database migration and deploy Web storage, verification, workspace projection,
+and signed resolution routes with both `HOSTED_CUSTOM_INFERENCE_ENABLED` and
+`HOSTED_CUSTOM_CHAT_COMPLETIONS_ENABLED` set to `0`. Then deploy Cloudflare and
+the runner bundle with `container_rollout=immediate`, require managed-container
+smoke to report the exact new runner fingerprint, and exercise the native
+Responses synthetic tool/final-response probes through the deployed Worker.
+The verification operation has one 60-second Worker deadline inside the
+75-second Web control timeout; cancellation propagation is covered at the
+Worker stream-adapter boundary instead of claimed as a remote capability.
+The invocation target uses the existing provider-egress signing secret through
+a context-separated key derivation; this release adds no custom-inference
+secret or binding.
+
+After that proof, set `HOSTED_CUSTOM_INFERENCE_ENABLED=1` for the intended Web
+rollout and verify one controlled native Responses connection end to end.
+Enable `HOSTED_CUSTOM_CHAT_COMPLETIONS_ENABLED=1` only after the exact Chat
+adapter conformance suite passes on the deployed candidate. A selected custom
+workspace presented to an incompatible Worker fails closed; it must never
+resolve to OpenAI or Venice.
+
+Rollback begins by preventing new custom selection and explicitly returning
+currently selected members to managed inference. Only after no selected custom
+connection remains may Web disable the main flag or Cloudflare/runner roll below
+the custom-inference contract. Forward-fix the compatible Worker/runner while
+any custom selection is active; an old runtime interpreting an unknown override
+as managed inference is not a supported rollback state.
 
 ## Required GitHub Environment Secrets
 

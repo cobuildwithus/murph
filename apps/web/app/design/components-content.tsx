@@ -2,7 +2,6 @@
 
 import {
   HOSTED_ASSISTANT_OPENAI_PROVIDER,
-  type HostedAssistantProvider,
 } from "@murphai/hosted-execution/assistant-model";
 import { useState } from "react";
 import { CheckCircle2, ContactRound, Monitor } from "lucide-react";
@@ -31,6 +30,7 @@ import {
   WebmailIcon,
 } from "@/src/components/settings/hosted-email-murph-contact-dialog";
 import {
+  HostedPhonePrivyHandOffStatus,
   HostedPhoneLinkAction,
   HostedPhoneLinkCardPresentation,
 } from "@/src/components/settings/hosted-phone-settings";
@@ -45,7 +45,10 @@ import {
 import {
   AssistantProviderDialog,
   AssistantProviderSummary,
+  type AssistantRoutingChoice,
 } from "@/src/components/settings/hosted-assistant-model-settings";
+import { HostedInferenceConnectionPane } from "@/src/components/settings/hosted-inference-connection-settings";
+import { DESIGN_INFERENCE_CONNECTION } from "./design-inference-connection";
 import { HealthDomainCard } from "@/src/components/overview/health-domain-card";
 import { ActiveExperimentBanner } from "@/src/components/overview/active-experiment-banner";
 import { TrialBillingBanner } from "@/src/components/home/trial-billing-banner";
@@ -153,6 +156,8 @@ import {
 } from "../(dashboard)/environment/environment-page-client";
 import type { EnvironmentVoiceScript } from "../(dashboard)/environment/environment-voice-script";
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
+import { DataExportControlStudy } from "./data-export-study";
+import { HealthDataConsentControlStudy } from "./health-data-consent-study";
 
 const DESIGN_ENVIRONMENT_GAP_SCRIPT: EnvironmentVoiceScript = {
   dialogTitle: "Fill the gaps in your report",
@@ -557,7 +562,7 @@ export function ComponentsContent() {
     useState<SegmentedControlDemoValue>("email");
   const [choiceCardValue, setChoiceCardValue] = useState("terra");
   const [providerDialogOpen, setProviderDialogOpen] = useState(false);
-  const [providerValue, setProviderValue] = useState<HostedAssistantProvider>(
+  const [providerValue, setProviderValue] = useState<AssistantRoutingChoice>(
     HOSTED_ASSISTANT_OPENAI_PROVIDER,
   );
   const [addedContactAvatar, setAddedContactAvatar] =
@@ -565,6 +570,8 @@ export function ComponentsContent() {
   const [inlineContactAvatarId, setInlineContactAvatarId] = useState("hooded");
   const [phoneInputCountryCode, setPhoneInputCountryCode] = useState("US");
   const [phoneInputValue, setPhoneInputValue] = useState("");
+  const [phoneTransferSupportDialogOpen, setPhoneTransferSupportDialogOpen] =
+    useState(false);
   const [whoopCompletionPreviewKey, setWhoopCompletionPreviewKey] = useState(0);
   const [whoopCapacityPreviewOpen, setWhoopCapacityPreviewOpen] = useState(false);
   const [whoopCapacityNoContactPreviewOpen, setWhoopCapacityNoContactPreviewOpen] =
@@ -1171,16 +1178,35 @@ export function ComponentsContent() {
             />
           </RadioGroup>
           <AssistantProviderSummary
-            currentProvider={HOSTED_ASSISTANT_OPENAI_PROVIDER}
-            draftProvider={providerValue}
+            connection={DESIGN_INFERENCE_CONNECTION}
+            currentRouting={HOSTED_ASSISTANT_OPENAI_PROVIDER}
+            draftRouting={providerValue}
             onChangeClick={() => setProviderDialogOpen(true)}
           />
           <AssistantProviderDialog
+            chatCompletionsAvailable
+            connection={DESIGN_INFERENCE_CONNECTION}
+            customInferenceAvailable
             onOpenChange={setProviderDialogOpen}
-            onProviderChange={setProviderValue}
+            onRoutingChange={setProviderValue}
             open={providerDialogOpen}
-            provider={providerValue}
+            routing={providerValue}
+            veniceAvailable
           />
+        </Section>
+
+        <Separator />
+
+        <Section title="Custom inference endpoint pane">
+          <div inert>
+            <HostedInferenceConnectionPane
+              chatCompletionsAvailable
+              configurationAvailable={false}
+              connection={null}
+              onConnectionChange={() => {}}
+              selected={false}
+            />
+          </div>
         </Section>
 
         <Separator />
@@ -1690,7 +1716,7 @@ export function ComponentsContent() {
             Settings repairs that projection directly. A declined transfer
             closes quietly, and a failed save retries without reopening Privy.
             Existing phone accounts use the same surface for replacement.
-            Support-required conflicts offer both retry and a direct email
+            Support-required conflicts stop retrying and leave one direct email
             action without putting account identifiers in the message.
             Privacy-safe lifecycle diagnostics observe these states without
             changing any rendered state or action.
@@ -1767,18 +1793,33 @@ export function ComponentsContent() {
           >
             {[
               {
+                disabled: false,
                 errorMessage: null,
                 label: "Resting",
+                showPhoneAction: true,
                 state: "resting",
                 statusMessage: null,
                 statusTone: "neutral" as const,
               },
               {
+                disabled: false,
                 errorMessage: null,
                 label: "Saved status",
+                showPhoneAction: true,
                 state: "status",
                 statusMessage: "Phone saved.",
                 statusTone: "success" as const,
+              },
+              {
+                disabled: true,
+                errorMessage:
+                  "That phone moved from another Murph account that is still active with its own sign-in. Contact support to reconcile it safely.",
+                label: "Support required",
+                showPhoneAction: false,
+                state: "support-required",
+                statusMessage:
+                  "That phone moved from another Murph account that is still active with its own sign-in. Contact support to reconcile it safely.",
+                statusTone: "destructive" as const,
               },
             ].map((preview) => (
               <div
@@ -1792,10 +1833,12 @@ export function ComponentsContent() {
                 <HostedContactChannelChoice
                   phone={
                     <HostedPhoneLinkCardPresentation
+                      disabled={preview.disabled}
                       errorMessage={preview.errorMessage}
                       isChangeFlow={false}
                       isLinking={false}
                       isSyncing={false}
+                      showPhoneAction={preview.showPhoneAction}
                       statusMessage={preview.statusMessage}
                       statusTone={preview.statusTone}
                       onClick={() => {}}
@@ -1807,6 +1850,29 @@ export function ComponentsContent() {
                 />
               </div>
             ))}
+          </div>
+          <div className="space-y-3">
+            <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              Settings support-required dialog
+            </p>
+            <Button
+              variant="outline"
+              onClick={() => setPhoneTransferSupportDialogOpen(true)}
+            >
+              Preview terminal dialog
+            </Button>
+            {phoneTransferSupportDialogOpen
+              ? (
+                  <HostedPhonePrivyHandOffStatus
+                    errorMessage="That phone moved from another Murph account that is still active with its own sign-in. Contact support to reconcile it safely."
+                    isLinking={false}
+                    isRetryAllowed={false}
+                    isSyncing={false}
+                    onAborted={() => setPhoneTransferSupportDialogOpen(false)}
+                    onRetry={() => {}}
+                  />
+                )
+              : null}
           </div>
         </Section>
 
@@ -2223,6 +2289,18 @@ export function ComponentsContent() {
             <ConclusionCard title="Key insights" variant="insight" items={[{ icon: "•", text: "Evening sessions drove sleep gains. Morning sessions showed no benefit." }, { icon: "•", text: "2–3x/week appears sufficient. Skipping one session had no negative impact." }]} />
             <ConclusionCard title="Recommendations" variant="recommendation" items={[{ icon: "→", text: "Continue sauna 2x/week as maintenance." }, { icon: "→", text: "Add cold exposure post-sauna for contrast protocol." }]} />
           </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Health data consent settings">
+          <HealthDataConsentControlStudy />
+        </Section>
+
+        <Separator />
+
+        <Section title="Data export">
+          <DataExportControlStudy />
         </Section>
 
         <Separator />

@@ -220,6 +220,44 @@ describe("hosted device-sync due reconcile sweeper", () => {
     expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("whoop");
   });
 
+  it("treats a consent-withdrawn race as an expected skipped wake", async () => {
+    const logger = buildLogger();
+    const store = buildStore([{
+      connectionId: "dsc_due_1",
+      connectedAt: "2026-05-04T12:00:00.000Z",
+      nextReconcileAt: "2026-05-05T00:00:00.000Z",
+      provider: "whoop",
+      userId: "member_due_1",
+    }]);
+    mocks.appendHostedDeviceSyncScheduledReconcileWake.mockResolvedValueOnce({
+      reason: "health_data_consent_withdrawn",
+      wakeAccepted: false,
+      wakeAppended: false,
+      wakeDuplicate: false,
+      wakeInserted: false,
+    });
+
+    const result = await runHostedDeviceSyncDueReconcileSweeper({
+      logger,
+      store,
+    });
+
+    expect(result).toMatchObject({
+      wakeAccepted: 0,
+      wakeAttempted: 1,
+      wakeFailed: 0,
+      wakeNotAccepted: 1,
+    });
+    expect(logger.info).toHaveBeenCalledWith(
+      "Hosted device-sync due reconcile wake skipped after consent withdrawal.",
+      { reason: "health_data_consent_withdrawn" },
+    );
+    expect(logger.warn).not.toHaveBeenCalledWith(
+      "Hosted device-sync due reconcile sweeper wake was not accepted.",
+      expect.anything(),
+    );
+  });
+
   it("continues the sweep when one scheduled wake throws", async () => {
     const logger = buildLogger();
     const store = buildStore([

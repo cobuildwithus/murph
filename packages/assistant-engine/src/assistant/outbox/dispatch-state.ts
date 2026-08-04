@@ -5,6 +5,7 @@ import {
   type AssistantDeliveryError,
   type AssistantOutboxIntent,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { recordAssistantDiagnosticEvent } from '../diagnostics.js'
 import { withAssistantRuntimeWriteLock } from '../runtime-write-lock.js'
 import { ensureAssistantState } from '../store/persistence.js'
@@ -145,6 +146,73 @@ export async function persistAssistantOutboxIntentDeliveryPendingConfirmation(in
     const persistedIntentValue =
       sanitizeAssistantOutboxIntentForPersistence(persistedIntent)
     await writeJsonFileAtomic(input.intentPath, persistedIntentValue)
+    return persistedIntent
+  })
+}
+
+export async function persistAssistantOutboxIntentLinqAppCardTextFallback(input: {
+  idempotencyKey: string
+  intentPath: string
+  persistedAt: Date
+  sending: AssistantOutboxIntent
+  vault: string
+}): Promise<AssistantOutboxIntent> {
+  return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
+    await ensureAssistantState(paths)
+    const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
+      vault: input.vault,
+    })
+    const originalIdempotencyKey = input.sending.deliveryIdempotencyKey
+    const fallbackIdempotencyKey = input.idempotencyKey.trim()
+    const fallbackIdentityIsValid =
+      originalIdempotencyKey !== null &&
+      (
+        fallbackIdempotencyKey === originalIdempotencyKey ||
+        fallbackIdempotencyKey === `${originalIdempotencyKey}:fallback`
+      )
+    if (!fallbackIdentityIsValid) {
+      throw new VaultCliError(
+        'ASSISTANT_LINQ_APP_CARD_FALLBACK_IDENTITY_INVALID',
+        'The iMessage app-card text fallback identity is invalid.',
+      )
+    }
+    if (
+      current &&
+      current.card === null &&
+      current.deliveryIdempotencyKey === fallbackIdempotencyKey &&
+      assistantOutboxIntentMatchesDispatchOwner(
+        current,
+        input.sending,
+        ['sending'],
+        false,
+      )
+    ) {
+      return current
+    }
+    if (
+      !current ||
+      current.card === null ||
+      !assistantOutboxIntentMatchesDispatchOwner(current, input.sending)
+    ) {
+      throw new VaultCliError(
+        'ASSISTANT_LINQ_APP_CARD_FALLBACK_OWNERSHIP_CHANGED',
+        'The iMessage app-card outbox owner changed before text fallback persistence.',
+        { retryable: true },
+      )
+    }
+
+    const persistedIntent = assistantOutboxIntentSchema.parse(
+      sanitizeAssistantOutboxIntentForPersistence({
+        ...current,
+        card: null,
+        deliveryIdempotencyKey: fallbackIdempotencyKey,
+        updatedAt: input.persistedAt.toISOString(),
+      }),
+    )
+    await writeJsonFileAtomic(
+      input.intentPath,
+      sanitizeAssistantOutboxIntentForPersistence(persistedIntent),
+    )
     return persistedIntent
   })
 }
