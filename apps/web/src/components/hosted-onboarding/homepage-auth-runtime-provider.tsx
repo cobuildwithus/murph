@@ -31,18 +31,16 @@ type WindowWithIdleCallback = typeof window & {
 export function HomepageAuthRuntimeProvider({
   authenticated,
   children,
-  inviteCode,
 }: {
   authenticated: boolean;
   children?: ReactNode;
-  inviteCode?: string;
 }) {
   if (authenticated) {
     return <>{children}</>;
   }
 
   return (
-    <UnauthenticatedHomepageAuthRuntimeProvider inviteCode={inviteCode}>
+    <UnauthenticatedHomepageAuthRuntimeProvider>
       {children}
     </UnauthenticatedHomepageAuthRuntimeProvider>
   );
@@ -50,13 +48,11 @@ export function HomepageAuthRuntimeProvider({
 
 function UnauthenticatedHomepageAuthRuntimeProvider({
   children,
-  inviteCode,
 }: {
   children?: ReactNode;
-  inviteCode?: string;
 }) {
-  const [open, setOpen] = useState(Boolean(inviteCode));
-  const [runtimeRequested, setRuntimeRequested] = useState(Boolean(inviteCode));
+  const [open, setOpen] = useState(false);
+  const [runtimeRequested, setRuntimeRequested] = useState(false);
   const prepareAuth = useCallback(() => {
     setRuntimeRequested(true);
   }, []);
@@ -117,7 +113,6 @@ function UnauthenticatedHomepageAuthRuntimeProvider({
   );
   const dialogProps = {
     autoSendPastedPhoneNumber: true,
-    inviteCode,
     onCompleted: handleAuthCompleted,
     onOpenChange: setOpen,
     open,
