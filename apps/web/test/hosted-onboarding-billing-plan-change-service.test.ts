@@ -120,7 +120,7 @@ describe("upgradeHostedBillingPlan", () => {
         type: "subscription_update_confirm",
       },
       return_url:
-        "https://join.example.test/settings#subscription",
+        "https://join.example.test/settings?planUpdate=canceled#subscription",
     });
   });
 

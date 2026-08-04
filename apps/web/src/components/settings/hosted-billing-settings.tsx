@@ -91,6 +91,7 @@ export function HostedBillingSettings(props: {
   familyState?: "none" | "owner" | "sponsored";
   groupPaymentMethodSaved?: boolean;
   payerMemberId?: string | null;
+  planChangePending?: boolean;
   scheduledBillingEffectiveAt?: Date | null;
   scheduledBillingPlanCode?: unknown;
   showGroupPlan?: boolean;
@@ -319,6 +320,9 @@ export function HostedBillingSettings(props: {
   ];
 
   const planResolved = groupCurrent || pulseCurrent || edgeCurrent || familyCurrent;
+  const visibleCards = props.planChangePending === true
+    ? cards.filter((card) => card.current)
+    : cards;
   const noPlanText =
     props.billingStatus === "active"
       ? "Your subscription is active."
@@ -347,6 +351,7 @@ export function HostedBillingSettings(props: {
         <p className="text-sm text-pretty text-muted-foreground">{noPlanText}</p>
       ) : null}
       <PlanUsageBand
+        planChangePending={props.planChangePending === true}
         pulseTrialBillingContinuationPending={pulseTrialBillingContinuationPending}
         status={props.usageStatus}
         usageTopUpActivePurchase={props.usageTopUpActivePurchase}
@@ -363,17 +368,24 @@ export function HostedBillingSettings(props: {
       <div
         className={cn(
           "grid items-stretch gap-3",
-          props.showGroupPlan === true && !familyCurrent
+          props.planChangePending === true
+            ? "sm:max-w-sm"
+            : props.showGroupPlan === true && !familyCurrent
             ? "sm:grid-cols-2 lg:grid-cols-4"
             : "sm:grid-cols-3",
         )}
       >
-        {cards.map((card) => (
-          <PlanCard key={card.key} card={card} />
+        {visibleCards.map((card) => (
+          <PlanCard
+            key={card.key}
+            card={props.planChangePending === true
+              ? { ...card, action: null }
+              : card}
+          />
         ))}
       </div>
       <div className="flex justify-end">
-        {familyState === "sponsored" ? (
+        {props.planChangePending === true ? null : familyState === "sponsored" ? (
           <p className="text-sm text-muted-foreground">
             Billing is managed by your Family plan owner.
           </p>
@@ -390,6 +402,7 @@ export function HostedBillingSettings(props: {
 }
 
 function PlanUsageBand(props: {
+  planChangePending: boolean;
   pulseTrialBillingContinuationPending: boolean;
   status?: HostedPlanUsageStatus | null;
   usageTopUpActivePurchase?: HostedUsageTopUpActivePurchase | null;
@@ -435,7 +448,9 @@ function PlanUsageBand(props: {
     const action = status.recommendedAction;
     const hasStartAction = action?.kind === "start_pulse";
     const canShowStartAction =
-      hasStartAction && !props.pulseTrialBillingContinuationPending;
+      hasStartAction
+      && !props.planChangePending
+      && !props.pulseTrialBillingContinuationPending;
     return (
       <>
         <div
@@ -509,9 +524,10 @@ function PlanUsageBand(props: {
         {props.usageTopUpOffers.length > 0 || props.usageTopUpActivePurchase
           ? usageTopUpDialog
           : action?.kind === "start_pulse"
+            && !props.planChangePending
             && !props.pulseTrialBillingContinuationPending ? (
           <StartPaidPulseButton>{action.label}</StartPaidPulseButton>
-        ) : action?.kind === "upgrade_edge" ? (
+        ) : action?.kind === "upgrade_edge" && !props.planChangePending ? (
           <UpgradeToEdgeButton
             expectedCurrentPlanCode={
               status.planCode === "launch_group_monthly"

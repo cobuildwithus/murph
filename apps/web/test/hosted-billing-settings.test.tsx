@@ -188,6 +188,39 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, /Manage billing/);
   });
 
+  test("suppresses every plan-changing action while webhook projection is pending", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      canStartFamily: true,
+      canSwitchToGroup: true,
+      canSwitchToPulse: true,
+      canUpgradeToEdge: true,
+      canUpgradeToPulse: true,
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "standard",
+      currentPeriodEnd: new Date("2026-08-27T04:00:00.000Z"),
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+      planChangePending: true,
+      showGroupPlan: true,
+      usageStatus: buildUsageStatus({
+        recommendedAction: {
+          kind: "upgrade_edge",
+          label: "Upgrade from usage",
+          url: "https://example.test/settings#subscription",
+        },
+      }),
+    }));
+
+    assert.match(markup, /Current plan/);
+    assert.doesNotMatch(markup, /<button/);
+    assert.doesNotMatch(markup, /Upgrade from usage|Manage billing/);
+    assert.doesNotMatch(markup, /Everything in Pulse|2 to 6 people, one bill/);
+  });
+
   test("shows the $3.50 Core plan only from the server-authorized catalog", async () => {
     const { HostedBillingSettings } = await import(
       "@/src/components/settings/hosted-billing-settings"
@@ -1829,6 +1862,37 @@ describe("HostedBillingSettings", () => {
     assert.deepEqual(rendered.assign.mock.calls[0], [
       "https://stripe.example.test/portal/session_123",
     ]);
+
+    await rendered.cleanup();
+  });
+
+  test("restores the upgrade action with an accessible error when Stripe handoff fails", async () => {
+    mocks.requestHostedOnboardingJson.mockRejectedValueOnce(
+      new Error("Could not open Stripe. Try again."),
+    );
+
+    const { UpgradeToEdgeButton } = await import(
+      "@/src/components/settings/hosted-plan-upgrade-button"
+    );
+    const rendered = await renderClientComponent(createElement(
+      UpgradeToEdgeButton,
+      { expectedCurrentPlanCode: "launch_monthly" },
+    ));
+
+    await act(async () => {
+      rendered.button.dispatchEvent(new rendered.window.Event("click", {
+        bubbles: true,
+      }));
+      await Promise.resolve();
+    });
+
+    const alert = rendered.window.document.querySelector('[role="alert"]');
+    assert.ok(alert instanceof rendered.window.HTMLElement);
+    assert.match(alert.textContent ?? "", /Could not open Stripe\. Try again\./);
+    assert.equal(rendered.button.disabled, false);
+    assert.match(rendered.button.textContent ?? "", /Upgrade to Edge/);
+    assert.equal(mocks.routerRefresh.mock.calls.length, 0);
+    assert.equal(rendered.assign.mock.calls.length, 0);
 
     await rendered.cleanup();
   });

@@ -3,7 +3,10 @@ import type Stripe from "stripe";
 
 import { getPrisma } from "../prisma";
 import { coerceStripeObjectId } from "./billing";
-import { HOSTED_BILLING_PLAN_CHANGE_RETURN_PARAM } from "./billing-plan-change-contract";
+import {
+  HOSTED_BILLING_PLAN_CHANGE_CANCELED_RETURN_VALUE,
+  HOSTED_BILLING_PLAN_CHANGE_RETURN_PARAM,
+} from "./billing-plan-change-contract";
 import {
   canUpgradeHostedBillingPlan,
   isHostedBillingPlanImmediateUpgrade,
@@ -375,11 +378,16 @@ function assertHostedStripeSubscriptionMatchesCustomer(input: {
 function buildHostedBillingPlanChangeReturnUrls(input: {
   targetPlanCode: HostedBillingPlanCode;
 }): { canceled: string; completed: string } {
-  const canceled = new URL(
+  const settings = new URL(
     "/settings#subscription",
     requireHostedOnboardingPublicBaseUrl(),
   );
-  const completed = new URL(canceled);
+  const canceled = new URL(settings);
+  canceled.searchParams.set(
+    HOSTED_BILLING_PLAN_CHANGE_RETURN_PARAM,
+    HOSTED_BILLING_PLAN_CHANGE_CANCELED_RETURN_VALUE,
+  );
+  const completed = new URL(settings);
   completed.searchParams.set(
     HOSTED_BILLING_PLAN_CHANGE_RETURN_PARAM,
     input.targetPlanCode,

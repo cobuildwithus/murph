@@ -24,7 +24,7 @@ describe("HostedPlanUpdateReturn", () => {
     vi.useRealTimers();
   });
 
-  test("polls the webhook-owned billing projection while the plan is syncing", async () => {
+  test("stops after six polls and restarts only when the member checks again", async () => {
     vi.useFakeTimers();
     const { HostedPlanUpdateReturn } = await import(
       "@/src/components/settings/hosted-plan-update-return"
@@ -38,10 +38,40 @@ describe("HostedPlanUpdateReturn", () => {
     );
 
     assert.match(rendered.container.textContent ?? "", /Activating Edge/);
+    const spinner = rendered.container.querySelector("svg");
+    assert.ok(spinner instanceof rendered.window.SVGElement);
+    assert.match(
+      spinner.getAttribute("class") ?? "",
+      /motion-reduce:animate-none/,
+    );
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_500);
+      });
+    }
+    assert.equal(mocks.routerRefresh.mock.calls.length, 6);
+    assert.match(rendered.container.textContent ?? "", /Your plan is still syncing/);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(9_000);
+    });
+    assert.equal(mocks.routerRefresh.mock.calls.length, 6);
+
+    const checkAgainButton = [...rendered.window.document.querySelectorAll("button")]
+      .find((button) => button.textContent?.includes("Check again"));
+    assert.ok(checkAgainButton instanceof rendered.window.HTMLButtonElement);
+    await act(async () => {
+      checkAgainButton.dispatchEvent(new rendered.window.Event("click", {
+        bubbles: true,
+      }));
+    });
+    assert.equal(mocks.routerRefresh.mock.calls.length, 7);
+    assert.match(rendered.container.textContent ?? "", /Activating Edge/);
+
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_500);
     });
-    assert.equal(mocks.routerRefresh.mock.calls.length, 1);
+    assert.equal(mocks.routerRefresh.mock.calls.length, 8);
 
     await rendered.cleanup();
   });

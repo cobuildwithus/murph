@@ -51,6 +51,10 @@ import {
   HOSTED_START_PAID_PULSE_RETURN_PARAM,
   HOSTED_START_PAID_PULSE_RETURN_VALUE,
 } from "@/src/lib/hosted-onboarding/billing-pulse-trial-continuation-contract";
+import {
+  HOSTED_BILLING_PLAN_CHANGE_CANCELED_RETURN_VALUE,
+  parseHostedBillingPlanChangeReturnValue,
+} from "@/src/lib/hosted-onboarding/billing-plan-change-contract";
 import { hasHostedMemberOwnActiveBilling } from "@/src/lib/hosted-onboarding/entitlement";
 import {
   readHostedFamilyAccessForMember,
@@ -127,6 +131,9 @@ export default async function SettingsPage({
     readFirstSearchParamValue(
       resolvedSearchParams[HOSTED_START_PAID_GROUP_RETURN_PARAM],
     ) === HOSTED_START_PAID_GROUP_RETURN_VALUE;
+  const planChangeReturn = parseHostedBillingPlanChangeReturnValue(
+    readOnlySearchParamValue(resolvedSearchParams.planUpdate),
+  );
   const { authenticated, authenticatedMember, session } =
     await getHostedDashboardPageAuthSnapshot();
   // Stripe sends the payment-method return here unsigned-in when the member
@@ -136,7 +143,11 @@ export default async function SettingsPage({
   const pulseTrialPaymentReturn = readPulseTrialPaymentReturn(resolvedSearchParams);
 
   if (!authenticated) {
-    if (pulseTrialPaymentReturn === null && !groupPaymentMethodSaved) {
+    if (
+      pulseTrialPaymentReturn === null
+      && !groupPaymentMethodSaved
+      && planChangeReturn === null
+    ) {
       redirect("/");
     }
     return <SettingsAuthRequired />;
@@ -146,6 +157,9 @@ export default async function SettingsPage({
   // session-bound cookie, so hand the now-authenticated visitor back to it.
   if (pulseTrialPaymentReturn) {
     redirect(pulseTrialPaymentReturn);
+  }
+  if (planChangeReturn === HOSTED_BILLING_PLAN_CHANGE_CANCELED_RETURN_VALUE) {
+    redirect("/settings#subscription");
   }
 
   const pulseTrialBillingContinuationAction =
@@ -285,14 +299,14 @@ export default async function SettingsPage({
   const currentPlanCode = parseHostedBillingPlanCode(
     billingRef?.currentBillingPlanCode,
   );
-  const planUpdateTarget = parseHostedBillingPlanCode(
-    readOnlySearchParamValue(resolvedSearchParams.planUpdate),
-  );
   const directPlanUpdateTarget =
-    planUpdateTarget === "launch_edge_monthly"
-      || planUpdateTarget === "launch_monthly"
-      ? planUpdateTarget
+    planChangeReturn === "launch_edge_monthly"
+      || planChangeReturn === "launch_monthly"
+      ? planChangeReturn
       : null;
+  const planChangePending =
+    directPlanUpdateTarget !== null
+    && currentPlanCode !== directPlanUpdateTarget;
   const scheduledPlanCode = parseHostedBillingPlanCode(
     billingRef?.scheduledBillingPlanCode,
   );
@@ -454,6 +468,7 @@ export default async function SettingsPage({
           canSwitchToGroup={canSwitchToGroup}
           familyState={activeFamilyOwner ? "owner" : sponsoredMember ? "sponsored" : "none"}
           groupPaymentMethodSaved={groupPaymentMethodSaved}
+          planChangePending={planChangePending}
           pulseTrialBillingContinuationPending={pulseTrialBillingContinuationPending}
           canStartPaidPulse={
             !hasScheduledPlanChange &&
@@ -530,7 +545,7 @@ export default async function SettingsPage({
           AI model
         </div>
         <HostedAssistantModelSettings
-          canUpgradeToEdge={canUpgradeToEdge}
+          canUpgradeToEdge={canUpgradeToEdge && !planChangePending}
           configurationAvailable={account?.assistant?.configurationAvailable === true}
           expectedCurrentPlanCode={
             currentPlanCode === "launch_group_monthly"

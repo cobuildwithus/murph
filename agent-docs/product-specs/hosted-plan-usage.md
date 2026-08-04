@@ -259,6 +259,17 @@ link. Stripe then owns the exact proration, payment collection, payment-method
 recovery, and required authentication. Its successful redirect returns to
 Settings, where a bounded status surface waits for the webhook-owned Postgres
 projection instead of claiming entitlement from the redirect itself. The
+allowlisted success target or cancellation marker stays in the Settings query
+so a Stripe link opened outside the member's signed-in browser can show the
+existing neutral sign-in handoff and resume the exact return URL afterward.
+An authenticated cancellation removes that marker and returns quietly to the
+Subscription section. Unknown, repeated, and Group values do not receive this
+auth-resume behavior. The
+return hint is presentation-only, but while it differs from the authoritative
+projection Settings suppresses every plan-changing control, including usage and
+model upsells, so the member cannot start the same commercial change again.
+Once the projection matches, normal plan controls resume and the return hint is
+removed. The
 assistant sends the Portal URL only after the member's explicit choice. A
 no-action result carries no URL.
 
