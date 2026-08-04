@@ -1,6 +1,8 @@
 import { act, createElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { HostedOnboardingApiError } from "@/src/components/hosted-onboarding/client-api";
+
 import { renderClientComponent } from "./render-client-component";
 
 type LinkAccountCallbacks = {
@@ -860,6 +862,49 @@ describe("HostedPhoneSettings", () => {
     expect(supportLink?.getAttribute("href")).toContain("subject=Help+linking+my+phone");
     expect(supportLink?.getAttribute("href")).not.toContain("privy-user-a");
     expect(mocks.finalizeHostedPhoneLink).not.toHaveBeenCalled();
+  });
+
+  it("offers support without retrying a terminal transferred-source conflict", async () => {
+    mocks.providerPhoneNumber = "+15550100002";
+    mocks.finalizeHostedPhoneLink.mockRejectedValue(new HostedOnboardingApiError({
+      code: "PRIVY_PHONE_TRANSFER_SOURCE_STILL_ACTIVE",
+      message:
+        "That phone moved from another Murph account that is still active with its own sign-in. Contact support to reconcile it safely.",
+      retryable: false,
+    }));
+    const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedPhoneSettings, {
+        initialPhoneNumber: null,
+      }),
+    );
+    cleanupRender = cleanup;
+
+    await act(async () => {
+      findButton(container, "Change phone")?.dispatchEvent(
+        new Event("click", { bubbles: true }),
+      );
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain(
+        "That phone moved from another Murph account",
+      );
+    });
+
+    const phoneButton = findButton(container, "Change phone");
+    expect(phoneButton?.disabled).toBe(true);
+    expect(container.textContent).toContain("Contact support");
+    expect(mocks.finalizeHostedPhoneLink).toHaveBeenCalledTimes(1);
+    expect(mocks.linkPhone).not.toHaveBeenCalled();
+    expect(mocks.updatePhone).not.toHaveBeenCalled();
+
+    await act(async () => {
+      phoneButton?.dispatchEvent(new Event("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(mocks.finalizeHostedPhoneLink).toHaveBeenCalledTimes(1);
   });
 
   it("does not infer an update flow from linked-account projections alone", async () => {

@@ -1687,7 +1687,7 @@ export function ComponentsContent() {
             Settings repairs that projection directly. A declined transfer
             closes quietly, and a failed save retries without reopening Privy.
             Existing phone accounts use the same surface for replacement.
-            Support-required conflicts offer both retry and a direct email
+            Support-required conflicts stop retrying and leave one direct email
             action without putting account identifiers in the message.
             Privacy-safe lifecycle diagnostics observe these states without
             changing any rendered state or action.
@@ -1764,6 +1764,7 @@ export function ComponentsContent() {
           >
             {[
               {
+                disabled: false,
                 errorMessage: null,
                 label: "Resting",
                 state: "resting",
@@ -1771,11 +1772,22 @@ export function ComponentsContent() {
                 statusTone: "neutral" as const,
               },
               {
+                disabled: false,
                 errorMessage: null,
                 label: "Saved status",
                 state: "status",
                 statusMessage: "Phone saved.",
                 statusTone: "success" as const,
+              },
+              {
+                disabled: true,
+                errorMessage:
+                  "That phone moved from another Murph account that is still active with its own sign-in. Contact support to reconcile it safely.",
+                label: "Support required",
+                state: "support-required",
+                statusMessage:
+                  "That phone moved from another Murph account that is still active with its own sign-in. Contact support to reconcile it safely.",
+                statusTone: "destructive" as const,
               },
             ].map((preview) => (
               <div
@@ -1789,6 +1801,7 @@ export function ComponentsContent() {
                 <HostedContactChannelChoice
                   phone={
                     <HostedPhoneLinkCardPresentation
+                      disabled={preview.disabled}
                       errorMessage={preview.errorMessage}
                       isChangeFlow={false}
                       isLinking={false}

@@ -8,6 +8,7 @@ import {
 import { PhoneIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { HostedOnboardingApiError } from "@/src/components/hosted-onboarding/client-api";
 import { finalizeHostedPhoneLink } from "@/src/components/hosted-onboarding/hosted-phone-auth-support";
 import {
   ContactSupportAction,
@@ -47,6 +48,7 @@ export function HostedPhoneSettings(props: {
   const { user: privyUser } = useUser();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLinking, setIsLinking] = useState(false);
+  const [isRetryAllowed, setIsRetryAllowed] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const accountTransferPendingRef = useRef(false);
@@ -167,6 +169,11 @@ export function HostedPhoneSettings(props: {
         reportDiagnostic("sync_succeeded");
       }
     } catch (error) {
+      if (isTerminalHostedPhoneLinkError(error)) {
+        pendingSyncExpectationRef.current = null;
+        pendingSyncOperationRef.current = null;
+        setIsRetryAllowed(false);
+      }
       reportDiagnostic("sync_failed", {
         detailCode: "other",
       });
@@ -278,6 +285,7 @@ export function HostedPhoneSettings(props: {
 
   async function handleLinkPhone() {
     setErrorMessage(null);
+    setIsRetryAllowed(true);
     setSuccessMessage(null);
 
     const pendingExpectation = pendingSyncExpectationRef.current;
@@ -369,6 +377,7 @@ export function HostedPhoneSettings(props: {
       <HostedPhonePrivyHandOffStatus
         errorMessage={errorMessage}
         isLinking={isLinking}
+        isRetryAllowed={isRetryAllowed}
         isSyncing={isSyncing}
         onAborted={props.onAborted}
         onRetry={handleLinkPhone}
@@ -378,7 +387,7 @@ export function HostedPhoneSettings(props: {
 
   return (
     <HostedPhoneLinkCardPresentation
-      disabled={isBusy}
+      disabled={isBusy || !isRetryAllowed}
       errorMessage={errorMessage}
       isChangeFlow={shouldUpdatePhone}
       isLinking={isLinking}
@@ -413,12 +422,14 @@ function HostedPhoneSupportAction({
 function HostedPhonePrivyHandOffStatus({
   errorMessage,
   isLinking,
+  isRetryAllowed,
   isSyncing,
   onAborted,
   onRetry,
 }: {
   errorMessage: string | null;
   isLinking: boolean;
+  isRetryAllowed: boolean;
   isSyncing: boolean;
   onAborted?: () => void;
   onRetry: () => void;
@@ -443,15 +454,19 @@ function HostedPhonePrivyHandOffStatus({
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
-            <Button
-              type="button"
-              size="xl"
-              className="w-full"
-              disabled={isLinking || isSyncing}
-              onClick={onRetry}
-            >
-              Try again
-            </Button>
+            {isRetryAllowed
+              ? (
+                  <Button
+                    type="button"
+                    size="xl"
+                    className="w-full"
+                    disabled={isLinking || isSyncing}
+                    onClick={onRetry}
+                  >
+                    Try again
+                  </Button>
+                )
+              : null}
             <HostedPhoneSupportAction errorMessage={errorMessage} />
           </div>
         </DialogContent>
@@ -565,4 +580,11 @@ function toPhoneLinkErrorMessage(error: unknown): string {
   }
 
   return toErrorMessage(error, "We could not link that phone number.");
+}
+
+function isTerminalHostedPhoneLinkError(error: unknown): boolean {
+  return (
+    error instanceof HostedOnboardingApiError
+    && error.code === "PRIVY_PHONE_TRANSFER_SOURCE_STILL_ACTIVE"
+  );
 }
