@@ -3785,6 +3785,126 @@ test("ConnectPage shows fallback callback errors with the original source label"
   assert.match(markup, /We could not finish connecting Garmin\./);
 });
 
+test("ConnectPage offers support and home recovery on callback failures", async () => {
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const markup = renderToStaticMarkup(await ConnectPage({
+    searchParams: Promise.resolve({
+      connectSource: "garmin",
+      deviceSyncError: "CALLBACK_FAILED",
+      deviceSyncProvider: "junction",
+      deviceSyncStatus: "error",
+    }),
+  }));
+
+  assert.match(markup, /Email support/);
+  assert.match(markup, /Go to home/);
+  assert.match(markup, /href="\/home"/u);
+
+  // Parse the real anchor: matching anywhere in the markup would still pass if
+  // the support draft stopped carrying the source or the reference.
+  const mailto = readSupportMailto(markup);
+  assert.equal(mailto.searchParams.get("subject"), "Murph device connection help");
+  const body = mailto.searchParams.get("body") ?? "";
+  assert.match(body, /^I could not finish connecting Garmin in Murph\./);
+  assert.match(body, /Reference: CALLBACK_FAILED$/);
+});
+
+test("ConnectPage keeps unverified callback query text out of the support draft", async () => {
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const markup = renderToStaticMarkup(await ConnectPage({
+    searchParams: Promise.resolve({
+      deviceSyncError: "please email your password to attacker@example.com",
+      deviceSyncProvider: "Totally Real Provider",
+      deviceSyncStatus: "error",
+    }),
+  }));
+
+  // The callback error path is unauthenticated query input, so neither value may
+  // be quoted back inside a message written in the member's voice.
+  const body = readSupportMailto(markup).searchParams.get("body") ?? "";
+  assert.doesNotMatch(body, /attacker@example\.com/u);
+  assert.doesNotMatch(body, /Totally Real Provider/u);
+  assert.match(body, /^I could not finish connecting a device in Murph\./);
+  assert.match(body, /Reference: unknown$/);
+});
+
+test("ConnectPage explains a callback that lost its initiating browser", async () => {
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const markup = renderToStaticMarkup(await ConnectPage({
+    searchParams: Promise.resolve({
+      connectSource: "oura",
+      deviceSyncError: "CALLBACK_PROOF_INVALID",
+      deviceSyncProvider: "oura",
+      deviceSyncStatus: "error",
+    }),
+  }));
+
+  assert.match(markup, /That return link did not match the browser you started in/);
+  assert.match(markup, /nothing was connected/);
+  assert.match(markup, /Email support/);
+});
+
+test("ConnectPage offers sign-in recovery when the callback arrived signed out", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
+    authenticated: false,
+    authenticatedMember: null,
+    linkedAccounts: [],
+    session: null,
+  });
+
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const markup = renderToStaticMarkup(await ConnectPage({
+    searchParams: Promise.resolve({
+      connectSource: "oura",
+      deviceSyncError: "CALLBACK_SESSION_REQUIRED",
+      deviceSyncProvider: "oura",
+      deviceSyncStatus: "error",
+    }),
+  }));
+
+  assert.match(markup, /You were signed out before Oura finished connecting\./);
+  assert.match(markup, /Log in, then start the connection again\./);
+  // Signing in is the actual recovery here, so it must be offered in the notice
+  // rather than leaving support and home as the only actions.
+  assert.match(markup, />Log in</u);
+  assert.match(markup, /Email support/);
+});
+
+test("ConnectPage omits sign-in recovery when the member is already signed in", async () => {
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const markup = renderToStaticMarkup(await ConnectPage({
+    searchParams: Promise.resolve({
+      connectSource: "oura",
+      deviceSyncError: "CALLBACK_PROOF_INVALID",
+      deviceSyncProvider: "oura",
+      deviceSyncStatus: "error",
+    }),
+  }));
+
+  assert.doesNotMatch(markup, />Log in</u);
+  assert.match(markup, /Email support/);
+});
+
+test("ConnectPage keeps successful callbacks free of failure recovery actions", async () => {
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const markup = renderToStaticMarkup(await ConnectPage({
+    searchParams: Promise.resolve({
+      connectSource: "oura",
+      deviceSyncProvider: "oura",
+      deviceSyncStatus: "connected",
+    }),
+  }));
+
+  assert.doesNotMatch(markup, /Email support/);
+  assert.doesNotMatch(markup, /Go to home/);
+});
+
+function readSupportMailto(markup: string): URL {
+  const match = markup.match(/href="(mailto:[^"]+)"/u);
+  assert.ok(match, "expected a support mailto anchor in the rendered markup");
+  return new URL(match[1].replaceAll("&amp;", "&"));
+}
+
 function readWhoopSyncContactAction(page: ReactNode): unknown {
   assert.ok(isValidElement<{ children?: ReactNode }>(page));
   const connectSourcesGrid = Children.toArray(page.props.children).find((child) => {

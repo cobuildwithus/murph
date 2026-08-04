@@ -49,6 +49,21 @@ export type HostedPrivateMediaContentType =
   | "image/png"
   | "image/webp";
 
+export type HostedPrivateMediaExtension = "jpg" | "png" | "webp";
+
+export function hostedPrivateMediaExtensionForContentType(
+  contentType: HostedPrivateMediaContentType,
+): HostedPrivateMediaExtension {
+  switch (contentType) {
+    case "image/jpeg":
+      return "jpg";
+    case "image/png":
+      return "png";
+    case "image/webp":
+      return "webp";
+  }
+}
+
 export interface HostedPrivateMediaPublishInput {
   attemptId: string;
   bytes: Uint8Array;
@@ -186,7 +201,8 @@ export async function stageHostedPrivateMedia(input: {
   }
 
   const url = new URL(
-    `${HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_PATH_PREFIX}${capability}`,
+    `${HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_PATH_PREFIX}${capability}`
+      + `/group-avatar.${hostedPrivateMediaExtensionForContentType(input.contentType)}`,
     deliveryOrigin,
   );
   url.searchParams.set("exp", String(expiresAtUnixSeconds));
@@ -290,16 +306,35 @@ export async function readHostedPrivateMedia(input: {
 
 export function matchHostedPrivateMediaCapabilityPath(
   pathname: string,
-): string | null {
+): {
+  capability: string;
+  extension: HostedPrivateMediaExtension | null;
+} | null {
   if (!pathname.startsWith(HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_PATH_PREFIX)) {
     return null;
   }
-  const capability = pathname.slice(
+  const remainder = pathname.slice(
     HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_PATH_PREFIX.length,
   );
-  return HOSTED_PRIVATE_MEDIA_TOKEN_PATTERN.test(capability)
-    ? capability
-    : null;
+  if (HOSTED_PRIVATE_MEDIA_TOKEN_PATTERN.test(remainder)) {
+    return { capability: remainder, extension: null };
+  }
+  const segments = remainder.split("/");
+  if (segments.length !== 2) {
+    return null;
+  }
+  const [capability, filename] = segments;
+  if (!capability || !HOSTED_PRIVATE_MEDIA_TOKEN_PATTERN.test(capability)) {
+    return null;
+  }
+  const match = /^group-avatar\.(jpg|png|webp)$/u.exec(filename ?? "");
+  if (!match) {
+    return null;
+  }
+  return {
+    capability,
+    extension: match[1] as HostedPrivateMediaExtension,
+  };
 }
 
 export function readHostedPrivateMediaCapabilitySecret(

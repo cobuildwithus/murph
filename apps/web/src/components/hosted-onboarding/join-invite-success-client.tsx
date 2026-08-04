@@ -11,6 +11,10 @@ import { JoinInviteEyebrow } from "./join-invite-eyebrow";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 import { isHostedOnboardingPendingStage } from "@/src/lib/hosted-onboarding/stage";
 import { HOSTED_APP_INITIAL_VISIT_HOME_PATH } from "@/src/lib/hosted-onboarding/app-routes";
+import {
+  consumeHostedGroupStartHandoff,
+  HOSTED_GROUP_START_PATH,
+} from "@/src/lib/hosted-groups/group-start-handoff";
 
 import { JOIN_INVITE_ACTIVATION_PENDING_COPY } from "./join-invite-copy";
 import { requestHostedBillingSuccess } from "./client-api";
@@ -131,7 +135,7 @@ export function JoinInviteSuccessClient({
     }
 
     homeRedirectStartedRef.current = true;
-    router.replace(HOSTED_APP_INITIAL_VISIT_HOME_PATH);
+    router.replace(resolveHostedInviteSuccessRedirectPath());
   }, [preview, router, shouldRedirectToHome]);
 
   const href = `/join/${encodeURIComponent(inviteCode)}`;
@@ -226,7 +230,7 @@ export function JoinInviteSuccessClient({
             type="button"
             onClick={() => {
               if (!preview && shouldRedirectToHome) {
-                router.replace(HOSTED_APP_INITIAL_VISIT_HOME_PATH);
+                router.replace(resolveHostedInviteSuccessRedirectPath());
                 return;
               }
 
@@ -354,4 +358,10 @@ function resolveHostedInviteSuccessState(status: HostedInviteStatusPayload): Hos
         variant: "terminal",
       };
   }
+}
+
+function resolveHostedInviteSuccessRedirectPath(): string {
+  return consumeHostedGroupStartHandoff()
+    ? HOSTED_GROUP_START_PATH
+    : HOSTED_APP_INITIAL_VISIT_HOME_PATH;
 }

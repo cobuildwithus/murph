@@ -128,6 +128,7 @@ vi.mock("@/src/components/ui/dialog", async () => {
         children,
         className,
         showCloseButton: _showCloseButton,
+        ...props
       },
       ref,
     ) {
@@ -137,6 +138,7 @@ vi.mock("@/src/components/ui/dialog", async () => {
         ? createElement(
             "div",
             {
+              ...props,
               className,
               "data-slot": "dialog-content",
               ref,
@@ -188,10 +190,16 @@ vi.mock("@/src/components/ui/drawer", () => ({
   DrawerContent: ({
     children,
     className,
+    ...props
   }: HTMLAttributes<HTMLDivElement>) =>
     createElement(
       "div",
-      { className, "data-slot": "drawer-content", role: "dialog" },
+      {
+        ...props,
+        className,
+        "data-slot": "drawer-content",
+        role: "dialog",
+      },
       children,
     ),
   DrawerDescription: (props: HTMLAttributes<HTMLParagraphElement>) =>
@@ -230,7 +238,7 @@ vi.mock("@/src/components/ui/collapsible", () => ({
       "data-default-open": defaultOpen ? "true" : "false",
     }),
   CollapsibleContent: (props: HTMLAttributes<HTMLDivElement>) =>
-    createElement("div", props),
+    createElement("div", { ...props, "data-slot": "collapsible-content" }),
   CollapsibleTrigger: ({
     children,
     render,
@@ -691,6 +699,11 @@ test("keeps the private monthly maximum out of the public sponsorship moment", a
     assert.ok(
       rendered.container.querySelector('[data-default-open="true"]'),
     );
+    const noteContent = rendered.container
+      .querySelector("#group-sponsor-message")
+      ?.closest('[data-slot="collapsible-content"]');
+    assert.ok(noteContent);
+    assert.equal(noteContent.classList.contains("max-md:pb-24"), true);
     const capSlider = rendered.container.querySelector<HTMLElement>(
       '[role="slider"][aria-valuetext="Up to $5 per month"]',
     );
@@ -776,6 +789,7 @@ test("identifies the fixed activation charge in the mobile sponsorship drawer", 
         "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
       customizationAllowed: true,
       initialOpen: true,
+      inert: true,
       mode: "monthly",
       monthlyCapOptions: groupSponsorshipMonthlyCaps(),
       offers: [groupSponsorshipOffers()[0]],
@@ -785,15 +799,110 @@ test("identifies the fixed activation charge in the mobile sponsorship drawer", 
   );
 
   try {
-    assert.ok(
-      rendered.container.querySelector('[data-slot="drawer-content"]'),
+    const drawer = rendered.container.querySelector<HTMLElement>(
+      '[data-slot="drawer-content"]',
     );
+    assert.ok(drawer);
+    assert.equal(drawer.dataset.inert, "true");
     const initialChargeButton = Array.from(
       rendered.container.querySelectorAll<HTMLButtonElement>("button"),
     ).find(
       (button) => button.textContent?.trim() === "Sponsor this chat · $5",
     );
     assert.ok(initialChargeButton);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("keeps mobile monthly payment recovery below the open note fields", async () => {
+  mocks.isMobile.mockReturnValue(true);
+  mocks.requestHostedOnboardingJson.mockRejectedValueOnce(
+    new Error("Payment status unavailable."),
+  );
+  const { GroupSponsorshipDialog } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(GroupSponsorshipDialog, {
+      checkoutUrl:
+        "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
+      customizationAllowed: true,
+      initialOpen: true,
+      mode: "monthly",
+      monthlyCapOptions: groupSponsorshipMonthlyCaps(),
+      offers: [groupSponsorshipOffers()[0]],
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    await clickButton(
+      rendered.container,
+      rendered.window,
+      "Sponsor this chat · $5",
+    );
+
+    const selection = rendered.container.querySelector<HTMLElement>(
+      '[data-slot="usage-top-up-selection"]',
+    );
+    const details = rendered.container.querySelector<HTMLElement>(
+      '[data-slot="group-sponsorship-selection-details"]',
+    );
+    const recovery = Array.from(
+      rendered.container.querySelectorAll<HTMLElement>('[role="alert"]'),
+    ).find((element) =>
+      element.textContent?.includes("We couldn’t confirm this payment yet")
+    );
+    assert.ok(selection);
+    assert.ok(details);
+    assert.ok(recovery);
+    const noteContent = rendered.container
+      .querySelector("#group-sponsor-message")
+      ?.closest('[data-slot="collapsible-content"]');
+    assert.ok(noteContent);
+    assert.equal(noteContent.classList.contains("max-md:pb-24"), false);
+    assert.equal(
+      selection.classList.contains("max-md:min-h-full"),
+      true,
+    );
+    assert.equal(selection.classList.contains("max-md:h-full"), false);
+    assert.equal(details.classList.contains("max-md:min-h-0"), false);
+    const selectionChildren = Array.from(selection.children);
+    assert.ok(
+      selectionChildren.indexOf(details) < selectionChildren.indexOf(recovery),
+    );
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("does not reserve mobile sticky-action space for one-time group contributions", async () => {
+  mocks.isMobile.mockReturnValue(true);
+  const { GroupSponsorshipDialog } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(GroupSponsorshipDialog, {
+      checkoutUrl:
+        "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
+      customizationAllowed: true,
+      initialOpen: true,
+      mode: "one_time",
+      monthlyCapOptions: groupSponsorshipMonthlyCaps(),
+      offers: groupSponsorshipOffers(),
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    const noteContent = rendered.container
+      .querySelector("#group-sponsor-message")
+      ?.closest('[data-slot="collapsible-content"]');
+    assert.ok(noteContent);
+    assert.equal(noteContent.classList.contains("max-md:pb-24"), false);
   } finally {
     await rendered.cleanup();
   }

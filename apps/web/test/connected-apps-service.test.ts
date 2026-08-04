@@ -668,6 +668,126 @@ describe("connected-app service", () => {
     expect(executeFetch).toHaveBeenCalledTimes(2);
   });
 
+  it("delivers a markup-heavy mailbox read that the raw wire ceiling used to discard", async () => {
+    // The provider answers 200 with full HTML envelopes. Judging that payload
+    // on wire size threw away a result that fits the assistant budget once the
+    // markup is stripped, and the assistant reported it as an outage.
+    installPrismaHarness();
+    const envelope = `<!doctype html><html><head><style>${".pad{color:red}".repeat(400)}</style></head>`
+      + `<body><table><tr><td><p>Voucher code: ABC-123</p>`
+      + `<p><a href="https://air.example.com/redeem">Redeem</a></p></td></tr></table></body></html>`;
+    const messages = Array.from({ length: 90 }, (_item, index) => ({
+      messageId: `msg_${index}`,
+      messageText: envelope,
+      subject: `Travel credit ${index}`,
+    }));
+    expect(JSON.stringify({ messages }).length).toBeGreaterThan(512 * 1024);
+
+    const fetchImpl = vi.fn(async (url: string | URL | Request): Promise<Response> => {
+      const parsed = new URL(String(url));
+      if (parsed.pathname === "/api/v3.1/tool_router/session") {
+        return jsonResponse({ session_id: "trs_member" });
+      }
+      if (parsed.pathname === "/api/v3.1/tool_router/session/trs_member/search") {
+        return jsonResponse({ messages });
+      }
+      throw new Error(`Unexpected Composio request ${String(url)}`);
+    });
+
+    const result = await executeHostedConnectedAppsRequest({
+      fetchImpl,
+      memberId: "hbm_member",
+      request: { input: { query: "travel credit" }, operation: "search" },
+    }) as { messages: { messageText: string }[] };
+
+    expect(result.messages).toHaveLength(messages.length);
+    // The voucher code and its link survive; the markup that made the payload
+    // exceed the wire ceiling does not.
+    expect(result.messages[0]!.messageText).toContain("Voucher code: ABC-123");
+    expect(result.messages[0]!.messageText).toContain("Redeem (https://air.example.com/redeem)");
+    expect(result.messages[0]!.messageText).not.toMatch(/<\/?(html|body|table|style|p|a)\b/iu);
+  });
+
+  it("asks for a narrower request when a result stays oversized after compaction", async () => {
+    installPrismaHarness();
+    const fetchImpl = vi.fn(async (url: string | URL | Request): Promise<Response> => {
+      const parsed = new URL(String(url));
+      if (parsed.pathname === "/api/v3.1/tool_router/session") {
+        return jsonResponse({ session_id: "trs_member" });
+      }
+      if (parsed.pathname === "/api/v3.1/tool_router/session/trs_member/search") {
+        return jsonResponse({ note: "x".repeat(200_000) });
+      }
+      throw new Error(`Unexpected Composio request ${String(url)}`);
+    });
+
+    await expect(executeHostedConnectedAppsRequest({
+      fetchImpl,
+      memberId: "hbm_member",
+      request: { input: { query: "everything" }, operation: "search" },
+    })).rejects.toMatchObject({
+      code: "CONNECTED_APPS_RESULT_TOO_LARGE",
+      httpStatus: 413,
+    });
+  });
+
+  it("classifies a provider body too large to read as a narrowable request", async () => {
+    // The provider answers 200 and the body is simply beyond what the tier can
+    // buffer. Reporting that as an outage is what produced the false diagnosis.
+    installPrismaHarness();
+    const fetchImpl = vi.fn(async (url: string | URL | Request): Promise<Response> => {
+      const parsed = new URL(String(url));
+      if (parsed.pathname === "/api/v3.1/tool_router/session") {
+        return jsonResponse({ session_id: "trs_member" });
+      }
+      if (parsed.pathname === "/api/v3.1/tool_router/session/trs_member/search") {
+        return new Response(`{"data":"${"x".repeat(5 * 1024 * 1024)}"}`, {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        });
+      }
+      throw new Error(`Unexpected Composio request ${String(url)}`);
+    });
+
+    await expect(executeHostedConnectedAppsRequest({
+      fetchImpl,
+      memberId: "hbm_member",
+      request: { input: { query: "everything" }, operation: "search" },
+    })).rejects.toMatchObject({
+      code: "CONNECTED_APPS_RESULT_TOO_LARGE",
+      httpStatus: 413,
+    });
+  });
+
+  it("keeps a malformed provider body retryable", async () => {
+    // Invalid JSON arrives on a 200 with nothing about the request to blame, so
+    // the assistant must not be told that repeating the call cannot work.
+    installPrismaHarness();
+    const fetchImpl = vi.fn(async (url: string | URL | Request): Promise<Response> => {
+      const parsed = new URL(String(url));
+      if (parsed.pathname === "/api/v3.1/tool_router/session") {
+        return jsonResponse({ session_id: "trs_member" });
+      }
+      if (parsed.pathname === "/api/v3.1/tool_router/session/trs_member/search") {
+        return new Response("{ truncated", {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        });
+      }
+      throw new Error(`Unexpected Composio request ${String(url)}`);
+    });
+
+    await expect(executeHostedConnectedAppsRequest({
+      fetchImpl,
+      memberId: "hbm_member",
+      request: { input: { query: "travel credit" }, operation: "search" },
+    })).rejects.toMatchObject({
+      code: "CONNECTED_APPS_PROVIDER_UNAVAILABLE",
+      httpStatus: 503,
+      retryable: true,
+    });
+  });
+
   it("executes OpenWeather through Composio with the server-held API key", async () => {
     vi.stubEnv("OPENWEATHER_API_KEY", "openweather-test-key");
     installPrismaHarness();

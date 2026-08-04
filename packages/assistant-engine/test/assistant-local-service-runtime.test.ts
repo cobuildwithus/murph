@@ -29,7 +29,11 @@ import type {
   AssistantNoReplyDisposition,
   AssistantProviderUsage,
 } from '../src/assistant/providers/types.ts'
-import { upsertAssistantInputEvent } from '../src/assistant/input-store.ts'
+import {
+  readAssistantInputEvent,
+  upsertAssistantInputEvent,
+} from '../src/assistant/input-store.ts'
+import { createStoreBackedAssistantInputSource } from '../src/assistant/input-source.ts'
 import { resolveAssistantConversationKey } from '../src/assistant/bindings.ts'
 import {
   ASSISTANT_IMAGE_RESPONSE_TRANSCRIPT_MARKER,
@@ -276,7 +280,7 @@ test('sendAssistantMessageLocal delivers an exact approval URL without persistin
 
 test('sendAssistantMessageLocal replies safely without starting the provider for an unverified external audience', async () => {
   const safetyResponse =
-    "I couldn't verify whether this is a private or group conversation, so I can't safely use account context here yet. Please try again in your private chat with Murph."
+    "I couldn't verify whether this is a private or group conversation, so I can't safely use account context here yet. Please try again in your private chat with Murph. If you're reporting a Murph product problem, you can also email support@withmurph.ai directly."
   const session = createAssistantSession({
     binding: {
       actorId: 'stored-direct-actor',
@@ -339,6 +343,7 @@ test('sendAssistantMessageLocal replies safely without starting the provider for
   })
 
   expect(result.response).toBe(safetyResponse)
+  expect(result.response).toContain('support@withmurph.ai')
   expect(result.delivery).toEqual(expect.objectContaining({
     target: 'external-thread',
   }))
@@ -1314,15 +1319,23 @@ test('sendAssistantMessageLocal retains valid group preceding replies and resolv
   })
   providerRelease.resolve()
 
-  const [initialResult, steeredResult, secondSteeredResult] = await Promise.all([
+  const [initialResult, steeredResult, secondSteeredOutcome] = await Promise.all([
     initialResultPromise,
     steeredResultPromise,
-    secondSteeredResultPromise,
+    secondSteeredResultPromise.then(
+      (result) => ({ result, status: 'fulfilled' as const }),
+      (error: unknown) => ({ error, status: 'rejected' as const }),
+    ),
   ])
 
   expect(initialResult.response).toBe('Retained answer.')
   expect(steeredResult.response).toBe('Retained answer.')
-  expect(secondSteeredResult.response).toBe('Retained answer.')
+  expect(secondSteeredOutcome.status).toBe('rejected')
+  if (secondSteeredOutcome.status === 'rejected') {
+    expect(secondSteeredOutcome.error).toMatchObject({
+      code: 'ASSISTANT_ACTIVE_TURN_NOT_ACTIVE',
+    })
+  }
   expect(mocks.deliverAssistantPrecedingReplies.mock.calls[0]?.[0]?.segments)
     .toEqual([
       expect.objectContaining({
@@ -2780,6 +2793,256 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
   assert.equal(steeredResult.response, 'final after late input')
 })
 
+test('sendAssistantMessageLocal leaves an acknowledged uncovered steer pending after provider success', async () => {
+  const context = await createTempVaultContext(
+    'assistant-local-service-uncovered-steer-',
+  )
+  tempRoots.push(context.parentRoot)
+  const session = createAssistantSession({
+    binding: {
+      actorId: null,
+      channel: 'telegram',
+      conversationKey: 'channel:telegram|identity:identity-1|thread:thread-1',
+      delivery: {
+        kind: 'thread',
+        target: 'thread-1',
+      },
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      threadIsDirect: false,
+    },
+  })
+  const initialInput = await upsertAssistantInputEvent({
+    vault: context.vaultRoot,
+    now: new Date('2026-04-22T10:00:00.000Z'),
+    event: {
+      content: {
+        attachmentDescriptors: [],
+        text: 'Initial durable request',
+      },
+      conversation: {
+        accountId: 'acct_1',
+        actorId: 'actor_1',
+        actorIsSelf: false,
+        source: 'telegram',
+        threadId: 'thread-1',
+        threadIsDirect: false,
+      },
+      occurredAt: '2026-04-22T10:00:00.000Z',
+      receivedAt: '2026-04-22T10:00:00.000Z',
+      replyTarget: {
+        channel: 'telegram',
+        messageId: 'message-initial',
+        threadId: 'thread-1',
+      },
+      sourceRef: createHostedMailboxSourceRef({
+        eventId: 'evt_uncovered_steer_initial',
+        laneSeq: '1',
+      }),
+    },
+  })
+  const uncoveredInput = await upsertAssistantInputEvent({
+    vault: context.vaultRoot,
+    now: new Date('2026-04-22T10:00:01.000Z'),
+    event: {
+      content: {
+        attachmentDescriptors: [],
+        text: 'Late durable follow up',
+      },
+      conversation: {
+        accountId: 'acct_1',
+        actorId: 'actor_1',
+        actorIsSelf: false,
+        source: 'telegram',
+        threadId: 'thread-1',
+        threadIsDirect: false,
+      },
+      occurredAt: '2026-04-22T10:00:01.000Z',
+      receivedAt: '2026-04-22T10:00:01.000Z',
+      replyTarget: {
+        channel: 'telegram',
+        messageId: 'message-late',
+        threadId: 'thread-1',
+      },
+      sourceRef: createHostedMailboxSourceRef({
+        eventId: 'evt_uncovered_steer_late',
+        laneSeq: '2',
+      }),
+    },
+  })
+  const providerStarted = createDeferred<void>()
+  const finishProviderResult = createDeferred<void>()
+  const admissionClosed = createDeferred<void>()
+  const steerStarted = createDeferred<void>()
+  const releaseSteer = createDeferred<void>()
+  const steerSettled = createDeferred<void>()
+  const liveSteeredPrompts: string[] = []
+  const activeTurnInput = vi.fn<AssistantActiveTurnInputAdmissionHook>(
+    async (input) => {
+      if (input.knownInputIds?.includes(uncoveredInput.inputId)) {
+        return {
+          kind: 'no-new-input',
+        }
+      }
+      if (activeTurnInput.mock.calls.length === 1) {
+        return {
+          kind: 'no-new-input',
+        }
+      }
+      expect(input.availableInputIds).toEqual([uncoveredInput.inputId])
+      return {
+        acceptedInputs: [
+          {
+            contentRef: {
+              kind: 'assistant-input-event',
+              refId: uncoveredInput.inputId,
+              version: uncoveredInput.schema,
+            },
+            id: uncoveredInput.inputId,
+            promptFallbackReason: 'missing-content-ref',
+            promptFallbackText: 'Late durable follow up',
+            source: 'assistant-input',
+          },
+        ],
+        kind: 'accepted',
+        prompt: 'Late durable follow up',
+        transcriptText: 'Late durable follow up',
+        userMessageContent: [
+          {
+            text: 'Late durable follow up',
+            type: 'text',
+          },
+        ],
+      }
+    },
+  )
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: {
+      ...createSharedPlan(),
+      persistUserPromptOnFailure: false,
+    },
+    realAcceptedInputPersistence: true,
+    session,
+  })
+  const { notifyAssistantActiveTurnInputAvailable } = await import(
+    '../src/assistant/active-turn-input-controller.ts'
+  )
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    await providerInput.onProviderRequestPlanned?.({
+      providerAttemptId: null,
+      codexContinuation: {
+        kind: 'explicit-structured-history',
+      },
+    })
+    const releaseLiveTurn =
+      providerInput.activeTurnSteering?.registerLiveProviderTurn({
+        interrupt: async () => undefined,
+        codexThreadId: 'thread-uncovered-steer',
+        providerTurnId: 'turn-uncovered-steer',
+        sessionId: session.sessionId,
+        steer: async (input) => {
+          liveSteeredPrompts.push(input.prompt)
+          steerStarted.resolve()
+          await releaseSteer.promise
+          steerSettled.resolve()
+        },
+        turnId: 'turn-1',
+      })
+    providerStarted.resolve()
+    await finishProviderResult.promise
+    providerInput.activeTurnSteering?.closeInputAdmission()
+    admissionClosed.resolve()
+    await steerSettled.promise
+    releaseLiveTurn?.()
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        response: 'Answer to the initial durable request',
+        responseDeliveryContextOrdinal: 0,
+        transcriptResponse: 'Answer to the initial durable request',
+        session,
+      },
+    }
+  })
+  const activeTurnCheckpoint = vi.fn(
+    async (_input: AssistantActiveTurnInputCheckpointInput) => undefined,
+  )
+
+  const resultPromise = sendAssistantMessageLocal({
+    acceptedTurnInput: {
+      initialInputs: [
+        {
+          contentRef: {
+            kind: 'assistant-input-event',
+            refId: initialInput.inputId,
+            version: initialInput.schema,
+          },
+          id: initialInput.inputId,
+          source: 'assistant-input',
+        },
+      ],
+    },
+    activeTurnCheckpoint,
+    activeTurnInput,
+    prompt: 'Initial durable request',
+    vault: context.vaultRoot,
+  })
+  await providerStarted.promise
+
+  await notifyAssistantActiveTurnInputAvailable({
+    conversation: {
+      channel: 'telegram',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      directness: 'group',
+    },
+    inputIds: [uncoveredInput.inputId],
+    vault: context.vaultRoot,
+  })
+  await steerStarted.promise
+  expect(liveSteeredPrompts).toEqual(['Late durable follow up'])
+
+  finishProviderResult.resolve()
+  await admissionClosed.promise
+  releaseSteer.resolve()
+
+  await expect(resultPromise).resolves.toMatchObject({
+    prompt: 'Initial durable request',
+    response: 'Answer to the initial durable request',
+  })
+
+  const journal = await readAssistantAcceptedTurnInputJournal(
+    context.vaultRoot,
+    'turn-1',
+  )
+  expect(journal?.inputIds).toEqual([initialInput.inputId])
+  expect(journal?.providerRequests[0]?.acceptedInputIds).toEqual([
+    initialInput.inputId,
+  ])
+  expect(activeTurnCheckpoint).not.toHaveBeenCalled()
+  expect(
+    await readAssistantInputEvent({
+      inputId: uncoveredInput.inputId,
+      vault: context.vaultRoot,
+    }),
+  ).toMatchObject({
+    content: {
+      text: 'Late durable follow up',
+    },
+    inputId: uncoveredInput.inputId,
+  })
+  expect(
+    (await readAssistantTranscriptEntries(
+      resolveAssistantStatePaths(context.vaultRoot),
+      session.sessionId,
+    )).some((entry) => entry.text === 'Late durable follow up'),
+  ).toBe(false)
+})
+
 test('sendAssistantMessageLocal finalizes one provider request when no live input arrives', async () => {
   const session = createAssistantSession({
     resumeState: {
@@ -2970,7 +3233,7 @@ test('sendAssistantMessageLocal updates provider request metadata when final con
   )
 })
 
-test('sendAssistantMessageLocal checkpoints event-backed live steering before hosted tool effects', async () => {
+test('sendAssistantMessageLocal serializes concurrent hosted tool preflights at the provider-visible bound', async () => {
   const context = await createTempVaultContext(
     'assistant-local-service-active-turn-event-steer-',
   )
@@ -3047,46 +3310,88 @@ test('sendAssistantMessageLocal checkpoints event-backed live steering before ho
       }),
     },
   })
+  const uncoveredHostedInput = await upsertAssistantInputEvent({
+    vault: context.vaultRoot,
+    now: new Date('2026-04-22T10:00:02.000Z'),
+    event: {
+      content: {
+        attachmentDescriptors: [],
+        text: 'Acknowledged but uncovered follow up',
+      },
+      conversation: {
+        accountId: 'acct_1',
+        actorId: 'actor_2',
+        actorIsSelf: false,
+        source: 'telegram',
+        threadId: 'thread-1',
+        threadIsDirect: false,
+      },
+      occurredAt: '2026-04-22T10:00:01.000Z',
+      receivedAt: '2026-04-22T10:00:01.000Z',
+      replyTarget: {
+        channel: 'telegram',
+        messageId: 'message-event-steer-uncovered',
+        threadId: 'thread-1',
+      },
+      sourceRef: createHostedMailboxSourceRef({
+        eventId: 'evt_active_turn_event_steer_uncovered',
+        laneSeq: '3',
+      }),
+    },
+  })
   const providerStarted = createDeferred<void>()
   const providerRelease = createDeferred<void>()
   const toolExecutionRequested = createDeferred<void>()
+  const ordinalZeroPreflightChecked = createDeferred<void>()
+  const ordinalOnePreflightRequested = createDeferred<void>()
+  const firstCheckpointStarted = createDeferred<void>()
+  const firstCheckpointRelease = createDeferred<void>()
+  const secondPreflightRequested = createDeferred<void>()
   const toolExecutionCheckpointed = createDeferred<void>()
   const liveSteeredPrompts: string[] = []
   let earlierParticipantAuthorization: { targetInputId: string } | null = null
   let earlierParticipantAuthorizationError: unknown = null
   const activeTurnInput = vi.fn<AssistantActiveTurnInputAdmissionHook>(
     async (input) => {
-      if (input.knownInputIds?.includes(hostedInput.inputId)) {
-        return {
-          kind: 'no-new-input',
-        }
-      }
       if (activeTurnInput.mock.calls.length === 1) {
         return {
           kind: 'no-new-input',
         }
       }
-      expect(input.availableInputIds).toEqual([hostedInput.inputId])
+      const nextInput = [hostedInput, uncoveredHostedInput].find(
+        (candidate) =>
+          input.availableInputIds?.includes(candidate.inputId) === true &&
+          !input.knownInputIds?.includes(candidate.inputId),
+      )
+      if (!nextInput) {
+        return {
+          kind: 'no-new-input',
+        }
+      }
+      const prompt =
+        nextInput.inputId === hostedInput.inputId
+          ? 'Event-backed follow up'
+          : 'Acknowledged but uncovered follow up'
       return {
         acceptedInputs: [
           {
             contentRef: {
               kind: 'assistant-input-event',
-              refId: hostedInput.inputId,
-              version: hostedInput.schema,
+              refId: nextInput.inputId,
+              version: nextInput.schema,
             },
-            id: hostedInput.inputId,
+            id: nextInput.inputId,
             promptFallbackReason: 'missing-content-ref',
-            promptFallbackText: 'Event-backed follow up',
+            promptFallbackText: prompt,
             source: 'assistant-input',
           },
         ],
         kind: 'accepted',
-        prompt: 'Event-backed follow up',
-        transcriptText: 'Event-backed follow up',
+        prompt,
+        transcriptText: prompt,
         userMessageContent: [
           {
-            text: 'Event-backed follow up',
+            text: prompt,
             type: 'text',
           },
         ],
@@ -3103,6 +3408,14 @@ test('sendAssistantMessageLocal checkpoints event-backed live steering before ho
   })
   const { notifyAssistantActiveTurnInputAvailable } = await import(
     '../src/assistant/active-turn-input-controller.ts'
+  )
+  const activeTurnCheckpoint = vi.fn(
+    async (_input: AssistantActiveTurnInputCheckpointInput) => {
+      if (activeTurnCheckpoint.mock.calls.length === 1) {
+        firstCheckpointStarted.resolve()
+        await firstCheckpointRelease.promise
+      }
+    },
   )
   mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
     await providerInput.onProviderRequestPlanned?.({
@@ -3123,7 +3436,18 @@ test('sendAssistantMessageLocal checkpoints event-backed live steering before ho
     })
     providerStarted.resolve()
     await toolExecutionRequested.promise
-    await providerInput.hostedToolContext?.beforeToolExecution?.()
+    await providerInput.hostedToolContext?.beforeToolExecution?.(0)
+    ordinalZeroPreflightChecked.resolve()
+    await ordinalOnePreflightRequested.promise
+    const firstPreflight =
+      providerInput.hostedToolContext?.beforeToolExecution?.(1) ??
+      Promise.resolve()
+    await firstCheckpointStarted.promise
+    const secondPreflight =
+      providerInput.hostedToolContext?.beforeToolExecution?.(1) ??
+      Promise.resolve()
+    secondPreflightRequested.resolve()
+    await Promise.all([firstPreflight, secondPreflight])
     try {
       earlierParticipantAuthorization =
         await providerInput.authorizeAcceptedMessageTarget?.({
@@ -3153,6 +3477,7 @@ test('sendAssistantMessageLocal checkpoints event-backed live steering before ho
   })
 
   const resultPromise = sendAssistantMessageLocal({
+    activeTurnCheckpoint,
     acceptedTurnInput: {
       initialInputs: [
         {
@@ -3191,7 +3516,37 @@ test('sendAssistantMessageLocal checkpoints event-backed live steering before ho
   await vi.waitFor(() => {
     expect(liveSteeredPrompts).toEqual(['Event-backed follow up'])
   })
+  await notifyAssistantActiveTurnInputAvailable({
+    conversation: {
+      channel: 'telegram',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      directness: 'group',
+    },
+    inputIds: [uncoveredHostedInput.inputId],
+    vault: context.vaultRoot,
+  })
+  await vi.waitFor(() => {
+    expect(liveSteeredPrompts).toEqual([
+      'Event-backed follow up',
+      'Acknowledged but uncovered follow up',
+    ])
+  })
   toolExecutionRequested.resolve()
+  await ordinalZeroPreflightChecked.promise
+
+  const journalBeforeCoveredToolRequest =
+    await readAssistantAcceptedTurnInputJournal(
+      context.vaultRoot,
+      'turn-1',
+    )
+  expect(
+    journalBeforeCoveredToolRequest?.providerRequests[0]?.acceptedInputIds,
+  ).toEqual([earlierHostedInput.inputId])
+
+  ordinalOnePreflightRequested.resolve()
+  await secondPreflightRequested.promise
+  firstCheckpointRelease.resolve()
   await toolExecutionCheckpointed.promise
 
   const journalBeforeToolEffect = await readAssistantAcceptedTurnInputJournal(
@@ -3213,7 +3568,8 @@ test('sendAssistantMessageLocal checkpoints event-backed live steering before ho
     targetInputId: earlierHostedInput.inputId,
   })
   assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 1)
-  assert.equal(activeTurnInput.mock.calls.length, 2)
+  assert.equal(activeTurnInput.mock.calls.length, 3)
+  expect(activeTurnCheckpoint).toHaveBeenCalledTimes(1)
   const journal = await readAssistantAcceptedTurnInputJournal(
     context.vaultRoot,
     'turn-1',
@@ -3227,6 +3583,30 @@ test('sendAssistantMessageLocal checkpoints event-backed live steering before ho
     earlierHostedInput.inputId,
     hostedInput.inputId,
   ])
+  expect(journal?.inputIds).not.toContain(uncoveredHostedInput.inputId)
+  expect(activeTurnCheckpoint).toHaveBeenCalledWith(
+    expect.objectContaining({
+      acceptedInputIds: [
+        earlierHostedInput.inputId,
+        hostedInput.inputId,
+      ],
+    }),
+  )
+  expect(
+    (await readAssistantTranscriptEntries(
+      resolveAssistantStatePaths(context.vaultRoot),
+      session.sessionId,
+    )).map((entry) => entry.text),
+  ).not.toContain('Acknowledged but uncovered follow up')
+  const nextTurnCandidates =
+    await createStoreBackedAssistantInputSource({
+      vault: context.vaultRoot,
+    }).listInputCandidates({
+      knownInputIds: journal?.inputIds ?? [],
+      limit: 10,
+    })
+  expect(nextTurnCandidates.inputs.map((candidate) => candidate.event.inputId))
+    .toEqual([uncoveredHostedInput.inputId])
 })
 
 test('sendAssistantMessageLocal attributes required progress after real live steering to the same provider request', async () => {
@@ -3379,6 +3759,7 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
     await providerInput.progressDelivery?.send(
       'Checking the live-steered follow up.',
       {
+        deliveryContextOrdinal: 1,
         required: true,
         source: 'system',
       },

@@ -41,7 +41,7 @@ describe("hosted product feedback record route", () => {
     });
   });
 
-  it("authenticates the callback and records bounded feedback", async () => {
+  it("links ordinary bounded feedback to the authenticated member", async () => {
     const feedback = {
       idempotencyKey: "a".repeat(64),
       kind: "feature_interest",
@@ -71,6 +71,32 @@ describe("hosted product feedback record route", () => {
     await expect(response.json()).resolves.toEqual({
       feedbackId: "product_feedback_123",
       recorded: true,
+    });
+  });
+
+  it("keeps explicit support escalation attribution on the same boundary", async () => {
+    const feedback = {
+      idempotencyKey: "b".repeat(64),
+      kind: "frustration",
+      relatedChangelogItemIds: [],
+      summary:
+        "Support escalation: a connected source reports success but Murph does not finish the connection.",
+    };
+    const response = await route.POST(
+      new Request(
+        "https://join.example.test/api/internal/hosted-execution/product-feedback/record",
+        {
+          body: JSON.stringify({ feedback }),
+          headers: { "content-type": "application/json" },
+          method: "POST",
+        },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.recordHostedProductFeedback).toHaveBeenCalledWith({
+      feedback,
+      memberId: "member_123",
     });
   });
 });

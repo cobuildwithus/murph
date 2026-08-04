@@ -44,6 +44,7 @@ import type {
   AssistantHostedNewsletterTool,
   AssistantHostedPersonalizationTool,
   AssistantHostedPlanUsageTool,
+  AssistantPhysicalNotePort,
   AssistantHostedPrivateImageUrlPublisher,
   AssistantHostedSubscriptionTool,
   AssistantHostedDeviceTool,
@@ -115,10 +116,11 @@ export interface AssistantHostedToolContext {
   readonly newsletterTool?: AssistantHostedNewsletterTool | null
   readonly personalizationTool?: AssistantHostedPersonalizationTool | null
   readonly planUsageTool?: AssistantHostedPlanUsageTool | null
+  readonly physicalNotes?: AssistantPhysicalNotePort | null
   readonly privateImageUrlPublisher?: AssistantHostedPrivateImageUrlPublisher | null
   readonly subscriptionTool?: AssistantHostedSubscriptionTool | null
   readonly phoneCalls?: AssistantPhoneCallPort | null
-  beforeToolExecution?(): Promise<void>
+  beforeToolExecution?(deliveryContextOrdinal: number): Promise<void>
   currentHostedDeliveryContext(): AssistantHostedDeliveryContext | null
   currentAssistantTarget?(): {
     model: string | null
@@ -163,7 +165,7 @@ type AssistantHostedToolDeliveryContext = {
 export function createAssistantHostedToolContext(input: {
   computerToolsAvailable?: boolean
   executionContext?: AssistantHostedExecutionContext | null
-  beforeToolExecution?: () => Promise<void>
+  beforeToolExecution?: (deliveryContextOrdinal: number) => Promise<void>
   getConversationScope?: () => AssistantConversationScope
   getDeliveryContext?: () => AssistantHostedToolDeliveryContext
   getUserActionAcceptedInputIds?: () => readonly string[]
@@ -276,6 +278,7 @@ export function createAssistantHostedToolContext(input: {
     newsletterTool,
     personalizationTool: executionContext?.personalizationTool ?? null,
     planUsageTool: executionContext?.planUsageTool ?? null,
+    physicalNotes: executionContext?.physicalNotes ?? null,
     privateImageUrlPublisher:
       executionContext?.privateImageUrlPublisher ?? null,
     subscriptionTool: executionContext?.subscriptionTool ?? null,

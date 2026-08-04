@@ -517,6 +517,12 @@ enum HostedPhoneCallStatus {
   failed
 }
 
+enum HostedPhysicalNoteStatus {
+  starting
+  accepted
+  failed
+}
+
 model HostedMember {
   id                             String                          @id
   billingStatus                  HostedBillingStatus             @default(not_started) @map("billing_status")
@@ -596,6 +602,7 @@ model HostedMember {
   computerRuns                   HostedComputerRun[]
   computerHandoffs               HostedComputerHandoff[]
   phoneCalls                     HostedPhoneCall[]
+  physicalNotes                  HostedPhysicalNote[]
   productFeedback                HostedProductFeedback[]
   sensitiveActionChallenges      HostedSensitiveActionChallenge[]
   threadContainer                HostedThreadContainer?          @relation("HostedThreadContainerMember")
@@ -620,12 +627,12 @@ model HostedCodexAuthConnection {
 
 model HostedProductFeedback {
   id                          String       @id
-  memberId                    String       @map("member_id")
+  memberId                    String?      @map("member_id")
   kind                        String
   relatedChangelogItemIdsJson Json         @map("related_changelog_item_ids_json")
   summary                     String?
   createdAt                   DateTime     @default(now()) @map("created_at")
-  member                      HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  member                      HostedMember? @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@index([memberId, createdAt])
   @@index([createdAt, kind], map: "hosted_product_feedback_created_at_kind_idx")
@@ -841,6 +848,27 @@ model HostedPhoneCall {
   @@index([memberId, createdAt])
   @@index([status, updatedAt])
   @@map("hosted_phone_call")
+}
+
+model HostedPhysicalNote {
+  id                       String                   @id
+  memberId                 String                   @map("member_id")
+  requestKey               String                   @map("request_key")
+  requestFingerprint       String                   @map("request_fingerprint")
+  provider                 String                   @default("lob")
+  providerLetterId         String?                  @unique @map("provider_letter_id")
+  status                   HostedPhysicalNoteStatus @default(starting)
+  complimentaryOfferCode   String?                  @map("complimentary_offer_code")
+  providerCostUsdMicros    BigInt                   @map("provider_cost_usd_micros")
+  pricingVersion           String                   @map("pricing_version")
+  acceptedAt               DateTime?                @map("accepted_at")
+  createdAt                DateTime                 @default(now()) @map("created_at")
+  updatedAt                DateTime                 @updatedAt @map("updated_at")
+  member                   HostedMember             @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([memberId, requestKey])
+  @@unique([memberId, complimentaryOfferCode])
+  @@map("hosted_physical_note")
 }
 
 model HostedMemberIdentity {
@@ -1814,6 +1842,12 @@ model HostedLinqLine {
   configuredAt               DateTime? @map("configured_at")
   providerSeenAt             DateTime? @map("provider_seen_at")
   providerPhoneNumberId      String?   @unique @map("provider_phone_number_id")
+  /// Written only when a validated authoritative provider phone-number
+  /// snapshot confirms this row's phone-to-provider-id pairing. Distinct from
+  /// providerSeenAt/providerLastSeenAt, which chat-health and status
+  /// projection also advance, so it is the only trustworthy freshness signal
+  /// for ownership-gated consumers.
+  providerInventoryConfirmedAt DateTime? @map("provider_inventory_confirmed_at")
   providerFirstSeenAt        DateTime? @map("provider_first_seen_at")
   providerLastSeenAt         DateTime? @map("provider_last_seen_at")
   healthStatus               String    @default("unknown") @map("health_status")
@@ -1865,6 +1899,7 @@ model HostedLinqLine {
   @@index([providerServiceStatus])
   @@index([providerReputationStatus])
   @@index([providerLastSeenAt])
+  @@index([providerInventoryConfirmedAt])
   @@index([lastFailedAt])
   @@map("hosted_linq_line")
 }

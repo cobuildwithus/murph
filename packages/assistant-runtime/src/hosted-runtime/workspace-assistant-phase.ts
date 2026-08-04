@@ -40,6 +40,7 @@ import {
   recordHostedMailboxAssistantInputItem,
   readAssistantInputEvent,
   readAssistantOutboxIntent,
+  refreshReminderAvailability,
   refreshAssistantContextSnapshotBestEffort,
   scheduleDeviceActivityTriggeredAutomations,
   upsertAssistantInputEvent,
@@ -64,10 +65,12 @@ import {
   type AutomationRoute,
 } from "@murphai/contracts";
 import {
+  AutomationAvailabilityConflictBlockError,
   patchAutomation,
   reconcileAutomationSupportSeries,
   resolveAutomationUpsertSlug,
   showAutomation,
+  stripAutomationAvailabilityConflictBlock,
   upsertAutomation,
 } from "@murphai/core";
 import {
@@ -1283,7 +1286,6 @@ function createHostedAssistantAutomationTool(input: {
   const currentRoute = automationRouteSchema.parse(
     resolveAssistantDeliveryRouteWithCurrentRoute({}, input.route),
   );
-
   return {
     async request(request, context) {
       context?.signal?.throwIfAborted();
@@ -1348,7 +1350,9 @@ function createHostedAssistantAutomationTool(input: {
             : { assistantTargetOverride: request.assistantTargetOverride }),
           ...(request.automationId ? { automationId: request.automationId } : {}),
           continuityPolicy: request.continuityPolicy ?? "preserve",
-          instructions: request.instructions,
+          instructions: stripHostedAssistantAvailabilityConflictBlock(
+            request.instructions,
+          ),
           route: currentRoute,
           schedule: request.schedule,
           ...(request.slug ? { slug: request.slug } : {}),
@@ -1409,7 +1413,11 @@ function createHostedAssistantAutomationTool(input: {
           : { continuityPolicy: request.continuityPolicy }),
         ...(request.instructions === undefined
           ? {}
-          : { instructions: request.instructions }),
+          : {
+              instructions: stripHostedAssistantAvailabilityConflictBlock(
+                request.instructions,
+              ),
+            }),
         lookup: request.lookup,
         ...(request.retargetToCurrentConversation === true
           ? { route: currentRoute }
@@ -1444,6 +1452,19 @@ function createHostedAssistantAutomationTool(input: {
       });
     },
   };
+}
+
+function stripHostedAssistantAvailabilityConflictBlock(
+  instructions: string,
+): string {
+  try {
+    return stripAutomationAvailabilityConflictBlock(instructions);
+  } catch (error) {
+    if (error instanceof AutomationAvailabilityConflictBlockError) {
+      throw new VaultCliError("invalid_option", error.message);
+    }
+    throw error;
+  }
 }
 
 function assertHostedAutomationSaveRequest(input: {
@@ -1695,6 +1716,7 @@ export async function runHostedWorkspaceAssistantPhase(
           input.runtime.platform.assistantConfigurationToolPort ?? null,
         connectedApps: input.runtime.platform.connectedApps ?? null,
         ...(clinicalRecordsConnectLinkTool ? { clinicalRecordsConnectLinkTool } : {}),
+        physicalNotes: input.runtime.platform.physicalNotes ?? null,
         phoneCalls: input.runtime.platform.phoneCalls ?? null,
         progressDeliveryDependencies: createHostedAssistantProgressDeliveryDependencies({
           effectsPort: input.runtime.platform.effectsPort,
@@ -1771,6 +1793,22 @@ export async function runHostedWorkspaceAssistantPhase(
                     feedback.idempotencyKey,
                     feedback,
                   );
+                },
+                // Support escalations are recorded through the Web callback
+                // inside the turn so the member-facing "queued" confirmation is
+                // backed by a durable record; they never join the best-effort
+                // post-delivery candidate flush.
+                async deliverProductSupportEscalation(
+                  feedback: HostedRuntimeProductFeedbackRecord,
+                ) {
+                  const port = input.runtime.platform.productFeedbackPort;
+                  if (!port) {
+                    throw new Error(
+                      "Hosted product feedback port unavailable for support escalation.",
+                    );
+                  }
+                  const response = await port.recordProductFeedback(feedback);
+                  return { recorded: response.recorded };
                 },
               },
             }
@@ -1901,10 +1939,13 @@ export async function runHostedWorkspaceAssistantPhase(
     const managedAutomationsResult = hasFreshConversationInput
       || systemMailboxMaintenance.pendingAssistantInputWakeAt !== null
       ? null
-      : await applyHostedManagedAutomationsBestEffort({
-        input,
-        retryStableKeyFailure: false,
-      });
+      : mergeHostedAssistantPhaseResults(
+          await applyHostedManagedAutomationsBestEffort({
+            input,
+            retryStableKeyFailure: false,
+          }),
+          await refreshHostedReminderAvailabilityBestEffort({ input }),
+        );
     const shouldContinueAssistantLane = systemMailboxMaintenance.continueAssistantLane
       || managedAutomationsResult !== null;
     if (
@@ -2606,6 +2647,115 @@ function hasFreshHostedMailboxInput(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): boolean {
   return input.initialMailboxImport.importResult.fetchedCount > 0;
+}
+
+async function refreshHostedReminderAvailabilityBestEffort(input: {
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+}): Promise<HostedWorkspaceRunnerAssistantPhaseResult | null> {
+  if (input.input.shouldYieldBackgroundMaintenance?.() === true) {
+    return null;
+  }
+
+  const nowMs = resolveHostedAssistantPhaseNowMs(input.input);
+  const maintenanceSignal = input.input.backgroundMaintenanceSignal
+    ?? input.input.signal
+    ?? null;
+  let result: Awaited<ReturnType<typeof refreshReminderAvailability>>;
+  try {
+    result = await refreshReminderAvailability({
+      connectedApps: input.input.runtime.platform.connectedApps ?? null,
+      now: new Date(nowMs),
+      shouldYield: input.input.shouldYieldBackgroundMaintenance ?? null,
+      signal: maintenanceSignal,
+      vaultRoot: input.input.restored.vaultRoot,
+    });
+  } catch (error) {
+    input.input.signal?.throwIfAborted();
+    if (
+      maintenanceSignal?.aborted
+      && input.input.shouldYieldBackgroundMaintenance?.() === true
+    ) {
+      return {
+        checkpointReason: "assistant_runtime_commit",
+        nextWakeAt: new Date(
+          nowMs + HOSTED_MANAGED_AUTOMATION_SETUP_RETRY_DELAY_MS,
+        ).toISOString(),
+        nextWakeReason: "assistant",
+        progressed: true,
+        redactedStatus: {
+          reminderAvailabilityMaintenanceYielded: true,
+        },
+      };
+    }
+    maintenanceSignal?.throwIfAborted();
+    const failure = buildHostedRuntimeFailureDiagnostics(
+      error,
+      "Hosted reminder availability maintenance failed.",
+      { includeSafeIdentity: true },
+    );
+    await writeHostedRuntimeLogBestEffort({
+      entry: {
+        ...buildHostedRuntimeLogContextFields({
+          attemptId: input.input.request.attemptId,
+          leaseGeneration: input.input.request.leaseGeneration,
+          workspaceVersion: input.input.request.workspaceVersion,
+        }),
+        component: "runtime",
+        errorCode: failure.errorCode,
+        eventCode: "runner.error",
+        level: "warn",
+        phase: "error",
+        redactedJson: {
+          ...failure.redactedJson,
+          reminderAvailabilityMaintenanceFailed: true,
+        },
+      },
+      platform: input.input.runtime.platform,
+    });
+    return null;
+  }
+
+  if (result.failed > 0) {
+    await writeHostedRuntimeLogBestEffort({
+      entry: {
+        ...buildHostedRuntimeLogContextFields({
+          attemptId: input.input.request.attemptId,
+          leaseGeneration: input.input.request.leaseGeneration,
+          workspaceVersion: input.input.request.workspaceVersion,
+        }),
+        component: "runtime",
+        eventCode: "runner.error",
+        level: "warn",
+        phase: "error",
+        redactedJson: {
+          reminderAvailabilityMaintenanceAttempted: result.attempted,
+          reminderAvailabilityMaintenanceFailed: result.failed,
+          reminderAvailabilityMaintenanceRefreshed: result.refreshed,
+        },
+      },
+      platform: input.input.runtime.platform,
+    });
+  }
+  const nextWakeAt = result.yielded === true
+    ? new Date(
+      nowMs + HOSTED_MANAGED_AUTOMATION_SETUP_RETRY_DELAY_MS,
+    ).toISOString()
+    : result.nextRefreshAt;
+  if (result.refreshed === 0 && nextWakeAt === null) {
+    return null;
+  }
+
+  return {
+    checkpointReason: "assistant_runtime_commit",
+    ...(nextWakeAt ? { nextWakeAt, nextWakeReason: "assistant" } : {}),
+    progressed: true,
+    redactedStatus: {
+      reminderAvailabilityMaintenanceAttempted: result.attempted,
+      reminderAvailabilityMaintenanceFailed: result.failed,
+      reminderAvailabilityMaintenanceRefreshed: result.refreshed,
+      reminderAvailabilityMaintenanceYielded: result.yielded === true,
+    },
+  };
 }
 
 async function applyHostedManagedAutomationsBestEffort(input: {

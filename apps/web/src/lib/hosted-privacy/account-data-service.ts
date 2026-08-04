@@ -1,4 +1,5 @@
 import { type HostedBillingStatus, Prisma, type PrismaClient } from "@prisma/client";
+import type Stripe from "stripe";
 
 import { sanitizeHostedRuntimeErrorCode } from "@murphai/device-syncd/hosted-runtime";
 import { isDeviceSyncError } from "@murphai/device-syncd/errors";
@@ -19,9 +20,18 @@ import {
 import { resolveHostedDeviceSyncBrowserProviderLabel } from "../device-sync/provider-label";
 import { acquireHostedWebhookTraceOwnerLockTx } from "../device-sync/webhook-trace-owner-lock";
 import { createHostedPrivyUserLookupKey } from "../hosted-onboarding/contact-privacy";
-import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import {
+  hostedOnboardingError,
+  isHostedOnboardingError,
+} from "../hosted-onboarding/errors";
 import { readHostedMemberStripeBillingRef } from "../hosted-onboarding/hosted-member-billing-store";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
+import {
+  enqueueHostedMemberChannelsUpdatedForActiveMemberTx,
+} from "../hosted-onboarding/member-channel-sync";
+import {
+  reconcileHostedPrivyIdentityOnMemberTx,
+} from "../hosted-onboarding/member-identity-service";
 import { readHostedAccountGroupStripeBillingRef } from "../hosted-onboarding/family-plan";
 import {
   acquireHostedGroupJoinOutreachDrainLockTx,
@@ -39,7 +49,27 @@ import {
   buildHostedLinqInviteSignupEffectIdMemberPrefix,
   parseHostedLinqInviteSignupEffectId,
 } from "../hosted-onboarding/linq-invite-signup-effect-id";
-import { getHostedOnboardingStripe } from "../hosted-onboarding/runtime";
+import {
+  acquireHostedPrivyPhoneTransferPhoneLocksTx,
+  assertHostedPrivyPhoneTransferSourceRetirementFenceTx,
+  HOSTED_PRIVY_PHONE_TRANSFER_RETIREMENT_TRANSACTION_OPTIONS,
+  prepareHostedPrivyPhoneTransferSourceRetirementTx,
+  type HostedPrivyPhoneTransferProof,
+  type HostedPrivyPhoneTransferSourceRetirementProof,
+} from "../hosted-onboarding/privy-phone-transfer-retirement";
+import { readHostedPrivyUserById } from "../hosted-onboarding/privy";
+import { buildHostedPrivySessionState } from "../hosted-onboarding/privy-user";
+import {
+  isHostedPulseTrialSubscriptionForKnownPolicy,
+  retrieveHostedPulseTrialCleanupTarget,
+} from "../hosted-onboarding/pulse-trial-subscription-cleanup";
+import {
+  hasHostedStripeSubscriptionPaymentMethod,
+} from "../hosted-onboarding/stripe-subscription-payment-method";
+import {
+  getHostedOnboardingStripe,
+  requireHostedStripeBillingPlanConfig,
+} from "../hosted-onboarding/runtime";
 import { logHostedStripeFailure } from "../hosted-onboarding/stripe-error-log";
 import { retrieveAndExpireHostedSubscriptionCheckout } from "../hosted-onboarding/subscription-checkout-lifecycle";
 import { listHostedMemberSubscriptionCheckoutSessionIds } from "../hosted-onboarding/subscription-checkout-store";
@@ -48,6 +78,7 @@ import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   lockHostedMemberRow,
 } from "../hosted-onboarding/shared";
+import type { HostedMemberCoreState } from "../hosted-onboarding/hosted-member-store";
 import {
   assertHostedUsageCreditPurchasesReadyForAccountDeletionTx,
   closeHostedUsageCreditPurchasesForAccountDeletion,
@@ -96,6 +127,12 @@ const HOSTED_ACCOUNT_DELETION_SUSPENSION_FENCE_TRANSACTION_OPTIONS = {
   // correlated consequence before suspension crosses the shared drain.
   timeout: 20_000,
 } as const;
+const HOSTED_PRIVY_PHONE_TRANSFER_STRIPE_AUTHORITY_TIMEOUT_MS = 5_000;
+const HOSTED_PRIVY_PHONE_TRANSFER_MIN_TRIAL_REMAINING_SECONDS = 10;
+const HOSTED_PRIVY_PHONE_TRANSFER_STRIPE_AUTHORITY_REQUEST_OPTIONS = {
+  maxNetworkRetries: 0,
+  timeout: HOSTED_PRIVY_PHONE_TRANSFER_STRIPE_AUTHORITY_TIMEOUT_MS,
+} as const satisfies Stripe.RequestOptions;
 
 export interface HostedAccountDataStoreCoverageEntry {
   readonly slug: string;
@@ -274,6 +311,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deletes phone-call rows and encrypted private briefs/results explicitly. Export reports counts only and omits private content and ciphertext.",
   },
   {
+    slug: "prisma.hosted_physical_note",
+    label: "Hosted physical notes",
+    deletion: "live-delete",
+    note: "Deletes bounded Lob request, status, pricing, and provider-reference rows with the hosted member. Postal addresses and artwork are never stored here; mail already accepted by Lob cannot be recalled from Lob or postal carriers.",
+  },
+  {
     slug: "prisma.hosted_runtime_log",
     label: "Legacy primary runtime logs",
     deletion: "live-delete",
@@ -343,7 +386,7 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     slug: "prisma.hosted_product_feedback",
     label: "Hosted product feedback rows",
     deletion: "live-delete",
-    note: "Deletes assistant-captured product feedback rows. Export includes safe kind/summary metadata and optional published changelog item ids while omitting the internal feedback id.",
+    note: "Deletes and exports only explicitly member-linked product feedback rows. Ordinary assistant-captured feedback is de-identified and stored without a member relation, so it cannot be associated with an account export or deletion request.",
   },
   {
     slug: "prisma.hosted_group_join_outreach",
@@ -631,9 +674,27 @@ type DeviceConnectionIdentity = {
 };
 
 type HostedAccountDeletionDatabaseResult = {
+  channelSyncDispatch: Awaited<
+    ReturnType<typeof enqueueHostedMemberChannelsUpdatedForActiveMemberTx>
+  >;
   deletedCounts: HostedAccountDataCounts;
   deletedRuntimeMemberIds: readonly string[];
 };
+
+interface HostedPrivyPhoneTransferAccountDeletionCompletion {
+  retirement: HostedPrivyPhoneTransferSourceRetirementProof;
+  targetMember: HostedMemberCoreState;
+  targetPhoneNumberBeforeTransfer: string | null;
+  targetPrivyUserId: string;
+  transfer: HostedPrivyPhoneTransferProof;
+}
+
+export interface HostedPrivyPhoneTransferAccountDeletionResult {
+  channelSyncDispatch: Awaited<
+    ReturnType<typeof enqueueHostedMemberChannelsUpdatedForActiveMemberTx>
+  >;
+  deletion: HostedAccountDeletionResult;
+}
 
 const HOSTED_ACCOUNT_RETENTION_NOTES = [
   "Messages already delivered to external carrier, Telegram, email, or Linq systems are not recalled from those services.",
@@ -686,6 +747,51 @@ export async function deleteHostedAccountData(input: {
   prisma: PrismaClient;
   request: Request;
 }): Promise<HostedAccountDeletionResult> {
+  const result = await deleteHostedAccountDataInternal({
+    ...input,
+    phoneTransfer: null,
+  });
+  return result.deletion;
+}
+
+export async function deleteHostedPrivyPhoneTransferSourceAccountData(input: {
+  prisma: PrismaClient;
+  request: Request;
+  retirement: HostedPrivyPhoneTransferSourceRetirementProof;
+  targetMember: HostedMemberCoreState;
+  targetPhoneNumberBeforeTransfer: string | null;
+  targetPrivyUserId: string;
+  transfer: HostedPrivyPhoneTransferProof;
+}): Promise<HostedPrivyPhoneTransferAccountDeletionResult> {
+  if (
+    input.retirement.sourceMemberId !== input.transfer.sourceMemberId
+    || input.targetMember.id === input.transfer.sourceMemberId
+    || input.targetPrivyUserId === input.transfer.sourcePrivyUserId
+  ) {
+    throwHostedPrivyPhoneTransferTargetNotReady();
+  }
+  return deleteHostedAccountDataInternal({
+    exitFeedback: null,
+    memberId: input.transfer.sourceMemberId,
+    phoneTransfer: {
+      retirement: input.retirement,
+      targetMember: input.targetMember,
+      targetPhoneNumberBeforeTransfer: input.targetPhoneNumberBeforeTransfer,
+      targetPrivyUserId: input.targetPrivyUserId,
+      transfer: input.transfer,
+    },
+    prisma: input.prisma,
+    request: input.request,
+  });
+}
+
+async function deleteHostedAccountDataInternal(input: {
+  exitFeedback?: HostedAccountExitFeedback | null;
+  memberId: string;
+  phoneTransfer: HostedPrivyPhoneTransferAccountDeletionCompletion | null;
+  prisma: PrismaClient;
+  request: Request;
+}): Promise<HostedPrivyPhoneTransferAccountDeletionResult> {
   const member = await input.prisma.hostedMember.findUnique({
     select: { billingStatus: true, createdAt: true, id: true },
     where: { id: input.memberId },
@@ -773,10 +879,45 @@ export async function deleteHostedAccountData(input: {
     ...connectedAppRevocations,
   ];
   assertProviderRevocationsAllowDeletion(providerRevocations);
+  const phoneTransfer = input.phoneTransfer;
+  const phoneTransferSessionBeforeBillingCleanup = phoneTransfer
+    ? await readHostedPrivyPhoneTransferTargetSession(phoneTransfer)
+    : null;
+  if (phoneTransfer && phoneTransferSessionBeforeBillingCleanup) {
+    // Reclassify immediately before billing cleanup. Stripe can promptly write
+    // the cancellation webhook back to this already-fenced source, so the
+    // final deletion transaction verifies only the immutable transfer fence.
+    const retirementBeforeBillingCleanup = await input.prisma.$transaction(
+      (tx) =>
+        prepareHostedPrivyPhoneTransferSourceRetirementTx({
+          identity: phoneTransferSessionBeforeBillingCleanup.identity,
+          member: phoneTransfer.targetMember,
+          now: deletionStartedAt,
+          prisma: tx,
+          targetPhoneNumberBeforeTransfer:
+            phoneTransfer.targetPhoneNumberBeforeTransfer,
+          transfer: phoneTransfer.transfer,
+        }),
+      HOSTED_PRIVY_PHONE_TRANSFER_RETIREMENT_TRANSACTION_OPTIONS,
+    );
+    if (
+      !isSameHostedPrivyPhoneTransferRetirement(
+        retirementBeforeBillingCleanup,
+        phoneTransfer.retirement,
+      )
+    ) {
+      throwHostedPrivyPhoneTransferTargetNotReady();
+    }
+  }
   // Cancel the subscription before local rows are deleted and fail closed:
   // a deleted account must never keep an active Stripe subscription billing it.
   const stripeSubscription = await cancelHostedStripeSubscriptionsForAccountDeletion({
     memberId: input.memberId,
+    ...(phoneTransfer
+      ? {
+          phoneTransferRetirement: phoneTransfer.retirement,
+        }
+      : {}),
     stripeSubscriptionIds,
   });
   await closeHostedUsageCreditPurchasesForAccountDeletion({
@@ -790,7 +931,32 @@ export async function deleteHostedAccountData(input: {
       prisma: input.prisma,
     });
   }
+  const phoneTransferSession = input.phoneTransfer
+    ? await readHostedPrivyPhoneTransferTargetSession(input.phoneTransfer)
+    : null;
   const databaseDeletion: HostedAccountDeletionDatabaseResult = await input.prisma.$transaction(async (tx) => {
+    if (input.phoneTransfer && phoneTransferSession) {
+      await acquireHostedPrivyPhoneTransferPhoneLocksTx({
+        prisma: tx,
+        targetPhoneNumberBeforeTransfer:
+          input.phoneTransfer.targetPhoneNumberBeforeTransfer,
+        transferPhoneNumber: input.phoneTransfer.transfer.phoneNumber,
+      });
+      for (const memberId of [
+        input.phoneTransfer.targetMember.id,
+        input.phoneTransfer.transfer.sourceMemberId,
+      ].sort()) {
+        await lockHostedMemberRow(tx, memberId);
+      }
+      await assertHostedPrivyPhoneTransferSourceRetirementFenceTx({
+        identity: phoneTransferSession.identity,
+        member: input.phoneTransfer.targetMember,
+        prisma: tx,
+        targetPhoneNumberBeforeTransfer:
+          input.phoneTransfer.targetPhoneNumberBeforeTransfer,
+        transfer: input.phoneTransfer.transfer,
+      });
+    }
     await cancelHostedGroupSponsorshipsForPayerAccountDeletionTx({
       now: deletionStartedAt,
       payerMemberIds: deletionMemberIds,
@@ -892,8 +1058,27 @@ export async function deleteHostedAccountData(input: {
       memberIds: transactionDeletionMemberIds,
       prisma: tx,
     });
+    let channelSyncDispatch: HostedAccountDeletionDatabaseResult["channelSyncDispatch"] =
+      null;
+    if (input.phoneTransfer && phoneTransferSession) {
+      await reconcileHostedPrivyIdentityOnMemberTx({
+        identity: phoneTransferSession.identity,
+        member: input.phoneTransfer.targetMember,
+        now: deletionStartedAt,
+        prisma: tx,
+      });
+      channelSyncDispatch =
+        await enqueueHostedMemberChannelsUpdatedForActiveMemberTx({
+          linkedAccounts: phoneTransferSession.linkedAccounts,
+          memberId: input.phoneTransfer.targetMember.id,
+          occurredAt: deletionStartedAt.toISOString(),
+          prisma: tx,
+          sourceType: "settings.phone.sync",
+        });
+    }
 
     return {
+      channelSyncDispatch,
       deletedCounts,
       deletedRuntimeMemberIds: transactionDeletionMemberIds,
     };
@@ -938,19 +1123,63 @@ export async function deleteHostedAccountData(input: {
     }),
   ));
   return {
-    cleanupPending: cleanup.cleanupPending,
-    cloudflare: cleanup.cloudflare,
-    deletedAt: new Date().toISOString(),
-    deletedCounts,
-    memberId: input.memberId,
-    providerRevocations,
-    retentionNotes: HOSTED_ACCOUNT_RETENTION_NOTES,
-    schema: HOSTED_ACCOUNT_DATA_DELETION_SCHEMA,
-    vendorAccounts: {
-      ...cleanup.vendorAccounts,
-      stripeSubscription,
+    channelSyncDispatch: databaseDeletion.channelSyncDispatch,
+    deletion: {
+      cleanupPending: cleanup.cleanupPending,
+      cloudflare: cleanup.cloudflare,
+      deletedAt: new Date().toISOString(),
+      deletedCounts,
+      memberId: input.memberId,
+      providerRevocations,
+      retentionNotes: HOSTED_ACCOUNT_RETENTION_NOTES,
+      schema: HOSTED_ACCOUNT_DATA_DELETION_SCHEMA,
+      vendorAccounts: {
+        ...cleanup.vendorAccounts,
+        stripeSubscription,
+      },
     },
   };
+}
+
+async function readHostedPrivyPhoneTransferTargetSession(
+  input: HostedPrivyPhoneTransferAccountDeletionCompletion,
+): Promise<ReturnType<typeof buildHostedPrivySessionState>> {
+  const session = buildHostedPrivySessionState(
+    await readHostedPrivyUserById(input.targetPrivyUserId),
+  );
+  if (
+    session.identity.userId !== input.targetPrivyUserId
+    || session.identity.phone?.number !== input.transfer.phoneNumber
+  ) {
+    throwHostedPrivyPhoneTransferTargetNotReady();
+  }
+  return session;
+}
+
+function isSameHostedPrivyPhoneTransferRetirement(
+  current: HostedPrivyPhoneTransferSourceRetirementProof,
+  expected: HostedPrivyPhoneTransferSourceRetirementProof,
+): boolean {
+  return current.sourceMemberId === expected.sourceMemberId
+    && (
+      current.autoTrialBilling === null
+        ? expected.autoTrialBilling === null
+        : expected.autoTrialBilling !== null
+          && current.autoTrialBilling.stripeCustomerId
+            === expected.autoTrialBilling.stripeCustomerId
+          && current.autoTrialBilling.stripeSubscriptionId
+            === expected.autoTrialBilling.stripeSubscriptionId
+    );
+}
+
+function throwHostedPrivyPhoneTransferTargetNotReady(): never {
+  throw hostedOnboardingError({
+    code: "PRIVY_PHONE_NOT_READY",
+    httpStatus: 409,
+    message:
+      "The phone transfer changed while Murph was reconciling it. Try again.",
+    retryable: true,
+  });
 }
 
 /**
@@ -1469,8 +1698,37 @@ async function closeHostedSubscriptionCheckoutsForAccountDeletion(input: {
 
 async function cancelHostedStripeSubscriptionsForAccountDeletion(input: {
   memberId: string;
+  phoneTransferRetirement?: HostedPrivyPhoneTransferSourceRetirementProof;
   stripeSubscriptionIds: readonly string[];
 }): Promise<HostedAccountVendorDeletionResult> {
+  if (input.phoneTransferRetirement) {
+    if (input.phoneTransferRetirement.sourceMemberId !== input.memberId) {
+      throwHostedPrivyPhoneTransferBillingAuthorityChanged();
+    }
+    const autoTrialBilling = input.phoneTransferRetirement.autoTrialBilling;
+    if (autoTrialBilling === null) {
+      if (input.stripeSubscriptionIds.length > 0) {
+        throwHostedPrivyPhoneTransferBillingAuthorityChanged();
+      }
+      return {
+        errorCode: null,
+        status: "skipped_no_record",
+      };
+    }
+    if (
+      input.stripeSubscriptionIds.length !== 1
+      || input.stripeSubscriptionIds[0]
+        !== autoTrialBilling.stripeSubscriptionId
+    ) {
+      throwHostedPrivyPhoneTransferBillingAuthorityChanged();
+    }
+    return cancelHostedPrivyPhoneTransferAutoTrialForAccountDeletion({
+      memberId: input.memberId,
+      stripeCustomerId: autoTrialBilling.stripeCustomerId,
+      stripeSubscriptionId: autoTrialBilling.stripeSubscriptionId,
+    });
+  }
+
   let result: HostedAccountVendorDeletionResult = {
     errorCode: null,
     status: "skipped_no_record",
@@ -1482,6 +1740,180 @@ async function cancelHostedStripeSubscriptionsForAccountDeletion(input: {
     });
   }
   return result;
+}
+
+async function cancelHostedPrivyPhoneTransferAutoTrialForAccountDeletion(input: {
+  memberId: string;
+  stripeCustomerId: string;
+  stripeSubscriptionId: string;
+}): Promise<HostedAccountVendorDeletionResult> {
+  const { priceId, stripe } = requireHostedStripeBillingPlanConfig({
+    billingPlanCode: "launch_monthly",
+  });
+  let subscription: Awaited<
+    ReturnType<typeof retrieveHostedPulseTrialCleanupTarget>
+  >;
+  try {
+    subscription = await retrieveHostedPulseTrialCleanupTarget({
+      expandCustomer: true,
+      expectedCustomerId: input.stripeCustomerId,
+      memberId: input.memberId,
+      priceId,
+      requestOptions:
+        HOSTED_PRIVY_PHONE_TRANSFER_STRIPE_AUTHORITY_REQUEST_OPTIONS,
+      stripe,
+      subscriptionId: input.stripeSubscriptionId,
+    });
+  } catch (error) {
+    if (
+      isHostedOnboardingError(error)
+      && error.code === "HOSTED_PULSE_TRIAL_CLEANUP_TARGET_CHANGED"
+    ) {
+      throwHostedPrivyPhoneTransferBillingAuthorityChanged();
+    }
+    throw error;
+  }
+  if (!subscription) {
+    throwHostedPrivyPhoneTransferBillingAuthorityChanged();
+  }
+  assertHostedPrivyPhoneTransferUnusedStripeSurface({
+    memberId: input.memberId,
+    priceId,
+    stripeCustomerId: input.stripeCustomerId,
+    stripeSubscriptionId: input.stripeSubscriptionId,
+    subscription,
+  });
+  if (subscription.status === "canceled") {
+    assertHostedPrivyPhoneTransferCanceledDuringTrial(subscription);
+    return {
+      errorCode: null,
+      status: "completed",
+    };
+  }
+  if (subscription.status === "incomplete_expired") {
+    return {
+      errorCode: null,
+      status: "completed",
+    };
+  }
+  if (subscription.status !== "trialing") {
+    throwHostedPrivyPhoneTransferBillingAuthorityChanged();
+  }
+  const trialEnd = subscription.trial_end;
+  if (
+    typeof trialEnd !== "number"
+    || !Number.isInteger(trialEnd)
+    || trialEnd <= (
+      Math.floor(Date.now() / 1_000)
+      + HOSTED_PRIVY_PHONE_TRANSFER_MIN_TRIAL_REMAINING_SECONDS
+    )
+  ) {
+    throwHostedPrivyPhoneTransferBillingAuthorityChanged();
+  }
+
+  let canceledSubscription: Awaited<
+    ReturnType<typeof stripe.subscriptions.cancel>
+  >;
+  try {
+    canceledSubscription = await stripe.subscriptions.cancel(
+      input.stripeSubscriptionId,
+      { expand: ["customer"] },
+      HOSTED_PRIVY_PHONE_TRANSFER_STRIPE_AUTHORITY_REQUEST_OPTIONS,
+    );
+  } catch (error) {
+    logHostedStripeFailure({
+      error,
+      operationName: "subscription.cancel.phone-transfer",
+    });
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_STRIPE_SUBSCRIPTION_CANCEL_FAILED",
+      httpStatus: 502,
+      message:
+        "We could not cancel the unused trial while linking your phone. Try again, or contact support if it keeps failing.",
+      retryable: true,
+    });
+  }
+  if (
+    canceledSubscription.status !== "canceled"
+  ) {
+    throwHostedPrivyPhoneTransferBillingAuthorityChanged();
+  }
+  assertHostedPrivyPhoneTransferUnusedStripeSurface({
+    memberId: input.memberId,
+    priceId,
+    stripeCustomerId: input.stripeCustomerId,
+    stripeSubscriptionId: input.stripeSubscriptionId,
+    subscription: canceledSubscription,
+  });
+  assertHostedPrivyPhoneTransferCanceledDuringTrial(canceledSubscription);
+  return {
+    errorCode: null,
+    status: "completed",
+  };
+}
+
+function assertHostedPrivyPhoneTransferUnusedStripeSurface(input: {
+  memberId: string;
+  priceId: string;
+  stripeCustomerId: string;
+  stripeSubscriptionId: string;
+  subscription: Stripe.Subscription;
+}): void {
+  const customer = input.subscription.customer;
+  if (
+    input.subscription.id !== input.stripeSubscriptionId
+    || !customer
+    || typeof customer !== "object"
+    || customer.object !== "customer"
+    || customer.deleted
+    || customer.id !== input.stripeCustomerId
+    || !isHostedPulseTrialSubscriptionForKnownPolicy({
+      memberId: input.memberId,
+      priceId: input.priceId,
+      subscription: input.subscription,
+    })
+    || input.subscription.collection_method !== "charge_automatically"
+    || hasHostedStripeSubscriptionPaymentMethod(input.subscription)
+    || input.subscription.cancel_at !== null
+    || input.subscription.cancel_at_period_end !== false
+    || input.subscription.pending_invoice_item_interval !== null
+    // Stripe itself attaches a pending SetupIntent to every
+    // automatic-collection trial without a payment method, so its presence
+    // is provider scaffolding. A setup intent that ever succeeded sets the
+    // payment method checked above, which stays fail-closed.
+    || input.subscription.pending_update !== null
+    || input.subscription.pause_collection !== null
+    || input.subscription.schedule !== null
+    || input.subscription.trial_settings?.end_behavior.missing_payment_method
+      !== "pause"
+  ) {
+    throwHostedPrivyPhoneTransferBillingAuthorityChanged();
+  }
+}
+
+function assertHostedPrivyPhoneTransferCanceledDuringTrial(
+  subscription: Stripe.Subscription,
+): void {
+  const endedAt = subscription.ended_at;
+  const trialEnd = subscription.trial_end;
+  if (
+    typeof endedAt !== "number"
+    || !Number.isInteger(endedAt)
+    || typeof trialEnd !== "number"
+    || !Number.isInteger(trialEnd)
+    || endedAt > trialEnd
+  ) {
+    throwHostedPrivyPhoneTransferBillingAuthorityChanged();
+  }
+}
+
+function throwHostedPrivyPhoneTransferBillingAuthorityChanged(): never {
+  throw hostedOnboardingError({
+    code: "PRIVY_PHONE_TRANSFER_REQUIRES_SUPPORT",
+    httpStatus: 409,
+    message:
+      "That phone belongs to another Murph account with saved activity. Contact support to reconcile it safely.",
+  });
 }
 
 async function listHostedFamilyBillingRefsOwnedByMember(input: {
@@ -1708,6 +2140,7 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_computer_handoff", await input.prisma.hostedComputerHandoff.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_computer_run", await input.prisma.hostedComputerRun.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_phone_call", await input.prisma.hostedPhoneCall.deleteMany({ where: { memberId: memberIdFilter } }));
+  recordCount("prisma.hosted_physical_note", await input.prisma.hostedPhysicalNote.count({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_member_email_authorization", await input.prisma.hostedMemberEmailAuthorization.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_member_subscription_checkout", await input.prisma.hostedMemberSubscriptionCheckout.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_member_billing_ref", await input.prisma.hostedMemberBillingRef.deleteMany({ where: { memberId: memberIdFilter } }));

@@ -27,6 +27,7 @@ import {
   buildGroupJoinPostAuthReturnPath,
   type GroupJoinPostJoinDestination,
 } from "@/src/lib/hosted-groups/group-join-handoff";
+import { HOSTED_APP_INITIAL_VISIT_HOME_PATH } from "@/src/lib/hosted-onboarding/app-routes";
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
@@ -79,8 +80,10 @@ export function GroupJoinSignInButton(input: {
 
 export function GroupJoinLegalConsentGate({
   initialStatus,
+  notNowHref,
 }: {
   initialStatus: HostedConsentStatus | null;
+  notNowHref: GroupJoinPostJoinDestination;
 }) {
   const router = useRouter();
 
@@ -104,7 +107,7 @@ export function GroupJoinLegalConsentGate({
         source="group-join"
       />
       <Link
-        href="/home"
+        href={notNowHref}
         className="inline-flex min-h-10 items-center justify-center text-center text-xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
       >
         Not now
@@ -205,7 +208,11 @@ export function GroupJoinAcceptForm(props: {
         <p className="text-base font-medium text-foreground">
           {props.alreadyActiveMember ? "Your sharing is updated." : `You're in ${props.groupName}.`}
         </p>
-        {props.postJoinContactOption ? (
+        {/* The initial-visit handoff is one-shot: this auth bound the Privy
+            user, so a later sign-in cannot recreate it. It outranks the
+            usual return-to-messaging-channel handoff. */}
+        {props.postJoinContactOption
+          && props.postJoinDestination !== HOSTED_APP_INITIAL_VISIT_HOME_PATH ? (
           <MurphContactLink
             actionLabel={GROUP_JOIN_RETURN_LABEL}
             className={buttonVariants({ className: "w-full", size: "xl" })}

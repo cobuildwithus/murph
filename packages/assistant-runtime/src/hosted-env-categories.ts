@@ -55,6 +55,7 @@ export const HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES = [
   ...HOSTED_SHARED_DEVICE_SYNC_PLATFORM_ENV_NAMES,
   "CF_PUBLIC_BASE_URL",
   "HOSTED_LOG_FINGERPRINT_SECRET",
+  "HOSTED_PHYSICAL_NOTES_ENABLED",
 ] as const;
 
 // These vars may come from trusted forwarded runtime profiles for legacy/local

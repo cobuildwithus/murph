@@ -331,6 +331,7 @@ test("shared provider runtime env key lists stay aligned with the configured pro
     "STRAVA_WEBHOOK_SIGNING_SECRET",
   ]);
   assert.deepEqual(deviceSyncProviderRuntimeVariableEnvKeys, [
+    "JUNCTION_API_BASE_URL",
     "JUNCTION_ENV",
     "JUNCTION_PROVIDER_FILTER",
     "JUNCTION_PUSH_SOURCE_RECOVERY_ENABLED",

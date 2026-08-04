@@ -3,6 +3,12 @@ import type { Prisma } from "@prisma/client";
 import type { HostedRuntimeAiAccessNoticeCode } from "./member-access";
 
 import {
+  buildHostedLinqGroupSetupUrl,
+  issueHostedLinqGroupEmailRecoveryToken,
+  HOSTED_LINQ_GROUP_EMAIL_RECOVERY_TEMPLATE,
+  HOSTED_LINQ_GROUP_SETUP_TEMPLATE,
+} from "./linq-group-setup";
+import {
   buildHostedGroupAwareInviteUrl,
 } from "../hosted-groups/group-join-invite-link";
 import {
@@ -123,6 +129,58 @@ export function buildIgnoredLinqWebhookPlan(
       ok: true,
       ignored: true,
       reason,
+    },
+  });
+}
+
+export function buildGroupSetupRequiredResponse(input: {
+  chatId: string;
+  messageId: string;
+  occurredAt: string;
+  participantEmail?: string | null;
+  recipientPhone: string;
+  sourceEventId: string;
+}): HostedOnboardingLinqDirectPlan {
+  const desiredSideEffects: HostedLinqMessageSideEffect[] = [
+    createHostedWebhookLinqMessageSideEffect({
+      chatId: input.chatId,
+      occurredAt: input.occurredAt,
+      replyToMessageId: input.messageId,
+      sourceEventId: input.sourceEventId,
+      template: HOSTED_LINQ_GROUP_SETUP_TEMPLATE,
+    }),
+  ];
+
+  const participantEmail = input.participantEmail?.trim() ?? "";
+  if (participantEmail) {
+    desiredSideEffects.push(
+      createHostedWebhookLinqMessageSideEffect({
+        assignedRecipientPhone: input.recipientPhone,
+        occurredAt: input.occurredAt,
+        participantContact: {
+          kind: "email",
+          value: participantEmail,
+        },
+        recoveryToken: issueHostedLinqGroupEmailRecoveryToken({
+          chatId: input.chatId,
+          now: new Date(input.occurredAt),
+          observedAt: input.occurredAt,
+          participantEmail,
+          recipientPhone: input.recipientPhone,
+        }),
+        sourceEventId: input.sourceEventId,
+        template: HOSTED_LINQ_GROUP_EMAIL_RECOVERY_TEMPLATE,
+        threadId: input.chatId,
+      }),
+    );
+  }
+
+  return buildActiveMemberDirectPlan({
+    desiredSideEffects,
+    response: {
+      joinUrl: buildHostedLinqGroupSetupUrl(),
+      ok: true,
+      reason: "sent-group-setup",
     },
   });
 }
@@ -320,6 +378,7 @@ export function buildConversationHomeRedirectResponse(input: {
   homeRecipientPhone: string;
   memberId: string;
   messageId: string;
+  occurredAt: string;
   sourceEventId: string;
 }): HostedOnboardingLinqDirectPlan {
   return buildActiveMemberDirectPlan({
@@ -330,6 +389,7 @@ export function buildConversationHomeRedirectResponse(input: {
         // receipt sends do not depend on routing still being present later.
         homeRecipientPhone: input.homeRecipientPhone,
         memberId: input.memberId,
+        occurredAt: input.occurredAt,
         replyToMessageId: input.messageId,
         sourceEventId: input.sourceEventId,
         template: "conversation_home_redirect",

@@ -44,7 +44,7 @@ const UPDATE_SCRIPT: EnvironmentVoiceScript = {
 test("partial reports offer to fill only what is missing", async () => {
   const rendered = await renderClientComponent(
     createElement(EnvironmentCaptureCard, {
-      contactAction: null,
+      contactOptions: [],
       coverage: 30,
       known: 9,
       script: GAP_SCRIPT,
@@ -65,7 +65,7 @@ test("partial reports offer to fill only what is missing", async () => {
 test("complete reports offer a free-form update instead of more questions", async () => {
   const rendered = await renderClientComponent(
     createElement(EnvironmentCaptureCard, {
-      contactAction: null,
+      contactOptions: [],
       coverage: 100,
       known: 30,
       script: UPDATE_SCRIPT,
@@ -85,7 +85,7 @@ test("complete reports offer a free-form update instead of more questions", asyn
 test("an empty-looking profile still respects previously declined facts", async () => {
   const rendered = await renderClientComponent(
     createElement(EnvironmentEmptyState, {
-      contactAction: null,
+      contactOptions: [],
       script: GAP_SCRIPT,
     }),
     {
@@ -100,6 +100,43 @@ test("an empty-looking profile still respects previously declined facts", async 
     const bodyText = rendered.window.document.body.textContent ?? "";
     assert.match(bodyText, /Continue the walkthrough/);
     assert.doesNotMatch(bodyText, /Start the 2-minute walkthrough/);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("chat instead uses the channel picker when several chat channels are connected", async () => {
+  const rendered = await renderClientComponent(
+    createElement(EnvironmentCaptureCard, {
+      contactOptions: [
+        {
+          href: "sms:+15550100001",
+          kind: "text",
+          label: "Messages",
+        },
+        {
+          href: "https://t.me/withmurph_bot",
+          kind: "telegram",
+          label: "Telegram",
+          rel: "noopener noreferrer",
+          target: "_blank",
+        },
+      ],
+      coverage: 30,
+      known: 9,
+      script: GAP_SCRIPT,
+    }),
+  );
+
+  try {
+    const chatButton = [...rendered.container.querySelectorAll("button")].find(
+      (candidate) => candidate.textContent?.includes("Chat instead"),
+    );
+    assert.ok(chatButton);
+
+    assert.equal(chatButton.tagName, "BUTTON");
+    assert.equal(chatButton.closest("a"), null);
+    assert.equal(rendered.container.querySelector('a[href^="sms:"]'), null);
   } finally {
     await rendered.cleanup();
   }

@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { usePrivy } from "@privy-io/react-auth";
+import { usePrivy, useUser } from "@privy-io/react-auth";
 import { ArrowRightIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
@@ -19,11 +19,21 @@ import type {
   HostedInviteVerificationMode,
 } from "@/src/lib/hosted-onboarding/types";
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
+import {
+  consumeHostedGroupStartHandoff,
+  HOSTED_GROUP_START_PATH,
+} from "@/src/lib/hosted-groups/group-start-handoff";
 
 import { ConsentSkeleton, HostedLegalConsentCard } from "../legal/hosted-legal-consent-card";
+import { useHostedPhoneLinkDiagnostics } from "../settings/hosted-phone-link-diagnostics";
 import { ConnectTelegram } from "../settings/hosted-telegram-settings";
 import { HostedPhoneSettings } from "../settings/hosted-phone-settings";
+import {
+  HostedIdentitySessionLoading,
+  HostedIdentitySessionMismatch,
+} from "../settings/hosted-settings-identity-link-dialog";
 import { requestHostedBillingCheckout } from "./client-api";
+import { HostedContactChannelChoice } from "./hosted-contact-channel-choice";
 import { HostedEmailAuthButton } from "./hosted-email-auth-button";
 import { logoutHostedAppSession } from "./hosted-app-session-client";
 import { HostedInvitePhoneAuth } from "./hosted-invite-phone-auth";
@@ -217,34 +227,80 @@ export function JoinInviteMessagingSetupIsland({
   privySessionMatchesAppSession: boolean;
 }) {
   const router = useRouter();
+  const {
+    authenticated: privyAuthenticated,
+    logout,
+    ready: privyReady,
+  } = usePrivy();
+  const { user } = useUser();
+  const [reauthPending, setReauthPending] = useState(false);
+  const clientIdentityPending =
+    !privyReady || (privyAuthenticated && user === null);
+  const clientSessionMatchesAppSession =
+    authenticated
+    && privyReady
+    && privyAuthenticated
+    && privySessionMatchesAppSession
+    && expectedPrivyUserId !== null
+    && user?.id === expectedPrivyUserId;
+  const createPhoneDiagnosticReporter = useHostedPhoneLinkDiagnostics({
+    appAuthenticated: authenticated,
+    clientUserMatchesExpected: expectedPrivyUserId !== null && user?.id === expectedPrivyUserId,
+    clientUserPresent: Boolean(user?.id),
+    expectedUserPresent: expectedPrivyUserId !== null,
+    operation: user?.phone?.number ? "update" : "link",
+    privyAuthenticated,
+    privyReady,
+    serverSessionMatches: privySessionMatchesAppSession,
+    showLinkForm: true,
+    surface: "join_invite",
+  });
 
   function refresh() {
     router.refresh();
   }
 
+  async function handleSignInAgain() {
+    setReauthPending(true);
+
+    try {
+      await logoutHostedAppSession({ logoutPrivy: logout });
+      router.refresh();
+    } finally {
+      setReauthPending(false);
+    }
+  }
+
+  if (clientIdentityPending) {
+    return <HostedIdentitySessionLoading />;
+  }
+
+  if (!clientSessionMatchesAppSession) {
+    return (
+      <HostedIdentitySessionMismatch
+        disabled={reauthPending}
+        onSignInAgain={handleSignInAgain}
+        pending={reauthPending}
+      />
+    );
+  }
+
   return (
-    <div className="space-y-5">
-      <HostedPhoneSettings
-        authenticated={authenticated}
-        autoOpen
-        expectedPrivyUserId={expectedPrivyUserId}
-        initialPhoneNumber={null}
-        onLinked={refresh}
-        privySessionMatchesAppSession={privySessionMatchesAppSession}
-      />
-
-      <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
-        <span className="h-px flex-1 bg-border" />
-        OR
-        <span className="h-px flex-1 bg-border" />
-      </div>
-
-      <ConnectTelegram
-        authenticated={authenticated && privySessionMatchesAppSession}
-        initialTelegramAccount={initialTelegramAccount}
-        onSynced={refresh}
-      />
-    </div>
+    <HostedContactChannelChoice
+      phone={
+        <HostedPhoneSettings
+          diagnosticReporterFactory={createPhoneDiagnosticReporter}
+          onLinked={refresh}
+        />
+      }
+      telegram={
+        <ConnectTelegram
+          authenticated={clientSessionMatchesAppSession}
+          initialTelegramAccount={initialTelegramAccount}
+          onSynced={refresh}
+        />
+      }
+    />
   );
 }
 
@@ -346,7 +402,11 @@ export function JoinInviteCheckoutPlanButtonIsland({
     checkoutOutcomeRef.current = null;
     if (!outcome) return;
     if (outcome.kind === "alreadyActive") {
-      router.refresh();
+      if (consumeHostedGroupStartHandoff()) {
+        router.replace(HOSTED_GROUP_START_PATH);
+      } else {
+        router.refresh();
+      }
       return;
     }
 

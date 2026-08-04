@@ -358,7 +358,7 @@ describe("Composio connected-app client", () => {
       const encoder = new TextEncoder();
       return new Response(new ReadableStream<Uint8Array>({
         start(controller) {
-          controller.enqueue(encoder.encode(`{"data":"${"x".repeat(600 * 1024)}"}`));
+          controller.enqueue(encoder.encode(`{"data":"${"x".repeat(5 * 1024 * 1024)}"}`));
           controller.close();
         },
       }), {
