@@ -19,7 +19,18 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Apply patch
-        run: python3 .github/scripts/apply-explicit-signup-referral-links.py
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 .github/scripts/apply-explicit-signup-referral-links.py 2>&1 | tee patch.log
+
+      - name: Upload patch log on failure
+        if: failure()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: explicit-signup-referral-patch-log
+          path: patch.log
+          retention-days: 1
 
       - name: Check patch whitespace
         run: git diff --check
