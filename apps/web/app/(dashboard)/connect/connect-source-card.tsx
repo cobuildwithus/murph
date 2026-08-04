@@ -3,7 +3,10 @@ import Image from "next/image";
 import { AuthButton } from "@/src/components/ui/auth-button";
 import { Button } from "@/src/components/ui/button";
 
-import type { ConnectSource } from "./connect-page-types";
+import type {
+  ConnectSource,
+  ConnectSourceSetupGuideId,
+} from "./connect-page-types";
 
 export function SourceCard({
   authenticated,
@@ -12,6 +15,7 @@ export function SourceCard({
   pendingDisconnect,
   source,
   onDisconnectTargetChange,
+  onSetupGuideOpen,
   onStartConnection,
 }: {
   authenticated: boolean;
@@ -20,8 +24,11 @@ export function SourceCard({
   pendingDisconnect: boolean;
   source: ConnectSource;
   onDisconnectTargetChange: (source: ConnectSource | null) => void;
+  onSetupGuideOpen?: (setupGuideId: ConnectSourceSetupGuideId) => void;
   onStartConnection: (source: ConnectSource) => Promise<void>;
 }) {
+  const setupGuideActionLabel = source.setupGuideActionLabel;
+  const setupGuideId = source.setupGuideId;
   const isAvailable = Boolean(source.connectTarget);
   const canStart = authenticated && isAvailable;
   const canDisconnect = authenticated && Boolean(source.disconnectConnectionId);
@@ -156,6 +163,16 @@ export function SourceCard({
                 aria-label={`${source.unavailableActionLabel} for ${source.name}`}
               >
                 {source.unavailableActionLabel}
+              </Button>
+            ) : setupGuideId && setupGuideActionLabel ? (
+              <Button
+                type="button"
+                disabled={!onSetupGuideOpen}
+                aria-label={`${setupGuideActionLabel} for ${source.name}`}
+                onClick={() => onSetupGuideOpen?.(setupGuideId)}
+                className="self-end"
+              >
+                {setupGuideActionLabel}
               </Button>
             ) : !authenticated ? (
               <AuthButton

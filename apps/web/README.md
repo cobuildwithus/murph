@@ -142,6 +142,14 @@ Routes and pages that only need connect-target metadata should use the narrower
 `@murphai/device-syncd/connect-config` entrypoint so builds do not pull provider
 runtime factories into static analysis.
 
+The `/connect` catalog may also expose an explicitly guided relay without
+pretending it is a hosted provider account. Zepp/Amazfit uses that path: its
+card explains how to share supported data into Apple Health and then connect
+Apple Health in the native Murph app. It must not create a Zepp provider row,
+claim direct Zepp cloud access, or promise historical backfill. The
+conversation handoff reuses Murph's existing contact routing and runtime voice
+memo tool.
+
 ## Device-sync wake epoch rollout
 
 Connection-scoped `device-sync.wake` items carry the connection row's

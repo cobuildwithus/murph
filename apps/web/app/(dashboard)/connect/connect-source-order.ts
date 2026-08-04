@@ -10,6 +10,7 @@ const CONNECT_SOURCE_POPULARITY_ORDER = [
   "apple-health",
   "samsung-health",
   "garmin",
+  "zepp",
   "fitbit",
   "google-fit",
   "strava",

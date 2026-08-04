@@ -5,6 +5,8 @@ export type LogoAsset = {
   width: number;
 };
 
+export type ConnectSourceSetupGuideId = "zepp-apple-health";
+
 export type ConnectSource = {
   connectionAvailable?: boolean;
   connectProvider?: string;
@@ -20,6 +22,8 @@ export type ConnectSource = {
   name: string;
   recoveryKind?: "connection_reset";
   requiresReconnect?: boolean;
+  setupGuideActionLabel?: string;
+  setupGuideId?: ConnectSourceSetupGuideId;
   unavailableActionLabel?: string;
   unavailableActionUrl?: string;
   unavailableMessage?: string;
