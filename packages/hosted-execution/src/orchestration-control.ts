@@ -48,6 +48,7 @@ export const HOSTED_RUNTIME_RECONCILIATION_BLOCKED_REASONS = [
   "ai_usage_denied",
   "ai_usage_gate_unavailable",
   "automation_engagement_paused",
+  "health_data_consent_withdrawn",
   "hosted_runtime_not_configured",
   "user_not_active",
 ] as const;

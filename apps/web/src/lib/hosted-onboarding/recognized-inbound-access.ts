@@ -105,7 +105,12 @@ export async function resolveHostedRecognizedInboundAccess(input: {
 function resolveHostedRecognizedInboundNoticeReason(
   code: HostedRuntimeAiAccessNoticeCode,
 ): string {
-  return code === "trial_conversion_pending"
-    ? "sent-trial-conversion-notice"
-    : "sent-billing-inactive-notice";
+  switch (code) {
+    case "health_data_consent_withdrawn":
+      return "sent-health-data-consent-withdrawn-notice";
+    case "trial_conversion_pending":
+      return "sent-trial-conversion-notice";
+    case "billing_inactive":
+      return "sent-billing-inactive-notice";
+  }
 }

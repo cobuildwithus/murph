@@ -6,6 +6,11 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  resolveHostedExecutionRunnerContainerName,
+  type HostedExecutionContainerNamespaceLike,
+  type HostedExecutionContainerStubLike,
+} from "../src/runner-container.js";
+import {
   hostedBundleUserPrefix,
   hostedMealPhotoUserPrefix,
   hostedPrivateMediaUserPrefix,
@@ -122,6 +127,74 @@ describe("hosted runner user data cleanup", () => {
     });
     expect(bucket.objects.has(stagedMediaKey)).toBe(false);
     expect(bucket.objects.has(unrelatedKey)).toBe(true);
+    expect(stateStore.deleteStateCallCount).toBe(1);
+    expect(durable.deleteAllCount).toBe(1);
+  });
+
+  it("retries the retained prior-version runner target before deleting user data", async () => {
+    const priorRunnerContainerName = `${USER_ID}--v-current`;
+    const rollbackRunnerContainerName = resolveHostedExecutionRunnerContainerName({
+      source: { CF_VERSION_METADATA: { id: "rollback" } },
+      userId: USER_ID,
+    });
+    expect(rollbackRunnerContainerName).not.toBe(priorRunnerContainerName);
+
+    const durable = createDurableObjectHarness();
+    const stateStore = createDeletionStateStore({
+      activeAttemptId: "attempt_active",
+      runnerContainerName: priorRunnerContainerName,
+    });
+    const bucket = new ListableMemoryEncryptedR2Bucket();
+    const requestedRunnerContainerNames: string[] = [];
+    const rollbackDestroyInstance = vi.fn(async () => {});
+    const priorDestroyInstance = vi.fn(async () => {
+      if (priorDestroyInstance.mock.calls.length === 1) {
+        throw new Error("prior runner destroy failed");
+      }
+    });
+    const runnerContainerNamespace: HostedExecutionContainerNamespaceLike = {
+      getByName(name) {
+        requestedRunnerContainerNames.push(name);
+        return createDestroyOnlyRunnerContainerStub(
+          name === priorRunnerContainerName
+            ? priorDestroyInstance
+            : rollbackDestroyInstance,
+        );
+      },
+    };
+    const request = {
+      buckets: { destination: bucket, source: bucket },
+      runnerContainerNamespace,
+      runnerRuntimeEnvSource: {
+        CF_VERSION_METADATA: { id: "current" },
+      },
+      state: durable.state,
+      stateStore,
+      userId: USER_ID,
+    };
+
+    await expect(deleteHostedRunnerUserData(request)).rejects.toThrow(
+      "container cleanup failed before user data deletion",
+    );
+    expect(requestedRunnerContainerNames).toEqual([priorRunnerContainerName]);
+    expect(stateStore.runnerContainerName).toBe(priorRunnerContainerName);
+    expect(stateStore.deleteStateCallCount).toBe(0);
+    expect(durable.deleteAllCount).toBe(0);
+
+    await expect(deleteHostedRunnerUserData(request)).resolves.toMatchObject({
+      durableObject: {
+        deleteAllCompleted: true,
+        stateDeleted: true,
+      },
+      ok: true,
+    });
+    expect(requestedRunnerContainerNames).toEqual([
+      priorRunnerContainerName,
+      priorRunnerContainerName,
+    ]);
+    expect(priorDestroyInstance).toHaveBeenCalledTimes(2);
+    expect(rollbackDestroyInstance).not.toHaveBeenCalled();
+    expect(stateStore.runnerContainerName).toBeNull();
     expect(stateStore.deleteStateCallCount).toBe(1);
     expect(durable.deleteAllCount).toBe(1);
   });
@@ -570,26 +643,39 @@ describe("hosted runner user data cleanup", () => {
 });
 
 function createDeletionStateStore(input: {
+  activeAttemptId?: string | null;
   deleted?: boolean;
+  runnerContainerName?: string | null;
 } = {}): {
   assertStateForUser(userId: string): Promise<void>;
-  clearWriteFenceForUserDeletion(userId: string): Promise<{
+  clearWriteFenceForUserControl(userId: string): Promise<{
     attemptId: string | null;
     cleared: boolean;
+    runnerContainerName: string | null;
   }>;
   deleteStateCallCount: number;
   deleteStateForUser(userId: string): Promise<{ deleted: boolean }>;
+  readonly runnerContainerName: string | null;
 } {
+  let activeAttemptId = input.activeAttemptId ?? null;
   let deleteStateCallCount = 0;
+  let runnerContainerName = input.runnerContainerName ?? null;
   return {
     async assertStateForUser(userId) {
       expect(userId).toBe(USER_ID);
     },
-    async clearWriteFenceForUserDeletion(userId) {
+    async clearWriteFenceForUserControl(userId) {
       expect(userId).toBe(USER_ID);
+      const attemptId = activeAttemptId;
+      const cleared = attemptId !== null;
+      if (cleared) {
+        activeAttemptId = null;
+        runnerContainerName ??= userId;
+      }
       return {
-        attemptId: null,
-        cleared: false,
+        attemptId,
+        cleared,
+        runnerContainerName,
       };
     },
     get deleteStateCallCount() {
@@ -598,7 +684,36 @@ function createDeletionStateStore(input: {
     async deleteStateForUser(userId) {
       expect(userId).toBe(USER_ID);
       deleteStateCallCount += 1;
-      return { deleted: input.deleted ?? true };
+      const deleted = input.deleted ?? true;
+      if (deleted) {
+        runnerContainerName = null;
+      }
+      return { deleted };
+    },
+    get runnerContainerName() {
+      return runnerContainerName;
+    },
+  };
+}
+
+function createDestroyOnlyRunnerContainerStub(
+  destroyInstance: () => Promise<void>,
+): HostedExecutionContainerStubLike {
+  return {
+    destroyInstance,
+    async invoke() {
+      return {
+        nextWakeAt: null,
+        status: "idle",
+      };
+    },
+    async smokeHealth() {
+      return {
+        ok: true,
+        runnerBundle: null,
+        service: "runner",
+        status: 200,
+      };
     },
   };
 }

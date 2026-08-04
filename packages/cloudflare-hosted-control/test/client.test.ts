@@ -36,6 +36,7 @@ describe("createCloudflareHostedControlClient", () => {
       "deleteUserData",
       "ensureRuntimeProcessing",
       "getRunnerStatus",
+      "reconcileRuntimeHealthDataConsent",
       "sendTelegramUsageLimitNotice",
       "stageEnvironmentVoice",
       "stageMealPhoto",
@@ -255,6 +256,62 @@ describe("createCloudflareHostedControlClient", () => {
       tokenAcquiredAtEpochMs: Date.parse("2026-07-06T12:00:00.010Z"),
       tokenAcquireStartedAtEpochMs: Date.parse("2026-07-06T12:00:00.000Z"),
     });
+  });
+
+  it("posts runtime health-data consent reconciliation and validates the bound result", async () => {
+    const fetchImpl = vi.fn(async () => createJsonResponse({
+      activeInvocationPreempted: true,
+      consentState: "revoked",
+      processingAllowed: false,
+      runnerContainerDestroyAttempted: true,
+      runnerContainerDestroyOk: true,
+      userId: "user_123",
+    })) as typeof fetch;
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test",
+      fetchImpl,
+      getBearerToken: async () => "token-123",
+    });
+
+    await expect(
+      client.reconcileRuntimeHealthDataConsent("user_123"),
+    ).resolves.toEqual({
+      activeInvocationPreempted: true,
+      consentState: "revoked",
+      processingAllowed: false,
+      runnerContainerDestroyAttempted: true,
+      runnerContainerDestroyOk: true,
+      userId: "user_123",
+    });
+    const [url, init] = vi.mocked(fetchImpl).mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      "https://runner.example.test/internal/users/user_123/runtime/health-data-consent",
+    );
+    expect(init).toMatchObject({
+      body: "{}",
+      method: "POST",
+    });
+    expect(new Headers(init.headers).get("x-hosted-execution-user-id")).toBe("user_123");
+  });
+
+  it("rejects inconsistent runtime health-data consent reconciliation results", async () => {
+    const fetchImpl = vi.fn(async () => createJsonResponse({
+      activeInvocationPreempted: false,
+      consentState: "revoked",
+      processingAllowed: true,
+      runnerContainerDestroyAttempted: false,
+      runnerContainerDestroyOk: true,
+      userId: "user_123",
+    })) as typeof fetch;
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test",
+      fetchImpl,
+      getBearerToken: async () => "token-123",
+    });
+
+    await expect(
+      client.reconcileRuntimeHealthDataConsent("user_123"),
+    ).rejects.toThrow("processingAllowed did not match consentState");
   });
 
   it("accepts an early runtime ensure-processing ack and still reports timing", async () => {
