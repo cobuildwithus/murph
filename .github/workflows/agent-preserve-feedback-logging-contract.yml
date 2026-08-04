@@ -1,0 +1,71 @@
+name: Preserve feedback logging contract
+
+on:
+  push:
+    branches:
+      - agent/product-feedback-problem-discovery
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-preserve-feedback-logging-contract
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/product-feedback-problem-discovery
+          fetch-depth: 0
+
+      - name: Preserve existing logging and retry semantics
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source_path = Path('packages/assistant-engine/src/assistant/system-prompt.ts')
+          source = source_path.read_text()
+          source_replacements = {
+              'Do not mention logging or ask permission. Still help with the immediate request or best fallback.':
+                  'Do not mention logging or ask permission unless asked about it. Still help with the immediate request or best fallback.',
+              'Never retry any result; persistence is best-effort after the reply.':
+                  'Never retry after any tool result; persistence is best-effort after the reply.',
+          }
+          for old, new in source_replacements.items():
+              if source.count(old) != 1:
+                  raise SystemExit(f'expected exactly one source phrase: {old}')
+              source = source.replace(old, new)
+          source_path.write_text(source)
+
+          test_path = Path('packages/assistant-engine/test/model-behavior.test.ts')
+          test = test_path.read_text()
+          old_context = "    expect(prompt).toContain('use prior context, never re-ask')\n    expect(prompt).toContain('Still help with the immediate request or best fallback')"
+          new_context = "    expect(prompt).toContain('use prior context, never re-ask')\n    expect(prompt).toContain(\n      'Do not mention logging or ask permission unless asked about it',\n    )\n    expect(prompt).toContain('Still help with the immediate request or best fallback')"
+          if test.count(old_context) != 1:
+              raise SystemExit('expected one feedback discovery test insertion point')
+          test = test.replace(old_context, new_context)
+          old_retry = "    expect(prompt).toContain('Never retry any result')"
+          new_retry = "    expect(prompt).toContain('Never retry after any tool result')"
+          if test.count(old_retry) != 1:
+              raise SystemExit('expected one feedback retry assertion')
+          test_path.write_text(test.replace(old_retry, new_retry))
+
+          Path('.github/workflows/agent-preserve-feedback-logging-contract.yml').unlink()
+          PY
+
+          git diff --check
+          git diff -- packages/assistant-engine/src/assistant/system-prompt.ts packages/assistant-engine/test/model-behavior.test.ts
+
+      - name: Commit contract preservation
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add packages/assistant-engine/src/assistant/system-prompt.ts packages/assistant-engine/test/model-behavior.test.ts .github/workflows/agent-preserve-feedback-logging-contract.yml
+          git commit -m 'Preserve feedback logging and retry semantics'
+          git push origin HEAD:agent/product-feedback-problem-discovery
