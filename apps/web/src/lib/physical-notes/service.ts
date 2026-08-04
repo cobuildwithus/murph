@@ -33,6 +33,7 @@ import { getPrisma } from "../prisma";
 import { readHostedAiUsageGate } from "../hosted-execution/usage-allowance";
 import { recordHostedAiUsageRecords } from "../hosted-execution/usage";
 import { buildHostedLobPhysicalNoteUsageRecord } from "../hosted-execution/usage-lob";
+import { readPhysicalNoteConfig } from "./config";
 import {
   createLobPhysicalNoteRuntime,
   type LobPhysicalNoteRuntime,
@@ -40,13 +41,6 @@ import {
 
 const COMPLIMENTARY_OFFER_CODE = "physical-note-v1";
 const REPLAY_WINDOW_MS = 23 * 60 * 60 * 1_000;
-
-interface PhysicalNoteConfig {
-  apiKey: string;
-  costUsdMicros: bigint;
-  fromAddressId: string;
-  pricingVersion: string;
-}
 
 export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequest & {
   memberId: string;
@@ -429,32 +423,6 @@ async function recordPaidPhysicalNoteUsageTx(input: {
   });
 }
 
-function readPhysicalNoteConfig(): PhysicalNoteConfig | null {
-  const apiKey = readEnv("LOB_API_KEY");
-  const fromAddressId = readEnv("LOB_FROM_ADDRESS_ID");
-  const pricingVersion = readEnv("LOB_PHYSICAL_NOTE_PRICING_VERSION");
-  const costText = readEnv("LOB_PHYSICAL_NOTE_COST_USD_MICROS");
-  if (!apiKey || !fromAddressId || !pricingVersion || !costText) {
-    return null;
-  }
-  if (
-    apiKey.startsWith("live_")
-    && process.env.LOB_PHYSICAL_NOTES_LIVE_ENABLED?.trim().toLowerCase() !== "true"
-  ) {
-    return null;
-  }
-  const cost = Number(costText);
-  if (!Number.isSafeInteger(cost) || cost <= 0) {
-    return null;
-  }
-  return {
-    apiKey,
-    costUsdMicros: BigInt(cost),
-    fromAddressId,
-    pricingVersion,
-  };
-}
-
 async function markHostedPhysicalNoteFailed(input: {
   memberId: string;
   noteId: string;
@@ -518,11 +486,6 @@ function toResponse(
 
 function createPhysicalNoteId(): string {
   return `hpn_${randomUUID().replaceAll("-", "")}`;
-}
-
-function readEnv(name: string): string | null {
-  const value = process.env[name]?.trim();
-  return value || null;
 }
 
 function unavailableResponse(): HostedPhysicalNoteSendResponse {
