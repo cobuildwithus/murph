@@ -90,7 +90,19 @@ function resolveHeroMessengerChannel(country: string): HeroMessengerChannel {
     : "imessage";
 }
 
-export default async function HomePage() {
+export default async function HomePage({
+  searchParams,
+}: {
+  searchParams: Promise<{
+    referral?: string | string[];
+  }>;
+}) {
+  const { referral } = await searchParams;
+  const referralInviteCode =
+    typeof referral === "string"
+    && /^[A-Za-z0-9_-]{1,256}$/u.test(referral.trim())
+      ? referral.trim()
+      : undefined;
   const [
     { authenticated },
     githubStarCount,
@@ -129,7 +141,10 @@ export default async function HomePage() {
       };
 
   return (
-    <HomepageAuthRuntimeProvider authenticated={authenticated}>
+    <HomepageAuthRuntimeProvider
+      authenticated={authenticated}
+      inviteCode={referralInviteCode}
+    >
       <main className="min-h-screen bg-[#f5f0e8] antialiased">
         {authenticated ? <LandingBrowserVaultWarm /> : null}
         <StickyNav
