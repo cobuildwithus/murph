@@ -1590,8 +1590,10 @@ An expected managed AI usage denial observed by the workspace read is not a
 transport preparation failure. Cloudflare binds the denied allowance to the
 fresh write fence and narrows a default invocation to the existing
 `system_mailbox` path, which imports eligible model-free system work and exits
-before foreground assistant admission; the same fence rejects all metered
-provider egress if the runtime reaches one unexpectedly. Explicit media
+before foreground assistant admission. It binds that effective processing mode
+into the same fence so controller priority, preemption, and the container job
+cannot diverge; the fence also rejects all metered provider egress if the runtime
+reaches one unexpectedly. Explicit media
 retention remains model-free, and custom inference keeps its selected route.
 This keeps a racing payloadless direct wake from manufacturing `runtime_error`
 state or mutating restored assistant recovery while Web and Temporal remain the

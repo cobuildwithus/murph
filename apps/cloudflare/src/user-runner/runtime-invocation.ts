@@ -258,6 +258,7 @@ export class RuntimeInvocationService {
     const token = await this.input.stateStore.bindWriteFenceInvocationFacts({
       customInferenceEnvelope,
       platformAiUsageAllowed,
+      processingMode: invocationProcessingMode,
       token: input.token,
       workspaceVersion,
     });
