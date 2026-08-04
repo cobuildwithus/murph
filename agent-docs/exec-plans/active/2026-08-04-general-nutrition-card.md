@@ -26,7 +26,7 @@ Updated: 2026-08-04
 - Card attachment is limited to requests the whole-response card completely
   satisfies; compound requests retain their complete ordinary text response.
 - New accepted input in the same live turn invalidates an earlier card-only
-  outcome, including an asynchronous attachment captured for the old context.
+  outcome, and the advanced multi-input context cannot attach another card.
 - Focused route-planning and tool-contract tests prove the new availability
   boundary and the unchanged private-direct restriction.
 
@@ -99,8 +99,8 @@ Updated: 2026-08-04
   retrospective. The pre-fix regression failed because the earlier card
   remained attached. The recorded decision continues with the existing turn
   owner: advancing accepted input clears the card-only outcome, and a late
-  attachment for an older delivery context is rejected. The regression and
-  existing singular-card scenario pass after the correction.
+  or new attachment after the context advances is rejected. The two live-steer
+  regressions and existing singular-card scenario pass after the correction.
 - All required GitHub Actions passed on correction head
   `6c5d22d914493d70ac446e87698a659a5bb5204d`; the live-steer correction head
   still requires its exact-head run and ReviewGPT round 3.

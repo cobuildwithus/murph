@@ -19929,7 +19929,7 @@ describe('steered final segments', () => {
     expect(result.finalMessage).toBe('You belong to Sunday runners.')
   })
 
-  it('keeps each steered final response card singular', async () => {
+  it('keeps a steered follow-up text-only after an earlier response card', async () => {
     const result = await runScriptedSteeredFinalSegmentsTurn([
       completedItemEvent({
         id: 'user-card-1',
@@ -19954,7 +19954,8 @@ describe('steered final segments', () => {
       }),
       {
         card: DAILY_NUTRITION_RESPONSE_CARD,
-        expectedText: 'response card attached',
+        expectedSuccess: false,
+        expectedText: 'response card unavailable for this final response',
         id: 85,
         kind: 'attach-response-card',
       },
@@ -19965,11 +19966,9 @@ describe('steered final segments', () => {
       }),
     ], { responseCardsAvailable: true })
 
-    expect(result.responseCard).toEqual(DAILY_NUTRITION_RESPONSE_CARD)
+    expect(result.responseCard).toBeNull()
     expect(result.responseMedia).toEqual([])
-    expect(result.finalMessage).toBe(
-      'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat from 3 logged meals.',
-    )
+    expect(result.finalMessage).toBe('Final follow-up answer.')
     expect(result.providerAuthoredFinalMessage).toBe('Final follow-up answer.')
     expect(result.precedingAgentMessageSegments).toEqual([{
       deliveryContextOrdinal: 0,

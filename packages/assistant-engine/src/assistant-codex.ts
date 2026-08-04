@@ -3847,10 +3847,13 @@ async function runCodexAppServerTurnOnProcess(
     card: AssistantResponseCard,
     deliveryContextOrdinal: number,
   ): void => {
-    if (deliveryContextOrdinal !== currentDeliveryContextOrdinal()) {
+    if (
+      deliveryContextOrdinal !== 0 ||
+      currentDeliveryContextOrdinal() !== deliveryContextOrdinal
+    ) {
       throw new VaultCliError(
-        'ASSISTANT_RESPONSE_CARD_STALE_CONTEXT',
-        'A response card cannot attach to an earlier response context.',
+        'ASSISTANT_RESPONSE_CARD_CONTEXT_ADVANCED',
+        'A response card cannot attach after accepted input advances the response context.',
       )
     }
     if (hasAcceptedNoReplyPatchForDeliveryContext(deliveryContextOrdinal)) {
