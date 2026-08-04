@@ -25,6 +25,11 @@ import type {
 } from "@murphai/device-syncd/types";
 
 import type { HostedSecureBoxPrismaClient } from "../../hosted-crypto/secure-box";
+import {
+  HOSTED_HEALTH_DATA_CONSENT_SCOPE,
+  readHostedHealthDataConsentState,
+} from "../../legal/consent";
+import { lockHostedMemberRow } from "../../hosted-onboarding/shared";
 import { buildHostedProviderAccountBlindIndex } from "../routing-index";
 import { buildHostedPublicDeviceSyncAccount } from "../internal-runtime";
 import {
@@ -155,6 +160,21 @@ export class PrismaHostedConnectionStore {
     const setupWrite = buildHostedConnectionSetupWrite(input, connectedAt, "create");
 
     const result = await this.prisma.$transaction(async (tx) => {
+      if (ownerId) {
+        await lockHostedMemberRow(tx, ownerId);
+        if (await readHostedHealthDataConsentState({
+          memberId: ownerId,
+          prisma: tx,
+        }) === "revoked") {
+          throw deviceSyncError({
+            code: "HEALTH_DATA_CONSENT_REQUIRED",
+            httpStatus: 403,
+            message: "Use Murph again before connecting a health source.",
+            retryable: false,
+          });
+        }
+      }
+
       let existing = await tx.deviceConnection.findUnique({
         where: {
           provider_providerAccountBlindIndex: {
@@ -885,6 +905,15 @@ export class PrismaHostedConnectionStore {
               and "account_group"."billing_status" = 'active'
               and "account_group"."suspended_at" is null
           )
+        )
+        -- A missing historical grant remains compatible with legacy members.
+        -- Only an explicit withdrawal removes scheduled-sync authority.
+        and not exists (
+          select 1
+          from "hosted_consent_grant" as "consent_grant"
+          where "consent_grant"."member_id" = "member"."id"
+            and "consent_grant"."scope" = ${HOSTED_HEALTH_DATA_CONSENT_SCOPE}
+            and "consent_grant"."status" = 'revoked'
         )
         and not exists (
           select 1

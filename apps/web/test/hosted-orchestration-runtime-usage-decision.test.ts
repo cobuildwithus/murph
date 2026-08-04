@@ -3,6 +3,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 const mocks = vi.hoisted(() => ({
   checkHostedAiUsageGate: vi.fn(),
   readHostedAiUsageGate: vi.fn(),
+  readHostedRuntimeAiAccessDecision: vi.fn(),
   resolveHostedAiUsageGate: vi.fn(),
 }));
 
@@ -10,6 +11,10 @@ vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
   checkHostedAiUsageGate: mocks.checkHostedAiUsageGate,
   readHostedAiUsageGate: mocks.readHostedAiUsageGate,
   resolveHostedAiUsageGate: mocks.resolveHostedAiUsageGate,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
+  readHostedRuntimeAiAccessDecision: mocks.readHostedRuntimeAiAccessDecision,
 }));
 
 import {
@@ -24,6 +29,8 @@ describe("resolveHostedRuntimeAiUsageGate", () => {
     mocks.checkHostedAiUsageGate.mockReset();
     mocks.readHostedAiUsageGate.mockReset();
     mocks.resolveHostedAiUsageGate.mockReset();
+    mocks.readHostedRuntimeAiAccessDecision.mockReset();
+    mocks.readHostedRuntimeAiAccessDecision.mockResolvedValue({ allowed: true });
   });
 
   it.each([
@@ -49,7 +56,11 @@ describe("resolveHostedRuntimeAiUsageGate", () => {
         prisma: undefined,
       });
       expect(mocks[owner]).toHaveBeenCalledTimes(1);
-      for (const [otherOwner, otherMock] of Object.entries(mocks)) {
+      for (const [otherOwner, otherMock] of [
+        ["checkHostedAiUsageGate", mocks.checkHostedAiUsageGate],
+        ["readHostedAiUsageGate", mocks.readHostedAiUsageGate],
+        ["resolveHostedAiUsageGate", mocks.resolveHostedAiUsageGate],
+      ] as const) {
         if (otherOwner !== owner) {
           expect(otherMock).not.toHaveBeenCalled();
         }
@@ -100,6 +111,26 @@ describe("resolveHostedRuntimeAiUsageGate", () => {
       decision,
       status: "denied",
     });
+  });
+
+  it("denies queued AI work after explicit consent withdrawal without spending usage", async () => {
+    mocks.readHostedRuntimeAiAccessDecision.mockResolvedValue({
+      allowed: false,
+      reason: "health_data_consent_withdrawn",
+      retryAfter: new Date("2026-07-01T00:00:00.000Z"),
+      userNotice: null,
+    });
+
+    await expect(resolveHostedRuntimeAiUsageGate({
+      mode: "mutating",
+      userId: "member_123",
+    })).resolves.toEqual({
+      status: "health_data_consent_withdrawn",
+    });
+
+    expect(mocks.checkHostedAiUsageGate).not.toHaveBeenCalled();
+    expect(mocks.readHostedAiUsageGate).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
   });
 
   it("preserves usage-gate failures for the caller", async () => {

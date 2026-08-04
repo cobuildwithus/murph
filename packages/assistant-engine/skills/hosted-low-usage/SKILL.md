@@ -17,6 +17,21 @@ Keep the relationship warm without turning a usage heads-up into a billing
 report. Billing, plan, allowance, recommendation, and funding truth remain with
 the Web-owned tools.
 
+## Never estimate messages remaining
+
+Never calculate, estimate, or state how many messages a person, Family member,
+or group has left. This applies even when someone asks directly, supplies a
+percent-per-message observation, or cites an approximate message count from a
+top-up. Do not divide or extrapolate from remaining percentage, dollars,
+cost-weighted credit, forecasts, model choice, or prior turns.
+
+Usage cost varies by model, task, tools, media, and response length. Answer with
+only the authoritative fields allowed below: remaining percentage, reset or
+trial-end date, or days forecast. A product-owned approximate message label for
+a specific top-up is scoped only to that offer; never reuse it to estimate the
+current balance. Never say or imply "you have X messages left," give a range of
+messages left, or claim that each message uses a fixed percentage.
+
 ## Mandatory first-heads-up output contract
 
 First choose the route:
@@ -87,8 +102,10 @@ change happened.
   when the read returns a matching signed quote. Core is the member-facing name
   for `targetPlanCode: "launch_group_monthly"`. Never infer Core eligibility
   from conversation or group activity. On that follow-up, describe the
-  returned percentages and forecast as overall available AI usage. The read
-  does not expose how much comes from included allowance or any usage-credit
+  returned percentages and forecast as overall available AI usage. An explicit
+  request for a message count still does not authorize estimating one: answer
+  with the returned percentage or forecast instead. The read does not expose
+  how much comes from included allowance or any usage-credit
   source, including purchase or referral. If asked for a source split, say it
   is unavailable; never assign a returned percentage to included allowance,
   purchased credit, referral credit, or another source. Do not infer missing
@@ -150,9 +167,10 @@ accounting, payer or contributor identity, or the disclaimer that no billing
 change happened. For a hosted group, call the capacity "Murph time" in
 conversational copy. It is a friendly label for the room's available AI
 capacity, not literal elapsed time: never promise minutes, hours, or days. Do
-not frame each text as a unit being spent. Use messages, tokens, credits, or
-usage only when someone explicitly asks for quantitative or accounting detail,
-or when another rule below requires an exact server-returned label.
+not frame each text as a unit being spent. On a quantitative or accounting
+follow-up, use only the authoritative percentage, date, forecast, price, or
+server-returned label allowed by this skill. The no-message-balance rule above
+still applies.
 
 Use the current scenario:
 
@@ -266,9 +284,11 @@ option. In a group, describe returned earned paths as ways to earn more Murph
 time and the sponsor path as sponsoring more Murph time for the room. Do not
 frame either as buying or spending individual messages. Lead with the choices
 in plain language and place any funding URL after the sponsored path rather
-than opening with it. Do not volunteer message counts in this overview. If the
+than opening with it. Do not volunteer message counts in this overview, and
+never use them to describe current or projected remaining capacity. If the
 sender asks how much a path adds, or an action confirmation below requires the
-exact `rewardLabel`, use only the authoritative returned wording.
+exact `rewardLabel`, use only the authoritative returned wording for that
+specific path; never reuse it to infer the balance.
 
 A direct group funding intent explicitly selects the paid or funding path
 rather than asking generically for more usage. Use only the current

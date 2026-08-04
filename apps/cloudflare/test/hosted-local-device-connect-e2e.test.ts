@@ -10,6 +10,12 @@ import {
 import {
   JunctionClient,
 } from "@murphai/device-syncd/providers/junction-client";
+import {
+  buildHostedExecutionTelegramConversationMessageWake,
+} from "@murphai/hosted-execution";
+import {
+  createHostedMailboxAssistantInputId,
+} from "@murphai/hosted-execution/assistant-identifiers";
 
 import {
   readHostedExecutionEnvironment,
@@ -48,7 +54,11 @@ const hostedPrismaModuleSpecifier = new URL(
   "../../web/src/lib/prisma.ts",
   import.meta.url,
 ).href;
-const linkUserId = `member_local_device_connect_${Date.now()}`;
+const runId = Date.now();
+const userId = `member_local_device_connect_${runId}`;
+const planUsageUserId = `member_local_plan_usage_control_${runId}`;
+const subscriptionUserId = `member_local_subscription_control_${runId}`;
+const subscriptionThreadId = `telegram_direct_subscription_${runId}`;
 const liveBrowserUserId =
   process.env.MURPH_E2E_JUNCTION_WHOOP_MEMBER_ID?.trim()
   || "member_e2e_junction_whoop_browser";
@@ -105,7 +115,7 @@ describe("hosted local device connect e2e", () => {
         persistDirOverride: workerPersistDirOverride,
         persistDirPrefix: "murph-hosted-local-device-connect-",
         requiredRunnerEnvProfile: "assistant",
-        scenarioLabel: "Local hosted device connect e2e",
+        scenarioLabel: "Local hosted device connect and web-control e2e",
         streamLogs: streamDevLogs,
       });
     } finally {
@@ -121,7 +131,7 @@ describe("hosted local device connect e2e", () => {
   it(
     "keeps Junction credentials in platform authority and creates a signed WHOOP connect link",
     async () => {
-      await requireScenario().seedActiveHostedMember({ memberId: linkUserId });
+      await requireScenario().seedActiveHostedMember({ memberId: userId });
       const runnerRuntime = buildHostedRunnerJobRuntimeConfig({
         configSource: requireScenario().runtimeEnv,
         forwardedEnv: buildHostedRunnerContainerEnv(requireScenario().runtimeEnv),
@@ -177,7 +187,7 @@ describe("hosted local device connect e2e", () => {
       expect(Boolean(requireScenario().runtimeEnv.MURPH_E2E_WHOOP_OTP)).toBe(false);
       expect(Boolean(requireScenario().runtimeEnv.MURPH_E2E_WHOOP_PASSWORD)).toBe(false);
 
-      const connectLink = await createHostedWhoopConnectLink(linkUserId);
+      const connectLink = await createHostedWhoopConnectLink(userId);
 
       // The runtime port surfaces the user-facing connect target. The
       // Junction implementation is asserted independently in resolvedConfig.
@@ -208,6 +218,91 @@ describe("hosted local device connect e2e", () => {
       expect(requireScenario().harness.stderrTail()).not.toContain(
         "No device sync providers are configured",
       );
+    },
+    300_000,
+  );
+
+  it(
+    "reads plan usage through the real signed runner-to-Web control plane",
+    async () => {
+      await requireScenario().seedActiveHostedMember({
+        billingPlanCode: "launch_monthly",
+        memberId: planUsageUserId,
+        stripeCustomerId: `cus_local_plan_usage_${runId}`,
+        stripeSubscriptionId: `sub_local_plan_usage_${runId}`,
+      });
+      const planUsagePort = buildRuntimePlatform(planUsageUserId).planUsageToolPort;
+      if (!planUsagePort) {
+        throw new Error("Hosted plan-usage port was not configured.");
+      }
+
+      await expect(planUsagePort.read({})).resolves.toMatchObject({
+        accessKind: "paid",
+        planCode: "launch_monthly",
+        planName: "Pulse",
+        status: "active",
+      });
+    },
+    300_000,
+  );
+
+  it(
+    "binds rejected subscription actions to one real mailbox input across signed Web control",
+    async () => {
+      await requireScenario().seedActiveHostedMember({
+        billingPlanCode: "launch_monthly",
+        memberId: subscriptionUserId,
+        stripeCustomerId: `cus_local_subscription_${runId}`,
+        stripeSubscriptionId: `sub_local_subscription_${runId}`,
+      });
+      const wake = buildHostedExecutionTelegramConversationMessageWake({
+        eventId:
+          `telegram.message.received:local:${subscriptionUserId}:subscription-control`,
+        occurredAt: new Date().toISOString(),
+        telegramMessage: {
+          messageId: `telegram_subscription_message_${runId}`,
+          schema: "murph.hosted-telegram-message.v1",
+          text: "Keep my Pulse subscription active.",
+          threadId: subscriptionThreadId,
+        },
+        userId: subscriptionUserId,
+      });
+      await requireScenario().enqueueWake(wake, subscriptionUserId);
+      const assistantInputId = createHostedMailboxAssistantInputId({
+        dedupeKey: wake.eventId,
+        eventId: wake.eventId,
+        lane: "conversation",
+        secret: subscriptionThreadId,
+        userId: subscriptionUserId,
+      });
+      const subscriptionPort = buildRuntimePlatform(subscriptionUserId)
+        .subscriptionToolPort;
+      if (!subscriptionPort) {
+        throw new Error("Hosted subscription port was not configured.");
+      }
+      const request = {
+        action: "continue_pulse" as const,
+        assistantInputId,
+      };
+
+      await expect(subscriptionPort.request(request)).rejects.toMatchObject({
+        code: "HOSTED_PULSE_TRIAL_START_PAID_UNSUPPORTED",
+        status: 409,
+        statusCode: 409,
+      });
+      await expect(subscriptionPort.request(request)).rejects.toMatchObject({
+        code: "HOSTED_PULSE_TRIAL_START_PAID_UNSUPPORTED",
+        status: 409,
+        statusCode: 409,
+      });
+      await expect(subscriptionPort.request({
+        action: "upgrade_edge",
+        assistantInputId,
+      })).rejects.toMatchObject({
+        code: "HOSTED_SUBSCRIPTION_INPUT_ACTION_CONFLICT",
+        status: 409,
+        statusCode: 409,
+      });
     },
     300_000,
   );
@@ -371,17 +466,21 @@ function assertLiveScenarioIsIsolated(): void {
 }
 
 async function createHostedWhoopConnectLink(memberId: string) {
-  const hostedExecutionEnvironment = readHostedExecutionEnvironment(
-    requireHostedWorkerRuntimeEnv(),
-  );
-  const platform = buildHostedExecutionRuntimePlatform({
-    boundUserId: memberId,
-    webCallbackSigning: hostedExecutionEnvironment.webCallbackSigning,
-    webControlBaseUrl: requireScenario().harness.webBaseUrl,
-  });
+  const platform = buildRuntimePlatform(memberId);
   return await platform.deviceSyncPort?.createConnectLink({
     messagingReturnTarget: "telegram",
     connectTarget: "whoop",
+  });
+}
+
+function buildRuntimePlatform(boundUserId: string) {
+  const hostedExecutionEnvironment = readHostedExecutionEnvironment(
+    requireHostedWorkerRuntimeEnv(),
+  );
+  return buildHostedExecutionRuntimePlatform({
+    boundUserId,
+    webCallbackSigning: hostedExecutionEnvironment.webCallbackSigning,
+    webControlBaseUrl: requireScenario().harness.webBaseUrl,
   });
 }
 
