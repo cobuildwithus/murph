@@ -14,7 +14,7 @@ Key decisions:
 - Limit the change to presentation and the requested semantic copy; do not alter settings persistence or privacy behavior.
 
 State:
-- Local implementation complete; PR review and CI pending.
+- Complete. The implementation, design proof, focused local verification, and exact-head CI are green; no further ReviewGPT runs will be sent per the user's explicit instruction.
 
 Done:
 - Confirmed the existing custom-inference, export, and health-consent studies and reviewed the supplied desktop states.
@@ -24,12 +24,15 @@ Done:
 - Updated the real design studies with stable proof selectors and captured synthetic desktop/mobile states for all three provider labels, export ready, and processing paused.
 - Passed 69 focused component/design tests, hosted Web typecheck, scoped ESLint, the frontend design-proof tests, and native-resolution visual inspection.
 - Confirmed the first remote design-proof failure was metadata-only: the guard requires a top-level catalog registry diff and a `Design page:` list item containing a visible `/design?tab=…` route. Registered the revised headings in both catalog owners; no production behavior changed.
+- Opened draft PR #1292 with hosted desktop/mobile proof for OpenAI, Venice, custom endpoint, export ready, and processing paused.
+- Passed the exact-head GitHub Actions surface: 13 successful checks, including frontend design proof, release build/typecheck, app verification, package coverage, host matrices, repository hygiene, and viewport overflow.
+- Stopped the in-progress preliminary ReviewGPT retry and sent no further reviews after the user's explicit request. The separate automated UI reviewer was unavailable due to exhausted reviewer credits; local native-resolution inspection remains the direct visual proof.
 
 Now:
-- Commit and push the exact rendered candidate, open the PR, and run the required frontend/product/coverage specialist review plus the Claude UI double-check.
+- Archive this plan through the final scoped commit path and hand off the live catalog and PR.
 
 Next:
-- Resolve any accepted review or CI findings, close the plan through the final scoped commit path, and hand off the live catalog URL.
+- None.
 
 Open questions (UNCONFIRMED if needed):
 - None blocking; the user explicitly supplied the desired provider-label pattern and alignment direction.
@@ -47,3 +50,6 @@ Working set (files/ids/commands):
 - apps/web/test/hosted-health-data-consent-settings.test.tsx
 - pnpm test:frontend-design-proof
 - pnpm --dir apps/web typecheck
+Status: completed
+Updated: 2026-08-04
+Completed: 2026-08-04
