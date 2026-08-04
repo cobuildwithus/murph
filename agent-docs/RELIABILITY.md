@@ -293,6 +293,11 @@ Last verified: 2026-07-31
   for the private message.
 - Foreground inbox/parser-backed daemon runs should favor restartable connectors with bounded backoff over permanently dead watch loops, while still keeping low-level restart behavior opt-in and always bounded by the owning abort signal.
 - Networked assistant/provider/channel calls should set explicit timeouts, propagate caller abort signals, and only auto-retry request shapes that are replay-safe or rate-limit directed.
+- Hosted artifact uploads are content-addressed and replay-safe. Transport failures
+  plus HTTP 408, 429, and 5xx responses carry typed retryability into the existing
+  device-sync job owner, which requeues with its normal bounded backoff. Write-fence
+  and authority failures, other HTTP responses, malformed data, and unclassified
+  errors remain terminal; the runtime must not create a second artifact retry queue.
 - Junction Link setup remains retryable but inert before proof-verified callback
   completion. Webhooks for an active `pending_link` or `link_returned` account
   release their trace claim and return a retryable not-ready response; they do

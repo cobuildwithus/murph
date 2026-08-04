@@ -205,6 +205,12 @@ writes, provider effects, and mailbox payload decode authorize the current
 runner by runtime-kind write-fence identity (`attemptId`, `generation`, and
 `userId`). The transport still carries the generation in the historical
 `leaseGeneration` header until the 2026-05-25 compatibility deletion.
+Artifact objects are addressed by their content hash, so retrying the same PUT is
+replay-safe. The Worker classifies transport failures and HTTP 408, 429, and 5xx
+responses as retryable; a hosted device-sync import preserves that classification
+for its existing job backoff owner. Authority/header failures and other HTTP
+responses remain terminal, and artifact transport does not own an independent
+retry loop.
 External provider egress must not send exact runtime authority headers to
 third-party provider origins. Runtime provider fetches instead carry the
 bound-user header plus a short-lived opaque provider-egress token from the
