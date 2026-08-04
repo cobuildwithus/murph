@@ -21,6 +21,7 @@ vi.mock("next/navigation", async (importOriginal) => {
   return {
     ...actual,
     useRouter: () => ({ replace: navigationMocks.replace }),
+    useSearchParams: () => new URLSearchParams(),
   };
 });
 
