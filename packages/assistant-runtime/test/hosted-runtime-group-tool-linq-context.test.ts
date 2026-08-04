@@ -198,7 +198,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     });
   });
 
-  it("denies referral actions on group email where the human sender is not authoritative", async () => {
+  it("denies referral and signup-link actions on group email without an authoritative sender", async () => {
     const request = vi.fn();
     const groupTool = createHostedGroupToolWithCurrentTurnContext({
       emailDeliveryContexts: [
@@ -218,6 +218,15 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
         unavailableReason: "authenticated_sender_required",
       },
     });
+    await expect(groupTool.request({
+    action: "create_signup_referral_link",
+  })).resolves.toEqual({
+    action: "create_signup_referral_link",
+    result: {
+      status: "unavailable",
+      unavailableReason: "authenticated_sender_required",
+    },
+  });
     expect(request).not.toHaveBeenCalled();
   });
 
