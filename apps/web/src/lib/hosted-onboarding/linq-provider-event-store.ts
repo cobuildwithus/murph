@@ -264,18 +264,27 @@ async function claimHostedLinqAlertsForProviderEventTx(input: {
   }
 
   const id = buildHostedLinqAlertId(kind, input.eventLookupKey);
+  // A `message.failed` payload carries no line phone number, so the parsed
+  // event's own hint is null even though the delivery receipt resolved the
+  // line. Reading the hint off the resolved line keeps the alert (and its
+  // email) able to answer which line failed.
+  const phoneNumberHint = input.event.phoneNumberHint
+    ?? await readHostedLinqAlertLineHintTx({
+      lineLookupKey: input.lineLookupKey,
+      prisma: input.prisma,
+    });
   const created = await input.prisma.hostedLinqAlert.createMany({
     data: {
       claimedAt: new Date(),
       deliveryId: input.deliveryId,
-      detailsJson: buildHostedLinqAlertDetailsJson(input.event),
+      detailsJson: buildHostedLinqAlertDetailsJson(input.event, phoneNumberHint),
       eventId: input.eventLookupKey,
       id,
       kind,
-      phoneNumberHint: input.event.phoneNumberHint,
+      phoneNumberHint,
       phoneNumberLookupKey: input.lineLookupKey,
       status: "pending",
-      subject: buildHostedLinqAlertSubject(kind, input.event),
+      subject: buildHostedLinqAlertSubject(kind, phoneNumberHint),
     },
     skipDuplicates: true,
   });
@@ -301,11 +310,27 @@ function resolveHostedLinqAlertKind(event: ParsedHostedLinqProviderEvent): strin
   }
 }
 
+async function readHostedLinqAlertLineHintTx(input: {
+  lineLookupKey: string | null;
+  prisma: HostedLinqProviderEventClient;
+}): Promise<string | null> {
+  if (!input.lineLookupKey) {
+    return null;
+  }
+
+  const line = await input.prisma.hostedLinqLine.findUnique({
+    where: { phoneNumberLookupKey: input.lineLookupKey },
+    select: { phoneNumberHint: true },
+  });
+
+  return line?.phoneNumberHint ?? null;
+}
+
 function buildHostedLinqAlertSubject(
   kind: string,
-  event: ParsedHostedLinqProviderEvent,
+  phoneNumberHint: string | null,
 ): string {
-  const line = event.phoneNumberHint ? ` ${event.phoneNumberHint}` : "";
+  const line = phoneNumberHint ? ` ${phoneNumberHint}` : "";
   if (kind === "message_failed") {
     return `[Murph] Linq message failed${line}`;
   }
@@ -313,7 +338,10 @@ function buildHostedLinqAlertSubject(
   return `[Murph] Linq line status updated${line}`;
 }
 
-function buildHostedLinqAlertDetailsJson(event: ParsedHostedLinqProviderEvent): Prisma.InputJsonValue {
+function buildHostedLinqAlertDetailsJson(
+  event: ParsedHostedLinqProviderEvent,
+  phoneNumberHint: string | null,
+): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify({
     actionTaken: "health_projection_updated_egress_policy_evaluated_at_send",
     deliveryStatus: event.deliveryStatus,
@@ -321,7 +349,7 @@ function buildHostedLinqAlertDetailsJson(event: ParsedHostedLinqProviderEvent): 
     eventType: event.eventType,
     failureCode: event.failureCode,
     failureReason: event.failureReason,
-    line: event.phoneNumberHint,
+    line: phoneNumberHint,
     phoneNumberRole: event.phoneNumberRole,
     providerCreatedAt: event.providerCreatedAt.toISOString(),
     providerReason: event.providerReason,

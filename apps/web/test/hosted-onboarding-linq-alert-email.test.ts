@@ -50,6 +50,28 @@ describe("sendPendingHostedLinqAlertsBestEffort", () => {
     });
   });
 
+  it("carries the failure reason, provider reason, and line into the email body", async () => {
+    const fixture = createAlertEmailPrismaFixture();
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      id: "email_provider_123",
+    }), { status: 200 }));
+
+    await sendPendingHostedLinqAlertsBestEffort({
+      alertIds: ["hla_message_failed_123"],
+      env: buildAlertEmailEnv(),
+      fetchImpl,
+      prisma: fixture.prisma as never,
+    });
+
+    const text = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body)).text as string;
+    // Without these the alert says only that a send failed, which is what made
+    // the original message_failed alerts impossible to act on.
+    expect(text).toContain("Failure code: 30007");
+    expect(text).toContain("Failure reason: carrier filtered the message");
+    expect(text).toContain("Provider reason: recipient carrier rejected the send");
+    expect(text).toContain("Line: ***0000");
+  });
+
   it("marks alerts failed without throwing when Resend rejects the send", async () => {
     const fixture = createAlertEmailPrismaFixture();
     const fetchImpl = vi.fn(async () => new Response("nope", {
@@ -164,8 +186,10 @@ function createAlertEmailPrismaFixture(input?: {
         eventIdSuffix: "led_123",
         eventType: "message.failed",
         failureCode: "30007",
-        failureReason: "[redacted]",
+        failureReason: "carrier filtered the message",
+        line: "***0000",
         providerCreatedAt: "2026-03-26T12:00:00.000Z",
+        providerReason: "recipient carrier rejected the send",
       },
       eventId: "evt_failed_123",
       id: "hla_message_failed_123",
