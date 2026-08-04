@@ -94,6 +94,16 @@ Last verified: 2026-08-04
 
 ## Runtime Expectations
 
+- Initial onboarding has one Postgres completion owner across website and
+  native clients. Existing members are backfilled complete. New-member save or
+  skip locks the member row and records preferences plus completion in one
+  transaction; the first completion wins and later attempts return an
+  idempotent completed projection without preference mutation. A failed write
+  leaves the picker mounted with its unsaved choices, while an unavailable
+  best-effort runtime wake does not roll back durable completion. Native
+  foreground refresh and website navigation re-read the canonical fact; no
+  local flag, lease, cleanup worker, or second reconciliation owner exists.
+
 - `packages/assistant-engine` owns one resident Codex App Server process and one
   memoized readiness promise on that process. Readiness covers spawn plus the
   App Server initialization handshake; it does not reserve the process for a

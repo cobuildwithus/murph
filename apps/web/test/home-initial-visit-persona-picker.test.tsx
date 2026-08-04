@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 
 import { act, createElement, type HTMLAttributes, type ReactNode } from "react";
-import { test, vi } from "vitest";
+import { afterEach, beforeEach, test, vi } from "vitest";
 
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 
@@ -12,11 +12,24 @@ vi.mock("@/src/components/murph/murph-persona-picker", () => ({
     onComplete,
     onOpenChange,
     open,
+    savePreference,
+    skipPreference,
   }: {
     onComplete?: (preferences: object | null) => void;
     onOpenChange: (open: boolean) => void;
     open: boolean;
+    savePreference?: (preferences: {
+      persona: "classic";
+      tone: "formal";
+      voice: "upbeat";
+    }) => Promise<object>;
+    skipPreference?: () => Promise<void>;
   }) {
+    const preferences = {
+      persona: "classic" as const,
+      tone: "formal" as const,
+      voice: "upbeat" as const,
+    };
     return open
       ? createElement(
           "section",
@@ -24,18 +37,22 @@ vi.mock("@/src/components/murph/murph-persona-picker", () => ({
           createElement("p", null, "Choose Murph’s main personality"),
           createElement(
             "button",
-            { onClick: () => onOpenChange(false), type: "button" },
+            {
+              onClick: async () => {
+                await skipPreference?.();
+                onComplete?.(null);
+                onOpenChange(false);
+              },
+              type: "button",
+            },
             "Close persona picker",
           ),
           createElement(
             "button",
             {
-              onClick: () => {
-                onComplete?.({
-                  persona: "classic",
-                  tone: "formal",
-                  voice: "upbeat",
-                });
+              onClick: async () => {
+                const saved = await savePreference?.(preferences) ?? preferences;
+                onComplete?.(saved);
                 onOpenChange(false);
               },
               type: "button",
@@ -45,7 +62,8 @@ vi.mock("@/src/components/murph/murph-persona-picker", () => ({
           createElement(
             "button",
             {
-              onClick: () => {
+              onClick: async () => {
+                await skipPreference?.();
                 onComplete?.(null);
                 onOpenChange(false);
               },
@@ -57,6 +75,19 @@ vi.mock("@/src/components/murph/murph-persona-picker", () => ({
       : null;
   },
 }));
+
+beforeEach(() => {
+  vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(
+    new Response(JSON.stringify({ completedNow: true, status: "completed" }), {
+      headers: { "content-type": "application/json" },
+      status: 200,
+    }),
+  ));
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 vi.mock("@/src/components/murph/murph-contact-card-picker", () => ({
   MurphContactCardPicker({
@@ -239,6 +270,39 @@ test("HomeInitialVisitPersonaPickerClient uses settings as the final Text Murph 
 
     assert.match(container.textContent ?? "", /Welcome to Murph/u);
     assert.equal(container.querySelector("a")?.getAttribute("href"), "/settings");
+  } finally {
+    await cleanup();
+  }
+});
+
+test("HomeInitialVisitPersonaPickerClient closes without welcome when another surface completed first", async () => {
+  vi.mocked(fetch).mockResolvedValueOnce(
+    new Response(JSON.stringify({ completedNow: false, status: "completed" }), {
+      headers: { "content-type": "application/json" },
+      status: 200,
+    }),
+  );
+  const { HomeInitialVisitPersonaPickerClient } = await import(
+    "../app/(dashboard)/home/initial-visit-persona-picker-client"
+  );
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HomeInitialVisitPersonaPickerClient, { contactAction: null }),
+    { requireButton: false },
+  );
+
+  try {
+    const completeButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent === "Complete persona picker",
+    );
+    assert.ok(completeButton);
+
+    await act(async () => {
+      completeButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    assert.equal(container.querySelector("[data-murph-persona-picker='open']"), null);
+    assert.doesNotMatch(container.textContent ?? "", /Welcome to Murph/u);
   } finally {
     await cleanup();
   }

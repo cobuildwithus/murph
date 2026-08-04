@@ -552,6 +552,7 @@ function createHostedMember(
     assistantToneCausalSeq: null,
     assistantVoice: null,
     assistantVoiceCausalSeq: null,
+    initialOnboardingCompletedAt: null,
     billingStatus: HostedBillingStatus.active,
     createdAt: new Date("2025-03-27T08:00:00.000Z"),
     id: "member_123",

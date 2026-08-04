@@ -59,6 +59,7 @@ export function MurphPersonaPicker({
   onSkip,
   open,
   savePreference = saveAssistantPersonaPreference,
+  skipPreference,
 }: {
   initialPersona?: AssistantPersonaId;
   initialTone?: AssistantTonePreference | null;
@@ -69,6 +70,7 @@ export function MurphPersonaPicker({
   onSkip?: () => void;
   open: boolean;
   savePreference?: typeof saveAssistantPersonaPreference;
+  skipPreference?: () => Promise<void>;
 }) {
   const isMobile = useIsMobile();
   const mainPersonaGroupId = useId();
@@ -163,16 +165,32 @@ export function MurphPersonaPicker({
     }
   };
 
-  const handleSkip = () => {
+  const handleSkip = async () => {
+    if (saving) return;
+    setSaving(true);
     setError(null);
-    onSkip?.();
-    onComplete?.(null);
-    setStep("main");
-    onOpenChange(false);
+    try {
+      await skipPreference?.();
+      if (!mountedRef.current) return;
+      onSkip?.();
+      onComplete?.(null);
+      setStep("main");
+      onOpenChange(false);
+    } catch {
+      if (mountedRef.current) {
+        setError("Could not save your Murph. Your choices are still here. Try again.");
+      }
+    } finally {
+      if (mountedRef.current) setSaving(false);
+    }
   };
 
   const handleOpenChange = (nextOpen: boolean) => {
     if (!nextOpen && saving) return;
+    if (!nextOpen && skipPreference) {
+      void handleSkip();
+      return;
+    }
     if (!nextOpen) setStep("main");
     onOpenChange(nextOpen);
   };
@@ -389,7 +407,7 @@ export function MurphPersonaPicker({
           disabled={saving}
           onClick={() => {
             if (step === "main") {
-              handleSkip();
+              void handleSkip();
               return;
             }
             setError(null);

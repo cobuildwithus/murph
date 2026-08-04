@@ -15,6 +15,7 @@ import { renderClientComponent } from "./render-client-component";
 const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
   readHostedMemberBillingEligibilityState: vi.fn(),
+  readHostedInitialOnboardingState: vi.fn(),
   readHostedAiUsageGate: vi.fn(),
   readHostedMemberMessagingSetupState: vi.fn(),
   projectHostedPersonalAiUsageStatus: vi.fn(),
@@ -148,6 +149,10 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
   readHostedMemberMessagingSetupState: mocks.readHostedMemberMessagingSetupState,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/initial-onboarding", () => ({
+  readHostedInitialOnboardingState: mocks.readHostedInitialOnboardingState,
+}));
+
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
   readHostedAiUsageGate: mocks.readHostedAiUsageGate,
 }));
@@ -183,6 +188,10 @@ beforeEach(() => {
   });
   mocks.shouldShowHomeDeviceSyncStep.mockResolvedValue(true);
   mocks.readHostedMemberBillingEligibilityState.mockResolvedValue(null);
+  mocks.readHostedInitialOnboardingState.mockResolvedValue({
+    preferences: { persona: null, tone: null, voice: null },
+    status: "pending",
+  });
   // Default to a member Murph can already reach, so the "Message Murph" step
   // stays hidden unless a test opts into the awaiting-first-message state.
   mocks.readHostedMemberMessagingSetupState.mockResolvedValue({
@@ -798,6 +807,27 @@ test("HomePage opens persona onboarding for initial visits", async () => {
   assert.match(markup, /data-contact-action-href="sms:\+15555550123"/);
   assert.match(markup, /Persona onboarding/);
   assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 1);
+});
+
+test("HomePage suppresses initial-visit onboarding after native completion", async () => {
+  mocks.readHostedInitialOnboardingState.mockResolvedValueOnce({
+    preferences: {
+      persona: "classic",
+      tone: "formal",
+      voice: "upbeat",
+    },
+    status: "completed",
+  });
+
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const markup = renderToStaticMarkup(
+    await HomePage({
+      searchParams: Promise.resolve({ initialVisit: "true" }),
+    }),
+  );
+
+  assert.doesNotMatch(markup, /data-home-initial-visit-persona-picker/);
+  assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 0);
 });
 
 test("HomePage skips the contact-card picker for Telegram-only members", async () => {

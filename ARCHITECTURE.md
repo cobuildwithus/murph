@@ -999,6 +999,27 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
 - `packages/openclaw-plugin`: published OpenClaw-compatible bundle package in the default Claude bundle layout (`skills/**`) that teaches OpenClaw to use Murph's existing `vault-cli` surface against the operator's configured vault via OpenClaw's built-in `exec` tool, keeping the integration skill-first, vault-first, and free of any second Murph assistant runtime inside OpenClaw
 - `fixtures/` and `e2e/`: deterministic fixture corpus and end-to-end smoke flows
 
+### Cross-platform initial onboarding
+
+Postgres owns the one-time hosted-member onboarding fact through
+`hosted_member.initial_onboarding_completed_at`. The migration backfills every
+member that predates the field as complete; members created afterward begin
+pending. The website reads that fact before rendering `?initialVisit=true`, and
+the iOS companion reads it through the bearer-only companion route. The native
+client receives the closed web-owned persona, voice, tone, and contact-avatar
+catalog and keeps only unsaved presentation state; it has no durable completion
+flag or parallel catalog.
+
+Persona save and explicit persona skip/dismiss both use one shared transaction.
+The transaction locks the member row, refuses to overwrite preferences after a
+prior completion, writes all selected style fields through the existing
+preference owner, and then records completion. The first surface therefore wins
+an app/web race; a stale second surface receives `completedNow: false` and
+closes without replaying the welcome state. Contact-card skip merely advances
+the flow. Foreground native refresh and a fresh website load both re-read the
+same fact. The short-lived native vCard handoff reuses the existing signed card
+claim and never makes the app a routing-data owner.
+
 ### iOS address-book advisory names
 
 The iOS companion owns the optional system Contacts prompt and produces one

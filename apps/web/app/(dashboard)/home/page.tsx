@@ -36,6 +36,7 @@ import { readHostedAiUsageGate } from "@/src/lib/hosted-execution/usage-allowanc
 import { projectHostedPersonalAiUsageStatus } from "@/src/lib/hosted-execution/usage-status";
 import { readHostedMemberBillingEligibilityState } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
 import { readHostedMemberMessagingSetupState } from "@/src/lib/hosted-onboarding/hosted-member-store";
+import { readHostedInitialOnboardingState } from "@/src/lib/hosted-onboarding/initial-onboarding";
 import { resolveHostedMemberMessagingState } from "@/src/lib/hosted-onboarding/messaging-state";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { getPrisma } from "@/src/lib/prisma";
@@ -86,8 +87,19 @@ export default async function HomePage({
       member,
       searchParams: resolvedSearchParams,
     }),
-    showInitialVisitPersonaPicker
-      ? resolveHomeInitialVisitContactAction()
+    showInitialVisitPersonaPicker && member
+      ? (async () => {
+          const state = await readHostedInitialOnboardingState({
+            memberId: member.id,
+            prisma,
+          });
+          return {
+            contactAction: state.status === "pending"
+              ? await resolveHomeInitialVisitContactAction()
+              : null,
+            state,
+          };
+        })()
       : Promise.resolve(null),
     member
       ? readHostedMemberMessagingSetupState({
@@ -101,7 +113,7 @@ export default async function HomePage({
     usageGateResult,
     deviceSyncCompletionDialogResult,
     connectedAppCompletionDialogResult,
-    initialVisitContactActionResult,
+    initialVisitProjectionResult,
     messagingSetupStateResult,
   ] = homeProjectionResults;
   const showDeviceStep = readSettledValue(showDeviceStepResult, false);
@@ -114,13 +126,14 @@ export default async function HomePage({
     connectedAppCompletionDialogResult,
     null,
   );
-  const initialVisitContactAction = readSettledValue(
-    initialVisitContactActionResult,
+  const initialVisitProjection = readSettledValue(
+    initialVisitProjectionResult,
     null,
   );
   const shouldRenderInitialVisitPersonaPicker =
     showInitialVisitPersonaPicker
-    && initialVisitContactActionResult.status === "fulfilled";
+    && initialVisitProjectionResult.status === "fulfilled"
+    && initialVisitProjection?.state.status === "pending";
   const messagingSetupState = readSettledValue(messagingSetupStateResult, null);
   // Telegram bots cannot open a conversation, so a member can finish signup
   // with a linked account Murph still cannot send to. Keep asking for that
@@ -196,7 +209,8 @@ export default async function HomePage({
 
       {shouldRenderInitialVisitPersonaPicker ? (
         <HomeInitialVisitPersonaPickerClient
-          contactAction={initialVisitContactAction}
+          contactAction={initialVisitProjection.contactAction}
+          initialPreferences={initialVisitProjection.state.preferences}
         />
       ) : null}
 

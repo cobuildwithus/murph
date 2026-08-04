@@ -1,5 +1,10 @@
 "use client";
 
+import type {
+  AssistantPersonaId,
+  AssistantTonePreference,
+  AssistantVoiceOptionId,
+} from "@murphai/contracts";
 import { MessageCircleIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
@@ -20,8 +25,14 @@ const INITIAL_VISIT_QUERY_KEY = "initialVisit";
 
 export function HomeInitialVisitPersonaPickerClient({
   contactAction,
+  initialPreferences = { persona: null, tone: null, voice: null },
 }: {
   contactAction: MurphContactOption | null;
+  initialPreferences?: {
+    persona: AssistantPersonaId | null;
+    tone: AssistantTonePreference | null;
+    voice: AssistantVoiceOptionId | null;
+  };
 }) {
   const [stage, setStage] = useState<"contact" | "persona" | "welcome" | "done">(
     contactAction?.kind === "text" ? "contact" : "persona",
@@ -48,9 +59,12 @@ export function HomeInitialVisitPersonaPickerClient({
   if (stage === "persona") {
     return (
       <MurphPersonaPicker
+        initialPersona={initialPreferences.persona ?? "classic"}
+        initialTone={initialPreferences.tone}
+        initialVoice={initialPreferences.voice}
         onComplete={(preferences) => {
-          personaSavedRef.current = preferences !== null;
-          setStage(preferences ? "welcome" : "done");
+          const showWelcome = preferences !== null && personaSavedRef.current;
+          setStage(showWelcome ? "welcome" : "done");
         }}
         onOpenChange={(nextOpen) => {
           if (!nextOpen && personaSavedRef.current) {
@@ -60,6 +74,18 @@ export function HomeInitialVisitPersonaPickerClient({
           if (!nextOpen) setStage("done");
         }}
         open
+        savePreference={async (preferences) => {
+          const result = await completeInitialOnboarding({
+            action: "save",
+            preferences,
+          });
+          personaSavedRef.current = result.completedNow;
+          return preferences;
+        }}
+        skipPreference={async () => {
+          personaSavedRef.current = false;
+          await completeInitialOnboarding({ action: "skip" });
+        }}
       />
     );
   }
@@ -138,6 +164,38 @@ export function HomeInitialVisitPersonaPickerClient({
   }
 
   return null;
+}
+
+async function completeInitialOnboarding(
+  body:
+    | { action: "skip" }
+    | {
+        action: "save";
+        preferences: {
+          persona: AssistantPersonaId;
+          tone: AssistantTonePreference;
+          voice: AssistantVoiceOptionId;
+        };
+      },
+): Promise<{ completedNow: boolean }> {
+  const response = await fetch("/api/settings/initial-onboarding", {
+    body: JSON.stringify(body),
+    headers: { "content-type": "application/json" },
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new Error("Initial onboarding completion failed.");
+  }
+  const result: unknown = await response.json();
+  if (
+    !result
+    || typeof result !== "object"
+    || (result as { status?: unknown }).status !== "completed"
+    || typeof (result as { completedNow?: unknown }).completedNow !== "boolean"
+  ) {
+    throw new Error("Initial onboarding completion response was invalid.");
+  }
+  return { completedNow: (result as { completedNow: boolean }).completedNow };
 }
 
 function stripInitialVisitQueryParam() {
