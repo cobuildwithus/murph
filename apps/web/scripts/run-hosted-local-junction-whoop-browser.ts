@@ -76,19 +76,23 @@ async function main(): Promise<void> {
     });
 
     stage = "junction_whoop_authorization";
-    await completeExternalAuthorization(page, config);
-
-    stage = "murph_callback_confirmation";
-    const callbackUrl = new URL(page.url());
-    if (callbackUrl.pathname !== "/api/device-sync/connect/junction/callback") {
-      throw new Error("Junction returned to an unexpected Murph callback path.");
+    const [callbackResponse] = await Promise.all([
+      page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return url.origin === config.webOrigin
+          && url.pathname === "/api/device-sync/connect/junction/callback";
+      }, { timeout: config.timeoutMs }),
+      completeExternalAuthorization(page, config),
+    ]);
+    if (callbackResponse.status() !== 302) {
+      throw new Error("Murph did not complete the Junction callback redirect.");
     }
-    await page
-      .getByRole("heading", { name: "Finish connecting your device" })
-      .waitFor({ timeout: config.timeoutMs });
-    await page.getByRole("button", { name: "Finish connection" }).click();
 
     stage = "murph_connected_completion";
+    await page.waitForURL(
+      (url) => url.origin === config.webOrigin && url.pathname === "/home",
+      { timeout: config.timeoutMs },
+    );
     await page.getByRole("heading", { name: /^WHOOP is connected$/i }).waitFor({
       timeout: config.timeoutMs,
     });
@@ -105,7 +109,7 @@ async function main(): Promise<void> {
     await disconnectJunctionAccount(page, config.timeoutMs);
 
     process.stdout.write(`MURPH_E2E_RESULT=${JSON.stringify({
-      callbackConfirmed: true,
+      callbackAutoCompleted: true,
       connectedAfterCallback: true,
       connectedAfterReload: true,
       disconnectedDuringCleanup: true,

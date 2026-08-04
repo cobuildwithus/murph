@@ -179,8 +179,10 @@ describe("hosted local device connect e2e", () => {
 
       const connectLink = await createHostedWhoopConnectLink(linkUserId);
 
+      // The runtime port surfaces the user-facing connect target. The
+      // Junction implementation is asserted independently in resolvedConfig.
       expect(connectLink).toMatchObject({
-        provider: "junction",
+        provider: "whoop",
         providerLabel: "WHOOP",
       });
       expect(connectLink?.expiresAt).toMatch(/^\d{4}-\d{2}-\d{2}T/u);
@@ -239,7 +241,7 @@ describe("hosted local device connect e2e", () => {
       });
 
       expect(result).toEqual({
-        callbackConfirmed: true,
+        callbackAutoCompleted: true,
         connectedAfterCallback: true,
         connectedAfterReload: true,
         disconnectedDuringCleanup: true,
@@ -262,7 +264,7 @@ interface LiveJunctionWhoopConfig {
 }
 
 interface JunctionWhoopBrowserResult {
-  callbackConfirmed: true;
+  callbackAutoCompleted: true;
   connectedAfterCallback: true;
   connectedAfterReload: true;
   disconnectedDuringCleanup: true;
