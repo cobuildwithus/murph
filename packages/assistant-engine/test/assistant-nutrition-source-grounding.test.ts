@@ -27,7 +27,7 @@ describe('assistant nutrition source grounding', () => {
     )
     expect(food).toContain('Do not let vision or memory answer both.')
     expect(food).toContain(
-      'For every numeric meal estimate—including interactive meal logs, user-sent photos, automatic-meal-capture enrichment, and scheduled closeouts—resolve nutrient density from the hosted food-label database',
+      'For every numeric meal estimate—including interactive meal logs, user-sent photos, automatic-meal-capture enrichment, and scheduled closeouts—resolve nutrient density from the hosted food-label database for every identifiable material component.',
     )
     expect(food).toContain(
       'use returned label or USDA facts for calories and macros',
