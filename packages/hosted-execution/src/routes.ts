@@ -10,6 +10,8 @@ export const HOSTED_RUNTIME_LOG_PATH = "/api/internal/hosted-runtime/log";
 export const HOSTED_RUNTIME_LATENCY_TRACE_PATH =
   "/api/internal/hosted-runtime/latency";
 export const HOSTED_RUNTIME_STATUS_PATH = "/api/internal/hosted-runtime/status";
+export const HOSTED_RUNTIME_HEALTH_DATA_ADMISSION_PATH =
+  "/api/internal/hosted-runtime/health-data-admission";
 export const HOSTED_RUNTIME_OWNER_RELEASED_PATH =
   "/api/internal/hosted-runtime/owner-released";
 export const HOSTED_RUNTIME_OWNER_RELEASE_IMMEDIATE_RECHECK_QUERY =

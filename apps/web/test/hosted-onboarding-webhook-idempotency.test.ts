@@ -1667,14 +1667,17 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       reason: "wake-appended-active-member",
     });
 
-    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(2);
+    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(3);
     const initialAccessReadOrder =
       prisma.hostedMember.findUnique.mock.invocationCallOrder[0]!;
-    const refreshedAccessReadOrder =
+    const exactAccessReadOrder =
       prisma.hostedMember.findUnique.mock.invocationCallOrder[1]!;
+    const refreshedAccessReadOrder =
+      prisma.hostedMember.findUnique.mock.invocationCallOrder[2]!;
     const reclassificationLockOrder =
       mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[0]!;
-    expect(initialAccessReadOrder).toBeLessThan(reclassificationLockOrder);
+    expect(initialAccessReadOrder).toBeLessThan(exactAccessReadOrder);
+    expect(exactAccessReadOrder).toBeLessThan(reclassificationLockOrder);
     expect(reclassificationLockOrder).toBeLessThan(refreshedAccessReadOrder);
     expect(
       refreshedAccessReadOrder,

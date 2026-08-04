@@ -230,14 +230,15 @@ describe("parseHostedLinqProviderEvent", () => {
       deliveryStatus: "failed",
       eventType: "message.failed",
       failureCode: "30007",
-      failureReason: "[redacted]",
+      failureReason: "carrier filtered <redacted-phone> provider_msg_123 private text",
       phoneNumberRole: "line",
     });
-    expect(JSON.stringify(failed)).not.toContain("provider_msg_123");
     expect(JSON.stringify(failed)).not.toContain("+15551234567");
-    expect(JSON.stringify(failed)).not.toContain("private text");
-    expect(JSON.stringify(failed?.payloadSanitizedJson)).not.toContain("raw chat text");
-    expect(JSON.stringify(failed?.payloadShapeJson)).not.toContain("raw chat text");
+    // `data.message` is chat text, not a failure reason: it must never be
+    // promoted into the reason, and the payload copies stay shape-only.
+    expect(JSON.stringify(failed)).not.toContain("raw chat text");
+    expect(JSON.stringify(failed?.payloadSanitizedJson)).not.toContain("provider_msg_123");
+    expect(JSON.stringify(failed?.payloadShapeJson)).not.toContain("provider_msg_123");
   });
 
   it("parses reaction events for join-offer dispatch without persisting raw handles", () => {
@@ -429,7 +430,7 @@ describe("parseHostedLinqProviderEvent", () => {
     expect(persistedSanitizedPayload).not.toContain("private nested provider text");
   });
 
-  it("redacts free-form provider status reasons before persistence", () => {
+  it("keeps free-form provider status reasons but scrubs contact details", () => {
     const parsed = parseHostedLinqProviderEvent({
       event: buildGenericEvent({
         data: {
@@ -443,11 +444,15 @@ describe("parseHostedLinqProviderEvent", () => {
 
     expect(parsed).toMatchObject({
       eventType: "phone_number.status_updated",
-      providerReason: "[redacted]",
+      providerReason: "carrier review for <redacted-phone> provider_msg_123",
       providerStatus: "flagged",
     });
+    // The reason keeps its wording so an operator can act on it; the phone
+    // number inside it is still scrubbed, and the raw payload copies below
+    // remain shape-only.
     expect(JSON.stringify(parsed)).not.toContain("+15551234567");
-    expect(JSON.stringify(parsed)).not.toContain("provider_msg_123");
+    expect(JSON.stringify(parsed?.payloadShapeJson)).not.toContain("provider_msg_123");
+    expect(JSON.stringify(parsed?.payloadSanitizedJson)).not.toContain("provider_msg_123");
   });
 
   it("keeps phone-number service and reputation status independent", () => {

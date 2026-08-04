@@ -199,9 +199,9 @@ test("dashboard consent keeps a failed save retryable and continues after retry"
     {
       location: {
         hash: "",
-        href: "https://app.example.test/settings?tab=privacy",
+        href: "https://app.example.test/home?tab=privacy",
         origin: "https://app.example.test",
-        pathname: "/settings",
+        pathname: "/home",
         search: "?tab=privacy",
       },
       requireButton: false,
@@ -516,12 +516,62 @@ test("a consent preview uses only its injected in-memory acceptance owner", asyn
   expect(rendered.reload).not.toHaveBeenCalled();
 });
 
+test("settings keeps the consent gate when launch consent is missing", async () => {
+  const rendered = await renderClientComponent(
+    createElement(DashboardLegalConsentGate, {
+      initialStatus: createLaunchConsentStatus(),
+    }),
+    {
+      location: {
+        hash: "#data-privacy",
+        href: "https://app.example.test/settings#data-privacy",
+        origin: "https://app.example.test",
+        pathname: "/settings",
+        search: "",
+      },
+      requireButton: false,
+    },
+  );
+  cleanupRender = rendered.cleanup;
+
+  expect(rendered.container.querySelector(
+    '[data-dashboard-legal-consent-gate="true"]',
+  )).toBeTruthy();
+});
+
+test("settings remains available after explicit health-data withdrawal", async () => {
+  const rendered = await renderClientComponent(
+    createElement(DashboardLegalConsentGate, {
+      initialStatus: createLaunchConsentStatus({
+        launchHealthDataRevoked: true,
+        launchLegalGranted: true,
+      }),
+    }),
+    {
+      location: {
+        hash: "#data-privacy",
+        href: "https://app.example.test/settings#data-privacy",
+        origin: "https://app.example.test",
+        pathname: "/settings",
+        search: "",
+      },
+      requireButton: false,
+    },
+  );
+  cleanupRender = rendered.cleanup;
+
+  expect(rendered.container.querySelector(
+    '[data-dashboard-legal-consent-gate="true"]',
+  )).toBeNull();
+});
+
 function expectNoLaunchCheckboxes(container: HTMLElement) {
   expect(container.querySelectorAll('input[type="checkbox"]')).toHaveLength(0);
 }
 
 function createLaunchConsentStatus(input: {
   launchHealthDataGranted?: boolean;
+  launchHealthDataRevoked?: boolean;
   launchLegalGranted?: boolean;
 } = {}): HostedConsentStatus {
   const legalDocuments: HostedConsentStatus["documents"] = [
@@ -568,12 +618,14 @@ function createLaunchConsentStatus(input: {
         "Terms, privacy, and AI disclosure",
         legalDocuments,
         launchLegalGranted,
+        false,
       ),
       consentScope(
         "launch.health-data",
         "Health data notice and processing authorization",
         healthDataDocuments,
         launchHealthDataGranted,
+        input.launchHealthDataRevoked ?? false,
       ),
     ],
   };
@@ -598,11 +650,26 @@ function consentScope(
   label: string,
   documents: HostedConsentStatus["documents"],
   granted: boolean,
+  revoked: boolean,
 ): HostedConsentStatus["scopes"][number] {
+  const now = "2026-07-23T12:00:00.000Z";
   return {
     current: granted,
     documents,
-    grant: null,
+    grant: granted || revoked
+      ? {
+          documentVersions: Object.fromEntries(
+            documents.map((document) => [document.id, document.version]),
+          ),
+          grantedAt: now,
+          lastEventId: revoked ? "consent_event_revoked" : "consent_event_granted",
+          revokedAt: revoked ? now : null,
+          scope,
+          source: "test",
+          status: revoked ? "revoked" : "granted",
+          updatedAt: now,
+        }
+      : null,
     granted,
     label,
     missingDocuments: granted ? [] : documents,

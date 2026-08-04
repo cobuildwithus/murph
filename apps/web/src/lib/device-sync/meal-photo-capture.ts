@@ -18,7 +18,10 @@ import {
   lockHostedMemberRow,
   lockHostedMemberSponsoredAccessRows,
 } from "../hosted-onboarding/shared";
-import { assertHostedHistoricalLaunchConsentGranted } from "../legal/consent";
+import {
+  assertHostedHistoricalLaunchConsentGranted,
+  readHostedHealthDataConsentState,
+} from "../legal/consent";
 
 export const MEAL_PHOTO_CAPTURE_SCHEMA_VERSION_HEADER = "x-murph-meal-capture-schema";
 export const MEAL_PHOTO_CAPTURE_CAPTURED_AT_HEADER = "x-murph-captured-at";
@@ -78,6 +81,36 @@ export interface MealPhotoCaptureRevocationRequest {
   schemaVersion: 1;
 }
 
+export async function revokeAllMealPhotoCaptureEnrollmentsForMember(input: {
+  memberId: string;
+  now?: Date;
+  prisma: PrismaClient;
+}): Promise<{ revokedCount: number }> {
+  const now = input.now ?? new Date();
+  return input.prisma.$transaction(async (tx) => {
+    await lockHostedMemberRow(tx, input.memberId);
+    if (await readHostedHealthDataConsentState({
+      memberId: input.memberId,
+      prisma: tx,
+    }) !== "revoked") {
+      return { revokedCount: 0 };
+    }
+    const result = await tx.hostedMealPhotoCaptureEnrollment.updateMany({
+      data: {
+        revokeReason: "health_data_consent_withdrawn",
+        revokedAt: now,
+        updatedAt: now,
+      },
+      where: {
+        memberId: input.memberId,
+        revokedAt: null,
+      },
+    });
+
+    return { revokedCount: result.count };
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
+
 export interface MealPhotoCaptureEnrollmentResponse {
   expiresAt: Date;
   idempotencySecret: string;
@@ -131,6 +164,10 @@ export async function issueMealPhotoCaptureEnrollment(input: {
 
   return input.prisma.$transaction(async (tx) => {
     await lockHostedMemberRow(tx, input.memberId);
+    await assertHostedHistoricalLaunchConsentGranted({
+      memberId: input.memberId,
+      prisma: tx,
+    });
     const existing = await tx.hostedMealPhotoCaptureEnrollment.findUnique({
       where: {
         memberId_installationIdHash: {
