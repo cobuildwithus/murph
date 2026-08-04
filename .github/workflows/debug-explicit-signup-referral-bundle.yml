@@ -24,50 +24,34 @@ jobs:
 
           source_path = Path("packages/assistant-runtime/src/hosted-runtime/workspace-assistant-phase.ts")
           source = source_path.read_text()
-          source_needle = '''    case "preflight_set_chat_avatar":
-              case "set_chat_avatar":
-              case "share_contact_card":
-              case "leave_membership":
-              case "post_disclosure_request":'''.replace("              ", "    ")
-          source_replacement = '''    case "create_signup_referral_link":
-              case "preflight_set_chat_avatar":
-              case "set_chat_avatar":
-              case "share_contact_card":
-              case "leave_membership":
-              case "post_disclosure_request":'''.replace("              ", "    ")
-          if source.count(source_needle) != 1:
-              raise SystemExit("workspace assistant response anchor did not match exactly once")
-          source_path.write_text(source.replace(source_needle, source_replacement, 1))
+          function_start = source.index(
+              "function buildHostedGroupEmailRestrictedActionUnavailable",
+          )
+          function_end = source.index("\n}\n\n/**", function_start) + 3
+          function = source[function_start:function_end]
+          case_anchor = '    case "preflight_set_chat_avatar":\n'
+          if function.count(case_anchor) != 1:
+              raise SystemExit("email-group response case anchor did not match exactly once")
+          function = function.replace(
+              case_anchor,
+              '    case "create_signup_referral_link":\n' + case_anchor,
+              1,
+          )
+          source_path.write_text(
+              source[:function_start] + function + source[function_end:],
+          )
 
           test_path = Path("packages/assistant-runtime/test/hosted-runtime-group-tool-linq-context.test.ts")
           test = test_path.read_text()
           old_title = '  it("denies referral actions on group email where the human sender is not authoritative", async () => {'
           new_title = '  it("denies referral and signup-link actions on group email without an authoritative sender", async () => {'
-          if test.count(old_title) != 1:
-              raise SystemExit("email-group test title anchor did not match exactly once")
-          test = test.replace(old_title, new_title, 1)
-          test_needle = '''    await expect(groupTool.request({
-              action: "read_usage_referral",
-            })).resolves.toEqual({
-              action: "read_usage_referral",
-              result: {
-                referral: null,
-                status: "unavailable",
-                unavailableReason: "authenticated_sender_required",
-              },
-            });
-            expect(request).not.toHaveBeenCalled();'''.replace("            ", "    ")
-          test_replacement = '''    await expect(groupTool.request({
-              action: "read_usage_referral",
-            })).resolves.toEqual({
-              action: "read_usage_referral",
-              result: {
-                referral: null,
-                status: "unavailable",
-                unavailableReason: "authenticated_sender_required",
-              },
-            });
-            await expect(groupTool.request({
+          test_start = test.index(old_title)
+          test_end = test.index("\n  it(", test_start + len(old_title))
+          block = test[test_start:test_end].replace(old_title, new_title, 1)
+          assertion_anchor = "    expect(request).not.toHaveBeenCalled();"
+          if block.count(assertion_anchor) != 1:
+              raise SystemExit("email-group no-forward assertion did not match exactly once")
+          signup_link_assertion = '''    await expect(groupTool.request({
               action: "create_signup_referral_link",
             })).resolves.toEqual({
               action: "create_signup_referral_link",
@@ -76,10 +60,13 @@ jobs:
                 unavailableReason: "authenticated_sender_required",
               },
             });
-            expect(request).not.toHaveBeenCalled();'''.replace("            ", "    ")
-          if test.count(test_needle) != 1:
-              raise SystemExit("email-group test body anchor did not match exactly once")
-          test_path.write_text(test.replace(test_needle, test_replacement, 1))
+          '''.replace("          ", "")
+          block = block.replace(
+              assertion_anchor,
+              signup_link_assertion + assertion_anchor,
+              1,
+          )
+          test_path.write_text(test[:test_start] + block + test[test_end:])
 
           Path(".github/workflows/debug-explicit-signup-referral-bundle.yml").unlink()
           PY
