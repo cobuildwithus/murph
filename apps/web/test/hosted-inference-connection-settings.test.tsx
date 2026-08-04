@@ -174,7 +174,7 @@ describe("hosted inference connection pane", () => {
       assert.deepEqual(connectionChanges, [savedConnection(false)]);
       assert.match(
         view.container.textContent ?? "",
-        /Choose Your endpoint and save to route new core replies to it/u,
+        /Choose Your endpoint and save to route inference to it/u,
       );
       assert.equal(nonEmptyLiveRegions(view.container).length, 1);
     } finally {
@@ -200,7 +200,7 @@ describe("hosted inference connection pane", () => {
       });
       assert.match(
         view.container.textContent ?? "",
-        /New core replies will switch to Murph-managed inference/u,
+        /Inference will return to your managed provider/u,
       );
     } finally {
       await view.cleanup();
