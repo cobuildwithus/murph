@@ -1767,6 +1767,7 @@ export function ComponentsContent() {
                 disabled: false,
                 errorMessage: null,
                 label: "Resting",
+                showPhoneAction: true,
                 state: "resting",
                 statusMessage: null,
                 statusTone: "neutral" as const,
@@ -1775,6 +1776,7 @@ export function ComponentsContent() {
                 disabled: false,
                 errorMessage: null,
                 label: "Saved status",
+                showPhoneAction: true,
                 state: "status",
                 statusMessage: "Phone saved.",
                 statusTone: "success" as const,
@@ -1784,6 +1786,7 @@ export function ComponentsContent() {
                 errorMessage:
                   "That phone moved from another Murph account that is still active with its own sign-in. Contact support to reconcile it safely.",
                 label: "Support required",
+                showPhoneAction: false,
                 state: "support-required",
                 statusMessage:
                   "That phone moved from another Murph account that is still active with its own sign-in. Contact support to reconcile it safely.",
@@ -1806,6 +1809,7 @@ export function ComponentsContent() {
                       isChangeFlow={false}
                       isLinking={false}
                       isSyncing={false}
+                      showPhoneAction={preview.showPhoneAction}
                       statusMessage={preview.statusMessage}
                       statusTone={preview.statusTone}
                       onClick={() => {}}

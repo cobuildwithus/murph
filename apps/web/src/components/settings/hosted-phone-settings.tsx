@@ -392,6 +392,7 @@ export function HostedPhoneSettings(props: {
       isChangeFlow={shouldUpdatePhone}
       isLinking={isLinking}
       isSyncing={isSyncing}
+      showPhoneAction={isRetryAllowed}
       statusMessage={statusMessage}
       statusTone={statusTone}
       onClick={handleLinkPhone}
@@ -515,6 +516,7 @@ export function HostedPhoneLinkCardPresentation(props: {
   isChangeFlow: boolean;
   isLinking: boolean;
   isSyncing: boolean;
+  showPhoneAction?: boolean;
   statusMessage: string | null;
   statusTone: "neutral" | "success" | "destructive";
   onClick: () => void;
@@ -525,13 +527,17 @@ export function HostedPhoneLinkCardPresentation(props: {
           when a message appears, so it stays tight to the action it reports
           on rather than reading as a gap below the card's primary CTA. */}
       <div className="space-y-2">
-        <HostedPhoneLinkAction
-          disabled={props.disabled}
-          isChangeFlow={props.isChangeFlow}
-          isLinking={props.isLinking}
-          isSyncing={props.isSyncing}
-          onClick={props.onClick}
-        />
+        {props.showPhoneAction === false
+          ? null
+          : (
+              <HostedPhoneLinkAction
+                disabled={props.disabled}
+                isChangeFlow={props.isChangeFlow}
+                isLinking={props.isLinking}
+                isSyncing={props.isSyncing}
+                onClick={props.onClick}
+              />
+            )}
 
         <SettingsStatusLine
           message={props.statusMessage}

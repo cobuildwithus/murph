@@ -893,18 +893,11 @@ describe("HostedPhoneSettings", () => {
       );
     });
 
-    const phoneButton = findButton(container, "Change phone");
-    expect(phoneButton?.disabled).toBe(true);
+    expect(findButton(container, "Change phone")).toBeUndefined();
     expect(container.textContent).toContain("Contact support");
     expect(mocks.finalizeHostedPhoneLink).toHaveBeenCalledTimes(1);
     expect(mocks.linkPhone).not.toHaveBeenCalled();
     expect(mocks.updatePhone).not.toHaveBeenCalled();
-
-    await act(async () => {
-      phoneButton?.dispatchEvent(new Event("click", { bubbles: true }));
-      await Promise.resolve();
-    });
-    expect(mocks.finalizeHostedPhoneLink).toHaveBeenCalledTimes(1);
   });
 
   it("does not infer an update flow from linked-account projections alone", async () => {
