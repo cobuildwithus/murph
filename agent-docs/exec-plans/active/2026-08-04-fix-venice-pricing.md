@@ -114,6 +114,12 @@ Updated: 2026-08-04
   gate rather than inventing a prompt-specific subsystem. The exact candidate
   must prove every tier with direct, tool-bearing, and compact requests before
   Web exposure.
+- 2026-08-04: Parent product-purpose revalidation after merging current `main`
+  found no remaining product-experience issue. The smallest complete journey is
+  still the existing provider choice and single Save, with the higher-capacity
+  drawdown disclosed in the Venice option, pending summary, and saved summary.
+  The live all-tier runtime matrix remains an explicit activation evidence gap,
+  not a reason to add another screen or prompt subsystem.
 
 ## Verification
 
@@ -128,3 +134,14 @@ Updated: 2026-08-04
   - Venice rows use a Venice pricing version and exact documented rates.
   - OpenAI rows retain the existing standard or Flex pricing versions.
   - No operator mapping exists that can diverge from the priced provider model.
+- Completed local proof after merging current `main`:
+  - Web focused Vitest: 135 tests passed.
+  - Cloudflare focused Vitest: 346 tests passed.
+  - Hosted-execution focused Vitest: 3 tests passed.
+  - Web, Cloudflare, and hosted-execution typechecks passed.
+  - Scoped Web ESLint, docs drift/gardening, frontend design-proof policy, and
+    `git diff --check` passed.
+  - Desktop and mobile saved-Venice and provider-dialog images were inspected
+    locally and through their hosted design-proof variants at native resolution.
+  - The required second-model UI review was attempted but could not run because
+    that service reported explicit usage-credit exhaustion.
