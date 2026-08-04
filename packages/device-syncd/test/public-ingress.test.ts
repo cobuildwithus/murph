@@ -3408,6 +3408,103 @@ test("public ingress claims and completes already-satisfied dirty hints", async 
   assert.equal(store.getConnectionByExternalAccount("demo", "demo-abc")?.lastWebhookAt, null);
 });
 
+test("public ingress finishes source lifecycle before concurrent dirty coalescing completes its trace", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const order: string[] = [];
+  let dirtySatisfied = false;
+  let releaseSourceLifecycle!: () => void;
+  let signalSourceLifecycleStarted!: () => void;
+  const sourceLifecycleReleased = new Promise<void>((resolve) => {
+    releaseSourceLifecycle = resolve;
+  });
+  const sourceLifecycleStarted = new Promise<void>((resolve) => {
+    signalSourceLifecycleStarted = resolve;
+  });
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async verifyAndParseWebhook({ rawBody }) {
+          const registration = rawBody.toString("utf8") === "registration";
+          return {
+            acceptanceMode: "level_dirty_hint",
+            externalAccountId: "demo-abc",
+            eventType: registration ? "provider.connection.created" : "daily.data.updated",
+            ...(registration ? { sourceProviderSlug: "apple_health_kit" } : {}),
+            traceId: registration ? "trace-registration" : "trace-dirty",
+            jobs: [{ kind: "reconcile" }],
+          };
+        },
+      }),
+    ]),
+    store,
+    hooks: {
+      async onConnectionSourceObserved({ eventType }) {
+        assert.equal(eventType, "provider.connection.created");
+        order.push("source:start");
+        signalSourceLifecycleStarted();
+        await sourceLifecycleReleased;
+        order.push("source:complete");
+        return { sourceAdmissionCommitted: true };
+      },
+      onLevelDirtyWebhookAlreadySatisfied({ webhook }) {
+        if (webhook.eventType === "provider.connection.created") {
+          assert.equal(dirtySatisfied, true);
+          order.push("registration:dirty-coalesced");
+          return { accepted: true };
+        }
+        return null;
+      },
+      onWebhookAccepted({ account, claimToken, traceId, webhook }) {
+        assert.equal(webhook.eventType, "daily.data.updated");
+        dirtySatisfied = true;
+        order.push("dirty:accepted");
+        return completeWebhookAcceptDurably(store, account, traceId, claimToken);
+      },
+    },
+  });
+
+  const begin = await ingress.startConnection({ provider: "demo" });
+  await ingress.handleOAuthCallback({ provider: "demo", state: begin.state, code: "abc" });
+  const account = store.getConnectionByExternalAccount("demo", "demo-abc");
+  assert.ok(account);
+  store.upsertConnectionSource({
+    connectionId: account.id,
+    sourceInstanceKey: `${account.id}:apple_health_kit`,
+    sourceProviderSlug: "apple_health_kit",
+    status: "disconnected",
+    firstSeenAt: "2026-04-10T00:00:00.000Z",
+    lastSeenAt: "2026-04-10T00:00:00.000Z",
+  });
+
+  const registration = ingress.handleWebhook(
+    "demo",
+    new Headers(),
+    Buffer.from("registration"),
+  );
+  await sourceLifecycleStarted;
+
+  await ingress.handleWebhook("demo", new Headers(), Buffer.from("dirty"));
+  releaseSourceLifecycle();
+  const registered = await registration;
+  const replay = await ingress.handleWebhook(
+    "demo",
+    new Headers(),
+    Buffer.from("registration"),
+  );
+
+  assert.equal(registered.accepted, true);
+  assert.equal(registered.duplicate, false);
+  assert.equal(replay.duplicate, true);
+  assert.deepEqual(order, [
+    "source:start",
+    "dirty:accepted",
+    "source:complete",
+    "registration:dirty-coalesced",
+  ]);
+  assert.equal(store.completedWebhookTraceCalls, 2);
+});
+
 test("public ingress completes a source-registration trace after target cleanup", async () => {
   const store = new InMemoryPublicIngressStore();
   let acceptedCalls = 0;

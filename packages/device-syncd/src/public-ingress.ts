@@ -1494,6 +1494,8 @@ export class DeviceSyncPublicIngress {
     }
 
     try {
+      // A dirty row proves only that import invalidation is queued. Await exact-
+      // source lifecycle work before dirty coalescing can complete this trace.
       if (webhookSourceProviderSlug) {
         const matchingSources = await this.store.listConnectionSources({
           connectionId: account.id,
