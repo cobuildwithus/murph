@@ -35,6 +35,7 @@ const JUNCTION_WHOOP_LIVE_ENV_KEYS = [
   "MURPH_E2E_WHOOP_HEADLESS",
   "MURPH_E2E_WHOOP_OTP",
   "MURPH_E2E_WHOOP_PASSWORD",
+  "MURPH_E2E_WHOOP_TIMEOUT_MS",
 ] as const;
 
 interface HostedLocalE2eRunnerCleanupOptions {

@@ -485,6 +485,7 @@ describe("hosted-local E2E suite preparation", () => {
       MURPH_E2E_WHOOP_HEADLESS: "1",
       MURPH_E2E_WHOOP_OTP: "123456",
       MURPH_E2E_WHOOP_PASSWORD: "sentinel-password",
+      MURPH_E2E_WHOOP_TIMEOUT_MS: "180000",
     };
 
     await runHostedLocalE2eSuite({

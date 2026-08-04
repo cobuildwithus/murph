@@ -135,7 +135,7 @@ async function addHostedSessionCookie(
     httpOnly: true,
     name: pair.slice(0, separatorIndex),
     sameSite: "Lax",
-    secure: config.webBaseUrl.startsWith("https://"),
+    secure: pair.startsWith("__Host-") || config.webBaseUrl.startsWith("https://"),
     url: config.webBaseUrl,
     value: decodeURIComponent(pair.slice(separatorIndex + 1)),
   }]);
