@@ -1,0 +1,1 @@
+export const HOSTED_BILLING_PLAN_CHANGE_RETURN_PARAM = "planUpdate";

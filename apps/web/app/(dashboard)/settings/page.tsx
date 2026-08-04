@@ -20,6 +20,7 @@ import { SettingsAuthRequired } from "./settings-auth-required";
 import { HostedFamilySettings } from "@/src/components/settings/hosted-family-settings";
 import { HostedPasskeySettings } from "@/src/components/settings/hosted-passkey-settings";
 import { PulseTrialBillingContinuation } from "@/src/components/settings/hosted-start-paid-pulse-button";
+import { HostedPlanUpdateReturn } from "@/src/components/settings/hosted-plan-update-return";
 import { Watch } from "lucide-react";
 import Link from "next/link";
 import { PageHeader } from "@/src/components/ui/page-header";
@@ -96,6 +97,7 @@ type SettingsSearchParams = {
   signature?: string | string[] | undefined;
   startPulse?: string | string[] | undefined;
   startGroup?: string | string[] | undefined;
+  planUpdate?: string | string[] | undefined;
   usageCheckout?: string | string[] | undefined;
   usageFamily?: string | string[] | undefined;
   usageMember?: string | string[] | undefined;
@@ -283,6 +285,14 @@ export default async function SettingsPage({
   const currentPlanCode = parseHostedBillingPlanCode(
     billingRef?.currentBillingPlanCode,
   );
+  const planUpdateTarget = parseHostedBillingPlanCode(
+    readOnlySearchParamValue(resolvedSearchParams.planUpdate),
+  );
+  const directPlanUpdateTarget =
+    planUpdateTarget === "launch_edge_monthly"
+      || planUpdateTarget === "launch_monthly"
+      ? planUpdateTarget
+      : null;
   const scheduledPlanCode = parseHostedBillingPlanCode(
     billingRef?.scheduledBillingPlanCode,
   );
@@ -429,6 +439,12 @@ export default async function SettingsPage({
         {pulseTrialBillingContinuationAction ? (
           <PulseTrialBillingContinuation
             action={pulseTrialBillingContinuationAction}
+          />
+        ) : null}
+        {directPlanUpdateTarget ? (
+          <HostedPlanUpdateReturn
+            active={currentPlanCode === directPlanUpdateTarget}
+            targetPlanCode={directPlanUpdateTarget}
           />
         ) : null}
         <HostedBillingSettings

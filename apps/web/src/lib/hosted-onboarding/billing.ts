@@ -121,41 +121,6 @@ export function coerceStripeInvoiceSubscriptionId(
   return coerceStripeSubscriptionId(invoice.parent?.subscription_details?.subscription as never);
 }
 
-/**
- * Stripe-hosted page for an unpaid subscription invoice, which is the only
- * surface that can actually collect the payment. The billing portal home is not
- * a substitute: it renders a pending update as inert status text and files the
- * payable invoice away under invoice history.
- *
- * Returns `null` unless the subscription's latest invoice is still owed by this
- * exact customer and subscription, so a stale or unrelated invoice can never be
- * presented as this subscription's payment step.
- */
-export function readStripeSubscriptionPayableInvoiceUrl(input: {
-  stripeCustomerId: string;
-  stripeSubscriptionId: string;
-  subscription: Stripe.Subscription;
-}): string | null {
-  const invoice = input.subscription.latest_invoice;
-
-  if (
-    !invoice ||
-    typeof invoice !== "object" ||
-    invoice.status !== "open" ||
-    typeof invoice.amount_remaining !== "number" ||
-    invoice.amount_remaining <= 0 ||
-    coerceStripeObjectId(invoice.customer) !== input.stripeCustomerId ||
-    coerceStripeInvoiceSubscriptionId(invoice) !== input.stripeSubscriptionId
-  ) {
-    return null;
-  }
-
-  return typeof invoice.hosted_invoice_url === "string" &&
-      invoice.hosted_invoice_url.startsWith("https://")
-    ? invoice.hosted_invoice_url
-    : null;
-}
-
 export function buildStripeSuccessUrl(baseUrl: string, inviteCode: string): string {
   return `${baseUrl}/join/${encodeURIComponent(inviteCode)}/success?session_id={CHECKOUT_SESSION_ID}`;
 }

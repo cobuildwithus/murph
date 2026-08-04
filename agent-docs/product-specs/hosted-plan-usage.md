@@ -251,22 +251,25 @@ from another tab. The public marker removal keeps completed or dismissed
 returns inert, and the existing short expiry bounds any surviving claim.
 
 Starting Pulse now uses the existing start-paid-Pulse service. Upgrading to
-Edge uses the existing plan-change service. Pulse activation keeps its existing
-Stripe-hosted invoice or Customer Portal handoff when payment is required. A
-pending Edge change returns the Stripe-hosted page for the invoice the failed
-charge left open, because that page is the only surface that can collect the
-payment the pending update waits on; the Customer Portal home shows the pending
-state as inert text and files the payable invoice under invoice history. The
-service returns that invoice URL only when the subscription's latest invoice is
-still open, still owed, and belongs to the same Stripe customer and
-subscription, so an unrelated or settled invoice is never presented as this
-subscription's payment step. Retrying the upgrade while that update is still
-pending returns the same invoice without issuing another subscription update.
-When no such payable invoice exists, the existing Customer Portal handoff
-remains the fallback. The assistant sends a returned
-Stripe URL only after the member's explicit choice and only when the
-authoritative result says payment is required. Completed, pending, and
-no-action results do not carry a URL.
+Edge uses the existing plan-change admission service, which validates the
+current member, billing owner, exact Customer and Subscription, one licensed
+monthly Subscription Item, target Price, and absence of a schedule or pending
+update before creating a Customer Portal `subscription_update_confirm` deep
+link. Stripe then owns the exact proration, payment collection, payment-method
+recovery, and required authentication. Its successful redirect returns to
+Settings, where a bounded status surface waits for the webhook-owned Postgres
+projection instead of claiming entitlement from the redirect itself. The
+assistant sends the Portal URL only after the member's explicit choice. A
+no-action result carries no URL.
+
+The retired Stripe hosted-AI meter is not part of current allowance accounting
+or billing. A dry-run-first operator migration removes only explicitly marked
+legacy metered items from otherwise recognized direct Murph subscriptions with
+no proration or charge. It skips terminal subscriptions and fails closed before
+apply when an active subscription has an unknown item, schedule, or pending
+update. Immediate plan confirmation does not delete compatibility items in the
+member's request path and does not retain Murph-owned invoice recovery as a
+fallback.
 
 The assistant may discuss plan and usage options before a choice, but the first
 assistant-initiated commercial mention is one short, reply-oriented question

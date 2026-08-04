@@ -155,7 +155,7 @@ describe("HostedBillingSettings", () => {
     vi.clearAllMocks();
     mocks.requestHostedOnboardingJson.mockResolvedValue({
       billingPlanCode: "launch_edge_monthly",
-      status: "upgraded",
+      status: "already_on_plan",
     });
     mocks.requestHostedPulseTrialStartPaid.mockResolvedValue({
       status: "started",
@@ -1286,20 +1286,12 @@ describe("HostedBillingSettings", () => {
     assert.doesNotMatch(markup, /Switch to Pulse</);
   });
 
-  test("posts the Edge upgrade request and refreshes on success", async () => {
+  test("opens Stripe directly for an Edge upgrade without a duplicate confirmation", async () => {
     const { UpgradeToEdgeButton } = await import("@/src/components/settings/hosted-plan-upgrade-button");
     const rendered = await renderClientComponent(createElement(UpgradeToEdgeButton));
 
     await act(async () => {
       rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
-    });
-    assert.equal(mocks.requestHostedOnboardingJson.mock.calls.length, 0);
-    assert.match(rendered.window.document.body.textContent ?? "", /For when you want the full picture\./);
-    assert.match(rendered.window.document.body.textContent ?? "", /\$20\/ month/);
-
-    const confirmButton = findLastButtonByText(rendered.window.document, "Upgrade to Edge", rendered.window);
-    await act(async () => {
-      confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
     });
 
     assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0], {
@@ -1831,10 +1823,6 @@ describe("HostedBillingSettings", () => {
 
     await act(async () => {
       rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
-    });
-    const confirmButton = findLastButtonByText(rendered.window.document, "Upgrade to Edge", rendered.window);
-    await act(async () => {
-      confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
     });
 
     assert.equal(mocks.routerRefresh.mock.calls.length, 0);

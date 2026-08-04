@@ -51,7 +51,6 @@ import {
   withHostedMemberStripeMutationLock,
 } from "./hosted-member-billing-store";
 import { readHostedMemberCoreState } from "./hosted-member-store";
-import { isHostedStripeLegacyAiUsageMeteredItem } from "./legacy-usage-price";
 import {
   requireHostedOnboardingPublicBaseUrl,
   requireHostedStripeBillingPlanConfig,
@@ -774,17 +773,6 @@ function buildHostedPulseTrialPaymentMethodCompletedReturnUrl(input: {
   return completedReturnUrl.toString();
 }
 
-function buildHostedStripePulseTrialStartPaidLegacyMeteredItemDeletes(input: {
-  priceId: string;
-  subscription: Stripe.Subscription;
-}): Stripe.SubscriptionUpdateParams.Item[] {
-  return buildHostedStripeTrialPaidPlanTransitionItems({
-    sourcePriceId: input.priceId,
-    subscription: input.subscription,
-    targetPriceId: input.priceId,
-  });
-}
-
 function buildHostedStripeTrialPaidPlanTransitionItems(input: {
   sourcePriceId: string;
   subscription: Stripe.Subscription;
@@ -799,7 +787,7 @@ function buildHostedStripeTrialPaidPlanTransitionItems(input: {
     acceptedRecurringPriceIds.has(item.price?.id ?? "")
   );
 
-  if (recurringItems.length !== 1) {
+  if (activeItems.length !== 1 || recurringItems.length !== 1) {
     throw buildHostedPulseTrialStartPaidItemError();
   }
 
@@ -813,32 +801,13 @@ function buildHostedStripeTrialPaidPlanTransitionItems(input: {
     throw buildHostedPulseTrialStartPaidItemError();
   }
 
-  const transitionItems: Stripe.SubscriptionUpdateParams.Item[] =
-    recurringItem.price.id === input.targetPriceId
-      ? []
-      : [{
-          id: recurringItem.id,
-          price: input.targetPriceId,
-          quantity: 1,
-        }];
-
-  for (const item of activeItems) {
-    if (item.id === recurringItem.id) {
-      continue;
-    }
-
-    if (isHostedStripeLegacyAiUsageMeteredItem(item)) {
-      transitionItems.push({
-        deleted: true,
-        id: item.id,
-      });
-      continue;
-    }
-
-    throw buildHostedPulseTrialStartPaidItemError();
-  }
-
-  return transitionItems;
+  return recurringItem.price.id === input.targetPriceId
+    ? []
+    : [{
+        id: recurringItem.id,
+        price: input.targetPriceId,
+        quantity: 1,
+      }];
 }
 
 function buildHostedPulseTrialStartPaidItemError(): Error {
@@ -853,11 +822,11 @@ function assertHostedStripePulseTrialStartPaidPostMutationSubscriptionShape(inpu
   priceId: string;
   subscription: Stripe.Subscription;
 }): void {
-  const legacyMeteredItems = buildHostedStripePulseTrialStartPaidLegacyMeteredItemDeletes(input);
-
-  if (legacyMeteredItems.length > 0) {
-    throw buildHostedPulseTrialStartPaidItemError();
-  }
+  buildHostedStripeTrialPaidPlanTransitionItems({
+    sourcePriceId: input.priceId,
+    subscription: input.subscription,
+    targetPriceId: input.priceId,
+  });
 }
 
 async function maybeResolveHostedPulseTrialStartPaidInvoiceResult<
@@ -1158,11 +1127,9 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription<
         });
         const cleanedSubscription = await callHostedStripeStartPaidPulseOperation(
           "subscription.update.paused-pre-resume-cleanup",
-          // Stripe rejects `proration_behavior` outright while a subscription is
-          // paused ("Resume the subscription first"), so it may only ride along
-          // with the item deletes it exists for. Without those, this degenerates
-          // to the metadata-only shape the trial-extension path already relies on
-          // against a paused subscription.
+          // Stripe rejects `proration_behavior` on a paused subscription unless
+          // this request also changes the plan item. A same-plan resume keeps the
+          // existing metadata-only cleanup shape.
           () => input.stripe.subscriptions.update(input.stripeSubscriptionId, {
             expand: [...START_PAID_PULSE_STRIPE_UPDATE_EXPANSIONS],
             ...(input.transitionItems.length > 0

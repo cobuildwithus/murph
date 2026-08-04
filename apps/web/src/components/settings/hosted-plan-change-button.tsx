@@ -46,7 +46,7 @@ export function HostedPlanChangeButton(props: {
   const plan = getHostedBillingPlanDefinition(props.targetPlanCode);
   const verb = props.mode === "schedule" ? "Switch" : "Upgrade";
   const label = pending
-    ? props.mode === "schedule" ? "Scheduling..." : "Upgrading..."
+    ? props.mode === "schedule" ? "Scheduling..." : "Opening Stripe..."
     : props.children ?? `${verb} to ${plan.displayName}`;
 
   async function handleConfirm() {
@@ -81,12 +81,12 @@ export function HostedPlanChangeButton(props: {
 
       setConfirmationOpen(false);
       router.refresh();
+      setPending(false);
     } catch (error) {
       setErrorMessage(toErrorMessage(
         error,
         `Could not ${props.mode === "schedule" ? "schedule" : "make"} this plan change right now.`,
       ));
-    } finally {
       setPending(false);
     }
   }
@@ -99,25 +99,37 @@ export function HostedPlanChangeButton(props: {
       <Button
         type="button"
         variant={props.block ? "secondary" : "default"}
-        onClick={() => setConfirmationOpen(true)}
+        onClick={props.mode === "schedule"
+          ? () => setConfirmationOpen(true)
+          : () => void handleConfirm()}
         disabled={props.disabled === true || pending}
         className={props.block ? "w-full" : undefined}
       >
         {label}
       </Button>
-      <Dialog open={confirmationOpen} onOpenChange={setConfirmationOpen}>
-        <DialogContent className="max-w-md gap-6 rounded-2xl border border-[#c4a882]/25 bg-[#fffcf6] p-6 text-[#2d3436] ring-[#c4a882]/25 md:p-7">
-          <HostedPlanChangeConfirmationContent
-            currentPeriodEnd={props.currentPeriodEnd}
-            errorMessage={errorMessage}
-            mode={props.mode}
-            onClose={() => setConfirmationOpen(false)}
-            onConfirm={() => void handleConfirm()}
-            pending={pending}
-            targetPlanCode={props.targetPlanCode}
-          />
-        </DialogContent>
-      </Dialog>
+      {props.mode === "upgrade" && errorMessage ? (
+        <p
+          role="alert"
+          aria-live="polite"
+          className="text-xs leading-tight text-destructive sm:max-w-xs sm:text-right"
+        >
+          {errorMessage}
+        </p>
+      ) : null}
+      {props.mode === "schedule" ? (
+        <Dialog open={confirmationOpen} onOpenChange={setConfirmationOpen}>
+          <DialogContent className="max-w-md gap-6 rounded-2xl border border-[#c4a882]/25 bg-[#fffcf6] p-6 text-[#2d3436] ring-[#c4a882]/25 md:p-7">
+            <HostedPlanChangeConfirmationContent
+              currentPeriodEnd={props.currentPeriodEnd}
+              errorMessage={errorMessage}
+              onClose={() => setConfirmationOpen(false)}
+              onConfirm={() => void handleConfirm()}
+              pending={pending}
+              targetPlanCode={props.targetPlanCode}
+            />
+          </DialogContent>
+        </Dialog>
+      ) : null}
     </div>
   );
 }
@@ -125,14 +137,12 @@ export function HostedPlanChangeButton(props: {
 export function HostedPlanChangeConfirmationContent(props: {
   currentPeriodEnd?: string | null;
   errorMessage: string | null;
-  mode: "schedule" | "upgrade";
   onClose: () => void;
   onConfirm: () => void;
   pending: boolean;
   targetPlanCode: HostedBillingPlanCode;
 }) {
   const plan = getHostedBillingPlanDefinition(props.targetPlanCode);
-  const verb = props.mode === "schedule" ? "Switch" : "Upgrade";
   const price = formatHostedBillingPrice(
     plan.recurringAmountUsdCents,
   );
@@ -142,12 +152,10 @@ export function HostedPlanChangeConfirmationContent(props: {
     <>
       <DialogHeader className="pr-10">
         <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
-          {verb} to {plan.displayName}
+          Switch to {plan.displayName}
         </DialogTitle>
         <DialogDescription className="text-sm leading-6 text-[#736a58]">
-          {props.mode === "schedule"
-            ? `Your current plan continues through ${effectiveDate}. Then ${plan.displayName} starts at ${price}/month.`
-            : `${plan.displayName} starts now at ${price}/month. Stripe applies the prorated plan change to your current billing period.`}
+          Your current plan continues through {effectiveDate}. Then {plan.displayName} starts at {price}/month.
         </DialogDescription>
       </DialogHeader>
 
@@ -183,9 +191,7 @@ export function HostedPlanChangeConfirmationContent(props: {
           disabled={props.pending}
           className="w-full"
         >
-          {props.pending
-            ? props.mode === "schedule" ? "Scheduling..." : "Upgrading..."
-            : `Confirm ${props.mode === "schedule" ? "switch" : "upgrade"}`}
+          {props.pending ? "Scheduling..." : "Confirm switch"}
         </Button>
         <Button
           type="button"

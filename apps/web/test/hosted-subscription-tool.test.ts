@@ -318,33 +318,7 @@ describe("hosted subscription tool", () => {
     });
   });
 
-  it("upgrades to Edge through the canonical plan-change owner", async () => {
-    mocks.upgradePlan.mockResolvedValue({
-      billingPlanCode: "launch_edge_monthly",
-      status: "upgraded",
-    });
-
-    await expect(handleHostedSubscriptionTool({
-      memberId: "member_123",
-      request: {
-        action: "upgrade_edge",
-        assistantInputId: ASSISTANT_INPUT_ID,
-      },
-    })).resolves.toEqual({
-      action: "upgrade_edge",
-      plan: EDGE_PLAN,
-      status: "completed",
-    });
-
-    expect(mocks.upgradePlan).toHaveBeenCalledWith({
-      expectedCurrentPlanCode: "launch_monthly",
-      memberId: "member_123",
-      prisma: { label: "prisma" },
-      targetPlanCode: "launch_edge_monthly",
-    });
-  });
-
-  it("returns the Edge Billing Portal URL while payment is pending", async () => {
+  it("returns Stripe's Edge confirmation URL from the canonical plan-change owner", async () => {
     mocks.upgradePlan.mockResolvedValue({
       billingPlanCode: "launch_monthly",
       paymentUrl: "https://billing.stripe.com/p/session_123",
@@ -362,6 +336,12 @@ describe("hosted subscription tool", () => {
       paymentUrl: "https://billing.stripe.com/p/session_123",
       plan: EDGE_PLAN,
       status: "payment_required",
+    });
+    expect(mocks.upgradePlan).toHaveBeenCalledWith({
+      expectedCurrentPlanCode: "launch_monthly",
+      memberId: "member_123",
+      prisma: { label: "prisma" },
+      targetPlanCode: "launch_edge_monthly",
     });
   });
 
