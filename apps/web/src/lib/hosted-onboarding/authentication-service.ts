@@ -43,7 +43,7 @@ import {
 import {
   createHostedPrivyIdentityConflictError,
   ensureHostedMemberForPrivyIdentityResolutionTx,
-  reconcileHostedPrivyIdentityOnMemberTx,
+  reconcileHostedPrivyIdentityOnMemberResolutionTx,
 } from "./member-identity-service";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -54,6 +54,7 @@ import { hostedOnboardingError } from "./errors";
 
 type HostedPrivyCompletionMemberResolution = {
   bindingAuthMethod: HostedPrivyAuthMethod;
+  identity: HostedPrivyIdentity;
   member: HostedMemberCoreState;
   primaryBindingSynced: boolean;
 };
@@ -114,9 +115,9 @@ export async function completeHostedPrivyVerification(input: {
             authMethod: inviteAuthMethod,
             identity: input.identity,
           });
-          const member = await prisma.$transaction(
+          const reconciliation = await prisma.$transaction(
             (tx) => runWithHostedDomainRootUnwrapCache(async () => {
-              const reconciledMember = await reconcileHostedPrivyIdentityOnMemberTx({
+              const reconciled = await reconcileHostedPrivyIdentityOnMemberResolutionTx({
                 allowVerifiedEmailRebinding: true,
                 authMethod: inviteAuthMethod,
                 expectedEmailLookupKey: pendingEmailContact?.lookupKey,
@@ -133,23 +134,24 @@ export async function completeHostedPrivyVerification(input: {
               });
               await syncHostedPrivyPrimaryBindingTx({
                 authMethod: inviteAuthMethod,
-                identity: input.identity,
-                memberId: reconciledMember.id,
+                identity: reconciled.identity,
+                memberId: reconciled.member.id,
                 prisma: tx,
               });
               await syncHostedMemberPendingActivationTimeZoneTx({
-                memberId: reconciledMember.id,
+                memberId: reconciled.member.id,
                 prisma: tx,
                 timeZone,
               });
-              return reconciledMember;
+              return reconciled;
             }),
             HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
           );
 
           return {
             bindingAuthMethod: inviteAuthMethod,
-            member,
+            identity: reconciliation.identity,
+            member: reconciliation.member,
             primaryBindingSynced:
               inviteAuthMethod === "email" || inviteAuthMethod === "telegram",
           };
@@ -167,7 +169,7 @@ export async function completeHostedPrivyVerification(input: {
               });
               await syncHostedPrivyPrimaryBindingTx({
                 authMethod,
-                identity: input.identity,
+                identity: memberResolution.identity,
                 memberId: memberResolution.member.id,
                 prisma: tx,
               });
@@ -178,6 +180,7 @@ export async function completeHostedPrivyVerification(input: {
               });
 
               return {
+                identity: memberResolution.identity,
                 member: memberResolution.member,
                 primaryBindingSynced: authMethod === "email" || authMethod === "telegram",
               };
@@ -191,7 +194,7 @@ export async function completeHostedPrivyVerification(input: {
 
     await syncHostedPrivyBindings({
       authMethod: memberResolution.bindingAuthMethod,
-      identity: input.identity,
+      identity: memberResolution.identity,
       memberId: member.id,
       primaryBindingSynced: memberResolution.primaryBindingSynced,
       prisma,
@@ -227,7 +230,7 @@ export async function completeHostedPrivyVerification(input: {
     const messagingSetupRequired = isHostedMemberMessagingSetupRequired({
       identity: {
         ...(messagingSetupState?.identity ?? {}),
-        emailLinked: Boolean(input.identity.email?.verifiedAt),
+        emailLinked: Boolean(memberResolution.identity.email?.verifiedAt),
       },
       routing: messagingSetupState?.routing ?? null,
     });

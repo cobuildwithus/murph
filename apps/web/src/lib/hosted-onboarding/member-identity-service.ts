@@ -345,17 +345,19 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
 }): Promise<HostedMemberCoreState> {
   const prisma = input.prisma ?? getPrisma();
 
-  return prisma.$transaction((tx) => reconcileHostedPrivyIdentityOnMemberTx({
-    allowVerifiedEmailRebinding: input.allowVerifiedEmailRebinding,
-    authMethod: input.authMethod,
-    expectedPhoneHint: input.expectedPhoneHint,
-    expectedPhoneLookupKey: input.expectedPhoneLookupKey,
-    expectedEmailLookupKey: input.expectedEmailLookupKey,
-    identity: input.identity,
-    member: input.member,
-    now: input.now,
-    prisma: tx,
-  }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  return prisma.$transaction(async (tx) => (
+    await reconcileHostedPrivyIdentityOnMemberResolutionTx({
+      allowVerifiedEmailRebinding: input.allowVerifiedEmailRebinding,
+      authMethod: input.authMethod,
+      expectedPhoneHint: input.expectedPhoneHint,
+      expectedPhoneLookupKey: input.expectedPhoneLookupKey,
+      expectedEmailLookupKey: input.expectedEmailLookupKey,
+      identity: input.identity,
+      member: input.member,
+      now: input.now,
+      prisma: tx,
+    })
+  ).member, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
 export async function ensureHostedMemberForPrivyIdentityTx(input: {
@@ -377,6 +379,7 @@ export async function ensureHostedMemberForPrivyIdentityResolutionTx(input: {
   prisma: Prisma.TransactionClient;
 }): Promise<{
   created: boolean;
+  identity: HostedPrivyIdentity;
   member: HostedMemberCoreState;
 }> {
   const authMethod = resolveHostedPrivyAuthMethodFromIdentity({
@@ -435,20 +438,23 @@ export async function ensureHostedMemberForPrivyIdentityResolutionTx(input: {
     });
     return {
       created: true,
+      identity: input.identity,
       member: createdMember,
     };
   }
 
+  const reconciliation = await reconcileHostedPrivyIdentityOnMemberResolutionTx({
+    allowVerifiedEmailRebinding: input.allowVerifiedEmailRebinding,
+    authMethod,
+    identity: input.identity,
+    member: existingMemberLookup.core,
+    now: input.now,
+    prisma: input.prisma,
+  });
   return {
     created: false,
-    member: await reconcileHostedPrivyIdentityOnMemberTx({
-      allowVerifiedEmailRebinding: input.allowVerifiedEmailRebinding,
-      authMethod,
-      identity: input.identity,
-      member: existingMemberLookup.core,
-      now: input.now,
-      prisma: input.prisma,
-    }),
+    identity: reconciliation.identity,
+    member: reconciliation.member,
   };
 }
 
@@ -463,6 +469,23 @@ export async function reconcileHostedPrivyIdentityOnMemberTx(input: {
   prisma: Prisma.TransactionClient;
   now: Date;
 }): Promise<HostedMemberCoreState> {
+  return (await reconcileHostedPrivyIdentityOnMemberResolutionTx(input)).member;
+}
+
+export async function reconcileHostedPrivyIdentityOnMemberResolutionTx(input: {
+  allowVerifiedEmailRebinding?: boolean;
+  authMethod?: HostedPrivyAuthMethod;
+  expectedEmailLookupKey?: string;
+  expectedPhoneHint?: string;
+  expectedPhoneLookupKey?: string;
+  identity: HostedPrivyIdentity;
+  member: HostedMemberCoreState;
+  prisma: Prisma.TransactionClient;
+  now: Date;
+}): Promise<{
+  identity: HostedPrivyIdentity;
+  member: HostedMemberCoreState;
+}> {
   if (
     input.identity.phone
     && (
@@ -501,35 +524,36 @@ export async function reconcileHostedPrivyIdentityOnMemberTx(input: {
   }
   assertHostedMemberNotSuspended(currentMember);
 
-  assertHostedPrivyIdentityMatchesExpectedPhone({
-    expectedPhoneHint: input.expectedPhoneHint,
-    expectedPhoneLookupKey: input.expectedPhoneLookupKey,
-    identity: input.identity,
-  });
-  assertHostedPrivyIdentityMatchesExpectedEmail({
-    expectedEmailLookupKey: input.expectedEmailLookupKey,
-    identity: input.identity,
-  });
-
-  const authMethod = resolveHostedPrivyAuthMethodFromIdentity({
-    authMethod: input.authMethod,
-    identity: input.identity,
-  });
   const privyUserChanged = Boolean(
     currentIdentity?.privyUserId
     && currentIdentity.privyUserId !== input.identity.userId,
   );
-  const liveIdentity = privyUserChanged && input.allowVerifiedEmailRebinding
+  const identity = privyUserChanged && input.allowVerifiedEmailRebinding
     ? resolveHostedPrivyIdentityFromVerifiedUser(
         await readHostedPrivyUserById(input.identity.userId, {
           maxRetries: 0,
           timeout: HOSTED_PRIVY_AUTHORITY_TIMEOUT_MS,
         }),
       )
-    : null;
-  const verifiedEmailAuthorizesRebinding = liveIdentity
+    : input.identity;
+
+  assertHostedPrivyIdentityMatchesExpectedPhone({
+    expectedPhoneHint: input.expectedPhoneHint,
+    expectedPhoneLookupKey: input.expectedPhoneLookupKey,
+    identity,
+  });
+  assertHostedPrivyIdentityMatchesExpectedEmail({
+    expectedEmailLookupKey: input.expectedEmailLookupKey,
+    identity,
+  });
+
+  const authMethod = resolveHostedPrivyAuthMethodFromIdentity({
+    authMethod: input.authMethod,
+    identity,
+  });
+  const verifiedEmailAuthorizesRebinding = privyUserChanged && input.allowVerifiedEmailRebinding
     ? await hasHostedVerifiedEmailRebindingAuthorityTx({
-        identity: liveIdentity,
+        identity,
         memberId: currentMember.id,
         prisma: input.prisma,
       })
@@ -548,8 +572,8 @@ export async function reconcileHostedPrivyIdentityOnMemberTx(input: {
     phone: shouldPersistHostedPrivyPhoneIdentity({
       authMethod,
       expectedPhoneLookupKey: input.expectedPhoneLookupKey,
-    })
-      ? input.identity.phone
+    }) && !privyUserChanged
+      ? identity.phone
       : null,
   });
 
@@ -557,13 +581,16 @@ export async function reconcileHostedPrivyIdentityOnMemberTx(input: {
     ...nextPhoneIdentity,
     memberId: currentMember.id,
     prisma: input.prisma,
-    privyUserId: input.identity.userId,
+    privyUserId: identity.userId,
     signupPhoneCodeSendAttemptId: null,
     signupPhoneCodeSendAttemptStartedAt: null,
     signupPhoneCodeSentAt: null,
     signupPhoneNumber: null,
   });
-  return currentMember;
+  return {
+    identity,
+    member: currentMember,
+  };
 }
 
 async function hasHostedVerifiedEmailRebindingAuthorityTx(input: {

@@ -229,6 +229,7 @@ function makeInvite(member: ReturnType<typeof makeMember>, overrides: Record<str
 describe("completeHostedPrivyVerification", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    Reflect.deleteProperty(globalThis, "__murphHostedPrivyManagementClient");
     privyManagementMocks.getUser.mockImplementation(async (userId: string) => ({
       id: userId,
     }));
@@ -411,6 +412,130 @@ describe("completeHostedPrivyVerification", () => {
         verifiedEmailVerifiedAt,
       }),
     }));
+  });
+
+  it("rejects an invite when the live principal email diverges from the token invite email", async () => {
+    const pendingEmailAddress = "pending-invite@example.com";
+    const canonicalEmailAddress = "canonical-member@example.com";
+    const pendingEmailLookupKey = createHostedEmailLookupKey(pendingEmailAddress)!;
+    const previousPrivyUserId = "did:privy:previous_invite_owner";
+    const replacementPrivyUserId = "did:privy:replacement_invite_owner";
+    const inviteMember = makeMember({
+      id: "member_live_email_invite",
+      maskedPhoneNumberHint: null,
+      phoneLookupKey: null,
+      phoneNumberVerifiedAt: null,
+      privyUserId: previousPrivyUserId,
+      walletAddress: null,
+      walletChainType: null,
+      walletCreatedAt: null,
+      walletProvider: null,
+    });
+    const inviteMemberWithRouting = {
+      ...inviteMember,
+      identity: {
+        createdAt: NOW,
+        maskedPhoneNumberHint: null,
+        memberId: inviteMember.id,
+        phoneLookupKey: null,
+        phoneNumberVerifiedAt: null,
+        privyUserId: previousPrivyUserId,
+        updatedAt: NOW,
+        walletAddress: null,
+        walletChainType: null,
+        walletCreatedAt: null,
+        walletProvider: null,
+      },
+      routing: {
+        linqChatIdEncrypted: null,
+        linqRecipientPhoneEncrypted: null,
+        memberId: inviteMember.id,
+        pendingLinqChatIdEncrypted: await encryptHostedWebNullableString({
+          field: "hosted-member-routing.pending-linq-chat-id",
+          memberId: inviteMember.id,
+          value: "linq_chat_live_email_invite",
+        }),
+        pendingLinqParticipantContactEncrypted: await encryptHostedWebNullableString({
+          field: "hosted-member-routing.pending-linq-participant-contact",
+          memberId: inviteMember.id,
+          value: pendingEmailAddress,
+        }),
+        pendingLinqParticipantContactKind: "email",
+        pendingLinqParticipantContactLookupKey: pendingEmailLookupKey,
+        pendingLinqParticipantContactObservedAt: NOW,
+        pendingLinqRecipientPhoneEncrypted: null,
+        telegramUserIdEncrypted: null,
+        telegramUserLookupKey: null,
+      },
+    };
+    const invite = makeInvite(inviteMemberWithRouting);
+    const storedIdentity = await readMemberIdentity(inviteMemberWithRouting);
+    if (!storedIdentity) {
+      throw new Error("Expected the live-email invite identity fixture.");
+    }
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(invite),
+        update: vi.fn(),
+      },
+      hostedMemberEmailAuthorization: {
+        findUnique: vi.fn().mockResolvedValue({
+          directPublicSenderAddressEncrypted: null,
+          directPublicSenderAuthorizedAt: NOW,
+          directPublicSenderLookupKey: createHostedEmailLookupKey(canonicalEmailAddress),
+          memberId: inviteMember.id,
+          verifiedEmailAddressEncrypted: null,
+          verifiedEmailLookupKey: createHostedEmailLookupKey(canonicalEmailAddress),
+          verifiedEmailVerifiedAt: NOW,
+        }),
+        upsert: vi.fn(),
+      },
+      hostedMemberIdentity: {
+        findUnique: vi.fn().mockResolvedValue({
+          ...storedIdentity,
+          privyUserId: previousPrivyUserId,
+        }),
+        upsert: vi.fn(),
+      },
+    });
+    privyManagementMocks.getUser.mockResolvedValueOnce({
+      id: replacementPrivyUserId,
+      linked_accounts: [{
+        address: canonicalEmailAddress,
+        type: "email",
+        verified_at: 1_743_064_200,
+      }],
+    });
+
+    await expect(completeHostedPrivyVerification({
+      authMethod: "email",
+      identity: makeIdentity({
+        email: {
+          address: pendingEmailAddress,
+          verifiedAt: 1_743_064_200,
+        },
+        phone: null,
+        userId: replacementPrivyUserId,
+        wallet: null,
+      }),
+      inviteCode: "invite-code",
+      now: NOW,
+      prisma,
+    })).rejects.toMatchObject({
+      code: "PRIVY_EMAIL_MISMATCH",
+      httpStatus: 403,
+    });
+
+    expect(privyManagementMocks.getUser).toHaveBeenCalledWith(
+      replacementPrivyUserId,
+      {
+        maxRetries: 0,
+        timeout: 5_000,
+      },
+    );
+    expect(prisma.hostedMemberIdentity.upsert).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberEmailAuthorization.upsert).not.toHaveBeenCalled();
+    expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
   });
 
   it("maps invite-bound primary email ownership conflicts to a merge-safe account conflict", async () => {
@@ -944,6 +1069,7 @@ describe("completeHostedPrivyVerification", () => {
     const oldPrivyUserId = "did:privy:previous_email_owner";
     const replacementPrivyUserId = "did:privy:replacement_email_owner";
     const emailAddress = "recovery@example.com";
+    const staleTokenEmailAddress = "stale-recovery@example.com";
     const existingMember = makeMember({
       id: "member_email_recovery",
       phoneLookupKey: DEFAULT_PHONE_LOOKUP_KEY,
@@ -1045,7 +1171,7 @@ describe("completeHostedPrivyVerification", () => {
     await expect(completeHostedPrivyVerification({
       identity: makeIdentity({
         email: {
-          address: emailAddress,
+          address: staleTokenEmailAddress,
           verifiedAt: 1_743_064_200,
         },
         userId: replacementPrivyUserId,
@@ -1068,6 +1194,28 @@ describe("completeHostedPrivyVerification", () => {
       },
     );
     expect(lockQuery).toHaveBeenCalledTimes(3);
+    expect(prisma.hostedMemberEmailAuthorization.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          directPublicSenderLookupKey: createHostedEmailLookupKey(emailAddress),
+          verifiedEmailLookupKey: createHostedEmailLookupKey(emailAddress),
+        }),
+        update: expect.objectContaining({
+          directPublicSenderLookupKey: createHostedEmailLookupKey(emailAddress),
+          verifiedEmailLookupKey: createHostedEmailLookupKey(emailAddress),
+        }),
+      }),
+    );
+    const persistedEmailLookupKeys = prisma.hostedMemberEmailAuthorization.upsert.mock.calls
+      .flatMap(([call]) => [
+        call.create?.directPublicSenderLookupKey,
+        call.create?.verifiedEmailLookupKey,
+        call.update?.directPublicSenderLookupKey,
+        call.update?.verifiedEmailLookupKey,
+      ]);
+    expect(persistedEmailLookupKeys).not.toContain(
+      createHostedEmailLookupKey(staleTokenEmailAddress),
+    );
     expect(identityUpsert).toHaveBeenCalledWith(expect.objectContaining({
       update: expect.objectContaining({
         privyUserIdEncrypted: expect.any(String),
