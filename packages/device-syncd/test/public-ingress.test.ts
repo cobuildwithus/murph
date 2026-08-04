@@ -1010,7 +1010,7 @@ test("starting another Junction source preserves an established shared account",
     sourceProviderSlug: string;
   }> = [];
   const observedSourceAttempts: Array<{
-    observedAt: string | null;
+    eventType: string;
     sourceProviderSlug: string;
     traceClaimed: boolean;
   }> = [];
@@ -1084,15 +1084,16 @@ test("starting another Junction source preserves an established shared account",
     async verifyAndParseWebhook(input) {
       const [sourceProviderSlug, timestampMode] = input.rawBody.toString("utf8").split(":");
       assert.ok(sourceProviderSlug);
-      const sourceObservedAt = timestampMode === "no_timestamp"
-        ? null
-        : "2026-03-26T12:01:00.000Z";
+      const eventType = timestampMode === "lifecycle"
+        ? "provider.connection.created"
+        : `${sourceProviderSlug}.data`;
       return {
         acceptanceMode: "durable_webhook_work",
         externalAccountId: "shared-junction-account",
-        eventType: `${sourceProviderSlug}.data`,
-        occurredAt: sourceObservedAt ?? input.now,
-        ...(sourceObservedAt ? { sourceObservedAt } : {}),
+        eventType,
+        occurredAt: timestampMode === "no_timestamp"
+          ? input.now
+          : "2026-03-26T12:01:00.000Z",
         traceId: `trace-${sourceProviderSlug}-${timestampMode ?? "timestamped"}`,
         sourceProviderSlug,
         dataSourceProviderSlug: sourceProviderSlug,
@@ -1140,13 +1141,16 @@ test("starting another Junction source preserves an established shared account",
       onConnectionSourceAdmissionRejected({ connectionStartedAt, sourceProviderSlug }) {
         rejectedSourceAttempts.push({ connectionStartedAt, sourceProviderSlug });
       },
-      onConnectionSourceObserved({ account, observedAt, sourceProviderSlug }) {
+      onConnectionSourceObserved({ account, eventType, sourceProviderSlug }) {
         observedSourceAttempts.push({
-          observedAt,
+          eventType,
           sourceProviderSlug,
           traceClaimed: store.claimWebhookTraceCalls > 0,
         });
-        if (sourceProviderSlug !== "apple_health_kit" || !observedAt) {
+        if (
+          sourceProviderSlug !== "apple_health_kit"
+          || eventType !== "provider.connection.created"
+        ) {
           return;
         }
         const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
@@ -1159,8 +1163,8 @@ test("starting another Junction source preserves an established shared account",
           sourceInstanceKey,
           sourceProviderSlug,
           status: "connected",
-          firstSeenAt: observedAt,
-          lastSeenAt: observedAt,
+          firstSeenAt: "2026-03-26T12:01:00.000Z",
+          lastSeenAt: "2026-03-26T12:01:00.000Z",
         });
         return { sourceAdmissionCommitted: true as const };
       },
@@ -1352,16 +1356,16 @@ test("starting another Junction source preserves an established shared account",
     lastSeenAt: "2026-03-26T12:00:00.000Z",
   });
   await assert.doesNotReject(
-    ingress.handleWebhook("junction", new Headers(), Buffer.from("apple_health_kit")),
+    ingress.handleWebhook("junction", new Headers(), Buffer.from("apple_health_kit:lifecycle")),
   );
   assert.deepEqual(observedSourceAttempts, [
     {
-      observedAt: "2026-03-26T12:01:00.000Z",
+      eventType: "fitbit.data",
       sourceProviderSlug: "fitbit",
       traceClaimed: true,
     },
     {
-      observedAt: "2026-03-26T12:01:00.000Z",
+      eventType: "provider.connection.created",
       sourceProviderSlug: "apple_health_kit",
       traceClaimed: true,
     },
@@ -1383,12 +1387,12 @@ test("starting another Junction source preserves an established shared account",
     firstSeenAt: "2026-03-26T12:02:00.000Z",
     lastSeenAt: "2026-03-26T12:02:00.000Z",
   });
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  for (const timestampMode of ["timestamped", "no_timestamp"]) {
     await assert.rejects(
       ingress.handleWebhook(
         "junction",
         new Headers(),
-        Buffer.from("apple_health_kit:no_timestamp"),
+        Buffer.from(`apple_health_kit:${timestampMode}`),
       ),
       (error: unknown) =>
         error instanceof DeviceSyncError
@@ -1397,12 +1401,12 @@ test("starting another Junction source preserves an established shared account",
   }
   assert.deepEqual(observedSourceAttempts.slice(-2), [
     {
-      observedAt: null,
+      eventType: "apple_health_kit.data",
       sourceProviderSlug: "apple_health_kit",
       traceClaimed: true,
     },
     {
-      observedAt: null,
+      eventType: "apple_health_kit.data",
       sourceProviderSlug: "apple_health_kit",
       traceClaimed: true,
     },
@@ -3325,10 +3329,11 @@ test("public ingress scopes durable webhook traces by external account while pre
   ]);
 });
 
-test("public ingress accepts already-satisfied dirty hints before claiming exact trace ids", async () => {
+test("public ingress claims and completes already-satisfied dirty hints", async () => {
   const store = new InMemoryPublicIngressStore();
   let alreadySatisfiedCalls = 0;
   let acceptedCalls = 0;
+  let observedCalls = 0;
   const ingress = createDeviceSyncPublicIngress({
     publicBaseUrl: "https://sync.example.test/device-sync",
     registry: createDeviceSyncRegistry([
@@ -3338,6 +3343,7 @@ test("public ingress accepts already-satisfied dirty hints before claiming exact
             acceptanceMode: "level_dirty_hint",
             externalAccountId: "demo-abc",
             eventType: "demo.updated",
+            sourceProviderSlug: "apple_health_kit",
             traceId: "trace-already-dirty",
             jobs: [
               {
@@ -3354,6 +3360,12 @@ test("public ingress accepts already-satisfied dirty hints before claiming exact
     ]),
     store,
     hooks: {
+      onConnectionSourceObserved({ eventType }) {
+        observedCalls += 1;
+        assert.equal(eventType, "demo.updated");
+        assert.equal(store.claimWebhookTraceCalls, 1);
+        return { sourceAdmissionCommitted: true };
+      },
       onLevelDirtyWebhookAlreadySatisfied({ webhook }) {
         alreadySatisfiedCalls += 1;
         assert.equal(webhook.acceptanceMode, "level_dirty_hint");
@@ -3372,6 +3384,16 @@ test("public ingress accepts already-satisfied dirty hints before claiming exact
     state: begin.state,
     code: "abc",
   });
+  const account = store.getConnectionByExternalAccount("demo", "demo-abc");
+  assert.ok(account);
+  store.upsertConnectionSource({
+    connectionId: account.id,
+    sourceInstanceKey: `${account.id}:apple_health_kit`,
+    sourceProviderSlug: "apple_health_kit",
+    status: "disconnected",
+    firstSeenAt: "2026-04-10T00:00:00.000Z",
+    lastSeenAt: "2026-04-10T00:00:00.000Z",
+  });
 
   const result = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
 
@@ -3379,10 +3401,68 @@ test("public ingress accepts already-satisfied dirty hints before claiming exact
   assert.equal(result.duplicate, false);
   assert.equal(result.traceId, scopeWebhookTraceId("demo", "demo-abc", "trace-already-dirty"));
   assert.equal(alreadySatisfiedCalls, 1);
+  assert.equal(observedCalls, 1);
   assert.equal(acceptedCalls, 0);
-  assert.equal(store.claimWebhookTraceCalls, 0);
-  assert.equal(store.completedWebhookTraceCalls, 0);
+  assert.equal(store.claimWebhookTraceCalls, 1);
+  assert.equal(store.completedWebhookTraceCalls, 1);
   assert.equal(store.getConnectionByExternalAccount("demo", "demo-abc")?.lastWebhookAt, null);
+});
+
+test("public ingress completes a source-registration trace after target cleanup", async () => {
+  const store = new InMemoryPublicIngressStore();
+  let acceptedCalls = 0;
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async verifyAndParseWebhook() {
+          return {
+            acceptanceMode: "level_dirty_hint",
+            externalAccountId: "demo-abc",
+            eventType: "provider.connection.created",
+            sourceProviderSlug: "apple_health_kit",
+            traceId: "trace-cleaned-registration",
+            jobs: [{ kind: "reconcile" }],
+          };
+        },
+      }),
+    ]),
+    store,
+    hooks: {
+      onConnectionSourceObserved() {
+        return { sourceRegistrationRemoved: true };
+      },
+      onLevelDirtyWebhookAlreadySatisfied() {
+        throw new Error("cleaned source registration must not reach dirty coalescing");
+      },
+      onWebhookAccepted() {
+        acceptedCalls += 1;
+        throw new Error("cleaned source registration must not reach durable acceptance");
+      },
+    },
+  });
+
+  const begin = await ingress.startConnection({ provider: "demo" });
+  await ingress.handleOAuthCallback({ provider: "demo", state: begin.state, code: "abc" });
+  const account = store.getConnectionByExternalAccount("demo", "demo-abc");
+  assert.ok(account);
+  store.upsertConnectionSource({
+    connectionId: account.id,
+    sourceInstanceKey: `${account.id}:apple_health_kit`,
+    sourceProviderSlug: "apple_health_kit",
+    status: "disconnected",
+    firstSeenAt: "2026-04-10T00:00:00.000Z",
+    lastSeenAt: "2026-04-10T00:00:00.000Z",
+    lastErrorCode: "SOURCE_USER_DISCONNECTED",
+  });
+
+  const result = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
+
+  assert.equal(result.accepted, true);
+  assert.equal(result.duplicate, false);
+  assert.equal(acceptedCalls, 0);
+  assert.equal(store.claimWebhookTraceCalls, 1);
+  assert.equal(store.completedWebhookTraceCalls, 1);
 });
 
 test("public ingress records no source arrival when durable acceptance fails", async () => {

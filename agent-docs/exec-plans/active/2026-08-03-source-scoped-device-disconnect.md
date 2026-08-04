@@ -70,6 +70,7 @@ Updated: 2026-08-03
 6. Commit and push the exact candidate, open the PR, run preliminary specialists and final ReviewGPT concurrently with CI, resolve findings, and repeat exact-head gates as required.
 7. Resolve the preliminary/final review findings covering native companion authority and stale-Link provider reauthorization, then run a correction ReviewGPT round on the exact pushed head.
 8. Resolve correction-round findings by carrying exact source proofs through native token and Link issuance, rereading live authorization at companion import, and admitting only provider-timestamped webhook observations after trace claim; run the required third exact-head review round.
+9. Resolve round-3 findings by allowing exact-source provider cleanup to take over an in-flight Disconnect/start claim, rejecting native token completion after parent disconnect begins, and reconciling signed source-registration events against Junction's live provider list; run round 4.
 
 ## Decisions
 
@@ -82,6 +83,8 @@ Updated: 2026-08-03
 - Review remediation crossed the anomaly-retrospective threshold: the first-reviewed patch had 509 added / 64 deleted source lines, while the corrected patch has 1,215 added / 141 deleted source lines; remediation itself accounts for 729 added / 100 deleted source lines before its final commit.
 - Continue in this PR because both added paths close demonstrated privacy/revocation failures in the same operation and owner boundary. The growth is source-claim, stale-callback cleanup, native admission, and their direct hooks—not a second owner. Retain the existing connection-source row and target-only provider revoke as the whole architecture; reject a queue, reconciler, schema change, secondary lifecycle service, or compatibility state.
 - Correction round 2 repeated the same causal-authority mechanism and therefore triggers the round-3 anomaly retrospective. Continue with the existing source row, mutation lock, and live store read: replace the request-local Boolean with an exact epoch proof, share one fence predicate across Web and `device-syncd`, and delete any reliance on cached account snapshots or synthesized receipt time. Do not add durable handoff state, a queue, or another lifecycle owner.
+- Round 3 again found the same registration-boundary mechanism, so round 4 requires the repeated-mechanism retrospective. Continue because the correction keeps one connection-source row and one mutation lock, separates only the two existing operation purposes (user disconnect versus start cleanup), and reuses Junction's current provider-list/revoke client. Reject token persistence, a registration ledger, a queue, a reconciler, account-wide cleanup, or another lifecycle owner.
+- The round-4 candidate has 1,856 added / 178 deleted authored-source lines (2,034 lines of source churn), 1,651 added / 35 deleted test lines, and 200 added / 1 deleted documentation lines. This crosses the indivisible-large-feature rationale threshold. Continue as one PR because browser removal, Web lifecycle state, shared webhook admission, native companion import, and Junction provider cleanup are all mutation paths for the same exact-source authorization promise; splitting any path would knowingly ship a disconnect that another path can undo. The implementation retains one durable source row, one existing lock, and the existing target-only provider calls across those owners.
 
 ## Verification
 
@@ -97,3 +100,9 @@ Updated: 2026-08-03
   - Stale same-source callbacks/runtime applies are rejected while a fresh explicit connect can admit the source again.
   - Source-specific and connection-wide confirmation states are visually correct on desktop and mobile.
   - All required exact-head review and CI gates pass with no unresolved findings.
+- Current local results:
+  - Hosted Web typecheck and scoped ESLint passed.
+  - Full hosted-Web Vitest passed: 8,552 tests, with 302 skipped by the suite.
+  - Focused hosted source-lifecycle Vitest passed: 114 tests.
+  - Device-syncd typecheck and focused public-ingress/Junction-provider Vitest passed: 284 tests.
+  - Diff hygiene and identifier/privacy scans passed.

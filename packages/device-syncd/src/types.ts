@@ -489,8 +489,6 @@ export interface ProviderWebhookResult {
   eventType: string;
   traceId: string;
   occurredAt?: string;
-  /** Immutable provider-authored event instant; never synthesized from receipt time. */
-  sourceObservedAt?: string;
   // Keep top-level parser data narrow; provider-owned jobs may carry sanitized payload hints.
   resourceCategory?: string | null;
   /** Source this provider event is attributable to, including lifecycle events. */
@@ -524,8 +522,6 @@ export interface DeviceSyncIngressWebhook {
   eventType: string;
   jobs: readonly DeviceSyncJobInput[];
   occurredAt?: string;
-  /** See `ProviderWebhookResult.sourceObservedAt`. */
-  sourceObservedAt?: string;
   // Accepted and unknown ingress hooks receive stripped summary plus provider-owned job hints.
   resourceCategory?: string | null;
   /** See `ProviderWebhookResult.sourceProviderSlug`. */
@@ -630,6 +626,10 @@ export interface DeviceSyncPublicIngressConnectionEstablishedResult {
   sourceAdmissionCommitted: true;
 }
 
+export type DeviceSyncPublicIngressConnectionSourceObservedResult =
+  | { sourceAdmissionCommitted: true }
+  | { sourceRegistrationRemoved: true };
+
 export interface DeviceSyncPublicIngressConnectionSourceAdmissionRejectedInput {
   account: PublicDeviceSyncAccount;
   /** Start instant of the rejected browser source-connection attempt. */
@@ -641,8 +641,7 @@ export interface DeviceSyncPublicIngressConnectionSourceAdmissionRejectedInput {
 
 export interface DeviceSyncPublicIngressConnectionSourceObservedInput {
   account: PublicDeviceSyncAccount;
-  /** Provider-authored event instant; missing timestamps cannot open an epoch. */
-  observedAt: string | null;
+  eventType: string;
   sourceProviderSlug: string;
   provider: DeviceSyncProvider;
   now: string;
@@ -711,8 +710,8 @@ export interface DeviceSyncPublicIngressHooks {
   onConnectionSourceObserved?(
     input: DeviceSyncPublicIngressConnectionSourceObservedInput,
   ): void
-    | DeviceSyncPublicIngressConnectionEstablishedResult
-    | Promise<void | DeviceSyncPublicIngressConnectionEstablishedResult>;
+    | DeviceSyncPublicIngressConnectionSourceObservedResult
+    | Promise<void | DeviceSyncPublicIngressConnectionSourceObservedResult>;
   onLevelDirtyWebhookAlreadySatisfied?(
     input: DeviceSyncPublicIngressWebhookAlreadySatisfiedInput,
   ): DeviceSyncPublicIngressWebhookAlreadySatisfiedResult
@@ -838,6 +837,7 @@ export interface DeviceConnectionHandler {
   refreshTokens?(account: DeviceSyncAccount, options?: { signal?: AbortSignal | null }): Promise<ProviderAuthTokens>;
   revokeAccess?(account: DeviceSyncAccount): Promise<void>;
   revokeSourceAccess?(account: DeviceSyncAccount, sourceProviderSlug: string): Promise<void>;
+  isSourceAccessActive?(account: DeviceSyncAccount, sourceProviderSlug: string): Promise<boolean>;
 }
 
 export interface DeviceSdkSignInToken {

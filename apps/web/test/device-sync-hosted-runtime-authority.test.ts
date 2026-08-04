@@ -929,6 +929,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
 
   it.each([
     "SOURCE_DISCONNECT_IN_PROGRESS",
+    "SOURCE_START_CLEANUP_IN_PROGRESS",
     "SOURCE_USER_DISCONNECTED",
   ])("does not let a runtime source projection cross the %s fence", async (lastErrorCode) => {
     const connectionId = "conn_junction";

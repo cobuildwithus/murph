@@ -355,16 +355,25 @@ Last verified: 2026-07-31
   exact pending source epoch through provider Link creation and rechecks it
   before OAuth-state persistence and response; a concurrent newer disconnect
   makes the Link unreachable instead of returning stale authorization.
+  If obsolete provider completion races an in-flight Disconnect or source-start
+  cleanup, it advances that exact operation's source epoch and performs another
+  idempotent target-only revoke. The initiating operation follows the newest
+  same-purpose claim before returning, while separate start-cleanup and user-
+  disconnect phase codes preserve the intended terminal state.
 - Companion Apple Health metadata and WHOOP overnight summaries recheck their
   exact source inside the health-data admission lock and again before runtime
   import by rereading the durable source row rather than trusting the queued
   account snapshot. Explicit Apple Health SDK connect captures the exact source
   epoch before token mint and creates a pending epoch afterward only when that
-  proof remains current. A provider-authored event timestamp newer than that
-  epoch may commit it connected, but synthesized receipt time may not. Source
+  proof remains current. A signed source-registration lifecycle event with no
+  timestamp instead rereads Junction's live provider list after trace claim: an
+  unchanged pending epoch plus a live target commits connected, while a fenced
+  source or disconnected parent triggers target-only cleanup. Receipt or
+  record-occurrence time is not substituted for registration proof. Source
   observation runs after the webhook attempt owns its trace so duplicate or
-  losing attempts cannot change authorization. WHOOP summary provenance remains `whoop`, but admission uses
-  the Junction `whoop_v2` lifecycle source. Resume, omitted intent, stale
+  losing attempts cannot change authorization. WHOOP summary provenance remains
+  `whoop`, but admission uses the Junction `whoop_v2` lifecycle source. Resume,
+  omitted intent, stale
   events, and background work never clear the source fence.
 - The hosted reply-latency operator alert remains one singleton incident owner.
   Fresh conversation mailbox rows that the existing Web AI usage gate

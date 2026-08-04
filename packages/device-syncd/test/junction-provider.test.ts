@@ -4460,7 +4460,6 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
     });
 
     assert.equal(parsed.dataSourceProviderSlug, sourceProviderSlug);
-    assert.equal(parsed.sourceObservedAt, "2026-04-03T00:00:00.000Z");
   }
 
   // A historical-pull completion is a data-less notification. Accepting its
@@ -4495,7 +4494,7 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
   });
 
   assert.equal(lifecycle.dataSourceProviderSlug, null);
-  assert.equal(lifecycle.sourceObservedAt, undefined);
+  assert.equal(lifecycle.sourceProviderSlug, "garmin");
   assert.equal(lifecycle.occurredAt, "2026-04-03T00:00:00.000Z");
 });
 
@@ -5386,10 +5385,23 @@ test("Junction provider cleanup deregisters only the requested source", async ()
   const revokeSourceAccess = requireValue(
     provider.connectionHandler?.revokeSourceAccess,
   );
+  const isSourceAccessActive = requireValue(
+    provider.connectionHandler?.isSourceAccessActive,
+  );
 
+  assert.equal(await isSourceAccessActive(createAccount(), "fitbit"), true);
+  assert.equal(await isSourceAccessActive(createAccount(), "oura"), false);
   await revokeSourceAccess(createAccount(), "fitbit");
 
   assert.deepEqual(requests, [
+    {
+      method: "GET",
+      url: "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1",
+    },
+    {
+      method: "GET",
+      url: "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1",
+    },
     {
       method: "GET",
       url: "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1",

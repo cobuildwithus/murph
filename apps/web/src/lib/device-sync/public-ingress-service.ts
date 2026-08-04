@@ -43,7 +43,6 @@ import {
 } from "./public-connection";
 import {
   acceptHostedCompanionHrvRmssdObservation,
-  admitHostedDeviceSyncConnectionSourceObservation,
   beginHostedDeviceSyncConnectionSourceReconnect,
   buildHostedCompanionHrvRmssdDirtyResource,
   captureHostedDeviceSyncConnectionSourceReconnect,
@@ -54,6 +53,7 @@ import {
   handleHostedDeviceSyncUnknownWebhook,
   handleHostedDeviceSyncWebhookAccepted,
   prepareHostedDeviceSyncConnectionSourceStart,
+  reconcileHostedDeviceSyncConnectionSourceRegistration,
 } from "./wake-service";
 import { readRawBodyBuffer } from "./http";
 import { HostedDeviceSyncWebhookAdminService } from "./webhook-admin-service";
@@ -123,23 +123,33 @@ export class HostedDeviceSyncPublicIngressService {
         },
         onConnectionSourceObserved: async ({
           account,
-          observedAt,
+          eventType,
           sourceProviderSlug,
         }) => {
           if (
             normalizeJunctionProviderSlug(sourceProviderSlug)
               !== COMPANION_APPLE_HEALTH_SOURCE_PROVIDER
-            || !observedAt
           ) {
             return;
           }
-          const admitted = await admitHostedDeviceSyncConnectionSourceObservation({
-            account,
-            observedAt,
-            sourceProviderSlug,
-            store: this.context.store,
-          });
-          return admitted ? { sourceAdmissionCommitted: true } : undefined;
+          if (
+            eventType === "provider.connection.created"
+            || eventType === "provider.connection.updated"
+          ) {
+            const reconciliation = await reconcileHostedDeviceSyncConnectionSourceRegistration({
+              account,
+              registry: this.registry,
+              sourceProviderSlug,
+              store: this.context.store,
+            });
+            if (reconciliation === "admitted") {
+              return { sourceAdmissionCommitted: true };
+            }
+            return reconciliation === "removed"
+              ? { sourceRegistrationRemoved: true }
+              : undefined;
+          }
+          return;
         },
         onLevelDirtyWebhookAlreadySatisfied: async ({ account }) => {
           const pending = await this.context.store.hasPendingDirtyConnection(account.id);

@@ -2,6 +2,7 @@ import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
 import { sanitizeHostedRuntimeErrorText } from "./hosted-runtime.ts";
 import {
   isDeviceSyncConnectionSetupPending,
+  isDeviceSyncSourceAdmitted,
   isEstablishedDeviceSyncConnection,
 } from "./public-account.ts";
 import { resolveDeviceSyncProviderCredentialPolicy } from "./provider-credential-policy.ts";
@@ -90,7 +91,6 @@ function toIngressWebhook(parsed: {
   eventType: string;
   jobs: DeviceSyncIngressWebhook["jobs"];
   occurredAt?: string;
-  sourceObservedAt?: string;
   resourceCategory?: string | null;
   sourceProviderSlug?: string | null;
   dataSourceProviderSlug?: string | null;
@@ -104,7 +104,6 @@ function toIngressWebhook(parsed: {
     eventType: parsed.eventType,
     jobs: [...parsed.jobs],
     ...(parsed.occurredAt ? { occurredAt: parsed.occurredAt } : {}),
-    ...(parsed.sourceObservedAt ? { sourceObservedAt: parsed.sourceObservedAt } : {}),
     ...(resourceCategory ? { resourceCategory } : {}),
     ...(sourceProviderSlug ? { sourceProviderSlug } : {}),
     ...(dataSourceProviderSlug ? { dataSourceProviderSlug } : {}),
@@ -1406,33 +1405,6 @@ export class DeviceSyncPublicIngress {
     const account = await this.store.getConnectionByExternalAccount(provider.provider, parsed.externalAccountId);
     const webhookSourceProviderSlug = normalizeString(webhook.sourceProviderSlug);
 
-    if (
-      account
-      && account.status === "active"
-      && !isDeviceSyncConnectionSetupPending(account)
-      && webhook.acceptanceMode === "level_dirty_hint"
-    ) {
-      // Only provider-declared level hints can be satisfied by committed dirty state.
-      // Exact webhook work must pass through trace claim and durable acceptance.
-      const alreadySatisfied = await this.hooks.onLevelDirtyWebhookAlreadySatisfied?.({
-        account,
-        traceId,
-        webhook,
-        provider,
-        now,
-      });
-
-      if (alreadySatisfied?.accepted === true) {
-        return {
-          accepted: true,
-          duplicate: false,
-          provider: provider.provider,
-          eventType: webhook.eventType,
-          traceId,
-        };
-      }
-    }
-
     const traceClaim = await claimWebhookTrace();
 
     if (traceClaim === "processed") {
@@ -1521,6 +1493,84 @@ export class DeviceSyncPublicIngress {
       });
     }
 
+    try {
+      if (webhookSourceProviderSlug) {
+        const matchingSources = await this.store.listConnectionSources({
+          connectionId: account.id,
+          sourceProviderSlug: webhookSourceProviderSlug,
+        });
+        if (
+          matchingSources.length > 0
+          && !isDeviceSyncSourceAdmitted(matchingSources, webhookSourceProviderSlug)
+        ) {
+          const sourceObservation = await this.hooks.onConnectionSourceObserved?.({
+            account,
+            eventType: webhook.eventType,
+            sourceProviderSlug: webhookSourceProviderSlug,
+            provider,
+            now,
+          });
+          if (
+            sourceObservation
+            && "sourceRegistrationRemoved" in sourceObservation
+            && sourceObservation.sourceRegistrationRemoved === true
+          ) {
+            await completeClaimedWebhookTrace(this.store, provider.provider, traceId, claimToken);
+            return {
+              accepted: true,
+              duplicate: false,
+              provider: provider.provider,
+              eventType: webhook.eventType,
+              traceId,
+            };
+          }
+          if (
+            account.status === "active"
+            && !isDeviceSyncConnectionSetupPending(account)
+            && (
+              !sourceObservation
+              || !("sourceAdmissionCommitted" in sourceObservation)
+              || sourceObservation.sourceAdmissionCommitted !== true
+            )
+          ) {
+            throw deviceSyncError({
+              code: "WEBHOOK_SOURCE_NOT_READY",
+              message: "Device source setup must finish before its webhook can be accepted.",
+              retryable: true,
+              httpStatus: 503,
+            });
+          }
+        }
+      }
+
+      if (
+        account.status === "active"
+        && !isDeviceSyncConnectionSetupPending(account)
+        && webhook.acceptanceMode === "level_dirty_hint"
+      ) {
+        const alreadySatisfied = await this.hooks.onLevelDirtyWebhookAlreadySatisfied?.({
+          account,
+          traceId,
+          webhook,
+          provider,
+          now,
+        });
+        if (alreadySatisfied?.accepted === true) {
+          await completeClaimedWebhookTrace(this.store, provider.provider, traceId, claimToken);
+          return {
+            accepted: true,
+            duplicate: false,
+            provider: provider.provider,
+            eventType: webhook.eventType,
+            traceId,
+          };
+        }
+      }
+    } catch (error) {
+      await this.store.releaseWebhookTrace(provider.provider, traceId, claimToken);
+      throw error;
+    }
+
     if (
       account.status === "active"
       && isDeviceSyncConnectionSetupPending(account)
@@ -1580,33 +1630,6 @@ export class DeviceSyncPublicIngress {
     const onWebhookAccepted = this.hooks.onWebhookAccepted;
 
     try {
-      if (webhookSourceProviderSlug) {
-        const matchingSources = await this.store.listConnectionSources({
-          connectionId: account.id,
-          sourceProviderSlug: webhookSourceProviderSlug,
-        });
-        if (
-          matchingSources.length > 0
-          && !matchingSources.some((source) => source.status === "connected")
-        ) {
-          const sourceObservation = await this.hooks.onConnectionSourceObserved?.({
-            account,
-            observedAt: webhook.sourceObservedAt ?? null,
-            sourceProviderSlug: webhookSourceProviderSlug,
-            provider,
-            now,
-          });
-          if (sourceObservation?.sourceAdmissionCommitted !== true) {
-            throw deviceSyncError({
-              code: "WEBHOOK_SOURCE_NOT_READY",
-              message: "Device source setup must finish before its webhook can be accepted.",
-              retryable: true,
-              httpStatus: 503,
-            });
-          }
-        }
-      }
-
       const acceptedResult = await onWebhookAccepted?.({
         account,
         claimToken,

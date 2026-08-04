@@ -537,6 +537,30 @@ export function createJunctionDeviceSyncProvider(
     });
   }
 
+  async function isSourceAccessActive(
+    account: DeviceSyncAccount,
+    sourceProviderSlug: string,
+  ): Promise<boolean> {
+    const userId = normalizeString(account.externalAccountId);
+    const targetProviderSlug = normalizeProviderSlug(sourceProviderSlug);
+    if (!userId || !targetProviderSlug) {
+      throw deviceSyncError({
+        code: "JUNCTION_SOURCE_STATUS_INPUT_INVALID",
+        message: "Junction source status requires a stored user and provider slug.",
+        retryable: false,
+        httpStatus: 409,
+      });
+    }
+
+    return (await client.listUserProviders(userId)).some((provider) =>
+      mapJunctionSourceStatus(provider.status) !== "disconnected"
+      && (
+        normalizeProviderSlug(provider.origin.sourceProviderSlug)
+        ?? normalizeProviderSlug(provider.slug)
+      ) === targetProviderSlug
+    );
+  }
+
   function createScheduledJobs(
     account: StoredDeviceSyncAccount,
     now: string,
@@ -2010,8 +2034,7 @@ export function createJunctionDeviceSyncProvider(
     const resource = inferJunctionWebhookResource(eventType, data);
     const sourceProviderSlug = extractJunctionWebhookSourceProviderSlug(data);
     const objectId = extractJunctionWebhookObjectId(data);
-    const sourceObservedAt = extractJunctionWebhookOccurredAt(data);
-    const occurredAt = sourceObservedAt ?? context.now;
+    const occurredAt = extractJunctionWebhookOccurredAt(data) ?? context.now;
     const window = buildJunctionWebhookWindow(data, occurredAt, context.now, resource);
     const webhookDataJsons = buildJunctionWebhookDataJobJsons({
       data,
@@ -2039,7 +2062,6 @@ export function createJunctionDeviceSyncProvider(
       eventType,
       traceId: verified.messageId,
       occurredAt,
-      ...(sourceObservedAt ? { sourceObservedAt } : {}),
       resourceCategory: resource?.category ?? null,
       sourceProviderSlug,
       // A historical-pull completion is a data-less notification, so accepting
@@ -2585,6 +2607,7 @@ export function createJunctionDeviceSyncProvider(
     connectionHandler: {
       beginConnection,
       completeConnection,
+      isSourceAccessActive,
       revokeAccess,
       revokeSourceAccess,
     },
