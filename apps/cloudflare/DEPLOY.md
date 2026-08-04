@@ -182,6 +182,25 @@ every bubble, and one reaction reaches its selected accepted message. Confirm
 no strict outbox parse failures or stale runner fingerprints appear in Workers
 Observability.
 
+## Native iMessage Response-Card Rollout
+
+Deploy the first native response-card release as one Cloudflare Worker and
+runner bundle update with `container_rollout=immediate`. Before allowing card
+traffic, require managed-container smoke to report the exact new runner-bundle
+fingerprint and prove the updated assistant CLI surface. There is no Web
+deployment dependency.
+
+Ordinary outbox records and hosted delivery side effects omit the optional
+`card` field. A new Worker with an old runner is therefore safe for ordinary
+work, although that runner cannot produce cards. The inverse is unsafe after a
+new runner writes or emits a card-bearing record or side effect: do not pair
+that state with an old Worker.
+
+The prior bundle remains a safe rollback only before the first card-bearing
+value exists. After that point, the new bundle is the hard rollback floor for
+workspaces, checkpoints, retained outbox intents, and side effects. Forward-fix
+on that bundle or newer rather than restoring an older reader.
+
 ## Audience-Key Rollout
 
 The first production deploy that can write assistant conversation keys with an

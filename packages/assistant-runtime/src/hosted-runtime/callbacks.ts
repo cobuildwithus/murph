@@ -811,6 +811,7 @@ async function persistHostedAssistantAskFallbackSupersession(input: {
     expectedUpdatedAt: current.updatedAt,
     intent: {
       ...current,
+      card: null,
       media: [],
       message: HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
       updatedAt,
@@ -3524,6 +3525,8 @@ function createHostedAssistantLinqSendDependency(input: {
       ?? normalizeHostedLinqDirectRecipient(deliveryContext?.fromPhoneNumber);
     const signal = mergeHostedAssistantLinqSignals(input.signal, request.signal);
     const idempotencyKey = request.idempotencyKey?.trim() || null;
+    let effectiveIdempotencyKey = idempotencyKey;
+    const persistAppCardTextFallback = request.persistAppCardTextFallback;
     const reviewedAssistantAskCompletion = idempotencyKey?.startsWith(
       HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
     ) === true;
@@ -3614,7 +3617,7 @@ function createHostedAssistantLinqSendDependency(input: {
               effectsPort: input.effectsPort ?? null,
               fromPhoneNumber,
               homeRouteFallbackAllowed: currentHomeRouteOnly,
-              idempotencyKey,
+              idempotencyKey: effectiveIdempotencyKey,
               intentId: input.intentId ?? null,
               replyToMessageId: request.replyToMessageId ?? null,
               providerDispatchRetrySafe: true,
@@ -3662,6 +3665,16 @@ function createHostedAssistantLinqSendDependency(input: {
         replyToMessageId: request.replyToMessageId ?? null,
         target: providerTarget,
         targetKind: providerTargetKind,
+        ...(request.card == null
+          ? {}
+          : {
+              card: request.card,
+              threadIsDirect:
+                request.threadIsDirect
+                ?? input.threadIsDirect
+                ?? deliveryContext?.threadIsDirect
+                ?? null,
+            }),
       }, {
         ...dependencies,
         ...(input.publicInternetFetch
@@ -3699,6 +3712,14 @@ function createHostedAssistantLinqSendDependency(input: {
               },
             }
           : {}),
+        ...(persistAppCardTextFallback
+          ? {
+              persistAppCardTextFallback: async (fallback) => {
+                await persistAppCardTextFallback(fallback);
+                effectiveIdempotencyKey = fallback.idempotencyKey;
+              },
+            }
+          : {}),
       });
     } catch (error) {
       if (!attemptedAt) {
@@ -3718,7 +3739,7 @@ function createHostedAssistantLinqSendDependency(input: {
             failureCode: readHostedAssistantLinqDeliveryFailureCode(error),
             failureReason: null,
             fromPhoneNumber,
-            idempotencyKey,
+            idempotencyKey: effectiveIdempotencyKey,
             intentId: input.intentId ?? null,
             providerTarget,
             providerThreadId: partialRichLinkResult.providerThreadId ?? null,
@@ -3745,7 +3766,7 @@ function createHostedAssistantLinqSendDependency(input: {
           failureCode: readHostedAssistantLinqDeliveryFailureCode(error),
           failureReason: readTrustedHostedAssistantLinqDeliveryFailureReason(error),
           fromPhoneNumber,
-          idempotencyKey,
+          idempotencyKey: effectiveIdempotencyKey,
           intentId: input.intentId ?? null,
           providerTarget,
           providerThreadId: null,
@@ -3758,6 +3779,8 @@ function createHostedAssistantLinqSendDependency(input: {
       throw error;
     }
     const acceptedAt = new Date();
+    effectiveIdempotencyKey =
+      result.idempotencyKey ?? effectiveIdempotencyKey;
     input.onProviderAccepted?.({
       acceptedAssistantInputIds: request.acceptedAssistantInputIds ?? [],
       acceptedAt,
@@ -3771,7 +3794,7 @@ function createHostedAssistantLinqSendDependency(input: {
         deliveryContext,
         directRecipientPhoneNumber: originalParticipantRecipientPhoneNumber,
         fromPhoneNumber,
-        idempotencyKey,
+        idempotencyKey: effectiveIdempotencyKey,
         intentId: input.intentId ?? null,
         providerTarget,
         providerThreadId: result.providerThreadId ?? null,
@@ -5235,6 +5258,7 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
     | "actorId"
     | "answeredMailboxItemIds"
     | "bindingDelivery"
+    | "card"
     | "channel"
     | "deliveryIdempotencyKey"
     | "deliverySource"
@@ -5260,6 +5284,7 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
     answeredMailboxItemIds: intent.answeredMailboxItemIds ?? [],
     bindingDeliveryKind: intent.bindingDelivery?.kind ?? null,
     bindingDeliveryTarget: intent.bindingDelivery?.target ?? null,
+    ...(intent.card == null ? {} : { card: intent.card }),
     channel: intent.channel ?? null,
     deliverySourceKey: readHostedAssistantDeliverySourceKey(intent.deliverySource),
     ...(intent.emailHtml == null ? {} : { emailHtml: intent.emailHtml }),
@@ -5601,9 +5626,16 @@ function normalizeHostedAssistantDeliveryMirrorFailure(input: {
 function assertSupportedHostedAssistantDeliveryPayload(
   payload: Pick<
     HostedAssistantDeliveryPayload,
-    "bindingDeliveryKind" | "channel" | "explicitTarget"
+    "bindingDeliveryKind" | "card" | "channel" | "explicitTarget" | "media"
   >,
 ): void {
+  if (payload.card != null && payload.media.length > 0) {
+    throw new VaultCliError(
+      "ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT",
+      "Assistant delivery cannot combine a response card with media.",
+    );
+  }
+
   if (payload.channel !== "email") {
     return;
   }
