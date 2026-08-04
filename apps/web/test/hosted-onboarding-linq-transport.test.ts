@@ -3659,6 +3659,112 @@ describe("hosted Linq webhook transport", () => {
       }
     });
 
+    it("does not spend another line slot for a correlated private recovery replay", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(dispatchNow);
+      const lookupKey = arrangeAssignableRecoveryLine();
+      const { line, prisma } = createHostedLinqLineCapacityPrisma({
+        maxNewConversationsPerDay: 10,
+        phoneNumberLookupKey: lookupKey,
+        proactiveConversationCount: 3,
+        proactiveConversationDayUtc: dispatchDayUtc,
+      });
+      const effect = buildGroupEmailRecoveryEffect(
+        "event-group-email-correlated-replay",
+      );
+      vi.mocked(readHostedLinqDeliveryProviderDispatchIntentTx)
+        .mockResolvedValueOnce({
+          groupJoinOutreachId: null,
+          groupJoinReplyOccurredAt: null,
+          id: "hld_group_email_correlated",
+          lastProviderEventId: "provider-event-correlated",
+          phoneNumberLookupKey: lookupKey,
+          providerCorrelated: true,
+          sourceRef: effect.effectId,
+          status: "accepted",
+          targetKind: "participant",
+          template: "group_email_recovery",
+        });
+
+      try {
+        await expect(drainHostedLinqSideEffectsDirect({
+          prisma: prisma as never,
+          sideEffects: [effect],
+        })).resolves.toEqual({
+          sentCount: 0,
+          skipped: [{
+            effectId: effect.effectId,
+            reason: "notice_already_claimed",
+            template: "group_email_recovery",
+          }],
+        });
+
+        expect(prisma.hostedLinqLine.updateMany).not.toHaveBeenCalled();
+        expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
+        expect(createHostedLinqChat).not.toHaveBeenCalled();
+        expect(line.proactiveConversationCount).toBe(3);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("reuses the original line slot while a private recovery is in flight", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(dispatchNow);
+      const lookupKey = arrangeAssignableRecoveryLine();
+      const retryAt = new Date("2026-03-27T12:15:00.000Z");
+      const { line, prisma } = createHostedLinqLineCapacityPrisma({
+        maxNewConversationsPerDay: 10,
+        phoneNumberLookupKey: lookupKey,
+        proactiveConversationCount: 3,
+        proactiveConversationDayUtc: dispatchDayUtc,
+      });
+      const effect = buildGroupEmailRecoveryEffect(
+        "event-group-email-in-flight-replay",
+      );
+      vi.mocked(readHostedLinqDeliveryProviderDispatchIntentTx)
+        .mockResolvedValueOnce({
+          groupJoinOutreachId: null,
+          groupJoinReplyOccurredAt: null,
+          id: "hld_group_email_in_flight",
+          lastProviderEventId: null,
+          phoneNumberLookupKey: lookupKey,
+          providerCorrelated: false,
+          sourceRef: effect.effectId,
+          status: "attempted",
+          targetKind: "participant",
+          template: "group_email_recovery",
+        });
+      vi.mocked(claimHostedLinqDeliveryProviderDispatchTx)
+        .mockResolvedValueOnce({
+          claimed: false,
+          id: "hld_group_email_in_flight",
+          retryAt,
+        });
+
+      try {
+        await expect(drainHostedLinqSideEffectsDirect({
+          prisma: prisma as never,
+          sideEffects: [effect],
+        })).resolves.toEqual({
+          sentCount: 0,
+          skipped: [{
+            effectId: effect.effectId,
+            reason: "notice_in_flight",
+            retryAt,
+            template: "group_email_recovery",
+          }],
+        });
+
+        expect(prisma.hostedLinqLine.updateMany).not.toHaveBeenCalled();
+        expect(claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledTimes(1);
+        expect(createHostedLinqChat).not.toHaveBeenCalled();
+        expect(line.proactiveConversationCount).toBe(3);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("skips a recovery link whose token expired before dispatch without spending line budget", async () => {
       vi.useFakeTimers();
       vi.setSystemTime(dispatchNow);

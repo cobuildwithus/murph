@@ -1376,6 +1376,14 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
       if (existingRoute) {
         return { status: "already_completed" };
       }
+      const persistedIntent =
+        await readHostedLinqDeliveryProviderDispatchIntentTx({
+          idempotencyKey: groupEmailRecoveryEffect.effectId,
+          prisma,
+        });
+      if (persistedIntent?.providerCorrelated) {
+        return { status: "already_completed" };
+      }
       const incomingLineState = await readHostedLinqIncomingLineState({
         phoneNumberLookupKeys: createHostedPhoneLookupKeyReadCandidates(
           groupEmailRecoveryEffect.payload.assignedRecipientPhone,
@@ -1386,26 +1394,31 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
         return { status: "target_unauthorized" };
       }
       // Private email recovery opens a brand-new conversation from the managed
-      // line, so it claims the same per-line daily new-conversation budget as
-      // every other proactive path. Without this a single sender could open one
-      // new conversation per group chat and burn the line's reputation.
-      const recoveryLine = await prisma.hostedLinqLine.findUnique({
-        select: { maxNewConversationsPerDay: true },
-        where: {
-          phoneNumberLookupKey: incomingLineState.phoneNumberLookupKey,
-        },
-      });
-      if (
-        !recoveryLine
-        || !await claimHostedLinqProactiveConversationCapacityTx({
-          dayUtc: startOfUtcDay(new Date(input.startedAtMs)),
-          limit: resolveHostedLinqSignupWelcomeDailyLimit(recoveryLine),
-          phoneNumberLookupKey: incomingLineState.phoneNumberLookupKey,
-          prisma,
-          requiredHealthStatus: "healthy",
-        })
-      ) {
-        return { status: "target_unauthorized" };
+      // line, so the first unresolved attempt claims the same per-line daily
+      // new-conversation budget as every other proactive path. The chat lock
+      // serializes this lookup with the delivery claim below; a retry that
+      // already has a durable intent must reuse the original reservation rather
+      // than burn another slot without opening another conversation.
+      if (!persistedIntent) {
+        const recoveryLine = await prisma.hostedLinqLine.findUnique({
+          select: { maxNewConversationsPerDay: true },
+          where: {
+            phoneNumberLookupKey: incomingLineState.phoneNumberLookupKey,
+          },
+        });
+        if (
+          !recoveryLine
+          || !await claimHostedLinqProactiveConversationCapacityTx({
+            dayUtc: startOfUtcDay(new Date(input.startedAtMs)),
+            limit: resolveHostedLinqSignupWelcomeDailyLimit(recoveryLine),
+            phoneNumberLookupKey: incomingLineState.phoneNumberLookupKey,
+            prisma,
+            requiredHealthStatus: "healthy",
+          })
+        ) {
+          return { status: "target_unauthorized" };
+        }
+        recoveryCapacityClaimed = true;
       }
     }
 
@@ -1449,7 +1462,7 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
     });
     if (recoveryCapacityClaimed && !claim.claimed) {
       throw new Error(
-        "Hosted Linq group-line recovery delivery conflicted after reserving line capacity.",
+        "Hosted Linq recovery delivery conflicted after reserving line capacity.",
       );
     }
     if (claim.claimed) {
