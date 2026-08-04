@@ -599,6 +599,7 @@ describe("deleteHostedAccountData", () => {
           order.push("stripe:subscription-cancel");
           return makeExactPhoneTransferStripeSubscription({
             ended_at: 1_900_000_000,
+            pending_setup_intent: "seti_trial_123",
             status: "canceled",
           });
         }),
@@ -608,8 +609,12 @@ describe("deleteHostedAccountData", () => {
       priceId: "price_launch_monthly",
       stripe,
     });
+    // Stripe attaches a pending SetupIntent to every automatic-collection
+    // trial without a payment method; the unused-surface check must accept it.
     serviceMocks.retrieveHostedPulseTrialCleanupTarget.mockResolvedValue(
-      makeExactPhoneTransferStripeSubscription(),
+      makeExactPhoneTransferStripeSubscription({
+        pending_setup_intent: "seti_trial_123",
+      }),
     );
     serviceMocks.persistHostedAccountDeletionCleanupTx.mockImplementation(async () => {
       order.push("persist:cleanup");
@@ -2532,6 +2537,32 @@ describe("deleteHostedAccountData", () => {
     expect(deleteCalls).toContainEqual({
       model: "hostedPhoneCall",
       where: { memberId: "member_123" },
+    });
+  });
+
+  it("records hosted physical-note rows before member deletion cascades them", async () => {
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const operationOrder: string[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      countResults: { hostedPhysicalNote: 2 },
+      deleteCalls,
+      onTransaction: () => undefined,
+      operationOrder,
+    });
+
+    const result = await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(result.deletedCounts["prisma.hosted_physical_note"]).toBe(2);
+    expect(operationOrder.indexOf("count:hostedPhysicalNote")).toBeLessThan(
+      operationOrder.indexOf("delete:hostedMember"),
+    );
+    expect(deleteCalls).not.toContainEqual({
+      model: "hostedPhysicalNote",
+      where: expect.anything(),
     });
   });
 

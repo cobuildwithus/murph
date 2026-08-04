@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto'
 
 import { z } from 'zod'
 import {
-  hostedPhysicalNoteRecipientSchema,
   normalizeHostedPhysicalNoteRecipient,
   type HostedPhysicalNoteRecipient,
 } from '@murphai/hosted-execution/physical-notes'
@@ -10,8 +9,9 @@ import {
 import type {
   AssistantConversationScope,
 } from '../../assistant/conversation-policy.js'
-import type {
-  SafeToolCallValidationDigest,
+import {
+  buildSafeToolCallValidationDigest,
+  type SafeToolCallValidationDigest,
 } from '../../assistant/tool-validation-digest.js'
 import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
 
@@ -33,7 +33,7 @@ const physicalNoteArgumentsSchema = z.object({
     city: z.string().trim().min(1).max(200),
     name: z.string().trim().min(1).max(40),
     postal_code: z.string().trim().regex(/^\d{5}(?:-\d{4})?$/u),
-    state: z.string().trim().length(2),
+    state: z.string().trim().regex(/^[A-Za-z]{2}$/u),
   }).strict(),
 }).strict().superRefine((value, context) => {
   if ((value.image_ref === undefined) !== (value.image_sha256 === undefined)) {
@@ -67,6 +67,7 @@ export const MURPH_SEND_PHYSICAL_NOTE_TOOL = {
     'On a trusted hosted image-completion turn whose generation was launched with the exact authorizing message_ref, omit image_ref, image_sha256, and message_ref so runtime code binds the exact generated image and request automatically.',
     'When a generated note was intentionally shown first and a person later says to send it, provide the exact image_ref and image_sha256 from that trusted completion plus the exact message_ref approving the send in the current turn. Runtime code re-reads and verifies the private vault bytes and exact accepted input.',
     'When the originating user already explicitly asked Murph to mail the note and supplied a complete US address, call this tool automatically after generation finishes; showing or attaching the image first is optional, not required.',
+    "The server supplies Murph's fixed return address. Never ask the person for a return address, invent one, or include one in the tool arguments or artwork.",
     'Do not call for a draft-only request, an incomplete address, bulk mail, an international address, impersonation, threats, harassment, fraud, or illegal content.',
     'The server decides whether the note is complimentary and computes any Murph-time cost. Never claim acceptance until this tool reports accepted.',
   ].join(' '),
@@ -96,12 +97,14 @@ export const MURPH_SEND_PHYSICAL_NOTE_TOOL = {
       to: {
         type: 'object',
         additionalProperties: false,
+        description:
+          "One recipient address only. Trusted server code supplies Murph's fixed return address.",
         properties: {
           name: { type: 'string', minLength: 1, maxLength: 40 },
           address_line1: { type: 'string', minLength: 1, maxLength: 64 },
           address_line2: { type: 'string', minLength: 1, maxLength: 64 },
           city: { type: 'string', minLength: 1, maxLength: 200 },
-          state: { type: 'string', minLength: 2, maxLength: 2 },
+          state: { type: 'string', pattern: '^[A-Za-z]{2}$' },
           postal_code: {
             type: 'string',
             pattern: '^\\d{5}(?:-\\d{4})?$',
@@ -146,17 +149,34 @@ export function readPhysicalNoteDynamicToolRequest(input: {
       validationDigest: parsed.validationDigest,
     }
   }
-  const recipient = normalizeHostedPhysicalNoteRecipient({
-    addressLine1: parsed.args.to.address_line1,
-    ...(parsed.args.to.address_line2
-      ? { addressLine2: parsed.args.to.address_line2 }
-      : {}),
-    city: parsed.args.to.city,
-    name: parsed.args.to.name,
-    postalCode: parsed.args.to.postal_code,
-    state: parsed.args.to.state.toUpperCase(),
-  })
-  hostedPhysicalNoteRecipientSchema.parse(recipient)
+  // Model arguments stay untrusted after the schema parse above; a hosted
+  // recipient-normalization failure must degrade to the same safe digest
+  // result instead of throwing into the codex stdout listener.
+  let recipient: HostedPhysicalNoteRecipient
+  try {
+    recipient = normalizeHostedPhysicalNoteRecipient({
+      addressLine1: parsed.args.to.address_line1,
+      ...(parsed.args.to.address_line2
+        ? { addressLine2: parsed.args.to.address_line2 }
+        : {}),
+      city: parsed.args.to.city,
+      name: parsed.args.to.name,
+      postalCode: parsed.args.to.postal_code,
+      state: parsed.args.to.state.toUpperCase(),
+    })
+  } catch (error) {
+    return {
+      kind: 'invalid-physical-note-arguments',
+      validationDigest: buildSafeToolCallValidationDigest({
+        error,
+        rawInput: input.arguments,
+        requestedToolName: 'murph.send_physical_note',
+        schemaName: 'murph.send_physical_note.recipient',
+        schemaRootKeys: PHYSICAL_NOTE_ARGUMENT_ROOT_KEYS,
+        toolName: 'murph.send_physical_note',
+      }),
+    }
+  }
   return {
     ...(parsed.args.image_ref && parsed.args.image_sha256
       ? {

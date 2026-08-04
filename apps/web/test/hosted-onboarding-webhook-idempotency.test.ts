@@ -1029,6 +1029,56 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
+  it.each([
+    [
+      "suspended member",
+      "member_suspended",
+      "ignored-linq-group-join-offer-member-suspended",
+    ],
+    [
+      "target-group member",
+      "already_group_member",
+      "ignored-linq-group-join-offer-already-member",
+    ],
+  ] as const)(
+    "consumes a %s join reaction without ordinary fallthrough",
+    async (_label, reactionReason, responseReason) => {
+      mocks.handleHostedGroupJoinOfferReaction.mockResolvedValueOnce({
+        reason: reactionReason,
+        status: "ignored",
+      });
+      const prisma = createPrismaStub();
+      mocks.getPrisma.mockReturnValue(prisma);
+
+      await expect(
+        handleHostedOnboardingLinqWebhook({
+          rawBody: buildLinqProviderWebhookBody({
+            data: {
+              chat_id: "chat_group_1",
+              from_handle: { handle: "+15551234567", service: "iMessage" },
+              line: { phone_number: "+15550000000" },
+              message_id: "msg_offer_123",
+              reaction_type: "like",
+            },
+            eventId: `evt_reaction_${reactionReason}`,
+            eventType: "reaction.added",
+          }),
+          signature: null,
+          timestamp: null,
+        }),
+      ).resolves.toMatchObject({
+        ignored: true,
+        ok: true,
+        reason: responseReason,
+      });
+
+      expect(mocks.buildHostedLinqAffirmativeReactionMessageEvent)
+        .not.toHaveBeenCalled();
+      expect(mocks.stageHostedLinqGroupReactionContext).not.toHaveBeenCalled();
+      expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    },
+  );
+
   it("consumes an unsupported-region join reaction without staging group work", async () => {
     // The refusal is a decided outcome for a reaction that targeted the canonical
     // offer, so the webhook must stop here rather than fall through to the generic
@@ -1617,14 +1667,17 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       reason: "wake-appended-active-member",
     });
 
-    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(2);
+    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(3);
     const initialAccessReadOrder =
       prisma.hostedMember.findUnique.mock.invocationCallOrder[0]!;
-    const refreshedAccessReadOrder =
+    const exactAccessReadOrder =
       prisma.hostedMember.findUnique.mock.invocationCallOrder[1]!;
+    const refreshedAccessReadOrder =
+      prisma.hostedMember.findUnique.mock.invocationCallOrder[2]!;
     const reclassificationLockOrder =
       mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[0]!;
-    expect(initialAccessReadOrder).toBeLessThan(reclassificationLockOrder);
+    expect(initialAccessReadOrder).toBeLessThan(exactAccessReadOrder);
+    expect(exactAccessReadOrder).toBeLessThan(reclassificationLockOrder);
     expect(reclassificationLockOrder).toBeLessThan(refreshedAccessReadOrder);
     expect(
       refreshedAccessReadOrder,

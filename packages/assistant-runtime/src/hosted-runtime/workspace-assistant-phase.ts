@@ -1794,6 +1794,22 @@ export async function runHostedWorkspaceAssistantPhase(
                     feedback,
                   );
                 },
+                // Support escalations are recorded through the Web callback
+                // inside the turn so the member-facing "queued" confirmation is
+                // backed by a durable record; they never join the best-effort
+                // post-delivery candidate flush.
+                async deliverProductSupportEscalation(
+                  feedback: HostedRuntimeProductFeedbackRecord,
+                ) {
+                  const port = input.runtime.platform.productFeedbackPort;
+                  if (!port) {
+                    throw new Error(
+                      "Hosted product feedback port unavailable for support escalation.",
+                    );
+                  }
+                  const response = await port.recordProductFeedback(feedback);
+                  return { recorded: response.recorded };
+                },
               },
             }
           : {}),

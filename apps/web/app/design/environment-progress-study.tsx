@@ -67,7 +67,7 @@ export function EnvironmentProgressStudy() {
       id="environment-progressive-capture"
       inert
     >
-      <StudyState label="0% · First walkthrough">
+      <StudyState label="0% · Auth-gated first walkthrough">
         <EnvironmentEmptyState contactOptions={DESIGN_CONTACT_OPTIONS} />
       </StudyState>
       <StudyState label="10% · Build the core picture">

@@ -68,6 +68,9 @@ describe('assistant physical notes', () => {
     expect(MURPH_SEND_PHYSICAL_NOTE_TOOL.description).toContain(
       'exact message_ref approving the send in the current turn',
     )
+    expect(
+      MURPH_SEND_PHYSICAL_NOTE_TOOL.inputSchema.properties.to.properties.state,
+    ).toEqual({ type: 'string', pattern: '^[A-Za-z]{2}$' })
   })
 
   it('normalizes the bounded US recipient', () => {
@@ -92,6 +95,25 @@ describe('assistant physical notes', () => {
         state: 'GA',
       },
     })
+  })
+
+  it('returns the safe invalid-arguments result for a non-alphabetic state', () => {
+    for (const state of ['d1', '1A']) {
+      expect(readPhysicalNoteDynamicToolRequest({
+        arguments: {
+          to: {
+            address_line1: '123 Main St',
+            city: 'Atlanta',
+            name: 'Sam',
+            postal_code: '30308',
+            state,
+          },
+        },
+        tool: MURPH_SEND_PHYSICAL_NOTE_TOOL.name,
+      })).toMatchObject({
+        kind: 'invalid-physical-note-arguments',
+      })
+    }
   })
 
   it('accepts an exact earlier generated-image identity only as a pair', () => {
@@ -211,74 +233,6 @@ describe('assistant physical notes', () => {
     })).not.toBe(first)
   })
 
-  it('executes a later approved send with the exact private bytes and identity', async () => {
-    const vaultRoot = await createPhysicalNoteVault()
-    const publishPrivateImageUrl = vi.fn<
-      NonNullable<
-        AssistantHostedToolContext['privateImageUrlPublisher']
-      >['publishPrivateImageUrl']
-    >(async () => ({
-        expiresAt: '2026-08-01T00:00:00.000Z',
-        url: 'https://private-media.example.test/note',
-      }))
-    const send = vi.fn(async () => ({
-      complimentary: true,
-      costUsdMicros: '250000',
-      physicalNoteId: 'hpn_test',
-      status: 'accepted' as const,
-    }))
-
-    const result = await executeMurphDynamicToolRequest({
-      authorizeAcceptedMessageTarget: authorizeApprovalInput,
-      deliveryContextOrdinal: 0,
-      env: {},
-      fetchImpl: fetch,
-      hostedToolContext: createHostedToolContext({
-        physicalNotes: { send },
-        privateImageUrlPublisher: { publishPrivateImageUrl },
-      }),
-      nextUsageOrdinal: () => 1,
-      progressDelivery: null,
-      request: {
-        imageRef: IMAGE_REF,
-        imageSha256: IMAGE_SHA256,
-        kind: 'send-physical-note',
-        messageRef: APPROVAL_INPUT_ID,
-        recipient: RECIPIENT,
-      },
-      vaultRoot,
-    })
-
-    expect(publishPrivateImageUrl).toHaveBeenCalledWith({
-      bytes: expect.any(Uint8Array),
-      contentType: 'image/png',
-    })
-    expect([
-      ...(publishPrivateImageUrl.mock.calls[0]?.[0].bytes ?? []),
-    ]).toEqual([...IMAGE_BYTES])
-    expect(send).toHaveBeenCalledWith({
-      artwork: {
-        expiresAt: '2026-08-01T00:00:00.000Z',
-        sha256: IMAGE_SHA256,
-        url: 'https://private-media.example.test/note',
-      },
-      originAssistantInputId: APPROVAL_INPUT_ID,
-      recipient: RECIPIENT,
-      requestKey: createPhysicalNoteRequestKey({
-        originAssistantInputId: APPROVAL_INPUT_ID,
-      }),
-    }, {
-      signal: null,
-    })
-    expect(result.rpcResult).toMatchObject({ success: true })
-    expect(result.rpcResult.contentItems[0]?.text).toContain(
-      '"status":"accepted"',
-    )
-    expect(result.rpcResult.contentItems[0]?.text).toContain(
-      '"costUsdMicros":"250000"',
-    )
-  })
-
   it('rejects changed artwork bytes before publishing or mailing', async () => {
     const vaultRoot = await createPhysicalNoteVault()
     const publishPrivateImageUrl = vi.fn()
@@ -353,7 +307,7 @@ describe('assistant physical notes', () => {
       '"status":"permission_denied"',
     )
     expect(result.rpcResult.contentItems[0]?.text).toContain(
-      'current participant is not authorized',
+      'action is not available to the current participant right now',
     )
   })
 })

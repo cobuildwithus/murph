@@ -8,6 +8,18 @@ Last verified: 2026-07-31
 - Prefer explicit failure paths and actionable errors over silent fallback behavior.
 - Update architecture and verification docs in the same change that introduces new runtime entrypoints.
 - Avoid hidden coupling between scripts, docs, and runtime code; document new dependencies in `ARCHITECTURE.md` and `agent-docs/references/testing-ci-map.md`.
+- Health-data withdrawal commits its revocation boundary, then waits for the
+  existing per-user Cloudflare execution owner to serialize with earlier
+  ensures, re-read the Web-owned grant, clear the write fence, and stop the
+  runner before acknowledging success. Later ensures re-read consent under the
+  same lock. Renewal waits behind the earlier stop, commits its new grant, then
+  signals the existing Temporal workflow. Best-effort provider cleanup failures
+  are secret-safe, do not roll back the grant, and may be retried idempotently
+  by repeating withdrawal.
+  Webhooks finalize an already-claimed trace without appending dirty work;
+  scheduled selection and wake admission both exclude explicit revocation; and
+  queued model work rechecks authority before usage is consumed. Renewal is a
+  new durable grant, not an implicit cleanup rollback.
 - Venice core inference is an all-or-none operator configuration: one Worker
   secret plus fixed Luna/Terra/Sol mappings. Deploy preflight rejects partial
   configuration, and Web keeps Venice hidden and projects OpenAI until the
@@ -293,16 +305,16 @@ Last verified: 2026-07-31
   for the private message.
 - Foreground inbox/parser-backed daemon runs should favor restartable connectors with bounded backoff over permanently dead watch loops, while still keeping low-level restart behavior opt-in and always bounded by the owning abort signal.
 - Networked assistant/provider/channel calls should set explicit timeouts, propagate caller abort signals, and only auto-retry request shapes that are replay-safe or rate-limit directed.
-- Junction Link setup remains retryable but inert before browser confirmation.
-  Webhooks for an active `pending_link` or `link_returned` account release their
-  trace claim and return a retryable not-ready response; they do not persist
-  dirty state or wake work. Manual reconcile, due scheduling, ordinary queued
-  jobs, and sync-success promotion apply the same account phase gate. After a
-  shared account is `source_confirmed`, a new target source does not move the
-  account back into a pending phase. Its `DeviceConnectionSource` remains
-  `disconnected`, and source-attributed webhooks, dirty-state commit races, and
-  provider pulls fail or exit without admitting target data until callback
-  confirmation reaches the sole runtime connection-established admission
+- Junction Link setup remains retryable but inert before proof-verified callback
+  completion. Webhooks for an active `pending_link` or `link_returned` account
+  release their trace claim and return a retryable not-ready response; they do
+  not persist dirty state or wake work. Manual reconcile, due scheduling,
+  ordinary queued jobs, and sync-success promotion apply the same account phase
+  gate. After a shared account is `source_confirmed`, a new target source does
+  not move the account back into a pending phase. Its `DeviceConnectionSource`
+  remains `disconnected`, and source-attributed webhooks, dirty-state commit
+  races, and provider pulls fail or exit without admitting target data until
+  callback completion reaches the sole runtime connection-established admission
   boundary. Shared ingress marks every account persistence request with the
   closed `replace` or `preserve_established` policy; hosted Prisma and local
   SQLite apply the same shared predicate inside their persistence transactions,
@@ -661,9 +673,13 @@ Last verified: 2026-07-31
 - The daily product-feedback digest is an internal read-and-email projection,
   not another feedback or delivery-state owner. The ten-minute cron does no
   work outside the 6pm Eastern hour, derives the prior 6pm-to-6pm window with
-  time-zone-aware day boundaries, and groups only the three allowlisted
-  product-feedback kinds into fixed count labels. That aggregate is bounded
-  independently of row volume and never reads the model-authored summary. An
+  time-zone-aware day boundaries, and renders only the three allowlisted
+  product-feedback kinds as fixed labels with truthful per-kind totals from a
+  grouped aggregate plus their capture-scrubbed summaries.
+  The summary read is bounded independently of row volume by a fixed row cap
+  with deterministic ordering, and any kind whose total exceeds its displayed
+  summaries appends an explicit per-kind omitted-remainder line instead of
+  growing the email or misstating counts. An
   empty window still sends the fixed empty digest, while missing configuration
   fails before the database read so the cron stays observably unhealthy.
   Every same-hour retry reuses the exact window and Eastern day-keyed Resend

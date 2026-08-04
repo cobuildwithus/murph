@@ -28,6 +28,36 @@ Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budg
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
+## Health-Data Consent Stop-Target Rollout
+
+Deploy the Cloudflare Worker that retains an exact user-control stop target
+before deploying the Web health-data withdrawal routes, then deploy Web
+immediately. No runner-bundle shape changes, but the Worker changes the meaning
+of an existing Durable Object row: after write authority is cleared,
+`active_runner_container_name` may remain populated until that exact container
+is confirmed destroyed. Withdrawal and account deletion both consume this
+pending-stop pointer before acknowledging their respective cleanup boundary.
+
+After the first such pending-stop row is written, this Worker is a hard
+Cloudflare rollback floor. An older Worker treats the absent active attempt as
+no exact target, derives a container name from its own version, and can erase
+the retained pointer during account deletion while the intended newer runner
+survives.
+
+The consent-aware Web deployment is also a hard rollback floor after it can
+record the first explicit `launch.health-data = revoked` event. Retaining only
+the signed callback route is insufficient: webhook admission, scheduled sync,
+shared-data reads, messaging, and other Web-owned consumers enforce revocation
+inside that Web artifact and do not pass through the Worker callback. After the
+consent-aware Web deployment is live, do not roll either plane below its floor.
+Forward-fix the compatible Web and Worker pair; do not add a callback-only shim,
+dual-read consent state, or a second lifecycle owner.
+
+After deployment, withdraw consent while a runner is active and confirm the
+stored target clears only after destruction succeeds. Also exercise one forced
+container-destroy retry through account deletion and confirm R2 and Durable
+Object deletion remain blocked until the same stored target is destroyed.
+
 ## Database Health Alert Rollout
 
 Before deploying the Worker version that introduces
@@ -678,6 +708,7 @@ Opt-in runtime integrations:
 - `HOSTED_EMAIL_DOMAIN`
 - `HOSTED_EMAIL_FROM_ADDRESS`
 - `HOSTED_EMAIL_LOCAL_PART`
+- `HOSTED_PHYSICAL_NOTES_ENABLED`
 - `LINQ_API_BASE_URL`
 - `TELEGRAM_API_BASE_URL`
 - `TELEGRAM_BOT_USERNAME`
@@ -692,6 +723,12 @@ Opt-in runtime integrations:
 - `JUNCTION_RECONCILE_DAYS`
 - `JUNCTION_RECONCILE_INTERVAL_MS`
 - `JUNCTION_REQUEST_TIMEOUT_MS`
+
+`HOSTED_PHYSICAL_NOTES_ENABLED` exposes the hosted physical-note tool only when
+set to exactly `true`; leave it unset to keep the tool disabled. Set it as a
+GitHub `production` environment variable, and only after Web's Lob
+configuration is live (see `agent-docs/product-specs/physical-notes.md`,
+Deployment).
 
 `DEVICE_SYNC_PUBLIC_BASE_URL` is optional. When set, it may select a stable
 provider callback/webhook path on the hosted Web hostname, but it must not use a

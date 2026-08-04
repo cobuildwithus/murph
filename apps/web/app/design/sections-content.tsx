@@ -21,11 +21,13 @@ import { AccountExitReasonStudy } from "./account-exit-reason-study";
 import { ChangelogArchiveStudy } from "./changelog-archive-study";
 import { ClubsPageStudy } from "./clubs-page-study";
 import { ConnectSourceCardStudy } from "./connect-source-card-study";
-import { DeviceSyncCallbackStudy } from "./device-sync-callback-study";
+import { DataExportFlowStudy } from "./data-export-study";
 import { FamilyInviteJoinStudy } from "./family-invite-join-study";
 import { GroupJoinStudy } from "./group-join-study";
+import { GroupStartStudy } from "./group-start-study";
 import { GroupMemberPlanStudy } from "./group-member-plan-study";
 import { GrowthScorecardStudy } from "./growth-scorecard-study";
+import { HealthDataConsentWithdrawalFlowStudy } from "./health-data-consent-study";
 import { HomeLoadStateStudy } from "./home-load-state-study";
 import { HomeOnboardingStepsStudy } from "./home-onboarding-steps-study";
 import { HomepageAuthWarmRuntimeStudy } from "./homepage-auth-warm-runtime-study";
@@ -40,6 +42,7 @@ import {
 } from "./group-usage-funding-study";
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 import { EnvironmentProgressStudy } from "./environment-progress-study";
+import { EnvironmentPrintStudy } from "./environment-print-study";
 
 function StudySection({
   children,
@@ -144,8 +147,26 @@ export function SectionsContent() {
 
       <Separator />
 
+      <StudySection title="Settings health data consent withdrawal and return">
+        <HealthDataConsentWithdrawalFlowStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Settings retained data export">
+        <DataExportFlowStudy />
+      </StudySection>
+
+      <Separator />
+
       <StudySection title="Environment progressive voice capture">
         <EnvironmentProgressStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Private Environment print report">
+        <EnvironmentPrintStudy />
       </StudySection>
 
       <Separator />
@@ -214,12 +235,6 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Device connection callback confirmation and failure">
-        <DeviceSyncCallbackStudy />
-      </StudySection>
-
-      <Separator />
-
       <StudySection title="Account deletion exit reason">
         <AccountExitReasonStudy />
       </StudySection>
@@ -264,6 +279,12 @@ export function SectionsContent() {
 
       <StudySection title="Group join message invites, actions, and sharing consents">
         <GroupJoinStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Unknown iMessage group setup and recovery">
+        <GroupStartStudy />
       </StudySection>
 
       <Separator />

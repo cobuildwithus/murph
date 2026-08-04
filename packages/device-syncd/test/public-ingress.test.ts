@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { test, vi } from "vitest";
 
 import { DeviceSyncError, deviceSyncError } from "../src/errors.ts";
+import { DEVICE_CONNECT_SOURCES } from "../src/config/connect-routes.ts";
 import { buildJunctionProviderSourceInstanceKey } from "../src/config/junction-connect-sources.ts";
+import { createJunctionDeviceSyncProvider } from "../src/providers/junction.ts";
 import { mergeGuardedJunctionHistoricalBackfillMetadata } from "../src/junction-historical-backfill-progress.ts";
 import { createDeviceSyncPublicIngress } from "../src/public-ingress.ts";
 import { createDeviceSyncRegistry } from "../src/registry.ts";
@@ -5091,10 +5093,10 @@ test("public ingress SDK sign-in session skips established side effects when ups
   ]);
 });
 
-test("public ingress SDK sign-in session treats connection-established hook failure as non-fatal", async () => {
+test("public ingress SDK sign-in session clears persisted authority and returns no token when admission fails", async () => {
   const store = new InMemoryPublicIngressStore();
-  const warnings: Array<{ message: string; context: Record<string, unknown> | undefined }> = [];
   let hookCalls = 0;
+  let mintedTokens = 0;
   const ingress = createDeviceSyncPublicIngress({
     publicBaseUrl: "https://sync.example.test/device-sync",
     registry: createDeviceSyncRegistry([
@@ -5120,6 +5122,7 @@ test("public ingress SDK sign-in session treats connection-established hook fail
             };
           },
           async createSignInToken() {
+            mintedTokens += 1;
             return {
               signInToken: "sdk-sign-in-token",
               environment: "sandbox",
@@ -5135,32 +5138,22 @@ test("public ingress SDK sign-in session treats connection-established hook fail
         throw new Error("wake enqueue failed with authorization=<REDACTED_AUTHORIZATION>");
       },
     },
-    log: {
-      warn(message, context) {
-        warnings.push({ message, context });
-      },
-    },
   });
 
-  const session = await ingress.createSdkSignInSession({
-    provider: "demo",
-    ownerId: "member-1",
-  });
+  await assert.rejects(
+    () => ingress.createSdkSignInSession({
+      provider: "demo",
+      ownerId: "member-1",
+    }),
+    /wake enqueue failed/u,
+  );
 
-  assert.equal(session.signInToken, "sdk-sign-in-token");
-  assert.equal(session.account.status, "active");
-  assert.equal(session.account.setupPhase, "source_confirmed");
+  const account = store.getConnectionByExternalAccount("demo", "demo-sdk-user-1");
+  assert.equal(account?.status, "reauthorization_required");
+  assert.equal(account?.setupPhase, "failed");
+  assert.equal(account?.accessTokenExpiresAt, null);
   assert.equal(hookCalls, 1);
-  assert.equal(warnings.length, 1);
-  assert.equal(warnings[0]?.message, "Device sync SDK sign-in established hook failed; continuing token mint.");
-  assert.equal(warnings[0]?.context?.failureCode, "DEVICE_SYNC_SDK_SIGN_IN_ESTABLISHED_HOOK_FAILED");
-  assert.deepEqual(warnings[0]?.context?.error, {
-    category: "unexpected_error",
-    message: "wake enqueue failed with authorization=[redacted]",
-    name: "Error",
-  });
-  assert.doesNotMatch(JSON.stringify(warnings), /sdk-sign-in-token/u);
-  assert.doesNotMatch(JSON.stringify(warnings), /REDACTED_AUTHORIZATION/u);
+  assert.equal(mintedTokens, 0);
 });
 
 test("public ingress SDK sign-in session rejects unsupported providers and missing owners", async () => {
@@ -5203,4 +5196,112 @@ test("public ingress SDK sign-in session rejects unsupported providers and missi
   );
 
   assert.equal(store.getConnectionByExternalAccount("demo-sdk", "demo-sdk-user-1"), null);
+});
+
+test("every default-enabled Junction Link connect source completes the real-provider callback with normalized initial jobs", async () => {
+  // Regression for the production outage where source-scoped Junction Link
+  // completions enqueued initial jobs whose payload carried a field the
+  // junction manifest did not declare: the callback handler threw
+  // DEVICE_SYNC_JOB_PAYLOAD_INVALID before persisting the connection, hard-
+  // walling every web Link connect. The fake-provider ingress tests above and
+  // the manifest-free provider unit tests each passed while the real
+  // provider/manifest seam was broken, so this test wires the REAL junction
+  // provider (Junction HTTP mocked at the fetch boundary) into the REAL
+  // ingress service and walks every default-enabled Link source end to end.
+  const junctionLinkRoutes = DEVICE_CONNECT_SOURCES.flatMap((source) =>
+    source.routes.flatMap((route) =>
+      route.kind === "junction_link" && route.defaultEnabled
+        ? [{ connectSourceId: source.connectSourceId, route }]
+        : []
+    )
+  );
+  assert.ok(
+    junctionLinkRoutes.length >= 10,
+    "expected the connect-source registry to enumerate default-enabled Junction Link routes",
+  );
+
+  for (const { connectSourceId, route } of junctionLinkRoutes) {
+    const junctionUserId = `junction-user-${route.sourceProviderSlug}`;
+    const provider = createJunctionDeviceSyncProvider({
+      apiKey: "sk_us_test_123",
+      clientUserIdSecret: "junction-client-user-id-secret",
+      environment: "sandbox",
+      region: "us",
+      pushSourceRecoveryEnabled: false,
+      summaryResources: ["activity"],
+      summaryBackfillDays: 2,
+      timeseriesResources: [],
+      fetchImpl: async (input) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+        if (url.startsWith("https://api.sandbox.us.junction.com/v2/user/resolve/")) {
+          return new Response(JSON.stringify({ id: junctionUserId }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        if (url === "https://api.sandbox.us.junction.com/v2/link/token") {
+          return new Response(JSON.stringify({ link_web_url: "https://link.junction.com/session/link-token-1" }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        throw new Error(`Unexpected Junction request for ${route.sourceProviderSlug}: ${url}`);
+      },
+    });
+
+    const store = new InMemoryPublicIngressStore();
+    const establishedJobs: Array<{ kind: string; payload?: Record<string, unknown> }> = [];
+    const ingress = createDeviceSyncPublicIngress({
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      allowedReturnOrigins: ["https://app.example.test"],
+      registry: createDeviceSyncRegistry([provider]),
+      store,
+      hooks: {
+        onConnectionEstablished(input) {
+          establishedJobs.push(...(input.connection.initialJobs ?? []));
+          return { sourceAdmissionCommitted: true };
+        },
+      },
+    });
+
+    const begin = await ingress.startConnection({
+      provider: "junction",
+      returnTo: "https://app.example.test/device-sync/connect/complete",
+      ownerId: "hosted-member-1",
+      sourceProviderSlug: route.sourceProviderSlug,
+      connectSourceId,
+      connectTarget: route.connectTarget,
+    });
+    assert.equal(
+      begin.authorizationUrl,
+      "https://link.junction.com/session/link-token-1",
+      `Junction Link start should succeed for ${route.sourceProviderSlug}`,
+    );
+
+    const connected = await ingress.handleConnectionCallback({
+      provider: "junction",
+      state: begin.state,
+      expectedOwnerId: "hosted-member-1",
+      query: new URLSearchParams({
+        murph_state: begin.state,
+        state: "success",
+      }),
+    });
+
+    assert.equal(connected.sourceProviderSlug, route.sourceProviderSlug);
+    assert.equal(connected.account.provider, "junction");
+    assert.equal(
+      connected.account.setupPhase,
+      "source_confirmed",
+      `Junction Link completion should confirm the source for ${route.sourceProviderSlug}`,
+    );
+    assert.deepEqual(establishedJobs.map((job) => job.kind), ["backfill", "reconcile"]);
+    for (const job of establishedJobs) {
+      assert.equal(
+        job.payload?.sourceProviderSlug,
+        route.sourceProviderSlug,
+        `initial ${job.kind} job should stay scoped to ${route.sourceProviderSlug} through the manifest boundary`,
+      );
+    }
+  }
 });

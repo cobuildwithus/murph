@@ -33,6 +33,7 @@ import { getPrisma } from "../prisma";
 import { readHostedAiUsageGate } from "../hosted-execution/usage-allowance";
 import { recordHostedAiUsageRecords } from "../hosted-execution/usage";
 import { buildHostedLobPhysicalNoteUsageRecord } from "../hosted-execution/usage-lob";
+import { readPhysicalNoteConfig } from "./config";
 import {
   createLobPhysicalNoteRuntime,
   type LobPhysicalNoteRuntime,
@@ -40,13 +41,6 @@ import {
 
 const COMPLIMENTARY_OFFER_CODE = "physical-note-v1";
 const REPLAY_WINDOW_MS = 23 * 60 * 60 * 1_000;
-
-interface PhysicalNoteConfig {
-  apiKey: string;
-  costUsdMicros: bigint;
-  fromAddressId: string;
-  pricingVersion: string;
-}
 
 export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequest & {
   memberId: string;
@@ -95,6 +89,9 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
       },
     },
   });
+  if (existing && existing.requestFingerprint !== requestFingerprint) {
+    throw new Error("Hosted physical-note request key collision.");
+  }
   if (existing) {
     const replay = await resolveHostedPhysicalNoteReplay({
       memberId: input.memberId,
@@ -115,14 +112,21 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
   if (!config) {
     throw new Error("Hosted physical-note configuration invariant failed.");
   }
-  const artworkExpiresAt = new Date(input.artwork.expiresAt);
-  if (artworkExpiresAt.getTime() <= Date.now() + 60_000) {
-    throw new TypeError("Physical-note artwork URL expires too soon.");
-  }
   const runtime = input.runtime ?? createLobPhysicalNoteRuntime({
     apiKey: config.apiKey,
     fromAddressId: config.fromAddressId,
   });
+  await resolveStaleComplimentaryPhysicalNote({
+    memberId: input.memberId,
+    prisma,
+    runtime,
+    signal: input.signal,
+  });
+
+  const artworkExpiresAt = new Date(input.artwork.expiresAt);
+  if (artworkExpiresAt.getTime() <= Date.now() + 60_000) {
+    throw new TypeError("Physical-note artwork URL expires too soon.");
+  }
   await reassertGroupOrigin?.();
   input.signal?.throwIfAborted();
 
@@ -255,6 +259,7 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
   }
   if (providerResult.kind === "definite_failure") {
     await markHostedPhysicalNoteFailed({
+      memberId: input.memberId,
       noteId: reservation.row.id,
       prisma,
     });
@@ -309,6 +314,47 @@ async function resolveHostedPhysicalNoteReplay(input: {
   return Date.now() - input.row.createdAt.getTime() >= REPLAY_WINDOW_MS
     ? toResponse(input.row, "pending")
     : null;
+}
+
+async function resolveStaleComplimentaryPhysicalNote(input: {
+  memberId: string;
+  prisma: PrismaClient;
+  runtime: LobPhysicalNoteRuntime;
+  signal?: AbortSignal;
+}): Promise<void> {
+  const stale = await input.prisma.hostedPhysicalNote.findFirst({
+    select: { id: true },
+    where: {
+      complimentaryOfferCode: COMPLIMENTARY_OFFER_CODE,
+      createdAt: {
+        lte: new Date(Date.now() - REPLAY_WINDOW_MS),
+      },
+      memberId: input.memberId,
+      status: "starting",
+    },
+  });
+  if (!stale) return;
+
+  const providerResult = await input.runtime.findLetterByNoteId({
+    noteId: stale.id,
+    signal: input.signal,
+  });
+  if (providerResult.kind === "accepted") {
+    await finalizeHostedPhysicalNoteAcceptance({
+      acceptedAt: new Date(),
+      memberId: input.memberId,
+      noteId: stale.id,
+      prisma: input.prisma,
+      providerLetterId: providerResult.providerLetterId,
+    });
+  }
+  if (providerResult.kind === "absent") {
+    await markHostedPhysicalNoteFailed({
+      memberId: input.memberId,
+      noteId: stale.id,
+      prisma: input.prisma,
+    });
+  }
 }
 
 async function finalizeHostedPhysicalNoteAcceptance(input: {
@@ -377,47 +423,26 @@ async function recordPaidPhysicalNoteUsageTx(input: {
   });
 }
 
-function readPhysicalNoteConfig(): PhysicalNoteConfig | null {
-  const apiKey = readEnv("LOB_API_KEY");
-  const fromAddressId = readEnv("LOB_FROM_ADDRESS_ID");
-  const pricingVersion = readEnv("LOB_PHYSICAL_NOTE_PRICING_VERSION");
-  const costText = readEnv("LOB_PHYSICAL_NOTE_COST_USD_MICROS");
-  if (!apiKey || !fromAddressId || !pricingVersion || !costText) {
-    return null;
-  }
-  if (
-    apiKey.startsWith("live_")
-    && process.env.LOB_PHYSICAL_NOTES_LIVE_ENABLED?.trim().toLowerCase() !== "true"
-  ) {
-    return null;
-  }
-  const cost = Number(costText);
-  if (!Number.isSafeInteger(cost) || cost <= 0) {
-    return null;
-  }
-  return {
-    apiKey,
-    costUsdMicros: BigInt(cost),
-    fromAddressId,
-    pricingVersion,
-  };
-}
-
 async function markHostedPhysicalNoteFailed(input: {
+  memberId: string;
   noteId: string;
   prisma: PrismaClient;
 }): Promise<void> {
-  await input.prisma.hostedPhysicalNote.updateMany({
-    data: {
-      complimentaryOfferCode: null,
-      status: "failed",
-    },
-    where: {
-      id: input.noteId,
-      providerLetterId: null,
-      status: "starting",
-    },
-  });
+  await input.prisma.$transaction(async (tx) => {
+    await lockHostedMemberRow(tx, input.memberId);
+    await tx.hostedPhysicalNote.updateMany({
+      data: {
+        complimentaryOfferCode: null,
+        status: "failed",
+      },
+      where: {
+        id: input.noteId,
+        memberId: input.memberId,
+        providerLetterId: null,
+        status: "starting",
+      },
+    });
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
 function buildPhysicalNoteFingerprint(input: {
@@ -461,11 +486,6 @@ function toResponse(
 
 function createPhysicalNoteId(): string {
   return `hpn_${randomUUID().replaceAll("-", "")}`;
-}
-
-function readEnv(name: string): string | null {
-  const value = process.env[name]?.trim();
-  return value || null;
 }
 
 function unavailableResponse(): HostedPhysicalNoteSendResponse {

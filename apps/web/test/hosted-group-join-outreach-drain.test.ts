@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   markDeliveryAccepted: vi.fn(),
   markDeliveryFailed: vi.fn(),
   markSkippedDelivery: vi.fn(),
+  readActiveAccess: vi.fn(),
   readParticipantPhone: vi.fn(),
   readRecentMessageEffectCounts: vi.fn(),
 }));
@@ -84,6 +85,10 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
   lookupHostedMemberIdentityByPhoneNumber: mocks.lookupMember,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
+  readActiveHostedMemberAccess: mocks.readActiveAccess,
+}));
+
 vi.mock("@/src/lib/hosted-groups/group-join-outreach-store", () => ({
   HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE: "hosted_group_join_outreach",
   HOSTED_GROUP_JOIN_OUTREACH_TEMPLATE: "group_join_outreach",
@@ -143,6 +148,7 @@ describe("hosted group join outreach drain", () => {
     });
     mocks.markDeliveryFailed.mockResolvedValue(undefined);
     mocks.markSkippedDelivery.mockResolvedValue(undefined);
+    mocks.readActiveAccess.mockResolvedValue(false);
     mocks.readParticipantPhone.mockReturnValue("+15551234567");
     mocks.readRecentMessageEffectCounts.mockResolvedValue(new Map());
   });
@@ -176,6 +182,28 @@ describe("hosted group join outreach drain", () => {
     // first-contact rules by the dedicated copy tests below.
     expect(send?.message).toMatch(/repl(y|ies)|say hi|send me a message/iu);
     expect(send?.message).not.toMatch(/https?:|www\./iu);
+  });
+
+  it("sends the unchanged opener to an inactive unsuspended existing member", async () => {
+    mocks.lookupMember.mockResolvedValue({
+      core: { id: "hbm_inactive", suspendedAt: null },
+    });
+    const { prisma } = createPrismaStub();
+
+    await expect(drainOneHostedGroupJoinOutreach({
+      now: NOW,
+      prisma,
+    })).resolves.toEqual({
+      kind: "sent",
+      outreachId: "hgrpjoa_opaque",
+    });
+
+    expect(mocks.readActiveAccess).toHaveBeenCalledWith({
+      memberId: "hbm_inactive",
+      now: NOW,
+      prisma: expect.anything(),
+    });
+    expect(mocks.createChat).toHaveBeenCalledTimes(1);
   });
 
   it("defers durably without a provider call when every line is at cap", async () => {
@@ -213,11 +241,47 @@ describe("hosted group join outreach drain", () => {
     {
       arrange: () => {
         mocks.lookupMember.mockResolvedValue({
-          core: { id: "hbm_existing", suspendedAt: null },
+          core: {
+            id: "hbm_suspended",
+            suspendedAt: new Date("2026-07-23T00:00:00.000Z"),
+          },
         });
       },
-      expected: { kind: "skipped", reason: "recipient_now_member" },
-      name: "the recipient already has an account",
+      expected: { kind: "skipped", reason: "recipient_suspended" },
+      name: "the recipient is suspended",
+      stub: {
+        memberSuspendedAt: new Date("2026-07-23T00:00:00.000Z"),
+      },
+    },
+    {
+      arrange: () => {
+        mocks.lookupMember.mockResolvedValue({
+          core: { id: "hbm_active", suspendedAt: null },
+        });
+        mocks.readActiveAccess.mockResolvedValue(true);
+      },
+      expected: { kind: "skipped", reason: "recipient_now_active" },
+      name: "the recipient now has active hosted access",
+    },
+    {
+      arrange: () => {
+        mocks.lookupMember.mockResolvedValue({
+          core: { id: "hbm_transitioning", suspendedAt: null },
+        });
+      },
+      expected: { kind: "deferred", reason: "recipient_state_in_flight" },
+      name: "a recipient authority transition owns the member row",
+      stub: { recipientLocked: false },
+    },
+    {
+      arrange: () => {
+        mocks.lookupMember.mockResolvedValue({
+          core: { id: "hbm_group_member", suspendedAt: null },
+        });
+      },
+      expected: { kind: "skipped", reason: "recipient_now_group_member" },
+      name: "the recipient already belongs to the target group",
+      stub: { targetMembership: true },
     },
     {
       arrange: () => {
@@ -763,9 +827,12 @@ describe("hosted group join outreach drain", () => {
 function createPrismaStub(options?: {
   attemptCount?: number;
   due?: null;
+  memberSuspendedAt?: Date | null;
   offerRevokedAt?: Date;
   pinnedLineKey?: string;
   recentLineKeys?: readonly string[];
+  recipientLocked?: boolean;
+  targetMembership?: boolean;
 }): {
   prisma: Parameters<typeof drainOneHostedGroupJoinOutreach>[0]["prisma"];
   updateMany: ReturnType<typeof vi.fn>;
@@ -781,6 +848,8 @@ function createPrismaStub(options?: {
   };
   const tx = {
     $executeRaw: vi.fn(async () => 0),
+    $queryRaw: vi.fn(async () =>
+      options?.recipientLocked === false ? [] : [{ id: "hbm_locked" }]),
     hostedGroupJoinOffer: {
       findUnique: vi.fn(async () => ({
         group: {
@@ -792,6 +861,16 @@ function createPrismaStub(options?: {
         },
         groupId: "hgrp_opaque",
         revokedAt: options?.offerRevokedAt ?? null,
+      })),
+    },
+    hostedGroupMember: {
+      findUnique: vi.fn(async () =>
+        options?.targetMembership ? { id: "hgrpm_existing" } : null),
+    },
+    hostedMember: {
+      findUnique: vi.fn(async () => ({
+        id: "hbm_locked",
+        suspendedAt: options?.memberSuspendedAt ?? null,
       })),
     },
     hostedGroupJoinOutreach: {

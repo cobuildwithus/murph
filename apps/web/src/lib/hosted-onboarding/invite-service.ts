@@ -147,7 +147,12 @@ export async function getHostedInviteStatus(input: {
     suspendedAt: invite.member.suspendedAt,
   });
   const messagingInput = {
-    identity: invite.member.identity,
+    identity: {
+      ...(invite.member.identity ?? {}),
+      emailLinked: Boolean(
+        invite.member.emailAuthorization?.verifiedEmailVerifiedAt,
+      ),
+    },
     routing: inviteRouting,
   };
   const messagingSetupRequired = isHostedMemberMessagingSetupRequired(messagingInput);
@@ -341,6 +346,7 @@ export interface HostedInviteBillingCheckoutSnapshot {
       stripeSubscriptionLookupKey: string | null;
     } | null;
     identity: {
+      memberId: string;
       phoneLookupKey: string | null;
     } | null;
     routing: HostedMemberRouting | null;
@@ -373,6 +379,7 @@ export async function requireHostedInviteForBillingCheckout(
           id: true,
           identity: {
             select: {
+              memberId: true,
               phoneLookupKey: true,
             },
           },
@@ -649,6 +656,11 @@ async function findHostedInviteByCode(
     include: {
       member: {
         include: {
+          emailAuthorization: {
+            select: {
+              verifiedEmailVerifiedAt: true,
+            },
+          },
           identity: true,
           routing: true,
         },

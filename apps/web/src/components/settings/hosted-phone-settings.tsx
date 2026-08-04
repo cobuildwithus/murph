@@ -5,8 +5,10 @@ import {
   useUpdateAccount,
   useUser,
 } from "@privy-io/react-auth";
+import { PhoneIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { HostedOnboardingApiError } from "@/src/components/hosted-onboarding/client-api";
 import { finalizeHostedPhoneLink } from "@/src/components/hosted-onboarding/hosted-phone-auth-support";
 import {
   ContactSupportAction,
@@ -46,6 +48,7 @@ export function HostedPhoneSettings(props: {
   const { user: privyUser } = useUser();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLinking, setIsLinking] = useState(false);
+  const [isRetryAllowed, setIsRetryAllowed] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const accountTransferPendingRef = useRef(false);
@@ -166,6 +169,11 @@ export function HostedPhoneSettings(props: {
         reportDiagnostic("sync_succeeded");
       }
     } catch (error) {
+      if (isTerminalHostedPhoneLinkError(error)) {
+        pendingSyncExpectationRef.current = null;
+        pendingSyncOperationRef.current = null;
+        setIsRetryAllowed(false);
+      }
       reportDiagnostic("sync_failed", {
         detailCode: "other",
       });
@@ -277,6 +285,7 @@ export function HostedPhoneSettings(props: {
 
   async function handleLinkPhone() {
     setErrorMessage(null);
+    setIsRetryAllowed(true);
     setSuccessMessage(null);
 
     const pendingExpectation = pendingSyncExpectationRef.current;
@@ -368,6 +377,7 @@ export function HostedPhoneSettings(props: {
       <HostedPhonePrivyHandOffStatus
         errorMessage={errorMessage}
         isLinking={isLinking}
+        isRetryAllowed={isRetryAllowed}
         isSyncing={isSyncing}
         onAborted={props.onAborted}
         onRetry={handleLinkPhone}
@@ -376,18 +386,17 @@ export function HostedPhoneSettings(props: {
   }
 
   return (
-    <div className="space-y-5">
-      <HostedPhoneLinkAction
-        disabled={isBusy}
-        isChangeFlow={shouldUpdatePhone}
-        isLinking={isLinking}
-        isSyncing={isSyncing}
-        onClick={handleLinkPhone}
-      />
-
-      <SettingsStatusLine message={statusMessage} tone={statusTone} />
-      <HostedPhoneSupportAction errorMessage={errorMessage} />
-    </div>
+    <HostedPhoneLinkCardPresentation
+      disabled={isBusy || !isRetryAllowed}
+      errorMessage={errorMessage}
+      isChangeFlow={shouldUpdatePhone}
+      isLinking={isLinking}
+      isSyncing={isSyncing}
+      showPhoneAction={isRetryAllowed}
+      statusMessage={statusMessage}
+      statusTone={statusTone}
+      onClick={handleLinkPhone}
+    />
   );
 }
 
@@ -411,15 +420,17 @@ function HostedPhoneSupportAction({
   );
 }
 
-function HostedPhonePrivyHandOffStatus({
+export function HostedPhonePrivyHandOffStatus({
   errorMessage,
   isLinking,
+  isRetryAllowed,
   isSyncing,
   onAborted,
   onRetry,
 }: {
   errorMessage: string | null;
   isLinking: boolean;
+  isRetryAllowed: boolean;
   isSyncing: boolean;
   onAborted?: () => void;
   onRetry: () => void;
@@ -444,15 +455,19 @@ function HostedPhonePrivyHandOffStatus({
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
-            <Button
-              type="button"
-              size="xl"
-              className="w-full"
-              disabled={isLinking || isSyncing}
-              onClick={onRetry}
-            >
-              Try again
-            </Button>
+            {isRetryAllowed
+              ? (
+                  <Button
+                    type="button"
+                    size="xl"
+                    className="w-full"
+                    disabled={isLinking || isSyncing}
+                    onClick={onRetry}
+                  >
+                    Try again
+                  </Button>
+                )
+              : null}
             <HostedPhoneSupportAction errorMessage={errorMessage} />
           </div>
         </DialogContent>
@@ -490,6 +505,51 @@ function HostedPhonePrivyHandOffStatus({
   );
 }
 
+/**
+ * The join and Settings surfaces both render this composed card. It is
+ * exported as a presentation so the design catalog can show the real
+ * spacing without a provider session behind it.
+ */
+export function HostedPhoneLinkCardPresentation(props: {
+  disabled?: boolean;
+  errorMessage: string | null;
+  isChangeFlow: boolean;
+  isLinking: boolean;
+  isSyncing: boolean;
+  showPhoneAction?: boolean;
+  statusMessage: string | null;
+  statusTone: "neutral" | "success" | "destructive";
+  onClick: () => void;
+}) {
+  return (
+    <div className="space-y-4">
+      {/* The status line reserves its height to keep the button from moving
+          when a message appears, so it stays tight to the action it reports
+          on rather than reading as a gap below the card's primary CTA. */}
+      <div className="space-y-2">
+        {props.showPhoneAction === false
+          ? null
+          : (
+              <HostedPhoneLinkAction
+                disabled={props.disabled}
+                isChangeFlow={props.isChangeFlow}
+                isLinking={props.isLinking}
+                isSyncing={props.isSyncing}
+                onClick={props.onClick}
+              />
+            )}
+
+        <SettingsStatusLine
+          message={props.statusMessage}
+          tone={props.statusTone}
+        />
+      </div>
+
+      <HostedPhoneSupportAction errorMessage={props.errorMessage} />
+    </div>
+  );
+}
+
 export function HostedPhoneLinkAction(props: {
   disabled?: boolean;
   isChangeFlow: boolean;
@@ -506,14 +566,16 @@ export function HostedPhoneLinkAction(props: {
       disabled={props.disabled}
       onClick={props.onClick}
     >
-      {props.isLinking || props.isSyncing ? <Spinner aria-hidden="true" /> : null}
+      {props.isLinking || props.isSyncing
+        ? <Spinner aria-hidden="true" />
+        : <PhoneIcon aria-hidden="true" className="size-4" />}
       {props.isSyncing
         ? "Saving…"
         : props.isLinking
           ? "Opening…"
           : props.isChangeFlow
-            ? "Verify a new phone"
-            : "Verify phone"}
+            ? "Change phone"
+            : "Add phone"}
     </Button>
   );
 }
@@ -524,4 +586,11 @@ function toPhoneLinkErrorMessage(error: unknown): string {
   }
 
   return toErrorMessage(error, "We could not link that phone number.");
+}
+
+function isTerminalHostedPhoneLinkError(error: unknown): boolean {
+  return (
+    error instanceof HostedOnboardingApiError
+    && error.code === "PRIVY_PHONE_TRANSFER_SOURCE_STILL_ACTIVE"
+  );
 }

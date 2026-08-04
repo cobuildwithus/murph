@@ -104,8 +104,15 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
         return;
       }
 
-      wakeFailed += 1;
       wakeNotAccepted += 1;
+      if (wake.reason === "health_data_consent_withdrawn") {
+        logger.info("Hosted device-sync due reconcile wake skipped after consent withdrawal.", {
+          reason: wake.reason,
+        });
+        return;
+      }
+
+      wakeFailed += 1;
       logger.warn("Hosted device-sync due reconcile sweeper wake was not accepted.", {
         errorCode: "HOSTED_DEVICE_SYNC_DUE_RECONCILE_WAKE_NOT_ACCEPTED",
         errorMessage: "Hosted device-sync due reconcile sweeper wake was not accepted.",

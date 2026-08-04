@@ -6,6 +6,7 @@ import {
 } from "@murphai/contracts";
 import {
   HOSTED_PRODUCT_FEEDBACK_KINDS,
+  HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
   type HostedProductFeedbackKind,
 } from "@murphai/hosted-execution/runtime-control";
 
@@ -16,6 +17,7 @@ import { getPrisma } from "../prisma";
 
 export const HOSTED_PRODUCT_FEEDBACK_DIGEST_TIME_ZONE = "America/New_York";
 export const HOSTED_PRODUCT_FEEDBACK_DIGEST_SEND_HOUR = 18;
+export const HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS = 200;
 
 const HOSTED_PRODUCT_FEEDBACK_DIGEST_RECIPIENTS_ENV =
   "HOSTED_PRODUCT_FEEDBACK_DIGEST_EMAILS";
@@ -23,6 +25,7 @@ const HOSTED_PRODUCT_FEEDBACK_DIGEST_SUBJECT = "Murph feedback";
 
 export type HostedProductFeedbackDigestBatch = {
   counts: Record<HostedProductFeedbackKind, number>;
+  summariesByKind: Record<HostedProductFeedbackKind, string[]>;
 };
 
 export type HostedProductFeedbackDigestOutcome =
@@ -124,30 +127,64 @@ export async function readHostedProductFeedbackDigestBatch(input: {
   endAt: Date;
   startAt: Date;
 }): Promise<HostedProductFeedbackDigestBatch> {
+  const digestRowFilter = {
+    createdAt: {
+      gte: input.startAt,
+      lt: input.endAt,
+    },
+    kind: {
+      in: [...HOSTED_PRODUCT_FEEDBACK_KINDS],
+    },
+    // Ordinary feedback is member-linked again and remains visible here. The
+    // reserved support marker stays out because its separate anonymous detail
+    // row carries the actionable issue summary.
+    NOT: {
+      summary: {
+        startsWith: HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
+      },
+    },
+    summary: {
+      not: null,
+    },
+  };
   const groupedCounts = await getPrisma().hostedProductFeedback.groupBy({
     by: ["kind"],
     _count: {
       _all: true,
     },
-    where: {
-      createdAt: {
-        gte: input.startAt,
-        lt: input.endAt,
-      },
-      kind: {
-        in: [...HOSTED_PRODUCT_FEEDBACK_KINDS],
-      },
+    where: digestRowFilter,
+  });
+  const rows = await getPrisma().hostedProductFeedback.findMany({
+    orderBy: [
+      { createdAt: "asc" },
+      { id: "asc" },
+    ],
+    select: {
+      kind: true,
+      summary: true,
     },
+    take: HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS,
+    where: digestRowFilter,
   });
   const counts = createEmptyHostedProductFeedbackDigestCounts();
+  const summariesByKind = createEmptyHostedProductFeedbackDigestSummaries();
 
   for (const groupedCount of groupedCounts) {
     if (isHostedProductFeedbackKind(groupedCount.kind)) {
       counts[groupedCount.kind] = groupedCount._count._all;
     }
   }
+  for (const row of rows) {
+    if (
+      isHostedProductFeedbackKind(row.kind) &&
+      typeof row.summary === "string" &&
+      row.summary.length > 0
+    ) {
+      summariesByKind[row.kind].push(row.summary);
+    }
+  }
 
-  return { counts };
+  return { counts, summariesByKind };
 }
 
 function formatHostedProductFeedbackDigest(
@@ -158,16 +195,27 @@ function formatHostedProductFeedbackDigest(
     feature_request: "Feature requests",
     frustration: "Product frustrations",
   };
-  const lines = HOSTED_PRODUCT_FEEDBACK_KINDS.flatMap((kind) => {
+  const sections = HOSTED_PRODUCT_FEEDBACK_KINDS.flatMap((kind) => {
     const count = batch.counts[kind];
-    return count > 0 ? [`- ${labels[kind]}: ${count}`] : [];
+    if (count === 0) {
+      return [];
+    }
+    const summaries = batch.summariesByKind[kind];
+    const omittedCount = count - summaries.length;
+    return [[
+      `${labels[kind]} (${count})`,
+      ...summaries.map((summary) => `- ${summary}`),
+      ...(omittedCount > 0
+        ? [`- (${omittedCount} more not shown past the ${HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS}-item email limit)`]
+        : []),
+    ].join("\n")];
   });
 
-  if (lines.length === 0) {
-    lines.push("- No feedback logged.");
+  if (sections.length === 0) {
+    sections.push("- No feedback logged.");
   }
 
-  return lines.join("\n");
+  return sections.join("\n\n");
 }
 
 function countHostedProductFeedbackDigestBatch(
@@ -187,6 +235,17 @@ function createEmptyHostedProductFeedbackDigestCounts(): Record<
     feature_interest: 0,
     feature_request: 0,
     frustration: 0,
+  };
+}
+
+function createEmptyHostedProductFeedbackDigestSummaries(): Record<
+  HostedProductFeedbackKind,
+  string[]
+> {
+  return {
+    feature_interest: [],
+    feature_request: [],
+    frustration: [],
   };
 }
 

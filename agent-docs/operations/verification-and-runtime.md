@@ -56,6 +56,13 @@ through `scripts/verification-dispatch.mjs`:
   either CLI is unavailable. No remote failure silently duplicates work
   locally. The `:local` package aliases exist only for executor diagnosis
   because canonical automatic execution is already local.
+- The `crabbox` executor is the only lane that creates paid Blacksmith spend, so
+  it is disabled by default and fails closed with a message naming the free
+  alternatives. A single deliberate invocation accepts the cost by also setting
+  `MURPH_ALLOW_TESTBOX_SPEND=1`. The flag is per-invocation on purpose: do not
+  export it into a shell profile, a worktree env file, or an agent's ambient
+  environment, because that silently restores the unbounded lane. It gates only
+  the paid executor and never widens `local` or `ssh`.
 - The Testbox hydration workflow must exist on the repository default branch
   before GitHub accepts a delegated `workflow_dispatch`. The change that first
   introduces or moves `.github/workflows/crabbox-bounded.yml` therefore uses
@@ -199,16 +206,26 @@ offering the Mac by disabling Remote Login or removing its authorized key.
 Measure time spent waiting for the exclusive local shared-host slot separately
 from active verification time. If a required canonical command has waited 10
 continuous minutes without acquiring that slot, stop only the exact waiting
-process tree owned by the current task and rerun the same command through
-Crabbox:
+process tree owned by the current task and rerun the same command on a free
+executor first. Prefer the dedicated SSH worker when it is configured and idle,
+because it runs the same canonical command without creating spend:
 
 ```bash
-MURPH_VERIFY_EXECUTOR=crabbox pnpm test:diff <path ...>
-MURPH_VERIFY_EXECUTOR=crabbox pnpm verify:acceptance
+MURPH_VERIFY_EXECUTOR=ssh pnpm test:diff <path ...>
+MURPH_VERIFY_EXECUTOR=ssh pnpm verify:acceptance
 ```
 
-If the dedicated SSH worker is configured and idle, it may run that same
-canonical command without creating spend. Otherwise the paid forced executor
+Only when no free executor can run the command does the paid Testbox lane
+apply, and it must be opted into per invocation:
+
+```bash
+MURPH_ALLOW_TESTBOX_SPEND=1 MURPH_VERIFY_EXECUTOR=crabbox pnpm test:diff <path ...>
+MURPH_ALLOW_TESTBOX_SPEND=1 MURPH_VERIFY_EXECUTOR=crabbox pnpm verify:acceptance
+```
+
+Report the spend when you take that lane: name the Testbox ID and the reason no
+free executor was usable. A slow local slot is a reason to wait or to use the
+SSH worker, not by itself a reason to spend. The paid forced executor
 creates a fresh one-shot Testbox through the fully pinned route. Crabbox stops
 every newly acquired delegated Testbox when the one-shot command exits unless
 `--keep` is passed; the dispatcher never passes `--keep` or
@@ -346,8 +363,11 @@ service, authenticated cron route, shared operational-email config, production
 cron allowlist, Prisma schema/migration inventory, and Web typecheck. The
 service proof must exercise the Eastern daily window across both DST
 transitions, the dedicated recipient list, fixed empty digest, day-keyed
-idempotency key, fixed three-kind aggregate that never reads free-form summary
-text, observable missing configuration, and a bounded same-hour retry. The
+idempotency key, the bounded three-kind summary read that selects only the
+kind and summary columns with deterministic ordering, truthful grouped
+per-kind totals with explicit omitted-remainder lines past the row cap,
+observable missing configuration, and a
+bounded same-hour retry. The
 direct scenario must compose the production sender against an isolated
 loopback Resend fake and prove identical request/key reuse plus one fake
 delivery after an ambiguous failure. Routine tests must not call Resend or read

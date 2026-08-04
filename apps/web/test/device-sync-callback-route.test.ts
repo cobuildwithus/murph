@@ -1,9 +1,8 @@
-import { renderToStaticMarkup } from "react-dom/server";
-
 import { deviceSyncError } from "@murphai/device-syncd/public-ingress";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { buildHostedDeviceSyncCallbackProof } from "@/src/lib/device-sync/browser-callback-proof";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 import { createRouteContext } from "./route-test-helpers";
 
@@ -15,17 +14,10 @@ const CALLBACK_URL =
   + `?murph_state=${CALLBACK_STATE}&result=success`;
 
 const mocks = vi.hoisted(() => ({
-  assertHostedOnboardingMutationOrigin: vi.fn(),
   createHostedDeviceSyncPublicIngressService: vi.fn(),
   discardConnectionCallback: vi.fn(),
   handleConnectionCallback: vi.fn(),
-  nextHeaders: vi.fn(),
-  requireActiveHostedAppSession: vi.fn(),
   requireActiveHostedAppSessionFromRequest: vi.fn(),
-}));
-
-vi.mock("next/headers", () => ({
-  headers: mocks.nextHeaders,
 }));
 
 vi.mock("@/src/lib/device-sync/public-ingress-service", () => ({
@@ -33,33 +25,24 @@ vi.mock("@/src/lib/device-sync/public-ingress-service", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
-  requireActiveHostedAppSession: mocks.requireActiveHostedAppSession,
   requireActiveHostedAppSessionFromRequest: mocks.requireActiveHostedAppSessionFromRequest,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
-  assertHostedOnboardingMutationOrigin: mocks.assertHostedOnboardingMutationOrigin,
-}));
+// The real error module stays unmocked so the route's isHostedOnboardingError
+// check recognizes the instances the mocked session read rejects with.
 
-type CallbackPageModule =
-  typeof import("../app/api/device-sync/connect/[provider]/callback/page");
-type CallbackCompletionRouteModule =
-  typeof import("../app/api/device-sync/connect/[provider]/callback/complete/route");
+type CallbackRouteModule =
+  typeof import("../app/api/device-sync/connect/[provider]/callback/route");
 
-let callbackPage: CallbackPageModule;
-let callbackCompletionRoute: CallbackCompletionRouteModule;
+let callbackRoute: CallbackRouteModule;
 
 describe("hosted device-sync callback boundary", () => {
   beforeAll(async () => {
-    callbackPage = await import("../app/api/device-sync/connect/[provider]/callback/page");
-    callbackCompletionRoute = await import(
-      "../app/api/device-sync/connect/[provider]/callback/complete/route"
-    );
+    callbackRoute = await import("../app/api/device-sync/connect/[provider]/callback/route");
   });
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv("DEVICE_SYNC_PUBLIC_BASE_URL", "https://control.example.test/api/device-sync");
     mocks.createHostedDeviceSyncPublicIngressService.mockReturnValue({
       discardConnectionCallback: mocks.discardConnectionCallback,
       handleConnectionCallback: mocks.handleConnectionCallback,
@@ -76,10 +59,6 @@ describe("hosted device-sync callback boundary", () => {
         "https://control.example.test/device-sync/connect/complete"
         + "?source=connect&connectSource=garmin&connectTarget=garmin",
     });
-    mocks.requireActiveHostedAppSession.mockResolvedValue({
-      member: { id: "member_a" },
-      sessionId: "session_a",
-    });
     mocks.requireActiveHostedAppSessionFromRequest.mockResolvedValue({
       member: { id: "member_a" },
       sessionId: "session_a",
@@ -88,60 +67,17 @@ describe("hosted device-sync callback boundary", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
-    vi.unstubAllEnvs();
   });
 
-  it("renders confirmation without exchanging provider credentials on callback GET", async () => {
-    const cookie = buildProofCookie();
-    mocks.nextHeaders.mockResolvedValue(new Headers({ cookie }));
+  it("completes the connection and redirects when the initiating browser returns", async () => {
+    const request = buildCallbackRequest();
 
-    const element = await callbackPage.default({
-      params: Promise.resolve({ provider: "junction" }),
-      searchParams: Promise.resolve({
-        murph_state: CALLBACK_STATE,
-        result: "success",
-      }),
-    });
-    const html = renderToStaticMarkup(element);
-
-    expect(html).toContain("Finish connecting your device");
-    expect(html).toContain("Finish connection");
-    expect(html).toContain(
-      `/api/device-sync/connect/junction/callback/complete`
-      + `?murph_state=${CALLBACK_STATE}&amp;result=success`,
-    );
-    expect(mocks.handleConnectionCallback).not.toHaveBeenCalled();
-    expect(mocks.discardConnectionCallback).not.toHaveBeenCalled();
-  });
-
-  it("burns the callback state when the transferable URL reaches a browser without its proof", async () => {
-    mocks.nextHeaders.mockResolvedValue(new Headers());
-
-    const element = await callbackPage.default({
-      params: Promise.resolve({ provider: "junction" }),
-      searchParams: Promise.resolve({
-        murph_state: CALLBACK_STATE,
-        result: "success",
-      }),
-    });
-    const html = renderToStaticMarkup(element);
-
-    expect(html).toContain("Connection not completed");
-    expect(html).toContain("Nothing was connected from it.");
-    expect(mocks.discardConnectionCallback).toHaveBeenCalledWith("junction");
-    expect(mocks.handleConnectionCallback).not.toHaveBeenCalled();
-  });
-
-  it("completes only after a same-origin POST presents the matching browser proof", async () => {
-    const request = buildCompletionRequest();
-
-    const response = await callbackCompletionRoute.POST(
+    const response = await callbackRoute.GET(
       request,
       createRouteContext({ provider: "junction" }),
     );
 
     expect(response.status).toBe(302);
-    expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(request);
     expect(mocks.handleConnectionCallback).toHaveBeenCalledWith("junction", {
       expectedOwnerId: "member_a",
     });
@@ -150,29 +86,30 @@ describe("hosted device-sync callback boundary", () => {
     expect(destination.pathname).toBe("/device-sync/connect/complete");
     expect(destination.searchParams.get("deviceSyncStatus")).toBe("connected");
     expect(destination.searchParams.get("deviceSyncProvider")).toBe("junction");
-    expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
+    // A newer concurrent start may own the provider proof slot by the time
+    // this response applies, so no callback response may touch the cookie.
+    expect(response.headers.get("set-cookie")).toBeNull();
   });
 
-  it("rejects a relayed completion URL without the initiating browser proof", async () => {
-    const request = new Request(CALLBACK_URL.replace(
-      "/callback?",
-      "/callback/complete?",
-    ), {
-      headers: {
-        origin: "https://control.example.test",
-      },
-      method: "POST",
-    });
+  it("burns the callback state and shows the Connect error notice when the URL arrives without its proof", async () => {
+    const request = new Request(CALLBACK_URL);
 
-    const response = await callbackCompletionRoute.POST(
+    const response = await callbackRoute.GET(
       request,
       createRouteContext({ provider: "junction" }),
     );
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(302);
+    const destination = new URL(response.headers.get("location")!);
+    expect(destination.pathname).toBe("/connect");
+    expect(destination.searchParams.get("deviceSyncStatus")).toBe("error");
+    expect(destination.searchParams.get("deviceSyncError")).toBe("CALLBACK_PROOF_INVALID");
+    expect(destination.searchParams.get("deviceSyncProvider")).toBe("junction");
     expect(mocks.discardConnectionCallback).toHaveBeenCalledWith("junction");
     expect(mocks.handleConnectionCallback).not.toHaveBeenCalled();
-    expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
+    // The single provider-wide proof slot may belong to a newer concurrent
+    // flow, so an unmatched callback must not clear it.
+    expect(response.headers.get("set-cookie")).toBeNull();
   });
 
   it("rejects the initiating browser proof when the active member changes", async () => {
@@ -181,30 +118,41 @@ describe("hosted device-sync callback boundary", () => {
       sessionId: "session_b",
     });
 
-    const response = await callbackCompletionRoute.POST(
-      buildCompletionRequest(),
+    const response = await callbackRoute.GET(
+      buildCallbackRequest(),
       createRouteContext({ provider: "junction" }),
     );
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(302);
+    const destination = new URL(response.headers.get("location")!);
+    expect(destination.pathname).toBe("/connect");
+    expect(destination.searchParams.get("deviceSyncStatus")).toBe("error");
     expect(mocks.discardConnectionCallback).toHaveBeenCalledWith("junction");
     expect(mocks.handleConnectionCallback).not.toHaveBeenCalled();
+    expect(response.headers.get("set-cookie")).toBeNull();
   });
 
-  it("does not touch callback state when same-origin mutation authority is absent", async () => {
-    mocks.assertHostedOnboardingMutationOrigin.mockImplementationOnce(() => {
-      throw new TypeError("cross-origin");
-    });
+  it("routes a signed-out callback to Connect recovery without touching state or proof", async () => {
+    mocks.requireActiveHostedAppSessionFromRequest.mockRejectedValueOnce(hostedOnboardingError({
+      code: "APP_SESSION_REQUIRED",
+      httpStatus: 401,
+      message: "An active app session is required.",
+      retryable: false,
+    }));
 
-    const response = await callbackCompletionRoute.POST(
-      buildCompletionRequest(),
+    const response = await callbackRoute.GET(
+      buildCallbackRequest(),
       createRouteContext({ provider: "junction" }),
     );
 
-    expect(response.status).toBe(500);
-    expect(mocks.createHostedDeviceSyncPublicIngressService).not.toHaveBeenCalled();
+    expect(response.status).toBe(302);
+    const destination = new URL(response.headers.get("location")!);
+    expect(destination.pathname).toBe("/connect");
+    expect(destination.searchParams.get("deviceSyncStatus")).toBe("error");
+    expect(destination.searchParams.get("deviceSyncError")).toBe("CALLBACK_SESSION_REQUIRED");
     expect(mocks.discardConnectionCallback).not.toHaveBeenCalled();
     expect(mocks.handleConnectionCallback).not.toHaveBeenCalled();
+    expect(response.headers.get("set-cookie")).toBeNull();
   });
 
   it("preserves source intent on provider callback error redirects", async () => {
@@ -222,8 +170,8 @@ describe("hosted device-sync callback boundary", () => {
       retryable: false,
     }));
 
-    const response = await callbackCompletionRoute.POST(
-      buildCompletionRequest(),
+    const response = await callbackRoute.GET(
+      buildCallbackRequest(),
       createRouteContext({ provider: "junction" }),
     );
 
@@ -233,7 +181,7 @@ describe("hosted device-sync callback boundary", () => {
     expect(location).toContain("deviceSyncError=OAUTH_CALLBACK_REJECTED");
     expect(location).toContain("connectSource=garmin");
     expect(location).toContain("connectTarget=garmin");
-    expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
+    expect(response.headers.get("set-cookie")).toBeNull();
   });
 
   it("sends replayed callbacks back without asserting a second outcome", async () => {
@@ -251,8 +199,8 @@ describe("hosted device-sync callback boundary", () => {
       retryable: false,
     }));
 
-    const response = await callbackCompletionRoute.POST(
-      buildCompletionRequest(),
+    const response = await callbackRoute.GET(
+      buildCallbackRequest(),
       createRouteContext({ provider: "junction" }),
     );
 
@@ -261,20 +209,24 @@ describe("hosted device-sync callback boundary", () => {
     expect(destination.searchParams.get("source")).toBe("assistant");
     expect(destination.searchParams.get("deviceSyncStatus")).toBeNull();
     expect(destination.searchParams.get("deviceSyncError")).toBeNull();
+    expect(response.headers.get("set-cookie")).toBeNull();
   });
 
-  it("returns generic callback HTML for unexpected completion failures", async () => {
+  it("routes unexpected completion failures to the Connect error notice", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mocks.handleConnectionCallback.mockRejectedValueOnce(new Error("boom"));
 
-    const response = await callbackCompletionRoute.POST(
-      buildCompletionRequest(),
+    const response = await callbackRoute.GET(
+      buildCallbackRequest(),
       createRouteContext({ provider: "junction" }),
     );
 
-    expect(response.status).toBe(500);
-    expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
-    expect(await response.text()).toContain("Please retry from Murph.");
+    expect(response.status).toBe(302);
+    const destination = new URL(response.headers.get("location")!);
+    expect(destination.pathname).toBe("/connect");
+    expect(destination.searchParams.get("deviceSyncStatus")).toBe("error");
+    expect(destination.searchParams.get("deviceSyncError")).toBe("CALLBACK_FAILED");
+    expect(destination.searchParams.get("deviceSyncProvider")).toBe("junction");
     expect(errorSpy).toHaveBeenCalledWith(
       "Hosted device-sync connection callback failed unexpectedly.",
       expect.objectContaining({
@@ -282,17 +234,45 @@ describe("hosted device-sync callback boundary", () => {
         provider: "junction",
       }),
     );
+    expect(response.headers.get("set-cookie")).toBeNull();
   });
 
-  it("returns safe callback HTML when provider route decoding fails", async () => {
-    const response = await callbackCompletionRoute.POST(
-      buildCompletionRequest(),
+  it("routes an undecodable provider callback to the Connect error notice", async () => {
+    const response = await callbackRoute.GET(
+      buildCallbackRequest(),
       createRouteContext({ provider: "%E0%A4%A" }),
     );
 
-    expect(response.status).toBe(400);
-    expect(await response.text()).toContain("callback URL was invalid");
+    expect(response.status).toBe(302);
+    const destination = new URL(response.headers.get("location")!);
+    expect(destination.pathname).toBe("/connect");
+    expect(destination.searchParams.get("deviceSyncStatus")).toBe("error");
+    expect(destination.searchParams.get("deviceSyncError")).toBe("CALLBACK_FAILED");
     expect(mocks.createHostedDeviceSyncPublicIngressService).not.toHaveBeenCalled();
+    expect(response.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("falls back to a Connect completion redirect when the stored returnTo is missing", async () => {
+    mocks.handleConnectionCallback.mockResolvedValueOnce({
+      account: {
+        id: "dsc_junction",
+        provider: "junction",
+      },
+      connectSourceId: null,
+      connectTarget: null,
+      returnTo: null,
+    });
+
+    const response = await callbackRoute.GET(
+      buildCallbackRequest(),
+      createRouteContext({ provider: "junction" }),
+    );
+
+    expect(response.status).toBe(302);
+    const destination = new URL(response.headers.get("location")!);
+    expect(destination.pathname).toBe("/connect");
+    expect(destination.searchParams.get("deviceSyncStatus")).toBe("connected");
+    expect(response.headers.get("set-cookie")).toBeNull();
   });
 });
 
@@ -306,15 +286,10 @@ function buildProofCookie(): string {
   return cookie.split(";", 1)[0] ?? "";
 }
 
-function buildCompletionRequest(): Request {
-  return new Request(
-    CALLBACK_URL.replace("/callback?", "/callback/complete?"),
-    {
-      headers: {
-        cookie: buildProofCookie(),
-        origin: "https://control.example.test",
-      },
-      method: "POST",
+function buildCallbackRequest(): Request {
+  return new Request(CALLBACK_URL, {
+    headers: {
+      cookie: buildProofCookie(),
     },
-  );
+  });
 }

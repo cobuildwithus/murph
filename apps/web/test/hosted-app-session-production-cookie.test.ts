@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
   const hostedWebSession = {
+    count: vi.fn(),
     create: vi.fn(),
     deleteMany: vi.fn(),
     findMany: vi.fn(),
@@ -43,6 +44,7 @@ describe("hosted app session production cookie", () => {
       async (callback: (tx: typeof mocks.transactionClient) => Promise<unknown>) =>
         callback(mocks.transactionClient),
     );
+    mocks.hostedWebSession.count.mockResolvedValue(0);
     mocks.hostedWebSession.create.mockResolvedValue({});
     mocks.hostedWebSession.deleteMany.mockResolvedValue({ count: 0 });
     mocks.hostedWebSession.findMany.mockResolvedValue([]);

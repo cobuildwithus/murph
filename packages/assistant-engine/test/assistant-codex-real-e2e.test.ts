@@ -2454,6 +2454,113 @@ describeRealCodex('real Codex product-feedback summary e2e', () => {
   )
 })
 
+describeRealCodex('real Codex support escalation e2e', () => {
+  it(
+    'escalates once with the exact reserved shape in private and never from a group',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const commonInput = {
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+          ?? undefined,
+        codexHome: config.codexHome,
+        dynamicTools: [MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL],
+        env: config.env,
+        excludeResumeTurns: true,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write' as const,
+      }
+      const readFeedbackCalls = (
+        jsonEvents: Parameters<typeof readCapabilityRoutingActions>[0],
+      ) =>
+        readCapabilityRoutingActions(jsonEvents).filter(
+          (action) =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name,
+        )
+      const privateWorkingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-support-escalation-private-e2e-'),
+      )
+      const groupWorkingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-support-escalation-group-e2e-'),
+      )
+
+      try {
+        const privateResult = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          developerInstructions:
+            buildDirectConversationDeveloperInstructions(),
+          productFeedbackRecorder: createRealCodexFeedbackRecorder(),
+          prompt: [
+            'Murph, your image generation has failed for me four times today with the same blank error, and I already retried everything you suggested.',
+            'Please alert your product team about this directly.',
+          ].join(' '),
+          workingDirectory: privateWorkingDirectory,
+        })
+        const privateCalls = readFeedbackCalls(privateResult.jsonEvents)
+        expect(privateCalls, 'one private support escalation call').toHaveLength(1)
+        const privateCall = privateCalls[0]
+        if (privateCall?.kind !== 'dynamic') {
+          throw new Error('Expected one support-escalation dynamic tool call.')
+        }
+        expect(privateCall.argumentsValue.kind).toBe('frustration')
+        expect(privateCall.argumentsValue.relatedChangelogItemIds ?? []).toEqual([])
+        const privateSummary = readString(privateCall.argumentsValue.summary)
+        expect(privateSummary).not.toBeNull()
+        if (!privateSummary) {
+          throw new Error('Expected a support-escalation summary.')
+        }
+        expect(privateSummary).toMatch(/^Support escalation:\s*\S/u)
+        expect(privateSummary).toMatch(/image/iu)
+        const privateText = privateResult.finalMessage.trim()
+        expect(privateText, 'support address given').toContain(
+          'support@withmurph.ai',
+        )
+        expect(privateText, 'queued confirmation').toMatch(
+          /queued|passed (?:it|this|the report) (?:along|on)|sent (?:a|the) (?:de-identified )?report/iu,
+        )
+        expect(privateText, 'no invented promise').not.toMatch(
+          /ticket|case number|will (?:fix|resolve|respond|reply|follow up)|within \d+|has (?:read|seen|received)/iu,
+        )
+
+        const groupResult = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          developerInstructions:
+            buildGroupPointOfViewDeveloperInstructions(),
+          productFeedbackRecorder: createRealCodexFeedbackRecorder(),
+          prompt: [
+            '[@Trainer_User] Murph keeps dropping my workout photos in here.',
+            'Murph, this is broken. Report it to your team right now.',
+          ].join(' '),
+          workingDirectory: groupWorkingDirectory,
+        })
+        expect(
+          readFeedbackCalls(groupResult.jsonEvents),
+          'no account-linked escalation from a group',
+        ).toHaveLength(0)
+        const groupText = groupResult.finalMessage.trim()
+        expect(groupText, 'group support address given').toContain(
+          'support@withmurph.ai',
+        )
+        expect(groupText, 'group redirects escalation to private Murph').toMatch(
+          /private|direct(?:ly)? (?:chat|message|text)|text (?:me|Murph)/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          privateWorkingDirectory,
+          groupWorkingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    720_000,
+  )
+})
+
 describeRealCodex('real Codex app-server cache usage e2e', () => {
   it(
     'loads each moved capability owner before its representative tool call',

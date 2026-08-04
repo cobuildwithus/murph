@@ -31,6 +31,7 @@ import {
   readHostedPrivyUserByIdIfExists,
   type HostedPrivyIdentity,
 } from "./privy";
+import { resolveHostedPrivyLinkedAccountState } from "./privy-shared";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   lockHostedMemberRow,
@@ -126,12 +127,34 @@ export async function readHostedPrivyPhoneTransferProof(input: {
     },
   );
   if (sourcePrivyUser) {
+    // A surviving source account means one of two very different things.
+    // While it still holds the phone the provider has not finished moving
+    // it, so retrying is the correct advice. Once the phone is gone from it
+    // the move is already complete and the provider deliberately kept the
+    // account because it carries other login methods, so it will never be
+    // deleted and retrying can never resolve anything.
+    const survivingSourcePhoneNumber =
+      resolveHostedPrivyLinkedAccountState(sourcePrivyUser).phone?.number;
+    const survivingSourceStillHoldsPhone = Boolean(
+      survivingSourcePhoneNumber
+      && normalizePhoneNumber(survivingSourcePhoneNumber)
+        === normalizePhoneNumber(phoneNumber),
+    );
+    if (survivingSourceStillHoldsPhone) {
+      throw hostedOnboardingError({
+        code: "PRIVY_PHONE_NOT_READY",
+        httpStatus: 409,
+        message:
+          "Privy is still finishing the phone transfer. Wait a moment and try again.",
+        retryable: true,
+      });
+    }
+
     throw hostedOnboardingError({
-      code: "PRIVY_PHONE_NOT_READY",
+      code: "PRIVY_PHONE_TRANSFER_SOURCE_STILL_ACTIVE",
       httpStatus: 409,
       message:
-        "Privy is still finishing the phone transfer. Wait a moment and try again.",
-      retryable: true,
+        "That phone moved from another Murph account that is still active with its own sign-in. Contact support to reconcile it safely.",
     });
   }
 
@@ -434,7 +457,6 @@ async function classifyHostedPrivyPhoneTransferSourceScaffoldTx(input: {
 
   return assertHostedPrivyPhoneTransferAutoTrialScaffoldTx({
     memberId: input.memberId,
-    phoneNumber: input.phoneNumber,
     prisma: input.prisma,
   });
 }
@@ -712,7 +734,6 @@ async function assertNoHostedPrivyPhoneTransferExternalMaterialTx(input: {
 
 async function assertHostedPrivyPhoneTransferAutoTrialScaffoldTx(input: {
   memberId: string;
-  phoneNumber: string;
   prisma: Prisma.TransactionClient;
 }): Promise<NonNullable<
   HostedPrivyPhoneTransferSourceRetirementProof["autoTrialBilling"]
@@ -820,9 +841,17 @@ async function assertHostedPrivyPhoneTransferAutoTrialScaffoldTx(input: {
       },
     }),
   ]);
+  const assignedHomeLine = routing?.linqRecipientPhoneLookupKey
+    ? await input.prisma.hostedLinqLine.findUnique({
+        where: { phoneNumberLookupKey: routing.linqRecipientPhoneLookupKey },
+        select: { phoneNumberLookupKey: true },
+      })
+    : null;
+  const hasAssignedHomeLine = Boolean(assignedHomeLine);
+
   if (
     !isHostedPrivyPhoneTransferAutoTrialRoutingScaffold({
-      phoneNumber: input.phoneNumber,
+      hasAssignedHomeLine,
       routing,
     })
     // The workspace lifecycle (version, snapshot, checkpoint, wake
@@ -916,22 +945,35 @@ async function assertHostedPrivyPhoneTransferCryptoScaffoldTx(input: {
 }
 
 function isHostedPrivyPhoneTransferAutoTrialRoutingScaffold(input: {
-  phoneNumber: string;
+  hasAssignedHomeLine: boolean;
   routing: Awaited<
     ReturnType<Prisma.TransactionClient["hostedMemberRouting"]["findUnique"]>
   >;
 }): boolean {
-  const phoneLookupKeys =
-    createHostedPhoneLookupKeyReadCandidates(input.phoneNumber);
   const routing = input.routing;
   return Boolean(
     routing
-    && !routing.linqChatLookupKey
-    && !routing.linqChatIdEncrypted
-    && !routing.linqParticipantContactKind
-    && !routing.linqParticipantContactLookupKey
+    // The home line texts every new signup within seconds and its delivery
+    // receipts record the provider chat identity plus the observed phone
+    // participant handle, so that outbound-established chat identity is
+    // platform scaffolding. Inbound member input stays gated by the
+    // conversation lane counter, and any non-phone participant handle
+    // still fails closed as cross-channel activity.
+    && (
+      !routing.linqParticipantContactKind
+      || (
+        routing.linqParticipantContactKind === "phone"
+        && routing.linqParticipantContactLookupKey
+      )
+    )
+    && (
+      !routing.linqParticipantContactLookupKey
+      || routing.linqParticipantContactKind === "phone"
+    )
+    // The recipient key stores which platform line the member is routed
+    // through, so scaffolding requires it to reference a configured line.
     && routing.linqRecipientPhoneLookupKey
-    && phoneLookupKeys.includes(routing.linqRecipientPhoneLookupKey)
+    && input.hasAssignedHomeLine
     && routing.linqRecipientPhoneEncrypted
     && routing.linqHomeLineAssignedAt
     && !routing.pendingLinqChatLookupKey

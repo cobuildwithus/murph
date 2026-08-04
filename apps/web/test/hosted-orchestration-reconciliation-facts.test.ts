@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   hasHostedMemberEstablishedLinqThreadRoute: vi.fn(),
   hasHostedMemberEstablishedLinqHomeRoute: vi.fn(),
   hostedThreadContainerParticipantFindFirst: vi.fn(),
+  hostedConsentGrantFindUnique: vi.fn(),
   hostedMemberFindUnique: vi.fn(),
   projectHostedAiUsageLimitNoticeForDelivery: vi.fn(),
   readHostedMailboxConsumedSeqByLane: vi.fn(),
@@ -137,6 +138,7 @@ describe("hosted orchestration reconciliation facts", () => {
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue(MEMBER_ID);
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord());
     mocks.hostedMemberFindUnique.mockResolvedValue(buildMemberAccessRecord());
+    mocks.hostedConsentGrantFindUnique.mockResolvedValue(null);
     mocks.hasHostedMemberEstablishedLinqHomeRoute.mockResolvedValue(false);
     mocks.hasHostedMemberEstablishedLinqThreadRoute.mockResolvedValue(false);
     mocks.hasHostedMailboxMealPhotoCaptureSince.mockResolvedValue(false);
@@ -411,6 +413,30 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(facts.blocked).toBeNull();
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
     expect(mocks.readHostedMailboxLatestPendingConversationItem).not.toHaveBeenCalled();
+  });
+
+  it("blocks non-model runtime work after explicit health-data withdrawal", async () => {
+    mocks.hostedConsentGrantFindUnique.mockResolvedValue({
+      scope: "launch.health-data",
+      status: "revoked",
+    });
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      nextWakeAt: FIXED_NOW,
+      nextWakeReason: "device-sync.reconcile",
+    }));
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(facts.blocked).toEqual({
+      reason: "health_data_consent_withdrawn",
+      retryAt: null,
+    });
+    expect(mocks.readHostedMailboxMaxSeqByLane).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
   });
 
   it("does not AI-gate a due inbox media retention wake", async () => {
@@ -1818,6 +1844,9 @@ function createPrismaClientStub() {
     },
     hostedMember: {
       findUnique: mocks.hostedMemberFindUnique,
+    },
+    hostedConsentGrant: {
+      findUnique: mocks.hostedConsentGrantFindUnique,
     },
     hostedThreadContainerParticipant: {
       findFirst: mocks.hostedThreadContainerParticipantFindFirst,

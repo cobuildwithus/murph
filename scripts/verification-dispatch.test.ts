@@ -81,13 +81,42 @@ describe("verification dispatcher", () => {
     }, true)).toContain("never forwards Vercel development credentials");
   });
 
+  it("disables paid Blacksmith Testbox spend unless a single run opts in", () => {
+    expect(resolveExecutorFailure({
+      MURPH_VERIFY_EXECUTOR: "crabbox",
+    }, true)).toContain("creates paid Blacksmith Testbox spend and is disabled by default");
+
+    expect(resolveExecutorFailure({
+      MURPH_ALLOW_TESTBOX_SPEND: "0",
+      MURPH_VERIFY_EXECUTOR: "crabbox",
+    }, true)).toContain("creates paid Blacksmith Testbox spend and is disabled by default");
+
+    expect(resolveExecutorFailure({
+      MURPH_ALLOW_TESTBOX_SPEND: "yes",
+      MURPH_VERIFY_EXECUTOR: "crabbox",
+    }, true)).toContain("MURPH_ALLOW_TESTBOX_SPEND must be 0 or 1.");
+
+    // The opt-in is scoped to the paid lane; it never widens the free executors.
+    expect(resolveExecutor({
+      MURPH_ALLOW_TESTBOX_SPEND: "1",
+      MURPH_VERIFY_EXECUTOR: "local",
+    }, true)).toMatchObject({ executor: "local", reason: "explicit" });
+
+    expect(resolveExecutor({
+      MURPH_ALLOW_TESTBOX_SPEND: "1",
+      MURPH_VERIFY_EXECUTOR: "crabbox",
+    }, true)).toMatchObject({ executor: "crabbox", reason: "explicit" });
+  });
+
   it("rejects coordinator pools and fails closed when an explicit remote stack is unavailable", () => {
     expect(resolveExecutorFailure({
+      MURPH_ALLOW_TESTBOX_SPEND: "1",
       MURPH_CRABBOX_POOL: "pool",
       MURPH_VERIFY_EXECUTOR: "crabbox",
     }, true)).toContain("does not use Crabbox pools");
 
     expect(resolveExecutor({
+      MURPH_ALLOW_TESTBOX_SPEND: "1",
       MURPH_VERIFY_EXECUTOR: "crabbox",
     }, true)).toMatchObject({
       executor: "crabbox",
@@ -95,6 +124,7 @@ describe("verification dispatcher", () => {
     });
 
     expect(resolveExecutorFailure({
+      MURPH_ALLOW_TESTBOX_SPEND: "1",
       MURPH_VERIFY_EXECUTOR: "crabbox",
     }, false)).toContain("Crabbox and Blacksmith CLIs are unavailable");
 
@@ -262,6 +292,7 @@ describe("verification dispatcher", () => {
           CRABBOX_CONFIG: "/tmp/attacker-controlled-crabbox.yaml",
           CUSTOM_PROVIDER_TOKEN: "must-not-reach-crabbox",
           GITHUB_TOKEN: "must-not-reach-crabbox",
+          MURPH_ALLOW_TESTBOX_SPEND: "1",
           MURPH_CRABBOX_NO_FORWARD: "must-not-reach-crabbox",
           MURPH_CRABBOX_PROFILE: "attacker-controlled-profile",
           MURPH_VERIFY_EXECUTOR: "crabbox",
@@ -325,6 +356,7 @@ describe("verification dispatcher", () => {
           CRABBOX_ENV_ALLOW: "OPENAI_API_KEY,VERCEL_OIDC_TOKEN",
           CUSTOM_PROVIDER_TOKEN: "must-not-reach-crabbox",
           GITHUB_TOKEN: "must-not-reach-crabbox",
+          MURPH_ALLOW_TESTBOX_SPEND: "1",
           MURPH_CRABBOX_LEASE_ID: "lease-1",
           MURPH_CRABBOX_NO_FORWARD: "must-not-reach-crabbox",
           MURPH_VERIFY_EXECUTOR: "crabbox",
@@ -851,6 +883,7 @@ describe("verification dispatcher", () => {
         env: {
           ...insideWorkspaceArtifactLockEnvironment(process.env),
           HOME: path.join(tempRoot, "home"),
+          MURPH_ALLOW_TESTBOX_SPEND: "1",
           MURPH_VERIFY_EXECUTOR: "crabbox",
           PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
         },
@@ -1291,6 +1324,7 @@ describe("verification dispatcher", () => {
           encoding: "utf8",
           env: {
             ...insideWorkspaceArtifactLockEnvironment(process.env),
+            MURPH_ALLOW_TESTBOX_SPEND: "1",
             MURPH_VERIFY_EXECUTOR: "crabbox",
             PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
           },
@@ -1322,6 +1356,7 @@ describe("verification dispatcher", () => {
         encoding: "utf8",
         env: {
           ...insideWorkspaceArtifactLockEnvironment(process.env),
+          MURPH_ALLOW_TESTBOX_SPEND: "1",
           MURPH_VERIFY_EXECUTOR: "crabbox",
           PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
         },
@@ -1367,6 +1402,7 @@ describe("verification dispatcher", () => {
         encoding: "utf8",
         env: {
           ...insideWorkspaceArtifactLockEnvironment(process.env),
+          MURPH_ALLOW_TESTBOX_SPEND: "1",
           MURPH_VERIFY_EXECUTOR: "crabbox",
           PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
         },
@@ -1663,6 +1699,7 @@ function withoutVerificationRoutingEnvironment(
   const sanitized = { ...environment };
   delete sanitized.CI;
   delete sanitized.CODEX_THREAD_ID;
+  delete sanitized.MURPH_ALLOW_TESTBOX_SPEND;
   delete sanitized.MURPH_CRABBOX_BLACKSMITH;
   delete sanitized.MURPH_CRABBOX_LEASE_ID;
   delete sanitized.MURPH_CRABBOX_POOL;

@@ -68,6 +68,7 @@ import {
 import {
   getPrisma,
 } from "../prisma";
+import { readHostedHealthDataConsentState } from "../legal/consent";
 import {
   resolveHostedRuntimeAiUsageGate,
   type HostedRuntimeUsageGateCheck,
@@ -159,6 +160,25 @@ export async function readHostedRuntimeReconciliationFacts(
       request: input,
       usageGateRequired: false,
       usageGateStatus: "not_required",
+    });
+    return facts;
+  }
+
+  if (await readHostedHealthDataConsentState({
+    memberId: input.userId,
+    prisma,
+  }) === "revoked") {
+    const facts = buildHostedRuntimeBlockedFacts({
+      mailboxLag: [],
+      reason: "health_data_consent_withdrawn",
+      retryAt: null,
+      workspace: projectedWorkspace,
+    });
+    emitHostedRuntimeReconciliationFacts({
+      facts,
+      request: input,
+      usageGateRequired: false,
+      usageGateStatus: "health_data_consent_withdrawn",
     });
     return facts;
   }
@@ -255,6 +275,22 @@ export async function readHostedRuntimeReconciliationFacts(
       now,
       userId: input.userId,
     });
+
+    if (gate.status === "health_data_consent_withdrawn") {
+      const facts = buildHostedRuntimeBlockedFacts({
+        mailboxLag,
+        reason: "health_data_consent_withdrawn",
+        retryAt: null,
+        workspace: projectedWorkspace,
+      });
+      emitHostedRuntimeReconciliationFacts({
+        facts,
+        request: input,
+        usageGateRequired: true,
+        usageGateStatus: gate.status,
+      });
+      return facts;
+    }
 
     if (gate.status === "denied") {
       let noticeRetryAt: Date | null = null;

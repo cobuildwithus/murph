@@ -121,6 +121,7 @@ describe("physical-note durable replay", () => {
       updatedAt: acceptedAt,
     };
     const hostedPhysicalNote = {
+      findFirst: vi.fn().mockResolvedValue(null),
       findUnique: vi.fn().mockResolvedValue(row),
       findUniqueOrThrow: vi.fn().mockResolvedValue(row),
       updateMany: vi.fn().mockResolvedValue({ count: 0 }),
@@ -135,7 +136,13 @@ describe("physical-note durable replay", () => {
     };
     const prisma = asPhysicalNotePrismaClient(prismaLike);
     const create = vi.fn<LobPhysicalNoteRuntime["create"]>();
-    const runtime = { create } satisfies LobPhysicalNoteRuntime;
+    const findLetterByNoteId = vi.fn<
+      LobPhysicalNoteRuntime["findLetterByNoteId"]
+    >();
+    const runtime = {
+      create,
+      findLetterByNoteId,
+    } satisfies LobPhysicalNoteRuntime;
     const { createHostedPhysicalNote } = await import(
       "@/src/lib/physical-notes/service"
     );
@@ -173,6 +180,7 @@ describe("physical-note durable replay", () => {
   it("rejects expiring artwork before reserving a new note", async () => {
     const hostedPhysicalNote = {
       create: vi.fn(),
+      findFirst: vi.fn().mockResolvedValue(null),
       findUnique: vi.fn().mockResolvedValue(null),
     };
     const prismaLike = {
@@ -185,7 +193,13 @@ describe("physical-note durable replay", () => {
     };
     const prisma = asPhysicalNotePrismaClient(prismaLike);
     const create = vi.fn<LobPhysicalNoteRuntime["create"]>();
-    const runtime = { create } satisfies LobPhysicalNoteRuntime;
+    const findLetterByNoteId = vi.fn<
+      LobPhysicalNoteRuntime["findLetterByNoteId"]
+    >();
+    const runtime = {
+      create,
+      findLetterByNoteId,
+    } satisfies LobPhysicalNoteRuntime;
     const { createHostedPhysicalNote } = await import(
       "@/src/lib/physical-notes/service"
     );
