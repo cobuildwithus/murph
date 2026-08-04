@@ -76,6 +76,23 @@ test('message formatting leaves fenced Markdown table examples unchanged', () =>
   })
 })
 
+test('message formatting preserves tables inside longer fenced examples', () => {
+  const value = [
+    '````md',
+    '```',
+    '| Day | Work |',
+    '| --- | --- |',
+    '| Monday | Squat |',
+    '```',
+    '````',
+  ].join('\n')
+
+  assert.deepEqual(renderMarkdownMessageText(value), {
+    decorations: [],
+    text: value,
+  })
+})
+
 test('message formatting leaves ordinary pipe-delimited prose unchanged', () => {
   const value = [
     'Use zone 2 | easy pace today.',

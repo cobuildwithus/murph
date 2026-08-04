@@ -23,7 +23,10 @@ type OpenMarkdownDecoration = MarkdownDecorationToken & {
   content: string
 }
 
-type MarkdownFenceMarker = '```' | '~~~'
+type MarkdownFence = {
+  character: '`' | '~'
+  length: number
+}
 
 const TRACKING_QUERY_PARAMETER_NAMES = new Set([
   'fbclid',
@@ -138,23 +141,23 @@ function renderMarkdownTablesAsPlainText(value: string): string {
 
   const lines = value.split('\n')
   const rendered: string[] = []
-  let fenceMarker: MarkdownFenceMarker | null = null
+  let fence: MarkdownFence | null = null
   let index = 0
 
   while (index < lines.length) {
     const line = lines[index]!
-    const marker = readMarkdownFenceMarker(line)
-    if (marker) {
-      if (fenceMarker === null) {
-        fenceMarker = marker
-      } else if (fenceMarker === marker && isMarkdownFenceClose(line)) {
-        fenceMarker = null
+    if (fence !== null) {
+      if (isMarkdownFenceClose(line, fence)) {
+        fence = null
       }
       rendered.push(line)
       index += 1
       continue
     }
-    if (fenceMarker !== null) {
+
+    const openingFence = readMarkdownFence(line)
+    if (openingFence) {
+      fence = openingFence
       rendered.push(line)
       index += 1
       continue
@@ -196,21 +199,25 @@ function renderMarkdownTablesAsPlainText(value: string): string {
   return rendered.join('\n')
 }
 
-function readMarkdownFenceMarker(
-  value: string,
-): MarkdownFenceMarker | null {
+function readMarkdownFence(value: string): MarkdownFence | null {
   const marker = /^ {0,3}(`{3,}|~{3,})/u.exec(value)?.[1]
-  if (marker?.startsWith('`')) {
-    return '```'
+  if (!marker) {
+    return null
   }
-  if (marker?.startsWith('~')) {
-    return '~~~'
+
+  return {
+    character: marker.startsWith('`') ? '`' : '~',
+    length: marker.length,
   }
-  return null
 }
 
-function isMarkdownFenceClose(value: string): boolean {
-  return /^ {0,3}(?:`{3,}|~{3,})\s*$/u.test(value)
+function isMarkdownFenceClose(value: string, fence: MarkdownFence): boolean {
+  const marker = /^ {0,3}(`{3,}|~{3,})\s*$/u.exec(value)?.[1]
+  return Boolean(
+    marker &&
+    marker.startsWith(fence.character) &&
+    marker.length >= fence.length,
+  )
 }
 
 function splitMarkdownTableRow(value: string): string[] | null {
