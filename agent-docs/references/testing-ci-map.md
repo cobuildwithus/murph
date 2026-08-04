@@ -297,7 +297,14 @@ never reads production feedback or enters Resend.
   With the same heap policy, a cold local Turbopack build compiled in 57
   seconds instead of roughly 4.4 minutes and completed all 229 static pages.
   Repeated exact-head Standard previews remain the external acceptance proof.
-  The advisory budget is
+  The next exact-head Standard preview still OOM-killed Turbopack, so the
+  catalog correction is retained as a boundary fix but not sufficient capacity
+  proof. Production builds therefore use Next's supported `--webpack` fallback
+  with `webpackBuildWorker` and `webpackMemoryOptimizations` enabled. The
+  Workflow integration contributes custom Webpack configuration, so the worker
+  must be explicit. Local development remains on Turbopack. The worker build
+  preserves the same heap split and all route/type validation and completed all
+  229 pages locally. The advisory budget is
   a cgroup-unit model of Vercel Standard's 8 GB build machine: 7.2 GB available
   to the build cgroup and a 0.8 GB reserve for OS/container overhead outside it
   at the ceiling. The legacy-named guard budget override must stay strictly

@@ -65,6 +65,19 @@ Updated: 2026-08-04
   the same 1 GiB parent / 3 GiB TypeScript-worker policy compiled in 57 seconds
   instead of roughly 4.4 minutes and completed all 229 static pages. Repeated
   exact-head Standard previews remain the acceptance proof.
+- The next exact-head Standard preview still OOM-killed Turbopack during
+  compilation. The catalog correction is retained as a proven graph and
+  server/client-boundary fix, but it is rejected as sufficient capacity proof.
+- Next's documented Webpack fallback completed the same application locally
+  with `webpackBuildWorker` and `webpackMemoryOptimizations` enabled. The worker
+  is explicit because the Workflow integration contributes custom Webpack
+  configuration, which otherwise disables Next's automatic worker selection.
+- That stricter build exposed one browser-vault parser re-export through a
+  server-heavy cursor module plus invalid Next route exports and optional route
+  props. Moving the parser to its browser-vault owner, keeping the cursor as the
+  legacy-facing re-export, and making route entry modules conform to Next 16
+  preserved validation instead of suppressing it. The complete Webpack build
+  then passed locally in the same 1 GiB / 3 GiB heap policy with all 229 pages.
 
 ## Architecture decision gate
 
@@ -76,6 +89,9 @@ Updated: 2026-08-04
 3. The bound was insufficient; compile-graph profiling identified and removed
    an accidental catalog-wide client boundary without changing product data
    ownership or adding another runtime mechanism.
+4. Turbopack still exceeded the Standard container after that correction, so
+   use Next's supported Webpack build worker and memory optimization path for
+   production builds while retaining Turbopack for local development.
 
 ## Tasks
 

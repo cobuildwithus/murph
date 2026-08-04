@@ -1383,6 +1383,15 @@ later validation worker or changing the compiled application. Repeated
 forced-cold Standard previews remain the direct acceptance evidence, and a Next
 upgrade must revalidate this worker boundary.
 
+Production builds explicitly use Next's supported `--webpack` fallback with
+`experimental.webpackBuildWorker=true` and
+`experimental.webpackMemoryOptimizations=true`. The Workflow integration
+contributes custom Webpack configuration, so the worker is opted in explicitly
+instead of relying on Next's automatic selection. The worker isolates Webpack
+compilation to reduce build-memory pressure, while the memory-optimization mode
+trades some compile speed for a lower peak. Local development remains on
+Turbopack by default.
+
 Next 16.2.6 accepts `experimental.turbopackMemoryLimit` at the JavaScript/native
 boundary but discards the `_memory_limit` argument when creating its native
 backend. The option is therefore omitted rather than documented or tested as a
@@ -1409,7 +1418,18 @@ instead of server-heavy barrels, while the three synthetic studies that pass
 callback props declare their own local client boundaries. With the same heap
 split, a cold local Turbopack build then compiled in 57 seconds instead of
 roughly 4.4 minutes and completed all 229 static pages. Exact-head forced-cold
-Standard previews remain the external acceptance proof.
+Standard previews remain the external acceptance proof. The next exact-head
+preview nevertheless OOM-killed Turbopack, so the catalog correction is kept
+for its proven boundary and graph improvement but is not claimed as sufficient
+capacity relief.
+
+The memory-optimized Webpack worker compiled the complete application within
+the local heap policy and enforced stricter route contracts. It exposed a
+browser-vault parser re-export through a server-heavy cursor, an extra helper
+export from a page module, optional page props, and one synchronous route-param
+compatibility union. Those boundaries now use their narrow owners and Next 16
+route signatures; validation remains enabled. A complete local Webpack build
+then passed TypeScript and generated all 229 pages.
 
 The default advisory budget is 7,200,000,000 cgroup-accounted bytes: the 8 GB
 machine model minus a 0.8 GB reserve for OS/container overhead outside the build

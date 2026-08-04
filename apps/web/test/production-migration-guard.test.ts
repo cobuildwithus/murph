@@ -1183,7 +1183,7 @@ describe("hosted web production migration guard", () => {
     );
     assert.match(
       productionNextBuildScript,
-      /exec node "--max-old-space-size=\$parent_old_space_mb" "\$next_bin" build/u,
+      /exec node "--max-old-space-size=\$parent_old_space_mb" "\$next_bin" build --webpack/u,
     );
     assert.match(
       verifyFastScript,
