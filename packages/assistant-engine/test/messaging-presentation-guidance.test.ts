@@ -11,14 +11,10 @@ describe('assistant messaging presentation guidance', () => {
     })
 
     expect(prompt).toContain(
-      'never emit a Markdown table, even when the user asks for a "table"',
+      'never send Markdown tables, even on request',
     )
-    expect(prompt).toContain(
-      'overrides any generic permission to use Markdown tables when explicitly requested',
-    )
-    expect(prompt).toContain(
-      'compact labeled list or one item per line',
-    )
+    expect(prompt).toContain('overrides other table guidance')
+    expect(prompt).toContain('Use labeled lines')
   })
 
   it('marks complex visual presentation as image-welcome without losing exact text', () => {
@@ -26,16 +22,14 @@ describe('assistant messaging presentation guidance', () => {
       profile: 'gpt5-agentic',
     })
 
-    expect(prompt).toContain('dense multi-column table, workout plan, schedule')
-    expect(prompt).toContain('proactively call `murph.generate_image` when available')
+    expect(prompt).toContain('dense tables/plans/schedules/matrices/diagrams')
+    expect(prompt).toContain('`murph.generate_image`')
+    expect(prompt).toContain('when available, clearer, and audience-safe')
     expect(prompt).toContain(
-      'explicitly marks image generation welcome and privacy-safe',
+      'Keep exact or safety-critical details (sets/reps, dates, dosages) in text',
     )
     expect(prompt).toContain(
-      'a generative image is never the sole source of truth',
-    )
-    expect(prompt).toContain(
-      "never place a member's private health data into a group image",
+      'No decorative images or private health data in group images',
     )
   })
 })
