@@ -14,6 +14,7 @@ import type {
   HostedConsentGrantSnapshot,
   HostedConsentStatus,
 } from "@/src/lib/legal/consent";
+import { cn } from "@/src/lib/utils";
 
 const DESIGN_CONSENT_AT = "2026-07-30T12:00:00.000Z";
 const DESIGN_LEGAL_DOCUMENTS: HostedConsentDocumentSnapshot[] = [
@@ -110,7 +111,9 @@ export function HealthDataConsentWithdrawalFlowStudy() {
   const preview = useSearchParams().get("study");
   const showWithdrawalError = preview === "health-data-withdrawal-error";
   const showWithdrawal =
-    preview === "health-data-withdrawal" || showWithdrawalError;
+    preview === null ||
+    preview === "health-data-withdrawal" ||
+    showWithdrawalError;
   const showResumePending = preview === "health-data-resume-pending";
   const showResume = preview === "health-data-resume" || showResumePending;
   const previewStatus = showWithdrawal
@@ -119,29 +122,27 @@ export function HealthDataConsentWithdrawalFlowStudy() {
 
   return (
     <div
-      className="mx-auto w-full max-w-2xl rounded-2xl border border-border bg-background p-5 sm:p-7"
+      className="grid w-full items-start gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(22rem,30rem)] lg:gap-12"
       data-design-section="health-data-consent-withdrawal"
       inert
     >
-      <div className="mb-5">
+      <div className="flex min-w-0 flex-col gap-4 border-y border-border py-5">
         <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-          Data & privacy
+          {showWithdrawal ? "Consent active" : "Consent withdrawn"}
         </p>
-        <p className="mt-2 text-sm leading-6 text-muted-foreground">
-          Use <span className="font-mono">study=health-data-withdrawal</span>,{" "}
-          <span className="font-mono">study=health-data-withdrawal-error</span>,{" "}
-          <span className="font-mono">study=health-data-resume</span>, or{" "}
-          <span className="font-mono">study=health-data-resume-pending</span> to
-          preview each dialog state. Status retry states appear in the
-          components study.
-        </p>
+        <HostedHealthDataConsentSettings
+          authenticated
+          initialStatus={previewStatus}
+        />
       </div>
-      <HostedHealthDataConsentSettings
-        authenticated
-        initialStatus={previewStatus}
-      />
       {showWithdrawal || showResume ? (
-        <div className="mx-auto mt-6 w-full max-w-sm rounded-3xl border border-border bg-popover p-6 sm:p-7">
+        <div
+          className={cn(
+            "mx-auto w-full max-w-lg lg:mx-0 lg:max-w-none",
+            showWithdrawal &&
+              "rounded-3xl bg-popover p-6 ring-1 ring-foreground/10 sm:p-8",
+          )}
+        >
           {showWithdrawal ? (
             <HostedHealthDataWithdrawalConfirmation
               errorMessage={

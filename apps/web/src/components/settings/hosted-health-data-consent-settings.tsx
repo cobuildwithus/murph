@@ -137,7 +137,7 @@ export function HostedHealthDataConsentSettings({
           aria-busy={pending}
           aria-describedby="health-data-withdrawal-description"
           aria-labelledby="health-data-withdrawal-title"
-          className="max-w-md gap-6 p-6 md:p-7"
+          className="max-w-lg gap-5 p-6 sm:p-8"
           initialFocus={cancelWithdrawalRef}
           showCloseButton={!pending}
         >
@@ -285,7 +285,7 @@ export function HostedHealthDataWithdrawalConfirmation({
 }) {
   return (
     <>
-      <DialogHeader className="pr-10">
+      <DialogHeader className="max-w-prose pr-10">
         <h2
           className="font-serif text-2xl/7 font-semibold tracking-normal text-foreground"
           id="health-data-withdrawal-title"
@@ -307,27 +307,27 @@ export function HostedHealthDataWithdrawalConfirmation({
           <AlertDescription>{errorMessage}</AlertDescription>
         </Alert>
       ) : null}
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
         <Button
-          className="w-full"
+          className="w-full sm:w-auto"
+          disabled={pending}
+          onClick={onCancel}
+          ref={cancelRef}
+          size="lg"
+          type="button"
+          variant="outline"
+        >
+          Cancel
+        </Button>
+        <Button
+          className="w-full sm:w-auto"
           disabled={pending}
           onClick={onConfirm}
-          size="xl"
+          size="lg"
           type="button"
           variant="destructive"
         >
           {pending ? "Withdrawing..." : "Withdraw consent"}
-        </Button>
-        <Button
-          className="w-full"
-          disabled={pending}
-          onClick={onCancel}
-          ref={cancelRef}
-          size="xl"
-          type="button"
-          variant="ghost"
-        >
-          Cancel
         </Button>
       </div>
     </>

@@ -60,6 +60,16 @@ test("renders consent status retry states from the production control", () => {
   expect(markup).toContain("text-destructive");
 });
 
+test("renders withdrawal confirmation as the default consent flow study", () => {
+  const markup = renderToStaticMarkup(
+    createElement(HealthDataConsentWithdrawalFlowStudy),
+  );
+
+  expect(markup).toContain("Consent active");
+  expect(markup).toContain("Withdraw health data consent?");
+  expect(markup).not.toContain("Use study=");
+});
+
 test("renders pending renewed consent from the production prompt", () => {
   mocks.study = "health-data-resume-pending";
 
