@@ -48,6 +48,9 @@ export interface HostedProviderEffectDependencies {
   fetchImplementation: typeof fetch | null;
   publicFetchImplementation?: typeof fetch | null;
   onProviderDispatchEntered?: (() => void) | null;
+  persistAppCardTextFallback?: (input: {
+    idempotencyKey: string;
+  }) => Promise<void>;
   signal?: AbortSignal;
   telegramMaxDeliveryAttempts?: number;
 }
@@ -58,6 +61,9 @@ interface HostedProviderEffectContext {
   env: NodeJS.ProcessEnv;
   fetchImplementation: typeof fetch;
   publicFetchImplementation?: typeof fetch;
+  persistAppCardTextFallback?: (input: {
+    idempotencyKey: string;
+  }) => Promise<void>;
   signal?: AbortSignal;
 }
 
@@ -138,31 +144,52 @@ export async function sendHostedProviderLinqMessage(
   request: HostedRuntimeLinqSendRequest,
   dependencies: HostedProviderEffectDependencies,
 ): Promise<HostedRuntimeLinqSendResponse> {
+  let effectiveRequest = request;
   const context = createHostedProviderEffectContext(
     dependencies,
     "Hosted Linq message delivery",
   );
-  if (shouldMaterializeHostedProviderLinqDirectThreadFirst(request)) {
+  const persistAppCardTextFallback = context.persistAppCardTextFallback;
+  if (persistAppCardTextFallback) {
+    context.persistAppCardTextFallback = async (input) => {
+      await persistAppCardTextFallback(input);
+      effectiveRequest = {
+        ...effectiveRequest,
+        card: null,
+        idempotencyKey: input.idempotencyKey,
+      };
+    };
+  }
+  if (shouldMaterializeHostedProviderLinqDirectThreadFirst(effectiveRequest)) {
     const recovered = await materializeHostedProviderLinqDirectThread({
       context,
-      request,
+      request: effectiveRequest,
     });
     if (recovered) {
-      return recovered;
+      return withHostedProviderLinqEffectiveIdentity(
+        recovered,
+        effectiveRequest,
+      );
     }
     throw createHostedProviderLinqRecoverySenderRequiredError();
   }
 
   try {
-  return await sendHostedProviderLinqMessageDirect(request, context);
+    return withHostedProviderLinqEffectiveIdentity(
+      await sendHostedProviderLinqMessageDirect(effectiveRequest, context),
+      effectiveRequest,
+    );
   } catch (error) {
     const recovered = await maybeRecoverHostedProviderMissingLinqThread({
       context,
       error,
-      request,
+      request: effectiveRequest,
     });
     if (recovered) {
-      return recovered;
+      return withHostedProviderLinqEffectiveIdentity(
+        recovered,
+        effectiveRequest,
+      );
     }
     throw error;
   }
@@ -285,6 +312,7 @@ async function sendHostedProviderLinqMessageDirect(
   context: HostedProviderEffectContext,
 ): Promise<HostedRuntimeLinqSendResponse> {
   return await sendLinqMessage({
+    directRecipientPhoneNumber: request.directRecipientPhoneNumber ?? null,
     fromPhoneNumber: request.fromPhoneNumber ?? null,
     idempotencyKey: request.idempotencyKey ?? null,
     media: request.media ?? null,
@@ -295,6 +323,9 @@ async function sendHostedProviderLinqMessageDirect(
     ...(request.targetKind === null || request.targetKind === undefined
       ? {}
       : { targetKind: request.targetKind }),
+    ...(request.card == null
+      ? {}
+      : { card: request.card, threadIsDirect: request.threadIsDirect ?? null }),
   }, {
     env: context.env,
     fetchImplementation: context.fetchImplementation,
@@ -304,6 +335,9 @@ async function sendHostedProviderLinqMessageDirect(
       : {}),
     ...(context.loadVaultFile ? { loadVaultFile: context.loadVaultFile } : {}),
     ...(context.loadVaultImage ? { loadVaultImage: context.loadVaultImage } : {}),
+    ...(context.persistAppCardTextFallback
+      ? { persistAppCardTextFallback: context.persistAppCardTextFallback }
+      : {}),
   });
 }
 
@@ -322,6 +356,9 @@ function createHostedProviderEffectContext(
       : {}),
     ...(dependencies.loadVaultImage
       ? { loadVaultImage: dependencies.loadVaultImage }
+      : {}),
+    ...(dependencies.persistAppCardTextFallback
+      ? { persistAppCardTextFallback: dependencies.persistAppCardTextFallback }
       : {}),
   };
 }
@@ -358,6 +395,7 @@ async function materializeHostedProviderLinqDirectThread(input: {
 
   try {
     const delivered = await sendHostedProviderLinqMessageDirect({
+      directRecipientPhoneNumber: recipient,
       fromPhoneNumber: sender,
       idempotencyKey: input.request.idempotencyKey ?? null,
       media: input.request.media ?? null,
@@ -365,6 +403,7 @@ async function materializeHostedProviderLinqDirectThread(input: {
       replyToMessageId: input.request.replyToMessageId ?? null,
       target: recipient,
       targetKind: "participant",
+      ...(input.request.card == null ? {} : { card: input.request.card, threadIsDirect: true }),
     }, input.context);
     const target =
       normalizeHostedProviderText(delivered.target) ??
@@ -390,6 +429,19 @@ async function materializeHostedProviderLinqDirectThread(input: {
     }
     throw error;
   }
+}
+
+function withHostedProviderLinqEffectiveIdentity(
+  result: HostedRuntimeLinqSendResponse,
+  request: HostedRuntimeLinqSendRequest,
+): HostedRuntimeLinqSendResponse {
+  const idempotencyKey =
+    normalizeHostedProviderText(result.idempotencyKey)
+    ?? normalizeHostedProviderText(request.idempotencyKey);
+  return {
+    ...result,
+    ...(idempotencyKey ? { idempotencyKey } : {}),
+  };
 }
 
 function shouldMaterializeHostedProviderLinqDirectThreadFirst(

@@ -81,6 +81,7 @@ import {
 import {
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
   HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
+  HOSTED_RUNTIME_HEALTH_DATA_ADMISSION_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
 import type {
@@ -334,6 +335,7 @@ describe("cloudflare worker routes", () => {
     expect(workerInternalRoutes.map(({ name }) => name)).toEqual([
       "deploy-container-smoke",
       "runtime-ensure-processing",
+      "runtime-health-data-consent",
       "user-data-delete",
       "telegram-usage-limit-notice",
       "environment-voice-stage",
@@ -359,6 +361,7 @@ describe("cloudflare worker routes", () => {
       "test-direct-r2-presigned-put",
       "deploy-container-smoke",
       "runtime-ensure-processing",
+      "runtime-health-data-consent",
       "user-data-delete",
       "telegram-usage-limit-notice",
       "environment-voice-stage",
@@ -2463,6 +2466,83 @@ describe("cloudflare worker routes", () => {
       expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
     });
 
+    it("runs runtime health-data consent reconciliation synchronously for Web OIDC", async () => {
+      const reconcileRuntimeHealthDataConsentForUser = vi.fn(async () => ({
+        activeInvocationPreempted: true,
+        consentState: "revoked" as const,
+        processingAllowed: false,
+        runnerContainerDestroyAttempted: true,
+        runnerContainerDestroyOk: true,
+        userId: "test-user",
+      }));
+      const stub = createUserRunnerStub({ reconcileRuntimeHealthDataConsentForUser });
+      const env = createWorkerEnv(stub);
+
+      const response = await worker.fetch(
+        await signControlRequest(new Request(
+          "https://runner.example.test/internal/users/test-user/runtime/health-data-consent",
+          {
+            body: "{}",
+            headers: { "content-type": "application/json; charset=utf-8" },
+            method: "POST",
+          },
+        )),
+        env,
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        activeInvocationPreempted: true,
+        consentState: "revoked",
+        processingAllowed: false,
+        runnerContainerDestroyAttempted: true,
+        runnerContainerDestroyOk: true,
+        userId: "test-user",
+      });
+      expect(reconcileRuntimeHealthDataConsentForUser).toHaveBeenCalledWith("test-user");
+    });
+
+    it("rejects callback-signature-only health-data reconciliation requests", async () => {
+      const reconcileRuntimeHealthDataConsentForUser = vi.fn();
+      const stub = createUserRunnerStub({ reconcileRuntimeHealthDataConsentForUser });
+      const env = createWorkerEnv(stub);
+
+      const response = await worker.fetch(
+        await signWebCallbackControlRequest(
+          new Request(
+            "https://runner.example.test/internal/users/test-user/runtime/health-data-consent",
+            { body: "{}", method: "POST" },
+          ),
+          env,
+        ),
+        env,
+      );
+
+      expect(response.status).toBe(401);
+      expect(reconcileRuntimeHealthDataConsentForUser).not.toHaveBeenCalled();
+    });
+
+    it("rejects nonempty runtime health-data consent reconciliation bodies", async () => {
+      const reconcileRuntimeHealthDataConsentForUser = vi.fn();
+      const stub = createUserRunnerStub({ reconcileRuntimeHealthDataConsentForUser });
+      const env = createWorkerEnv(stub);
+
+      const response = await worker.fetch(
+        await signControlRequest(new Request(
+          "https://runner.example.test/internal/users/test-user/runtime/health-data-consent",
+          {
+            body: JSON.stringify({ consentState: "revoked" }),
+            headers: { "content-type": "application/json; charset=utf-8" },
+            method: "POST",
+          },
+        )),
+        env,
+      );
+
+      expect(response.status).toBe(400);
+      expect(reconcileRuntimeHealthDataConsentForUser).not.toHaveBeenCalled();
+    });
+
     it("acks web-plane OIDC runtime ensure-processing requests early and schedules the Durable Object call", async () => {
       let resolveEnsure!: (value: {
         action: "woken";
@@ -3441,6 +3521,14 @@ function createRuntimeControlRunnerHarness(input: {
       return Response.json({
         fetchedAt: "2026-04-27T00:00:00.000Z",
         workspace: input.workspace ?? createRuntimeControlWorkspaceState("test-user"),
+      });
+    }
+
+    if (url.pathname === HOSTED_RUNTIME_HEALTH_DATA_ADMISSION_PATH) {
+      return Response.json({
+        consentState: "granted",
+        processingAllowed: true,
+        userId: "test-user",
       });
     }
 

@@ -44,6 +44,7 @@ vi.mock("@/src/lib/hosted-onboarding/authentication-service", () => ({
 }));
 
 vi.mock("@/src/lib/legal/consent", () => ({
+  HOSTED_HEALTH_DATA_CONSENT_SCOPE: "launch.health-data",
   assertHostedLaunchRequiredConsentGranted: mocks.assertHostedLaunchRequiredConsentGranted,
   readHostedConsentStatus: mocks.readHostedConsentStatus,
 }));

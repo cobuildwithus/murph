@@ -154,6 +154,8 @@ import {
 } from "../(dashboard)/environment/environment-page-client";
 import type { EnvironmentVoiceScript } from "../(dashboard)/environment/environment-voice-script";
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
+import { DataExportControlStudy } from "./data-export-study";
+import { HealthDataConsentControlStudy } from "./health-data-consent-study";
 
 const DESIGN_ENVIRONMENT_GAP_SCRIPT: EnvironmentVoiceScript = {
   dialogTitle: "Fill the gaps in your report",
@@ -2263,6 +2265,18 @@ export function ComponentsContent() {
             <ConclusionCard title="Key insights" variant="insight" items={[{ icon: "•", text: "Evening sessions drove sleep gains. Morning sessions showed no benefit." }, { icon: "•", text: "2–3x/week appears sufficient. Skipping one session had no negative impact." }]} />
             <ConclusionCard title="Recommendations" variant="recommendation" items={[{ icon: "→", text: "Continue sauna 2x/week as maintenance." }, { icon: "→", text: "Add cold exposure post-sauna for contrast protocol." }]} />
           </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Health data consent settings">
+          <HealthDataConsentControlStudy />
+        </Section>
+
+        <Separator />
+
+        <Section title="Data export">
+          <DataExportControlStudy />
         </Section>
 
         <Separator />

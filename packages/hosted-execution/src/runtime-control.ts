@@ -2872,6 +2872,21 @@ export interface HostedRuntimeWebStatusResponse {
   workspace: HostedWorkspaceState | null;
 }
 
+export const HOSTED_HEALTH_DATA_CONSENT_STATES = [
+  "granted",
+  "revoked",
+  "missing",
+] as const;
+
+export type HostedHealthDataConsentState =
+  (typeof HOSTED_HEALTH_DATA_CONSENT_STATES)[number];
+
+export interface HostedRuntimeHealthDataAdmissionResponse {
+  consentState: HostedHealthDataConsentState;
+  processingAllowed: boolean;
+  userId: string;
+}
+
 export const HOSTED_WORKSPACE_INVOCATION_STATUSES = [
   "idle",
   "budget_exhausted",

@@ -2387,6 +2387,65 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
+  it("does not mutate direct routing after explicit health-data withdrawal", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const hostedMemberRoutingUpsert = vi.fn().mockResolvedValue({});
+    const prisma = withPrismaTransaction({
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingRef: null,
+          billingStatus: HostedBillingStatus.active,
+          consentGrants: [{ scope: "launch.health-data", status: "revoked" }],
+          suspendedAt: null,
+          threadContainer: null,
+        }),
+      },
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue({
+          member: {
+            billingStatus: HostedBillingStatus.active,
+            id: "member_telegram_123",
+            suspendedAt: null,
+          },
+          memberId: "member_telegram_123",
+          telegramUserIdEncrypted: null,
+        }),
+        upsert: hostedMemberRoutingUpsert,
+      },
+    });
+
+    await expect(handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        message: {
+          business_connection_id: "biz-setup",
+          chat: {
+            id: 123,
+            type: "private",
+          },
+          date: 1_774_522_600,
+          from: {
+            first_name: "Alice",
+            id: 456,
+          },
+          message_id: 1,
+          text: "/start",
+        },
+        update_id: 658,
+      }),
+      secretToken: "telegram-secret",
+    })).resolves.toEqual({
+      ignored: true,
+      ok: true,
+      reason: "inactive-member",
+    });
+
+    expect(hostedMemberRoutingUpsert).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
   it("does not record group participant authority until the linked sender becomes active", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
     const participantUpsert = vi.fn().mockResolvedValue({});

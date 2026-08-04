@@ -762,6 +762,18 @@ dependency. A rollback to the prior bundle is safe only before the first
 is the hard rollback floor because a workspace, checkpoint, or retained outbox
 intent may contain the marker. Do not try to prove an incident-time drain;
 forward-fix instead of adding a compatibility reader or dual writer.
+Native iMessage response cards follow the same runtime-only hard-cut rule.
+Deploy Cloudflare and the runner bundle together with
+`container_rollout=immediate`, then require managed-container smoke to report
+the exact new runner-bundle fingerprint and assistant CLI surface before card
+traffic begins. Ordinary outbox records and hosted delivery side effects omit
+the optional `card` field, so a new Worker with an old runner remains safe for
+ordinary work; an old runner cannot produce cards. A new runner that has
+written or emitted a card-bearing record or side effect must not be paired with
+an old Worker. Before the first card-bearing value exists, the prior bundle is
+a safe rollback. Afterward, the new bundle is the hard rollback floor for
+workspaces, checkpoints, retained outbox intents, and side effects; forward-fix
+instead of restoring an older reader. There is no Web deployment dependency.
 Preference sparse deltas and cross-lane causal sequencing are hard-cut. Web
 always produces the sequence-aware delta and supports the signed input-bound
 personality transaction; there is no complete-snapshot producer or disabled

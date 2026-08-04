@@ -1,12 +1,31 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE } from "@murphai/device-syncd/public-account";
 
-const { randomBytesMock, supersedeDirtyStateMock } = vi.hoisted(() => ({
+const {
+  lockHostedMemberRowMock,
+  randomBytesMock,
+  readHostedHealthDataConsentStateMock,
+  supersedeDirtyStateMock,
+} = vi.hoisted(() => ({
+  lockHostedMemberRowMock: vi.fn(async () => undefined),
   randomBytesMock: vi.fn((length: number) => Buffer.from(Array.from({ length }, (_, index) => index))),
+  readHostedHealthDataConsentStateMock: vi.fn(
+    async (): Promise<"granted" | "missing" | "revoked"> => "missing",
+  ),
   supersedeDirtyStateMock: vi.fn(async () => ({
     retainedCredentialIndependentPayloadCount: 0,
     supersededPayloadCount: 0,
   })),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/shared", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/src/lib/hosted-onboarding/shared")>()),
+  lockHostedMemberRow: lockHostedMemberRowMock,
+}));
+
+vi.mock("@/src/lib/legal/consent", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/src/lib/legal/consent")>()),
+  readHostedHealthDataConsentState: readHostedHealthDataConsentStateMock,
 }));
 
 vi.mock("node:crypto", async () => {
@@ -87,6 +106,7 @@ const TEST_CODEC = {
 describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    readHostedHealthDataConsentStateMock.mockResolvedValue("missing");
   });
 
   // Consume semantics (replay, expiry, mismatches) are owned by
@@ -149,6 +169,38 @@ describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
 describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    readHostedHealthDataConsentStateMock.mockResolvedValue("missing");
+  });
+
+  it("denies health-data admission after locking and re-reading consent", async () => {
+    const executeRaw = vi.fn();
+    const tx = { $executeRaw: executeRaw };
+    const callback = vi.fn();
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: {
+        $transaction: async <TResult>(
+          transactionCallback: (transaction: typeof tx) => Promise<TResult>,
+        ) => transactionCallback(tx),
+      } as never,
+    });
+    readHostedHealthDataConsentStateMock.mockResolvedValueOnce("revoked");
+
+    await expect(store.withHealthDataAdmissionLock(
+      "user-123",
+      "dsc_123",
+      callback,
+    )).rejects.toMatchObject({
+      code: "HEALTH_DATA_CONSENT_REQUIRED",
+      httpStatus: 403,
+    });
+
+    expect(lockHostedMemberRowMock).toHaveBeenCalledWith(tx, "user-123");
+    expect(readHostedHealthDataConsentStateMock).toHaveBeenCalledWith({
+      memberId: "user-123",
+      prisma: tx,
+    });
+    expect(executeRaw).not.toHaveBeenCalled();
+    expect(callback).not.toHaveBeenCalled();
   });
 
   it("creates new hosted connections without creating a Prisma secret row", async () => {
@@ -214,6 +266,15 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       connectedAt: "2026-03-25T00:00:00.000Z",
       nextReconcileAt: "2026-03-25T05:00:00.000Z",
     });
+
+    expect(lockHostedMemberRowMock).toHaveBeenCalledWith(tx, "user-123");
+    expect(readHostedHealthDataConsentStateMock).toHaveBeenCalledWith({
+      memberId: "user-123",
+      prisma: tx,
+    });
+    expect(lockHostedMemberRowMock.mock.invocationCallOrder[0]).toBeLessThan(
+      readHostedHealthDataConsentStateMock.mock.invocationCallOrder[0] ?? 0,
+    );
 
     expect(created.id).toMatch(/^dsc_[A-Za-z0-9_-]+$/u);
     expect(createdArtifacts.connection).toMatchObject({

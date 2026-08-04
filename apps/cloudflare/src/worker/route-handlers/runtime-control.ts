@@ -76,6 +76,32 @@ const runtimeEnsureProcessingRoute = {
   wrongMethodResponse: "method-not-allowed",
 } satisfies DeclarativeRoute<WorkerRouteContext>;
 
+const runtimeHealthDataConsentRoute = {
+  authorizeBeforeMethod: true,
+  authorization: "vercel-oidc",
+  beforeMethod(context, params) {
+    return requireBoundInternalRouteUser(
+      context,
+      params,
+      "runtime-health-data-consent",
+    );
+  },
+  async handle(context, params) {
+    return handleRuntimeHealthDataConsentRoute(context, params.userId);
+  },
+  match: (pathname) => matchCloudflareHostedControlUserRoutePath(
+    "runtimeHealthDataConsentReconcile",
+    pathname,
+  ),
+  methods: [
+    CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS
+      .runtimeHealthDataConsentReconcile.method,
+  ],
+  name: "runtime-health-data-consent",
+  signatureBodyLimitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
+  wrongMethodResponse: "method-not-allowed",
+} satisfies DeclarativeRoute<WorkerRouteContext>;
+
 const userStatusRoute = {
   authorizeBeforeMethod: true,
   authorization: "vercel-oidc",
@@ -93,6 +119,7 @@ const userStatusRoute = {
 
 export const runtimeProcessingRoutes = [
   runtimeEnsureProcessingRoute,
+  runtimeHealthDataConsentRoute,
 ] as const;
 
 export const userStatusRoutes = [
@@ -228,6 +255,29 @@ export async function handleRuntimeEnsureProcessingRoute(
     orchestration,
     userId,
   }));
+}
+
+export async function handleRuntimeHealthDataConsentRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  const userId = decodeRouteParam(encodedUserId);
+  const payload = await readCachedRequestText(context, {
+    limitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
+  });
+  const body = requireJsonObject(payload.trim() ? JSON.parse(payload) : {});
+  if (Object.keys(body).length > 0) {
+    throw new TypeError(
+      "Hosted runtime health-data consent request must be empty.",
+    );
+  }
+  const stub = await resolveUserRunnerStub(context.env, userId);
+  if (!stub.reconcileRuntimeHealthDataConsentForUser) {
+    throw new Error(
+      "Hosted runtime health-data consent reconciliation is unavailable.",
+    );
+  }
+  return json(await stub.reconcileRuntimeHealthDataConsentForUser(userId));
 }
 
 function runRuntimeEnsureProcessingForUser(input: {
