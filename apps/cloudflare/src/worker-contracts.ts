@@ -33,8 +33,10 @@ export type WorkerProviderEgressTokenValidationResult =
     }
   | {
       attemptId: string;
+      customInferenceEnvelope?: string;
       leaseGeneration: string;
       owns: true;
+      platformAiUsageAllowed?: boolean;
       userId: string;
       workspaceVersion: string | null;
     };
@@ -55,6 +57,7 @@ export type WorkerProviderEgressCredentialValidationResult =
       attemptId: string;
       leaseGeneration: string;
       owns: true;
+      platformAiUsageAllowed?: boolean;
       userId: string;
       workspaceVersion: string | null;
     };
@@ -105,6 +108,7 @@ export interface WorkerRunnerContainerNamespaceLike<
 export interface WorkerUserRunnerStubLike {
   bindUser?(userId: string): Promise<{ userId: string }>;
   deleteHostedUserData?(userId: string): Promise<unknown>;
+  reconcileRuntimeHealthDataConsentForUser?(userId: string): Promise<unknown>;
   publishHostedPrivateMedia?(
     input: HostedPrivateMediaPublishInput,
   ): Promise<HostedPrivateMediaPublishResult>;
@@ -204,9 +208,6 @@ export interface WorkerEnvironmentContract<
   HOSTED_ASSISTANT_PROVIDER?: string;
   HOSTED_ASSISTANT_REASONING_EFFORT?: string;
   HOSTED_ASSISTANT_SANDBOX?: string;
-  HOSTED_VENICE_LUNA_MODEL?: string;
-  HOSTED_VENICE_SOL_MODEL?: string;
-  HOSTED_VENICE_TERRA_MODEL?: string;
   ELEVENLABS_API_KEY?: string;
   OPENAI_API_KEY?: string;
   VENICE_API_KEY?: string;
@@ -221,6 +222,8 @@ export interface WorkerEnvironmentContract<
   HOSTED_R2_PRESIGN_ACCOUNT_ID?: string;
   HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT?: string;
   HOSTED_R2_CUTOVER_PHASE?: string;
+  HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256?: string;
+  HOSTED_R2_WRITE_ADMISSION?: string;
   HOSTED_R2_PRESIGN_BUCKET_NAME?: string;
   HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME?: string;
   HOSTED_R2_PRESIGN_CONTROL_ENDPOINT?: string;

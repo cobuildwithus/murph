@@ -4613,6 +4613,33 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
+                "resolve-address": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "country": {
+                          "description": "Optional ISO 3166-1 alpha-2 country restriction. Repeat --country to add more than one.",
+                          "maxItems": 10,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z]{2}$"
+                          }
+                        },
+                        "language": {
+                          "description": "Optional language hint for provider display names.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 10
+                        }
+                      }
+                    }
+                  }
+                },
                 "estimate": {
                   "type": "object",
                   "additionalProperties": false,

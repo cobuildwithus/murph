@@ -14,6 +14,7 @@ import { readHostedExecutionEnvironment } from "../env.ts";
 import { readRequestBodyText } from "../json.ts";
 import type {
   HostedRunnerUserDataDeletionResult,
+  HostedRuntimeHealthDataConsentReconcileResult,
 } from "../user-runner.js";
 import type { HostedExecutionContainerNamespaceLike } from "../runner-container.js";
 import type {
@@ -35,6 +36,9 @@ import type {
 export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLike {
   bindUser(userId: string): Promise<{ userId: string }>;
   deleteHostedUserData(userId: string): Promise<HostedRunnerUserDataDeletionResult>;
+  reconcileRuntimeHealthDataConsentForUser?(
+    userId: string,
+  ): Promise<HostedRuntimeHealthDataConsentReconcileResult>;
   publishHostedPrivateMedia(
     input: HostedPrivateMediaPublishInput,
   ): Promise<HostedPrivateMediaPublishResult>;

@@ -289,11 +289,42 @@ summary and tool payload, while the group case remains tool-free.
   creates a root-level cgroup-v2 child for accounting only and moves the build
   process into that cgroup while keeping the build itself on the invoking user,
   environment, cwd, and stdio. It does not currently write `memory.max`,
-  `memory.swap.max`, or `memory.oom.group`. The advisory budget is a cgroup-unit
-  model of Vercel Standard's 8 GB build machine: 7.2 GB available to the build
-  cgroup and a 0.8 GB reserve for OS/container overhead outside it at the
-  ceiling. The legacy-named guard budget override must stay strictly above the
-  6,000,000,000-byte known-false-positive cgroup floor and at or below
+  `memory.swap.max`, or `memory.oom.group`. The Vercel package build gives the
+  parent Next process a direct 1 GiB old-space flag and appends a 3 GiB flag to
+  `NODE_OPTIONS`. Node applies the direct flag to the parent; Next 16.2.6
+  rebuilds its non-isolated TypeScript worker options from the parent arguments
+  followed by `NODE_OPTIONS`, while removing the flag from isolated static
+  workers. The same script owns the Vercel package build and CI memory-
+  observation invocation. The split reduces the compile-parent peak without
+  weakening generated-contract validation, while repeated forced-cold Standard
+  previews remain the real Vercel acceptance proof. A 2 GiB parent-bound
+  candidate passed one forced-cold Standard preview but the next identical
+  build still hit the 8 GB container OOM boundary. Single global 1 GiB and 1.5
+  GiB limits starved Next's
+  generated-contract TypeScript worker, as did a 1 GiB parent / 2 GiB worker
+  split. The 1 GiB / 3 GiB split completed the full local build. Either a V8
+  heap failure or a container OOM rejects the candidate. The first forced-cold
+  Standard preview with that split still exhausted the container during
+  Turbopack compilation. Profiling identified the multiplier: `/design` made
+  the whole catalog a client graph solely to manage its `tab` query parameter.
+  The route now parses that query on the server and uses URL-backed tab links,
+  while reachable client modules use narrow client-safe public imports and only
+  the three callback-bearing synthetic studies declare local client boundaries.
+  With the same heap policy, a cold local Turbopack build compiled in 57
+  seconds instead of roughly 4.4 minutes and completed all 229 static pages.
+  Repeated exact-head Standard previews remain the external acceptance proof.
+  The next exact-head Standard preview still OOM-killed Turbopack, so the
+  catalog correction is retained as a boundary fix but not sufficient capacity
+  proof. Production builds therefore use Next's supported `--webpack` fallback
+  with `webpackBuildWorker` and `webpackMemoryOptimizations` enabled. The
+  Workflow integration contributes custom Webpack configuration, so the worker
+  must be explicit. Local development remains on Turbopack. The worker build
+  preserves the same heap split and all route/type validation and completed all
+  229 pages locally. The advisory budget is
+  a cgroup-unit model of Vercel Standard's 8 GB build machine: 7.2 GB available
+  to the build cgroup and a 0.8 GB reserve for OS/container overhead outside it
+  at the ceiling. The legacy-named guard budget override must stay strictly
+  above the 6,000,000,000-byte known-false-positive cgroup floor and at or below
   7,200,000,000 bytes, preserving at least a 0.8 GB reserve under the 8 GB
   machine model. The floor comes from the fully working 2026-07-06 Linux CI run
   where a 6.0 GB cgroup cap OOM-killed a build that Vercel's real 8 GB Standard
@@ -301,9 +332,11 @@ summary and tool payload, while the group case remains tool-free.
   numbers are historical single-process RSS measurements only, not cgroup cap
   bounds; cgroup accounting includes anonymous memory across all build workers
   plus page cache. Live CI on 2026-07-07 showed the hard limit cannot ship green
-  yet: `turbopackMemoryLimit=3GiB` matched the 4 GiB cold-build anon ramp,
-  rising about 2.9 GB at 12 seconds, 5.5 GB at 27 seconds, and 6.9 GB at 42
-  seconds before an OOM-group kill. The guard samples cgroup `memory.current`
+  yet: `turbopackMemoryLimit=3GiB` matched the 4 GiB-configured cold-build anon
+  ramp, rising about 2.9 GB at 12 seconds, 5.5 GB at 27 seconds, and 6.9 GB at 42
+  seconds before an OOM-group kill. Next 16.2.6 discards that option while
+  creating the native backend, so it changed no enforced target and is now
+  omitted. The guard samples cgroup `memory.current`
   and selected `memory.stat` fields about every 3 seconds, prints trajectory
   lines about every 15 seconds, then reports sampled maxima before cgroup
   `memory.peak`, `memory.events`, and selected final-read `memory.stat` values.
@@ -654,6 +687,13 @@ keep the one-second presentation-only deadline and late-result rejection.
 - No automated check hits a live AgentMail endpoint; email provisioning, polling, and in-thread reply behavior are currently verified through mocked CLI and inboxd tests only.
 - No automated check hits a live WHOOP or other wearable OAuth provider; device-syncd auth/webhook behavior is currently verified through local service tests, route tests, stubbed control-plane callers, and the hosted-local device-connect smoke that creates a signed WHOOP connect link against synthetic provider config.
 - Automatic meal-photo capture is covered by hosted-web enrollment/upload, companion bearer-consent status/acceptance, verified-email route fallback and current-recipient resolution, accepted-capture member-wide engagement, and model-gate-with-system-lag tests; hosted-execution wake/route parsing tests; Cloudflare private-object, processing-mode, and signed control-proxy tests; Temporal blocked-system and foreground-fairness tests; assistant-runtime system-only cron projection/post-checkpoint cleanup, canonical import/idempotency/automation-postcondition, and fail-closed email-authority tests; managed-automation tests; oldest-first closeout-work CLI tests; and canonical meal photo-retirement tests. Routine CI does not grant a real iPhone Photos permission or upload to the production R2 bucket, so deployed product proof still requires an explicit physical-device capture.
+- The temporary R2 cutover write-admission gate has focused Cloudflare route
+  coverage for both callback-signed Temporal ensures and Vercel OIDC direct
+  hints, including proof that paused requests do not call UserRunner or schedule
+  `waitUntil`. Parser, deploy-config, preflight, and hosted-local tests cover the
+  status/config shape. Routine checks do not prove a live 100-percent Worker
+  rollout or a production runner drain; the cutover runbook owns that deployed
+  proof before the direct-upload capability wait begins.
 - No routine repo verification command validates a real Cloudflare Worker deploy or a real Cloudflare-managed native-container rollout. `apps/cloudflare` tests now cover the in-repo worker, direct Durable Object RPC and alarms in the Workers runtime, the Durable Object/container boundary, configurable container idle-timeout wiring, container activity-expiry cleanup behavior, runtime-owned hard-floor/shutdown checkpointing plus invocation-local pre-floor assistant wake service, selective artifact materialization plus preserved-artifact snapshot behavior, keyring-aware hosted ciphertext reads by stored `keyId`, bundle/artifact cleanup on successful transitions, and Node container-image seams. The repo also ships `pnpm --dir apps/cloudflare test:e2e:runner-python:local` as a targeted final-image Python PATH E2E: it assembles a fresh runner bundle, prepares the cached native base image, builds the same `linux/amd64` app-layer Dockerfile used by the Cloudflare container, starts the image with its normal entrypoint, waits for `/health`, and checks as the non-root `runner` user from immutable `/app` with the baked runner PATH to prove `python` and `python3` resolve to Python 3. `pnpm --dir apps/cloudflare runner:docker:smoke` remains the broader local final-image smoke: it overlays smoke entrypoints into a derived bundle, restores a real fixture vault into an isolated smoke workspace inside the container, exercises `vault-cli` through Codex App Server `command/exec` for default vault reads, explicit raw `--vault`, measurement and scheduled-measurement writes, representative list commands, and hidden-vault schema/LLM metadata, exercises the shared `@murphai/parsers` attachment pipeline, and records metadata-only CLI proof counts plus the selected provider ids so the proof explicitly covers the shipped `murph` / `vault-cli` bins plus native `python` / `python3`, `pdftotext`, and ffmpeg-backed audio normalization/preparation behavior under the hosted runner's rebound `HOME` / `VAULT` model; hosted transcription itself is Worker-mediated Workers AI and is covered by `apps/cloudflare/test/runner-egress-intercept.test.ts`, the parsers remote-transcription provider tests, and the `linq-webhook` hosted-local E2E CI gate (fake `AI` binding, real egress route) instead of an in-image speech model. The runner bundle packer uses runner-specific tarballs for the CLI shell and Health Commons so E2E and deploy bundles keep the same CLI/runtime/catalog surfaces without the public npm package's nested bundled workspace payload or web-only Health Commons artifacts. Private Murph Cloud's `Deploy Cloudflare Hosted Execution` workflow runs protected-main-only Cloudflare deploy jobs on Blacksmith: hosted-local E2E gates start loopback Postgres containers, install Temporal CLI, run `codex-gateway-prefix` and `linq-delivery` with `MURPH_HOSTED_LOCAL_E2E_FAST_GATE=1`, and run `linq-scheduled-reminder` with its full one-minute reminder lead and 10-second idle checkpoint. Normal Worker deploy runs add a Blacksmith runner smoke gate that prepares the runner bundle/base image before running the focused Cloudflare verify lane plus `runner:docker:smoke:prepared-base` from the same commit. Its explicit immediate option remains the break-glass path that skips those E2E/smoke gates while still requiring the protected-main hosted Codex auth guard. The Blacksmith deploy job attaches the production environment, verifies the protected-main checkout, assembles the runner bundle and native base image without step-scoped production secrets, renders deploy config and Worker secrets, dry-runs the generated Wrangler deploy bundle, executes a direct `wrangler deploy`, reads `wrangler deployments status --json` for the smoke version and final traffic summary, validates the required GitHub environment wiring up front including `CF_PUBLIC_BASE_URL` for smoke runs, declares the required hosted runtime secrets through generated Wrangler config, and pairs the deploy docs with a checked-in transient R2 lifecycle config/helper. Gradual deploys run deployed managed-container runner-bundle and assistant CLI surface smoke with a longer retry window so Cloudflare has time to surface the new container application version; `container_rollout=immediate` adds the stricter direct-R2 managed-container smoke, and the `live_model_turn` workflow input (default on) adds one real `gpt-5.6-terra` `codex exec` turn from the deployed container through the Worker OpenAI egress intercept; that turn runs in production-deploy smoke only, never per-PR CI or hosted-local E2E. Hosted prompt-cache prefix drift, core Linq delivery regressions, scheduled Linq reminder regressions, runner-image regressions, missing deployed assistant CLI hot-path schemas, or invalid generated deploy bundles therefore block private-workflow deploys before or immediately after the real deploy step; the immediate path keeps the deploy job's own build validation, deploy, and strict managed-container smoke checks. Live deployment still depends on operator-supplied Cloudflare credentials, GitHub environment wiring, first-time container provisioning in Cloudflare, and an operator applying the bucket lifecycle rules to the real R2 buckets.
 - The private protected-main Cloudflare workflow's reusable `preview` option is covered
   by deploy-automation and preflight tests rather than a routine live deploy.

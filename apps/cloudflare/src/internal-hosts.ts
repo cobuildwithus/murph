@@ -20,9 +20,13 @@ export const CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES = new Set<string>(
   Object.values(CLOUDFLARE_HOSTED_RUNTIME_HOSTS),
 );
 
-// Worker-mediated transcription is signed provider egress, not an internal
-// control-plane host, so it stays out of
+// Custom inference and transcription are signed provider egress, not internal
+// control-plane hosts, so they stay out of
 // CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES.
+export const CLOUDFLARE_HOSTED_CUSTOM_INFERENCE_HOST =
+  "murph-custom-inference.worker";
+export const CLOUDFLARE_HOSTED_CUSTOM_INFERENCE_BASE_URL =
+  `http://${CLOUDFLARE_HOSTED_CUSTOM_INFERENCE_HOST}/v1`;
 export const CLOUDFLARE_HOSTED_TRANSCRIBE_HOST = "murph-transcribe.worker";
 export const CLOUDFLARE_HOSTED_TRANSCRIBE_PATH = "/v1/transcribe";
 export const CLOUDFLARE_HOSTED_TRANSCRIBE_ENDPOINT =

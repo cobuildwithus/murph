@@ -227,7 +227,7 @@ test("HomePage stops before page loaders when dashboard auth redirects", async (
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
 
   await assert.rejects(async () => {
-    await HomePage();
+    await HomePage({ searchParams: Promise.resolve({}) });
   }, /NEXT_REDIRECT:\/join/);
   assert.equal(mocks.shouldShowHomeDeviceSyncStep.mock.calls.length, 0);
   assert.equal(mocks.readHostedMemberBillingEligibilityState.mock.calls.length, 0);
@@ -240,7 +240,7 @@ test("HomePage keeps its core content when an independent projection fails", asy
   );
 
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
-  const markup = renderToStaticMarkup(await HomePage());
+  const markup = renderToStaticMarkup(await HomePage({ searchParams: Promise.resolve({}) }));
 
   assert.match(markup, /Welcome to Murph/);
   assert.match(markup, /Some dashboard details are unavailable/);
@@ -256,7 +256,7 @@ test("HomePage degrades a failed read-only usage projection without mutating all
   );
 
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
-  const markup = renderToStaticMarkup(await HomePage());
+  const markup = renderToStaticMarkup(await HomePage({ searchParams: Promise.resolve({}) }));
 
   assert.match(markup, /Welcome to Murph/);
   assert.match(markup, /Some dashboard details are unavailable/);
@@ -291,7 +291,7 @@ test("HomePage retains an authoritative usage notice when its action projection 
   );
 
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
-  const markup = renderToStaticMarkup(await HomePage());
+  const markup = renderToStaticMarkup(await HomePage({ searchParams: Promise.resolve({}) }));
 
   assert.match(markup, /Some dashboard details are unavailable/);
   assert.match(markup, /used 100% of this month(?:&#x27;|')s included Pulse usage/u);
@@ -388,7 +388,7 @@ test("HomePage hides the connect devices card when device sync is already active
   mocks.shouldShowHomeDeviceSyncStep.mockResolvedValueOnce(false);
 
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
-  const markup = renderToStaticMarkup(await HomePage());
+  const markup = renderToStaticMarkup(await HomePage({ searchParams: Promise.resolve({}) }));
 
   assert.match(markup, /Welcome to Murph/);
   assert.doesNotMatch(markup, /Connect devices/);
@@ -407,7 +407,7 @@ test("HomePage keeps active Pulse Trial users in the product without a start-pai
   mocks.readHostedMemberBillingEligibilityState.mockResolvedValueOnce(PULSE_TRIAL_BILLING_STATE);
 
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
-  const markup = renderToStaticMarkup(await HomePage());
+  const markup = renderToStaticMarkup(await HomePage({ searchParams: Promise.resolve({}) }));
 
   assert.match(markup, /Welcome to Murph/);
   assert.doesNotMatch(markup, /Start Pulse now/);
@@ -428,7 +428,7 @@ test("HomePage shows the resume billing banner for paused Pulse Trial users", as
   mocks.readHostedMemberBillingEligibilityState.mockResolvedValueOnce(PULSE_TRIAL_BILLING_STATE);
 
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
-  const markup = renderToStaticMarkup(await HomePage());
+  const markup = renderToStaticMarkup(await HomePage({ searchParams: Promise.resolve({}) }));
 
   assert.match(markup, /Resume Pulse billing/);
   assert.match(markup, /Add a payment method and resume billing/);
@@ -454,7 +454,7 @@ test("HomePage does not show a blocked banner while purchased usage remains", as
   });
 
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
-  const markup = renderToStaticMarkup(await HomePage());
+  const markup = renderToStaticMarkup(await HomePage({ searchParams: Promise.resolve({}) }));
 
   assert.doesNotMatch(markup, /Account notice/);
   assert.doesNotMatch(markup, /New replies and other AI work are blocked/);
@@ -494,7 +494,7 @@ test("HomePage shows blocked Pulse usage with an add-usage action", async () => 
   });
 
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
-  const markup = renderToStaticMarkup(await HomePage());
+  const markup = renderToStaticMarkup(await HomePage({ searchParams: Promise.resolve({}) }));
 
   assert.match(markup, /used 100% of this month(?:&#x27;|')s included Pulse usage/u);
   assert.match(markup, /Resets in 6 days/);
@@ -551,7 +551,7 @@ test("HomePage keeps the exhausted Pulse block notice when action resolution fai
   });
 
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
-  const markup = renderToStaticMarkup(await HomePage());
+  const markup = renderToStaticMarkup(await HomePage({ searchParams: Promise.resolve({}) }));
 
   assert.match(markup, /used 100% of this month(?:&#x27;|')s included Pulse usage/u);
   assert.match(markup, /New replies and other AI work are blocked/);
@@ -627,7 +627,7 @@ test("HomePage shows blocked Edge usage with an add-usage action", async () => {
   });
 
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
-  const markup = renderToStaticMarkup(await HomePage());
+  const markup = renderToStaticMarkup(await HomePage({ searchParams: Promise.resolve({}) }));
 
   assert.match(markup, /used 100% of this month(?:&#x27;|')s included Edge usage/u);
   assert.match(markup, /Resets in 6 days/);
@@ -659,7 +659,7 @@ test("HomePage shows a blocked Family usage notice without a personal action", a
   });
 
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
-  const markup = renderToStaticMarkup(await HomePage());
+  const markup = renderToStaticMarkup(await HomePage({ searchParams: Promise.resolve({}) }));
 
   assert.match(markup, /used 100% of your included usage this month/u);
   assert.match(markup, /Other Family members have separate allowances/u);
@@ -702,7 +702,7 @@ test("HomePage shows blocked trial usage with the existing Start Pulse action", 
   mocks.readHostedMemberBillingEligibilityState.mockResolvedValueOnce(PULSE_TRIAL_BILLING_STATE);
 
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
-  const markup = renderToStaticMarkup(await HomePage());
+  const markup = renderToStaticMarkup(await HomePage({ searchParams: Promise.resolve({}) }));
 
   assert.match(markup, /used 100% of your included trial usage/u);
   assert.match(markup, /New replies and other AI work are blocked/);
@@ -732,7 +732,7 @@ test("HomePage shows non-limit denied usage notices without a reset countdown", 
   });
 
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
-  const markup = renderToStaticMarkup(await HomePage());
+  const markup = renderToStaticMarkup(await HomePage({ searchParams: Promise.resolve({}) }));
 
   assert.match(markup, /Your trial just ended/);
   assert.match(markup, /included trial access is no longer active/);
@@ -881,7 +881,7 @@ test("HomePage asks for the first message when Murph has no way to send one", as
   });
 
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
-  const markup = renderToStaticMarkup(await HomePage());
+  const markup = renderToStaticMarkup(await HomePage({ searchParams: Promise.resolve({}) }));
 
   assert.match(markup, /Message Murph/);
   assert.match(markup, /Murph can&#x27;t message you first/);
@@ -901,7 +901,7 @@ test("HomePage hides the message step once Murph has a way to reach the member",
   });
 
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
-  const markup = renderToStaticMarkup(await HomePage());
+  const markup = renderToStaticMarkup(await HomePage({ searchParams: Promise.resolve({}) }));
 
   assert.doesNotMatch(markup, /Murph can&#x27;t message you first/);
   assert.match(markup, /Connect devices/);

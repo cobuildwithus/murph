@@ -4,11 +4,15 @@ import {
   resolveHostedAiUsageGate,
   type HostedAiUsageGateDecisionWithSource,
 } from "../hosted-execution/usage-allowance";
+import { readHostedRuntimeAiAccessDecision } from "../hosted-onboarding/member-access";
 
 export type HostedRuntimeUsageGateCheck =
   | {
     usageRunningLow?: true;
     status: "allowed";
+  }
+  | {
+    status: "health_data_consent_withdrawn";
   }
   | {
     decision: Extract<HostedAiUsageGateDecisionWithSource, { allowed: false }>;
@@ -25,6 +29,15 @@ export async function resolveHostedRuntimeAiUsageGate(input: {
   userId: string;
 }): Promise<HostedRuntimeUsageGateCheck> {
   const now = normalizeHostedRuntimeUsageDecisionDate(input.now);
+  const access = await readHostedRuntimeAiAccessDecision({
+    memberId: input.userId,
+    now,
+    prisma: input.prisma,
+  });
+  if (!access.allowed && access.reason === "health_data_consent_withdrawn") {
+    return { status: "health_data_consent_withdrawn" };
+  }
+
   const readGate = input.mode === "read_only"
     ? readHostedAiUsageGate
     : input.mode === "mutating"

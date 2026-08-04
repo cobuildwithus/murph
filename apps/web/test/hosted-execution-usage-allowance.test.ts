@@ -464,6 +464,70 @@ describe("hosted AI usage allowance pricing", () => {
     });
   });
 
+  it("prices Venice GPT-5.6 usage at Venice's official provider rates", () => {
+    const cases = [
+      {
+        costUsdMicros: 10_440_000n,
+        model: "gpt-5.6-luna",
+        providerModel: "openai-gpt-56-luna",
+        rates: {
+          cachedInput: "130000",
+          cacheWrite: "1560000",
+          input: "1250000",
+          output: "7500000",
+        },
+      },
+      {
+        costUsdMicros: 26_100_000n,
+        model: "gpt-5.6-terra",
+        providerModel: "openai-gpt-56-terra",
+        rates: {
+          cachedInput: "310000",
+          cacheWrite: "3910000",
+          input: "3130000",
+          output: "18750000",
+        },
+      },
+      {
+        costUsdMicros: 52_190_000n,
+        model: "gpt-5.6-sol",
+        providerModel: "openai-gpt-56-sol",
+        rates: {
+          cachedInput: "630000",
+          cacheWrite: "7810000",
+          input: "6250000",
+          output: "37500000",
+        },
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      expect(priceHostedAiUsageForAllowance({
+        ...BASE_USAGE_RECORD,
+        cachedInputTokens: 1_000_000,
+        cacheWriteTokens: 1_000_000,
+        inputTokens: 3_000_000,
+        outputTokens: 1_000_000,
+        providerName: "venice",
+        requestedModel: testCase.model,
+        servedModel: testCase.model,
+        totalTokens: 4_000_000,
+      })).toMatchObject({
+        costUsdMicros: testCase.costUsdMicros,
+        counted: true,
+        pricingSnapshot: {
+          model: testCase.model,
+          pricingSource: "https://docs.venice.ai/overview/pricing",
+          providerModel: testCase.providerModel,
+          ratesUsdMicrosPerMillionTokens: testCase.rates,
+          standardCostUsdMicros: testCase.costUsdMicros.toString(),
+          tokenPricingBasis: "standard",
+        },
+        pricingVersion: "venice-api-pricing-2026-08-04-gpt-5.6-standard",
+      });
+    }
+  });
+
   it("prices GPT-5.6 cache-write tokens at the official write rate", () => {
     expect(priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,

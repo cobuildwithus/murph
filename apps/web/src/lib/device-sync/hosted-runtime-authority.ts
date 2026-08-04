@@ -42,6 +42,7 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 
 import { createHostedDeviceSyncControlPlane } from "./control-plane";
+import { isHostedSourceDisconnectFenced } from "./connection-source-lifecycle";
 import {
   buildHostedPublicDeviceSyncAccount,
   type HostedStaticDeviceSyncConnectionRecord,
@@ -853,6 +854,11 @@ function resolveHostedRuntimeSourceUpdatesToApply(input: {
     let update = normalized.update;
     const current = currentByInstanceKey.get(update.sourceInstanceKey) ?? null;
     const currentLastSeenAt = current?.lastSeenAt ?? null;
+
+    if (current && isHostedSourceDisconnectFenced(current)) {
+      staleCount += 1;
+      continue;
+    }
 
     // The runner's snapshot can predate an arrival Web already recorded, so an
     // otherwise valid update must not carry the older value back. Forward-only

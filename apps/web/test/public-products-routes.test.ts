@@ -180,7 +180,7 @@ describe("public product API routes", () => {
 
     const response = await detailRoute.GET(
       new Request("https://example.test/api/public/v1/products/supplement_ZHNsZDox"),
-      { params: { productRef: "supplement_ZHNsZDox" } },
+      { params: Promise.resolve({ productRef: "supplement_ZHNsZDox" }) },
     );
 
     expect(response.status).toBe(200);

@@ -5,6 +5,7 @@ import { test } from "vitest";
 import {
   formatDeviceSyncAccountLabel,
   formatDeviceSyncProviderLabel,
+  resolveJunctionConnectSourceLabel,
 } from "../src/provider-label.ts";
 
 test("formatDeviceSyncProviderLabel prefers the configured source label", () => {
@@ -15,6 +16,11 @@ test("formatDeviceSyncProviderLabel uses shared Junction source labels", () => {
   assert.equal(formatDeviceSyncProviderLabel("map_my_fitness"), "MapMyFitness");
   assert.equal(formatDeviceSyncProviderLabel("accuchek_ble"), "Accu-Chek");
   assert.equal(formatDeviceSyncProviderLabel("dexcom_v3"), "Dexcom");
+});
+
+test("resolveJunctionConnectSourceLabel exposes only catalog-backed labels", () => {
+  assert.equal(resolveJunctionConnectSourceLabel("accuchek_ble"), "Accu-Chek");
+  assert.equal(resolveJunctionConnectSourceLabel("unknown_provider"), null);
 });
 
 test("formatDeviceSyncProviderLabel title-cases unknown provider identifiers", () => {

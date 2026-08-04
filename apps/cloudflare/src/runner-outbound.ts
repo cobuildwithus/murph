@@ -2186,8 +2186,9 @@ async function deleteWorkspaceSnapshotObjectBestEffort(input: {
     return true;
   } catch {
     // Unique snapshot keys can coexist in both fixed-role buckets while the
-    // online copier is running. Failed cleanup is retained for a later
-    // idempotent retry instead of leaving one role's copy live indefinitely.
+    // managed migration and cutover bridge are active. Failed cleanup is
+    // retained for a later idempotent retry instead of leaving one role's copy
+    // live indefinitely.
     return false;
   }
 }

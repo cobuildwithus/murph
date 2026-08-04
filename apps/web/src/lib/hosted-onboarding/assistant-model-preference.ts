@@ -24,6 +24,12 @@ import {
   type HostedAssistantReasoningEffort,
   type HostedAssistantReasoningEffortOverride,
 } from "@murphai/hosted-execution/assistant-model";
+import {
+  HOSTED_CUSTOM_INFERENCE_VERIFICATION_PROFILE,
+  buildHostedCustomInferenceModelAlias,
+  requireHostedInferenceProtocol,
+  type HostedAssistantCustomInferenceOverride,
+} from "@murphai/hosted-execution/assistant-inference";
 
 import {
   parseHostedBillingPhase,
@@ -83,6 +89,16 @@ export const HOSTED_MEMBER_ASSISTANT_MODEL_SELECT = {
     },
   },
   billingStatus: true,
+  inferenceConnection: {
+    select: {
+      contextWindowTokens: true,
+      protocol: true,
+      revision: true,
+      selected: true,
+      supportsImages: true,
+      verificationProfile: true,
+    },
+  },
   suspendedAt: true,
   threadContainer: {
     select: {
@@ -117,7 +133,10 @@ export interface HostedMemberAssistantModelResolution {
   availableProviders: readonly HostedAssistantProvider[];
   availableReasoningEfforts: readonly HostedAssistantReasoningEffort[];
   configurationAvailable: boolean;
+  customInferenceReverificationRequired: boolean;
+  customInferenceSelected: boolean;
   dormantSolPreference: boolean;
+  hostedAssistantCustomInferenceOverride?: HostedAssistantCustomInferenceOverride;
   hostedAssistantModelOverride?: HostedAssistantModelOverride;
   hostedAssistantProviderOverride?: HostedAssistantProviderOverride;
   hostedAssistantReasoningEffortOverride?: HostedAssistantReasoningEffortOverride;
@@ -341,6 +360,8 @@ export function resolveHostedMemberAssistantModel(
       availableProviders: [],
       availableReasoningEfforts: [],
       configurationAvailable: false,
+      customInferenceReverificationRequired: false,
+      customInferenceSelected: false,
       dormantSolPreference: false,
       model: HOSTED_ASSISTANT_TERRA_MODEL,
       provider: HOSTED_ASSISTANT_DEFAULT_PROVIDER,
@@ -353,6 +374,29 @@ export function resolveHostedMemberAssistantModel(
   const configurationAvailable = isThreadContainerMember
     ? member.suspendedAt === null
     : isHostedPersonalAssistantConfigurationAvailable(member);
+  const inferenceConnection = configurationAvailable && !isThreadContainerMember
+    ? member.inferenceConnection
+    : null;
+  const customInferenceSelected = inferenceConnection?.selected === true;
+  const customInferenceReverificationRequired = customInferenceSelected
+    && inferenceConnection.verificationProfile
+      !== HOSTED_CUSTOM_INFERENCE_VERIFICATION_PROFILE;
+  const customInferenceOverride = customInferenceSelected
+      && !customInferenceReverificationRequired
+      && inferenceConnection
+    ? {
+        contextWindowTokens: inferenceConnection.contextWindowTokens,
+        modelAlias: buildHostedCustomInferenceModelAlias(
+          inferenceConnection.revision,
+        ),
+        protocol: requireHostedInferenceProtocol(
+          inferenceConnection.protocol,
+        ),
+        revision: inferenceConnection.revision,
+        supportsImages: inferenceConnection.supportsImages,
+        verificationProfile: inferenceConnection.verificationProfile,
+      } satisfies HostedAssistantCustomInferenceOverride
+    : null;
   const solAvailable = isThreadContainerMember || isHostedMemberSolModelEligible({
     accountGroupMemberships: member.accountGroupMemberships,
     billingStatus: member.billingStatus,
@@ -409,7 +453,12 @@ export function resolveHostedMemberAssistantModel(
         : HOSTED_ASSISTANT_REASONING_EFFORTS
       : [],
     configurationAvailable,
+    customInferenceReverificationRequired,
+    customInferenceSelected,
     dormantSolPreference,
+    ...(customInferenceOverride
+      ? { hostedAssistantCustomInferenceOverride: customInferenceOverride }
+      : {}),
     ...(model !== HOSTED_ASSISTANT_TERRA_MODEL
       ? { hostedAssistantModelOverride: model }
       : {}),

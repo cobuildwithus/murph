@@ -4,6 +4,7 @@ import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@murphai/runtime-state/node/runtim
 import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
 
 import {
+  createDefaultImporterPort,
   createDeviceSyncService,
   SqliteDeviceSyncStore,
 } from "@murphai/device-syncd/service";
@@ -13,8 +14,14 @@ import type {
   CreateDeviceSyncServiceInput,
   DeviceSyncService,
 } from "@murphai/device-syncd/service";
-import type { ProviderJobConnectionSource } from "@murphai/device-syncd/types";
-import type { HostedRuntimeDeviceSyncPort } from "./hosted-runtime/platform.ts";
+import type {
+  DeviceSyncImporterPort,
+  ProviderJobConnectionSource,
+} from "@murphai/device-syncd/types";
+import {
+  HostedRuntimeArtifactWriteError,
+  type HostedRuntimeDeviceSyncPort,
+} from "./hosted-runtime/platform.ts";
 
 const storeByService = new WeakMap<DeviceSyncService, SqliteDeviceSyncStore>();
 
@@ -29,9 +36,12 @@ export function createHostedRuntimeDeviceSyncService(
   );
 
   try {
-    const { deviceSyncPort, ...serviceInput } = input;
+    const { deviceSyncPort, importer, ...serviceInput } = input;
     const service = createDeviceSyncService({
       ...serviceInput,
+      importer: createHostedRuntimeDeviceSyncImporter(
+        importer ?? createDefaultImporterPort(),
+      ),
       ...(deviceSyncPort
         ? {
             listConnectionSourcesForJob: async (sourceInput) =>
@@ -50,6 +60,29 @@ export function createHostedRuntimeDeviceSyncService(
     store.close();
     throw error;
   }
+}
+
+function createHostedRuntimeDeviceSyncImporter(
+  importer: DeviceSyncImporterPort,
+): DeviceSyncImporterPort {
+  return {
+    async importDeviceProviderSnapshot(input) {
+      try {
+        return await importer.importDeviceProviderSnapshot(input);
+      } catch (error) {
+        if (!(error instanceof HostedRuntimeArtifactWriteError)) {
+          throw error;
+        }
+        throw deviceSyncError({
+          cause: error,
+          code: "HOSTED_DEVICE_SYNC_ARTIFACT_WRITE_FAILED",
+          httpStatus: error.retryable ? 503 : 500,
+          message: "Hosted device-sync artifact persistence failed. Retry shortly.",
+          retryable: error.retryable,
+        });
+      }
+    },
+  };
 }
 
 async function listHostedJobConnectionSources(input: {

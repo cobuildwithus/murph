@@ -1,5 +1,11 @@
-import { resolveDeviceConnectSourceById } from "./config/connect-routes.ts";
-import { resolveJunctionConnectSourceLabel } from "./config/junction-connect-sources.ts";
+import {
+  resolveDeviceConnectSourceById,
+  resolveJunctionDeviceConnectRouteByProviderSlug,
+} from "./config/connect-routes.ts";
+
+export function resolveJunctionConnectSourceLabel(providerSlug: string): string | null {
+  return resolveJunctionDeviceConnectRouteByProviderSlug(providerSlug)?.source.label ?? null;
+}
 
 export function formatDeviceSyncProviderLabel(provider: string): string {
   const directConnectSourceLabel = resolveDeviceConnectSourceById(provider)?.label;

@@ -113,6 +113,9 @@ import type {
   AssistantProviderSessionOptions,
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import type {
+  AssistantResponseCard,
+} from '@murphai/operator-config/assistant-response-cards'
 import {
   normalizeAssistantProviderConfig,
   serializeAssistantProviderSessionOptions,
@@ -566,6 +569,106 @@ describe('Codex model catalog', () => {
     expect(catalog.selectedModel?.id).toBe('custom-codex')
     expect(resolveCodexCatalogReasoningOptions(null)).toEqual([])
     expect(findCodexCatalogModelOptionIndex(null, [])).toBe(0)
+  })
+
+  it('propagates a singular response card through the provider turn result', async () => {
+    const route = createRoute()
+    const session = createAssistantSession({
+      providerOptions: route.providerOptions,
+    })
+    const input = {
+      prompt: 'Render the already computed nutrition card.',
+      vault: '/vaults/test',
+    } satisfies Parameters<typeof executeCodexTurnWithRecovery>[0]['input']
+    const card: AssistantResponseCard = {
+      kind: 'daily_nutrition',
+      localDate: '2026-07-28',
+      mealCount: 3,
+      totals: {
+        calories: { total: 1_490.25, mealCount: 3 },
+        proteinGrams: { total: 94.5, mealCount: 3 },
+        carbsGrams: { total: 193.125, mealCount: 3 },
+        fatGrams: { total: 34.75, mealCount: 3 },
+      },
+    }
+    const providerAttempt = createProviderAttemptResult()
+    if (!providerAttempt.ok) {
+      throw new Error('Expected a successful provider fixture.')
+    }
+
+    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportedUserMessageContentTypes: ['text'],
+      supportsReasoningEffort: true,
+    })
+    providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue({
+      ...providerAttempt,
+      result: {
+        ...providerAttempt.result,
+        responseCard: card,
+        responseMedia: null,
+      },
+    })
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
+      activeTurnSteering: null,
+      executionContext: { hosted: null },
+      input,
+      profile: {
+        promptProfile: 'conversation',
+        toolProfile: 'provider-turn',
+        threadScope: 'session-thread',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-07-28',
+        currentTimeZone: 'UTC',
+      },
+      route,
+      sharedPlan: createSharedPlan(),
+      turnId: 'turn-response-card-propagation',
+    } satisfies AssistantCodexTurnExecutionPlan)
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
+      attemptCount: 1,
+      route,
+      routePlan: {
+        assistantContractFingerprint: 'a'.repeat(64),
+        assistantCliContract: null,
+        cliEnv: {},
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        } satisfies AssistantCodexContinuation,
+        developerInstructions: null,
+        diagnosticsPolicy: {
+          environment: 'local',
+          privateIssueCaptureEnabled: false,
+          surface: null,
+        },
+        dynamicTools: [],
+        onboardingGuidanceInjected: false,
+        planningDiagnostics: createRoutePlanningDiagnostics(),
+        promptCacheMetadata: null,
+        resume: null,
+        sessionContext: undefined,
+        systemPrompt: null,
+        turnContextPrompt: null,
+        workingDirectory: '/work',
+      } satisfies AssistantRouteTurnPlan,
+      session,
+    } satisfies AssistantCodexAttemptPlan)
+
+    const outcome = await executeCodexTurnWithRecovery({
+      input,
+      plan: createSharedPlan(),
+      resolvedSession: session,
+      route,
+      turnCreatedAt: '2026-07-28T00:00:00.000Z',
+      turnId: 'turn-response-card-propagation',
+    })
+
+    expect(outcome.kind).toBe('succeeded')
+    if (outcome.kind !== 'succeeded') {
+      throw new Error('Expected a successful provider outcome.')
+    }
+    expect(outcome.providerTurn.responseCard).toEqual(card)
+    expect(outcome.providerTurn.responseMedia).toEqual([])
   })
 
   it('enforces the output-only boundary at provider execution', async () => {

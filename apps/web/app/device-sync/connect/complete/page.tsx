@@ -15,8 +15,8 @@ export const metadata: Metadata = createMurphPageMetadata({
 export default async function DeviceSyncConnectCompletePage({
   searchParams,
 }: {
-  searchParams?: Promise<DeviceSyncCompletionSearchParams>;
-} = {}) {
-  const resolvedSearchParams = searchParams ? await searchParams : {};
+  searchParams: Promise<DeviceSyncCompletionSearchParams>;
+}) {
+  const resolvedSearchParams = await searchParams;
   redirect(buildDeviceSyncCompletionHomeRedirectHref(resolvedSearchParams));
 }

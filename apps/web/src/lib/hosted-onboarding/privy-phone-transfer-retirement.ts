@@ -29,9 +29,9 @@ import { acquireHostedLinqParticipantPhoneLockTx } from "./linq-participant-cont
 import { normalizePhoneNumber } from "./phone";
 import {
   readHostedPrivyUserByIdIfExists,
-  resolveHostedPrivyIdentityFromVerifiedUser,
   type HostedPrivyIdentity,
 } from "./privy";
+import { resolveHostedPrivyLinkedAccountState } from "./privy-shared";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   lockHostedMemberRow,
@@ -134,7 +134,7 @@ export async function readHostedPrivyPhoneTransferProof(input: {
     // account because it carries other login methods, so it will never be
     // deleted and retrying can never resolve anything.
     const survivingSourcePhoneNumber =
-      resolveHostedPrivyIdentityFromVerifiedUser(sourcePrivyUser).phone?.number;
+      resolveHostedPrivyLinkedAccountState(sourcePrivyUser).phone?.number;
     const survivingSourceStillHoldsPhone = Boolean(
       survivingSourcePhoneNumber
       && normalizePhoneNumber(survivingSourcePhoneNumber)
