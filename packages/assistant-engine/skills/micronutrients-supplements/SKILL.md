@@ -55,7 +55,8 @@ Ask: "Are you trying to correct a known low lab, improve a symptom/performance t
 For every named supplement product, brand, exact dose, serving, ingredient-panel
 question, product image or list, and create or update request, use
 `vault-cli supplement search-labels` for one product or
-`vault-cli supplement search-labels-batch` for several before relying on memory
+`vault-cli
+supplement search-labels-batch` for several before relying on memory
 or web search. Batch a multi-product stack instead of looking up each item
 serially. Skip exact-product lookup only for a genuinely generic evidence
 question where product identity, serving, formulation, and market status cannot
