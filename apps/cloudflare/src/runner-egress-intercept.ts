@@ -1554,8 +1554,13 @@ async function maybeHandleVeniceRequest(input: {
     headers,
     { body: upstreamBody },
   );
-  const diagnosticBody = upstreamRequest.clone();
-  const canonicalModelKind = readHostedResponsesRequestModelKind(body);
+  const captureMemoryDiagnostic = isHostedCodexMemoryRequest(input.request);
+  const diagnosticBody = captureMemoryDiagnostic
+    ? upstreamRequest.clone()
+    : null;
+  const canonicalModelKind = captureMemoryDiagnostic
+    ? readHostedResponsesRequestModelKind(body)
+    : null;
   let response: Response;
   try {
     response = await fetchAuthorizedProviderUpstream({
@@ -1567,6 +1572,29 @@ async function maybeHandleVeniceRequest(input: {
       url: input.url,
     });
   } catch (error) {
+    if (diagnosticBody) {
+      const diagnosticPromise = emitHostedRunnerOpenAiCacheDiagnostic({
+        canonicalModelKind,
+        ctx: input.ctx ?? null,
+        endpointKind: readVeniceCacheDiagnosticEndpointKind(pathMatch.pathnameSuffix),
+        env: input.env,
+        providerKind: "venice",
+        providerResponseTtfbMs: Date.now() - startedAt,
+        providerTransportFailed: true,
+        request: input.request,
+        upstreamRequestBody: diagnosticBody,
+        userId: authorization.userId,
+        writeFence: authorization.writeFence,
+      });
+      await scheduleOrAwaitHostedProviderDiagnostic({
+        ctx: input.ctx ?? null,
+        promise: diagnosticPromise,
+      });
+    }
+    throw error;
+  }
+
+  if (diagnosticBody) {
     const diagnosticPromise = emitHostedRunnerOpenAiCacheDiagnostic({
       canonicalModelKind,
       ctx: input.ctx ?? null,
@@ -1574,8 +1602,8 @@ async function maybeHandleVeniceRequest(input: {
       env: input.env,
       providerKind: "venice",
       providerResponseTtfbMs: Date.now() - startedAt,
-      providerTransportFailed: true,
       request: input.request,
+      response,
       upstreamRequestBody: diagnosticBody,
       userId: authorization.userId,
       writeFence: authorization.writeFence,
@@ -1584,26 +1612,7 @@ async function maybeHandleVeniceRequest(input: {
       ctx: input.ctx ?? null,
       promise: diagnosticPromise,
     });
-    throw error;
   }
-
-  const diagnosticPromise = emitHostedRunnerOpenAiCacheDiagnostic({
-    canonicalModelKind,
-    ctx: input.ctx ?? null,
-    endpointKind: readVeniceCacheDiagnosticEndpointKind(pathMatch.pathnameSuffix),
-    env: input.env,
-    providerKind: "venice",
-    providerResponseTtfbMs: Date.now() - startedAt,
-    request: input.request,
-    response,
-    upstreamRequestBody: diagnosticBody,
-    userId: authorization.userId,
-    writeFence: authorization.writeFence,
-  });
-  await scheduleOrAwaitHostedProviderDiagnostic({
-    ctx: input.ctx ?? null,
-    promise: diagnosticPromise,
-  });
   return response;
 }
 
@@ -1993,6 +2002,22 @@ function readVeniceCacheDiagnosticEndpointKind(
   return pathnameSuffix === "/responses/compact"
     ? "responses_compact"
     : "responses";
+}
+
+function isHostedCodexMemoryRequest(request: Request): boolean {
+  const header = request.headers.get(
+    OPENAI_CACHE_DIAGNOSTIC_CODEX_TURN_METADATA_HEADER,
+  )?.trim();
+  if (!header) {
+    return false;
+  }
+  try {
+    const parsed = JSON.parse(header);
+    return isHostedOpenAiDiagnosticRecord(parsed)
+      && parsed.request_kind === "memory";
+  } catch {
+    return false;
+  }
 }
 
 function readHostedResponsesRequestModelKind(body: ArrayBuffer): string | null {

@@ -47,13 +47,14 @@ correlation fields retain their current contract and limits.
 ### Provider request diagnostics
 
 `runner.provider_egress_diagnostic` is the bounded provider-request trace for
-hosted OpenAI and Venice Responses traffic. Version 2 records request and input
-byte counts, allowlisted shape/model kinds, cache-key presence, and keyed prefix
-fingerprints. Venice rows additionally record the canonical Murph model, the
-allowlisted upstream Venice model id, response-header latency, HTTP outcome,
-validated `CF-RAY`, bounded provider retry count, and whether the provider's
-reported model matches the requested route. `providerResponseTtfbMs` measures
-time through response headers, not full streamed-generation latency.
+hosted OpenAI Responses traffic and Venice Responses calls explicitly tagged by
+Codex as `request_kind: memory`. Version 2 records request and input byte counts,
+allowlisted shape/model kinds, cache-key presence, and keyed prefix fingerprints.
+Venice memory rows additionally record the canonical Murph model, the allowlisted
+upstream Venice model id, response-header latency, HTTP outcome, validated
+`CF-RAY`, bounded provider retry count, and whether the provider's reported model
+matches the requested route. `providerResponseTtfbMs` measures time through
+response headers, not full streamed-generation latency.
 
 Codex `session_id`, `thread_id`, `turn_id`, and `window_id` values are never
 stored. When `HOSTED_LOG_FINGERPRINT_SECRET` is configured, the Worker records
@@ -65,10 +66,11 @@ headers, account balances, credentials, paths, vault content, and direct member
 identifiers remain excluded.
 
 The row is observability only and remains failure-isolated from provider egress.
-Container egress persists it through the existing awaited callback fallback
-when a Cloudflare `waitUntil` scheduler is unavailable. Non-OK and
-transport-error diagnostics use warning retention, while
-accepted and request-only diagnostics use debug retention.
+Venice foreground and untagged calls do not create these rows. Container egress
+persists tagged memory rows through the existing awaited callback fallback when
+a Cloudflare `waitUntil` scheduler is unavailable. Non-OK and transport-error
+diagnostics use warning retention, while accepted and request-only diagnostics
+use debug retention.
 
 ## Append and deletion serialization
 

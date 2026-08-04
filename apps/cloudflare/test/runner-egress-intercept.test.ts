@@ -2717,6 +2717,42 @@ describe("hostedRunnerIntercept", () => {
     expect(JSON.stringify(runtimeLogBody)).not.toContain(privateTransportDetail);
   });
 
+  it("does not persist Venice provider diagnostics for foreground turns", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const credential = await createTestProviderEgressCredential({
+      providerKind: "venice",
+    });
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.venice.ai/api/v1/responses", {
+        body: JSON.stringify({
+          input: "synthetic foreground request",
+          model: "gpt-5.6-sol",
+          stream: true,
+        }),
+        headers: {
+          authorization: `Bearer ${credential}`,
+          "content-type": "application/json",
+          "x-codex-turn-metadata": JSON.stringify({ request_kind: "turn" }),
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        VENICE_API_KEY: "venice-worker-secret",
+        validateRuntimeProviderEgressCredential: async (input) =>
+          createProviderEgressCredentialValidationResult(input),
+        validateRuntimeWriteFence: async () => true,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(new URL(readFetchTargetUrl(fetchMock.mock.calls[0]?.[0])).hostname)
+      .toBe("api.venice.ai");
+  });
+
   it("normalizes Responses Lite tools before Venice upstream egress", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
