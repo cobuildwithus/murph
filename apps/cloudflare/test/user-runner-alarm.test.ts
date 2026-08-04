@@ -1931,6 +1931,38 @@ describe("HostedUserRunner execution coordination", () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 
+  it("completes a racing managed-usage denial without recording a runtime failure", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureReadyForProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
+    >(async () => ({ kind: "ready" }));
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureReadyForProcessing,
+      platformAiUsageAllowed: false,
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+
+    await vi.waitFor(() => {
+      expect(invoke).toHaveBeenCalledOnce();
+      expect(readRunnerMeta(sql)).toMatchObject({
+        active_attempt_id: null,
+        failure_count: 0,
+        last_error_code: null,
+        wake_at: null,
+      });
+    });
+  });
+
   it("returns timeout retry cadence and clears the fresh fence when startup readiness times out", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -5445,6 +5477,7 @@ function createRunnerHarness(input: {
   onStatusRead?: () => Promise<void> | void;
   onStorageList?: (input: { prefix?: string }) => Promise<void> | void;
   onWorkspaceRead?: (input: { timeoutMs: number }) => Promise<void> | void;
+  platformAiUsageAllowed?: boolean;
   readActiveRuntimeUserFence?: HostedExecutionContainerStubLike["readActiveRuntimeUserFence"];
   ownerReleaseResponse?: () => Promise<Response> | Response;
   runtimeLogResponse?: () => Promise<Response> | Response;
@@ -5575,6 +5608,7 @@ function createRunnerHarness(input: {
     onStatusRead: input.onStatusRead,
     onOwnerReleased: input.onOwnerReleased,
     onWorkspaceRead: input.onWorkspaceRead,
+    platformAiUsageAllowed: input.platformAiUsageAllowed,
     runtimeLogResponse: input.runtimeLogResponse,
     ownerReleaseResponse: input.ownerReleaseResponse,
   });
@@ -5787,6 +5821,7 @@ function installWebControlResponses(
     readMailboxLag?: () => HostedRuntimeWebStatusResponse["mailboxLag"];
     runtimeLogResponse?: () => Promise<Response> | Response;
     ownerReleaseResponse?: () => Promise<Response> | Response;
+    platformAiUsageAllowed?: boolean;
   } = {},
 ): void {
   mocks.fetchHostedExecutionWebControlPlaneResponse.mockImplementation(
@@ -5799,6 +5834,9 @@ function installWebControlResponses(
         await hooks.onWorkspaceRead?.({ timeoutMs: input.timeoutMs });
         return jsonResponse({
           fetchedAt: FIXED_NOW,
+          ...(hooks.platformAiUsageAllowed === undefined
+            ? {}
+            : { platformAiUsageAllowed: hooks.platformAiUsageAllowed }),
           workspace,
         });
       }
@@ -6110,6 +6148,7 @@ function readRunnerMeta(sql: TestSqlStorageLike): {
   active_workspace_version: string | null;
   backoff_until: null;
   failure_count: number;
+  last_error_code: string | null;
   last_invocation_at: string | null;
   wake_at: null;
 } {
@@ -6121,6 +6160,7 @@ function readRunnerMeta(sql: TestSqlStorageLike): {
     active_workspace_version: string | null;
     backoff_until: null;
     failure_count: number;
+    last_error_code: string | null;
     last_invocation_at: string | null;
     wake_at: null;
   }>(
@@ -6131,6 +6171,7 @@ function readRunnerMeta(sql: TestSqlStorageLike): {
             active_workspace_version,
             NULL AS backoff_until,
             failure_count,
+            last_error_code,
             last_invocation_at,
             NULL AS wake_at
      FROM runner_meta

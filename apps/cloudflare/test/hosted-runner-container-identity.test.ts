@@ -507,7 +507,7 @@ describe("hosted runner container identity", () => {
     })).resolves.toEqual(runtimeTarget);
   });
 
-  it("rejects a managed route when allowance changed after reconciliation", async () => {
+  it("binds a denied managed allowance to the fresh runtime fence", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const durable = createRunnerDurableState();
@@ -532,16 +532,24 @@ describe("hosted runner container identity", () => {
       userId: TEST_USER_ID,
     });
 
-    await expect(service.prepareWithFence({
+    const prepared = await service.prepareWithFence({
       input: {
         orchestrationAttemptId: "orchestration_attempt_managed_denied",
         userId: TEST_USER_ID,
       },
       token,
-    })).rejects.toThrow(
-      "Hosted managed inference was no longer allowed during invocation preparation.",
-    );
+    });
     expect(invokedContainerNames).toEqual([]);
+    if (!prepared.token.providerEgressToken) {
+      throw new Error("Expected a provider egress token on the active fence.");
+    }
+    await expect(stateStore.validateProviderEgressToken({
+      providerEgressToken: prepared.token.providerEgressToken,
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      owns: true,
+      platformAiUsageAllowed: false,
+    });
   });
 
   it("lets inbox media retention run under a denied allowance while metered egress stays blocked", async () => {
@@ -568,7 +576,8 @@ describe("hosted runner container identity", () => {
       userId: TEST_USER_ID,
     });
 
-    // Modes that can reach a model stay blocked under a denied allowance.
+    // System-mailbox work uses the same denied provider-egress fence as the
+    // default runtime path.
     await expect(service.prepareWithFence({
       input: {
         orchestrationAttemptId: "orchestration_attempt_system_mailbox_denied",
@@ -576,9 +585,9 @@ describe("hosted runner container identity", () => {
         userId: TEST_USER_ID,
       },
       token,
-    })).rejects.toThrow(
-      "Hosted managed inference was no longer allowed during invocation preparation.",
-    );
+    })).resolves.toMatchObject({
+      workspaceVersion: "0",
+    });
 
     await expect(service.prepareWithFence({
       input: {

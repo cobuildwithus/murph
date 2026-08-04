@@ -236,15 +236,12 @@ export class RuntimeInvocationService {
       }
       platformAiUsageAllowed = workspaceRead.platformAiUsageAllowed;
     } else if (workspaceRead.platformAiUsageAllowed === false) {
-      if (input.input.processingMode !== "inbox_media_retention") {
-        throw new Error(
-          "Hosted managed inference was no longer allowed during invocation preparation.",
-        );
-      }
-      // Inbox media retention deletes expired private media without any model
-      // call, so a denied managed allowance must not block it. Binding the
-      // denial into the write fence keeps every metered provider egress
-      // rejected for the run anyway.
+      // A payloadless direct wake can win the race with Temporal's usage-block
+      // reconciliation. Keep that expected product block out of transport
+      // failure state: the mailbox adapter will expose the canonical empty
+      // denied prefix, while the bound fence rejects every metered provider
+      // egress if the invocation reaches one unexpectedly. Retention-only work
+      // can also proceed because it needs no model call.
       platformAiUsageAllowed = false;
     }
     const customInferenceEnvelope = customInferenceTarget
