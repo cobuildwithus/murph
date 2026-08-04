@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: codex-zepp-apple-health-relay
+  group: codex-zepp-pr-verification
   cancel-in-progress: false
 
 jobs:
