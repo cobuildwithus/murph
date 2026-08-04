@@ -139,4 +139,4 @@ export function toRedactedPublicDeviceSyncAccount(
   } satisfies PublicDeviceSyncAccount;
 }
 
-export { sanitizeStoredDeviceSyncMetadata } from "./shared.ts";
+export { sanitizeStoredDeviceSyncMetadata } from "./metadata.ts";

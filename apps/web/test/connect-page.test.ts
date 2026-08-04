@@ -162,7 +162,7 @@ afterEach(() => {
 });
 
 test("ConnectPage renders source search, source names, and logo marks", async () => {
-  const { default: ConnectPage, metadata } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage, metadata } = await import("../app/(dashboard)/connect/connect-page-content");
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.equal(metadata.title, "Connect Devices — Murph");
@@ -393,7 +393,7 @@ test("ConnectPage maps the WHOOP setup Messages option at the server boundary", 
     },
   ]);
 
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const page = await ConnectPage();
 
   assert.deepEqual(readWhoopSyncContactAction(page), {
@@ -414,7 +414,7 @@ test("ConnectPage preserves the WHOOP setup Telegram option at the server bounda
     },
   ]);
 
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const page = await ConnectPage();
 
   assert.deepEqual(readWhoopSyncContactAction(page), {
@@ -431,7 +431,7 @@ test("ConnectPage fails open when the WHOOP setup contact route cannot resolve",
     new Error("contact routing unavailable"),
   );
 
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const page = await ConnectPage();
 
   assert.equal(readWhoopSyncContactAction(page), null);
@@ -568,7 +568,7 @@ test("ConnectPage enables Garmin when Junction exposes Garmin as a connect targe
   vi.stubEnv("JUNCTION_PROVIDER_FILTER", "garmin");
   vi.stubEnv("JUNCTION_REGION", "us");
 
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.match(markup, /aria-label="Connect Garmin"/u);
@@ -585,7 +585,7 @@ test("ConnectPage hides Strava when direct and Junction connection routes are co
   vi.stubEnv("JUNCTION_PROVIDER_FILTER", "strava");
   vi.stubEnv("JUNCTION_REGION", "us");
 
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.doesNotMatch(markup, />Strava</u);
@@ -608,7 +608,7 @@ test("ConnectPage preserves an existing Strava connection for status and disconn
     ],
   });
 
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.match(markup, /Strava connected/u);
@@ -639,7 +639,7 @@ test("ConnectPage does not offer Strava reconnection for an existing account nee
     ],
   });
 
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.match(markup, /Strava needs attention from the connected app/u);
@@ -655,7 +655,7 @@ test("ConnectPage enables every Link source exposed by the shared Junction defau
   vi.stubEnv("JUNCTION_REGION", "us");
 
   const { default: ConnectPage, resolveConfiguredConnectSources } = await import(
-    "../app/(dashboard)/connect/page"
+    "../app/(dashboard)/connect/connect-page-content"
   );
   const { JUNCTION_DEFAULT_PROVIDER_FILTER } = await import("@murphai/device-syncd/config");
   const markup = renderToStaticMarkup(await ConnectPage());
@@ -669,7 +669,7 @@ test("ConnectPage enables every Link source exposed by the shared Junction defau
   assert.doesNotMatch(markup, />Accu-Chek</u);
   assert.doesNotMatch(markup, />Samsung Health</u);
 
-  const { listVisibleConnectSources } = await import("../app/(dashboard)/connect/page");
+    const { listVisibleConnectSources } = await import("../app/(dashboard)/connect/connect-page-content");
   const visibleSourceIds = new Set(listVisibleConnectSources().map((source) => source.id));
   const configuredSourceIds = new Set(
     (await import("@murphai/device-syncd/config")).DEVICE_CONNECT_SOURCES
@@ -729,7 +729,7 @@ test("ConnectPage enables mapped Junction Link source slugs only", async () => {
   vi.stubEnv("JUNCTION_PROVIDER_FILTER", "map_my_fitness,beurer_api");
   vi.stubEnv("JUNCTION_REGION", "us");
 
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.match(markup, /aria-label="Connect MapMyFitness"/u);
@@ -759,7 +759,7 @@ test("ConnectSourcesGrid posts mapped Junction connect targets", async () => {
   });
   vi.stubGlobal("fetch", fetch);
 
-  const { resolveConfiguredConnectSources } = await import("../app/(dashboard)/connect/page");
+  const { resolveConfiguredConnectSources } = await import("../app/(dashboard)/connect/connect-page-content");
   const { ConnectSourcesGrid } = await import("../app/(dashboard)/connect/connect-page-client");
   const logo = { className: "size-11 object-contain", height: 44, src: "/logo.png", width: 44 };
   const [source] = resolveConfiguredConnectSources([
@@ -832,7 +832,7 @@ test("ConnectPage marks direct and Junction upstream sources connected from host
     ],
   });
 
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.match(markup, /Oura connected/);
@@ -867,7 +867,7 @@ test("ConnectPage marks iOS Apple Health Junction SDK source connected from host
     ],
   });
 
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.match(markup, /Apple Health connected/u);
@@ -904,7 +904,7 @@ test("ConnectPage shows source-scoped disconnects for multi-source Junction acco
     ],
   });
 
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.match(markup, /Apple Health connected/u);
@@ -942,7 +942,7 @@ test("ConnectPage scopes disconnects by every non-disconnected Junction upstream
     ],
   });
 
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.match(markup, /Garmin connected/u);
@@ -986,7 +986,7 @@ test("ConnectPage keeps source disconnects visible for parent-level Junction rea
     ],
   });
 
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.match(markup, /Apple Health needs reconnect/u);
@@ -1032,7 +1032,7 @@ test("ConnectPage does not apply parent Junction reauthorization to disconnected
     ],
   });
 
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.match(markup, /Garmin needs reconnect/u);
@@ -1067,7 +1067,7 @@ test("ConnectPage shows mobile-managed guidance for Apple Health reconnect state
     ],
   });
 
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.match(markup, /Apple Health needs reconnect/u);
@@ -1115,7 +1115,7 @@ test("ConnectPage ignores disconnected Junction upstream projections on active c
     ],
   });
 
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.match(markup, /Oura connected/u);
@@ -1145,7 +1145,7 @@ test("ConnectPage surfaces reauthorization-required sources as reconnectable", a
     ],
   });
 
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.match(markup, /Whoop needs reconnect/);
@@ -1173,7 +1173,7 @@ test("ConnectPage keeps disconnected sources quiet and connectable", async () =>
     ],
   });
 
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.match(markup, /Whoop not connected/);
@@ -1205,7 +1205,7 @@ test("ConnectPage surfaces active sources with reconnect action as reconnectable
     ],
   });
 
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.match(markup, /Whoop needs reconnect/);
@@ -1245,7 +1245,7 @@ test("ConnectPage preserves unambiguous Junction source reconnects with upstream
     ],
   });
 
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.match(markup, /Whoop needs reconnect/u);
@@ -1256,7 +1256,7 @@ test("ConnectPage preserves unambiguous Junction source reconnects with upstream
 });
 
 test("ConnectPage lets active state win when duplicate rows mention the same source", async () => {
-  const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/page");
+  const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/connect-page-content");
 
   assert.deepEqual(
     resolveConnectSourceConnectionStates([{ id: "whoop" }], [
@@ -1291,7 +1291,7 @@ test("ConnectPage lets active state win when duplicate rows mention the same sou
 });
 
 test("ConnectPage maps Apple Health Junction upstream slugs to the visible source", async () => {
-  const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/page");
+  const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/connect-page-content");
 
   for (const sourceProviderSlug of ["apple_health_kit", "apple_health"]) {
     assert.deepEqual(
@@ -1324,7 +1324,7 @@ test("ConnectPage maps Apple Health Junction upstream slugs to the visible sourc
 });
 
 test("ConnectPage carries source-scoped disconnect ids for multi-source upstream projections", async () => {
-  const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/page");
+  const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/connect-page-content");
 
   assert.deepEqual(
     resolveConnectSourceConnectionStates([{ id: "apple-health" }, { id: "whoop" }], [
@@ -1372,7 +1372,7 @@ test("ConnectPage carries source-scoped disconnect ids for multi-source upstream
 });
 
 test("ConnectPage preserves reconnect action on active source matches", async () => {
-  const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/page");
+  const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/connect-page-content");
 
   assert.deepEqual(
     resolveConnectSourceConnectionStates([{ id: "whoop" }], [
@@ -1399,7 +1399,7 @@ test("ConnectPage preserves reconnect action on active source matches", async ()
 });
 
 test("ConnectPage lets Junction source reconnect win over healthy duplicate direct source", async () => {
-  const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/page");
+  const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/connect-page-content");
 
   assert.deepEqual(
     resolveConnectSourceConnectionStates([{ id: "whoop" }], [
@@ -1440,7 +1440,7 @@ test("ConnectPage lets Junction source reconnect win over healthy duplicate dire
 });
 
 test("ConnectPage keeps healthy Junction child sources connected when another child needs reconnect", async () => {
-  const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/page");
+  const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/connect-page-content");
 
   assert.deepEqual(
     resolveConnectSourceConnectionStates([{ id: "garmin" }, { id: "whoop" }], [
@@ -1495,7 +1495,7 @@ test("ConnectPage keeps healthy Junction child sources connected when another ch
 });
 
 test("ConnectPage gives each reconnect-required Junction child its own target", async () => {
-  const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/page");
+  const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/connect-page-content");
 
   assert.deepEqual(
     resolveConnectSourceConnectionStates([{ id: "garmin" }, { id: "whoop" }], [
@@ -1597,7 +1597,7 @@ test("ConnectPage adds source-scoped disconnects beside Junction reconnect actio
     ],
   });
 
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.match(markup, /Garmin needs reconnect/u);
@@ -1610,7 +1610,7 @@ test("ConnectPage adds source-scoped disconnects beside Junction reconnect actio
 });
 
 test("ConnectPage projects Junction connection-reset sources with account-scoped disconnects", async () => {
-  const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/page");
+  const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/connect-page-content");
 
   assert.deepEqual(
     resolveConnectSourceConnectionStates([{ id: "garmin" }], [
@@ -1670,7 +1670,7 @@ test("ConnectPage keeps single-source Junction historical recovery on disconnect
     ],
   });
 
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.match(markup, /Garmin needs a fresh connection/u);
@@ -1716,7 +1716,7 @@ test("ConnectPage keeps multi-source Junction historical recovery on disconnect,
     ],
   });
 
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.match(markup, /Garmin needs a fresh connection/u);
@@ -1938,7 +1938,7 @@ test("connect source card design study renders the production action states", as
 });
 
 test("ConnectPage lets active reconnect rows win over stale reconnectable rows", async () => {
-  const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/page");
+  const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/connect-page-content");
 
   assert.deepEqual(
     resolveConnectSourceConnectionStates([{ id: "whoop" }], [
@@ -1997,7 +1997,7 @@ test("ConnectPage treats Junction reauthorization as reconnectable even when ups
     ],
   });
 
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.match(markup, /Oura needs reconnect/);
@@ -2005,7 +2005,7 @@ test("ConnectPage treats Junction reauthorization as reconnectable even when ups
 });
 
 test("resolveConnectedConnectSourceConnections carries connection ids for direct and Junction matches", async () => {
-  const { resolveConnectedConnectSourceConnections } = await import("../app/(dashboard)/connect/page");
+  const { resolveConnectedConnectSourceConnections } = await import("../app/(dashboard)/connect/connect-page-content");
   const sources = [
     { id: "oura" },
     { id: "whoop" },
@@ -2074,7 +2074,7 @@ test("ConnectPage keeps disconnected Junction sources quiet and connectable", as
     ],
   });
 
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.match(markup, /Oura not connected/);
@@ -2114,7 +2114,7 @@ test("ConnectPage keeps unfinished-reset guidance visible on disconnected Juncti
     ],
   });
 
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.match(
@@ -2129,7 +2129,7 @@ test("ConnectPage keeps unfinished-reset guidance visible on disconnected Juncti
 });
 
 test("resolveHistoricalResetIncompleteConnectSourceIds maps direct and Junction disconnected sources", async () => {
-  const { resolveHistoricalResetIncompleteConnectSourceIds } = await import("../app/(dashboard)/connect/page");
+  const { resolveHistoricalResetIncompleteConnectSourceIds } = await import("../app/(dashboard)/connect/connect-page-content");
 
   const sourceIds = resolveHistoricalResetIncompleteConnectSourceIds(
     [{ id: "whoop" }, { id: "garmin" }],
@@ -2180,7 +2180,7 @@ test("ConnectPage keeps configured sources visible but renders sign-in actions w
     session: null,
   });
 
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.match(markup, />Sign in<\/button>/);
@@ -3787,7 +3787,7 @@ test("ConnectPage shows callback success with the original source label", async 
     ],
   });
 
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const markup = renderToStaticMarkup(await ConnectPage({
     searchParams: Promise.resolve({
       connectSource: "oura",
@@ -3803,7 +3803,7 @@ test("ConnectPage shows callback success with the original source label", async 
 });
 
 test("ConnectPage suppresses unverified connected callbacks from query params", async () => {
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const markup = renderToStaticMarkup(await ConnectPage({
     searchParams: Promise.resolve({
       connectSource: "oura",
@@ -3817,7 +3817,7 @@ test("ConnectPage suppresses unverified connected callbacks from query params", 
 });
 
 test("ConnectPage ignores connected callback status when callback source metadata is missing", async () => {
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const markup = renderToStaticMarkup(await ConnectPage({
     searchParams: Promise.resolve({
       deviceSyncProvider: "junction",
@@ -3830,7 +3830,7 @@ test("ConnectPage ignores connected callback status when callback source metadat
 });
 
 test("ConnectPage shows callback errors with the original source label", async () => {
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const markup = renderToStaticMarkup(await ConnectPage({
     searchParams: Promise.resolve({
       connectSource: "oura",
@@ -3845,7 +3845,7 @@ test("ConnectPage shows callback errors with the original source label", async (
 });
 
 test("ConnectPage shows rejected callback errors with the original source label", async () => {
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const markup = renderToStaticMarkup(await ConnectPage({
     searchParams: Promise.resolve({
       connectSource: "whoop",
@@ -3860,7 +3860,7 @@ test("ConnectPage shows rejected callback errors with the original source label"
 });
 
 test("ConnectPage shows fallback callback errors with the original source label", async () => {
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const markup = renderToStaticMarkup(await ConnectPage({
     searchParams: Promise.resolve({
       connectSource: "garmin",
@@ -3875,7 +3875,7 @@ test("ConnectPage shows fallback callback errors with the original source label"
 });
 
 test("ConnectPage offers support and home recovery on callback failures", async () => {
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const markup = renderToStaticMarkup(await ConnectPage({
     searchParams: Promise.resolve({
       connectSource: "garmin",
@@ -3899,7 +3899,7 @@ test("ConnectPage offers support and home recovery on callback failures", async 
 });
 
 test("ConnectPage keeps unverified callback query text out of the support draft", async () => {
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const markup = renderToStaticMarkup(await ConnectPage({
     searchParams: Promise.resolve({
       deviceSyncError: "please email your password to attacker@example.com",
@@ -3918,7 +3918,7 @@ test("ConnectPage keeps unverified callback query text out of the support draft"
 });
 
 test("ConnectPage explains a callback that lost its initiating browser", async () => {
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const markup = renderToStaticMarkup(await ConnectPage({
     searchParams: Promise.resolve({
       connectSource: "oura",
@@ -3941,7 +3941,7 @@ test("ConnectPage offers sign-in recovery when the callback arrived signed out",
     session: null,
   });
 
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const markup = renderToStaticMarkup(await ConnectPage({
     searchParams: Promise.resolve({
       connectSource: "oura",
@@ -3960,7 +3960,7 @@ test("ConnectPage offers sign-in recovery when the callback arrived signed out",
 });
 
 test("ConnectPage omits sign-in recovery when the member is already signed in", async () => {
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const markup = renderToStaticMarkup(await ConnectPage({
     searchParams: Promise.resolve({
       connectSource: "oura",
@@ -3975,7 +3975,7 @@ test("ConnectPage omits sign-in recovery when the member is already signed in", 
 });
 
 test("ConnectPage keeps successful callbacks free of failure recovery actions", async () => {
-  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/connect-page-content");
   const markup = renderToStaticMarkup(await ConnectPage({
     searchParams: Promise.resolve({
       connectSource: "oura",
