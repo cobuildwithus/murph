@@ -71,6 +71,13 @@ describe("signup referral group-tool parsing", () => {
     });
   });
 
+  it("rejects unsupported response statuses", () => {
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "create_signup_referral_link",
+      result: { status: "pending" },
+    })).toThrow();
+  });
+
   it("rejects noncanonical expiry evidence", () => {
     expect(() => parseHostedRuntimeGroupToolResponse({
       action: "create_signup_referral_link",
