@@ -23,6 +23,8 @@ type OpenMarkdownDecoration = MarkdownDecorationToken & {
   content: string
 }
 
+type MarkdownFenceMarker = '```' | '~~~'
+
 const TRACKING_QUERY_PARAMETER_NAMES = new Set([
   'fbclid',
   'gclid',
@@ -33,6 +35,7 @@ const TRACKING_QUERY_PARAMETER_NAMES = new Set([
   'wbraid',
 ])
 const RAW_HTTP_URL_START_PATTERN = /https?:\/\//giu
+const MARKDOWN_TABLE_SEPARATOR_CELL_PATTERN = /^:?-{3,}:?$/u
 
 // Keep longer markers before their prefixes so `**bold**` is not read as `*italic*`.
 const MARKDOWN_DECORATION_TOKENS: readonly MarkdownDecorationToken[] = [
@@ -44,7 +47,9 @@ const MARKDOWN_DECORATION_TOKENS: readonly MarkdownDecorationToken[] = [
 ]
 
 export function renderMarkdownMessageText(value: string): DecoratedMessageText {
-  value = sanitizeUserFacingMessageLinks(value)
+  value = sanitizeUserFacingMessageLinks(
+    renderMarkdownTablesAsPlainText(value),
+  )
 
   let text = ''
   const decorations: MessageTextDecoration[] = []
@@ -124,6 +129,156 @@ export function sanitizeUserFacingMessageLinks(value: string): string {
   return unwrapParenthesizedRawUrls(
     cleanRawUrls(replaceMarkdownLinksWithRawUrls(value)),
   )
+}
+
+function renderMarkdownTablesAsPlainText(value: string): string {
+  if (!value.includes('|') || !value.includes('\n')) {
+    return value
+  }
+
+  const lines = value.split('\n')
+  const rendered: string[] = []
+  let fenceMarker: MarkdownFenceMarker | null = null
+  let index = 0
+
+  while (index < lines.length) {
+    const line = lines[index]!
+    const marker = readMarkdownFenceMarker(line)
+    if (marker) {
+      if (fenceMarker === null) {
+        fenceMarker = marker
+      } else if (fenceMarker === marker && isMarkdownFenceClose(line)) {
+        fenceMarker = null
+      }
+      rendered.push(line)
+      index += 1
+      continue
+    }
+    if (fenceMarker !== null) {
+      rendered.push(line)
+      index += 1
+      continue
+    }
+
+    const header = splitMarkdownTableRow(line)
+    const separator = splitMarkdownTableRow(lines[index + 1] ?? '')
+    if (
+      !header ||
+      !separator ||
+      header.length < 2 ||
+      separator.length !== header.length ||
+      !separator.every(isMarkdownTableSeparatorCell)
+    ) {
+      rendered.push(line)
+      index += 1
+      continue
+    }
+
+    const rows: string[][] = []
+    let rowIndex = index + 2
+    while (rowIndex < lines.length) {
+      const row = splitMarkdownTableRow(lines[rowIndex]!)
+      if (
+        !row ||
+        row.length !== header.length ||
+        row.every((cell) => cell.length === 0)
+      ) {
+        break
+      }
+      rows.push(row)
+      rowIndex += 1
+    }
+
+    rendered.push(renderMarkdownTableRowsAsPlainText(header, rows))
+    index = rowIndex
+  }
+
+  return rendered.join('\n')
+}
+
+function readMarkdownFenceMarker(
+  value: string,
+): MarkdownFenceMarker | null {
+  const marker = /^ {0,3}(`{3,}|~{3,})/u.exec(value)?.[1]
+  if (marker?.startsWith('`')) {
+    return '```'
+  }
+  if (marker?.startsWith('~')) {
+    return '~~~'
+  }
+  return null
+}
+
+function isMarkdownFenceClose(value: string): boolean {
+  return /^ {0,3}(?:`{3,}|~{3,})\s*$/u.test(value)
+}
+
+function splitMarkdownTableRow(value: string): string[] | null {
+  if (/^(?: {4}|\t)/u.test(value)) {
+    return null
+  }
+
+  const trimmed = value.trim()
+  if (!trimmed.includes('|')) {
+    return null
+  }
+
+  const start = trimmed.startsWith('|') ? 1 : 0
+  const end = trimmed.endsWith('|') ? trimmed.length - 1 : trimmed.length
+  const body = trimmed.slice(start, end)
+  const cells: string[] = []
+  let cell = ''
+  let inCodeSpan = false
+
+  for (let index = 0; index < body.length; index += 1) {
+    const character = body[index]!
+    if (character === '\\' && body[index + 1] === '|') {
+      cell += '|'
+      index += 1
+      continue
+    }
+    if (character === '`') {
+      inCodeSpan = !inCodeSpan
+      cell += character
+      continue
+    }
+    if (character === '|' && !inCodeSpan) {
+      cells.push(cell.trim())
+      cell = ''
+      continue
+    }
+    cell += character
+  }
+
+  cells.push(cell.trim())
+  return cells.length >= 2 ? cells : null
+}
+
+function isMarkdownTableSeparatorCell(value: string): boolean {
+  return MARKDOWN_TABLE_SEPARATOR_CELL_PATTERN.test(
+    value.replace(/\s/gu, ''),
+  )
+}
+
+function renderMarkdownTableRowsAsPlainText(
+  headers: readonly string[],
+  rows: readonly (readonly string[])[],
+): string {
+  const labels = headers.map(
+    (header, index) => header || `Column ${index + 1}`,
+  )
+  const renderedRows = rows.length > 0
+    ? rows
+    : [labels.map(() => '')]
+
+  return renderedRows
+    .map((row) => row
+      .map(
+        (cell, index) =>
+          `${labels[index]}: ${cell || 'Not specified'}`,
+      )
+      .join('\n'))
+    .join('\n\n')
 }
 
 function replaceMarkdownLinksWithRawUrls(value: string): string {
