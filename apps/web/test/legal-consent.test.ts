@@ -11,6 +11,7 @@ import {
   parseHostedConsentAcceptRequest,
   parseHostedConsentRevokeRequest,
   recordHostedLaunchConsentDecline,
+  resolveHostedHealthDataConsentState,
   type HostedConsentGrantSnapshot,
 } from "@/src/lib/legal/consent";
 
@@ -100,14 +101,18 @@ describe("hosted legal consent registry", () => {
     }
   });
 
-  it("keeps launch consent scopes non-revocable", () => {
+  it("keeps legal acceptance immutable and permits health-data withdrawal", () => {
     expect(() => parseHostedConsentRevokeRequest({
       scope: "launch.legal",
     })).toThrowError(HostedOnboardingError);
 
-    expect(() => parseHostedConsentRevokeRequest({
+    expect(parseHostedConsentRevokeRequest({
       scope: "launch.health-data",
-    })).toThrowError(HostedOnboardingError);
+      source: "settings",
+    })).toEqual({
+      scope: "launch.health-data",
+      source: "settings",
+    });
 
     expect(parseHostedConsentRevokeRequest({
       scope: "feature.connected-health-source",
@@ -116,6 +121,22 @@ describe("hosted legal consent registry", () => {
       scope: "feature.connected-health-source",
       source: "settings",
     });
+  });
+
+  it("distinguishes explicit withdrawal from a missing legacy grant", () => {
+    expect(resolveHostedHealthDataConsentState([])).toBe("missing");
+    expect(resolveHostedHealthDataConsentState([{
+      scope: "launch.health-data",
+      status: "granted",
+    }])).toBe("granted");
+    expect(resolveHostedHealthDataConsentState([{
+      scope: "launch.health-data",
+      status: "revoked",
+    }])).toBe("revoked");
+    expect(resolveHostedHealthDataConsentState([{
+      scope: "launch.health-data",
+      status: "unexpected",
+    }])).toBe("missing");
   });
 
   it("records pending launch scopes as idempotent privacy-safe decline events", async () => {

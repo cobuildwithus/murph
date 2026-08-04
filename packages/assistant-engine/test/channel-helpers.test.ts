@@ -341,6 +341,7 @@ describe('channel helper seams', () => {
         kind: 'participant',
         target: 'participant-7',
       },
+      card: null,
       candidate: {
         kind: 'participant',
         target: 'participant-7',

@@ -927,7 +927,10 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       );
   });
 
-  it("does not let a runtime source projection cross an explicit disconnect fence", async () => {
+  it.each([
+    "SOURCE_DISCONNECT_IN_PROGRESS",
+    "SOURCE_USER_DISCONNECTED",
+  ])("does not let a runtime source projection cross the %s fence", async (lastErrorCode) => {
     const connectionId = "conn_junction";
     const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
       connectionId,
@@ -941,7 +944,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         connectionId,
         displayName: null,
         firstSeenAt: "2026-04-06T09:00:00.000Z",
-        lastErrorCode: "SOURCE_USER_DISCONNECTED",
+        lastErrorCode,
         lastErrorMessage: null,
         lastSeenAt: "2026-04-06T10:00:00.000Z",
         resourceAvailabilitySummary: { sleep: true },

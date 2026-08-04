@@ -481,6 +481,7 @@ function createAcceptedEditSourceInputId(
 }
 
 function createPrisma(input: {
+  existingMemberConsentStatus?: "granted" | "revoked";
   pendingGroupReactionContextEncrypted?: string | null;
   pendingParticipantAddition?: boolean;
   routeAccountLookupKeyProjection?: string | null;
@@ -493,6 +494,7 @@ function createPrisma(input: {
   routeOwnerTrialEndsAt?: Date;
   routeParticipantAccessRequiresRosterRefresh?: boolean;
   routeParticipantActive?: boolean;
+  routeParticipantConsentStatus?: "granted" | "revoked";
   routeParticipantHandleLookupKey?: string;
   routeParticipantHasProjection?: boolean;
   routeParticipantRemoved?: boolean;
@@ -519,6 +521,8 @@ function createPrisma(input: {
   const routeParticipantAccessRequiresRosterRefresh =
     input.routeParticipantAccessRequiresRosterRefresh ?? false;
   const routeParticipantActive = input.routeParticipantActive ?? false;
+  const routeParticipantConsentStatus =
+    input.routeParticipantConsentStatus ?? "granted";
   const routeParticipantHasProjection = input.routeParticipantHasProjection ?? true;
   const routeParticipantRemoved = input.routeParticipantRemoved ?? false;
   let routeParticipantLeaseRefreshed = false;
@@ -788,6 +792,18 @@ function createPrisma(input: {
       return {
         accountGroupMemberships: [],
         billingStatus: HostedBillingStatus.active,
+        consentGrants:
+          where.id === "member_active_participant_123"
+            ? [{
+                scope: "launch.health-data",
+                status: routeParticipantConsentStatus,
+              }]
+            : input.existingMemberConsentStatus
+              ? [{
+                  scope: "launch.health-data",
+                  status: input.existingMemberConsentStatus,
+                }]
+              : [],
         suspendedAt: null,
         threadContainer: null,
       };
@@ -1712,6 +1728,51 @@ describe("Linq message edit correction planning", () => {
     expect(
       mailboxStore.appendHostedMailboxEnvelopeWithSourceMessageTx,
     ).toHaveBeenCalledOnce();
+  });
+
+  it("rejects an unattributed correction when its exact sender has withdrawn", async () => {
+    const prisma = createPrisma({
+      routeContainerMemberId: "member_thread_container_123",
+      routeParticipantActive: true,
+      routeParticipantConsentStatus: "revoked",
+    });
+    const originalWake = buildAcceptedGroupLinqOriginalWake({
+      senderMemberId: null,
+    });
+    vi.mocked(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber)
+      .mockResolvedValueOnce({
+        core: {
+          billingStatus: HostedBillingStatus.active,
+          createdAt: new Date("2026-06-24T00:00:00.000Z"),
+          id: "member_active_participant_123",
+          suspendedAt: null,
+          updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+        },
+        identity: {},
+        matchedBy: "phoneNumber",
+      } as Awaited<
+        ReturnType<typeof memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber>
+      >);
+    vi.mocked(mailboxStore.readHostedMailboxSourceConversationEntriesTx)
+      .mockResolvedValueOnce([{
+        contentAvailable: true,
+        itemId: "mailbox_group_original_123",
+        userId: originalWake.userId,
+        wake: originalWake,
+      }]);
+
+    await expect(planHostedLinqMessageEditedWebhook({
+      event: buildLinqMessageEditedEvent(),
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      response: {
+        ignored: true,
+        reason: "message-edit-group-route-inactive",
+      },
+    });
+    expect(
+      mailboxStore.appendHostedMailboxEnvelopeWithSourceMessageTx,
+    ).not.toHaveBeenCalled();
   });
 
   it("accepts a group correction when optional participant projection is absent", async () => {
@@ -4028,6 +4089,86 @@ describe("Linq explicit external-thread routing", () => {
     });
   });
 
+  it("does not append a bound group message from an explicitly withdrawn sender", async () => {
+    const prisma = createPrisma({
+      routeContainerMemberId: "member_thread_container_123",
+      routeOwnerActive: true,
+      routeParticipantActive: true,
+      routeParticipantConsentStatus: "revoked",
+    });
+    vi.mocked(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber)
+      .mockResolvedValueOnce({
+        core: {
+          billingStatus: HostedBillingStatus.active,
+          createdAt: new Date("2026-06-24T00:00:00.000Z"),
+          id: "member_active_participant_123",
+          suspendedAt: null,
+          updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+        },
+        identity: {},
+        matchedBy: "phoneNumber",
+      } as Awaited<
+        ReturnType<typeof memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber>
+      >);
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "health-data-consent-withdrawn",
+    });
+    expect(
+      prisma.hostedThreadContainerParticipant.updateMany,
+    ).not.toHaveBeenCalled();
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("stops a recognized direct sender immediately after explicit withdrawal", async () => {
+    const prisma = createPrisma({
+      existingMemberConsentStatus: "revoked",
+    });
+    vi.mocked(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber)
+      .mockResolvedValueOnce({
+        core: {
+          billingStatus: HostedBillingStatus.active,
+          createdAt: new Date("2026-06-24T00:00:00.000Z"),
+          id: "member_direct_123",
+          suspendedAt: null,
+          updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+        },
+        identity: {},
+        matchedBy: "phoneNumber",
+      } as Awaited<
+        ReturnType<typeof memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber>
+      >);
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({ isGroup: false }),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toEqual({
+      ok: true,
+      reason: "sent-health-data-consent-withdrawn-notice",
+    });
+    expect(plan.desiredSideEffects).toEqual([
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          memberId: "member_direct_123",
+          noticeCode: "health_data_consent_withdrawn",
+        }),
+      }),
+    ]);
+    expect(linqDailyState.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberRouting.upsert).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberRouting.updateMany).not.toHaveBeenCalled();
+  });
+
   it("does not let another quiet participant authorize an unverified sender", async () => {
     const restoreKeyring = configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v2",
@@ -6282,6 +6423,68 @@ describe("Linq group chat auto-provision", () => {
     } finally {
       info.mockRestore();
     }
+  });
+
+  it("does not expose a group sender's withdrawal status in the thread", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    mockSenderLookup(senderCore);
+    prisma.hostedMember.findUnique.mockResolvedValue({
+      accountGroupMemberships: [],
+      billingStatus: HostedBillingStatus.active,
+      consentGrants: [{
+        scope: "launch.health-data",
+        status: "revoked",
+      }],
+      suspendedAt: null,
+      threadContainer: null,
+    });
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "group-chat",
+    });
+    expect(plan.desiredSideEffects).toEqual([]);
+    expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("stays silent for a withdrawn group sender even when a managed line is available", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000");
+    mockSenderLookup(senderCore);
+    prisma.hostedMember.findUnique.mockResolvedValue({
+      accountGroupMemberships: [],
+      billingStatus: HostedBillingStatus.active,
+      consentGrants: [{
+        scope: "launch.health-data",
+        status: "revoked",
+      }],
+      suspendedAt: null,
+      threadContainer: null,
+    });
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      prisma: prisma as never,
+    });
+
+    // A member whose access lapsed for billing is offered group setup, but an
+    // explicit withdrawal has to stop outreach instead: an assignable line is
+    // the case where the setup offer would otherwise be sent.
+    expect(plan.response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "group-chat",
+    });
+    expect(plan.desiredSideEffects).toEqual([]);
+    expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
   it("does not provision a delayed group message sent during a trial that has expired by processing time", async () => {

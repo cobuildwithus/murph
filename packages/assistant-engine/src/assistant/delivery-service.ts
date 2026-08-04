@@ -2,6 +2,9 @@ import type {
   AssistantResponseMedia,
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import type {
+  AssistantResponseCard,
+} from '@murphai/operator-config/assistant-response-cards'
 import {
   parseTelegramThreadTarget,
 } from '@murphai/messaging-ingress/telegram-webhook'
@@ -150,6 +153,7 @@ export function dropUnsupportedAssistantResponseMediaForChannel(input: {
 }
 
 export async function deliverAssistantReply(input: {
+  card?: AssistantResponseCard | null
   dedupeToken?: string | null
   input: AssistantMessageInput
   media?: readonly AssistantResponseMedia[] | null
@@ -159,6 +163,13 @@ export async function deliverAssistantReply(input: {
   turnId: string
 }): Promise<AssistantDeliveryOutcome> {
   const requestedMedia = normalizeAssistantResponseMediaList(input.media ?? [])
+  const card = input.card ?? null
+  if (card !== null && requestedMedia.length > 0) {
+    throw new VaultCliError(
+      'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',
+      'A response card cannot be combined with response media.',
+    )
+  }
   if (!input.input.deliverResponse) {
     return {
       kind: 'not-requested',
@@ -186,6 +197,22 @@ export async function deliverAssistantReply(input: {
   })
   const baseDedupeToken =
     input.dedupeToken ?? hostedDelivery.deliveryIdempotencyKey ?? null
+
+  if (card !== null) {
+    return await deliverAssistantCurrentAudienceMessage({
+      card,
+      dedupeToken: baseDedupeToken,
+      answeredMailboxItemIds: input.input.answeredMailboxItemIds ?? [],
+      deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
+      deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
+      input: input.input,
+      media: [],
+      message: input.response,
+      session: input.session,
+      sharedPlan: input.sharedPlan,
+      turnId: input.turnId,
+    })
+  }
 
   if (!assistantChannelSupportsReplyBubbles(deliveryFields.channel)) {
     return await deliverAssistantCurrentAudienceMessage({
@@ -849,6 +876,7 @@ function resolveAssistantInputRouteBindingDelivery(input: {
 }
 
 async function deliverAssistantCurrentAudienceMessage(input: {
+  card?: AssistantResponseCard | null
   answeredMailboxItemIds?: readonly string[] | null
   dedupeToken: string | null
   deliveryIdempotencyKey: string | null
@@ -879,6 +907,7 @@ async function deliverAssistantCurrentAudienceMessage(input: {
     externalThreadRouteAuthority:
       input.input.outboxExternalThreadRouteAuthority ?? null,
     dedupeToken: input.dedupeToken,
+    card: input.card ?? null,
     media: input.media,
     message: input.message,
     nativeReplyRequested: input.input.deliveryNativeReplyRequested,

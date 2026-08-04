@@ -59,6 +59,7 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
   claimWebhookTraceCalls = 0;
   completedWebhookTraceCalls = 0;
   markConnectionSetupFailedError: Error | null = null;
+  lastCreatedOAuthState: OAuthStateRecord | null = null;
   upsertConnectionCalls = 0;
   private accountCounter = 0;
 
@@ -77,6 +78,7 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
   }
 
   createOAuthState(input: OAuthStateRecord): OAuthStateRecord {
+    this.lastCreatedOAuthState = input;
     this.oauthStates.set(input.state, input);
     return input;
   }
@@ -3885,7 +3887,10 @@ test("public ingress passes connect source context to connection-established hoo
   assert.equal(connectionEvents[0]?.account.id, connected.account.id);
   assert.equal(connectionEvents[0]?.connectSourceId, "garmin");
   assert.equal(connectionEvents[0]?.connectTarget, "garmin");
-  assert.equal(typeof connectionEvents[0]?.connectionStartedAt, "string");
+  assert.equal(
+    connectionEvents[0]?.connectionStartedAt,
+    store.lastCreatedOAuthState?.createdAt,
+  );
   assert.equal(connectionEvents[0]?.sourceProviderSlug, "garmin");
   assert.equal(connected.sourceProviderSlug, "garmin");
 });
@@ -5094,10 +5099,10 @@ test("public ingress SDK sign-in session skips established side effects when ups
   ]);
 });
 
-test("public ingress SDK sign-in session treats connection-established hook failure as non-fatal", async () => {
+test("public ingress SDK sign-in session clears persisted authority and returns no token when admission fails", async () => {
   const store = new InMemoryPublicIngressStore();
-  const warnings: Array<{ message: string; context: Record<string, unknown> | undefined }> = [];
   let hookCalls = 0;
+  let mintedTokens = 0;
   const ingress = createDeviceSyncPublicIngress({
     publicBaseUrl: "https://sync.example.test/device-sync",
     registry: createDeviceSyncRegistry([
@@ -5123,6 +5128,7 @@ test("public ingress SDK sign-in session treats connection-established hook fail
             };
           },
           async createSignInToken() {
+            mintedTokens += 1;
             return {
               signInToken: "sdk-sign-in-token",
               environment: "sandbox",
@@ -5138,32 +5144,22 @@ test("public ingress SDK sign-in session treats connection-established hook fail
         throw new Error("wake enqueue failed with authorization=<REDACTED_AUTHORIZATION>");
       },
     },
-    log: {
-      warn(message, context) {
-        warnings.push({ message, context });
-      },
-    },
   });
 
-  const session = await ingress.createSdkSignInSession({
-    provider: "demo",
-    ownerId: "member-1",
-  });
+  await assert.rejects(
+    () => ingress.createSdkSignInSession({
+      provider: "demo",
+      ownerId: "member-1",
+    }),
+    /wake enqueue failed/u,
+  );
 
-  assert.equal(session.signInToken, "sdk-sign-in-token");
-  assert.equal(session.account.status, "active");
-  assert.equal(session.account.setupPhase, "source_confirmed");
+  const account = store.getConnectionByExternalAccount("demo", "demo-sdk-user-1");
+  assert.equal(account?.status, "reauthorization_required");
+  assert.equal(account?.setupPhase, "failed");
+  assert.equal(account?.accessTokenExpiresAt, null);
   assert.equal(hookCalls, 1);
-  assert.equal(warnings.length, 1);
-  assert.equal(warnings[0]?.message, "Device sync SDK sign-in established hook failed; continuing token mint.");
-  assert.equal(warnings[0]?.context?.failureCode, "DEVICE_SYNC_SDK_SIGN_IN_ESTABLISHED_HOOK_FAILED");
-  assert.deepEqual(warnings[0]?.context?.error, {
-    category: "unexpected_error",
-    message: "wake enqueue failed with authorization=[redacted]",
-    name: "Error",
-  });
-  assert.doesNotMatch(JSON.stringify(warnings), /sdk-sign-in-token/u);
-  assert.doesNotMatch(JSON.stringify(warnings), /REDACTED_AUTHORIZATION/u);
+  assert.equal(mintedTokens, 0);
 });
 
 test("public ingress SDK sign-in session rejects unsupported providers and missing owners", async () => {

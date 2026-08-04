@@ -882,15 +882,26 @@ export class DeviceSyncPublicIngress {
     }
 
     if (!canReuseExistingAccount && shouldRunSdkConnectionEstablishedHook(previousAccount)) {
-      await this.runSdkConnectionEstablishedHook({
-        account,
-        connection: {
-          ...connection,
-          ...(initialJobs ? { initialJobs } : {}),
-        },
-        provider,
-        now,
-      });
+      try {
+        await this.runSdkConnectionEstablishedHook({
+          account,
+          connection: {
+            ...connection,
+            ...(initialJobs ? { initialJobs } : {}),
+          },
+          provider,
+          now,
+        });
+      } catch (error) {
+        await this.cleanupPersistedOAuthConnection(
+          provider,
+          account,
+          connection,
+          now,
+          error,
+        );
+        throw error;
+      }
     }
 
     return {
@@ -940,17 +951,7 @@ export class DeviceSyncPublicIngress {
   private async runSdkConnectionEstablishedHook(
     input: DeviceSyncPublicIngressConnectionEstablishedInput,
   ): Promise<void> {
-    try {
-      await this.hooks.onConnectionEstablished?.(input);
-    } catch (error) {
-      this.logger.warn?.("Device sync SDK sign-in established hook failed; continuing token mint.", {
-        provider: input.provider.provider,
-        accountId: input.account.id,
-        externalAccountIdHash: hashExternalAccountIdForLogs(input.connection.externalAccountId),
-        failureCode: "DEVICE_SYNC_SDK_SIGN_IN_ESTABLISHED_HOOK_FAILED",
-        error: summarizePublicIngressError(error),
-      });
-    }
+    await this.hooks.onConnectionEstablished?.(input);
   }
 
   async handleConnectionCallback(input: HandleConnectionCallbackInput): Promise<CompleteConnectionResult> {

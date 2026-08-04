@@ -10,6 +10,7 @@ import {
   buildHostedAssistantDeliverySentRecord,
   type HostedAssistantDeliveryMedia,
   type HostedAssistantDeliveryPayload,
+  type HostedAssistantResponseCard,
   type HostedAssistantMessageDeliveryReceipt,
   sameHostedAssistantDeliveryAttempt,
   sameHostedAssistantDeliveryFailure,
@@ -90,6 +91,18 @@ function createHostedAssistantDeliveryReceipt(
   };
 }
 
+const NUTRITION_CARD: HostedAssistantResponseCard = {
+  kind: "daily_nutrition",
+  localDate: "2026-07-28",
+  mealCount: 3,
+  totals: {
+    calories: { total: 1490.25, mealCount: 3 },
+    proteinGrams: { total: 94.5, mealCount: 3 },
+    carbsGrams: { total: 193.125, mealCount: 3 },
+    fatGrams: { total: 34.75, mealCount: 3 },
+  },
+};
+
 describe("hosted assistant delivery contracts", () => {
   it("reuses gateway-owned delivery target kinds", () => {
     expect(hostedAssistantDeliveryTargetKindValues).toEqual(gatewayDeliveryTargetKindValues);
@@ -122,6 +135,91 @@ describe("hosted assistant delivery contracts", () => {
     }];
 
     expect(parseHostedAssistantDeliverySideEffects(payload)).toEqual(payload);
+  });
+
+
+  it("propagates strict response cards and preserves legacy card omission", () => {
+    const payload = createHostedAssistantDeliveryPayload({
+      card: NUTRITION_CARD,
+      channel: "linq",
+      media: [],
+      message: "Nutrition for 2026-07-28: 3 meals.",
+    });
+    const effect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe-card",
+      effectId: "intent-card",
+      payload,
+    });
+
+    expect(effect.payload.card).toEqual(NUTRITION_CARD);
+    expect(parseHostedAssistantDeliverySideEffect(effect)).toEqual(effect);
+
+    const { card: removedCard, ...legacyPayload } = payload;
+    expect(removedCard).toEqual(NUTRITION_CARD);
+    expect(parseHostedAssistantDeliverySideEffect({
+      ...effect,
+      payload: legacyPayload,
+    }).payload).not.toHaveProperty("card");
+  });
+
+  it("rejects malformed hosted response cards and card-media coexistence", () => {
+    const canonical = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe-card-validation",
+      effectId: "intent-card-validation",
+      payload: createHostedAssistantDeliveryPayload({
+        card: NUTRITION_CARD,
+        channel: "linq",
+      }),
+    });
+
+    for (const card of [
+      { ...NUTRITION_CARD, kind: "unknown_card" },
+      { ...NUTRITION_CARD, localDate: "2026-02-30" },
+      { ...NUTRITION_CARD, unexpected: true },
+      {
+        ...NUTRITION_CARD,
+        totals: {
+          ...NUTRITION_CARD.totals,
+          calories: { total: null, mealCount: 3 },
+        },
+      },
+      {
+        ...NUTRITION_CARD,
+        totals: {
+          ...NUTRITION_CARD.totals,
+          proteinGrams: { total: 94.5, mealCount: 4 },
+        },
+      },
+    ]) {
+      expect(() => parseHostedAssistantDeliverySideEffect({
+        ...canonical,
+        payload: {
+          ...canonical.payload,
+          card,
+        },
+      })).toThrow();
+    }
+
+    expect(() => parseHostedAssistantDeliverySideEffect({
+      ...canonical,
+      payload: {
+        ...canonical.payload,
+        media: [{
+          alt: null,
+          kind: "image",
+          source: null,
+          url: "https://cdn.example.test/nutrition.png",
+        }],
+      },
+    })).toThrow(/cannot combine card and media/);
+
+    expect(() => parseHostedAssistantDeliverySideEffect({
+      ...canonical,
+      payload: {
+        ...canonical.payload,
+        threadIsDirect: false,
+      },
+    })).toThrow(/requires a private direct conversation/);
   });
 
   it("parses bounded private vault-image delivery media", () => {

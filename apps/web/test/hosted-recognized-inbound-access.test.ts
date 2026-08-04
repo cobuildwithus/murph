@@ -67,6 +67,33 @@ describe("recognized inbound access", () => {
     expect(mocks.issueHostedInvite).not.toHaveBeenCalled();
   });
 
+  it("returns the Settings recovery path after health-data withdrawal", async () => {
+    mocks.readHostedRuntimeAiAccessDecision.mockResolvedValue({
+      allowed: false,
+      reason: "health_data_consent_withdrawn",
+      retryAfter: new Date("2026-07-25T12:15:00.000Z"),
+      userNotice: {
+        code: "health_data_consent_withdrawn",
+        message: "Murph is paused. Use Murph again in Settings.",
+      },
+    });
+
+    await expect(resolveHostedRecognizedInboundAccess({
+      allowSignupFallback: true,
+      inviteChannel: "linq",
+      member: { id: "member_withdrawn", suspendedAt: null },
+      noticeSeed: "event_withdrawn",
+      prisma: {} as never,
+    })).resolves.toEqual({
+      kind: "access_notice",
+      message: "Murph is paused. Use Murph again in Settings.",
+      noticeCode: "health_data_consent_withdrawn",
+      responseReason: "sent-health-data-consent-withdrawn-notice",
+    });
+
+    expect(mocks.issueHostedInvite).not.toHaveBeenCalled();
+  });
+
   it("returns a fresh signup handoff for a recognized member with no billing to recover", async () => {
     mocks.readHostedRuntimeAiAccessDecision.mockResolvedValue({
       allowed: false,

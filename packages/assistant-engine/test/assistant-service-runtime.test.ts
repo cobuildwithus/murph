@@ -2362,6 +2362,7 @@ describe("assistant delivery orchestration seam", () => {
         kind: "participant",
         target: "audience-delivery",
       },
+      card: null,
       channel: "telegram",
       dedupeToken: null,
       deliveryIdempotencyKey: null,
