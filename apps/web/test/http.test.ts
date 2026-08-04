@@ -562,6 +562,21 @@ describe("json route helper factory", () => {
       .toBe("see <redacted-url> for details");
   });
 
+  it("redacts a whole email address whose domain is www-prefixed", () => {
+    // Ordering regression: if the schemeless-URL rule runs first it consumes the
+    // domain and strands the local part, which is usually the identifying half.
+    for (const address of [
+      "alice@www.example.test",
+      "alice+tag@www.example.test",
+      "alice@mail.www.example.test",
+    ]) {
+      const sanitized = httpModule.sanitizeJsonLogString(`provider rejected ${address}`);
+      expect(sanitized).toBe("provider rejected <redacted-email>");
+      expect(sanitized).not.toContain("alice");
+      expect(sanitized).not.toContain("example.test");
+    }
+  });
+
   it("keeps non-contact numerics readable so diagnostics stay useful", () => {
     // Over-redaction would defeat the purpose of keeping provider reasons.
     for (const value of [

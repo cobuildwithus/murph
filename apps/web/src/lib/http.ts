@@ -592,10 +592,13 @@ export function sanitizeJsonLogString(
     .replace(/\bwhsec_[A-Z0-9]+\b/giu, "<redacted-secret>")
     .replace(/\bfile:\/\/\S+/giu, "<redacted-path>")
     .replace(/\bhttps?:\/\/\S+/giu, "<redacted-url>")
+    // Email must resolve before the schemeless-URL rule below. A `www.`-prefixed
+    // domain is legal in an address, so matching the URL first would consume the
+    // domain and strand the identifying local part (`alice@<redacted-url>`).
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu, "<redacted-email>")
     // A scheme is a formatting choice, not a sensitivity boundary: `www.host/x`
     // leaks exactly what `https://www.host/x` would.
     .replace(/\bwww\.\S+/giu, "<redacted-url>")
-    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu, "<redacted-email>")
     .replace(/\+\d[\d().\s-]{7,}\d/gu, "<redacted-phone>")
     // Same number without the country prefix. External text we do not control
     // (provider failure reasons especially) writes phone numbers in national
