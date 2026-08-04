@@ -105,11 +105,38 @@ Require current runner status from every relevant Durable Object and wait for
 pre-bridge Worker and Durable Object invocations to drain. Ordinary reads,
 writes, lists, and new direct uploads must still resolve to OC.
 
-### 2. Close destructive and write admission
+### 2. Copy the baseline while runtime admission stays open
 
 Enable the account-deletion maintenance control at both admission and effect
-boundaries. Set `HOSTED_R2_WRITE_ADMISSION=paused`, deploy the Worker version to
-100 percent, and require every status response to report `writeAdmission=paused`.
+boundaries so the approved ownership set cannot shrink during the managed copy.
+Keep `HOSTED_R2_CUTOVER_PHASE=source_active` and
+`HOSTED_R2_WRITE_ADMISSION=open`: messages and ordinary runtime work continue
+against OC throughout the bulk transfer.
+
+Read current hosted ownership and canonical workspace snapshot state through
+the authorized read-only production path. Admit immutable user-scoped bundle,
+artifact, browser-vault replica, and unique workspace-snapshot keys owned by
+current hosted members. Fail closed on mutable fixed keys, pre-v2 canonical
+snapshots, unknown placement, lifecycle-managed placement, or ownership changes
+during the read. Record aggregate counts and bytes only.
+
+Use the dashboard wizard only when the whole source inventory exactly equals
+the approved manifest. Otherwise create managed jobs with exact key batches and
+destination overwrite disabled. Wait for every baseline job to reach a terminal
+state. If a job stalls or reports a failure, reconcile that job's submitted keys
+against the destination by exact key and size. Retry only missing or mismatched
+keys in a new managed job. Do not infer failure solely from a stale progress
+counter, and do not change the source to recover a destination problem.
+
+Prove exact key-and-size parity for the baseline manifest while runtime writes
+remain open. This is a warm-copy checkpoint, not promotion proof: new immutable
+objects may continue to appear in OC and are handled by the final delta.
+
+### 3. Pause and drain runtime writes
+
+Set `HOSTED_R2_WRITE_ADMISSION=paused`, deploy the Worker version to 100 percent,
+and require every status response to report `writeAdmission=paused`. Start a
+30-minute pre-promotion deadline when the paused version reaches 100 percent.
 The Worker-level check must return `retry_later` for both signed Temporal calls
 and Vercel OIDC direct latency hints without calling UserRunner. Inbound messages
 remain accepted in the web-owned encrypted mailbox. An invocation already in
@@ -128,33 +155,17 @@ explicit per-runner drain are both required:
 
 The production direct-PUT URL lifetime is ten minutes and the upload request
 has a separate conservative ten-minute completion bound. Wait both intervals
-after the last version capable of issuing an OC PUT ticket, then prove there is
-no in-flight write, ticket issuance, or completion.
+after the last runner becomes idle, then prove there is no in-flight write,
+ticket issuance, or completion. This drain and every remaining pre-promotion
+step must fit inside the same 30-minute deadline.
 
-### 3. Build the approved manifest
+### 4. Copy and prove the final delta
 
-Read current hosted ownership and canonical workspace snapshot state through
-the authorized read-only production path. Inventory OC only after the write
-drain. Admit immutable user-scoped bundle, artifact, browser-vault replica, and
-unique workspace-snapshot keys owned by current hosted members.
-
-Fail closed on mutable fixed keys, pre-v2 canonical snapshots, unknown
-placement, lifecycle-managed placement, or ownership changes during the read.
-Record aggregate counts and bytes only.
-
-### 4. Run Super Slurper
-
-Use the dashboard wizard only when the whole frozen source equals the approved
-manifest. Otherwise create managed jobs with exact key batches and destination
-overwrite disabled.
-
-Wait for every job to reach a terminal state. If a job stalls or reports a
-failure, reconcile that job's submitted keys against the destination by exact
-key and size. Retry only missing or mismatched keys in a new managed job. Do
-not infer failure solely from a stale progress counter, and do not change the
-source to recover a destination problem.
-
-### 5. Prove destination parity
+Build a fresh approved manifest from a clean process after the write drain.
+Inventory both buckets and submit only approved keys that are absent from ENAM;
+an existing destination key must already have the exact source byte size. Wait
+for every delta job to reach a terminal state and reconcile its exact submitted
+keys.
 
 After all jobs finish, inventory both buckets again under the same write fence.
 Require:
@@ -164,10 +175,20 @@ Require:
 - ENAM contains no unapproved migration object; and
 - aggregate object and byte counts match.
 
-Repeat the destination comparison from a fresh operator process. Revoke the
-migration credential after the second pass.
+Repeat the comparison from another clean operator process. Before revoking the
+migration credential, run direct destination PUT, HEAD, GET, and delete smokes.
 
-### 6. Promote ENAM
+The 30-minute deadline is fail-safe, not an estimate to extend. If every
+pre-promotion requirement cannot pass before it expires, or any requirement
+fails, keep `HOSTED_R2_CUTOVER_PHASE=source_active`, deploy
+`HOSTED_R2_WRITE_ADMISSION=open`, require the source-active/open version at 100
+percent, and prove a queued mailbox item is consumed. Do not promote. Reconcile
+or quarantine the non-authoritative destination and retry the final delta in a
+later bounded window. Keep account deletion in maintenance only until any
+outstanding managed jobs are terminal and the destination disposition is known,
+then re-enable it.
+
+### 5. Promote ENAM
 
 Deploy the same bridge with:
 
@@ -192,7 +213,7 @@ If any approved OC object is absent from ENAM, keep writes closed and repair
 forward. Do not restart copying broadly or return to OC-only authority after
 ENAM accepts production writes.
 
-### 7. Resume service
+### 6. Resume service
 
 Deploy `HOSTED_R2_WRITE_ADMISSION=open` only after promotion checks pass, then
 require the destination-active Worker version at 100 percent and confirm a
@@ -203,6 +224,11 @@ the direct web hint remains optional and performs no retry.
 Re-enable account
 deletion only after its race canary proves the bridge deletes from both
 concrete buckets and retains state for retry after a partial failure.
+
+Promotion is the irreversible boundary. A failure after ENAM becomes
+authoritative keeps admission paused and repairs forward; it must be declared as
+an active service incident rather than silently extending the pre-promotion
+deadline or returning to OC-only writes.
 
 Keep OC, the second binding, upload-session bucket affinity, dual deletion, and
 ENAM-to-OC fallback through:

@@ -29,6 +29,21 @@ describe("hosted runner R2 cutover status", () => {
     });
   });
 
+  it("accepts bridge status from before write-admission projection", () => {
+    expect(parseHostedRunnerStatusResponse({
+      ...baseStatus,
+      r2Cutover: {
+        coexisting: true,
+        phase: "source_active",
+        protocolVersion: "r2-oc-enam-v1",
+      },
+    }).r2Cutover).toEqual({
+      coexisting: true,
+      phase: "source_active",
+      protocolVersion: "r2-oc-enam-v1",
+    });
+  });
+
   it("remains backward-compatible with pre-bridge runner status", () => {
     expect(parseHostedRunnerStatusResponse(baseStatus).r2Cutover).toBeUndefined();
   });
