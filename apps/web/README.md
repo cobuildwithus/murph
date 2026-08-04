@@ -1371,14 +1371,32 @@ production `next build` in a root-level cgroup-v2 child for accounting only. It
 does not write `memory.max`, `memory.swap.max`, or `memory.oom.group`.
 
 The production build launches the parent Next process explicitly through Node
-with `--max-old-space-size=2048`. Next 16.2.6 passes
-`turbopackMemoryLimit=4GiB` separately to the native Turbopack project and
-removes a Node old-space flag only from its isolated static workers. Bounding
-the parent JavaScript old space therefore reduces one independent contributor
-to the container peak without changing later worker isolation, Turbopack's
-native target, or the compiled application. The bound is not proof that a
-particular Vercel build fits; repeated forced-cold Standard previews remain the
-direct acceptance evidence.
+with `--max-old-space-size=1024` while appending
+`--max-old-space-size=3072` to `NODE_OPTIONS`. Node gives the direct CLI flag
+precedence in the parent. Next 16.2.6 reconstructs its non-isolated TypeScript
+worker options from the parent arguments followed by `NODE_OPTIONS`, so the
+mandatory generated-contract validation receives the 3 GiB limit. Next removes
+that option from its isolated static workers. The existing caller options are
+preserved. The shared script is used by the Vercel package build and the CI
+memory-observation lane. This bounds the compile parent without starving the
+later validation worker or changing the compiled application. Repeated
+forced-cold Standard previews remain the direct acceptance evidence, and a Next
+upgrade must revalidate this worker boundary.
+
+Next 16.2.6 accepts `experimental.turbopackMemoryLimit` at the JavaScript/native
+boundary but discards the `_memory_limit` argument when creating its native
+backend. The option is therefore omitted rather than documented or tested as a
+4 GiB governor that does not exist. A Next upgrade must re-audit that behavior
+before reintroducing the option.
+
+A 2 GiB parent-old-space candidate passed one forced-cold Standard preview but
+the next identical build was still killed by the 8 GB container OOM boundary.
+Single global limits of 1 GiB and 1.5 GiB completed compilation but
+deterministically exhausted V8 old space in Next's generated-contract
+TypeScript validation. A split with 1 GiB for the parent and 2 GiB for that
+worker failed at the same boundary; the 1 GiB / 3 GiB split completed the full
+local build. Either a V8 heap failure or a container OOM invalidates it rather
+than justifying weaker checks.
 
 The default advisory budget is 7,200,000,000 cgroup-accounted bytes: the 8 GB
 machine model minus a 0.8 GB reserve for OS/container overhead outside the build
@@ -1401,24 +1419,24 @@ across all build workers plus page cache. A fully working Linux CI run on
 2026-07-06 proved the mismatch: a 6,000,000,000-byte cgroup cap OOM-killed a
 build that the real 8 GB Vercel Standard machine accepts.
 
-Linux CI defaults to wrapping the `apps/web verify` production `next build` step
-with `apps/web/scripts/build-memory-guard.sh`. Privileged operations are limited
+Linux CI defaults to wrapping the shared production Next-build script with
+`apps/web/scripts/build-memory-guard.sh`. Privileged operations are limited
 to creating/removing that measured cgroup and moving the build process into it;
 the build itself still runs as the invoking user with its normal environment,
 working directory, and stdio.
 
 Enforcement is deferred because live CI on 2026-07-07 showed the cold-build
-multi-process anonymous-memory ramp is not governed by the Turbopack heap limit:
+multi-process anonymous-memory ramp was unchanged by the ignored Turbopack option:
 with `turbopackMemoryLimit=3GiB`, anon climbed about 2.9 GB at 12 seconds, 5.5
 GB at 27 seconds, and 6.9 GB at 42 seconds before an OOM-group kill, matching
-the prior 4 GiB run. Any hard cgroup limit that leaves a meaningful reserve on
+the prior 4 GiB-configured run. Any hard cgroup limit that leaves a meaningful reserve on
 the 8 GB machine would currently false-fail the cold build. Cold-build memory
 optimization is the follow-up work; production config should not carry
 unproven heap-limit churn from the 3 GiB trial.
 
-That failed 3 GiB trial changed the native Turbopack target, not the parent
-Node old-space bound above. Keep the two controls distinct when profiling or
-changing the build.
+That failed 3 GiB trial changed only a discarded configuration input, not a
+native Turbopack target. Keep it distinct from the enforced Node old-space
+policy when profiling or changing the build.
 
 The guard samples cgroup `memory.current` and selected `memory.stat` fields
 about every 3 seconds during the build, prints trajectory lines about every 15

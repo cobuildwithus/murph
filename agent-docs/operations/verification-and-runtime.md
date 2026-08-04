@@ -514,16 +514,25 @@ cgroup-v2 child for accounting only, moves the build process into that cgroup,
 and then execs the build as the invoking user with the caller's environment,
 working directory, and stdio unchanged. In the current observe-only state it
 does not write `memory.max`, `memory.swap.max`, or `memory.oom.group`. The
-production build starts the parent Next process through Node with
-`--max-old-space-size=2048`; Next 16.2.6 keeps that parent JavaScript old-space
-bound separate from the native Turbopack project's 4 GiB memory target and
-removes the flag from its isolated static workers. This bounds one contributor
-to the container peak without weakening the build, but only repeated
-forced-cold Standard previews prove the real Vercel boundary. The
-advisory budget is a cgroup-unit machine model for Vercel Standard's 8 GB build
-machine: 7.2 GB available to the build cgroup, with a 0.8 GB reserve for
-OS/container overhead outside it at the ceiling. The legacy-named guard budget
-override must stay strictly greater than the 6,000,000,000-byte cgroup floor
+Vercel package build starts the parent Next process with a direct 1 GiB
+old-space flag and appends a 3 GiB old-space flag to `NODE_OPTIONS`. Node applies
+the direct flag to the parent; Next 16.2.6 rebuilds its non-isolated TypeScript
+worker options from the parent arguments followed by `NODE_OPTIONS`, so the
+mandatory generated-contract validation receives 3 GiB. Next removes the flag
+from isolated static workers. The same script owns the Vercel package build and
+CI memory-observation invocation. This bounds the compile parent without
+weakening validation, but only repeated forced-cold Standard previews prove the
+real Vercel boundary. A 2 GiB parent-bound candidate passed one forced-cold
+preview but the next identical build was still killed by the 8 GB container
+OOM boundary. Single
+global 1 GiB and 1.5 GiB limits starved Next's generated-contract TypeScript
+worker, and a 1 GiB parent / 2 GiB worker split did the same. A 1 GiB parent /
+3 GiB worker split completed the full local build. Either failure mode still
+invalidates the candidate. The advisory budget is a cgroup-unit machine model
+for Vercel Standard's 8 GB build machine: 7.2 GB available to the build cgroup,
+with a 0.8 GB reserve for OS/container overhead outside it at the ceiling. The
+legacy-named guard budget override must stay strictly greater than the
+6,000,000,000-byte cgroup floor
 and less than or equal to 7,200,000,000 bytes, which preserves at least a 0.8 GB
 reserve under that model. The floor comes from a fully working Linux CI run on
 2026-07-06 where a 6.0 GB cgroup cap OOM-killed a build that the real Vercel 8
@@ -532,11 +541,12 @@ PR #349's 5.34 GB passing and 6.18 GB exit-137 failure numbers are historical
 single-process RSS measurements only; they are not comparable to cgroup
 accounting, which includes anonymous memory across all build workers plus page
 cache. Live CI on 2026-07-07 showed enforcement cannot ship green yet:
-`turbopackMemoryLimit=3GiB` produced the same cold-build anon ramp as 4 GiB
+`turbopackMemoryLimit=3GiB` produced the same cold-build anon ramp as the 4 GiB
 (about 2.9 GB at 12 seconds, 5.5 GB at 27 seconds, and 6.9 GB at 42 seconds)
 before an OOM-group kill. Cold-build memory optimization is explicit follow-up
-work. That experiment changed Turbopack's native target, not the parent Node
-old-space bound. The guard samples cgroup `memory.current` and selected `memory.stat`
+work. Next 16.2.6 discards that option when creating its native backend, so the
+experiment changed no enforced target. The no-op option is now omitted. The
+guard samples cgroup `memory.current` and selected `memory.stat`
 fields about every 3 seconds, prints trajectory lines about every 15 seconds,
 then reports sampled maxima before cgroup `memory.peak`, `memory.events`, and
 selected final-read `memory.stat` values. If sampled max anon or `memory.peak`

@@ -33,10 +33,22 @@ Updated: 2026-08-03
   workers, and gives Turbopack a 4-GiB target.
 - Repository CI evidence records that reducing only the Turbopack target to
   3 GiB did not reduce the observed cold-build anonymous-memory ramp.
-- Next 16.2.6 passes `turbopackMemoryLimit` to the native Turbopack project but
-  applies `experimental.cpus` to later build workers. Its isolated static
-  workers remove `--max-old-space-size`; the parent `next build` process does
-  not, so the parent heap remains a separate candidate contributor.
+- Next 16.2.6 accepts `turbopackMemoryLimit` at the JavaScript/native boundary
+  but discards `_memory_limit` when constructing the native backend. The option
+  is not an enforced governor and must be removed from config and claims.
+- Next applies `experimental.cpus` to later build workers. Its isolated static
+  workers remove `--max-old-space-size`; the parent and non-isolated TypeScript
+  worker do not, so they require a shared phase-aware invocation.
+- A 2 GiB parent-old-space candidate passed one forced-cold Standard preview,
+  then an identical forced-cold build was killed during `next build` with exit
+  137 and Vercel's OOM marker. The 2 GiB bound is therefore rejected as
+  insufficient rather than accepted from a single success.
+- Global 1 GiB and 1.5 GiB follow-ups completed Turbopack compilation locally,
+  then exhausted V8 old space during Next's generated-contract TypeScript
+  validation. A 1 GiB parent / 2 GiB TypeScript-worker split failed at the same
+  boundary; a 1 GiB / 3 GiB split completed the full local build. Next 16.2.6
+  derives the non-isolated worker limit from `NODE_OPTIONS` but honors the
+  direct CLI flag in the parent, while isolated static workers remove the flag.
 
 ## Architecture decision gate
 

@@ -10,7 +10,7 @@
     "dev": "vercel env run -- pnpm dev:local-env",
     "dev:local-env": "bash -c 'pnpm legal:pdf && pnpm health-commons:generate && pnpm prisma:generate && pnpm --dir ../.. exec tsx apps/web/scripts/dev-local.ts \"$@\"' --",
     "dev:prepared-local-env": "bash -c 'pnpm --dir ../.. exec tsx apps/web/scripts/dev-local.ts \"$@\"' --",
-    "build": "node ../../scripts/run-with-host-verification-slot.mjs 'apps/web build' -- bash -c 'pnpm public-routes:waf-check && pnpm product-labels:env-check && pnpm legal:pdf && pnpm health-commons:generate && pnpm prisma:generate && pnpm typecheck:prepared && node --max-old-space-size=2048 node_modules/next/dist/bin/next build && pnpm --dir ../.. workflow:clean-web-artifacts -- --quiet && pnpm health-commons:trace-check'",
+    "build": "node ../../scripts/run-with-host-verification-slot.mjs 'apps/web build' -- bash -c 'pnpm public-routes:waf-check && pnpm product-labels:env-check && pnpm legal:pdf && pnpm health-commons:generate && pnpm prisma:generate && pnpm typecheck:prepared && bash scripts/run-production-next-build.sh && pnpm --dir ../.. workflow:clean-web-artifacts -- --quiet && pnpm health-commons:trace-check'",
     "health-commons:generate": "pnpm --dir ../.. health-commons:generate",
     "health-commons:trace-check": "pnpm --dir ../.. exec tsx apps/web/scripts/check-health-commons-traces.ts",
     "lint": "eslint .",
