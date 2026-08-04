@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-07-31
+Last verified: 2026-08-04
 
 ## Accepted-Message Targeting
 
@@ -1302,8 +1302,12 @@ accepted input in the same live turn invalidates an earlier card-only decision,
 and attachment is rejected after the delivery context advances. Every
 card copies the immediately preceding single-date canonical meal-totals read.
 Both versions use the same deterministic text fallback, Linq capability
-boundary, inline URL size bound, and existing outbox idempotency lifecycle. No
-card API, database, auth path, cleanup owner, or second queue exists.
+boundary, inline URL size bound, and existing outbox idempotency lifecycle.
+Linq owns the always-visible static transcript layout, which marks partial
+totals without exposing their values; tapping the card passes the same inline
+URL to the offline iOS reader. The installed extension does not own initial
+balloon visibility. No card API, database, auth path, cleanup owner, or second
+queue exists.
 
 Assistant image media has an explicit public/private type boundary. `image`
 contains an intentionally public fetchable URL, while `vault_image` contains a
