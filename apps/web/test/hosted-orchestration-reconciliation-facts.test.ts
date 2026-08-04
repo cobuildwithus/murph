@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   readHostedMailboxPayload: vi.fn(),
   readHostedMailboxWakeByItemId: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
+  readSelectedHostedInferenceConnectionOverride: vi.fn(),
   readHostedWorkspace: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
   resolveHostedRuntimeAiUsageGate: vi.fn(),
@@ -115,6 +116,11 @@ vi.mock("@/src/lib/hosted-orchestration/runtime-usage-decision", () => ({
   resolveHostedRuntimeAiUsageGate: mocks.resolveHostedRuntimeAiUsageGate,
 }));
 
+vi.mock("@/src/lib/hosted-inference/connection-store", () => ({
+  readSelectedHostedInferenceConnectionOverride:
+    mocks.readSelectedHostedInferenceConnectionOverride,
+}));
+
 type ReconciliationRoute = typeof import(
   "../app/api/internal/hosted-orchestration/users/[userId]/reconciliation-facts/route"
 );
@@ -162,6 +168,7 @@ describe("hosted orchestration reconciliation facts", () => {
     mocks.readHostedMailboxWakeByItemId.mockResolvedValue(null);
     mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(null);
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status: "allowed" });
+    mocks.readSelectedHostedInferenceConnectionOverride.mockResolvedValue(null);
     mocks.tryMarkHostedMailboxConversationAiUsageDenied.mockResolvedValue(false);
   });
 
@@ -400,7 +407,7 @@ describe("hosted orchestration reconciliation facts", () => {
       },
     ]);
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
-      decision: buildHostedAccessInactiveUsageGateDecision(),
+      decision: buildUsageLimitExceededGateDecision(),
       status: "denied",
     });
 
@@ -437,6 +444,7 @@ describe("hosted orchestration reconciliation facts", () => {
     });
     expect(mocks.readHostedMailboxMaxSeqByLane).not.toHaveBeenCalled();
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+    expect(mocks.readSelectedHostedInferenceConnectionOverride).not.toHaveBeenCalled();
   });
 
   it("does not AI-gate a due inbox media retention wake", async () => {
@@ -661,6 +669,41 @@ describe("hosted orchestration reconciliation facts", () => {
       now: new Date(FIXED_NOW),
       userId: MEMBER_ID,
     });
+  });
+
+  it("admits member-funded custom core inference when managed usage is denied", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      nextWakeAt: FIXED_NOW,
+      nextWakeReason: "assistant_due",
+    }));
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      decision: buildUsageLimitExceededGateDecision(),
+      status: "denied",
+    });
+    mocks.readSelectedHostedInferenceConnectionOverride.mockResolvedValue({
+      contextWindowTokens: 131_072,
+      modelAlias: "murph-custom-r3",
+      protocol: "responses",
+      revision: 3,
+      supportsImages: false,
+      verificationProfile:
+        "murph-codex-0.145.0-portable-responses-v1",
+    });
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(facts.blocked).toBeNull();
+    expect(mocks.tryMarkHostedMailboxConversationAiUsageDenied)
+      .not.toHaveBeenCalled();
+    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat)
+      .not.toHaveBeenCalled();
+    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread)
+      .not.toHaveBeenCalled();
   });
 
   it("sends the current-chat Linq trial conversion notice when pending conversation work is runtime-denied", async () => {

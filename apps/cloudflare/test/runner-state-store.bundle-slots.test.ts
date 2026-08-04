@@ -17,6 +17,8 @@ const CURRENT_RUNNER_META_COLUMNS = [
   "active_generation",
   "active_kind",
   "active_provider_egress_token_hash",
+  "active_custom_inference_envelope",
+  "active_platform_ai_allowed",
   "active_runner_container_name",
   "active_reason",
   "active_started_at",
@@ -259,7 +261,7 @@ function runnerBundleSlotsTableExists(db: DatabaseSync): boolean {
     expect(columns).not.toContain("backoff_until");
     expect(columns).not.toContain("active_expires_at");
     expect(columns).not.toContain(retiredBrowserVaultRefreshColumn);
-    expect(readRunnerStateSchemaVersion(db)).toBe(13);
+    expect(readRunnerStateSchemaVersion(db)).toBe(15);
     const state = await store.readState();
     expect(state).toEqual({
       failureCount: 0,
@@ -331,7 +333,7 @@ function runnerBundleSlotsTableExists(db: DatabaseSync): boolean {
     const { db, store } = createRunnerStateStoreHarness(setupLegacyRunnerSchema);
 
     expect(readRunnerMetaColumns(db)).toEqual(expect.arrayContaining(CURRENT_RUNNER_META_COLUMNS));
-    expect(readRunnerStateSchemaVersion(db)).toBe(13);
+    expect(readRunnerStateSchemaVersion(db)).toBe(15);
     expect(readRunnerMetaActiveState(db)).toMatchObject({
       active_attempt_id: "workspace-invocation-1",
     });
