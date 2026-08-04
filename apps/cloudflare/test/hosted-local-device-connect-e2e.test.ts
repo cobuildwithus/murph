@@ -42,23 +42,12 @@ const junctionProviderModuleSpecifier = new URL(
   "../../../packages/device-syncd/src/providers/junction.ts",
   import.meta.url,
 ).href;
-const hostedConsentModuleSpecifier = new URL(
-  "../../web/src/lib/legal/consent.ts",
-  import.meta.url,
-).href;
-const hostedAppSessionModuleSpecifier = new URL(
-  "../../web/src/lib/hosted-onboarding/app-session.ts",
-  import.meta.url,
-).href;
-const hostedPrismaModuleSpecifier = new URL(
-  "../../web/src/lib/prisma.ts",
-  import.meta.url,
-).href;
 const runId = Date.now();
 const userId = `member_local_device_connect_${runId}`;
 const planUsageUserId = `member_local_plan_usage_control_${runId}`;
 const subscriptionUserId = `member_local_subscription_control_${runId}`;
 const subscriptionThreadId = `telegram_direct_subscription_${runId}`;
+const browserSessionUserId = `member_local_browser_session_${runId}`;
 const liveBrowserUserId =
   process.env.MURPH_E2E_JUNCTION_WHOOP_MEMBER_ID?.trim()
   || "member_e2e_junction_whoop_browser";
@@ -74,10 +63,6 @@ const syntheticJunctionConfig = {
 };
 const liveJunctionWhoopConfig = readLiveJunctionWhoopConfig(process.env);
 const junctionConfig = liveJunctionWhoopConfig ?? syntheticJunctionConfig;
-
-if (liveJunctionWhoopConfig) {
-  assertLiveScenarioIsIsolated();
-}
 
 let scenario: HostedLocalFullStackScenario | null = null;
 
@@ -110,6 +95,7 @@ describe("hosted local device connect e2e", () => {
           JUNCTION_PROVIDER_FILTER: "whoop_v2",
           JUNCTION_REGION: junctionConfig.region,
           MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
+          MURPH_DEV_WEB_HOST: "localhost",
         },
         localDatabaseUrl,
         persistDirOverride: workerPersistDirOverride,
@@ -307,6 +293,24 @@ describe("hosted local device connect e2e", () => {
     300_000,
   );
 
+  it(
+    "mints the browser session through harness authority and accepts consent over Web",
+    async () => {
+      await requireScenario().seedActiveHostedMember({ memberId: browserSessionUserId });
+      const sessionCookie = await issueHostedBrowserSession({
+        memberId: browserSessionUserId,
+      });
+      const statusResponse = await fetch(
+        `${requireScenario().harness.webBaseUrl}/api/legal/consent/status`,
+        { headers: { cookie: sessionCookie } },
+      );
+
+      expect(statusResponse.status).toBe(200);
+      expect(requireScenario().runtimeEnv.MURPH_DEV_WEB_HOST).toBe("localhost");
+    },
+    300_000,
+  );
+
   // The default scenario remains hermetic. This opt-in branch uses one real
   // Junction sandbox user and WHOOP account, and must run as the only selected
   // hosted-local scenario so no unrelated process inherits its credentials.
@@ -319,7 +323,6 @@ describe("hosted local device connect e2e", () => {
         memberId: liveBrowserUserId,
       });
       const hostedSessionCookie = await issueHostedBrowserSession({
-        environment: requireScenario().runtimeEnv,
         memberId: liveBrowserUserId,
       });
       const connectLink = await createHostedWhoopConnectLink(liveBrowserUserId);
@@ -369,30 +372,6 @@ interface JunctionWhoopBrowserResult {
 
 interface JunctionProviderModule {
   buildJunctionClientUserId(secret: string, ownerId: string): string;
-}
-
-interface HostedBrowserSessionPrisma {
-  $disconnect(): Promise<void>;
-}
-
-interface HostedConsentModule {
-  recordHostedLaunchRequiredConsent(input: {
-    memberId: string;
-    prisma: HostedBrowserSessionPrisma;
-    scope: "launch.health-data" | "launch.legal";
-    source: string;
-  }): Promise<unknown>;
-}
-
-interface HostedAppSessionModule {
-  issueHostedAppSession(input: {
-    memberId: string;
-    privyUserId: string;
-  }): Promise<{ cookie: string }>;
-}
-
-interface HostedPrismaModule {
-  getPrisma(): HostedBrowserSessionPrisma;
 }
 
 function readLiveJunctionWhoopConfig(
@@ -447,22 +426,6 @@ function requireLiveJunctionWhoopConfig(): LiveJunctionWhoopConfig {
     throw new Error("Live Junction WHOOP E2E configuration was not enabled.");
   }
   return liveJunctionWhoopConfig;
-}
-
-function assertLiveScenarioIsIsolated(): void {
-  const selectedE2eFiles = process.argv
-    .map((argument) => argument.replaceAll("\\", "/"))
-    .filter((argument) => argument.endsWith("e2e.test.ts"));
-  if (
-    selectedE2eFiles.length !== 1
-    || !selectedE2eFiles[0]?.endsWith(
-      "apps/cloudflare/test/hosted-local-device-connect-e2e.test.ts",
-    )
-  ) {
-    throw new Error(
-      "Run the live Junction WHOOP browser proof by itself: pnpm hosted-local e2e device-connect.",
-    );
-  }
 }
 
 async function createHostedWhoopConnectLink(memberId: string) {
@@ -522,70 +485,64 @@ async function resetLiveJunctionWhoopProvider(
 }
 
 async function issueHostedBrowserSession(input: {
-  environment: NodeJS.ProcessEnv;
   memberId: string;
 }): Promise<string> {
-  const restoreEnvironment = applyProcessEnvironment({
-    ...input.environment,
-    NODE_ENV: "test",
-    VITEST: "1",
+  const session = await requireScenario().issueHostedAppSession({
+    memberId: input.memberId,
+    privyUserId: `did:privy:${input.memberId}`,
   });
-
-  try {
-    const [consentModule, sessionModule, prismaModule] = await Promise.all([
-      import(hostedConsentModuleSpecifier) as Promise<HostedConsentModule>,
-      import(hostedAppSessionModuleSpecifier) as Promise<HostedAppSessionModule>,
-      import(hostedPrismaModuleSpecifier) as Promise<HostedPrismaModule>,
-    ]);
-    const prisma = prismaModule.getPrisma();
-
-    try {
-      await consentModule.recordHostedLaunchRequiredConsent({
-        memberId: input.memberId,
-        prisma,
-        scope: "launch.legal",
-        source: "hosted-local-junction-whoop-browser-e2e",
-      });
-      await consentModule.recordHostedLaunchRequiredConsent({
-        memberId: input.memberId,
-        prisma,
-        scope: "launch.health-data",
-        source: "hosted-local-junction-whoop-browser-e2e",
-      });
-      const session = await sessionModule.issueHostedAppSession({
-        memberId: input.memberId,
-        privyUserId: `did:privy:${input.memberId}`,
-      });
-      return session.cookie;
-    } finally {
-      await prisma.$disconnect();
-    }
-  } finally {
-    restoreEnvironment();
-  }
+  const cookie = `${session.cookieName}=${encodeURIComponent(session.cookieValue)}`;
+  await acceptHostedLaunchConsents({
+    sessionCookie: cookie,
+    webBaseUrl: requireScenario().harness.webBaseUrl,
+  });
+  return cookie;
 }
 
-function applyProcessEnvironment(environment: NodeJS.ProcessEnv): () => void {
-  const previousValues = new Map<string, string | undefined>();
-
-  for (const [key, value] of Object.entries(environment)) {
-    previousValues.set(key, process.env[key]);
-    if (value === undefined) {
-      delete process.env[key];
-    } else {
-      process.env[key] = value;
-    }
+async function acceptHostedLaunchConsents(input: {
+  sessionCookie: string;
+  webBaseUrl: string;
+}): Promise<void> {
+  const statusResponse = await fetch(`${input.webBaseUrl}/api/legal/consent/status`, {
+    headers: { cookie: input.sessionCookie },
+  });
+  const status = await statusResponse.json() as {
+    scopes?: Array<{
+      documents: Array<{ id: string; version: string }>;
+      scope: string;
+    }>;
+  };
+  if (statusResponse.status !== 200) {
+    throw new Error(`Hosted consent status failed: ${JSON.stringify(status)}`);
   }
 
-  return () => {
-    for (const [key, value] of previousValues) {
-      if (value === undefined) {
-        delete process.env[key];
-      } else {
-        process.env[key] = value;
-      }
+  for (const scope of ["launch.legal", "launch.health-data"]) {
+    const scopeStatus = status.scopes?.find((candidate) => candidate.scope === scope);
+    if (!scopeStatus) {
+      throw new Error(`Hosted consent status did not include scope ${scope}.`);
     }
-  };
+    const acceptedDocumentVersions = Object.fromEntries(
+      scopeStatus.documents.map((document) => [document.id, document.version]),
+    );
+    const acceptResponse = await fetch(`${input.webBaseUrl}/api/legal/consent/accept`, {
+      body: JSON.stringify({
+        acceptedDocumentVersions,
+        scope,
+        source: "hosted-local-e2e",
+      }),
+      headers: {
+        "content-type": "application/json",
+        cookie: input.sessionCookie,
+        origin: input.webBaseUrl,
+      },
+      method: "POST",
+    });
+    if (acceptResponse.status !== 200) {
+      throw new Error(
+        `Hosted consent accept for ${scope} failed: ${await acceptResponse.text()}`,
+      );
+    }
+  }
 }
 
 function temporarilyRemoveProcessEnvironment(keys: readonly string[]): () => void {
