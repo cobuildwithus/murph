@@ -86,7 +86,13 @@ function readCardToolRequest(argumentsValue: unknown) {
 describe('murph.attach_response_card', () => {
   it('describes the private on-demand canonical-read contract', () => {
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'on member request or during managed meal closeout',
+      'current accepted member message explicitly requests it',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'card replaces the entire final response',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'compound requests with complete ordinary text and no card',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'vault-cli meal totals --from <date> --to <same-date>',
