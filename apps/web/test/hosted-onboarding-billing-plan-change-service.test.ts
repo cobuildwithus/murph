@@ -47,8 +47,12 @@ describe("upgradeHostedBillingPlan", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv(
-      "HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID",
-      "bpc_plan_change",
+      "HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_EDGE_MONTHLY",
+      "bpc_edge_plan_change",
+    );
+    vi.stubEnv(
+      "HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_MONTHLY",
+      "bpc_pulse_plan_change",
     );
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
     mocks.withHostedMemberStripeMutationLock.mockImplementation(
@@ -99,7 +103,7 @@ describe("upgradeHostedBillingPlan", () => {
       { expand: ["items.data.price"] },
     );
     expect(mocks.stripe.billingPortal.sessions.create).toHaveBeenCalledWith({
-      configuration: "bpc_plan_change",
+      configuration: "bpc_edge_plan_change",
       customer: "cus_fixture",
       flow_data: {
         after_completion: {
@@ -122,6 +126,39 @@ describe("upgradeHostedBillingPlan", () => {
       return_url:
         "https://join.example.test/settings?planUpdate=canceled#subscription",
     });
+  });
+
+  test("selects the exact target plan Portal configuration", async () => {
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValue(
+      makeBillingRef({ currentBillingPlanCode: "launch_group_monthly" }),
+    );
+    mocks.stripe.subscriptions.retrieve.mockResolvedValue(
+      makeSubscription({ priceId: "price_group" }),
+    );
+
+    await expect(upgradeHostedBillingPlan({
+      expectedCurrentPlanCode: "launch_group_monthly",
+      memberId: "member_fixture",
+      targetPlanCode: "launch_monthly",
+    })).resolves.toMatchObject({
+      billingPlanCode: "launch_group_monthly",
+      status: "pending_payment",
+    });
+
+    expect(mocks.stripe.billingPortal.sessions.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        configuration: "bpc_pulse_plan_change",
+        flow_data: expect.objectContaining({
+          subscription_update_confirm: expect.objectContaining({
+            items: [{
+              id: "si_plan",
+              price: "price_pulse",
+              quantity: 1,
+            }],
+          }),
+        }),
+      }),
+    );
   });
 
   test("returns no-action when the local billing owner is already on target", async () => {
@@ -204,7 +241,7 @@ describe("upgradeHostedBillingPlan", () => {
 
   test("requires the dedicated plan-change Portal configuration", async () => {
     vi.stubEnv(
-      "HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID",
+      "HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_EDGE_MONTHLY",
       "",
     );
 
