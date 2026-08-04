@@ -40,6 +40,9 @@ import {
   normalizeRequiredText,
   warnAssistantBestEffortFailure,
 } from './assistant/shared.js'
+import type {
+  AssistantResponseCard,
+} from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 export {
@@ -54,6 +57,7 @@ export interface DeliverAssistantMessageInput {
   actorId?: string | null
   alias?: string | null
   channel?: string | null
+  card?: AssistantResponseCard | null
   conversation?: ConversationRef | null
   identityId?: string | null
   media?: readonly AssistantResponseMedia[] | null
@@ -99,6 +103,7 @@ export async function deliverAssistantMessage(
       vault: input.vault,
       turnId: receipt.turnId,
       sessionId: resolved.session.sessionId,
+      card: input.card ?? null,
       media: input.media ?? [],
       message: normalizedMessage,
       ...(input.nativeReplyRequested === true ? { nativeReplyRequested: true } : {}),
@@ -301,6 +306,7 @@ export async function deliverAssistantMessageOverBinding(
     actorId?: string | null
     answeredMailboxItemIds?: readonly string[] | null
     channel?: string | null
+    card?: AssistantResponseCard | null
     deliverySource?: AssistantDeliverySource | null
     idempotencyKey?: string | null
     identityId?: string | null
@@ -361,6 +367,7 @@ export async function deliverAssistantMessageOverBinding(
       actorId: binding.actorId,
       answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
       bindingDelivery: binding.delivery,
+      card: input.card ?? null,
       deliverySource: input.deliverySource ?? null,
       explicitTarget,
       idempotencyKey: input.idempotencyKey ?? null,

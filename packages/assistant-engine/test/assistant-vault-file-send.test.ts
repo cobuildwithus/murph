@@ -1333,6 +1333,7 @@ function createVaultFileIntent() {
     answeredMailboxItemIds: [],
     attemptCount: 0,
     bindingDelivery: { kind: 'thread' as const, target: 'chat_123' },
+    card: null,
     channel: 'linq',
     createdAt: '2026-06-24T11:00:00.000Z',
     dedupeKey: 'dedupe_123',

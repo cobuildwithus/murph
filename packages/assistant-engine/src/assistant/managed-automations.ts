@@ -195,7 +195,7 @@ export const MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION = {
     '',
     'Use the engine-supplied `Occurrence local date` from the Scheduled occurrence context as the action and search-date anchor, even when the wall-clock `Today\'s date` differs. Use the occurrence instant for bounded same-occurrence retry evidence.',
     '',
-    'If the skill selects neither a retained photo nor a same-occurrence removal revision, return `{"kind":"skip","privateSummary":"No captured meals are awaiting closeout."}`. A removal failure or any selected photo remaining fails the run. After successful cleanup, return one ordinary user-facing closeout using the skill\'s content rules; do not expose images, internal paths, or automation details.',
+    'If the skill selects neither a retained photo nor a same-occurrence removal revision, return `{"kind":"skip","privateSummary":"No captured meals are awaiting closeout."}`. A removal failure or any selected photo remaining fails the run. After successful cleanup, follow the skill\'s presentation rules. If a response card is attached, return a `send_message` decision whose text contains no nutrition values because the runtime replaces it with deterministic card text. Otherwise return the ordinary compact closeout. Do not expose images, internal paths, or automation details.',
   ].join('\n'),
 } satisfies MurphManagedAutomationSeed
 
