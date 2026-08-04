@@ -1,6 +1,6 @@
 ---
 name: micronutrients-supplements
-description: Use for vitamin D iron ferritin B12 magnesium omega 3 creatine supplement evidence dosing testing and safety questions.
+description: Use for vitamin D iron ferritin B12 magnesium omega 3 creatine supplement evidence product labels dosing testing and safety questions.
 ---
 
 # Micronutrients And Supplements
@@ -52,13 +52,33 @@ Ask: "Are you trying to correct a known low lab, improve a symptom/performance t
 
 ## Resolve and preserve supplement labels
 
-Use `vault-cli supplement search-labels` for one product or `vault-cli
-supplement search-labels-batch` for several before web lookup. Increase the
-default result limit only when the first result is ambiguous, generic, or
-missing a likely variant. Use a returned serving, dose, or amount instead of
-asking the user to restate it. If the database is unavailable or incomplete,
-prefer an official manufacturer label or another primary source and state the
-gap.
+For every named supplement product, brand, exact dose, serving, ingredient-panel
+question, product image or list, and create or update request, use
+`vault-cli supplement search-labels` for one product or
+`vault-cli supplement search-labels-batch` for several before relying on memory
+or web search. Batch a multi-product stack instead of looking up each item
+serially. Skip exact-product lookup only for a genuinely generic evidence
+question where product identity, serving, formulation, and market status cannot
+change the answer.
+
+Match the exact variant before using returned facts. Prefer agreement on product
+name, brand or manufacturer, serving, UPC, and other available identifiers; do
+not merge nearby formulas, flavors, strengths, or historical labels. Use a
+returned serving, dose, or amount instead of asking the user to restate it, but
+never treat a search result as proof that it is the product the user owns when
+material identifiers conflict or remain ambiguous.
+
+The hosted corpus can include NIH DSLD, DailyMed, and first-party manufacturer
+label records. Preserve and, when relevant, name the actual returned source.
+Never describe a database match as FDA approval, and never treat label presence
+as proof of efficacy, purity, third-party testing, current availability, or
+safety for this user.
+
+Increase the default result limit only when the first result is ambiguous,
+generic, or missing a likely variant. If a returned serving, amount, or
+ingredient field is absent or source-null, do not infer it from a nearby product
+or marketing text. Prefer an official manufacturer label or another primary
+source and state the unresolved gap.
 
 When saving known label facts, preserve the full active ingredient panel with
 repeated `vault-cli supplement save --ingredient` JSON-object flags and save the
