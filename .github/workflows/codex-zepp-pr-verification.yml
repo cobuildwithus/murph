@@ -71,10 +71,10 @@ jobs:
 
       - name: Focused assistant prompt tests
         run: >-
-          pnpm exec vitest run
-          --config packages/assistant-engine/vitest.config.ts
+          pnpm --dir packages/assistant-engine exec vitest run
+          --config vitest.config.ts
           --no-coverage
-          packages/assistant-engine/test/model-behavior.test.ts
+          test/model-behavior.test.ts
 
       - name: Typecheck affected packages
         run: |
