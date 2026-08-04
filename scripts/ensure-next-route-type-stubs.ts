@@ -2,6 +2,8 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { isAllowedNextEnvRouteTypesImportPath } from "./check-no-js.ts";
+
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const routeTypesImportPattern = /import\s+["'](\.\/[^"'`]*types\/routes\.d\.ts)["'];/u;
 const rootParamsTypesImportPattern =
@@ -54,20 +56,20 @@ export async function ensureNextRouteTypeStub(nextEnvPath: string): Promise<stri
   const nextEnvContents = await readOrCreateNextEnvDeclaration(nextEnvPath);
   const stubRelativeImportPath = extractNextRouteTypesImport(nextEnvContents);
 
-  if (!stubRelativeImportPath) {
-    return null;
+  if (!stubRelativeImportPath || !isAllowedNextEnvRouteTypesImportPath(stubRelativeImportPath)) {
+    throw new Error("next-env.d.ts is missing the generated Next 16.3 route-types import.");
   }
 
+  const rootParamsRelativeImportPath = stubRelativeImportPath.replace(
+    /routes\.d\.ts$/u,
+    "root-params.d.ts",
+  );
   const stubPath = path.resolve(path.dirname(nextEnvPath), stubRelativeImportPath);
   await ensureDeclarationStub(stubPath, routeTypesStubContents);
-
-  const rootParamsRelativeImportPath = extractNextRootParamsTypesImport(nextEnvContents);
-  if (rootParamsRelativeImportPath) {
-    await ensureDeclarationStub(
-      path.resolve(path.dirname(nextEnvPath), rootParamsRelativeImportPath),
-      rootParamsTypesStubContents,
-    );
-  }
+  await ensureDeclarationStub(
+    path.resolve(path.dirname(nextEnvPath), rootParamsRelativeImportPath),
+    rootParamsTypesStubContents,
+  );
 
   await ensureNextRouteTypesRuntimeStub(stubPath);
   await removeStaleNextValidatorStub(stubPath);
@@ -76,17 +78,39 @@ export async function ensureNextRouteTypeStub(nextEnvPath: string): Promise<stri
 }
 
 async function readOrCreateNextEnvDeclaration(nextEnvPath: string): Promise<string> {
+  let contents: string;
   try {
-    return await readFile(nextEnvPath, "utf8");
+    contents = await readFile(nextEnvPath, "utf8");
   } catch (error) {
     if (!isNodeErrorWithCode(error, "ENOENT")) {
       throw error;
     }
+
+    contents = buildNextEnvDeclarationArtifact(defaultRouteTypesImportPath);
+    await writeFile(nextEnvPath, contents, "utf8");
+    return contents;
   }
 
-  const contents = buildNextEnvDeclarationArtifact(defaultRouteTypesImportPath);
-  await writeFile(nextEnvPath, contents, "utf8");
-  return contents;
+  const routeTypesImportPath = extractNextRouteTypesImport(contents);
+  if (!routeTypesImportPath || !isAllowedNextEnvRouteTypesImportPath(routeTypesImportPath)) {
+    throw new Error("next-env.d.ts has an unsupported generated route-types import.");
+  }
+
+  const expectedCurrentContents = buildNextEnvDeclarationArtifact(routeTypesImportPath);
+  if (normalizeDeclarationContents(contents) === normalizeDeclarationContents(expectedCurrentContents)) {
+    return contents;
+  }
+
+  const legacyContents = buildLegacyNextEnvDeclarationArtifact(routeTypesImportPath);
+  if (normalizeDeclarationContents(contents) !== normalizeDeclarationContents(legacyContents)) {
+    throw new Error("next-env.d.ts does not match the generated Next 16.2 or 16.3 declaration shape.");
+  }
+
+  const migratedContents = contents.includes("\r\n")
+    ? expectedCurrentContents.replace(/\n/g, "\r\n")
+    : expectedCurrentContents;
+  await writeFile(nextEnvPath, migratedContents, "utf8");
+  return migratedContents;
 }
 
 function buildNextEnvDeclarationArtifact(routeTypesImportPath: string): string {
@@ -97,6 +121,16 @@ function buildNextEnvDeclarationArtifact(routeTypesImportPath: string): string {
     `import "${rootParamsImportPath}";`,
     ...nextEnvTrailingLines,
   ].join("\n");
+}
+
+function buildLegacyNextEnvDeclarationArtifact(routeTypesImportPath: string): string {
+  return [...nextEnvCommonLines, `import "${routeTypesImportPath}";`, ...nextEnvTrailingLines].join(
+    "\n",
+  );
+}
+
+function normalizeDeclarationContents(contents: string): string {
+  return contents.replace(/\r\n/g, "\n").replace(/\n$/u, "");
 }
 
 async function ensureDeclarationStub(stubPath: string, contents: string): Promise<void> {

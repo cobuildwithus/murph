@@ -124,7 +124,7 @@ describe("check-no-js hygiene guards", () => {
     ).toBe(false);
   });
 
-  it("prepares route and root-params stubs for a clean Next 16.3 typecheck", async () => {
+  it("migrates the generated Next 16.2 declaration before preparing 16.3 stubs", async () => {
     const testTempRoot = process.env.MURPH_VITEST_TEMP_ROOT;
     if (!testTempRoot) {
       throw new Error("MURPH_VITEST_TEMP_ROOT is required.");
@@ -136,12 +136,17 @@ describe("check-no-js hygiene guards", () => {
     const rootParamsPath = path.join(workspaceRoot, ".next-smoke/dev/types/root-params.d.ts");
 
     try {
-      await writeFile(
-        nextEnvPath,
-        buildNextEnvDeclarationArtifact("./.next-smoke/dev/types/routes.d.ts"),
+      const currentDeclaration = buildNextEnvDeclarationArtifact(
+        "./.next-smoke/dev/types/routes.d.ts",
       );
+      const legacyDeclaration = currentDeclaration.replace(
+        'import "./.next-smoke/dev/types/root-params.d.ts";\n',
+        "",
+      );
+      await writeFile(nextEnvPath, legacyDeclaration);
 
       await expect(ensureNextRouteTypeStub(nextEnvPath)).resolves.toBe(routeTypesPath);
+      await expect(readFile(nextEnvPath, "utf8")).resolves.toBe(currentDeclaration);
       await expect(readFile(routeTypesPath, "utf8")).resolves.toContain(
         "Auto-generated route-type stub",
       );
@@ -150,6 +155,36 @@ describe("check-no-js hygiene guards", () => {
       );
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects a root-params import outside the accepted route-types directory", async () => {
+    const testTempRoot = process.env.MURPH_VITEST_TEMP_ROOT;
+    if (!testTempRoot) {
+      throw new Error("MURPH_VITEST_TEMP_ROOT is required.");
+    }
+
+    const workspaceRoot = await mkdtemp(path.join(testTempRoot, "next-type-boundary-"));
+    const escapeRoot = `${workspaceRoot}-escape`;
+    const nextEnvPath = path.join(workspaceRoot, "next-env.d.ts");
+    const escapedRootParamsPath = path.join(escapeRoot, "types/root-params.d.ts");
+    const malformedDeclaration = buildNextEnvDeclarationArtifact(
+      "./.next/types/routes.d.ts",
+    ).replace(
+      "./.next/types/root-params.d.ts",
+      `../${path.basename(escapeRoot)}/types/root-params.d.ts`,
+    );
+
+    try {
+      await writeFile(nextEnvPath, malformedDeclaration);
+
+      await expect(ensureNextRouteTypeStub(nextEnvPath)).rejects.toThrow(
+        "does not match the generated Next 16.2 or 16.3 declaration shape",
+      );
+      await expect(access(escapedRootParamsPath)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+      await rm(escapeRoot, { force: true, recursive: true });
     }
   });
 
