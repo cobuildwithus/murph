@@ -1967,6 +1967,7 @@ describe('assistant Codex turn planning', () => {
         dynamicTools: resolveMurphDynamicTools({
           assistantStyleSettingsAvailable: true,
           progressUpdatesAvailable: false,
+          responseCardsAvailable: true,
           voiceMemoGenerationAvailable: false,
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
@@ -1974,7 +1975,7 @@ describe('assistant Codex turn planning', () => {
     )
   })
 
-  it('offers response cards only to the managed private-direct meal closeout', async () => {
+  it('offers response cards to private-direct conversations and automations', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'bootstrap contract',
     )
@@ -2012,7 +2013,7 @@ describe('assistant Codex turn planning', () => {
         occurrenceAt: '2026-07-28T21:00:00.000-04:00',
       },
     })).resolves.toContain('attach_response_card')
-    await expect(toolNames(createMessageInput())).resolves.not.toContain(
+    await expect(toolNames(createMessageInput())).resolves.toContain(
       'attach_response_card',
     )
     await expect(toolNames({
@@ -2021,7 +2022,7 @@ describe('assistant Codex turn planning', () => {
         automationId: 'automation_other',
         occurrenceAt: '2026-07-28T21:00:00.000-04:00',
       },
-    })).resolves.not.toContain('attach_response_card')
+    })).resolves.toContain('attach_response_card')
     await expect(toolNames(
       {
         ...createMessageInput(),
@@ -2277,6 +2278,7 @@ describe('assistant Codex turn planning', () => {
           assistantStyleSettingsAvailable: true,
           messageTargetingAvailable: true,
           progressUpdatesAvailable: false,
+          responseCardsAvailable: true,
           voiceMemoGenerationAvailable: false,
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
@@ -2325,6 +2327,7 @@ describe('assistant Codex turn planning', () => {
           messageTargetingAvailable: true,
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
+          responseCardsAvailable: true,
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }),
@@ -2356,6 +2359,7 @@ describe('assistant Codex turn planning', () => {
           messageTargetingAvailable: true,
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
+          responseCardsAvailable: true,
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }),
@@ -2384,6 +2388,7 @@ describe('assistant Codex turn planning', () => {
           messageTargetingAvailable: true,
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
+          responseCardsAvailable: true,
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }),
@@ -2408,6 +2413,7 @@ describe('assistant Codex turn planning', () => {
           messageTargetingAvailable: false,
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
+          responseCardsAvailable: true,
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }),
@@ -2463,6 +2469,7 @@ describe('assistant Codex turn planning', () => {
           assistantStyleSettingsAvailable: true,
           computerToolsAvailable: true,
           progressUpdatesAvailable: false,
+          responseCardsAvailable: true,
           voiceMemoGenerationAvailable: plan.voiceMemoDeliveryChannel !== null,
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,

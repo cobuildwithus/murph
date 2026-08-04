@@ -5,6 +5,7 @@ import type { AssistantResponseCard } from '@murphai/operator-config/assistant-r
 
 import {
   executeMurphDynamicToolRequest,
+  MURPH_ATTACH_RESPONSE_CARD_TOOL,
   readMurphDynamicToolRequest,
 } from '../src/assistant-codex/dynamic-tools.ts'
 
@@ -83,6 +84,21 @@ function readCardToolRequest(argumentsValue: unknown) {
 }
 
 describe('murph.attach_response_card', () => {
+  it('describes the private on-demand canonical-read contract', () => {
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'on member request or during managed meal closeout',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'vault-cli meal totals --from <date> --to <same-date>',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'never calculate or reuse totals',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).not.toContain(
+      'available only to the managed private-direct closeout',
+    )
+  })
+
   it('uses the strict card contract at the model-facing boundary', () => {
     expect(readCardToolRequest({ card: CARD })).toEqual({
       card: CARD,
